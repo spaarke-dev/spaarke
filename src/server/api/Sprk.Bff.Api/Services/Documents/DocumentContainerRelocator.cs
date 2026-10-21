@@ -120,6 +120,28 @@ public sealed class DocumentContainerRelocator
     /// </summary>
     internal static readonly TimeSpan ReleaseLockWait = TimeSpan.FromSeconds(2);
 
+    /// <summary>
+    /// #2159 slice 4: the TOTAL time recording the releases of one re-file's descendant documents
+    /// (<see cref="RecordReleasesAsync(IReadOnlyList{Guid}, SecureExitPermit, CancellationToken)"/>) waits for their locks.
+    /// Each still gets one lock attempt once it is spent, so only a document whose lock is held at that moment goes without.
+    /// </summary>
+    internal static readonly TimeSpan DescendantReleaseLockBudget = TimeSpan.FromSeconds(5);
+
+    /// <summary>#2159 B5: the file (or one of its versions) is larger than a single-request copy — permanent until #2176 (an upload-session copy).</summary>
+    internal const string TerminalTooLarge = "too-large";
+
+    /// <summary>#2159 B5: the row's ledger already owes <see cref="MaxLedgerEntries"/> moves — permanent until they settle.</summary>
+    internal const string TerminalLedgerFull = "ledger-full";
+
+    /// <summary>
+    /// #2159 B5: the row's ledger has been unreadable for the job's limit of consecutive runs — permanent until an
+    /// administrator repairs it. Set by the job (<see cref="SecureChildReconciliationJob"/>), never by a single call.
+    /// </summary>
+    internal const string TerminalLedgerUnreadable = "ledger-unreadable";
+
+    /// <summary>The prefix of the pending line an unreadable ledger reports (<see cref="DocumentRelocationOutcome.Pending"/>).</summary>
+    internal const string LedgerUnreadablePendingPrefix = "ledger-unreadable:";
+
     /// <summary>How often <see cref="RecordReleaseAsync"/> asks for the lock again within <see cref="ReleaseLockWait"/>.</summary>
     internal static readonly TimeSpan ReleaseLockRetryInterval = TimeSpan.FromMilliseconds(250);
 
@@ -867,7 +889,10 @@ public sealed class DocumentContainerRelocator
         {
             return DocumentRelocationOutcome.Of(
                 documentId, RelocationState.Failed, sourceDrive, sourceItem, target, null,
-                $"the file is {facts.Size} bytes, larger than a single-request copy ({MaxRelocatableBytes} bytes)").With(prior);
+                $"the file is {facts.Size} bytes, larger than a single-request copy ({MaxRelocatableBytes} bytes)").With(prior) with
+            {
+                TerminalCause = TerminalTooLarge,
+            };
         }
 
         if (!apply)
@@ -891,7 +916,10 @@ public sealed class DocumentContainerRelocator
         {
             return DocumentRelocationOutcome.Of(
                 documentId, RelocationState.Failed, sourceDrive, sourceItem, target, null,
-                $"its version history could not be copied: {history.Failure}").With(prior);
+                $"its version history could not be copied: {history.Failure}").With(prior) with
+            {
+                TerminalCause = history.TooLarge ? TerminalTooLarge : null,
+            };
         }
 
         var moved = await MoveAsync(documentId, row, sourceDrive, sourceItem, target,
@@ -1217,19 +1245,51 @@ public sealed class DocumentContainerRelocator
     /// the file, which must be one the re-file left (<see cref="SecureExitPermit.RootsLeft"/>). Anything else records
     /// nothing. An unreadable ledger is left as it is. Never throws for a read or write fault (<see cref="RelocationReleaseState.Failed"/>).</para>
     /// </remarks>
-    public async Task<RelocationReleaseOutcome> RecordReleaseAsync(Guid documentId, SecureExitPermit permit, CancellationToken ct = default)
+    public Task<RelocationReleaseOutcome> RecordReleaseAsync(Guid documentId, SecureExitPermit permit, CancellationToken ct = default)
+        => RecordReleaseAsync(documentId, permit, ReleaseLockWait, ct);
+
+    /// <summary>
+    /// #2159 slice 4 — <see cref="RecordReleaseAsync(Guid, SecureExitPermit, CancellationToken)"/> for each of a re-file's
+    /// DESCENDANT documents, in order, their lock waits sharing one <see cref="DescendantReleaseLockBudget"/>: each waits at
+    /// most <see cref="ReleaseLockWait"/> and at most what is left; once it is spent, each still gets one lock attempt (no
+    /// wait), so only a document whose lock is held at that moment is <see cref="RelocationReleaseState.LockHeld"/> — its
+    /// file stays held until a re-file releases it again. One outcome per id, in order. Never throws (cancellation aside).
+    /// </summary>
+    public Task<IReadOnlyList<(Guid DocumentId, RelocationReleaseOutcome Outcome)>> RecordReleasesAsync(
+        IReadOnlyList<Guid> documentIds, SecureExitPermit permit, CancellationToken ct = default)
+        => RecordReleasesAsync(documentIds, permit, DescendantReleaseLockBudget, ct);
+
+    internal async Task<IReadOnlyList<(Guid DocumentId, RelocationReleaseOutcome Outcome)>> RecordReleasesAsync(
+        IReadOnlyList<Guid> documentIds, SecureExitPermit permit, TimeSpan budget, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(documentIds);
+        ArgumentNullException.ThrowIfNull(permit);
+        var deadline = _time.GetUtcNow() + budget;
+        var outcomes = new List<(Guid, RelocationReleaseOutcome)>(documentIds.Count);
+        foreach (var documentId in documentIds)
+        {
+            var left = deadline - _time.GetUtcNow();
+            var wait = left <= TimeSpan.Zero ? TimeSpan.Zero : left < ReleaseLockWait ? left : ReleaseLockWait;
+            outcomes.Add((documentId, await RecordReleaseAsync(documentId, permit, wait, ct).ConfigureAwait(false)));
+        }
+
+        return outcomes;
+    }
+
+    private async Task<RelocationReleaseOutcome> RecordReleaseAsync(
+        Guid documentId, SecureExitPermit permit, TimeSpan lockWait, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(permit);
-        var deadline = _time.GetUtcNow() + ReleaseLockWait;
+        var deadline = _time.GetUtcNow() + lockWait;
         while (!await TryLockAsync(documentId, ct).ConfigureAwait(false))
         {
             if (_time.GetUtcNow() >= deadline)
             {
                 _logger.LogWarning(
                     "[DOCUMENT-RELOCATE] The F3 release of document {DocumentId}'s file was NOT recorded: another relocation of it "
-                    + "held its lock for {Wait}. Its file stays held where it is; the re-file stands.", documentId, ReleaseLockWait);
+                    + "held its lock for {Wait}. Its file stays held where it is; the re-file stands.", documentId, lockWait);
                 return new RelocationReleaseOutcome(RelocationReleaseState.LockHeld,
-                    $"another relocation of this document held its lock for {ReleaseLockWait.TotalSeconds:0.#} s; no release was recorded");
+                    $"another relocation of this document held its lock for {lockWait.TotalSeconds:0.#} s; no release was recorded");
             }
 
             await Task.Delay(ReleaseLockRetryInterval, _time, ct).ConfigureAwait(false);
@@ -1471,6 +1531,9 @@ public sealed class DocumentContainerRelocator
     {
         public static History Fail(string why) => new([], null, new RelocationWitness(null, null, null), why);
 
+        /// <summary>#2159 B5: a version is larger than a single-request copy — permanent, unlike every other failure here.</summary>
+        public bool TooLarge { get; init; }
+
         /// <summary>
         /// The steps written AFTER the state <paramref name="witness"/> recorded — a source's edits since its move — oldest
         /// first, ending with its current content (owner round 54 item 3: no intermediate edit is dropped).
@@ -1586,7 +1649,10 @@ public sealed class DocumentContainerRelocator
 
         if (steps.Any(s => s.ExpectedSize is > MaxRelocatableBytes))
         {
-            return History.Fail($"a version of {drive}/{item} is larger than a single-request copy ({MaxRelocatableBytes} bytes)");
+            return History.Fail($"a version of {drive}/{item} is larger than a single-request copy ({MaxRelocatableBytes} bytes)") with
+            {
+                TooLarge = true,
+            };
         }
 
         return new History(steps, facts, witness, null);
@@ -1622,7 +1688,10 @@ public sealed class DocumentContainerRelocator
         {
             return MoveResult.Failed(DocumentRelocationOutcome.Of(
                 documentId, RelocationState.Failed, sourceDrive, sourceItem, targetDrive, null,
-                $"the row already owes {ledger.Entries.Count} earlier moves; settle them before moving it again"));
+                $"the row already owes {ledger.Entries.Count} earlier moves; settle them before moving it again") with
+            {
+                TerminalCause = TerminalLedgerFull,
+            });
         }
 
         // Read the row's own reference columns BEFORE any byte moves: if they cannot be read, nothing has happened yet.
@@ -2131,7 +2200,7 @@ public sealed class DocumentContainerRelocator
         {
             // An unreadable ledger is never acted on (it could name anything); an administrator must repair it.
             return SettleSummary.Unreadable(
-                $"ledger-unreadable: {RelocationLedgerColumn} of this document is not a relocation ledger; it is not acted on — "
+                $"{LedgerUnreadablePendingPrefix} {RelocationLedgerColumn} of this document is not a relocation ledger; it is not acted on — "
                 + "an administrator must clear or repair it");
         }
 
@@ -2745,14 +2814,20 @@ public sealed class DocumentContainerRelocator
             if (facts.Size is > MaxRelocatableBytes)
             {
                 return DocumentRelocationOutcome.Of(other, RelocationState.Failed, entry.SourceDrive, entry.SourceItem, targetDrive,
-                    null, "too large for a single-request copy");
+                    null, "too large for a single-request copy") with
+                {
+                    TerminalCause = TerminalTooLarge,
+                };
             }
 
             var history = await ReadHistoryAsync(entry.SourceDrive, entry.SourceItem, VersionRecordOf(row), ct).ConfigureAwait(false);
             if (history.Failure is not null)
             {
                 return DocumentRelocationOutcome.Of(other, RelocationState.Failed, entry.SourceDrive, entry.SourceItem, targetDrive,
-                    null, $"its version history could not be copied: {history.Failure}");
+                    null, $"its version history could not be copied: {history.Failure}") with
+                {
+                    TerminalCause = history.TooLarge ? TerminalTooLarge : null,
+                };
             }
 
             var moved = await MoveAsync(other, row, entry.SourceDrive, entry.SourceItem, targetDrive,
@@ -3218,6 +3293,14 @@ public sealed record DocumentRelocationOutcome(
     /// the job (<c>releaseExpiredDocuments</c>), for an administrator.
     /// </summary>
     public bool ReleaseExpired { get; init; }
+
+    /// <summary>
+    /// #2159 B5: a <see cref="RelocationState.Failed"/> that no repeat call can settle — <see cref="DocumentContainerRelocator.TerminalTooLarge"/>
+    /// or <see cref="DocumentContainerRelocator.TerminalLedgerFull"/> (the job adds
+    /// <see cref="DocumentContainerRelocator.TerminalLedgerUnreadable"/>). The job reports it once, never carries it, and it
+    /// fails no later run; <see langword="null"/> for every other outcome.
+    /// </summary>
+    public string? TerminalCause { get; init; }
 
     /// <summary>Sources kept because rows of other records still use them.</summary>
     public IReadOnlyList<KeptSource> KeptForOtherRecords { get; init; } = [];

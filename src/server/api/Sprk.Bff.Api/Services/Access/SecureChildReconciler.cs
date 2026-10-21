@@ -890,13 +890,14 @@ public sealed class SecureChildReconciler
 
         // #2159 slice 2c: the documents filed under the re-filed row followed it out of S1 under the same F3 act (owner round
         // 24 item 2), so each of their files is released the same way — each checked by the relocator against the roots
-        // this re-file left (a document isolated under another secure record stays held).
+        // this re-file left (a document isolated under another secure record stays held). Slice 4: their lock waits share
+        // one budget (DocumentContainerRelocator.DescendantReleaseLockBudget).
         if (permit is not null && report is { IsolatedDocumentIds.Count: > 0 })
         {
-            foreach (var documentId in report.IsolatedDocumentIds.Where(id => id != childId))
+            var descendants = report.IsolatedDocumentIds.Where(id => id != childId).Distinct().ToList();
+            if (descendants.Count > 0)
             {
-                await RecordFileReleaseAsync(documentId, permit, $"filed under re-filed {childLogicalName.Trim()} {childId:D}", ct)
-                    .ConfigureAwait(false);
+                await RecordDescendantReleasesAsync(childLogicalName.Trim(), childId, descendants, permit, ct).ConfigureAwait(false);
             }
         }
 
@@ -925,6 +926,54 @@ public sealed class SecureChildReconciler
     /// file's secure record is one of those roots. Only a written re-file's own permission. Never throws — a release not
     /// recorded (lock held, a fault, another secure record) leaves the file held where it is (fail closed); the re-file stands.
     /// </summary>
+    private async Task RecordDescendantReleasesAsync(
+        string table, Guid rowId, IReadOnlyList<Guid> documentIds, SecureExitPermit permit, CancellationToken ct)
+    {
+        if (_relocator is null)
+        {
+            _logger.LogWarning(
+                "[SECURE-CHILD-RECONCILE] {Table} {Id} left {Count} secure record(s) with F3, but no relocator is available to "
+                + "record the releases of the files of the documents filed under it ({Documents}); they stay held where they are.",
+                table, rowId, permit.RootsLeft.Count, string.Join(", ", documentIds));
+            return;
+        }
+
+        IReadOnlyList<(Guid DocumentId, RelocationReleaseOutcome Outcome)> outcomes;
+        try
+        {
+            outcomes = await _relocator.RecordReleasesAsync(documentIds, permit, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex,
+                "[SECURE-CHILD-RECONCILE] {Table} {Id} was re-filed out of a secure record with F3, but the releases of the files "
+                + "of the documents filed under it could not be recorded ({Documents}); they stay held — re-file again to release "
+                + "them.", table, rowId, string.Join(", ", documentIds));
+            return;
+        }
+
+        foreach (var (documentId, release) in outcomes)
+        {
+            _logger.Log(
+                release.State is RelocationReleaseState.Recorded or RelocationReleaseState.NotNeeded ? LogLevel.Information : LogLevel.Warning,
+                "[SECURE-CHILD-RECONCILE] sprk_document {Id} (filed under re-filed {Table} {RowId}) left {Count} secure record(s) "
+                + "with F3: release {State} ({Detail}).", documentId, table, rowId, permit.RootsLeft.Count, release.State, release.Detail);
+        }
+
+        // A file left held because its lock was busy or a write failed can be released only by a re-file: name them all.
+        var notReleased = outcomes
+            .Where(o => o.Outcome.State is RelocationReleaseState.LockHeld or RelocationReleaseState.Failed)
+            .Select(o => o.DocumentId)
+            .ToList();
+        if (notReleased.Count > 0)
+        {
+            _logger.LogWarning(
+                "[SECURE-CHILD-RECONCILE] {Table} {Id} was re-filed with F3, but the files of {Count} document(s) filed under it "
+                + "were NOT released (a busy lock or a failed write) and stay held: {Documents}. Re-file the row again to release them.",
+                table, rowId, notReleased.Count, string.Join(", ", notReleased));
+        }
+    }
+
     private async Task RecordFileReleaseAsync(Guid childId, SecureExitPermit permit, string how, CancellationToken ct)
     {
         if (_relocator is null)

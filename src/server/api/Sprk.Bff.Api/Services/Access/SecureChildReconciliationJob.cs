@@ -91,7 +91,8 @@ namespace Sprk.Bff.Api.Services.Access;
 /// relocated twice. Reported in <c>ResultJson.refileRelocations</c>; a failed or still-owing move makes the run
 /// unsuccessful. Until the pass reaches it, a re-filed document is refused under the strict rule (about two minutes plus
 /// the run). Known limit: its window is per instance and the catch-up does not walk documents, so a move a previous
-/// instance carried is reached again only when the row next changes or by <c>DocumentContainerMigrationJob</c>.</para>
+/// instance carried is reached again only when the row next changes or by <c>DocumentContainerMigrationJob</c> (the repair;
+/// workaround: any write to the row puts it back in the window).</para>
 /// <para><b>The inherited Access Permission (task 173, owner rounds 81/84).</b> Each run also keeps <c>sprk_accesspermission</c>
 /// on To Do, Event, Communication and Document equal to the most restrictive value of the records at the top of their
 /// filing (<see cref="ChildAccessPermissionReconciler"/>): the rows changed since its own watermark and everything filed
@@ -155,6 +156,13 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
 
     /// <summary>#2159 B6: an undecidable document is carried (and fails the run) for at most this many consecutive runs.</summary>
     internal const int MaxUndecidableRuns = 5;
+
+    /// <summary>
+    /// #2159 B5: a document whose relocation ledger is unreadable for this many consecutive runs of the backstop becomes
+    /// TERMINAL (<see cref="DocumentContainerRelocator.TerminalLedgerUnreadable"/>): reported once, never failing a later run.
+    /// A per-instance count and a constant, like <see cref="MaxUndecidableRuns"/>: a restart only adds retries.
+    /// </summary>
+    internal const int MaxUnreadableLedgerRuns = 5;
 
     /// <summary>
     /// Task 173: the per-run cap on the inherited Access Permission SWEEP window (the rows of To Do, Event, Communication and
@@ -706,6 +714,8 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                     sourceKeptForOtherRecords = relocations.Files?.SourceKeptForOtherRecords ?? 0,
                     // #2159 slice 2c: documents whose F3 release expired this run, unused — still held (ids only).
                     releaseExpiredDocuments = relocations.ReleaseExpired.Take(MaxSampledRefileIds).ToArray(),
+                    terminal = relocations.Terminal,
+                    terminalDocuments = relocations.TerminalNew.Take(MaxSampledRefileIds).ToArray(),
                     passComplete = relocations.PassComplete,
                     failure = relocations.Failure,
                 },
@@ -750,6 +760,8 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                     failedDocuments = refile.Failed.Take(MaxSampledRefileIds).ToArray(),
                     deferredDocuments = refile.Deferred.Take(MaxSampledRefileIds).ToArray(),
                     releaseExpiredDocuments = refile.ReleaseExpired.Take(MaxSampledRefileIds).ToArray(),
+                    terminal = refile.Terminal,
+                    terminalDocuments = refile.TerminalNew.Take(MaxSampledRefileIds).ToArray(),
                     failure = refile.Failure,
                 },
                 // Task 173 (owner rounds 81/84): To Do, Event, Communication and Document show the most restrictive Access
@@ -900,6 +912,12 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         /// <summary>#2159 B4: checked out — left alone until the check-in; counted apart, not incomplete.</summary>
         public IReadOnlyList<Guid> CheckedOut { get; init; } = [];
 
+        /// <summary>#2159 B5: the terminal documents of this run (permanent failures), counted apart, never incomplete.</summary>
+        public int Terminal { get; init; }
+
+        /// <summary>#2159 B5: the terminal documents not reported before on this instance, with their cause (reported once).</summary>
+        public IReadOnlyList<TerminalDocument> TerminalNew { get; init; } = [];
+
         /// <summary>#2159 slice 2c: the documents whose F3 release had expired, unused, and was dropped this run.</summary>
         public IReadOnlyList<Guid> ReleaseExpired { get; init; } = [];
     }
@@ -962,9 +980,38 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             }
         }
 
+        // B5: a permanent failure (too large, a full ledger, a ledger unreadable for MaxUnreadableLedgerRuns runs) is
+        // TERMINAL: reported once, never incomplete, never retried as unfinished work.
+        var terminal = new Dictionary<Guid, string>();
+        lock (_cursorGate)
+        {
+            foreach (var o in outcomes)
+            {
+                if (o.Pending.Any(p => p.StartsWith(DocumentContainerRelocator.LedgerUnreadablePendingPrefix, StringComparison.Ordinal)))
+                {
+                    var runs = _unreadableLedgerRuns.GetValueOrDefault(o.DocumentId) + 1;
+                    _unreadableLedgerRuns[o.DocumentId] = runs;
+                    if (runs >= MaxUnreadableLedgerRuns)
+                        terminal[o.DocumentId] = DocumentContainerRelocator.TerminalLedgerUnreadable;
+                }
+                else
+                {
+                    _unreadableLedgerRuns.Remove(o.DocumentId);
+                }
+
+                foreach (var t in o.MovedAlong.Prepend(o).Where(t => t.TerminalCause is not null))
+                    terminal.TryAdd(t.DocumentId, t.TerminalCause!);
+            }
+        }
+
+        var terminalNew = ReportTerminal(outcomes.SelectMany(o => o.MovedAlong.Prepend(o)).Select(o => o.DocumentId), terminal);
+
         // B7/B4: a held or checked-out document that owes nothing is waiting on a person, not unfinished work: counted apart.
         var batch = DocumentRelocationBatchResult.From(outcomes);
-        var files = MakeSecureFilesSummary.From(batch with { Incomplete = batch.Incomplete.Where(o => !Waits(o)).ToList() });
+        var files = MakeSecureFilesSummary.From(batch with
+        {
+            Incomplete = batch.Incomplete.Where(o => !Waits(o) && !terminal.ContainsKey(o.DocumentId)).ToList(),
+        });
         var held = outcomes.Where(o => o.State == RelocationState.HeldIsolated && Waits(o)).Select(o => o.DocumentId).ToList();
         var checkedOut = outcomes.Where(o => o.State == RelocationState.CheckedOut && Waits(o)).Select(o => o.DocumentId).ToList();
         var releaseExpired = outcomes.Where(o => o.ReleaseExpired).Select(o => o.DocumentId).ToList();
@@ -985,9 +1032,12 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         return new MakeSecureRelocationRun(mode, owing.Count, stranded.Count, files, passComplete, null)
         {
             Taken = outcomes.Where(o => DocumentRelocationBatchResult.IsSettled(o)
-                                        || o.State is RelocationState.HeldIsolated or RelocationState.CheckedOut)
+                                        || o.State is RelocationState.HeldIsolated or RelocationState.CheckedOut
+                                        || terminal.ContainsKey(o.DocumentId))
                 .Select(o => o.DocumentId).ToHashSet(),
             ReleaseExpired = releaseExpired,
+            Terminal = terminal.Count,
+            TerminalNew = terminalNew,
             HeldIsolated = held,
             CheckedOut = checkedOut,
         };
@@ -1024,6 +1074,12 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
 
         /// <summary>B4: checked out — left alone; reached again when the check-in modifies the row. Not carried, not failed.</summary>
         public List<Guid> CheckedOut { get; } = new();
+
+        /// <summary>B5: permanent failures this run (too large, a full ledger): not carried, not failed.</summary>
+        public int Terminal { get; set; }
+
+        /// <summary>B5: the terminal documents not reported before on this instance, with their cause (reported once).</summary>
+        public IReadOnlyList<TerminalDocument> TerminalNew { get; set; } = [];
         public List<Guid> UnfiledHomeUnknown { get; } = new();
         public List<Guid> SourceUnverified { get; } = new();
         public List<Guid> FileMissing { get; } = new();
@@ -1045,6 +1101,38 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         /// (B6). A held or checked-out document is not unfinished work (B7, B4): no run of this pass can release it.
         /// </summary>
         public bool Incomplete => Failure is not null || Failed.Count > 0 || StillOwed.Count > 0 || Undecidable.Count > 0;
+    }
+
+    /// <summary>#2159 B5: a terminal document and its cause (<see cref="DocumentRelocationOutcome.TerminalCause"/>).</summary>
+    internal sealed record TerminalDocument(Guid Id, string Cause);
+
+    /// <summary>
+    /// #2159 B5: the terminal documents among <paramref name="seen"/> not reported before on this instance (reported once,
+    /// logged as an error for an administrator); a seen document that is no longer terminal may be reported again later.
+    /// </summary>
+    private List<TerminalDocument> ReportTerminal(IEnumerable<Guid> seen, IReadOnlyDictionary<Guid, string> terminal)
+    {
+        var fresh = new List<TerminalDocument>();
+        lock (_cursorGate)
+        {
+            foreach (var id in seen.Distinct())
+            {
+                if (!terminal.TryGetValue(id, out var cause))
+                    _terminalReported.Remove(id);
+                else if (_terminalReported.Add(id))
+                    fresh.Add(new TerminalDocument(id, cause));
+            }
+        }
+
+        foreach (var t in fresh)
+        {
+            _logger.LogError(
+                "[SECURE-CHILD-RECONCILE] document {DocumentId} cannot be relocated by any repeat run ({Cause}); it is reported "
+                + "once and no longer retried — an administrator must act (too-large: #2176; ledger-full or ledger-unreadable: "
+                + "settle or repair its sprk_relocationpending).", t.Id, t.Cause);
+        }
+
+        return fresh;
     }
 
     /// <summary>How many document ids each list of the re-file report carries (the counts are complete).</summary>
@@ -1074,8 +1162,9 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     /// <para><b>Known limit.</b> The watermark, cursor and carried rows are per instance. A new instance looks back
     /// <see cref="InitialRecentChangesLookback"/>; a document re-filed earlier whose move never completed (it was carried by a
     /// previous instance) is reached again only when the row next changes, or by the operator-run
-    /// <see cref="DocumentContainerMigrationJob"/>. The catch-up does not walk documents: a full walk of every document's
-    /// derivation is not a two-minute net's cost.</para>
+    /// <see cref="DocumentContainerMigrationJob"/>, which is the repair (#2159 B3: it accepts the BFF-bound-item proof). The
+    /// workaround without it: any write to the row changes its <c>modifiedon</c> and puts it back in the window. The catch-up
+    /// does not walk documents: a full walk of every document's derivation is not a two-minute net's cost.</para>
     /// </remarks>
     private async Task<RefileRelocationRun> RelocateRefiledDocumentsAsync(
         IServiceProvider services, IGenericEntityService dataverse, bool writes, DateTimeOffset startedAt,
@@ -1172,6 +1261,8 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             SkippedForMakeSecure = candidates.Keys.Count(handledByMakeSecure.Contains),
         };
         var carry = new List<Guid>();
+        var terminal = new Dictionary<Guid, string>();
+        var terminalSeen = new List<Guid>();
         var undecidableNow = new Dictionary<Guid, int>();
         var inPlace = 0;
         var calls = 0;
@@ -1310,11 +1401,17 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                     case RelocationState.Undecidable:
                         Undecidable(documentId);
                         break;
+                    case RelocationState.Failed when outcome.TerminalCause is { } cause:
+                        // B5: a permanent failure — reported once, never carried, never failing a run.
+                        terminal[documentId] = cause;
+                        break;
                     default:
                         run.Failed.Add(documentId);
                         carry.Add(documentId);
                         break;
                 }
+
+                terminalSeen.Add(documentId);
 
                 Handled(documentId, inWindow);
             }
@@ -1343,6 +1440,8 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
 
         run.Examined = examined;
         run.InPlace = inPlace;
+        run.Terminal = terminal.Count;
+        run.TerminalNew = ReportTerminal(terminalSeen, terminal);
         run.WindowDrained = drained;
         run.WatermarkHeld = !watermarkMoved;
         var result = run;
@@ -1715,6 +1814,11 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     // #2159 B2/B6: when the window the cursor walks started, and how many consecutive runs each carried row was undecidable.
     private DateTimeOffset? _refileWindowStartedAt;
     private readonly Dictionary<Guid, int> _refileUndecidableRuns = new();
+
+    // #2159 B5: the terminal documents already reported (by either pass) and the backstop's consecutive unreadable-ledger
+    // runs, per instance. A document leaves the reported set when an outcome for it is no longer terminal.
+    private readonly HashSet<Guid> _terminalReported = new();
+    private readonly Dictionary<Guid, int> _unreadableLedgerRuns = new();
 
     // Task 147: the recent-changes watermark, with the same per-instance, in-singleton reasoning as the cursor. A restart
     // looks back InitialRecentChangesLookback. A change older than that is reached by the full sweep.

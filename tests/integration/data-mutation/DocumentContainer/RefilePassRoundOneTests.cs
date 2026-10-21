@@ -292,7 +292,7 @@ public class RefilePassRoundOneTests
     }
 
     /// <summary>A document in S1's own container filed under S2 (an outside edit), isolated, with a ledger the backstop lists.</summary>
-    private static (World Pointer, SecureChildShareWorld Job) HeldWithALedger()
+    internal static (World Pointer, SecureChildShareWorld Job) HeldWithALedger()
     {
         var pointer = R.Env();
         pointer.Rows[("sprk_document", T.DocumentId)] = R.Doc(T.DocumentId, R.SecondSecureMatter, T.SecureContainer);

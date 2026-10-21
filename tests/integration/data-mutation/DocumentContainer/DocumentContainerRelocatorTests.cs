@@ -1077,6 +1077,7 @@ public class DocumentContainerRelocatorTests
         var outcome = await rig.Relocator.RelocateIfMisplacedAsync(DocumentId, apply: true);
 
         outcome.State.Should().Be(RelocationState.Failed);
+        outcome.TerminalCause.Should().Be(DocumentContainerRelocator.TerminalTooLarge, "#2159 B5: no repeat call can move it (#2176)");
         rig.Steps.Should().BeEmpty();
     }
 
@@ -2702,8 +2703,27 @@ public class DocumentContainerRelocatorTests
 
         outcome.State.Should().Be(RelocationState.Failed);
         outcome.Detail.Should().Contain("larger than a single-request copy");
+        outcome.TerminalCause.Should().Be(DocumentContainerRelocator.TerminalTooLarge, "#2159 B5: a version too large is permanent too");
         rig.Steps.Should().BeEmpty();
         world.Updates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AVersionListThatCannotBeRead_FailsTheMove_AndIsNotTerminal()
+    {
+        // #2159 B5 must not fire: every other history failure is retryable — a later run may read the list.
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(drive: CustomerBContainer, item: Item);
+        var rig = new Rig(world);
+        rig.Spe.Setup(s => s.ListFileVersionsAsync(CustomerBContainer, Item, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("graph is unavailable"));
+
+        var outcome = await rig.Relocator.RelocateIfMisplacedAsync(DocumentId, apply: true);
+
+        outcome.State.Should().Be(RelocationState.Failed, outcome.Detail);
+        outcome.Detail.Should().Contain("could not be listed");
+        outcome.TerminalCause.Should().BeNull();
+        rig.Steps.Should().BeEmpty();
     }
 
     [Fact]

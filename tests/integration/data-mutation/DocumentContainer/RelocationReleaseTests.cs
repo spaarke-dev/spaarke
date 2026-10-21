@@ -14,6 +14,7 @@
 // document-pointer world, and the REAL SecureChildReconciler over task 148's world.
 
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
@@ -641,13 +642,13 @@ public class RelocationReleaseTests
 
     /// <summary>The REAL reconciler over task 148's world: an event filed under S2 (re-filed there from S1), with the
     /// document filed under the event, both isolated.</summary>
-    private static SecureChildReconciler EventReconciler(T.Rig rig)
+    private static SecureChildReconciler EventReconciler(T.Rig rig, ILogger<SecureChildReconciler>? logger = null)
     {
         var shareWorld = SecureChildShareWorld.Standard()
             .SecureRoot("sprk_matter", R.SecondSecureMatter)
             .SecureChild("sprk_event", Event, ("sprk_regardingmatter", "sprk_matter", R.SecondSecureMatter))
             .SecureChild("sprk_document", T.DocumentId, ("sprk_relatedevent", "sprk_event", Event));
-        return SecureChildShareWorld.ReconcilerOver(() => shareWorld, new FakeRecordShareTable(), null!, relocator: rig.Relocator);
+        return SecureChildShareWorld.ReconcilerOver(() => shareWorld, new FakeRecordShareTable(), null!, relocator: rig.Relocator, logger: logger);
     }
 
     [Fact(DisplayName = "slice 2c must fire: an EVENT re-filed S1→S2 with F3 releases the file of the document filed under it, which then moves into S2")]
@@ -665,6 +666,50 @@ public class RelocationReleaseTests
 
         (await RelocateAsync(rig, RelocationPurpose.Refile)).State.Should().Be(RelocationState.Relocated);
         rig.DriveOf(T.DocumentId).Should().Be(R.SecondSecureContainer);
+    }
+
+    [Fact(DisplayName = "slice 4 must fire: a descendant the shared lock-wait budget left without a release is named by id in the log, to re-file again")]
+    public async Task ARefiledEvent_NamesADescendantLeftUnreleased()
+    {
+        var (world, rig) = RefiledToS2();
+        rig.Locks.Held.Add(DocumentContainerRelocator.RelocationLockKey(T.DocumentId));
+        var logger = new CapturingLogger();
+
+        var report = await EventReconciler(rig, logger).AfterRefileAsync(
+            "sprk_event", Event, () => Task.FromResult(true), Reparent(Permit(S1)), CancellationToken.None);
+
+        report!.IsolatedDocumentIds.Should().Contain(T.DocumentId);
+        world.Updates.Should().BeEmpty("its lock was busy: no release");
+        logger.Lines.Should().ContainSingle(l => l.Level == LogLevel.Warning && l.Message.Contains("were NOT released"))
+            .Which.Message.Should().Contain(T.DocumentId.ToString());
+    }
+
+    [Fact(DisplayName = "slice 4 must not fire: a descendant released within the budget is not named as unreleased")]
+    public async Task ARefiledEvent_DoesNotNameAReleasedDescendant()
+    {
+        var (_, rig) = RefiledToS2();
+        var logger = new CapturingLogger();
+
+        await EventReconciler(rig, logger).AfterRefileAsync(
+            "sprk_event", Event, () => Task.FromResult(true), Reparent(Permit(S1)), CancellationToken.None);
+
+        logger.Lines.Should().NotContain(l => l.Message.Contains("were NOT released"));
+        logger.Lines.Should().Contain(l => l.Message.Contains(T.DocumentId.ToString()) && l.Message.Contains(nameof(RelocationReleaseState.Recorded)));
+    }
+
+    private sealed class CapturingLogger : ILogger<SecureChildReconciler>
+    {
+        public List<(LogLevel Level, string Message)> Lines { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            lock (Lines)
+                Lines.Add((logLevel, formatter(state, exception)));
+        }
     }
 
     [Fact(DisplayName = "slice 2c must not fire: a descendant whose file is isolated under ANOTHER secure record (S3) the re-file did not leave stays held")]
