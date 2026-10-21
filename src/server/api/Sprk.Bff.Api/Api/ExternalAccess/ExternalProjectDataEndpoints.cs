@@ -2625,7 +2625,8 @@ public static class ExternalProjectDataEndpoints
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            // DeleteAsync throws only from its token and document read, before anything is deleted. An HttpClient timeout
+            // DeleteAsync throws only from its token, document read and child-document read (task 188 slice D), before
+            // anything is deleted. An HttpClient timeout
             // is a TaskCanceledException while ct is NOT cancelled: that is a failed read (503), not the caller leaving.
             logger.LogError(ex, "[EXT-DELETE] Document {DocumentId} could not be read for the delete", id);
             return DeleteOwnUnavailable();
@@ -2643,6 +2644,16 @@ public static class ExternalProjectDataEndpoints
                 return Results.Problem(statusCode: 409, title: "Document checked out",
                     detail: "This document is being edited, so it cannot be deleted now. Nothing was deleted.",
                     extensions: new Dictionary<string, object?> { ["reasonCode"] = "document_locked" });
+
+            case HasChildDocumentsDeleteResult hasChildren:
+                // Task 188 slice D: other documents name this one as their parent. No count on this plane: a child the
+                // caller cannot see (D7) must not be counted to them. FileGone: Dataverse's Restrict refused the row
+                // after the file went (a child created after the pre-check); the row is kept.
+                logger.LogInformation(
+                    "[EXT-DELETE] Document {DocumentId}: refused, it has child documents; file already gone: {FileGone}",
+                    id, hasChildren.FileGone);
+                return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.DocumentHasChildDocuments(
+                    childCount: null, fileGone: hasChildren.FileGone);
 
             case FileNotDeletedDeleteResult notDeleted:
                 return Results.Problem(statusCode: notDeleted.FailureStatusCode, title: "Document not deleted",
