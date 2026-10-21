@@ -321,3 +321,9 @@ Criterion 89 (blank the writer client id, expect the writer-failure alert to fir
 - **Peer notices:** R3, uac-r2, word-add-in and ebilling, before and after.
 - **Limit:** this proves the web-resource branch of the scoped publish. The entity, ribbon, app-module and sitemap branches are covered by the module's unit tests (`tests/scripts/Publish-SolutionComponents.Tests.ps1`). ebilling's `Deploy-Ebilling*` scripts use the same module for their entity publishes.
 
+## 2026-10-21 — ebilling 115 option run on sprk_policyversion.sprk_ruletype (dev; ebilling owner OK + ontology PASS)
+
+- ebilling inserted 100000015 AddedFee and 100000016 Discount into the local choice, then ran a scoped publish of sprk_policyversion only.
+- Ontology read-back: a local choice (not global) with 16 options. Ontology's 100000000 Threshold, 100000001 Switch and 100000002 Existence are unchanged, as are billing's 100000003–100000013.
+- 100000014 SubmissionIntegrity is still absent on dev; ebilling task 049's option script hasn't run.
+
