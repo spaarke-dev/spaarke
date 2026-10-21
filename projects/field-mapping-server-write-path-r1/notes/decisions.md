@@ -85,3 +85,25 @@ Their no-objection binds us to the items carried into later tasks:
 
 017's diff goes to UAC-r2 for the same review. ebilling-r1 has no objection, subject to its re-check of the fix-round-2
 seam tests (re-checked 27bac15a42: no objection, 2026-10-21).
+
+## 2026-10-21 — #2188 fix design: D, the caller-mask (agreed with UAC-r2)
+
+- **Why not the literal fix:** reading the mapping source as the caller doesn't fit as written.
+  `IDataverseUserClient` returns JSON, the engine needs a typed `Entity`, and there is no OBO SDK client.
+- **Rejected alternatives:**
+  - A: a JSON→Entity converter plus a change to the shared OBO client;
+  - B: a new per-request OBO ServiceClient (ADR-028 work);
+  - C: turning off Office quick-create mapping.
+- **D:** keep the app-only typed read for types only. One caller GET through `IDataverseUserClient`, selecting only the
+  mapped columns (lookups via `_col_value`). A column that is non-null for the app but null or absent for the caller
+  is removed before the engine runs.
+- **UAC-r2 conditions:**
+  1. Fail closed for any type that can't be compared: file, image, partylist, absent, and so on.
+  2. The race between the two reads is accepted as a known limit.
+  3. A masked column gets the empty-column text exactly; a missing or denied source keeps the source-level warning;
+     nothing distinguishes masked from empty.
+  4. An ArchTest makes every engine call site with a source pass through `MappingSourceCallerMask`.
+  5. Cancellation is rethrown; a timeout or fault is Unavailable, with no app-value fallback.
+  6. Must-fire and must-not-fire tests, plus mutants.
+- **Sequence:** the Office hotfix PR to master first. Task 014's mapping step reuses the helper after master is merged
+  in.
