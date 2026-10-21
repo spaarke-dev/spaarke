@@ -39,3 +39,29 @@ The census was run with the operator's own token and printed counts only. The sc
 
   It is also a standing safety net: it heals any archive whose best-effort link failed later.
 - **Unmatched rows** (68 with no key, 23 with an Exchange id, 20 children under them): listed by id and count for the owner, who decides whether they become Restricted. The job never sets Restricted.
+
+## 3. Implementation (PR #2221, draft, head d811f84168)
+
+- **Job:** `EmailArchiveCommunicationLinkSweepJob`.
+  - Registered disabled in `CommunicationModule`; run through `POST /api/admin/jobs/{jobId}/trigger`.
+  - Dry run unless `EmailArchiveLinkSweep:Apply=true`.
+  - Writes only `sprk_relatedcommunication`, null → the one exact match, through `UpdateIfRowVersionMatchesAsync`.
+  - Reasons: `noKey`, `exchangeItemId`, `matched`, `ambiguous`, `noCommunication`, `changedSinceRead`, `failed`.
+- **Checks:**
+  - 27 new unit tests; with the reference job's suite, 51/51.
+  - ArchTests 1337/1337.
+  - BFF and `Spaarke.sln` builds: 0 errors, 0 warnings.
+  - Publish +9,940 B against a fresh master build; no vulnerable packages.
+- **Mutants**, each killed and restored:
+
+  | Mutant | Tests that failed |
+  |---|---|
+  | Ambiguous branch removed | 4 |
+  | Dry run writes | 5 |
+  | Case-insensitive accept | 2 |
+  | Stale row version passed to the write | 4 |
+- **Guard.** On master, `EveryGenericUpdateWriter_AsksTheAppOnlyRefusal` does not scan `UpdateIfRowVersionMatchesAsync`, so an entry would be reported stale. A comment records the member entry `EmailArchiveCommunicationLinkSweepJob::LinkAsync` and its reason. Field-mapping's task/fm-016 widens the scan; whoever merges second turns the comment into the entry.
+- **Read paths opened by the link:** none through Dataverse row security; the relationship is NoCascade on share, assign and reparent.
+  - Two app-only lookups by communication reveal only that an archive exists: chat ingest (404 vs 403) and the archive route's `ArchiveDocumentId`. This was already true before 190, and it is filed as **#2222**.
+  - D7 can only hide a newly linked archive, never show one.
+- **Known limit:** the children counts in the report are direct children only. The D7 walk goes up to 3 hops.
