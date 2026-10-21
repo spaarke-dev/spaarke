@@ -87,7 +87,7 @@
   <escalation>
     <trigger>If 088's columns or status values differ from the background, STOP; do not adapt the schema.</trigger>
     <trigger>If moving the gateway changes SessionFileBlobStore's behaviour or tests, STOP and report the options.</trigger>
-    <trigger>If the Defender tag key or values cannot be confirmed, or reading index tags needs more than Storage Blob Data Contributor, STOP and record it for 091.</trigger>
+    <trigger>If the Defender tag key or values cannot be confirmed, STOP and record it for 091. (Tag reads are settled: Storage Blob Data Contributor lacks blobs/tags/read, so 091 option A (owner 2026-10-21) grants a custom role = Contributor + blobs/tags/read per container; 090 relies on that role and needs no further escalation for it.)</trigger>
     <trigger>If any download check cannot run before the first byte, STOP.</trigger>
     <trigger>If uac-r2 asks for a Dataverse audit row instead of the log event, STOP and raise 🔔 Human Input Required (O-29).</trigger>
   </escalation>
