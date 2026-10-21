@@ -383,6 +383,30 @@ public sealed partial class SecureChildOwnershipAiToolTests
         EmailRevokes().Should().Be(1, "the last step's removal");
         EmailShareOf(Sharee).Should().BeNull("the last step takes the mirror off");
         GrantRevokedWarnings().Should().BeEmpty("no thread move ran, so no grant was revoked");
+        RemovalErrors().Should().BeEmpty(
+            "round 11 (F2-1): the step before the reconcile is not the last try, so its exhausted removal is a Warning");
+    }
+
+    [Fact(DisplayName = "#2143 r11 F2-1 must-fire: when the LAST step's removal is exhausted too, it is still logged as an ERROR, once")]
+    public async Task FilingRoute_NoThreadMove_WhenTheLastStepsRemovalIsExhausted_ItIsStillAnError()
+    {
+        // As above, but every read of the row after the first faults: the step before the reconcile and the last step both
+        // exhaust their removals. Only the last one is an ERROR; S's sharee keeps the share, and the log says so.
+        AnEmailIn(SecureMatter, OrdinaryMattersThread, Directory.SecureBu, Directory.SecureNamedTeam);
+        _shareTable.Seed("sprk_communication", RefiledEmail, DataversePrincipalRef.User(Sharee), CollaborateMask);
+        _user.FullAccessOn.Add(SecureMatter);
+        ShareWorld.TransientRowReadFaultsOf("sprk_communication", RefiledEmail, read => read >= 2);
+
+        await RefileTo(OrdinaryMatter);
+
+        ShareWorld.TransientRowReadFaultsFired("sprk_communication", RefiledEmail).Should().BeGreaterThanOrEqualTo(8,
+            "both steps' mirror reads and all six removal attempts faulted — never vacuous");
+        EmailRevokes().Should().Be(0, "no removal got through");
+        EmailShareOf(Sharee).Should().Be(CollaborateMask);
+        RemovalErrors().Should().ContainSingle("the last step's exhausted removal is still an ERROR");
+        _sharesLog.Entries.Count(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning
+            && e.Message.Contains("not all removed", StringComparison.Ordinal))
+            .Should().Be(1, "the step before the reconcile logged its exhausted removal as a Warning");
     }
 
     [Fact(DisplayName = "#2143 r9 F2 must-not-fire: with no fault the mirror is removed exactly once, at the hook, and the grant stands")]

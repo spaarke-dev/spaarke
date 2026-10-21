@@ -379,7 +379,16 @@ public sealed class SecureChildShareSynchronizer
     /// removal, which reads its owner again and refuses a row still owned by the Secure team (still isolated: no removal,
     /// no error). Else a row that LEFT isolation would keep its mirrored shares for good, as the two-minute reconcile
     /// visits only Secure-team-owned rows.</remarks>
-    public async Task<bool> AfterRefileAsync(string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, CancellationToken ct)
+    public Task<bool> AfterRefileAsync(string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, CancellationToken ct) =>
+        AfterRefileAsync(childLogicalName, childId, wasIsolated, LogLevel.Error, ct);
+
+    /// <summary>
+    /// <see cref="AfterRefileAsync(string, Guid, Func{Task{bool}}, CancellationToken)"/> with the level of the log it writes
+    /// when every removal attempt failed. #2143 round 11 (F2-1): a caller that tries again after it (the reconciler's
+    /// steps before its last one) passes <see cref="LogLevel.Warning"/>; only the last try is an ERROR.
+    /// </summary>
+    public async Task<bool> AfterRefileAsync(
+        string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, LogLevel exhaustedLevel, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(wasIsolated);
         SecureChildShareSyncStatus mirrored;
@@ -448,10 +457,23 @@ public sealed class SecureChildShareSynchronizer
             }
         }
 
-        _logger.LogError(
-            "[SECURE-CHILD-SHARES] {Table} {Id} left its secure record, but its mirrored shares were not all removed after " +
-            "{Attempts} attempts ({Status}: {Detail}) — the secure record's sharees may still open it", childLogicalName, childId,
-            MirrorRemovalAttempts, removal?.Status, removal?.Detail);
+        // #2143 round 11 (F2-1): a Failed mirror step never read the owner, so it is not known that the row left isolation.
+        if (mirrored is SecureChildShareSyncStatus.Failed)
+        {
+            _logger.Log(exhaustedLevel,
+                "[SECURE-CHILD-SHARES] {Table} {Id} may have left its secure record (its owner could not be read), and its " +
+                "mirrored shares were not all removed after {Attempts} attempts ({Status}: {Detail}) — if it left, the secure " +
+                "record's sharees may still open it", childLogicalName, childId, MirrorRemovalAttempts, removal?.Status,
+                removal?.Detail);
+        }
+        else
+        {
+            _logger.Log(exhaustedLevel,
+                "[SECURE-CHILD-SHARES] {Table} {Id} left its secure record, but its mirrored shares were not all removed after " +
+                "{Attempts} attempts ({Status}: {Detail}) — the secure record's sharees may still open it", childLogicalName,
+                childId, MirrorRemovalAttempts, removal?.Status, removal?.Detail);
+        }
+
         return false;
     }
 

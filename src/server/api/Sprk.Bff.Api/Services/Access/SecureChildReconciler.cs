@@ -936,7 +936,8 @@ public sealed class SecureChildReconciler
         {
             if (mirrorTakenOff || before != true || !await LeftIsolationAsync(table, childId, ct).ConfigureAwait(false))
                 return;
-            mirrorTakenOff = await _shares.AfterRefileAsync(table, childId, isolatedBefore, ct).ConfigureAwait(false);
+            // #2143 round 11 (F2-1): not the last try — the last step below retries — so an exhausted removal is a Warning here.
+            mirrorTakenOff = await _shares.AfterRefileAsync(table, childId, isolatedBefore, LogLevel.Warning, ct).ConfigureAwait(false);
         }
 
         if (reconcilesThread)
