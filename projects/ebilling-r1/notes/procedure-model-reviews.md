@@ -300,3 +300,23 @@ So the post-commit re-run is not only for root-made-Secure: it is the main check
 **Extracted fields after a later source change: UAC position, confirmed by the owner 2026-10-21 ("yes invoice stay readable"); a known limit in v5.** They do not follow the source. Once the re-run passes, the invoice is its own business record under the core record: its readers are the core record's readers, narrowed by the invoice's own Access Permission. Disclosure happened at submit, as with a download (uac-r2 K2). To hide an invoice later, set its own Access Permission to Restricted; D7 and uac-r2 task 191 then hide it from flagged-external users.
 
 **For uac-r2 task 191:** v5 names each new table and the root column it hangs from, for all core types. uac-r2 updates its delete design §12 to keep record-scoped rule-set rows as secure child rows.
+
+## 8. ontology-r1 scoped re-check of v5 (70fc2cc616), 2026-10-21
+
+Verdict: **FINDINGS, nothing blocking.** 2b and O1 resolved; 9a's intent carries to the record-scoped set. Patch v5 before the POMLs (folded into v5.1 together with uac-r2's re-review).
+
+- **F2-a (§5.2, I-P5).** The record policy version's "based on" link to the base version, and everything under a record-scoped set, must be **RemoveLink**; state that no Restrict is reachable from a core-record delete (D-172, #2132).
+- **F2-b (§5.2, §6.3).** After RemoveLink a record-scoped set has no lookup. State that a record scope with no lookup applies to nothing (the loader requires scope plus a non-null lookup); the sweep is cleanup only.
+- **F2-c (§6.3, §7.1).** An override has no firm, so a change made for firm F would exclude the base rule for every firm and apply the record rule to firm G too, contradicting D-175 C. Fix: the Exclude row and the record-scoped set carry the firm, using the scope values below. Add the question to §15.
+- **F2-d (§7.1).** The gap rule fires for any Active Procedure with no version in force. State whether a Draft-only Procedure counts as Active, and whether a future-dated v1 means "not applicable yet" or a gap. (Our proposed reading for the owner: Draft-only is not Active; a Procedure applies from its first version's effective date, so earlier work is "not applicable", not a gap. A gap is a hole between versions, or after an end date with no successor.)
+- **F3-a.** The option sets (Type, Applies to, Status, Purpose, version status) are global and start at 100000000.
+- **F3-b.** Name the published-marker column and its values; the pointer ratchet is a baseline-plus-controls ArchTest.
+- **F3-c.** Restate the ExpenseRule split (caps replace, checklist adds) in §7.3, since §12 retires the file it points to.
+- **F3-d.** Type name: we record "Internal Standard" (owner in this session); ontology is re-confirming with the owner because its D-175 holds its own relay.
+- **F3-e.** List the lineage edges agreed with uac-r2 (`sprk_ruleset` → core record, `sprk_policy` → set, policy version → policy, plus the Procedure tables) and write out the rewritten census guard with must-fire and must-not-fire controls.
+- **F4-a.** §8.1 "Billing instructions for this matter" → "for this record".
+- **Answers to our §15:**
+  1. **Marker:** reuse `sprk_ruleset.sprk_scope`, no new boolean; drop `sprk_isexceptions`. Add **Record = 100000002** (every firm on the record) and **Firm record = 100000003** (one firm, existing `sprk_firm`), as D-171 and the 080 notes planned. Term: "record-scoped rule set" (ontology adds it to component-model §3).
+  2. **Retiring one Procedure Version:** ontology is asking the owner. Its recommendation: Superseded = no re-check; Retired/withdrawn = re-check pending and In Review invoices whose snapshot cites it (the gap hold then applies); decided invoices keep their snapshot.
+  3. **AddedFee:** the reference is ebilling's D-27 (closed typed templates). `InvoiceExtractionToolHandler` returns the header due date but no per-line fee kind. So the validator refuses "not allowed" and "after N days" until extraction returns both, with a test on each; the cap form can ship now.
+- **Matter-only items:** §8.1 wording; §13 must use the shared core-record list, not three names typed by hand; confirm the Billing tab and record setup exist on project and work-assignment forms (§3.2, O-19); confirm `sprk_assignedlawfirm1/2` exists on all three core types (§3.3).
