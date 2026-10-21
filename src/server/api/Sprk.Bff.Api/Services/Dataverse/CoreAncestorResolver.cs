@@ -966,7 +966,8 @@ public sealed class CoreAncestorResolver
     /// <paramref name="parents"/> takes from them (<see cref="InheritedAccessPermission"/>), or <see langword="null"/> when
     /// it takes none — the host is not one of the four tables or lacks the column, the row names no parent (its own value
     /// stands), or the parents could not be read (logged as a warning; nothing is written, and the reconcile job corrects
-    /// it within its cycle). Never throws (cancellation aside): the value is display-only, so it never fails a write.
+    /// it within its cycle). Never throws (cancellation aside): on To Do, Event and Communication the value is display only,
+    /// so it never fails a write. A document gets none (task 189's fence, see <c>InheritedAccessPermissionAsync</c>).
     /// </summary>
     /// <remarks>
     /// For a writer that UPDATES an existing row with a field dictionary it did not hand to
@@ -980,8 +981,9 @@ public sealed class CoreAncestorResolver
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(fields);
-        if (!InheritedAccessPermission.AppliesTo(hostEntityLogicalName))
-            return null;
+        if (!InheritedAccessPermission.AppliesTo(hostEntityLogicalName)
+            || InheritedAccessPermission.RecordsOwnNarrowing(hostEntityLogicalName))
+            return null; // task 189's fence: no document value from here, and no read of the document
 
         Entity? stored = null;
         if (existingRowId != Guid.Empty)
@@ -1162,6 +1164,14 @@ public sealed class CoreAncestorResolver
         Guid self = default)
     {
         if (!InheritedAccessPermission.AppliesTo(hostEntityLogicalName))
+            return null;
+
+        // Task 189 (D7 T7a): the fence. A document holds max(own narrowing, inherited), and only
+        // InheritedAccessPermission.DecideDocument's writers write it (the reconcile job and
+        // RefreshInheritedAccessPermissionAsync), with its record in the same update. This path gives a bare inherited
+        // value, so a document gets none: StampAsync, DeriveForHostAsync, ApplyInheritedAccessPermissionAsync and
+        // ResolveInheritedAccessPermissionAsync never write one, whoever calls them for a document.
+        if (InheritedAccessPermission.RecordsOwnNarrowing(hostEntityLogicalName))
             return null;
 
         // The writer's target is a parent when the host can be filed under its table (a contact, an organization or a

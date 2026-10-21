@@ -171,6 +171,59 @@ public class InheritedAccessPermissionStampTests
         level.Should().Be(Restricted);
     }
 
+    [Theory]
+    [InlineData("sprk_todo", true)]
+    [InlineData("sprk_event", true)]
+    [InlineData("sprk_communication", true)]
+    [InlineData("sprk_document", false)]
+    public async Task StampAsync_UnderARestrictedMatter_CarriesTheInheritedValue_ExceptOnADocument(string host, bool carries)
+    {
+        // Task 189 (D7 T7a), the stamp-path fence. Must fire: a document passed through the stamp path gets NO
+        // sprk_accesspermission in its payload (it holds max(own, inherited), written only by DecideDocument's writers).
+        // Must not fire: a To Do, Event or Communication stamp still carries its inherited value, in both payload shapes.
+        var matter = Root("sprk_matter", Restricted);
+        var entity = new Entity(host);
+        var fields = new Dictionary<string, object>();
+
+        var fromEntity = await Resolver().StampAsync(entity, "sprk_matter", matter);
+        var fromFields = await Resolver().StampAsync(fields, host, "sprk_matter", matter);
+
+        fromEntity.Succeeded.Should().BeTrue();
+        fromFields.Succeeded.Should().BeTrue();
+        if (carries)
+        {
+            entity.GetAttributeValue<OptionSetValue>(Column)!.Value.Should().Be(Restricted);
+            ((OptionSetValue)fields[Column]).Value.Should().Be(Restricted);
+            fromEntity.InheritedAccessPermission.Should().Be(Restricted);
+        }
+        else
+        {
+            entity.Contains(Column).Should().BeFalse("a document's value is never written by the stamp path");
+            fields.Should().NotContainKey(Column);
+            fromEntity.InheritedAccessPermission.Should().BeNull();
+            fromFields.InheritedAccessPermission.Should().BeNull();
+        }
+    }
+
+    [Fact]
+    public async Task TheOtherStampPathMembers_GiveADocumentNoValue_AndResolveDoesNotReadIt()
+    {
+        // Task 189's fence, must fire: ApplyInheritedAccessPermissionAsync, DeriveForHostAsync and
+        // ResolveInheritedAccessPermissionAsync give a document under a Restricted matter nothing to write.
+        var matter = Root("sprk_matter", Restricted);
+        var stored = Row("sprk_document", ("sprk_matter", "sprk_matter", matter));
+        var document = new Entity("sprk_document") { ["sprk_matter"] = new EntityReference("sprk_matter", matter) };
+
+        (await Resolver().ApplyInheritedAccessPermissionAsync(document)).Should().BeNull();
+        document.Contains(Column).Should().BeFalse();
+        (await Resolver().DeriveForHostAsync("sprk_document", "sprk_matter", matter)).InheritedAccessPermission.Should().BeNull();
+
+        var readsBefore = _world.QueriedTables.Count(t => t == "sprk_document");
+        (await Resolver().ResolveInheritedAccessPermissionAsync("sprk_document", new Dictionary<string, object>(), stored))
+            .Should().BeNull();
+        _world.QueriedTables.Count(t => t == "sprk_document").Should().Be(readsBefore, "the fence returns before reading the row");
+    }
+
     [Fact]
     public async Task StampAsync_OnARefile_AFilingThatLeadsBackToTheRowItself_NeverBringsBackTheParentItIsLeaving()
     {
