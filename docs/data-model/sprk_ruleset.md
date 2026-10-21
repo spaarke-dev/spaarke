@@ -63,6 +63,7 @@ Existing columns are unchanged. Added:
 |---|---|---|
 | `sprk_domain` | Choice, global `sprk_policydomain` | Empty = Ontology. Billing policies set Billing. |
 | `sprk_ruleset` | Lookup -> `sprk_ruleset` (delete RemoveLink) | The rule set the policy belongs to. Stable across versions. Relationship `sprk_ruleset_policy_ruleset`. |
+| `sprk_createdbyperson` | Lookup -> `systemuser` (delete RemoveLink) | Task 080 (D-173, ontology F4-1): the person who asked for the policy; the BFF stamps it. Created unsecured; task 081 secures it. Relationship `sprk_systemuser_sprk_policy_createdbyperson`. |
 
 ## sprk_policyversion (additive)
 
@@ -86,9 +87,10 @@ Added by task 080 (EB-D-148, model 7.2):
 
 | Logical name | Type | Notes |
 |---|---|---|
-| `sprk_procedureversion` | Lookup -> `sprk_procedureversion` (delete **Restrict**, optional) | The Procedure Version this policy version belongs to. Restrict: a Procedure Version with policy versions cannot be deleted. Relationship `sprk_policyversion_procedureversion_procedureversion`. |
-| `sprk_publishstate` | Choice, global `sprk_publishstate` (Draft 100000000, Published 100000001), optional, **no default** | Only Published versions are loaded by the resolver. Existing rows stay empty (dev data is recreated, O-13). |
+| `sprk_procedureversion` | Lookup -> `sprk_procedureversion` (delete **Restrict**, optional) | The Procedure Version this policy version belongs to. Restrict: a Procedure Version with policy versions cannot be deleted. Relationship `sprk_policyversion_procedureversion_procedureversion`. **Field-secured (BFF-only writes).** |
+| `sprk_publishstate` | Choice, global `sprk_publishstate` (Draft 100000000, Published 100000001), optional, **no default** | Only Published versions are loaded by the resolver. Existing rows stay empty (dev data is recreated, O-13). **Field-secured (BFF-only writes).** |
 | `sprk_basedonversion` | Lookup -> `sprk_policyversion` (delete **RemoveLink**) | For a record rule: the base rule's policy version it was copied from. Never Restrict (ontology F2-a). Relationship `sprk_policyversion_basedonversion_policyversion`. |
+| `sprk_createdbyperson` | Lookup -> `systemuser` (delete RemoveLink) | Task 080 (D-173, ontology F4-1): the person who asked for the version; the BFF stamps it. Created unsecured; task 081 secures it. Relationship `sprk_systemuser_sprk_policyversion_createdbyperson`. |
 
 The predecessor of a version is its sibling under the same `sprk_policy` with the next-lower `sprk_versionnumber`; there is no extra link column.
 
@@ -101,6 +103,9 @@ The predecessor of a version is its sibling under the same `sprk_policy` with th
 The Signals readers of `sprk_policy` select **every enabled, active policy** regardless of subject or domain (`SignalReevaluationJob.ReadEnabledPoliciesAsync`, `PolicyScopeResolver.LoadEnabledPoliciesAsync`). An enabled billing policy would therefore be picked up by the nightly pass and the event-trigger pass; see `projects/ebilling-r1/notes/019-policy-store-ruleset.md` for the reader inventory and what 070 must do.
 
 ## Gotchas
+
+- **Deleting or merging an organization fails while a Procedure or a Procedure Assignment names it** (task 080): `sprk_procedure.sprk_firm` and `sprk_procedureassignment.sprk_firm` are Restrict, because a nulled firm would widen a firm-only Procedure or override to every firm. Retire or re-point the Procedure first.
+- The Procedure Version -> Procedure lookup and the assignment's record lookups and excluded-policy lookup are **delete-only cascades**, not parental: deleting the parent deletes the rows, but a reassign or share of the parent never reaches them (the record owner resolver and the secure-child job own their owner and shares).
 
 - The primary-name `MaxLength` and `RequiredLevel` in an entity-create body are ignored (850 / None); the script shortens `sprk_name` to 200 (only while the table has no rows) and sets it to ApplicationRequired right after creating the table (DEF-007).
 - The status relabel is safe because the table is new and empty; the script refuses (exit 2) if value 1 or 2 carries any label other than the system or the target one.
