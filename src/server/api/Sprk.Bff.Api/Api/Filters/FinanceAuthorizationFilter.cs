@@ -475,6 +475,11 @@ public class FinanceAuthorizationFilter : IEndpointFilter
                 ? InternalCallersOnlyReasonCode
                 : null;
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // The client went away: still refused (fail closed), but not a fault worth an Error log.
+            return SystemFailureReasonCode;
+        }
         catch (Exception ex)
         {
             logger?.LogError(ex, "Finance authorization step 0 faulted for caller {UserId}; denying (fail closed)", userId);

@@ -45,6 +45,9 @@ public sealed class FinanceStepZeroCaller
 
     private const string IsExternalColumn = "sprk_isexternal";
 
+    /// <summary>The oid the caller's token carries (<c>FinanceAuthzTestAuthHandler.CallerObjectId</c>); only it resolves.</summary>
+    public Guid ExpectedOid { get; set; } = Guid.Parse(Sprk.Bff.Api.Tests.Api.Finance.FinanceAuthzTestAuthHandler.CallerObjectId);
+
     /// <summary>What the lookup finds; settable between requests.</summary>
     public StepZeroCallerKind Kind { get; set; }
 
@@ -133,10 +136,15 @@ public sealed class FinanceStepZeroCaller
             return Task.FromResult(new EntityCollection([row]));
         }
 
+        // The lookup must ask for THE CALLER's oid: a query for any other oid finds no row (and so refuses).
+        var asksForTheCaller = q.Criteria.Conditions.Any(c =>
+            c.AttributeName == "azureactivedirectoryobjectid" && c.Values.Count == 1 && c.Values[0] is Guid oid && oid == ExpectedOid);
+
         return Kind switch
         {
             StepZeroCallerKind.LookupFault => Task.FromException<EntityCollection>(new InvalidOperationException("systemuser lookup failed")),
             StepZeroCallerKind.NoSystemUserRow => Task.FromResult(new EntityCollection()),
+            _ when !asksForTheCaller => Task.FromResult(new EntityCollection()),
             _ => Task.FromResult(new EntityCollection([new Entity("systemuser", SystemUserId)])),
         };
     }
