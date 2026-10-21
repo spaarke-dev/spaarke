@@ -472,7 +472,7 @@ A **rule** is a `sprk_policy` in a rule set. It keeps its identity across the Pr
 **Rule types the examples need (ontology 6):**
 
 - **AddedFee (O-16).** Fee kind (late fee, administrative fee, interest …) and an allowance: not allowed, a cap (amount or percent), or allowed after N days. Option value 100000015 (`RuleType.cs:93`), mapped in `RuleDomains.DomainOf` (an unmapped value throws), pinning test extended, PR to ontology-r1. **The validator refuses "not allowed" and "after N days"** until extraction returns the fee kind per line and the due date, with a test on each refusal; the cap form ships now. Today `InvoiceExtractionToolHandler` returns the header due date but no per-line fee kind (ontology §15 answer 3; the reference is ebilling's D-27, closed typed templates).
-- **Discount.** Option value 100000016. **A check only:** "agreed discount not applied".
+- **Discount.** Option value 100000016. **A check only:** "rate above the agreed discounted rate" (per line; ontology-r1 115 review: a firm may discount at invoice level, so the check never claims the discount was not applied). A line with no rack rate gives one "Discount not checked: no rack rate" finding.
 - Catalogue additions go through D-27 and ontology-r1. "Approve travel" works today through ExpenseRule.
 
 ### 6.4 Inheritance: direct association only (unchanged)
