@@ -630,8 +630,9 @@ public sealed class SecureChildShareSynchronizer
             if (team.TeamId is { } secureTeam && owningTeam == secureTeam)
             {
                 _logger.LogWarning(
-                    "[SECURE-CHILD-SHARES] {Child} is still owned by the Secure Record owner team; its shares are NOT removed " +
-                    "(that would leave it readable by nobody). Re-own it first.", child);
+                    "[SECURE-CHILD-SHARES] {Child} is still owned by the Secure Record owner team, so it is still isolated: its " +
+                    "shares are NOT removed (that would leave it readable by nobody). If it should have left isolation, it must " +
+                    "be re-owned before its mirror can come off.", child);
                 return new SecureChildMirrorRemoval(
                     SecureChildShareSyncStatus.Incomplete, 0, $"{child} is still owned by the Secure Record owner team",
                     StillIsolated: true);
