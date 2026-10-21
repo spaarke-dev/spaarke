@@ -11,7 +11,7 @@
 | Field | Value |
 |---|---|
 | **Task** | **090 wrap-up**, 🔲 **HELD** until operator UAT passes (no active fix work) |
-| **Status** | #2032 **merged** (PR #2205, `9b6963d73`) and **live on dev**: R3 deployed master `84291ecea8` 2026-10-21 16:42Z; verified ProductVersion, healthz 200, lock/activate routes 401 (registered) |
+| **Status** | #2032 **merged** (PR #2205, `9b6963d73`) and **live on dev**: R3 deployed master `84291ecea8` 2026-10-21 16:42Z; verified ProductVersion, healthz 200, lock/activate routes 401 (registered). SPE Admin page (`sprk_speadmin`, create-dialog fix) deployed + published to spaarkedev1 the same day, from sources identical to master |
 | **Tasks** | 27 ✅ · 2 🔄 (**029** = operator UAT render · **050** = platform-blocked) · 1 🔲 (**090**) of 30 |
 | **Next Action** | Operator UAT (item 4, plus container create/activate/lock/unlock), then 090 via task-execute |
 | **Blocked?** | Deploy: operator approves; R3 deploys from master. 090 held for UAT |
