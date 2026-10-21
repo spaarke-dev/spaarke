@@ -11,8 +11,8 @@ namespace Spaarke.ArchTests;
 /// </summary>
 /// <remarks>
 /// <para><b>The signal.</b> A source scan of <c>src/server/**</c> for every WRITE of the column. That means an indexer
-/// assignment, an <c>Add</c>/<c>TryAdd</c>/<c>SetAttributeValue</c> with the column as its key, a dictionary-initializer entry,
-/// a JSON writer call, or a member assignment (an anonymous payload). The column is matched by its literal and by the
+/// assignment, an <c>Add</c>/<c>TryAdd</c>/<c>SetAttributeValue</c> with the column as its key, a dictionary-initializer entry
+/// (on one line, or on its own line in a multi-line initializer), a JSON writer call, or a member assignment (an anonymous payload). The column is matched by its literal and by the
 /// constants that hold it (<see cref="KnownAliases"/>; a new constant fails until it is listed). Each write is attributed to
 /// its enclosing member (a method or a local function), and every member that writes must be listed:</para>
 /// <list type="bullet">
@@ -36,7 +36,7 @@ namespace Spaarke.ArchTests;
 /// and must not see.</para>
 /// <para><b>Controls.</b> <see cref="Detector_MustFireAndMustNotFire"/> runs the same detector over inline sources: each write
 /// shape is found and attributed to the right member (including the outer method after a local function). A read, a
-/// comparison, a column list, a set, a comment, another column's constant, a log message and a one-argument <c>Add</c> are
+/// comparison, a column list, a set (on one line or several), a comment, another column's constant, a log message and a one-argument <c>Add</c> are
 /// not found. A new constant holding the column is reported.</para>
 /// </remarks>
 public class DocumentAccessPermissionWriterGuardTests
@@ -152,8 +152,8 @@ public class DocumentAccessPermissionWriterGuardTests
             new[]
             {
                 ("AddStyle", 0), ("AliasWrite", 0), ("AnonymousPayload", 0), ("ExpressionBodied", 0), ("GenericTuple", 0),
-                ("Initializer", 0), ("JsonWriter", 0), ("LocalFunction", 0), ("Outer", 0), ("Outer", 1), ("QualifiedAlias", 0),
-                ("Tuple", 0),
+                ("Initializer", 0), ("JsonWriter", 0), ("LocalFunction", 0), ("MultiLineInitializer", 0),
+                ("MultiLineInitializer", 1), ("Outer", 0), ("Outer", 1), ("QualifiedAlias", 0), ("Tuple", 0),
             },
             sites.GroupBy(s => s.Member).SelectMany(g => g.Select((_, i) => (g.Key, i)))
                 .OrderBy(x => x.Key, StringComparer.Ordinal).ThenBy(x => x.i).ToArray());
@@ -174,7 +174,8 @@ public class DocumentAccessPermissionWriterGuardTests
     {
         new(@"\[\s*" + Key + @"\s*\]\s*=(?![=>])", RegexOptions.Compiled), // fields[KEY] = …
         new(@"\.(?:Add|TryAdd|SetAttributeValue)\(\s*" + Key + @"\s*,", RegexOptions.Compiled), // fields.Add(KEY, …)
-        new(@"[{,]\s*\{\s*" + Key + @"\s*,", RegexOptions.Compiled), // new Dictionary { { KEY, … } }
+        // new Dictionary { { KEY, … } }, and the usual multi-line initializer, whose entry starts its line
+        new(@"(?:^|[{,])\s*\{\s*" + Key + @"\s*,", RegexOptions.Compiled),
         new(@"\.Write\w*\(\s*" + Key, RegexOptions.Compiled), // writer.WriteNumber(KEY, …)
     };
 
@@ -283,6 +284,13 @@ public class DocumentAccessPermissionWriterGuardTests
 
             internal Dictionary<string, object> Initializer() => new Dictionary<string, object> { { "sprk_accesspermission", 1 } };
 
+            internal Dictionary<string, object> MultiLineInitializer() => new Dictionary<string, object>
+            {
+                { "sprk_name", "x" },
+                { "sprk_accesspermission", 1 },
+                { InheritedAccessPermission.Column, 2 },
+            };
+
             internal void JsonWriter(Utf8JsonWriter writer, int level)
             {
                 writer.WriteNumber("sprk_accesspermission", level);
@@ -317,6 +325,15 @@ public class DocumentAccessPermissionWriterGuardTests
                 if (fields[InheritedAccessPermission.Column] == null) { }
                 var set = new ColumnSet("sprk_name", "sprk_accesspermission");
                 var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_accesspermission", "sprk_issecure" };
+                var multiLine = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    "sprk_accesspermission",
+                    InheritedAccessPermission.Column,
+                };
+                var reasons = new Dictionary<string, string>
+                {
+                    { "sprk_accesspermissionreason", "x" },
+                };
                 columns.Add("sprk_accesspermission");
                 // fields["sprk_accesspermission"] = new OptionSetValue(1);
                 _logger.LogInformation("{Table}: sprk_accesspermission = {Value} {", table, value);
