@@ -115,7 +115,7 @@ public sealed class InvoiceLineDecisionServiceTests
         public readonly List<(string? Token, string Set, Guid Id)> RightsAsked = [];
         public readonly ListLogger<InvoiceLineDecisionService> Log = new();
         public readonly Mock<CallerRecordAccessProbe> Probe = new(
-            new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!) { CallBase = false };
+            new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!, null!) { CallBase = false };
         /// <summary>The caller's rights, by default the REAL roles' (F1-2): Core User and Basic User hold only Read on <c>sprk_billingevent</c>
         /// (D-90), Write on the invoice and AppendTo on the core.</summary>
         public Func<string, Guid, AccessRights> Rights = RealReviewerRights;
