@@ -2,8 +2,10 @@
 
 > #2126 / ISS-015. Design: `notes/2119-manage-access-all-forms-design.md` §6.
 > Branch `uac/188-d7-document-narrowing` (worktree `C:/wt188`), based on `origin/master` 4f5f22694c.
-> Status: code, tests and guard are done; the draft PR is open. Not deployed. The R3 deploy, the live gate and the
-> field-security `-Apply` are main-session or owner steps (§10).
+> Status: code, tests and guard are done; the draft PR (#2170) is open. Not deployed. The R3 deploy, the live gate and
+> the field-security `-Apply` are main-session or owner steps (§10).
+> Round 2 (main-session decisions on #2170, 2026-10-20): every ancestor is checked; every read the predicate makes runs
+> app-only on every surface; the cost is measured, logged and bounded (§1, §4, §6, §11).
 
 ## 1. The rule (as built)
 
@@ -13,23 +15,24 @@ A document is visible to a caller who is not an internal systemuser only when AL
 2. **Own value.** Its own stored `sprk_accesspermission` is not Restricted (100000002).
    - A value that is not a known level hides it (fail closed).
    - Null or absent counts as Standard.
-3. **Ancestor value** (main-session scope addition, 2026-10-20). On the same bounded `sprk_parentdocument` walk, no
-   visited ancestor's own value is Restricted. An unreadable ancestor value also hides it.
+3. **Ancestor value** (main-session scope addition and decision, 2026-10-20). On the bounded `sprk_parentdocument` walk,
+   NO ancestor's own value is Restricted. An unreadable ancestor value also hides it.
    - Rule text: **"An ancestor document's own Access Permission = Restricted hides the descendant (an attachment under a
-     Restricted .eml is hidden). The ancestor's value is read on the same walk as rule 4, with no extra round trip. An
-     unreadable ancestor value fails closed."**
+     Restricted .eml is hidden), wherever it sits on the walk, even when the descendant carries its own visible
+     communication link. The ancestor's value is read on the same walk as rule 4. An unreadable ancestor value fails
+     closed."**
+   - So the walk continues past the first communication link, to the top of the chain (at most 3 hops).
 4. **Communication.** The communication it comes from passes the task 065 rule:
    - flag JSON `false`;
    - a thread set;
    - that thread explicitly Open now.
 
-   Which communication counts:
+   Which communication counts (unchanged):
    - the document's own `_sprk_relatedcommunication_value`;
    - when that is empty, its parent's (`sprk_parentdocument`), then the grandparent's, at most **3 parent hops**;
-   - the **first link found decides**.
+   - the **first link found decides**. An ancestor's link above it is not consulted.
 
-   The 065 rule is reused, not copied. It moved into `CommunicationOpenThreadGate.ReadVisibleCommunicationIdsAsync`, and
-   the assistant's tools and the external plane share that one copy.
+   The 065 rule is reused, not copied. It moved into `CommunicationOpenThreadGate.ReadVisibleCommunicationIdsAsync`.
 
 **Fail closed.** Each of these hides the document:
 - a link that is present but not a GUID;
@@ -38,38 +41,45 @@ A document is visible to a caller who is not an internal systemuser only when AL
 - a chain that would need a fourth hop;
 - a communication that does not come back.
 
+**Recorded trade-off (accepted by the main session, 2026-10-20).** Because rule 3 must be decided to the top of the
+chain, a cycle or a chain longer than 3 hops hides the document **even when the document has its own visible link**.
+Pinned by `ADocumentWithItsOwnVisibleLink_AndAChainThatNeedsAFourthHop_IsHidden`, `ADocumentWithItsOwnVisibleLink_InACycle_IsHidden`
+and the route case `own-visible-link-four-hop-chain`.
+
 A failed read hides the whole page, and the response says `Truncated`. The assistant's tools fail the call with no data.
 
 **Own value wider than the root.** It changes nothing, because visibility is "root AND own".
 
-**Internal systemusers** on the external plane are not narrowed. This is the 065 rule's own exemption
-(`CommunicationThreadReadService`).
+**Internal systemusers** on the external plane are not narrowed (confirmed intended, 2026-10-20). This is the 065 rule's
+own exemption (`CommunicationThreadReadService`).
 - A caller is internal only when `CallerPrincipal.SystemUserId` is set AND `ISystemUserIdentityResolver.IsExternalAsync`
   is false.
 - A contact, a systemuser flagged external, and a failed lookup are all narrowed.
 - The resolver reaches `ExternalDataService` as an optional constructor parameter, which the typed-client factory
-  supplies (`ExternalAccessModule.cs:95`; the resolver is a singleton). There is no new DI registration.
+  supplies (`ExternalAccessModule.cs:95`; the resolver is a singleton).
 
-**The I-14 amendment** is in `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md`. I-16 is corrected there: "no
-access decision reads a child's copy, EXCEPT the external document narrowing — it only narrows; it never widens".
+**Whose reads (main-session decision 2, 2026-10-20).** The predicate is a security check, so EVERY read it makes runs under
+the BFF's app-only identity, on every surface:
+- the documents' own columns (Access Permission and both links);
+- the parent chain;
+- the communications and the threads.
 
-### Interpretation question for the main session (ancestor leg)
+The external plane already read app-only (`ExternalDataService.QueryRowsOrThrowAsync`). The assistant's tools now reach the
+predicate only through the injected `AppOnlyDocumentNarrowing` delegate
+(`ExternalDataService.ReadAndNarrowDocumentsAsync`, registered in `ExternalAccessModule`). It re-reads the documents BY ID
+app-only and returns only a hide decision. The user's own read still supplies every row the model sees; the narrowing can
+only remove rows from it. A link that field security masks for the user (it reads as null) can therefore never read as
+"no link". The user-OBO reader (`ExternalCallerCommunicationGuard.QueryOver`) is removed.
 
-The walk stops at the first link (interpretation (b)), so an ancestor ABOVE a document that carries its own link is not
-checked. Example: a document linked to a visible communication, whose parent .eml is Restricted, stays visible.
-- This is pinned by `ADocumentWithItsOwnVisibleLink_IsDecidedByThatLink_ItsAncestorsAreNotVisited`.
-- No writer sets both links on one document today (§7), so the case does not arise from the product's own writes.
-- **Alternative (a):** keep walking past the first link to check Restricted ancestors. That costs up to 3 more batched
-  document reads per page for linked rows.
-- Say which interpretation you want. Either is a one-line change in `ExternalDocumentNarrowing.Step`, plus flipping that
-  one test.
+**The I-14 amendment** is in `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md`. I-16 is corrected there: "no access
+decision reads a child's copy, EXCEPT the external document narrowing — it only narrows; it never widens".
 
 ## 2. Surface table
 
 | Surface | Wiring (file:line) | Behaviour when hidden |
 |---|---|---|
 | External list: projects, matters, work assignments, service requests and invoices (one helper, `ExternalProjectDataEndpoints.cs:625`) | `ExternalDataService.cs:490-491` (decide), `:672` (list `$select` carries `SelectColumns`) | Row dropped; `Truncated` when the read faulted |
-| Download content (6 routes → `DownloadDocumentForParent`, `ExternalProjectDataEndpoints.cs:645`) | `:684` → `IsDocumentReadableUnderAsync` `:1490`, narrowing `:1505` → `ExternalDataService.IsDocumentVisibleAsync` `:1854`; single read `$select` `ExternalDataService.cs:938` | The existing "not part of this record" refusal, before any SPE pointer resolve or file read |
+| Download content (6 routes → `DownloadDocumentForParent`, `ExternalProjectDataEndpoints.cs:645`) | `:684` → `IsDocumentReadableUnderAsync` `:1490`, narrowing `:1505` → `ExternalDataService.IsDocumentVisibleAsync`; single read `$select` `ExternalDataService.cs:938` | The existing "not part of this record" refusal, before any SPE pointer resolve or file read |
 | Versions (6 routes → `ListDocumentVersionsForParent`, `:2070`) | `:2099` → same as download | Same refusal; no SPE read |
 | Preview | None on the external plane: no preview or thumbnail route exists (`MapGet` scan of `Api/ExternalAccess`) | — |
 | Documents module fetch | `ExternalModuleDataEndpoints.cs:213` (injects `NarrowDocumentsAsync`), `:342-351` (projects `NarrowingAttributes`), `:377-392` (decide), `:411` (Truncated), `ExternalModuleRegistry.cs:216/225` (`NarrowsDocuments` derived from `RecordEntity`, never configured) | Row dropped; columns it projected stripped; `Truncated` on fault |
@@ -77,16 +87,14 @@ checked. Example: a document linked to a visible communication, whose parent .em
 | Delete own document | A write; out of scope | — |
 | Messages | The message routes refuse attachments | — |
 | Notifications feed | No documents | — |
-| `dataverse.read_query` | `DataverseReadQueryHandler.cs:159` (document guard), `:233` (columns injected), `:295` (decide), `:318` (row filter); injected columns stripped `:359` | Row dropped; reason codes logged |
-| `dataverse.search_data` | `DataverseSearchDataHandler.cs:298` (document hits), `:303` (`ReadAndDecideAsync`), `:311` (drop) | Hit dropped silently |
-| `dataverse.describe` | `DataverseDescribeHandler.cs:356/360` (guard), `:425-426` (decide) | Same code and message as not-found |
+| `dataverse.read_query` | `DataverseReadQueryHandler.cs:177/185` (document guard), `:306-316` (ids → `AppOnlyDocumentNarrowing`), `:334-338` (row filter). Nothing is injected into the user's query any more | Row dropped; reason codes logged |
+| `dataverse.search_data` | `DataverseSearchDataHandler.cs:309-317` (document hits → `AppOnlyDocumentNarrowing`), `:320-326` (drop) | Hit dropped silently |
+| `dataverse.describe` | `DataverseDescribeHandler.cs` guard, then `:439` (`AppOnlyDocumentNarrowing` on the record id) | Same code and message as not-found |
 
 Task 078's assistant rule (related communication only) is removed. `ExternalCallerCommunicationGuard` keeps only the
-`IsDocumentTable` gate and the `QueryOver` reader. 078's existing tests pass against the predicate unchanged:
-- `ExecuteChatAsync_ExternalCallerOnDocument_HidesDocumentsWhoseRelatedCommunicationFailsRule`;
-- `..._RelatedCommunicationsSpanTwoChunks_...`;
-- `..._UnreadableRelatedCommunicationLink_Hidden`;
-- the search and describe equivalents.
+`IsDocumentTable` gate (and its own sprk_communication-row guard, unchanged). 078's tests now run against the predicate
+with the truth seeded in the app-only world (`AppOnlyDocumentWorld`) and the user's read carrying only what the query
+selected.
 
 ## 3. Component justification (§11)
 
@@ -96,15 +104,36 @@ Task 078's assistant rule (related communication only) is removed. `ExternalCall
    - `CommunicationOpenThreadGate` decides a communication (065);
    - `ExternalCallerCommunicationGuard` (078) applied one leg in the assistant only.
 2. *Extension:* the root rule's input is root links plus grants, read through the secure-flag and live-parent seams. This
-   predicate's input is the document's own columns and its parent chain, read through a reader shared with the
-   assistant's user client. So it sits beside the rule. 078's leg is removed in its favour, and the 065 rule is moved
-   into `CommunicationOpenThreadGate` rather than copied.
+   predicate's input is the document's own columns and its parent chain, read through one app-only OData reader. So it
+   sits beside the rule. 078's leg is removed in its favour, and the 065 rule is moved into `CommunicationOpenThreadGate`
+   rather than copied.
 3. *Cost of doing nothing:* a partner with a grant on a matter downloads the .eml of an internal-only email and its
    attachments, and sees a document a user marked Restricted (ISS-015).
 
 **`ExternalDataService.NarrowDocumentsAsync` / `IsDocumentVisibleAsync`** (new methods in an existing file).
 - This is the one external-plane seam: it carries the internal-systemuser exemption and the fail-closed wrapper.
 - Without it, each of the three external surfaces would carry its own exemption and fault handling.
+
+**`AppOnlyDocumentNarrowing` delegate + `ExternalDataService.ReadAndNarrowDocumentsAsync` + one scoped registration in
+`ExternalAccessModule`** (round 2, decision 2).
+1. *Existing:* `ExternalDataService` is the app-only reader the external plane uses; owner rounds 7 and 8 gave the write
+   tools narrow-by-construction app-only helpers.
+2. *Extension:* the method extends `ExternalDataService`; the delegate is the narrowest dependency a public tool handler
+   can take on it (nothing else of the reader is reachable). Injecting `ExternalDataService` itself would hand the tools
+   every app-only read.
+3. *Cost of doing nothing:* under field security, the tools read a masked link as "no link" and show an internal-only
+   email's attachments (the round-1 F-7 fail-open).
+- The delegate resolves `ExternalDataService` lazily, so a tool call that never narrows (an internal caller) builds no
+  client.
+
+**`CommunicationOpenThreadGate.ReadChunksAsync` / `MaxChunksInFlight`** (round 2, decision 3).
+1. *Existing:* every level already read in OR-filter chunks of `ChunkSize`, one after another.
+2. *Extension:* one helper in the gate, used by the hop reads, the communication read and the thread read.
+   `ReadOpenThreadIdsAsync` is unchanged (other callers).
+3. *Cost of doing nothing:* a 5,000-row list makes its 100-chunk levels one request at a time (§4).
+
+**`DocumentNarrowingCost` + `DocumentNarrowingResult.Cost` + `LogNarrowingCost`** (round 2, decision 3). Counts what one
+decision read, for the one cost line per request the coordinator asked for. Nothing else carries the counts.
 
 **`DocumentNarrower` delegate.** `ExecuteScopedFetchCoreAsync` is a static pipeline driven by delegates (`executeFetch`,
 `readNonSecureRoots`, `readLiveParents`). The delegate is a required parameter, so a caller cannot leave the narrowing
@@ -129,28 +158,59 @@ out.
 
 **ArchTest `ExternalDocumentNarrowingGuardTests`.** This is new guard surface (§9).
 
-## 4. Query cost (worst case, measured by test)
+## 4. Query cost
 
-Reads per request, for a caller who is narrowed:
+**How "one batched read per hop level per page" is met.** A "batched read" is one OR-filter read by primary key over the
+DISTINCT ids of a level: `$filter=sprk_documentid eq a or sprk_documentid eq b ...`. The GET URL bounds one request to
+**`ChunkSize` = 50 ids** (`CommunicationOpenThreadGate.ChunkSize`, shared with the 065 rule; about 2.8 KB of filter). So
+one level over P distinct ids is ⌈P/50⌉ requests.
 
-| Rows | Reads |
+- The number of **levels** per request is fixed: at most 3 hop levels + the communications + the threads (+ 1 by-id level
+  for the assistant's tools, whose rows come from the user's read). It never grows with the number of rows.
+- No read is ever made per row. A parent on the page, or read at an earlier hop, is not read again.
+- Round 2: the chunks of ONE level now run **up to `MaxChunksInFlight` = 4 at once**
+  (`CommunicationOpenThreadGate.ReadChunksAsync`). Before, they ran one after another. Levels stay sequential: each needs
+  the ids the previous one returned.
+
+| Rows | Requests |
 |---|---|
 | A row that decides on its own columns (own Restricted or unreadable; or no link and no parent) | 0 |
-| Per hop level (≤ 3) | 1 batched `sprk_documents` read per 50 DISTINCT parents still undecided. A parent already on the page (or read at an earlier hop) is not read again |
-| Communications | ⌈distinct communications / 50⌉ batched reads, then ⌈distinct threads / 50⌉ batched thread-privacy reads (the 065 rule) |
+| Each hop level (≤ 3) | ⌈P/50⌉ by-key `sprk_documents` reads over the DISTINCT parents still undecided |
+| Communications | ⌈C/50⌉ reads over the distinct communications of the walks that passed, then ⌈T/50⌉ thread-privacy reads over their distinct threads (none when no communication passes the flag test) |
+| Assistant tools only | + ⌈N/50⌉ by-id reads of the rows themselves |
 | Internal systemuser | 0 |
 
-**Worst case per page of N rows:**
+**Worst case per request of N rows** (requests, and latency rounds with 4 in flight):
 
-    3·⌈P/50⌉ + ⌈C/50⌉ + ⌈T/50⌉
+    requests = 3·⌈P/50⌉ + ⌈C/50⌉ + ⌈T/50⌉           rounds ≈ 3·⌈P/200⌉ + ⌈C/200⌉ + ⌈T/200⌉
 
-- P = distinct parents, C = distinct communications, T = distinct threads.
-- Measured: `APageIsReadInBatches_NeverOneReadPerRow` (120 rows under 120 distinct parents) makes exactly 3 document
-  reads + 1 communication read + 1 thread read.
-- For a 5,000-row list where every row is under its own communication: ~100 + ~100 sequential reads.
-  - This is the same order as task 187's live-parent walk on such a page.
-  - The reads are sequential chunks, and no cost log was added. See finding F-5.
-- A single-document route: ≤ 3 document reads + 1 + 1.
+- The external list reads at most 5,000 rows (`MaxCollectionRows` = 25 pages × 200) and narrows them in ONE decision.
+- **Round 1's "~200 sequential reads"** was a list of 5,000 rows each under its own communication and thread, with no
+  parents: ⌈5000/50⌉ = 100 communication requests + 100 thread requests, one after another. Now: the same 200 requests in
+  about 50 rounds.
+- **Worst case after decision 1**: 5,000 rows, each with its own link AND its own distinct parent, grandparent and
+  great-grandparent, and its own thread: 300 hop requests + 100 + 100 = **500 requests, about 125 rounds** (before
+  concurrency: 500 sequential). Typical data is far smaller: an email's attachments share one .eml parent and one
+  communication, so P and C are the number of emails, not of attachments.
+- A single-document route: ≤ 3 document requests + 1 + 1. Describe: + 1 by-id request.
+- Measured by test: `APageIsReadInBatches_NeverOneReadPerRow` (120 rows under 120 distinct parents: 3 document requests,
+  1 communication, 1 thread, one hop level); `TheChunksOfOneLevel_AreReadConcurrently_UpToTheCap` (5 chunks: exactly 4 in
+  flight); the cost records in `ExternalDocumentNarrowingTests`.
+
+**The cost line.** One line per request, counts only (no ids), from the seam that ran the decision:
+
+    [EXT-NARROWING] cost plane={external|assistant} rows={N} hidden={H} faulted={bool} hopLevels={L}
+        documentReads={D} communicationReads={C} threadReads={T}
+
+It is Debug, and Information when the request made more than `NarrowingCostInformationThreshold` = 20 requests. Pinned
+by `TheAssistantsNarrowing_LogsOneCostLine_IdsNeverLogged` and `TheExternalPlane_LogsOneCostLinePerRequest`.
+
+**Still large (for the coordinator's follow-up decision).** The 500-request worst case is real if partners hold grants on
+records with thousands of deep, unshared document chains. Options, none taken here:
+- a larger chunk (the URL allows far more than 50 ids; the chunk is shared with the 065 rule);
+- start the communication read for rows whose own link is known while the hop walk runs (fewer rounds, same requests,
+  some reads wasted on rows an ancestor later hides);
+- reuse the communication rows task 187's live-parent walk already reads on the external list.
 
 ## 5. Cache statement
 
@@ -173,12 +233,13 @@ This was a read-only check of spaarkedev1 on 2026-10-20 (`.uac188/t188_mdhole2.p
 **The hole.**
 - Neither link is on a form, but both are writable through the Web API by any user with Write on the document.
 - Clearing `sprk_relatedcommunication` on an internal-only email's .eml makes it and its attachments visible to
-  partners.
+  partners. Clearing `sprk_parentdocument` on an attachment of a Restricted .eml does the same.
 - `sprk_accesspermission` is user-editable by design. A user's own Restricted can only narrow, and lowering it back
   restores the root's answer, never more.
 
-**The fix.** Field security on both links, using task 133's profiles. The engine was extended with target
-`DocumentNarrowingLinks`, and `scripts/Set-DocumentNarrowingFieldSecurity.ps1` is the named entry point.
+**The fix.** Field security on BOTH links, using task 133's profiles. The engine was extended with target
+`DocumentNarrowingLinks`, and `scripts/Set-DocumentNarrowingFieldSecurity.ps1` is the named entry point. Both columns stay
+in the target (main-session decision 2026-10-20).
 
 **The dry run on dev** (`-WhatIf`-equivalent default mode; nothing written):
 - p1: both profiles exist and are in SpaarkeCore — OK.
@@ -194,15 +255,13 @@ This was a read-only check of spaarkedev1 on 2026-10-20 (`.uac188/t188_mdhole2.p
 **`-Apply` is an owner-approved main-session step.**
 - Live order: deploy the BFF with task 188 → dry run → owner approval → `-Apply` → `-Verify`.
 
-**Trade-off (read before `-Apply`).**
+**Masked reads no longer matter to the predicate (round 2).**
 - A secured column reads EMPTY for a user outside the reader profile.
-- The assistant's `dataverse.*` tools read as the user, so for such a user the predicate would see "no link" and SHOW
-  the document (fail open).
-- (p2) guards this: every BU default team must be on the reader profile. A BU created later needs the reader-team step
-  re-run.
-- The external plane reads app-only (BFF writer profile), so it is unaffected.
-- `sprk_parentdocument` is included because the walk reads it. The main session may drop it from the target if it
-  prefers to lock only the communication link.
+- The predicate never reads as the user any more (§1 "Whose reads"), so a mask cannot open a document. Pinned by the
+  must-fire tests in the three AI handler test classes, where the user's read returns the link or the parent as null and
+  the app-only world holds an internal-only communication or a Restricted parent.
+- (p2) stays as defence in depth: it keeps users and forms reading the links. A business unit created later needs the
+  reader-team step re-run, as for every other locked column.
 
 ## 7. Writers, re-file and set-regarding (confirmation)
 
@@ -220,153 +279,179 @@ This was a read-only check of spaarkedev1 on 2026-10-20 (`.uac188/t188_mdhole2.p
 - The generic record-update paths have no column guard but are config-driven. (p5) confirms that no field-mapping rule
   targets these columns on dev.
 
-**Pipeline attachments** link only to the communication (`sprk_relatedcommunication`), not to the .eml as parent. So a
-Restricted .eml does not hide them through the walk (finding F-3).
+**Pipeline attachments** link to the communication (`sprk_relatedcommunication`), not to the .eml as parent, so the
+communication leg covers them (an internal-only or non-Open email hides them). A Restricted .eml does not hide them
+through the walk (finding F-3); the coordinator carries that to T8.
 
 ## 8. Mutation table (negative controls)
 
-`.uac188/t188_mutate.py` applied each mutation, rebuilt, ran the filtered suite (262 cases), restored the source, and
-checked SHA-1. All 7 sources matched the pre-mutation hashes afterwards.
+Each mutant was applied to the source in turn, the unit suite was run (filter: the narrowing, route, handler and
+freeze tests, 335 cases), and the source was restored. The 9 sources were checked against their pre-mutation SHA-1s after
+every run. **35 of 35 killed.** Runner: `.uac188/t188_mutate.py` (untracked).
 
-| # | Mutation | File | Failed cases | Killing tests (examples) |
-|---|---|---|---|---|
-| M1 | Own Restricted leg removed | ExternalDocumentNarrowing | 17 | `OwnRestricted_IsHidden_*`, `List_HidesTheDocument(own-restricted)`, `SingleDocumentRoute_Refuses…(own-restricted)`, module, AI |
-| M2 | Unknown own value read as Standard | ″ | 3 | `OwnValueThatIsNotAKnownLevel_IsHidden_FailClosed`, `AnAncestorWhoseValueIsUnreadable_*` |
-| M3 | Communication (065) leg always visible | ″ | 37 | `LinkedToAnInternalOnlyCommunication_IsHidden`, `…PrivateThread…`, `…NoThread…`, `…FlagIsUnreadable…`, route and module cases |
-| M4 | Ancestor Restricted leg removed | ″ | 14 | `AttachmentWhoseParentEmlIsRestricted_WithNoLinkAnywhere_IsHidden`, `ARestrictedGrandparent_HidesTheDocument`, `ARestrictedParentLinkedToAVisibleCommunication_*`, route `parent-eml-restricted` / `grandparent-restricted`, AI read_query, search and describe |
-| M5 | Parent walk removed | ″ | 44 | `AttachmentWhoseParentEmlIsLinkedToAnInternalOnly…`, `ACycle_IsHidden`, `AFourHopChain_*`, batching, route cases |
-| M6 | Hop bound raised to 4 | ″ | 4 | `AFourHopChain_IsHidden_*`, route `four-hop-chain` (list and single) |
-| M7 | Cycle check removed | ″ | 2 | `ACycle_IsHidden`, `ADocumentThatIsItsOwnParent_IsHidden` |
-| M8 | Unreadable link check removed | ″ | 1 | `ACommunicationLinkThatIsNotAGuid_IsHidden_WithoutARead` |
-| M9 | Parent not found → visible | ″ | 1 | `AParentThatDoesNotComeBack_IsHidden` |
-| M10 | Unreadable parent link → visible | ″ | 1 | `AParentLinkThatIsNotAGuid_IsHidden_WithoutARead` |
-| M11 | Read fault fails open | ″ | 7 | `AFailedRead_HidesEveryRow_AndSaysSo_*`, `List_WhenTheNarrowingReadFails_*`, `SingleDocumentRoute_WhenTheNarrowingReadFails_*`, module fault |
-| S1 | List surface unwired | ExternalDataService | 10 | `List_HidesTheDocument(*)`, `List_WhenTheNarrowingReadFails_*` |
-| S2 | List `$select` drops the predicate columns | ″ | 2 | `List_ReadsTheAccessPermission_AndTheParentLinks_InTheListQuery`, `List_HidesTheDocument` |
-| S3 | Single-document `$select` drops the predicate columns | ″ | 2 | `SingleDocumentRoute_RefusesTheDocument_*` |
-| S4 | Download and versions unwired | ExternalProjectDataEndpoints | 20 | `SingleDocumentRoute_RefusesTheDocument_*` (content and versions), fault case |
-| S5 | Module fetch unwired | ExternalModuleDataEndpoints | 2 | `DocumentsModuleFetch_*` |
-| S6 | Module projection drops `NarrowingAttributes` | ″ | 1 | `DocumentsModuleFetch_HidesOwnAndAncestorRestricted_*` |
-| S7 | read_query unwired | DataverseReadQueryHandler | 6 | 078's three tests, plus `…Task188_OwnOrAncestorRestrictedOrInternalOnlyParent_Hidden` |
-| S8 | search_data unwired | DataverseSearchDataHandler | 3 | 078's two tests, plus `…Task188_…_Dropped` |
-| S9 | describe unwired | DataverseDescribeHandler | 8 | 078's theory, plus `…Task188_HiddenByThePredicate_AnswersLikeNotFound` |
-| E1 | Internal exemption removed | ExternalDataService | 1 | `AnInternalSystemUser_IsNotNarrowed_AndNothingIsRead` |
-| E2 | Every systemuser treated as internal | ″ | 1 | `ASystemUserFlaggedExternal_IsNarrowed` |
+| Id | Mutation | Failing tests | Killed by (representative) |
+|---|---|---|---|
+| M1 | own Restricted leg removed | 16 | `ASystemUserFlaggedExternal_IsNarrowed` |
+| M2 | unknown own value read as Standard | 2 | `OwnValueThatIsNotAKnownLevel_IsHidden_FailClosed` |
+| M3 | communication (065) leg removed | 24 | `DocumentsModuleFetch_HidesOwnAndAncestorRestricted_...` |
+| M4 | ancestor Restricted leg removed | 18 | `List_HidesTheDocument(case: ...)` |
+| M5 | parent walk removed | 39 | `DocumentsModuleFetch_WhenTheNarrowingReadFails_HidesTheRows_...` |
+| M6 | hop bound raised to 4 | 4 | `ADocumentWithItsOwnVisibleLink_AndAChainThatNeedsAFourthHop_IsHidden` |
+| M7 | cycle check removed | 3 | `ACycle_IsHidden`, `ADocumentWithItsOwnVisibleLink_InACycle_IsHidden` |
+| M8 | unreadable link check removed | 1 | `ACommunicationLinkThatIsNotAGuid_IsHidden_WithoutARead` |
+| M9 | parent not found read as visible | 1 | `AParentThatDoesNotComeBack_IsHidden` |
+| M10 | unreadable parent link read as visible | 1 | `AParentLinkThatIsNotAGuid_IsHidden_WithoutARead` |
+| M11 | read fault fails open | 4 | `List_WhenTheNarrowingReadFails_HidesThePage_AndSaysTruncated` |
+| A1 | ancestor walk stops at the first link (round-1 shape) | 10 | `ADocumentWithItsOwnVisibleLink_UnderARestrictedParentEml_IsHidden` |
+| A2 | a cycle under an own link left to the communication leg | 1 | `ADocumentWithItsOwnVisibleLink_InACycle_IsHidden` |
+| A3 | a chain past the bound under an own link left to the communication leg | 3 | route case `own-visible-link-four-hop-chain` |
+| A4 | the LAST link decides the communication (an ancestor overrides) | 4 | `ADocumentWithItsOwnInternalOnlyLink_UnderAParentLinkedToAVisibleCommunication_IsHidden`, route case `own-visible-link-parent-eml-internal-only` |
+| A5 | a hidden walk still sends its communication to the 065 read | 9 | `ADocumentWithItsOwnVisibleLink_UnderARestrictedParentEml_IsHidden` (its read counts) |
+| O1 | read_query narrows over the user (OBO) reader | 9 | `ExecuteChatAsync_ExternalCallerOnDocument_FieldSecurityMasksTheLinkForTheUser_AppOnlyReadsAnInternalOnlyCommunication_Hidden` (and the ArchTest, below) |
+| O2 | search_data narrows over the user (OBO) reader | 4 | `ExecuteChatAsync_ExternalCallerDocumentHit_TheUsersReadWouldShowNoLink_AppOnlyReadsAnInternalOnlyCommunication_Dropped` (and the ArchTest) |
+| O3 | describe narrows over the user (OBO) reader | 8 | `ExecuteChatAsync_ExternalCallerDocument_Task188_ParentMaskedForTheUser_AppOnlyReadsARestrictedParent_AnswersLikeNotFound` (and the ArchTest) |
+| O4 | the registered seam does not narrow | 1 | `TheAssistantsNarrowing_IsRegistered_OverTheAppOnlyReader` |
+| C1 | assistant cost line removed | 1 | `TheAssistantsNarrowing_LogsOneCostLine_IdsNeverLogged` |
+| C2 | external cost line removed | 1 | `TheExternalPlane_LogsOneCostLinePerRequest` |
+| P1 | chunks of a level read one after another | 1 | `TheChunksOfOneLevel_AreReadConcurrently_UpToTheCap` |
+| P2 | no cap on chunks in flight | 1 | `TheChunksOfOneLevel_AreReadConcurrently_UpToTheCap` |
+| S1 | list surface unwired | 2 | `List_HidesTheDocument(case: ...)` |
+| S2 | list select drops the predicate columns | 2 | `List_ReadsTheAccessPermission_AndTheParentLinks_InTheListQuery` |
+| S3 | single-document select drops the predicate columns | 1 | `SingleDocumentRoute_RefusesTheDocument_AsNotUnderTheParent_AndReadsNothingFromSpe` |
+| S4 | download/versions unwired | 2 | `SingleDocumentRoute_WhenTheNarrowingReadFails_Refuses_AndReadsNothingFromSpe` |
+| S5 | module fetch unwired | 2 | `DocumentsModuleFetch_HidesOwnAndAncestorRestricted_...` |
+| S6 | module projection drops the narrowing attributes | 1 | `DocumentsModuleFetch_HidesOwnAndAncestorRestricted_...` |
+| S7 | read_query unwired | 6 | `ExecuteChatAsync_ExternalCallerOnDocumentWithUnreadableRelatedCommunicationLink_Hidden` |
+| S8 | search_data unwired | 4 | `ExecuteChatAsync_ExternalCallerDocumentHitWithUnreadableRelatedCommunicationLink_Dropped` |
+| S9 | describe unwired | 5 | `ExecuteChatAsync_ExternalCallerDocumentHiddenByRelatedCommunication_AnswersLikeNotFound` |
+| E1 | internal exemption removed | 1 | `AnInternalSystemUser_IsNotNarrowed_AndNothingIsRead` |
+| E2 | every systemuser treated as internal | 1 | `ASystemUserFlaggedExternal_IsNarrowed` |
 
-There were no survivors.
+P2 survived the first run: the concurrency test released its reads as soon as the cap's worth had started, so the
+released reads could finish before a 5th started. The test now holds every read until it has seen the cap's worth start
+and waited 300 ms more (the idiom of `AccessibleRecordSetServiceTests`' NFR-02 cap test), so a missing cap shows as a 5th
+read in flight. P1 and P2 were re-run against the fixed test; both were killed.
 
-**Guard proofs** (§9). The guard was run against two real-code mutations, and each was restored afterwards:
-- the list unwired (`NarrowDocumentsAsync` replaced): the guard fails;
-- the single-document narrowing replaced with `Task.FromResult(true)`: the guard fails.
+**Guard proof (rule 2, ArchTests).** O1, O2 and O3 were each applied and the ArchTests project was rebuilt. Each one
+fails `TheCoreDecision_IsCalledOnlyFromTheAppOnlySeams` (1 failed, 3 passed in `ExternalDocumentNarrowingGuardTests`).
+Runner: `.uac188/t188_guardproof.py`. The sources were checked against their SHA-1s afterwards.
 
 ## 9. ArchTest guard
 
 `tests/Spaarke.ArchTests/ExternalDocumentNarrowingGuardTests.cs` uses IL, via `IlCallScan`.
 
-**What counts as a surface.** A BFF source method that calls a surface primitive:
+**Rule 1 — every surface reaches the predicate.**
+
+What counts as a surface. A BFF source method that calls a surface primitive:
 - `BuildDocumentListUrl`;
 - `GetDocumentParentAndNameAsync`;
 - `DocumentScopeRead.IsReadableUnder`;
 - `ExternalModuleDescriptor.ScopeRows`;
 - `ExternalCallerCommunicationGuard.IsDocumentTable`.
 
-**What counts as reaching the narrowing.** The method must reach, transitively over BFF methods, one of:
+What counts as reaching the narrowing. The method must reach, transitively over BFF methods, one of:
 - `ExternalDocumentNarrowing.DecideAsync`, `DecideOrFailClosedAsync` or `ReadAndDecideAsync`;
-- `ExternalDataService.NarrowDocumentsAsync` or `IsDocumentVisibleAsync`;
-- `DocumentNarrower.Invoke`.
+- `ExternalDataService.NarrowDocumentsAsync`, `IsDocumentVisibleAsync` or `ReadAndNarrowDocumentsAsync`;
+- `DocumentNarrower.Invoke` or `AppOnlyDocumentNarrowing.Invoke`.
 
 Lambdas, local functions and state machines count for the method they were written in. A comment, a string or a `nameof`
 does not count.
 
-**Ratchet baseline.** Two listed non-document callers, each with its reason:
+Ratchet baseline. Two listed non-document callers, each with its reason:
 - `ExternalMessageEndpoints.EvaluateRecordGateAsync`: it scopes the message's regarding record;
 - `ExternalNotificationFeedEndpoints.GetFeedCoreAsync`: service requests.
 
-An entry goes stale, and fails the guard, when it stops using a primitive or starts narrowing.
+An entry goes stale, and fails the guard, when it stops using a primitive or starts narrowing. Non-vacuity: seven wired
+surfaces are pinned as both "seen reading" and "seen reaching". Controls (`Detector_MustFireAndMustNotFire`): must fire
+for a mention-only read; must not fire for a narrowing inside a lambda, a narrowing through a helper, or a type with no
+document read.
 
-**Non-vacuity.** Seven wired surfaces are pinned as both "seen reading" and "seen reaching".
-
-**Controls** (`Detector_MustFireAndMustNotFire`):
-- must fire: a mention-only read;
-- must not fire: a narrowing inside a lambda; a narrowing through a helper; a type with no document read.
+**Rule 2 — app-only reads (round 2, decision 2).** The core decision (`DecideAsync`, `DecideOrFailClosedAsync`,
+`ReadAndDecideAsync`) takes its reader as an argument. So it may be referenced only from `ExternalDocumentNarrowing` and
+`ExternalDataService`, whose only reader is app-only (`TheCoreDecision_IsCalledOnlyFromTheAppOnlySeams`).
+- Non-vacuity: `ExternalDataService::NarrowDocumentsAsync` and `::ReadAndNarrowDocumentsAsync` are seen calling it.
+- Controls (`CoreDecisionDetector_MustFireAndMustNotFire`): a fixture deciding over a reader of its own fires; one using
+  the injected `AppOnlyDocumentNarrowing`, and one using `NarrowDocumentsAsync`, do not.
 
 **Limits (K).**
 - Reach is per method by name. It says the method can get to the narrowing, not that every path does. The surface tests
   pin the paths.
 - A new hand-written `sprk_documents` query that uses no primitive is not seen. The primitive list is the contract a
   reviewer extends.
+- Rule 2 trusts that `ExternalDataService` hands the predicate its own app-only reader; a second reader added inside
+  `ExternalDataService` would not be seen. It has one reader today.
 - A non-document module whose FetchXML link-entities `sprk_document` columns is not narrowed (finding F-6).
 
 ## 10. Gates
 
+Round 2, run on the final sources (after the mutants, with the binaries rebuilt from the restored files):
+
 | Gate | Result |
 |---|---|
-| BFF build (via the ArchTests and unit builds) | 0 errors, 0 warnings |
-| Filtered unit suites (`Services.Ai.Handlers \| ExternalAccess \| UnifiedAccessControl \| Communication`) | 6,580 passed, 2 skipped, 0 failed |
-| New tests | `ExternalDocumentNarrowingTests` 50, `ExternalDocumentNarrowingRouteTests` 50, AI handler tests 7 cases, guard 2 |
-| Full ArchTests | 1,210 passed, 0 failed |
-| Publish size (§10 / NFR-01) | See the block below |
-| Vulnerable packages | `dotnet list package --vulnerable --include-transitive`: none. No package changes |
-| /conflict-check | Open PRs overlap only on `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md`: #2161 (#2159 relocation) and #1911 (ebilling). **Task 189's branch `uac/189-own-narrowing` edits the same I-16 row**, so a line conflict is expected and the second to merge resolves it. The texts are compatible: 189 says a parented Document holds max(own narrowing, inherited); 188 says the stored value may hide a document from partners |
-| code-review / adr-check | §11 |
+| `dotnet build src/server/api/Sprk.Bff.Api/` | succeeded, 0 warnings |
+| Unit tests, filtered (`Services.Ai.Handlers` \| `ExternalAccess` \| `UnifiedAccessControl` \| `Communication`) | 6614 passed, 2 skipped, 0 failed |
+| `tests/Spaarke.ArchTests` (full project) | 1212 passed, 0 failed |
+| Mutants (§8) | 35 of 35 killed; guard proof O1–O3 fails rule 2 |
+| Publish size (§10 bullet 3) | branch `62b767a4c3` zip 39,328,681 B vs master `4f5f22694c` (fresh build, the branch's merge base) zip 39,314,285 B: **+14,396 B (+0.01 MB)**; raw +42,848 B; 4 PDBs on both sides. Total 39.3 MB, under the 55 MB review line |
+| `dotnet list package --vulnerable` | no vulnerable packages; no package changes |
+| `git merge-tree` against `origin/master` `44063b3473` | clean. Master moved by 27 files since the base; one BFF file (`GateDecisionRecordSharing.cs`, +18/−9), which is not on this path |
 
-**Publish size**, measured with `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` from
-fresh short-path worktrees: master 4f5f22694c in `C:/wt188m`, the branch at dcca594f60 in `C:/wt188b`.
-- Mode: framework-dependent linux-x64 (csproj).
-- Compression: `Compress-Archive -CompressionLevel Optimal`, PDBs included.
-- Master: 39,314,226 B (37.49 MB).
-- Branch: 39,324,452 B (37.50 MB).
-- **Delta: +10,226 B compressed (+27,864 B raw).** The ceiling is 60 MB.
+Not run, by the brief: the full unfiltered unit suite, any deploy, and field security `-Apply`.
+
+**Expected conflict.** Task 189 edits the I-16 row of `DATAVERSE-WRITE-PATH-ARCHITECTURE.md`. This round leaves I-16
+alone (round 1 corrected it), so the conflict is a line conflict for whichever PR merges second.
 
 ## 11. Review findings (code-review + adr-check, self-run)
 
 **ADR compliance.**
 - ADR-002 WP-6 (fail closed): yes.
 - ADR-009: no cache.
-- ADR-010: no new interface or registration.
-- ADR-013: the AI handlers consume an Infrastructure static. No CRUD→AI dependency.
-- ADR-015: reason codes and counts only. The document id is logged as the existing download and versions lines already
-  do.
-- ADR-028: no auth mechanism changes.
+- ADR-010: one new scoped registration (the `AppOnlyDocumentNarrowing` delegate, §3); no new interface.
+- ADR-013: the AI handlers consume an Infrastructure delegate. No CRUD→AI dependency.
+- ADR-015: reason codes and counts only; the cost line carries no ids (pinned). The document id is logged as the existing
+  download and versions lines already do.
+- ADR-028: no auth mechanism changes. The tools' app-only read is the existing external-plane identity, used for a
+  hide-only decision (see the rule amendment below).
 - ADR-052: no background work.
-- ADR-038:
-  - The new tests sit beside their siblings in `tests/unit/...` (`ExternalMultiRootRuleTests`,
-    `ExternalLiveParentRuleTests`, `CommunicationOpenThreadGateTests`). That is outside the KEEP paths.
-  - **Recommend /test-diet classify them KEEP**, or move them to `tests/integration/auth/ExternalAccess/`, because they
-    are I-14's "Enforced by".
-  - No `Mock<HttpMessageHandler>`. The fakes are the existing handler fakes, plus `Mock<IDataverseUserClient>` at the
-    module boundary.
+- ADR-038: the new tests sit beside their siblings in `tests/unit/...` (`ExternalMultiRootRuleTests`,
+  `ExternalLiveParentRuleTests`, `CommunicationOpenThreadGateTests`). The coordinator confirmed the placement and that
+  /test-diet keeps them. No `Mock<HttpMessageHandler>`: the fakes are the existing `FakeDataverse` handler, plus
+  `Mock<IDataverseUserClient>` at the module boundary.
 
-**Findings for the main session** (fixed in scope: none outstanding. Each is a decision or a filing):
-- **F-1 (interpretation, §1).** Should Restricted ancestors above a linked document also hide it? Currently no
-  (interpretation (b)).
+**🔔 Rule amendment needing owner sign-off (CLAUDE.md §6.5 path B).** `IDataverseUserClient`'s remark states the spec MUST
+rule "User-OBO ONLY ... AI tool handlers MUST NOT reach Dataverse through any other client". Decision 2 makes the three
+read tools take ONE app-only dependency, `AppOnlyDocumentNarrowing`. It is built the way owner rounds 7 and 8 amended the
+rule for the write tools (narrow by construction: a delegate that returns only a hide decision; no app-only data reaches
+the model). The amendment text is in each handler's class remarks, marked "owner sign-off pending on the PR". The PR
+cites it; code review must approve it explicitly.
+
+**Findings for the main session.**
+- **F-1 (resolved, decision 1).** Restricted ancestors above a linked document hide it. The interpretation test is flipped
+  into the must-fire `ADocumentWithItsOwnVisibleLink_UnderARestrictedParentEml_IsHidden`.
 - **F-2 (task 189's file, found in passing).** The remark at `ChildAccessPermissionReconciler.cs:95-96` reads "display
-  only (no access decision reads it), so nothing here can widen or narrow anyone's access". After 188 that is false for
-  documents: a value the reconciler writes as Restricted hides that document from partners. Not edited here: it is
-  189's file.
-- **F-3 (T8 / 189).** Communication-pipeline attachments link to the communication, not to the .eml as parent. So "a
-  Restricted .eml hides its attachments" holds only for documents whose `sprk_parentdocument` is the .eml (the email
-  attachment path, `DataverseServiceClientImpl.cs:1023`).
-- **F-4 (consistency).** A document filed under a Restricted root stores Restricted (I-16 inheritance). It is therefore
-  hidden from partners who reach it through ANOTHER, readable root. This matches "follows its parent unless more
-  restricted".
-  - Contacts never reach Restricted roots (the `AccessibleRecordSetService` veto), so the contact plane loses nothing it
-    had.
-  - Confirm that this is intended for external systemusers.
-- **F-5 (K3, performance).** The worst case on a 5,000-row list is ~200 sequential reads (§4), and no cost log was
-  added. Suggest a follow-up issue if R3 sees latency: a cost log like 187's, or reuse the communication rows the 187
-  walk already reads.
+  only (no access decision reads it) ...". After 188 that is false for documents. 189 fixes its own remark (decision 6);
+  not edited here.
+- **F-3 (carried to T8 by the coordinator).** Communication-pipeline attachments link to the communication, not to the
+  .eml as parent, so the communication leg covers them; "a Restricted .eml hides its attachments" holds only for
+  documents whose `sprk_parentdocument` is the .eml (the email attachment path).
+- **F-4 (confirmed intended).** A document under a Restricted root stores Restricted (I-16), so it is hidden from external
+  systemusers who reach it through another root. Contacts never reach Restricted roots, so they lose nothing they had.
+- **F-5 (addressed, decision 3).** Chunks of a level now run 4 at once; one cost line per request; the worst case is in
+  §4 for the coordinator's follow-up decision.
 - **F-6 (K).** A non-document module with a FetchXML link-entity to `sprk_document` columns is not narrowed. No such
   module exists today: modules are rows, and the documents module is `RecordEntity = sprk_document`.
-- **F-7 (FLS trade-off, §6).** The assistant reads as the user. A link masked by field security for a user outside the
-  reader profile fails open. (p2) guards it.
-- **F-8.** Internal systemusers are exempt on the external plane (the 065 rule's posture). Confirm.
+- **F-7 (resolved, decision 2).** The predicate reads app-only on every surface; a masked link can no longer fail open.
+  (p2) stays as defence in depth.
+- **F-8 (confirmed intended).** Internal systemusers are exempt on the external plane (the 065 rule's posture).
 
 ## 12. ADR-034 / auth constraint text (for the main session to apply to `.claude/`)
 
-> A child's Access Permission may narrow partner visibility (Restricted hides it); it never widens it. Enforced by: task
-> 188's tests (`ExternalDocumentNarrowingTests`, `ExternalDocumentNarrowingRouteTests`, the `dataverse.*` handler
-> tests) and `ExternalDocumentNarrowingGuardTests` (ArchTest).
+> A child's Access Permission may narrow partner visibility (Restricted hides it); it never widens it. The external
+> document narrowing's own reads (links, parent chain, Access Permission, communication flag and thread) always run under
+> the BFF's app-only identity, on every surface; the assistant's tools reach it only through `AppOnlyDocumentNarrowing`.
+> Enforced by: task 188's tests (`ExternalDocumentNarrowingTests`, `ExternalDocumentNarrowingRouteTests`, the
+> `dataverse.*` handler tests with a masked user read) and `ExternalDocumentNarrowingGuardTests` (ArchTest: every surface
+> reaches the predicate; its core decision is called only from the app-only seams).
 
 ## 13. Not done here (by design)
 
@@ -374,4 +459,5 @@ fresh short-path worktrees: master 4f5f22694c in `C:/wt188m`, the branch at dcca
   to an internal-only communication must be absent. Main session.
 - **Field security `-Apply` / `-Verify`.** Owner-approved, after the deploy.
 - **`.claude/` edits** (the ADR-034 / auth constraint text, §12). Main session.
-- The task exceeded the ~100-step size guideline. Shown by the mutation run, the guard and two scope additions.
+- **Merge order.** Task 189 edits the same I-16 row; a line conflict is expected and the second to merge resolves it.
+- The task exceeded the ~100-step size guideline, through the mutation runs, the guard and two rounds of decisions.
