@@ -772,6 +772,24 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
     }
 
     [Fact]
+    public async Task CreateContainer_WhenGraphAnswers503_SaysTheOutcomeIsUnknown_NotThatNothingWasCreated()
+    {
+        // #2032: a 503 may come after Graph committed the container. The admin is told a container may exist and to look
+        // for it before creating it again — not "try again", which could make a second one.
+        _fixture.Graph.StubPostExact(ContainersPath, """{"error":{"code":"serviceNotAvailable","message":"x"}}""", 503);
+        using var client = Admin();
+
+        var problem = await Problem(
+            await client.PostAsJsonAsync($"/api/spe/containers?configId={ConfigA}", new { displayName = "New" }),
+            HttpStatusCode.InternalServerError);
+
+        problem["errorCode"].GetString().Should().Be("spe.containers.create_outcome_unknown");
+        problem["displayName"].GetString().Should().Be("New");
+        _fixture.Graph.AllRequests.Count(r => r.Method == "POST" && r.Path == ContainersPath)
+            .Should().Be(1, "a create Graph may have committed is never re-sent");
+    }
+
+    [Fact]
     public async Task CreateContainer_WhoseOwnerCannotBeDetermined_Is403_AndCreatesNothing()
     {
         // An unresolvable caller passes the filter for a unit-less config (the compatibility rule) — but no owner exists.
@@ -1196,8 +1214,12 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
         }
     }
 
-    private void StubCreate(string id, string type) =>
+    /// <summary>The create answers 201 with <paramref name="id"/>, and its activate answers 204 (#2032).</summary>
+    private void StubCreate(string id, string type)
+    {
         _fixture.Graph.StubPostExact(ContainersPath, ContainerJson(id, type, null), 201);
+        _fixture.Graph.StubPostExact($"{ContainersPath}/{id}/activate", "", 204);
+    }
 
     private void StubContainerList(params string[] ids) =>
         _fixture.Graph.StubGetExact(ContainersPath,
