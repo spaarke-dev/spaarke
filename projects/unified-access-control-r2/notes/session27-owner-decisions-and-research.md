@@ -1797,3 +1797,9 @@ Owner text, verbatim: "1. yes that's fine / 2. yes / 3. invoice file storage wil
 ebilling v5.5. The Outlook add-in always saves the invoice email as a `.eml` on the core record.
 1. **Invoice email exposure, option (i).** The from-email `.eml` is saved own-Restricted, with a recorded marker that the submission wrote that narrowing. ebilling (a′) skips only a marked narrowing, so firm F still sees its own invoice through the firm route, and other partners on the matter cannot open the invoice email.
 2. **An email the add-in can't identify: refuse with a retryable "try again".** No `.eml` and no submission are saved. It is all-or-nothing, as ebilling K1 requires. Relayed to ebilling.
+
+## Round 119 (owner, 2026-10-21)
+
+1. **#2161 sign-off: yes, and deploy.** CLAUDE.md §6 security sign-off. Merged as `84291ecea8`, then a deploy request to R3 for master `84291ecea8`, which also carries #2177 and #2205. R3 needs the owner's approval in its own session.
+2. **Task 188 round 4e approach: ok.** App-only generic writers refuse `sprk_parentdocument` and `sprk_relatedcommunication` on `sprk_document`, because they are D7 visibility inputs. Link changes go through the caller-checked re-file routes.
+3. **#2191: ok.** Merges when UAC accepts the parser-based guard re-check and CI is green.
