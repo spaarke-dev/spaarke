@@ -893,6 +893,44 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
     }
 
     /// <summary>
+    /// UAC-r2 re-check of #2191, must fire: on a SECURE source the caller's rights are read TWICE (once for every source, once by
+    /// the plan) and both must deny consistently. The first read allows Read|AppendTo; the SECOND throws — the plan does not swallow
+    /// a fault as "allowed": the exception propagates, nothing is created.
+    /// </summary>
+    [Fact]
+    public async Task OfficeCreate_FromASecureMatter_WhenThePlansRightsReadThrows_NothingIsCreated()
+    {
+        var (secure, _) = Matters();
+        _officeProbe.SetupSequence(p => p.GetCallerRightsAsync("caller-token", MatterEntitySet, secure, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AccessRights.Read | AccessRights.AppendTo)
+            .ThrowsAsync(new TimeoutException("the plan's rights read timed out"));
+
+        var act = () => OfficeCreateProjectFrom(secure);
+
+        await act.Should().ThrowAsync<TimeoutException>();
+        _officeCreates.Should().BeEmpty();
+        _officeProbe.Verify(p => p.GetCallerRightsAsync("caller-token", MatterEntitySet, secure, It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    /// <summary>
+    /// UAC-r2 re-check, must fire: the first read allows, the plan's SECOND read answers None — the plan refuses with its own
+    /// <c>caller_cannot_file_under_parent</c>; nothing is created.
+    /// </summary>
+    [Fact]
+    public async Task OfficeCreate_FromASecureMatter_WhenThePlansRightsReadAnswersNone_IsRefused_AndNothingIsCreated()
+    {
+        var (secure, _) = Matters();
+        _officeProbe.SetupSequence(p => p.GetCallerRightsAsync("caller-token", MatterEntitySet, secure, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AccessRights.Read | AccessRights.AppendTo)
+            .ReturnsAsync(AccessRights.None);
+
+        var result = await OfficeCreateProjectFrom(secure);
+
+        ShouldBeRefusedAsNotFileable(result);
+        _officeProbe.Verify(p => p.GetCallerRightsAsync("caller-token", MatterEntitySet, secure, It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    /// <summary>
     /// G5, Office: the request carries no bearer token, so the caller's own rights cannot be asked — refused (500 kind,
     /// <c>caller_rights_unverifiable</c>), nothing created (ADR-003: never "allowed" because it could not be checked).
     /// </summary>

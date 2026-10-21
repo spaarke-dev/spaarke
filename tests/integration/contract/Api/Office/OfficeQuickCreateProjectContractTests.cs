@@ -340,6 +340,33 @@ public class OfficeQuickCreateProjectContractTests
         AssertNothingCreated(factory);
     }
 
+    /// <summary>
+    /// UAC-r2 re-check of #2191, must fire: the request carries no bearer token (the host's default client sends none), so the
+    /// caller's own AppendTo on the source cannot be asked — refused at the HTTP level with <c>caller_rights_unverifiable</c> (500),
+    /// never "allowed" because it could not be checked; nothing created, and the rights probe was not asked about the source.
+    /// </summary>
+    [Fact]
+    public async Task Post_Project_WhenTheRequestCarriesNoBearerToken_Returns500CallerRightsUnverifiable_AndCreatesNothing()
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(factory);
+        ArrangeBusinessUnit(factory);
+        ArrangeSourceRights(factory, AccessRights.Read | AccessRights.AppendTo); // would allow, were the caller checked
+        CaptureCreate(factory);
+
+        var response = await factory.CreateClient().PostAsJsonAsync(Route, new QuickCreateRequest
+        {
+            Name = "Unverifiable Caller",
+            SourceEntityType = "sprk_project",
+            SourceRecordId = SourceProjectId,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        var problem = await ReadProblemAsync(response);
+        problem.Should().ContainKey("errorCode").WhoseValue.Should().Be("caller_rights_unverifiable");
+        AssertNothingCreated(factory);
+    }
+
     [Fact]
     public async Task Post_Project_WhenCallerCannotReadTheSourceRecord_Returns403_ReadsNothing_AndCreatesNothing()
     {
