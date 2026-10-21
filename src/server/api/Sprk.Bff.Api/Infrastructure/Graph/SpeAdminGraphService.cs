@@ -12,6 +12,7 @@ using Microsoft.Kiota.Abstractions.Serialization;
 using Microsoft.Kiota.Authentication.Azure;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
+using Sprk.Bff.Api.Infrastructure.Http;
 
 namespace Sprk.Bff.Api.Infrastructure.Graph;
 
@@ -1412,9 +1413,21 @@ public sealed class SpeAdminGraphService
             ContainerTypeId = Guid.TryParse(containerTypeId, out var ctGuid) ? ctGuid : Guid.Empty
         };
 
-        var created = await ExecuteWithRetryAsync(
-            () => graphClient.Storage.FileStorage.Containers.PostAsync(body, cancellationToken: ct),
-            ct);
+        // #2032: the create is not idempotent. NoTransientRetryOption stops the Graph handler re-sending it after a 5xx, a
+        // 408 or a transport fault (Graph may have committed the first, leaving a duplicate); it still retries a 429, which
+        // Graph did not process — so no ExecuteWithRetryAsync here. An answer that leaves it unknown whether a container
+        // was created is reported as such, not as "nothing was created" (ContainerOperations.CreateContainerAsync, #1755).
+        var createOption = new NoTransientRetryOption();
+        Microsoft.Graph.Models.FileStorageContainer? created;
+        try
+        {
+            created = await graphClient.Storage.FileStorage.Containers
+                .PostAsync(body, rc => rc.Options.Add(createOption), ct);
+        }
+        catch (Exception ex) when (CreateOutcomeIsUnknown(createOption, ex))
+        {
+            throw new ContainerCreateOutcomeUnknownException(displayName, ex);
+        }
 
         if (created is null)
         {
@@ -1441,13 +1454,20 @@ public sealed class SpeAdminGraphService
             // and hardcoded null — but an inference is not a measurement, and if Graph ever does
             // report a value here we would still have been discarding it.
             StorageUsedInBytes: ReadStorageUsedInBytes(created.AdditionalData),
-            // CREATE genuinely returns this — measured 2026-08-27, a fresh container comes back
-            // `status: inactive` until /activate is called. So unlike the LIST paths this is a real
-            // read, and the old `: "active"` fallback was actively wrong here: it reported a
-            // brand-new, not-yet-activated container as active.
-            Status: ReadContainerStatus(created.Status, created.AdditionalData),
+            // CREATE answers `status: inactive` (measured 2026-08-27) — that is the state BEFORE the bind. The bind
+            // activates it (POST /activate, #2032) and throws when that fails, so reaching here means Graph accepted the
+            // activation: report what the container now is, not the create response's snapshot of what it was.
+            Status: "active",
             ArchiveStatus: ReadArchiveStatus(created.AdditionalData));
     }
+
+    /// <summary>
+    /// True when a failed create POST leaves unknown whether Graph created the container: an attempt reached Graph and its
+    /// answer was not a settled refusal. The same rule as <c>ContainerOperations.OutcomeIsUnknown</c> (#1755), which the
+    /// external-access create uses; see <see cref="NoTransientRetryOption"/> for what the handler records.
+    /// </summary>
+    private static bool CreateOutcomeIsUnknown(NoTransientRetryOption option, Exception ex) =>
+        option.CloseAndReadOutcomeUnknown() || ex is ApiException { ResponseStatusCode: >= 500 or 408 };
 
     /// <summary>
     /// Retrieves a single SPE container by its Graph FileStorageContainer ID.
@@ -1588,10 +1608,15 @@ public sealed class SpeAdminGraphService
     }
 
     /// <summary>
-    /// Activates an SPE container by PATCHing its status to <c>active</c>.
+    /// Activates an SPE container with Graph's <c>POST /storage/fileStorage/containers/{id}/activate</c> action (#2032).
     /// Returns <c>false</c> when Graph responds 404.
-    /// Throws <see cref="ODataError"/> for other failures (e.g., 409 Conflict if state transition is invalid).
+    /// Throws <see cref="ODataError"/> for other failures.
     /// </summary>
+    /// <remarks>
+    /// This used to PATCH <c>status = "active"</c>, but <c>status</c> is read-only on <c>fileStorageContainer</c>: the
+    /// PATCH either failed or "worked" only as a property update that may itself activate the container. The action is the
+    /// documented way. It is idempotent, so it keeps the 429 retry.
+    /// </remarks>
     /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerId">The Graph FileStorageContainer ID to activate.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -1606,23 +1631,9 @@ public sealed class SpeAdminGraphService
 
         _logger.LogInformation("Activating SPE container {ContainerId}", containerId);
 
-        // Use AdditionalData to set status as a raw string value, bypassing the FileStorageContainerStatus enum
-        // which may not include all SPE beta status values in the current SDK version.
-        var patch = new Microsoft.Graph.Models.FileStorageContainer
-        {
-            AdditionalData = new Dictionary<string, object> { ["status"] = "active" }
-        };
-
         try
         {
-            await ExecuteWithRetryAsync(
-                async () =>
-                {
-                    await graphClient.Storage.FileStorage.Containers[containerId]
-                        .PatchAsync(patch, cancellationToken: ct);
-                    return (object?)null;
-                },
-                ct);
+            await ActivateNewContainerAsync(graphClient, containerId, ct).ConfigureAwait(false);
 
             _logger.LogInformation("SPE container {ContainerId} activated successfully", containerId);
             return true;
@@ -1635,10 +1646,28 @@ public sealed class SpeAdminGraphService
     }
 
     /// <summary>
-    /// Locks an SPE container by PATCHing its status to <c>locked</c>.
-    /// Returns <c>false</c> when Graph responds 404.
-    /// Throws <see cref="ODataError"/> for other failures (e.g., 409 Conflict if state transition is invalid).
+    /// <c>POST /storage/fileStorage/containers/{id}/activate</c> with the 429 retry. Shared by
+    /// <see cref="ActivateContainerAsync"/> and the bind of a container this service has just created.
     /// </summary>
+    private Task ActivateNewContainerAsync(GraphServiceClient graphClient, string containerId, CancellationToken ct) =>
+        ExecuteWithRetryAsync<object?>(
+            async () =>
+            {
+                await graphClient.Storage.FileStorage.Containers[containerId].Activate
+                    .PostAsync(cancellationToken: ct).ConfigureAwait(false);
+                return null;
+            },
+            ct);
+
+    /// <summary>
+    /// Locks an SPE container read-only with Graph's <c>POST /storage/fileStorage/containers/{id}/lock</c> action
+    /// (<c>lockState: lockedReadOnly</c>, #2032).
+    /// Returns <c>false</c> when Graph responds 404.
+    /// Throws <see cref="ODataError"/> for other failures.
+    /// </summary>
+    /// <remarks>
+    /// This used to PATCH <c>status = "locked"</c>; <c>status</c> is read-only, and "locked" is not one of its values.
+    /// </remarks>
     /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerId">The Graph FileStorageContainer ID to lock.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -1653,9 +1682,9 @@ public sealed class SpeAdminGraphService
 
         _logger.LogInformation("Locking SPE container {ContainerId}", containerId);
 
-        var patch = new Microsoft.Graph.Models.FileStorageContainer
+        var lockBody = new Microsoft.Graph.Storage.FileStorage.Containers.Item.Lock.LockPostRequestBody
         {
-            AdditionalData = new Dictionary<string, object> { ["status"] = "locked" }
+            LockState = Microsoft.Graph.Models.SiteLockState.LockedReadOnly
         };
 
         try
@@ -1663,8 +1692,8 @@ public sealed class SpeAdminGraphService
             await ExecuteWithRetryAsync(
                 async () =>
                 {
-                    await graphClient.Storage.FileStorage.Containers[containerId]
-                        .PatchAsync(patch, cancellationToken: ct);
+                    await graphClient.Storage.FileStorage.Containers[containerId].Lock
+                        .PostAsync(lockBody, cancellationToken: ct);
                     return (object?)null;
                 },
                 ct);
@@ -1680,10 +1709,11 @@ public sealed class SpeAdminGraphService
     }
 
     /// <summary>
-    /// Unlocks an SPE container by PATCHing its status back to <c>active</c>.
+    /// Unlocks an SPE container with Graph's <c>POST /storage/fileStorage/containers/{id}/unlock</c> action (#2032).
     /// Returns <c>false</c> when Graph responds 404.
-    /// Throws <see cref="ODataError"/> for other failures (e.g., 409 Conflict if not currently locked).
+    /// Throws <see cref="ODataError"/> for other failures.
     /// </summary>
+    /// <remarks>This used to PATCH the read-only <c>status</c> back to <c>active</c>.</remarks>
     /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerId">The Graph FileStorageContainer ID to unlock.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -1698,19 +1728,13 @@ public sealed class SpeAdminGraphService
 
         _logger.LogInformation("Unlocking SPE container {ContainerId}", containerId);
 
-        // Unlock transitions a locked container back to active (the only valid transition from locked).
-        var patch = new Microsoft.Graph.Models.FileStorageContainer
-        {
-            AdditionalData = new Dictionary<string, object> { ["status"] = "active" }
-        };
-
         try
         {
             await ExecuteWithRetryAsync(
                 async () =>
                 {
-                    await graphClient.Storage.FileStorage.Containers[containerId]
-                        .PatchAsync(patch, cancellationToken: ct);
+                    await graphClient.Storage.FileStorage.Containers[containerId].Unlock
+                        .PostAsync(cancellationToken: ct);
                     return (object?)null;
                 },
                 ct);
@@ -3459,6 +3483,12 @@ public sealed class SpeAdminGraphService
             {
                 throw new InvalidOperationException("Graph created a container but reported no id.");
             }
+
+            // #2032: Graph creates a container inactive and deletes it on its own if it is not activated within 24 hours.
+            // The stamp PATCH below may activate it implicitly, but nothing has measured that it does, so activate it
+            // explicitly, as ContainerOperations and the control plane's GraphContainerProvisioner do. Inside the try, so
+            // a failed activation removes the container like any other failed bind step.
+            await ActivateNewContainerAsync(graphClient, containerId, ct).ConfigureAwait(false);
 
             await ExecuteWithRetryAsync<object?>(async () =>
             {

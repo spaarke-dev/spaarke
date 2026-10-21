@@ -1,6 +1,6 @@
 # Current Task State — sdap-SPE-admin-app-r2
 
-> **Last Updated**: 2026-10-15 (Add Permission fix + #1908)
+> **Last Updated**: 2026-10-21 (by context-handoff, mid #2032 fix)
 > **Recovery**: read Quick Recovery, then the project [`CLAUDE.md`](CLAUDE.md) **Standing directives & gotchas**.
 > Prior state (verbatim): [`notes/handoff-history/current-task-archive-2026-10-07.md`](notes/handoff-history/current-task-archive-2026-10-07.md) — grep only for a specific past detail.
 
@@ -10,18 +10,15 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **090 — wrap-up**, 🔲 **HELD** until operator UAT passes |
-| **Status** | All code merged and **live in dev** (BFF + SPE Admin page). Waiting on operator actions + UAT |
+| **Task** | **#2032 fix** (ad-hoc defect fix, not a POML task) — then **090 wrap-up**, 🔲 **HELD** until operator UAT passes |
+| **Status** | #2032 code written + builds; tests in progress. uac-r2 PR #2024 (NoTransientRetryOption) merged; master merged into branch (`1559bc5e40`) |
 | **Tasks** | 27 ✅ · 2 🔄 (**029** = operator UAT render · **050** = platform-blocked) · 1 🔲 (**090**) of 30 |
-| **Next Action** | Wait for the operator's UAT result. Then run task **090** via `task-execute` (cite `notes/test-diet-report.md` — the `/test-diet` gate is already satisfied) |
-| **Blocked?** | Not code-blocked. Operator owns: Model 1 grant + UAT |
+| **Next Action** | (1) `SpeAdminPerContainerScopeTests.StubCreate` (~line 1199) must also `StubPostExact($"{ContainersPath}/{id}/activate", "", 204)` — 2 create tests fail without it, and the stamp-failure 503 test passes for the wrong reason. (2) Add admin-plane contract tests to `tests/integration/contract/SpeAdmin/ContainerCreationStampContractTests.cs` mirroring the `ProvisioningCreate_*` ones (helpers `StubCreated`/`StubActivated`/`ActivatePosts`/`CreatePosts`/`ResilienceHandler` exist): activate-before-stamp + Status "active"; activate fails → removed; 503 → sent once + `ContainerCreateOutcomeUnknownException`; 429 → retried; 400 → not unknown; Activate/Lock/Unlock POST the actions (lock body `lockState: lockedReadOnly`), no PATCH. Endpoint test: outcome-unknown → 500 `spe.containers.create_outcome_unknown`. (3) run `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~SpeAdmin\|FullyQualifiedName~ContainerCreation"`, publish-size, PR + auto-merge, tell R3 session (`spaarke-wt-spa-external-access-platform-05`) it's on master |
+| **Blocked?** | Deploy: operator approves; coordinate with R3 per project CLAUDE.md. 090 held for UAT |
 
-### Files modified this session (all committed)
-- `src/server/api/Sprk.Bff.Api/**` SpeAdmin — secret-free managed-identity change (PR #1291, merged + deployed)
-- `projects/sdap-SPE-admin-app-r2/notes/probe050_archival.py` — archival probe, re-created + committed
-- `projects/sdap-SPE-admin-app-r2/notes/task-050-findings.md` §9 — 2026-10-07 re-probe
-- `projects/sdap-SPE-admin-app-r3/{design.md,README.md}` — **re-scoped** (§0)
-- `docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md` §3A/§6A/§6B — identity model
+### Uncommitted files (#2032)
+- `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs` — create uses `NoTransientRetryOption` (no `ExecuteWithRetryAsync`), `CreateOutcomeIsUnknown` → `ContainerCreateOutcomeUnknownException`; bind activates first (`ActivateNewContainerAsync`); returned Status "active"; Activate/Lock/Unlock use `/activate`, `/lock` (`SiteLockState.LockedReadOnly`), `/unlock` actions; `using Sprk.Bff.Api.Infrastructure.Http`
+- `src/server/api/Sprk.Bff.Api/Api/SpeAdmin/ContainerEndpoints.cs` — catch `ContainerCreateOutcomeUnknownException` → 500 + `ContainerCreateOutcomeUnknownCode = "spe.containers.create_outcome_unknown"` + `displayName`
 
 ### Critical context
 SPE Admin no longer uses owning-app secrets: container work runs as the BFF managed identity

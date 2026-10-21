@@ -41,6 +41,9 @@ public static class ContainerEndpoints
     /// <summary>A created container could not be bound to its owning business unit (task 165).</summary>
     internal const string ContainerStampFailedCode = "spe.containers.business_unit_stamp_failed";
 
+    /// <summary>The create POST was sent and its outcome is unknown: a container may exist (#2032).</summary>
+    internal const string ContainerCreateOutcomeUnknownCode = "spe.containers.create_outcome_unknown";
+
     /// <summary>
     /// Registers the container list, get-by-ID, and create endpoints on the provided route group.
     /// Called from <see cref="SpeAdminEndpoints.MapSpeAdminEndpoints"/> with the /api/spe group.
@@ -560,6 +563,27 @@ public static class ContainerEndpoints
                         ["containerId"] = ex.ContainerId,
                         ["traceId"] = context.TraceIdentifier
                     });
+        }
+        catch (ContainerCreateOutcomeUnknownException ex)
+        {
+            // #2032: the create POST reached Graph but its answer did not settle whether a container was made, and it is
+            // no longer re-sent (that is what made duplicates). Not "try again": a retry could make a second one.
+            logger.LogError(
+                ex, "CreateContainer: the create of '{DisplayName}' for configId {ConfigId} was sent but its outcome is " +
+                    "unknown; a container may exist that no admin route has bound. TraceId={TraceId}",
+                ex.DisplayName, configGuid, context.TraceIdentifier);
+
+            return Results.Problem(
+                title: "Internal Server Error",
+                detail: $"The request to create container '{ex.DisplayName}' got no answer that says whether it was " +
+                        "created. Check the container list for it before creating it again, so a second one is not made.",
+                statusCode: StatusCodes.Status500InternalServerError,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = ContainerCreateOutcomeUnknownCode,
+                    ["displayName"] = ex.DisplayName,
+                    ["traceId"] = context.TraceIdentifier
+                });
         }
         catch (SpeAdminGraphService.ConfigNotFoundException ex)
         {
