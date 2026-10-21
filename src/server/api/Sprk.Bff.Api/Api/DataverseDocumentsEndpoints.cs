@@ -339,6 +339,18 @@ public static class DataverseDocumentsEndpoints
                     });
                 }
 
+                // Task 188 slice D (owner round 111 item 3): sprk_document_ParentDocument is Delete = Restrict, so a
+                // document other documents name as their parent is refused here with the one 409 shape, never a raw
+                // Dataverse refusal as a 500. A failed read throws before the delete (the 500 below; nothing deleted).
+                var childCount = (await dataverseService.GetDocumentsByParentAsync(Guid.Parse(id), context.RequestAborted)).Count();
+                if (childCount > 0)
+                {
+                    logger.LogInformation(
+                        "Delete refused for document {DocumentId}: {ChildCount} child document(s) still name it as parent",
+                        id, childCount);
+                    return ProblemDetailsHelper.DocumentHasChildDocuments(childCount, traceId);
+                }
+
                 await dataverseService.DeleteDocumentAsync(id);
 
                 logger.LogInformation("Document deleted successfully: {DocumentId}", id);

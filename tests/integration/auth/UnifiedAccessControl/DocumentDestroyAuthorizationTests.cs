@@ -141,6 +141,46 @@ public class DocumentDestroyAuthorizationTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
+    // Task 188 slice D — sprk_document_ParentDocument is Delete = Restrict: a document other documents name as their
+    // parent is refused with the ONE 409 shape on both internal routes, never a raw Dataverse refusal as a 500.
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task DeleteDocument_OfAParentWithChildDocuments_Is409_WithTheCount_AndDestroysNothing()
+    {
+        _fixture.ChildDocumentCounts[DocumentId] = 3;
+        using var client = _fixture.CreateClientWithRights("ReadAccess,DeleteAccess");
+
+        var response = await client.DeleteAsync($"/api/documents/{DocumentId}");
+
+        await ShouldBeHasChildDocuments(response, expectedCount: 3);
+        _fixture.DeletedDocumentIds.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DeleteDataverseDocument_OfAParentWithChildDocuments_Is409_WithTheCount_AndDestroysNothing()
+    {
+        _fixture.ChildDocumentCounts[DocumentId] = 2;
+        using var client = _fixture.CreateClientWithRights("ReadAccess,DeleteAccess");
+
+        var response = await client.DeleteAsync($"/api/v1/documents/{DocumentId}");
+
+        await ShouldBeHasChildDocuments(response, expectedCount: 2);
+        _fixture.DeletedDataverseDocumentIds.Should().BeEmpty(
+            "the refusal comes before IDocumentDataverseService.DeleteDocumentAsync, so Dataverse's Restrict never fires");
+    }
+
+    private static async Task ShouldBeHasChildDocuments(HttpResponseMessage response, int expectedCount)
+    {
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body);
+        using var problem = System.Text.Json.JsonDocument.Parse(body);
+        problem.RootElement.GetProperty("reasonCode").GetString()
+            .Should().Be(Sprk.Bff.Api.Services.DocumentCheckoutService.HasChildDocumentsCode);
+        problem.RootElement.GetProperty("childCount").GetInt32().Should().Be(expectedCount);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
     // The two destroy routes must AGREE — the C3 finding was an asymmetry, not a URL
     // ─────────────────────────────────────────────────────────────────────────────
 

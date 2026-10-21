@@ -493,6 +493,9 @@ public static class DocumentOperationsEndpoints
                     checkedOut.CheckedOutError,
                     statusCode: 409
                 ),
+                // Task 188 slice D: still the parent of other documents; nothing was deleted.
+                HasChildDocumentsDeleteResult hasChildren =>
+                    ProblemDetailsHelper.DocumentHasChildDocuments(hasChildren.ChildCount, correlationId),
                 FailedDeleteResult failed => TypedResults.Problem(
                     statusCode: 500,
                     title: "Delete Failed",

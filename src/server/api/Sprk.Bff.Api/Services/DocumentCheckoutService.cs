@@ -817,6 +817,19 @@ public class DocumentCheckoutService
             );
         }
 
+        // 1b. A document that still has child documents is refused BEFORE anything is deleted (unified-access-control-r2
+        // task 188 slice D, owner round 111 item 3). sprk_document_ParentDocument is Delete = Restrict, so Dataverse would
+        // refuse the row anyway, but only AFTER step 2 had deleted the file. A failed read throws here, before any delete
+        // (fail closed), exactly as the document read above does.
+        var childCount = await CountChildDocumentsAsync(documentId, ct);
+        if (childCount > 0)
+        {
+            _logger.LogInformation(
+                "Delete refused for document {DocumentId}: {ChildCount} child document(s) still name it as parent [{CorrelationId}]",
+                documentId, childCount, correlationId);
+            return new HasChildDocumentsDeleteResult(childCount, correlationId);
+        }
+
         // 2. Delete file from SPE first
         if (filePolicy == DocumentFileDeletePolicy.VerifiedFileFirstKeepRowOnFailure)
         {
@@ -963,6 +976,40 @@ public class DocumentCheckoutService
 
     /// <summary>The code of a <see cref="FileNotDeletedDeleteResult"/> whose file delete failed (task 032).</summary>
     public const string FileNotDeletedCode = "document_file_not_deleted";
+
+    /// <summary>
+    /// The code of a <see cref="HasChildDocumentsDeleteResult"/>: the document is still the <c>sprk_parentdocument</c> of
+    /// other documents (an .eml and its attachments), so it is not deleted (task 188 slice D).
+    /// </summary>
+    public const string HasChildDocumentsCode = "document_has_child_documents";
+
+    /// <summary>The most child documents <see cref="CountChildDocumentsAsync"/> counts; any count above zero refuses.</summary>
+    private const int ChildDocumentCountCap = 5000;
+
+    /// <summary>
+    /// How many documents name <paramref name="documentId"/> as their <c>sprk_parentdocument</c>, active or not (Delete =
+    /// Restrict refuses on any of them), counted up to <see cref="ChildDocumentCountCap"/>. App-only, ids never returned.
+    /// A failed read throws.
+    /// </summary>
+    private async Task<int> CountChildDocumentsAsync(Guid documentId, CancellationToken ct)
+    {
+        var url = $"{DocumentEntitySet}?$select=sprk_documentid&$filter=_sprk_parentdocument_value eq {documentId}" +
+                  $"&$top={ChildDocumentCountCap}";
+        var response = await _httpClient.GetAsync(url, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogError(
+                "Dataverse returned {StatusCode} for the child documents of document {DocumentId}",
+                response.StatusCode, documentId);
+            throw new HttpRequestException(
+                $"Dataverse error ({response.StatusCode}) reading the child documents of document {documentId}.");
+        }
+
+        var data = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);
+        return data.TryGetProperty("value", out var rows) && rows.ValueKind == JsonValueKind.Array
+            ? rows.GetArrayLength()
+            : throw new HttpRequestException($"Dataverse answered the child documents of document {documentId} without rows.");
+    }
 
     /// <summary>
     /// Looks up the Dataverse systemuserid for a given Azure AD Object ID.
@@ -1596,6 +1643,17 @@ public record FileNotDeletedDeleteResult(string Code, int FailureStatusCode, str
     : DeleteResult(false, CorrelationId)
 {
     public new int StatusCode => FailureStatusCode;
+}
+
+/// <summary>
+/// The document is still the parent (<c>sprk_parentdocument</c>) of <paramref name="ChildCount"/> other documents, so
+/// NOTHING was deleted: neither its file nor its row (task 188 slice D; the relationship is Delete = Restrict). Code
+/// <see cref="DocumentCheckoutService.HasChildDocumentsCode"/>, 409.
+/// </summary>
+public record HasChildDocumentsDeleteResult(int ChildCount, string CorrelationId)
+    : DeleteResult(false, CorrelationId)
+{
+    public new int StatusCode => 409;
 }
 
 /// <summary>What a document delete does when the SharePoint Embedded file cannot be deleted.</summary>

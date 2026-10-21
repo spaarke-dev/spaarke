@@ -562,6 +562,76 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
     }
 
     // =====================================================================
+    // Task 188 slice D: sprk_document_ParentDocument is Delete = Restrict. A document other documents name as their
+    // parent is refused 409 BEFORE its file is touched; the link (which D7's narrowing walks) is kept.
+    // =====================================================================
+
+    [Fact]
+    public async Task Document_WithChildDocuments_Is409_NamesNoCount_AndNothingIsDeleted()
+    {
+        var id = _fixture.Seed(DeletableKind.Document, contact: CallerContact, parents: Project(RecordA));
+        var child = _fixture.Dataverse.AddChild(id);
+        _fixture.Principal = ContactOn(RecordA, ExternalAccessLevel.Collaborate);
+
+        using var response = await Delete("documents", id);
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body);
+        ProblemCode(body).Should().Be(DocumentCheckoutService.HasChildDocumentsCode);
+        body.Should().NotContain("childCount", "a child the caller cannot see (D7) must not be counted to them")
+            .And.NotContain(child.ToString());
+        _fixture.Steps.Should().BeEmpty("the file is not touched: a Restrict refusal of the row would otherwise leave "
+            + "a row whose file is gone");
+        _fixture.Exists(DeletableKind.Document, id).Should().BeTrue();
+        _fixture.Dataverse.Contains(child).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task InternalDelete_ParentWithChildDocuments_IsRefused_WithTheCount_BeforeTheFile()
+    {
+        var id = _fixture.Seed(DeletableKind.Document, contact: CallerContact, parents: Project(RecordA));
+        _fixture.Dataverse.AddChild(id);
+        _fixture.Dataverse.AddChild(id);
+        var service = _fixture.Services.GetRequiredService<DocumentCheckoutService>();
+
+        var result = await service.DeleteAsync(id, "corr-188d");
+
+        result.Should().BeOfType<HasChildDocumentsDeleteResult>().Which.ChildCount.Should().Be(2);
+        _fixture.Steps.Should().BeEmpty("BestEffort deletes the file before the row; the refusal must come first");
+        _fixture.Exists(DeletableKind.Document, id).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Delete_OfAChildDocument_IsNotRefused()
+    {
+        // Must-not-fire: the rule is about documents that ARE a parent, not documents that HAVE one.
+        var parent = _fixture.Seed(DeletableKind.Document, contact: CallerContact, parents: Project(RecordA));
+        var child = _fixture.Dataverse.AddChild(parent);
+        var service = _fixture.Services.GetRequiredService<DocumentCheckoutService>();
+
+        var result = await service.DeleteAsync(child, "corr-188d");
+
+        result.Should().BeOfType<SuccessDeleteResult>();
+        _fixture.Dataverse.Contains(child).Should().BeFalse();
+        _fixture.Steps.Should().Equal($"file-delete:drive-{child:N}/item-{child:N}", $"row-delete:{child}");
+    }
+
+    [Fact]
+    public async Task Document_WhenTheChildDocumentReadFails_Is503_AndNothingIsDeleted()
+    {
+        // Fail closed: "could not tell whether it has children" never proceeds to the file.
+        var id = _fixture.Seed(DeletableKind.Document, contact: CallerContact, parents: Project(RecordA));
+        _fixture.Principal = ContactOn(RecordA, ExternalAccessLevel.Collaborate);
+        _fixture.Dataverse.ChildReadStatus = HttpStatusCode.ServiceUnavailable;
+
+        using var response = await Delete("documents", id);
+
+        await ShouldBeDeleteOwnUnavailable(response);
+        _fixture.Steps.Should().BeEmpty();
+        _fixture.Exists(DeletableKind.Document, id).Should().BeTrue();
+    }
+
+    // =====================================================================
     // Faults: "could not tell" is a 503, never a 403 and never a delete
     // =====================================================================
 
@@ -1110,11 +1180,24 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
         /// <summary>Set to make the document row GET throw this (an HttpClient timeout is a TaskCanceledException).</summary>
         public Exception? ReadFault { get; set; }
 
+        /// <summary>Set to make the child-document query (task 188 slice D) fail with this status.</summary>
+        public HttpStatusCode? ChildReadStatus { get; set; }
+
         public void Reset()
         {
             _rows.Clear();
             RowDeleteStatus = null;
             ReadFault = null;
+            ChildReadStatus = null;
+        }
+
+        /// <summary>Adds a document whose <c>sprk_parentdocument</c> is <paramref name="parentId"/> (an attachment).</summary>
+        public Guid AddChild(Guid parentId)
+        {
+            var id = Guid.NewGuid();
+            Add(id, $"drive-{id:N}", $"item-{id:N}");
+            _rows[id]["_sprk_parentdocument_value"] = parentId.ToString();
+            return id;
         }
 
         public void Add(Guid id, string driveId, string itemId) => _rows[id] = new Dictionary<string, object?>
@@ -1137,6 +1220,29 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             var path = request.RequestUri!.AbsolutePath;
+
+            // The child-document query: sprk_documents?$filter=_sprk_parentdocument_value eq {id}, evaluated on the rows.
+            if (request.Method == HttpMethod.Get && path.EndsWith("/sprk_documents", StringComparison.Ordinal))
+            {
+                if (ChildReadStatus is { } childStatus)
+                    return Task.FromResult(new HttpResponseMessage(childStatus));
+                var query = Uri.UnescapeDataString(request.RequestUri.Query);
+                var match = System.Text.RegularExpressions.Regex.Match(query, @"_sprk_parentdocument_value eq ([0-9a-fA-F-]{36})");
+                if (!match.Success)
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadRequest));
+                var parent = match.Groups[1].Value;
+                var children = _rows.Values
+                    .Where(r => r.TryGetValue("_sprk_parentdocument_value", out var p)
+                                && string.Equals(p as string, parent, StringComparison.OrdinalIgnoreCase))
+                    .Select(r => new Dictionary<string, object?> { ["sprk_documentid"] = r["sprk_documentid"] })
+                    .ToList();
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(JsonSerializer.Serialize(new { value = children }),
+                        System.Text.Encoding.UTF8, "application/json"),
+                });
+            }
+
             var open = path.LastIndexOf('(');
             if (!path.Contains("/sprk_documents(", StringComparison.Ordinal) || open < 0
                 || !Guid.TryParse(path[(open + 1)..path.LastIndexOf(')')], out var id))
