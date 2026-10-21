@@ -48,6 +48,7 @@
     <constraint source="model 5.2 K-2">sprk_billingfirm and sprk_billingresponsible are not in the access-conferring registry and no grant or share path reads them; ExternalModuleRegistry gains none of the new tables.</constraint>
     <constraint source="project">Not in this task: the resolver and its precedence (082); the 6.6 read models (084); the O-17 sweep that retires record-scoped sets whose record is gone (model 5.2, not assigned in the re-plan; raise it to the main session); delete code (uac-r2's planner and 080's cascade).</constraint>
     <constraint source=".claude/constraints/bff-extensions.md, ADR-010">Concrete service in AddFinanceModule; publish-size delta; no package; no new HIGH CVE.</constraint>
+    <constraint source="uac-r2 2026-10-21 (round 113 item 3; task 191)">Procedures are internal-only. Flagged-external systemusers on dev hold the same roles as internal users (Spaarke Basic User, Spaarke Console User, Spaarke Office Add In User) through their business unit's default team. So until uac-r2 task 191 lands, this task adds NO role privilege on sprk_procedure, sprk_procedureversion or sprk_procedureassignment without uac-r2's agreement; all access goes through the BFF.</constraint>
   </constraints>
 
   <knowledge>
