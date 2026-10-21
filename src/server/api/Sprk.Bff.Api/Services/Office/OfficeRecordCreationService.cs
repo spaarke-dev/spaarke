@@ -965,17 +965,64 @@ public sealed class OfficeRecordCreationService
 
         foreach (var parent in parents)
         {
-            var rights = await _callerAccess.GetCallerRightsAsync(
-                    token, Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.EntitySetFor(parent.Table), parent.Id, ct)
-                .ConfigureAwait(false);
-            if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.AppendTo))
+            if (await CallerCannotAppendToAsync(token, parent.Table, parent.Id, ct).ConfigureAwait(false) is { } refusal)
             {
-                return Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution.Refused(CallerCannotFileUnderParent,
-                    "you do not have permission to file a project under the secure record it names");
+                return refusal;
             }
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// AS THE CALLER: AppendTo on <paramref name="table"/> <paramref name="id"/> - the right a project needs on the record it is
+    /// filed under, which the app-only create never asks Dataverse for. The refusal is the plan's own
+    /// (<see cref="CallerCannotFileUnderParent"/>, the same text), whatever the record is: a record the caller cannot see, a
+    /// record that does not exist and a rights read that could not answer all read <see cref="Spaarke.Dataverse.AccessRights.None"/>,
+    /// so it leaks neither. <c>null</c>: allowed.
+    /// </summary>
+    private async Task<Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution?> CallerCannotAppendToAsync(
+        string token, string table, Guid id, CancellationToken ct)
+    {
+        var rights = await _callerAccess!.GetCallerRightsAsync(
+                token, Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.EntitySetFor(table), id, ct)
+            .ConfigureAwait(false);
+        return rights.HasFlag(Spaarke.Dataverse.AccessRights.AppendTo)
+            ? null
+            : Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution.Refused(CallerCannotFileUnderParent,
+                "you do not have permission to file a project under the secure record it names");
+    }
+
+    /// <summary>
+    /// #2191 K2 (UAC-r2 re-check): the project is created app-only, so Dataverse never checks AppendTo on the record it is filed
+    /// under - and for an ORDINARY source nothing else does either (the plan asks only for secure parents). Asked here, for every
+    /// source, once the pair is derived. A caller that cannot be checked (no probe or token) is refused, as the plan refuses it.
+    /// </summary>
+    private async Task<RecordCreationResult?> CallerMayFileUnderAsync(FiledUnderPair derived, CancellationToken ct)
+    {
+        var token = _http?.HttpContext is { } context
+            ? Sprk.Bff.Api.Infrastructure.Auth.TokenHelper.ExtractBearerTokenOrNull(context)
+            : null;
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution? refusal;
+        if (_callerAccess is null || string.IsNullOrWhiteSpace(token))
+        {
+            _logger.LogError(
+                "[RECORD-CREATE] A project filed under {Table} {RecordId} cannot be checked against the caller's own rights here " +
+                "(probe or token unavailable). Refused (fail closed).", derived.Table, derived.Id);
+            refusal = Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution.Refused(CallerRightsUnverifiable,
+                "your permission to create a project under the record it is created from could not be checked");
+        }
+        else
+        {
+            refusal = await CallerCannotAppendToAsync(token, derived.Table, derived.Id, ct).ConfigureAwait(false);
+        }
+
+        return refusal is null
+            ? null
+            : RecordCreationResult.Failed(new RecordCreationFailure(
+                KindFor(refusal.RefusalCode),
+                refusal.RefusalCode ?? CallerCannotFileUnderParent,
+                $"The project was not created: {refusal.Reason}."));
     }
 
     // ── #2191 review K2: the project is filed under the record it is created from ─────────────────────────────────────
@@ -1064,6 +1111,13 @@ public sealed class OfficeRecordCreationService
     /// </remarks>
     private async Task<RecordCreationResult?> FileUnderSourceAsync(Entity entity, FiledUnderPair derived, CancellationToken ct)
     {
+        // The caller's own AppendTo on the record the project is filed under: every source, ordinary or secure, before the
+        // pair is written or any other refusal is weighed (one answer whatever the record is; no existence leak).
+        if (await CallerMayFileUnderAsync(derived, ct).ConfigureAwait(false) is { } appendRefusal)
+        {
+            return appendRefusal;
+        }
+
         var pairId = Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairIdColumn;
         var pairType = Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairTypeColumn;
 
@@ -1095,11 +1149,20 @@ public sealed class OfficeRecordCreationService
 
         switch (await SourceIsSecureAsync(derived, ct).ConfigureAwait(false))
         {
-            case false:
+            case SourceFlag.Ordinary:
                 return null; // an ordinary source: the mapped pair is kept, as before
 
-            case null:
+            case SourceFlag.Unreadable:
                 return FiledUnderUndetermined(retryable: true);
+
+            case SourceFlag.Empty:
+                // Not a fault: reading it again returns the same empty value, so "Try again" would be a lie. The plan's own
+                // reason for a parent whose flag is empty (SecureRootInheritance), in its refusal's shape.
+                return RecordCreationResult.Failed(new RecordCreationFailure(
+                    KindFor(Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ParentUndetermined),
+                    Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ParentUndetermined,
+                    $"The project was not created: the {derived.Table} it is filed under has no secure flag value "
+                    + "(empty is never read as not secure)."));
 
             default:
                 _logger.LogWarning(
@@ -1115,16 +1178,43 @@ public sealed class OfficeRecordCreationService
         }
     }
 
+    /// <summary>What the source's own secure flag says (<see cref="SourceIsSecureAsync"/>).</summary>
+    private enum SourceFlag
+    {
+        /// <summary>The flag reads <c>false</c>.</summary>
+        Ordinary,
+
+        /// <summary>The flag reads <c>true</c>.</summary>
+        Secure,
+
+        /// <summary>The flag reads EMPTY: not "not secure" (owner round 17 item 3), and not a fault - a retry reads it empty again.</summary>
+        Empty,
+
+        /// <summary>The read faulted (or returned no row): worth trying again.</summary>
+        Unreadable,
+    }
+
     /// <summary>
-    /// The source's own <see cref="SecureFlagAttribute"/>, read app-only; <see langword="null"/> when it cannot be read — and,
-    /// as the plan reads a parent's flag (owner round 17 item 3), when it reads EMPTY: "cannot be read", never "not secure".
+    /// The source's own <see cref="SecureFlagAttribute"/>, read app-only. An empty flag and a read that faulted are told apart:
+    /// both refuse (as the plan reads a parent's flag, owner round 17 item 3: empty is never "not secure"), but only a fault
+    /// is worth retrying.
     /// </summary>
-    private async Task<bool?> SourceIsSecureAsync(FiledUnderPair parent, CancellationToken ct)
+    private async Task<SourceFlag> SourceIsSecureAsync(FiledUnderPair parent, CancellationToken ct)
     {
         try
         {
             var row = await _entities.RetrieveAsync(parent.Table, parent.Id, [SecureFlagAttribute], ct).ConfigureAwait(false);
-            return row?.GetAttributeValue<bool?>(SecureFlagAttribute);
+            if (row is null)
+            {
+                return SourceFlag.Unreadable;
+            }
+
+            return row.GetAttributeValue<bool?>(SecureFlagAttribute) switch
+            {
+                true => SourceFlag.Secure,
+                false => SourceFlag.Ordinary,
+                null => SourceFlag.Empty,
+            };
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -1135,7 +1225,7 @@ public sealed class OfficeRecordCreationService
             _logger.LogError(ex,
                 "[RECORD-CREATE] The secure flag of {Table} {RecordId} could not be read. Refused (fail closed).",
                 parent.Table, parent.Id);
-            return null;
+            return SourceFlag.Unreadable;
         }
     }
 

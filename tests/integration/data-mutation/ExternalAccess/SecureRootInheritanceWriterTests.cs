@@ -603,16 +603,25 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
                             ["sprk_recordtype"] = new EntityReference("sprk_recordtype_ref", typeRef),
                         }));
 
-        // #2191 K2: the record-type catalog row the service derives the filed-under pair's type from.
+        // #2191 K2: the record-type catalog row the service derives the filed-under pair's type from. Answered BY NAME, as
+        // RecordTypeCatalogSetup.Answer does: the row of the source's table only, so a derivation that asks the catalog about
+        // the wrong table (or asks without a name) gets no row and the create is refused, rather than being handed typeRef.
         entities
             .Setup(e => e.RetrieveMultipleAsync(
                 It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => q.EntityName == OfficeRecordCreationService.RecordTypeEntity),
                 It.IsAny<CancellationToken>()))
-            .Returns(() => catalogFails
-                ? Task.FromException<EntityCollection>(new TimeoutException("catalog read timed out"))
-                : Task.FromResult(catalogHasRow
+            .Returns((Microsoft.Xrm.Sdk.Query.QueryExpression query, CancellationToken _) =>
+            {
+                if (catalogFails)
+                    return Task.FromException<EntityCollection>(new TimeoutException("catalog read timed out"));
+
+                var asksForTheSourceTable = query.Criteria.Conditions.Any(c =>
+                    c.AttributeName == OfficeRecordCreationService.RecordTypeLogicalNameAttribute
+                    && c.Values.OfType<string>().Any(v => string.Equals(v, sourceTable, StringComparison.OrdinalIgnoreCase)));
+                return Task.FromResult(catalogHasRow && asksForTheSourceTable
                     ? new EntityCollection(new List<Entity> { new(OfficeRecordCreationService.RecordTypeEntity, typeRef) })
-                    : new EntityCollection()));
+                    : new EntityCollection());
+            });
 
         // The maker's mapping profile files the new project under the matter it is created from (the polymorphic pair).
         var fieldMappings = new Mock<IFieldMappingDataverseService>();
@@ -714,7 +723,7 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
         _fixture.Updates.Should().NotContain(u => u.RecordId == result.RecordId && u.Payload.ContainsKey("ownerid@odata.bind"));
         ShouldBeSecure(result.RecordId, "filed under a secure matter by the mapping's pair");
         _officeProbe.Verify(p => p.GetCallerRightsAsync("caller-token", "sprk_matters", secure, It.IsAny<CancellationToken>()),
-            Times.Once, "AppendTo on the secure matter is asked AS THE CALLER");
+            Times.AtLeastOnce, "AppendTo on the secure matter is asked AS THE CALLER (twice: once for every source, once by the plan)");
     }
 
     /// <summary>Owner round 31 item 2, Office: the maker cannot be shared — the project is removed again; nothing created.</summary>
@@ -1135,25 +1144,43 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
     }
 
     /// <summary>
-    /// #2191 K2 review F3, must fire: the mapping names another record and the source's own secure flag cannot be told — the
-    /// read faults, or the flag reads EMPTY ("cannot be read", never "not secure") — so the mapped pair is not trusted to keep
-    /// isolation: refused, nothing created.
+    /// #2191 K2 review F3, must fire: the mapping names another record and the source's own secure flag READ FAULTS — the mapped
+    /// pair is not trusted to keep isolation: refused (a fault is worth retrying: "Try again"), nothing created.
     /// </summary>
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task OfficeCreate_WhenTheMappingNamesAnotherRecord_AndTheSourceFlagCannotBeRead_IsRefused(bool readFaults)
+    [Fact]
+    public async Task OfficeCreate_WhenTheMappingNamesAnotherRecord_AndTheSourceFlagReadFaults_IsRefused_AsRetryable()
     {
         var (secure, ordinary) = Matters();
-        if (!readFaults)
-            FlagUnreadable(secure);
 
         var result = await OfficeCreateProjectFrom(secure,
-            OfficeCreator(secure, RecordTypeRef(_fixture, "sprk_matter"), mappedPairId: ordinary, flagReadFails: readFaults));
+            OfficeCreator(secure, RecordTypeRef(_fixture, "sprk_matter"), mappedPairId: ordinary, flagReadFails: true));
 
         result.Succeeded.Should().BeFalse();
         result.Failure!.Code.Should().Be(RecordOwnerRefusal.ParentUndetermined);
         result.Failure.Detail.Should().EndWith("Try again.");
+        _officeCreates.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// UAC-r2 re-check of #2191 (F1), must fire: the mapping names another record and the source's secure flag reads EMPTY — never
+    /// "not secure", so refused, nothing created; and NOT "Try again": a retry reads it empty again. The text is the plan's own
+    /// for a parent whose flag is empty.
+    /// </summary>
+    [Fact]
+    public async Task OfficeCreate_WhenTheMappingNamesAnotherRecord_AndTheSourceFlagIsEmpty_IsRefused_AsNotRetryable()
+    {
+        var (secure, ordinary) = Matters();
+        FlagUnreadable(secure);
+
+        var result = await OfficeCreateProjectFrom(secure,
+            OfficeCreator(secure, RecordTypeRef(_fixture, "sprk_matter"), mappedPairId: ordinary));
+
+        result.Succeeded.Should().BeFalse();
+        result.Failure!.Code.Should().Be(RecordOwnerRefusal.ParentUndetermined);
+        result.Failure.Kind.Should().Be(RecordCreationFailureKind.OwnerUnresolved);
+        result.Failure.Detail.Should().Be(
+            "The project was not created: the sprk_matter it is filed under has no secure flag value (empty is never read as not secure).");
+        result.Failure.Detail.Should().NotContain("Try again");
         _officeCreates.Should().BeEmpty();
     }
 
@@ -1225,6 +1252,129 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
             OfficeCreator(secure, RecordTypeRef(_fixture, "sprk_matter"), catalogHasRow: false));
 
         result.Failure!.Detail.Should().Contain("Ask an administrator").And.NotContain("Try again");
+    }
+
+    // ── UAC-r2 re-check of #2191: the caller's AppendTo on the record an ORDINARY (or any) source files the project under ──────
+
+    private const string ProjectEntitySet = "sprk_projects";
+    private const string MatterEntitySet = "sprk_matters";
+
+    private void CallerHolds(string entitySet, Guid id, AccessRights rights) =>
+        _officeProbe.Setup(p => p.GetCallerRightsAsync("caller-token", entitySet, id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(rights);
+
+    private Guid OrdinaryProject()
+    {
+        var id = Guid.NewGuid();
+        _fixture.SeedProject(id, owningTeamId: SecureChildShareWorld.GeneralTeam, isSecure: false);
+        return id;
+    }
+
+    private void ShouldBeRefusedAsNotFileable(RecordCreationResult result)
+    {
+        result.Succeeded.Should().BeFalse();
+        result.Failure!.Kind.Should().Be(RecordCreationFailureKind.SecureFilingRefused);
+        result.Failure.Code.Should().Be(OfficeRecordCreationService.CallerCannotFileUnderParent);
+        // The plan's own text for the same refusal (CallerMayCreateUnderAsync): one answer, whichever the record is.
+        result.Failure.Detail.Should().Be(
+            "The project was not created: you do not have permission to file a project under the secure record it names.");
+        _officeCreates.Should().BeEmpty("the app-only create never ran");
+    }
+
+    /// <summary>
+    /// UAC-r2 re-check, must fire: an ORDINARY matter source the caller can Read but not AppendTo — the app-only create would
+    /// file the project under it regardless; refused with the plan's code, no create.
+    /// </summary>
+    [Fact]
+    public async Task OfficeCreate_FromAnOrdinaryMatter_WhenTheCallerCannotAppendToIt_IsRefused_AndNothingIsCreated()
+    {
+        var (_, ordinary) = Matters();
+        CallerHolds(MatterEntitySet, ordinary, AccessRights.Read);
+
+        var result = await OfficeCreateProjectFrom(ordinary);
+
+        ShouldBeRefusedAsNotFileable(result);
+    }
+
+    /// <summary>UAC-r2 re-check, must fire: the same for an ORDINARY project source.</summary>
+    [Fact]
+    public async Task OfficeCreate_FromAnOrdinaryProject_WhenTheCallerCannotAppendToIt_IsRefused_AndNothingIsCreated()
+    {
+        var parent = OrdinaryProject();
+        CallerHolds(ProjectEntitySet, parent, AccessRights.Read);
+
+        var result = await OfficeCreateProjectFrom(parent,
+            OfficeCreator(parent, RecordTypeRef(_fixture, "sprk_project"), sourceTable: "sprk_project"), sourceTable: "sprk_project");
+
+        ShouldBeRefusedAsNotFileable(result);
+    }
+
+    /// <summary>
+    /// UAC-r2 re-check, must NOT fire: an ordinary matter or project the caller holds AppendTo on (and nothing else but Read) —
+    /// created, ordinary, and filed under the source; the rights were asked for that very record.
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_matter")]
+    [InlineData("sprk_project")]
+    public async Task OfficeCreate_FromAnOrdinarySource_WhenTheCallerCanAppendToIt_IsCreated_FiledUnderIt(string table)
+    {
+        var source = table == "sprk_matter" ? Matters().Ordinary : OrdinaryProject();
+        var entitySet = table == "sprk_matter" ? MatterEntitySet : ProjectEntitySet;
+        var typeRef = RecordTypeRef(_fixture, table);
+        CallerHolds(entitySet, source, AccessRights.Read | AccessRights.AppendTo);
+
+        var result = await OfficeCreateProjectFrom(source, OfficeCreator(source, typeRef, sourceTable: table), sourceTable: table);
+
+        result.Succeeded.Should().BeTrue(result.Failure?.Detail);
+        ShouldBeFiledUnder(_officeCreates.Should().ContainSingle().Subject, source, typeRef);
+        _officeProbe.Verify(p => p.GetCallerRightsAsync("caller-token", entitySet, source, It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+    }
+
+    /// <summary>
+    /// UAC-r2 re-check, must fire: the caller's rights cannot be told — the probe answers None, which is what it answers when
+    /// the OBO exchange or the rights read fails — so the create is refused (fail closed), nothing created.
+    /// </summary>
+    [Fact]
+    public async Task OfficeCreate_FromAnOrdinaryMatter_WhenTheRightsReadCouldNotAnswer_IsRefused_AndNothingIsCreated()
+    {
+        var (_, ordinary) = Matters();
+        CallerHolds(MatterEntitySet, ordinary, AccessRights.None);
+
+        var result = await OfficeCreateProjectFrom(ordinary);
+
+        ShouldBeRefusedAsNotFileable(result);
+    }
+
+    /// <summary>UAC-r2 re-check, must fire: the rights read THROWS — the exception propagates (never "allowed"); nothing created.</summary>
+    [Fact]
+    public async Task OfficeCreate_FromAnOrdinaryMatter_WhenTheRightsReadThrows_NothingIsCreated()
+    {
+        var (_, ordinary) = Matters();
+        _officeProbe.Setup(p => p.GetCallerRightsAsync("caller-token", MatterEntitySet, ordinary, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("rights read timed out"));
+
+        var act = () => OfficeCreateProjectFrom(ordinary);
+
+        await act.Should().ThrowAsync<TimeoutException>();
+        _officeCreates.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// UAC-r2 re-check, must fire: no bearer token, so the caller's rights on an ORDINARY source cannot be asked — refused with the
+    /// plan's unverifiable code (500 kind), nothing created.
+    /// </summary>
+    [Fact]
+    public async Task OfficeCreate_FromAnOrdinaryMatter_WhenTheCallersRightsCannotBeAsked_IsRefused_AndNothingIsCreated()
+    {
+        var (_, ordinary) = Matters();
+
+        var result = await OfficeCreateProjectFrom(ordinary,
+            OfficeCreator(ordinary, RecordTypeRef(_fixture, "sprk_matter"), withBearerToken: false));
+
+        result.Succeeded.Should().BeFalse();
+        result.Failure!.Kind.Should().Be(RecordCreationFailureKind.SecureFilingFailed);
+        result.Failure.Code.Should().Be(OfficeRecordCreationService.CallerRightsUnverifiable);
+        _officeCreates.Should().BeEmpty();
     }
 
     // ── (2) RE-FILE: dataverse.update_record ────────────────────────────────────────────────────────────────────────

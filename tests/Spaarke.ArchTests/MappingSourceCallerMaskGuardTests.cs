@@ -1,3 +1,5 @@
+using System.Reflection;
+using System.Text;
 using System.Text.RegularExpressions;
 using Xunit;
 
@@ -27,7 +29,11 @@ namespace Spaarke.ArchTests;
 /// engine's method taken as a method group (#2191 review).</para>
 /// <para><b>Known limits</b> (accepted, review pass 2): the scan strips a line from the first <c>//</c>, so a <c>//</c> inside
 /// a string hides the rest of that line; the mask call's arguments are not checked; the name inside a string literal is a
-/// fail-closed false positive.</para>
+/// fail-closed false positive. A call made through REFLECTION (<c>GetMethod("Apply").Invoke</c>) is not seen by any text scan;
+/// <see cref="TheEngine_OffersNoOtherPathThatTakesASourceEntity"/> keeps the engine's own surface to the two guarded entry
+/// points, which is what makes a reflective call the only way round.</para>
+/// <para><b>Spellings tolerated</b> (UAC-r2 re-check of #2191): a verbatim identifier (<c>CreateTimeFieldMapping.@Apply(</c>) and
+/// a block comment between any two tokens the patterns match (<see cref="StripBlockComments"/>).</para>
 ///
 /// <para>Crude by design (<see cref="SourceScan"/>): text, not syntax. Paired with must-fire controls (a bypass in each shape
 /// fails) and must-not-fire controls (the masked Office shape and a literal null pass).</para>
@@ -46,7 +52,7 @@ public class MappingSourceCallerMaskGuardTests
     };
 
     private static readonly Regex EngineCall = new(
-        @"\bCreateTimeFieldMapping\s*\.\s*(Apply|ApplyFillOnly)\s*\(",
+        @"\bCreateTimeFieldMapping\s*\.\s*@?(Apply|ApplyFillOnly)\s*\(",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     /// <summary>A <c>using static</c> import of the engine, or a <c>using</c> alias of it (#2191 review, F a) — either hides
@@ -57,7 +63,7 @@ public class MappingSourceCallerMaskGuardTests
 
     /// <summary>The engine's method taken as a method group, not called (#2191 review, F b): a delegate call hides the source.</summary>
     private static readonly Regex EngineMethodGroup = new(
-        @"\bCreateTimeFieldMapping\s*\.\s*(Apply|ApplyFillOnly)\b(?!\s*\()",
+        @"\bCreateTimeFieldMapping\s*\.\s*@?(Apply|ApplyFillOnly)\b(?!\s*\()",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     [Fact(DisplayName = "#2188: every source handed to the field-mapping engine was masked to the caller's view first")]
@@ -74,7 +80,9 @@ public class MappingSourceCallerMaskGuardTests
                 continue;
             }
 
-            var code = SourceScan.CodeText(File.ReadAllLines(file));
+            // Block comments go first, on the raw text: CodeText cuts each line at its first "//", which would leave a block
+            // comment that contains one unclosed.
+            var code = SourceScan.CodeText(StripBlockComments(File.ReadAllText(file)).Split('\n'));
             callSites += EngineCall.Matches(code).Count;
             offenders.AddRange(Violations(code).Select(v => $"{relative}:{v}"));
         }
@@ -85,6 +93,29 @@ public class MappingSourceCallerMaskGuardTests
             "source is read app-only, which ignores field-level security; mask it first:\n" +
             "  source = await MappingSourceCallerMask.ApplyAsync(callerClient, table, id, appRead, sourceColumns, logger, ct);\n" +
             "and pass that local (or a literal null). " + string.Join("\n", offenders));
+    }
+
+    /// <summary>
+    /// The scan guards the two entry points, so they must be the only way in: every non-private method of the engine that takes an
+    /// <see cref="Microsoft.Xrm.Sdk.Entity"/> (a source or a target) is <c>Apply</c> or <c>ApplyFillOnly</c>. A third one — a
+    /// new overload-by-another-name — would take a source the scan never looks at. Reflection, not text, so a rename or a
+    /// formatting trick cannot hide it.
+    /// </summary>
+    [Fact(DisplayName = "#2188: CreateTimeFieldMapping's only non-private methods that take an Entity are Apply and ApplyFillOnly")]
+    public void TheEngine_OffersNoOtherPathThatTakesASourceEntity()
+    {
+        var engine = typeof(Program).Assembly.GetType("Sprk.Bff.Api.Services.Dataverse.FieldMapping.CreateTimeFieldMapping");
+        Assert.NotNull(engine);
+
+        var methods = engine!
+            .GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+            .Where(m => !m.IsPrivate && m.GetParameters().Any(p => p.ParameterType == typeof(Microsoft.Xrm.Sdk.Entity)))
+            .Select(m => m.Name)
+            .Distinct()
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(new[] { "Apply", "ApplyFillOnly" }, methods);
     }
 
     // ── controls ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -274,6 +305,41 @@ public class MappingSourceCallerMaskGuardTests
             """
         },
         {
+            "(UAC-r2 re-check) the engine's method named with a verbatim identifier",
+            """
+            var source = await _entities.RetrieveAsync(table, id, columns, ct);
+            CreateTimeFieldMapping.@Apply(rules, target, source, protectedAttributes, warnings, _logger);
+            """
+        },
+        {
+            "(UAC-r2 re-check) the verbatim-identifier method taken as a method group",
+            """
+            f = CreateTimeFieldMapping.@ApplyFillOnly;
+            f(rules, target, appRead, p, w, l);
+            """
+        },
+        {
+            "(UAC-r2 re-check) a block comment between the type, the dot and the method",
+            """
+            var source = await _entities.RetrieveAsync(table, id, columns, ct);
+            CreateTimeFieldMapping /* masked */ . /* really */ ApplyFillOnly /* x */ (rules, target, source, protectedAttributes, warnings, _logger);
+            """
+        },
+        {
+            "(UAC-r2 re-check) a block comment inside the argument list, hiding the unmasked local",
+            """
+            var read = await _entities.RetrieveAsync(table, id, columns, ct);
+            CreateTimeFieldMapping.Apply(rules, target, /* source */ read, protectedAttributes, warnings, _logger);
+            """
+        },
+        {
+            "(UAC-r2 re-check) a block comment that itself contains // does not hide the call after it",
+            """
+            var source = await _entities.RetrieveAsync(table, id, columns, ct);
+            /* see https://example.test/mask */ CreateTimeFieldMapping.Apply(rules, target, source, p, w, l);
+            """
+        },
+        {
             "(#2191 review, F b) the engine's method taken as a method group and called through the delegate",
             """
             Action<IEnumerable<FieldMappingRuleEntity>, Entity, Entity?, IReadOnlySet<string>, List<string>, ILogger> f;
@@ -320,6 +386,20 @@ public class MappingSourceCallerMaskGuardTests
             """
         },
         {
+            "(UAC-r2 re-check) a verbatim identifier and block comments around a masked source",
+            """
+            var masked = await MappingSourceCallerMask.ApplyAsync(caller, table, id, appRead, columns, _logger, ct);
+            CreateTimeFieldMapping /* the engine */ . @Apply(rules, target, /* masked */ masked, p, w, l);
+            """
+        },
+        {
+            "(UAC-r2 re-check) a block comment that mentions the engine does not count as a call",
+            """
+            /* old: CreateTimeFieldMapping.Apply(rules, target, appRead, p, w, l); */
+            CreateTimeFieldMapping.ApplyFillOnly(rules, target, null, p, w, l);
+            """
+        },
+        {
             "a named, masked source",
             """
             var masked = await MappingSourceCallerMask.ApplyAsync(caller, table, id, appRead, columns, _logger, ct);
@@ -338,6 +418,7 @@ public class MappingSourceCallerMaskGuardTests
     /// <summary>Each violation in <paramref name="code"/> as "line: reason".</summary>
     internal static List<string> Violations(string code)
     {
+        code = StripBlockComments(code);
         var violations = new List<string>();
 
         foreach (Match import in EngineImport.Matches(code))
@@ -576,6 +657,102 @@ public class MappingSourceCallerMaskGuardTests
         }
 
         return arguments.Count > 2 && !Regex.IsMatch(arguments[2].Text, @"^\w+\s*:") ? arguments[2] : null;
+    }
+
+    /// <summary>
+    /// <paramref name="code"/> with every <c>/* ... */</c> block comment blanked to spaces (newlines kept, so offsets and line
+    /// numbers do not move). A small scanner, not a regex: a <c>/*</c> inside a string, char literal or <c>//</c> comment is not a
+    /// comment start, and a <c>//</c> inside a block comment is just text. Idempotent.
+    /// </summary>
+    internal static string StripBlockComments(string code)
+    {
+        var result = new StringBuilder(code.Length);
+        for (var i = 0; i < code.Length;)
+        {
+            var c = code[i];
+            if (c == '/' && i + 1 < code.Length && code[i + 1] == '/')
+            {
+                var end = code.IndexOf('\n', i);
+                end = end < 0 ? code.Length : end;
+                result.Append(code, i, end - i);
+                i = end;
+            }
+            else if (c == '/' && i + 1 < code.Length && code[i + 1] == '*')
+            {
+                var end = code.IndexOf("*/", i + 2, StringComparison.Ordinal);
+                end = end < 0 ? code.Length : end + 2;
+                for (; i < end; i++)
+                {
+                    result.Append(code[i] is '\n' or '\r' ? code[i] : ' ');
+                }
+            }
+            else if (c == '"')
+            {
+                var start = i;
+                var quotes = 1;
+                while (i + quotes < code.Length && code[i + quotes] == '"')
+                {
+                    quotes++;
+                }
+
+                if (quotes >= 3)
+                {
+                    // A raw string literal: up to the same number of quotes again.
+                    var close = code.IndexOf(new string('"', quotes), i + quotes, StringComparison.Ordinal);
+                    i = close < 0 ? code.Length : close + quotes;
+                }
+                else
+                {
+                    var verbatim = start > 0 && (code[start - 1] == '@' || (start > 1 && code[start - 1] == '$' && code[start - 2] == '@')
+                        || (start > 1 && code[start - 1] == '@' && code[start - 2] == '$'));
+                    i++;
+                    while (i < code.Length)
+                    {
+                        if (!verbatim && code[i] == '\\')
+                        {
+                            i += 2;
+                            continue;
+                        }
+
+                        if (code[i] == '"')
+                        {
+                            if (verbatim && i + 1 < code.Length && code[i + 1] == '"')
+                            {
+                                i += 2;
+                                continue;
+                            }
+
+                            i++;
+                            break;
+                        }
+
+                        if (code[i] == '\n' && !verbatim)
+                        {
+                            break; // an unterminated regular string: stop at the line, never run on
+                        }
+
+                        i++;
+                    }
+                }
+
+                result.Append(code, start, Math.Min(i, code.Length) - start);
+            }
+            else if (c == '\'' && i + 2 < code.Length)
+            {
+                // A char literal: 'x' or '\x' - skipped so '"' does not open a string.
+                var end = code[i + 1] == '\\' ? i + 3 : i + 2;
+                end = end < code.Length && code[end] == '\'' ? end + 1 : i + 1;
+                result.Append(code, i, end - i);
+                i = end;
+            }
+            else
+            {
+                result.Append(c);
+                i++;
+            }
+        }
+
+        return result.ToString();
     }
 
     private static string Shorten(string text)
