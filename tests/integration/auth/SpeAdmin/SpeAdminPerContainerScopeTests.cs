@@ -785,8 +785,30 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
 
         problem["errorCode"].GetString().Should().Be("spe.containers.create_outcome_unknown");
         problem["displayName"].GetString().Should().Be("New");
+        // This host's Graph client has no resilience handler, so the count alone does not prove the create is not re-sent;
+        // ContainerCreationStampContractTests proves that through GraphHttpMessageHandler. Here it guards the endpoint.
         _fixture.Graph.AllRequests.Count(r => r.Method == "POST" && r.Path == ContainersPath)
-            .Should().Be(1, "a create Graph may have committed is never re-sent");
+            .Should().Be(1);
+    }
+
+    [Fact]
+    public async Task CreateContainer_WhoseMarkerFails_AndCannotBeRemoved_NamesTheContainerLeftActive()
+    {
+        // #2032 review: the container is created, activated and stamped; the ownership marker PATCH fails, and so does the
+        // delete that undoes it. A live container exists that no list shows — the admin is told its id, not "unexpected".
+        const string Failed = """{"error":{"code":"generalException","message":"x"}}""";
+        StubCreate("c-new", TypeT);
+        _fixture.Graph.StubPatchSequence($"{ContainersPath}/c-new/customProperties", ("{}", 200), (Failed, 500));
+        _fixture.Graph.StubGet($"{ContainersPath}/c-new", ContainerJson("c-new", TypeT, UnitA.ToString()));
+        _fixture.Graph.StubDelete($"{ContainersPath}/c-new", Failed, 500);
+        using var client = Admin();
+
+        var problem = await Problem(
+            await client.PostAsJsonAsync($"/api/spe/containers?configId={ConfigA}", new { displayName = "New" }),
+            HttpStatusCode.InternalServerError);
+
+        problem["errorCode"].GetString().Should().Be("spe.containers.left_active");
+        problem["containerId"].GetString().Should().Be("c-new");
     }
 
     [Fact]

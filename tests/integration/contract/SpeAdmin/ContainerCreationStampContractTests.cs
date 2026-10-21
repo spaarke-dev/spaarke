@@ -155,6 +155,56 @@ public sealed class ContainerCreationStampContractTests : IDisposable
         CreatePosts().Should().Be(1);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("{\"displayName\":\"New\",\"status\":\"inactive\"}")]
+    public async Task AdminPlaneCreate_WhenGraphAnswers201WithNoContainer_ReportsTheOutcomeUnknown(string body)
+    {
+        // #2032 review: a 2xx is Graph committing the create; one naming no container is not "nothing was created". It
+        // used to be an InvalidOperationException ("unexpected error") or a bind of container "" with an empty id.
+        _graph.StubPostExact(ContainersPath, body, 201);
+
+        var act = () => AdminGraph().CreateContainerAsync(
+            _graph.CreateGraphClient(ResilienceHandler()), TypeId.ToString(), "New", null, Unit, CancellationToken.None);
+
+        await act.Should().ThrowAsync<ContainerCreateOutcomeUnknownException>();
+        _graph.AllRequests.Should().OnlyContain(r => r.Method == "POST" && r.Path == ContainersPath,
+            "nothing is activated, bound or deleted for a container with no id");
+    }
+
+    [Fact]
+    public async Task AdminPlaneCreate_WhenTheCallerCancelsDuringTheCreatePost_StillReadsTheIdAndBindsIt()
+    {
+        // #2032 review, as ContainerOperations (#1735/#1755): a client disconnect mid-POST used to abort the read of the
+        // only answer that names the new container. The caller cancels when the POST reaches Graph: no timer to race.
+        using var caller = new CancellationTokenSource();
+        _graph.StubPostExact(ContainersPath, CreatedBody, 201, onReceived: caller.Cancel);
+        StubActivated();
+        _graph.StubPatch($"{ContainersPath}/c-new/customProperties", "{}");
+        _graph.StubGet($"{ContainersPath}/c-new", Container(Unit));
+
+        var created = await AdminGraph().CreateContainerAsync(
+            _graph.CreateGraphClient(), TypeId.ToString(), "New", null, Unit, caller.Token);
+
+        created.Id.Should().Be("c-new");
+        caller.IsCancellationRequested.Should().BeTrue("the caller gave up while the create POST was in flight");
+        _graph.RequestsFor($"{ContainersPath}/c-new").Select(r => r.Method).Should().Equal("POST", "PATCH", "GET");
+    }
+
+    [Fact]
+    public async Task AdminPlaneCreate_WhenTheCallerHasCancelledBeforeTheCreate_SendsNothing()
+    {
+        StubCreated();
+        using var caller = new CancellationTokenSource();
+        caller.Cancel();
+
+        var act = () => AdminGraph().CreateContainerAsync(
+            _graph.CreateGraphClient(), TypeId.ToString(), "New", null, Unit, caller.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        _graph.AllRequests.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task AdminActivate_PostsTheActivateAction_NotAPatchOfTheReadOnlyStatus()
     {

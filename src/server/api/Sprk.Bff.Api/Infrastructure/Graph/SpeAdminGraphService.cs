@@ -1378,8 +1378,11 @@ public sealed class SpeAdminGraphService
     /// container that cannot be stamped is soft-deleted and <see cref="ContainerBindingException"/> is thrown.
     /// </param>
     /// <returns>A <see cref="SpeContainerSummary"/> representing the newly created container.</returns>
-    /// <exception cref="InvalidOperationException">Thrown when Graph API returns null unexpectedly.</exception>
-    /// <exception cref="ODataError">Thrown when Graph API returns an error response.</exception>
+    /// <exception cref="ODataError">Graph refused the create: nothing was created.</exception>
+    /// <exception cref="ContainerCreateOutcomeUnknownException">
+    /// The create reached Graph but its answer (a 5xx, a 408, a lost response, or a success naming no container) does not
+    /// settle whether a container was made. It is not re-sent (#2032).
+    /// </exception>
     /// <exception cref="ContainerBindingException">The container was created but could not be bound.</exception>
     public async Task<SpeContainerSummary> CreateContainerAsync(
         GraphServiceClient graphClient,
@@ -1417,23 +1420,33 @@ public sealed class SpeAdminGraphService
         // 408 or a transport fault (Graph may have committed the first, leaving a duplicate); it still retries a 429, which
         // Graph did not process — so no ExecuteWithRetryAsync here. An answer that leaves it unknown whether a container
         // was created is reported as such, not as "nothing was created" (ContainerOperations.CreateContainerAsync, #1755).
+        // The caller's last chance to stop the create (#1735/#1755, as ContainerOperations): once the POST is sent, Graph
+        // may commit a container whose id only its answer carries, so the POST runs on its own token, not the caller's —
+        // a cancel mid-POST would leave one that nothing can find, bind or remove.
+        ct.ThrowIfCancellationRequested();
         var createOption = new NoTransientRetryOption();
         Microsoft.Graph.Models.FileStorageContainer? created;
-        try
+        using (var send = new CancellationTokenSource(UncancellableStepTimeout))
         {
-            created = await graphClient.Storage.FileStorage.Containers
-                .PostAsync(body, rc => rc.Options.Add(createOption), ct);
-        }
-        catch (Exception ex) when (CreateOutcomeIsUnknown(createOption, ex))
-        {
-            throw new ContainerCreateOutcomeUnknownException(displayName, ex);
+            try
+            {
+                created = await graphClient.Storage.FileStorage.Containers
+                    .PostAsync(body, rc => rc.Options.Add(createOption), send.Token);
+            }
+            catch (Exception ex) when (CreateOutcomeIsUnknown(createOption, ex))
+            {
+                throw new ContainerCreateOutcomeUnknownException(displayName, ex);
+            }
         }
 
-        if (created is null)
+        // A 2xx is Graph committing the create. One that names no container leaves a container nothing names: not
+        // "nothing was created" (ContainerOperations, #1755 round 2).
+        if (string.IsNullOrEmpty(created?.Id))
         {
-            throw new InvalidOperationException(
-                $"Graph API returned null when creating container '{displayName}' " +
-                $"for containerTypeId '{containerTypeId}'. The container may not have been created.");
+            throw new ContainerCreateOutcomeUnknownException(displayName,
+                new InvalidOperationException(created is null
+                    ? "Graph answered the create with success but no container."
+                    : "Graph answered the create with a container that has no id."));
         }
 
         _logger.LogInformation(
@@ -1442,10 +1455,10 @@ public sealed class SpeAdminGraphService
 
         // Owner round 20 item 1: the container carries its owning business unit from the moment it exists. A
         // stamp that cannot be written AND read back removes the container again (ContainerBindingException).
-        await BindNewContainerAsync(graphClient, created.Id ?? string.Empty, owningBusinessUnitId, ct).ConfigureAwait(false);
+        await BindNewContainerAsync(graphClient, created.Id, owningBusinessUnitId, ct).ConfigureAwait(false);
 
         return new SpeContainerSummary(
-            Id: created.Id ?? string.Empty,
+            Id: created.Id,
             DisplayName: created.DisplayName ?? displayName,
             Description: created.Description,
             ContainerTypeId: created.ContainerTypeId?.ToString() ?? containerTypeId,
@@ -1633,7 +1646,7 @@ public sealed class SpeAdminGraphService
 
         try
         {
-            await ActivateNewContainerAsync(graphClient, containerId, ct).ConfigureAwait(false);
+            await PostActivateAsync(graphClient, containerId, ct).ConfigureAwait(false);
 
             _logger.LogInformation("SPE container {ContainerId} activated successfully", containerId);
             return true;
@@ -1649,7 +1662,7 @@ public sealed class SpeAdminGraphService
     /// <c>POST /storage/fileStorage/containers/{id}/activate</c> with the 429 retry. Shared by
     /// <see cref="ActivateContainerAsync"/> and the bind of a container this service has just created.
     /// </summary>
-    private Task ActivateNewContainerAsync(GraphServiceClient graphClient, string containerId, CancellationToken ct) =>
+    private Task PostActivateAsync(GraphServiceClient graphClient, string containerId, CancellationToken ct) =>
         ExecuteWithRetryAsync<object?>(
             async () =>
             {
@@ -3488,7 +3501,7 @@ public sealed class SpeAdminGraphService
             // The stamp PATCH below may activate it implicitly, but nothing has measured that it does, so activate it
             // explicitly, as ContainerOperations and the control plane's GraphContainerProvisioner do. Inside the try, so
             // a failed activation removes the container like any other failed bind step.
-            await ActivateNewContainerAsync(graphClient, containerId, ct).ConfigureAwait(false);
+            await PostActivateAsync(graphClient, containerId, ct).ConfigureAwait(false);
 
             await ExecuteWithRetryAsync<object?>(async () =>
             {
