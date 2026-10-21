@@ -383,3 +383,13 @@ Code checked at 70fc2cc616 and master a10e814d02. **Verdict: ACCEPT WITH CHANGES
 - **C7.** Round-116 leftovers: (a′)'s effect accepted, covering Restricted as well as internal-only; F1-4 confirmed.
 - **Probes (no action beyond recording):** a publish/read race is benign since nothing is stored; a non-atomic publish can briefly show a false banner or fault into "could not be checked" (recorded as K); the comparison's fault log carries ids and counts only.
 - **Owner round 117 (K-3)** is recorded in uac-r2's session27 notes at `eff5f6c714`.
+
+## 13. uac-r2 re-check of v5.3 (cbee545d41), 2026-10-21
+
+**ACCEPT-WITH-CHANGES.** C1, C2, C3, C6 and C7 closed; C4 and C5 partly closed. All applied in v5.4 (section 5.3 of the model).
+
+- **Step 0 definition:** resolve the caller's systemuser from `oid` (no row → refuse); `sprk_isexternal` true → refuse; **false or blank → internal** (round 67; `RecordContainerResolver.cs:2400`, `SpeContainerMembershipSync.cs:235`); a fault reading the flag → refuse. "Definitely false" would have hidden the banner from every internal user with a blank flag. CIAM contacts never reach these routes (workforce scheme 401, `AuthorizationModule.cs:47-55`).
+- **Placement:** inside `FinanceAuthorizationFilter`, before any record read, one route-group flag, the route's own `Deny()`: 403 on `/review` and `/context`; `UniformNotFound` on `/invoice-submissions/{id}` and `/blocked`. Not in `InvoiceSubmissionService` (shared with the external submit route).
+- **Scope (group rule, owner round 116 item 2):** every `/api/finance` route that reads or writes invoices or submissions, adding the missed `GET /api/finance/submissions/{submissionId}/blocked` (`SubmissionOverrideEndpoints.cs:40`; `BlockedFindingView` plus the override stamp with reviewer reason and id), the line-decision, accept-clean, related-work, override, return and internal submit routes, plus `/api/finance/rulesets/*` (`RuleSetService`; record-scoped rule sets hold override content). Out of scope: `/invoices/search`, `/matters/{id}/summary`. `/invoice-submissions/{id}` is in scope by the group rule only: it returns firm-visible facts (`InvoiceSubmissionContracts.cs:184`).
+- **Nothing breaks:** none of these routes is on master; no client calls `/review`, `/context` or `/invoice-submissions/{id}`; RuleReview calls only `rulesets`; the external SPA uses `/api/v1/external/*` only.
+- **Leftover:** the 081 row's "banner comparison on the invoice GET" → "on `/review` only".

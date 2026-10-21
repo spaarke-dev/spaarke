@@ -1,6 +1,6 @@
 # Procedures and files — revised approach
 
-> **Status**: v5.3, 2026-10-21. v5.3 applies uac-r2's re-check of v5.2 (`b5872265be`; C1–C7: snapshot states, app-only comparison, cost bound, one route, step 0 on Finance invoice reads and on every Procedure/override read). v5.2 applied uac-r2's check of v5.1 (`ae690ec8a4`; the banner is computed at read time, N1–N9). v5 (`70fc2cc616`) re-checked by ontology-r1 (findings, nothing blocking), uac-r2 (accept with changes) and word-add-in-r1 (§9.1 matches; three gaps); all folded in here, with the owner's re-check answer (ontology D-175). Waiting on the owner's answers in section 15, then the owner finalizes.
+> **Status**: v5.4, 2026-10-21. v5.4 applies uac-r2's re-check of v5.3 (`cbee545d41`): step 0 is defined once (section 5.3), "false or blank" means internal, and its scope is every `/api/finance` invoice and submission route plus `/api/finance/rulesets/*`. v5.3 applies uac-r2's re-check of v5.2 (`b5872265be`; C1–C7: snapshot states, app-only comparison, cost bound, one route, step 0 on Finance invoice reads and on every Procedure/override read). v5.2 applied uac-r2's check of v5.1 (`ae690ec8a4`; the banner is computed at read time, N1–N9). v5 (`70fc2cc616`) re-checked by ontology-r1 (findings, nothing blocking), uac-r2 (accept with changes) and word-add-in-r1 (§9.1 matches; three gaps); all folded in here, with the owner's re-check answer (ontology D-175). Waiting on the owner's answers in section 15, then the owner finalizes.
 > - v5 folded in the three peer reviews of v4 (`c260f9de11`) and the owner's answers A–R; v5.1 folds in the v5 re-checks (`procedure-model-reviews.md` §8, §9); v5.2 folds in uac-r2's check of v5.1 (§11). Section 0 lists what changed.
 > - Nothing is implemented. No schema, task or decision row has changed yet.
 > - Once the owner answers section 15 and finalizes, this note becomes decision **EB-D-148** plus revised POMLs for 079–087 and new tasks (section 13). The UI/UX is prototyped separately (O-14); the back end goes first.
@@ -76,10 +76,20 @@
 | 1 | No snapshot, or a pre-v5 snapshot, shows a distinct **"Not yet checked"** state, never "no change". Invoices judged only by `BILL-SYSTEM-SUBMISSION` are exempt (no banner). | uac-r2 C1 |
 | 2 | The comparison runs **app-only**, like the evaluation, and returns one banner state only (no diff, names or ids). New K limit: one bit about a Secure distance-1 parent. | uac-r2 C2 |
 | 3 | Cost bound: one resolution per invoice, each row read once, work dates in memory; a test that the query count does not depend on line count; once per page load on `/api/finance/invoices/{id}/review` only; 429 or timeout → "could not be checked"; the fault log carries ids and counts only. | uac-r2 C3 |
-| 4 | Only that route computes the banner, and only when `sprk_isexternal` reads definitely false. **Step 0 on the internal Finance invoice reads** that expose Procedure or override content (`/review`, `/context`, `/api/finance/invoice-submissions/{id}`): refuse flagged-external systemusers; a fault refuses. A change to existing routes (sections 12 and 13). | uac-r2 C4; owner M and round 113 |
+| 4 | Only that route computes the banner, and only when `sprk_isexternal` reads false or blank. **Step 0 on the internal Finance invoice reads** (`/review`, `/context`, `/api/finance/invoice-submissions/{id}`): refuse flagged-external systemusers; a fault refuses. *(Superseded in v5.4: the definition, placement and scope are in section 5.3, and it is not a change to master behaviour.)* | uac-r2 C4; owner M and round 113 |
 | 5 | Step 0 covers **every** Procedure and override service operation, reads included (the 6.6 read models). | uac-r2 C5 |
 | 6 | K-3 wording everywhere: accepted as a known limit (owner round 117). Round-116 wording: (a′)'s effect accepted (Restricted and internal-only); F1-4 confirmed. | uac-r2 C6, C7 |
 | 7 | K: a non-atomic publish can briefly show a false banner, or two Active versions that fault into "could not be checked". | uac-r2 probes |
+
+### What changed in v5.4
+
+| # | Change | Source |
+|---|---|---|
+| 1 | **Step 0 is defined once (section 5.3):** the caller's systemuser from `oid` (no row → refuse); `sprk_isexternal` true → refuse; **false or blank → internal**; a fault reading the flag → refuse. Every "definitely false" in this note now reads "false or blank". | uac-r2 v5.3 re-check; round 67 |
+| 2 | **Where:** a check inside `FinanceAuthorizationFilter`, before any record read, set by one flag at route-group level, answering with the route's own `Deny()` (403 on `/review` and `/context`; `UniformNotFound` 404 on `/invoice-submissions/{id}` and `/blocked`). Not in `InvoiceSubmissionService`, which the external submit route shares. | uac-r2 v5.3 re-check |
+| 3 | **Scope by group rule (owner round 116 item 2):** every `/api/finance` route that reads or writes invoices or submissions, including `GET /api/finance/submissions/{submissionId}/blocked`, plus `/api/finance/rulesets/*` (`RuleSetService`). Out of scope: `/invoices/search`, `/matters/{id}/summary`. `/invoice-submissions/{id}` is in scope by the group rule, not because it exposes Procedure content (it returns firm-visible facts only). | uac-r2 v5.3 re-check |
+| 4 | **Not a change to master behaviour:** none of these routes is on master yet, and no client depends on them for flagged-external callers. It is a change on our branch, landing with #1911 (sections 12 and 13 corrected). | uac-r2 v5.3 re-check |
+| 5 | The 081 row says the banner comparison runs on `/review` only. | uac-r2 v5.3 re-check |
 
 ---
 
@@ -385,6 +395,31 @@ Neither column confers access (section 5.2).
 
 ---
 
+### 5.3 Step 0: refusing flagged-external callers on internal routes
+
+One definition, used by every "step 0" in this note (Upload, the Procedure and override services, the Finance routes):
+
+1. Resolve the caller's systemuser from the token's `oid`. **No row → refuse.**
+2. `sprk_isexternal` **true → refuse.** **False or blank → internal** (the platform rule, uac-r2 round 67; `RecordContainerResolver.cs:2400`, `SpeContainerMembershipSync.cs:235`).
+3. **A fault reading the flag → refuse.**
+
+CIAM contacts never reach these routes: the workforce scheme rejects their tokens with 401 (`AuthorizationModule.cs:47-55`).
+
+**Finance routes.** Step 0 is a check inside `FinanceAuthorizationFilter`, run **before any record read**, switched on by one flag at **route-group level**, and it answers with the route's own `Deny()`: 403 on `/review` and `/context`; `UniformNotFound` (404) on `/invoice-submissions/{id}` and `/blocked`, so the answer is the same whether or not the id exists. It is **not** placed in `InvoiceSubmissionService`, which the external submit route shares.
+
+**Scope (group rule, owner round 116 item 2: flagged-external users reach invoices only through the firm route).** Every `/api/finance` route that reads or writes invoices or submissions:
+- `/api/finance/invoices/{id}/review` (`InvoiceLineReviewEndpoints.cs:39`) and `/context` (`InvoiceContextEndpoints.cs:28`);
+- `/api/finance/invoice-submissions/{id}` (`InvoiceSubmissionEndpoints.cs:74`). It returns firm-visible facts only (`InvoiceSubmissionContracts.cs:184`), so it is in scope by the group rule, not because it exposes Procedure content;
+- `GET /api/finance/submissions/{submissionId}/blocked` (`SubmissionOverrideEndpoints.cs:40`). It returns `BlockedFindingView` (policy code, version id, clause) plus the override stamp with the reviewer's reason and id, from the snapshot that v5 extends with the Procedure Version and the override basis;
+- `/lines/{lineId}/decision`, `/lines/decisions`, `/accept-clean`, `/lines/{lineId}/related-work`;
+- `/submissions/{id}/override` and `/return`;
+- the internal submit routes;
+- plus `/api/finance/rulesets/*` (`RuleSetEndpoints.cs`, `RuleSetService`): record-scoped rule sets hold override content, and these routes are gated only by billing-admin today.
+
+Out of scope: `/api/finance/invoices/search` and `/matters/{id}/summary` (no Procedure or override content).
+
+**Not a change to master behaviour.** None of these routes is on master yet. No client calls `/review`, `/context` or `/invoice-submissions/{id}`; RuleReview calls only `rulesets`; the external SPA uses `/api/v1/external/*` only, and the external `GET /invoice-submissions/{id}` answers from its own scope with no internal call. The change lands on our branch with #1911.
+
 ## 6. How a record becomes subject to Procedures and rules
 
 ### 6.1 Three sources, one firm condition
@@ -542,7 +577,7 @@ Unchanged at the core: the immutable policy version (clause and location), reaso
   - **What it covers:** every trigger, because it compares outcomes: an override removed or added, a record rule switched off, a Procedure retired or newly assigned, a version ended, retired or newly published (a first version included), a date change. uac-r2 N1's scope falls out of it: a project's override that reached a work-assignment invoice at distance 1 is in that invoice's snapshot; an override for firm F never touches firm G's invoice.
   - **Why full comparison, not only the snapshot-citation test:** the citation test (snapshot cites a removed override, a retired Procedure, an ended or retired version, or a record rule switched Off) misses a newly published first version and a newly added override (N8). The full comparison runs only on the single-invoice review read, within the cost bound above. **Invoice lists do not show the banner in R1** (a known limit, section 15).
   - **A fault** in the comparison shows a short "Procedure changes could not be checked" note instead; it never blocks the page and never reads as "no change". The fault log carries ids and counts only.
-  - **Who sees it (uac-r2 N3, C4):** internal systemusers only. The review route computes and returns the banner and the "could not be checked" note **only when `sprk_isexternal` reads definitely false**; a true flag or a read fault leaves the field out. It is never computed for CIAM contacts, never on the external `/invoice-submissions` routes or for export files, it is not in the firm findings DTO or the SPA invoice projection, and R3's negative test asserts its absence. It reveals nothing beyond the invoice the caller can already read: no counts, no other invoices, no override reasons or Procedure names in its text.
+  - **Who sees it (uac-r2 N3, C4):** internal systemusers only. The review route computes and returns the banner and the "could not be checked" note **only when step 0 classes the caller as internal** (`sprk_isexternal` false or blank; section 5.3); a true flag, no systemuser row or a read fault leaves the field out (and step 0 has already refused the route). It is never computed for CIAM contacts, never on the external `/invoice-submissions` routes or for export files, it is not in the firm findings DTO or the SPA invoice projection, and R3's negative test asserts its absence. It reveals nothing beyond the invoice the caller can already read: no counts, no other invoices, no override reasons or Procedure names in its text.
   - **Nothing is written:** no marker column, no field security, no banner write, no write scope to check, nothing to keep atomic with the change.
   - **Known limits:** (K) an internal reader learns one bit, "something changed", about a Secure distance-1 parent they cannot read, with no content (uac-r2 C2). (K) A publish is not atomic, so a read during it can briefly show a false banner, or see two Active versions and fault into "could not be checked"; nothing is stored, so the next read is right (uac-r2 probe).
   - Decided invoices keep their snapshot and get no banner.
@@ -677,7 +712,7 @@ Unchanged at the core: the immutable policy version (clause and location), reaso
 | 102 (D-74 adjustment rule list) | Uses the resolver, not its own scope filter. |
 | 108 | Loads through the BFF download route. |
 | External invoice-document routes (R3 task 031, uac-r2 187) | Retired with the firm file routes (9.3). |
-| Internal Finance invoice reads (`/api/finance/invoices/{id}/review` `InvoiceLineReviewEndpoints.cs:39`, `/context` `InvoiceContextEndpoints.cs:28`, `/api/finance/invoice-submissions/{id}` `InvoiceSubmissionEndpoints.cs:74`) | **Step 0 added in R1:** refuse flagged-external systemusers; a fault reading the flag refuses (uac-r2 C4; owner M and round 113). `FinanceAuthorizationFilter` has no `sprk_isexternal` check today, so this changes existing routes; flagged-external callers use the firm route. uac-r2 confirms. |
+| `/api/finance` invoice and submission routes, and `/api/finance/rulesets/*` (section 5.3) | **Step 0 in R1**, inside `FinanceAuthorizationFilter` at route-group level (uac-r2 C4/C5 and its v5.3 re-check; owner M and rounds 113, 116). `FinanceAuthorizationFilter` has no `sprk_isexternal` check today, but none of these routes is on master yet and no client depends on them for flagged-external callers, so this is a change on our branch landing with #1911, not a change to master behaviour. Flagged-external callers use the firm route. |
 | Docs | "Procedure Library" retired (3.4). |
 | Dev data | Recreated, not migrated (O-13). |
 
@@ -686,7 +721,7 @@ Unchanged at the core: the immutable policy version (clause and location), reaso
 | Task | Becomes |
 |---|---|
 | 080 schema | `sprk_procedure`, `sprk_procedureversion`, `sprk_procedureassignment`, `sprk_storedfile`; record lookups and the scope values Record (100000002) / Firm record (100000003) on `sprk_ruleset.sprk_scope`; `sprk_publishstate` on policy version; no banner column (the banner is computed at read time, 8.2); global option sets from 100000000; the Stored File source lookups Restrict and the "based on" link RemoveLink; `sprk_storedfile` at Deep; check that the Billing tab and record setup exist on the project and work-assignment forms; `sprk_procedure` on rule set; `sprk_procedureversion` and the published marker on policy version; `sprk_procedureversion` on rate card; `sprk_billingfirm` and `sprk_billingresponsible` on every core table in the shared list (`FilingCores`; no hand-typed table names); custom statuses, DateOnly dates, the alternate key; field security (I-P2, F1-b); Restrict and delete behaviours (5.2); creator person (081 adds the tables to `Set-ChildRecordCreatorPersonSchema.ps1` and `StampedChildTables`, asserting zero non-null values before securing); auditing. Notices to ontology-r1 and uac-r2 before and after. ontology-r1 reviews the schema in full. |
-| 081 | Procedure service (versions, I-P1–I-P5, copy-forward, retire reconcile; retire, publish and date changes need Write plus the billing-admin privilege; step 0 refuses `sprk_isexternal` callers; the read-time banner comparison on the invoice GET); assignment and override service (pin, exclude, change rule into the record-scoped rule set), caller-checked (F1-c); secure child registration for assignment rows and record-scoped rule sets (F4-a); census waiver and guard rewrite with must-fire / must-not-fire controls (O1, F3-e); NFR-05 depth list incl. `sprk_storedfile`; the K-2 pin test. |
+| 081 | Procedure service (versions, I-P1–I-P5, copy-forward, retire reconcile; retire, publish and date changes need Write plus the billing-admin privilege; step 0 refuses `sprk_isexternal` callers; the read-time banner comparison on `/review` only); assignment and override service (pin, exclude, change rule into the record-scoped rule set), caller-checked (F1-c); secure child registration for assignment rows and record-scoped rule sets (F4-a); census waiver and guard rewrite with must-fire / must-not-fire controls (O1, F3-e); NFR-05 depth list incl. `sprk_storedfile`; the K-2 pin test. |
 | 082 | The resolver (7.1) with the firm condition, gaps and holds, and the re-keyed version selection (7.2); `BILL-SYSTEM-SUBMISSION` exemption; the ratchet ArchTest. |
 | 083 | Firm clause via the resolver, with the firm-facing name. |
 | 084 | Waits for the prototype (O-14). The back end exposes the read models of 6.6. |
@@ -694,7 +729,7 @@ Unchanged at the core: the immutable policy version (clause and location), reaso
 | 086 | What remains: secure child registration for invoice Stored Files. |
 | 087 | Dropped. |
 | New | File store service, control and orphan reconcile; Stored File schema; provisioning (storage account checks in 4.2, customer-provisioning hand-off); Submit Invoice (server contract; the add-in surface after the owner's process discussion); invoice submission and exports to files; firm file routes and retirement of the four document routes (uac-r2 review, task 188 entry, R3 deploy pairing); internal route's and upload's flagged-external refusals; the (a′) `ExternalMarker` predicate on `sprk_invoice` across the listed surfaces (with uac-r2); container-scoped storage role; the affected-invoice banner (8.2; the explicit re-check is ebilling-r2's); AddedFee and Discount types; docs clean-up. |
-| New (step 0 on Finance invoice reads) | Add the `sprk_isexternal` refusal (fault refuses) to `/api/finance/invoices/{id}/review`, `/context` and `/api/finance/invoice-submissions/{id}`, with must-fire and must-not-fire tests; the review route alone computes the banner (8.2). uac-r2 C4; uac-r2 confirms. |
+| New (Finance step 0) | Step 0 per section 5.3: one route-group flag on every `/api/finance` invoice and submission route and on `/api/finance/rulesets/*`, checked in `FinanceAuthorizationFilter` before any record read, answering with each route's own `Deny()` (403 on `/review` and `/context`; `UniformNotFound` on `/invoice-submissions/{id}` and `/blocked`). Tests per route: must-fire (flag true; no systemuser row; flag read fault) and must-not-fire (flag false; flag blank), plus a test that the 404 answer is identical for a real and a non-existent id. The review route alone computes the banner (8.2). uac-r2 C4/C5 and v5.3 re-check. |
 
 ## 14. Coordination
 
