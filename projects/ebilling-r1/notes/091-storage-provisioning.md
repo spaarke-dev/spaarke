@@ -60,14 +60,26 @@ Every built-in that can read the tag can also write it. Only a custom role keeps
 
 Not affected by this question, and ready to author once the stop is lifted: removing the account-scope grant from `storage-account.bicep` and adding the container-scoped Contributor grant on `ai-chunks` (§2) — `ai-chunks` needs no tag read.
 
-## 4. Planned bicep (not written — for the next session)
+## 4. Account-scope removal — done in session 2 (2026-10-21), on the coordinator's instruction
+
+The §3 stop stays: no eBilling container, no `ebilling-file-store.bicep`, no eBilling role. What was authored (no deploy, no what-if, no Key Vault):
+
+- `storage-account.bicep`: both account-scope grants deleted (`uamiStorageBlobRbac`, and the legacy `storageBlobRbac` with its unused `appServicePrincipalId` parameter). New parameter `userAssignedIdentityContainerNames` (default empty) and a loop `uamiContainerBlobRbac` over the module's own `blobContainers`: one Storage Blob Data Contributor assignment per listed container, `scope` = that container, name `guid(container id, principal, role)`. A listed name not in `containers` gets no grant.
+- `customer.bicep`: `var bffBlobContainerNames = ['ai-chunks']`, passed as `userAssignedIdentityContainerNames`, and unioned into the created containers (`baseStorageContainers`) so the granted container always exists.
+- `customer.json` recompiled (Bicep 0.46.1). Diff = the variables above, the module's parameters and the role-assignment copy loop only.
+- Operator texts: `appsettings.template.json` `SessionFileStore._operator_prerequisites`, the `SessionFileBlobStore` 403 message, the `ChatDocumentEndpoints` `DurableStoreFailedErrorCode` comment now say container scope.
+- Guard: `CustomerStampKeylessTemplateTests` — every Storage Blob Data Contributor/Owner/Reader assignment in `customer.json` is at container scope (plus negative control), and `bffBlobContainerNames` contains `SessionFileBlobStore.DefaultContainerName`. Both fail on the previous `customer.json`.
+
+**Existing stamps keep the old grant.** ARM incremental deployment does not delete a role assignment that left the template, so on every already-provisioned stamp (and dev) the account-scope assignment `guid(account id, UAMI principal, ba92f5b4-…)` stays until it is deleted explicitly — a live step needing the owner's OK. Delete it only after the container-scope grant on `ai-chunks` exists, or the session-file store (if enabled) and the H13 Blob probe start failing 403.
+
+### Original plan (session 1)
 
 - `storage-account.bicep`: delete `uamiStorageBlobRbac` and the legacy `storageBlobRbac` (both account scope); add a parameter naming the containers the stamp identity is granted on (default empty), and a loop over the module's `blobContainers` creating one Storage Blob Data Contributor assignment **at container scope** per listed container (`guid(container id, principal, role)`, `principalType: ServicePrincipal`), copying `acs-communication.bicep` :98-124.
 - `customer.bicep`: pass `['ai-chunks']` for the UAMI (and union it into `effectiveStorageContainers` so the container always exists); update the comments at :309-318 that say the UAMI holds the role on the account.
 - Recompile `customer.json` (`az bicep build --file customer.bicep --outfile customer.json`; `CustomerStampKeylessTemplateTests` and `ArmTemplateInspectorTests` read it). The committed `customer.json` matched a fresh 0.46.1 build on 2026-10-21 (line endings aside), so the regenerated diff will be this change only.
 - `modules/ebilling-file-store.bicep` (POML step 3) with `roleDefinitionId` per the owner's answer to §3.
 
-## 5. Stale text to fix with the account-scope removal (not edited — out of this session's file scope)
+## 5. Stale text to fix with the account-scope removal (fixed in session 2, §4)
 
 - `src/server/api/Sprk.Bff.Api/appsettings.template.json:497` `_operator_prerequisites` tells the operator to grant Storage Blob Data Contributor "on that storage account" and says the module grants only via `appServicePrincipalId`.
 - `src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionFileBlobStore.cs:558-560` exception message: "needs the 'Storage Blob Data Contributor' role on the storage account … 'appServicePrincipalId' is passed to the module".
@@ -88,7 +100,7 @@ Not filed yet (step 7 depends on §3). Contents:
 
 | Criterion | Status |
 |---|---|
-| Module builds clean, no secret | Not started (stopped at step 2) |
+| Module builds clean, no secret | eBilling module not started (stopped at step 2); `storage-account.bicep` and `customer.bicep` build clean |
 | Notes record inventory, tag finding, what-if, owner OK | Tag finding and code inventory recorded; live az inventory (step 1), what-if and owner OK pending |
 | Containers + one container-scope assignment each on dev | Live step — needs owner OK |
 | Negative: no account/RG/subscription grant; network, soft delete, KV unchanged | Live step |
