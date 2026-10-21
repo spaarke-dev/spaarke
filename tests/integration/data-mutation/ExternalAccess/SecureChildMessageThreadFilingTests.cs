@@ -165,6 +165,24 @@ public class SecureChildMessageThreadFilingTests
         _world.OwnerWrites.Should().NotContain(w => messages.Contains(w.Id), "each is still filed under S2 through its thread");
     }
 
+    [Fact(DisplayName = "#2143 r8: the batched record-thread read is committed (NoLock = false), as the re-file path reads a thread")]
+    public async Task TheBatchedRecordThreadRead_IsCommitted_NeverADirtyRead()
+    {
+        // A dirty read could see a thread re-filed by a transaction that then rolls back, and decide its messages from parents
+        // the thread never committed. The single read it replaced (RecordThreadFiling.ReadThreadAsync) is committed too.
+        var (s1, _, _) = MessagesInThreadsOfASecureRootOutsideThePass(2);
+
+        await Reconciler().ReconcileAsync(
+            "sprk_matter", s1, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Unsecure, CancellationToken.None);
+
+        var batched = _world.Queries
+            .Where(q => q.EntityName == ThreadTable && q.Criteria.Conditions.Any(c =>
+                c.AttributeName == ThreadTable + "id" && c.Operator == Microsoft.Xrm.Sdk.Query.ConditionOperator.In))
+            .ToList();
+        batched.Should().NotBeEmpty();
+        batched.Should().OnlyContain(q => !q.NoLock, "a committed read");
+    }
+
     [Fact(DisplayName = "#2143 r7e must-fire: a thread chunk that faults leaves every message of that chunk failed and unwritten")]
     public async Task AFaultedThreadChunk_LeavesEveryMessageInItFailed_AndUnwritten()
     {
