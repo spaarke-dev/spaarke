@@ -206,6 +206,7 @@ internal sealed class UpdateRecordActionCore
         // #2091 round 4: the reparent reads the row; a change that moves none of its parents (a rebind onto the parent it
         // holds) is written and is no re-file, so the step does not run.
         var refiled = false;
+        RecordOwnerResolution? refiledBy = null;
         if (parentChanges.Count == 0)
         {
             await Patch(cancellationToken);
@@ -238,6 +239,7 @@ internal sealed class UpdateRecordActionCore
             }
 
             refiled = !reparent.ParentsUnchanged;
+            refiledBy = reparent;
         }
 
         // After whichever path wrote the record (the plain PATCH or the re-file): task 156's re-stamp, then task 142's
@@ -252,7 +254,7 @@ internal sealed class UpdateRecordActionCore
         {
             if (refiled)
             {
-                await children.AfterRefileAsync(refiledTable, input.RecordId, wasIsolated, CancellationToken.None).ConfigureAwait(false);
+                await children.AfterRefileAsync(refiledTable, input.RecordId, wasIsolated, refiledBy, CancellationToken.None).ConfigureAwait(false);
             }
         }
         // Spaarkeai-word-add-in-r1 task 129: a re-file that could not run the step above (a host without the reconciler, logged

@@ -339,7 +339,7 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
             // reads): the re-filed row's mirror and task 148's pass over everything filed under it.
             if (refile.Written && children is not null && wasIsolated is not null)
             {
-                await children.AfterRefileAsync(tablename, recordId, wasIsolated, CancellationToken.None).ConfigureAwait(false);
+                await children.AfterRefileAsync(tablename, recordId, wasIsolated, refile.Resolution, CancellationToken.None).ConfigureAwait(false);
             }
 
             // Ontology D-48 / #1659 (owner decision D-125, every server-side filing path): a communication this tool re-filed
@@ -423,7 +423,7 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
 
     /// <summary>What the re-file step decided: a finished tool <c>Result</c> (a refusal or the caller's own error), or
     /// <c>Written</c> when the caller's PATCH already ran inside the re-file. Neither = an ordinary update.</summary>
-    private readonly record struct RefileStep(ToolResult? Result, bool Written);
+    private readonly record struct RefileStep(ToolResult? Result, bool Written, RecordOwnerResolution? Resolution = null);
 
     /// <summary>
     /// Task 146 r2 (verifier item 2). The re-file itself is <see cref="OwnedChildWrite.RefileAsync"/> — since task 147 r1
@@ -442,7 +442,7 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         return outcome switch
         {
             { NotARefile: true } => default,
-            { Written: true } => new RefileStep(null, true),
+            { Written: true } => new RefileStep(null, true, outcome.Resolution),
             _ => new RefileStep(RefileRefusal(tool, tablename, outcome, startedAt), false),
         };
     }

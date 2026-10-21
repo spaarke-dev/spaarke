@@ -10,6 +10,7 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Jobs;
 
 namespace Sprk.Bff.Api.Services.Documents;
@@ -42,7 +43,8 @@ namespace Sprk.Bff.Api.Services.Documents;
 /// row owned by the Secure Record owner team whose derivation is not a secure record's own container never has its file
 /// moved — not by a re-file, not by the Make Secure backstop, not by the legacy migration, and not moved along by another
 /// row's settle (<see cref="RelocationState.HeldIsolated"/>) — nor, when its file is in ANOTHER secure record's own
-/// container, into this one's (S1 to S2 needs F3). Whether the row is isolated (owned in the Secure Record business unit)
+/// container, into this one's (S1 to S2 needs F3: only the release a BFF re-file with F3 records, <see cref="RecordReleaseAsync"/>,
+/// lets that one move through, #2159 slice 2). Whether the row is isolated (owned in the Secure Record business unit)
 /// is read by the relocator itself, under the document's lock and again just before the re-point, and an unreadable
 /// answer moves nothing. A checked-out document is never moved (<see cref="RelocationState.CheckedOut"/>).</item>
 /// </list>
@@ -102,6 +104,22 @@ public sealed class DocumentContainerRelocator
 
     /// <summary>The most old items a row's ledger holds; a row that would need more is not moved (reported failed).</summary>
     internal const int MaxLedgerEntries = 8;
+
+    /// <summary>
+    /// #2159 slice 2: how long an F3 release (<see cref="RelocationRelease"/>) stays usable after the re-file that recorded
+    /// it. The re-file pass and the backstop move a released file within minutes; an older release is stale — it holds,
+    /// and the next locked pass drops it. A file still held after that needs the move made again through the BFF.
+    /// </summary>
+    internal static readonly TimeSpan ReleaseLifetime = TimeSpan.FromDays(7);
+
+    /// <summary>
+    /// #2159 slice 2: how long recording a release waits for the document's relocation lock (another relocation of it is
+    /// running) before it gives up — the re-file's own response must not wait on a move.
+    /// </summary>
+    internal static readonly TimeSpan ReleaseLockWait = TimeSpan.FromSeconds(2);
+
+    /// <summary>How often <see cref="RecordReleaseAsync"/> asks for the lock again within <see cref="ReleaseLockWait"/>.</summary>
+    internal static readonly TimeSpan ReleaseLockRetryInterval = TimeSpan.FromMilliseconds(250);
 
     /// <summary>The most referencing rows one source check reads; more is undecidable (pending), never "none".</summary>
     internal const int MaxReferencesPerSource = 50;
@@ -652,7 +670,8 @@ public sealed class DocumentContainerRelocator
     /// unit's container. For EVERY purpose (#2159): a checked-out row is left alone (<see cref="RelocationState.CheckedOut"/>,
     /// B4); and the widening guard holds an isolated row (owned in the Secure Record business unit) whose move would leave
     /// its secure record — its derivation is not a secure record's own container, or its file is in ANOTHER secure record's
-    /// own container (A1: S1 to S2 needs F3) — as <see cref="RelocationState.HeldIsolated"/>, nothing moved (isolation
+    /// own container (A1: S1 to S2 needs F3, honoured only through the exact, unexpired release a BFF re-file with F3
+    /// recorded — <see cref="RecordReleaseAsync"/>, consumed by the re-point) — as <see cref="RelocationState.HeldIsolated"/>, nothing moved (isolation
     /// holds the row, owner round 24 item 2). The guard runs again under the confirmed lock just before the re-point (B8).
     /// What it cannot read moves nothing (<see cref="RelocationState.Failed"/>). A ledger entry an earlier move owes is
     /// settled first all the same: deleting a stale source and re-keying only narrow.
@@ -731,6 +750,11 @@ public sealed class DocumentContainerRelocator
         // An earlier move of this row may still owe something (round 37 / F2): settle it BEFORE anything else, so a
         // repeat call completes it whatever the file's placement is now.
         var ledger = RelocationLedger.Parse(row!.GetAttributeValue<string>(RelocationLedgerColumn));
+        if (apply && ledger?.Release is { } release && release.IsSpent(sourceDrive, sourceItem, _time.GetUtcNow()))
+        {
+            ledger = await DropSpentReleaseAsync(documentId, ledger, release, ct).ConfigureAwait(false);
+        }
+
         var prior = await SettleOrReportAsync(documentId, row, sourceDrive, sourceItem, ledger, purpose, apply, ct)
             .ConfigureAwait(false);
 
@@ -1066,13 +1090,44 @@ public sealed class DocumentContainerRelocator
 
         if (derivation.IsSecure)
         {
+            // #2159 slice 2: the ONE way through — the F3 release a BFF re-file recorded for exactly this move (this item,
+            // into this container, unexpired). Consumed by the re-point's own ledger write (MoveAsync), never here: a move
+            // that stops later keeps it for the retry. Missing, unreadable, stale or for another move: held.
+            RelocationRelease? release;
+            bool releaseUnreadable;
+            try
+            {
+                (release, releaseUnreadable) = await ReadReleaseAsync(documentId, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex,
+                    "[DOCUMENT-RELOCATE] Document {DocumentId} is NOT moved: its F3 release could not be read.", documentId);
+                return DocumentRelocationOutcome.Of(documentId, RelocationState.Failed, sourceDrive, sourceItem, target, null,
+                    "whether an F3 re-file released its move into this secure record's container could not be read; nothing is "
+                    + "moved and a later call retries");
+            }
+
+            if (release is { } r && r.Releases(sourceDrive, sourceItem, target, _time.GetUtcNow()))
+            {
+                _logger.LogInformation(
+                    "[DOCUMENT-RELOCATE] Document {DocumentId}: its move from {SourceDrive} into {Target} was released by the F3 "
+                    + "re-file of {Caller} ({Basis}) at {At}.", documentId, sourceDrive, target, r.AuthorizedBy, r.Basis, r.At);
+                return null;
+            }
+
+            var why = releaseUnreadable
+                ? "its relocation ledger (where an F3 release is recorded) is unreadable"
+                : release is null
+                    ? "no F3 re-file released this move"
+                    : "its F3 release is for another move, or has expired";
             _logger.LogWarning(
                 "[DOCUMENT-RELOCATE] Document {DocumentId} is NOT moved: it is isolated and its file is in another secure record's "
-                + "container {SourceDrive}; leaving it for {Target} ({Reason}) needs F3.", documentId, sourceDrive, target,
-                derivation.Reason);
+                + "container {SourceDrive}; leaving it for {Target} ({Reason}) needs F3 ({Why}).", documentId, sourceDrive, target,
+                derivation.Reason, why);
             return DocumentRelocationOutcome.Of(documentId, RelocationState.HeldIsolated, sourceDrive, sourceItem, target, null,
                 "isolated, and its file is in another secure record's own container: leaving that secure record for this one is "
-                + "an un-secure and needs F3 (owner round 10 item 7); its file is not moved");
+                + $"an un-secure and needs F3 (owner round 10 item 7) — {why}; its file is not moved");
         }
 
         _logger.LogWarning(
@@ -1126,6 +1181,176 @@ public sealed class DocumentContainerRelocator
         return teamBu is { } bu && bu != Guid.Empty
             ? bu == secureBu
             : throw new InvalidOperationException($"the business unit of sprk_document {documentId:D}'s owning team {teamId:D} could not be read");
+    }
+
+    /// <summary>
+    /// #2159 slice 2 — records the F3 release of a re-filed document's file: the BFF re-file took the document out of
+    /// secure record S1 with the caller's F3 permission (<paramref name="permit"/>) and filed it under secure record S2, so
+    /// its file may follow it from S1's own container into S2's — the one move the widening guard otherwise holds (A1).
+    /// </summary>
+    /// <remarks>
+    /// <para>The relocator stays the ONE writer of the ledger: the release is read-modify-written under the document's ADR-004
+    /// relocation lock (asked for up to <see cref="ReleaseLockWait"/>; still held → nothing is written,
+    /// <see cref="RelocationReleaseState.LockHeld"/>), and never outside it.</para>
+    /// <para>What it names is read HERE, under the lock, never taken from the caller: the row's current file (the source), the
+    /// container it derives to now (the target — a secure record's own), and the secure record whose own container holds
+    /// the file, which must be one the re-file left (<see cref="SecureExitPermit.RootsLeft"/>). Anything else records
+    /// nothing. An unreadable ledger is left as it is. Never throws for a read or write fault (<see cref="RelocationReleaseState.Failed"/>).</para>
+    /// </remarks>
+    public async Task<RelocationReleaseOutcome> RecordReleaseAsync(Guid documentId, SecureExitPermit permit, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(permit);
+        var deadline = _time.GetUtcNow() + ReleaseLockWait;
+        while (!await TryLockAsync(documentId, ct).ConfigureAwait(false))
+        {
+            if (_time.GetUtcNow() >= deadline)
+            {
+                _logger.LogWarning(
+                    "[DOCUMENT-RELOCATE] The F3 release of document {DocumentId}'s file was NOT recorded: another relocation of it "
+                    + "held its lock for {Wait}. Its file stays held where it is; the re-file stands.", documentId, ReleaseLockWait);
+                return new RelocationReleaseOutcome(RelocationReleaseState.LockHeld,
+                    $"another relocation of this document held its lock for {ReleaseLockWait.TotalSeconds:0.#} s; no release was recorded");
+            }
+
+            await Task.Delay(ReleaseLockRetryInterval, _time, ct).ConfigureAwait(false);
+        }
+
+        try
+        {
+            return await RecordReleaseCoreAsync(documentId, permit, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[DOCUMENT-RELOCATE] The F3 release of document {DocumentId}'s file could not be recorded.", documentId);
+            return new RelocationReleaseOutcome(RelocationReleaseState.Failed,
+                $"it could not be read or written ({ex.GetType().Name}); no release was recorded");
+        }
+        finally
+        {
+            await UnlockAsync(documentId).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<RelocationReleaseOutcome> RecordReleaseCoreAsync(Guid documentId, SecureExitPermit permit, CancellationToken ct)
+    {
+        var row = await ReadRowAsync(documentId, ct).ConfigureAwait(false);
+        var sourceDrive = row?.GetAttributeValue<string>(DriveColumn)?.Trim();
+        var sourceItem = row?.GetAttributeValue<string>(ItemColumn)?.Trim();
+        if (string.IsNullOrWhiteSpace(sourceDrive) || string.IsNullOrWhiteSpace(sourceItem))
+        {
+            return new RelocationReleaseOutcome(RelocationReleaseState.NotNeeded, "the row carries no file");
+        }
+
+        var derivation = await _resolver.DeriveDocumentContainersAsync(documentId, ct).ConfigureAwait(false);
+        if (!derivation.Decided)
+        {
+            return new RelocationReleaseOutcome(RelocationReleaseState.Failed,
+                $"its container could not be derived ({derivation.Reason}); no release was recorded");
+        }
+
+        if (!derivation.IsSecure || derivation.Allows(sourceDrive) || string.IsNullOrWhiteSpace(derivation.PrimaryContainer))
+        {
+            return new RelocationReleaseOutcome(RelocationReleaseState.NotNeeded,
+                derivation.Allows(sourceDrive)
+                    ? "its file is already in its derived container"
+                    : "it derives to no secure record's own container, so the widening guard asks no release");
+        }
+
+        var sourceRecord = await _resolver.ResolveOwningRecordAsync(sourceDrive, ct).ConfigureAwait(false);
+        if (sourceRecord is null)
+        {
+            return new RelocationReleaseOutcome(RelocationReleaseState.NotNeeded,
+                "its file is in no secure record's own container: the move into the secure record's container only narrows");
+        }
+
+        if (!permit.RootsLeft.Any(root =>
+                string.Equals(root.EntityLogicalName, sourceRecord.EntityLogicalName, StringComparison.OrdinalIgnoreCase)
+                && root.RecordId == sourceRecord.RecordId))
+        {
+            _logger.LogWarning(
+                "[DOCUMENT-RELOCATE] The F3 re-file of document {DocumentId} did not leave {Table} {RecordId}, whose own container "
+                + "{SourceDrive} holds its file: no release is recorded; the file stays held.", documentId,
+                sourceRecord.EntityLogicalName, sourceRecord.RecordId, sourceDrive);
+            return new RelocationReleaseOutcome(RelocationReleaseState.NotCovered,
+                $"its file is in the own container of {sourceRecord.EntityLogicalName} {sourceRecord.RecordId:D}, which this "
+                + "re-file did not leave with F3; no release was recorded");
+        }
+
+        var ledger = RelocationLedger.Parse(row!.GetAttributeValue<string>(RelocationLedgerColumn));
+        if (ledger is null)
+        {
+            return new RelocationReleaseOutcome(RelocationReleaseState.Failed,
+                $"its {RelocationLedgerColumn} is unreadable; it is not overwritten, and no release was recorded");
+        }
+
+        var release = new RelocationRelease
+        {
+            SourceDrive = sourceDrive,
+            SourceItem = sourceItem,
+            TargetContainer = derivation.PrimaryContainer!.Trim(),
+            SourceRecordTable = sourceRecord.EntityLogicalName,
+            SourceRecordId = sourceRecord.RecordId,
+            AuthorizedBy = permit.Decision.CallerSystemUserId,
+            Basis = permit.Decision.Basis.ToString(),
+            At = _time.GetUtcNow(),
+        };
+
+        if (!await StillLockedAsync(documentId, ct).ConfigureAwait(false))
+        {
+            return new RelocationReleaseOutcome(RelocationReleaseState.Failed,
+                LockLost(documentId, "before its F3 release was recorded"));
+        }
+
+        await _dataverse.UpdateAsync(DocumentEntity, documentId, new Dictionary<string, object>
+        {
+            [RelocationLedgerColumn] = (ledger with { Release = release }).Serialize(),
+        }, ct).ConfigureAwait(false);
+        _logger.LogInformation(
+            "[DOCUMENT-RELOCATE] Recorded the F3 release of document {DocumentId}'s file {SourceDrive}/{SourceItem} into {Target} "
+            + "(left {Table} {RecordId}; by {Caller}, {Basis}).", documentId, sourceDrive, sourceItem, release.TargetContainer,
+            release.SourceRecordTable, release.SourceRecordId, release.AuthorizedBy, release.Basis);
+        return new RelocationReleaseOutcome(RelocationReleaseState.Recorded,
+            $"its file may follow it from {sourceDrive} into {release.TargetContainer}");
+    }
+
+    /// <summary>The row's F3 release, read now; <c>Unreadable</c> when its ledger is not a relocation ledger. A fault throws.</summary>
+    private async Task<(RelocationRelease? Release, bool Unreadable)> ReadReleaseAsync(Guid documentId, CancellationToken ct)
+    {
+        var row = await _dataverse.RetrieveAsync(DocumentEntity, documentId, [RelocationLedgerColumn], ct).ConfigureAwait(false)
+                  ?? throw new InvalidOperationException($"sprk_document {documentId:D} could not be read");
+        var ledger = RelocationLedger.Parse(row.GetAttributeValue<string>(RelocationLedgerColumn));
+        return ledger is null ? (null, true) : (ledger.Release, false);
+    }
+
+    /// <summary>
+    /// Drops a release that can release nothing again (<see cref="RelocationRelease.IsSpent"/>), under the confirmed lock, so
+    /// the row leaves the backstop's "ledger owes" listing. A failed or unlocked write leaves it; it holds either way.
+    /// </summary>
+    private async Task<RelocationLedger> DropSpentReleaseAsync(
+        Guid documentId, RelocationLedger ledger, RelocationRelease release, CancellationToken ct)
+    {
+        var without = ledger with { Release = null };
+        if (!await StillLockedAsync(documentId, ct).ConfigureAwait(false))
+        {
+            return ledger;
+        }
+
+        try
+        {
+            await _dataverse.UpdateAsync(DocumentEntity, documentId, new Dictionary<string, object>
+            {
+                [RelocationLedgerColumn] = without.IsEmpty ? DBNull.Value : without.Serialize(),
+            }, ct).ConfigureAwait(false);
+            _logger.LogInformation(
+                "[DOCUMENT-RELOCATE] Dropped the spent F3 release of document {DocumentId} ({SourceDrive}/{SourceItem} into "
+                + "{Target}, recorded {At}).", documentId, release.SourceDrive, release.SourceItem, release.TargetContainer, release.At);
+            return without;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "[DOCUMENT-RELOCATE] The spent F3 release of document {DocumentId} could not be dropped.", documentId);
+            return ledger;
+        }
     }
 
     /// <summary>
@@ -1462,7 +1687,8 @@ public sealed class DocumentContainerRelocator
             At = _time.GetUtcNow(),
             Witness = plan.OldItemWitness,
         };
-        alsoWrite[RelocationLedgerColumn] = ledger.With(entry).Serialize();
+        // #2159 slice 2: a release is CONSUMED here, in the re-point's own write — the item it named is no longer the row's.
+        alsoWrite[RelocationLedgerColumn] = (ledger.With(entry) with { Release = null }).Serialize();
         alsoWrite[RelocatedVersionHistory.Column] = record.Json!;
 
         // Round 54 item 2: the re-point is destructive — only under a lock confirmed as this call's NOW. A lost lock
@@ -1938,7 +2164,7 @@ public sealed class DocumentContainerRelocator
 
         // Write the ledger back. A failed write leaves the stored ledger as it was; every step above is idempotent, so the
         // next call redoes only what it finds owed — but this call must not report the row settled.
-        var updated = new RelocationLedger(remaining);
+        var updated = ledger with { Entries = remaining };
         if (!updated.SameAs(ledger))
         {
             if (!await StillLockedAsync(documentId, ct).ConfigureAwait(false))
@@ -1953,7 +2179,7 @@ public sealed class DocumentContainerRelocator
             {
                 await _dataverse.UpdateAsync(DocumentEntity, documentId, new Dictionary<string, object>
                 {
-                    [RelocationLedgerColumn] = remaining.Count == 0 ? DBNull.Value : updated.Serialize(),
+                    [RelocationLedgerColumn] = updated.IsEmpty ? DBNull.Value : updated.Serialize(),
                 }, ct).ConfigureAwait(false);
                 _logger.LogInformation(
                     "[DOCUMENT-RELOCATE] ledger of document {DocumentId}: {Before} -> {After} entr(ies) owed or kept.",
@@ -2549,10 +2775,19 @@ public sealed class DocumentContainerRelocator
     // The ledger
     // ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-    /// <summary>The row's relocation ledger: the old items a move of THIS row still owes something for.</summary>
+    /// <summary>
+    /// The row's relocation ledger: the old items a move of THIS row still owes something for, and (#2159 slice 2) the F3
+    /// release a BFF re-file recorded for the row's next move (<see cref="Release"/>).
+    /// </summary>
     internal sealed record RelocationLedger(IReadOnlyList<RelocationLedgerEntry> Entries)
     {
         public static RelocationLedger EmptyLedger { get; } = new([]);
+
+        /// <summary>#2159 slice 2: the F3 release of the row's move from one secure record's container into another's.</summary>
+        public RelocationRelease? Release { get; init; }
+
+        /// <summary>Nothing owed and no release: the column is cleared.</summary>
+        public bool IsEmpty => Entries.Count == 0 && Release is null;
 
         /// <summary>The ledger in <paramref name="json"/>; empty for no value; <see langword="null"/> when unreadable.</summary>
         public static RelocationLedger? Parse(string? json)
@@ -2566,12 +2801,13 @@ public sealed class DocumentContainerRelocator
             {
                 var stored = JsonSerializer.Deserialize<StoredLedger>(json, LedgerJson);
                 if (stored is not { V: 1, Entries: { } entries }
-                    || entries.Any(e => string.IsNullOrWhiteSpace(e.SourceDrive) || string.IsNullOrWhiteSpace(e.SourceItem)))
+                    || entries.Any(e => string.IsNullOrWhiteSpace(e.SourceDrive) || string.IsNullOrWhiteSpace(e.SourceItem))
+                    || stored.Release is { IsWellFormed: false })
                 {
                     return null;
                 }
 
-                return new RelocationLedger(entries);
+                return new RelocationLedger(entries) { Release = stored.Release };
             }
             catch (JsonException)
             {
@@ -2580,13 +2816,55 @@ public sealed class DocumentContainerRelocator
         }
 
         public RelocationLedger With(RelocationLedgerEntry entry)
-            => new(Entries.Where(e => !SameItem(e.SourceDrive, e.SourceItem, entry.SourceDrive, entry.SourceItem)).Append(entry).ToList());
+            => this with
+            {
+                Entries = Entries.Where(e => !SameItem(e.SourceDrive, e.SourceItem, entry.SourceDrive, entry.SourceItem)).Append(entry).ToList(),
+            };
 
-        public string Serialize() => JsonSerializer.Serialize(new StoredLedger(1, Entries.ToList()), LedgerJson);
+        public string Serialize() => JsonSerializer.Serialize(new StoredLedger(1, Entries.ToList(), Release), LedgerJson);
 
-        public bool SameAs(RelocationLedger other) => Entries.SequenceEqual(other.Entries);
+        public bool SameAs(RelocationLedger other) => Entries.SequenceEqual(other.Entries) && Equals(Release, other.Release);
 
-        private sealed record StoredLedger(int V, List<RelocationLedgerEntry>? Entries);
+        private sealed record StoredLedger(int V, List<RelocationLedgerEntry>? Entries, RelocationRelease? Release = null);
+    }
+
+    /// <summary>
+    /// #2159 slice 2 — the F3 release of ONE move of the row: its file <see cref="SourceItem"/> in secure record
+    /// <see cref="SourceRecordTable"/>/<see cref="SourceRecordId"/>'s own container <see cref="SourceDrive"/> may follow it
+    /// into <see cref="TargetContainer"/>, because a BFF re-file took the row out of that record with
+    /// <see cref="AuthorizedBy"/>'s F3 permission at <see cref="At"/>. Written only by <see cref="RecordReleaseAsync"/>
+    /// under the row's lock; consumed by the re-point; honoured only on an exact match (<see cref="Releases"/>).
+    /// </summary>
+    internal sealed record RelocationRelease
+    {
+        public required string SourceDrive { get; init; }
+        public required string SourceItem { get; init; }
+        public required string TargetContainer { get; init; }
+        public required string SourceRecordTable { get; init; }
+        public Guid SourceRecordId { get; init; }
+        public Guid AuthorizedBy { get; init; }
+        public string? Basis { get; init; }
+        public DateTimeOffset At { get; init; }
+
+        /// <summary>Every field a release is matched on is present (otherwise the whole ledger is unreadable).</summary>
+        [JsonIgnore]
+        public bool IsWellFormed
+            => !string.IsNullOrWhiteSpace(SourceDrive) && !string.IsNullOrWhiteSpace(SourceItem)
+               && !string.IsNullOrWhiteSpace(TargetContainer) && !string.IsNullOrWhiteSpace(SourceRecordTable)
+               && SourceRecordId != Guid.Empty && At != default;
+
+        /// <summary>Unexpired: recorded no more than <see cref="ReleaseLifetime"/> ago, and not in the future.</summary>
+        public bool IsCurrent(DateTimeOffset now) => At <= now + TimeSpan.FromMinutes(5) && now - At <= ReleaseLifetime;
+
+        /// <summary>Does it release exactly this move: this item, into this container, unexpired?</summary>
+        public bool Releases(string sourceDrive, string sourceItem, string target, DateTimeOffset now)
+            => IsCurrent(now)
+               && SameItem(SourceDrive, SourceItem, sourceDrive, sourceItem)
+               && RecordContainerResolver.IsSameContainerId(TargetContainer, target);
+
+        /// <summary>It can release nothing again: the row's file is no longer the item it named, or it expired.</summary>
+        public bool IsSpent(string currentDrive, string currentItem, DateTimeOffset now)
+            => !IsCurrent(now) || !SameItem(SourceDrive, SourceItem, currentDrive, currentItem);
     }
 
     /// <summary>
@@ -2807,6 +3085,31 @@ public enum RelocationState
     /// </summary>
     CheckedOut,
 }
+
+/// <summary>#2159 slice 2: what <see cref="DocumentContainerRelocator.RecordReleaseAsync"/> did.</summary>
+public enum RelocationReleaseState
+{
+    /// <summary>The release was written to the row's ledger, under its lock.</summary>
+    Recorded,
+
+    /// <summary>No release is needed: the document's file does not leave a secure record's own container for another's.</summary>
+    NotNeeded,
+
+    /// <summary>
+    /// Not recorded: the move the file would make is not one this F3 permission covers (its file is in a secure record the
+    /// re-file did not leave). The widening guard keeps holding it.
+    /// </summary>
+    NotCovered,
+
+    /// <summary>Not recorded: another relocation of the document held its lock past <see cref="DocumentContainerRelocator.ReleaseLockWait"/>.</summary>
+    LockHeld,
+
+    /// <summary>Not recorded: something could not be read or written (the file stays held — fail closed).</summary>
+    Failed,
+}
+
+/// <summary>#2159 slice 2: the answer of <see cref="DocumentContainerRelocator.RecordReleaseAsync"/>.</summary>
+public sealed record RelocationReleaseOutcome(RelocationReleaseState State, string Detail);
 
 /// <summary>A source kept because rows of other records still use it (round 37 item 2: <c>SourceKeptForOtherRecords</c>).</summary>
 /// <param name="DocumentId">The document that moved away from it.</param>

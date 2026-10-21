@@ -1099,6 +1099,7 @@ public static class FieldMappingEndpoints
                         targetEntity, childRecordId, updatePayload, token, impersonateSystemUserId: callerSystemUserId);
                     Func<Task<bool>>? wasIsolated = null;
                     var refiled = false;
+                    Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution? refiledBy = null;
                     if (!mayRefile)
                     {
                         await Write(ct);
@@ -1145,6 +1146,7 @@ public static class FieldMappingEndpoints
 
                         // #2091 round 4: a rule that re-binds the parent the child already holds moves nothing — no step.
                         refiled = !reparent.ParentsUnchanged;
+                        refiledBy = reparent;
                     }
 
                     updated++;
@@ -1165,7 +1167,7 @@ public static class FieldMappingEndpoints
                     if (refiled && children is not null && wasIsolated is not null)
                     {
                         await children.AfterRefileAsync(
-                            targetEntity.Trim().ToLowerInvariant(), childRecordId, wasIsolated, CancellationToken.None);
+                            targetEntity.Trim().ToLowerInvariant(), childRecordId, wasIsolated, refiledBy, CancellationToken.None);
                     }
 
                     // Task 142 (L1): a push that wrote a ROOT's "Assigned *" column (a project/matter/work assignment

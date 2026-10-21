@@ -550,7 +550,7 @@ public static class ChildRecordEndpoints
                 entity, id,
                 async () => GetString(row.Body, "_owningteam_value") is { } before && Guid.TryParse(before, out var beforeTeam)
                             && await children.IsSecureOwnerTeamAsync(beforeTeam, CancellationToken.None).ConfigureAwait(false),
-                CancellationToken.None).ConfigureAwait(false);
+                outcome.Resolution, CancellationToken.None).ConfigureAwait(false);
         }
 
         return Results.NoContent();

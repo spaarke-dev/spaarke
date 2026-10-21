@@ -275,6 +275,9 @@ internal static class TestRecordContainerResolver
         /// <summary>Every app-only UPDATE faults (the relocator's re-point fails).</summary>
         public Exception? UpdateFault { get; set; }
 
+        /// <summary>#2159 slice 2: a single-row read that faults when this answers an exception for (table, columns).</summary>
+        public Func<string, string[], Exception?>? RetrieveFault { get; set; }
+
         /// <summary>The entity service the last <see cref="Build"/> created — the relocator shares it (task 166 f1).</summary>
         public IGenericEntityService? EntityService { get; private set; }
 
@@ -319,6 +322,11 @@ internal static class TestRecordContainerResolver
             entityService.Setup(s => s.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string entity, Guid id, string[] columns, CancellationToken _) =>
                 {
+                    if (RetrieveFault?.Invoke(entity, columns) is { } scripted)
+                    {
+                        throw scripted;
+                    }
+
                     if (entity == "sprk_document" && CreatedByPersonColumnMissing && columns.Contains("sprk_createdbyperson"))
                     {
                         throw new InvalidOperationException(

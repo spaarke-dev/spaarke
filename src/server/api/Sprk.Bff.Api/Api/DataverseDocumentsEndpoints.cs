@@ -117,6 +117,7 @@ public static class DataverseDocumentsEndpoints
 
             // Task 147 r1c: set when this update re-filed the document (the reparent wrote) — the after-re-file step below.
             Func<Task<bool>>? refiledFromIsolation = null;
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution? refiledBy = null;
 
             try
             {
@@ -224,6 +225,7 @@ public static class DataverseDocumentsEndpoints
                     // record a column already holds) is written, but is no re-file: no step after one.
                     if (!reparent.ParentsUnchanged)
                     {
+                        refiledBy = reparent;
                         refiledFromIsolation = () => isolationReadFault is null
                             ? Task.FromResult(isolatedBefore)
                             : Task.FromException<bool>(isolationReadFault);
@@ -243,7 +245,8 @@ public static class DataverseDocumentsEndpoints
                 // moved out of every secure record → the mirror goes — and task 148's pass over everything filed under it.
                 if (refiledFromIsolation is not null)
                 {
-                    await children.AfterRefileAsync("sprk_document", Guid.Parse(id), refiledFromIsolation, CancellationToken.None);
+                    // #2159 slice 2: with the reparent's answer, so an F3 move from S1 to S2 records its file's release.
+                    await children.AfterRefileAsync("sprk_document", Guid.Parse(id), refiledFromIsolation, refiledBy, CancellationToken.None);
                 }
 
                 var updatedDocument = await dataverseService.GetDocumentAsync(id);
