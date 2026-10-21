@@ -108,6 +108,41 @@ public sealed class InvoiceLineReviewEndpointsAuthorizationContractTests
         host.Probe.SystemUserIdCalls.Should().Be(0);
     }
 
+    public static IEnumerable<object[]> RoutesRefused() => FinanceStepZeroCaller.Cross(Routes(), FinanceStepZeroCaller.RefusedKinds);
+
+    public static IEnumerable<object[]> RoutesInternal() => FinanceStepZeroCaller.Cross(Routes(), FinanceStepZeroCaller.InternalKinds);
+
+    [Theory(DisplayName = "Task 099 must-fire: /review and every line-decision route refuse a flagged-external, row-less or unreadable caller with 403, before any rights call, even one holding Read and Write")]
+    [MemberData(nameof(RoutesRefused))]
+    public async Task StepZero_RefusesBeforeAnyRightsCallOrRead(string method, string url, object? body, StepZeroCallerKind kind)
+    {
+        await using var host = await Host.StartAsync();
+        host.Access.Grant(InvoiceSet, InvoiceId, AccessRights.Read | AccessRights.Write | AccessRights.Append);
+        host.StepZero.Kind = kind;
+
+        var response = await host.SendAsync(Request(method, url, body));
+
+        await host.StepZero.AssertRefusedAsync(response, kind, uniformNotFound: false);
+        host.Access.Calls.Should().BeEmpty();
+        host.Entities.VerifyNoOtherCalls();
+        host.Probe.SystemUserIdCalls.Should().Be(0);
+    }
+
+    [Theory(DisplayName = "Task 099 must-not-fire: /review and every line-decision route with a flag that reads false or blank reach the record check as before")]
+    [MemberData(nameof(RoutesInternal))]
+    public async Task StepZero_AdmitsAnInternalCaller(string method, string url, object? body, StepZeroCallerKind kind)
+    {
+        await using var host = await Host.StartAsync();
+        host.StepZero.Kind = kind;
+
+        var response = await host.SendAsync(Request(method, url, body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        host.Access.Calls.Should().ContainSingle()
+            .Which.Should().Be(new FinAuth.AccessCall(FinAuth.AccessPath.Record, InvoiceSet, InvoiceId, HasToken: true));
+        host.Entities.VerifyNoOtherCalls();
+    }
+
     [Theory]
     [MemberData(nameof(DecideRoutes))]
     public async Task DecideRoutes_NeedWrite_ReadAloneIsNotEnough(string method, string url, object? body)
@@ -394,6 +429,9 @@ public sealed class InvoiceLineReviewEndpointsAuthorizationContractTests
 
     private sealed class Host : IAsyncDisposable
     {
+        /// <summary>The step-0 caller (task 099); internal unless a test changes <see cref="FinanceStepZeroCaller.Kind"/>.</summary>
+        public FinanceStepZeroCaller StepZero { get; private set; } = null!;
+
         private WebApplication _app = null!;
         private HttpClient _client = null!;
         private int _writes;
@@ -420,6 +458,7 @@ public sealed class InvoiceLineReviewEndpointsAuthorizationContractTests
                 })
                 .AddScheme<AuthenticationSchemeOptions, FinanceAuthzTestAuthHandler>(FinanceAuthzTestAuthHandler.SchemeName, _ => { });
             builder.Services.AddAuthorization();
+            host.StepZero = FinanceStepZeroCaller.Register(builder.Services); // task 099: every /api/finance route runs step 0
             builder.Services.AddOptions<EbillingOptions>().Configure(o => o.Enabled = ebillingEnabled);
 
             // The REAL authorization stack, substituted only at the access-data boundary.

@@ -43,6 +43,7 @@ public static class RateCardImportEndpoints
     {
         var group = app.MapGroup(Route)
             .RequireAuthorization()
+            .RequireInternalFinanceCaller() // step 0 on every /api/finance route (section 5.3, task 099)
             .WithTags("Finance");
 
         // GET /api/finance/ratecards/import-template — the workbook template

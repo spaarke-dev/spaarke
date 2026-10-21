@@ -88,6 +88,40 @@ public sealed class InvoiceRelatedWorkEndpointsAuthorizationContractTests
         host.Search.VerifyNoOtherCalls();
     }
 
+    public static IEnumerable<object[]> RefusedKinds => FinanceStepZeroCaller.RefusedKinds.Select(k => new object[] { k });
+
+    public static IEnumerable<object[]> InternalKinds => FinanceStepZeroCaller.InternalKinds.Select(k => new object[] { k });
+
+    [Theory(DisplayName = "Task 099 must-fire: /related-work refuses a flagged-external, row-less or unreadable caller with 403, before any rights call, read or search, even when it holds Read")]
+    [MemberData(nameof(RefusedKinds))]
+    public async Task StepZero_RefusesBeforeAnyRightsCallReadOrSearch(StepZeroCallerKind kind)
+    {
+        await using var host = await Host.StartAsync();
+        host.Access.Grant(InvoiceSet, InvoiceId, AccessRights.Read);
+        host.StepZero.Kind = kind;
+
+        var response = await host.SendAsync(Request(Url(InvoiceId, LineId)));
+
+        await host.StepZero.AssertRefusedAsync(response, kind, uniformNotFound: false);
+        host.Access.Calls.Should().BeEmpty();
+        host.Entities.VerifyNoOtherCalls();
+        host.Search.VerifyNoOtherCalls();
+    }
+
+    [Theory(DisplayName = "Task 099 must-not-fire: /related-work with a flag that reads false or blank reaches the record check as before")]
+    [MemberData(nameof(InternalKinds))]
+    public async Task StepZero_AdmitsAnInternalCaller(StepZeroCallerKind kind)
+    {
+        await using var host = await Host.StartAsync();
+        host.StepZero.Kind = kind;
+
+        var response = await host.SendAsync(Request(Url(InvoiceId, LineId)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        host.Access.Calls.Should().ContainSingle()
+            .Which.Should().Be(new FinAuth.AccessCall(FinAuth.AccessPath.Record, InvoiceSet, InvoiceId, HasToken: true));
+    }
+
     [Fact]
     public async Task CallerWithoutReadOnTheInvoice_IsDenied_EvenWithOtherRights()
     {
@@ -267,6 +301,9 @@ public sealed class InvoiceRelatedWorkEndpointsAuthorizationContractTests
 
     private sealed class Host : IAsyncDisposable
     {
+        /// <summary>The step-0 caller (task 099); internal unless a test changes <see cref="FinanceStepZeroCaller.Kind"/>.</summary>
+        public FinanceStepZeroCaller StepZero { get; private set; } = null!;
+
         private WebApplication _app = null!;
         private HttpClient _client = null!;
         private readonly List<Entity> _documents = [];
@@ -291,6 +328,7 @@ public sealed class InvoiceRelatedWorkEndpointsAuthorizationContractTests
                 })
                 .AddScheme<AuthenticationSchemeOptions, TenantAwareAuthHandler>(TenantAwareAuthHandler.SchemeName, _ => { });
             builder.Services.AddAuthorization();
+            host.StepZero = FinanceStepZeroCaller.Register(builder.Services); // task 099: every /api/finance route runs step 0
             builder.Services.AddOptions<EbillingOptions>().Configure(o => o.Enabled = ebillingEnabled);
 
             // The REAL authorization stack, substituted only at the access-data boundary.

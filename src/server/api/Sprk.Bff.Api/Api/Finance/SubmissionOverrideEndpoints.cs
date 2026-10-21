@@ -34,6 +34,7 @@ public static class SubmissionOverrideEndpoints
     {
         var group = app.MapGroup(Route)
             .RequireAuthorization()
+            .RequireInternalFinanceCaller() // step 0 on every /api/finance route (section 5.3, task 099)
             .WithTags("Finance");
 
         // GET /api/finance/submissions/{submissionId}/blocked: Read on the submission as the caller; an unreadable and an absent row are the same 404.

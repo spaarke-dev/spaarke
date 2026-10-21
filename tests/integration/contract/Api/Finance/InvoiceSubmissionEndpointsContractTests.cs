@@ -42,6 +42,9 @@ namespace Sprk.Bff.Api.Tests.Api.Finance;
 /// </remarks>
 public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
 {
+    /// <summary>The step-0 caller (task 099); internal unless a test changes <see cref="FinanceStepZeroCaller.Kind"/>.</summary>
+    public FinanceStepZeroCaller StepZero { get; private set; } = null!;
+
     private static readonly Guid FirmId = InvoiceSubmissionServiceTests.FirmId;
     private static readonly Guid MatterId = InvoiceSubmissionServiceTests.MatterId;
     private static readonly Guid OtherFirmId = Guid.NewGuid();
@@ -76,6 +79,7 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
             })
             .AddScheme<AuthenticationSchemeOptions, FinanceAuthzTestAuthHandler>(FinanceAuthzTestAuthHandler.SchemeName, _ => { });
         builder.Services.AddAuthorization();
+        StepZero = FinanceStepZeroCaller.Register(builder.Services); // task 099: every /api/finance route runs step 0
         builder.Services.AddRateLimiter(opt =>
             opt.AddPolicy("dataverse-query", _ => RateLimitPartition.GetNoLimiter("dataverse-query-test")));
 
@@ -91,6 +95,16 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
 
         builder.WebHost.UseTestServer();
         _app = builder.Build();
+        // Task 099: a request carrying RecordBodyHeader has its body stream wrapped, so a test can prove whether anything read it.
+        _app.Use(async (context, next) =>
+        {
+            if (context.Request.Headers.ContainsKey(RecordBodyHeader))
+            {
+                context.Request.Body = new ReadRecordingStream(context.Request.Body, () => Interlocked.Increment(ref _bodyReads));
+            }
+
+            await next();
+        });
         _app.UseRouting();
         _app.UseAuthentication();
         _app.UseAuthorization();
@@ -1036,6 +1050,170 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.CoreRecordUnavailable);
         _participations.LinkReads.Should().BeEmpty("the record's own fields are read first; a missing record never reaches the link read");
         NothingWritten();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Step 0 (ebilling-r1 task 099; section 5.3): internal routes refuse flagged-external callers; external routes are unchanged
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    public static IEnumerable<object[]> SubmitRoutesRefused =>
+        FinanceStepZeroCaller.Cross(InternalSegments.Select(row => row), FinanceStepZeroCaller.RefusedKinds);
+
+    public static IEnumerable<object[]> SubmitRoutesInternal =>
+        FinanceStepZeroCaller.Cross(InternalSegments.Select(row => row), FinanceStepZeroCaller.InternalKinds);
+
+    public static IEnumerable<object[]> RefusedKinds => FinanceStepZeroCaller.RefusedKinds.Select(k => new object[] { k });
+
+    [Theory(DisplayName = "Task 099 must-fire: every internal submit route refuses a flagged-external, row-less or unreadable caller with 403, before any rights call, read or write")]
+    [MemberData(nameof(SubmitRoutesRefused))]
+    public async Task StepZero_internal_submit_refuses_before_any_rights_call_or_write(string segment, string set, StepZeroCallerKind kind)
+    {
+        var (entity, id) = CoreOf(segment);
+        _participations.Links[(entity, id)] = new[] { FirmId };
+        StepZero.Kind = kind;
+
+        var response = await PostInternalToAsync(segment, set, id);
+
+        await StepZero.AssertRefusedAsync(response, kind, uniformNotFound: false);
+        _access.Calls.Should().BeEmpty();
+        _participations.LinkReads.Should().BeEmpty();
+        NothingWritten();
+    }
+
+    [Theory(DisplayName = "Task 099 must-fire: a refused caller's multipart upload is refused at step 0 WITHOUT the request body being read (the form is parsed in the handler, after step 0 and the rights checks)")]
+    [MemberData(nameof(RefusedKinds))]
+    public async Task StepZero_internal_submit_never_reads_the_request_body_of_a_refused_caller(StepZeroCallerKind kind)
+    {
+        _access.Grant(FinanceAuthorizationFilter.MatterEntitySet, MatterId, AccessRights.Read | AccessRights.AppendTo);
+        _access.Grant(FinanceAuthorizationFilter.VendorOrganizationEntitySet, FirmId, AccessRights.AppendTo);
+        StepZero.Kind = kind;
+
+        var response = await PostRecordingBodyAsync();
+
+        await StepZero.AssertRefusedAsync(response, kind, uniformNotFound: false);
+        Volatile.Read(ref _bodyReads).Should().Be(0, "minimal API binds no form parameter on this route; the handler reads the form only after the filter let the request through");
+        NothingWritten();
+    }
+
+    [Theory(DisplayName = "Task 099 must-not-fire control: the same recording catches the body being read for an internal caller (so the zero above is not a blind probe)")]
+    [InlineData(StepZeroCallerKind.FlagFalse)]
+    [InlineData(StepZeroCallerKind.FlagBlank)]
+    public async Task StepZero_internal_submit_reads_the_request_body_of_an_internal_caller(StepZeroCallerKind kind)
+    {
+        _access.Grant(FinanceAuthorizationFilter.MatterEntitySet, MatterId, AccessRights.Read | AccessRights.AppendTo);
+        _access.Grant(FinanceAuthorizationFilter.VendorOrganizationEntitySet, FirmId, AccessRights.AppendTo);
+        StepZero.Kind = kind;
+
+        var response = await PostRecordingBodyAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        Volatile.Read(ref _bodyReads).Should().BeGreaterThan(0);
+    }
+
+    private const string RecordBodyHeader = "X-Test-Record-Body-Reads";
+    private int _bodyReads;
+
+    private Task<HttpResponseMessage> PostRecordingBodyAsync()
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/finance/matters/{MatterId}/invoice-submissions?firmId={FirmId}") { Content = Form() };
+        request.Headers.Add(FinanceAuthzTestAuthHandler.CallerHeader, "1");
+        request.Headers.Add(RecordBodyHeader, "1");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "caller-token");
+        return _client.SendAsync(request);
+    }
+
+    /// <summary>Forwards every read to <paramref name="inner"/> and reports each one.</summary>
+    private sealed class ReadRecordingStream(Stream inner, Action onRead) : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            onRead();
+            return inner.Read(buffer, offset, count);
+        }
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            onRead();
+            return inner.ReadAsync(buffer, offset, count, cancellationToken);
+        }
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            onRead();
+            return inner.ReadAsync(buffer, cancellationToken);
+        }
+    }
+
+    [Theory(DisplayName = "Task 099 must-not-fire: every internal submit route admits a caller whose flag reads false or blank, as before")]
+    [MemberData(nameof(SubmitRoutesInternal))]
+    public async Task StepZero_internal_submit_admits_an_internal_caller(string segment, string set, StepZeroCallerKind kind)
+    {
+        var (entity, id) = CoreOf(segment);
+        _participations.Links[(entity, id)] = new[] { FirmId };
+        StepZero.Kind = kind;
+
+        var response = await PostInternalToAsync(segment, set, id);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+    }
+
+    [Theory(DisplayName = "Task 099 must-fire: GET /api/finance/invoice-submissions/{id} refuses a step-0 caller with the uniform 404, before any rights call, indistinguishable from an internal caller's 404 for an absent id")]
+    [MemberData(nameof(RefusedKinds))]
+    public async Task StepZero_internal_get_is_the_uniform_404_indistinguishable_from_an_internal_absent_id(StepZeroCallerKind kind)
+    {
+        var submissionId = Guid.NewGuid();
+        var absentId = Guid.NewGuid();
+        StoredSubmission(submissionId, FirmId);
+        _access.Grant(FinanceAuthorizationFilter.InvoiceSubmissionEntitySet, submissionId, AccessRights.Read);
+        _access.Grant(FinanceAuthorizationFilter.InvoiceSubmissionEntitySet, absentId, AccessRights.Read); // rights pass: the handler's own 404
+        StepZero.Kind = kind;
+
+        var refused = await SendAsync(HttpMethod.Get, $"/api/finance/invoice-submissions/{submissionId}");
+        await StepZero.AssertRefusedAsync(refused, kind, uniformNotFound: true);
+        _access.Calls.Should().BeEmpty();
+
+        StepZero.Kind = StepZeroCallerKind.FlagFalse; // an INTERNAL caller, with the rights, asking for an id that does not exist
+        _h.Submission = null; // the store holds nothing: the handler's own 404
+        var absent = await SendAsync(HttpMethod.Get, $"/api/finance/invoice-submissions/{absentId}");
+        _access.Calls.Should().NotBeEmpty("the internal caller reached the record check and the handler");
+
+        await Sprk.Bff.Api.Tests.Api.Filters.FinanceStepZeroTests.AssertIndistinguishableAsync(refused, absent);
+    }
+
+    [Theory(DisplayName = "Task 099 must-not-fire: GET /api/finance/invoice-submissions/{id} with a flag that reads false or blank answers as before")]
+    [InlineData(StepZeroCallerKind.FlagFalse)]
+    [InlineData(StepZeroCallerKind.FlagBlank)]
+    public async Task StepZero_internal_get_admits_an_internal_caller(StepZeroCallerKind kind)
+    {
+        var submissionId = Guid.NewGuid();
+        StoredSubmission(submissionId, FirmId);
+        _access.Grant(FinanceAuthorizationFilter.InvoiceSubmissionEntitySet, submissionId, AccessRights.Read);
+        StepZero.Kind = kind;
+
+        var response = await SendAsync(HttpMethod.Get, $"/api/finance/invoice-submissions/{submissionId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact(DisplayName = "Task 099: the external submit route is untouched — it runs no step-0 lookup")]
+    public async Task StepZero_does_not_run_on_the_external_submit_route()
+    {
+        StepZero.Kind = StepZeroCallerKind.FlagTrue;
+
+        var external = await PostExternalAsync(Form());
+
+        external.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        StepZero.Queries.Should().BeEmpty();
     }
 
     [Fact]

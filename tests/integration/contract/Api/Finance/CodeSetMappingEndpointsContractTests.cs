@@ -47,6 +47,9 @@ public sealed class CodeSetMappingEndpointsContractTests
 
     private sealed class Host : IAsyncDisposable
     {
+        /// <summary>The step-0 caller (task 099); internal unless a test changes <see cref="FinanceStepZeroCaller.Kind"/>.</summary>
+        public FinanceStepZeroCaller StepZero { get; private set; } = null!;
+
         public readonly FakeCodingReferenceData Data = new();
         public readonly Mock<IInvoiceAi> Ai = new();
         public readonly FinAuth.RecordingAccessDataSource Access = new();
@@ -73,6 +76,7 @@ public sealed class CodeSetMappingEndpointsContractTests
                 })
                 .AddScheme<AuthenticationSchemeOptions, FinanceAuthzTestAuthHandler>(FinanceAuthzTestAuthHandler.SchemeName, _ => { });
             builder.Services.AddAuthorization();
+            host.StepZero = FinanceStepZeroCaller.Register(builder.Services); // task 099: every /api/finance route runs step 0
             builder.Services.AddOptions<EbillingOptions>().Configure(o => o.Enabled = ebillingEnabled);
             builder.Services.AddSingleton<IAccessDataSource>(host.Access);
             builder.Services.AddScoped<IAuthorizationRule, OperationAccessRule>();
@@ -196,6 +200,39 @@ public sealed class CodeSetMappingEndpointsContractTests
         host.Probe.Calls.Should().NotBeEmpty("the route asked Dataverse, as the caller, what they hold");
         host.Data.QueryCount.Should().Be(0);
         host.Data.Updates.Should().BeEmpty();
+    }
+
+    public static IEnumerable<object[]> AllRoutesRefused => FinanceStepZeroCaller.Cross(AllRoutes, FinanceStepZeroCaller.RefusedKinds);
+
+    public static IEnumerable<object[]> AllRoutesInternal => FinanceStepZeroCaller.Cross(AllRoutes, FinanceStepZeroCaller.InternalKinds);
+
+    [Theory(DisplayName = "Task 099 must-fire: every code-set route refuses a flagged-external, row-less or unreadable caller before any privilege question or read")]
+    [MemberData(nameof(AllRoutesRefused))]
+    public async Task EveryRoute_StepZero_RefusesBeforeAnyCheckOrRead(string method, string url, bool hasBody, StepZeroCallerKind kind)
+    {
+        await using var host = await Host.StartAsync();
+        host.StepZero.Kind = kind;
+
+        var response = await host.Client.SendAsync(Req(method, url, body: hasBody ? new { codeSetId = host.Litigation } : null));
+
+        await host.StepZero.AssertRefusedAsync(response, kind, uniformNotFound: false);
+        host.Probe.Calls.Should().BeEmpty();
+        host.Data.QueryCount.Should().Be(0);
+        host.Data.Updates.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "Task 099 must-not-fire: on every code-set route a flag that reads false or blank reaches the privilege check as before")]
+    [MemberData(nameof(AllRoutesInternal))]
+    public async Task EveryRoute_StepZero_AdmitsAnInternalCaller(string method, string url, bool hasBody, StepZeroCallerKind kind)
+    {
+        await using var host = await Host.StartAsync(admin: false);
+        host.StepZero.Kind = kind;
+
+        var response = await host.Client.SendAsync(Req(method, url, body: hasBody ? new { codeSetId = host.Litigation } : null));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.InsufficientPrivilegeReasonCode);
+        host.Probe.Calls.Should().NotBeEmpty();
     }
 
     [Theory]
