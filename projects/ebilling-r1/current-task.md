@@ -40,7 +40,7 @@ O-1 to O-17. Main points:
 - **ontology-r1:** scoped re-check of v5, then a full schema review of the 080 rewrite. Records the superseding decision row when D-148 is final. They may have asked the owner their [Owner] items directly; reuse those answers.
 - **word-add-in-r1:** re-checks the revised §9.1.
 - **R3:** dev BFF 4f5f22694; the 015 delete stays blocked; sprk_invoicestatus still exists on dev.
-- **field-mapping:** the 012 recipe is OK with corrections (a)–(c); they send 013 before merge.
+- **field-mapping:** the 012 recipe is OK with corrections (a)–(c). 013 reviewed 2026-10-21: no objection once F3 (seam-test assertions on Item/Caller, a throwing rule, cancellation) is fixed in 013. F1 (no invoice rule registered → 017 gate), F2 (500 split), F4 (the (c) test) and the arm-order pin go into the reconciliation commit. 014 must keep one `item`, set RelatedEntitySet and protect the family core lookups; 016/040 must call `CheckGenericUpdateAsync`.
 
 ### Standing rules (unchanged)
 - **Worktrees and git:** agents work only in their own worktree; remove worktrees only with Remove-WorktreeSafe.ps1; never bare git stash; never --no-verify.
