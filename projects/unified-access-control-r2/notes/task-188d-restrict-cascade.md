@@ -1,0 +1,145 @@
+# Task 188 slice D — document links Delete = Restrict
+
+> Branch `uac/188d-restrict-cascade` (from `origin/master`). Must merge before, or together with, #2170 (D7).
+> Owner decision: round 111 item 3, option (a) Restrict (`notes/session27-owner-decisions-and-research.md`).
+
+## 1. Why
+
+D7 (task 188, #2170) hides a document from external callers when the communication it comes from is internal-only or
+not Open. It finds the communication through `sprk_relatedcommunication`, else through the `sprk_parentdocument` chain.
+Both relationships were Delete = RemoveLink (`sprk_Communication.xml:151`, `sprk_Document.xml:322` on master
+`2a38e6ce6c`), so deleting the communication, or the parent .eml document, cleared the link and the documents became
+visible to partners. Restrict refuses that delete while a linked document exists, so the link is kept.
+
+## 2. What changed
+
+| Piece | Change |
+|---|---|
+| Solution XML | `sprk_document_RelatedCommunication_sprk_communication` and `sprk_document_ParentDocument`: `CascadeDelete` RemoveLink → Restrict. Archive (RemoveLink), Assign, Share, Unshare, Reparent, RollupView untouched. Restrict + Archive RemoveLink already exists on 9 other relationships in this solution, so the pair is valid. |
+| `scripts/Set-DocumentLinkDeleteRestrict.ps1` | Copy of `Set-DocumentAnalysisCascadeSchema.ps1`: dry run by default, `-Apply`, `-Verify`, solution membership via `scripts/common/DataverseSolutionMembership.ps1`, publish on `-Apply`. Adds (b): `-Verify` also reads the two relationships in the solution XML and fails unless both read Restrict. Adds an offline `-SelfTest` of the XML reader (2 must-fire, 1 must-not-fire, 1 missing). |
+| `DocumentCheckoutService.DeleteCoreAsync` | After the checkout check and BEFORE the SPE file step: counts documents whose `_sprk_parentdocument_value` is this document (app-only, any state, cap 5000). Any → `HasChildDocumentsDeleteResult(count)`, nothing deleted. A failed read throws before any delete (fail closed), like the document read before it. |
+| `ProblemDetailsHelper.DocumentHasChildDocuments` | The ONE 409 shape: `reasonCode` = `document_has_child_documents`, `childCount` when given, `traceId`. |
+| `DELETE /api/documents/{id}` | Maps `HasChildDocumentsDeleteResult` → the 409 with the count. |
+| `DELETE /api/v1/external/documents/{id}` | Maps it → the 409 WITHOUT a count: a child the external caller cannot see (D7) must not be counted to them. |
+| `DELETE /api/v1/documents/{id}` (legacy, `IDocumentDataverseService`) | Counts children with `GetDocumentsByParentAsync` before `DeleteDocumentAsync`; any → the 409 with the count. Before this, the Restrict refusal would have surfaced as the route's generic 500. |
+| I-14 (`DATAVERSE-WRITE-PATH-ARCHITECTURE.md`) | One sentence: the Restrict cascade keeps the link; enforced by the script's `-Verify` and the delete-path tests. |
+
+Why the check must precede the file step: both document delete policies delete the SPE file BEFORE the row. A Restrict
+refusal at the row step would leave a row whose file is gone (BestEffort) or answer 500 "file deleted, row not"
+(VerifiedFileFirst, external route).
+
+### CLAUDE.md §11
+
+**The script** — (1) Existing: `Set-DocumentAnalysisCascadeSchema.ps1` sets a different cascade on different
+relationships; no script touches these two. (2) Extension: that script's relationship list and target value are
+constants of its decision (round 34, Cascade); adding Restrict rows would give one script two targets and two owner
+decisions, so it is copied, as the brief and that script's own pattern direct. (3) Cost of doing nothing: there is no
+repeatable live apply or check of these two cascades; a solution import or a hand edit could put RemoveLink back
+unseen, and documents would become visible to partners again.
+
+**The refusal code `document_has_child_documents`, `HasChildDocumentsDeleteResult`, `ProblemDetailsHelper.DocumentHasChildDocuments`**
+— (1) Existing: `document_locked` (409, checkout) and `has_related_records` (409, external service request with related
+records) are other conditions; none means "this document is a parent". (2) Extension: reusing `document_locked` would
+make the model-driven app and the SPA tell the user the document is checked out; `has_related_records` is the service
+request's code on a different table. One new result type in the existing `DeleteResult` family and one helper shared by
+the three routes. (3) Cost of doing nothing: under Restrict the internal route would delete the file and then fail the
+row (a row with no file, answered 500), the external route would answer 500 `document_row_not_deleted` after deleting
+the file, and the legacy route would answer a generic 500.
+
+## 3. Delete paths (master `2a38e6ce6c` + this branch)
+
+| Path | File:line | Deletes | Under Restrict | Action |
+|---|---|---|---|---|
+| Internal single-document delete `DELETE /api/documents/{id}` | `Api/DocumentOperationsEndpoints.cs:80` → `Services/DocumentCheckoutService.cs:781` `DeleteCoreAsync` (row delete `:879`) | sprk_document (+ SPE file) | Parent with children: refused by Dataverse after the file was deleted | **Fixed**: pre-check `:824`, 409 with count (`DocumentOperationsEndpoints.cs:497`). Tests: `ExternalDeleteOwnTests.InternalDelete_ParentWithChildDocuments_IsRefused_WithTheCount_BeforeTheFile`, `DocumentDestroyAuthorizationTests.DeleteDocument_OfAParentWithChildDocuments_Is409_WithTheCount_AndDestroysNothing` |
+| External delete-own `DELETE /api/v1/external/documents/{id}` | `Api/ExternalAccess/ExternalProjectDataEndpoints.cs:507`, `:2597` → same `DeleteCoreAsync` (VerifiedFileFirst) | sprk_document (+ file) | Same, answered 500 `document_row_not_deleted` after the file went | **Fixed**: same pre-check; 409 without count (`:2642`); a failed child read → 503 `delete_own_unavailable`, nothing deleted. Tests: `ExternalDeleteOwnTests.Document_WithChildDocuments_Is409_NamesNoCount_AndNothingIsDeleted`, `Document_WhenTheChildDocumentReadFails_Is503_AndNothingIsDeleted`; must-not-fire `Delete_OfAChildDocument_IsNotRefused` |
+| Legacy `DELETE /api/v1/documents/{id}` | `Api/DataverseDocumentsEndpoints.cs:311` → `IDocumentDataverseService.DeleteDocumentAsync` (`Spaarke.Dataverse/DataverseServiceClientImpl.cs:1088`) | sprk_document row only (no file — pre-existing) | Raw Dataverse refusal → generic 500 | **Fixed**: pre-check `:345`, 409 with count. Test: `DocumentDestroyAuthorizationTests.DeleteDataverseDocument_OfAParentWithChildDocuments_Is409_WithTheCount_AndDestroysNothing` |
+| Communication "delete" `DELETE /api/communications/{id}`, `/threads/{threadId}` | `Api/CommunicationEndpoints.cs:297`, `:283` → `ThreadResolver.DeactivateMessageAsync` | Nothing: statecode Inactive / statuscode Deleted (soft delete) | Unaffected | None |
+| Unresolved external post | `Services/Communication/CommunicationService.cs:1452` | Nothing: deactivates (soft delete) | Unaffected | None |
+| Core-record delete (planner / executor, `notes/core-record-delete-design.md`) | Not on master: no `CoreRecordDelete*` code exists | — | — | Not implemented. The design must order documents children-first, then each communication after its documents (§4 below) |
+| AI tool `dataverse.delete_record` | `Services/Ai/Handlers/DataverseDeleteRecordHandler.cs:162` (User OBO, any table) | Any row the user may delete, incl. sprk_document / sprk_communication | Dataverse refusal → `ToolResult.Error` with Dataverse's own message and a mapped code (`DataverseUserClient.MapErrorCode`); never a 500 | None. The frozen GA contract is "fails with the user's own Dataverse error". Known limit: the message is Dataverse's wording, not the 409 code |
+| External `DeleteRecordAsync` (todo / event / service request) | `Infrastructure/ExternalAccess/ExternalDataService.cs:2728` | Refuses `DeletableKind.Document` (`:2730`); never a communication | Unaffected | None |
+| Secure-root create rollback | `Services/Access/SecureRootInheritance.cs:1200` | sprk_project / sprk_workassignment just created | Unaffected | None |
+| Compensation deletes (analysis promote, reports, invoice, workspace layout, membership junction) | `AnalysisEndpoints.cs:1264`, `ReportingEndpoints.cs:508/637`, `InvoiceReviewService.cs:1127`, `WorkspaceLayoutService.cs:797`, `MembershipJunctionUpdater.cs:244` | Other tables | Unaffected | None |
+| Email processing (`IncomingCommunicationProcessor`, `EmailAttachmentProcessor`) | — | No document or communication delete found | — | None |
+| Office add-in / undo | — | No document or communication delete in `Services/Office` | — | None |
+| Retention / cleanup jobs | `SessionFilesCleanupJob`, `RagIndexingPipeline` | AI Search index entries only | Unaffected | None |
+| `scripts/seed-uat-communication-corpus.ps1 -Clean` | `:35` | sprk_communication rows with the UAT marker | Refused for a seed communication that a document links to (the seed creates none; only a later hand link) | None; the Web API error names the row. Noted |
+| `scripts/Repair-ComposeIdentityKey.ps1 -Strategy Delete` | `:213` | Duplicate compose sprk_document rows | Refused for a duplicate that is a parent (compose documents are not parents); the try/catch records it under failures | None |
+| `scripts/Load-DemoSampleData.ps1` | — | Demo documents carry no parent or communication link | Unaffected | None |
+
+## 4. Core-record delete design — amendment for the main session
+
+`notes/core-record-delete-design.md` lives only on the project branch, not on master, so this branch cannot edit it.
+These statements in it assume RemoveLink and need amending for these two relationships:
+
+- §3.2 (ordering, line ~212): "RemoveLink empties a child's lookup when its parent goes" → for
+  `sprk_relatedcommunication` and `sprk_parentdocument` the platform now REFUSES a parent delete while a child exists.
+  The executor must delete documents children-first (attachments before their parent .eml, deepest first), and every
+  document linked to a communication before that communication. A Restrict refusal during the run is a Partial
+  (the parent kept), never an orphan.
+- D1 (line ~241) "Relationship metadata stays RemoveLink" and the known-limit row (line ~264) "Every relationship is
+  RemoveLink": add "except `sprk_document_RelatedCommunication_sprk_communication` and `sprk_document_ParentDocument`,
+  Restrict (task 188 slice D, owner round 111 item 3); a delete that bypasses the BFF is refused there instead of
+  orphaning".
+- D8: deleting a communication's documents first is now required, not only chosen.
+
+## 5. Single-document delete of a parent: (i) refuse, not (ii) delete the children
+
+Recommendation **(i)**, implemented. Evidence that the product does not treat an .eml and its attachments as one unit
+on delete:
+
+- The model-driven app command (`src/client/webresources/js/sprk_DocumentOperations.js:1080`) confirms "This will
+  permanently delete "<name>" and its file" — one document, one file.
+- The shared hook (`Spaarke.DocumentOperations/src/hooks/useDocumentActions.ts:203`) and the SPE viewer PCF
+  (`SpeDocumentViewer/control/BffClient.ts:231`) delete the ids they are given, one call each.
+- No server code deletes child documents: `GetDocumentsByParentAsync` is used only by AI analysis and visualization
+  (reads). Under RemoveLink, deleting an .eml KEPT its attachments (unparented), so today they are separate records.
+
+(ii) would newly delete records and files the user did not select: a user-visible behaviour change.
+
+Follow-ups (not done here, scope):
+- The model-driven app's delete command treats every 409 as "checked out" (`sprk_DocumentOperations.js`, the
+  `response.status === 409` branch), so it will tell the user the document is checked out. It should read
+  `reasonCode === 'document_has_child_documents'` and say "delete its attachments first". Web resource change + deploy.
+- `CascadeArchive` stays RemoveLink on both relationships (the brief: leave other cascades alone). If Dataverse
+  long-term retention is ever enabled for sprk_communication or sprk_document, archiving a communication would clear the
+  link the same way. Not enabled today, as far as this task saw.
+
+## 6. Live (spaarkedev1, read-only, 2026-10-21)
+
+`-Apply` NOT run (main-session gate).
+
+Dry run: both relationships unmanaged, customizable, `Delete=RemoveLink, Archive=RemoveLink`, everything else
+NoCascade; both in SpaarkeCore via `sprk_document` (subcomponents included); XML reads Restrict.
+
+`-Verify` (exit 1, expected before `-Apply`):
+
+```
+(a) MISSING  sprk_document_RelatedCommunication_sprk_communication Delete = Restrict (is RemoveLink)
+    MISSING  sprk_document_ParentDocument Delete = Restrict (is RemoveLink)
+(b) OK       sprk_Communication.xml ... CascadeDelete = Restrict
+    OK       sprk_Document.xml ... CascadeDelete = Restrict
+(c) OK       both relationships in SpaarkeCore (sprk_document includes subcomponents)
+VERIFY FAIL (2)
+```
+
+Counts (no ids):
+
+| Measure | Count |
+|---|---|
+| Documents, total | 596 |
+| Documents with `sprk_relatedcommunication` set | 76 |
+| **Communications with ≥ 1 linked document** (deletes Restrict will refuse) | **49** |
+| Documents with `sprk_parentdocument` set | 77 |
+| **Documents with ≥ 1 child document** (deletes Restrict will refuse) | **46** |
+| **Documents linking to a communication that no longer exists** | **0** (76 set, 76 resolve) |
+| Documents linking to a parent document that no longer exists | 0 (77 set, 77 resolve) |
+| Proxy: .eml archives (`sprk_isemailarchive`) | 172 |
+| Proxy: .eml archives with NO communication link | 120 |
+| Audit: Delete operations recorded on sprk_communication / sprk_document | 70 / 754 |
+
+Reading the orphan count: RemoveLink empties the lookup when the parent is deleted, so a dangling id cannot exist; 0 is
+expected and does not mean nothing was un-hidden. The already-unhidden set is among the 120 .eml archives with no
+communication link (and their attachments), but that set also holds archives created before communications existed,
+so it is an upper bound, not a count. The 70 communication deletes in audit bound how many communications could have
+released documents.
