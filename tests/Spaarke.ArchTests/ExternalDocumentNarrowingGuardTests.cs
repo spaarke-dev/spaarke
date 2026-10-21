@@ -22,8 +22,15 @@ namespace Spaarke.ArchTests;
 /// (<see cref="ExternalCallerCommunicationGuard.IsDocumentTable"/>).</para>
 /// <para><b>Narrowing primitives</b>: <see cref="ExternalDocumentNarrowing.DecideAsync"/>,
 /// <see cref="ExternalDocumentNarrowing.DecideOrFailClosedAsync"/>, <see cref="ExternalDocumentNarrowing.ReadAndDecideAsync"/>,
-/// <see cref="ExternalDataService.NarrowDocumentsAsync"/>, <see cref="ExternalDataService.IsDocumentVisibleAsync"/> and a
-/// <see cref="DocumentNarrower"/> invocation.</para>
+/// <see cref="ExternalDataService.NarrowDocumentsAsync"/>, <see cref="ExternalDataService.IsDocumentVisibleAsync"/>,
+/// <see cref="ExternalDataService.ReadAndNarrowDocumentsAsync"/>, and a <see cref="DocumentNarrower"/> or
+/// <see cref="AppOnlyDocumentNarrowing"/> invocation.</para>
+/// <para><b>App-only reads</b> (main-session decision 2026-10-20). The core decision
+/// (<see cref="ExternalDocumentNarrowing.DecideAsync"/> and its two siblings) takes its reader as an argument, so it is called
+/// only where that reader is the BFF's app-only one: from <see cref="ExternalDocumentNarrowing"/> itself and from
+/// <see cref="ExternalDataService"/>, whose only reader is app-only. Every other surface reaches it through those seams
+/// (the assistant's tools through <see cref="AppOnlyDocumentNarrowing"/>). <see cref="TheCoreDecision_IsCalledOnlyFromTheAppOnlySeams"/>
+/// enforces it; <see cref="CoreDecisionDetector_MustFireAndMustNotFire"/> is its control.</para>
 /// <para><b>Reach</b> is transitive over the BFF's own methods: a method reaches the narrowing when its compiled body (its
 /// lambdas, local functions and async state machines included, attributed to the method they were written in) references
 /// a narrowing primitive or a method that reaches it. So a route handler that reads a document and calls a helper that
@@ -89,8 +96,8 @@ public class ExternalDocumentNarrowingGuardTests
 
         Assert.True(problems.Count == 0,
             "An external document surface must apply ExternalDocumentNarrowing after the root rule (task 188, I-14 as amended): " +
-            "call ExternalDataService.NarrowDocumentsAsync / IsDocumentVisibleAsync (external plane) or " +
-            "ExternalDocumentNarrowing.DecideAsync / ReadAndDecideAsync (assistant tools), or list the method with its reason:\n" +
+            "call ExternalDataService.NarrowDocumentsAsync / IsDocumentVisibleAsync (external plane) or the injected " +
+            "AppOnlyDocumentNarrowing (assistant tools), or list the method with its reason:\n" +
             string.Join("\n", problems));
     }
 
@@ -110,6 +117,52 @@ public class ExternalDocumentNarrowingGuardTests
         Assert.Contains($"{typeof(NarrowingGuardControlNarrowsThroughAHelper).FullName}::ListAsync", scan.Reaches);
         Assert.DoesNotContain(scan.Surfaces.Keys, k => k.StartsWith(typeof(NarrowingGuardControlNoDocuments).FullName!, StringComparison.Ordinal));
     }
+
+    /// <summary>The types whose reader is the BFF's app-only one: the only callers the core decision may have.</summary>
+    private static readonly Type[] AppOnlySeams = { typeof(ExternalDocumentNarrowing), typeof(ExternalDataService) };
+
+    [Fact(DisplayName = "Task 188: THE document narrowing reads app-only — its core decision is called only from the app-only seams")]
+    public void TheCoreDecision_IsCalledOnlyFromTheAppOnlySeams()
+    {
+        var callers = CoreDecisionCallers(BffTypes.Value);
+
+        // Non-vacuity: the two seams are seen calling it.
+        Assert.Contains($"{typeof(ExternalDataService).FullName}::{nameof(ExternalDataService.NarrowDocumentsAsync)}", callers);
+        Assert.Contains($"{typeof(ExternalDataService).FullName}::{nameof(ExternalDataService.ReadAndNarrowDocumentsAsync)}", callers);
+
+        var offenders = callers.Where(c => !AppOnlySeams.Any(seam => c.StartsWith(seam.FullName + "::", StringComparison.Ordinal))).ToArray();
+        Assert.True(offenders.Length == 0,
+            "THE document narrowing's own reads must run under the BFF's app-only identity on every surface (main-session " +
+            "decision 2026-10-20): call ExternalDataService.NarrowDocumentsAsync / IsDocumentVisibleAsync, or inject " +
+            "AppOnlyDocumentNarrowing, instead of handing ExternalDocumentNarrowing a reader of your own:\n" +
+            string.Join("\n", offenders));
+    }
+
+    [Fact(DisplayName = "Task 188: negative control — a core decision over a reader of its own is found; the app-only seams are not")]
+    public void CoreDecisionDetector_MustFireAndMustNotFire()
+    {
+        var fixtures = new[]
+        {
+            typeof(NarrowingGuardControlDecidesOverItsOwnReader), typeof(NarrowingGuardControlNarrowsThroughTheAppOnlySeam),
+            typeof(NarrowingGuardControlNarrowsInALambda),
+        };
+
+        var callers = CoreDecisionCallers(fixtures.SelectMany(IlCallScan.WithNested));
+
+        Assert.Equal(new[] { $"{typeof(NarrowingGuardControlDecidesOverItsOwnReader).FullName}::ReadAsync" }, callers);
+    }
+
+    /// <summary>Every source method that references a core decision method, as "{outermost type}::{source method}".</summary>
+    private static IReadOnlyList<string> CoreDecisionCallers(IEnumerable<Type> types) =>
+        IlCallScan.MethodReferences(types)
+            .Where(r => r.Target.DeclaringType == typeof(ExternalDocumentNarrowing)
+                && r.Target.Name is nameof(ExternalDocumentNarrowing.DecideAsync)
+                    or nameof(ExternalDocumentNarrowing.DecideOrFailClosedAsync)
+                    or nameof(ExternalDocumentNarrowing.ReadAndDecideAsync))
+            .Select(r => SourceKey(r.Caller, r.CallerMethod))
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
 
     // ── detector ─────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -182,8 +235,10 @@ public class ExternalDocumentNarrowingGuardTests
                  or nameof(ExternalDocumentNarrowing.DecideOrFailClosedAsync)
                  or nameof(ExternalDocumentNarrowing.ReadAndDecideAsync))
             || (declaring == typeof(ExternalDataService)
-                && method.Name is nameof(ExternalDataService.NarrowDocumentsAsync) or nameof(ExternalDataService.IsDocumentVisibleAsync))
-            || (declaring == typeof(DocumentNarrower) && method.Name == nameof(DocumentNarrower.Invoke)));
+                && method.Name is nameof(ExternalDataService.NarrowDocumentsAsync) or nameof(ExternalDataService.IsDocumentVisibleAsync)
+                    or nameof(ExternalDataService.ReadAndNarrowDocumentsAsync))
+            || (declaring == typeof(DocumentNarrower) && method.Name == nameof(DocumentNarrower.Invoke))
+            || (declaring == typeof(AppOnlyDocumentNarrowing) && method.Name == nameof(AppOnlyDocumentNarrowing.Invoke)));
 
     private static string? SurfacePrimitive(MethodBase method) => method.DeclaringType switch
     {
@@ -249,4 +304,19 @@ internal sealed class NarrowingGuardControlNarrowsThroughAHelper(ExternalDataSer
 internal sealed class NarrowingGuardControlNoDocuments
 {
     internal string Name(Guid id) => $"record {id}";
+}
+
+/// <summary>MUST FIRE (app-only rule): decides documents over a reader of its own (e.g. the user's client).</summary>
+internal sealed class NarrowingGuardControlDecidesOverItsOwnReader
+{
+    internal Task<DocumentNarrowingResult> ReadAsync(IReadOnlyCollection<Guid> ids, CancellationToken ct) =>
+        ExternalDocumentNarrowing.ReadAndDecideAsync(
+            ids, (_, _, _) => Task.FromResult<IReadOnlyList<Dictionary<string, System.Text.Json.JsonElement>>>(
+                Array.Empty<Dictionary<string, System.Text.Json.JsonElement>>()), ct);
+}
+
+/// <summary>MUST NOT FIRE (app-only rule): narrows through the injected app-only seam.</summary>
+internal sealed class NarrowingGuardControlNarrowsThroughTheAppOnlySeam(AppOnlyDocumentNarrowing narrow)
+{
+    internal async Task<bool> IsVisibleAsync(Guid id, CancellationToken ct) => (await narrow(new[] { id }, ct)).IsVisible(id);
 }
