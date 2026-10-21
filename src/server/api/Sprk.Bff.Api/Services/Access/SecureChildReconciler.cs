@@ -1190,23 +1190,42 @@ public sealed class SecureChildReconciler
         /// a thread regarding a secure root OUTSIDE this pass is still filed under that root (<see cref="ContextFor"/>). A
         /// preloaded thread is never read again. A read that faults is recorded, not thrown: its messages are left undecided
         /// (<see cref="DecideRowAsync"/> reports them failed and writes nothing), never decided as if the thread filed nothing.
+        /// Round 7 (R7e): read in batches like <see cref="LoadDescendantsAsync"/> — one paged <c>id IN (…)</c> query per chunk of
+        /// <see cref="SecureChildShareSynchronizer.DescendantConditionsPerQuery"/> ids, not one query per thread. A chunk whose
+        /// read faults records every thread of it as faulted (none of them is known); a thread the chunk does not return
+        /// (deleted, or not readable) is recorded as faulted too, as the single read did.
         /// </summary>
         private async Task LoadThreadsOutsidePassAsync()
         {
-            foreach (var threadId in _descendants
-                         .Select(d => RecordThreadFiling.ThreadOf(d.Row))
-                         .OfType<Guid>()
-                         .Distinct()
-                         .Where(id => !_byRef.ContainsKey((RecordThreadFiling.ThreadTable, id))))
+            var threadIds = _descendants
+                .Select(d => RecordThreadFiling.ThreadOf(d.Row))
+                .OfType<Guid>()
+                .Distinct()
+                .Where(id => !_byRef.ContainsKey((RecordThreadFiling.ThreadTable, id)))
+                .ToArray();
+
+            foreach (var chunk in threadIds.Chunk(SecureChildShareSynchronizer.DescendantConditionsPerQuery))
             {
+                var query = new QueryExpression(RecordThreadFiling.ThreadTable) { ColumnSet = new ColumnSet(true), NoLock = false };
+                query.Criteria.AddCondition(
+                    $"{RecordThreadFiling.ThreadTable}id", ConditionOperator.In, chunk.Select(id => (object)id).ToArray());
                 try
                 {
-                    _threadsOutsidePass[threadId] =
-                        await RecordThreadFiling.ReadThreadAsync(_owner._dataverse, threadId, _ct).ConfigureAwait(false);
+                    foreach (var thread in await ReadAllPagesAsync(RecordThreadFiling.ThreadTable, query).ConfigureAwait(false))
+                        _threadsOutsidePass[thread.Id] = thread;
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException || !_ct.IsCancellationRequested)
                 {
-                    Log.LogWarning(ex, "[SECURE-CHILD-RECONCILE] record thread {ThreadId}: it could not be read, so the messages in "
+                    Log.LogWarning(ex, "[SECURE-CHILD-RECONCILE] {Count} record threads (first {ThreadId}): they could not be read, "
+                        + "so the messages in them are left as they are (#2143).", chunk.Length, chunk[0]);
+                    foreach (var threadId in chunk)
+                        _threadReadFaults[threadId] = "its record thread could not be read";
+                    continue;
+                }
+
+                foreach (var threadId in chunk.Where(id => !_threadsOutsidePass.ContainsKey(id)))
+                {
+                    Log.LogWarning("[SECURE-CHILD-RECONCILE] record thread {ThreadId}: it could not be read, so the messages in "
                         + "it are left as they are (#2143).", threadId);
                     _threadReadFaults[threadId] = "its record thread could not be read";
                 }

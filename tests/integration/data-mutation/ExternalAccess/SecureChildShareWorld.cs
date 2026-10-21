@@ -55,6 +55,9 @@ internal sealed class SecureChildShareWorld
     /// <summary>Every table queried, in order.</summary>
     public List<string> QueriedTables { get; } = new();
 
+    /// <summary>#2143 round 7 (R7e): every query asked, in order (one entry per page read).</summary>
+    public List<QueryExpression> Queries { get; } = new();
+
     /// <summary>
     /// The NAMED owner team of THIS world (task 148): <see cref="SecureTeam"/> unless the world was built to match another
     /// harness's ids (<see cref="Standard(Guid, Guid)"/>). <see cref="SecureRoot"/> and <see cref="SecureChild"/> use it.
@@ -657,6 +660,7 @@ internal sealed class SecureChildShareWorld
     public EntityCollection Answer(QueryExpression query)
     {
         QueriedTables.Add(query.EntityName);
+        Queries.Add(query);
         if (_failingTables.Contains(query.EntityName))
             throw QueryFault?.Invoke() ?? new InvalidOperationException($"Test: {query.EntityName} cannot be read.");
         if (query.Criteria.Conditions.Any(c =>
