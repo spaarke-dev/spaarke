@@ -1731,3 +1731,164 @@ Not run, by the brief: the full unfiltered unit suite, any deploy, any Dataverse
 
 - `UpdateRecordActionCore` (the UpdateRecord playbook node) can write a reparentable child's `sprk_parentdocument` from
   playbook-configured lookups. Whether that target meets the narrowing was not checked here (not a request-body route).
+
+## 21. Round 4e — app-only generic writers refuse a document's D7 link columns
+
+Commits: `426ca7e7fb` (the refusal, tests, ArchTest), `19f72e1017` (merge of `origin/master` `733c65063c`, clean), and the
+docs/notes commit. It closes §20's "Not examined" item.
+
+### The gap
+
+`UpdateRecordActionCore` (the Update Record playbook node, and the action seam without impersonation),
+`DataverseUpdateHandler` (a playbook's output mapping) and the field-mapping push write any column their payload names.
+Their only document guard, `InheritedAccessPermission.RefuseAppOnlyWrite` (task 189 K5), covered `sprk_accesspermission`
+and `sprk_accessinheritance`, not the two links the narrowing walks. A playbook could re-point or clear an attachment's
+`sprk_parentdocument` (rule 3: a Restricted ancestor) or `sprk_relatedcommunication` (rule 4: the 065 communication rule)
+and un-hide it. A re-file the payload caused could also re-stamp an inherited-only Restricted value lower.
+
+### The rule
+
+D7's link columns are visibility inputs, so an app-only generic writer never writes them. Legitimate link changes go
+through:
+- the re-file routes (`RecordOwnershipResolver.ReparentAsync`, caller-checked; #2200 decides a document target on the
+  Document path);
+- the Office create (I-19, the link set inside the create);
+- the BFF's own typed writers (below).
+
+### The fix (one place)
+
+`RefuseAppOnlyWrite` keeps its signature and its callers:
+- **The column set.** `InheritedAccessPermission.DocumentLinkColumns` is built from the predicate's own constants
+  (`ExternalDocumentNarrowing.ParentDocumentAttribute` / `RelatedCommunicationAttribute`), so the two cannot drift.
+- **The match.** On `sprk_document` only, through `SecureRootInheritance.NormalizeColumn`, so a value, a null (clear),
+  `{nav}@odata.bind`, `_{column}_value` and any case are all refused.
+- **The refusal.** The same shape (`RecordOwnerResolution.Refused`) with its own reason code,
+  `sdap.access.document_link_server_only`; the detail names the column only. A payload naming an access column AND a link
+  keeps task 189's code (pinned).
+- **The callers.** Unchanged: the playbook node refuses before anything is written (`RecordOwnerUnresolvedException`; the
+  impersonated seam is not asked, as before), the output mapping refuses before anything is read or written, and the push
+  skips the rule with its reason and applies the rest.
+
+### Callers found (grep, before the change)
+
+`RefuseAppOnlyWrite` callers:
+- `UpdateRecordActionCore.cs:151`;
+- `DataverseUpdateHandler.cs:58`;
+- `FieldMappingEndpoints.cs:1052`.
+
+There are no others.
+
+Every write of either column in `src/server`: each is a typed BFF writer that CREATES the row, so none goes through a
+generic update path:
+- `sprk_relatedcommunication`: `CommunicationService.cs:519/2736/3019`, `IncomingCommunicationProcessor.cs:1128/1347`,
+  `MessageAttachmentMaterializer.cs:279` (all `IGenericEntityService.CreateAsync`).
+- `sprk_parentdocument`: `DataverseServiceClientImpl.cs:1023` (`CreateDocumentAsync`, from `EmailAttachmentProcessor.cs:332`
+  and `UploadFinalizationWorker.cs:1275`). `RecordOwnershipResolver.ParentChangesOf(UpdateDocumentRequest)` (:833) only
+  READS the request to plan a reparent.
+
+So no legitimate BFF writer is broken. Dataverse-side configuration was not readable here (no Dataverse access):
+- §6's dev dry run (p5) found no field-mapping rule, AI topic-registry row or email update field targeting either column.
+- A deployed playbook whose Update Record node or output mapping names one would now fail that node with the refusal.
+  None is in the repo (no JSON/YAML/TS reference).
+
+### What covers the impersonated path
+
+`UpdateRecordActionCore` with `ImpersonateSystemUserId` (the action seam's confirmed apply) runs as that user and is not
+asked, as before. The push runs as its caller but IS asked (a configuration, task 189's reasoning). What covers a user's
+own write, through the seam, the Web API or a form, is Dataverse field security on both columns:
+`scripts/Set-DocumentNarrowingFieldSecurity.ps1` → `Set-DocumentPointerFieldSecurity.ps1 -Target DocumentNarrowingLinks`.
+- The writer profile is the BFF application users only, so an impersonated update by any user is refused by Dataverse.
+- System Administrators bypass it by platform rule.
+- **It is NOT applied yet.** `-Apply` is an owner-approved manual gate (§6; I-14 known limit). Until it runs, a user with
+  Write on a document can set or clear either link, through the seam's impersonated apply as through the Web API.
+
+### ArchTest (`ExternalDocumentNarrowingGuardTests`, region "Task 188 round 4e")
+
+- **`EveryGenericUpdateWriter_AsksTheAppOnlyRefusal`.** Every BFF type whose compiled code calls
+  `IFieldMappingDataverseService.UpdateRecordFieldsAsync` (the interface or a concrete implementation) must also reference
+  `RefuseAppOnlyWrite`, or be listed in `GenericWritersThatUpdateNoDocument` with its reason. Listed:
+  - `InvoiceReviewService` (sprk_invoice);
+  - `SignalEvaluationService` (sprk_spendsignal);
+  - `OwnedChildWrite` and `RecordCreationService` (creates on a fresh id: a link set in a create can only hide the new
+    row).
+- **Ratchet and non-vacuity.** A stale or now-refusing entry fails. Non-vacuity pins the three writers as seen writing
+  and refusing.
+- **`GenericWriterDetector_MustFireAndMustNotFire`.**
+  - Must fire: a write with only a comment and a `nameof` of the refusal; a write through `DataverseWebApiService`.
+  - Must not fire: the refusal inside a lambda; a listed writer; a typed `IGenericEntityService.UpdateAsync`.
+  - It also pins both stale-entry messages.
+- **Limit (stated).** Per type, as the #2091 guard: `DataverseUpdateHandler` refuses in `UpdateAsync` and writes in two
+  private methods. A generic writer built on `IGenericEntityService.UpdateAsync` is not seen; the BFF's typed writers use
+  that with literal keys.
+
+### Tests (`tests/integration/data-mutation/ChildAccessPermission/DocumentLinkAppOnlyWriterTests.cs`, 35 cases)
+
+Must fire, per writer:
+- **Playbook node / action seam:** set, cleared (null), odd case, `_value`, and the bind form (×3 lookups). Refused
+  with the link code, nothing written.
+- **Output mapping:** the same six, plus three bind forms (one a null bind). Refused, nothing written.
+- **Push:** set and cleared for each link, and the bind form. The rule is skipped ("set by Spaarke") and the rest is
+  pushed. A push of only a link writes nothing and counts the child skipped.
+
+Must not fire:
+- the document's other columns, including the similarly named `sprk_parentfilename`, and a non-link lookup
+  (`sprk_contact@odata.bind`) — all written;
+- the same column names on `sprk_todo` / `sprk_event`, per writer — written or pushed.
+
+Pins:
+- `DocumentLinkColumns` is exactly the predicate's two attributes;
+- an access column beside a link keeps task 189's code.
+
+**Before → after.** With `ParentLineage.cs` at HEAD (only the two new declarations added, so the tests compile): 24 of
+35 failed, every must-fire case: 12 wrote with no exception (3 playbook, 9 output mapping), 6 playbook cases went into
+the reparent path (the write would proceed in production), and 6 push cases pushed the link. After: 35 of 35.
+
+| Writer | Before | After |
+|---|---|---|
+| Update Record node / action seam (app-only) | Set, re-pointed or cleared either link; a parent change ran a reparent | Refused before anything is written (`sdap.access.document_link_server_only`) |
+| Output mapping (`DataverseUpdateHandler`) | Wrote either link | Refused before anything is read or written |
+| Field-mapping push | Pushed a rule targeting either link to every child document | The rule is skipped with its reason; the rest is pushed |
+| Action seam impersonating its user | Wrote as the user | Unchanged: field security (not yet applied) |
+
+### Mutation table (round 4e): 7 of 7 killed
+
+Runner: `.uac188/t188r4e_mutate.py` (untracked; deleted at the end). For each mutant: apply it, rebuild, run the new class
+plus task 189's `DocumentAccessPermissionAppOnlyWriterTests` and `DocumentAccessPermissionPushTargetTests` (52 cases),
+and, where marked, the ArchTest fact. Then restore and check the SHA-1. The call-removal mutants replace the call with a
+non-constant null.
+
+| Id | Mutation | Unit failed | ArchTest failed |
+|---|---|---|---|
+| MU | `UpdateRecordActionCore` no longer asks the refusal | 12 | 1 |
+| MD | `DataverseUpdateHandler` no longer asks the refusal | 11 | 1 |
+| MF | the field-mapping push no longer asks the refusal | 10 | 1 |
+| ML1 | `sprk_parentdocument` dropped from the set | 14 | — |
+| ML2 | `sprk_relatedcommunication` dropped from the set | 12 | — |
+| MN | the link test reads raw keys (bind, `_value`, case missed) | 11 | — |
+| MT | the link test never matches the document table | 31 | — |
+
+### Gates (round 4e)
+
+| Gate | Result |
+|---|---|
+| Build `--no-incremental` after the merge: BFF, unit tests, ArchTests | 0 errors, 0 warnings each |
+| Unit, filtered (UpdateRecord, Playbook, DataverseUpdate, FieldMapping, AccessPermission, ParentLineage, InheritedAccess, UnifiedAccessControl, ExternalAccess, Document; `Category!=Live`) | 2,368 passed, 0 failed, 1 skipped |
+| ArchTests, full project | 1,129 passed, 0 failed |
+| Merge `origin/master` `733c65063c` | clean, no conflicts (`19f72e1017`); master added no new caller of the generic update |
+
+Not run, by the brief: the full unfiltered unit suite, any deploy, field security `-Apply`, and any Dataverse, Azure or
+Key Vault access.
+
+### Merge with #2186 (slice D)
+
+`git merge-tree HEAD origin/uac/188d-restrict-cascade` reports three text conflicts. Resolve them as follows; do not
+merge #2186 from here.
+- **`DATAVERSE-WRITE-PATH-ARCHITECTURE.md`, the I-14 row.** Take this branch's (D7) row. Append slice D's sentence,
+  "**Task 188 slice D (owner round 111 item 3):** deleting a communication or a parent document no longer clears …
+  (`ExternalDeleteOwnTests`, `DocumentDestroyAuthorizationTests`)", at the end of the invariant column, after "An own
+  value wider than the root changes nothing". The I-16 / I-19 rows already state slice D's effect (this round).
+- **`ProblemDetailsHelper.cs`.** Keep both methods: `RecordOwnerUnsettled` (#2143, from master) and slice D's
+  `DocumentHasChildDocuments`.
+- **`DocumentDestroyAuthorizationTestFixture.cs`.** Keep both constructor arguments. `RecordingDocumentDataverseService`
+  takes `deleted, updated, onUpdated` (master) plus `childCounts, rowDeleteFaults` (slice D), and the factory passes all
+  five.
