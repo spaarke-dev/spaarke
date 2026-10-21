@@ -1720,3 +1720,16 @@ The full record is in `notes/185-invite-code-design.md` §11.
 3. **#2122 (#2121 option b): approved.** This is the security sign-off.
 4. **186: Tracy access confirmed** by the owner (home-directory sign-in). Next is the server gate.
 5. Q1/Q10, #1864, #2119 D1–D6, census a/b/c, CustomerBusinessUnitId and #2139: the owner asked for more information. The explanations were given in chat; these remain open.
+
+## Round 111 (owner, 2026-10-21)
+
+1. **#2150 (#2143): option (a).** One bounded round 11 that changes only the log level and wording of the two round-10 F2 findings: the false "sharees may still open it" ERROR after a transient Failed mirror step, and the unsafe "Re-own it first" on an isolated row. Control flow stays as it is.
+2. **188: path B approved.** CLAUDE.md §6.5 path B, an amendment: the AI tools' User-OBO-only rule gains one narrow exception. That exception is `AppOnlyDocumentNarrowing`, which re-reads by id app-only and returns only a hide decision; it never returns rows or widens. This is the owner sign-off the I-14 text and `IDataverseUserClient` remarks were waiting on. The main session applies the `.claude/` text on the #2170 branch.
+3. **F1-B cascade (deleting a communication or parent .eml un-hides its documents): (a), Restrict**, with the owner's note "take the most consistent with other decisions". The main session confirmed this is consistent:
+   - "security fails closed" (CLAUDE.md §17);
+   - D7's "derived at read time, never stamped" (option (b)'s permanent stamp would contradict it);
+   - delete design D1's intent that a delete outside the BFF must not quietly change access.
+
+   Restrict applies to `sprk_communication → sprk_document` (`sprk_relatedcommunication`) and `sprk_document → sprk_document` (`sprk_parentdocument`). Every BFF delete path deletes or unlinks the child documents first. The core-record delete deletes documents (children first) before their communication.
+4. **Limited does not hide from partners.** D7 stays as written: only Restricted hides. A must-not-fire test pins it.
+5. **#2179: (c), accept and document.** Flagged-external systemusers who hold direct Dataverse access are trusted with it. D7's guarantee covers contacts (CIAM) and every BFF surface, not direct Dataverse access by flagged-external systemusers. This sits beside I-14's round-77 known limit.

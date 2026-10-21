@@ -24,19 +24,29 @@
 
 ## In flight (agents)
 1. **D7: task 188 = PR #2170** (C:/wt188, head c3da0a5d0e after round 2). Security pass 1 → round 3 split into fresh agents, in order (they share the ArchTest file):
-   - **A (running):** `RetrievalAccessTrim` narrows for external callers; drive-item keys pass only if a readable row on the item is visible after narrowing; external-lookup fault → treat as external (narrow), never refuse all.
-   - **B:** the narrowing inside `DocumentAuthorizationFilter` for EVERY document-id route (all 26, all ops) + the bulk-download filter + the two unfiltered list routes (`DataverseDocumentsEndpoints.cs:550`, `:646`); lookup fault → narrow (same rule as A).
+   - **A DONE** (f1263870c0 + notes 7bba318b10): `RetrievalAccessTrim` narrows for external callers (doc + drive-item keys); 4/4 mutants; filtered 11,382 pass; ArchTests 1212; +17,158 B total. Limit: no "withheld" note to the tool on a narrowing fault (warning logged only).
+   - **B (running):** the narrowing inside `DocumentAuthorizationFilter` for EVERY document-id route (all 26, all ops) + the bulk-download filter + the two unfiltered list routes (`DataverseDocumentsEndpoints.cs:550`, `:646`); lookup fault → narrow (same rule as A).
    - **C:** `sprk_analysis` rows hidden when their `sprk_documentid` is hidden (`AppOnlyDocumentNarrowing` overload, hide-only) in read_query + search_data; extended surface ArchTest; K7 allow-list of delegate consumers; publish size, merge-tree, notes, PR body.
-   - **OWNER (🔔 pending):** path B for the AI-tool app-only seam ("188: path B approved"); **F1-B cascade** (RemoveLink on communication/parent delete un-hides; recommend (a) Restrict); **Limited** (hide too, or Restricted only as D7 says); #2179 (flagged-external direct Dataverse access). Before deploy: read-only count of partner-visible docs that will disappear (K4).
-   - **Task 189 = PR #2169** (C:/wt189): pass-1 fix round running (F1 record for every parented doc + downstream `modifiedon` check; F3 regex; raise-only write on undecided record; K5 app-only writers refuse the columns). Then pass 2. Merges before 188 (I-16 line conflict) and before word-add-in #2177 (T8).
+   - **OWNER round 111 (2026-10-21) decided:** path B APPROVED; cascade **(a) Restrict**; **Limited does not hide**; #2179 **(c)** accepted + closed. Next steps:
+     - After slice B lands, the MAIN SESSION commits the `.claude/` amendment on the #2170 branch. Text is in the round-111 notes; find the right `.claude/adr` / `constraints/auth.md` home. The agent is not allowed to write `.claude/`.
+     - **Slice C** additionally:
+       - updates the `IDataverseUserClient.cs:13-19` rule text to name the exception;
+       - changes I-14 "owner sign-off pending" to "approved round 111";
+       - adds the #2179 known limit;
+       - adds a Limited must-not-fire test.
+     - **Slice D (after C):** set Restrict on `sprk_relatedcommunication` (`sprk_Communication.xml:151-152`) and `sprk_parentdocument` (`sprk_Document.xml:322-323`).
+       - Script: dry run / `-Apply` / `-Verify`, copying `Set-DocumentAnalysisCascadeSchema.ps1`.
+       - Every BFF delete path must delete or unlink the child documents first. The core-record delete runs documents (children first) before the communication. The single-document delete refuses cleanly (409) or handles the children.
+       - The dev `-Apply` happens after review.
+     - **Before deploy:** a read-only count of partner-visible documents that will disappear (K4).
+   - **Task 189 = PR #2169** (C:/wt189, head abcf516022): pass-1 fixes F3 c20e9882aa, K1+K2 raise-only b7f74100f3, K5 f69b007da8; wide run 10066/0, ArchTests 1211, +7,787 B. **F1 (record for every parented doc) being committed now** with deploy-order gate: #2169 deploys before #2161, and #2161 does not deploy until 189's record backfill reports zero unchanged-value record writes (~N/500 runs; #2161's re-file pass looks back 60 min); #2161 pre-deploy gate adds a read-only misplaced-file count. Then security pass 2. Merges before 188 (I-16 line conflict) and before word-add-in #2177 (T8).
    - **Task 190 (T7b)** starts after 188 merges. **#2177 (word-add-in T8):** two security passes pending a slot.
    - 036 flag-on gates DONE: PASS server-side (0a4fbaa38); #1567 closed; sent to R3; filed #2167 (privilege-after-RPA invariant), #2168 (disabled/unlicensed refusal surfaces as a fault). Owner SPA steps (ii)–(vi) are in the gates note.
    - ebilling 050a r3: FIX-ROUND-NEEDED sent (F3 tests for walk-Failed / no-Secure-team; F1 pre-existing D-140 thread hop; K4 accepted as known limit). Re-check the fix diff when sent.
-2. **#2150 (#2143) round 7** (C:/wt2143, draft; head f81b616bd7 + R7a–e): F3 asked about every secure root removed from the row's own columns, plus caller plumbing (fixes the round-6 regression: re-file off a secure record left the email stuck).
-   - Next: scoped re-check of the fix diff → owner sign-off → merge → R3 deploy → gate. Exception name unchanged: `RecordOwnerUnsettledException` → 409 `record_owner_unsettled` (tell ebilling at merge; K2: FinanceEndpoints :281 catch becomes dead code after both merge).
-3. **#2161 (#2159/#2151)** (C:/wt2159, draft; head d5a7cc5867): slices 1 → 4 in order, each reported; agent files the B5 over-250 MB issue.
-   - Rule: secure→secure (S1→S2) moves are held unless an F3 release entry exists; `IsolationHoldAsync` guards every purpose.
-   - Next: re-check → owner sign-off → merge → deploy → gate.
+2. **#2150 (#2143) round 10 done** (C:/wt2143, draft; head **0ba86217e2**): F2-b (Failed sync falls through to `RemoveMirrorAsync`), F2-a (hook before the grant on anchor + threadless paths), cheap closes; all mutants killed; filter 2133/2133, ArchTests 1152/1152.
+   - r10 re-check DONE: behaviour correct and fail-closed on every path; 950/950 filtered. Two NEW log-only F2s: F2-1 false ERROR "sharees may still open it" after a transient Failed mirror step (`SecureChildShareSynchronizer.cs:451-454`; fix: `exhaustedLevel` param, Warning on the earlier calls, Error only on the last step `SecureChildReconciler.cs:968`; "could not be read" wording when Failed; assert `RemovalErrors()` empty in the NoThreadMove test). F2-2 "Re-own it first" on a correctly isolated row (`:610-612`; reword as unsafe-to-re-own). **Owner chose (a), round 111.** **Running:** round 11. F2-1 takes an `exhaustedLevel` parameter: Warning on the earlier calls, Error only on the last step. F2-2 rewords the message. No behaviour change. Next: quick scoped re-check → owner sign-off (as stated in option (a)) → merge → deploy → gate.
+   - Then owner sign-off → merge → R3 deploy → gate. At merge tell ebilling (K2: D-140 thread hop → `RecordThreadFiling.ParentsOf`; FinanceEndpoints confirm catch dead) and word-add-in (wire the caller into the attachment-branch `FileIfUnfiledAsync`).
+3. **#2161 (#2159/#2151)** (C:/wt2159, draft; head 2662545da2): slices 1–4 done; #2176 filed (B5 > 250 MB). Final pass: FIX-ROUND-NEEDED (no widening found). **Running:** fix round for 1 F1 checkout-mid-copy not re-checked (source deleted under the editor), 2 F1 same-container re-copy consumes the F3 release (S1→S2 held for good), 3 F2 unrecordable release has no working recovery (durable ADR-004 retry preferred; agent stops if disproportionate), 4 F1-low MakeSecure skips B9 source proof on S1→S2, 5 pre-existing cancelled-copy orphan (finally cleanup). K1–K7 accepted. Then scoped re-check → owner sign-off → merge → deploy → gate.
 
 ## Next after those
 - **#2153 (#2152)** (C:/wt2152, draft, head 863326f0b): owner sign-off → merge → R3 deploy → gate.
