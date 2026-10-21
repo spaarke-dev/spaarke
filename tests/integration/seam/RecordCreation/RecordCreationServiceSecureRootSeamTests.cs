@@ -250,16 +250,53 @@ public sealed class RecordCreationServiceSecureRootSeamTests : IClassFixture<Pro
         _fixture.Grants.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task CreateAsync_AProjectUnderASecureMatter_IsCreatedIntoIsolation_WithTheSecureBusinessUnitsSearchDefaults()
+    {
+        // Task 015 review round 1 (F6), FR-10: step 8 reads the OWNING unit — for a row created into isolation, the named
+        // team's unit (the Secure BU), never the caller's.
+        var secure = Guid.NewGuid();
+        SecureMatter(_fixture, secure);
+        var secureIndex = Guid.NewGuid();
+        var unitReads = new List<Guid>();
+        var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        entities
+            .Setup(e => e.RetrieveAsync("team", SecureTeam, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("team", SecureTeam)
+            {
+                ["businessunitid"] = new EntityReference("businessunit", ProvisionProjectTestFixture.SecureBuId),
+            });
+        entities
+            .Setup(e => e.RetrieveAsync("businessunit", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, string[], CancellationToken>((_, id, _, _) => unitReads.Add(id))
+            .ReturnsAsync(new Entity("businessunit", ProvisionProjectTestFixture.SecureBuId)
+            {
+                ["sprk_searchindexname"] = "spaarke-secure-index",
+                ["sprk_ai_search_index"] = new EntityReference("sprk_aisearchindex", secureIndex),
+            });
+
+        var outcome = await Service(entities.Object).CreateAsync(await ProjectUnder(secure), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        outcome.Isolated.Should().BeTrue();
+        outcome.OwningTeamId.Should().Be(SecureTeam);
+        unitReads.Should().Equal([ProvisionProjectTestFixture.SecureBuId], "the isolated owner's unit, read once");
+        var (table, _, fields) = _writes.Should().ContainSingle().Subject;
+        table.Should().Be("sprk_project");
+        fields["sprk_searchindexname"].Should().Be("spaarke-secure-index");
+        fields["sprk_AI_Search_Index@odata.bind"].Should().Be($"/sprk_aisearchindexes({secureIndex:D})");
+    }
+
     // ── Harness ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
-    private RecordCreationService Service()
+    private RecordCreationService Service(IGenericEntityService? entities = null)
     {
         var stamps = new StampWorld();
         var restamper = new CoreAncestorRestamper(stamps.Service, stamps.Resolver, NullLogger<CoreAncestorRestamper>.Instance);
         return new RecordCreationService(
             new Mock<IRecordOwnershipResolver>(MockBehavior.Strict).Object,
             AppCreatesIntoTheWorld(),
-            new Mock<IGenericEntityService>(MockBehavior.Strict).Object,
+            entities ?? new Mock<IGenericEntityService>(MockBehavior.Strict).Object,
             _fixture.Services.GetRequiredService<SecureRootFilingGate>(),
             restamper,
             SecureChildShareWorld.SynchronizerOver(() => World, new FakeRecordShareTable()),
@@ -279,6 +316,22 @@ public sealed class RecordCreationServiceSecureRootSeamTests : IClassFixture<Pro
         }), CancellationToken.None);
         mapped.Item.Should().NotBeNull(mapped.ValidationError);
         return new RecordCreationRequest("sprk_workassignment", new RecordCreationPayload.Mapped(mapped.Item!))
+        {
+            CorrelationId = FixedCorrelation,
+        };
+    }
+
+    /// <summary>A project filed under <paramref name="matter"/> by its ADR-024 pair (its only filing).</summary>
+    private async Task<RecordCreationRequest> ProjectUnder(Guid matter)
+    {
+        var mapped = await DataverseWriteItemMapper.MapAsync(_caller, "sprk_project", JsonSerializer.SerializeToElement(new
+        {
+            sprk_projectname = "Phase 2",
+            sprk_regardingrecordid = matter.ToString("D"),
+            sprk_regardingrecordtype = new { relatedTable = "sprk_recordtype_ref", recordId = RecordTypeRef(_fixture, "sprk_matter") },
+        }), CancellationToken.None);
+        mapped.Item.Should().NotBeNull(mapped.ValidationError);
+        return new RecordCreationRequest("sprk_project", new RecordCreationPayload.Mapped(mapped.Item!))
         {
             CorrelationId = FixedCorrelation,
         };
@@ -314,11 +367,19 @@ public sealed class RecordCreationServiceSecureRootSeamTests : IClassFixture<Pro
             .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((table, id, fields, _, _) =>
             {
                 _journal.Add("create");
-                table.Should().Be("sprk_workassignment");
+                table.Should().BeOneOf("sprk_workassignment", "sprk_project");
                 _writes.Add((table, id, fields));
-                _fixture.SeedWorkAssignment(id, owningTeamId: BoundId(fields, "ownerid@odata.bind"),
-                    isSecure: fields.TryGetValue("sprk_issecure", out var flag) && flag is true,
-                    createdBy: AppUser, createdByPerson: BoundId(fields, "sprk_CreatedByPerson@odata.bind"));
+                var isSecure = fields.TryGetValue("sprk_issecure", out var flag) && flag is true;
+                if (table == "sprk_project")
+                {
+                    _fixture.SeedProject(id, owningTeamId: BoundId(fields, "ownerid@odata.bind"), isSecure: isSecure,
+                        createdBy: AppUser, createdByPerson: BoundId(fields, "sprk_CreatedByPerson@odata.bind"));
+                }
+                else
+                {
+                    _fixture.SeedWorkAssignment(id, owningTeamId: BoundId(fields, "ownerid@odata.bind"), isSecure: isSecure,
+                        createdBy: AppUser, createdByPerson: BoundId(fields, "sprk_CreatedByPerson@odata.bind"));
+                }
                 if (BoundId(fields, "sprk_RegardingMatter@odata.bind") is { } matter)
                     World.Set(table, id, "sprk_regardingmatter", new EntityReference("sprk_matter", matter));
                 _creatorShareAtCreate = _fixture.ShareMaskOf(id, Creator);
