@@ -7,11 +7,12 @@
 #      declarations, an empty list, a non-sprk_ name and a duplicate; a mere USE of FilingCores is not a declaration;
 #   2. the plan built from the parsed list (Resolve-Plan, metadata reads stubbed): one record lookup per core table on
 #      sprk_ruleset (RemoveLink), one typed lookup per core table on sprk_procedureassignment (Cascade), sprk_billingfirm and
-#      sprk_billingresponsible on every core table (RemoveLink); every Cascade lookup (the assignment's core lookups and
-#      sprk_excludedpolicy, plus Procedure Version -> Procedure, which is NOT parental) carries the exact delete-only cascade
-#      configuration (Delete Cascade; Assign/Share/Unshare/Reparent/Merge/RollupView NoCascade), and Get-CascadeMismatches fires
-#      on any member that differs; no lookup whose target is a core table is Restrict. A fourth core table in the list adds its
-#      lookups (not hand-typed);
+#      sprk_billingresponsible on every core table (RemoveLink); the assignment's core lookups are RemoveLink with every cascade
+#      member NoCascade; only sprk_procedureassignment.sprk_excludedpolicy and sprk_procedureversion.sprk_procedure are Delete Cascade
+#      (the one parental relationship each table may have; Dataverse 0x80047007), each with the exact delete-only configuration, and
+#      Get-CascadeMismatches fires on any member that differs; the plan guard fires on two Delete Cascade lookups on one table and on a
+#      Cascade core lookup; the in-place repair (known drift, PUT body, ORDER before sprk_excludedpolicy) is pinned; no lookup whose
+#      target is a core table is Restrict. A fourth core table in the list adds its lookups (not hand-typed);
 #   3. the script text names no core table at all (no hand-typed list).
 #
 # Pester 3.4:  Import-Module Pester -RequiredVersion 3.4.0 ; Invoke-Pester tests/scripts/Deploy-EbillingProcedureSchema.Tests.ps1
@@ -31,7 +32,7 @@ if (-not ('EscalationException' -as [type])) {
 # Pull the functions under test out of the script (it cannot be dot-sourced: it runs on load).
 $errs = $null; $tokens = $null
 $script:Ast = [System.Management.Automation.Language.Parser]::ParseFile($script:ScriptPath, [ref]$tokens, [ref]$errs)
-foreach ($name in 'Get-FilingCores', 'Get-CascadeDeleteOnly', 'New-LookupSpec', 'Get-NewTableRel', 'Get-ExpectedDelete', 'Get-ExpectedCascade', 'Get-CascadeMismatches', 'New-CreatorSpec', 'Resolve-Plan', 'Get-RequiredColumnSpecs', 'Get-RequiredLevelProblem', 'Get-PublishEntities', 'Get-MissingOptionValue') {
+foreach ($name in 'Get-FilingCores', 'Get-CascadeDeleteOnly', 'Get-CascadeNone', 'Test-KnownCascadeDrift', 'Get-CascadeFixBody', 'Get-ParentalPlanProblems', 'Get-ParentalProblems', 'Get-OtherParentalRelationships', 'Assert-NoOtherParental', 'New-LookupSpec', 'Get-NewTableRel', 'Get-ExpectedDelete', 'Get-ExpectedCascade', 'Get-CascadeMismatches', 'New-CreatorSpec', 'Resolve-Plan', 'Get-RequiredColumnSpecs', 'Get-RequiredLevelProblem', 'Get-PublishEntities', 'Get-MissingOptionValue') {
     $fn = $script:Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true) | Select-Object -First 1
     Invoke-Expression $fn.Extent.Text
 }
@@ -116,10 +117,18 @@ Describe 'Resolve-Plan (the plan follows the parsed list)' {
         $rs.Count | Should Be 3
         @($rs | Where-Object { $_.Delete -ne 'RemoveLink' }).Count | Should Be 0
     }
-    It 'creates one typed lookup per core table on the assignment, Cascade' {
+    It 'creates one typed lookup per core table on the assignment, RemoveLink with nothing cascading (NOT Cascade: parental limit)' {
         $as = @($three | Where-Object { $_.Table -eq 'sprk_procedureassignment' -and $_.Column -in @('sprk_matter', 'sprk_project', 'sprk_workassignment') })
         $as.Count | Should Be 3
-        @($as | Where-Object { $_.Delete -ne 'Cascade' }).Count | Should Be 0
+        @($as | Where-Object { $_.Delete -ne 'RemoveLink' }).Count | Should Be 0
+        foreach ($c in $as) {
+            @(Get-CascadeMismatches (Get-ExpectedCascade $c) @{ Delete = 'RemoveLink'; Assign = 'NoCascade'; Share = 'NoCascade'; Unshare = 'NoCascade'; Reparent = 'NoCascade'; Merge = 'NoCascade'; RollupView = 'NoCascade' }).Count | Should Be 0
+            $c.DriftFrom | Should Be 'Cascade'
+            ($c.Desc -match 'REMOVELINK') | Should Be $true
+            ($c.Desc -match 'planner \(task 117\)') | Should Be $true
+            ($c.Desc -match 'sweep as the backstop') | Should Be $true
+            ($c.Desc -match 'CASCADE: deleting the record') | Should Be $false
+        }
     }
     It 'puts sprk_billingfirm and sprk_billingresponsible on every core table, RemoveLink, to sprk_organization' {
         foreach ($t in 'sprk_matter', 'sprk_project', 'sprk_workassignment') {
@@ -151,14 +160,15 @@ Describe 'Resolve-Plan (the plan follows the parsed list)' {
     It 'gives EVERY Cascade lookup the exact custom configuration, and nothing else gets one' {
         $exact = @{ Assign = 'NoCascade'; Delete = 'Cascade'; Merge = 'NoCascade'; Reparent = 'NoCascade'; Share = 'NoCascade'; Unshare = 'NoCascade'; RollupView = 'NoCascade' }
         $cascade = @($three | Where-Object { $_.Delete -eq 'Cascade' })
-        # the three core-record lookups and sprk_excludedpolicy on the assignment, plus sprk_procedureversion.sprk_procedure
-        (@($cascade | ForEach-Object { "$($_.Table).$($_.Column)" } | Sort-Object) -join ',') | Should Be ((@('sprk_procedureassignment.sprk_matter', 'sprk_procedureassignment.sprk_project', 'sprk_procedureassignment.sprk_workassignment', 'sprk_procedureassignment.sprk_excludedpolicy', 'sprk_procedureversion.sprk_procedure') | Sort-Object) -join ',')
+        # the ONE parental relationship per table: sprk_excludedpolicy on the assignment, sprk_procedure on the version
+        (@($cascade | ForEach-Object { "$($_.Table).$($_.Column)" } | Sort-Object) -join ',') | Should Be ((@('sprk_procedureassignment.sprk_excludedpolicy', 'sprk_procedureversion.sprk_procedure') | Sort-Object) -join ',')
         foreach ($c in $cascade) {
             @(Get-CascadeMismatches $c.Cascade $exact).Count | Should Be 0
             @(Get-CascadeMismatches $exact (Get-ExpectedCascade $c)).Count | Should Be 0
             $c.Cascade.Keys.Count | Should Be 7
         }
-        @($three | Where-Object { $_.Delete -ne 'Cascade' -and $_.Cascade }).Count | Should Be 0
+        # the only other lookups carrying an explicit configuration are the three assignment core lookups (RemoveLink, all NoCascade)
+        (@($three | Where-Object { $_.Delete -ne 'Cascade' -and $_.Cascade } | ForEach-Object { "$($_.Table).$($_.Column)" } | Sort-Object) -join ',') | Should Be 'sprk_procedureassignment.sprk_matter,sprk_procedureassignment.sprk_project,sprk_procedureassignment.sprk_workassignment'
     }
     It 'expects Assign / Share / Unshare / Reparent NoCascade on every non-cascade lookup too (none is parental)' {
         foreach ($s in @($three | Where-Object { $_.Delete -ne 'Cascade' })) {
@@ -330,6 +340,213 @@ Describe 'Get-MissingOptionValue (the sprk_scope re-read after securing)' {
     }
     It 'names every option when the re-read returns none (must-fire)' {
         @(Get-MissingOptionValue @() $want).Count | Should Be 4
+    }
+}
+
+Describe 'the parental limit (one Delete Cascade relationship per table, dev run 2026-10-21)' {
+    $script:Fixture = @('sprk_matter', 'sprk_project', 'sprk_workassignment')
+    Resolve-Plan @('sprk_matter', 'sprk_project', 'sprk_workassignment')
+    $plan = $script:Lookups
+    $cores = 'sprk_matter', 'sprk_project', 'sprk_workassignment'
+    function New-Rel($col, $delete = 'NoCascade', $assign = 'NoCascade', $share = 'NoCascade', $merge = 'NoCascade') {
+        return [pscustomobject]@{ SchemaName = "rel_$col"; ReferencingAttribute = $col; CascadeConfiguration = [pscustomobject]@{ Delete = $delete; Assign = $assign; Share = $share; Unshare = 'NoCascade'; Reparent = 'NoCascade'; Merge = $merge; RollupView = 'NoCascade' } }
+    }
+
+    It 'the real plan has at most one Delete Cascade lookup per table and passes the plan guard (must-not-fire)' {
+        @(Get-ParentalPlanProblems $plan $cores).Count | Should Be 0
+        foreach ($g in @($plan | Where-Object { $_.Delete -eq 'Cascade' } | Group-Object Table)) { $g.Count | Should Be 1 }
+    }
+    It 'fires on two Delete Cascade lookups on one table (must-fire)' {
+        $two = @($plan) + (New-LookupSpec 'sprk_procedureassignment' 'sprk_other' 'sprk_Other' 'rel_other' 'sprk_policy' 'Other' 'd' 'Cascade')
+        $r = @(Get-ParentalPlanProblems $two $cores)
+        $r.Count | Should Be 1
+        ($r[0] -match 'sprk_procedureassignment has 2 Delete = Cascade') | Should Be $true
+    }
+    It 'fires when a core lookup on the assignment is set to Cascade (must-fire)' {
+        $bad = @($plan | Where-Object { -not ($_.Table -eq 'sprk_procedureassignment' -and $_.Column -eq 'sprk_project') }) + (New-LookupSpec 'sprk_procedureassignment' 'sprk_project' 'sprk_Project' 'rel_p' 'sprk_project' 'Project' 'd' 'Cascade')
+        $r = @(Get-ParentalPlanProblems $bad $cores)
+        ($r.Count -ge 1) | Should Be $true
+        (@($r | Where-Object { $_ -match 'core table sprk_project' }).Count) | Should Be 1
+    }
+    It 'the three core lookups are RemoveLink and never Cascade, even on a fourth core table' {
+        $script:Fixture = @('sprk_matter', 'sprk_project', 'sprk_workassignment', 'sprk_agreement')
+        Resolve-Plan @('sprk_matter', 'sprk_project', 'sprk_workassignment', 'sprk_agreement') | Out-Null
+        $four = $script:Lookups
+        @($four | Where-Object { $_.Table -eq 'sprk_procedureassignment' -and $_.Target -in 'sprk_matter', 'sprk_project', 'sprk_workassignment', 'sprk_agreement' -and $_.Delete -ne 'RemoveLink' }).Count | Should Be 0
+        @(Get-ParentalPlanProblems $four ($cores + 'sprk_agreement')).Count | Should Be 0
+        Resolve-Plan @('sprk_matter', 'sprk_project', 'sprk_workassignment')
+    }
+
+    Context 'Test-KnownCascadeDrift (the one drift repaired in place)' {
+        $spec = @($plan | Where-Object { $_.Table -eq 'sprk_procedureassignment' -and $_.Column -eq 'sprk_matter' })[0]
+        $known = [pscustomobject]@{ Delete = 'Cascade'; Assign = 'NoCascade'; Share = 'NoCascade'; Unshare = 'NoCascade'; Reparent = 'NoCascade'; Merge = 'NoCascade'; RollupView = 'NoCascade' }
+        It 'accepts exactly Delete Cascade with the rest NoCascade (must-not-fire as a refusal)' {
+            (Test-KnownCascadeDrift $spec $known) | Should Be $true
+        }
+        It 'refuses any other difference (must-fire as a refusal)' {
+            $m = $known.PSObject.Copy(); $m.Delete = 'Restrict'
+            (Test-KnownCascadeDrift $spec $m) | Should Be $false
+            foreach ($k in 'Assign', 'Share', 'Unshare', 'Reparent', 'Merge') {
+                $x = $known.PSObject.Copy(); $x.$k = 'Cascade'
+                (Test-KnownCascadeDrift $spec $x) | Should Be $false
+            }
+            (Test-KnownCascadeDrift $spec $null) | Should Be $false
+        }
+        It 'never applies to a lookup without a DriftFrom (sprk_excludedpolicy, version -> Procedure)' {
+            foreach ($c in 'sprk_excludedpolicy') {
+                (Test-KnownCascadeDrift @($plan | Where-Object { $_.Column -eq $c })[0] $known) | Should Be $false
+            }
+            (Test-KnownCascadeDrift @($plan | Where-Object { $_.Table -eq 'sprk_procedureversion' -and $_.Column -eq 'sprk_procedure' })[0] $known) | Should Be $false
+        }
+        It 'an already-fixed relationship is no drift and no mismatch (second run changes nothing)' {
+            $fixed = [pscustomobject]@{ Delete = 'RemoveLink'; Assign = 'NoCascade'; Share = 'NoCascade'; Unshare = 'NoCascade'; Reparent = 'NoCascade'; Merge = 'NoCascade'; RollupView = 'NoCascade' }
+            (Test-KnownCascadeDrift $spec $fixed) | Should Be $false
+            @(Get-CascadeMismatches $fixed (Get-ExpectedCascade $spec)).Count | Should Be 0
+        }
+    }
+
+    Context 'Get-CascadeFixBody (the in-place PUT payload)' {
+        $spec = @($plan | Where-Object { $_.Table -eq 'sprk_procedureassignment' -and $_.Column -eq 'sprk_matter' })[0]
+        function New-ReadRel {
+            return [pscustomobject]@{
+                '@odata.type' = '#Microsoft.Dynamics.CRM.OneToManyRelationshipMetadata'; MetadataId = 'e460e4bf-8ecd-f111-a05d-3833c5e9614d'
+                SchemaName = 'sprk_matter_procedureassignment_matter'; ReferencedEntity = 'sprk_matter'; ReferencingAttribute = 'sprk_matter'
+                CascadeConfiguration = [pscustomobject]@{ Assign = 'NoCascade'; Delete = 'Cascade'; Archive = 'RemoveLink'; Merge = 'NoCascade'; Reparent = 'NoCascade'; Share = 'NoCascade'; Unshare = 'NoCascade'; RollupView = 'NoCascade' }
+            }
+        }
+        It 'sets Delete RemoveLink and Assign / Share / Unshare / Reparent / Merge NoCascade, and nothing else' {
+            $before = New-ReadRel
+            $body = Get-CascadeFixBody (New-ReadRel) (Get-ExpectedCascade $spec)
+            $body.CascadeConfiguration.Delete | Should Be 'RemoveLink'
+            foreach ($k in 'Assign', 'Share', 'Unshare', 'Reparent', 'Merge') { $body.CascadeConfiguration.$k | Should Be 'NoCascade' }
+            $body.CascadeConfiguration.Archive | Should Be 'RemoveLink'
+            $body.CascadeConfiguration.RollupView | Should Be 'NoCascade'
+            $body.MetadataId | Should Be $before.MetadataId
+            $body.SchemaName | Should Be $before.SchemaName
+            $body.'@odata.type' | Should Be $before.'@odata.type'
+            @($body.PSObject.Properties.Name).Count | Should Be @($before.PSObject.Properties.Name).Count
+        }
+        It 'reads back clean against the six expected members (must-not-fire) and would be caught if Delete stayed Cascade (must-fire)' {
+            $six = @{ Delete = 'RemoveLink'; Assign = 'NoCascade'; Share = 'NoCascade'; Unshare = 'NoCascade'; Reparent = 'NoCascade'; Merge = 'NoCascade' }
+            $body = Get-CascadeFixBody (New-ReadRel) (Get-ExpectedCascade $spec)
+            @(Get-CascadeMismatches $body.CascadeConfiguration $six).Count | Should Be 0
+            @(Get-CascadeMismatches (New-ReadRel).CascadeConfiguration $six).Count | Should Be 1
+        }
+        It 'sets all six members whatever the read values were, Merge included (the payload does not rely on the known drift)' {
+            $odd = New-ReadRel
+            foreach ($k in 'Assign', 'Share', 'Unshare', 'Reparent', 'Merge') { $odd.CascadeConfiguration.$k = 'Cascade' }
+            $body = Get-CascadeFixBody $odd (Get-ExpectedCascade $spec)
+            $body.CascadeConfiguration.Delete | Should Be 'RemoveLink'
+            foreach ($k in 'Assign', 'Share', 'Unshare', 'Reparent', 'Merge') { $body.CascadeConfiguration.$k | Should Be 'NoCascade' }
+        }
+        It 'refuses an expected configuration without one of the six members (must-fire)' {
+            { Get-CascadeFixBody (New-ReadRel) @{ Delete = 'RemoveLink'; Assign = 'NoCascade' } } | Should Throw 'has no'
+        }
+    }
+
+    Context 'Get-ParentalProblems (the verify of the final shape)' {
+        $final = @(
+            (New-Rel 'owninguser'), (New-Rel 'owningbusinessunit' 'Restrict'), (New-Rel 'sprk_matter' 'RemoveLink'), (New-Rel 'sprk_project' 'RemoveLink'),
+            (New-Rel 'sprk_procedure' 'Restrict'), (New-Rel 'sprk_excludedpolicy' 'Cascade'), (New-Rel 'sprk_firm' 'Restrict')
+        )
+        It 'is silent on the final shape (must-not-fire)' {
+            @(Get-ParentalProblems 'sprk_procedureassignment' $final 'sprk_excludedpolicy').Count | Should Be 0
+        }
+        It 'is silent when only Merge cascades (Dataverse sets Merge on lookups to contact) (must-not-fire)' {
+            $r = @($final) + (New-Rel 'sprk_contact' 'RemoveLink' 'NoCascade' 'NoCascade' 'Cascade')
+            @(Get-ParentalProblems 'sprk_procedureassignment' $r 'sprk_excludedpolicy').Count | Should Be 0
+        }
+        It 'fires when sprk_matter is still Delete Cascade (must-fire)' {
+            $r = @($final | Where-Object { $_.ReferencingAttribute -ne 'sprk_matter' }) + (New-Rel 'sprk_matter' 'Cascade')
+            $p = @(Get-ParentalProblems 'sprk_procedureassignment' $r 'sprk_excludedpolicy')
+            $p.Count | Should Be 1
+            ($p[0] -match 'sprk_matter') | Should Be $true
+        }
+        It 'fires on any other member cascading: assign or share (must-fire)' {
+            foreach ($k in 'assign', 'share') {
+                $r = @($final | Where-Object { $_.ReferencingAttribute -ne 'sprk_project' })
+                $r += if ($k -eq 'assign') { New-Rel 'sprk_project' 'RemoveLink' 'Cascade' } else { New-Rel 'sprk_project' 'RemoveLink' 'NoCascade' 'Cascade' }
+                @(Get-ParentalProblems 'sprk_procedureassignment' $r 'sprk_excludedpolicy').Count | Should Be 1
+            }
+        }
+        It 'fires when the allowed relationship is missing or is not Delete Cascade (must-fire)' {
+            @(Get-ParentalProblems 'sprk_procedureassignment' @($final | Where-Object { $_.ReferencingAttribute -ne 'sprk_excludedpolicy' }) 'sprk_excludedpolicy').Count | Should Be 1
+            $r = @($final | Where-Object { $_.ReferencingAttribute -ne 'sprk_excludedpolicy' }) + (New-Rel 'sprk_excludedpolicy' 'RemoveLink')
+            @(Get-ParentalProblems 'sprk_procedureassignment' $r 'sprk_excludedpolicy').Count | Should Be 1
+        }
+        It 'works the same for the version table (only sprk_procedure is parental)' {
+            $v = @((New-Rel 'owninguser'), (New-Rel 'sprk_procedure' 'Cascade'), (New-Rel 'sprk_previousversion' 'RemoveLink'))
+            @(Get-ParentalProblems 'sprk_procedureversion' $v 'sprk_procedure').Count | Should Be 0
+            @(Get-ParentalProblems 'sprk_procedureversion' (@($v) + (New-Rel 'sprk_extra' 'Cascade')) 'sprk_procedure').Count | Should Be 1
+        }
+    }
+
+    Context 'ORDER: the in-place repair, read back, before sprk_excludedpolicy is created' {
+        function Get-Attr($t, $c, $sel) { return $null }
+        function Get-DvOrNull([string]$Path, [int]$Retries = 0) {
+            if ($Path -match 'ManyToOneRelationships') { return [pscustomobject]@{ value = @($script:Rels) } }
+            return $null
+        }
+        $excluded = @($plan | Where-Object { $_.Table -eq 'sprk_procedureassignment' -and $_.Column -eq 'sprk_excludedpolicy' })[0]
+        $matterSpec = @($plan | Where-Object { $_.Table -eq 'sprk_procedureassignment' -and $_.Column -eq 'sprk_matter' })[0]
+        It 'refuses to create sprk_excludedpolicy while sprk_matter is still Delete Cascade (must-fire)' {
+            $DryRun = $false; $script:InPlaceFixes = [System.Collections.Generic.List[object]]::new()
+            $script:Rels = @((New-Rel 'owninguser'), (New-Rel 'sprk_matter' 'Cascade'))
+            { Assert-NoOtherParental $excluded } | Should Throw 'already has a parental relationship'
+        }
+        It 'refuses in apply mode even when a repair is merely planned (the PUT has not landed) (must-fire)' {
+            $DryRun = $false
+            $script:InPlaceFixes = [System.Collections.Generic.List[object]]::new(); $script:InPlaceFixes.Add(@{ Spec = $matterSpec; Cascade = $true; Desc = $true })
+            $script:Rels = @((New-Rel 'owninguser'), (New-Rel 'sprk_matter' 'Cascade'))
+            { Assert-NoOtherParental $excluded } | Should Throw 'already has a parental relationship'
+        }
+        It 'refuses on ANY other parental relationship, not only sprk_matter (must-fire)' {
+            $DryRun = $false; $script:InPlaceFixes = [System.Collections.Generic.List[object]]::new()
+            $script:Rels = @((New-Rel 'owninguser'), (New-Rel 'sprk_matter' 'RemoveLink'), (New-Rel 'sprk_workassignment' 'RemoveLink' 'Cascade'))
+            { Assert-NoOtherParental $excluded } | Should Throw 'already has a parental relationship'
+        }
+        It 'proceeds once the PUT has landed and sprk_matter reads back RemoveLink (must-not-fire)' {
+            $DryRun = $false; $script:InPlaceFixes = [System.Collections.Generic.List[object]]::new()
+            $script:Rels = @((New-Rel 'owninguser'), (New-Rel 'sprk_matter' 'RemoveLink'))
+            { Assert-NoOtherParental $excluded } | Should Not Throw
+        }
+        It 'in -WhatIf a PLANNED repair counts as done, an unplanned Cascade does not' {
+            $DryRun = $true
+            $script:Rels = @((New-Rel 'owninguser'), (New-Rel 'sprk_matter' 'Cascade'))
+            $script:InPlaceFixes = [System.Collections.Generic.List[object]]::new(); $script:InPlaceFixes.Add(@{ Spec = $matterSpec; Cascade = $true; Desc = $true })
+            { Assert-NoOtherParental $excluded } | Should Not Throw
+            $script:InPlaceFixes = [System.Collections.Generic.List[object]]::new()
+            { Assert-NoOtherParental $excluded } | Should Throw 'already has a parental relationship'
+        }
+        It 'does not look at a lookup that is not Delete Cascade, or one that already exists' {
+            $DryRun = $false; $script:InPlaceFixes = [System.Collections.Generic.List[object]]::new()
+            $script:Rels = @((New-Rel 'sprk_matter' 'Cascade'))
+            { Assert-NoOtherParental $matterSpec } | Should Not Throw
+        }
+        It 'the script runs the repair (PUT, then read back) before it creates any other assignment lookup, and the guard runs inside every create' {
+            $text = Get-Content -LiteralPath $script:ScriptPath -Raw
+            $step4 = $text.IndexOf('Write-Host "4. P4 table')
+            $repair = $text.IndexOf('Repair-CoreLookupDrift', $step4)
+            $firstCreate = $text.IndexOf('Invoke-LookupSpec $s', $step4)
+            $excludedCreate = $text.IndexOf('$_.Column -notin $script:Cores.Table', $step4)
+            ($step4 -gt 0 -and $repair -gt $step4 -and $firstCreate -gt $repair -and $excludedCreate -gt $repair) | Should Be $true
+            # inside the repair: PUT first, then the read-back loop, then the Changed entry
+            $fn = $text.IndexOf('function Repair-CoreLookupDrift')
+            $put = $text.IndexOf('Invoke-Dv -Path "RelationshipDefinitions(', $fn)
+            $back = $text.IndexOf('Get-LookupRelationship $s.Table $s.Column', $put)
+            $done = $text.IndexOf('CHANGED  $tag CascadeConfiguration', $back)
+            ($fn -gt 0 -and $put -gt $fn -and $back -gt $put -and $done -gt $back) | Should Be $true
+            # the guard is the first statement of Invoke-LookupSpec
+            $il = $text.IndexOf('function Invoke-LookupSpec($s) {')
+            $text.Substring($il, 120) -match 'Assert-NoOtherParental \$s' | Should Be $true
+        }
+    }
+
+    It 'Resolve-Plan itself stops (escalation) when the plan guard reports a problem, and runs on when it does not (must-fire / must-not-fire at the source)' {
+        $script:Fixture = @('sprk_matter', 'sprk_project', 'sprk_workassignment')
+        { Resolve-Plan @('sprk_matter', 'sprk_project', 'sprk_workassignment') } | Should Not Throw
+        function Get-ParentalPlanProblems { return @('sprk_procedureassignment has 2 Delete = Cascade lookups') }
+        { Resolve-Plan @('sprk_matter', 'sprk_project', 'sprk_workassignment') } | Should Throw 'one-parental-relationship-per-table'
     }
 }
 
