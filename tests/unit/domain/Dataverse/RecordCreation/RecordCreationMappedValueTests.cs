@@ -3,6 +3,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.RecordCreation;
 using Xunit;
 
@@ -141,6 +142,26 @@ public class RecordCreationMappedValueTests
     public void IsFilingLookup_LineageOwnershipParentAndSecureRootFilingColumns(string table, string column, bool filing)
     {
         RecordCreationService.IsFilingLookup(table, column).Should().Be(filing);
+    }
+
+    // Fix round 3 (UAC-r2 review, F-B): a lookup is filing when the lists say so OR the owner decision files the row under it.
+    [Theory]
+    [InlineData("sprk_workassignment", "sprk_regardingcommunication", "sprk_communication", true)] // no list names it (#2190)
+    [InlineData("sprk_invoice", "sprk_regardingworkassignment", "sprk_workassignment", true)] // not in the invoice's lineage
+    [InlineData("sprk_communication", "sprk_communicationthread", "sprk_communicationthread", true)] // lineage only: still filing
+    [InlineData("sprk_signal", "sprk_policy", "sprk_policy", false)] // a citation files nothing (#2084)
+    [InlineData("sprk_event", "sprk_assignedto", "contact", false)] // a person
+    [InlineData("sprk_workassignment", "sprk_assignedto", "contact", false)]
+    public void IsFilingLookup_OfALookup_IsTheListsOrTheOwnerDecisionsOwnTest(string table, string column, string target, bool filing)
+    {
+        var lookup = new DataverseWriteItemMapper.MappedLookup(column, target, target + "s", Guid.NewGuid());
+
+        RecordCreationService.IsFilingLookup(table, lookup).Should().Be(filing);
+        if (filing && !RecordCreationService.IsFilingLookup(table, column))
+        {
+            OwnedChildWrite.ParentsOf(table, new DataverseWriteItemMapper.MappedItem("{}", [column]) { Lookups = [lookup] })
+                .Should().ContainSingle("the owner decision files the row under it");
+        }
     }
 
     private static string? Raw(object? value, string? dateBehaviour) =>

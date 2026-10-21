@@ -59,6 +59,7 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     private static readonly Guid Assignee = Guid.Parse("a0140000-0000-4000-8000-0000000000c1");
     private static readonly Guid CallersContact = Guid.Parse("a0140000-0000-4000-8000-0000000000c2");
     private static readonly Guid MatterType = Guid.Parse("a0140000-0000-4000-8000-0000000000e1");
+    private static readonly Guid Communication = Guid.Parse("a0140000-0000-4000-8000-000000000007");
     private const string CallerToken = "caller-bearer-token";
     private const string FixedCorrelation = "seam-014-correlation";
 
@@ -423,6 +424,134 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
         StringOf(_creates.Should().ContainSingle().Subject.Fields, "sprk_RegardingMatter@odata.bind")
             .Should().Be($"/sprk_matters({OrdinaryMatter:D})");
+    }
+
+    // =====================================================================================
+    // Fix round 3 (UAC-r2 review, F-B) — "filing" is also the owner decision's own test (OwnedChildWrite.ParentsOf)
+    // =====================================================================================
+
+    [Fact]
+    public async Task CreateAsync_AWorkAssignmentsRegardingCommunicationMarkedServerSet_IsAskedAppendToBeforeThePlan_AndRefused()
+    {
+        // No filing list names sprk_workassignment.sprk_regardingcommunication (#2190), yet the owner decision files the row
+        // under the communication. Server-set, it skipped step 5's AppendTo, so it is asked before the plan (must fire).
+        _scripted.NoAppendTo.Add(Communication);
+
+        var marked = await Service().CreateAsync(WorkAssignmentUnderCommunication(serverSet: true), AsCaller(), CancellationToken.None);
+
+        marked.Refusal.Should().NotBeNull("a row is never filed under a record the caller was not asked about");
+        marked.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.NotFoundOrDenied);
+        marked.Refusal.OwnerDecision!.RefusalCode.Should().Be(DataverseUserClientErrorCodes.AccessDenied,
+            "refused by step 6's pre-plan AppendTo, in the plan's own shape");
+        Problem(marked, "sprk_workassignment").Status.Should().Be(StatusCodes.Status404NotFound);
+        _creates.Should().BeEmpty();
+        _journal.Should().NotContain(["owner", "create"]);
+    }
+
+    [Fact]
+    public async Task CreateAsync_AMappedWorkAssignmentRegardingCommunicationTheCallerCannotAppendTo_IsRefused_NotDropped()
+    {
+        // Closes review K-5: a mapped lookup the owner decision files the row under is the caller's own (must fire).
+        _user.Columns["sprk_workassignment"] = new() { ["sprk_regardingcommunication"] = ("Lookup", true) };
+        _sources[("sprk_project", SourceProject)]["sprk_communication"] = new EntityReference("sprk_communication", Communication);
+        Profile("sprk_project", "sprk_workassignment", Rule("sprk_communication", "sprk_regardingcommunication", Lookup));
+        _scripted.NoAppendTo.Add(Communication);
+
+        var outcome = await Service().CreateAsync(
+            Request("sprk_workassignment", new Dictionary<string, object?> { ["sprk_name"] = "Review the lease" },
+                mappingSource: ("sprk_project", SourceProject)),
+            AsCaller(), CancellationToken.None);
+
+        outcome.Refusal.Should().NotBeNull("a mapped filing lookup is refused, never dropped");
+        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.NotFoundOrDenied);
+        Problem(outcome, "sprk_workassignment").Status.Should().Be(StatusCodes.Status404NotFound);
+        _creates.Should().BeEmpty();
+        _journal.Should().NotContain(["owner", "create"]);
+    }
+
+    [Fact]
+    public async Task CreateAsync_AChildsOwnershipParentLookupNoListNames_MarkedServerSet_IsRefusedBeforeMappingReadsAnything()
+    {
+        // An invoice's sprk_regardingworkassignment is in no lineage list, yet the owner decision files the invoice under the
+        // work assignment: server-set, it is the K-2 refusal (must fire). Review K-1: refused before step 3 reads anything.
+        Profile("sprk_matter", "sprk_invoice", Rule("sprk_matterdescription", "sprk_description", Memo));
+        var workAssignment = Guid.NewGuid();
+        var item = new DataverseWriteItemMapper.MappedItem(
+            JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["sprk_invoicenumber"] = "INV-1",
+                ["sprk_RegardingWorkAssignment@odata.bind"] = $"/sprk_workassignments({workAssignment:D})",
+            }),
+            ["sprk_invoicenumber", "sprk_regardingworkassignment"])
+        {
+            Lookups = [new DataverseWriteItemMapper.MappedLookup(
+                "sprk_regardingworkassignment", "sprk_workassignment", "sprk_workassignments", workAssignment)],
+        };
+        var request = new RecordCreationRequest("sprk_invoice", new RecordCreationPayload.Mapped(item))
+        {
+            CorrelationId = FixedCorrelation,
+            ServerSetLookupColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_regardingworkassignment" },
+            Mapping = RecordCreationMapping.ForCaller(_probe, CallerToken, "sprk_matter", OrdinaryMatter),
+        };
+
+        var outcome = await Service().CreateAsync(request, AsCaller(), CancellationToken.None);
+
+        outcome.Refusal!.Code.Should().Be(RecordCreationRefusal.ServerSetFilingLookupCode);
+        Problem(outcome, "sprk_invoice").Status.Should().Be(StatusCodes.Status500InternalServerError);
+        _journal.Should().NotContain(["profile", "probe", "source-read", "user:check", "owner", "create"]);
+        outcome.Steps.Should().NotContain(s => s.Step == RecordCreationStep.FieldMapping, "refused before step 3");
+        outcome.Steps[^1].Should().Be(new RecordCreationStepRecord(
+            RecordCreationStep.CallerChecks, RecordCreationStepState.Refused, RecordCreationRefusal.ServerSetFilingLookupCode));
+        _creates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CreateAsync_ACitationLookupMarkedServerSet_IsNotAFilingLookup_AndPassesTheGuard()
+    {
+        // A Signal CITES its rule (RecordOwnershipResolver.IsCitation): the owner decision files nothing under it, so it is
+        // no filing lookup, server-set or not (must not fire).
+        var policy = Guid.NewGuid();
+        var item = new DataverseWriteItemMapper.MappedItem(
+            JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["sprk_name"] = "Spend over budget",
+                ["sprk_Policy@odata.bind"] = $"/sprk_policies({policy:D})",
+            }),
+            ["sprk_name", "sprk_policy"])
+        {
+            Lookups = [new DataverseWriteItemMapper.MappedLookup("sprk_policy", "sprk_policy", "sprk_policies", policy)],
+        };
+        var request = new RecordCreationRequest("sprk_signal", new RecordCreationPayload.Mapped(item))
+        {
+            CorrelationId = FixedCorrelation,
+            ServerSetLookupColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_policy" },
+        };
+
+        var outcome = await Service().CreateAsync(request, AsCaller(), CancellationToken.None);
+
+        outcome.Refusal?.Code.Should().NotBe(RecordCreationRefusal.ServerSetFilingLookupCode);
+        _journal.Should().Contain("user:check", "the create went past the guard to step 5's checks");
+    }
+
+    [Fact]
+    public async Task CreateAsync_AWorkAssignmentsAssignedToMarkedServerSet_IsNotAFilingLookup_AndCostsNoAppendTo()
+    {
+        // A person is no ownership parent: a server-set sprk_assignedto stays exempt from AppendTo (must not fire).
+        _scripted.NoAppendToIn.Add(("contacts", Assignee));
+        var request = Request("sprk_workassignment", new Dictionary<string, object?>
+        {
+            ["sprk_name"] = "Review the lease",
+            ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
+            ["sprk_AssignedTo@odata.bind"] = $"/contacts({Assignee:D})",
+        }, mapping: false) with
+        {
+            ServerSetLookupColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_assignedto" },
+        };
+
+        var outcome = await Service().CreateAsync(request, AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        StringOf(_creates.Should().ContainSingle().Subject.Fields, "sprk_AssignedTo@odata.bind").Should().Be($"/contacts({Assignee:D})");
     }
 
     // =====================================================================================
@@ -969,6 +1098,20 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         }, mapping: false) with
         {
             ServerSetLookupColumns = serverSet is null ? null : new HashSet<string>(StringComparer.OrdinalIgnoreCase) { serverSet },
+        };
+
+    /// <summary>A work assignment filed under <see cref="Communication"/> by the caller's bind, asking for no mapping; the
+    /// lookup marked server-set when <paramref name="serverSet"/>.</summary>
+    private RecordCreationRequest WorkAssignmentUnderCommunication(bool serverSet) =>
+        Request("sprk_workassignment", new Dictionary<string, object?>
+        {
+            ["sprk_name"] = "Reply to the client",
+            ["sprk_RegardingCommunication@odata.bind"] = $"/sprk_communications({Communication:D})",
+        }, mapping: false) with
+        {
+            ServerSetLookupColumns = serverSet
+                ? new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_regardingcommunication" }
+                : null,
         };
 
     private RecordCreationRequest Event(object body, (string Table, Guid Id)? mappingSource) =>

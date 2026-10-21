@@ -369,6 +369,15 @@ internal sealed partial class RecordCreationService
             trace.Record(RecordCreationStep.TableRules, RecordCreationStepState.Ran, "no server-owned column in the caller's payload");
         }
 
+        // UAC-r2's review of 013 (K-2), a step-5 rule asked before step 3 reads anything (task 014 fix round 3, review
+        // K-1): a server-set lookup costs no AppendTo, so a FILING lookup is never one. Server-set columns are never mapped,
+        // so the caller's item already carries every server-set lookup the row will.
+        if (user is not null && ServerSetFilingColumn(table, item, request.ServerSetLookupColumns) is { } serverSetFilingColumn)
+        {
+            trace.Begin(RecordCreationStep.CallerChecks);
+            return Decision.Refuse(ServerSetFilingRefused(serverSetFilingColumn, noun));
+        }
+
         // ── Step 3: field mapping (task 014) — fill-only, the source read as the caller; the mapped values' origin kept ──
         trace.Begin(RecordCreationStep.FieldMapping);
         var mappingWarnings = new List<RecordCreationWarning>();
@@ -424,10 +433,7 @@ internal sealed partial class RecordCreationService
         }
         else
         {
-            // UAC-r2's review of 013 (K-2): a server-set lookup costs no AppendTo, so a FILING lookup is never one.
-            if (ServerSetFilingColumn(table, request.ServerSetLookupColumns) is { } serverSetFiling)
-                return Decision.Refuse(ServerSetFilingRefused(serverSetFiling, noun));
-
+            // The K-2 guard (a server-set FILING lookup) ran before step 3.
             if (mappedValues.Count == 0)
             {
                 var check = await CallerWriteAuthorization.CheckCallerMayCreateAsync(
