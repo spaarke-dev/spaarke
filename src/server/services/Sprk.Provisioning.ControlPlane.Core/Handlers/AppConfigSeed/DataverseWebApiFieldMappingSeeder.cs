@@ -484,8 +484,9 @@ public sealed class DataverseWebApiFieldMappingSeeder : IAppConfigSeeder
         Uri envUri, string bearerToken, string profileId, string profileName,
         FieldMappingRuleSeedItem rule, CancellationToken cancellationToken)
     {
+        // A lookup filters on its _<name>_value form; the bare lookup name is a Dataverse 400 (#1318, FR-05c).
         var filter =
-            $"sprk_fieldmappingprofile eq {profileId} and " +
+            $"_sprk_fieldmappingprofile_value eq {profileId} and " +
             $"sprk_sourcefield eq '{rule.SourceField.Replace("'", "''", StringComparison.Ordinal)}' and " +
             $"sprk_targetfield eq '{rule.TargetField.Replace("'", "''", StringComparison.Ordinal)}'";
         var getUri = new Uri(envUri,

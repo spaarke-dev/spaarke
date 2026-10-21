@@ -57,17 +57,17 @@ public class RecordCreatorPersonStampTests
     // Office quick-create — RecordCreationService (matter, project)
     // =====================================================================================
 
-    private RecordCreationService OfficeCreator()
+    private OfficeRecordCreationService OfficeCreator()
     {
         var ownership = new Mock<IRecordOwnershipResolver>();
         ownership.Setup(o => o.ResolveOwningTeamAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Team);
-        return new RecordCreationService(
+        return new OfficeRecordCreationService(
             _entities.Object, _fieldMappings.Object, ownership.Object,
             IdentityNormalizationFixtures.NoLinkedContact(),
             Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(),
             Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(),
-            NullLogger<RecordCreationService>.Instance);
+            NullLogger<OfficeRecordCreationService>.Instance);
     }
 
     [Theory]
