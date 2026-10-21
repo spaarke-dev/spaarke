@@ -206,7 +206,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
         var probe = new Mock<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>(
             new HttpClient(), new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
-            NullLogger<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>.Instance, null!)
+            NullLogger<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>.Instance, null!, null!)
         { CallBase = false };
         probe.Setup(p => p.GetCallerSystemUserIdAsync("office-token", It.IsAny<CancellationToken>())).ReturnsAsync(OfficeSaver);
         probe.Setup(p => p.GetCallerRightsAsync("office-token", "sprk_communications", RefiledEmail, It.IsAny<CancellationToken>()))
