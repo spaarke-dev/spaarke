@@ -149,7 +149,7 @@ Full rationale for each decision is in `notes/decisions-log.md`.
 - 2026-10-17 — D-101: every submission that is read creates its invoice. Rejected → created Rejected. Blocked → In Review, held until Override / Return. Their Decision Records file under the invoice; `sprk_decisionrecord` gets no submission lookup.
 - 2026-10-17 — D-102: held invoices never count toward spend. This is automatic under D-103; 049 keeps a must-fire test on both sum paths (rollup and `FinanceBaseValues.ReadAsync`). Reviewed by ontology-r1.
 
-- 2026-10-21 — **"Matter" is shorthand for any core record.** e-billing applies to `sprk_matter`, `sprk_project` and `sprk_workassignment`, and will extend to `sprk_agreement`. Every new table, lookup, field, control and rule is built to the core-record set (one list, like `InvoiceFamilyCoreRecordGuard.FilingCores`), never to `sprk_matter` alone. A test or a design that names only `sprk_matter` needs a reason.
+- 2026-10-21 — **"Matter" is shorthand for any core record.** e-billing applies to `sprk_matter`, `sprk_project` and `sprk_workassignment`, and will extend to `sprk_agreement` in e-billing R2 (owner 2026-10-21: an agreement is a core record that can stand alone or sit under a matter or project). Every new table, lookup, field, control and rule is built to the core-record set (one list, like `InvoiceFamilyCoreRecordGuard.FilingCores`), never to `sprk_matter` alone. A test or a design that names only `sprk_matter` needs a reason.
 
 ### Open owner questions
 
