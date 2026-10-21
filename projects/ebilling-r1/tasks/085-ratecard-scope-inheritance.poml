@@ -64,7 +64,7 @@
   </knowledge>
 
   <steps mode="directional">
-    <step order="0">Read notes/080-ruleset-scope-schema.md: option values and the backfill result on dev. Confirm every dev card has a scope or is listed.</step>
+    <step order="0">Read notes/080-ruleset-scope-schema.md: option values and the backfill result on dev. Confirm every dev card has a scope or is listed. On spaarkedev1, review the cards 080 marked Firm and the orphaned cards it marked CoreRecord, and record the confirmation (or any card re-marked, with the reason) in this task's notes; the owner does not review the dev list (D-147 / ontology D-174). Before 085 is deployed to a customer environment, that environment's Firm list goes to the owner.</step>
     <step order="1">RateRow gains the card's scope; ReadRatesAsync reads sprk_scope; BuildRateQuery reads the chain's cards.</step>
     <step order="2">RateCardResolver.Applies and Tier with scope and distance; resolver tests.</step>
     <step order="3">InvoiceResolutionService gets the chain from CoreRecordChain; service tests.</step>
