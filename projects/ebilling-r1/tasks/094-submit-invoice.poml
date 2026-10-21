@@ -76,7 +76,6 @@
     <trigger>If the Stored File row cannot join 049's ExecuteTransaction (for example 086's ForParents owner cannot be resolved before the transaction), STOP and report; do not commit the file row separately.</trigger>
     <trigger>If 090's flip cannot check blob existence and SHA inside the If-Match write, STOP and report to 090's owner rather than flipping without the check.</trigger>
     <trigger>If 092 has not landed and extraction still reads bytes from the source Document's SPE pointer, STOP and ask whether extraction reads the staged copy here or waits for 092.</trigger>
-    <trigger>If the communication UI action that calls this route is expected in this task, STOP: no prototype or component spec exists for it (shared CommunicationTimeline MessageAttachments.tsx is the likely host); ask the owner where it belongs.</trigger>
   </escalation>
 
   <justification>
@@ -111,7 +110,7 @@
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Reviews: adversarial-reviewer twice (auth, tenant isolation) and uac-r2 (model 14). Wave order puts 092 before 094 (W3-C); it is not a declared dep. Known limits carried from the model (owner-visible): a change after step 5 passes (O-32, uac-r2 K2), K3 soft delete 7 days, K4, K6; the D-139 rule that an ended submission blocks a re-submit of the same document is kept from 050a. The guard's live version-bump proof is still outstanding (model section 15, Engineering).</notes>
+  <notes>Reviews: adversarial-reviewer twice (auth, tenant isolation) and uac-r2 (model 14). Wave order puts 092 before 094 (W3-C); it is not a declared dep. Known limits carried from the model (owner-visible): a change after step 5 passes (O-32, uac-r2 K2), K3 soft delete 7 days, K4, K6; the D-139 rule that an ended submission blocks a re-submit of the same document is kept from 050a. The guard's live version-bump proof is still outstanding (model section 15, Engineering). OWNER 2026-10-21 (re-plan Q1): the email UI is task 118 (toolbar Submit Invoice replacing Link Invoice, flagged attachments via the profile's sprk_documenttype = Invoice, Email Review Invoice tab). This task is server-only; record the final route name, request (communication, invoice document, supporting documents) and error codes in its notes for 118.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

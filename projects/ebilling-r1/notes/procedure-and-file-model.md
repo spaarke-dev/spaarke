@@ -780,6 +780,8 @@ Unchanged at the core: the immutable policy version (clause and location), reaso
 - **Inactive invoices are not changeable.** A correction (097) against a Rejected, Returned to Firm, Cancelled or Superseded invoice is refused (409). It becomes changeable only if reactivated, and only an admin may reactivate.
 - **An Override releases any held invoice** (114), whatever the channel and whatever raised the hold — the master "push it through", tracked by its Decision Record.
 - **Storage (K-3, 091):** remove the account-scope storage grant; dev/test is not a current risk, and the requirement is correct settings for provisioned customer environments (container-scoped only).
+- **Submit Invoice in the email UI (118):** three entry points running one flow: the email toolbar's "Link Invoice" becomes "Submit Invoice"; attachments the document profile typed as Invoice (`sprk_documenttype`) show a badge and "Submit as invoice"; the Email Review dialog gets an Invoice tab. The marking step is the Outlook add-in's, shared. No new classifier.
+- **Step 0 (099) covers every `/api/finance` route.**
 
 - **Banner on lists (known limit).** R1 computes the banner only on the single-invoice review read; invoice lists do not show it.
 - **Banner known limits (uac-r2 C2, probes):** one bit about a Secure distance-1 parent; a brief false banner or "could not be checked" during a non-atomic publish (section 8.2).

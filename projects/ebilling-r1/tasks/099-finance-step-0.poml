@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="099" project="ebilling-r1">
   <metadata>
-    <title>Finance step 0: refuse flagged-external callers on every /api/finance invoice and submission route and /rulesets/* (5.3)</title>
+    <title>Finance step 0: refuse flagged-external callers on every /api/finance route (5.3; owner 2026-10-21)</title>
     <phase>3 Rules (WP3) — Procedure model (EB-D-148), wave W3-A</phase>
     <gate>startable once 100 and 105 are merged into the branch (this task adds the route-group flag to their endpoint files); uac-r2 reviews the diff before merge (auth)</gate>
     <status>not-started</status>
@@ -80,7 +80,6 @@
   </steps>
 
   <escalation>
-    <trigger>If /invoice-review/reject, the recalculate routes, /ratecards/* or /code-set-mappings/* turn out to read or write invoice or submission rows (section 5.3's group rule), STOP and ask the main session whether the flag goes on them; do not decide it here. (Recalculate reads invoices to sum spend.)</trigger>
     <trigger>If the step-0 check cannot run before the target declaration's record reads without restructuring the filter, STOP and agree the shape with uac-r2; never move it into InvoiceSubmissionService.</trigger>
     <trigger>If a client or test on this branch calls an in-scope route as a flagged-external systemuser on purpose, STOP and raise 🔔 Human Input Required (section 5.3 says none does).</trigger>
   </escalation>
@@ -114,7 +113,7 @@
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Two adversarial-review passes (auth). Later tasks reuse the flag: 081 and 089 (Procedure and assignment routes), 084 (6.6 read models), 090 and 098 (file routes apply the same definition). 113 reads the verdict item. P3-A beside 080, 088, 115, 091: no shared files.</notes>
+  <notes>Two adversarial-review passes (auth). Later tasks reuse the flag: 081 and 089 (Procedure and assignment routes), 084 (6.6 read models), 090 and 098 (file routes apply the same definition). 113 reads the verdict item. P3-A beside 080, 088, 115, 091: no shared files. OWNER 2026-10-21 (re-plan Q3): step 0 applies to EVERY route under /api/finance (invoices, submissions, invoice-review incl. reject, recalculate, matter/project rollups, ratecards, code-set-mappings, rulesets, related-work), so a future route cannot be missed. Apply it at the /api/finance group level where possible; an ArchTest fails any /api/finance route without it. This supersedes the narrower scope in this POML's other text.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

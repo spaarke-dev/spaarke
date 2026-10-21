@@ -1,7 +1,7 @@
 # TASK-INDEX — ebilling-r1
 
 > **Last Updated**: 2026-10-21 (re-plan after EB-D-148: 079–086 rewritten, 087 cancelled, 088–099, 113–117 and 189 added, 150 amended; brief `../notes/replan-eb-d-148.md`)
-> **Task count**: 106 · **Spec**: [`../spec.md`](../spec.md) · **Plan**: [`../plan.md`](../plan.md) · **Decomposition brief**: [`../notes/drafts/task-decomposition.md`](../notes/drafts/task-decomposition.md)
+> **Task count**: 107 · **Spec**: [`../spec.md`](../spec.md) · **Plan**: [`../plan.md`](../plan.md) · **Decomposition brief**: [`../notes/drafts/task-decomposition.md`](../notes/drafts/task-decomposition.md)
 > **Legend**: 🔲 [open] not started · 🟡 [wip] in progress · ⏸ [wip] waiting on an owner decision · ✅ [done] completed · 🔄 needs retry · ⏭️ [deferred]. The bracketed ASCII token is what `scripts/check-task-status-drift.ps1` reads (`[blocked]` there means blocked-shipped, a closed state, so it is not used for open blocks).
 
 ## Quick Recovery
@@ -99,12 +99,13 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 096 | 🔲 [open] | Remove the Office server legs for Invoice as a save target and invoice quick-create | FULL | sonnet / high | P3-F | 095 |
 | 097 | 🔲 [open] | Corrected invoice: the old invoice closes Superseded in step 4 (guarded) and its open Signals close Superseded | FULL | opus / high | P3-F (p-safe false) | 094, 104, 088 |
 | 098 | 🔲 [open] | (a′) on sprk_invoice: hide invoices with an isolated Submit Invoice source, and derived rows, from external callers | FULL | opus / high | P3-C (p-safe false) | 088, 090 |
-| 099 | 🔲 [open] | Finance step 0: refuse flagged-external callers on every /api/finance invoice and submission route and /rulesets/* (5.3) | FULL | opus / high | P3-A | none |
+| 099 | 🔲 [open] | Finance step 0: refuse flagged-external callers on every /api/finance route (5.3; owner 2026-10-21) | FULL | opus / high | P3-A | none |
 | 113 | 🔲 [open] | Read-time Procedure-change banner on /review: app-only comparison with the snapshot, internal callers only | FULL | sonnet / high | P3-F | 082, 100 |
 | 114 | 🔲 [open] | Override releases a no-version-in-force gap hold for that invoice only, recorded through WriteBillingDecisionAsync | FULL | sonnet / high | P3-F | 082, 105 |
 | 115 | 🔲 [open] | AddedFee (100000015) and Discount (100000016) billing rule types: options, domain, schemas, validator refusals, handlers | FULL | opus / high | P3-A | none |
 | 116 | 🔲 [open] | Procedure Version documents: drafting and readers keyed per version on its Stored File; sprk_sourcedocument retired | FULL | opus / high | P3-F (p-safe false) | 081, 085, 090 |
 | 117 | 🔲 [open] | Core-record delete and Procedures: retire sweep for unlinked record-scoped rule sets; delete lists agreed with uac-r2 | FULL | opus / high | P3-D (p-safe false) | 089 |
+| 118 | 🔲 [open] | Submit Invoice in the email UI: toolbar button (replaces Link Invoice), flagged attachments, Email Review Invoice tab | FULL | sonnet / high | P3-F | 094 |
 
 ### Phase 4 — Review and approval (WP4)
 
@@ -122,7 +123,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 109 | ✅ [done] | ConsoleKit additions: outcome cards, count filters, disclosure, status labels | STANDARD | sonnet / high | P4-A | none |
 | 110 | 🔲 [open] | Invoice Review code page — lines, review pane, corrections, bulk, by-rule | STANDARD | opus / high | P4-C | 100, 101, 102, 108, 109 |
 | 111 | 🔲 [open] | Invoice decision wizard and context / related / history panes | STANDARD | sonnet / high | none | 110, 103, 104, 105, 106, 107 |
-| 112 | 🔲 [open] | Deploy WP4 to dev | STANDARD | sonnet / high | none (deploy) | 052, 100, 101, 102, 103, 104, 105, 106, 107, 110, 111, 079, 095, 096, 097, 113, 114 |
+| 112 | 🔲 [open] | Deploy WP4 to dev | STANDARD | sonnet / high | none (deploy) | 052, 100, 101, 102, 103, 104, 105, 106, 107, 110, 111, 079, 095, 096, 097, 113, 114, 118 |
 
 ### Phase 5 — Firm feedback (WP5)
 
@@ -200,6 +201,7 @@ Phase 3
   W3-11 (parallel, 4): 083, 084 (back end), 085, 094 — prereq 082 / 082 / 082 / 086+092+098 — goal-eligible: NO (094 isolation)
   W3-12 (parallel, 4): 116, 095, 113, 114 — prereq 085 / 094 / 082+100 / 082+105; 116 and 095 p-safe false (no shared files with each other)
                                                                        — goal-eligible: NO
+  W3-12b (single):    118 email UI — prereq 094 + word-add-in-r1 shared marking step — goal-eligible: NO
   W3-13 (single):     097 — prereq 094, 104; after 095 (shared InvoiceSubmission files) — goal-eligible: NO
   W3-14 (single):     096 — prereq 095 + word-add-in-r1 release gate   — goal-eligible: NO
   W3-5 (single):      079 deploy WP3 — prereq per its row               — goal-eligible: NO (deploy)
@@ -256,5 +258,5 @@ joined at 049 by `029 → 070 → 071 → 072 → 073 → 049`, and WP1 `029` ga
 | 096 | word-add-in-r1 removes the add-in side first; server legs one release later |
 | 084 | UI half waits for the prototype (O-14) |
 | 116 | The `sprk_sourcedocument` column delete runs only after 079, with the owner's OK |
-| 094, 097, 099, 114 | Open owner questions raised by the POMLs' escalation triggers (see current-task.md) |
+| 118 | word-add-in-r1 moves its attachment-marking step into a shared component (or agrees this task builds it there) |
 | 163 | UAT sign-off |
