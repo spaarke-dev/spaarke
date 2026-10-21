@@ -25,7 +25,8 @@ namespace Spaarke.ArchTests;
 /// without a verbatim <c>@</c> — the <c>source</c> argument (third positional, or named <c>source:</c>) is either the literal
 /// <c>null</c> / <c>default</c> (nothing read, nothing copied), or a plain local name. For a local name the rule is an
 /// ALLOW-LIST per occurrence, decided on syntax nodes in the SAME member body (method, constructor or accessor; a local function is
-/// judged as part of the member that contains it, so a variable it captures is traced):
+/// judged as part of the member that contains it, so a variable it captures is traced; but a mask assignment inside a local function,
+/// lambda or anonymous method does not count for a call outside it):
 /// every occurrence of that name there must be (1) a declaration or a statement-level assignment of <c>null</c>, <c>default</c>
 /// or exactly <c>(await )?MappingSourceCallerMask.ApplyAsync(…)</c> (optionally <c>.ConfigureAwait(false)</c>, nothing else);
 /// (2) a null check; or (3) an engine call's source argument — and at least one assignment must be a mask call. Anything else (a
@@ -568,6 +569,64 @@ public class MappingSourceCallerMaskGuardTests
             """
         },
         {
+            "(UAC-r2 re-check) the mask only inside a local function that is never invoked, the call outside it",
+            """
+            class Svc
+            {
+                async Task M()
+                {
+                    Entity? s = null;
+                    async Task L() { s = await MappingSourceCallerMask.ApplyAsync(c, t, i, appRead, cols, _logger, ct); }
+                    CreateTimeFieldMapping.Apply(r, t, s, p, w, l);
+                }
+            }
+            """
+        },
+        {
+            "(UAC-r2 re-check) the mask only inside a local function that is invoked, the call outside it",
+            """
+            class Svc
+            {
+                async Task M()
+                {
+                    Entity? s = null;
+                    async Task L() { s = await MappingSourceCallerMask.ApplyAsync(c, t, i, appRead, cols, _logger, ct); }
+                    await L();
+                    CreateTimeFieldMapping.Apply(r, t, s, p, w, l);
+                }
+            }
+            """
+        },
+        {
+            "(UAC-r2 re-check) the mask only inside a local function, declared from the raw read (as UAC wrote it), the call outside",
+            """
+            class Svc
+            {
+                async Task M()
+                {
+                    var s = appRead;
+                    async Task L() { s = await MappingSourceCallerMask.ApplyAsync(c, t, i, appRead, cols, _logger, ct); }
+                    CreateTimeFieldMapping.Apply(r, t, s, p, w, l);
+                }
+            }
+            """
+        },
+        {
+            "(UAC-r2 re-check) the mask only inside a lambda, the call outside it",
+            """
+            class Svc
+            {
+                async Task M()
+                {
+                    Entity? s = null;
+                    Func<Task> f = async () => { s = await MappingSourceCallerMask.ApplyAsync(c, t, i, appRead, cols, _logger, ct); };
+                    await f();
+                    CreateTimeFieldMapping.Apply(r, t, s, p, w, l);
+                }
+            }
+            """
+        },
+        {
             "(UAC-r2 re-check, F3-2) the engine named through a :: alias-qualified name",
             """
             using FM = Sprk.Bff.Api.Services.Dataverse.FieldMapping;
@@ -687,6 +746,39 @@ public class MappingSourceCallerMaskGuardTests
             """
         },
         {
+            "(UAC-r2 re-check) the mask and the call both inside the same local function",
+            """
+            class Svc
+            {
+                async Task M()
+                {
+                    async Task L()
+                    {
+                        Entity? s = null;
+                        s = await MappingSourceCallerMask.ApplyAsync(c, t, i, appRead, cols, _logger, ct);
+                        CreateTimeFieldMapping.Apply(r, t, s, p, w, l);
+                    }
+                    await L();
+                }
+            }
+            """
+        },
+        {
+            "(UAC-r2 re-check) the mask in the method body, the call in a local function inside it",
+            """
+            class Svc
+            {
+                async Task M()
+                {
+                    Entity? s = null;
+                    s = await MappingSourceCallerMask.ApplyAsync(c, t, i, appRead, cols, _logger, ct);
+                    void L() { CreateTimeFieldMapping.Apply(r, t, s, p, w, l); }
+                    L();
+                }
+            }
+            """
+        },
+        {
             "a named, masked source",
             """
             var masked = await MappingSourceCallerMask.ApplyAsync(caller, table, id, appRead, columns, _logger, ct);
@@ -764,7 +856,7 @@ public class MappingSourceCallerMaskGuardTests
             }
         }
 
-        var analysed = new HashSet<(SyntaxNode Scope, string Name)>();
+        var analysed = new HashSet<(SyntaxNode Scope, string Name, SyntaxNode? Boundary)>();
         foreach (var call in calls)
         {
             var argument = SourceArgument(call);
@@ -782,9 +874,10 @@ public class MappingSourceCallerMaskGuardTests
                 case IdentifierNameSyntax id:
                     var scope = ScopeOf(call);
                     var name = id.Identifier.ValueText;
-                    if (analysed.Add((scope, name)))
+                    var boundary = FunctionBoundary(call);
+                    if (analysed.Add((scope, name, boundary)))
                     {
-                        violations.AddRange(UnsanctionedUses(scope, name, sourceArguments).Select(reason => $"{Line(call)}: '{name}' {reason}"));
+                        violations.AddRange(UnsanctionedUses(scope, name, sourceArguments, call).Select(reason => $"{Line(call)}: '{name}' {reason}"));
                     }
 
                     break;
@@ -829,7 +922,7 @@ public class MappingSourceCallerMaskGuardTests
     /// access, a parameter, a <c>??=</c> — is a violation; so is a name never assigned from the mask in this body (a field, a
     /// property or a base-class member declared outside it).
     /// </summary>
-    private static IEnumerable<string> UnsanctionedUses(SyntaxNode scope, string name, ISet<SyntaxNode> sourceArguments)
+    private static IEnumerable<string> UnsanctionedUses(SyntaxNode scope, string name, ISet<SyntaxNode> sourceArguments, SyntaxNode call)
     {
         var maskAssigned = false;
         var tokens = scope.DescendantTokens().Where(t => t.IsKind(SyntaxKind.IdentifierToken) && t.ValueText == name).ToList();
@@ -859,7 +952,7 @@ public class MappingSourceCallerMaskGuardTests
 
                     if (IsMaskCall(assignment.Right))
                     {
-                        maskAssigned = true;
+                        maskAssigned |= MaskReaches(token.Parent!, call);
                         continue;
                     }
 
@@ -877,7 +970,7 @@ public class MappingSourceCallerMaskGuardTests
 
                     if (value is not null && IsMaskCall(value))
                     {
-                        maskAssigned = true;
+                        maskAssigned |= MaskReaches(token.Parent!, call);
                         continue;
                     }
 
@@ -895,6 +988,17 @@ public class MappingSourceCallerMaskGuardTests
             yield return "is never assigned from the mask in this member body (a parameter, a field, a property or a base-class member?) — mask the source where it is read";
         }
     }
+
+    /// <summary>The local function, lambda or anonymous method around <paramref name="node"/>, or null in the member body itself.</summary>
+    private static SyntaxNode? FunctionBoundary(SyntaxNode node)
+        => node.Ancestors().FirstOrDefault(a => a is LocalFunctionStatementSyntax or AnonymousFunctionExpressionSyntax);
+
+    /// <summary>
+    /// A mask assignment counts for an engine call only if it runs in the call's own function or an enclosing one: an assignment
+    /// inside a local function, lambda or anonymous method does not count for a call outside it (it may never run). Fails closed.
+    /// </summary>
+    private static bool MaskReaches(SyntaxNode assignment, SyntaxNode call)
+        => FunctionBoundary(assignment) is not { } boundary || call.Ancestors().Contains(boundary);
 
     /// <summary>True for <c>x is null</c>, <c>x is not null</c>, <c>x == null</c>, <c>x != null</c> (and the mirrored comparisons).</summary>
     private static bool IsNullCheck(IdentifierNameSyntax id)
