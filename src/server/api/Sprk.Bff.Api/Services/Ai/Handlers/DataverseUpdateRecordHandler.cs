@@ -244,7 +244,7 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
             // the gate reads app-only, so a refusal of its own (an unreadable flag, a walled creator) would otherwise tell a
             // caller who may not file under the record that it exists and is secure.
             if (Sprk.Bff.Api.Services.Access.SecureRootInheritance.Inherits(tablename)
-                && await OwnedChildWrite.CheckCallerMayFileRootUnderAsync(
+                && await CallerWriteAuthorization.CheckCallerMayFileRootUnderAsync(
                         _dataverse, tablename, entitySetName, recordId, mapped.Item!, cancellationToken)
                     .ConfigureAwait(false) is { } filingRefusal)
             {
