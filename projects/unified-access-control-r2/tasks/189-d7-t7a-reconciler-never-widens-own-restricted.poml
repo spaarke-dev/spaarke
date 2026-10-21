@@ -3,7 +3,7 @@
   <metadata>
     <title>D7 T7a: ChildAccessPermissionReconciler must not widen a child's own Restricted (#2126)</title>
     <phase>Session 28: UAC (owner round 110, 2026-10-20)</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security: the reconciler overwrites the value that task 188's predicate reads; a widening here silently defeats D7.</rigor-reason>
     <model-tier>opus</model-tier>
