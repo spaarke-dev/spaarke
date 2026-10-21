@@ -12,20 +12,13 @@
 | Field | Value |
 |-------|-------|
 | **Task** | #1911 draft PR. **Active work: the new Procedure and file model** (owner 2026-10-20/21). It replaces the Procedure Library / D-145 / rule-set record-scope design (tasks 079–087). **Do not start any 079–087 implementation or schema before the owner finalizes.** |
-| **Design** | `notes/procedure-and-file-model.md`, now **v5.8** (owner F1-a (i), F1-c refuse; uac-r2 ACCEPT-WITH-CHANGES on v5.7 applied). v5.5 recorded the owner's Submit Invoice process (I, L) and the `from-email` contract (word-add-in-r1 reviewed it; folded in). v5.6 applies uac-r2's CHANGES-NEEDED review of v5.5 (reviews §14). **uac-r2: ACCEPT on v5.8** (the whole model). **Next:** the owner answers the remaining open questions, then finalizes. All peer reviews are in `notes/procedure-model-reviews.md` §1–§14. |
+| **Design** | `notes/procedure-and-file-model.md`, now **v5.9**: every owner question answered (2026-10-21). v5.5 recorded the owner's Submit Invoice process (I, L) and the `from-email` contract (word-add-in-r1 reviewed it; folded in). v5.6 applies uac-r2's CHANGES-NEEDED review of v5.5 (reviews §14). **uac-r2: ACCEPT on v5.8** (the whole model). **Next:** the owner finalizes; then EB-D-148 and the re-plan (task-create). All peer reviews are in `notes/procedure-model-reviews.md` §1–§14. |
 | **Peer status** | ontology-r1: **PASS** on v5.1 (reviews §10); ready for the 080 schema review. word-add-in-r1: §9.1 matches; its three flagged-attachment gaps are folded in. uac-r2: accepts with changes each round; v5.3 → v5.4 is text only. |
 | **Background** | **D-140 done:** `task/ebill-d140-parentsof` + uac-r2's arch fix (`task/ebill-d140-archfix`, af038b2bbd; uac-r2 ACCEPT) merged into work/ebilling-r1 as 13b310e1c4 and pushed. Combined tip: build 0 errors, ArchTests 1309/1309, broad filter 14256 passed / 2 failed under load (both pass alone, 77/77; unrelated; filed #2208). Agent worktrees `C:\code_files\spaarke\.claude\worktrees\agent-ac2cb36d489b624e8` and `agent-a63d1a942dbb89891` can be removed with Remove-WorktreeSafe.ps1. |
 | **Next Action** | (1) Handle the v5.4 and D-140 agent completions as above. (2) Owner answers the open items below → patch → the owner finalizes. (3) Decision row **EB-D-148** (project-prefixed ids); re-plan 079–087 plus the new tasks in the model's §13 (task-create). ontology-r1 then does the full 080 schema review; uac-r2 registers the tables in 191. |
 
 ### Open owner questions (model §15)
-1. Does "no automatic re-check" (owner via ontology D-175) cover every case: override removal (D), Procedure retire (D2), version end? The model assumes yes.
-2. Does switching a rule Off (Procedure retire, or override removal) still close open findings on In Review invoices through the D-170 PolicyRetired sweep, or leave them open with the banner? The model keeps the sweep until answered.
-3. Can an Override release an invoice held because no Procedure version is in force?
-4. Exports and "the related external user": did the owner mean firms see their own invoices, not the export file? The model keeps exports internal-only.
-5. *(Answered 2026-10-21 via word-add-in-r1, recorded in reviews §4.x and model v5.5: explicit Invoice/Supporting/Don't save marks, separate add-in Invoice module, corrections as resubmissions, the .eml always saved without attachment children through one `from-email` endpoint, LEDES out of scope.)*
-6. The F2-d gap reading (accepted by ontology-r1): draft-only is not Active; work before the first version is not applicable; hold only for a hole between versions or work after a final end date.
-8. *(Answered 2026-10-21: F1-a option (i), F1-c refuse; model v5.7.)*
-7. The banner text: the owner's "A new procedure that applies to this invoice has been published", or the neutral "The procedures that apply to this invoice have changed; re-check to apply them."
+None. All answered 2026-10-21 (reviews §4.x, §4.y; model v5.9). **Waiting for the owner to finalize**, then EB-D-148 and the re-plan.
 
 ### Owner decisions already given (do not ask again)
 - **Model:** A option 1 (record-scoped `sprk_ruleset`, `sprk_scope` Record 100000002 / Firm record 100000003); B `sprk_billingfirm` + `sprk_billingresponsible` (→ `sprk_organization`, all core types, not access-conferring); C; D/D2 superseded by no-auto-re-check; E hold + warning; F, G; H "Internal Standard"; I yes (process TBD); J A+B; K internal-only/Restricted/Private allowed with isolation carried; M; N; O all-or-nothing; P; Q, Q2 (no migration), R.

@@ -225,6 +225,19 @@ Given in word-add-in-r1's session and relayed to us; checked in `projects/spaark
 
 Applied in model v5.5 (section 0 v5.5, 9.1, 13, 15). The contract word-add-in-r1 asked for is in 9.1 ("Email-only save").
 
+### 4.y Owner answers to the last six questions (model section 15), 2026-10-21
+
+Given directly in this session.
+
+1. No automatic re-check: **yes, all three** (override removal, Procedure retire, Procedure Version end).
+2. Switching a rule Off: **yes, close the open findings automatically**, but show a warning when the action is triggered, e.g. "Retiring this Procedure will close all related rules and remove pending decisions on active invoices" (or similar).
+3. **An Override can release** an invoice held because no version is in force: "a master 'push it through the system'".
+4. **Export files internal only.**
+5. Gap reading: **yes.**
+6. Banner: **use the revised (neutral) wording**, "The procedures that apply to this invoice have changed; re-check to apply them."
+
+Applied in model v5.9.
+
 ## 5. SPA-r3: early views on the firm invoice-file route (not final; waits for the owner's go)
 
 - **Today.** The SPA reaches invoice PDFs as SharePoint Embedded Documents at `/api/v1/external/invoices/{id}/documents` (+ `/{documentId}/content`, `/versions`, POST upload; `ExternalProjectDataEndpoints.cs:384-418`, `RequireWorkforceCeiling`). Master has no SPA submission wizard and no findings display.
