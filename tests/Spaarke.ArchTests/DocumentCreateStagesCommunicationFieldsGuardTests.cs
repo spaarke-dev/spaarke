@@ -141,7 +141,7 @@ public class DocumentCreateStagesCommunicationFieldsGuardTests
     private const string OutcomeMethod = "ApplyEmailCommunicationOutcome";
 
     private static readonly Regex RecordAssignment = new(
-        @"\bAccessInheritanceRecord\s*=(?![=>])", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+        @"\bAccessInheritanceRecord\s*(?:\?\?|[-+*/%&|^]|<<|>>)?=(?![=>])", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     /// <summary>
     /// The <c>AccessInheritanceRecord</c> assignments in <paramref name="source"/> (code text) that are NOT inside
@@ -197,12 +197,14 @@ public class DocumentCreateStagesCommunicationFieldsGuardTests
                 // create.AccessInheritanceRecord = "x";   (commented out: does not count)
                 var record = create.AccessInheritanceRecord;
                 if (create.AccessInheritanceRecord == null) { }
+                if (create.AccessInheritanceRecord != null) { }
                 var request = new CreateDocumentRequest { AccessInheritanceRecord = "x" };
+                create.AccessInheritanceRecord ??= "{}";
             }
             """;
 
-        Assert.Equal(1, RecordAssignmentsOutsideTheOutcome(source, isOutcomeFile: true));
-        Assert.Equal(3, RecordAssignmentsOutsideTheOutcome(source, isOutcomeFile: false));
+        Assert.Equal(2, RecordAssignmentsOutsideTheOutcome(source, isOutcomeFile: true));
+        Assert.Equal(4, RecordAssignmentsOutsideTheOutcome(source, isOutcomeFile: false));
     }
 
     [Fact(DisplayName = "Task 130 guard control: a CreateDocumentAsync body without the stager call fails the scan")]
