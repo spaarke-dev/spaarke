@@ -1300,3 +1300,152 @@ class where marked), restore, SHA-1-check the six sources. **8 of 8 killed** (+ 
 | `git merge-tree --write-tree origin/master HEAD` (master `2a38e6ce6c`) | clean (tree `02a26f2e25`) |
 
 Not run, by the brief: the full unfiltered unit suite, any deploy, any Dataverse, Azure or Key Vault access.
+
+## 18. Round 4b — one grant helper (F1-2), attachment text (F1-4), the round-4a gaps, K7 hardening, pins
+
+Commits `5a711090f7` (F1-2), `b6a443694b` (F1-4), `9124da140d` (regarding document), `e8029ff745` (chat SPE items),
+`2da300d180` (ArchTest F1-2 rule + K7 hardening), `c6fb21dc24` (pins). The rule is unchanged (§1); every site reuses
+`InternalPlaneDocumentNarrowing` over `InternalRouteDocumentNarrowing`. Internal systemusers make no narrowing call and no
+app-only read at any site (pinned per site).
+
+### F1-2 — one helper for every document grant
+
+`InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync(httpContext, authorizationService, userId, documentIds, operation,
+token, surface, logger, ct)`: the `Spaarke.Core.Auth` document decision per id (the first deny is returned unchanged), then
+ONE `ForCallerAsync` over all ids; any hidden id → `AuthorizationResult` deny with `HiddenReasonCode`
+(`sdap.access.deny.insufficient_rights`) and rule `ExternalDocumentNarrowing`. An empty list is allowed (no call). Each site
+maps the deny exactly as it mapped an AuthorizationService deny before:
+
+| Site | Routes | Hidden → |
+|---|---|---|
+| `CommunicationRecordAuthorizationFilter.CanReadDocumentsAsync` (:793; the attachment loop :621) | send, send-bulk (attachment documents) | the filter's existing Forbidden; one narrowing call over all attachment ids. The false comment "a reader can already download the bytes" is replaced (a reader may NOT: the narrowing hides the bytes too) |
+| `PlaybookAuthorizationFilter` (:744) | playbook execute / run (every run document) | the run's uniform 403; nothing runs |
+| `FinanceAuthorizationFilter` Document path (:395) | analysis anchor read, analysis create/promote and run, finance confirm/reject | `result.ReasonCode` into the existing finance denial (identical body to an unreadable document) |
+| `ChatDocumentEndpoints` ingest (:1028, round 4a's call folded in) | `POST /api/ai/chat/sessions/{id}/documents/from-document` | `ProblemDetailsHelper.Forbidden(reason)`, before any download |
+
+**Ebilling.** An internal caller makes no narrowing call, so finance confirm/reject is unchanged for internal callers
+(pinned: `Reject_InternalCaller_RestrictedDocument_IsNotNarrowed`, 0 calls, no app-only read). A failed caller lookup
+counts as external (the slice rule).
+
+**Cost.** `GET /api/ai/analysis/{id}`'s Document anchors now narrow inside the anchor check as well as in F1-3: 3 narrowing
+calls for one GET (was 1). Updated in `AnalysisDerivedContentNarrowingTests` (must-not-fire visible counts 1 → 3).
+
+### F1-4 — attachment text
+
+`CommunicationAttachmentTextService` (:132): after `QueryDocumentPointersAsync`, `NarrowForCallerAsync` runs ONE
+`ForCallerAsync` over the pointer documents and keeps the shown ones. A hidden id is absent, so it reads
+`Extractable=false`; a narrowing fault hides every id (all dropped). Logs carry counts only.
+
+### Round-4a gaps
+
+- **R4a-1, chat SPE drive items (Compose Path B): fixed.** `AiAuthorizationFilter.IsSpeItemShownToCallerAsync` (:842),
+  after SPE's OBO check (:795): internal caller → shown; otherwise the caller's OWN read
+  `sprk_documents?$select=sprk_documentid&$filter=sprk_graphitemid eq '…' or sprk_driveitemid eq '…'` (OData literal
+  escaped). A failed or malformed read → hidden; no row → SPE's own check stands; otherwise ONE
+  `NarrowForExternalCallerAsync` over the ids and the item is shown when ANY id is shown (a row with no usable id cannot be
+  shown). Limit (K): a document row the caller cannot read looks like no row, so the item falls back to SPE's OBO check,
+  as before.
+- **R4a-2, `sprk_regardingdocument`: fixed.** It is a third link in `AnalysisAuthorizationFilter.AnalysisDocumentColumns`
+  (so `IsAnalysisDocumentHiddenFromCallerAsync`) and in the AI tools' `DocumentDerivedTables` map
+  (`_sprk_regardingdocument_value`, `read_query` / `search_data` / `describe`).
+- **R4a-4, `GET /api/ai/chat/sessions/by-analysis/{analysisId}`: SAFE for D7.** It returns `AnalysisSessionSummary`
+  (`SessionId`, `MessageCount`, `IsArchived`, `CreatedOn`) and no content; every content route (`/sessions/{id}/history`,
+  `restore`, messages) carries `AddSessionOwnershipFilter` + `AddAiAuthorizationFilter`, which now narrow. Finding (not
+  fixed, task 164): it discloses a session's existence and message count with no owner or analysis-read check. Task 164's
+  analysis-read rule was not added here.
+
+### Guard (`ExternalDocumentNarrowingGuardTests`)
+
+**F1-2 rule** `EveryDocumentResourceGrant_GoesThroughTheNarrowingHelper`: any method in the BFF that calls
+`Spaarke.Core.Auth` `AuthorizationService.AuthorizeAsync` / `IAuthorizationService.AuthorizeAsync` (the document-resource
+decision) fails unless it is an owner (`InternalPlaneDocumentNarrowing::AuthorizeDocumentsAsync`,
+`DocumentAuthorizationFilter::InvokeAsync`) or in the ratchet baseline. A stale baseline entry fails. Control
+`DocumentGrantDetector_MustFireAndMustNotFire`: fires for a direct call on the class and through the interface; does not
+fire through the helper, for a record-path call (returns `AccessSnapshot`), or for a listed entry.
+
+**Ratchet baseline** (`DirectDocumentGrantBaseline`):
+
+| Entry | Reason |
+|---|---|
+| `BulkDownloadAuthorizationFilter::InvokeAsync` | drops rather than refuses: per-id grant, then ONE `ForCallerAsync` over the allowed set (slice B, pinned). The helper's first-deny answer cannot express a partial set |
+| `ResourceAccessHandler::HandleRequirementAsync` | handler of the `driveitem.*` policies; no route requires one (scan 2026-10-21) and its resource id is a container, drive or route id. A route that requires one on a document id must use the helper |
+
+**K7 hardening.**
+- Callers of `ExternalDataService.{ReadAndNarrowDocumentsAsync, NarrowDocumentsAsync, IsDocumentVisibleAsync}` are seam
+  consumers ("calls ExternalDataService.X"); `ExternalDataService` itself is the reader, not a consumer.
+- `IlCallScan.TypeReferences`: `ldtoken`, `castclass`, `isinst`, `newobj` (and other InlineType / type-table InlineTok)
+  operands naming a seam type → "type token X".
+- String literals naming a seam type (`Type.GetType("…AppOnlyDocumentNarrowing")`) → "names a seam in a string".
+- One must-fire fixture per bypass shape, compiled into the ArchTests assembly (not src):
+  `SeamControlDynamicInvokeByTypeToken`, `SeamControlCallsTheAppOnlyReaderDirectly`, `SeamControlResolvesBySeamName`;
+  must-not-fire `SeamControlMentionsNoSeam`.
+- The new detection found two unlisted external-plane consumers, now listed with reasons: `ExternalModuleDataEndpoints`,
+  `ExternalProjectDataEndpoints` (they call the app-only reader directly; they are the external plane).
+
+### Pins (one focused test each)
+
+| Leg | Test |
+|---|---|
+| `ExternalDocumentNarrowing.cs:548` every row read for an id must be visible | `AnIdWithAVisibleAndAHiddenRow_IsHidden_InEitherOrder` |
+| `:388` rows for ids nobody asked about are ignored | `AByIdRead_ARowForAnIdNobodyAskedAbout_IsIgnored` |
+| `RetrievalAccessTrim.cs:297` a drive-item row with no document id on a page that also narrows | `ADriveItemRowWithoutADocumentId_IsWithheld_EvenWhenThePageNarrowsAVisibleDocument` |
+| `ExternalCallerCommunicationGuard.cs:222` an unresolved derived row is hidden | `ADerivedRowThatWasNotResolved_IsHidden` |
+
+### Tests
+
+Must fire (flagged-external caller) at each site — communication send and send-bulk, playbook execute, finance reject,
+attachment text, chat SPE item: own Restricted, internal-only communication, Restricted parent, narrowing fault, lookup
+fault. Must not fire: an internal caller (no narrowing call, no app-only read) and a visible document. Chat SPE item also:
+any-visible-row allowed, a row with no id denied, no row keeps SPE's check, a failed read denies. Regarding document:
+`describe` theory (restricted, unseeded, not-a-guid, visible), `read_query` / `search_data` cases, and an
+`AnalysisDerivedContentNarrowingTests` "regarding-document-restricted" must-fire case. Hosts that state no caller now state
+one (`FinanceAuthHost`, `PlaybookAuthHost`, `ChatAuthHost`, the communication host and the attachment-text harness:
+`NarrowingMode`, default Internal) or use Option A (`AnalysisEndpointsAuthorizationContractTests`,
+`SecureChildOwnershipWriterTests`).
+
+### §11 answers
+
+- **`AuthorizeDocumentsAsync`.** Existing: the per-site `AuthorizeAsync` + `ForCallerAsync` pairs. Extension: it IS an
+  extension (a method on the existing static `InternalPlaneDocumentNarrowing`); no DI registration. Cost of doing nothing:
+  four sites grant documents the narrowing hides (F1-2).
+- **`IsSpeItemShownToCallerAsync` / `CommunicationAttachmentTextService.NarrowForCallerAsync`.** Private methods; they
+  resolve the existing `IDataverseUserClient` and stated caller from `RequestServices`; no new registration, endpoint or
+  package.
+
+### Mutation table (round 4b)
+
+Runner `.uac188/t188r4b_mutate.py` (untracked; deleted at the end). Each: apply, rebuild, run the targeted unit filter
+(459 cases) and, where marked, the guard class (16), restore, SHA-1-check the source. **13 of 13 killed.**
+
+| Id | Mutation | Unit failing | ArchTest failing |
+|---|---|---|---|
+| MH | the helper skips the narrowing (`… \|\| true`) | 21 | 0 (call still in IL; per-method reach) |
+| MA | attachment-text narrowing removed | 6 | — |
+| MD | chat drive-item ids pass through | 7 | — |
+| MR1 | `AnalysisDocumentColumns` without regarding | 1 | — |
+| MR2 | `DocumentDerivedTables` without regarding | 10 | — |
+| MG | finance Document path grants directly (ArchTest ban) | 8 | **1** (`EveryDocumentResourceGrant_…`) |
+| MK1 | K7 type-token shape not detected | — | 1 |
+| MK2 | K7 direct `ExternalDataService` reader call not detected | — | 2 |
+| MK3 | K7 seam-in-a-string not detected | — | 1 |
+| P1 | `:548` the last row decides | 1 | — |
+| P2 | `:388` unasked rows kept | 1 | — |
+| P3 | `RetrievalAccessTrim :297` no-id drive item shown | 1 | — |
+| P4 | guard `:222` unresolved row not hidden | 1 | — |
+
+**Before → after** per item = the reverting mutant: F1-2 (MH) 21 → 0; F1-4 (MA) 6 → 0; chat SPE items (MD) 7 → 0;
+regarding document (MR1 + MR2) 11 → 0; ArchTest ban (MG) 1 → 0; K7 shapes 1 / 2 / 1 → 0; pins 1 each → 0.
+
+### Gates (round 4b)
+
+| Gate | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/ --no-incremental` | succeeded, 0 errors, 0 warnings; unit and ArchTests projects 0 warnings |
+| Unit, filtered (`Communication` \| `Playbook` \| `Finance` \| `Analysis` \| `Chat` \| `.Ai.` \| `Services.Ai.Handlers` \| `Retrieval` \| `UnifiedAccessControl` \| `ExternalAccess`, `Category!=Live`) | 12,769 passed, 0 failed, 3 skipped (12,772) on `c6fb21dc24` |
+| `tests/Spaarke.ArchTests`, full project | 1,224 passed, 0 failed |
+| Mutants | 13 of 13 killed; sources SHA-1-checked after every run |
+| Publish size (`dotnet publish -c Release`, framework-dependent, `Compress-Archive -CompressionLevel Optimal`, 4 PDBs) | branch `c6fb21dc24` 39,350,489 B. vs round 4a's branch build (39,347,888 B): +2,601 B. vs fresh `origin/master` `2a38e6ce6c` (39,354,901 B, §17; master unchanged since): −4,412 B. Total 39.4 MB |
+| Packages | no change; `dotnet list package --vulnerable`: none |
+| `git merge-tree --write-tree origin/master HEAD` (master `2a38e6ce6c`) | clean (tree `bb50819272`) |
+
+Not run, by the brief: the full unfiltered unit suite, any deploy, any Dataverse, Azure or Key Vault access.
