@@ -18,7 +18,9 @@ This project reviewed ebilling-r1's `projects/ebilling-r1/notes/procedure-and-fi
 - Can a Restricted source be used? That is a task-130 document whose email couldn't be identified.
 - Can a source whose thread is not Open be used?
 
-## Race options (sent to the owner; no choice made yet)
+**Owner decision on the race (2026-10-21, later the same day): fix both, A + B.** File the email first, and make the invoice file follow its source.
+
+## Race options (sent to the owner; the owner chose A + B)
 
 | Option | What it does | What it misses |
 |---|---|---|
