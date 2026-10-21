@@ -189,3 +189,23 @@ Three reviews of `procedure-and-file-model.md` v4. Each item is folded into v5 o
 | N | A reusable Procedure used for a Secure matter (e.g. its rate card) is readable org-wide, name included (O-6) | Confirm O-6. Matter-only rules go in the record-scoped rule set (A). |
 | O | uac-r2 K1: derived invoice content readable under M if the post-commit check fails | Accept (already accepted in 050a). |
 | P | Auditing on the assignment and Stored File tables, plus a download audit event | Yes. |
+
+## 5. SPA-r3: early views on the firm invoice-file route (not final; waits for the owner's go)
+
+- **Today.** The SPA reaches invoice PDFs as SharePoint Embedded Documents at `/api/v1/external/invoices/{id}/documents` (+ `/{documentId}/content`, `/versions`, POST upload; `ExternalProjectDataEndpoints.cs:384-418`, `RequireWorkforceCeiling`). Master has no SPA submission wizard and no findings display.
+- **Correction to uac-r2's Q6 (to reconcile with uac-r2).** "Workforce systemuser → 403 UseInternalRoute" contradicts A9 / UAC 036 (on in dev): licensed users use the SPA under their own rights. R3 proposes serving systemusers the 036 way: caller Read on the invoice, then the file gate.
+- **Route shape.**
+  - `GET /api/v1/external/invoices/{id}/files` (list) and `GET .../files/{fileId}/content` (download), with the same group and filters as the document routes.
+  - One gate function returns the visible file set. The download checks "fileId ∈ set" and authorizes before streaming.
+  - No upload on this route; uploads go through submission.
+  - An invisible invoice gets the uniform 404 on both routes, never an empty 200.
+  - The SPA (R4) reuses DocumentLibrary's list and download, without upload.
+  - Question from R3: during migration, can one invoice have both SPE documents and files? (O-13: no migration, so new invoices have files only.)
+- **Task 188 ArchTest.** The route is classified as an external content surface with its own predicate (Firm-visible + Servable + clean). The guard names the gate method, with must-fire and must-not-fire controls. This is uac-r2's call.
+- **Findings projection.** An explicit allow-list DTO, built field by field, plus a negative test that no override reason, Procedure name or Procedure id appears.
+- **Scan pending.** R3 prefers showing the row with `scanStatus: pending` ("Checking file…", no download) and having content answer 409 `file_scan_pending`. A malicious file drops out (404). Hiding it until clean is simpler but invites duplicate uploads. **Owner decision Q.**
+
+| # | Question | Recommendation |
+|---|---|---|
+| Q | Firm sees a pending-scan file as "Checking file…", or the file is hidden until clean | Show it as pending (R3's view): no download until clean. |
+| R | Licensed (systemuser) SPA users on the firm file route | Serve them under their own rights, the 036 way, once reconciled with uac-r2. |
