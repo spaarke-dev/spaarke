@@ -25,7 +25,7 @@ using EntityReference = Microsoft.Xrm.Sdk.EntityReference;
 namespace Sprk.Bff.Api.Services.Office;
 
 /// <summary>
-/// Input to <see cref="RecordCreationService.CreateAsync"/>.
+/// Input to <see cref="OfficeRecordCreationService.CreateAsync"/>.
 /// </summary>
 public sealed record RecordCreationRequest
 {
@@ -125,7 +125,7 @@ public enum RecordCreationFailureKind
 public sealed record RecordCreationFailure(RecordCreationFailureKind Kind, string Code, string Detail);
 
 /// <summary>
-/// Outcome of <see cref="RecordCreationService.CreateAsync"/>: the created record, or a
+/// Outcome of <see cref="OfficeRecordCreationService.CreateAsync"/>: the created record, or a
 /// <see cref="RecordCreationFailure"/>. A business outcome is never an exception.
 /// </summary>
 public sealed record RecordCreationResult
@@ -194,7 +194,7 @@ public sealed record RecordCreationResult
 /// <para><b>ADR-010</b>: concrete, one registration (<c>OfficeModule</c>). No interface — there is one
 /// implementation, and the contract test substitutes the Dataverse boundary, not this class.</para>
 /// </remarks>
-public sealed class RecordCreationService
+public sealed class OfficeRecordCreationService
 {
     internal const string MatterEntity = "sprk_matter";
     internal const string MatterNameAttribute = "sprk_mattername";
@@ -304,7 +304,7 @@ public sealed class RecordCreationService
     private readonly Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService _identity;
     private readonly Sprk.Bff.Api.Services.Access.SecureRootFilingGate _rootFiling;
     private readonly Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer _assignedAccess;
-    private readonly ILogger<RecordCreationService> _logger;
+    private readonly ILogger<OfficeRecordCreationService> _logger;
     private readonly Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe? _callerAccess;
     private readonly Microsoft.AspNetCore.Http.IHttpContextAccessor? _http;
 
@@ -313,14 +313,14 @@ public sealed class RecordCreationService
     /// without the external-access module still composes this service; without it such a create is REFUSED (fail closed),
     /// never made unchecked.</param>
     /// <param name="http">The request whose bearer token the probe exchanges (same optionality).</param>
-    public RecordCreationService(
+    public OfficeRecordCreationService(
         IGenericEntityService entities,
         IFieldMappingDataverseService fieldMappings,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity,
         Sprk.Bff.Api.Services.Access.SecureRootFilingGate rootFiling,
         Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
-        ILogger<RecordCreationService> logger,
+        ILogger<OfficeRecordCreationService> logger,
         Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe? callerAccess = null,
         Microsoft.AspNetCore.Http.IHttpContextAccessor? http = null)
     {

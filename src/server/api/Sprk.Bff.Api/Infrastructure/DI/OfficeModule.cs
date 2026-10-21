@@ -70,7 +70,7 @@ public static class OfficeModule
         // implementation, no seam) and UNCONDITIONAL: its consumer, OfficeService.QuickCreateAsync, serves an
         // unconditionally-mapped route, and its deps (IGenericEntityService, IFieldMappingDataverseService) are
         // unconditional GraphModule singletons — no §10 F.1 asymmetry.
-        services.AddScoped<RecordCreationService>();
+        services.AddScoped<OfficeRecordCreationService>();
 
         // spaarkeai-word-add-in-r1 task 121 (owner 2026-10-09, "file it if unfiled"): an email save that reconciles to an
         // existing, unfiled communication files it to the save's record through the association engine's existing-row
