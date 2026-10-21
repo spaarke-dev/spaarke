@@ -429,3 +429,17 @@ Checked clean by uac-r2: `[]` means no children; invoice text stays out of email
 
 **word-add-in-r1 on v5.6 point 1:** "exactly one Document with that `sprk_relatedcommunication`" fails after #2177 (attachment children and several .eml Documents link to one communication). v5.7 resolves candidates by `sprk_isemailarchive = true`, then the target core record with no parent, then the marked attachment's SHA-256, refusing retryably on none or several. Code checked: `OfficeDocumentPersistence.cs:327`, `UploadFinalizationWorker.cs:684`, `GetEmailArchiveByCommunicationAsync` (`DataverseServiceClientImpl.cs:1152`, first only).
 
+## 15. uac-r2 re-check of v5.6/v5.7 (`f66eec5e25..ef9b1a9e9b`), 2026-10-21: ACCEPT-WITH-CHANGES
+
+Every v5.5 item closed (F1-a, F1-b, F1-c, F1-d, F2-a, F2-b, F2-c, Q1). The reused-.eml known limit is accepted (same user's own duplicate; random MIME boundary, `OfficeEmailEnricher.cs:255-365`; SHA check covers a missing part). No new owner decision.
+
+| # | Change | v5.8 |
+|---|---|---|
+| 1 | Marker on the .eml, not the Stored File (undo would delete it; retry then hides the invoice permanently). 080 settles `ParentLineage.RefuseAppOnlyWrite`, the field-mapping skip and field security; the ArchTest also bans the marker in update payloads. | Applied |
+| 2 | "A user's later Restricted hides it" is false for a marked .eml; hide via the communication's internal-only flag; K limit: lower-then-raise leaves the marker. | Applied |
+| 3 | "Several" can't be retried away (another user's marked .eml of the same email); use the created .eml on a fresh create, only the caller's candidates on the duplicate path. | Applied |
+| 4 | Retryable only for Graph timeout / 429 / 5xx and transient Dataverse errors; named permanent messages otherwise. | Applied |
+| 5 | Stale text against F1-c and own-Restricted (step 1, "Retired in v5.5" paragraph, "Capture first", "Keys"). | Rewritten or removed |
+
+uac-r2 checks the v5.8 diff only; then the model is ACCEPT from UAC.
+
