@@ -129,7 +129,7 @@ public sealed class IncomingAssociationResolver
         var decision = await EvaluateInternalAsync(message, context, communicationId, admitTargets: null, ct);
 
         // An EXISTING row being filed: a reparent (task 146) — the owner is re-derived before the write.
-        var refiled = await ApplyDecisionAsync(communicationId, decision, ownerAlreadyResolved: false, ct);
+        var refiled = await ApplyDecisionAsync(communicationId, decision, ownerAlreadyResolved: false, secureExitCaller: null, ct);
 
         // Spaarkeai-word-add-in-r1 task 129: the filing was written — the email's thread follows it (best-effort; never
         // throws). Here, not in ApplyDecisionAsync: ApplyToExistingRecordAsync's caller (the Office reconciled-email filing)
@@ -148,7 +148,7 @@ public sealed class IncomingAssociationResolver
     public Task ApplyToNewRecordAsync(Guid communicationId, AssociationDecision decision, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(decision);
-        return ApplyDecisionAsync(communicationId, decision, ownerAlreadyResolved: true, ct);
+        return ApplyDecisionAsync(communicationId, decision, ownerAlreadyResolved: true, secureExitCaller: null, ct);
     }
 
     /// <summary>
@@ -161,15 +161,19 @@ public sealed class IncomingAssociationResolver
     /// <remarks>Only the record <paramref name="onlyRecordId"/> is filed: the decision is narrowed to it first
     /// (<see cref="NarrowToRecord"/>), so the writes AND the provenance say the same thing. The thread is NOT reconciled
     /// here: the caller runs <c>SecureChildReconciler.AfterRefileAsync</c>, the one step after a re-file, which does it.</remarks>
+    /// <param name="secureExitCaller">#2143 round 8 (F1-B): the person whose act this filing is (the Office save's user), asked
+    /// F3 by the reparent when the filing takes the communication out of a secure record — the thread it sits in included
+    /// (round 7b). <c>null</c> acts for nobody: such a filing is refused.</param>
     /// <returns><c>false</c> (nothing written) when the decision does not write <paramref name="onlyRecordId"/>.</returns>
     public async Task<bool> ApplyToExistingRecordAsync(
-        Guid communicationId, AssociationDecision decision, Guid onlyRecordId, CancellationToken ct)
+        Guid communicationId, AssociationDecision decision, Guid onlyRecordId,
+        Sprk.Bff.Api.Services.Access.SecureRemovalCaller? secureExitCaller, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(decision);
         if (NarrowToRecord(decision, onlyRecordId) is not { } narrowed)
             return false;
 
-        await ApplyDecisionAsync(communicationId, narrowed, ownerAlreadyResolved: false, ct).ConfigureAwait(false);
+        await ApplyDecisionAsync(communicationId, narrowed, ownerAlreadyResolved: false, secureExitCaller, ct).ConfigureAwait(false);
         return true;
     }
 
@@ -491,6 +495,7 @@ public sealed class IncomingAssociationResolver
         Guid communicationId,
         AssociationDecision decision,
         bool ownerAlreadyResolved,
+        Sprk.Bff.Api.Services.Access.SecureRemovalCaller? secureExitCaller,
         CancellationToken ct)
     {
         var fields = await BuildDecisionFieldsAsync(communicationId, decision, ct);
@@ -515,6 +520,7 @@ public sealed class IncomingAssociationResolver
                     RecordId = communicationId,
                     ParentChanges = parentChanges,
                     WhenUnfiled = Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.KeepCreator,
+                    SecureExitCaller = secureExitCaller,
                 },
                 token => _genericEntityService.UpdateAsync("sprk_communication", communicationId, fields, token),
                 ct);

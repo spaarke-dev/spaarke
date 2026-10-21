@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>POST /api/v1/events and POST /api/ai/analysis/create create through RecordCreationService (FR-19)</title>
+    <phase>3 W3 Product creators onto the service</phase>
+    <gate>019 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in Sprk.Bff.Api; tags include bff-api; both routes carry route-level authorization filters that must stay intact; adds tests at KEEP paths (TEST-MODIFYING override).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Two well-bounded route conversions onto an existing, reviewed service with a clear reference (the child-records route in task 017).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W3-server</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>019</deps>
+    <tags>bff-api, testing</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Convert `CreateEventAsync` (`Api/Events/EventEndpoints.cs` ~:695) and `CreateAnalysis` (`Api/Ai/AnalysisEndpoints.cs` ~:128) so the row create goes through `RecordCreationService` (caller principal). Keep the route-level filters exactly as they are (ADR-008): `AddRecordRouteAccessAuthorizationFilter` on events and `AddAnalysisCreateAuthorizationFilter` on analysis. Post-create steps that are specific to the route (event membership event publish, analysis N:N scope association) stay in the endpoint unless the service already owns them.</prompt>
+  <role>SPAARKE platform developer, .NET 10 BFF Minimal API. Follow ADRs strictly.</role>
+  <goal>Events and analyses created through the typed routes carry the service's invariants (mapping if profiled, I-1 stamp, record-first owner, search-index default) and the routes' existing contract tests pass unchanged.</goal>
+
+  <context>
+    <background>spec.md FR-19, NFR-07. `CreateEventAsync` currently resolves the owner itself (`ownership.ResolveOwnerAsync`, ~:722), resolves the regarding write set (`ResolveRegardingWriteAsync`, ~:735), resolves the acting user's contact (`ResolveActingUserContactAsync`, ~:748) and calls `CreateEventInDataverseAsync` (~:1121) then publishes a membership event. `CreateAnalysis` validates, resolves the owner over `sprk_document` (~:150), creates via `dataverseService.CreateAnalysisAsync` and then associates N:N scopes (`AssociateScopesAsync` ~:177). The service owns owner, regarding/creator person and table defaults (steps 7 and 9 of the pipeline), so the endpoint's private versions of those are deleted once the service supplies them; the N:N scope association is not a create-time column and stays in the endpoint.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Events/EventEndpoints.cs (CreateEventAsync ~:695, CreateEventInDataverseAsync ~:1121; filters ~:127-130 unchanged)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs (CreateAnalysis ~:128; filter ~:44-45 unchanged; AssociateScopesAsync ~:177 stays)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordTableRules.cs (sprk_event and sprk_analysis entries if a default/exception is missing)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ChildRecordEndpoints.cs (route re-pointed in task 017: the pattern to copy)</file>
+      <file role="canonical-reference">tests/integration/contract/Api/Events/EventEndpointsAuthorizationContractTests.cs</file>
+      <file role="canonical-reference">tests/integration/contract/Api/Ai/AnalysisEndpointsAuthorizationContractTests.cs</file>
+      <file role="canonical-reference">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs (ledger must be unchanged)</file>
+      <file role="new">tests/integration/data-mutation/RecordOwnership/TypedRouteCreateInvariantsTests.cs (event and analysis rows carry owner, stamp, mapping through the service)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="019" status="required">W2 service deployed and reviewed.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008 (path A, spec ADR Tensions)">Scope: authorization. Route-level filters stay on both routes (`.RequireAuthorization()`, the record-route access filter, the analysis create filter) and the RouteAuthorizationGuardTests ledger is unchanged. Payload-dependent checks run only in `CallerWriteAuthorization` through the service; the endpoints add no new inline authorization logic.</constraint>
+    <constraint source="ADR-019">Scope: responses. Existing status codes and `errorCode` values of both routes are unchanged (NFR-07), including the event owner refusal 409 and regarding-stamp refusal; service refusal Kinds map to those through the shared map or a route-local adapter; an unmapped Kind fails closed to the route's existing generic failure.</constraint>
+    <constraint source="ADR-028">Scope: identity. Caller principal; the service resolves WhoAmI on the caller token. The create stays app-only. The endpoints must not create with the user token.</constraint>
+    <constraint source="ADR-010">Scope: DI. Inject the already-registered scoped `RecordCreationService` into the endpoint handlers; no new registration.</constraint>
+    <constraint source="NFR-01 (spec)">Scope: both routes. Fail closed: a refusal or exception from the service creates nothing and the route returns its existing failure; the analysis scope association must not run if the create refused. The event membership event is published only after a successful create.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: BFF publish. Placement Justification in the PR; fresh-master publish-size delta per §10.4; `dotnet list package --vulnerable --include-transitive`; no package.</constraint>
+    <constraint source="ADR-038">Scope: tests added or modified. KEEP paths; no Mock&lt;HttpMessageHandler&gt;; no DI-registration tests. Existing contract tests change only to follow a moved type, never by weakening an assertion. Cover the stated contract plus the named edge cases only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Typed Minimal API routes with endpoint filters</topic>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Create payload shapes.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; read spec FR-19; re-grep `CreateEventAsync` and `CreateAnalysis` and the contract tests that cover them.</step>
+    <step order="1">Write failing tests first: an event created through the route is team-owned by the record-first owner, has the I-1 stamp and the mapped fields (Matter to Event profile); an analysis created through the route has the same; each route's existing refusal responses are unchanged.</step>
+    <step order="2">Convert the event route: build the service request from the DTO (user-entered values + regarding), call the service, map the result to `CreateEventResponse`, publish the membership event after success. Remove the endpoint's private owner/regarding/contact resolution only where the service now supplies the same behaviour (the acting-user contact for sprk_assignedto belongs in the registry "for"-person rule; confirm task 012 covers sprk_event, else add the registry entry).</step>
+    <step order="3">Convert the analysis route the same way; keep `AssociateScopesAsync` after a successful create.</step>
+    <step order="4">Build; run both Authorization contract tests, RouteAuthorizationGuardTests (ledger unchanged), SecureChildOwnershipAiToolTests*, RecordOwnerAssignmentCensusTests; publish-size delta; CVE check.</step>
+    <step order="5">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="6">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the event route's response contract (status code or `errorCode`) for an existing refusal cannot be preserved through the service's refusal Kinds, STOP and escalate per CLAUDE.md §6 (breaking API contract).</trigger>
+    <trigger>If the service cannot express the event's acting-user contact (sprk_assignedto) or the analysis's document-based owner without a registry change beyond a column default, STOP and escalate before editing RecordTableRules semantics.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Grep `CreateEventInDataverseAsync` (Api/Events/EventEndpoints.cs ~:1121) and `CreateAnalysisAsync` (Api/Ai/AnalysisEndpoints.cs ~:166 via IAnalysisDataverseService); each route resolves its own owner with `ResolveOwnerAsync` (~:722 and ~:150). Existing tests: tests/integration/contract/Api/Events/EventEndpointsAuthorizationContractTests.cs and Api/Ai/AnalysisEndpointsAuthorizationContractTests.cs cover authorization, not owner/stamp/mapping.</existing>
+    <extension>Yes for production code: both routes call the existing service; no new production file. The only new file is a test class, because the existing authorization contract suites must pass unchanged and none asserts owner, stamp or mapping on these rows.</extension>
+    <cost-of-doing-nothing>Events and analyses created through the typed routes keep skipping field mapping and drift from the owner and stamp behaviour of the other surfaces (spec FR-19, section 11 table).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Events/EventEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs</output>
+    <output type="test">tests/integration/data-mutation/RecordOwnership/TypedRouteCreateInvariantsTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`POST /api/v1/events` and `POST /api/ai/analysis/create` create the row through `RecordCreationService`; neither handler calls `ResolveOwnerAsync` or a direct Dataverse create for the row itself.</criterion>
+    <criterion testable="true">Created event and analysis rows carry the record-first owner, the I-1 stamp and (where a profile exists) the mapped fields, asserted by tests.</criterion>
+    <criterion testable="true">The route-level filters and the RouteAuthorizationGuardTests ledger are unchanged; EventEndpointsAuthorizationContractTests and AnalysisEndpointsAuthorizationContractTests pass with unchanged assertions.</criterion>
+    <criterion testable="true">Existing status codes and `errorCode` values of both routes are unchanged (owner-refusal 409 and regarding-stamp refusal included).</criterion>
+    <criterion testable="true">Negative: a service refusal creates nothing; the analysis N:N scope association does not run and the event membership event is not published when the create refused.</criterion>
+    <criterion testable="true">Negative: a caller who fails the route filter still gets the filter's response before the service is reached (service not invoked, asserted).</criterion>
+    <criterion testable="true">BFF build 0 errors; the contract tests above, RouteAuthorizationGuardTests, SecureChildOwnershipAiToolTests* and RecordOwnerAssignmentCensusTests pass; publish-size delta and CVE result recorded in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-19, NFR-07. Live check is task 036. The Event wizard migration (client) is task 023.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

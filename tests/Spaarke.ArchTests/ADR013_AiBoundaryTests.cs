@@ -96,10 +96,13 @@ public class ADR013_AiBoundaryTests
     // D-66 (spaarke-ontology-platform-r1 task 048): the shared Dataverse write core is NOT an AI type.
     // ---------------------------------------------------------------------------------------------
 
-    /// <summary>The shared write core, by full name. Nested and compiler-generated types match by prefix.</summary>
+    /// <summary>The shared write core, by full name. Nested and compiler-generated types match by prefix.
+    /// field-mapping-server-write-path-r1 task 011 moved OwnedChildWrite's caller checks, unchanged, into
+    /// CallerWriteAuthorization; it is listed so the moved code stays under this guard.</summary>
     private static readonly string[] DataverseWriteCoreTypes =
     {
         "Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite",
+        "Sprk.Bff.Api.Services.Dataverse.CallerWriteAuthorization",
         "Sprk.Bff.Api.Services.Dataverse.DataverseWriteItemMapper",
     };
 
@@ -128,7 +131,8 @@ public class ADR013_AiBoundaryTests
         //    NetArchTest sees type-level dependencies (fields, signatures, base types); IlCallScan adds the call sites
         //    in method bodies (a static call such as DataverseRecordCitations.RecordPath is invisible to NetArchTest).
         var coreResult = Types.InAssembly(assembly)
-            .That().HaveNameStartingWith("OwnedChildWrite").Or().HaveNameStartingWith("DataverseWriteItemMapper")
+            .That().HaveNameStartingWith("OwnedChildWrite").Or().HaveNameStartingWith("CallerWriteAuthorization")
+            .Or().HaveNameStartingWith("DataverseWriteItemMapper")
             .ShouldNot().HaveDependencyOn(AiNamespace.TrimEnd('.'))
             .GetResult();
         var coreViolations = (coreResult.FailingTypeNames ?? new List<string>())

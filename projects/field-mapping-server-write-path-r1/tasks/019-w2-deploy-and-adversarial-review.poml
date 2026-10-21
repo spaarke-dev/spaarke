@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="019" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>W2 deploy to dev, live checks, adversarial review (security, twice) and publish size (NFR-01, NFR-05)</title>
+    <phase>2 W2 Unified RecordCreationService</phase>
+    <gate>017+018 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deploys the BFF to dev and gates W2 on a security review; tags include deploy, security, review; any code fix found here modifies Sprk.Bff.Api .cs.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Runs a scripted deploy, scripted live checks and launches reviewer agents; fixes found by review are small and named (file:line), and the review itself runs on its own agent tier.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploy gate: single dev environment, and every W3 task depends on its result.</parallel-reason>
+    <deps>017, 018</deps>
+    <tags>deploy, bff-api, security, review</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy the W2 BFF (tasks 011-018) to dev with the `bff-deploy` skill, run the live checks, run the adversarial review of the W2 diff (TWICE, per NFR-01 for security work), fix every F-class finding (or file and report it), and measure publish size against a fresh master build. Stop on any 5xx or owner mismatch.</prompt>
+  <role>SPAARKE platform engineer, BFF deployment and release verification. Follow the bff-deploy skill literally.</role>
+  <goal>The W2 BFF is running on dev and verified live; two independent adversarial reviews of the W2 diff have no open F-class finding; publish size and CVE results are recorded; W3 is unblocked.</goal>
+
+  <context>
+    <background>spec.md NFR-01 ("Security-sensitive tasks (FR-06...FR-09, FR-25) carry FULL rigor and an adversarial review"), NFR-05 (publish size and CVE), Success Criteria 3, 5, 6. The W2 diff is the change set of tasks 011-018 on this branch versus master. Sub-agents (including the adversarial-reviewer) cannot write to `.claude/`; the main session applies edits there, and review results come back as text. Publish-size thresholds (root CLAUDE.md §10): at least +5 MB in one task needs justification; 55 MB total triggers architecture review; 60 MB is a hard stop.</background>
+    <relevant-files>
+      <file role="canonical-reference">.claude/skills/bff-deploy/SKILL.md (deploy procedure; scripts/Deploy-BffApi.ps1)</file>
+      <file role="canonical-reference">.claude/agents/adversarial-reviewer.md</file>
+      <file role="canonical-reference">.claude/constraints/bff-extensions.md (publish-size measurement method, root CLAUDE.md §10.4)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs (live check target)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ChildRecordEndpoints.cs (child-records route live check)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs (Office quick-create live check)</file>
+      <file role="canonical-reference">projects/field-mapping-server-write-path-r1/notes/decisions.md (record outcomes)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="017" status="required">Route, chat and decision callers on the service.</dependency>
+      <dependency task="018" status="required">Office quick-create on the service; old core deleted.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §5">Scope: live changes. Deploy to dev (spaarke-bff-dev) only. No deployment beyond dev without the explicit OK of the owner. Run `context-handoff` after the deployment.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: BFF publish. Measure publish-size delta against a FRESH master build per root CLAUDE.md §10.4 (Compress-Archive, short path, file-count check); run `dotnet list package --vulnerable --include-transitive`; no new HIGH CVE. Total at or above 55 MB triggers an architecture review; at or above 60 MB is a hard stop.</constraint>
+    <constraint source="CLAUDE.md §8.5">Scope: review. One adversarial-reviewer pass per change set, TWICE for security work: the second pass runs after the first pass's fixes and must be a fresh agent (do not resume the first). Each launch states its model and effort (agent-cost.md); give the reviewer the diff and the spec FRs 06-09, not this task's conclusions. Findings are classified fix-now (F1-F4) or known-limit (K1-K4); fix every F-class finding or file it and report it to the operator.</constraint>
+    <constraint source="ADR-008 (path A, spec ADR Tensions)">Scope: review input. Tell the reviewer that payload-dependent checks live in `CallerWriteAuthorization` by an approved project-scoped exception, and ask it to verify that no route-level authorization was weakened and that the route ledger is intact.</constraint>
+    <constraint source="NFR-01 (spec)">Scope: review focus. The reviewer must try to break fail-closed behaviour: a caller-check exception, an unresolved WhoAmI, a denied or missing mapping source (existence oracle), a mapped lookup the caller cannot AppendTo, a chat create of an unregistered table, and an unresolved owner.</constraint>
+    <constraint source="project">Scope: live data. Live checks create real rows on dev; use clearly named test rows (prefix "FMSWP-019") and record their ids so the owner can delete them. Never edit or delete rows you did not create. Do not run any bulk write.</constraint>
+    <constraint source="ADR-038">Scope: tests. No new tests are required by this task; any fix made for a review finding adds or updates its test at the KEEP path of the area fixed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF deployment and verification; adversarial review</topic>
+    <files>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="web-api-client" location=".claude/patterns/dataverse/web-api-client.md">Reading rows back to verify owner, stamp and mapping.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; confirm TASK-INDEX shows 017 and 018 complete; confirm the working tree builds and `dotnet test` of the touched suites is green before deploying.</step>
+    <step order="1">Build a fresh master publish and a branch publish; compute the size delta and file-count difference with the §10.4 method; run `dotnet list package --vulnerable --include-transitive`. Record both in notes/decisions.md. Stop if total is 60 MB or more.</step>
+    <step order="2">Launch adversarial-reviewer pass 1 over the W2 diff (branch vs master) with the NFR-01 focus list. Apply or file every F-class finding; re-run the affected tests.</step>
+    <step order="3">Launch adversarial-reviewer pass 2 (fresh agent) over the fix diff plus the whole W2 diff. Repeat step 2 until no F-class finding remains. Give a one-line reason in the notes if a third pass is needed.</step>
+    <step order="4">Deploy to dev with the bff-deploy skill (scripts/Deploy-BffApi.ps1). Do not treat a success message alone as success: confirm the hash-verify and the /healthz result the script reports.</step>
+    <step order="5">Live check A: create a Matter-filed Event through the child-records route as a test user; read the row back with the Dataverse MCP and verify owner (BU default Owner team per FR-09), I-1 stamp, mapped fields present, search-index default.</step>
+    <step order="6">Live check B: create a Project through Office quick-create under a Matter; verify owner equals check A's owner rule, stamp, mapping, search-index, and that the quick-create response shape and codes are unchanged.</step>
+    <step order="7">Live check C: a chat-style create of a child (dataverse.create_record path) carries the I-1 stamp at create; a create naming a parent the test user cannot AppendTo is refused with the uniform outcome.</step>
+    <step order="8">Query App Insights for the last 30 minutes after the live checks: no 5xx on the touched routes and no new exception type versus the 24 hours before the deploy. Record the query and result.</step>
+    <step order="9">Run `context-handoff` (CLAUDE.md §5). Write the outcome (deploy hash, test row ids, review findings and dispositions, size delta, CVE, App Insights result) to projects/field-mapping-server-write-path-r1/notes/decisions.md.</step>
+    <step order="10">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="11">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Any 5xx on a touched route, any owner mismatch between surfaces, or any failed live check: STOP, do not continue to the next check, report to the human with the row ids, and propose rollback by redeploying the previous bundle.</trigger>
+    <trigger>If an adversarial review finds an authorization bypass or an existence oracle, STOP deploying, fix per CLAUDE.md §8.5, and report to the human before any deploy.</trigger>
+    <trigger>If publish size reaches 55 MB total or grows by 5 MB or more in this change set, STOP and escalate (architecture review / justification) per CLAUDE.md §10.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="powershell">Run scripts/Deploy-BffApi.ps1 and publish-size measurement</tool>
+    <tool name="dotnet">Build/test .NET</tool>
+    <tool name="agent:adversarial-reviewer">Independent security review of the W2 diff</tool>
+    <tool name="mcp:dataverse">Read rows back on dev to verify owner, stamp, mapping</tool>
+    <tool name="az">App Insights queries</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/field-mapping-server-write-path-r1/notes/decisions.md (deploy, review, live-check, size and CVE results)</output>
+    <output type="deployment">spaarke-bff-dev running the W2 build, hash-verified</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Two adversarial-reviewer passes (the second a fresh agent) ran over the W2 diff and the notes list each finding with its F/K class and disposition; no F-class finding is open (fixed, or filed and reported to the operator).</criterion>
+    <criterion testable="true">The BFF is deployed to dev via the bff-deploy skill, the script's hash-verify passed, and /healthz is healthy.</criterion>
+    <criterion testable="true">A Matter-filed Event created through the child-records route and a Project created through Office quick-create under the same Matter each show, on read-back, the same owner rule (BU default Owner team), an I-1 stamp, and (where a profile exists) mapped fields; the Office response shape and error codes are unchanged.</criterion>
+    <criterion testable="true">A chat-style created child carries its I-1 stamp at create.</criterion>
+    <criterion testable="true">Negative: a create naming a parent the test user cannot AppendTo is refused with the uniform 404/403 outcome and no row is created; a denied mapping source produces no mapped values and one warning.</criterion>
+    <criterion testable="true">App Insights shows no 5xx on the touched routes and no new exception type after the deploy; the query and result are in the notes.</criterion>
+    <criterion testable="true">Publish-size delta against a fresh master build, file-count check and the CVE result are recorded; no new HIGH CVE; total below 55 MB or an approved escalation is recorded.</criterion>
+    <criterion testable="true">Build 0 errors and the W2 test suites (SecureChildOwnershipAiToolTests*, RefileWriterAfterRefileGuardTests, RouteAuthorizationGuardTests, RecordOwnerAssignmentCensusTests, Office contract tests) are green on the deployed commit; all test rows created on dev are listed by id in the notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec NFR-01, NFR-05; Success Criteria 3, 5, 6. W3 tasks (020 and the server-path tasks 030-034) depend on this gate.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

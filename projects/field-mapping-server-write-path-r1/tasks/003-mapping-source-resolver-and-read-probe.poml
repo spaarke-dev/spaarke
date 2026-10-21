@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Mapping-source resolver + Read-as-caller source probe (FR-03, FR-04)</title>
+    <phase>1 W1 Canonical engine and configuration</phase>
+    <gate>001 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security-sensitive (tags include security; a source read must not become an existence oracle or an AppendTo bypass, NFR-01); modifies .cs in Sprk.Bff.Api; adds tests at KEEP paths.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Authorization boundary: the probe must fail closed and leak nothing; refactors shared filter logic without changing its contract.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W1-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>001</deps>
+    <tags>bff-api, field-mapping, security, testing</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add a mapping-source resolver (explicit `mappingSource` → ADR-024 regarding pair → the table's single typed parent lookup → ambiguous = no source plus warning) and a Read-as-caller source probe that reuses the logic `QuickCreateSourceAccessFilter` already uses. Extract the shared Read check into one helper both the filter and the new probe call; do not fork it. A caller who cannot read the source gets no mapping and a warning, never a refusal and never a signal that distinguishes "missing" from "denied".</prompt>
+  <role>SPAARKE platform developer, .NET 10 BFF, Dataverse authorization (RetrievePrincipalAccess), security-first. Follow ADRs strictly.</role>
+  <goal>`resolver` tests cover explicit, inferred-from-pair, inferred-from-typed-lookup, ambiguous and none; the probe returns a source record only after a Read-as-caller check; a Read-denied or unreadable-or-missing source yields no mapped values and an identical warning; system principals read app-only; `QuickCreateSourceAccessFilter` behaviour and its existing tests are unchanged.</goal>
+
+  <context>
+    <background>spec.md FR-03, FR-04, NFR-01; design.md §4. `QuickCreateSourceAccessFilter` (Api/Filters, ~:225 AuthorizeSourceAsync) checks Read via `CallerRecordAccessProbe.GetCallerRightsAsync` (Infrastructure/ExternalAccess) after `EntityAccessFilter.TryResolveEntitySet`, then `OperationAccessPolicy.HasRequiredRights(rights, "read")`; a miss in the entity-set table DENIES. The filter returns HTTP 403 (deny); the new probe must instead degrade to "no mapping + warning" because mapping is optional. The residual noted in the filter (Read is record-level; an app-only read does not apply column-level security) is carried, not fixed, here.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Filters/QuickCreateSourceAccessFilter.cs (~:225 AuthorizeSourceAsync: delegate the Read decision to the extracted helper; contract unchanged)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerRecordAccessProbe.cs (~:219 GetCallerRightsAsync)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Dataverse/FieldMapping/MappingSourceResolver.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Dataverse/FieldMapping/MappingSourceReadProbe.cs (the shared Read helper; the filter and the resolver both call it)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Dataverse/FieldMapping/MappingSourceResolverTests.cs</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Dataverse/FieldMapping/MappingSourceReadProbeTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/OwnedChildWrite.cs (grep for PairTargetAsync — ADR-024 pair resolution; read only)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Office/RecordCreationService.cs (~:1193 ApplyFieldMappingsAsync — today's explicit-source-only reader)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="required">Engine lives under Services/Dataverse/FieldMapping/.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-01">Scope: the probe and resolver. Fail closed: any thrown probe, unmapped entity type or insufficient right means no mapping; the warning text is identical for missing and denied sources and never echoes the caller's value.</constraint>
+    <constraint source="ADR-028">Scope: identity. Read is checked under the caller's token; system principals read app-only; the managed identity is never used to answer a caller's Read question.</constraint>
+    <constraint source="ADR-008">Scope: the filter. Route-level authorization stays in `QuickCreateSourceAccessFilter`; this task only extracts its Read decision so both share one implementation. The filter's status codes, error codes and ordering must not change.</constraint>
+    <constraint source="ADR-024">Scope: precedence. Regarding pair first, then the table's single typed parent lookup; if still ambiguous, no inferred source and a warning.</constraint>
+    <constraint source="ADR-010">Scope: DI. The resolver and probe are static or constructed by their owners; add no new interface and no new DI registration unless the existing filter's constructor forces one (record it).</constraint>
+    <constraint source="ADR-038">Scope: tests added by this task. Unit tests under `tests/unit/Sprk.Bff.Api.Tests/`; no `Mock&lt;HttpMessageHandler&gt;`; no DI-registration tests.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: BFF publish. State Placement Justification in the PR; measure publish-size delta against a fresh master build per root CLAUDE.md §10.4; run `dotnet list package --vulnerable --include-transitive`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Source resolution and caller Read authorization</topic>
+    <files>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+    </files>
+    <patterns>
+      <pattern name="polymorphic-resolver" location=".claude/patterns/dataverse/polymorphic-resolver.md">The regarding pair and its resolution.</pattern>
+      <pattern name="relationship-navigation" location=".claude/patterns/dataverse/relationship-navigation.md">Typed parent lookups per table.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor (security); read spec FR-03/FR-04/NFR-01, design §4, the filter's class remarks; re-grep `AuthorizeSourceAsync`, `TryResolveEntitySet`, `GetCallerRightsAsync`.</step>
+    <step order="1">Extract the Read decision (entity-set resolve, rights probe, HasRequiredRights, exception handling) from `AuthorizeSourceAsync` into one shared helper; re-point the filter at it with no change to its responses. Run the existing filter tests before and after.</step>
+    <step order="2">Implement the resolver: explicit `mappingSource` (entity + id) wins; else the ADR-024 pair; else the single typed parent lookup; several typed candidates or none usable = no source (warning only when ambiguous). No profile = silent no-op; profile with no active rules = warning.</step>
+    <step order="3">Implement the probe use for the caller principal: Read-as-caller before any read; denied, missing, unmapped type or thrown probe all return the same "no mapping" outcome with the same warning text; system principal path reads app-only without the Read probe.</step>
+    <step order="4">Tests: explicit, inferred-from-pair, inferred-from-typed-lookup, ambiguous, none; Read-allowed reads; Read-denied yields no mapped values plus warning.</step>
+    <step order="5">Negative/security tests (mandatory): missing source and denied source produce byte-identical warnings and outcomes; a thrown probe produces no mapping (fail closed); an unmapped entity type produces no mapping; the warning never contains the source id's existence signal or the raw upstream message; a system principal does not call the caller probe.</step>
+    <step order="6">Build + run tests (including the existing QuickCreateSourceAccessFilter tests); measure publish size; run the CVE check.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="8">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the Read probe cannot be shared without changing `QuickCreateSourceAccessFilter`'s observable contract (status code, errorCode or ordering), STOP and escalate per CLAUDE.md §6 (security-sensitive code) with options.</trigger>
+    <trigger>If the only way to distinguish missing from denied is an observable difference (timing, text, status), STOP and escalate; uniform behaviour is a hard requirement.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Grep for `GetCallerRightsAsync` and `AuthorizeSourceAsync` shows the Read decision lives only inside QuickCreateSourceAccessFilter (private, HTTP-shaped); grep for `Source` in Services/Office/RecordCreationService.cs ~:1193 shows today's reader takes an explicit source only and performs no Read check.</existing>
+    <extension>The Read decision is extracted from the filter and shared (spec §11 row "Mapping-source resolver + fill-only applier": extends ApplyFieldMappingsAsync). A new resolver file is needed only because source inference (pair, typed lookup, ambiguity) has no existing home and must be callable from non-HTTP creators; it is not a new service or DI registration.</extension>
+    <cost-of-doing-nothing>Non-wizard creators (Office, chat, system) get no mapping source, and any server mapping that reads a source without a Read-as-caller check becomes an AppendTo bypass and existence oracle (NFR-01).</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="dotnet">Build/test .NET</tool></tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Dataverse/FieldMapping/MappingSourceResolver.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Dataverse/FieldMapping/MappingSourceReadProbe.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Dataverse/FieldMapping/MappingSourceResolverTests.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Dataverse/FieldMapping/MappingSourceReadProbeTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Resolver tests exist and pass for explicit, inferred-from-pair, inferred-from-typed-lookup, ambiguous (no source plus warning) and none (silent no-op).</criterion>
+    <criterion testable="true">A Read-denied source yields a create-time mapping result with no mapped values and one warning; the call never throws and never refuses the create.</criterion>
+    <criterion testable="true">`QuickCreateSourceAccessFilter` and the new probe call one shared Read helper; no second copy of the entity-set/rights/HasRequiredRights sequence exists (grep proves it).</criterion>
+    <criterion testable="true">Negative: missing and denied sources produce identical outcomes and identical warning text; a thrown probe or an unmapped entity type yields no mapping; no warning contains the raw exception message or confirms the source exists.</criterion>
+    <criterion testable="true">Negative: a system principal reads the source without invoking the caller probe; a caller principal never reads the source before the probe returns Read.</criterion>
+    <criterion testable="true">Existing QuickCreateSourceAccessFilter tests pass unchanged; BFF build 0 errors; publish-size delta and CVE result recorded in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-03, FR-04, NFR-01. Security tag: one adversarial pass runs with the W2 review (task 019). The unified service wires this resolver at pipeline step 3 in task 014.
+Completed 2026-10-20 (task/fm-003, merged 463c2a8f8). 28 new tests (unit/domain + integration/auth); quick-create filter contract unchanged; publish +6,876 B cumulative vs master; no CVE. Found DI-002 / #2137. Details: notes/task-003-notes.md.
+rework: fix-round-1 task 003</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1449,7 +1449,7 @@ public static class OfficeEndpoints
     /// form simply has no prefill, and the create itself refuses such a caller with its own message.
     /// </summary>
     private static async Task<IResult> GetQuickCreateDefaultsAsync(
-        RecordCreationService recordCreation,
+        OfficeRecordCreationService recordCreation,
         Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver callerResolver,
         HttpContext context,
         CancellationToken cancellationToken)
