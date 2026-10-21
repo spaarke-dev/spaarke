@@ -87,7 +87,7 @@
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Found while writing this task (not fixed here; ontology-r1 owns the test): DecisionRecordContextImmutabilityTests.CreateEntryPoints (tests/Spaarke.ArchTests/DecisionRecordContextImmutabilityTests.cs:197) lists WriteAsync, WriteGateDecisionAsync and WriteConditionClearedAsync but not WriteBillingDecisionAsync, although that public method creates records through CreateAsync (DecisionRecordWriter.cs:1369). Reported to the main session for filing.</notes>
+  <notes>Found while writing this task (not fixed here; ontology-r1 owns the test): DecisionRecordContextImmutabilityTests.CreateEntryPoints (tests/Spaarke.ArchTests/DecisionRecordContextImmutabilityTests.cs:197) lists WriteAsync, WriteGateDecisionAsync and WriteConditionClearedAsync but not WriteBillingDecisionAsync, although that public method creates records through CreateAsync (DecisionRecordWriter.cs:1369). Reported to the main session for filing. OWNER 2026-10-21 (re-plan Q4): an Override releases ANY held invoice, whatever the channel (SPA, internal, Outlook) and whatever raised the hold (including a 101 correction) — the master 'push it through', always recorded by its Decision Record through WriteBillingDecisionAsync. This answers both escalation triggers; the release is not limited to the no-version-in-force hold.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

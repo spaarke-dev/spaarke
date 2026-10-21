@@ -96,7 +96,7 @@
     <criterion testable="true">The hand-off issue exists, links this task, and is listed in notes/defer-issues.md.</criterion>
   </acceptance-criteria>
 
-  <notes>The model leaves "dev uses the existing account" unverified (4.2); step 1 settles it. customer.bicep passes the UAMI to the storage module at :315 (the model cites :313).</notes>
+  <notes>The model leaves "dev uses the existing account" unverified (4.2); step 1 settles it. customer.bicep passes the UAMI to the storage module at :315 (the model cites :313). OWNER 2026-10-21 (re-plan Q5): remove the account-scope Storage Blob Data Contributor assignment for the stamp identity. Dev/test is not a current risk, so the dev removal is low priority (still needs the owner's OK when run); the priority is that the provisioned customer environments get the correct settings: container-scoped assignments only, in the bicep that customer provisioning uses (storage-account.bicep / customer.bicep), with container-scoped grants for any non-ebilling container the identity needs.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
