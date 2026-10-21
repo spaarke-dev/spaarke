@@ -553,6 +553,9 @@ public sealed class BillingFactLoader
                 TrackingNumber = submission.GetAttributeValue<string>("sprk_trackingnumber") ?? string.Empty,
                 Sequence = submission.GetAttributeValue<int?>("sprk_submissionsequence") ?? 0,
                 FirmInvoiceNumber = submission.GetAttributeValue<string>("sprk_firminvoicenumber"),
+                InvoiceId = submission.GetAttributeValue<EntityReference>("sprk_invoice")?.Id is { } priorInvoiceId && priorInvoiceId != Guid.Empty
+                    ? priorInvoiceId
+                    : null,
                 Status = status,
                 SecureRoots = null, // set from the walk below; unresolved until then
                 Lines = invoice is not null && lines.TryGetValue(invoice.Id, out var priorLines) ? priorLines : [],

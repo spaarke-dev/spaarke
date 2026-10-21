@@ -344,6 +344,9 @@ public class BillingFactLoaderTests
             (rejectedAtIntake, BillingPriorStatus.Rejected), (received, BillingPriorStatus.Active),
         });
         loaded.PriorSubmissions.Should().NotContain(p => p.SubmissionId == SubmissionId, "K1: never its own prior");
+        // D-176 / #2118: the submission's invoice lookup is carried, so a visible Duplicate can cite the earlier invoice; none when it has none.
+        loaded.PriorSubmissions.Single(p => p.SubmissionId == active).InvoiceId.Should().Be(activeInvoice);
+        loaded.PriorSubmissions.Single(p => p.SubmissionId == received).InvoiceId.Should().BeNull();
         loaded.PriorSubmissions.Single(p => p.SubmissionId == active).Lines.Should().Equal(
             new BillingPriorLine { Date = new DateOnly(2026, 2, 2), TimekeeperName = "Jane Doe", Hours = 1.5m, Narrative = "Draft motion", Amount = 862.5m },
             new BillingPriorLine { Date = new DateOnly(2026, 2, 3), Hours = null, Amount = 40m });
