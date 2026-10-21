@@ -36,7 +36,7 @@
           sprk_previousversion (-> sprk_procedureversion, RemoveLink), sprk_effectivefrom / sprk_effectiveto (DateOnly),
           sprk_status (sprk_procedureversionstatus), sprk_notconverted (two options, default No; task 116), sprk_createdbyperson.
       P4  Table sprk_procedureassignment (user-owned, primary sprk_name, audited): one typed lookup per FilingCores table named
-          after its table (Cascade), sprk_procedure (-> sprk_procedure, Restrict, optional), sprk_mode (LOCAL choice: Follow
+          after its table (RemoveLink, all NoCascade), sprk_procedure (-> sprk_procedure, Restrict, optional), sprk_mode (LOCAL choice: Follow
           latest 100000000, Pinned 100000001, Excluded 100000002), sprk_pinnedversion (-> sprk_procedureversion, Restrict),
           sprk_excludedpolicy (-> sprk_policy, Cascade), sprk_firm (-> sprk_organization, Restrict), sprk_reason (memo),
           sprk_createdbyperson.
@@ -55,17 +55,29 @@
           sprk_ratecard). sprk_createdbyperson is created UNSECURED (task 081 secures it).
       P10 IsAuditEnabled on sprk_procedure, sprk_procedureversion and sprk_procedureassignment.
 
-    DELETE BEHAVIOUR (see also CASCADE CONFIGURATION below). Restrict only on lookups to a Procedure, a Procedure Version or a firm, never to a core record (model 5.2).
+    DELETE BEHAVIOUR (see also CASCADE CONFIGURATION AND THE PARENTAL LIMIT below). Restrict only on lookups to a Procedure, a Procedure Version or a firm, never to a core record (model 5.2).
     The two firm lookups' Restrict (sprk_procedure.sprk_firm, sprk_procedureassignment.sprk_firm) is this task's proposal: a nulled
     firm would widen a firm-only Procedure, or an override, to every firm. An existing lookup with another behaviour is never
     changed by script: the pre-flight stops (exit 2).
 
-    CASCADE CONFIGURATION (uac-r2 review). Every Cascade relationship (the four on sprk_procedureassignment: the core-record lookups
-    and sprk_excludedpolicy; and sprk_procedureversion.sprk_procedure, which is NOT parental) gets a custom configuration:
-    Delete = Cascade; Assign, Share, Unshare, Reparent, Merge and RollupView = NoCascade. A reassign or share of the parent must
-    not cascade onto these rows: RecordOwnershipResolver and the secure-child job (task 089) own their owner and shares. Every
-    other lookup is created Assign / Share / Unshare / Reparent NoCascade with its listed delete behaviour. The verify step reads
-    every member back.
+    CASCADE CONFIGURATION AND THE PARENTAL LIMIT (uac-r2 review; dev run 2026-10-21). Dataverse counts Delete = Cascade as a PARENTAL
+    relationship, and a table can have only ONE ("0x80047007 ... is parented to Entity <the first core table>. Cannot create another
+    parental relation with Entity <the second>"). So exactly one relationship per table is Delete Cascade, with a custom configuration (Delete
+    = Cascade; Assign, Share, Unshare, Reparent, Merge, RollupView = NoCascade, never the full parental one):
+        sprk_procedureversion.sprk_procedure   (the only parental relationship on sprk_procedureversion)
+        sprk_procedureassignment.sprk_excludedpolicy   (the only parental relationship on sprk_procedureassignment)
+    The assignment's core-record lookups (one per FilingCores table) are RemoveLink with Assign, Share, Unshare, Reparent, Merge and
+    RollupView NoCascade: the core-record delete planner (task 117) deletes a record's assignment rows before the record, with the
+    117 sweep as the backstop. A reassign or share of a parent never cascades onto these rows: RecordOwnershipResolver and the
+    secure-child job (task 089) own their owner and shares. Every other lookup is created Assign / Share / Unshare / Reparent
+    NoCascade with its listed delete behaviour. The plan refuses (exit 2) a table with two Delete Cascade lookups and any core
+    lookup set to Cascade; the verify reads every member back and pins that no other relationship on the two tables is parental.
+
+    FIX IN PLACE. A first dev run created the first core lookup on sprk_procedureassignment with Delete = Cascade before the second parental
+    refusal stopped it. When that relationship exists with exactly that known configuration (Delete Cascade, Assign / Share /
+    Unshare / Reparent / Merge NoCascade) the script PUTs its CascadeConfiguration to RemoveLink / NoCascade (reads all six back) and
+    updates the lookup's Description to the RemoveLink text, BEFORE it creates the other core lookups. Any other difference from the
+    expected configuration still stops the pre-flight (exit 2, nothing changed).
 
     REQUIRED LEVELS (ontology F4-2). sprk_procedureversion.sprk_procedure and sprk_versionnumber are raised to SystemRequired (the
     alternate key columns; precedent Deploy-EbillingSubmissionSchema step 4b), then read back in the verify step.
@@ -408,11 +420,18 @@ function Get-CascadeDeleteOnly {
     return @{ Assign = 'NoCascade'; Delete = 'Cascade'; Merge = 'NoCascade'; Reparent = 'NoCascade'; Share = 'NoCascade'; Unshare = 'NoCascade'; RollupView = 'NoCascade' }
 }
 
+# The configuration of a lookup that must cascade NOTHING, with the given delete behaviour (RemoveLink): the assignment's core lookups.
+function Get-CascadeNone([string]$Delete) {
+    return @{ Assign = 'NoCascade'; Delete = $Delete; Merge = 'NoCascade'; Reparent = 'NoCascade'; Share = 'NoCascade'; Unshare = 'NoCascade'; RollupView = 'NoCascade' }
+}
+
 # One lookup to create. Rel is the relationship schema name. Delete is the delete behaviour the relationship must read. A lookup
 # whose delete behaviour is Cascade gets the custom delete-only CascadeConfiguration above (Cascade = the full configuration).
-function New-LookupSpec([string]$Table, [string]$Column, [string]$Schema, [string]$Rel, [string]$Target, [string]$Display, [string]$Desc, [string]$Delete) {
-    $cascade = if ($Delete -eq 'Cascade') { Get-CascadeDeleteOnly } else { $null }
-    return [pscustomobject]@{ Table = $Table; Column = $Column; Schema = $Schema; Rel = $Rel; Target = $Target; Display = $Display; Desc = $Desc; Delete = $Delete; Cascade = $cascade }
+# -Cascade is an explicit full configuration (the assignment's core lookups: RemoveLink, all NoCascade). -DriftFrom names the one
+# delete behaviour a known earlier run may have left on an existing relationship that the script then repairs in place.
+function New-LookupSpec([string]$Table, [string]$Column, [string]$Schema, [string]$Rel, [string]$Target, [string]$Display, [string]$Desc, [string]$Delete, [hashtable]$Cascade = $null, [string]$DriftFrom = '') {
+    if (-not $Cascade -and $Delete -eq 'Cascade') { $Cascade = Get-CascadeDeleteOnly }
+    return [pscustomobject]@{ Table = $Table; Column = $Column; Schema = $Schema; Rel = $Rel; Target = $Target; Display = $Display; Desc = $Desc; Delete = $Delete; Cascade = $Cascade; DriftFrom = $DriftFrom }
 }
 
 # Relationship name for a lookup on a NEW table: {table}_{column}_{target}, sprk_ prefixes dropped from the column and the target
@@ -421,7 +440,35 @@ function Get-NewTableRel([string]$Table, [string]$Column, [string]$Target) {
     return ('{0}_{1}_{2}' -f $Table, ($Column -replace '^sprk_', ''), ($Target -replace '^sprk_', ''))
 }
 
+# The relationships (as read) other than $Column's that cascade Delete, Assign, Share, Unshare or Reparent, i.e. that Dataverse already
+# counts as the table's parental relationship. $FixedColumns are the columns an in-place repair has fixed (WhatIf only, where the
+# PUT is not sent): they are not counted.
+function Get-OtherParentalRelationships([string]$Column, $Relationships, [string[]]$FixedColumns = @()) {
+    $out = @()
+    foreach ($r in @($Relationships)) {
+        if ($r.ReferencingAttribute -eq $Column -or $r.ReferencingAttribute -in $FixedColumns) { continue }
+        $c = $r.CascadeConfiguration
+        if (@('Delete', 'Assign', 'Share', 'Unshare', 'Reparent' | Where-Object { [string]$c.$_ -in 'Cascade', 'UserOwned' }).Count -gt 0) { $out += $r }
+    }
+    return $out
+}
+
+# A Delete = Cascade lookup is parental, and a table can have only one: refuse (exit 2) to START creating one while any other
+# relationship on its table is already parental. This pins the order of the fix: the in-place repair of the core lookup that the
+# earlier run left Cascade must have run, and been read back, before sprk_excludedpolicy is created.
+function Assert-NoOtherParental($s) {
+    if ($s.Delete -ne 'Cascade' -and -not ($s.Cascade -and $s.Cascade.Delete -eq 'Cascade')) { return }
+    if (Get-Attr $s.Table $s.Column) { return }   # exists: nothing is created
+    $rels = @((Get-DvOrNull "EntityDefinitions(LogicalName='$($s.Table)')/ManyToOneRelationships?`$select=SchemaName,ReferencingAttribute,CascadeConfiguration" -Retries 2).value)
+    $fixed = if ($DryRun) { @($script:InPlaceFixes | Where-Object { $_.Cascade -and $_.Spec.Table -eq $s.Table } | ForEach-Object { $_.Spec.Column }) } else { @() }
+    $other = @(Get-OtherParentalRelationships $s.Column $rels $fixed)
+    if ($other.Count -gt 0) {
+        throw [EscalationException]::new("Not creating $($s.Table).$($s.Column) (Delete = Cascade): $($s.Table) already has a parental relationship ($(($other | ForEach-Object { "$($_.SchemaName) on $($_.ReferencingAttribute)" }) -join '; ')) and a table can have only one (0x80047007). The in-place repair must run and read back first. Nothing further was changed.")
+    }
+}
+
 function Invoke-LookupSpec($s) {
+    Assert-NoOtherParental $s
     Set-EbEntity $s.Table
     $p = @{ Column = $s.Column; SchemaName = $s.Schema; RelSchema = $s.Rel; Target = $s.Target; Display = $s.Display; Description = $s.Desc; DeleteBehavior = $s.Delete }
     if ($s.Cascade) { $p.Cascade = $s.Cascade }
@@ -444,6 +491,54 @@ function Get-CascadeMismatches($Actual, [hashtable]$Expected) {
     foreach ($k in ($Expected.Keys | Sort-Object)) {
         if ([string]$Actual.$k -ne [string]$Expected[$k]) { $out += "$k is '$($Actual.$k)', expected '$($Expected[$k])'" }
     }
+    return $out
+}
+
+# True when an existing relationship reads exactly the KNOWN drift of this spec (Delete = the spec's DriftFrom value, Assign / Share /
+# Unshare / Reparent / Merge NoCascade): the one difference the script repairs in place. RollupView and Archive are not compared.
+function Test-KnownCascadeDrift($Spec, $Actual) {
+    if (-not $Spec.DriftFrom -or -not $Actual) { return $false }
+    $known = @{ Delete = $Spec.DriftFrom; Assign = 'NoCascade'; Share = 'NoCascade'; Unshare = 'NoCascade'; Reparent = 'NoCascade'; Merge = 'NoCascade' }
+    return (@(Get-CascadeMismatches $Actual $known).Count -eq 0)
+}
+
+# The PUT body of the in-place repair: the relationship as READ, with exactly the six members Delete, Assign, Share, Unshare,
+# Reparent and Merge set to the expected values. Everything else (MetadataId, SchemaName, RollupView, Archive, ...) is sent back as read.
+function Get-CascadeFixBody($Relationship, [hashtable]$Expected) {
+    foreach ($k in 'Delete', 'Assign', 'Share', 'Unshare', 'Reparent', 'Merge') {
+        if (-not $Expected.ContainsKey($k)) { throw "Get-CascadeFixBody: the expected configuration has no '$k'." }
+        $Relationship.CascadeConfiguration.$k = $Expected[$k]
+    }
+    return $Relationship
+}
+
+# Plan guard: a table can have only ONE Delete = Cascade (parental) relationship (0x80047007), and a core-table lookup is never
+# Cascade. Returns the problems; empty when the plan is sound.
+function Get-ParentalPlanProblems($Lookups, [string[]]$CoreTables) {
+    $out = @()
+    $isCascade = { param($x) $x.Delete -eq 'Cascade' -or ($x.Cascade -and $x.Cascade.Delete -eq 'Cascade') }
+    foreach ($g in @($Lookups | Where-Object { & $isCascade $_ } | Group-Object Table)) {
+        if ($g.Count -gt 1) { $out += "$($g.Name) has $($g.Count) Delete = Cascade lookups ($(($g.Group | ForEach-Object { $_.Column }) -join ', ')); a table can have only one parental relationship (0x80047007)" }
+    }
+    foreach ($x in $Lookups) {
+        if ($x.Target -in $CoreTables -and (& $isCascade $x)) { $out += "$($x.Table).$($x.Column) targets the core table $($x.Target) with Delete = Cascade; core lookups are RemoveLink (a table can have only one parental relationship)" }
+    }
+    return $out
+}
+
+# Verify of the final shape on one table: the only relationship that cascades Delete, Assign, Share, Unshare or Reparent is
+# $AllowedColumn's, and that one reads Delete = Cascade. $Relationships are the table's many-to-one relationships as read
+# (ReferencingAttribute, SchemaName, CascadeConfiguration). Merge is not counted (Dataverse itself sets it on lookups to contact).
+function Get-ParentalProblems([string]$Table, $Relationships, [string]$AllowedColumn) {
+    $out = @()
+    foreach ($r in @($Relationships)) {
+        $c = $r.CascadeConfiguration
+        $par = @('Delete', 'Assign', 'Share', 'Unshare', 'Reparent' | Where-Object { [string]$c.$_ -in 'Cascade', 'UserOwned' })
+        if ($par.Count -gt 0 -and $r.ReferencingAttribute -ne $AllowedColumn) { $out += "$Table relationship $($r.SchemaName) ($($r.ReferencingAttribute)) cascades $($par -join ', '), but only $AllowedColumn may be parental" }
+    }
+    $allowed = @($Relationships | Where-Object { $_.ReferencingAttribute -eq $AllowedColumn }) | Select-Object -First 1
+    if (-not $allowed) { $out += "$Table has no relationship for $AllowedColumn" }
+    elseif ([string]$allowed.CascadeConfiguration.Delete -ne 'Cascade') { $out += "$Table.$AllowedColumn reads Delete = '$($allowed.CascadeConfiguration.Delete)', expected Cascade (the table's only parental relationship)" }
     return $out
 }
 
@@ -483,11 +578,11 @@ function Resolve-Plan([string[]]$CoreTables) {
 
     # P4 sprk_procedureassignment: one typed lookup per core table (Cascade), then the rest
     foreach ($c in $cores) {
-        $lk.Add((New-LookupSpec $Assignment $c.Table $c.Schema "$($c.Table)_procedureassignment_$($c.Suffix)" $c.Table $c.Display "The $($c.Display.ToLowerInvariant()) this assignment or override is on. Exactly one core lookup is set on a row (enforced by the BFF). CASCADE: deleting the record deletes its assignment rows (model 5.2). Never Restrict to a core record." 'Cascade'))
+        $lk.Add((New-LookupSpec $Assignment $c.Table $c.Schema "$($c.Table)_procedureassignment_$($c.Suffix)" $c.Table $c.Display "The $($c.Display.ToLowerInvariant()) this assignment or override is on. Exactly one core lookup is set on a row (enforced by the BFF). REMOVELINK, not Cascade: Dataverse counts Delete Cascade as parental and a table can have only one parental relationship, so the core-record delete planner (task 117) deletes the record's assignment rows first, with the 117 sweep as the backstop. Never Restrict to a core record." 'RemoveLink' -Cascade (Get-CascadeNone 'RemoveLink') -DriftFrom 'Cascade'))
     }
     $lk.Add((New-LookupSpec $Assignment $Procedure 'sprk_Procedure' (Get-NewTableRel $Assignment $Procedure $Procedure) $Procedure 'Procedure' 'The Procedure this row assigns, pins or excludes. Optional: a rule-level override names the excluded policy instead. RESTRICT: a Procedure that is assigned cannot be deleted (retire it instead).' 'Restrict'))
     $lk.Add((New-LookupSpec $Assignment 'sprk_pinnedversion' 'sprk_PinnedVersion' (Get-NewTableRel $Assignment 'sprk_pinnedversion' $Version) $Version 'Pinned Version' 'The Procedure Version used whatever is newer (mode Pinned). RESTRICT: only stops deleting a pinned Procedure Version, never a core record.' 'Restrict'))
-    $lk.Add((New-LookupSpec $Assignment 'sprk_excludedpolicy' 'sprk_ExcludedPolicy' (Get-NewTableRel $Assignment 'sprk_excludedpolicy' 'sprk_policy') 'sprk_policy' 'Excluded Rule' 'The rule (policy) a rule-level override switches off on this record (O-10). CASCADE: a deleted rule deletes its override, so a nulled rule can never read as a Procedure-level Exclude.' 'Cascade'))
+    $lk.Add((New-LookupSpec $Assignment 'sprk_excludedpolicy' 'sprk_ExcludedPolicy' (Get-NewTableRel $Assignment 'sprk_excludedpolicy' 'sprk_policy') 'sprk_policy' 'Excluded Rule' 'The rule (policy) a rule-level override switches off on this record (O-10). CASCADE: a deleted rule deletes its override, so a nulled rule can never read as a Procedure-level Exclude. The ONLY parental (Delete Cascade) relationship of this table.' 'Cascade'))
     $lk.Add((New-LookupSpec $Assignment 'sprk_firm' 'sprk_Firm' (Get-NewTableRel $Assignment 'sprk_firm' $org) $org 'Firm' 'Optional firm the override is limited to (6.3). RESTRICT: a nulled firm would widen the override to every firm (task 080 proposal).' 'Restrict'))
     $lk.Add((New-CreatorSpec $Assignment))
 
@@ -514,6 +609,8 @@ function Resolve-Plan([string[]]$CoreTables) {
         $lk.Add((New-LookupSpec $c.Table 'sprk_billingresponsible' 'sprk_BillingResponsible' (Get-NewTableRel $c.Table 'sprk_billingresponsible' $org) $org 'Billing Responsible' 'The client''s billing entity. No R1 consumer. Confers NO access: never add it to the access registry (model 5.2, K-2).' 'RemoveLink'))
     }
     $script:Lookups = @($lk)
+    $planProblems = @(Get-ParentalPlanProblems $script:Lookups $CoreTables)
+    if ($planProblems.Count -gt 0) { throw [EscalationException]::new("The plan breaks the one-parental-relationship-per-table rule (nothing was changed):`n    - " + ($planProblems -join "`n    - ")) }
 
     # Non-lookup columns (for the pre-flight type check): Table, Column, AttributeType.
     $script:Columns = @(
@@ -594,10 +691,22 @@ function Test-LookupSpecPreflight($s, [System.Collections.Generic.List[string]]$
         if ($lk -and $lk.Targets -and ($lk.Targets -notcontains $s.Target)) { $Problems.Add("$($s.Table).$($s.Column) exists as a lookup to '$($lk.Targets -join ',')', expected '$($s.Target)'") }
         $rel = Get-LookupRelationship $s.Table $s.Column
         if ($rel) {
+            $fixCascade = $false; $fixDesc = $false
             $diff = @(Get-CascadeMismatches $rel.CascadeConfiguration (Get-ExpectedCascade $s))
             if ($diff.Count -gt 0) {
-                $Problems.Add("$($s.Table).$($s.Column) ($($rel.SchemaName)) has a different CascadeConfiguration: $($diff -join '; '). Changing it needs an owner decision; not changed")
+                if (Test-KnownCascadeDrift $s $rel.CascadeConfiguration) {
+                    $fixCascade = $true
+                    Write-Host "  NOTE: $($s.Table).$($s.Column) ($($rel.SchemaName)) reads Delete = $($s.DriftFrom) from the earlier run: it is repaired in place to $($s.Delete) / NoCascade (the one known drift)." -ForegroundColor Yellow
+                }
+                else {
+                    $Problems.Add("$($s.Table).$($s.Column) ($($rel.SchemaName)) has a different CascadeConfiguration: $($diff -join '; '). Changing it needs an owner decision; not changed")
+                }
             }
+            if ($s.DriftFrom) {
+                $d = Get-DvOrNull "EntityDefinitions(LogicalName='$($s.Table)')/Attributes(LogicalName='$($s.Column)')/Microsoft.Dynamics.CRM.LookupAttributeMetadata?`$select=Description"
+                if ($d -and [string]$d.Description.UserLocalizedLabel.Label -ne $s.Desc) { $fixDesc = $true }
+            }
+            if ($fixCascade -or $fixDesc) { $script:InPlaceFixes.Add(@{ Spec = $s; Cascade = $fixCascade; Desc = $fixDesc }) }
         }
     }
     else {
@@ -613,6 +722,7 @@ function Test-LookupSpecPreflight($s, [System.Collections.Generic.List[string]]$
 $script:ReaderId = $null
 $script:WriterId = $null
 $script:ProfilesToCreate = [System.Collections.Generic.List[string]]::new()
+$script:InPlaceFixes = [System.Collections.Generic.List[object]]::new()   # filled by the pre-flight, applied by Repair-CoreLookupDrift
 
 function Get-ProfileByName([string]$Name) {
     $safe = $Name.Replace("'", "''")
@@ -916,6 +1026,54 @@ function Test-ExternalRolePrivileges([string[]]$Tables) {
     }
 }
 
+# The in-place repair of an existing core lookup that a first run left with Delete = Cascade (the table's only parental
+# relationship may be sprk_excludedpolicy). PUTs the relationship's CascadeConfiguration (Delete, Assign, Share, Unshare, Reparent,
+# Merge) and the lookup's Description, then reads each back. Runs BEFORE the other core lookups are created.
+function Repair-CoreLookupDrift {
+    foreach ($f in $script:InPlaceFixes) {
+        $s = $f.Spec; $tag = "$($s.Table).$($s.Column)"
+        $expected = Get-ExpectedCascade $s
+        if ($f.Cascade) {
+            if ($DryRun) { $script:Changed.Add("$tag cascade $($s.DriftFrom) -> $($s.Delete)"); Write-Host "  WOULD CHANGE $tag ($($s.Rel)) CascadeConfiguration: Delete $($s.DriftFrom) -> $($s.Delete); Assign / Share / Unshare / Reparent / Merge NoCascade" -ForegroundColor Cyan }
+            else {
+                $rel = Get-DvOrNull "RelationshipDefinitions(SchemaName='$($s.Rel)')/Microsoft.Dynamics.CRM.OneToManyRelationshipMetadata" -Retries 2
+                if (-not $rel) { throw "$($s.Rel) was not found for the in-place repair." }
+                $body = Get-CascadeFixBody $rel $expected
+                Invoke-WhilePropagating { Invoke-Dv -Path "RelationshipDefinitions($($rel.MetadataId))" -Method PUT -Body $body -ExtraHeaders @{ 'MSCRM.MergeLabels' = 'true' } | Out-Null }
+                $left = @()
+                for ($i = 0; $i -lt 6; $i++) {
+                    $back = Get-LookupRelationship $s.Table $s.Column
+                    $left = @(Get-CascadeMismatches $back.CascadeConfiguration @{ Delete = $expected.Delete; Assign = 'NoCascade'; Share = 'NoCascade'; Unshare = 'NoCascade'; Reparent = 'NoCascade'; Merge = 'NoCascade' })
+                    if ($left.Count -eq 0) { break }
+                    Start-Sleep -Seconds 3
+                }
+                if ($left.Count -gt 0) { throw "$tag CascadeConfiguration still differs after the in-place PUT: $($left -join '; ')." }
+                $script:Changed.Add("$tag cascade $($s.DriftFrom) -> $($s.Delete)"); $script:Wrote = $true
+                Write-Host "  CHANGED  $tag CascadeConfiguration -> Delete $($s.Delete), Assign / Share / Unshare / Reparent / Merge NoCascade (all six read back)" -ForegroundColor Green
+            }
+        }
+        if ($f.Desc) {
+            if ($DryRun) { $script:Changed.Add("$tag description"); Write-Host "  WOULD CHANGE $tag Description to the RemoveLink text" -ForegroundColor Cyan }
+            else {
+                $path = "EntityDefinitions(LogicalName='$($s.Table)')/Attributes(LogicalName='$($s.Column)')/Microsoft.Dynamics.CRM.LookupAttributeMetadata"
+                $a = Get-DvOrNull $path -Retries 2
+                if (-not $a) { throw "$tag was not found for the description update." }
+                $a.Description = New-Label $s.Desc
+                Invoke-WhilePropagating { Invoke-Dv -Path $path -Method PUT -Body $a -ExtraHeaders @{ 'MSCRM.MergeLabels' = 'true' } | Out-Null }
+                $now = ''
+                for ($i = 0; $i -lt 6; $i++) {
+                    $now = [string](Get-DvOrNull "${path}?`$select=Description").Description.UserLocalizedLabel.Label
+                    if ($now -eq $s.Desc) { break }
+                    Start-Sleep -Seconds 3
+                }
+                if ($now -ne $s.Desc) { throw "$tag Description still reads the old text after the update." }
+                $script:Changed.Add("$tag description"); $script:Wrote = $true
+                Write-Host "  CHANGED  $tag Description -> the RemoveLink text (read back)" -ForegroundColor Green
+            }
+        }
+    }
+}
+
 # ---------------------------------------------------------------------------------------------------------------
 # Run
 # ---------------------------------------------------------------------------------------------------------------
@@ -1053,6 +1211,7 @@ try {
     Write-Host "4. P4 table $Assignment (user-owned, audited)" -ForegroundColor Cyan
     New-ProcedureTable $Assignment 'Procedure Assignment' 'Procedure Assignments' 'A Procedure assigned to a core record, with a per-record mode (follow latest, pinned, excluded) or a rule-level override. Secure child of the record it names (ebilling-r1 EB-D-148, model 5.2, 6.2, 6.3).' 'Name of the assignment.'
     Set-EbEntity $Assignment
+    Repair-CoreLookupDrift
     foreach ($s in $script:Lookups | Where-Object { $_.Table -eq $Assignment -and $_.Column -in $script:Cores.Table }) { Invoke-LookupSpec $s }
     Set-EbEntity $Assignment
     Add-LocalChoice -Column 'sprk_mode' -Schema 'sprk_Mode' -Display 'Mode' -Description 'Follow latest (the version in force on the work date), Pinned (the Pinned Version whatever is newer) or Excluded (the Procedure or rule does not apply here). Model 6.2.' -Labels @('Follow latest', 'Pinned', 'Excluded')
@@ -1209,6 +1368,23 @@ try {
             foreach ($m in @(Get-CascadeMismatches $cc (Get-ExpectedCascade $s))) { $bad.Add("$($s.Table).$($s.Column) CascadeConfiguration: $m") }
             if ($s.Target -in $coreSet -and $cc.Delete -eq 'Restrict') { $bad.Add("$($s.Table).$($s.Column) targets a core table and reads Restrict") }
             if ($rel.SchemaName -ne $s.Rel) { $bad.Add("$($s.Table).$($s.Column) relationship is named $($rel.SchemaName), expected $($s.Rel)") }
+        }
+
+        # The final cascade shape (parental limit): the three core lookups are RemoveLink across the board with the lookup text;
+        # sprk_excludedpolicy and sprk_procedureversion.sprk_procedure are the only parental relationships on their tables.
+        foreach ($s in $script:Lookups | Where-Object { $_.Table -eq $Assignment -and $_.Column -in $coreSet }) {
+            $rel = Get-LookupRelationship $s.Table $s.Column
+            $cc = if ($rel) { $rel.CascadeConfiguration } else { $null }
+            foreach ($m in @(Get-CascadeMismatches $cc @{ Delete = 'RemoveLink'; Assign = 'NoCascade'; Share = 'NoCascade'; Unshare = 'NoCascade'; Reparent = 'NoCascade'; Merge = 'NoCascade' })) { $bad.Add("$($s.Table).$($s.Column) must be RemoveLink / NoCascade: $m") }
+            $d = Get-DvOrNull "EntityDefinitions(LogicalName='$($s.Table)')/Attributes(LogicalName='$($s.Column)')/Microsoft.Dynamics.CRM.LookupAttributeMetadata?`$select=Description"
+            if (-not $d -or [string]$d.Description.UserLocalizedLabel.Label -ne $s.Desc) { $bad.Add("$($s.Table).$($s.Column) Description is not the RemoveLink text") }
+            else { Write-Host "  $($s.Table).$($s.Column): RemoveLink, all NoCascade, Description is the RemoveLink text" }
+        }
+        foreach ($pt in @(@($Assignment, 'sprk_excludedpolicy'), @($Version, $Procedure))) {
+            $rels = @((Get-DvOrNull "EntityDefinitions(LogicalName='$($pt[0])')/ManyToOneRelationships?`$select=SchemaName,ReferencingAttribute,CascadeConfiguration" -Retries 2).value)
+            $pp = @(Get-ParentalProblems $pt[0] $rels $pt[1])
+            foreach ($x in $pp) { $bad.Add($x) }
+            if ($pp.Count -eq 0) { Write-Host "  $($pt[0]).$($pt[1]) is the only parental relationship on $($pt[0]); no other Cascade there" }
         }
 
         # sprk_scope options exactly 100000000-100000003; one record lookup per FilingCores table.
