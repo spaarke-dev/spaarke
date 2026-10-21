@@ -1,15 +1,15 @@
 # Current Task — field-mapping-server-write-path-r1
 
-> **Last updated**: 2026-10-20 (checkpoint at 85% context)
-> **Phase**: Wave 2. Done: 001, 002, 003, 006, 010, 011. 012 ✅ (verified, pushed). 004→005 agent still running.
+> **Last updated**: 2026-10-21
+> **Phase**: Wave 2. Done (7/43): 001, 002, 003, 006, 010, 011, 012. In flight: 013 (fix round 1), 004→005 (relaunched).
 
 ## Quick Recovery
 
 | Field | Value |
 |---|---|
-| **HEAD** | `92e039f5b3` on `work/field-mapping-server-write-path-r1`, pushed. 0 behind master at 77ef24010e. Verified: Spaarke.sln 0/0, ArchTests 1183, suites 1746 |
-| **Running** | (1) The 004→005 implementer agent, branch `task/fm-004-005`, base c4a2a7b81. (2) The **013** agent (opus/xhigh), branch `task/fm-013`, base bad3195920 (master merged at that point). 013 goes to UAC-r2 and ebilling-r1 for review before any master merge |
-| **Next Action** | When the 004/005 agent reports:<br>• merge `task/fm-004-005` (expect overlap only with master in Spaarke.Dataverse);<br>• verify (sln build, ArchTests, suites);<br>• mark 004 and 005;<br>• push.<br>005's live sprk_syncmode migration needs the owner's OK (dry run only). Then the next candidate is **013** (opus/xhigh; deps 011 ✅ and 012 ✅). |
+| **HEAD** | `036bc69bab` on `work/field-mapping-server-write-path-r1`, pushed; master merged at 44063b3473, no overlap with 013's files |
+| **Running** | (1) **013** agent (opus/xhigh), branch `task/fm-013` (base bad3195920, tip c09c73c1f7 before fixes), worktree `C:\code_files\spaarke\.claude\worktrees\agent-a87bbe45568936ca4`. Fix round 1 in progress: F1/F2 secure-root and autonumber-retry tests; F3 caller-set autonumber column refused as BlockedColumn; F4/F5 SystemPrincipal on an isolated/secure plan refused 403 `system_principal_unsupported` **before** PlanCreateAsync (main-session fail-closed decision); K1 census name join (expires 018); K2 never-throw post-create calls. Then a second adversarial pass (security). (2) **004→005** agent relaunched from 036bc69bab, branch `task/fm-004-005`. The first launch stopped on a wrong base and did no work |
+| **Next Action** | On each report: merge with `--no-ff`, verify (sln, ArchTests, suites), mark the POML and TASK-INDEX, push. After 013: send the range to UAC-r2 (refusal codes, owner, post-create order) and ebilling-r1 (registry rule, corrections a–c) for review before any master merge. After 005: bring the dry-run numbers to the owner for live migration OK. Next task: **014** (deps 002, 003, 013) |
 
 ## How wave-2 agents are run (lessons)
 
@@ -56,7 +56,9 @@
 
 ## Next tasks after the wave
 
-- **013:** opus/xhigh, sequential core. Deps 011 ✅ and 012 (being verified).
+- **014 → 015 → 016 → 017/018 → 019** after 013 (W2 sequential core).
+- **Owner item from 013 F4:** if a 017/018 server adapter needs a SystemPrincipal create under a secure root, it
+  needs an app-only access check on `RequestedBy`. 013 fails closed until then.
 - **040:** needs 005 and 019.
 - **050:** needs 019.
 - W1 is otherwise done once 004 and 005 land.
