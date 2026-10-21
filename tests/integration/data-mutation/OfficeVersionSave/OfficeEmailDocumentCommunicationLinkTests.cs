@@ -326,7 +326,220 @@ public class OfficeEmailDocumentCommunicationLinkTests
         RelatedCommunicationQueued(world).Should().BeNull();
     }
 
+    // ── Task 131 (#2171): the filing outcome is on the 202 response ───────────────────────────────────────────────────
+
+    [Fact]
+    public async Task EmailSave_ReconciledToAnUnfiledCommunicationTheCallerMayNotWrite_Reports_NotPermitted_AndStillSaves()
+    {
+        var store = new CommunicationStore();
+        var communicationId = store.Seed(RfcId);
+        store.DenyWrite();
+        var world = new OfficeVersionSaveWorld();
+        using var factory = Host(world, store);
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CallerToken);
+
+        var response = await client.PostAsJsonAsync("/api/office/save", EmailSave());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        (await EmailFilingWireAsync(response)).Should().Be("NotPermitted");
+        store.CommunicationWrites.Should().BeEmpty("the communication is left unfiled");
+        world.CreatedDocumentRequests.Should().ContainSingle().Which.RelatedCommunicationId.Should().Be(communicationId);
+    }
+
+    [Fact]
+    public async Task AttachmentSave_WhoseParentEmailTheCallerMayNotWrite_Reports_NotPermitted()
+    {
+        var store = new CommunicationStore();
+        store.Seed(RfcId);
+        store.DenyWrite();
+        var world = new OfficeVersionSaveWorld();
+        using var factory = Host(world, store, new ParentEmailGraph());
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CallerToken);
+
+        var response = await client.PostAsJsonAsync("/api/office/save", AttachmentSave(parentEmailId: ItemId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        (await EmailFilingWireAsync(response)).Should().Be("NotPermitted");
+        store.CommunicationWrites.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task EmailSave_FilingAnUnfiledCommunication_Reports_Filed()
+    {
+        var store = new CommunicationStore();
+        store.Seed(RfcId);
+        var world = new OfficeVersionSaveWorld();
+        using var factory = Host(world, store);
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CallerToken);
+
+        var response = await client.PostAsJsonAsync("/api/office/save", EmailSave());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        (await EmailFilingWireAsync(response)).Should().Be("Filed");
+        store.CommunicationWrites.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task AttachmentSave_FilingItsUnfiledParentEmail_Reports_Filed()
+    {
+        var store = new CommunicationStore();
+        store.Seed(RfcId);
+        var world = new OfficeVersionSaveWorld();
+        using var factory = Host(world, store, new ParentEmailGraph());
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CallerToken);
+
+        var response = await client.PostAsJsonAsync("/api/office/save", AttachmentSave(parentEmailId: ItemId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        (await EmailFilingWireAsync(response)).Should().Be("Filed");
+    }
+
+    [Fact]
+    public async Task EmailSave_WhenTheFilingFails_Reports_Failed_AndTheSaveIsStillAccepted()
+    {
+        var store = new CommunicationStore();
+        store.Seed(RfcId);
+        store.FailFilingRead = true;
+        var world = new OfficeVersionSaveWorld();
+        using var factory = Host(world, store);
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CallerToken);
+
+        var response = await client.PostAsJsonAsync("/api/office/save", EmailSave());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        (await EmailFilingWireAsync(response)).Should().Be("Failed");
+        store.CommunicationWrites.Should().BeEmpty();
+        world.CreatedDocumentRequests.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task EmailSave_OfAnAlreadyFiledCommunication_Reports_AlreadyFiled()
+    {
+        var store = new CommunicationStore();
+        var communicationId = store.Seed(RfcId);
+        store.FiledElsewhere.Add(communicationId);
+        var world = new OfficeVersionSaveWorld();
+        using var factory = Host(world, store);
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CallerToken);
+
+        var response = await client.PostAsJsonAsync("/api/office/save", EmailSave());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        (await EmailFilingWireAsync(response)).Should().Be("AlreadyFiled");
+        store.CommunicationWrites.Should().BeEmpty("a communication already filed is never moved");
+    }
+
+    [Fact]
+    public async Task EmailSave_ThatCreatesItsOwnCommunication_CarriesNoFilingOutcome()
+    {
+        var store = new CommunicationStore(); // nothing seeded: the capture inserts the communication
+        store.DenyWrite();
+        var world = new OfficeVersionSaveWorld();
+        using var factory = Host(world, store);
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CallerToken);
+
+        var response = await client.PostAsJsonAsync("/api/office/save", EmailSave());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        store.Inserts.Should().Be(1);
+        await AssertNoEmailFilingAsync(response);
+    }
+
+    [Fact]
+    public async Task EmailSave_NamingNoRecord_CarriesNoFilingOutcome()
+    {
+        var store = new CommunicationStore();
+        store.Seed(RfcId);
+        store.DenyWrite();
+        var world = new OfficeVersionSaveWorld();
+        using var factory = Host(world, store);
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CallerToken);
+        var request = EmailSave() with { TargetEntity = null };
+
+        var response = await client.PostAsJsonAsync("/api/office/save", request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        await AssertNoEmailFilingAsync(response);
+    }
+
+    [Fact]
+    public async Task DocumentSave_CarriesNoFilingOutcome()
+    {
+        var store = new CommunicationStore();
+        store.Seed(RfcId);
+        store.DenyWrite();
+        var world = new OfficeVersionSaveWorld();
+        using var factory = Host(world, store);
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CallerToken);
+
+        var response = await client.PostAsJsonAsync(
+            "/api/office/save", OfficeVersionSaveWorld.NewDocumentSave("Brief.docx", Encoding.UTF8.GetBytes("brief")));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        await AssertNoEmailFilingAsync(response);
+    }
+
+    [Fact]
+    public async Task DuplicateEmailSave_ReplaysNoFilingOutcome_ItNeverClaimsAFilingThatDidNotHappen()
+    {
+        var store = new CommunicationStore();
+        store.Seed(RfcId);
+        store.DenyWrite();
+        var world = new OfficeVersionSaveWorld();
+        using var factory = Host(world, store);
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CallerToken);
+        var request = EmailSave();
+
+        var first = await PostWithKeyAsync(client, request, "first");
+        (await EmailFilingWireAsync(first)).Should().Be("NotPermitted", "precondition: the first save reported the refusal");
+        var retry = await PostWithKeyAsync(client, request, "second");
+
+        retry.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await retry.Content.ReadFromJsonAsync<SaveResponse>())!.Duplicate.Should().BeTrue();
+        await AssertNoEmailFilingAsync(retry);
+    }
+
+    [Theory]
+    [InlineData(ReconciledFilingResult.NotApplicable, null)]
+    [InlineData(ReconciledFilingResult.Filed, EmailFilingOutcome.Filed)]
+    [InlineData(ReconciledFilingResult.AlreadyFiled, EmailFilingOutcome.AlreadyFiled)]
+    [InlineData(ReconciledFilingResult.NotPermitted, EmailFilingOutcome.NotPermitted)]
+    [InlineData(ReconciledFilingResult.Failed, EmailFilingOutcome.Failed)]
+    public void EveryFilingResult_MapsToItsWireOutcome_AndNotApplicableToNone(ReconciledFilingResult result, EmailFilingOutcome? expected) =>
+        OfficeService.ToEmailFilingOutcome(result).Should().Be(expected);
+
     // ── Helpers ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    private static Task<HttpResponseMessage> PostWithKeyAsync(HttpClient client, SaveRequest body, string key)
+    {
+        var message = new HttpRequestMessage(HttpMethod.Post, "/api/office/save") { Content = JsonContent.Create(body) };
+        message.Headers.Add("X-Idempotency-Key", key);
+        return client.SendAsync(message);
+    }
+
+    /// <summary>The wire value of <c>emailFiling</c> in the response body, or <c>null</c> when the property is absent.</summary>
+    private static async Task<string?> EmailFilingWireAsync(HttpResponseMessage response)
+    {
+        using var body = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return body.RootElement.TryGetProperty("emailFiling", out var value) ? value.GetString() : null;
+    }
+
+    /// <summary>The property is omitted from the JSON — not merely null — so an older client sees an unchanged body.</summary>
+    private static async Task AssertNoEmailFilingAsync(HttpResponseMessage response)
+    {
+        using var body = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.TryGetProperty("emailFiling", out _).Should().BeFalse();
+    }
 
     private static SaveRequest EmailSave() => new()
     {
@@ -424,6 +637,8 @@ public class OfficeEmailDocumentCommunicationLinkTests
                 .Setup(d => d.RetrieveAsync("sprk_communication", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string _, Guid id, string[] _, CancellationToken _) =>
                 {
+                    if (FailFilingRead)
+                        throw new InvalidOperationException("Test: Dataverse could not read the communication.");
                     var row = new DataverseEntity("sprk_communication", id);
                     if (FiledElsewhere.Contains(id))
                         row["sprk_regardingmatter"] = new EntityReference("sprk_matter", Guid.NewGuid());
@@ -458,6 +673,14 @@ public class OfficeEmailDocumentCommunicationLinkTests
 
         /// <summary>Every write to a <c>sprk_communication</c> (the filing engine's), in order.</summary>
         public List<(Guid Id, Dictionary<string, object> Fields)> CommunicationWrites { get; } = [];
+
+        /// <summary>Task 131: reading a communication's filing throws, so a filing attempt Fails.</summary>
+        public bool FailFilingRead { get; set; }
+
+        /// <summary>Task 131: even the caller's own token holds no Write on a communication (a secure thread).</summary>
+        public void DenyWrite() =>
+            Probe.Setup(p => p.GetCallerRightsAsync(CallerToken, "sprk_communications", It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(AccessRights.Read);
 
         public Dictionary<string, Guid> ByMessageId { get; } = new(StringComparer.Ordinal);
 

@@ -25,6 +25,11 @@ import { openQuickSaveDialog } from '@shared/commands/quickSaveDialog';
 import { readSavedDocument, type QuickSaveResponse } from '@shared/commands/readSavedDocument';
 import { buildQuickSaveRecordLink } from '@shared/taskpane/services/quickSaveHelpers';
 import { configuredSpaarkeAppName } from '@shared/taskpane/services/openRecordLauncher';
+import {
+  describeEmailFilingProblem,
+  readEmailFilingProblem,
+  type EmailFilingProblem,
+} from '@shared/taskpane/services/emailFilingNotice';
 
 // Register global functions for Office to call
 declare global {
@@ -107,14 +112,24 @@ function skippedNotice(content: EmailContentCapture | undefined): string {
   return ` ${skipped === 1 ? '1 attachment was' : `${skipped} attachments were`} left out: too large, a cloud link or unreadable.`;
 }
 
-/** The result-dialog text for a saved email. Names how many attachments were left out — never silent. */
+/**
+ * The result-dialog text for a saved email. Names how many attachments were left out — never silent.
+ *
+ * Task 131 (#2171): when the save worked but the email it reconciled to could not be filed to the record, the dialog says
+ * so instead of "filed to <record>" — which would be untrue. It stays a success dialog (the save succeeded); the sentence
+ * is the same one the task pane shows and names no record.
+ */
 function describeEmailSaved(
   target: { name: string } | null,
   content: EmailContentCapture | undefined,
-  duplicate: boolean
+  duplicate: boolean,
+  emailFilingProblem?: EmailFilingProblem | null
 ): string {
   if (duplicate) {
     return 'This email is already saved in Spaarke. Nothing new was saved.';
+  }
+  if (emailFilingProblem) {
+    return `${describeEmailFilingProblem(emailFilingProblem)}${skippedNotice(content)}`;
   }
   return target
     ? `Saved to Spaarke and filed to ${target.name}.${skippedNotice(content)}`
@@ -203,7 +218,12 @@ async function quickSave(event: Office.AddinCommands.Event): Promise<void> {
     }
 
     await dialog.show({
-      message: describeEmailSaved(target, content, response?.duplicate === true),
+      message: describeEmailSaved(
+        target,
+        content,
+        response?.duplicate === true,
+        readEmailFilingProblem(response?.emailFiling)
+      ),
       status: 'success',
       linkUrl:
         saved.kind === 'saved'

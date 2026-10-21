@@ -43,6 +43,41 @@ public record SaveResponse
     /// Error information if save failed.
     /// </summary>
     public SaveError? Error { get; init; }
+
+    /// <summary>
+    /// Task 131 (#2171): what the save did about FILING the email it reconciled to. Present only on a new-save success
+    /// response for an email save (or an attachment save, whose parent email is filed with it) that reconciled to an
+    /// existing communication. Omitted from the JSON (<c>null</c>) whenever there is nothing to report: the save created
+    /// its own communication, named no record, saved a Word document, or is an idempotent replay (which returns before
+    /// any filing). Additive: clients that do not know the field ignore it.
+    /// </summary>
+    /// <remarks>
+    /// Never fails the save and never names the record the communication is filed under: the client can tell the user
+    /// the email was not filed, not what it is filed to.
+    /// </remarks>
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public EmailFilingOutcome? EmailFiling { get; init; }
+}
+
+/// <summary>
+/// Task 131 (#2171): the outcome of filing the reconciled email communication to the save's record. Serialized by name
+/// (<c>"Filed"</c>, <c>"AlreadyFiled"</c>, <c>"NotPermitted"</c>, <c>"Failed"</c>), as <see cref="ArtifactType"/> is.
+/// "Nothing to report" is not a member: the property is omitted instead.
+/// </summary>
+public enum EmailFilingOutcome
+{
+    /// <summary>The email's communication was unfiled and is now filed to the save's record.</summary>
+    Filed,
+
+    /// <summary>The communication was already filed (to any record) and was left as it was.</summary>
+    AlreadyFiled,
+
+    /// <summary>The caller may not change the communication, so it was left unfiled.</summary>
+    NotPermitted,
+
+    /// <summary>The filing could not be completed; the communication was left as it was.</summary>
+    Failed
 }
 
 /// <summary>
