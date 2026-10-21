@@ -1,0 +1,793 @@
+using System.Data;
+using System.Globalization;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Access;
+using Sprk.Bff.Api.Services.Ai.Membership;
+using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse.FieldMapping;
+using SearchIndexColumns = Sprk.Bff.Api.Services.Ai.SearchIndexNameResolver;
+
+namespace Sprk.Bff.Api.Services.RecordCreation;
+
+/// <summary>
+/// Repair mode (field-mapping-server-write-path-r1 task 016, spec FR-14 / FR-25 / NFR-03): steps 3, 7, 8 and 10 of the
+/// create pipeline applied to an EXISTING row, fill-only, against the row's CURRENT values.
+/// </summary>
+/// <remarks>
+/// <para><b>One read, at most one write.</b> The row is read once, committed, with every column (its filing lookups decide
+/// the mapping source and the owner, as the reparent's whole-row read does). The four steps add to ONE patch; an empty patch
+/// writes nothing, so a second repair of the same row writes nothing (NFR-03). A non-empty patch is ONE update conditioned on
+/// the version that was read (<see cref="Spaarke.Dataverse.IGenericEntityService.UpdateIfRowVersionMatchesAsync"/>): a row
+/// another writer changed meanwhile is not written and not retried (the next pass reads it afresh), so a value that writer
+/// set is never overwritten by a patch computed before it.</para>
+/// <para><b>Fill-only.</b> A present value is never overwritten, even one that differs from what the mapping, the owner rule,
+/// the business unit or the stamp would give (FR-02 "not supplied": scalars absent, null or blank; lookups unbound; booleans
+/// and option sets absent). The owner is changed only on a systemuser-owned row (a team-owned row keeps its owner) and never
+/// on a row its table's ownership exception keeps with its creator.</para>
+/// <para><b>System principal (ADR-028, FR-07).</b> Every read and the write are app-only under the managed identity; there
+/// is no caller, no WhoAmI, no impersonation and no caller check. Pre-write rules are not run: they are create rules, and
+/// are not widened to updates (ebilling-r1, w2-coordination).</para>
+/// <para><b>Fail closed (NFR-01, ADR-019).</b> An owner that cannot be resolved leaves <c>ownerid</c> unchanged and is
+/// reported as a typed refusal; the other fields are still repaired. No exception text is returned: the detail is logged
+/// with the row id.</para>
+/// <para><b>ADR-010.</b> A method on the existing scoped service: no registration, no endpoint. The scheduled pass and the
+/// admin trigger (task 052) call it.</para>
+/// </remarks>
+internal sealed partial class RecordCreationService
+{
+    /// <summary>The invoice family: ebilling-r1's <c>InvoiceFamilyCoreRecordGuard</c> owns every stored-row write of these.</summary>
+    private static readonly IReadOnlySet<string> InvoiceFamilyTables =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_invoice", "sprk_billingevent" };
+
+    private const string OwnerColumn = "ownerid";
+    private const string OwningBusinessUnitColumn = "owningbusinessunit";
+    private const string VersionNumberColumn = "versionnumber";
+    private const string SearchIndexTable = "sprk_aisearchindex";
+
+    /// <summary>
+    /// Repairs <paramref name="table"/> <paramref name="id"/> as the system principal: mapping (step 3), owner (step 7),
+    /// search-index default (step 8) and the I-1 stamp (step 10), fill-only, in ONE conditional update — or none when
+    /// nothing is missing. Never throws for a Dataverse fault (cancellation aside): every outcome is in the report.
+    /// </summary>
+    /// <exception cref="ArgumentException">No table or no id.</exception>
+    internal async Task<RecordRepairOutcome> RepairAsync(string table, Guid id, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(table);
+        if (id == Guid.Empty)
+            throw new ArgumentException("A record id is required.", nameof(id));
+
+        table = table.Trim().ToLowerInvariant();
+        var rule = TableRules(table);
+        if (rule is null)
+        {
+            _logger.LogInformation("[RECORD-REPAIR] {Table} {Id}: the table is not one this service creates; not repaired", table, id);
+            return RecordRepairOutcome.Row(table, id, RecordRepairStatus.Skipped, RecordRepairReason.TableUnsupported);
+        }
+
+        Entity? row;
+        try
+        {
+            row = await ReadRowForRepairAsync(table, id, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[RECORD-REPAIR] {Table} {Id} could not be read; nothing was repaired", table, id);
+            return RecordRepairOutcome.Row(table, id, RecordRepairStatus.Failed, RecordRepairReason.ReadFailed);
+        }
+
+        if (row is null)
+            return RecordRepairOutcome.Row(table, id, RecordRepairStatus.Skipped, RecordRepairReason.RowNotFound);
+
+        var patch = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        var report = new List<RecordRepairField>();
+        var warnings = new List<string>();
+
+        await RepairMappingAsync(table, rule, row, patch, report, warnings, ct).ConfigureAwait(false);
+        var owner = await RepairOwnerAsync(table, rule, row, patch, report, ct).ConfigureAwait(false);
+        await RepairSearchIndexAsync(table, rule, row, owner.BusinessUnit, patch, report, ct).ConfigureAwait(false);
+        await RepairStampAsync(table, row, patch, report, ct).ConfigureAwait(false);
+
+        RecordRepairOutcome Outcome(RecordRepairStatus status, string? reason) => new()
+        {
+            Table = table,
+            Id = id,
+            Status = status,
+            ReasonCode = reason,
+            Fields = reason is null ? report : NotWritten(report, reason),
+            OwnerRefusal = owner.Refusal,
+            Warnings = warnings,
+        };
+
+        if (patch.Count == 0)
+            return Outcome(RecordRepairStatus.NothingToRepair, null);
+
+        var version = row.RowVersion
+            ?? (row.GetAttributeValue<long?>(VersionNumberColumn) is { } number ? number.ToString(CultureInfo.InvariantCulture) : null);
+        if (string.IsNullOrWhiteSpace(version))
+        {
+            _logger.LogError("[RECORD-REPAIR] {Table} {Id} came back without its version, so it cannot be written conditionally; " +
+                             "nothing was written", table, id);
+            return Outcome(RecordRepairStatus.Failed, RecordRepairReason.VersionUnknown);
+        }
+
+        if (await InvoiceFamilyUpdateRefusalAsync(table, id, patch, ct).ConfigureAwait(false) is { } refusedBy)
+            return Outcome(RecordRepairStatus.Skipped, refusedBy);
+
+        var ownerWritten = patch.ContainsKey(OwnerColumn);
+        try
+        {
+            await _entities.UpdateIfRowVersionMatchesAsync(table, id, version, patch, ct).ConfigureAwait(false);
+        }
+        catch (DBConcurrencyException ex)
+        {
+            // Nothing was written: the row moved after it was read. Not retried (NFR-03) — the next pass reads it afresh.
+            _logger.LogInformation(ex, "[RECORD-REPAIR] {Table} {Id} changed after it was read; nothing was written", table, id);
+            return Outcome(RecordRepairStatus.RowChanged, RecordRepairReason.RowChanged);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // Ambiguous: it may have landed. Never retried blindly (NFR-03); an owner write is evicted for anyway.
+            _logger.LogError(ex, "[RECORD-REPAIR] the repair write of {Table} {Id} failed ({Columns}); not retried", table, id,
+                string.Join(", ", patch.Keys.Order(StringComparer.Ordinal)));
+            if (ownerWritten)
+                await EvictOwnerChangeAsync(table, id).ConfigureAwait(false);
+            return Outcome(RecordRepairStatus.Failed, RecordRepairReason.WriteFailed);
+        }
+        catch (OperationCanceledException)
+        {
+            if (ownerWritten)
+                await EvictOwnerChangeAsync(table, id).ConfigureAwait(false);
+            throw;
+        }
+
+        if (ownerWritten)
+            await EvictOwnerChangeAsync(table, id).ConfigureAwait(false);
+
+        _logger.LogInformation("[RECORD-REPAIR] {Table} {Id} repaired ({Columns})", table, id,
+            string.Join(", ", patch.Keys.Order(StringComparer.Ordinal)));
+        return Outcome(RecordRepairStatus.Repaired, null);
+    }
+
+    /// <summary>The row, read committed with every column (the reparent's whole-row read); <c>null</c> when it does not exist.</summary>
+    private async Task<Entity?> ReadRowForRepairAsync(string table, Guid id, CancellationToken ct)
+    {
+        var query = new QueryExpression(table)
+        {
+            ColumnSet = new ColumnSet(true),
+            TopCount = 1,
+            NoLock = false,
+        };
+        query.Criteria.AddCondition($"{table}id", ConditionOperator.Equal, id);
+        return (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+    }
+
+    // ── Step 3: mapping ─────────────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Step 3 against the row's current values: the source inferred from the row's filing (FR-03: its pair, else its one
+    /// filed-under parent; the record-type catalog read app-only), the profile, the source read app-only
+    /// (<see cref="MappingSourceReader.System"/>, no probe), then <see cref="CreateTimeFieldMapping.ApplyFillOnly"/> — the
+    /// create's own fill decision — over a copy of the row. A mapped value that would file the row under a record (a filing
+    /// or ownership-parent lookup, or an I-1 stamp column) is not written: Repair never re-files a row.
+    /// </summary>
+    private async Task RepairMappingAsync(
+        string table, RecordTableRule rule, Entity row, Dictionary<string, object> patch, List<RecordRepairField> report,
+        List<string> warnings, CancellationToken ct)
+    {
+        if (!rule.MappingApplies)
+        {
+            report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, null, RecordRepairReason.MappingExcluded));
+            return;
+        }
+
+        try
+        {
+            // A stamped child's I-1 stamp columns are COPIES of its source's root, not filings: leaving them in would read the
+            // row as filed under two records (its source and the root), which FR-03 cannot tell apart.
+            var copies = StampCopyColumns(table, row);
+            var resolution = await MappingSourceResolver.ResolveAsync(
+                    table, null, null, row.Attributes.Where(a => a.Value is not null && !copies.Contains(a.Key)).ToArray(),
+                    RecordTypeTableAppOnlyAsync, ct)
+                .ConfigureAwait(false);
+            if (resolution.Source is not { } source)
+            {
+                if (resolution.Origin == MappingSourceOrigin.Undetermined)
+                {
+                    report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, null, RecordRepairReason.MappingSourceUndetermined));
+                }
+                else
+                {
+                    // FR-03: filed under nothing, so no source — the silent no-op, counted by the caller from this code.
+                    report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, null, RecordRepairReason.MappingSourceNone));
+                }
+
+                return;
+            }
+
+            FieldMappingProfileEntity? profile;
+            try
+            {
+                profile = await _appOnly
+                    .GetFieldMappingProfileWithRulesAsync(source.EntityLogicalName, table, activeRulesOnly: true, ct)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[RECORD-REPAIR] the field-mapping profile {Source} -> {Table} could not be read for {Id}; " +
+                                       "nothing was mapped", source.EntityLogicalName, table, row.Id);
+                warnings.Add(MappingConfigurationUnreadable);
+                report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, null, RecordRepairReason.MappingUnavailable));
+                return;
+            }
+
+            var rules = (profile?.Rules ?? []).Select(NormalizedRule).ToList();
+            if (rules.Count == 0)
+            {
+                report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, null, RecordRepairReason.MappingNoRules));
+                return;
+            }
+
+            var read = await MappingSourceReadProbe.ReadAsync(
+                    MappingSourceReader.System, source, CreateTimeFieldMapping.CollectSourceColumns(rules), _entities, _logger, ct)
+                .ConfigureAwait(false);
+            if (!read.Readable)
+            {
+                warnings.Add(read.Warning ?? MappingSourceReadProbe.SourceUnavailableWarning);
+                report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, null, RecordRepairReason.MappingSourceUnreadable));
+                return;
+            }
+
+            var target = new Entity(table, row.Id);
+            foreach (var (column, value) in row.Attributes)
+                target[column] = value;
+
+            var written = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            CreateTimeFieldMapping.ApplyFillOnly(
+                rules, target, read.Record, ProtectedFromMapping(table, rule, serverSetLookupColumns: null), warnings, _logger,
+                moneyAttributes: null, mappedColumns: written);
+
+            var columns = rules
+                .Select(r => r.TargetField?.Trim())
+                .Where(c => !string.IsNullOrEmpty(c))
+                .Select(c => c!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Order(StringComparer.Ordinal);
+            foreach (var column in columns)
+            {
+                if (written.Contains(column) && target.Attributes.TryGetValue(column, out var value) && value is not null)
+                {
+                    if (WouldFileTheRow(table, column, value))
+                    {
+                        report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, column, RecordRepairReason.MappedValueWouldRefile));
+                        continue;
+                    }
+
+                    patch[column] = value;
+                    report.Add(RecordRepairField.Repaired(RecordRepairPart.Mapping, column));
+                }
+                else if (HoldsValue(row, column))
+                {
+                    report.Add(RecordRepairField.Present(RecordRepairPart.Mapping, column));
+                }
+                else
+                {
+                    report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, column, RecordRepairReason.MappingNoValue));
+                }
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[RECORD-REPAIR] mapping {Table} {Id} faulted; nothing was mapped", table, row.Id);
+            foreach (var mapped in patch.Keys.ToArray())
+                patch.Remove(mapped);
+            report.RemoveAll(f => f.Part == RecordRepairPart.Mapping);
+            warnings.Add(MappingFaulted);
+            report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, null, RecordRepairReason.MappingUnavailable));
+        }
+    }
+
+    /// <summary>The I-1 stamp columns of a row filed under an intermediate (its copies of that record's root); else none.</summary>
+    private static IReadOnlySet<string> StampCopyColumns(string table, Entity row)
+    {
+        if (!CoreAncestorResolver.StampSourceColumns.ContainsKey(table)
+            || CoreAncestorResolver.ClassifyStampSource(table, row, CoreAncestorResolver.PartyRegardingColumnNames(table)).Kind
+               != StampSourceKind.Source)
+        {
+            return new HashSet<string>();
+        }
+
+        return CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Whether writing <paramref name="value"/> to <paramref name="column"/> would file the row under a record.</summary>
+    private static bool WouldFileTheRow(string table, string column, object value) =>
+        IsFilingLookup(table, column)
+        || CoreAncestorResolver.CoreAncestorLookups.Any(l => string.Equals(l.LookupAttribute, column, StringComparison.OrdinalIgnoreCase))
+        || (value is EntityReference reference
+            && RecordOwnershipResolver.IsOwnershipParent(reference.LogicalName)
+            && !RecordOwnershipResolver.IsCitation(table, column));
+
+    /// <summary>FR-02 "supplied", for the report: a value that is not blank text and not an unbound lookup.</summary>
+    private static bool HoldsValue(Entity row, string column) =>
+        row.Attributes.TryGetValue(column, out var value) && value switch
+        {
+            null => false,
+            string text => !string.IsNullOrWhiteSpace(text),
+            EntityReference reference => reference.Id != Guid.Empty,
+            _ => true,
+        };
+
+    /// <summary>The table a <c>sprk_recordtype_ref</c> names, read app-only (the pair's type, FR-03).</summary>
+    private async Task<string?> RecordTypeTableAppOnlyAsync(Guid typeId, CancellationToken ct)
+    {
+        var query = new QueryExpression(RecordTypeTable)
+        {
+            ColumnSet = new ColumnSet(OwnedChildWrite.RecordTypeLogicalNameColumn),
+            TopCount = 1,
+        };
+        query.Criteria.AddCondition(RecordTypeTable + "id", ConditionOperator.Equal, typeId);
+        var type = (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+        return type?.GetAttributeValue<string>(OwnedChildWrite.RecordTypeLogicalNameColumn);
+    }
+
+    // ── Step 7: owner ───────────────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>What step 7 decided: the business unit the row is owned in after the repair, and the owner refusal.</summary>
+    private sealed record OwnerRepair(Guid? BusinessUnit, RecordCreationRefusal? Refusal);
+
+    /// <summary>
+    /// Step 7 for an existing row (FR-09): only a systemuser-owned row (user- or application-owned) is re-owned; a team-owned
+    /// row keeps its owner. The parents are the row's own (<see cref="RecordOwnershipContext.ParentsOf(Entity)"/>, plus a
+    /// message's record-thread filing, <see cref="RecordThreadFiling"/>, as the reconciler and the reparent read them) and
+    /// the create's resolution decides (<see cref="ResolveOwnerOverAsync"/>, <see cref="OwnerDecided"/>). A row filed under
+    /// nothing is owned by the team of the PERSON who owns it (I-6, the acting user); an application-owned one has no such
+    /// person and is refused (<see cref="RecordOwnerRefusal.NoOwnerSource"/>) — never given the application user's team. A
+    /// table's ownership exception (an unfiled communication keeps its creator, E1) keeps the owner.
+    /// </summary>
+    /// <remarks><b>Escalation (task 016 trigger 2), fail closed until the owner decides:</b> an owner in another business
+    /// unit than the row's is NOT written on a table whose rows can have children inheriting access (every ownership-parent
+    /// table) — the move would carry those children's access with it.</remarks>
+    private async Task<OwnerRepair> RepairOwnerAsync(
+        string table, RecordTableRule rule, Entity row, Dictionary<string, object> patch, List<RecordRepairField> report,
+        CancellationToken ct)
+    {
+        var rowUnit = row.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn) is { } unit && unit.Id != Guid.Empty
+            ? unit.Id
+            : (Guid?)null;
+        var current = row.GetAttributeValue<EntityReference>(OwnerColumn);
+        if (current is null || current.Id == Guid.Empty)
+        {
+            report.Add(RecordRepairField.Skipped(RecordRepairPart.Owner, OwnerColumn, RecordRepairReason.OwnerUnknown));
+            return new OwnerRepair(rowUnit, null);
+        }
+
+        if (!string.Equals(current.LogicalName, "systemuser", StringComparison.OrdinalIgnoreCase))
+        {
+            report.Add(RecordRepairField.Present(RecordRepairPart.Owner, OwnerColumn, RecordRepairReason.OwnerTeamOwned));
+            return new OwnerRepair(rowUnit, null);
+        }
+
+        var noun = NounOf(table);
+        RecordOwnerResolution owner;
+        try
+        {
+            var threadParents = await RecordThreadFiling.ParentsAsync(_entities, table, RecordThreadFiling.ThreadOf(row), ct)
+                .ConfigureAwait(false);
+            var parents = RecordOwnershipContext.ParentsOf(row).Concat(threadParents).Distinct().ToArray();
+            if (rule.OwnershipException is not null && parents.Length == 0)
+            {
+                report.Add(RecordRepairField.Skipped(RecordRepairPart.Owner, OwnerColumn, RecordRepairReason.OwnerKeptByException));
+                return new OwnerRepair(rowUnit, null);
+            }
+
+            // I-6 for an unfiled row: the PERSON who owns it acts. An application user, or one that cannot be told, is no one.
+            Guid? actingUser = parents.Length == 0
+                && await ApplicationUserCheck.IsApplicationUserAsync(_entities, current.Id, _logger, ct).ConfigureAwait(false) == false
+                    ? current.Id
+                    : null;
+
+            var resolved = await ResolveOwnerOverAsync(
+                    table, parents, pairInvalidId: false, row.GetAttributeValue<string>(SecureRootInheritance.PairIdColumn),
+                    row.GetAttributeValue<EntityReference>(SecureRootInheritance.PairTypeColumn)?.Id, callerObjectId: null,
+                    callerSystemUserId: actingUser, requestedBy: null, ct)
+                .ConfigureAwait(false);
+            if (resolved.Refusal is { } undetermined)
+                return OwnerRefused(row, undetermined, report);
+
+            owner = resolved.Owner!;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[RECORD-REPAIR] the owner of {Table} {Id} could not be decided (fault); it was not changed", table, row.Id);
+            return OwnerRefused(row, OwnerUnavailable(noun), report);
+        }
+
+        var (decided, refusal) = OwnerDecided(table, owner);
+        if (refusal is not null)
+            return OwnerRefused(row, refusal, report);
+
+        var team = decided!.OwningTeamId!.Value;
+        Guid teamUnit;
+        try
+        {
+            teamUnit = await TeamBusinessUnitAsync(team, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[RECORD-REPAIR] the business unit of the owner team {Team} of {Table} {Id} could not be read; " +
+                                 "the owner was not changed", team, table, row.Id);
+            return OwnerRefused(row, OwnerUnavailable(noun), report);
+        }
+
+        if (rowUnit != teamUnit && RecordOwnershipResolver.IsOwnershipParent(table))
+        {
+            _logger.LogWarning(
+                "[RECORD-REPAIR] ESCALATION (task 016 trigger 2): re-owning {Table} {Id} would move it from business unit {From} " +
+                "to {To} while rows filed under it inherit its access; the owner was not changed", table, row.Id, rowUnit, teamUnit);
+            report.Add(RecordRepairField.Skipped(RecordRepairPart.Owner, OwnerColumn, RecordRepairReason.OwnerMovesBusinessUnit));
+            return new OwnerRepair(rowUnit, null);
+        }
+
+        patch[OwnerColumn] = new EntityReference("team", team);
+        report.Add(RecordRepairField.Repaired(RecordRepairPart.Owner, OwnerColumn));
+        return new OwnerRepair(teamUnit, null);
+    }
+
+    /// <summary>The owner is unchanged, so the row stays in its own business unit; the refusal is reported, typed.</summary>
+    private OwnerRepair OwnerRefused(Entity row, RecordCreationRefusal refusal, List<RecordRepairField> report)
+    {
+        _logger.LogInformation("[RECORD-REPAIR] the owner of {Table} {Id} was not changed: {Code}", row.LogicalName, row.Id, refusal.Code);
+        report.Add(RecordRepairField.Refused(RecordRepairPart.Owner, OwnerColumn, refusal.Code));
+        var unit = row.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn) is { } held && held.Id != Guid.Empty
+            ? held.Id
+            : (Guid?)null;
+        return new OwnerRepair(unit, refusal);
+    }
+
+    private static RecordCreationRefusal OwnerUnavailable(string noun) => new(
+        RecordCreationRefusalKind.Unavailable, RecordCreationRefusal.OwnerUnavailableCode,
+        $"The owner of this {noun} could not be decided right now, so it was not changed.");
+
+    // ── Step 8: search-index default ────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Step 8 (FR-10) for an existing row: on a search-indexed table, each of the two columns the row does not hold is filled
+    /// from its OWNING business unit (the repaired owner's when step 7 re-owned it), by the create's own reads. A unit that
+    /// cannot be read fills nothing.
+    /// </summary>
+    private async Task RepairSearchIndexAsync(
+        string table, RecordTableRule rule, Entity row, Guid? businessUnit, Dictionary<string, object> patch,
+        List<RecordRepairField> report, CancellationToken ct)
+    {
+        if (!rule.SearchIndexed)
+            return;
+
+        var name = SearchIndexColumns.LegacyTextColumn;
+        var lookup = SearchIndexColumns.LookupColumn;
+        var holdsName = HoldsValue(row, name) || patch.ContainsKey(name);
+        var holdsLookup = HoldsValue(row, lookup) || patch.ContainsKey(lookup);
+        if (holdsName)
+            report.Add(RecordRepairField.Present(RecordRepairPart.SearchIndex, name));
+        if (holdsLookup)
+            report.Add(RecordRepairField.Present(RecordRepairPart.SearchIndex, lookup));
+        if (holdsName && holdsLookup)
+            return;
+
+        (string? Name, Guid? Index) defaults;
+        try
+        {
+            if (businessUnit is not { } unit)
+                throw new InvalidOperationException("the row's owning business unit is not known");
+            defaults = await BusinessUnitSearchDefaultsAsync(unit, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[RECORD-REPAIR] the search-index defaults for {Table} {Id} could not be read; none filled", table, row.Id);
+            if (!holdsName)
+                report.Add(RecordRepairField.Skipped(RecordRepairPart.SearchIndex, name, RecordRepairReason.SearchIndexUnavailable));
+            if (!holdsLookup)
+                report.Add(RecordRepairField.Skipped(RecordRepairPart.SearchIndex, lookup, RecordRepairReason.SearchIndexUnavailable));
+            return;
+        }
+
+        if (!holdsName)
+        {
+            if (defaults.Name is { } indexName)
+            {
+                patch[name] = indexName;
+                report.Add(RecordRepairField.Repaired(RecordRepairPart.SearchIndex, name));
+            }
+            else
+            {
+                report.Add(RecordRepairField.Skipped(RecordRepairPart.SearchIndex, name, RecordRepairReason.SearchIndexNoDefault));
+            }
+        }
+
+        if (!holdsLookup)
+        {
+            if (defaults.Index is { } index)
+            {
+                patch[lookup] = new EntityReference(SearchIndexTable, index);
+                report.Add(RecordRepairField.Repaired(RecordRepairPart.SearchIndex, lookup));
+            }
+            else
+            {
+                report.Add(RecordRepairField.Skipped(RecordRepairPart.SearchIndex, lookup, RecordRepairReason.SearchIndexNoDefault));
+            }
+        }
+    }
+
+    // ── Step 10: I-1 stamp ──────────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Step 10 (I-1) for an existing row: the stamp columns it is MISSING, from its source's current root
+    /// (<see cref="CoreAncestorRestamper.PlanMissingStampAsync"/>). A held stamp — stale or not — and the row's children are
+    /// <see cref="CoreAncestorStampReconciliationJob"/>'s.
+    /// </summary>
+    private async Task RepairStampAsync(
+        string table, Entity row, Dictionary<string, object> patch, List<RecordRepairField> report, CancellationToken ct)
+    {
+        if (!CoreAncestorResolver.StampSourceColumns.ContainsKey(table))
+            return;
+
+        Dictionary<string, object>? missing;
+        try
+        {
+            missing = await _restamper.PlanMissingStampAsync(table, row, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[RECORD-REPAIR] the core-ancestor stamp of {Table} {Id} could not be planned; none added", table, row.Id);
+            report.Add(RecordRepairField.Skipped(RecordRepairPart.CoreAncestorStamp, null, RecordRepairReason.StampUnavailable));
+            return;
+        }
+
+        if (missing is null)
+        {
+            report.Add(RecordRepairField.Present(RecordRepairPart.CoreAncestorStamp, null, RecordRepairReason.StampNothingMissing));
+            return;
+        }
+
+        foreach (var (column, value) in missing.OrderBy(m => m.Key, StringComparer.Ordinal))
+        {
+            patch[column] = value;
+            report.Add(RecordRepairField.Repaired(RecordRepairPart.CoreAncestorStamp, column));
+        }
+    }
+
+    // ── The write ───────────────────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The ONE place ebilling-r1's invoice-family guard drops into (w2-coordination: tasks 016 and 040 call
+    /// <c>InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync</c>, app-only, D-96, on stored-row writes). A reason code
+    /// refuses the write (the row is skipped, nothing written); <c>null</c> lets it go ahead.
+    /// </summary>
+    /// <remarks>
+    /// TODO(#1911): the guard is not on master yet (ebilling-r1 PR #1911 is a draft). Until it lands, a repair of a
+    /// <c>sprk_invoice</c> or <c>sprk_billingevent</c> row is NOT written (fail closed): replace the refusal below with
+    /// <c>await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(...)</c> over <paramref name="patch"/>, returning its
+    /// refusal's reason code, or <c>null</c> when it admits the write. Pre-write rules are not widened to updates.
+    /// </remarks>
+    private Task<string?> InvoiceFamilyUpdateRefusalAsync(
+        string table, Guid id, IReadOnlyDictionary<string, object> patch, CancellationToken ct)
+    {
+        _ = patch;
+        _ = ct;
+        if (!InvoiceFamilyTables.Contains(table))
+            return Task.FromResult<string?>(null);
+
+        _logger.LogWarning(
+            "[RECORD-REPAIR] {Table} {Id} was not repaired: the invoice-family update guard (ebilling-r1 #1911) is not available " +
+            "on this build, so a stored invoice-family row is not written", table, id);
+        return Task.FromResult<string?>(RecordRepairReason.InvoiceFamilyGuardUnavailable);
+    }
+
+    /// <summary>
+    /// An owner write stales the access caches (<see cref="IMembershipCacheInvalidator.InvalidateRecordOwnerChangeAsync"/>:
+    /// "every owner-changing writer MUST call it"), once per write ATTEMPT. Resolved from a scope, so the service's
+    /// registration is unchanged; never throws — the TTLs are the backstop.
+    /// </summary>
+    private async Task EvictOwnerChangeAsync(string table, Guid id)
+    {
+        var set = (SecureChildLineage.Children.TryGetValue(table, out var lineage) ? lineage.EntitySet : null)
+                  ?? RegardingNameFields.EntitySetName(table);
+        if (set is null)
+        {
+            _logger.LogError("[RECORD-REPAIR] {Table} {Id} was re-owned, but its entity set is not known, so its cached access " +
+                             "was not evicted (the TTL backstop applies)", table, id);
+            return;
+        }
+
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            if (scope.ServiceProvider.GetService<IMembershipCacheInvalidator>() is not { } invalidator)
+            {
+                _logger.LogWarning("[RECORD-REPAIR] {Table} {Id} was re-owned, but no cache invalidator is registered in this host " +
+                                   "(the TTL backstop applies)", table, id);
+                return;
+            }
+
+            await invalidator.InvalidateRecordOwnerChangeAsync(table, set, id, $"record-repair:{table}:{id:D}", CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[RECORD-REPAIR] evicting the caches after re-owning {Table} {Id} failed; the TTLs are the backstop",
+                table, id);
+        }
+    }
+
+    /// <summary>The report of a patch that was not written: each repaired field becomes skipped, with the row's reason.</summary>
+    private static IReadOnlyList<RecordRepairField> NotWritten(IReadOnlyList<RecordRepairField> report, string reason) =>
+        report.Select(f => f.State == RecordRepairFieldState.Repaired
+                ? f with { State = RecordRepairFieldState.Skipped, ReasonCode = reason }
+                : f)
+            .ToArray();
+}
+
+/// <summary>What a repair did with the row (task 016).</summary>
+internal enum RecordRepairStatus
+{
+    /// <summary>The fill-only patch was written in one update.</summary>
+    Repaired,
+
+    /// <summary>Nothing was missing: no write.</summary>
+    NothingToRepair,
+
+    /// <summary>The row was not repaired (unsupported table, no such row, the invoice-family guard): no write.</summary>
+    Skipped,
+
+    /// <summary>The row changed after it was read: nothing was written, not retried.</summary>
+    RowChanged,
+
+    /// <summary>The read or the write faulted (the write is not retried; see the logs, with the row id).</summary>
+    Failed,
+}
+
+/// <summary>The pipeline step a reported field belongs to.</summary>
+internal enum RecordRepairPart
+{
+    /// <summary>Step 3, field mapping.</summary>
+    Mapping,
+
+    /// <summary>Step 7, the owner.</summary>
+    Owner,
+
+    /// <summary>Step 8, the search-index default.</summary>
+    SearchIndex,
+
+    /// <summary>Step 10, the I-1 core-ancestor stamp.</summary>
+    CoreAncestorStamp,
+}
+
+/// <summary>A reported field's outcome.</summary>
+internal enum RecordRepairFieldState
+{
+    /// <summary>Filled by the repair's write.</summary>
+    Repaired,
+
+    /// <summary>The row holds a value: kept (fill-only).</summary>
+    Present,
+
+    /// <summary>Not filled, for <see cref="RecordRepairField.ReasonCode"/>.</summary>
+    Skipped,
+
+    /// <summary>The owner could not be decided: <see cref="RecordRepairOutcome.OwnerRefusal"/> is the typed refusal.</summary>
+    Refused,
+}
+
+/// <summary>One field (or, with no <see cref="Column"/>, one whole step) of a repair report.</summary>
+internal sealed record RecordRepairField(
+    RecordRepairPart Part, string? Column, RecordRepairFieldState State, string? ReasonCode = null)
+{
+    internal static RecordRepairField Repaired(RecordRepairPart part, string column) =>
+        new(part, column, RecordRepairFieldState.Repaired);
+
+    internal static RecordRepairField Present(RecordRepairPart part, string? column, string? reason = null) =>
+        new(part, column, RecordRepairFieldState.Present, reason);
+
+    internal static RecordRepairField Skipped(RecordRepairPart part, string? column, string reason) =>
+        new(part, column, RecordRepairFieldState.Skipped, reason);
+
+    internal static RecordRepairField Refused(RecordRepairPart part, string column, string reason) =>
+        new(part, column, RecordRepairFieldState.Refused, reason);
+}
+
+/// <summary>A repair's report (ADR-019: codes and caller-safe words only; the detail is in the logs, with the row id).</summary>
+internal sealed record RecordRepairOutcome
+{
+    public required string Table { get; init; }
+
+    public required Guid Id { get; init; }
+
+    public required RecordRepairStatus Status { get; init; }
+
+    /// <summary>Why the row was skipped, changed or failed; <c>null</c> when it was repaired or had nothing to repair.</summary>
+    public string? ReasonCode { get; init; }
+
+    /// <summary>Every field each step considered, in step order.</summary>
+    public IReadOnlyList<RecordRepairField> Fields { get; init; } = [];
+
+    /// <summary>The typed refusal when the owner could not be decided (the owner is then unchanged).</summary>
+    public RecordCreationRefusal? OwnerRefusal { get; init; }
+
+    /// <summary>Field-mapping warnings, as the create reports them.</summary>
+    public IReadOnlyList<string> Warnings { get; init; } = [];
+
+    /// <summary>Whether the one update was written.</summary>
+    public bool Wrote => Status == RecordRepairStatus.Repaired;
+
+    internal static RecordRepairOutcome Row(string table, Guid id, RecordRepairStatus status, string reason) =>
+        new() { Table = table, Id = id, Status = status, ReasonCode = reason };
+}
+
+/// <summary>The stable reason codes of a repair report.</summary>
+internal static class RecordRepairReason
+{
+    internal const string TableUnsupported = "record_repair.table_unsupported";
+    internal const string RowNotFound = "record_repair.row_not_found";
+    internal const string ReadFailed = "record_repair.read_failed";
+    internal const string VersionUnknown = "record_repair.version_unknown";
+    internal const string RowChanged = "record_repair.row_changed";
+    internal const string WriteFailed = "record_repair.write_failed";
+
+    /// <summary>ebilling-r1 #1911's guard is not on this build: an invoice-family row is not written (fail closed).</summary>
+    internal const string InvoiceFamilyGuardUnavailable = "record_repair.invoice_family_guard_unavailable";
+
+    internal const string MappingExcluded = "record_repair.mapping_excluded";
+
+    /// <summary>FR-03: the row is filed under nothing, so no mapping source can be inferred (the silent no-op, counted).</summary>
+    internal const string MappingSourceNone = "record_repair.mapping_source_none";
+
+    internal const string MappingSourceUndetermined = "record_repair.mapping_source_undetermined";
+    internal const string MappingUnavailable = "record_repair.mapping_unavailable";
+    internal const string MappingNoRules = "record_repair.mapping_no_rules";
+    internal const string MappingSourceUnreadable = "record_repair.mapping_source_unreadable";
+    internal const string MappingNoValue = "record_repair.mapping_no_value";
+    internal const string MappedValueWouldRefile = "record_repair.mapped_value_would_refile";
+
+    internal const string OwnerUnknown = "record_repair.owner_unknown";
+    internal const string OwnerTeamOwned = "record_repair.owner_team_owned";
+    internal const string OwnerKeptByException = "record_repair.owner_kept_by_exception";
+
+    /// <summary>Task 016 escalation trigger 2: the owner would move the row to another business unit (fail closed).</summary>
+    internal const string OwnerMovesBusinessUnit = "record_repair.owner_moves_business_unit";
+
+    internal const string SearchIndexUnavailable = "record_repair.search_index_unavailable";
+    internal const string SearchIndexNoDefault = "record_repair.search_index_no_default";
+
+    internal const string StampUnavailable = "record_repair.stamp_unavailable";
+    internal const string StampNothingMissing = "record_repair.stamp_nothing_missing";
+}
