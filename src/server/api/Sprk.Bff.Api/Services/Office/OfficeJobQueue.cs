@@ -40,6 +40,9 @@ public class OfficeJobQueue
     /// profile and index for this version. False leaves the payload exactly as before (the property is omitted).</param>
     /// <param name="owningTeamId">Task 080: the owner team <c>SaveAsync</c> resolved for this save's document, handed
     /// on so the worker's attachment children get the same one. Null for a version save (omitted from the payload).</param>
+    /// <param name="relatedCommunicationId">Task 130: the communication the save's email-derived document was created
+    /// linked to, handed on so the worker creates every attachment child linked to it. Null for a Document save, and for
+    /// an email-derived save whose document was created Restricted — the worker then creates its children Restricted.</param>
     public async Task QueueUploadFinalizationAsync(
         Guid jobId,
         string idempotencyKey,
@@ -54,7 +57,8 @@ public class OfficeJobQueue
         bool isVersionSave,
         Guid? owningTeamId,
         CancellationToken cancellationToken,
-        Guid? createdByPersonId = null)
+        Guid? createdByPersonId = null,
+        Guid? relatedCommunicationId = null)
     {
         _logger.LogDebug(
             "Queueing upload finalization job {JobId} for {ContentType}",
@@ -128,6 +132,7 @@ public class OfficeJobQueue
             VersionSaveJobId = isVersionSave ? jobId : null,
             OwningTeamId = owningTeamId,
             CreatedByPersonId = createdByPersonId, // task 146 c1-r1 — carried with the team
+            RelatedCommunicationId = relatedCommunicationId, // task 130 — the children's communication link
         };
 
         // Create the job message

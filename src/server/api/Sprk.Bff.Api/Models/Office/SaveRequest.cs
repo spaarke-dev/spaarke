@@ -360,8 +360,9 @@ public record AttachmentMetadata
     public Guid? ParentEmailArtifactId { get; init; }
 
     /// <summary>
-    /// Parent email's internetMessageId (for fetching attachment content via Graph API).
-    /// When provided, server will fetch the email via Graph API and extract this attachment's content.
+    /// The parent email's identifier: an Exchange item id (the Graph key the server fetches the email and this attachment's
+    /// content by) or an RFC 5322 Message-ID. Task 130 resolves the parent's <c>sprk_communication</c> from it: an RFC id is
+    /// looked up directly; an Exchange item id is fetched from Graph and the email captured.
     /// </summary>
     [MaxLength(998)]
     public string? ParentEmailId { get; init; }
