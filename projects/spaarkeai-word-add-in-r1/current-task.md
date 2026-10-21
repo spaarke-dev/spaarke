@@ -9,8 +9,8 @@
 | Field | Value |
 |---|---|
 | **Task** | No code task active. **130 ✅** (#2177, `4e36c1929d`) and **131 ✅** (#2182, `733c65063c`) merged 2026-10-21; C:\wt131 removed. Open: 042 (UAT), 125 (guest live check), 090 (wrap-up). |
-| **Status** | 130 is live on the dev BFF (`84291ecea8`); 131 is not yet. The owner gave the go (2026-10-21) to deploy in coordination with the other projects. |
-| **Next Action** | 1. When a dev BFF containing `733c65063c` is live (R3's or UAC's next routine deploy; check its ProductVersion), redeploy the Outlook add-in (`/office-addins-deploy`) so 131's notice shows. Before that, merge master into the work branch.<br>2. When R3 sends the owner's two .eml save times or subjects, read the sprk_document rows back and report them to UAC and R3.<br>3. Owner live checks (below), then 090. |
+| **Status** | 130 and 131 are both live in dev. BFF `583f90c1d9` (R3, 18:04:37Z) contains 733c65063c, 4e36c1929d and 077. The add-in auto-deployed on the #2182 merge push (`deploy-office-addins.yml`, 16:50:34Z, success). The notice text is in the hosted `150.bundle.js`, which both the Outlook taskpane and commands (Quick Save) load. No manual add-in deploy is needed. |
+| **Next Action** | 1. When R3 sends the times or subjects of the owner's two .eml saves, read the sprk_document rows back and report them to UAC and R3.<br>2. Owner live checks (below), then 090. |
 
 ## Task 130 (#2126 / R3 ISS-015 / UAC D7 T8): what is in #2177
 - Every Office email-derived `sprk_document` (the .eml, each attachment child, a single attachment, the worker fallback) is created linked to its `sprk_communication`, or Restricted. Restricted carries `sprk_accessinheritance` = `AccessInheritance.OwnNarrowing(Restricted)` in the same create (UAC 189); the stager refuses a value without its record.
@@ -19,9 +19,9 @@
 - **Deploy dependency:** a BFF with T8 REQUIRES `sprk_document.sprk_accessinheritance` (`Set-DocumentAccessPermissionSchema.ps1`, guide §7.4). It is applied in dev; prod needs it before any BFF with 189 or T8. A deploy needs the owner's go, coordinated with R3, and the build must contain 077.
 
 ## Live in dev
-- **BFF `spaarke-bff-dev`: master `1.0.0+84291ecea8`** since 2026-10-21 16:42:49Z (deployed by R3 on our OK and the owner's go; contains #2177 / task 130, 077, and `a10e814d02`; healthz 200; `sprk_accessinheritance` confirmed before the swap). Task 131 (#2182) is NOT in it. R3's 30-minute App Insights reading (16:41:30Z–17:12:38Z): **0** stager refusals and no new exception class; the only group is the known Graph "Invalid hostname" noise. UAC's gate (one identified and one unidentifiable .eml save) waits on the owner; when R3 sends times or subjects, read the sprk_document rows back (relatedcommunication, accesspermission, accessinheritance).
+- **BFF `spaarke-bff-dev`: master `1.0.0+583f90c1d9`** since 2026-10-21 18:04:37Z (deployed by R3; contains #2177 / task 130, #2182 / task 131 and 077; healthz 200). Before it: `84291ecea8` from 16:42:49Z (task 130 only; `sprk_accessinheritance` confirmed before that swap). R3's 30-minute App Insights reading (16:41:30Z–17:12:38Z): **0** stager refusals and no new exception class; the only group is the known Graph "Invalid hostname" noise. UAC's gate (one identified and one unidentifiable .eml save) waits on the owner; when R3 sends times or subjects, read the sprk_document rows back (relatedcommunication, accesspermission, accessinheritance).
 - **Console `sprk_spaarkeai`:** `deploy-spaarke-ai.yml` auto-publishes on every master push touching SpaarkeAi or the shared UI packages; read `modifiedon` to know which build is live. Default landing tab is Worklist (ontology data change 2026-10-17; Daily Briefing is in the Workspaces dropdown).
-- The add-ins are current (`05356cbf7`).
+- The add-ins are current (`733c65063c`; `deploy-office-addins.yml` runs on every master push).
 
 ## eBilling (ebilling-r1, owner-requested review): decisions recorded in `notes/ebilling-r1-review-2026-10-21.md`
 - Decided and sent: K5 race fixed by A + B; internal-only, Restricted and Private-thread sources allowed with isolation carried. The Outlook invoice flow:
