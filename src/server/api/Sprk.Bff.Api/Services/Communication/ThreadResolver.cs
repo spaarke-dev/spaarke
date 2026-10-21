@@ -767,7 +767,7 @@ public sealed class ThreadResolver : IThreadResolver
                 // whose thread resolution failed) never shows on a record's panel. Resolve its thread now, through the same
                 // join→grant sequence as the capture paths; an unfiled email without a thread is left as it is.
                 if (regarding is not null)
-                    await ResolveMissingThreadAsync(email, communicationId, host, ct);
+                    await ResolveMissingThreadAsync(email, communicationId, host, beforeMessageGrant, ct);
                 else
                     _logger.LogDebug("Filing reconcile skipped: {CommunicationId} is unfiled and has no thread", communicationId);
                 return;
@@ -846,7 +846,8 @@ public sealed class ThreadResolver : IThreadResolver
             // false, and only the email moves).
             if (!isDefaultThread && isActive
                 && await FiledToOnlyAsync(threadId, communicationId, regarding, recordId, ct) is { } filedToRecord
-                && await AnchorThreadForFilingAsync(threadId, thread, communicationId, regarding, recordId, filedToRecord, ct))
+                && await AnchorThreadForFilingAsync(
+                    threadId, thread, communicationId, regarding, recordId, filedToRecord, beforeMessageGrant, ct))
             {
                 return;
             }
@@ -1034,7 +1035,9 @@ public sealed class ThreadResolver : IThreadResolver
     /// Rule 2: anchors the thread to R — the fields <see cref="CreateThreadAsync"/> writes for an anchored thread, owned by
     /// R's team (S6) — re-derives its name, and grants R's members every message in it filed to R. A thread anchored to a
     /// previous record loses that record's typed lookup (and its display fields when R has none), so the thread's one anchor
-    /// (<see cref="ThreadAnchorOf"/>) is R.
+    /// (<see cref="ThreadAnchorOf"/>) is R. #2143 round 10 (F2-a): <paramref name="beforeMessageGrant"/> runs once, after the
+    /// anchor and before the grants — as on rule 3's move — so the step after a re-file takes the email's mirror off before
+    /// this grant, never after it (the removal revokes every direct share).
     /// </summary>
     /// <returns>
     /// <c>false</c> when the thread may not follow whole because its owner or R's is the Secure team (F1-b) — nothing is
@@ -1044,7 +1047,7 @@ public sealed class ThreadResolver : IThreadResolver
     /// </returns>
     private async Task<bool> AnchorThreadForFilingAsync(
         Guid threadId, DataverseEntity thread, Guid communicationId, RegardingAnchor regarding, Guid recordId,
-        IReadOnlyList<Guid> filedToRecord, CancellationToken ct)
+        IReadOnlyList<Guid> filedToRecord, Func<CancellationToken, Task>? beforeMessageGrant, CancellationToken ct)
     {
         Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution? ownership;
         try
@@ -1123,6 +1126,9 @@ public sealed class ThreadResolver : IThreadResolver
             "{CommunicationId}", threadId, regarding.RecordType, recordId, teamId, communicationId);
 
         await ReDeriveThreadNameAsync(threadId, ct); // marker-gated; a user-renamed thread keeps its name
+
+        if (beforeMessageGrant is not null)
+            await beforeMessageGrant(ct);
 
         var assignment = ThreadAssignment.Anchored(threadId, regarding.RecordType, recordId);
         foreach (var messageId in filedToRecord)
@@ -1298,10 +1304,12 @@ public sealed class ThreadResolver : IThreadResolver
     /// the step's mirror, its pass and its gate step run after this reconcile and see that join, so the join runs none of its
     /// own. On its own (<see cref="FilingReconcileHost.Standalone"/>, the backfill sweep) nothing else follows it: a join under a
     /// record the email is NOT filed to runs the step once for that join; a join under a record it is filed to adds no parent
-    /// and runs none.
+    /// and runs none. #2143 round 10 (F2-a): <paramref name="beforeMessageGrant"/> runs between that join and the grant, as on
+    /// rule 3's move.
     /// </remarks>
     private async Task ResolveMissingThreadAsync(
-        DataverseEntity email, Guid communicationId, FilingReconcileHost host, CancellationToken ct)
+        DataverseEntity email, Guid communicationId, FilingReconcileHost host,
+        Func<CancellationToken, Task>? beforeMessageGrant, CancellationToken ct)
     {
         var joinRunsAfterRefileFor = host == FilingReconcileHost.Standalone
             ? (Func<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent, bool>)(filedUnder =>
@@ -1326,6 +1334,8 @@ public sealed class ThreadResolver : IThreadResolver
 
         _logger.LogInformation(
             "Filing reconcile gave the threadless email {CommunicationId} thread {ThreadId}", communicationId, assignment.ThreadId);
+        if (beforeMessageGrant is not null)
+            await beforeMessageGrant(ct);
         await GrantAsync(communicationId, assignment, ct);
 
         // Task 065 fix round 4 (K1): a RECEIVED email is written internal-only until its thread is known; this sweep is the

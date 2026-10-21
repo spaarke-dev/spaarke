@@ -390,6 +390,110 @@ public sealed partial class SecureChildOwnershipAiToolTests
         GrantRevokedWarnings().Should().BeEmpty();
     }
 
+    // ---- #2143 round 10 (F2-a): every thread-reconcile path that grants runs the hook first ----
+
+    private static readonly Guid UsersOwnThread = Guid.Parse("a2143000-0000-4000-8000-0000000000eb");
+
+    /// <summary>
+    /// The email (filed to secure S, Secure-owned, holding S's sharee's mirror) re-filed by a Full Access holder on S onto
+    /// ordinary O, with the share world's by-id reads 2-5 of it faulting: the mirror step before the reconcile (read 2) and its
+    /// removal's three attempts (reads 3-5) — so the mirror is still on the email when the reconcile grants.
+    /// </summary>
+    private async Task RefileOntoTheOrdinaryRecordWithThePreReconcileRemovalFaulting()
+    {
+        _shareTable.Seed("sprk_communication", RefiledEmail, DataversePrincipalRef.User(Sharee), CollaborateMask);
+        _user.FullAccessOn.Add(SecureMatter);
+        ShareWorld.TransientRowReadFaultsOf("sprk_communication", RefiledEmail, read => read is >= 2 and <= 5);
+
+        var result = await RefileTo(OrdinaryMatter);
+
+        Status(result).Should().Be(Microsoft.AspNetCore.Http.StatusCodes.Status204NoContent, Detail(result));
+        ShareWorld.TransientRowReadFaultsFired("sprk_communication", RefiledEmail).Should().Be(4,
+            "the removal before the reconcile faulted on every attempt");
+        _world.Row("sprk_communication", RefiledEmail).GetAttributeValue<EntityReference>("owningteam")?.Id
+            .Should().Be(Directory.ChildTeam, "the re-file itself took it out of isolation");
+    }
+
+    [Fact(DisplayName = "#2143 r10 F2-a must-fire: rule 2 (the email's ordinary thread follows it whole) takes the mirror off before its grant: the grant stands and no mirror remains")]
+    public async Task FilingRoute_WholeThreadAnchor_TakesTheMirrorOffBeforeItsGrant()
+    {
+        // The email sits alone in a user's own Open, active, non-default thread: rule 2 anchors that thread to O and grants O's
+        // members the email. Before round 10 that path ran no hook, so the mirror the faulted step left came off at the last
+        // step — revoking the grant too, with no Warning.
+        AnEmailAloneInAUsersOwnThread();
+
+        await RefileOntoTheOrdinaryRecordWithThePreReconcileRemovalFaulting();
+
+        _world.Row("sprk_communication", RefiledEmail).GetAttributeValue<EntityReference>(ThreadResolver.ThreadLookupOnCommunication)?.Id
+            .Should().Be(UsersOwnThread, "the thread followed the filing whole (rule 2), the email did not move");
+        EmailShareOf(Sharee).Should().BeNull("no secure-child mirror outlives the email's isolation");
+        EmailShareOf(RecordMember).Should().Be(ReadMask, "the mirror came off at the hook, before rule 2's grant");
+        GrantRevokedWarnings().Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "#2143 r10 F2-a must-not-fire: with no fault, rule 2's hook finds the mirror already off: one removal, the grant stands, no Warning")]
+    public async Task FilingRoute_WholeThreadAnchor_WithNoFault_RemovesTheMirrorOnce_AndTheGrantStands()
+    {
+        AnEmailAloneInAUsersOwnThread();
+        _shareTable.Seed("sprk_communication", RefiledEmail, DataversePrincipalRef.User(Sharee), CollaborateMask);
+        _user.FullAccessOn.Add(SecureMatter);
+
+        var result = await RefileTo(OrdinaryMatter);
+
+        Status(result).Should().Be(Microsoft.AspNetCore.Http.StatusCodes.Status204NoContent, Detail(result));
+        _world.Row("sprk_communication", RefiledEmail).GetAttributeValue<EntityReference>(ThreadResolver.ThreadLookupOnCommunication)?.Id
+            .Should().Be(UsersOwnThread);
+        EmailRevokes().Should().Be(1, "removed once, before the reconcile; the hook is latched");
+        EmailShareOf(Sharee).Should().BeNull();
+        EmailShareOf(RecordMember).Should().Be(ReadMask);
+        GrantRevokedWarnings().Should().BeEmpty();
+    }
+
+    /// <summary>The email filed to secure S, alone in a user's own Open, active, non-default (Direct) thread.</summary>
+    private void AnEmailAloneInAUsersOwnThread()
+    {
+        AnEmailIn(SecureMatter, UsersOwnThread, Directory.SecureBu, Directory.SecureNamedTeam);
+        _world.WithRecord("sprk_communicationthread", UsersOwnThread, Directory.ChildBu, extra: new()
+        {
+            ["ownerid"] = new EntityReference("systemuser", Guid.Parse("a2143000-0000-4000-8000-0000000000ef")),
+            ["sprk_threadtype"] = new OptionSetValue(100000001), // Direct: no record above it
+            ["sprk_privacystate"] = new OptionSetValue(100000000), // Open
+            ["sprk_isdefaultthread"] = false,
+            ["statecode"] = new OptionSetValue(0),
+        });
+    }
+
+    [Fact(DisplayName = "#2143 r10 F2-a must-fire: a threadless email's join takes the mirror off before its grant: the grant stands and no mirror remains")]
+    public async Task AfterRefileStep_ThreadlessJoin_TakesTheMirrorOffBeforeItsGrant()
+    {
+        // The email, re-filed off secure S onto ordinary O (ordinary-owned now, still holding S's sharee's mirror), has no
+        // thread: the reconcile resolves one (O's default thread) and grants O's members the email. Before round 10 that path
+        // ran no hook. The step after the re-file is driven directly, with an email key strategy that finds no conversation (so
+        // the join descends to O's default thread, Tier 2).
+        AnEmailIn(OrdinaryMatter, OrdinaryMattersThread, Directory.ChildBu, Directory.ChildTeam);
+        _world.Row("sprk_communication", RefiledEmail).Attributes.Remove(ThreadResolver.ThreadLookupOnCommunication);
+        _shareTable.Seed("sprk_communication", RefiledEmail, DataversePrincipalRef.User(Sharee), CollaborateMask);
+        ShareWorld.TransientRowReadFaultsOf("sprk_communication", RefiledEmail, read => read is >= 2 and <= 5);
+        var noConversation = new Mock<IThreadKeyStrategy>();
+        noConversation.SetupGet(k => k.SupportedType).Returns(CommunicationType.Email);
+        noConversation
+            .Setup(k => k.ResolveAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ThreadKeyResolution(null, false));
+
+        _world.Row("sprk_communication", RefiledEmail).GetAttributeValue<EntityReference>(ThreadResolver.ThreadLookupOnCommunication)
+            .Should().BeNull("threadless before the step");
+        await Children(ThreadsOverTheDirectory(new[] { noConversation.Object })).AfterRefileAsync(
+            "sprk_communication", RefiledEmail, () => Task.FromResult(true), Sprk.Bff.Api.Services.Access.RefileThreadStep.Reconcile, CancellationToken.None);
+
+        ShareWorld.TransientRowReadFaultsFired("sprk_communication", RefiledEmail).Should().Be(4,
+            "the removal before the reconcile faulted on every attempt");
+        _world.Row("sprk_communication", RefiledEmail).GetAttributeValue<EntityReference>(ThreadResolver.ThreadLookupOnCommunication)?.Id
+            .Should().Be(OrdinaryMattersThread, "the threadless email joined O's default thread");
+        EmailShareOf(Sharee).Should().BeNull("no secure-child mirror outlives the email's isolation");
+        EmailShareOf(RecordMember).Should().Be(ReadMask, "the mirror came off at the hook, before the join's grant");
+        GrantRevokedWarnings().Should().BeEmpty();
+    }
+
     // ---- #2143 round 10 (F2-b): a mirror step that could not decide still takes a row that left isolation through the removal ----
 
     /// <summary>
@@ -549,7 +653,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
     /// The REAL thread resolver over the resolver's directory: rows are read from it, a matter's default thread is found by its
     /// key, and the email's thread-lookup stamp lands on its row.
     /// </summary>
-    private ThreadResolver ThreadsOverTheDirectory()
+    private ThreadResolver ThreadsOverTheDirectory(IThreadKeyStrategy[]? strategies = null)
     {
         var entities = new Mock<IGenericEntityService>();
         entities
@@ -581,7 +685,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
             SecureChildShareWorld.Configuration(),
             NullLogger<Sprk.Bff.Api.Services.Communication.Access.DirectThreadAccessService>.Instance, _gate.Sharing);
         return new ThreadResolver(
-            Array.Empty<IThreadKeyStrategy>(), entities.Object, _world.Resolver(), NullLogger<ThreadResolver>.Instance,
+            strategies ?? Array.Empty<IThreadKeyStrategy>(), entities.Object, _world.Resolver(), NullLogger<ThreadResolver>.Instance,
             grants);
     }
 

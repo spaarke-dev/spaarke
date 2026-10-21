@@ -123,7 +123,9 @@ public interface IThreadResolver
     /// <para>#2143 round 8 (F1-A): <paramref name="beforeMessageGrant"/>, when given, runs once the join that moves the email
     /// to its record's thread has landed and BEFORE the email's #1629 grant to that record's members — the step after a re-file
     /// takes the email's secure-child mirror off there when that join took it out of isolation, so the mirror's removal (every
-    /// direct share) never revokes the grant the move gives. <c>null</c>: nothing runs.</para>
+    /// direct share) never revokes the grant the move gives. <c>null</c>: nothing runs. Round 10 (F2-a): it runs once before the
+    /// #1629 grant on EVERY path that gives one — that move, rule 2's whole-thread anchor (before its grants), and a threadless
+    /// email's join (between the join and its grant).</para>
     /// </summary>
     Task ReconcileThreadForFilingAsync(
         Guid communicationId,
