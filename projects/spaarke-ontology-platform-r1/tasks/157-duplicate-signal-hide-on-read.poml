@@ -4,7 +4,7 @@
     <title>Hide a billing Duplicate Signal's earlier-invoice detail from a reader who cannot read that invoice (D-176, #2118)</title>
     <phase>3 Worklist</phase>
     <gate>startable (D-176 owner 2026-10-21; ebilling field list 22fe2e6c73 + duplicateOf.invoiceId 6017ebdf20 on work/ebilling-r1)</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Data-exposure rule on the Signal read path (security tag).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -72,7 +72,10 @@
     <trigger>If hiding requires changing the billing writer or any file outside SignalReadService.cs, the new class, its DI line and their tests, STOP and report.</trigger>
   </escalation>
 
-  <notes>Created 2026-10-21 by the main session (D-176). Known limits to record: native model-driven sprk_signal form/views and ebilling's own invoice-review surfaces are not covered by this BFF read check (ebilling told to apply the same rule on their surfaces); ApprovedRate/Discount rate-card quotes are inside the family (agreed with ebilling 2026-10-21). ebilling reviews the range before merge.</notes>
+  <notes>Created 2026-10-21 by the main session (D-176). Known limits to record: native model-driven sprk_signal form/views and ebilling's own invoice-review surfaces are not covered by this BFF read check (ebilling told to apply the same rule on their surfaces); ApprovedRate/Discount rate-card quotes are inside the family (agreed with ebilling 2026-10-21). ebilling reviews the range before merge.
+
+    Implemented 2026-10-21 on task/ontology-157-duplicate-hide (bdc4178cc5): EarlierInvoiceReadability (shared with ebilling 119, public sealed: SignalReadService's public ctor takes it) + SignalReadService steps (9a) detect from STORED evidence before D-142 (which strips every billing line's text) and (9b) withhold after it. Escalation 1 raised and resolved (option B). Tests: 12 route cases + 15 unit cases; seeding proofs (a) and (b) fire. Awaiting the main session's independent review, PR and merge; status → completed and TASK-INDEX at merge. Detail: notes/task-157-duplicate-hide-on-read.md.
+    rework: none task 157</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
