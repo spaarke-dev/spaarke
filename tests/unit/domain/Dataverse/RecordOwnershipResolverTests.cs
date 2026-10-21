@@ -1726,6 +1726,79 @@ public class RecordOwnershipResolverTests
         applied.Should().BeFalse();
     }
 
+    // #2159 slice 2: a written re-file carries the F3 permission it was given — the roots it left and the decision — so the
+    // step after it can let the document's file follow it (S1 to S2). Generic: the resolver knows nothing of files.
+
+    [Fact]
+    public async Task Reparent_FromOneSecureRootToAnother_WithF3_CarriesThePermit_TheRootLeftAndTheDecision()
+    {
+        var (directory, documentId) = SecureDocumentWorld();
+
+        var resolution = await Build(directory).ReparentAsync(
+            new RecordReparent
+            {
+                EntityLogicalName = "sprk_document",
+                RecordId = documentId,
+                ParentChanges = new Dictionary<string, EntityReference?>
+                {
+                    ["sprk_project"] = null,
+                    ["sprk_matter"] = new EntityReference("sprk_matter", OtherSecureMatterId),
+                },
+                SecureExitCaller = CallerHolding(FullAccess),
+            },
+            _ => Task.CompletedTask,
+            CancellationToken.None);
+
+        resolution.IsRefused.Should().BeFalse(resolution.Reason);
+        resolution.SecureExitPermitted.Should().NotBeNull();
+        resolution.SecureExitPermitted!.RootsLeft.Should().Equal(new RecordOwnershipParent("sprk_project", SecureProjectId));
+        resolution.SecureExitPermitted.Decision.IsPermitted.Should().BeTrue();
+        resolution.SecureExitPermitted.Decision.CallerSystemUserId.Should().Be(CallerUserId);
+    }
+
+    [Fact]
+    public async Task Reparent_OutOfASecureRoot_WithF3_CarriesThePermit()
+    {
+        var (directory, documentId) = SecureDocumentWorld();
+
+        var resolution = await Build(directory).ReparentAsync(
+            MoveToOrdinaryMatter(documentId, CallerHolding(FullAccess)), _ => Task.CompletedTask, CancellationToken.None);
+
+        resolution.SecureExitPermitted!.RootsLeft.Should().Equal(new RecordOwnershipParent("sprk_project", SecureProjectId));
+    }
+
+    [Fact]
+    public async Task Reparent_RefusedByF3_CarriesNoPermit()
+    {
+        var (directory, documentId) = SecureDocumentWorld();
+
+        var resolution = await Build(directory).ReparentAsync(
+            MoveToOrdinaryMatter(documentId, CallerHolding(Collaborate)), _ => Task.CompletedTask, CancellationToken.None);
+
+        resolution.IsForbidden.Should().BeTrue();
+        resolution.SecureExitPermitted.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Reparent_LeavingNoSecureRoot_CarriesNoPermit()
+    {
+        var (directory, documentId) = SecureDocumentWorld();
+
+        var resolution = await Build(directory).ReparentAsync(
+            new RecordReparent
+            {
+                EntityLogicalName = "sprk_document",
+                RecordId = documentId,
+                ParentChanges = new Dictionary<string, EntityReference?> { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) },
+                SecureExitCaller = CallerHolding(FullAccess),
+            },
+            _ => Task.CompletedTask,
+            CancellationToken.None);
+
+        resolution.IsRefused.Should().BeFalse(resolution.Reason);
+        resolution.SecureExitPermitted.Should().BeNull("it left no secure root");
+    }
+
     [Fact]
     public async Task Reparent_GainingAParentWhileStillUnderItsSecureRoot_AsksNothing()
     {
@@ -1855,6 +1928,7 @@ public class RecordOwnershipResolverTests
         resolution.IsRefused.Should().BeFalse(resolution.Reason);
         applied.Should().BeTrue();
         directory.Assignments.Should().Equal(("sprk_communication", messageId, ChildTeam));
+        resolution.SecureExitPermitted.Should().BeNull("#2159 slice 2: no secure root can be named, so no root was left to permit");
     }
 
     [Fact]

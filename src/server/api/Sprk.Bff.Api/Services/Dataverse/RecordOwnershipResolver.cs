@@ -832,6 +832,20 @@ public static class RecordOwnerRefusal
     public const string ParentUndetermined = "record_owner_parent_undetermined";
 }
 
+/// <summary>
+/// A re-file's F3 permission to leave secure roots (<see cref="RecordOwnerResolution.SecureExitPermitted"/>): every secure
+/// root the change took the row out from under, and the decision that permitted it (who, and on what basis).
+/// </summary>
+/// <remarks>
+/// Component Justification (CLAUDE.md §11): (1) Existing — <see cref="Sprk.Bff.Api.Services.Access.SecureRemovalDecision"/>
+/// carries the caller and basis, but not the roots left, and is surfaced only on a refusal. (2) Extension — it is reused
+/// as-is inside this record; the roots are known only inside the F3 check, so this record carries them out. (3) Cost of doing
+/// nothing — a step after the re-file cannot tell the F3-permitted move S1 to S2 from the same edit made outside the BFF, so
+/// an isolated document's file stays in S1's container for good (#2159 A1) or would move without F3.
+/// </remarks>
+public sealed record SecureExitPermit(
+    IReadOnlyList<RecordOwnershipParent> RootsLeft, Sprk.Bff.Api.Services.Access.SecureRemovalDecision Decision);
+
 /// <summary>The answer to an ownership question: a team, a reasoned refusal, or (opted-in only) unchanged.</summary>
 public sealed record RecordOwnerResolution(
     RecordOwnerOutcome Outcome, Guid? OwningTeamId, string? RefusalCode, string? Reason)
@@ -867,6 +881,14 @@ public sealed record RecordOwnerResolution(
     /// (<see cref="Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.RecordOwnerRefused(RecordOwnerResolution, string, string?)"/>).
     /// </summary>
     public Sprk.Bff.Api.Services.Access.SecureRemovalDecision? SecureRemovalRefusal { get; init; }
+
+    /// <summary>
+    /// Set on a re-file WRITTEN after it took the row out from under at least one secure root with the caller's F3 permission
+    /// (owner round 10 item 7): the roots it left and the permitting decision. <c>null</c> when the re-file left no secure
+    /// root, and on every refusal. A step after the re-file may act on that permission for the row only — the resolver
+    /// knows nothing of what (#2159 slice 2: the document's file follows it from S1's container into S2's).
+    /// </summary>
+    public SecureExitPermit? SecureExitPermitted { get; init; }
 
     /// <summary>True for a refusal the F3 check made (<see cref="SecureRemovalRefusal"/>): an AUTHORIZATION answer, not an
     /// owner refusal — HTTP writers answer it with the unsecure endpoint's ProblemDetails, not the owner refusal's 409.</summary>
@@ -1339,7 +1361,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // limit applies". A change that takes the row out from under a secure root — to no secure root, or to a
         // different one — needs the caller's F3 rights on every secure root it leaves, decided BEFORE anything is
         // written, by the same check the unsecure endpoint makes (SecureDesignationRemoval).
-        var exitRefusal = await RefuseUnlessPermittedToLeaveSecureRootsAsync(
+        var (exitRefusal, exitPermit) = await RefuseUnlessPermittedToLeaveSecureRootsAsync(
             request, current, filedUnderBefore, parents, resolution, ct).ConfigureAwait(false);
         if (exitRefusal is not null)
         {
@@ -1347,6 +1369,12 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 "Refusing to re-file {Entity} {RecordId} out of a secure record: {Reason} ({Code}). The change was NOT "
                 + "written.", request.EntityLogicalName, request.RecordId, exitRefusal.Reason, exitRefusal.RefusalCode);
             return exitRefusal;
+        }
+
+        // #2159 slice 2: every answer of this written re-file carries the F3 permission it was given (the roots it left).
+        if (exitPermit is not null)
+        {
+            resolution = resolution with { SecureExitPermitted = exitPermit };
         }
 
         await applyChange(ct).ConfigureAwait(false);
@@ -1454,7 +1482,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
 
     /// <summary>
     /// Owner round 10 item 7 (task 146 c1): the refusal to send when the re-file takes the row out from under a secure
-    /// root and the caller may not, or <c>null</c> when it may proceed. Nothing is written here.
+    /// root and the caller may not (or no refusal), and the F3 permission when the change leaves at least one secure root
+    /// with it (<see cref="RecordOwnerResolution.SecureExitPermitted"/>, #2159 slice 2). Nothing is written here.
     /// </summary>
     /// <remarks>
     /// <para><b>Which secure roots the row leaves.</b> The secure roots above the row's parents BEFORE the change, less
@@ -1470,7 +1499,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// record thread it joined) admits only its creator. A filing deeper than <see cref="MaxLineageDepth"/> refuses, as
     /// the owner decision does.</para>
     /// </remarks>
-    private async Task<RecordOwnerResolution?> RefuseUnlessPermittedToLeaveSecureRootsAsync(
+    private async Task<(RecordOwnerResolution? Refusal, SecureExitPermit? Permit)> RefuseUnlessPermittedToLeaveSecureRootsAsync(
         RecordReparent request, Entity current, IReadOnlyCollection<RecordOwnershipParent> filedUnderBefore,
         IReadOnlyCollection<RecordOwnershipParent> filedUnderAfter, RecordOwnerResolution resolution, CancellationToken ct)
     {
@@ -1481,16 +1510,16 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         var mayLeaveIsolation = !resolution.IsSecureOwner && resolution.Outcome != RecordOwnerOutcome.Unchanged;
         if (!removesAParent && !mayLeaveIsolation)
         {
-            return null;
+            return (null, null);
         }
 
         var secureBu = await ResolveSecureBusinessUnitAsync(ct).ConfigureAwait(false);
         if (secureBu.Ambiguous)
         {
-            return RecordOwnerResolution.Refused(
+            return (RecordOwnerResolution.Refused(
                 RecordOwnerRefusal.SecureBusinessUnitAmbiguous,
                 "more than one business unit carries the Secure Record name, so whether the change leaves a secure record "
-                + "cannot be decided");
+                + "cannot be decided"), null);
         }
 
         (IReadOnlyList<RecordOwnershipParent> Roots, RecordOwnershipParent? TooDeepAt) none =
@@ -1499,11 +1528,11 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         var after = removesAParent ? await SecureRootsAboveAsync(filedUnderAfter, secureBu.Id, ct).ConfigureAwait(false) : none;
         if ((before.TooDeepAt ?? after.TooDeepAt) is { } tooDeep)
         {
-            return RecordOwnerResolution.Refused(
+            return (RecordOwnerResolution.Refused(
                 RecordOwnerRefusal.ParentUnresolved,
                 $"the record's filing runs through more than {MaxLineageDepth} levels of records (still unresolved at "
                 + $"{tooDeep.EntityLogicalName} {tooDeep.RecordId:D}), so whether the change leaves a secure record cannot "
-                + "be decided");
+                + "be decided"), null);
         }
 
         var left = before.Roots.Where(root => !after.Roots.Contains(root)).ToList();
@@ -1516,7 +1545,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
 
         if (left.Count == 0 && !unidentified)
         {
-            return null; // no secure root is left, and the row is not taken out of secure isolation
+            return (null, null); // no secure root is left, and the row is not taken out of secure isolation
         }
 
         var decision = await Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.DecideAsync(
@@ -1547,8 +1576,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             decision.CallerSystemUserId);
 
         return decision.IsPermitted
-            ? null
-            : RecordOwnerResolution.SecureRemovalRefused(decision, ChildNoun(request.EntityLogicalName));
+            ? (null, left.Count > 0 ? new SecureExitPermit(left, decision) : null)
+            : (RecordOwnerResolution.SecureRemovalRefused(decision, ChildNoun(request.EntityLogicalName)), null);
     }
 
     /// <summary>The noun a move-out message names the row by ("document", "event", "to-do", …).</summary>
