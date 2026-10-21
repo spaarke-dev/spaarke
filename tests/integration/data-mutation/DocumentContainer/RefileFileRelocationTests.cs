@@ -672,7 +672,7 @@ public class RefileFileRelocationTests
         private readonly IConfigurationRoot _configuration = new ConfigurationBuilder().AddInMemoryCollection().Build();
         private readonly SecureChildReconciliationJob _job;
 
-        public JobHarness(SecureChildShareWorld world, T.Rig rig)
+        public JobHarness(SecureChildShareWorld world, T.Rig rig, TimeProvider? time = null)
         {
             var services = new ServiceCollection();
             services.AddSingleton(SecureChildShareWorld.EntitiesOver(() => world).Object);
@@ -685,19 +685,24 @@ public class RefileFileRelocationTests
             foreach (var (key, value) in SecureChildShareWorld.Configuration().AsEnumerable())
                 _configuration[key] = value;
             _job = new SecureChildReconciliationJob(
-                provider.GetRequiredService<IServiceScopeFactory>(), TimeProvider.System, _configuration,
+                provider.GetRequiredService<IServiceScopeFactory>(), time ?? TimeProvider.System, _configuration,
                 NullLogger<SecureChildReconciliationJob>.Instance);
         }
 
+        /// <summary>The last run's whole report.</summary>
+        public JsonElement Last { get; private set; }
+
         public async Task<(JobRunResult Result, JsonElement Refile, JsonElement MakeSecure)> RunAsync(
-            string? maxRelocations = null, bool writes = true)
+            string? maxRelocations = null, bool writes = true, string? examinationBudget = null, CancellationToken ct = default)
         {
             _configuration[SecureChildReconciliationJob.MaxRelocationsPerRunConfigKey] = maxRelocations;
+            _configuration[SecureChildReconciliationJob.RefileExaminationBudgetConfigKey] = examinationBudget;
             _configuration[SecureChildReconciliationJob.RecentChangesWritesEnabledConfigKey] = writes ? null : "false";
             var result = await _job.ExecuteAsync(
                 new JobRunContext(Guid.NewGuid(), "test", JobRunTrigger.Scheduled, new Dictionary<string, object>()),
-                CancellationToken.None);
+                ct);
             using var doc = JsonDocument.Parse(result.ResultJson!);
+            Last = doc.RootElement.Clone();
             return (result, doc.RootElement.GetProperty("refileRelocations").Clone(),
                 doc.RootElement.GetProperty("makeSecureRelocations").Clone());
         }
