@@ -483,7 +483,29 @@ public class SemanticSearchAuthorizationTests : IClassFixture<SemanticSearchAuth
     private Sprk.Bff.Api.Services.Ai.PublicContracts.RetrievalAccessTrim RealTrim(ReadableDocumentsUserClient userClient) => new(
         _fixture.Services.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>(),
         userClient,
+        InternalCaller(),
+        InternalSystemUser(),
+        // Task 188 round 3: the caller is an internal systemuser, so the external document narrowing never runs.
+        (_, _) => throw new InvalidOperationException("The document narrowing was not expected to run (internal caller)."),
         Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Services.Ai.PublicContracts.RetrievalAccessTrim>.Instance);
+
+    private static readonly Guid InternalSystemUserId = Guid.Parse("0a0a0a0a-0000-0000-0000-0000000001a8");
+
+    /// <summary>Task 188 round 3: every caller of these tests resolves to one internal systemuser (not narrowed).</summary>
+    private static Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver InternalCaller()
+    {
+        var resolver = new Mock<Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver>();
+        resolver.Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Sprk.Bff.Api.Services.Ai.Context.CallerSystemUserResolution.Resolved(InternalSystemUserId.ToString("D")));
+        return resolver.Object;
+    }
+
+    private static Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver InternalSystemUser()
+    {
+        var identity = new Mock<Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver>();
+        identity.Setup(r => r.IsExternalAsync(InternalSystemUserId, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        return identity.Object;
+    }
 
     private static SearchResult CrossRecordRow(string documentId, string? parentType, string? parentId) => new()
     {

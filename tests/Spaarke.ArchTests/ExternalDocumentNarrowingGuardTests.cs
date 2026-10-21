@@ -77,6 +77,7 @@ public class ExternalDocumentNarrowingGuardTests
             Assert.True(scan.Surfaces.ContainsKey(surface), $"{surface} should be seen reading documents — the scan lost its signal.");
             Assert.True(scan.Reaches.Contains(surface), $"{surface} should be seen reaching the narrowing — the scan lost its signal.");
         }
+        Assert.True(scan.Reaches.Contains("Sprk.Bff.Api.Services.Ai.PublicContracts.RetrievalAccessTrim::TrimByRecordAsync"), "Task 188 round 3 (F1-A): the AI retrieval trim must narrow an external caller's document keys (AppOnlyDocumentNarrowing).");
 
         var problems = new List<string>();
         foreach (var (method, primitives) in scan.Surfaces.OrderBy(s => s.Key, StringComparer.Ordinal))
