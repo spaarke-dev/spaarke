@@ -1045,6 +1045,23 @@ public static class FieldMappingEndpoints
 
                 foreach (var rule in rules.OrderBy(r => r.Priority))
                 {
+                    // Task 189 (D7 T7a, security pass 2): a document's Access Permission and its own-narrowing record are
+                    // set by Spaarke (max(own, inherited)). A rule targeting either on a document is skipped, and the rest
+                    // of the push applies: one push from a Standard matter would otherwise clear the own narrowing of every
+                    // child document it reaches.
+                    if (Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.RefuseAppOnlyWrite(
+                            targetEntity, [rule.TargetField]) is { } setBySpaarke)
+                    {
+                        recordFieldResults.Add(new FieldMappingResultDto
+                        {
+                            SourceField = rule.SourceField,
+                            TargetField = rule.TargetField,
+                            Status = FieldMappingStatus.Skipped,
+                            ErrorMessage = setBySpaarke.Reason,
+                        });
+                        continue;
+                    }
+
                     var fieldResult = ApplyMappingRule(rule, sourceValues, updatePayload, lookupBinds);
                     recordFieldResults.Add(fieldResult);
                 }
