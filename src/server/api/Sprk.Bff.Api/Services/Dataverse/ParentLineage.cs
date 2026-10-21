@@ -556,6 +556,37 @@ internal static class InheritedAccessPermission
     /// <summary>True when rows of <paramref name="table"/> record their own narrowing (<see cref="RecordTables"/>).</summary>
     internal static bool RecordsOwnNarrowing(string? table) => table is not null && RecordTables.Contains(table);
 
+    /// <summary>
+    /// Task 189 fix round C (K5): the reason code when an app-only generic writer names a document's Access Permission or
+    /// its own-narrowing record (<see cref="RefuseAppOnlyWrite"/>).
+    /// </summary>
+    internal const string AppOnlyDocumentWriteReasonCode = "sdap.access.document_access_server_only";
+
+    /// <summary>
+    /// Task 189 fix round C (K5): an APP-ONLY generic writer never writes a document's <see cref="Column"/> or its
+    /// own-narrowing record (<see cref="AccessInheritance.Column"/>). These writers are the Update Record playbook node and
+    /// the action seam when they act for no person (<c>UpdateRecordActionCore</c>), and an AI output mapping
+    /// (<c>DataverseUpdateHandler</c>). A model or a configuration builds their payload, not a person. Only
+    /// <see cref="DecideDocument"/>'s writers keep the value at max(own, inherited). A payload that lowered it, or rewrote
+    /// the record, would show a user's Restricted document to partners (D7, task 188). This is the same refusal
+    /// <c>ChildRecordEndpoints.RootServerOwnedColumns</c> makes for a work assignment. A user's own write is not refused: the
+    /// form, the user-OBO chat tools, the field-mapping push, and an update impersonating its user all run as that user.
+    /// </summary>
+    /// <returns>The refusal (nothing is written), or <see langword="null"/> when the write may proceed.</returns>
+    internal static RecordOwnerResolution? RefuseAppOnlyWrite(string? table, IEnumerable<string> keys)
+    {
+        ArgumentNullException.ThrowIfNull(keys);
+        if (!RecordsOwnNarrowing(table?.Trim()))
+            return null;
+
+        var named = keys.Select(SecureRootInheritance.NormalizeColumn)
+            .FirstOrDefault(k => k is Column or AccessInheritance.Column);
+        return named is null
+            ? null
+            : RecordOwnerResolution.Refused(AppOnlyDocumentWriteReasonCode,
+                $"{named} of a document is set by Spaarke (it keeps the document's own narrowing), so it was not written");
+    }
+
     /// <summary>What to hold and what to write on one row of a <see cref="RecordTables"/> table (task 189).</summary>
     internal sealed record DocumentDecision
     {

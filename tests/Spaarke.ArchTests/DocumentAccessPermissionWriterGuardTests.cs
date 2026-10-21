@@ -31,7 +31,9 @@ namespace Spaarke.ArchTests;
 /// constant from a write. The key at the write site is in the text.</para>
 /// <para><b>Limits (accepted, task 189).</b> The scan works per member, as the #2091 guard works per type. A key held in a
 /// local variable, a payload a caller hands in (the generic update writers, a playbook) and a write outside
-/// <c>src/server</c> are not seen.
+/// <c>src/server</c> are not seen. For the app-only generic writers that take a caller's payload (a playbook's Update Record
+/// node and output mapping), a run-time refusal covers it instead: <c>InheritedAccessPermission.RefuseAppOnlyWrite</c>
+/// (fix round C, K5), pinned by <c>DocumentAccessPermissionAppOnlyWriterTests</c>.
 /// The member detector is crude (a declaration line, brace depth with strings blanked); the controls below pin what it must
 /// and must not see.</para>
 /// <para><b>Controls.</b> <see cref="Detector_MustFireAndMustNotFire"/> runs the same detector over inline sources: each write
