@@ -120,7 +120,7 @@
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Two adversarial-review passes (auth, tenant isolation). Role rows and creator-person columns must be live on dev before 079 deploys the BFF; 079 re-runs both -Verify runs. 086 registers invoice Stored Files on the same files afterwards.</notes>
+  <notes>Two adversarial-review passes (auth, tenant isolation). Role rows and creator-person columns must be live on dev before 079 deploys the BFF; 079 re-runs both -Verify runs. 086 registers invoice Stored Files on the same files afterwards. spaarke-prototype 2026-10-21: answer questions h-j of notes/084-prototype-questions.md (removal-preview read, the typed parameter schema per rule type for change-rule, the request shapes of pin, exclude and change) in this task's notes, and send the path to spaarke-prototype.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
