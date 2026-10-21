@@ -47,11 +47,19 @@ public sealed class RecordCreationServicePipelineSeamTests
     private static readonly Guid CallerOid = Guid.Parse("a0130000-0000-4000-8000-0000000000ab");
     private static readonly Guid OrdinaryMatter = Guid.Parse("a0130000-0000-4000-8000-000000000001");
     private static readonly Guid MissingMatter = Guid.Parse("a0130000-0000-4000-8000-000000000002");
+    private static readonly Guid SecureMatter = Guid.Parse("a0130000-0000-4000-8000-000000000003");
     private const string FixedCorrelation = "seam-013-correlation";
 
     private readonly Directory _world = Directory.Standard()
         .WithUser(Caller, CallerOid, Directory.ChildBu)
-        .WithOrdinaryRoot("sprk_matter", OrdinaryMatter);
+        .WithOrdinaryRoot("sprk_matter", OrdinaryMatter)
+        .WithSecureRoot("sprk_matter", SecureMatter);
+
+    /// <summary>Every app-only create ATTEMPT (a retried create is one row, several attempts).</summary>
+    private readonly List<(string Table, Guid Id)> _createAttempts = [];
+
+    /// <summary>Faults the app-only create answers, one per attempt, in order; an empty queue lets the create land.</summary>
+    private readonly Queue<Exception> _createFaults = new();
 
     private readonly List<string> _journal = [];
     private readonly List<(string Table, Guid Id)> _restampReads = [];
@@ -60,8 +68,10 @@ public sealed class RecordCreationServicePipelineSeamTests
     private readonly List<(string Table, Guid Id, Dictionary<string, object?> Fields)> _creates = [];
     private readonly Mock<IFieldMappingDataverseService> _appOnly = new(MockBehavior.Strict);
     private readonly Mock<IGenericEntityService> _readBack = new(MockBehavior.Strict);
-    private readonly StampWorld _stamps = new StampWorld().Row("sprk_matter", OrdinaryMatter);
-    private readonly SecureChildShareWorld _shareWorld = SecureChildShareWorld.Standard().OrdinaryRoot("sprk_matter", OrdinaryMatter);
+    private readonly StampWorld _stamps = new StampWorld().Row("sprk_matter", OrdinaryMatter).Row("sprk_matter", SecureMatter);
+    private readonly SecureChildShareWorld _shareWorld = SecureChildShareWorld.Standard()
+        .OrdinaryRoot("sprk_matter", OrdinaryMatter)
+        .SecureRoot("sprk_matter", SecureMatter);
     private readonly RecordingPublisher _publisher;
     private readonly CapturingLogger _logger = new();
     private Exception? _resolverFault;
@@ -78,6 +88,10 @@ public sealed class RecordCreationServicePipelineSeamTests
             .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((table, id, fields, _, _) =>
             {
                 _journal.Add("create");
+                _createAttempts.Add((table, id));
+                if (_createFaults.TryDequeue(out var fault))
+                    throw fault;
+
                 // The app-only create is a Web API PATCH: a body naming a lookup by its logical name is refused, as live.
                 if (ScriptedUserClient.UndeclaredPropertyIn(table, JsonSerializer.Serialize(fields), "ownerid", "sprk_CreatedByPerson")
                     is { } undeclared)
@@ -470,8 +484,192 @@ public sealed class RecordCreationServicePipelineSeamTests
     }
 
     // =====================================================================================
+    // Step 11 — the autonumber retry (NFR-03): the platform's own number only, on the SAME id
+    // =====================================================================================
+
+    [Fact]
+    public async Task CreateAsync_AMatterWhoseNumberIsTakenTwice_IsRetriedOnTheSameId_AndCreatesOneRow()
+    {
+        _createFaults.Enqueue(NumberTaken());
+        _createFaults.Enqueue(NumberTaken());
+
+        var outcome = await Service().CreateAsync(
+            await MappedRequest("sprk_matter", new { sprk_mattername = "Acme v. Widget" }), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        _createAttempts.Should().HaveCount(RecordCreationService.MaxNumberAttempts);
+        _createAttempts.Select(a => a.Id).Distinct().Should().ContainSingle(
+            "a retry re-sends the SAME id, so an upsert that did land cannot be created twice");
+        _creates.Should().ContainSingle().Which.Id.Should().Be(outcome.CreatedId!.Value);
+    }
+
+    [Fact]
+    public async Task CreateAsync_AMatterWhoseNumberIsTakenOnEveryAttempt_Is409NumberUnavailable_AndRunsNoPostCreateStep()
+    {
+        for (var attempt = 0; attempt < RecordCreationService.MaxNumberAttempts; attempt++)
+            _createFaults.Enqueue(NumberTaken());
+
+        var outcome = await Service().CreateAsync(
+            await MappedRequest("sprk_matter", new { sprk_mattername = "Acme v. Widget" }), AsCaller(), CancellationToken.None);
+
+        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.Conflict);
+        outcome.Refusal.Code.Should().Be(RecordCreationRefusal.NumberUnavailableCode);
+        Problem(outcome, "sprk_matter").Status.Should().Be(StatusCodes.Status409Conflict);
+        _createAttempts.Should().HaveCount(RecordCreationService.MaxNumberAttempts);
+        _creates.Should().BeEmpty();
+        _journal.Should().NotContain(["readback", "assigned-access", "membership"]);
+        Steps(outcome).Should().NotContain(s => s.Step == RecordCreationStep.PostCreate);
+    }
+
+    [Fact]
+    public async Task CreateAsync_WhenTheCreateFailsForAnyOtherReason_ItPropagatesAfterOneAttempt()
+    {
+        _createFaults.Enqueue(new HttpRequestException("Dataverse answered 500", null, System.Net.HttpStatusCode.InternalServerError));
+        var request = await MappedRequest("sprk_matter", new { sprk_mattername = "Acme v. Widget" });
+
+        var create = () => Service().CreateAsync(request, AsCaller(), CancellationToken.None);
+
+        await create.Should().ThrowAsync<HttpRequestException>();
+        _createAttempts.Should().ContainSingle("a create that faulted may have landed, so it is never retried (NFR-03)");
+    }
+
+    [Fact]
+    public async Task CreateAsync_ADuplicateOnATableWithNoAutonumber_PropagatesAfterOneAttempt()
+    {
+        _createFaults.Enqueue(NumberTaken());
+
+        var create = () => Service().CreateAsync(
+            WebApiRequest("sprk_event", new { sprk_eventname = "Hearing", sprk_RegardingMatter_bind = $"/sprk_matters({OrdinaryMatter:D})" }),
+            AsCaller(), CancellationToken.None);
+
+        await create.Should().ThrowAsync<HttpRequestException>();
+        _createAttempts.Should().ContainSingle("only an autonumber table's number is retried");
+    }
+
+    [Fact]
+    public async Task CreateAsync_ACallerPayloadNamingTheAutonumber_IsRefusedAsABlockedColumn_BeforeAnyCheckOrWrite()
+    {
+        var outcome = await Service().CreateAsync(
+            await MappedRequest("sprk_matter", new { sprk_mattername = "Acme v. Widget", sprk_matternumber = "MAT-000001" }),
+            AsCaller(), CancellationToken.None);
+
+        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.BlockedColumn);
+        outcome.Refusal.Code.Should().Be(RecordCreationRefusal.BlockedColumnCode);
+        outcome.Refusal.Detail.Should().Be("Column 'sprk_matternumber' of a matter is set by Spaarke — omit it.");
+        Problem(outcome, "sprk_matter").Status.Should().Be(StatusCodes.Status403Forbidden);
+        Journal().Should().NotContain(["user:check", "owner", "create"]);
+        _createAttempts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CreateAsync_ASystemItemNamingItsOwnNumber_IsNotRetried_WhenThatNumberIsTaken()
+    {
+        _createFaults.Enqueue(NumberTaken());
+        var request = await MappedRequest("sprk_matter", new { sprk_mattername = "Imported", sprk_matternumber = "MAT-000001" });
+
+        var create = () => Service().CreateAsync(
+            request, RecordCreationPrincipal.ForSystem(RecordRequester.Of(Caller, CallerOid)), CancellationToken.None);
+
+        await create.Should().ThrowAsync<HttpRequestException>("the row collides on the number it names, which no retry changes");
+        _createAttempts.Should().ContainSingle();
+    }
+
+    // =====================================================================================
+    // The owner over a SECURE parent (UAC-r2 condition (b)): secure-if-any, and the G5 core's two secure-filing refusals
+    // =====================================================================================
+
+    [Fact]
+    public async Task CreateAsync_AnEventFiledUnderASecureMatter_IsOwnedByTheSecureTeam()
+    {
+        var outcome = await Service().CreateAsync(
+            WebApiRequest("sprk_event", new { sprk_eventname = "Hearing", sprk_RegardingMatter_bind = $"/sprk_matters({SecureMatter:D})" }),
+            AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        Owner(fields).Should().Be(Directory.SecureNamedTeam, "secure-if-any: a child of a secure matter is owned by the named Secure team");
+        outcome.OwningTeamId.Should().Be(Directory.SecureNamedTeam);
+        outcome.Isolated.Should().BeFalse("a child follows its parent's owner; only a work assignment or project is created into isolation");
+        fields["sprk_CreatedByPerson@odata.bind"].Should().Be($"/systemusers({Caller:D})");
+        Journal().Should().ContainInOrder("owner", "create", "mirror");
+    }
+
+    [Fact]
+    public async Task CreateAsync_AWorkAssignmentTheOwnerFindsSecure_ButThePlanDidNot_Is409NoOwnerSource_AndCreatesNothing()
+    {
+        // The plan reads a Dataverse with no rows (no secure parent); the resolver's world says the matter IS secure. The
+        // two cannot be reconciled at create time, so the G5 core's refusal applies: never a root owned by the Secure team
+        // outside isolation.
+        var outcome = await Service().CreateAsync(
+            await MappedRequest("sprk_workassignment", new { sprk_name = "Review", sprk_regardingmatter = Lookup("sprk_matter", SecureMatter) }),
+            AsCaller(), CancellationToken.None);
+
+        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.OwnerUnresolved);
+        outcome.Refusal.Code.Should().Be(RecordOwnerRefusal.NoOwnerSource);
+        outcome.Refusal.Detail.Should().Contain("could not be decided consistently").And.Contain("NOT created");
+        Problem(outcome, "sprk_workassignment").Status.Should().Be(StatusCodes.Status409Conflict);
+        _createAttempts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CreateAsync_ANonReparentableRecordUnderASecureMatter_Is409NoOwnerSource_AndCreatesNothing()
+    {
+        // sprk_signal is a registry table that is no ownership parent, so it may not take the Secure owner (the G5 core's
+        // second secure-filing refusal). The arm only — the Signal writer itself does not route through this service.
+        _scripted.Held.UnionWith(["prvCreatesprk_signal", "prvAppendsprk_signal"]);
+        var outcome = await Service().CreateAsync(
+            await MappedRequest("sprk_signal", new { sprk_name = "Deadline risk", sprk_matter = Lookup("sprk_matter", SecureMatter) }),
+            AsCaller(), CancellationToken.None);
+
+        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.OwnerUnresolved, outcome.Refusal.Detail);
+        outcome.Refusal.Code.Should().Be(RecordOwnerRefusal.NoOwnerSource);
+        outcome.Refusal.Detail.Should().Contain("cannot be filed under a secure record").And.Contain("NOT created");
+        Problem(outcome, "sprk_signal").Status.Should().Be(StatusCodes.Status409Conflict);
+        _createAttempts.Should().BeEmpty();
+    }
+
+    // =====================================================================================
+    // A system principal and a work assignment or project filed under a record (fix round 1, fail closed)
+    // =====================================================================================
+
+    [Fact]
+    public async Task CreateAsync_AsTheSystem_AWorkAssignmentFiledUnderARecord_Is403_BeforeThePlan_AndCreatesNothing()
+    {
+        var request = await MappedRequest("sprk_workassignment",
+            new { sprk_name = "Review", sprk_regardingmatter = Lookup("sprk_matter", OrdinaryMatter) });
+        _journal.Clear();
+
+        var outcome = await Service().CreateAsync(
+            request, RecordCreationPrincipal.ForSystem(RecordRequester.Of(Caller, CallerOid)), CancellationToken.None);
+
+        outcome.Refusal!.Code.Should().Be(RecordCreationRefusal.SystemPrincipalUnsupportedCode,
+            "whether the matter is secure is known only once the plan reads it, and its checks are the caller's");
+        Problem(outcome, "sprk_workassignment").Status.Should().Be(StatusCodes.Status403Forbidden);
+        outcome.Steps.Should().ContainSingle(s => s.Step == RecordCreationStep.SecureRootPlan)
+            .Which.State.Should().Be(RecordCreationStepState.Refused);
+        _journal.Should().BeEmpty("refused before the plan, the owner and the create");
+        _createAttempts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CreateAsync_AsTheSystem_AWorkAssignmentFiledUnderNothing_IsCreated()
+    {
+        var request = await MappedRequest("sprk_workassignment", new { sprk_name = "Review" });
+        _journal.Clear();
+
+        var outcome = await Service().CreateAsync(
+            request, RecordCreationPrincipal.ForSystem(RecordRequester.Of(Caller, CallerOid)), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        _creates.Should().ContainSingle().Which.Table.Should().Be("sprk_workassignment");
+    }
+
+    // =====================================================================================
     // Harness
     // =====================================================================================
+
+    private static HttpRequestException NumberTaken() =>
+        new("A record with matching key values already exists (0x80060892).", null, System.Net.HttpStatusCode.PreconditionFailed);
 
     private RecordCreationService Service()
     {

@@ -31,7 +31,9 @@ namespace Sprk.Bff.Api.Services.RecordCreation;
 /// <para><b>Principals (FR-07, ADR-028).</b> A caller is named by WhoAmI under their own token; one Dataverse cannot name
 /// is refused (403, <see cref="RecordCreationRefusalKind.PrincipalUnresolved"/>) before the payload is read. A system
 /// principal skips the as-caller steps 2 and 5 only and records <see cref="RecordRequester"/> when it has one; every other
-/// step is the caller's. A table with a pre-write rule (checked as the caller) refuses a system create (fail closed).</para>
+/// step is the caller's. Two things are checked only as a caller, so they refuse a system create (fail closed): a table's
+/// pre-write rules, and filing a work assignment or project under a record (which may be secure, and is then shared to the
+/// person after their own AppendTo).</para>
 /// <para><b>Fail closed (NFR-01).</b> An exception or timeout in any step before the create refuses it (503) and writes
 /// nothing; an owner decision that faults is <see cref="RecordCreationRefusal.OwnerUnavailableCode"/>. A create that faults
 /// propagates — it may have landed, so it is never retried blindly (NFR-03): only an autonumber table's alternate-key
@@ -170,6 +172,9 @@ internal sealed class RecordCreationService
         // ── Step 11: ONE app-only create (alternate-key retry on an autonumber table only) ─────────────────────────────
         trace.Begin(RecordCreationStep.Create);
         var id = Guid.NewGuid();
+        // Only the platform's own number is retried: a row that names its number (a server writer's mapped item; a caller's
+        // is refused at step 2) collides on THAT number, which no retry changes.
+        var retriesTheNumber = rule.AutonumberColumn is not null && !decision.Item!.Columns.Any(c => IsNumberColumn(rule, c));
         for (var attempt = 1; ; attempt++)
         {
             try
@@ -177,7 +182,7 @@ internal sealed class RecordCreationService
                 await _appOnly.UpdateRecordFieldsAsync(table, id, decision.Fields!, ct).ConfigureAwait(false);
                 break;
             }
-            catch (Exception ex) when (rule.AutonumberColumn is not null && IsAlternateKeyDuplicate(ex))
+            catch (Exception ex) when (retriesTheNumber && IsAlternateKeyDuplicate(ex))
             {
                 if (attempt >= MaxNumberAttempts)
                 {
@@ -325,9 +330,10 @@ internal sealed class RecordCreationService
                 item = ((RecordCreationPayload.Mapped)request.Payload).Item;
             }
 
-            // The table's own server-owned columns first (the child-record route's order), then the ones every app-only
-            // create owns, with the creator person (the G5 core's first check, the same words).
-            if (item.Columns.FirstOrDefault(rule.TableServerOwnedColumns.Contains) is { } tableColumn)
+            // The table's own server-owned columns first (the child-record route's order) — its autonumber among them: the
+            // platform issues the number, as the Office create's protected list says — then the ones every app-only create
+            // owns, with the creator person (the G5 core's first check, the same words).
+            if (item.Columns.FirstOrDefault(c => rule.TableServerOwnedColumns.Contains(c) || IsNumberColumn(rule, c)) is { } tableColumn)
             {
                 return Decision.Refuse(new RecordCreationRefusal(RecordCreationRefusalKind.BlockedColumn,
                     RecordCreationRefusal.BlockedColumnCode, $"Column '{tableColumn}' of a {noun} is set by Spaarke — omit it."));
@@ -388,25 +394,28 @@ internal sealed class RecordCreationService
         Guid? isolatedTeam = null;
         if (SecureRootInheritance.Inherits(table))
         {
+            // A work assignment or project filed under a record may be filed under a SECURE one: then it is created into
+            // isolation and shared to the person it is made for, after that person's own AppendTo (G5) on the secure
+            // record. A system principal has no caller to ask that as, and whether the record is secure is known only
+            // once the plan reads it, so a system create that files one under anything is refused here, before the plan
+            // (fail closed; task 013 fix round 1, OWNER/017-018: an app-only access check on RequestedBy is the
+            // alternative). Filed under nothing, the plan answers Ordinary without a read.
+            if (user is null && FilesUnderARecord(table, item))
+            {
+                return Decision.Refuse(new RecordCreationRefusal(RecordCreationRefusalKind.Forbidden,
+                    RecordCreationRefusal.SystemPrincipalUnsupportedCode,
+                    $"A {noun} filed under another record may be filed under a secure record, and is then created secure " +
+                    "and shared to the person it is made for once that person's own access is checked. This create acts " +
+                    "for no caller whose access can be checked, so it was not created."));
+            }
+
             var plan = await _rootFiling.PlanCreateAsync(table, OwnedChildWrite.WritesOf(item), creatorPerson, ct,
                 user is null ? null : CallerMayFileUnder(user, creatorPerson, item, request.ServerSetLookupColumns)).ConfigureAwait(false);
             if (plan.Refusal is { } planRefusal)
                 return Decision.Refuse(PlanRefused(planRefusal, noun));
 
             if (plan is { Isolated: true, SecureOwnerTeamId: { } secureTeam })
-            {
-                // An isolated root is created for a person (its creator person) and shared to them; a system create that
-                // names nobody has no one to make it for, so it is refused before anything is written (fail closed).
-                if (creatorPerson == Guid.Empty)
-                {
-                    return Decision.Refuse(new RecordCreationRefusal(RecordCreationRefusalKind.Forbidden,
-                        RecordCreationRefusal.SystemPrincipalUnsupportedCode,
-                        $"A {noun} filed under a secure record is created secure and shared to the person it is made for, " +
-                        "and this create names no person, so it was not created."));
-                }
-
                 isolatedTeam = secureTeam;
-            }
 
             trace.Record(RecordCreationStep.SecureRootPlan, RecordCreationStepState.Ran,
                 isolatedTeam is null ? "ordinary" : "into isolation (the named Secure Record Owners team)");
@@ -685,6 +694,21 @@ internal sealed class RecordCreationService
     private static bool IsAlternateKeyDuplicate(Exception ex) =>
         ex is HttpRequestException { StatusCode: HttpStatusCode.PreconditionFailed }
         || DataverseServiceClientImpl.IsAlternateKeyDuplicate(ex);
+
+    /// <summary>The table's autonumber column (<see cref="RecordTableRule.AutonumberColumn"/>), which the platform fills.</summary>
+    private static bool IsNumberColumn(RecordTableRule rule, string column) =>
+        rule.AutonumberColumn is { } number && string.Equals(column, number, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Whether the row names a record it is filed under — the plan's own test before it reads anything
+    /// (<see cref="SecureRootFilingGate.PlanCreateAsync"/>: a create that writes none of the table's filing columns is
+    /// ordinary).
+    /// </summary>
+    private static bool FilesUnderARecord(string table, DataverseWriteItemMapper.MappedItem item)
+    {
+        var filing = SecureRootInheritance.FilingColumnsOf(table);
+        return OwnedChildWrite.WritesOf(item).Any(w => filing.Contains(SecureRootInheritance.NormalizeColumn(w.Key)));
+    }
 
     /// <summary>
     /// Step 12, in the existing paths' order: the number read-back (autonumber tables), the isolated root's completion, the
