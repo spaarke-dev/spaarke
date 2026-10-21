@@ -1738,3 +1738,19 @@ The full record is in `notes/185-invite-code-design.md` §11.
 
 1. **#2169 sign-off: yes.** Task 189 (a document's own narrowing is never widened) may merge. CLAUDE.md §6 security sign-off given directly by the owner. Deploy order stands: #2169 before #2161, with the backfill gate.
 2. **#2150 sign-off: yes.** #2143 (ReparentAsync owner write is conditional and re-derived) may merge. CLAUDE.md §6 security sign-off given directly by the owner.
+
+## Round 113 (owner, 2026-10-21)
+
+Owner text, verbatim:
+
+> 1. let's ensure access for licensed 'is external' is correct for both dataverse access AND SPA access. if the systemuse is marked 'sprk_isexternal' then that user should not have access to any record that is marked 'internal only' whether in dataverse or SPA. Internal means internal to the customer/company--this may reverse the earlier decision. This should apply to Procedures files which are all considered 'internal only' for file download (there may be extracts in rules/decision records that an 'is external' can see--that's fine)
+>
+> Invoices and export files will need to be accessible to the related external user (i.e., its their invoice)
+>
+> 2. i'm not sure i'm following but we should take the email and invoice pdf as either all pass or none pass; e.g., we should not allow an email but not its invoice pdf; and vice versa we should not allow a invoice pdf if the email does not have rights to the matter.
+
+Main-session reading (not owner text):
+
+1. **Reverses #2179 (c) (round 111 item 5) and the round-77 I-14 known limit.** A systemuser with `sprk_isexternal = true` must not reach an internal-only record through Dataverse directly (Web API, model-driven app) or through any BFF/SPA surface. BFF-side narrowing (task 188) stays; Dataverse-side enforcement is new work (#2179 option (b) shape; design first). #2179 reopened.
+   - **ebilling F1-e:** the internal file route refuses flagged-external callers for Procedure files, always. Rule/decision-record extracts that an external user may see are not affected. Invoice and export files stay reachable by the related external user (their own invoice); the relation that decides "their invoice" is for ebilling and SPA-r3 to define.
+2. **ebilling K1: all-or-nothing.** The email and its invoice PDF are filed together or not at all. A failed isolation re-run after commit undoes everything the submission created (invoice, lines, findings, Signal rows, the file), not just the bytes. A PDF is never accepted under a matter the email is not allowed under. The residual is only the seconds between commit and the re-run, and only where the transaction's document-row guard cannot catch the race.
