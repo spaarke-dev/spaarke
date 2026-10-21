@@ -348,3 +348,14 @@ Verification after the fix: `dotnet build` 0 warnings, 0 errors. Handler classes
 - **Ontology:** smoke PASS. SPE admin and ebilling were told the version.
 - **Open:** whether the owner does UAC gate item 4 (two .eml saves, read back by word-add-in) or it relies on the first real saves.
 - **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261021T164028Z` (= `a10e814d02`).
+
+## Dev BFF deploy of master 583f90c1d9 (2026-10-21 18:03Z; owner: "yes, deploy 583f90c1d9")
+
+- **Contents:** #2191 (the field-mapping fix for the #2188 Office quick-create source-read leak; the source is now read as the caller), #2182 (word-add-in task 131, "email not filed" notice) and word-add-in docs (#2210, #2211).
+- **Peer OKs:** field-mapping, word-add-in, UAC, ebilling, ontology and SPE admin. Provisioning has a standing OK.
+- **Pre-checks:** live DLL `84291ecea8`, an ancestor. No e0df77339.
+- **Rollback snapshot:** `deploy/rollback/wwwroot-20261021T180216Z` (222 files, DLL `84291ecea8`).
+- **Deploy:** detached `C:/wtbffe-583`. Package 37.62 MB; 4 critical files SHA-256 verified; CORS OK. No settings changed.
+- **Read-back** (18:04:37Z): `1.0.0+583f90c1d91198f810b18d60c86f86c130c751d1`. healthz and healthz/dataverse 200; `/api/me` anonymous 401.
+- **30 minutes** (to 18:34Z): no new exception class (only the Graph "Invalid hostname" noise ×6). T8 refusals 0; #2191 refusal codes 0, because no Office quick-create has run yet. Reconciliation runs 18:16–18:34Z Succeeded. Ontology smoke PASS.
+- **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261021T180216Z` (= `84291ecea8`).
