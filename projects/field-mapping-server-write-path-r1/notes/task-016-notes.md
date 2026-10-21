@@ -523,3 +523,34 @@ per occurrence" in its remarks (:27, :921) describes how a masked local's uses a
 - A per-occurrence key would be a new mechanism, which the brief rules out.
 - Left for the coordinator. `KnownCallSites` is still 2. The scan already sees 3 call sites (Office, step 3, Repair),
   because `Repair.cs` is scanned today, so it should go to 3 together with the entry.
+
+**Condition 3: done (the coordinator authorized a per-occurrence exemption).** The file `Allowlist` is unchanged. A new
+`UnmaskedCallExemptions` (`(Uses, Reason)`, the `CreateOwnerResolutionGuardTests` shape) is keyed
+`path|Type.Member`. The entry is
+`src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.Repair.cs|RecordCreationService.RepairMappingAsync`,
+with Uses = 1 and the agreed reason verbatim.
+
+How the guard now works:
+- Calls are attributed to the declared member around them (`ScopeOf`/`MemberKey`). A call in a local function, lambda
+  or anonymous method counts for that member.
+- Each call is judged on its own; the old per-name de-duplication is gone.
+- Past `Uses`, every further unmasked call fails. Unmasked calls in other members always fail.
+- `EveryUnmaskedCallExemption_IsStillUsed` reports an entry as stale when the reason is empty, the key is malformed, the
+  file or member is gone, or the member has fewer unmasked calls than `Uses`.
+- `KnownCallSites` is 3.
+
+Controls, run through the same walker:
+- must-fire: a second unmasked call in the exempt member; a call in another member; a lambda call in another member;
+- must-not-fire: exactly one unmasked call in the exempt member, directly or in a local function;
+- stale: a member with zero unmasked calls, a gone member, a gone file, an empty reason.
+
+Mutants (each applied alone, built, run, restored):
+- E1 (no allowance): the real fact and both must-not-fire controls fail.
+- E2 (unlimited allowance): the second-call control fails.
+- E3 (keyed by file, not member): the other-member and lambda controls fail.
+- E4 (local functions not attributed to their member): the local-function control fails.
+- E5 (stale ignores the count): the stale control fails.
+- E6 (stale ignores a gone member) did not compile as written. It is equivalent anyway: a gone member has zero calls, so
+  the count check reports it too.
+
+Before the entry, the real fact failed on `Repair.cs:323`; with it, the fact passes.
