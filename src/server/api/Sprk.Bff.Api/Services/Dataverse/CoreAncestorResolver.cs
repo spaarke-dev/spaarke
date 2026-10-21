@@ -1,5 +1,6 @@
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse.Models;
 
 namespace Sprk.Bff.Api.Services.Dataverse;
@@ -1039,9 +1040,14 @@ public sealed class CoreAncestorResolver
     /// when it differs. Reads the row as stored, so every filing parent counts. A parentless row is never written (its own
     /// value stands). Never throws (cancellation aside): a failure is logged and the reconcile job corrects it within its
     /// cycle.
+    /// <para>Task 189 (D7 T7a, #2126): a document holds max(own narrowing, inherited), decided by
+    /// <see cref="InheritedAccessPermission.DecideDocument"/> from its record (<see cref="AccessInheritance.Column"/>) — the
+    /// same decision as the reconcile job. A document created Restricted under a Standard matter stays Restricted, and its
+    /// narrowing is recorded as its own in the same update. A parentless document's value is never written; a narrowing on
+    /// it is recorded. Fail closed: no record column, an unreadable record or an unknown level writes nothing.</para>
     /// </summary>
-    /// <returns>The value the row now holds from its parents, or <see langword="null"/> when it takes none or it could not
-    /// be decided.</returns>
+    /// <returns>The value the row now holds (a document: max(own, inherited)), or <see langword="null"/> when it takes none
+    /// from parents or it could not be decided.</returns>
     public async Task<int?> RefreshInheritedAccessPermissionAsync(
         string entityLogicalName, Guid recordId, CancellationToken ct = default)
     {
@@ -1055,6 +1061,9 @@ public sealed class CoreAncestorResolver
             var columns = await walk.ColumnsForAsync(table!, ct).ConfigureAwait(false);
             if (!columns.Contains(InheritedAccessPermission.Column))
                 return null; // the environment lacks the column (the schema script adds it)
+
+            if (InheritedAccessPermission.RecordsOwnNarrowing(table))
+                return await RefreshDocumentAccessPermissionAsync(table!, recordId, walk, columns, ct).ConfigureAwait(false);
 
             var row = await _entityService.RetrieveAsync(table!, recordId, columns.ToArray(), ct).ConfigureAwait(false);
             var parents = await walk.ParentsOfAsync(row, ct).ConfigureAwait(false);
@@ -1086,6 +1095,62 @@ public sealed class CoreAncestorResolver
                 "reconciliation job corrects it within its cycle.", table, recordId);
             return null;
         }
+    }
+
+    /// <summary>
+    /// Task 189 (D7 T7a, #2126): <see cref="RefreshInheritedAccessPermissionAsync"/> for a document. The row is read and
+    /// written in one step, as the To Do path is (no re-read: the read is the moment before the write, which is the window
+    /// the reconcile job's re-read leaves too). Value and record go in ONE update.
+    /// </summary>
+    private async Task<int?> RefreshDocumentAccessPermissionAsync(
+        string table, Guid recordId, ParentLineageWalk walk, IReadOnlyList<string> columns, CancellationToken ct)
+    {
+        if (!(await _columnProbe(table, ct).ConfigureAwait(false)).Contains(AccessInheritance.Column))
+        {
+            _logger.LogWarning(
+                "[INHERITED-ACCESS-PERMISSION] {Table} {Id}: this environment has no {Column} (the own-narrowing record), so " +
+                "nothing is written to it (fail closed).", table, recordId, AccessInheritance.Column);
+            return null;
+        }
+
+        var row = await _entityService.RetrieveAsync(table, recordId, [.. columns, AccessInheritance.Column], ct)
+            .ConfigureAwait(false);
+        var parents = await walk.ParentsOfAsync(row, ct).ConfigureAwait(false);
+        InheritedAccessPermission.Answer? answer = null;
+        if (parents.Count > 0)
+        {
+            answer = await InheritedAccessPermission.ResolveAsync(walk, parents, ct, (table, recordId)).ConfigureAwait(false);
+            if (answer.Status != ParentTopsStatus.Found || answer.Value is null)
+            {
+                _logger.LogWarning(
+                    "[INHERITED-ACCESS-PERMISSION] {Table} {Id}: its inherited Access Permission cannot be decided ({Reason}); " +
+                    "left as it is, and the secure-child reconciliation job looks at it again.", table, recordId, answer.Reason);
+                return null;
+            }
+        }
+
+        var decision = InheritedAccessPermission.DecideDocument(
+            row.GetAttributeValue<OptionSetValue>(InheritedAccessPermission.Column)?.Value,
+            row.GetAttributeValue<string>(AccessInheritance.Column),
+            parents,
+            answer?.Value);
+        if (decision.Undetermined is { } why)
+        {
+            _logger.LogWarning(
+                "[INHERITED-ACCESS-PERMISSION] {Table} {Id}: {Reason}; nothing is written to it (fail closed), and the " +
+                "secure-child reconciliation job looks at it again.", table, recordId, why);
+            return null;
+        }
+
+        var fields = new Dictionary<string, object>();
+        if (decision.WriteValue)
+            fields[InheritedAccessPermission.Column] = new OptionSetValue(decision.Target);
+        if (decision.Record is { } record)
+            fields[AccessInheritance.Column] = record.Serialize();
+        if (fields.Count > 0)
+            await _entityService.UpdateAsync(table, recordId, fields, ct).ConfigureAwait(false);
+
+        return parents.Count == 0 ? null : decision.Target;
     }
 
     private async Task<int?> InheritedAccessPermissionAsync(

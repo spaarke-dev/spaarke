@@ -219,6 +219,76 @@ public class InheritedAccessPermissionStampTests
     }
 
     [Fact]
+    public async Task RefreshInheritedAccessPermissionAsync_ADocumentCreatedRestrictedUnderAStandardMatter_StaysRestricted_AndRecordsItsOwn()
+    {
+        // Task 189 (D7 T7a, #2126; must fire): the child-records create of a document its creator narrowed. Before task 189
+        // this refresh reset it to the matter's Standard.
+        var matter = Root("sprk_matter", Standard);
+        var document = Row("sprk_document", Restricted, ("sprk_matter", "sprk_matter", matter));
+
+        var level = await Resolver().RefreshInheritedAccessPermissionAsync("sprk_document", document);
+
+        level.Should().Be(Restricted);
+        _world.AccessPermissionWrites.Should().BeEmpty("the document's own Restricted is never widened");
+        var record = RecordIn(_world.AccessRecordWrites.Should().ContainSingle().Subject.Text);
+        record.OwnPermission.Should().Be(Restricted, "the narrowing is recorded as its own, so the job keeps it too");
+        record.FloorPermission.Should().Be(Standard);
+    }
+
+    [Fact]
+    public async Task RefreshInheritedAccessPermissionAsync_ADocumentUnderARestrictedMatter_TakesItsValue_WithItsRecord_InOneUpdate()
+    {
+        // Task 189 (must not fire): an inherited value is still set from the parents.
+        var matter = Root("sprk_matter", Restricted);
+        var document = Row("sprk_document", Standard, ("sprk_matter", "sprk_matter", matter));
+
+        var level = await Resolver().RefreshInheritedAccessPermissionAsync("sprk_document", document);
+
+        level.Should().Be(Restricted);
+        _world.AccessPermissionWrites.Should().ContainSingle().Which.Should().Be(("sprk_document", document, Restricted));
+        _world.CombinedAccessWrites.Should().ContainSingle().Which.Should().Be(("sprk_document", document));
+        RecordIn(_world.AccessRecordWrites.Single().Text).OwnPermission.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task RefreshInheritedAccessPermissionAsync_AParentlessDocumentsNarrowing_IsRecorded_ItsValueNeverWritten()
+    {
+        // Task 189: round 81 holds (no value write); the narrowing is recorded so a later filing keeps it.
+        var document = Row("sprk_document", Restricted);
+
+        var level = await Resolver().RefreshInheritedAccessPermissionAsync("sprk_document", document);
+
+        level.Should().BeNull();
+        _world.AccessPermissionWrites.Should().BeEmpty();
+        RecordIn(_world.AccessRecordWrites.Should().ContainSingle().Subject.Text).OwnPermission.Should().Be(Restricted);
+    }
+
+    [Fact]
+    public async Task RefreshInheritedAccessPermissionAsync_WhenDocumentsLackTheRecordColumn_NothingIsWritten()
+    {
+        // Task 189 (fail closed): before the schema script runs, a document's own narrowing cannot be read.
+        var matter = Root("sprk_matter", Restricted);
+        var document = Row("sprk_document", Standard, ("sprk_matter", "sprk_matter", matter));
+        var probe = Probe();
+        var resolver = new CoreAncestorResolver(World(), async (table, ct) =>
+            (await probe(table, ct)).Where(c => c != AccessInheritance.Column).ToHashSet(StringComparer.OrdinalIgnoreCase), _log);
+
+        var level = await resolver.RefreshInheritedAccessPermissionAsync("sprk_document", document);
+
+        level.Should().BeNull();
+        _world.AccessPermissionWrites.Should().BeEmpty();
+        _world.AccessRecordWrites.Should().BeEmpty();
+        _log.Warnings.Should().Contain(w => w.Contains(AccessInheritance.Column));
+    }
+
+    private static AccessInheritance RecordIn(string text)
+    {
+        var (record, unreadable) = AccessInheritance.Parse(text);
+        unreadable.Should().BeFalse();
+        return record!;
+    }
+
+    [Fact]
     public async Task TopsAsync_ADocumentWhoseOnlyLinkIsItsOwnCurrentVersion_IsParentless()
     {
         // sprk_currentversionid names the document's own file version (whose sprk_document names it again): not a parent.

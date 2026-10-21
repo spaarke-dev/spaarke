@@ -244,13 +244,25 @@ public static class AccessFollowsParent
 /// from: a stored value that differs from max(own, last floor) is a user's edit; a parent set that differs is a re-file (which
 /// never loosens); a floor that moved with the same parents is the parent's change (inherited values follow it, both ways).
 /// One versioned JSON column (the relocation ledger's precedent, <c>sprk_relocationpending</c>) instead of five columns.</para>
+/// <para><b>On <c>sprk_document</c> (task 189, D7 T7a).</b> The same record carries a document's own narrowing. The rule is
+/// <see cref="InheritedAccessPermission.DecideDocument"/>, and it differs from the work assignment and project rule in
+/// three ways:</para>
+/// <list type="bullet">
+/// <item>The floor is the task 173 value (the tops of the filing), and the Secure fields are always false.</item>
+/// <item>A re-file follows the new parents.</item>
+/// <item>The column is NOT field-secured there. The stored value is max(own, inherited), and the inherited part is
+/// recomputed from the parents and never read from the record. So an edit of the value or of the record can only remove the
+/// user's own narrowing (any user with Write may, D7) or add one; it can never take the document below its parents' live
+/// value.</item>
+/// </list>
 /// <para><b>No record (existing rows): the backfill rule</b> — a value equal to the current floor is inherited; a value
 /// stricter than it is set on the record. Applied the first time the job (or an inline follow) sees the row, and written.</para>
 /// </remarks>
 internal sealed record AccessInheritance(
     IReadOnlyList<string> Parents, bool FloorSecure, int FloorPermission, bool OwnSecure, int? OwnPermission)
 {
-    /// <summary>The column (Multiple lines of text) on <c>sprk_workassignment</c> and <c>sprk_project</c>.</summary>
+    /// <summary>The column (Multiple lines of text) on <c>sprk_workassignment</c> and <c>sprk_project</c> (field-secured), and on
+    /// <c>sprk_document</c> (task 189; not secured, see the remarks).</summary>
     internal const string Column = "sprk_accessinheritance";
 
     /// <summary>
@@ -307,6 +319,51 @@ internal sealed record AccessInheritance(
         other is not null && FloorSecure == other.FloorSecure && FloorPermission == other.FloorPermission
         && OwnSecure == other.OwnSecure && OwnPermission == other.OwnPermission
         && new HashSet<string>(Parents, StringComparer.OrdinalIgnoreCase).SetEquals(other.Parents);
+
+    /// <summary>
+    /// The record's OWN Access Permission, read from a stored value against its access record (owner round 87). This is the
+    /// ONE copy of the rule: <see cref="SecureRootInheritance.Decide"/> (task 175) and the document rule
+    /// <see cref="InheritedAccessPermission.DecideDocument"/> (task 189) both call it.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>With a record.</b> A stored value that differs from max(own, last floor) was set outside the inherited-value
+    /// writers: a user's edit, or a BFF writer's own narrowing. If it is stricter than the last floor, it is the record's own.
+    /// If it equals the last floor, there is no own value. If it is below the last floor, it is not the record's own: the own
+    /// value is unchanged and the stored value is put back.</para>
+    /// <para><b>Without one</b> (existing rows), the backfill rule applies: a value stricter than the current floor is own;
+    /// one equal to it is inherited. A re-file is the caller's to handle (task 175's rule; documents follow their new
+    /// parents).</para>
+    /// </remarks>
+    internal static int? OwnPermissionOf(int storedRank, int? storedPermission, AccessInheritance? record, int floorRank)
+    {
+        if (record is null)
+            return storedRank > floorRank ? storedPermission : null;
+
+        var own = record.OwnPermission;
+        var lastFloorRank = SecureRootInheritance.RankOf(record.FloorPermission);
+        if (storedRank != Math.Max(SecureRootInheritance.RankOf(own), lastFloorRank))
+        {
+            if (storedRank > lastFloorRank)
+                own = storedPermission;
+            else if (storedRank == lastFloorRank)
+                own = null;
+            // below the last floor: not the record's own; put back below
+        }
+
+        return own;
+    }
+
+    /// <summary>
+    /// Task 189 (D7 T7a): the record a BFF writer stores BESIDE an own narrowing it sets on a document, in the same payload.
+    /// Its first user is word-add-in-r1 T8's fallback Restricted for an email it cannot identify. Without this record, a
+    /// narrowing that equals the parents' value reads as inherited and follows them when they widen. The reconciler fills in
+    /// the real parents and floor on its next run, and keeps the own value.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="permission"/> is not Limited or Restricted.</exception>
+    internal static AccessInheritance OwnNarrowing(int permission) =>
+        SecureRootInheritance.RankOf(permission) > 0
+            ? new AccessInheritance(Array.Empty<string>(), false, InheritedAccessPermission.Standard, false, permission)
+            : throw new ArgumentOutOfRangeException(nameof(permission), permission, "An own narrowing is Limited or Restricted.");
 }
 
 /// <summary>
@@ -491,19 +548,17 @@ public sealed partial class SecureRootInheritance
             .OrderBy(k => k, StringComparer.Ordinal).ToList();
         var (floorSecure, floorRank) = FloorOf(ancestry);
 
+        // The Access Permission's own part: one copy of the rule, shared with task 189's document rule.
+        var ownPermission = AccessInheritance.OwnPermissionOf(storedRank, storedPermission, marker, floorRank);
         bool ownSecure;
-        int? ownPermission;
         if (marker is null)
         {
             // The backfill rule (existing rows): stricter than the floor = set on the record; equal = inherited.
             ownSecure = storedSecure == true && !floorSecure;
-            ownPermission = storedRank > floorRank ? storedPermission : null;
         }
         else
         {
             ownSecure = marker.OwnSecure;
-            ownPermission = marker.OwnPermission;
-            var lastFloorRank = RankOf(marker.FloorPermission);
 
             // A user's edit since the record was written.
             var expectedSecure = ownSecure || marker.FloorSecure;
@@ -511,15 +566,6 @@ public sealed partial class SecureRootInheritance
                 ownSecure = true; // Make Secure (or another own act)
             else if (storedSecure == false && expectedSecure)
                 ownSecure = false; // an F3 unsecure (or a flag cleared outside the BFF)
-
-            if (storedRank != Math.Max(RankOf(ownPermission), lastFloorRank))
-            {
-                if (storedRank > lastFloorRank)
-                    ownPermission = storedPermission;
-                else if (storedRank == lastFloorRank)
-                    ownPermission = null;
-                // below the last floor: not the record's own; put back below
-            }
 
             // A re-file: what the stored values hold beyond the NEW floor becomes the record's own (round 87 item 5).
             if (!new HashSet<string>(marker.Parents, StringComparer.OrdinalIgnoreCase).SetEquals(parentsNow))

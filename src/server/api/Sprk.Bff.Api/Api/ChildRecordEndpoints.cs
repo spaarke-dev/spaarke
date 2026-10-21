@@ -534,6 +534,7 @@ public static class ChildRecordEndpoints
 
         // Task 173 (owner rounds 81/84): after a re-file, or a caller's own update of the column on a record that has a
         // parent (locked on the form), the row shows what its parents give it now. A parentless row is left as written.
+        // Task 189: a document shows max(its own narrowing, what its parents give it); its own narrowing is never widened.
         if (outcome.Written || mapped.Item!.Columns.Contains(InheritedAccessPermission.Column, StringComparer.OrdinalIgnoreCase))
             await restamper.RefreshInheritedAccessPermissionAsync(entity, id, CancellationToken.None).ConfigureAwait(false);
 

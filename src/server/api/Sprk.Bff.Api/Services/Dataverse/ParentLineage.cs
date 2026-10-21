@@ -463,9 +463,11 @@ internal sealed class ParentLineageWalk
 /// 81, extended by round 84): the MOST RESTRICTIVE <c>sprk_accesspermission</c> of the records at the top of its filing.
 /// </summary>
 /// <remarks>
-/// <para><b>Display only.</b> No access decision reads a child table's value (round 2 Q6; round 81): enforcement keeps
-/// reading the roots. A parentless child's own value is recorded only (owner, 2026-10-08: "This is fine (BUT in future we
-/// might need to revisit)").</para>
+/// <para><b>Display only on To Do, Event and Communication.</b> No access decision reads their value (round 2 Q6; round 81):
+/// enforcement keeps reading the roots. A parentless child's own value is recorded only (owner, 2026-10-08: "This is fine
+/// (BUT in future we might need to revisit)"). A DOCUMENT may narrow: under D7 (#2126) its own Restricted hides it from
+/// partners, so its stored value is max(own, inherited) and is never lowered below its own narrowing (task 189,
+/// <see cref="DecideDocument"/>).</para>
 /// <para><b>The rule.</b> Restricted over Limited over Standard; a null value, or a top whose table has no such column,
 /// counts as Standard. A row with no non-null filing lookup has no inherited value: its own value is the user's and is
 /// never overwritten. Written by the shared stamp path (<see cref="CoreAncestorResolver"/>) and kept in step by
@@ -539,4 +541,114 @@ internal static class InheritedAccessPermission
     /// <summary>A short "table id" list of the tops, for logs and the job report.</summary>
     internal static string Describe(IEnumerable<ParentTop> tops) =>
         string.Join(", ", tops.Select(t => $"{t.Table} {t.Id:D}"));
+
+    /// <summary>
+    /// Task 189 (D7 T7a, #2126): the tables whose rows RECORD their own narrowing in <see cref="AccessInheritance.Column"/>.
+    /// Only documents do: under D7 a document's own Restricted hides it from partners. On these tables the stored value is
+    /// max(own, inherited) (<see cref="DecideDocument"/>), and the BFF never lowers it below the own narrowing. On the other
+    /// three tables it stays equal to the inherited value, as before.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> RecordTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "sprk_document",
+    };
+
+    /// <summary>True when rows of <paramref name="table"/> record their own narrowing (<see cref="RecordTables"/>).</summary>
+    internal static bool RecordsOwnNarrowing(string? table) => table is not null && RecordTables.Contains(table);
+
+    /// <summary>What to hold and what to write on one row of a <see cref="RecordTables"/> table (task 189).</summary>
+    internal sealed record DocumentDecision
+    {
+        /// <summary>
+        /// Not null: nothing may be written to the row (fail closed). Holds the reason, which names no person. Causes: its
+        /// record cannot be read, or its stored value is not a known level.
+        /// </summary>
+        public string? Undetermined { get; init; }
+
+        /// <summary>The value the row holds after the decision: max(own, inherited), or its own value when it has no parent.</summary>
+        public int Target { get; init; }
+
+        /// <summary>The stored value differs from <see cref="Target"/>, so it is written. Never on a parentless row.</summary>
+        public bool WriteValue { get; init; }
+
+        /// <summary>The record to write in the same update, or <see langword="null"/> when the stored one is current.</summary>
+        public AccessInheritance? Record { get; init; }
+
+        /// <summary>The row's own narrowing after the decision (<see langword="null"/>: it follows its parents).</summary>
+        public int? Own { get; init; }
+
+        /// <summary>The own narrowing holds the value above what the parents give: the parents' value was NOT written over it.</summary>
+        public bool OwnKept { get; init; }
+    }
+
+    /// <summary>
+    /// Task 189 (D7 T7a): the ONE decision for a document's Access Permission, made by both of its BFF writers (the
+    /// reconcile job and the child-records create refresh). The stored value is max(own, inherited): inherited values follow
+    /// the parents both ways, and an own narrowing is never widened.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Own vs inherited</b> is task 175's classification, one copy (<see cref="AccessInheritance.OwnPermissionOf"/>):
+    /// a value set outside these writers (a user's edit, a BFF writer's narrowing) becomes the document's own when it is
+    /// stricter than the last inherited value; an edit back to that value removes it; an edit below it is put back. Without a
+    /// record (existing rows) a value stricter than the current inherited one is own, and one equal to it is inherited. That
+    /// is sound because task 173 kept every parented row equal to its parents before this task.</para>
+    /// <para><b>A re-file follows the new parents.</b> The task 173 contract is kept for every row without an own narrowing
+    /// (unlike task 175's "a re-file never loosens", which is for work assignments and projects).</para>
+    /// <para><b>A parentless row</b> keeps its own value, which is never written (round 81). When that value narrows, it is
+    /// RECORDED as its own, so a later filing keeps it.</para>
+    /// <para><b>Fail closed:</b> an unreadable record, or a stored value that is not a known level, decides nothing
+    /// (<see cref="DocumentDecision.Undetermined"/>).</para>
+    /// <para><b>No write for the Standard majority.</b> A row with no record, no own narrowing and a Standard inherited value
+    /// gets no record: the backfill rule reads that absence the same way.</para>
+    /// </remarks>
+    /// <param name="stored">The row's stored <see cref="Column"/>.</param>
+    /// <param name="recordText">The row's stored <see cref="AccessInheritance.Column"/>.</param>
+    /// <param name="parents">The row's non-null filing parents (<see cref="ParentLineageWalk.ParentsOfAsync"/>).</param>
+    /// <param name="inherited">What its parents give it (<see cref="ResolveAsync"/>); ignored when it has none.</param>
+    internal static DocumentDecision DecideDocument(
+        int? stored, string? recordText, IReadOnlyCollection<(string Table, Guid Id)> parents, int? inherited)
+    {
+        ArgumentNullException.ThrowIfNull(parents);
+        var (record, unreadable) = AccessInheritance.Parse(recordText);
+        if (unreadable)
+            return new DocumentDecision { Undetermined = $"its own narrowing ({AccessInheritance.Column}) cannot be read" };
+
+        var storedRank = SecureRootInheritance.RankOf(stored);
+        if (storedRank < 0)
+            return new DocumentDecision { Undetermined = "it holds an Access Permission that is not Standard, Limited or Restricted" };
+
+        if (parents.Count == 0)
+        {
+            var ownValue = storedRank > 0 ? stored : null;
+            var parentless = new AccessInheritance(Array.Empty<string>(), false, Standard, false, ownValue);
+            var writeParentless = record is null ? ownValue is not null : !parentless.SameAs(record);
+            return new DocumentDecision
+            {
+                Target = SecureRootInheritance.PermissionOf(storedRank),
+                Record = writeParentless ? parentless : null,
+                Own = ownValue,
+            };
+        }
+
+        var floorRank = SecureRootInheritance.RankOf(inherited);
+        if (inherited is null || floorRank < 0)
+            return new DocumentDecision { Undetermined = "what its parents give it could not be decided" };
+
+        var own = AccessInheritance.OwnPermissionOf(storedRank, stored, record, floorRank);
+        var targetRank = Math.Max(SecureRootInheritance.RankOf(own), floorRank);
+        var target = SecureRootInheritance.PermissionOf(targetRank);
+        var next = new AccessInheritance(
+            parents.Select(p => $"{p.Table.Trim().ToLowerInvariant()}:{p.Id:D}")
+                .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(k => k, StringComparer.Ordinal).ToList(),
+            false, SecureRootInheritance.PermissionOf(floorRank), false, own);
+        var writeRecord = record is null ? own is not null || floorRank > 0 : !next.SameAs(record);
+        return new DocumentDecision
+        {
+            Target = target,
+            WriteValue = stored != target,
+            Record = writeRecord ? next : null,
+            Own = own,
+            OwnKept = targetRank > floorRank,
+        };
+    }
 }
