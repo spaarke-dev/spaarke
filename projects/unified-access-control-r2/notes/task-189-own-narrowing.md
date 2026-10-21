@@ -348,7 +348,11 @@ Unchanged:
 | `42e64bf51f` | this file: §2.6, §4, §8.7 |
 | `51cb5fb94b` | Fix round 2: documents fenced out of the stamp path (§8.8) and 5 test cases |
 | `7933cf456f` | Fix round 2: the guard's baseline is empty; the fenced stamp members are non-document writers |
-| (this commit) | this file: §8.8; the data-model doc and I-16 |
+| `a8b301292b` | this file: §8.8; the data-model doc and I-16 |
+| `c20e9882aa` | Fix round C, F3: the writer guard finds a multi-line dictionary initializer entry (§8.9) |
+| `b7f74100f3` | Fix round C, K1+K2: raise only when a document's own narrowing cannot be known (§8.9) |
+| `f69b007da8` | Fix round C, K5: app-only generic writers refuse a document's Access Permission and record (§8.9) |
+| (this commit) | this file: §8.9 |
 
 ### 8.2 Tests
 
@@ -563,3 +567,111 @@ ArchTest source scan).
   - Publish size: master `3531ed65e3` (no `src/server` change since the base `4f5f22694c`) 39,314,243 B; branch
     `7933cf456f` 39,320,170 B; delta **+5,927 B**.
   - CVE: none.
+
+### 8.9 Fix round C (main session, 2026-10-20): the first security pass
+
+The pass came back FIX-ROUND-NEEDED. One commit per item, each with must-fire and must-not-fire tests and mutants.
+
+- **F3 (`c20e9882aa`). The writer guard missed the usual multi-line dictionary initializer.**
+  - Before: the initializer pattern needed `{` or `,` before the entry, so an entry that starts its own line was not
+    seen.
+  - After: `(?:^|[{,])\s*\{\s*KEY\s*,`.
+  - Controls: a multi-line initializer with the literal key and with the constant (must fire); a multi-line set holding
+    the column and a multi-line dictionary of another column (must not fire).
+  - The real-source scan found no new site. Guard mutant G7 (the old pattern) fails the control.
+- **K1+K2 (`b7f74100f3`). Raise only, when the own narrowing cannot be known.**
+  - Before: an unreadable record (not JSON, another version, an unknown level inside it), or an environment without the
+    record column, wrote nothing. A Standard document under a Restricted matter stayed Standard.
+  - After: `InheritedAccessPermission.DecideDocumentRaiseOnly`. Whatever the own narrowing is, max(own, inherited) is at
+    least the live floor, so a stored value below a decided floor is raised to it. Only the value is written; the record
+    is untouched. A value at or above the floor is kept, nothing is lowered, and an unknown stored level still writes
+    nothing.
+  - The reconciler decides documents without the record column raise-only instead of skipping them, and never asks for
+    the column (its re-read compares the value alone). The create refresh does the same.
+  - An unreadable record is still reported `undetermined` and carried. The run reports `raisedOnly` (also in `changed`).
+  - The test world now refuses any read or write that names the missing column, as Dataverse does.
+- **K5 (`f69b007da8`). App-only generic writers refuse a document's two columns.**
+  - Writers: `UpdateRecordActionCore` when it impersonates nobody (the Update Record node; the action seam without a
+    user), and `DataverseUpdateHandler` (a playbook's output mapping).
+  - They refuse a payload naming `sprk_accesspermission` or `sprk_accessinheritance` on `sprk_document`
+    (`sdap.access.document_access_server_only`, nothing written).
+  - Unchanged:
+    - the same columns on a to-do or event;
+    - a user's own write: an impersonated update, the user-OBO chat tools, the field-mapping push (written as the caller
+      since task 166), and the form.
+  - The chat create tool already blocks documents. No other app-only payload writer reaches a document: the create node
+    executors write notifications and tasks only.
+- **F1: prepared and verified, NOT committed. Stopped and reported.** The change: write the record for every parented
+  document, `writeRecord = record is null || !next.SameAs(record)`.
+  - Tests:
+    - the main session's sequence as a must-fire test: D Restricted and M Restricted in one window, then M widens, D stays
+      Restricted;
+    - the create refresh gives a Standard document under a Standard matter its record;
+    - the one assertion that said the Standard majority gets no record is updated (it was the only one).
+  - Before: 3 red. After: 349 pass. The docs and the K1 known limit are narrowed.
+  - Saved as `.uac189/t189_f1.patch` in this worktree. It applies cleanly on `f69b007da8`.
+  - **What reacts to a document's `modifiedon` change:**
+    - Re-index or re-profile: nothing, on master.
+      - RAG indexing (`BulkRagIndexingJobHandler`, `ScheduledRagIndexingService`, which is off by default) picks
+        `sprk_ragindexedon eq null` only.
+      - Profile and index triggers are event-driven (upload, create).
+      - `RecordSyncJob` and `DataverseIndexSyncService` do not include `sprk_document`.
+      - No plugin step, flow or AI Search indexer over Dataverse exists in source.
+    - Audit: both columns are audited and the entity's audit is on. Each legacy parented document gets one entry, once,
+      and then none while nothing changes.
+    - The reconciler: record writes share `MaxAccessPermissionWritesPerRun` (500). A backfill of N legacy documents takes
+      about N/500 runs (2 minutes each). Meanwhile value writes share the cap and converge more slowly (deferred rows keep
+      the window).
+    - **#2161** (open, head `2662545da2`), the re-file pass `RelocateRefiledDocumentsAsync`. It lists documents with
+      `modifiedon` at or after its watermark. Its own remarks name "any write to the row" as the way to put a row back in
+      the window. Per run it examines at most 500 (60-second slice), and each examination derives the document's
+      containers (Dataverse reads).
+      - A document whose drive is allowed counts `inPlace`: reads only.
+      - A document whose drive is NOT allowed is moved by `RelocateIfMisplacedAsync(..., Refile)` (at most 25 relocator
+        calls a run).
+      - An undecidable derivation fails the run, is carried, and is dropped after 5 runs.
+
+      **So with F1 and #2161 both deployed, the churn does more than cost runs.** Each legacy document F1 writes enters
+      the re-file window once. A document whose file already sits outside its derived containers is relocated, and an
+      undecidable one fails runs. I cannot confirm "never re-files anything".
+  - Options (for the main session):
+    1. Size the misplaced backlog first: #2161's pass report-only (`wouldMove`), or the operator-run
+       `DocumentContainerMigrationJob` report, on dev. If it is zero (or the moves are wanted), commit the patch.
+    2. Sequence it: deploy F1 and let the backfill finish before #2161's pass goes live. A new instance looks back
+       only 60 minutes, so a backfill that finished earlier is not listed.
+    3. Accept the moves as #2161's intended repair (capped at 25 a run), and commit now.
+- **Accepted known limits (main session; in the PR body).**
+  - K3: a Limited edit with two parent moves in one window is misread. The partner predicate is unaffected, because it
+    reads Restricted only.
+  - K4: the race between the re-read and the write can write a stale value. It corrects itself on the next run.
+- **Mutants** (`.uac189/t189_mutate.py`, filter: the reconcile, stamp, cascade, root-inheritance and app-only writer
+  classes). All killed.
+
+  | # | Perturbation | Red |
+  |---|---|---|
+  | M14 | no raise when the own narrowing is unknown | 5 |
+  | M15 | raise-only writes the floor even at or above it (lowers) | 4 |
+  | M16 | the re-read asks for the missing record column | 1 |
+  | M17 | the reconciler skips a table without the record column again | 1 |
+  | M18 | the refresh writes nothing on an unreadable record | 1 |
+  | M19 | `RefuseAppOnlyWrite` never refuses | 5 |
+  | M20 | the playbook update core does not ask | 3 |
+  | M21 | the output-mapping handler does not ask | 2 |
+  | M22 | a user's own (impersonated) update is refused too | 1 |
+  | M23 | the columns are refused on every table | 5 |
+  | G7 | the guard's old initializer pattern | the control |
+- **Gates (round C, on `f69b007da8`).**
+  - Build: 0 warnings, 0 errors.
+  - Filtered suite (the round B classes plus the K5 class): **347, all pass**. With the writer suites
+    (`RefilePathRestampTests`, `UpdateRecord*`, `DataverseUpdateHandler*`, `OutputOrchestrator*`, `ActionSeam*`):
+    **479, all pass**.
+  - Fails before: the K1+K2 tests against the round B production files, 8 red. K5 and F3 by mutants (M19 to M21, G7),
+    because the tests name the new reason code.
+  - Wide run (no other load): **10066 passed, 0 failed, 9 skipped**.
+  - ArchTests: **1211 / 1211**.
+  - Publish size, fresh detached worktrees: master `44063b3473` 39,314,306 B; branch `f69b007da8` 39,322,093 B; delta
+    **+7,787 B**. The worktrees were removed afterwards.
+  - CVE: none.
+  - Merge: `origin/master` `44063b3473` and #2161 (`2662545da2`) merge cleanly. #2170 (`c3da0a5d0e`) has one hunk
+    on I-16, as before. #2150 (`0ba86217e2`) has one hunk in `SecureChildShareWorld.Answer`; keep both sides. Its
+    `UpdateRecordActionCore` and `DataverseUpdateHandler` merge cleanly.
