@@ -110,6 +110,51 @@ public sealed partial class SecureChildOwnershipAiToolTests
         email.GetAttributeValue<EntityReference>("owningteam")?.Id.Should().Be(Directory.GeneralTeam, "the second matter's team");
     }
 
+    private static readonly Guid SecondSecureMatter = Guid.Parse("a2143000-0000-4000-8000-0000000000a8");
+    private static readonly Guid SecondSecureMattersThread = Guid.Parse("a2143000-0000-4000-8000-0000000000ea");
+
+    [Fact(DisplayName = "#2143 r7c F2: step 1 of the two-step bypass - a plain PATCH moving an email off secure S2's thread, by an S1-only holder, is refused 403 not_permitted and nothing is written")]
+    public async Task ChildRecordPatch_AThreadOnlyMoveOffASecureRecordsThread_ByACallerWithoutFullAccessOnIt_IsRefusedAtStepOne()
+    {
+        // The email regards secure S1 and sits in secure S2's thread. Step 1 moves it to an ordinary thread with a plain PATCH
+        // of the thread lookup alone; step 2 would re-file its regarding off S1 (which the caller may). Before round 7c step 1
+        // was an ordinary PATCH: no reparent, no F3 on S2.
+        _world.WithSecureRoot("sprk_matter", SecondSecureMatter);
+        AnEmailIn(SecureMatter, SecureMattersThread, Directory.SecureBu, Directory.SecureNamedTeam);
+        RecordThread(SecondSecureMattersThread, SecondSecureMatter, Directory.SecureBu, Directory.SecureNamedTeam);
+        _world.Row("sprk_communication", RefiledEmail)[ThreadResolver.ThreadLookupOnCommunication] =
+            new EntityReference("sprk_communicationthread", SecondSecureMattersThread);
+        _user.FullAccessOn.Add(SecureMatter); // S1 only
+
+        var result = await Sprk.Bff.Api.Api.ChildRecordEndpoints.UpdateAsync(
+            "sprk_communication", RefiledEmail,
+            Payload(new() { ["sprk_CommunicationThread@odata.bind"] = $"/sprk_communicationthreads({OrdinaryMattersThread:D})" }),
+            _user, _world.Resolver(), Restamper(), Children(ThreadsOverTheDirectory()), HttpContextOfCaller(),
+            NullLogger<Program>.Instance, CancellationToken.None);
+
+        Status(result).Should().Be(Microsoft.AspNetCore.Http.StatusCodes.Status403Forbidden, Detail(result));
+        ReasonCode(result).Should().Be(Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.NotPermittedReasonCode);
+        _user.Patches.Should().BeEmpty("the thread-only PATCH is a re-file, refused before it is sent");
+        _world.Assignments.Should().BeEmpty();
+        _world.Row("sprk_communication", RefiledEmail).GetAttributeValue<EntityReference>(ThreadResolver.ThreadLookupOnCommunication)?.Id
+            .Should().Be(SecondSecureMattersThread);
+    }
+
+    [Fact(DisplayName = "#2143 r7c F2: a plain PATCH moving an email between ordinary records' threads is a re-file that writes and asks no F3")]
+    public async Task ChildRecordPatch_AThreadOnlyMoveBetweenOrdinaryThreads_IsWritten()
+    {
+        AnEmailIn(OrdinaryMatter, OrdinaryMattersThread, Directory.ChildBu, Directory.ChildTeam);
+
+        var result = await Sprk.Bff.Api.Api.ChildRecordEndpoints.UpdateAsync(
+            "sprk_communication", RefiledEmail,
+            Payload(new() { ["sprk_CommunicationThread@odata.bind"] = $"/sprk_communicationthreads({SecondOrdinaryMattersThread:D})" }),
+            _user, _world.Resolver(), Restamper(), Children(ThreadsOverTheDirectory()), HttpContextOfCaller(),
+            NullLogger<Program>.Instance, CancellationToken.None);
+
+        Status(result).Should().Be(Microsoft.AspNetCore.Http.StatusCodes.Status204NoContent, Detail(result));
+        _user.Patches.Should().ContainSingle();
+    }
+
     // ── harness ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>

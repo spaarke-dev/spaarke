@@ -1026,7 +1026,10 @@ public class RecordOwnershipResolverTests
     [InlineData("sprk_communication", "contact", "sprk_RegardingMatter@odata.bind", true)]
     [InlineData("sprk_todo", "contact", "sprk_regardingservicerequest", true)] // a service request files a to-do too
     [InlineData("sprk_communication", "contact", "sprk_subject", false)] // round 4: a cleared TEXT column is no re-file
-    [InlineData("sprk_communication", "contact", "sprk_communicationthread", false)] // filing lineage, not an ownership parent
+    [InlineData("sprk_communication", "contact", "sprk_communicationthread", true)] // #2143 r7c: a message's thread re-files it
+    [InlineData("sprk_communication", "sprk_communicationthread", null, true)] // #2143 r7c: a thread set re-files it
+    [InlineData("sprk_document", "sprk_fileversion", null, false)] // a document's current version: lineage only, no re-file
+    [InlineData("sprk_document", "contact", "sprk_currentversionid", false)]
     [InlineData("sprk_communication", "contact", null, false)]
     [InlineData("sprk_matter", "sprk_matter", "sprk_project", false)] // a secure root is never re-filed by its lookups
     [InlineData("sprk_servicerequest", "sprk_matter", "sprk_regardingmatter", false)]
@@ -1034,6 +1037,28 @@ public class RecordOwnershipResolverTests
         string table, string lookupTarget, string? clearedColumn, bool expected)
     {
         RecordReparent.MayRefile(table, [lookupTarget], clearedColumn is null ? [] : [clearedColumn]).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("sprk_communication", "sprk_CommunicationThread@odata.bind", "/sprk_communicationthreads(21430000-0000-4000-8000-0000000000f1)", true)]
+    [InlineData("sprk_communication", "sprk_communicationthread", "ref", true)]
+    [InlineData("sprk_document", "sprk_CurrentVersionId@odata.bind", "/sprk_fileversions(21430000-0000-4000-8000-0000000000f2)", false)]
+    [InlineData("sprk_document", "sprk_currentversionid", "ref", false)]
+    public void WithLineageLookupsIn_OnItsOwn_OnlyAMessagesThreadIsAReFile(string table, string key, string value, bool isARefile)
+    {
+        // Must-fire / must-NOT-fire (#2143 round 7c, F2): a payload whose ONLY change is a lineage-only lookup. A message's thread
+        // re-files it (RecordReparent.IsThreadFilingColumn), so it is returned as a change and every writer routes it through
+        // the reparent; a document's current version still makes no change a re-file on its own.
+        var target = table == "sprk_communication" ? "sprk_communicationthread" : "sprk_fileversion";
+        object raw = value == "ref" ? new EntityReference(target, Guid.NewGuid()) : value;
+        var fields = new Dictionary<string, object?> { [key] = raw };
+
+        var changes = RecordReparent.WithLineageLookupsIn(table, RecordReparent.ParentChangesWithClearsIn(table, fields), fields);
+
+        changes.Count.Should().Be(isARefile ? 1 : 0);
+        RecordReparent.MayRefile(table, changes).Should().Be(isARefile);
+        if (isARefile)
+            changes.Should().ContainKey("sprk_communicationthread").WhoseValue!.LogicalName.Should().Be("sprk_communicationthread");
     }
 
     [Fact]

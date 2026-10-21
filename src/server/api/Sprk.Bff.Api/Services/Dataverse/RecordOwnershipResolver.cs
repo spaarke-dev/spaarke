@@ -630,9 +630,32 @@ public sealed record RecordReparent
             return false;
 
         var table = entityLogicalName.Trim().ToLowerInvariant();
+        // #2143 round 7c: a message's thread set or cleared re-files it (IsThreadFilingColumn).
+        var threadFiles = RecordThreadFiling.AppliesTo(table);
         return lookupTargets.Any(RecordOwnershipResolver.IsOwnershipParent)
-            || clearedColumns.Any(c => FilingParentOf(table, Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(c)) is not null);
+            || (threadFiles && lookupTargets.Any(t => string.Equals(t, RecordThreadFiling.ThreadTable, StringComparison.OrdinalIgnoreCase)))
+            || clearedColumns.Any(c => FilingParentOf(table, Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(c)) is not null
+                                       || IsThreadFilingColumn(table, c));
     }
+
+    /// <summary>
+    /// #2143 round 7c: whether <paramref name="column"/> of <paramref name="table"/> is a lineage-only lookup that nonetheless
+    /// RE-FILES the row — a message's thread (<c>sprk_communication.sprk_communicationthread</c>), whose own filing the message
+    /// takes (<see cref="RecordThreadFiling"/>). Setting or clearing it moves what the message is filed under, so every writer
+    /// routes it through <see cref="IRecordOwnershipResolver.ReparentAsync"/> (F3 included) even when it is the only change.
+    /// Every other lineage-only lookup (a document's current version) still never makes a change a re-file on its own.
+    /// </summary>
+    /// <remarks>Component Justification (CLAUDE.md §11): (1) Existing — <see cref="LineageOnlyTargetOf"/> names the lineage-only
+    /// lookups; <see cref="RecordThreadFiling"/> owns the thread rule. (2) Extension — a predicate over the two, beside them, used
+    /// by the existing helpers (<see cref="WithLineageLookupsIn"/>, <see cref="MayRefile(string, IEnumerable{string}, IEnumerable{string})"/>)
+    /// and <c>OwnedChildWrite</c>'s gate; no new surface. (3) Cost of doing nothing — a thread-only PATCH moved a message off a
+    /// secure record's thread with no F3 and no owner decided (#2143 round 7 F2).</remarks>
+    internal static bool IsThreadFilingColumn(string? table, string? column) =>
+        RecordThreadFiling.AppliesTo(table)
+        && column is not null
+        && string.Equals(
+            Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(column), RecordThreadFiling.ThreadColumn,
+            StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// The ONE map of a child's lookups to an ownership parent, for the columns a generic payload names (a bind's key, a
@@ -686,9 +709,10 @@ public sealed record RecordReparent
     /// #2110 (ontology K3): <paramref name="parentChanges"/> plus every lineage lookup <paramref name="fields"/> SETS that files
     /// the row under no ownership parent (<see cref="LineageOnlyTargetOf"/>), as an <see cref="EntityReference"/> value or an
     /// <c>@odata.bind</c> naming one row of its target — so the reparent can tell whether the change moved it. A clear is in
-    /// <paramref name="parentChanges"/> already (every null is). They decide no owner and never make a change a reparent on
-    /// their own: an empty map is returned as it is. A bind that names no row of the lookup's target is left out (Dataverse
-    /// refuses it).
+    /// <paramref name="parentChanges"/> already (every null is). They decide no owner, and — but for a message's thread — never make
+    /// a change a reparent on their own: an empty map gains nothing else. #2143 round 7c: a message's thread
+    /// (<see cref="IsThreadFilingColumn"/>) is added to an empty map too, so a thread-only change is a re-file. A bind that
+    /// names no row of the lookup's target is left out (Dataverse refuses it).
     /// </summary>
     public static IReadOnlyDictionary<string, EntityReference?> WithLineageLookupsIn<TValue>(
         string entityLogicalName,
@@ -698,10 +722,10 @@ public sealed record RecordReparent
         ArgumentException.ThrowIfNullOrWhiteSpace(entityLogicalName);
         ArgumentNullException.ThrowIfNull(parentChanges);
         ArgumentNullException.ThrowIfNull(fields);
-        if (parentChanges.Count == 0)
+        var table = entityLogicalName.Trim().ToLowerInvariant();
+        if (parentChanges.Count == 0 && !RecordThreadFiling.AppliesTo(table))
             return parentChanges;
 
-        var table = entityLogicalName.Trim().ToLowerInvariant();
         Dictionary<string, EntityReference?>? merged = null;
         foreach (var (key, raw) in fields)
         {
@@ -710,6 +734,10 @@ public sealed record RecordReparent
 
             var column = Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(key);
             if (LineageOnlyTargetOf(table, column) is not { } target || parentChanges.ContainsKey(column))
+                continue;
+
+            // #2143 round 7c: on its own, only a message's thread makes the change a re-file.
+            if (parentChanges.Count == 0 && !IsThreadFilingColumn(table, column))
                 continue;
 
             var reference = raw switch

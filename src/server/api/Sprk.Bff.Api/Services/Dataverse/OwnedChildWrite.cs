@@ -1537,6 +1537,11 @@ internal static class OwnedChildWrite
             // A cleared column may be a cleared lookup — the row cannot tell a generic writer which (ReparentAsync reads it).
             foreach (var column in item.ClearedColumns)
                 changes.TryAdd(column, null);
+
+            // #2143 round 7c: a message's thread set by the update re-files it (RecordReparent.IsThreadFilingColumn), so a
+            // thread-only update is decided by the reparent (F3 included), never sent as an ordinary PATCH.
+            foreach (var lookup in item.Lookups.Where(l => RecordReparent.IsThreadFilingColumn(table, l.Column)))
+                changes.TryAdd(lookup.Column, new Microsoft.Xrm.Sdk.EntityReference(lookup.RelatedTable, lookup.RecordId));
         }
 
         if (changes.Count == 0 || (!isChild && newParents.Length == 0))
@@ -1572,9 +1577,9 @@ internal static class OwnedChildWrite
                 : new RefileOutcome { NotARefile = true };
         }
 
-        // #2110 (ontology K3): a lineage lookup the update sets that files the row under no ownership parent — a message's
-        // thread — rides along, so the reparent can tell whether this change moved it (RecordOwnerResolution.ParentsUnchanged).
-        // It decides no owner, and it made no update a re-file above.
+        // #2110 (ontology K3): a lineage lookup the update sets that files the row under no ownership parent rides along, so the
+        // reparent can tell whether this change moved it (RecordOwnerResolution.ParentsUnchanged). It decides no owner, and —
+        // but for a message's thread (#2143 round 7c, above) — it made no update a re-file.
         foreach (var lookup in item.Lookups.Where(l => RecordReparent.LineageOnlyTargetOf(table, l.Column) is not null))
             changes.TryAdd(lookup.Column, new Microsoft.Xrm.Sdk.EntityReference(lookup.RelatedTable, lookup.RecordId));
 
