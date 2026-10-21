@@ -989,7 +989,7 @@ public sealed class OfficeQuickCreateTestWebAppFactory : OfficeTestWebAppFactory
         new HttpClient(),
         new ConfigurationBuilder().Build(),
         NullLogger<CallerRecordAccessProbe>.Instance,
-        null!);
+        null!, null!);
 
     /// <summary>Every Create-privilege question the quick-create filter asked, in order (uac-r2 task 166, S-69).</summary>
     public List<string> PrivilegeQuestions { get; } = new();

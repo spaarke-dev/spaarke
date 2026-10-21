@@ -870,7 +870,7 @@ public sealed class ReportingCatalogBindingContractTests
             new HttpClient(),
             new ConfigurationBuilder().Build(),
             NullLogger<CallerRecordAccessProbe>.Instance,
-            null!);
+            null!, null!);
 
         /// <summary>The app-only reference read DELETE makes (task 166 r2). Defaults to "no other row".</summary>
         public Mock<IGenericEntityService> EntityService { get; } = new(MockBehavior.Loose);

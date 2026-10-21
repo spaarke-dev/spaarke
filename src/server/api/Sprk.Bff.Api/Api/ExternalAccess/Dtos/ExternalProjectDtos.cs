@@ -24,6 +24,18 @@ public sealed class ExternalCollectionResponse<T>
     [JsonPropertyName("truncated")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool Truncated { get; init; }
+
+    /// <summary>
+    /// Whether the caller may create a child of this list's kind (a to-do; an event on a project) under the record the
+    /// list is scoped to: the answer that record's create route would give. Written ONLY for a caller whose access
+    /// Dataverse decides (<c>CallerPrincipal.DataverseConfirmsWrites</c>, unified-access-control-r2 task 036 fix round 1,
+    /// F4): their <c>/me</c> level reflects only what they may SEE, so the client asks the record instead. Omitted
+    /// (<c>null</c>) for every other caller and on every other list, so those responses are byte-for-byte what they were;
+    /// a client reads a missing field as "not said" and keeps its access-level rule. The route still decides every create.
+    /// </summary>
+    [JsonPropertyName("canCreate")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? CanCreate { get; init; }
 }
 
 // ---------------------------------------------------------------------------

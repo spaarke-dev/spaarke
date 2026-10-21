@@ -384,6 +384,34 @@ public class ImpersonationNegativeCanaryTests
             string.Join(", ", enabledIn));
     }
 
+    [Fact]
+    public void Fr20ImpersonatedRootSetFlagScan_CoversThePerEnvironmentTemplates()
+    {
+        // Task 036 fix round 2: the per-environment templates are rendered into real settings at deploy time, so an
+        // "Enabled": true written there must trip the gate. With the old "appsettings*.json" pattern neither was scanned.
+        var scanned = AppSettingsFiles().Select(Path.GetFileName).ToArray();
+
+        scanned.Should().Contain(new[]
+        {
+            "appsettings.template.json",
+            "appsettings.Development.json.template",
+            "appsettings.Production.json.template",
+        });
+        scanned.Should().NotContain("appsettings.tokens.md", "only settings files are scanned");
+    }
+
+    [Theory]
+    [InlineData("{ \"ExternalAccess\": { \"ImpersonatedRootSets\": { \"Enabled\": true } } }", true)]
+    [InlineData("{ \"ExternalAccess\": { \"ImpersonatedRootSets\": { \"Enabled\": #{IMPERSONATED_ROOT_SETS}# } } }", true)]
+    [InlineData("{ \"ExternalAccess__ImpersonatedRootSets__Enabled\": \"x\", \"ExternalAccess:ImpersonatedRootSets:Enabled\": \"true\" }", true)]
+    [InlineData("{ \"ExternalAccess\": { \"ImpersonatedRootSets\": { \"Enabled\": false } } }", false)]
+    [InlineData("{ \"ExternalAccess\": { } }", false)]
+    public void Fr20ImpersonatedRootSetFlagScan_FiresOnAnythingNotLiterallyFalse(string settingsText, bool fires)
+    {
+        // Must-fire / must-not-fire controls for the text scan the configuration tripwire relies on.
+        Fr20FlagIsNotDemonstrablyOff(settingsText).Should().Be(fires);
+    }
+
     /// <summary>
     /// Names of the checked-in BFF settings files in which the FR-20 impersonated-root-set flag is NOT
     /// demonstrably off. Empty is the expected steady state — task 036 ships the flag defaulted to
@@ -430,9 +458,14 @@ public class ImpersonationNegativeCanaryTests
         @"(?:""ImpersonatedRootSets""\s*:\s*\{[^}]*?""Enabled""|""[^""]*ImpersonatedRootSets:Enabled"")\s*:\s*(?<value>[^,}]+)",
         RegexOptions.IgnoreCase);
 
+    /// <summary>
+    /// Every checked-in BFF settings file, templates included: <c>appsettings*.json*</c> takes
+    /// <c>appsettings.template.json</c> and the per-environment <c>appsettings.{Env}.json.template</c> files a
+    /// deployment renders (task 036 fix round 2 — the earlier <c>appsettings*.json</c> skipped the latter).
+    /// </summary>
     private static string[] AppSettingsFiles() => Directory.GetFiles(
         Path.Combine(ResolveRepoRoot(), "src", "server", "api", "Sprk.Bff.Api"),
-        "appsettings*.json",
+        "appsettings*.json*",
         SearchOption.TopDirectoryOnly);
 
     // ══════════════════════════════════════════════════════════════════════════════════════════════

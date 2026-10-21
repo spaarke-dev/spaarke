@@ -723,6 +723,12 @@ Client startup validates no hardcoded URL fallbacks (per task 024).
   and fails closed — nothing moves — until they exist; the field-security script grants the BFF-managed reader / writer
   profiles on them, and until it does, a BFF application user that does not hold System Administrator cannot write them,
   so relocations keep failing closed (retried) in between.
+- `ExternalAccess__ImpersonatedRootSets__Enabled` — **leave unset (false) at deployment** (unified-access-control-r2
+  task 036, FR-20). Off, an internal user's (systemuser's) access on the SPA and Teams comes from the BFF's membership
+  rules, exactly as before the setting existed. On, Dataverse decides it: the user sees what Dataverse lets them read, and
+  every write is checked against their own Dataverse rights on the record. Turn it on only through
+  [§12.8](#128-fr-20--let-dataverse-decide-internal-users-spateams-access), per environment, never in a checked-in
+  settings file (`ImpersonationNegativeCanaryTests` fails the build unless every checked-in value is literally `false`).
 - `PowerBi__AllowedWorkspaces__{n}__WorkspaceId` (+ optional `__CustomerBusinessUnitId`) when the Reporting module is
   enabled — the workspaces the catalog may act on; empty refuses every report ([reporting-admin.md](reporting-admin.md#environment-variables)).
 
@@ -1362,6 +1368,17 @@ and work assignment. Deep at the root reaches every child unit, the `Secure Reco
 would read every secure record. Deep in the customer's unit stops at that unit. An App User that already exists in
 another unit (an environment provisioned before T259) is QuarantineRequired, never moved: a business-unit change removes
 all of a user's roles, and H6/H7/H7b sign in as the BFF App User.
+
+**Both App Users must hold `prvActOnBehalfOfAnotherUser` and stay at Organization scope** (unified-access-control-r2
+tasks 034–036). The BFF reads some Dataverse data AS the signed-in internal user (the `MSCRMCallerID` header): the
+communication reads, the Office add-in picker, and — once [§12.8](#128-fr-20--let-dataverse-decide-internal-users-spateams-access)
+turns it on — the internal user's SPA/Teams record sets. Dataverse honours the header only for a caller holding
+`prvActOnBehalfOfAnotherUser`. No Spaarke role carries it: the App Users hold it through **System Administrator**
+(Global depth). In dev that is `# mi-bff-api-dev`, `SDAP-BFF-SPE-API` and `# Spaarke DMS-SPE Dev 1` — checked by role on
+2026-09-30, and proven live only by the task 034 canary (§12.8 step 3). Never grant it to a Spaarke role as a workaround.
+⚠️ **Do not narrow an App User** (register E-2 / E-3). An impersonated read returns what BOTH the App User and the user
+can read: an App User moved to a smaller role or a narrower depth silently returns FEWER records than the user can read —
+no error, an under-grant that looks like a correct answer.
 
 Then reconciles the stamp identity's Microsoft Graph app roles to exactly the evidence-backed set in `GraphAppRoles.cs`
 (task 261 / G31 — every app-only call the stamp BFF makes, its Microsoft Learn least-privileged permission, and the
@@ -2174,6 +2191,117 @@ If the repair PATCH itself 403s, the caller lacks the Dataverse privilege to upd
 > **Operator note (rollout of this check)**: if a run PROVISIONED BEFORE task 205d relied on Dataverse's applicationid-only auto-resolution and it happened to resolve the UAMI row's `azureactivedirectoryobjectid` incorrectly, that environment may fail T2 for the FIRST TIME on the next H13/task-186 run after this change deploys — even though it previously reported green. This is NOT a regression: it is this section's detection working as intended on a latent pre-existing misconfiguration. Apply the recovery recipe above; do not assume the provisioning pipeline itself broke.
 
 **Scope note**: this section is purely about the `azureactivedirectoryobjectid` identity-matching trap. It does not concern, and does not reintroduce, any never-delete rationale for `Dataverse-ClientSecret` / `BFF-API-ClientSecret` — that credential-retention question was superseded 2026-08-24 when ADR-028 exception E-3 closed (see root `CLAUDE.md` §9 + this guide's credential sections); do not conflate the two.
+
+### 12.8 FR-20 — let Dataverse decide internal users' SPA/Teams access
+
+> Added by `unified-access-control-r2` task 036 (FR-20; owner rules C9 / D1, round 59, round 75). Setting:
+> `ExternalAccess__ImpersonatedRootSets__Enabled` (App Service). It ships **off**. Design and decisions:
+> `projects/unified-access-control-r2/notes/036-fr20-implementation.md`; ADR-034 Amendment A2.
+
+The owner rule: an internal user (a systemuser) who can open a record in the model-driven app can open it in the SPA and
+in Teams, with the same rights, and a user Dataverse does not admit cannot. The setting changes **systemusers only**; CIAM
+contacts and workforce contacts are decided exactly as before in both states.
+
+| | Off (the default; transitional) | On (the end state) |
+|---|---|---|
+| Records an internal user sees | The BFF's membership rules (ownership, owning team, owning business unit, the "Assigned *" contacts), each at Read / Write / Create | Dataverse's own answer, read AS the user — one id-only read per root type (project, matter, work assignment), cached 2 minutes — each at Read |
+| A write (create to-do, upload, create event, edit to-do, post a message, delete own) | Decided by the rights above | The BFF also asks Dataverse for the user's rights on the target record, app-only, impersonating the user's systemuser (one call per write, for every internal user however they signed in — precondition 3). A child (to-do, document, event, message) needs AppendTo on the parent **and** the user's Create privilege on the child table (`prvCreatesprk_Todo`, `prvCreatesprk_Document`, `prvCreatesprk_Event`, `prvCreatesprk_Communication`; a second call); an edit needs Write on the to-do; a delete-own needs Delete on the row as well as the creator stamp. A service request's writes stay the requester rule in both states (accepted, decision e) |
+| Contact grants of a user who is also a granted contact | Kept | Kept — Dataverse cannot see them |
+| No Access list, Restricted veto | In force | In force |
+| A root set over 5,000 records | Module data responses carry `"truncated": true` | Same; the 5,000 kept are the most recently modified (task 036 decision (f), owner 2026-10-18) |
+| A Dataverse read that fails | — | The request fails, or the write is refused. There is no fallback to the membership rules |
+
+**Off does not close the business-unit over-grant of the membership rules.** It is the transitional state; on is the end
+state.
+
+**Preconditions — every one, per environment, before turning it on:**
+
+1. Tasks **142** (Assigned-To access materialized as Dataverse shares) and **143** (the No Access list applied to internal
+   users in Dataverse) are complete and deployed to the environment. Without them, turning it on removes internal users'
+   "Assigned To *" access and the internal half of the No Access list.
+2. Both Dataverse App Users hold `prvActOnBehalfOfAnotherUser` and are not narrowed (§7.7).
+3. **How a write is confirmed — settled, task 036 decision (a), owner 2026-10-18, widened by option C, owner
+   2026-10-20; nothing to do beyond item 2.** The BFF never exchanges an SPA/Teams user's token on this plane (ADR-028
+   A1–A3), and a token issued by a customer's directory (WorkforceHome, ADR-028 A9) could not be exchanged for a
+   Dataverse token in Spaarke's tenant anyway. For **every** internal user — a Spaarke-tenant sign-in or one resolved
+   through the stored home link — the BFF asks app-only, as the Dataverse App User, naming the user's systemuser:
+   `RetrievePrincipalAccess` with `Principal = systemusers(<id>)` on the target record, and
+   `RetrieveUserSetOfPrivilegesByNames` on that systemuser for the child table's Create privilege (both impersonating the
+   user, like the read, so item 2's `prvActOnBehalfOfAnotherUser` covers them). Dataverse answers from the user's own
+   roles, teams and shares, so such a user is expected to write what the same user could write in the model-driven app,
+   and their lists' `canCreate` is the same answer. That parity is **not yet proven live** for roles the user holds only
+   through a team, or for disabled and unlicensed users: the task 036 live checks (Verify, (vi) and (vii)) cover them.
+   A record created seconds earlier that answers "not found" is asked again (twice, within about 1.6 s); a fault, an
+   impersonation failure (`0x8004A110`, or `0x80040220` whose message names `prvActOnBehalfOfAnotherUser`; logged as a
+   Warning, not as "no rights") or no answer within 15 seconds refuses the write.
+4. **Internal users who write in the SPA or Teams hold Spaarke Core User** (or a role with the same privileges). Under
+   "on", Dataverse decides writes from the user's own roles, as the model-driven app does. Spaarke Core User grants
+   Create, Write and Delete on `sprk_todo`, `sprk_document`, `sprk_event` and `sprk_communication`. **Spaarke Basic User**
+   grants them on `sprk_communication` only (Basic depth), and **Spaarke Office Add In User** grants only Create and Write
+   on `sprk_event`. A user whose only role is one of these two keeps reading. A Basic User can post messages but loses
+   the to-do, document and event writes; an Office Add In User keeps creating events (the role also grants AppendTo on
+   `sprk_project` and `sprk_matter`) but loses the to-do and document writes and delete-own on events — exactly as in the
+   model-driven app. Check the roles of SPA/Teams writers before turning it on.
+5. **The task 034 negative canary passes against the environment, in this rollout** (`tests/integration/auth/README.md`
+   § Provisioning the canary user, then § Running it):
+
+   ```bash
+   export SPAARKE_CANARY_DATAVERSE_URL="https://<env>.crm.dynamics.com"
+   export SPAARKE_CANARY_SYSTEMUSERID="<an existing non-admin test user's systemuserid>"
+   export SPAARKE_CANARY_SEEDED_MATTER_IDS="<the matters that user's role depth admits, derived app-only>"
+   export SPAARKE_CANARY_REQUIRED=true
+   export AZURE_TOKEN_CREDENTIALS=AzureCliCredential
+   export SPAARKE_TESTS_ALLOW_OUTBOUND=1
+   az login   # as an identity that maps to the BFF Dataverse App User
+
+   dotnet test tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj \
+     --filter "FullyQualifiedName~ImpersonationNegativeCanaryTests"
+   ```
+
+   🔴 **PASS means the impersonated set is STRICTLY SMALLER than the app-only set. Equal sets are a FAILURE**:
+   impersonation is inert and the read is returning every row the App User can read, which looks exactly like success.
+   A NOT RUN is not a pass. Record both set sizes, the user's roles and how the expected set was derived in
+   `projects/unified-access-control-r2/notes/task-034-negative-canary.md`. On a failure, stop: do not turn it on.
+6. **SPA affordances under "on" (settled, task 036 decision g).** `/me` reports such a user's levels at Read (the set
+   confers Read) and adds `writeAccessPerRecord: true`. The SPA then takes a record's create and upload controls from
+   that record's own list, which asks Dataverse once for the record in hand (`canCreate`: Add Task and Create Event on a
+   project, Upload Document on a project, matter, work assignment or invoice). Download and version history are offered
+   wherever a document list rendered (they need only Read), and a project to-do's status toggle is offered and decided by
+   the edit route itself (a refusal reverts it and says so). Remaining limits: Invite User and the issued-grants list stay
+   hidden for such a user (contact grants are a contact's action; the route refuses a systemuser); to-do and event create
+   is offered only on a project page, as before; each single-record list costs one extra Dataverse call for such a user.
+
+**Turn it on:**
+
+```bash
+az webapp config appsettings set --name <app> --resource-group <rg> \
+  --settings ExternalAccess__ImpersonatedRootSets__Enabled=true
+```
+
+App Service restarts the app on a settings change. Cached principals and root sets lapse within 2 minutes.
+
+**Verify:**
+
+- On an internal user's next request, the BFF logs `[WF-AUTHZ] Access source for systemuser … : ImpersonatedRootSet`
+  (Application Insights: `traces | where message has "Access source for systemuser"`). `Membership` there means the
+  setting did not apply.
+- Run the task 036 live checks with an existing non-admin test user in the right business unit, and record each record id
+  in the task notes: (ii) a record the user can Read but not Write in the model-driven app is listed and refuses a write
+  with 403; (iii) a record in the user's business unit (or owned by its default team) but outside the user's role depth is
+  not listed; (iv) a record whose "Assigned To *" names the user's linked contact is listed (task 142's share); (v) a
+  secure record with the user on its No Access list is refused in both the model-driven app and the SPA/Teams; (vi) in a
+  tenant whose internal users sign in through WorkforceHome, sign in to the SPA as such a user and repeat (ii): the
+  write the model-driven app refuses is refused with 403, the one it allows succeeds, and the BFF log for it says
+  `answered via app-only-named-principal`; (vii) with one disabled and one unlicensed test systemuser, a write is
+  refused (if Dataverse answers either with rights, stop: do not turn it on, and report it), and with a user whose only
+  role comes through a team, the SPA allows exactly the writes the model-driven app allows.
+- A Warning `[DELEGATION-RPA-UNAVAILABLE] App-only RetrievePrincipalAccess … answered a fault, not an access answer`
+  means the BFF App User lacks `prvActOnBehalfOfAnotherUser` (item 2): every write is refused until it is fixed. Microsoft
+  documents no error code for that fault, and a bare `0x80040220` can also carry it; so if EVERY systemuser's
+  confirmation logs `[DELEGATION] Rights … : None`, check the privilege before reading it as a roles problem.
+
+**Turn it off (the kill switch):** set `ExternalAccess__ImpersonatedRootSets__Enabled=false`, or delete the setting. The
+next composition uses the membership rules again. The "on" state writes nothing, so there is nothing to undo.
 
 ---
 

@@ -171,6 +171,25 @@ public sealed class CallerPrincipal
     /// </summary>
     public IReadOnlySet<string> UndatedAccessTermEntityTypes { get; init; } = EmptyEntityTypes;
 
+    /// <summary>
+    /// FR-20 (unified-access-control-r2 task 036, owner round 59 item 2): <c>true</c> when this caller's own access was
+    /// decided by Dataverse — a workforce systemuser composed with <c>ExternalAccess:ImpersonatedRootSets:Enabled</c> on, whose
+    /// root ids came from the impersonated read at Read only. Every write route on <c>/api/v1/external</c> then asks
+    /// Dataverse, as the caller, for its rights on the target record before writing
+    /// (<c>ExternalProjectDataEndpoints.WithDataverseRightsAsync</c>), so no write rests on a constant.
+    /// <c>false</c> for every CIAM contact, every workforce contact and every systemuser composed with the flag off: their
+    /// routes decide exactly as before this property existed.
+    /// </summary>
+    public bool DataverseConfirmsWrites { get; init; }
+
+    /// <summary>
+    /// NFR-03 (task 036): the root entity types (logical names) whose accessible set is KNOWN INCOMPLETE — composition hit
+    /// a ceiling with more records available (<see cref="AccessibleRecordSet.Capped"/>, the impersonated read's row cap or
+    /// the membership walk's). A response listing records through this scope reports it (the module data fetch's
+    /// <c>truncated</c>), so a capped set is never presented as the whole truth. Empty when every set is complete.
+    /// </summary>
+    public IReadOnlySet<string> TruncatedRootEntityTypes { get; init; } = EmptyEntityTypes;
+
     private static readonly IReadOnlySet<string> EmptyEntityTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
     private IReadOnlySet<Guid>? _matterIds;
@@ -762,6 +781,18 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
             // grant route caps an issued grant's expiry at the grantor's own only when their level rests on a dated grant.
             UndatedAccessTermEntityTypes = new[] { accessibleProjects, accessibleMatters, accessibleWorkAssignments }
                 .Where(set => set.Sources.StandingGrantMembership || set.Sources.OrgExpansionMembership)
+                .Select(set => set.EntityType)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase),
+            // Task 036 (FR-20): Dataverse decided this caller's own access, so its writes are confirmed against Dataverse.
+            // The flag is read once per composition, so the three sets agree; if flags ever become per type, decide this
+            // per entity type: the confirmation widens composed rights on the write routes, but delete-own then also needs
+            // Dataverse Delete, and /me switches the SPA's create controls to each list's canCreate.
+            DataverseConfirmsWrites = accessibleProjects.Sources.ImpersonatedRootSet
+                || accessibleMatters.Sources.ImpersonatedRootSet
+                || accessibleWorkAssignments.Sources.ImpersonatedRootSet,
+            // NFR-03 (task 036): a set known to be incomplete is carried to the responses that list through it.
+            TruncatedRootEntityTypes = new[] { accessibleProjects, accessibleMatters, accessibleWorkAssignments }
+                .Where(set => set.Capped)
                 .Select(set => set.EntityType)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase),
         });
