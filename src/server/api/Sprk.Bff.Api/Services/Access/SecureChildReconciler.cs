@@ -864,7 +864,7 @@ public sealed class SecureChildReconciler
     /// <see cref="AfterRefileAsync(string, Guid, Func{Task{bool}}, RefileThreadStep, CancellationToken)"/> for a re-file a PERSON
     /// made (#2143 round 7, F1): <paramref name="secureExitCaller"/> is that re-file's
     /// <see cref="Sprk.Bff.Api.Services.Dataverse.RecordReparent.SecureExitCaller"/>, carried into the thread reconcile
-    /// (<see cref="Sprk.Bff.Api.Services.Communication.IThreadResolver.ReconcileThreadForFilingAsync(Guid, Sprk.Bff.Api.Services.Communication.FilingReconcileHost, SecureRemovalCaller?, CancellationToken)"/>),
+    /// (<see cref="Sprk.Bff.Api.Services.Communication.IThreadResolver.ReconcileThreadForFilingAsync(Guid, Sprk.Bff.Api.Services.Communication.FilingReconcileHost, SecureRemovalCaller?, Func{CancellationToken, Task}?, CancellationToken)"/>),
     /// so a re-filed communication's move off a secure record's thread is decided on the rights the re-file was checked
     /// against. Every user-initiated re-file writer calls this overload; <c>null</c> acts for nobody.
     /// </summary>
