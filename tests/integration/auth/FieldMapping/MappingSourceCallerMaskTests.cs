@@ -152,7 +152,6 @@ public class MappingSourceCallerMaskTests
     {
         { "sprk_partylist", new EntityCollection() },
         { "sprk_image", new byte[] { 1, 2, 3 } },
-        { "sprk_tags", new OptionSetValueCollection { new OptionSetValue(1), new OptionSetValue(2) } },
         { "sprk_contract", Guid.Parse("4f1c2a3b-0000-4000-8000-0000000000f1") }, // a GUID that is not the primary key: maybe a file
         { "sprk_aliased", new AliasedValue("x", "y", 1) },
     };
@@ -168,6 +167,48 @@ public class MappingSourceCallerMaskTests
 
         masked!.Contains(column).Should().BeFalse("file, image, party list, multi-select and unknown kinds fail closed");
         caller.Paths.Single().Should().NotContain(column, "an unreadable kind is not even asked");
+    }
+
+    [Fact]
+    public async Task ApplyAsync_AMultiSelectChoiceTheCallerReads_IsKept()
+    {
+        var tags = new OptionSetValueCollection { new OptionSetValue(1), new OptionSetValue(2) };
+        var appRead = new Entity(Table, SourceId) { ["sprk_tags"] = tags };
+        var caller = CallerSeeing(appRead);
+
+        var masked = await Mask(caller, appRead, new[] { "sprk_tags" });
+
+        masked!.GetAttributeValue<OptionSetValueCollection>("sprk_tags").Should().BeSameAs(tags,
+            "the Web API answers a multi-select as \"1,2\" or null, so the null test applies to it (review pass 1, K2)");
+        caller.Paths.Single().Should().Contain("sprk_tags");
+    }
+
+    [Fact]
+    public async Task ApplyAsync_AMultiSelectChoiceTheCallerCannotRead_IsRemoved()
+    {
+        var appRead = new Entity(Table, SourceId)
+        {
+            ["sprk_tags"] = new OptionSetValueCollection { new OptionSetValue(1), new OptionSetValue(2) },
+        };
+        var caller = CallerSeeing(appRead);
+        caller.Secured.Add("sprk_tags");
+
+        var masked = await Mask(caller, appRead, new[] { "sprk_tags" });
+
+        masked!.Contains("sprk_tags").Should().BeFalse();
+    }
+
+    [Fact(Timeout = 10000)] // without the bound the read never returns: a failure, not a hung run
+    public async Task ApplyAsync_WhenTheCallerReadNeverAnswers_IsBounded_AndTheSourceIsUnavailable()
+    {
+        var appRead = AppRead();
+        var caller = CallerSeeing(appRead);
+        caller.HangUntilCancelled = true;
+
+        var masked = await MappingSourceCallerMask.ApplyAsync(
+            caller, Table, SourceId, appRead, Mapped, NullLogger.Instance, CancellationToken.None, timeout: TimeSpan.FromMilliseconds(50));
+
+        masked.Should().BeNull("a caller read past its bound makes the source unavailable (review pass 1, K4)");
     }
 
     [Fact]

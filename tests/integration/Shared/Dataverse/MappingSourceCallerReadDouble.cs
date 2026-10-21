@@ -66,13 +66,26 @@ public sealed class MappingSourceCallerReadDouble : IDataverseUserClient
     /// <summary>Every path read, in order.</summary>
     public List<string> Paths { get; } = new();
 
-    public Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken)
+    /// <summary>When true, every read waits until its token is cancelled — a Dataverse that never answers.</summary>
+    public bool HangUntilCancelled { get; set; }
+
+    public async Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken)
     {
         lock (Paths)
         {
             Paths.Add(relativePath);
         }
 
+        if (HangUntilCancelled)
+        {
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+        }
+
+        return await Answer(relativePath, cancellationToken);
+    }
+
+    private Task<DataverseUserResponse> Answer(string relativePath, CancellationToken cancellationToken)
+    {
         cancellationToken.ThrowIfCancellationRequested();
         if (Throw is { } exception)
         {

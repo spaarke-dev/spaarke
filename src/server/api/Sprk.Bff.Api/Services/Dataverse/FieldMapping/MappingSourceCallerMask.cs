@@ -27,14 +27,22 @@ namespace Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 /// only; the target type of a polymorphic lookup is never compared;</item>
 /// <item>a scalar (text, whole/decimal/float number, money, choice, yes/no, date) is asked by its logical name and kept only
 /// when non-null;</item>
+/// <item>a multi-select choice (<see cref="OptionSetValueCollection"/>) is asked by its logical name too: the Web API answers
+/// it as a string (<c>"1,2"</c>) or null, so the same null test applies (review pass 1, K2);</item>
 /// <item>a <see cref="Guid"/> is kept only for the source's own primary key (<c>{table}id</c>); any other GUID-valued column
 /// may be a file column and is UNREADABLE;</item>
-/// <item>everything else — file, image (<c>byte[]</c>), party list (<see cref="EntityCollection"/>), multi-select choice
-/// (<see cref="OptionSetValueCollection"/>, whose Web API shape differs), and any type not listed — is UNREADABLE and never
-/// copied, and so is a column whose name is not a plain logical name or that is ABSENT from the caller's response.</item>
+/// <item>everything else — file, image (<c>byte[]</c>), party list (<see cref="EntityCollection"/>), and any type not
+/// listed — is UNREADABLE and never copied, and so is a column whose name is not a plain logical name or that is ABSENT from
+/// the caller's response.</item>
 /// </list>
 /// <para>Calculated and rollup columns need no case of their own: they come back in the same shape as their result type on
 /// both reads, and field security masks them the same way.</para>
+///
+/// <para><b>Relies on the app read never asking for unmasked data</b> (review pass 1, K1). Under a Dataverse data-masking
+/// rule the caller's read returns a non-null MASKED value (for example <c>"***"</c>), so the null test keeps the column — and
+/// that is safe only because the app read returns the same masked value: no read in this path asks for
+/// <c>UnMaskedData</c>. If the app read ever did, this helper would copy the unmasked value into a record the caller can read.
+/// Any change that unmasks the app read must also compare values here, not only null versus not-null.</para>
 ///
 /// <para><b>A removed column looks exactly like an empty one</b> (UAC-r2 condition 3). It is simply absent from the returned
 /// entity, which is how the SDK presents an empty column, so the unchanged rule engine
@@ -63,6 +71,13 @@ internal static partial class MappingSourceCallerMask
     private static partial Regex LogicalNameRegex();
 
     /// <summary>
+    /// The most the caller read may take (review pass 1, K4): past it the source is unavailable instead of holding the
+    /// user's create open on a slow Dataverse. The same 15 s bound, on a token linked to the caller's, as
+    /// <c>CallerRecordAccessProbe.AppOnlyQuestionTimeout</c> — so the caller's own cancellation still wins and is rethrown.
+    /// </summary>
+    internal static readonly TimeSpan CallerReadTimeout = TimeSpan.FromSeconds(15);
+
+    /// <summary>
     /// The app-read <paramref name="appRead"/> reduced to the <paramref name="mappedColumns"/> the caller can read, or
     /// <see langword="null"/> when the caller read could not be made or answered (the source is then unavailable — nothing is
     /// copied). Never throws except a cancellation of <paramref name="ct"/>.
@@ -74,6 +89,7 @@ internal static partial class MappingSourceCallerMask
     /// <param name="mappedColumns">The profile's source columns (<see cref="CreateTimeFieldMapping.CollectSourceColumns"/>).</param>
     /// <param name="logger">Optional logger; it never receives a column name or a column count.</param>
     /// <param name="ct">Cancellation; its cancellation propagates.</param>
+    /// <param name="timeout">The caller read's bound; <see langword="null"/> is <see cref="CallerReadTimeout"/> (a test seam).</param>
     internal static async Task<Entity?> ApplyAsync(
         IDataverseUserClient? caller,
         string sourceEntityLogicalName,
@@ -81,7 +97,8 @@ internal static partial class MappingSourceCallerMask
         Entity appRead,
         IReadOnlyCollection<string> mappedColumns,
         ILogger? logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        TimeSpan? timeout = null)
     {
         ArgumentNullException.ThrowIfNull(appRead);
         ArgumentNullException.ThrowIfNull(mappedColumns);
@@ -128,9 +145,11 @@ internal static partial class MappingSourceCallerMask
         var path = $"{entitySet}({sourceRecordId:D})?$select={string.Join(",", select)}";
 
         DataverseUserResponse response;
+        using var bounded = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        bounded.CancelAfter(timeout ?? CallerReadTimeout);
         try
         {
-            response = await caller.GetAsync(path, ct).ConfigureAwait(false);
+            response = await caller.GetAsync(path, bounded.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -186,8 +205,9 @@ internal static partial class MappingSourceCallerMask
         {
             EntityReference => $"_{column}_value",
             Guid => string.Equals(column, primaryKey, StringComparison.Ordinal) ? column : null,
-            string or int or long or decimal or double or bool or DateTime or OptionSetValue or Money => column,
-            _ => null, // file, image, party list, multi-select choice, anything unlisted
+            string or int or long or decimal or double or bool or DateTime or OptionSetValue or Money
+                or OptionSetValueCollection => column,
+            _ => null, // file, image, party list, anything unlisted
         };
     }
 }

@@ -18,8 +18,11 @@ namespace Spaarke.ArchTests;
 /// <para><b>The rule.</b> At each call of <c>CreateTimeFieldMapping.Apply(</c> or <c>.ApplyFillOnly(</c> under
 /// <c>src/server/**</c>, the <c>source</c> argument (third positional, or named <c>source:</c>) is either the literal
 /// <c>null</c> / <c>default</c> (nothing read, nothing copied), or a plain local whose EVERY assignment in that file is
-/// <c>null</c>, <c>default</c> or the result of <c>MappingSourceCallerMask.…</c>. An expression, a parameter, an
-/// <c>out</c>/pattern binding or a <c>using static</c> import of the engine cannot be verified and fails.</para>
+/// <c>null</c>, <c>default</c> or exactly <c>(await )?MappingSourceCallerMask.ApplyAsync(…)</c> (optionally
+/// <c>.ConfigureAwait(false)</c>, nothing else). The name may not be a method parameter anywhere in the file, and may not be
+/// indexed or have a member used (the masked entity reaches the engine untouched). An expression, an
+/// <c>out</c>/<c>ref</c>/pattern binding or a <c>using static</c> import of the engine cannot be verified and fails. Review
+/// pass 1 (F3) added the coalesce, parameter and top-up shapes.</para>
 ///
 /// <para>Crude by design (<see cref="SourceScan"/>): text, not syntax. Paired with must-fire controls (a bypass in each shape
 /// fails) and must-not-fire controls (the masked Office shape and a literal null pass).</para>
@@ -122,6 +125,52 @@ public class MappingSourceCallerMaskGuardTests
             """
         },
         {
+            "(review pass 1, F3 a) the mask's answer coalesced with the app read",
+            """
+            Entity? source = null;
+            source = await MappingSourceCallerMask.ApplyAsync(caller, t, id, appRead, cols, _logger, ct) ?? appRead;
+            CreateTimeFieldMapping.Apply(rules, target, source, p, w, l);
+            """
+        },
+        {
+            "(review pass 1, F3 a) the mask call followed by more than ConfigureAwait(false)",
+            """
+            var source = (await MappingSourceCallerMask.ApplyAsync(caller, t, id, appRead, cols, _logger, ct).ConfigureAwait(false)).Clone();
+            CreateTimeFieldMapping.Apply(rules, target, source, p, w, l);
+            """
+        },
+        {
+            "(review pass 1, F3 b) a second method that takes the source as a parameter",
+            """
+            async Task A()
+            {
+                Entity? source = null;
+                source = await MappingSourceCallerMask.ApplyAsync(c, t, i, a, cols, _logger, ct);
+                CreateTimeFieldMapping.Apply(rules, target, source, p, w, l);
+            }
+            void B(IEnumerable<FieldMappingRuleEntity> rules, Entity? source)
+            {
+                CreateTimeFieldMapping.ApplyFillOnly(rules, target, source, p, w, l);
+            }
+            """
+        },
+        {
+            "(review pass 1, F3 c) the masked entity topped up with the app read",
+            """
+            var source = await MappingSourceCallerMask.ApplyAsync(c, t, i, appRead, cols, _logger, ct);
+            source.Attributes.AddRange(appRead.Attributes);
+            CreateTimeFieldMapping.Apply(rules, target, source, p, w, l);
+            """
+        },
+        {
+            "(review pass 1, F3 c) a column written back into the masked entity",
+            """
+            var source = await MappingSourceCallerMask.ApplyAsync(c, t, i, appRead, cols, _logger, ct);
+            source!["sprk_fee"] = appRead["sprk_fee"];
+            CreateTimeFieldMapping.Apply(rules, target, source, p, w, l);
+            """
+        },
+        {
             "an engine imported with using static",
             """
             using static Sprk.Bff.Api.Services.Dataverse.FieldMapping.CreateTimeFieldMapping;
@@ -220,29 +269,107 @@ public class MappingSourceCallerMaskGuardTests
     {
         var id = Regex.Escape(name.TrimStart('@'));
 
-        // An out argument, a pattern or foreach binding: assigned by something this scan cannot see.
-        if (Regex.IsMatch(code, $@"\bout\s+(?:[\w.<>?]+\s+)?{id}\b|\bis\s+[\w.<>?]+\s+{id}\b|\bforeach\s*\([^)]*\b{id}\s+in\b"))
+        // An out / ref argument, a pattern or foreach binding: assigned by something this scan cannot see.
+        if (Regex.IsMatch(code, $@"\b(?:out|ref)\s+(?:[\w.<>?]+\s+)?{id}\b|\bis\s+[\w.<>?]+\s+{id}\b|\bforeach\s*\([^)]*\b{id}\s+in\b"))
         {
-            yield return "is bound by out / is / foreach, which cannot be checked";
+            yield return "is bound by out / ref / is / foreach, which cannot be checked";
         }
 
-        var assignments = Regex.Matches(code, $@"(?<![\w.])@?{id}\s*(?:\?\?)?=(?![=>])\s*(?<rhs>[^;]+);");
+        // A parameter of ANY method in the file (a typed name in a parameter list): a second method could hand the engine a
+        // source it was given, while the file's only assignments of the name are masked ones (review pass 1, F3 b).
+        if (Regex.IsMatch(code,
+                $@"[(,]\s*(?:\[[^\]]*\]\s*)?(?:(?:this|ref|in|out|params|scoped)\s+)?[A-Za-z_][\w.]*(?:<[^()]*?>)?\??(?:\[\])?\??\s+@?{id}\s*[,)=]"))
+        {
+            yield return "is a method parameter in this file — mask the source where it is read, not in a caller";
+        }
+
+        // Any write into, or use of, the masked entity's members: the mask's answer could be topped up with app-read values
+        // afterwards (review pass 1, F3 c). Fail closed: the engine is the only consumer of the masked local.
+        if (Regex.IsMatch(code, $@"(?<![\w.])@?{id}\s*!?\s*\??\s*[\[.]"))
+        {
+            yield return "is indexed or has a member used (e.g. source[...] or source.Attributes...) — the masked entity must reach the engine untouched";
+        }
+
+        var assignments = Assignments(code, id).ToList();
         if (assignments.Count == 0)
         {
-            // A parameter or a field: the source was read somewhere this call site cannot vouch for.
-            yield return "is never assigned in this file (a parameter or field?) — mask the source where it is read";
+            // A field, or a name this scan cannot see assigned: the source was read somewhere this call site cannot vouch for.
+            yield return "is never assigned in this file (a field?) — mask the source where it is read";
         }
 
-        foreach (Match assignment in assignments)
+        foreach (var rhs in assignments)
         {
-            var rhs = assignment.Groups["rhs"].Value.Trim();
-            if (rhs is "null" or "default" || Regex.IsMatch(rhs, @"^(await\s+)?MappingSourceCallerMask\b"))
+            if (rhs is "null" or "default" || IsExactlyAMaskCall(rhs))
             {
                 continue;
             }
 
-            yield return $"is assigned from '{Shorten(rhs)}', not from MappingSourceCallerMask";
+            yield return $"is assigned from '{Shorten(rhs)}', not exactly from MappingSourceCallerMask.ApplyAsync(…)";
         }
+    }
+
+    /// <summary>The right-hand side of every assignment (<c>=</c> or <c>??=</c>) to <paramref name="id"/>, up to its <c>;</c>.</summary>
+    private static IEnumerable<string> Assignments(string code, string id)
+    {
+        foreach (Match assignment in Regex.Matches(code, $@"(?<![\w.])@?{id}\s*(?:\?\?)?=(?![=>])"))
+        {
+            var start = assignment.Index + assignment.Length;
+            var depth = 0;
+            var end = start;
+            for (; end < code.Length; end++)
+            {
+                var c = code[end];
+                if (c is '(' or '[' or '{')
+                {
+                    depth++;
+                }
+                else if (c is ')' or ']' or '}')
+                {
+                    if (depth == 0)
+                    {
+                        break;
+                    }
+
+                    depth--;
+                }
+                else if (c == ';' && depth == 0)
+                {
+                    break;
+                }
+            }
+
+            yield return code[start..end].Trim();
+        }
+    }
+
+    /// <summary>
+    /// True only for <c>(await )?MappingSourceCallerMask.ApplyAsync(&lt;balanced args&gt;)</c>, optionally followed by
+    /// <c>.ConfigureAwait(false)</c>, and nothing else (no <c>?? appRead</c>, no further member access — review pass 1, F3 a).
+    /// </summary>
+    private static bool IsExactlyAMaskCall(string rhs)
+    {
+        var head = Regex.Match(rhs, @"^(?:await\s+)?MappingSourceCallerMask\s*\.\s*ApplyAsync\s*\(");
+        if (!head.Success)
+        {
+            return false;
+        }
+
+        var depth = 0;
+        var close = -1;
+        for (var i = head.Length - 1; i < rhs.Length; i++)
+        {
+            if (rhs[i] == '(')
+            {
+                depth++;
+            }
+            else if (rhs[i] == ')' && --depth == 0)
+            {
+                close = i;
+                break;
+            }
+        }
+
+        return close > 0 && Regex.IsMatch(rhs[(close + 1)..], @"^\s*(?:\.\s*ConfigureAwait\s*\(\s*false\s*\))?\s*$");
     }
 
     /// <summary>The top-level arguments of the call whose '(' is at <paramref name="open"/>.</summary>
