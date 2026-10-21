@@ -146,7 +146,8 @@ internal sealed class UpdateRecordActionCore
 
         // unified-access-control-r2 task 189 fix round C (K5): a payload that acts for no person (a playbook node, the action
         // seam without an impersonated user) never writes a document's Access Permission or its own-narrowing record; only
-        // the document rule's writers do. Refused before anything is written.
+        // the document rule's writers do. Refused before anything is written. Task 188 round 4e: nor its D7 link columns
+        // (sprk_parentdocument, sprk_relatedcommunication), set, cleared or bound (InheritedAccessPermission.DocumentLinkColumns).
         if (input.ImpersonateSystemUserId is null
             && InheritedAccessPermission.RefuseAppOnlyWrite(input.EntityLogicalName, updatePayload.Keys) is { } documentRefusal)
         {

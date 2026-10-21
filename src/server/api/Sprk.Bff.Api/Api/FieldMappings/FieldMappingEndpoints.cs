@@ -1048,7 +1048,8 @@ public static class FieldMappingEndpoints
                     // Task 189 (D7 T7a, security pass 2): a document's Access Permission and its own-narrowing record are
                     // set by Spaarke (max(own, inherited)). A rule targeting either on a document is skipped, and the rest
                     // of the push applies: one push from a Standard matter would otherwise clear the own narrowing of every
-                    // child document it reaches.
+                    // child document it reaches. Task 188 round 4e: the same for its D7 link columns (sprk_parentdocument,
+                    // sprk_relatedcommunication; InheritedAccessPermission.DocumentLinkColumns), which decide whether partners see it.
                     if (Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.RefuseAppOnlyWrite(
                             targetEntity, [rule.TargetField]) is { } setBySpaarke)
                     {

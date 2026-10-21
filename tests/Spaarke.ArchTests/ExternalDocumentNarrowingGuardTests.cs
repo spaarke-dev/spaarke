@@ -1070,6 +1070,139 @@ public class ExternalDocumentNarrowingGuardTests
         if (op == System.Reflection.Emit.OpCodes.Ldc_I4_3) return 3;
         return null;
     }
+
+    // ── Task 188 round 4e: every app-only generic update writer asks THE refusal (the D7 link columns) ──────────────
+    // Self-contained: its own primitives, list, facts and GenericWriterControl* fixtures (end of file).
+    // A document's sprk_parentdocument and sprk_relatedcommunication are visibility inputs of THE narrowing (D7 rules 3
+    // and 4), and so are its Access Permission and own-narrowing record (task 189). The generic update
+    // (IFieldMappingDataverseService.UpdateRecordFieldsAsync) writes whatever payload its caller built (a playbook, an
+    // output mapping, a field-mapping rule), so a type that calls it must also call InheritedAccessPermission.RefuseAppOnlyWrite,
+    // or be listed with the reason it can never update an existing document.
+    // Granularity and limit (stated): per TYPE, as the #2091 re-file guard (a writer's refusal and its write sit in different
+    // methods of DataverseUpdateHandler); a type that refuses on one path and skips it on another passes (code review; the
+    // DocumentLinkAppOnlyWriterTests pin the three writers' paths). A generic update built on another primitive
+    // (IGenericEntityService.UpdateAsync, which the BFF's typed writers use with literal keys) is not seen.
+
+    /// <summary>Generic update callers that never update an existing document, each with its reason (code review checks it).</summary>
+    private static readonly IReadOnlyDictionary<string, string> GenericWritersThatUpdateNoDocument = new Dictionary<string, string>
+    {
+        ["Sprk.Bff.Api.Services.Finance.InvoiceReviewService"] =
+            "Writes sprk_invoice only (InvoiceEntity), a create by upsert on a fresh id.",
+        ["Sprk.Bff.Api.Services.Finance.SignalEvaluationService"] = "Writes sprk_spendsignal only (SignalEntity).",
+        ["Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite"] =
+            "Creates only (a fresh Guid upserted): a link set in a create can only HIDE the new row (D7 narrows, never widens), " +
+            "and no existing document is re-pointed or un-linked.",
+        ["Sprk.Bff.Api.Services.RecordCreation.RecordCreationService"] =
+            "Creates only (step 11, a fresh Guid upserted): the same reason as OwnedChildWrite.",
+    };
+
+    [Fact(DisplayName = "Task 188 r4e: every app-only generic update writer asks InheritedAccessPermission.RefuseAppOnlyWrite (or is listed)")]
+    public void EveryGenericUpdateWriter_AsksTheAppOnlyRefusal()
+    {
+        var scan = GenericWriterScan(BffTypes.Value);
+
+        // Non-vacuity: the three writers that take a payload they did not build are seen writing AND refusing.
+        foreach (var writer in new[]
+                 {
+                     "Sprk.Bff.Api.Services.Ai.Nodes.UpdateRecordActionCore",
+                     "Sprk.Bff.Api.Services.Dataverse.DataverseUpdateHandler",
+                     "Sprk.Bff.Api.Api.FieldMappings.FieldMappingEndpoints",
+                 })
+        {
+            Assert.True(scan.TryGetValue(writer, out var use) && use.Writes,
+                $"{writer} should be seen calling the generic update — the scan lost its signal.");
+            Assert.True(use!.Refuses, $"{writer} should be seen calling RefuseAppOnlyWrite — the scan lost its signal.");
+        }
+
+        var problems = GenericWriterProblems(scan, GenericWritersThatUpdateNoDocument);
+        Assert.True(problems.Count == 0,
+            "A type that calls the generic update (IFieldMappingDataverseService.UpdateRecordFieldsAsync) writes a payload it may " +
+            "not have built. It must ask InheritedAccessPermission.RefuseAppOnlyWrite before the write, so a document's D7 link " +
+            "columns (sprk_parentdocument, sprk_relatedcommunication) and its Access Permission are never written by it (task 188 " +
+            "round 4e, task 189 K5), or be listed in GenericWritersThatUpdateNoDocument with the reason it never updates an " +
+            "existing document:\n" + string.Join("\n", problems));
+    }
+
+    [Fact(DisplayName = "Task 188 r4e: negative control — a generic update with only a mention of the refusal is found (interface and concrete service); a refusal in a lambda, a listed writer and a typed update are not")]
+    public void GenericWriterDetector_MustFireAndMustNotFire()
+    {
+        var fixtures = new[]
+        {
+            typeof(GenericWriterControlMentionOnly), typeof(GenericWriterControlThroughTheConcreteService),
+            typeof(GenericWriterControlRefusesInALambda), typeof(GenericWriterControlListed),
+            typeof(GenericWriterControlTypedUpdate), typeof(GenericWriterControlListedButRefuses),
+        };
+        var listed = new Dictionary<string, string>
+        {
+            [typeof(GenericWriterControlListed).FullName!] = "control: listed",
+            [typeof(GenericWriterControlListedButRefuses).FullName!] = "control: a stale entry (it refuses)",
+            ["Spaarke.ArchTests.GenericWriterControlGone"] = "control: a stale entry (no such writer)",
+        };
+
+        var problems = GenericWriterProblems(GenericWriterScan(fixtures.SelectMany(IlCallScan.WithNested)), listed);
+
+        Assert.Equal(
+            new[]
+            {
+                $"NEW generic update writer without the refusal: {typeof(GenericWriterControlMentionOnly).FullName}",
+                $"NEW generic update writer without the refusal: {typeof(GenericWriterControlThroughTheConcreteService).FullName}",
+                "STALE entry Spaarke.ArchTests.GenericWriterControlGone: it no longer calls the generic update — remove it.",
+                $"STALE entry {typeof(GenericWriterControlListedButRefuses).FullName}: it now asks the refusal — remove it (the ratchet).",
+            },
+            problems);
+    }
+
+    private sealed class GenericWriterUse
+    {
+        public bool Writes { get; set; }
+        public bool Refuses { get; set; }
+    }
+
+    /// <summary>Outermost type full name → whether its compiled code calls the generic update, and the refusal.</summary>
+    private static Dictionary<string, GenericWriterUse> GenericWriterScan(IEnumerable<Type> types)
+    {
+        var uses = new Dictionary<string, GenericWriterUse>(StringComparer.Ordinal);
+        foreach (var (caller, _, target) in IlCallScan.MethodReferences(types))
+        {
+            var owner = IlCallScan.Outermost(caller);
+            var writes = IsGenericUpdate(target) && target.DeclaringType != owner;
+            var refuses = target.DeclaringType == typeof(Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission)
+                && target.Name == nameof(Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.RefuseAppOnlyWrite);
+            if (!writes && !refuses)
+                continue;
+
+            var key = owner.FullName!;
+            if (!uses.TryGetValue(key, out var use))
+                uses[key] = use = new GenericWriterUse();
+            use.Writes |= writes;
+            use.Refuses |= refuses;
+        }
+
+        return uses;
+    }
+
+    private static bool IsGenericUpdate(MethodBase method) =>
+        method.Name == nameof(Spaarke.Dataverse.IFieldMappingDataverseService.UpdateRecordFieldsAsync)
+        && method.DeclaringType is { } declaring
+        && typeof(Spaarke.Dataverse.IFieldMappingDataverseService).IsAssignableFrom(declaring);
+
+    private static List<string> GenericWriterProblems(
+        IReadOnlyDictionary<string, GenericWriterUse> scan, IReadOnlyDictionary<string, string> listed)
+    {
+        var problems = scan.Where(s => s.Value.Writes && !s.Value.Refuses && !listed.ContainsKey(s.Key))
+            .Select(s => $"NEW generic update writer without the refusal: {s.Key}")
+            .Order(StringComparer.Ordinal)
+            .ToList();
+        foreach (var entry in listed.Keys.Order(StringComparer.Ordinal))
+        {
+            if (!scan.TryGetValue(entry, out var use) || !use.Writes)
+                problems.Add($"STALE entry {entry}: it no longer calls the generic update — remove it.");
+            else if (use.Refuses)
+                problems.Add($"STALE entry {entry}: it now asks the refusal — remove it (the ratchet).");
+        }
+
+        return problems;
+    }
 }
 
 // Compiled control fixtures for ExternalDocumentNarrowingGuardTests.Detector_MustFireAndMustNotFire. Top-level types (the
@@ -1404,4 +1537,55 @@ internal sealed class DocumentDecisionControlListed(Spaarke.Core.Auth.Authorizat
 {
     internal async Task<bool> ReadAsync(Guid id) =>
         (await authorization.GetCallerAccessAsync("u", id.ToString(), "t")).AccessRights.HasFlag(Spaarke.Dataverse.AccessRights.Read);
+}
+
+// ── Task 188 round 4e: compiled control fixtures for GenericWriterDetector_MustFireAndMustNotFire (never run; IL only) ──
+
+/// <summary>MUST FIRE (r4e): a generic update that only MENTIONS the refusal (this comment says it calls RefuseAppOnlyWrite).</summary>
+internal sealed class GenericWriterControlMentionOnly(Spaarke.Dataverse.IFieldMappingDataverseService writes)
+{
+    internal Task<string> WriteAsync(string table, Guid id, Dictionary<string, object?> payload) =>
+        writes.UpdateRecordFieldsAsync(table, id, payload, CancellationToken.None)
+            .ContinueWith(_ => nameof(Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.RefuseAppOnlyWrite));
+}
+
+/// <summary>MUST FIRE (r4e): the same write through the concrete app-only service, not the interface.</summary>
+internal sealed class GenericWriterControlThroughTheConcreteService(Spaarke.Dataverse.DataverseWebApiService writes)
+{
+    internal Task WriteAsync(string table, Guid id, Dictionary<string, object?> payload) =>
+        writes.UpdateRecordFieldsAsync(table, id, payload, CancellationToken.None);
+}
+
+/// <summary>MUST NOT FIRE (r4e): asks the refusal inside a lambda (attributed to its outermost type), then writes.</summary>
+internal sealed class GenericWriterControlRefusesInALambda(Spaarke.Dataverse.IFieldMappingDataverseService writes)
+{
+    internal async Task WriteAsync(string table, Guid id, Dictionary<string, object?> payload)
+    {
+        Func<bool> refused = () => Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.RefuseAppOnlyWrite(table, payload.Keys) is not null;
+        if (!refused())
+            await writes.UpdateRecordFieldsAsync(table, id, payload, CancellationToken.None);
+    }
+}
+
+/// <summary>MUST NOT FIRE (r4e): a generic update listed with its reason.</summary>
+internal sealed class GenericWriterControlListed(Spaarke.Dataverse.IFieldMappingDataverseService writes)
+{
+    internal Task WriteAsync(Guid id) =>
+        writes.UpdateRecordFieldsAsync("sprk_spendsignal", id, new Dictionary<string, object?> { ["sprk_name"] = "x" }, CancellationToken.None);
+}
+
+/// <summary>MUST NOT FIRE (r4e): listed, but it asks the refusal (the control lists it as a stale entry).</summary>
+internal sealed class GenericWriterControlListedButRefuses(Spaarke.Dataverse.IFieldMappingDataverseService writes)
+{
+    internal Task WriteAsync(string table, Guid id, Dictionary<string, object?> payload) =>
+        Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.RefuseAppOnlyWrite(table, payload.Keys) is null
+            ? writes.UpdateRecordFieldsAsync(table, id, payload, CancellationToken.None)
+            : Task.CompletedTask;
+}
+
+/// <summary>MUST NOT FIRE (r4e): a typed update with literal keys, not the generic update.</summary>
+internal sealed class GenericWriterControlTypedUpdate(Spaarke.Dataverse.IGenericEntityService entities)
+{
+    internal Task WriteAsync(Guid id) =>
+        entities.UpdateAsync("sprk_document", id, new Dictionary<string, object> { ["sprk_documentdescription"] = "x" }, CancellationToken.None);
 }
