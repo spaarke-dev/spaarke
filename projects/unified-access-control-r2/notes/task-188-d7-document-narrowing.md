@@ -7,7 +7,8 @@
 > Round 2 (main-session decisions on #2170, 2026-10-20): every ancestor is checked; every read the predicate makes runs
 > app-only on every surface; the cost is measured, logged and bounded (§1, §4, §6, §11).
 > Round 3 slice A (security pass 1, F1-A, 2026-10-21): the AI retrieval trim applies the narrowing for external callers
-> (§14). Slices B and C are separate.
+> (§14). Slice B (§15): the internal plane's document routes. Slice C (§16, owner round 111 applied): rows derived from a
+> document (`sprk_analysis`, `sprk_analysisoutput`), the K7 allow-list of the app-only seams, path B approved.
 
 ## 1. The rule (as built)
 
@@ -798,3 +799,249 @@ pre-existing defect: filed as **#2185** (`bug`). It passed in the final branch r
 | `git merge-tree --write-tree origin/master HEAD` | clean |
 
 Not run, by the brief: the full unfiltered unit suite, any deploy, any Dataverse, Azure or Key Vault access.
+
+## 16. Round 3 slice C — rows derived from a document, the K7 allow-list, owner round 111
+
+Slices A (§14) and B (§15) are not touched, apart from their stale "owner sign-off pending" remarks, which now read
+"approved, owner round 111".
+
+Owner decisions applied (round 111, 2026-10-21):
+- path B is approved: the AI tools' User-OBO-only rule has ONE exception, the app-only narrowing seams, which return a
+  hide decision only;
+- Limited does not hide;
+- #2179 (c) is accepted: direct Dataverse access is not narrowed;
+- cascade (a) Restrict is slice D, not here.
+
+**The defect.** For an external caller, `dataverse.read_query` and `dataverse.search_data` returned `sprk_analysis` and
+`sprk_analysisoutput` rows whose source document the narrowing hides:
+- `sprk_analysis`: the AI analysis of a document;
+- `sprk_analysisoutput`: the analysis's output text, `sprk_value`.
+
+So the analysis of an internal-only email's .eml, or of a Restricted document, reached the model.
+
+**The fix.**
+
+1. **Hide-only overload: `AppOnlyDocumentNarrowingExtensions.HiddenDocumentIdsAsync`** (`ExternalDocumentNarrowing.cs:464`).
+   - It extends the existing `AppOnlyDocumentNarrowing` delegate. A delegate cannot be overloaded, and no new
+     registration is needed.
+   - It takes document ids and makes ONE seam call: the by-id app-only re-read, then the decision.
+   - It returns the hidden SET only: no rows, no reasons.
+   - What lands in the set:
+     - `Guid.Empty` (no document): never.
+     - `UnreadableLink` (a document id that cannot be decided): always, and it is never sent to Dataverse.
+     - A document that does not come back: yes.
+   - No decidable id: no call. A failed read THROWS.
+2. **Source links: `ExternalCallerCommunicationGuard.ReadSourceDocumentIdsAsync`** (`:159`).
+   - For each derived row id, it reads the source document BY ID over the caller's OWN user client. The rows are the
+     user's; only the decision on the documents runs app-only.
+   - `sprk_analysis`: reads `sprk_analysises?$select=sprk_analysisid,_sprk_documentid_value` by id.
+   - `sprk_analysisoutput`: reads `_sprk_analysisid_value`, then reads its analyses the same way.
+   - One batched read per level: an OR filter, in chunks of 50, at most 4 in flight
+     (`CommunicationOpenThreadGate.ReadChunksAsync`).
+3. **Applied after the user-OBO read.** Nothing is injected into the user's query.
+   - `read_query`, `DataverseReadQueryHandler.cs`:
+     - `:185/193`: the guard;
+     - `:344-346`: the sources, then ONE overload call for the page;
+     - `:377`: the row filter.
+   - `search_data`, `DataverseSearchDataHandler.cs`:
+     - `:331-340`: the page's derived hits, all tables, then ONE overload call;
+     - `:356-357`: the drop.
+   - Internal callers: no source read and no narrowing call.
+
+**Decision recorded (the brief's fail-closed rule).** A row is hidden when it HAS a source document that cannot be
+decided:
+- the source link read does not return the row (deleted, unreadable, or a stale search hit);
+- the link is present but not a GUID;
+- an output's analysis does not come back;
+- the document does not come back app-only.
+
+A row with NO source document (the lookup reads null) is unaffected (`IsDerivedRowHidden`, `:200`). A fault in the
+source-link read or the narrowing read fails the tool call with no data.
+
+**Logs (ADR-015).** `entity={table|document-derived} reason=source_document_hidden={n},source_document_undecidable={n}`.
+Counts only, no ids, pinned by `AssertTelemetryRespectsAdr015`.
+
+**Cost.**
+
+| Request | Reads |
+|---|---|
+| `read_query` page of N analysis rows (N ≤ 200) | ⌈N/50⌉ user reads, then ONE narrowing call over the D distinct source documents: ⌈D/50⌉ by-id reads, plus the hop, communication and thread levels (§4) |
+| `read_query` page of outputs | as above, plus ⌈A/50⌉ user reads of the A distinct analyses |
+| `search_data` (≤ 25 hits) | at most 1 user read per derived table, plus 1 for the outputs' analyses; ONE narrowing call for every derived hit of the page |
+
+A page that also has `sprk_document` hits makes its existing document call too. That is two calls, one per kind, so the
+document hits keep their reason-coded log.
+
+### Surface classification (tables the AI tools return that carry document content or derived content)
+
+| Table | What it carries | Class |
+|---|---|---|
+| `sprk_document` | the document's metadata and summary (`sprk_filesummary`) | In scope; narrowed since round 2 (`read_query`, `search_data`, `describe`) |
+| `sprk_analysis` | an AI analysis of ONE source document (`sprk_documentid`, NOT NULL), with its working and final text | **In scope; narrowed (slice C)** in `read_query` and `search_data`. For `describe`, see F-C1 |
+| `sprk_analysisoutput` | an analysis's output text (`sprk_value`) | **In scope; narrowed through its analysis (slice C)** in `read_query` and `search_data`. For `describe`, see F-C1 |
+| `sprk_communication*` family, `sprk_communicationattachment` included | email and message content, and attachments | SAFE: the 065 rule rides in the query (`sprk_communication`), or the table is refused outright (078) |
+| `sprk_emailartifact`, `sprk_attachmentartifact`, `sprk_emailreviewlog`, `sprk_affinity` | copies of email content | SAFE: refused outright for an external caller (`RefusedContentTables`, 078) |
+| `sprk_fileversion` | version number, check-in and check-out dates and users (`DocumentCheckoutService.cs:1078-1081`); no content | SAFE: no content. Version CONTENT is served only by the version routes, which narrow (slice B and the external plane) |
+| Chunks, summaries, embeddings | live in the AI Search index, not in Dataverse | SAFE for these tools, which read Dataverse only. Every retrieval path is trimmed (slice A) |
+| `sprk_analysischatmessage`, `sprk_analysisemailmetadata`, `sprk_analysisworkingversion`, `sprk_analysisknowledge` | listed in the ERD (`entity-relationship-model.md`) as children of `sprk_analysis` | SAFE as far as the code shows: no BFF code reads or writes them, and the live child map (`SecureChildLineage`, read 2026-10-02) has none of them. Not checked live, because this slice has no Dataverse access: **K-C3** |
+| `sprk_memo`, `sprk_todo`, `sprk_signal`, `sprk_decisionrecord`, `sprk_agreement`, `sprk_event` (regarding a document or an analysis) | records in their own right that are ABOUT a document; authored by users or the AI | **Open decision OD-C2.** They are not the document's content. Hiding them would extend D7 from documents to records that refer to documents |
+| `sprk_invoice` | fields extracted from an invoice document (`InvoiceExtractionJobHandler`) | **Open decision OD-C3.** The record has its own external-plane access, but its fields derive from a document |
+
+### Findings (for the main session)
+
+- **F-C1 (not fixed: outside the brief's two tools).**
+  - `dataverse.describe` returns the full record of `tables/sprk_analysis/records/{id}` (and of `sprk_analysisoutput`) to
+    an external caller, with no narrowing. `DataverseDescribeHandler.DescribeRecordAsync` narrows only `sprk_document`.
+  - The model is told to describe the paths that search returns, and the ids also reach it through other rows.
+  - The same seam would fix it in about 15 lines: `ReadSourceDocumentIdsAsync` over the one id, then
+    `HiddenDocumentIdsAsync`, then answer as for not-found.
+- **OD-C1 (decision).** `sprk_analysis.sprk_outputfileid` is the saved output DOCUMENT.
+  - When a user marks the output file Restricted but its source document is visible, the analysis row, which holds the
+    same text, stays visible.
+  - Hiding on either document is one more column in `DocumentDerivedTables` (the fail-closed direction).
+  - Not done here: the brief names `sprk_documentid` only.
+- **OD-C2, OD-C3:** see the table above.
+- **K-C1.**
+  - The source link is read as the user. `sprk_analysis.sprk_documentid` is not field-secured: no target of the
+    field-security engine names it, so a mask cannot open a row today.
+  - If it is ever secured, a masked link would read as "no source document", and the row would be unaffected.
+  - The column is NOT NULL, so "no source" does not arise for a real analysis.
+- **K-C2.** The derived-row ArchTest sees the two tools by method. A NEW derived table must be added to
+  `DocumentDerivedTables`; that list is the contract, like the primitive list in §9.
+- **K-C3:** the ERD-only tables above.
+
+### §11 answers (slice C)
+
+**`AppOnlyDocumentNarrowingExtensions.HiddenDocumentIdsAsync`.**
+1. *Existing:* `AppOnlyDocumentNarrowing`, the one app-only seam.
+2. *Extension:* it IS an extension of that seam (a delegate cannot take an overload). It needs no registration and no new
+   type beyond the static extension class.
+3. *Cost of doing nothing:* each derived-row caller would turn a full decision into a set of ids and handle the
+   undecidable sentinel itself, and the brief's "hide-only, no rows" contract would exist in prose only.
+
+**`ExternalCallerCommunicationGuard.IsDocumentDerivedTable`, `ReadSourceDocumentIdsAsync`, `IsDerivedRowHidden` and
+`DerivedHiddenSummary`** (new members of an existing class).
+1. *Existing:* the guard already holds the table tests and the user-client reads that the three tools share.
+2. *Extension:* the members are added to it.
+3. *Cost of doing nothing:* an external caller's assistant returns the analysis, or its output, of an internal-only email
+   or a Restricted document.
+
+No new DI registration, interface, endpoint or package.
+
+### Guard (ArchTest, `ExternalDocumentNarrowingGuardTests`)
+
+**`EveryDocumentDerivedSurface_ReachesTheHideOnlyOverload`.**
+- A BFF method that tests or reads derived rows (`IsDocumentDerivedTable`, `ReadSourceDocumentIdsAsync`) must reach
+  `HiddenDocumentIdsAsync`. Reaching the seam through the document path does not count.
+- Non-vacuity: both tools are pinned.
+- Control `DerivedRowDetector_MustFireAndMustNotFire`:
+  - fires for a read that skips the overload, and for one that narrows only through the whole-result seam;
+  - does not fire for a read that uses the overload through a helper.
+
+**K7: `TheAppOnlyNarrowingSeams_HaveOnlyListedConsumers`.**
+- What counts as a consumer: every outermost BFF type that does any of these with `AppOnlyDocumentNarrowing` or
+  `InternalRouteDocumentNarrowing`:
+  - holds one (a field, a parameter or a return type);
+  - resolves one (a generic instantiation);
+  - invokes or builds one;
+  - calls a method that takes one.
+- Each consumer must be listed in `AllowedSeamConsumers` with its reason. A stale entry also fails (the ratchet).
+- The list today, each entry found by the scan:
+  - `ExternalAccessModule`: the one registrar;
+  - `AppOnlyDocumentNarrowingExtensions`: the overload;
+  - `DataverseReadQueryHandler`, `DataverseSearchDataHandler` and `DataverseDescribeHandler`: the tools (path B);
+  - `RetrievalAccessTrim`: slice A;
+  - `InternalPlaneDocumentNarrowing`: slice B.
+- Control `SeamConsumerDetector_MustFireAndMustNotFire`: fires for a type that takes, resolves or builds a seam; does not
+  fire for one that does none of these.
+
+**Option A condition 2: `TheAllVisibleTestDouble_NeverReachesProduction`.** Confirmed, and now guarded:
+- No `src/server/**/*.cs` file names `AllVisibleDocumentNarrowing`. Every tracked `.cs` under `src/` is under
+  `src/server`. Non-vacuity: the double is still found in the tests.
+- The BFF assembly references no test assembly.
+- Only `ExternalAccessModule` builds the seams (the delegate constructor), and `AddExternalAccess` reaches
+  `ReadAndNarrowDocumentsAsync`.
+- The unit tests `TheAssistantsNarrowing_IsRegistered_OverTheAppOnlyReader` and
+  `TheInternalRoutesNarrowing_IsRegistered_OverTheAppOnlyReader` resolve the production registrations and see them read
+  app-only and decide.
+- Control: `AllVisibleDoubleDetector_MustFireAndMustNotFire`.
+
+### Tests (slice C)
+
+**`DataverseReadQueryHandlerTests`.**
+- Must fire (each analysis hidden): an own-Restricted document; an internal-only email's document; a document the BFF
+  cannot read back; a non-GUID link; a link read that does not return the row.
+- Must not fire: a visible source and no source are both kept.
+- The page makes one user source read and one narrowing call, sends no narrowing read as the user, and logs per ADR-015.
+- Outputs are hidden through their analysis.
+- An internal caller is unchanged: no source read and no narrowing.
+- A source-read fault and an app-only fault each give an error with no data.
+
+**`DataverseSearchDataHandlerTests`.**
+- The same cases on hits: analyses and outputs mixed with a matter hit. Counts and warnings are post-filter; the page
+  makes ONE narrowing call.
+- An internal caller is unchanged, with no extra read.
+- Both faults give no data.
+
+**`ExternalDocumentNarrowingTests`.**
+- `OwnLimited_StaysVisible_ToAnExternalCaller_OnTheByIdRead_EvenUnderALimitedParentAndAVisibleLink` (owner round 111).
+- The overload:
+  - returns the hidden set only, in one call;
+  - includes the undecidable id and never sends it;
+  - never includes `Guid.Empty`;
+  - makes no call when nothing is decidable;
+  - throws on a failed read.
+
+**Before → after.**
+- Before: the two handlers were reverted to `936ab537af`, keeping the guard and the overload so the tests compile. 7 of
+  the 9 new handler tests failed and 168 passed. The 2 internal-caller must-not-fire cases pass either way.
+- After: 175 of 175 in the three classes.
+- The Limited test passes both before and after: it pins existing behaviour.
+
+### Mutation table (slice C)
+
+Runner: `.uac188/t188c_mutate.py` (untracked; deleted at the end). For each mutant:
+1. Apply it, then rebuild the unit and ArchTests projects.
+2. Run the handler classes and `ExternalDocumentNarrowingTests` (222 cases), and `ExternalDocumentNarrowingGuardTests`
+   (12).
+3. Restore the source and check its SHA-1.
+
+**6 of 6 killed.**
+
+| Id | Mutation | Unit failing | ArchTest | Killed by (representative) |
+|---|---|---|---|---|
+| C1 | overload skipped (both tools: the hidden set is always empty) | 5 | fails (derived-row reach) | `ExecuteChatAsync_ExternalCallerOnAnalysis_HidesRowsWhoseSourceDocumentIsHiddenOrUndecidable_KeepsTheRest`, `…DerivedHits_DropsAnalysesAndOutputs…` |
+| C2a | analysis treated as visible on a narrowing fault (the overload swallows it) | 3 | passes | `…OnAnalysis_AnAppOnlyReadFails_ErrorWithNoData`, `…DerivedHits_NarrowingFails_ErrorWithNoData`, `HiddenDocumentIds_AFailedRead_Throws` |
+| C2b | an undecidable source read as "no document" | 3 | passes | `…OnAnalysis_HidesRows…`, `…OnAnalysisOutput_…ThroughTheAnalysis`, `…DerivedHits_Drops…` |
+| C3 | Limited treated as hiding | 4 | passes | `OwnLimited_StaysVisible_…`, `OwnStandardLimitedOrNull_…(Limited)`, `AStandardParentWithNoLink_StaysVisible(Limited)` |
+| C4a | guard allow-list: an entry removed (`RetrievalAccessTrim`) | 0 | fails (K7) | `TheAppOnlyNarrowingSeams_HaveOnlyListedConsumers` |
+| C4b | guard allow-list: a new unlisted consumer of the seam added in `src/` | 0 | fails (K7) | `TheAppOnlyNarrowingSeams_HaveOnlyListedConsumers` |
+
+### Gates (slice C)
+
+Run on the final sources (`bc4e5473c8`; the pre-commit `dotnet format` changed nothing):
+
+| Gate | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/ --no-incremental` | succeeded, 0 errors, 0 warnings. The unit and ArchTests projects also build with 0 warnings |
+| Unit tests, filtered: `Services.Ai.Handlers`, `Insights`, `RetrievalAccessTrim`, `Retrieval`, `SemanticSearch`, `ExternalAccess`, `UnifiedAccessControl`, `Documents`, with `Category!=Live` | **5,798 passed, 0 failed, 0 skipped** |
+| `tests/Spaarke.ArchTests`, the full project | **1,220 passed, 0 failed** (1,214 + 6 new) |
+| Mutants | 6 of 6 killed; the sources were SHA-1-checked after every run |
+| Publish size (`dotnet publish -c Release`, framework-dependent, `Compress-Archive -CompressionLevel Optimal`, 4 PDBs on each side, fresh detached worktrees) | See the three comparisons below |
+| `dotnet list package --vulnerable --include-transitive` | no vulnerable packages; no package changes |
+| `git merge-tree --write-tree origin/master HEAD` (master `2a38e6ce6c`) | clean (tree `8a19b4f494`) |
+
+Publish size, branch `bc4e5473c8` = 39,344,071 B (total 39.3 MB):
+
+| Compared with | That build | Zip delta | Raw delta |
+|---|---|---|---|
+| Merge base `4f5f22694c` (all of task 188) | 39,314,341 B | **+29,730 B (+0.03 MB)** | +74,664 B |
+| Pre-slice head `936ab537af` (slice C alone) | 39,336,551 B | **+7,520 B** | +15,176 B |
+| A fresh build of current `origin/master` `2a38e6ce6c` | 39,354,818 B | −10,747 B | — |
+
+The last comparison is negative because master has moved ahead with other work.
+
+Not run, by the brief:
+- the full unfiltered unit suite;
+- any deploy;
+- any Dataverse, Azure or Key Vault access.
