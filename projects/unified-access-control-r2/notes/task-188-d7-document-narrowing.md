@@ -834,7 +834,8 @@ So the analysis of an internal-only email's .eml, or of a Restricted document, r
 2. **Source links: `ExternalCallerCommunicationGuard.ReadSourceDocumentIdsAsync`** (`:159`).
    - For each derived row id, it reads the source document BY ID over the caller's OWN user client. The rows are the
      user's; only the decision on the documents runs app-only.
-   - `sprk_analysis`: reads `sprk_analysises?$select=sprk_analysisid,_sprk_documentid_value` by id.
+   - `sprk_analysis`: reads `sprk_analysises?$select=sprk_analysisid,_sprk_documentid_value,_sprk_outputfileid_value` by id
+     (the output file since part 2, OD-C1).
    - `sprk_analysisoutput`: reads `_sprk_analysisid_value`, then reads its analyses the same way.
    - One batched read per level: an OR filter, in chunks of 50, at most 4 in flight
      (`CommunicationOpenThreadGate.ReadChunksAsync`).
@@ -877,19 +878,19 @@ document hits keep their reason-coded log.
 | Table | What it carries | Class |
 |---|---|---|
 | `sprk_document` | the document's metadata and summary (`sprk_filesummary`) | In scope; narrowed since round 2 (`read_query`, `search_data`, `describe`) |
-| `sprk_analysis` | an AI analysis of ONE source document (`sprk_documentid`, NOT NULL), with its working and final text | **In scope; narrowed (slice C)** in `read_query` and `search_data`. For `describe`, see F-C1 |
-| `sprk_analysisoutput` | an analysis's output text (`sprk_value`) | **In scope; narrowed through its analysis (slice C)** in `read_query` and `search_data`. For `describe`, see F-C1 |
+| `sprk_analysis` | an AI analysis of ONE source document (`sprk_documentid`, NOT NULL), with its working and final text, and its saved output file (`sprk_outputfileid`) | **In scope; narrowed (slice C)** in `read_query`, `search_data` and `describe` (F-C1, fixed). Hidden when the source document OR the output file is hidden or undecidable (OD-C1, included) |
+| `sprk_analysisoutput` | an analysis's output text (`sprk_value`) | **In scope; narrowed through its analysis (slice C)** in `read_query`, `search_data` and `describe` |
 | `sprk_communication*` family, `sprk_communicationattachment` included | email and message content, and attachments | SAFE: the 065 rule rides in the query (`sprk_communication`), or the table is refused outright (078) |
 | `sprk_emailartifact`, `sprk_attachmentartifact`, `sprk_emailreviewlog`, `sprk_affinity` | copies of email content | SAFE: refused outright for an external caller (`RefusedContentTables`, 078) |
 | `sprk_fileversion` | version number, check-in and check-out dates and users (`DocumentCheckoutService.cs:1078-1081`); no content | SAFE: no content. Version CONTENT is served only by the version routes, which narrow (slice B and the external plane) |
 | Chunks, summaries, embeddings | live in the AI Search index, not in Dataverse | SAFE for these tools, which read Dataverse only. Every retrieval path is trimmed (slice A) |
 | `sprk_analysischatmessage`, `sprk_analysisemailmetadata`, `sprk_analysisworkingversion`, `sprk_analysisknowledge` | listed in the ERD (`entity-relationship-model.md`) as children of `sprk_analysis` | SAFE as far as the code shows: no BFF code reads or writes them, and the live child map (`SecureChildLineage`, read 2026-10-02) has none of them. Not checked live, because this slice has no Dataverse access: **K-C3** |
-| `sprk_memo`, `sprk_todo`, `sprk_signal`, `sprk_decisionrecord`, `sprk_agreement`, `sprk_event` (regarding a document or an analysis) | records in their own right that are ABOUT a document; authored by users or the AI | **Open decision OD-C2.** They are not the document's content. Hiding them would extend D7 from documents to records that refer to documents |
-| `sprk_invoice` | fields extracted from an invoice document (`InvoiceExtractionJobHandler`) | **Open decision OD-C3.** The record has its own external-plane access, but its fields derive from a document |
+| `sprk_memo`, `sprk_todo`, `sprk_signal`, `sprk_decisionrecord`, `sprk_agreement`, `sprk_event` (regarding a document or an analysis) | records in their own right that are ABOUT a document; authored by users or the AI | **Open: OD-C2, not narrowed in 188 (coordinator decision); classified in #2189.** They are not the document's content. Hiding them would extend D7 from documents to records that refer to documents |
+| `sprk_invoice` | fields extracted from an invoice document (`InvoiceExtractionJobHandler`) | **Open: OD-C3, not narrowed in 188 (coordinator decision); classified in #2189.** The record has its own external-plane access, but its fields derive from a document |
 
 ### Findings (for the main session)
 
-- **F-C1 (not fixed: outside the brief's two tools).**
+- **F-C1 (FIXED in part 2 below; first reported as outside the brief's two tools).**
   - `dataverse.describe` returns the full record of `tables/sprk_analysis/records/{id}` (and of `sprk_analysisoutput`) to
     an external caller, with no narrowing. `DataverseDescribeHandler.DescribeRecordAsync` narrows only `sprk_document`.
   - The model is told to describe the paths that search returns, and the ids also reach it through other rows.
@@ -899,14 +900,15 @@ document hits keep their reason-coded log.
   - When a user marks the output file Restricted but its source document is visible, the analysis row, which holds the
     same text, stays visible.
   - Hiding on either document is one more column in `DocumentDerivedTables` (the fail-closed direction).
-  - Not done here: the brief names `sprk_documentid` only.
-- **OD-C2, OD-C3:** see the table above.
+  - INCLUDED in part 2 below (coordinator decision).
+- **OD-C2, OD-C3:** not narrowed in 188 (coordinator decision); filed as #2189 with per-table code evidence and a
+  proposed rule each.
 - **K-C1.**
   - The source link is read as the user. `sprk_analysis.sprk_documentid` is not field-secured: no target of the
     field-security engine names it, so a mask cannot open a row today.
   - If it is ever secured, a masked link would read as "no source document", and the row would be unaffected.
   - The column is NOT NULL, so "no source" does not arise for a real analysis.
-- **K-C2.** The derived-row ArchTest sees the two tools by method. A NEW derived table must be added to
+- **K-C2.** The derived-row ArchTest sees the three tools by method. A NEW derived table must be added to
   `DocumentDerivedTables`; that list is the contract, like the primitive list in §9.
 - **K-C3:** the ERD-only tables above.
 
@@ -1045,3 +1047,87 @@ Not run, by the brief:
 - the full unfiltered unit suite;
 - any deploy;
 - any Dataverse, Azure or Key Vault access.
+
+### Part 2 — coordinator decisions on F-C1, OD-C1, OD-C2 and OD-C3 (2026-10-21)
+
+The coordinator decided:
+- **F-C1: fix it.** `dataverse.describe` hides an `sprk_analysis` / `sprk_analysisoutput` record the same way.
+- **OD-C1: include it.** An analysis is hidden when its source document OR its output file is hidden; an undecidable one
+  also hides.
+- **OD-C2 / OD-C3: do not narrow in 188; file an issue.** Filed as **#2189** ("[uac-r2] D7 follow-up: classify AI-derived
+  tables …", label `bug`). For each table it gives the writer, whether the content can carry a hidden document's text,
+  the document link, and a proposed rule. 188 classifies these tables as **open**.
+
+**The change.**
+
+1. **The derived-table map takes several links** (`ExternalCallerCommunicationGuard.DocumentDerivedTables`).
+   - `sprk_analysis`: `_sprk_documentid_value` AND `_sprk_outputfileid_value`.
+   - `sprk_analysisoutput`: `_sprk_analysisid_value`, through the analysis (it inherits BOTH of the analysis's links).
+2. **`ReadSourceDocumentIdsAsync` returns every document of a row** (`IReadOnlyDictionary<Guid, IReadOnlyList<Guid>>`).
+   - An empty list: the row has no document; it is unaffected.
+   - `UnreadableLink` in the list: a row that does not come back, a link that is not a GUID, or (for an output) an
+     analysis that does not come back.
+   - Still one batched read per level: `$select={pk},{link1},{link2}`.
+3. **`IsDerivedRowHidden` hides a row when ANY of its documents is in the hidden set.** An unresolved row is hidden.
+4. **`read_query` and `search_data`** flatten every row's documents into the ONE overload call per page.
+5. **`describe` (F-C1).** `DataverseDescribeHandler.DescribeRecordAsync` adds `guardDerived` for an external caller on a
+   derived table:
+   - A not-found answers with the guarded not-found shape (`RecordNotVisible`: `NotFound` code and
+     `RecordNotVisibleMessage`), so a hidden record and a missing one read the same.
+   - After the user's read of the record, it reads the record's links as the user (`ReadSourceDocumentIdsAsync`, one id),
+     calls `HiddenDocumentIdsAsync`, and on a hidden row logs `reason=record_hidden` and answers `RecordNotVisible`.
+   - A link-read or narrowing fault fails the tool call with no data.
+   - An internal caller is unchanged: no link read, no narrowing call.
+
+**Cost.** `describe` on a derived record adds one user read (two for an output) and one narrowing call. `read_query` and
+`search_data` read one more column; the narrowing call now covers the output files too.
+
+**Guard.** `DerivedRowSurfaces` pins `DataverseDescribeHandler::DescribeRecordAsync` as well, so the ArchTest
+`EveryDocumentDerivedSurface_ReachesTheHideOnlyOverload` fails if describe stops reaching the overload. The control
+fixture `DerivedGuardControlNarrowsThroughAHelper` was adapted to the list shape.
+
+**Tests (part 2).**
+- `DataverseDescribeHandlerTests` (new, 17 cases):
+  - must fire on an analysis: source own Restricted; source undecidable; source not a GUID; output file own Restricted
+    (source visible); output file undecidable; output file not a GUID; the link read does not return the analysis;
+  - must fire on an output: its analysis's source Restricted; its analysis's output file Restricted;
+  - a missing analysis answers exactly like a hidden one, with no narrowing call;
+  - must not fire: visible source and null output file; both visible; neither set; an output over a visible analysis;
+    an internal caller with a Restricted source (no link read, no narrowing);
+  - a link-read fault and an app-only fault each give an error with no data.
+- `DataverseReadQueryHandlerTests`: `…OnAnalysis_HidesRowsWhoseOutputFileIsHiddenOrUndecidable_OdC1` (hidden output file,
+  undecidable output file, non-GUID output file hide; a visible output file with no source is kept; one narrowing call).
+  The existing source-link expectation now reads the two-column select.
+- `DataverseSearchDataHandlerTests`: `…AnalysisHits_DropsThoseWhoseOutputFileIsHiddenOrUndecidable_OdC1`.
+
+**Before → after.** With the four source files at `305ef2c3d4` and the new tests: **18 of the 241 cases fail**: 15 of the 17 new
+describe cases (the two that pass either way are the internal caller and the output over a visible analysis), the two new
+output-file handler tests, and the existing analysis test's two-column source-read expectation. After: **241 of 241**.
+
+**Mutants (part 2): 4 of 4 killed.** Runner `.uac188/t188c2_mut.py` (untracked, deleted); sources SHA-1-checked after the
+run.
+
+| Id | Mutation | Unit failing | ArchTest | Killed by (representative) |
+|---|---|---|---|---|
+| C5 | describe never guards a derived record (`guardDerived` stays false) | 15 | passes | `…ExternalCallerAnalysis_Task188SliceC_HiddenOrUndecidableDocument_AnswersLikeNotFound` (all 7), `…MissingAnalysis_AnswersExactlyLikeHiddenAnalysis` |
+| C6 | describe skips the hide-only overload (empty hidden set) | 10 | **fails** (derived-row reach) | the describe must-fire cases, `…AppOnlyReadFails_ErrorWithNoData`, `EveryDocumentDerivedSurface_ReachesTheHideOnlyOverload` |
+| C7 | OD-C1: the output-file link dropped from the map | 10 | passes | `…HidesRowsWhoseOutputFileIsHiddenOrUndecidable_OdC1`, `…AnalysisHits_DropsThoseWhoseOutputFileIsHiddenOrUndecidable_OdC1`, the describe output-file cases |
+| C8 | a row hidden only by its FIRST document | 5 | passes | the three tools' output-file cases with a visible source |
+
+C1–C4 (part 1) were not re-run: their edits target code this part reshaped. C1's ArchTest kill is re-proved by C6.
+
+**Gates (part 2).**
+
+Run on the final sources (`13367dd0c6`; the pre-commit `dotnet format` changed nothing):
+
+| Gate | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/ --no-incremental` | succeeded, 0 errors, 0 warnings. The unit and ArchTests projects also build with 0 warnings |
+| Unit tests, the same filter as part 1 (`Category!=Live`) | **5,817 passed, 0 failed, 0 skipped** (5,798 + the 19 new cases) |
+| `tests/Spaarke.ArchTests`, the full project | **1,220 passed, 0 failed** |
+| Mutants | 4 of 4 killed (C5–C8); the sources were SHA-1-checked after the run |
+| `git merge-tree --write-tree origin/master HEAD` (master `2a38e6ce6c`) | clean (tree `4fe2f0d2ec`) |
+| Packages | no change, so no new CVE |
+| Publish size | not re-measured: part 2 adds no package or file, only code in three existing handlers and the guard (part 1: +7,520 B for the whole slice) |
+
+Not run, by the brief: the full unfiltered unit suite, any deploy, any Dataverse, Azure or Key Vault access.
