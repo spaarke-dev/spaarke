@@ -47,6 +47,16 @@ public class CustomerStampKeylessTemplateTests
     private const string SearchIndexDataReaderRoleId = "1407120a-92aa-4202-b7e9-c0e197c71c8f";
     private const string L2PrincipalExpression = "[parameters('controlPlaneUamiPrincipalId')]";
 
+    private const string StorageBlobDataContributorRoleId = "ba92f5b4-2d11-453d-a403-e96b0029c9fe";
+
+    /// <summary>Built-in Storage Blob Data Contributor, Owner and Reader.</summary>
+    private static readonly string[] BlobDataRoleIds =
+    [
+        StorageBlobDataContributorRoleId,
+        "b7e6dc6d-f1e8-4753-8033-0f276bb0955b",
+        "2a2b9908-6ea1-4ae2-8e65-a410df84e7d1",
+    ];
+
     /// <summary>Any ARM <c>list*()</c> call (listKeys, listSecrets, listCredentials, listAccountSas, …), a key-bearing
     /// connection string, or a SAS authorization rule. Scanned over the template with descriptions removed.</summary>
     private static readonly Regex KeyMaterial = new(
@@ -233,6 +243,54 @@ public class CustomerStampKeylessTemplateTests
         Assert.Null(grant.Condition); // the real-template test requires the non-empty-principal condition
     }
 
+    [Fact(DisplayName = "Q5 (ebilling-r1 091): every Storage Blob Data role in the stamp is assigned at container scope, never on the account")]
+    public void StampBlobDataRoles_AreContainerScoped()
+    {
+        var violations = BlobDataRoleScopeViolations(CustomerTemplate(), out var containerGrants);
+
+        Assert.True(containerGrants >= 1, "customer.json has no container-scoped Storage Blob Data grant — the scan is no longer seeing the stamp UAMI's grant.");
+        Assert.True(violations.Count == 0, "Storage Blob Data roles must be granted per container (owner 2026-10-21, ebilling-r1 re-plan Q5): " + string.Join("; ", violations));
+    }
+
+    [Fact(DisplayName = "Q5 (ebilling-r1 091): the stamp UAMI is granted the session-file store's default container")]
+    public void StampUami_IsGrantedSessionFileContainer()
+    {
+        var granted = CustomerTemplate()["variables"]?["bffBlobContainerNames"] as JsonArray;
+
+        Assert.NotNull(granted);
+        Assert.Contains(
+            Sprk.Bff.Api.Services.Ai.Sessions.SessionFileBlobStore.DefaultContainerName,
+            granted!.Select(n => n?.GetValue<string>()));
+    }
+
+    [Fact(DisplayName = "Q5 (ebilling-r1 091): negative control — an account-scope and an unscoped blob grant are flagged; a container grant and a non-storage role are not")]
+    public void StampBlobDataRoles_NegativeControl()
+    {
+        var template = JsonNode.Parse($$"""
+            { "variables": { "blob": "{{StorageBlobDataContributorRoleId}}", "kv": "4633458b-17de-408a-b874-0445c86b69e6" },
+              "resources": [
+                { "type": "Microsoft.Authorization/roleAssignments", "name": "account",
+                  "scope": "[resourceId('Microsoft.Storage/storageAccounts', 'sa')]",
+                  "properties": { "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('blob'))]" } },
+                { "type": "Microsoft.Authorization/roleAssignments", "name": "unscoped",
+                  "properties": { "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '{{StorageBlobDataContributorRoleId}}')]" } },
+                { "type": "Microsoft.Authorization/roleAssignments", "name": "container",
+                  "scope": "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', 'sa', 'default', 'c')]",
+                  "properties": { "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('blob'))]" } },
+                { "type": "Microsoft.Authorization/roleAssignments", "name": "keyvault",
+                  "scope": "[resourceId('Microsoft.KeyVault/vaults', 'kv')]",
+                  "properties": { "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('kv'))]" } }
+              ] }
+            """)!;
+
+        var violations = BlobDataRoleScopeViolations(template, out var containerGrants);
+
+        Assert.Equal(1, containerGrants);
+        Assert.Equal(2, violations.Count);
+        Assert.Contains(violations, v => v.Contains("'account'", StringComparison.Ordinal));
+        Assert.Contains(violations, v => v.Contains("'unscoped'", StringComparison.Ordinal));
+    }
+
     // ---- rules ------------------------------------------------------------------------------------------------
 
     private static List<string> LocalAuthViolations(JsonNode template)
@@ -361,6 +419,36 @@ public class CustomerStampKeylessTemplateTests
             else if (properties?["deadLetterWithResourceIdentity"]?["identity"]?["type"] is null)
             {
                 violations.Add($"subscription '{Name(resource)}' has no dead-letter identity");
+            }
+        }
+
+        return violations;
+    }
+
+    /// <summary>Storage Blob Data Contributor / Owner / Reader role assignments whose scope is not a single blob
+    /// container (account, resource group or no scope at all).</summary>
+    private static List<string> BlobDataRoleScopeViolations(JsonNode template, out int containerGrants)
+    {
+        var violations = new List<string>();
+        containerGrants = 0;
+        foreach (var (resource, variables) in Resources(template).Where(r => IsType(r.Resource, "Microsoft.Authorization/roleAssignments")))
+        {
+            var roleExpression = resource["properties"]?["roleDefinitionId"]?.GetValue<string>() ?? string.Empty;
+            var variable = Regex.Match(roleExpression, @"variables\('([^']+)'\)").Groups[1].Value;
+            var roleText = variable.Length > 0 ? variables?[variable]?.GetValue<string>() ?? roleExpression : roleExpression;
+            if (!BlobDataRoleIds.Any(id => roleText.Contains(id, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            var scope = resource["scope"]?.GetValue<string>() ?? string.Empty;
+            if (scope.Contains("Microsoft.Storage/storageAccounts/blobServices/containers", StringComparison.Ordinal))
+            {
+                containerGrants++;
+            }
+            else
+            {
+                violations.Add($"role assignment '{Name(resource)}' grants a Storage Blob Data role at scope '{(scope.Length == 0 ? "(deployment scope)" : scope)}'");
             }
         }
 

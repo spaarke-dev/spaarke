@@ -24,11 +24,11 @@ param disableSharedKeyAccess bool = true
 @description('Subnet ID for VNet network rule (empty = allow all)')
 param allowedSubnetId string = ''
 
-@description('App Service principal ID for Storage Blob Data Contributor RBAC role. HISTORICALLY the per-customer BFF App Service SystemAssigned MI; task 029 removed the SystemAssigned MI from `modules/app-service.bicep`. Task 030 canonical replacement is `userAssignedIdentityPrincipalId` below. Retained for legacy callers as interim safety net per plan.md §3 — remove post-Phase F acceptance.')
-param appServicePrincipalId string = ''
-
-@description('Principal ID of the per-customer User-Assigned Managed Identity (from `modules/uami.bicep`, task 028) granted Storage Blob Data Contributor (built-in role `ba92f5b4-2d11-453d-a403-e96b0029c9fe`) on this Storage account. Task 030 canonical target per ADR-028 (UAMI-first data-plane access). Empty default skips the assignment (caller-side wiring). Emitted assignment sets principalType=ServicePrincipal.')
+@description('Principal ID of the per-customer User-Assigned Managed Identity (from `modules/uami.bicep`, task 028) granted Storage Blob Data Contributor (built-in role `ba92f5b4-2d11-453d-a403-e96b0029c9fe`) at CONTAINER scope on each container in `userAssignedIdentityContainerNames` — never on the account (owner 2026-10-21, ebilling-r1 re-plan Q5). Empty default skips the grants (caller-side wiring). Emitted assignments set principalType=ServicePrincipal.')
 param userAssignedIdentityPrincipalId string = ''
+
+@description('Containers (a subset of `containers`) on which `userAssignedIdentityPrincipalId` is granted Storage Blob Data Contributor, one assignment per container at the scope of that container. A name not in `containers` gets no grant, so the caller must also list it in `containers`. Default empty: no grant. Every blob consumer the identity runs needs its container here, or its calls fail 403 (ebilling-r1 notes/091-storage-provisioning.md §2).')
+param userAssignedIdentityContainerNames array = []
 
 @description('Tags for the resource')
 param tags object = {}
@@ -144,39 +144,29 @@ resource lifecyclePolicy 'Microsoft.Storage/storageAccounts/managementPolicies@2
 }
 
 // ============================================================================
-// RBAC: Storage Blob Data Contributor for App Service managed identity
-// Required BEFORE disabling shared key access so the app can still read/write blobs
+// RBAC: Storage Blob Data Contributor for the stamp UAMI — CONTAINER scope only
+// Owner 2026-10-21 (ebilling-r1 re-plan Q5): the identity holds no data role at
+// account scope; it is granted only on the containers it uses, so a container it
+// does not list (another workload's, or the eBilling file store's) is not readable.
+// Same pattern as acs-communication.bicep's dead-letter writer.
 // ============================================================================
 
 // Storage Blob Data Contributor built-in role ID
 var storageBlobDataContributorRoleId = 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
 
-// interim per plan.md §3 — remove post-Phase F acceptance (UAMI grants proven).
-// See `key-vault.bicep` "interim" comment for full rationale (task 029 removed SA-MI).
-resource storageBlobRbac 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(appServicePrincipalId)) {
-  // Use a deterministic GUID based on storage + principal + role to avoid conflicts
-  name: guid(storageAccount.id, appServicePrincipalId, storageBlobDataContributorRoleId)
-  scope: storageAccount
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageBlobDataContributorRoleId)
-    principalId: appServicePrincipalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-// Canonical Phase-C grant per task 030 + ADR-028: UAMI is granted Storage Blob Data
-// Contributor. Stable across App Service slot swaps (T5 fix). principalType=ServicePrincipal
-// avoids Azure Graph propagation-delay "principal not found" deploy failures. Idempotent
-// guid() name.
-resource uamiStorageBlobRbac 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(userAssignedIdentityPrincipalId)) {
-  name: guid(storageAccount.id, userAssignedIdentityPrincipalId, storageBlobDataContributorRoleId)
-  scope: storageAccount
+// ADR-028 UAMI-first data-plane access; stable across App Service slot swaps (T5).
+// principalType=ServicePrincipal avoids Azure Graph propagation-delay "principal not
+// found" deploy failures. Idempotent guid(container id, principal, role) name.
+resource uamiContainerBlobRbac 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for (container, i) in containers: if (!empty(userAssignedIdentityPrincipalId) && contains(userAssignedIdentityContainerNames, container)) {
+  name: guid(blobContainers[i].id, userAssignedIdentityPrincipalId, storageBlobDataContributorRoleId)
+  scope: blobContainers[i]
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageBlobDataContributorRoleId)
     principalId: userAssignedIdentityPrincipalId
     principalType: 'ServicePrincipal'
+    description: 'Stamp UAMI blob data access on this container only (container scope, ebilling-r1 re-plan Q5)'
   }
-}
+}]
 
 // ============================================================================
 // OUTPUTS
@@ -187,4 +177,4 @@ output storageAccountName string = storageAccount.name
 output primaryEndpoint string = storageAccount.properties.primaryEndpoints.blob
 
 // No connection-string output (task 244): callers use the blob endpoint above with their managed
-// identity (Storage Blob Data Contributor below). customer.bicep disables shared key access.
+// identity (Storage Blob Data Contributor on its containers, above). customer.bicep disables shared key access.

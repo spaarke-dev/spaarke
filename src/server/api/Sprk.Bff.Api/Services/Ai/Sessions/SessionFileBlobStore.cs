@@ -555,9 +555,11 @@ public sealed class SessionFileBlobStore
         403 => new InvalidOperationException(
             $"Durable session-file {operation} was DENIED (403). The identity the BFF resolves " +
             $"('Graph:ManagedIdentity:ClientId' when set, otherwise the App Service system-assigned identity) " +
-            $"needs the 'Storage Blob Data Contributor' role on the storage account behind " +
-            $"'{BlobEndpointConfigKey}'. Note that storage-account.bicep only creates that assignment when " +
-            "'appServicePrincipalId' is passed to the module.", ex),
+            $"needs the 'Storage Blob Data Contributor' role at the scope of the container named by " +
+            $"'{ContainerNameConfigKey}' (default '{DefaultContainerName}') on the account behind " +
+            $"'{BlobEndpointConfigKey}'. The identity holds no account-scope data role: storage-account.bicep " +
+            "grants it only on the containers listed in 'userAssignedIdentityContainerNames' " +
+            "(customer.bicep 'bffBlobContainerNames').", ex),
 
         404 => new InvalidOperationException(
             $"Durable session-file {operation} failed (404). The container named by '{ContainerNameConfigKey}' " +
