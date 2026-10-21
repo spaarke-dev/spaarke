@@ -1013,6 +1013,15 @@ public sealed class OfficeQuickCreateTestWebAppFactory : OfficeTestWebAppFactory
     public OfficeQuickCreateTestWebAppFactory()
     {
         CallerRead = MappingSourceCallerReadDouble.MirroringAppReads(Entities);
+        // #2191 K2: a project created from a matter or project is filed under it — the pair's type comes from the record-type
+        // catalog, and the secure-root plan then reads that parent's flag. This host holds no matter or project rows, so the
+        // parent read finds none and confers nothing (an ordinary create, as every pre-existing test here expects).
+        Entities
+            .Setup(e => e.RetrieveMultipleAsync(
+                It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => q.EntityName == "sprk_matter" || q.EntityName == "sprk_project"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.EntityCollection());
+        Entities.AnswersRecordTypeCatalog();
 
         // uac-r2 task 166 (S-69): the filter's second half asks the CALLER's table Create privilege through the
         // probe's virtual privilege seam. Answered from HeldPrivileges. (The Office test clients send no bearer

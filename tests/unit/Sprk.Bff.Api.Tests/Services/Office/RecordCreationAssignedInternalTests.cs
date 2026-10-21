@@ -34,6 +34,7 @@ public class RecordCreationAssignedInternalTests
         _entities.Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .Callback<Entity, CancellationToken>((e, _) => _created.Add(e))
             .ReturnsAsync(Guid.NewGuid());
+        _entities.AnswersRecordTypeCatalog(); // #2191 K2: a project created from a matter is filed under it
     }
 
     private OfficeRecordCreationService Sut(Mock<IIdentityNormalizationService> identity)

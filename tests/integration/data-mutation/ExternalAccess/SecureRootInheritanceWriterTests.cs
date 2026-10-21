@@ -555,8 +555,14 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
     /// <summary>Task 158 r1c-v1: what changes right after the Office create — between its plan and its provisioning.</summary>
     private Action<Guid>? _afterOfficeCreate;
 
+    /// <param name="callerRead">#2191 K2: the caller's read of the mapping source (default: it reads what the app read did).</param>
+    /// <param name="appReadFails">#2191 K2: the app-only read of the mapping source throws.</param>
+    /// <param name="mappedPairId">#2191 K2: the record the mapping's pair names (default: the source matter itself).</param>
+    /// <param name="catalogHasRow">#2191 K2: the record-type catalog has the source table's row.</param>
     private OfficeRecordCreationService OfficeCreator(
-        Guid sourceMatter, Guid typeRef, FieldMappingRuleEntity? extraRule = null, bool withBearerToken = true)
+        Guid sourceMatter, Guid typeRef, FieldMappingRuleEntity? extraRule = null, bool withBearerToken = true,
+        MappingSourceCallerReadDouble? callerRead = null, bool appReadFails = false, Guid? mappedPairId = null,
+        bool catalogHasRow = true)
     {
         var entities = new Mock<IGenericEntityService>(MockBehavior.Loose);
         entities
@@ -574,11 +580,29 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
             });
         entities
             .Setup(e => e.RetrieveAsync("sprk_matter", sourceMatter, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Entity("sprk_matter", sourceMatter)
-            {
-                ["sprk_matterid"] = sourceMatter,
-                ["sprk_recordtype"] = new EntityReference("sprk_recordtype_ref", typeRef),
-            });
+            .Returns((string _, Guid _, string[] columns, CancellationToken _) =>
+                // #2191 K2: the service's own read of the source's secure flag answers from the fixture's Dataverse.
+                columns.SequenceEqual(new[] { OfficeRecordCreationService.SecureFlagAttribute })
+                    ? Task.FromResult(new Entity("sprk_matter", sourceMatter)
+                    {
+                        [OfficeRecordCreationService.SecureFlagAttribute] = World.ValueOf<bool?>("sprk_matter", sourceMatter, "sprk_issecure"),
+                    })
+                    : appReadFails
+                        ? Task.FromException<Entity>(new TimeoutException("app-only read timed out"))
+                        : Task.FromResult(new Entity("sprk_matter", sourceMatter)
+                        {
+                            ["sprk_matterid"] = mappedPairId ?? sourceMatter,
+                            ["sprk_recordtype"] = new EntityReference("sprk_recordtype_ref", typeRef),
+                        }));
+
+        // #2191 K2: the record-type catalog row the service derives the filed-under pair's type from.
+        entities
+            .Setup(e => e.RetrieveMultipleAsync(
+                It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => q.EntityName == OfficeRecordCreationService.RecordTypeEntity),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => catalogHasRow
+                ? new EntityCollection(new List<Entity> { new(OfficeRecordCreationService.RecordTypeEntity, typeRef) })
+                : new EntityCollection());
 
         // The maker's mapping profile files the new project under the matter it is created from (the polymorphic pair).
         var fieldMappings = new Mock<IFieldMappingDataverseService>();
@@ -616,7 +640,7 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
             IdentityNormalizationFixtures.NoLinkedContact(), _gate,
             Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(), NullLogger<OfficeRecordCreationService>.Instance,
             _officeProbe.Object, new HttpContextAccessor { HttpContext = withBearerToken ? CallerRequest() : new DefaultHttpContext() },
-            MappingSourceCallerReadDouble.MirroringAppReads(entities)); // #2188: the caller reads what the app read returned
+            callerRead ?? MappingSourceCallerReadDouble.MirroringAppReads(entities)); // #2188: the caller reads what the app read returned
     }
 
     /// <summary>
@@ -932,6 +956,143 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
         FlagUnreadable(secure);
 
         var result = await OfficeCreateProjectFrom(secure);
+
+        result.Succeeded.Should().BeFalse();
+        result.Failure!.Code.Should().Be(RecordOwnerRefusal.ParentUndetermined);
+        _officeCreates.Should().BeEmpty();
+    }
+
+    // ── #2191 review K2 (UAC-r2): the project is filed under the record it is created from, whatever the mapping read ─────
+
+    private Task<RecordCreationResult> OfficeCreateProjectFrom(Guid matter, OfficeRecordCreationService creator) =>
+        creator.CreateAsync(new RecordCreationRequest
+        {
+            EntityType = QuickCreateEntityType.Project,
+            Name = "Lease review",
+            CallerUserId = "oid",
+            OwnerSystemUserId = Creator.ToString("D"),
+            SourceEntityLogicalName = "sprk_matter",
+            SourceRecordId = matter,
+        });
+
+    private static void ShouldBeFiledUnder(Entity created, Guid matter, Guid typeRef)
+    {
+        Guid.Parse(created[SecureRootInheritance.PairIdColumn]!.ToString()!).Should().Be(matter, "the pair's id names that matter");
+        created.GetAttributeValue<EntityReference>(SecureRootInheritance.PairTypeColumn).Id.Should().Be(typeRef, "typed as a matter");
+    }
+
+    /// <summary>
+    /// #2191 K2, must fire: the caller's read of the mapping source fails (a 429 here), so the mapping copies nothing — and the
+    /// project made from a SECURE matter is still filed under it and created INTO isolation, never unfiled and ordinary.
+    /// </summary>
+    [Fact]
+    public async Task OfficeCreate_FromASecureMatter_WhenTheCallerReadOfTheSourceFails_IsStillFiledUnderIt_AndIsolated()
+    {
+        var (secure, _) = Matters();
+        var typeRef = RecordTypeRef(_fixture, "sprk_matter");
+        var failing = new MappingSourceCallerReadDouble(_ => null) { FailWithStatus = 429 };
+
+        var result = await OfficeCreateProjectFrom(secure, OfficeCreator(secure, typeRef, callerRead: failing));
+
+        result.Succeeded.Should().BeTrue(result.Failure?.Detail);
+        result.Warnings.Should().Contain(OfficeRecordCreationService.SourceUnreadableWarning, "the mapping source was unavailable");
+        var row = _officeCreates.Should().ContainSingle().Subject;
+        ShouldBeFiledUnder(row, secure, typeRef);
+        row.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(SecureTeam, "created INTO isolation");
+        row.GetAttributeValue<bool?>("sprk_issecure").Should().BeTrue();
+        ShouldBeSecure(result.RecordId, "filed under the secure matter it was created from");
+    }
+
+    /// <summary>#2191 K2, must fire: the APP-ONLY read of the mapping source fails — the same: filed under the matter, isolated.</summary>
+    [Fact]
+    public async Task OfficeCreate_FromASecureMatter_WhenTheAppReadOfTheSourceFails_IsStillFiledUnderIt_AndIsolated()
+    {
+        var (secure, _) = Matters();
+        var typeRef = RecordTypeRef(_fixture, "sprk_matter");
+
+        var result = await OfficeCreateProjectFrom(secure, OfficeCreator(secure, typeRef, appReadFails: true));
+
+        result.Succeeded.Should().BeTrue(result.Failure?.Detail);
+        var row = _officeCreates.Should().ContainSingle().Subject;
+        ShouldBeFiledUnder(row, secure, typeRef);
+        row.GetAttributeValue<bool?>("sprk_issecure").Should().BeTrue();
+        ShouldBeSecure(result.RecordId, "filed under the secure matter it was created from");
+    }
+
+    /// <summary>
+    /// #2191 K2, must not fire: a project made from an ORDINARY matter is an ordinary project, as before — filed under the
+    /// matter, owned by the caller's business-unit team, unflagged — also when the mapping source could not be read.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OfficeCreate_FromAnOrdinaryMatter_IsAnOrdinaryProject_FiledUnderIt(bool callerReadFails)
+    {
+        var (_, ordinary) = Matters();
+        var typeRef = RecordTypeRef(_fixture, "sprk_matter");
+        var creator = OfficeCreator(ordinary, typeRef,
+            callerRead: callerReadFails ? new MappingSourceCallerReadDouble(_ => null) { FailWithStatus = 503 } : null);
+
+        var result = await OfficeCreateProjectFrom(ordinary, creator);
+
+        result.Succeeded.Should().BeTrue(result.Failure?.Detail);
+        var row = _officeCreates.Should().ContainSingle().Subject;
+        ShouldBeFiledUnder(row, ordinary, typeRef);
+        row.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(SecureChildShareWorld.GeneralTeam);
+        row.Contains("sprk_issecure").Should().BeFalse();
+        ShouldNotBeSecured(result.RecordId, "an ordinary matter passes no isolation on");
+    }
+
+    /// <summary>
+    /// #2191 K2 refinement (UAC-r2), must fire: the source is SECURE and the mapping's pair names a different record (an
+    /// ordinary matter) — it may not lower the project's isolation: refused, nothing created, and the refusal says nothing
+    /// about the other record.
+    /// </summary>
+    [Fact]
+    public async Task OfficeCreate_FromASecureMatter_WhenTheMappingFilesItUnderAnotherRecord_IsRefused_AndNothingIsCreated()
+    {
+        var (secure, ordinary) = Matters();
+        var typeRef = RecordTypeRef(_fixture, "sprk_matter");
+
+        var result = await OfficeCreateProjectFrom(secure, OfficeCreator(secure, typeRef, mappedPairId: ordinary));
+
+        result.Succeeded.Should().BeFalse();
+        result.Failure!.Kind.Should().Be(RecordCreationFailureKind.SecureFilingRefused);
+        result.Failure.Code.Should().Be(OfficeRecordCreationService.SecureSourceFilingMismatch);
+        result.Failure.Detail.Should().NotContain(ordinary.ToString("D"));
+        _officeCreates.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// #2191 K2 refinement, must not fire: the source is ORDINARY and the mapping's pair names a different record — the mapped
+    /// pair is kept, as before (an ordinary source has no isolation to lower).
+    /// </summary>
+    [Fact]
+    public async Task OfficeCreate_FromAnOrdinaryMatter_WhenTheMappingFilesItUnderAnotherRecord_KeepsTheMappedPair()
+    {
+        var (_, ordinary) = Matters();
+        var other = Guid.NewGuid();
+        _fixture.SeedMatter(other, isSecure: false);
+        var typeRef = RecordTypeRef(_fixture, "sprk_matter");
+
+        var result = await OfficeCreateProjectFrom(ordinary, OfficeCreator(ordinary, typeRef, mappedPairId: other));
+
+        result.Succeeded.Should().BeTrue(result.Failure?.Detail);
+        ShouldBeFiledUnder(_officeCreates.Should().ContainSingle().Subject, other, typeRef);
+        ShouldNotBeSecured(result.RecordId, "filed under the ordinary matter the mapping names");
+    }
+
+    /// <summary>
+    /// #2191 K2, must fire: the record-type catalog has no row for the source's table, so the pair cannot be derived — refused
+    /// rather than created unfiled (and so possibly NOT isolated); nothing created.
+    /// </summary>
+    [Fact]
+    public async Task OfficeCreate_WhenThePairCannotBeDerived_IsRefused_AndNothingIsCreated()
+    {
+        var (secure, _) = Matters();
+
+        var result = await OfficeCreateProjectFrom(secure,
+            OfficeCreator(secure, RecordTypeRef(_fixture, "sprk_matter"), catalogHasRow: false));
 
         result.Succeeded.Should().BeFalse();
         result.Failure!.Code.Should().Be(RecordOwnerRefusal.ParentUndetermined);

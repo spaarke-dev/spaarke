@@ -314,6 +314,14 @@ public sealed class SecureRootCreateRouteFixture : ProvisionProjectTestFixture
                 ["sprk_matterid"] = id.ToString("D"),
                 ["sprk_recordtype"] = new EntityReference("sprk_recordtype_ref", _mappedType ?? Guid.Empty),
             }));
+
+        // #2191 K2: the record-type catalog row the service derives a project's filed-under pair from (the matter's type).
+        entities
+            .Setup(e => e.RetrieveMultipleAsync(
+                It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => q.EntityName == "sprk_recordtype_ref"), It.IsAny<CancellationToken>()))
+            .Returns(() => Task.FromResult(_mappedType is { } type
+                ? new EntityCollection(new List<Entity> { new("sprk_recordtype_ref", type) })
+                : new EntityCollection()));
         return entities;
     }
 
