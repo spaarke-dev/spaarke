@@ -345,14 +345,17 @@ public sealed partial class SecureChildOwnershipAiToolTests
         GrantRevokedWarnings().Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "#2143 r9 F2 must-fire: a hook isolation-read fault followed by a mirror-read fault leaves no secure share: the last step takes the mirror off (the grant with it)")]
+    [Fact(DisplayName = "#2143 r9 F2 must-fire: a hook isolation-read fault followed by a mirror-read fault and failed removal reads leaves no secure share: the last step takes the mirror off (the grant with it)")]
     public async Task FilingRoute_AHookReadFaultThenAMirrorReadFault_TheLastStepTakesTheMirrorOff()
     {
         // Before round 9: the hook's faulted read answered "left", the mirror step could not read the row (Failed) and returned,
         // and the latch was set anyway: the last step ran as "was not isolated" and S's sharee kept Collaborate. Now the last
         // step removes the mirror — and, as the removal revokes every direct share, the grant the move gave (an under-share,
-        // logged: fail closed).
-        await RefileOffTheSecureThreadWithReadFaults(read => read is 2 or 3);
+        // logged: fail closed). Round 10 (F2-b): a Failed mirror step goes on to the removal, so the hook's removal must fail
+        // too for the last step to be the one: reads 2 (the hook's isolation read), 3 (the mirror's read of the row) and 4-6
+        // (the removal's three attempts) fault.
+        await RefileOffTheSecureThreadWithReadFaults(read => read is >= 2 and <= 6);
+        ShareWorld.TransientRowReadFaultsFired("sprk_communication", RefiledEmail).Should().Be(5);
 
         EmailShareOf(Sharee).Should().BeNull("no secure-child share outlives the email's isolation");
         EmailShareOf(RecordMember).Should().BeNull("the removal after the grant revokes it too: an under-share, never an over-share");
@@ -385,6 +388,69 @@ public sealed partial class SecureChildOwnershipAiToolTests
         EmailShareOf(Sharee).Should().BeNull();
         EmailShareOf(RecordMember).Should().Be(ReadMask);
         GrantRevokedWarnings().Should().BeEmpty();
+    }
+
+    // ---- #2143 round 10 (F2-b): a mirror step that could not decide still takes a row that left isolation through the removal ----
+
+    /// <summary>
+    /// A to-do filed under secure S (Secure-owned, holding S's sharee's mirror) re-filed by a Full Access holder on S onto
+    /// <paramref name="matter"/>; the share world's FIRST by-id read of it (the mirror step's read of the row) faults.
+    /// </summary>
+    private async Task RefileTheSecureToDoWithItsMirrorReadFaulting(Guid matter)
+    {
+        _world.WithRecord("sprk_todo", Todo, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam, extra: new()
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", SecureMatter),
+        });
+        ShareWorld.SecureChild("sprk_todo", Todo, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
+        _shareTable.Seed("sprk_todo", Todo, DataversePrincipalRef.User(Sharee), CollaborateMask);
+        _user.FullAccessOn.Add(SecureMatter);
+        _user.OwningTeamOf[Todo] = Directory.SecureNamedTeam;
+        ShareWorld.Set("sprk_todo", Todo, "sprk_regardingmatter", new EntityReference("sprk_matter", matter));
+        ShareWorld.TransientRowReadFaultsOf("sprk_todo", Todo, read => read == 1);
+
+        var result = await RefileChild("sprk_todo", Todo, new()
+        {
+            ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({matter:D})",
+        });
+
+        Status(result).Should().Be(Microsoft.AspNetCore.Http.StatusCodes.Status204NoContent, Detail(result));
+        ShareWorld.TransientRowReadFaultsFired("sprk_todo", Todo).Should().Be(1, "the mirror step's read of the row faulted");
+    }
+
+    /// <summary>The synchronizer's Errors that a re-filed row's mirror removal failed (not its own read fault's Error).</summary>
+    private IEnumerable<string> RemovalErrors() => _sharesLog.Entries
+        .Where(e => e.Level >= Microsoft.Extensions.Logging.LogLevel.Error && e.Message.Contains("not all removed", StringComparison.Ordinal))
+        .Select(e => e.Message);
+
+    [Fact(DisplayName = "#2143 r10 F2-b must-fire: a to-do re-filed off secure S onto ordinary O, whose mirror step cannot read it, still loses S's mirrored shares")]
+    public async Task ChildRefile_OffASecureMatter_WhenTheMirrorStepCannotReadTheRow_TheMirrorIsStillRemoved()
+    {
+        // Before round 10: the mirror step answered Failed and the re-file step returned before it asked whether the row was
+        // isolated, so S's sharee kept Collaborate on an ordinary to-do for good (the two-minute reconcile sees only
+        // Secure-owned rows).
+        await RefileTheSecureToDoWithItsMirrorReadFaulting(OrdinaryMatter);
+
+        _world.Assignments.Should().Equal(("sprk_todo", Todo, Directory.ChildTeam));
+        _shareTable.MaskOf("sprk_todo", Todo, DataversePrincipalRef.User(Sharee)).Should().BeNull(
+            "the removal reads the owner again: ordinary, so the mirror comes off");
+        RemovalErrors().Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "#2143 r10 F2-b must-not-fire: a to-do re-filed from secure S onto secure S2, whose mirror step cannot read it, keeps its mirror, and no error is logged")]
+    public async Task ChildRefile_BetweenSecureMatters_WhenTheMirrorStepCannotReadTheRow_ItKeepsItsMirror()
+    {
+        // Still owned by the Secure team: the removal refuses it (still isolated, not a fault) — it keeps its shares, and the
+        // two-minute reconcile completes its mirror.
+        _world.WithSecureRoot("sprk_matter", SecondSecureMatter);
+        ShareWorld.SecureRoot("sprk_matter", SecondSecureMatter);
+
+        await RefileTheSecureToDoWithItsMirrorReadFaulting(SecondSecureMatter);
+
+        _world.Assignments.Should().BeEmpty("it stays with the Secure team");
+        _shareTable.MaskOf("sprk_todo", Todo, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask);
+        _shareTable.WriteLog.Should().NotContain(w => w.Action == "RevokeAccess" && w.RecordId == Todo);
+        RemovalErrors().Should().BeEmpty("a row still isolated is not a failed removal");
     }
 
     private static readonly Guid SecondSecureMatter = Guid.Parse("a2143000-0000-4000-8000-0000000000a8");

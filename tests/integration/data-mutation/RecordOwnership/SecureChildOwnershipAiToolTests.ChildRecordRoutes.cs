@@ -98,7 +98,10 @@ public sealed partial class SecureChildOwnershipAiToolTests
     private SecureChildReconciler Children(Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null) =>
         SecureChildShareWorld.ReconcilerOver(
             () => ShareWorld, _shareTable, null!, threads: threads, gateDecisionRecords: _gateOverShareWorld ?? _gate.Sharing,
-            logger: _reconcilerLog);
+            logger: _reconcilerLog, sharesLogger: _sharesLog);
+
+    /// <summary>#2143 round 10: what the reconciler's synchronizer logged.</summary>
+    private readonly Sprk.Bff.Api.Tests.Services.Communication.CapturingLogger<SecureChildShareSynchronizer> _sharesLog = new();
 
     /// <summary>#2143 round 9: what the reconciler's step after a re-file logged.</summary>
     private readonly Sprk.Bff.Api.Tests.Services.Communication.CapturingLogger<SecureChildReconciler> _reconcilerLog = new();

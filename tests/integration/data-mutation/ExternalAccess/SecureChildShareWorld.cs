@@ -194,8 +194,18 @@ internal sealed class SecureChildShareWorld
     public SecureChildShareWorld TransientRowReadFaultsOf(string table, Guid id, Func<int, bool> fails)
     {
         _transientRowReadFaults[(table, id)] = (fails, 0);
+        _transientRowReadFaultsFired[(table, id)] = 0;
         return this;
     }
+
+    private readonly Dictionary<(string Table, Guid Id), int> _transientRowReadFaultsFired = new();
+
+    /// <summary>
+    /// #2143 round 10: how many of <see cref="TransientRowReadFaultsOf"/>'s faults on that row actually fired — so a test that
+    /// relies on one cannot pass vacuously when a read is added earlier and the fault lands on another step.
+    /// </summary>
+    public int TransientRowReadFaultsFired(string table, Guid id) =>
+        _transientRowReadFaultsFired.TryGetValue((table, id), out var fired) ? fired : 0;
 
     private readonly HashSet<(string Table, Guid Id)> _failingIdListReads = new();
 
@@ -589,14 +599,16 @@ internal sealed class SecureChildShareWorld
         Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null,
         Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker? ownerPrivileges = null,
         Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing? gateDecisionRecords = null,
-        Microsoft.Extensions.Logging.ILogger<SecureChildReconciler>? logger = null)
+        Microsoft.Extensions.Logging.ILogger<SecureChildReconciler>? logger = null,
+        Microsoft.Extensions.Logging.ILogger<SecureChildShareSynchronizer>? sharesLogger = null)
     {
         var entities = EntitiesOver(current).Object;
         var configuration = Configuration();
         var resolver = new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver(
             entities, configuration, NullLogger<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver>.Instance);
         var synchronizer = new SecureChildShareSynchronizer(
-            entities, shares, noAccessGuard ?? NobodyWalled(), configuration, NullLogger<SecureChildShareSynchronizer>.Instance);
+            entities, shares, noAccessGuard ?? NobodyWalled(), configuration,
+            sharesLogger ?? NullLogger<SecureChildShareSynchronizer>.Instance);
         return new SecureChildReconciler(
             entities, resolver, synchronizer, webApi, configuration, logger ?? NullLogger<SecureChildReconciler>.Instance,
             gateDecisionRecords ?? new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing, // ontology 042b: a gate-record double over an empty world
@@ -688,7 +700,11 @@ internal sealed class SecureChildShareWorld
             var read = transient.Reads + 1;
             _transientRowReadFaults[(query.EntityName, readId)] = (transient.Fails, read);
             if (transient.Fails(read))
+            {
+                _transientRowReadFaultsFired[(query.EntityName, readId)] =
+                    _transientRowReadFaultsFired.GetValueOrDefault((query.EntityName, readId)) + 1;
                 throw new InvalidOperationException($"Test: read {read} of this {query.EntityName} row faulted (transient).");
+            }
         }
 
         if (query.Criteria.Conditions.Any(c =>
