@@ -26,6 +26,8 @@ A systemuser with sprk_isexternal = true must not read or change any internal-on
 3. all Procedure files (ebilling). Extracts of Procedures in rules or decision records that an external user may see are not affected.
 
 Invoice and export files stay reachable by the related external user through the firm route (036 read set, I-14 veto, task 187 rule, file gate).
+
+Open question carried in (ebilling 099 review, 2026-10-21): scorecard grades (`ScorecardCalculatorEndpoints`, /api/matters|projects/{id} grades) are derived from spend but sit outside /api/finance, so ebilling's step 0 does not refuse a flagged-external systemuser there; likewise `InsightsSearchEndpoint` and `WorkspaceAiEndpoints`. Decide in the design study whether they count as internal-only for a flagged-external systemuser.
   </goal>
 
   <design-checkpoint>
