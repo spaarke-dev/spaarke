@@ -288,8 +288,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
         var heldThread = Guid.Parse("a2110000-0000-4000-8000-0000000000e5");
         var otherThread = Guid.Parse("a2110000-0000-4000-8000-0000000000e6");
         // #2143 round 6: the resolver reads both threads (RecordThreadFiling); Direct threads, so they file the message under nothing.
-        _world.WithRecord("sprk_communicationthread", heldThread, Directory.ChildBu)
-            .WithRecord("sprk_communicationthread", otherThread, Directory.ChildBu);
+        _world.WithRecord("sprk_communicationthread", heldThread, Directory.ChildBu, extra: new() { ["sprk_threadtype"] = new OptionSetValue(100000001) }) // #2143 r7d: Direct
+            .WithRecord("sprk_communicationthread", otherThread, Directory.ChildBu, extra: new() { ["sprk_threadtype"] = new OptionSetValue(100000001) }); // #2143 r7d: Direct
         _world.WithRecord("sprk_communication", JoiningMessage, Directory.ChildBu, owningTeam: Directory.ChildTeam, extra: new()
         {
             ["sprk_regardingmatter"] = new EntityReference("sprk_matter", OrdinaryMatter),
@@ -390,6 +390,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
         {
             _joinedThreadRow["sprk_regardingmatter"] = new EntityReference("sprk_matter", matter);
             ShareWorld.Add("sprk_communicationthread", JoinedThread,
+                ("sprk_threadtype", new OptionSetValue(100000000)), // #2143 r7d: a record thread
                 ("owningteam", new EntityReference("team", matter == SecureMatter ? Directory.SecureNamedTeam : SecureChildShareWorld.GeneralTeam)),
                 ("sprk_regardingmatter", new EntityReference("sprk_matter", matter)));
         }
@@ -398,7 +399,11 @@ public sealed partial class SecureChildOwnershipAiToolTests
             _joinedThreadRow["sprk_regardingproject"] = new EntityReference("sprk_project", project);
 
         // #2143 round 6: the resolver reads the thread a join names (RecordThreadFiling) from its own Dataverse — the same row.
-        var threadColumns = new Dictionary<string, object>();
+        var threadColumns = new Dictionary<string, object>
+        {
+            // #2143 r7d: the thread's type, as the join reads it.
+            ["sprk_threadtype"] = new OptionSetValue(regardingMatter is null && regardingProject is null ? 100000001 : 100000000),
+        };
         if (regardingMatter is { } threadMatter)
             threadColumns["sprk_regardingmatter"] = new EntityReference("sprk_matter", threadMatter);
         if (regardingProject is { } threadProject)

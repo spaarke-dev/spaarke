@@ -1520,9 +1520,10 @@ public class RecordOwnershipResolverTests
         var secureThread = new EntityReference("sprk_communicationthread", Guid.NewGuid());
         var directory = Directory()
             .WithRecord("sprk_project", SecureProjectId, SecureBu)
-            .WithRecord("sprk_communicationthread", previousThread.Id, ChildBu, owningTeam: ChildTeam)
+            .WithRecord("sprk_communicationthread", previousThread.Id, ChildBu, owningTeam: ChildTeam, extra: new() { ["sprk_threadtype"] = new OptionSetValue(100000001) }) // #2143 r7d: Direct
             .WithRecord("sprk_communicationthread", secureThread.Id, SecureBu, owningTeam: SecureNamedTeam, extra: new()
             {
+                ["sprk_threadtype"] = new OptionSetValue(100000000), // #2143 r7d: a record thread
                 ["sprk_regardingproject"] = new EntityReference("sprk_project", SecureProjectId),
             })
             .WithRecord("sprk_communication", communicationId, ChildBu, owningTeam: ChildTeam,
@@ -2305,10 +2306,12 @@ public class RecordOwnershipResolverTests
             .WithRecord("sprk_matter", SecureThreadMatterId, SecureBu, isSecure: true, owningTeam: SecureNamedTeam)
             .WithRecord("sprk_communicationthread", SecureThreadId, SecureBu, owningTeam: SecureNamedTeam, extra: new()
             {
+                ["sprk_threadtype"] = new OptionSetValue(100000000), // #2143 r7d: a record thread
                 ["sprk_regardingmatter"] = new EntityReference("sprk_matter", SecureThreadMatterId),
             })
             .WithRecord("sprk_communicationthread", OrdinaryThreadId, ChildBu, owningTeam: ChildTeam, extra: new()
             {
+                ["sprk_threadtype"] = new OptionSetValue(100000000), // #2143 r7d: a record thread
                 ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
             })
             .WithRecord("sprk_communication", messageId, owningBu, owningTeam: owningTeam, extra: columns);
@@ -2904,7 +2907,7 @@ public class RecordOwnershipResolverTests
         var (directory, messageId) = MessageWorld(OtherOrdinaryMatterId, GeneralBu, GeneralTeam, threadId: DirectThreadId);
         directory
             .WithRecord("sprk_matter", OtherOrdinaryMatterId, GeneralBu, owningTeam: GeneralTeam)
-            .WithRecord("sprk_communicationthread", DirectThreadId, SecureBu, owningTeam: SecureNamedTeam);
+            .WithRecord("sprk_communicationthread", DirectThreadId, SecureBu, owningTeam: SecureNamedTeam, extra: new() { ["sprk_threadtype"] = new OptionSetValue(100000001) }); // #2143 r7d: Direct
         var request = MoveMessageTo(messageId, MatterId, CallerHolding(Collaborate));
 
         var resolution = await Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
@@ -2923,9 +2926,10 @@ public class RecordOwnershipResolverTests
         var messageId = Guid.NewGuid();
         var directory = Directory()
             .WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam)
-            .WithRecord("sprk_communicationthread", DirectThreadId, GeneralBu, owningTeam: GeneralTeam)
+            .WithRecord("sprk_communicationthread", DirectThreadId, GeneralBu, owningTeam: GeneralTeam, extra: new() { ["sprk_threadtype"] = new OptionSetValue(100000001) }) // #2143 r7d: Direct
             .WithRecord("sprk_communicationthread", OrdinaryThreadId, ChildBu, owningTeam: ChildTeam, extra: new()
             {
+                ["sprk_threadtype"] = new OptionSetValue(100000000), // #2143 r7d: a record thread
                 ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
             })
             .WithRecord("sprk_communication", messageId, GeneralBu, owningTeam: GeneralTeam, extra: new()
@@ -3585,6 +3589,70 @@ public class RecordOwnershipResolverTests
 
         resolution.IsRefused.Should().BeFalse();
         asked.Should().BeEmpty("no secure record is left");
+    }
+
+    // ---- #2143 round 7 (R7d): a thread's parents are decided by its type ----
+
+    /// <summary>
+    /// #2143 round 7 (R7d): a message regarding the ordinary matter (<see cref="MatterId"/>), in a thread of its own whose
+    /// regarding names the secure matter S (<see cref="SecureThreadMatterId"/>). <paramref name="threadType"/> null leaves the
+    /// type unset; <paramref name="isDefaultThread"/> marks the thread the way a master thread is marked.
+    /// </summary>
+    private static (FakeDirectory Directory, Guid MessageId) MessageInAThreadRegardingS(int? threadType, bool isDefaultThread = false)
+    {
+        var threadId = Guid.NewGuid();
+        var (directory, messageId) = MessageWorld(MatterId, ChildBu, ChildTeam, threadId: threadId);
+        var thread = new Dictionary<string, object>
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", SecureThreadMatterId),
+            ["sprk_isdefaultthread"] = isDefaultThread,
+        };
+        if (threadType is { } type)
+            thread["sprk_threadtype"] = new OptionSetValue(type);
+        directory
+            .WithRecord("sprk_communicationthread", threadId, SecureBu, owningTeam: SecureNamedTeam, extra: thread)
+            .WithRecord("sprk_matter", OtherOrdinaryMatterId, GeneralBu, owningTeam: GeneralTeam);
+        return (directory, messageId);
+    }
+
+    [Theory]
+    [InlineData(false)] // a Direct thread that carries a regarding
+    [InlineData(true)] // a master thread: Direct, marked as the default thread
+    public async Task Reparent_OfAMessageInADirectThreadRegardingASecureRecord_TheThreadContributesNothing(bool isDefaultThread)
+    {
+        // Must-NOT-fire (#2143 round 7, R7d): a Direct thread (100000001) is not filed under any record, whatever its regarding
+        // holds, so it contributes no parent. The message re-filed between ordinary matters asks no F3 and takes the new
+        // matter's team. Before R7d the thread's regarding made S a parent: F3 was asked and this caller refused.
+        var (directory, messageId) = MessageInAThreadRegardingS(threadType: 100000001, isDefaultThread);
+        var asked = new List<Guid>();
+        var request = MoveMessageTo(messageId, OtherOrdinaryMatterId, CallerHolding(Collaborate, asked: asked));
+
+        var resolution = await Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
+
+        resolution.IsRefused.Should().BeFalse("a Direct thread files the message under nothing");
+        asked.Should().BeEmpty("no secure record is left");
+        resolution.IsSecureOwner.Should().BeFalse();
+        resolution.OwningTeamId.Should().Be(GeneralTeam);
+        MessageOwnerOf(directory, messageId).Should().Be(GeneralTeam);
+    }
+
+    [Fact]
+    public async Task Reparent_OfAMessageInAnUntypedThreadRegardingASecureRecord_CountsItAsARecordThread_AndTheMessageStaysSecure()
+    {
+        // Must-fire (#2143 round 7, R7d): a thread with no type is read as a Record thread, so its secure regarding still
+        // files the message under S — fail closed by isolating. A Full Access holder on S is asked about S and permitted;
+        // the message stays Secure-owned until its thread follows the filing.
+        var (directory, messageId) = MessageInAThreadRegardingS(threadType: null);
+        var asked = new List<Guid>();
+        var request = MoveMessageTo(messageId, OtherOrdinaryMatterId, CallerHolding(FullAccess, asked: asked));
+
+        var resolution = await Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
+
+        resolution.IsRefused.Should().BeFalse();
+        asked.Should().Contain(SecureThreadMatterId, "an untyped thread's regarding is a parent");
+        resolution.IsSecureOwner.Should().BeTrue("an untyped thread regarding S keeps the message Secure");
+        NoOrdinaryOwnerEverSent(directory);
+        MessageOwnerOf(directory, messageId).Should().Be(SecureNamedTeam);
     }
 
     private static RecordReparent MoveMessageTo(

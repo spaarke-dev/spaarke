@@ -425,9 +425,10 @@ public class SecureChildOwnershipTests
             extra: new() { ["sprk_communicationthread"] = previousThread });
         // #2143 round 6: the resolver reads both threads (RecordThreadFiling) — the Direct one the message leaves, and the secure
         // record's thread it joins, which files it under that record.
-        world.WithRecord("sprk_communicationthread", previousThread.Id, Directory.ChildBu)
+        world.WithRecord("sprk_communicationthread", previousThread.Id, Directory.ChildBu, extra: new() { ["sprk_threadtype"] = new OptionSetValue(100000001) }) // #2143 r7d: Direct
             .WithRecord("sprk_communicationthread", threadId, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam, extra: new()
             {
+                ["sprk_threadtype"] = new OptionSetValue(100000000), // #2143 r7d: a record thread
                 ["sprk_regardingmatter"] = new EntityReference("sprk_matter", SecureMatter),
             });
         var assignFailure = new InvalidOperationException("Read Privilege Check For Owner failed");

@@ -697,6 +697,9 @@ public sealed class RefileWriterBindShapeTests
                 .SecureChild("sprk_communicationthread", ThreadA, ("sprk_regardingmatter", "sprk_matter", SecureMatter))
                 .SecureChild("sprk_communicationthread", ThreadB, ("sprk_regardingmatter", "sprk_matter", SecureMatter))
                 .Set("sprk_communication", Communication, "sprk_communicationthread", new EntityReference("sprk_communicationthread", thread));
+            // #2143 r7d: record threads.
+            _world.Set("sprk_communicationthread", ThreadA, "sprk_threadtype", new OptionSetValue(100000000));
+            _world.Set("sprk_communicationthread", ThreadB, "sprk_threadtype", new OptionSetValue(100000000));
         }
     }
 

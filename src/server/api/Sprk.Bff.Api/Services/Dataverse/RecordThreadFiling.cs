@@ -6,9 +6,11 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 
 /// <summary>
 /// #2143 round 6: the ONE rule for "the parents a message's record thread files it under" (S6): a <c>sprk_communication</c>
-/// in a thread takes every ownership parent the thread row carries (<see cref="RecordOwnershipContext.ParentsOf(Entity)"/>),
-/// in addition to its own. A per-user master or Direct thread carries no regarding, so it adds nothing — the thread itself
-/// is never an ownership parent (<see cref="RecordOwnershipResolver.OwnershipParentEntities"/>' remarks). Shared by the live
+/// in a RECORD thread takes every ownership parent the thread row carries (<see cref="RecordOwnershipContext.ParentsOf(Entity)"/>),
+/// in addition to its own. Round 7d: decided by the thread's TYPE (<c>sprk_threadtype</c>, <see cref="ParentsOf"/>) — a
+/// Direct thread, the per-user master included, adds nothing whatever lookups it carries; a thread whose type is not set or
+/// not known counts as a record thread (secure-if-any makes that the isolating answer). The thread itself is never an
+/// ownership parent (<see cref="RecordOwnershipResolver.OwnershipParentEntities"/>' remarks). Shared by the live
 /// re-file path (<see cref="RecordOwnershipResolver"/>'s <c>ReparentAsync</c> and its settle reads) and the backstop
 /// (<c>SecureChildReconciler</c>'s <c>ContextFor</c>), so the two never disagree on a message's owner.
 /// </summary>
@@ -29,6 +31,12 @@ internal static class RecordThreadFiling
     /// <summary>A message's thread lookup.</summary>
     internal const string ThreadColumn = "sprk_communicationthread";
 
+    /// <summary>The thread's type (<c>ThreadTopology</c>).</summary>
+    internal const string ThreadTypeColumn = "sprk_threadtype";
+
+    /// <summary><c>sprk_threadtype</c> Direct (1:1, and the per-user master): files its messages under nothing.</summary>
+    internal const int DirectThreadType = 100000001;
+
     /// <summary>Whether <paramref name="table"/> is the table whose rows take their thread's filing.</summary>
     internal static bool AppliesTo(string? table) =>
         string.Equals(table?.Trim(), CommunicationTable, StringComparison.OrdinalIgnoreCase);
@@ -42,11 +50,18 @@ internal static class RecordThreadFiling
             : null;
     }
 
-    /// <summary>The parents <paramref name="thread"/> files its messages under: every ownership parent it carries.</summary>
+    /// <summary>
+    /// The parents <paramref name="thread"/> files its messages under, by its TYPE (#2143 round 7d): a Direct thread
+    /// (<see cref="DirectThreadType"/>, the per-user master included) none; a record thread (<c>100000000</c>) — and a thread
+    /// whose type is not set or not known, counted as one (fail closed by isolating: secure-if-any) — every ownership parent it
+    /// carries.
+    /// </summary>
     internal static IReadOnlyList<RecordOwnershipParent> ParentsOf(Entity thread)
     {
         ArgumentNullException.ThrowIfNull(thread);
-        return RecordOwnershipContext.ParentsOf(thread);
+        return thread.GetAttributeValue<OptionSetValue>(ThreadTypeColumn)?.Value == DirectThreadType
+            ? Array.Empty<RecordOwnershipParent>()
+            : RecordOwnershipContext.ParentsOf(thread);
     }
 
     /// <summary>

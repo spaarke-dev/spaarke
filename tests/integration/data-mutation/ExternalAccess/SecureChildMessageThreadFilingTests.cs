@@ -40,6 +40,7 @@ public class SecureChildMessageThreadFilingTests
         if (seedThread)
         {
             _world.Add("sprk_communicationthread", threadId,
+                ("sprk_threadtype", new OptionSetValue(100000000)), // #2143 r7d: a record thread
                 ("owningteam", new EntityReference("team", SecureTeam)),
                 ("sprk_regardingmatter", new EntityReference("sprk_matter", s2)));
         }
@@ -92,6 +93,7 @@ public class SecureChildMessageThreadFilingTests
             .SecureChild("sprk_communicationthread", thread, ("sprk_regardingmatter", "sprk_matter", matter))
             .UserOwnedChild("sprk_communication", message, ("sprk_communicationthread", "sprk_communicationthread", thread))
             .FailingRowReadsOf("sprk_communicationthread", thread);
+        _world.Set("sprk_communicationthread", thread, "sprk_threadtype", new OptionSetValue(100000000)); // #2143 r7d
 
         var report = await Reconciler().ReconcileAsync(
             "sprk_matter", matter, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Provisioning, CancellationToken.None);

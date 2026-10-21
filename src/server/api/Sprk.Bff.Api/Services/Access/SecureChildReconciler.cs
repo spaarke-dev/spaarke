@@ -305,7 +305,8 @@ public sealed record OrdinaryRowReownResult(OrdinaryRowReownOutcome Outcome, str
 /// neither it nor its own children are reached. An unfiled row is never reached.</para>
 /// <para><b>The rule is the resolver's, with 146's inputs.</b> Each row's parents are every ownership-parent lookup it
 /// carries (<see cref="RecordOwnershipContext.ParentsOf"/> over all its columns — the reparent's input), plus, for a message,
-/// its record thread's filing (S6, <c>RecordThreadFiling</c> — the re-file path's rule; #2143 round 6: a thread outside the
+/// its record thread's filing (S6, <c>RecordThreadFiling</c> — the re-file path's rule, by the thread's type (round 7d: a Direct
+/// thread adds nothing; an unset or unknown type counts as a record thread); #2143 round 6: a thread outside the
 /// pass is read, and a message whose thread cannot be read is left undecided); a row that names no parent keeps
 /// its owner (<see cref="UnfiledOwnership.KeepCreator"/>). Rows are decided shallowest first and
 /// REPEATED TO A FIXPOINT (task 148 r1; report-only too since r2, over planned owners): a row whose parent sits at its own level (an FR-26-stamped analysis of a document, a
@@ -1871,7 +1872,8 @@ public sealed class SecureChildReconciler
             var parents = IsGrant(row.LogicalName)
                 ? GrantRootParent(row)
                 : RecordOwnershipContext.ParentsOf(row).ToList();
-            // #2143 round 6: the ONE rule for a message's thread parents (RecordThreadFiling), from the pass's preloaded row or,
+            // #2143 round 6: the ONE rule for a message's thread parents (RecordThreadFiling — round 7d: by the thread's type, a
+            // Direct thread adding nothing), from the pass's preloaded row or,
             // for a thread outside the pass, the one LoadThreadsOutsidePassAsync read (a faulted read decides nothing here:
             // DecideRowAsync never resolves such a row).
             if (RecordThreadFiling.ThreadOf(row) is { } threadId
