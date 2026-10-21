@@ -138,6 +138,7 @@
       - K3: a caller payload holding an explicit null under lowercase `sprk_ai_search_index@odata.bind` must not produce two keys that differ only in case after step 8's fill. Normalise the bind key (or drop the null entry before filling); test the duplicate-key case and the canonical-case case.
       Whichever of 017 or 018 lands first owns this; the other confirms it.
     </criterion>
+    <criterion testable="true">On merge of the Office move onto the unified create: close #1614 and #1617 (their unified-service half merged in #2214, cf0886360a; the Office half closes here). Cite the merge SHA.</criterion>
   </acceptance-criteria>
 
   <notes>Spec FR-13 part 2, FR-12, NFR-07. Office todo and document save are task 030 (not here). Release note: Office Project-under-Matter owner changes (task 015); Office Invoice becomes team-owned.
