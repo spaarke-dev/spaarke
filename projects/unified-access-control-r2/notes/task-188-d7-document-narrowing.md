@@ -1131,3 +1131,172 @@ Run on the final sources (`13367dd0c6`; the pre-commit `dotnet format` changed n
 | Publish size | not re-measured: part 2 adds no package or file, only code in three existing handlers and the guard (part 1: +7,520 B for the whole slice) |
 
 Not run, by the brief: the full unfiltered unit suite, any deploy, any Dataverse, Azure or Key Vault access.
+
+
+## 17. Round 4a — the AI-area gaps from security pass 2 (F1-1, F1-3, F1-5)
+
+Commits `d3b589d151` (F1-1), `37229a3aed` (F1-3), `ffe869362b` (F1-5), `bfca006249` (guard), `8eb347dc6d` (two test hosts).
+Scenario for every finding: a systemuser flagged `sprk_isexternal` (a B2B guest) with Read on matter M through a share.
+The rule is unchanged (§1); every site reuses `InternalPlaneDocumentNarrowing` over `InternalRouteDocumentNarrowing`
+(`plane=internal-routes`), so nothing of the rule is copied.
+
+### F1-1 — `IAiAuthorizationService` checked Read only
+
+**The fix** (`Services/Ai/AiAuthorizationService.cs`, after the Read loop). For a caller who is not a resolved internal
+systemuser, the ids Read allowed go through ONE `InternalPlaneDocumentNarrowing.ForCallerAsync` call:
+- a hidden id moves to the denied set with the SAME reason as an unreadable id (`Insufficient permissions (Read access
+  required)`), so the `Denied` / `Partial` shapes are unchanged and a hidden document cannot be told from an unreadable one;
+- a narrowing fault hides every id (deny all); a failed lookup counts as external (the slice A / B rule);
+- an id the caller cannot Read is never sent to the narrowing; internal systemusers make no call and no read.
+
+Sites covered by that one change (each pinned by its own test through its production code):
+
+| Site | Wiring | Hidden → |
+|---|---|---|
+| Chat document context: DocumentId, AdditionalDocumentIds, an `sprk_document` host, the compose active document | `AiAuthorizationFilter.AreChatContextChecksAllowedAsync` → `AuthorizeAsync` | the chat family's uniform 403; the handler never builds the context |
+| Analysis execute | `AnalysisAuthorizationFilter.AuthorizeDocumentAccessAsync` → `AuthorizeAsync` | 403; `AnalysisDocumentLoader` never runs |
+| `POST /api/ai/rag/search` | `RagEndpoints.TrimToReadableDocumentsAsync` → `AuthorizeAsync` | the row is dropped |
+| `GET /api/ai/visualization/related/{id}` | `VisualizationEndpoints.AuthorizeRowsAsync` → `AuthorizeAsync` | the row is dropped (and a hub left with no row) |
+
+**Rows not in the authorized input.** RAG: every returned row is kept only when its own `DocumentId` is in the authorized
+set, so no row can carry a document that was not decided. Visualization: the parent `.eml` and sibling rows that
+`VisualizationService.GetEmailSiblingsAsync` reads app-only are RESULT rows (`IsResultRow`), so they are in the ids
+`AuthorizeRowsAsync` sends to `AuthorizeAsync` and are narrowed by the same call (pinned: a hidden parent `.eml` and a
+Restricted sibling are dropped). The source node is decided by the route filter (same service); hubs are the source's own
+lookups.
+
+**Also fixed (found by the new guard rule): `POST /api/ai/chat/sessions/{sessionId}/documents/from-document`**
+(`ChatDocumentEndpoints.IngestArchiveDocumentAsync`). It downloads the `.eml` app-only after a Read-only check
+(`IAuthorizationService`), by document id or by communication id, so the external caller could ingest an internal-only
+email into an AI session. It now calls `ForCallerAsync` after the Read check and refuses a hidden archive with
+`ProblemDetailsHelper.Forbidden(InternalPlaneDocumentNarrowing.HiddenReasonCode)` (the existing `insufficient_rights`
+403), before the pointer check and the download.
+
+**K7 allow-list: `AiAuthorizationService` is NOT added.** K7 lists types that hold, resolve, invoke or build a seam, or call
+a method that takes one. `AiAuthorizationService` calls `ForCallerAsync` (no seam parameter), so it is not a consumer;
+`InternalPlaneDocumentNarrowing` (already listed) is. Listing it would fail K7 as a STALE entry. Its coverage is the new
+AI content rule below.
+
+### F1-3 — derived analysis content for a hidden document
+
+**One helper**, `AnalysisAuthorizationFilter.IsAnalysisDocumentHiddenFromCallerAsync(httpContext, analysisId, logger)`:
+1. a resolved internal systemuser: `false`, nothing read;
+2. otherwise it reads `sprk_documentid` and `sprk_outputfileid` (`AnalysisDocumentColumns`) app-only through
+   `IGenericEntityService` (as the analysis-read rule reads its anchors);
+3. ONE `InternalPlaneDocumentNarrowing.NarrowForExternalCallerAsync` call over the populated links;
+4. `true` when either is hidden, the narrowing faults, or the links cannot be read (a throw or no row: undecidable);
+   an analysis with neither link is unaffected.
+
+`InternalPlaneDocumentNarrowing` now exposes its two steps (`IsExternalOrUnknownCallerAsync`, internal, and
+`NarrowForExternalCallerAsync`); `ForCallerAsync` is the two composed, unchanged in behaviour.
+
+| Site | Where | Hidden → |
+|---|---|---|
+| `GET /api/ai/analysis/{analysisId}` | `AuthorizeAnalysisAccessAsync`: the evaluator's `next` is wrapped, so the helper runs only AFTER the analysis-read rule allowed | `FinanceAuthorizationFilter.UniformRecordNotFound` (the route's uniform 404); `GetAnalysisAsync` never runs |
+| Chat analysis host (`sprk_analysis` / `sprk_analysisoutput` sentinel) | `AnalysisAuthorizationFilter.IsAnalysisReadableAsync` (`… is null && !hidden`) | not readable → the chat family's uniform 403 |
+| `GET /api/ai/chat/context-mappings/analysis/{analysisId}` | `AnalysisChatContextEndpoints.GetAnalysisChatContextAsync`, before the resolver and its cache | `TypedResults.NotFound()` (the route's existing 404) |
+
+### F1-5 — `read_query`'s row-cap warning
+
+`DataverseReadQueryHandler`: `rawPageLength = value.GetArrayLength()` before any row is hidden; the warning tests
+`rawPageLength >= translation.Top`. Test: TOP 50, 50 rows returned, 3 own-Restricted → 47 rows and the warning; 49 rows →
+no warning.
+
+### Guard (`ExternalDocumentNarrowingGuardTests`, self-contained region "Task 188 round 4a")
+
+`EveryAiDocumentGrantAndAiContentDownload_ReachesTheNarrowing`:
+- **Grants:** every concrete `IAiAuthorizationService`'s `AuthorizeAsync` must reach the narrowing. Non-vacuity: the
+  implementation, plus the four grant sites (`AiAuthorizationFilter::AreChatContextChecksAllowedAsync`,
+  `AnalysisAuthorizationFilter::AuthorizeDocumentAccessAsync`, `RagEndpoints::TrimToReadableDocumentsAsync`,
+  `VisualizationEndpoints::AuthorizeRowsAsync`).
+- **Downloads:** every `Sprk.Bff.Api.Services.Ai.*` / `Sprk.Bff.Api.Api.Ai.*` method that calls
+  `ISpeFileOperations` / `SpeFileStore` `DownloadFileAsync`, `DownloadFileAsUserAsync`, `DownloadFileVersionAsync` or
+  `DownloadFileVersionAsUserAsync` must reach the narrowing or be listed in `AiContentDownloadsDecidedElsewhere`:
+  - `AnalysisDocumentLoader::ExtractDocumentTextAsync` and `DocumentContextService::ExtractDocumentTextAsync` (decided
+    upstream by `AuthorizeAsync`, which narrows);
+  - `AppOnlyAnalysisService::AnalyzeDocumentAsync` / `::ExtractDocumentTextAsync` and `FileIndexingService::IndexFileAsync` /
+    `::IndexFileAppOnlyAsync` (unattended profile and indexing; the bytes never reach a caller).
+  A stale entry (no longer downloads, or now narrows) fails. `ChatDocumentEndpoints::IngestArchiveDocumentAsync` is pinned
+  as seen, and reaches.
+- Control `AiContentDetector_MustFireAndMustNotFire` (fixtures `AiContentControl*`): fires for a grant on Read alone, a
+  download that skips the narrowing, and a stale listed entry; does not fire for a grant that narrows through a helper, a
+  download that narrows, or a listed download.
+- Limit (as §9): reach is per method. A mutant that keeps the call but never takes its branch (M1) passes the guard; the
+  behaviour tests kill it. Removing the call (G1) fails the guard.
+
+### Tests
+
+- `AiDocumentNarrowingTests` (new, `tests/unit/.../Services/Ai/`): the REAL `AiAuthorizationService`, the REAL caller
+  resolver over a stated systemuser, the REAL predicate behind the real app-only seam (`AppOnlyDocumentWorld`).
+  - Must fire (each over own Restricted, internal-only communication, Restricted parent, narrowing fault, lookup fault,
+    external-flag fault): `AuthorizeAsync` (alone, and beside a visible id); chat (DocumentId, AdditionalDocumentIds,
+    `sprk_document` host); analysis execute; RAG search; visualization related (hidden parent `.eml` + Restricted sibling).
+  - Must not fire: an internal user (no call, no read) and a visible document, at every site; an unreadable id is never
+    narrowed; a hidden id and an unreadable id get identical denials.
+- `AnalysisDerivedContentNarrowingTests` (new, over `AnalysisAuthHost`): the three F1-3 sites × source own Restricted,
+  source internal-only, source Restricted parent, OUTPUT FILE Restricted (source visible), narrowing fault, lookup fault,
+  link-read fault; must not fire for an internal user (and no link read) and for visible documents; the read rule runs
+  first (a refused caller costs no narrowing call); the context-mappings resolver is never consulted for a hidden analysis.
+- `ChatDocumentEndpointsContractTests`: the ingest × own Restricted, internal-only, Restricted parent, narrowing fault,
+  lookup fault (403, never downloaded); internal user and visible archive ingest (200).
+- `DataverseReadQueryHandlerTests.ExecuteChatAsync_ExternalCaller_RowCapWarning_IsMeasuredBeforeTheNarrowing` (50/true,
+  49/false).
+- Test hosts: `TestInfrastructure/StatedNarrowingCaller` (new) registers the stated caller and the world (the three
+  registrations `DocumentRouteNarrowingTestFixture` makes inline). Hosts about other things state an INTERNAL caller:
+  `AnalysisAuthHost`, `ChatDocumentEndpointsTestFixture`, `ChatAuthHost`, the visualization and `AiAuthorizationServiceTests`
+  contexts. The two full `WebApplicationFactory<Program>` hosts (`ChatAgentRouteProofFixture`,
+  `RouteSweepAuthorizationFixture`) use the slice B Option A double (`AllVisibleDocumentNarrowing`).
+  `AnalysisAuthHost` also maps `MapAnalysisChatContextEndpoints` (with the `ai-context` limiter and the resolver).
+
+**Before → after** (sources reverted for the finding, new tests kept; filter: the new classes, the ingest, read_query cap,
+`DocumentRouteExternalNarrowingTests`, `AiAuthorizationServiceTests`, 175 cases):
+- F1-1 (`AiAuthorizationService` and the ingest without the narrowing): 58 failed / 117 passed → 175 passed.
+- F1-3 (the three wirings removed, helper kept): 24 failed → 0.
+- F1-5 (cap on the narrowed count): 1 failed → 0.
+
+### Mutation table (round 4a)
+
+Runner `.uac188/t188r4a_mutate.py` (untracked; deleted at the end). Each: apply, rebuild, run the 175 cases (and the guard
+class where marked), restore, SHA-1-check the six sources. **8 of 8 killed** (+ guard proof G1).
+
+| Id | Mutation | Unit failing | ArchTest |
+|---|---|---|---|
+| M1 | `AuthorizeAsync` skips the narrowing (branch never taken) | 52 | passes (call still in IL; see the limit) |
+| G1 | `AuthorizeAsync` no longer calls the narrowing | 52 | **fails**: `NOT NARROWED (grant): AiAuthorizationService::AuthorizeAsync` |
+| M2a | a narrowing fault is treated as visible (`NarrowForExternalCallerAsync` shows all) | 18 | passes |
+| M2b | an analysis link-read fault is treated as visible | 3 | passes |
+| M3 | the analysis routes ignore the output file (`AnalysisDocumentColumns` = source only) | 3 | passes |
+| M4 | the row cap is measured after the narrowing | 1 | passes |
+| M5 | the archive ingest skips the narrowing | 6 | **fails**: `NOT NARROWED (download): ChatDocumentEndpoints::IngestArchiveDocumentAsync` |
+| M6 | `GET /api/ai/analysis/{id}` unwired (helper kept) | 8 | passes |
+
+### Findings for the main session (not fixed here)
+
+- **R4a-1 (chat SPE items).** A chat context id that is not a GUID but has a drive id (`AiAuthorizationFilter.AddStoredDocument`
+  → `checks.SpeItems`, the Compose Path B active document) is decided by the caller's OBO SPE read only, not narrowed. When
+  that drive item is an `sprk_document`'s file, a hidden document's content is reachable. Fix shape: slice A's drive-item
+  key rule (`sprk_driveitemid` → documents → narrowing). Not in this brief.
+- **R4a-2 (`sprk_regardingdocument`).** The analysis-read rule treats `sprk_regardingdocument` as a document anchor; F1-3
+  narrows only `sprk_documentid` and `sprk_outputfileid` (the brief's two columns, the slice C map). One more entry in
+  `AnalysisDocumentColumns` would include it.
+- **R4a-3 (context-mappings has no read rule).** `GET /api/ai/chat/context-mappings/analysis/{analysisId}` still has no
+  analysis-read decision (ledger: pending waiver, task 164); round 4a adds the narrowing only. Its resolver reads the id as
+  an `sprk_analysisoutput`, while the narrowing reads it as an `sprk_analysis`: for an external caller an id that is not an
+  analysis is undecidable and answers 404 (the route answers 404 today anyway: the resolver's select names attributes that
+  do not exist).
+- **R4a-4 (`GET /api/ai/chat/sessions/by-analysis/{analysisId:guid}`).** Ledger: returns the newest session bound to any
+  analysis with no owner check, safe only by accident. Not touched.
+
+### Gates (round 4a)
+
+| Gate | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/ --no-incremental` | succeeded, 0 errors, 0 warnings; unit and ArchTests projects 0 warnings |
+| Unit, filtered (`.Ai.` \| `Analysis` \| `Rag` \| `Visualization` \| `Chat` \| `Services.Ai.Handlers` \| `UnifiedAccessControl` \| `AccessControl` \| `ExternalAccess`, `Category!=Live`) | 14,658 passed, 0 failed, 2 skipped (14,660) on `8eb347dc6d`. The first run on `bfca006249` had 4 failures (ChatAgentRouteProof ×2, RagEndpointsAuthorization ×2: full hosts with no stated caller), fixed in `8eb347dc6d` (Option A) |
+| `tests/Spaarke.ArchTests`, full project | 1,222 passed, 0 failed |
+| Mutants | 8 of 8 killed + G1; sources SHA-1-checked after every run |
+| Publish size (`dotnet publish -c Release`, framework-dependent, `Compress-Archive -CompressionLevel Optimal`, 4 PDBs each side, fresh detached worktrees) | branch `bfca006249` 39,347,888 B vs a fresh `origin/master` `2a38e6ce6c` build 39,354,901 B: −7,013 B (master has moved ahead). Against slice C's branch build (`bc4e5473c8`, 39,344,071 B, §16): +3,817 B for round 4a. Total 39.3 MB |
+| Packages | no change, so no new CVE |
+| `git merge-tree --write-tree origin/master HEAD` (master `2a38e6ce6c`) | clean (tree `02a26f2e25`) |
+
+Not run, by the brief: the full unfiltered unit suite, any deploy, any Dataverse, Azure or Key Vault access.
