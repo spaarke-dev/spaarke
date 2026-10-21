@@ -493,7 +493,7 @@ public sealed class InvoiceSubmissionExistingDocumentTests
     /// <paramref name="communicationMatter"/> (null: none, a thread-only reply); the thread's is <paramref name="threadMatter"/>. Not isolated
     /// (the isolation world holds no row of it), so only the D-140 chain decides.
     /// </summary>
-    private static (Harness Harness, Guid Thread) ThreadReply(Guid? communicationMatter, Guid threadMatter)
+    private static (Harness Harness, Guid Thread) ThreadReply(Guid? communicationMatter, Guid threadMatter, int? threadType = null)
     {
         var (h, communication) = EmailAttachment(communicationMatter);
         var thread = Guid.NewGuid();
@@ -502,6 +502,11 @@ public sealed class InvoiceSubmissionExistingDocumentTests
         {
             ["sprk_regardingmatter"] = new EntityReference("sprk_matter", threadMatter),
         };
+        if (threadType is { } type)
+        {
+            h.Threads[thread]["sprk_threadtype"] = new OptionSetValue(type);
+        }
+
         return (h, thread);
     }
 
@@ -542,6 +547,45 @@ public sealed class InvoiceSubmissionExistingDocumentTests
         refusedForS.StatusCode.Should().Be(StatusCodes.Status409Conflict, "the communication's own regarding files it under M as well");
         refusedForS.ErrorCode.Should().Be(InvoiceSubmissionErrors.DocumentCoreRecordMismatch);
         ShouldHaveWrittenNothing(ontoS);
+    }
+
+    // -- D-140 thread hop = RecordThreadFiling.ParentsOf (#2143 round 7d): the thread's TYPE decides whether it files its messages --
+
+    private const int RecordThreadType = 100000000;
+    private const int DirectThreadType = 100000001;
+
+    [Fact(DisplayName = "D-140 / ParentsOf (must not fire): a communication regarding M in a DIRECT thread whose row carries regarding S is filed under M only, so the confirm onto M is received (the over-refusal)")]
+    public async Task DirectThread_CarryingAnotherRecord_FilesNothing_ConfirmOntoM_IsReceived()
+    {
+        var (h, _) = ThreadReply(communicationMatter: MatterId, threadMatter: Guid.NewGuid(), threadType: DirectThreadType);
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None);
+
+        outcome.Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received, "a Direct thread (the per-user master included) files its messages under nothing");
+    }
+
+    [Fact(DisplayName = "D-140 / ParentsOf (must not fire): a thread-only reply in a DIRECT thread carrying a record files nothing, so it is unfiled and received for any record")]
+    public async Task DirectThread_OnlyReply_IsUnfiled_IsReceived()
+    {
+        var (h, _) = ThreadReply(communicationMatter: null, threadMatter: Guid.NewGuid(), threadType: DirectThreadType);
+
+        (await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None)).Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
+    }
+
+    [Theory(DisplayName = "D-140 / ParentsOf (must fire): a communication regarding M in a RECORD thread, or one whose type is unset or unknown (fail closed), whose row carries regarding S is 409 document_core_record_mismatch")]
+    [InlineData(RecordThreadType)]
+    [InlineData(null)]
+    [InlineData(7)]
+    [InlineData(0)]
+    public async Task RecordUnsetOrUnknownThreadType_CarryingAnotherRecord_ConfirmOntoM_Is409(int? threadType)
+    {
+        var (h, _) = ThreadReply(communicationMatter: MatterId, threadMatter: Guid.NewGuid(), threadType: threadType);
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None);
+
+        outcome.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.DocumentCoreRecordMismatch);
+        ShouldHaveWrittenNothing(h);
     }
 
     [Fact(DisplayName = "050a round 4 (uac-r2 F1): a communication thread that cannot be read is 503 (fail closed, as a communication read fault), nothing written")]
