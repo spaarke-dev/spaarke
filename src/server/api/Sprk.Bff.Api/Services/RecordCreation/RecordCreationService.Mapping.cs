@@ -102,17 +102,19 @@ internal sealed partial class RecordCreationService
     /// UAC-r2's review of 013 (K-2): a lookup the SERVER set costs no AppendTo at step 5
     /// (<see cref="RecordCreationRequest.ServerSetLookupColumns"/>), so a lineage or ownership-parent lookup must never be one
     /// — it would file the row under a record nobody asked about. The first such column, or <c>null</c>. A work assignment's
-    /// or project's own filing column is not refused here: the secure-root plan asks AppendTo on it when the record is
-    /// SECURE (task 013's callback), and <see cref="ServerSetRootFilingLookups"/> has it asked after the plan otherwise.
+    /// or project's own filing column is not refused here: <see cref="ServerSetRootFilingLookups"/> has it asked AppendTo,
+    /// as the caller, at step 6 before the plan (refused in the plan's own not-found shape, which task 013's secure-parent
+    /// test pins).
     /// </summary>
     private static string? ServerSetFilingColumn(string table, IReadOnlySet<string>? serverSetLookupColumns) =>
         serverSetLookupColumns?.FirstOrDefault(c => IsChildFilingLookup(table, c.Trim().ToLowerInvariant()));
 
     /// <summary>
-    /// UAC-r2's review of 013 (K-2), task 014 fix round 1: the lookups of <paramref name="item"/> that file a work assignment
-    /// or project (<see cref="SecureRootInheritance.FilingColumnsOf"/>) and that the SERVER set. Step 5 skipped their
-    /// AppendTo and the plan asks it on a secure record only, so step 6 asks it, as the caller, whatever the record — none
-    /// is ever filed under unasked. Empty for any other table, and when the server set nothing.
+    /// UAC-r2's review of 013 (K-2), task 014 review rounds 1 and 2: the lookups of <paramref name="item"/> that file a work
+    /// assignment or project (<see cref="SecureRootInheritance.FilingColumnsOf"/>) and that the SERVER set. Step 5 skipped
+    /// their AppendTo and the plan asks it on a secure record only, so step 6 asks it, as the caller, whatever the record and
+    /// before the plan reads it — none is ever filed under unasked. Empty for any other table, and when the server set
+    /// nothing.
     /// </summary>
     private static DataverseWriteItemMapper.MappedLookup[] ServerSetRootFilingLookups(
         string table, DataverseWriteItemMapper.MappedItem item, IReadOnlySet<string>? serverSetLookupColumns)

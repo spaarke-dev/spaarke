@@ -95,6 +95,7 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     private readonly RecordingPublisher _publisher = new();
     private Exception? _profileFault;
     private Func<string, RecordTableRule?> _tableRules = RecordTableRules.Find;
+    private Func<SecureRootFilingGate> _rootFiling = SecureRootFilingGateFixtures.NothingSecure;
 
     public RecordCreationServiceMappingSeamTests()
     {
@@ -376,7 +377,7 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     public async Task CreateAsync_AWorkAssignmentFilingLookupMarkedServerSet_IsStillAskedAppendTo_UnderAnOrdinaryRecord()
     {
         // Fix round 1 (review F-1): the plan asks AppendTo on a SECURE record only, so a filing lookup the server set
-        // under an ORDINARY one is asked after the plan — the same uniform answer as the unmarked request's.
+        // under an ORDINARY one is asked at step 6 — the same uniform answer as the unmarked request's.
         _scripted.NoAppendTo.Add(OrdinaryMatter);
 
         var marked = await Service().CreateAsync(
@@ -390,6 +391,27 @@ public sealed partial class RecordCreationServiceMappingSeamTests
                 "marked server-set or not, a record the caller may not file under answers alike");
         _creates.Should().BeEmpty();
         _journal.Should().NotContain("create");
+    }
+
+    [Fact]
+    public async Task CreateAsync_AWorkAssignmentFilingLookupMarkedServerSet_IsAskedBeforeThePlanReadsTheRecord()
+    {
+        // Review pass 2 (finding A): asked after the plan, a plan that refused first — live, a matter whose secure flag
+        // cannot be read (409); here, a host whose inheritance cannot read the record at all — answered differently from
+        // step 5's uniform not-found, telling a record that exists from a missing one. Asked before it, the answers match.
+        _rootFiling = SecureRootFilingGateFixtures.Unregistered;
+        _scripted.NoAppendTo.Add(OrdinaryMatter);
+
+        var marked = await Service().CreateAsync(
+            WorkAssignmentUnder(OrdinaryMatter, serverSet: "sprk_regardingmatter"), AsCaller(), CancellationToken.None);
+        var unmarked = await Service().CreateAsync(WorkAssignmentUnder(OrdinaryMatter), AsCaller(), CancellationToken.None);
+
+        marked.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.NotFoundOrDenied);
+        marked.Refusal.OwnerDecision!.RefusalCode.Should().Be(DataverseUserClientErrorCodes.AccessDenied,
+            "refused in the shape of the plan's own AppendTo callback");
+        JsonSerializer.Serialize(Problem(marked, "sprk_workassignment"))
+            .Should().Be(JsonSerializer.Serialize(Problem(unmarked, "sprk_workassignment")));
+        _creates.Should().BeEmpty();
     }
 
     [Fact]
@@ -891,7 +913,7 @@ public sealed partial class RecordCreationServiceMappingSeamTests
 
         return new RecordCreationService(
             new JournalingResolver(_world.Resolver(null), _journal), _appOnly.Object, _sourceReader.Object,
-            SecureRootFilingGateFixtures.NothingSecure(), restamper, shares,
+            _rootFiling(), restamper, shares,
             new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), _publisher,
             NullLogger<RecordCreationService>.Instance)
         {

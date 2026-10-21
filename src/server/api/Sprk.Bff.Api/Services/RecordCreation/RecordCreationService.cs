@@ -487,22 +487,30 @@ internal sealed partial class RecordCreationService
                     "for no caller whose access can be checked, so it was not created."));
             }
 
-            var plan = await _rootFiling.PlanCreateAsync(table, OwnedChildWrite.WritesOf(item), creatorPerson, ct,
-                user is null ? null : CallerMayFileUnder(user, creatorPerson, item, request.ServerSetLookupColumns)).ConfigureAwait(false);
-            if (plan.Refusal is { } planRefusal)
-                return Decision.Refuse(PlanRefused(planRefusal, noun));
-
-            // UAC-r2's review of 013 (K-2), task 014 fix round 1: a filing lookup the SERVER set skipped step 5's AppendTo,
-            // and the plan asks it only on a secure record — so it is asked here, as the caller, whatever the record. A
-            // refusal is step 5's own uniform answer (a record the caller may not file under and a missing one alike).
+            // UAC-r2's review of 013 (K-2), task 014 review rounds 1 and 2: a filing lookup the SERVER set skipped step 5's
+            // AppendTo, and the plan asks it only on a secure record — so it is asked here, as the caller, whatever the
+            // record, and BEFORE the plan reads it app-only (a plan refusal given first, such as an unreadable flag, would
+            // tell a record that exists from a missing one). Refused as the plan's own AppendTo callback refuses: the
+            // uniform not-found, the same body as step 5's for an unmarked lookup.
             if (user is not null
                 && ServerSetRootFilingLookups(table, item, request.ServerSetLookupColumns) is { Length: > 0 } serverSetFiling)
             {
                 var appendTo = await CallerWriteAuthorization.CheckCallerMayAppendToAsync(user, creatorPerson, serverSetFiling, ct)
                     .ConfigureAwait(false);
-                if (!appendTo.Succeeded)
+                if (appendTo.ClientFailure is not null)
                     return Decision.Refuse(CallerCheckRefused(appendTo, noun));
+                if (!appendTo.Succeeded)
+                {
+                    return Decision.Refuse(PlanRefused(
+                        RecordOwnerResolution.Refused(DataverseUserClientErrorCodes.AccessDenied, appendTo.Denied ?? NotAvailableToFileUnder),
+                        noun));
+                }
             }
+
+            var plan = await _rootFiling.PlanCreateAsync(table, OwnedChildWrite.WritesOf(item), creatorPerson, ct,
+                user is null ? null : CallerMayFileUnder(user, creatorPerson, item, request.ServerSetLookupColumns)).ConfigureAwait(false);
+            if (plan.Refusal is { } planRefusal)
+                return Decision.Refuse(PlanRefused(planRefusal, noun));
 
             if (plan is { Isolated: true, SecureOwnerTeamId: { } secureTeam })
                 isolatedTeam = secureTeam;
