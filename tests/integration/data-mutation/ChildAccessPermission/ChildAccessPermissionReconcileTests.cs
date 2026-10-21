@@ -184,8 +184,10 @@ public class ChildAccessPermissionReconcileTests
         var job = new Harness();
         var matter = job.Root("sprk_matter", Standard);
         var document = job.Child("sprk_document", Standard, ("sprk_matter", "sprk_matter", matter));
-        await job.RunAsync(); // settles: Standard under Standard, nothing written
-        job.World.AccessRecordWrites.Should().BeEmpty("the Standard majority gets no record (no modifiedon churn)");
+        await job.RunAsync(); // settles: Standard under Standard; its record {floor Standard, own none} is written (F1)
+        job.World.AccessPermissionWrites.Should().BeEmpty("its value is already right");
+        RecordOf(job, document).OwnPermission.Should().BeNull("every parented document gets a record, the Standard majority too");
+        RecordOf(job, document).FloorPermission.Should().Be(Standard);
 
         job.World.Set("sprk_document", document, Column, new OptionSetValue(Restricted)); // a user's narrowing
         job.World.Modified("sprk_document", document, job.Now.UtcDateTime);
@@ -406,6 +408,32 @@ public class ChildAccessPermissionReconcileTests
         job.World.Modified("sprk_matter", matter, job.Now.UtcDateTime);
         await job.RunAsync();
         ValueOf(job, document).Should().Be(Restricted, "the user's own narrowing is never widened");
+    }
+
+    [Fact]
+    public async Task Run_ARestrictedSetInTheWindowItsStandardMatterTightened_IsKept_WhenTheMatterWidens()
+    {
+        // Fix round C, F1 (must fire): a user sets the document Restricted under its Standard matter and, in the same window,
+        // sets the matter Restricted. Without a record, the edit equals the live inherited value and reads as inherited: the
+        // run recorded {own none, floor Restricted}, and the document followed the matter back to Standard. With the record
+        // every parented document gets, the edit is stricter than the last inherited value, so it is the user's own.
+        var job = new Harness();
+        var matter = job.Root("sprk_matter", Standard);
+        var document = job.Child("sprk_document", Standard, ("sprk_matter", "sprk_matter", matter));
+        await job.RunAsync(); // the sweep records {floor Standard, own none}
+
+        job.World.Set("sprk_document", document, Column, new OptionSetValue(Restricted));
+        job.World.Modified("sprk_document", document, job.Now.UtcDateTime);
+        job.World.Set("sprk_matter", matter, Column, new OptionSetValue(Restricted));
+        job.World.Modified("sprk_matter", matter, job.Now.UtcDateTime);
+        await job.RunAsync();
+        RecordOf(job, document).OwnPermission.Should().Be(Restricted);
+
+        job.World.Set("sprk_matter", matter, Column, new OptionSetValue(Standard));
+        job.World.Modified("sprk_matter", matter, job.Now.UtcDateTime);
+        await job.RunAsync();
+
+        ValueOf(job, document).Should().Be(Restricted, "the user's own Restricted is never widened");
     }
 
     [Fact]

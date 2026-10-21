@@ -289,6 +289,23 @@ public class InheritedAccessPermissionStampTests
     }
 
     [Fact]
+    public async Task RefreshInheritedAccessPermissionAsync_AStandardDocumentUnderAStandardMatter_GetsItsRecord()
+    {
+        // Fix round C, F1 (must fire): every parented document gets a record when it is created, the Standard majority too,
+        // so a narrowing its user makes in the window its matter tightens is told from an inherited value.
+        var matter = Root("sprk_matter", Standard);
+        var document = Row("sprk_document", Standard, ("sprk_matter", "sprk_matter", matter));
+
+        var level = await Resolver().RefreshInheritedAccessPermissionAsync("sprk_document", document);
+
+        level.Should().Be(Standard);
+        _world.AccessPermissionWrites.Should().BeEmpty("its value is already right");
+        var record = RecordIn(_world.AccessRecordWrites.Should().ContainSingle().Subject.Text);
+        record.OwnPermission.Should().BeNull();
+        record.FloorPermission.Should().Be(Standard);
+    }
+
+    [Fact]
     public async Task RefreshInheritedAccessPermissionAsync_ADocumentUnderARestrictedMatter_TakesItsValue_WithItsRecord_InOneUpdate()
     {
         // Task 189 (must not fire): an inherited value is still set from the parents.

@@ -641,8 +641,10 @@ internal static class InheritedAccessPermission
     /// (<see cref="DocumentDecision.Undetermined"/>), so its row is decided by <see cref="DecideDocumentRaiseOnly"/>: only
     /// raised to the live floor, and its record left as it is. A stored value that is not a known level decides
     /// nothing.</para>
-    /// <para><b>No write for the Standard majority.</b> A row with no record, no own narrowing and a Standard inherited value
-    /// gets no record: the backfill rule reads that absence the same way.</para>
+    /// <para><b>Every parented row gets a record</b> (fix round C, F1). Without one, a user's narrowing made in the same window
+    /// as its parent tightening to the same level reads as inherited, and the document follows the parent's later widening.
+    /// With the record (the last inherited value) that edit is stricter than it, so it is the user's own. Each row without a
+    /// record is written once (the sweep reaches the legacy rows), then not again while nothing changes.</para>
     /// </remarks>
     /// <param name="stored">The row's stored <see cref="Column"/>.</param>
     /// <param name="recordText">The row's stored <see cref="AccessInheritance.Column"/>.</param>
@@ -684,7 +686,7 @@ internal static class InheritedAccessPermission
             parents.Select(p => $"{p.Table.Trim().ToLowerInvariant()}:{p.Id:D}")
                 .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(k => k, StringComparer.Ordinal).ToList(),
             false, SecureRootInheritance.PermissionOf(floorRank), false, own);
-        var writeRecord = record is null ? own is not null || floorRank > 0 : !next.SameAs(record);
+        var writeRecord = record is null || !next.SameAs(record);
         return new DocumentDecision
         {
             Target = target,
