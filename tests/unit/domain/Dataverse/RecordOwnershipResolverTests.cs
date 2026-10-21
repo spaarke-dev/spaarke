@@ -1587,15 +1587,14 @@ public class RecordOwnershipResolverTests
     [Theory]
     [InlineData(false)] // the move lands before the owner write: the put-back reads it again
     [InlineData(true)] // the move lands right after the change, before the first read: the put-back's own observation
-    public async Task Reparent_WhenAnotherWriterMovesTheMessageToAnotherThreadWithTheSameParents_BeforeThePutBack_ItIsNotReverted(
+    public async Task Reparent_IntoASecureRecord_WhenAnotherWriterMovesTheMessageToAnotherThreadWithTheSameParents_ItIsStillPutBack(
         bool beforeTheFirstRead)
     {
-        // Must-fire (#2143 round 8): as in the F4 test the change re-files the message into the secure matter and its thread,
-        // and the owner assignment fails, so the change is put back. But before the put-back ANOTHER writer moved the message
-        // to a second thread regarding the same secure matter: the parents are what this call resolved, the owner is the one
-        // before the change — yet the filing is that writer's, not this call's. Before round 8 the put-back checked only the
-        // parents and the owner, and reverted the other writer's move; it now also requires the lineage-only lookups (the
-        // thread) this call left, and leaves the row to the newer writer.
+        // Must-fire (#2143 round 9, F1): as in the F4 test the change re-files the message into the secure matter and its
+        // thread, and the owner assignment fails, so the change is put back. Before the put-back ANOTHER writer moved the
+        // message to a second thread regarding the same secure matter. Round 8 left the row to that writer — filed under the
+        // secure matter while still owned by its ORDINARY owner from before the change: a secure filing on an ordinary owner.
+        // Toward a secure target the lineage test does not apply: the filing is put back whole, as before round 8.
         var (directory, messageId) = MessageWorld(MatterId, ChildBu, ChildTeam, threadId: OrdinaryThreadId);
         var otherSecureThread = Guid.NewGuid();
         directory.WithRecord("sprk_communicationthread", otherSecureThread, SecureBu, owningTeam: SecureNamedTeam, extra: new()
@@ -1635,9 +1634,67 @@ public class RecordOwnershipResolverTests
         moved.Should().BeTrue("the other writer's move landed before the put-back");
         var row = directory.Row("sprk_communication", messageId);
         row.GetAttributeValue<EntityReference>("sprk_communicationthread")?.Id
-            .Should().Be(otherSecureThread, "the other writer's thread move is never reverted");
+            .Should().Be(OrdinaryThreadId, "no secure filing is left on the ordinary owner");
         row.GetAttributeValue<EntityReference>("sprk_regardingmatter")?.Id
-            .Should().Be(SecureThreadMatterId, "the filing is left to the newer writer whole");
+            .Should().Be(MatterId, "the filing is put back whole");
+        MessageOwnerOf(directory, messageId).Should().Be(ChildTeam, "the owner the put-back filing belongs to");
+    }
+
+    [Theory]
+    [InlineData(false)] // the move lands before the owner write: the put-back reads it again
+    [InlineData(true)] // the move lands right after the change, before the first read: the put-back's own observation
+    public async Task Reparent_OffASecureRecord_WhenAnotherWriterMovesTheMessageToAnotherThreadWithTheSameParents_ItIsNotReverted(
+        bool beforeTheFirstRead)
+    {
+        // Must-not-fire (#2143 round 8, kept by round 9's F1): the change re-files a HELD message off the secure matter onto the
+        // ordinary matter and its thread, and the assignment to the ordinary owner fails, so the change is put back. Before
+        // the put-back ANOTHER writer moved the message to a second thread regarding the same ORDINARY matter: the filing is
+        // that writer's, and toward an ordinary target it is never reverted. The owner stays the Secure team from before the
+        // change: an ordinary filing on a secure owner, an under-share the caller logs for repair.
+        var (directory, messageId) = MessageWorld(SecureThreadMatterId, SecureBu, SecureNamedTeam, threadId: SecureThreadId);
+        var otherOrdinaryThread = Guid.NewGuid();
+        directory.WithRecord("sprk_communicationthread", otherOrdinaryThread, ChildBu, owningTeam: ChildTeam, extra: new()
+        {
+            ["sprk_threadtype"] = new OptionSetValue(100000000),
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+        });
+        var assignFailure = new InvalidOperationException("missing prvReadsprk_Communication");
+        directory.AssignmentFault = assignFailure;
+        var moved = false;
+        void MoveIt(FakeDirectory world)
+        {
+            moved = true;
+            world.Write("sprk_communication", messageId, new()
+            {
+                ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", otherOrdinaryThread),
+            });
+        }
+
+        if (!beforeTheFirstRead)
+            directory.BeforeWrite = (world, fields) => { if (!moved && fields.ContainsKey("ownerid")) MoveIt(world); };
+        var request = new RecordReparent
+        {
+            EntityLogicalName = "sprk_communication",
+            RecordId = messageId,
+            ParentChanges = new Dictionary<string, EntityReference?>
+            {
+                ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+                ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", OrdinaryThreadId),
+            },
+            SecureExitCaller = CallerHolding(FullAccess), // an exit from a secure record needs F3 rights
+        };
+
+        var act = () => Build(directory).ReparentAsync(
+            request, Applies(directory, request, beforeTheFirstRead ? () => MoveIt(directory) : null), CancellationToken.None);
+
+        await act.Should().ThrowAsync<Exception>();
+        moved.Should().BeTrue("the other writer's move landed before the put-back");
+        var row = directory.Row("sprk_communication", messageId);
+        row.GetAttributeValue<EntityReference>("sprk_communicationthread")?.Id
+            .Should().Be(otherOrdinaryThread, "the other writer's thread move is never reverted");
+        row.GetAttributeValue<EntityReference>("sprk_regardingmatter")?.Id
+            .Should().Be(MatterId, "the filing is left to the newer writer whole");
+        MessageOwnerOf(directory, messageId).Should().Be(SecureNamedTeam, "held: the failed assignment changed no owner");
     }
 
     [Fact]

@@ -2627,7 +2627,10 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// K2: the filing is put back only while the row is still owned by its PRE-change owner (<paramref name="before"/>) — the
     /// owner the restored filing belongs to; a row another writer (or the reconcile) re-owned is left to it. Round 8: and only
     /// while it holds the lineage-only lookups this call left (<see cref="RowBeforeChange.LineageLookups"/>) — another
-    /// writer's move to a different thread with the same parents is that writer's filing, and is never reverted.
+    /// writer's move to a different thread with the same parents is that writer's filing, and is never reverted. Round 9
+    /// (F1): that lineage test applies only toward an ORDINARY target. Toward the SECURE team the row's filing is a secure
+    /// record's while its owner is still the ordinary one before the change, so leaving it to the other writer would leave
+    /// a secure filing on an ordinary owner; it is put back, as before round 8.
     /// </summary>
     private async Task<PutBackOutcome> PutBackFilingAsync(
         RecordReparent request, IReadOnlyDictionary<string, object> restore,
@@ -2642,7 +2645,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             {
                 version = observed.Version;
                 filedAsResolved = observed.ParentsAsResolved && observed.OwningTeam == before.OwningTeam
-                    && SameLineage(before.LineageLookups, observed.LineageLookups);
+                    && (target.IsSecureOwner || SameLineage(before.LineageLookups, observed.LineageLookups));
             }
             else
             {
@@ -2682,7 +2685,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 filedAsResolved = state is not null
                     && FiledAsResolved(state, resolvedFrom)
                     && state.OwningTeam == before.OwningTeam
-                    && SameLineage(before.LineageLookups, state.LineageLookups);
+                    && (target.IsSecureOwner || SameLineage(before.LineageLookups, state.LineageLookups));
             }
 
             if (!filedAsResolved)
