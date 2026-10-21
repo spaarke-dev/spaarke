@@ -209,6 +209,14 @@ public sealed class BulkDownloadAuthorizationFilter : IEndpointFilter
             }
         }
 
+        // Step 4 (unified-access-control-r2 task 188 round 3 slice B): THE external document narrowing, one call over the
+        // whole authorized set. For a caller who is not an internal systemuser, a document it hides is DROPPED from the
+        // allowed set — exactly as an unauthorized id is — so the handler reports it with the same manifest reason as an
+        // unauthorized or missing document and never reads its bytes. A narrowing that faults drops every document.
+        var visibility = await InternalPlaneDocumentNarrowing.ForCallerAsync(
+            httpContext, authorized, "bulk-download", _logger);
+        authorized.RemoveWhere(id => !visibility.IsShown(id));
+
         httpContext.Items[AuthorizedDocumentIdsKey] = authorized;
 
         _logger?.LogInformation(

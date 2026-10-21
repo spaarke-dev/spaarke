@@ -3,6 +3,7 @@ using System.Security.Claims;
 using Microsoft.Extensions.Logging;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Auth;
+using Sprk.Bff.Api.Api.Filters;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -25,9 +26,25 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// implemented at the storage layer (task 003) for operations that may fail due to
 /// eventual consistency in newly created documents.
 /// </para>
+/// <para>
+/// <strong>External document narrowing</strong> (unified-access-control-r2 task 188 round 4a, F1-1). Read alone is not
+/// enough for a caller who is not a resolved INTERNAL systemuser (a systemuser flagged <c>sprk_isexternal</c>, an
+/// unresolved caller, or a failed lookup): after the Read loop, every authorized id goes through THE document narrowing
+/// (<see cref="InternalPlaneDocumentNarrowing.ForCallerAsync"/>, one app-only call per request). An id it hides moves to
+/// the denied set with the SAME reason as an unreadable id, so a hidden document and one the caller cannot Read are
+/// indistinguishable. A narrowing fault hides every id (deny all). Internal systemusers are not narrowed and nothing is
+/// read for them. Every caller of this service (chat document context, analysis execute, RAG search rows, visualization
+/// rows) downloads or returns content only for the ids it authorizes, so the narrowing covers them all.
+/// </para>
 /// </remarks>
 public class AiAuthorizationService : IAiAuthorizationService
 {
+    /// <summary>The denial reason of an id the caller may not Read — also given to an id the narrowing hides.</summary>
+    private const string InsufficientReadReason = "Insufficient permissions (Read access required)";
+
+    /// <summary>The narrowing's log label for this seam (no ids).</summary>
+    private const string NarrowingSurface = "ai-authorization";
+
     private readonly IAccessDataSource _accessDataSource;
     private readonly ILogger<AiAuthorizationService> _logger;
 
@@ -112,6 +129,23 @@ public class AiAuthorizationService : IAiAuthorizationService
                 if (!string.IsNullOrEmpty(reason))
                 {
                     denialReasons.Add($"{documentId}: {reason}");
+                }
+            }
+        }
+
+        // Task 188 round 4a (F1-1): THE external document narrowing over the ids Read allowed. A hidden id is denied
+        // exactly like an unreadable one; a narrowing fault hides them all (fail closed).
+        if (authorizedIds.Count > 0)
+        {
+            var visibility = await InternalPlaneDocumentNarrowing.ForCallerAsync(
+                httpContext, authorizedIds.Select(id => id.ToString()), NarrowingSurface, _logger).ConfigureAwait(false);
+            if (visibility.Narrowed)
+            {
+                foreach (var hiddenId in authorizedIds.Where(id => !visibility.IsShown(id.ToString())).ToList())
+                {
+                    authorizedIds.Remove(hiddenId);
+                    deniedIds.Add(hiddenId);
+                    denialReasons.Add($"{hiddenId}: {InsufficientReadReason}");
                 }
             }
         }
@@ -203,7 +237,7 @@ public class AiAuthorizationService : IAiAuthorizationService
                     documentId,
                     accessSnapshot.AccessRights);
 
-                return (false, "Insufficient permissions (Read access required)");
+                return (false, InsufficientReadReason);
             }
         }
         catch (Exception ex)

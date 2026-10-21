@@ -398,7 +398,92 @@ public class AnalysisAuthorizationFilter : IEndpointFilter
         }
 
         var targets = await ResolveAnalysisReadTargetsAsync(httpContext, analysisId, _logger);
-        return await EvaluateAsync(context, next, targets, FinanceDenial.UniformNotFound);
+
+        // Task 188 round 4a (F1-3): AFTER the analysis-read rule allowed, an analysis whose source document or output
+        // file the external document narrowing hides answers the same uniform 404.
+        return await EvaluateAsync(context, async ctx =>
+                await IsAnalysisDocumentHiddenFromCallerAsync(httpContext, analysisId, _logger)
+                    ? (object?)FinanceAuthorizationFilter.UniformRecordNotFound(httpContext)
+                    : await next(ctx),
+            targets, FinanceDenial.UniformNotFound);
+    }
+
+    /// <summary>The <c>sprk_analysis</c> columns naming the documents its content derives from (task 188, OD-C1; round 4b:
+    /// the typed regarding document, <c>sprk_regardingdocument</c>, which the analysis-read rule also treats as an anchor).</summary>
+    internal static readonly string[] AnalysisDocumentColumns = ["sprk_documentid", "sprk_outputfileid", "sprk_regardingdocument"];
+
+    /// <summary>The narrowing's log label for the analysis routes (no ids).</summary>
+    private const string AnalysisNarrowingSurface = "analysis-derived-content";
+
+    /// <summary>
+    /// unified-access-control-r2 task 188 round 4a (F1-3): whether analysis <paramref name="analysisId"/> must be withheld
+    /// from the request's caller because THE external document narrowing hides a document its content derives from — its
+    /// source document (<c>sprk_documentid</c>) or its output file (<c>sprk_outputfileid</c>). The ONE helper of
+    /// <c>GET /api/ai/analysis/{analysisId}</c>, the chat analysis host and <c>GET /api/ai/chat/context-mappings/analysis/{analysisId}</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>A resolved INTERNAL systemuser is never narrowed and nothing is read (false). For any other caller (flagged
+    /// external, unresolved, or a failed lookup) the two links are read app-only (<see cref="IGenericEntityService"/>, as
+    /// the analysis-read rule reads its anchors) and decided by <see cref="InternalPlaneDocumentNarrowing.NarrowForExternalCallerAsync"/>
+    /// in ONE call. True when either document is hidden, when the narrowing faults (it then shows none), or when the links
+    /// cannot be read (undecidable: fail closed). An analysis with neither link populated derives from no document and is
+    /// unaffected.</para>
+    /// <para>Run AFTER the route's own read rule, so a caller the rule refuses costs no app-only read. ADR-015: the log
+    /// carries the analysis id (as the rule's own lines do) and a reason code, never a document id.</para>
+    /// </remarks>
+    internal static async Task<bool> IsAnalysisDocumentHiddenFromCallerAsync(HttpContext httpContext, Guid analysisId, ILogger? logger)
+    {
+        ArgumentNullException.ThrowIfNull(httpContext);
+        var ct = httpContext.RequestAborted;
+        if (!await InternalPlaneDocumentNarrowing.IsExternalOrUnknownCallerAsync(httpContext, AnalysisNarrowingSurface, logger, ct))
+        {
+            return false;
+        }
+
+        Entity? row;
+        try
+        {
+            var entityService = httpContext.RequestServices.GetRequiredService<IGenericEntityService>();
+            row = await entityService.RetrieveAsync(AnalysisEntityLogicalName, analysisId, AnalysisDocumentColumns, ct);
+            if (row is null)
+            {
+                throw new InvalidOperationException("The analysis row did not come back.");
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(ex,
+                "[ANALYSIS-AUTH] Analysis {AnalysisId}: its document links could not be read for the external document "
+                + "narrowing; withheld (fail closed, reason=source_document_undecidable)", analysisId);
+            return true;
+        }
+
+        var documentIds = AnalysisDocumentColumns
+            .Select(column => row.GetAttributeValue<EntityReference>(column))
+            .Where(reference => reference is not null && reference.Id != Guid.Empty)
+            .Select(reference => reference!.Id.ToString())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (documentIds.Count == 0)
+        {
+            return false;
+        }
+
+        var visibility = await InternalPlaneDocumentNarrowing.NarrowForExternalCallerAsync(
+            httpContext, documentIds, AnalysisNarrowingSurface, logger);
+        if (documentIds.All(visibility.IsShown))
+        {
+            return false;
+        }
+
+        logger?.LogInformation(
+            "[ANALYSIS-AUTH] Analysis {AnalysisId} withheld from a caller who is not an internal systemuser "
+            + "(reason=source_document_hidden); uniform 404", analysisId);
+        return true;
     }
 
     /// <summary>
@@ -523,7 +608,8 @@ public class AnalysisAuthorizationFilter : IEndpointFilter
     internal static async Task<bool> IsAnalysisReadableAsync(HttpContext httpContext, Guid analysisId, ILogger? logger)
     {
         var targets = await ResolveAnalysisReadTargetsAsync(httpContext, analysisId, logger);
-        return await EvaluateOutsideFilterAsync(httpContext, targets, FinanceDenial.UniformNotFound, logger) is null;
+        return await EvaluateOutsideFilterAsync(httpContext, targets, FinanceDenial.UniformNotFound, logger) is null
+            && !await IsAnalysisDocumentHiddenFromCallerAsync(httpContext, analysisId, logger);
     }
 
     /// <summary>

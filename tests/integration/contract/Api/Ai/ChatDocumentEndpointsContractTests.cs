@@ -628,6 +628,95 @@ public class ChatDocumentEndpointsContractTests : IClassFixture<ChatDocumentEndp
             "an unauthorized caller must never trigger the app-only SPE download of the .eml");
     }
 
+    // ─── Task 188 round 4a: THE external document narrowing on the archive ingest ──────────────────────────
+
+    /// <summary>Arranges an ingestable archive the caller may Read, and returns its id after seeding <paramref name="case"/>.</summary>
+    private Guid ArrangeArchive(string @case)
+    {
+        var world = _fx.World;
+        var id = Guid.NewGuid();
+        switch (@case)
+        {
+            case "own-restricted":
+                world.Document(id, permission: 100000002);
+                break;
+            case "internal-only-communication":
+                var communication = Guid.NewGuid();
+                var thread = Guid.NewGuid();
+                world.Thread(thread, 100000000);
+                world.Communication(communication, internalOnly: true, thread);
+                world.Document(id, communication: communication);
+                break;
+            case "restricted-parent":
+                world.Document(id, parent: world.Document(Guid.NewGuid(), permission: 100000002));
+                break;
+            case "narrowing-fault":
+                world.Document(id);
+                world.Faults["sprk_documents"] = HttpStatusCode.ServiceUnavailable;
+                break;
+            case "lookup-fault":
+                _fx.CallerMode = Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode.LookupFault;
+                world.Document(id, permission: 100000002);
+                break;
+            case "visible":
+                world.Document(id);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(@case), @case, null);
+        }
+
+        _fx.Sessions.Session = BuildSession(TestSessionId, uploadedFiles: null);
+        _fx.DataverseMock
+            .Setup(d => d.GetDocumentAsync(id.ToString(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DocumentEntity
+            {
+                Id = id.ToString(), Name = "Re Acme", GraphDriveId = "drive-1", GraphItemId = "item-1",
+                FileName = "Re Acme.eml", IsEmailArchive = true, HasFile = true
+            });
+        _fx.SpeMock
+            .Setup(s => s.DownloadFileAsync("drive-1", "item-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new MemoryStream(Encoding.UTF8.GetBytes("From: a@x.com\r\n\r\nbody")));
+        return id;
+    }
+
+    [Theory(DisplayName = "Task 188 r4a: an external caller is refused the ingest of an archive the narrowing hides (403, never downloaded)")]
+    [InlineData("own-restricted")]
+    [InlineData("internal-only-communication")]
+    [InlineData("restricted-parent")]
+    [InlineData("narrowing-fault")]
+    [InlineData("lookup-fault")]
+    public async Task IngestFromDocument_ExternalCaller_HiddenArchive_IsRefusedAndNeverDownloaded(string @case)
+    {
+        _fx.Reset();
+        _fx.CallerMode = Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode.External;
+        var id = ArrangeArchive(@case);
+
+        var response = await _fx.CreateAuthenticatedClient().PostAsJsonAsync(
+            $"/api/ai/chat/sessions/{TestSessionId}/documents/from-document", new { documentId = id });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await response.Content.ReadAsStringAsync()).Should().Contain("sdap.access.deny.insufficient_rights",
+            "a hidden archive is refused with the same deny shape as no Read");
+        _fx.SpeMock.Verify(
+            s => s.DownloadFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory(DisplayName = "Task 188 r4a: must not fire — an internal user ingests a Restricted archive; an external caller a visible one")]
+    [InlineData(Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode.Internal, "own-restricted", 0)]
+    [InlineData(Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode.External, "visible", 1)]
+    public async Task IngestFromDocument_MustNotFire(Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode mode, string @case, int narrowingCalls)
+    {
+        _fx.Reset();
+        _fx.CallerMode = mode;
+        var id = ArrangeArchive(@case);
+
+        var response = await _fx.CreateAuthenticatedClient().PostAsJsonAsync(
+            $"/api/ai/chat/sessions/{TestSessionId}/documents/from-document", new { documentId = id });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _fx.World.Calls.Should().Be(narrowingCalls);
+    }
+
     // ─── Helpers ───────────────────────────────────────────────────────────────
 
     private static ChatSession BuildSession(string sessionId, IReadOnlyList<ChatSessionFile>? uploadedFiles)
@@ -692,6 +781,12 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
     // task 064 (E1c): the from-document ingest endpoint applies per-document authorization
     // (mirrors eml-render's DocumentAuthorizationFilter). Default: allow; the 403 test flips it.
     public Mock<IAuthorizationService> AuthzMock { get; } = new();
+
+    /// <summary>Task 188 round 4a: who the caller is for THE external document narrowing (reset to internal).</summary>
+    internal Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode CallerMode { get; set; } = Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode.Internal;
+
+    /// <summary>Task 188 round 4a: the app-only world THE external document narrowing reads (replaced on reset).</summary>
+    internal Sprk.Bff.Api.Tests.Services.Ai.Handlers.AppOnlyDocumentWorld World { get; private set; } = new();
     public List<string> CacheCalls { get; } = new();
 
     /// <summary>
@@ -837,6 +932,10 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
         // task 064 (E1c): per-document authorization mock (endpoint injects IAuthorizationService).
         builder.Services.AddSingleton<IAuthorizationService>(AuthzMock.Object);
 
+        // unified-access-control-r2 task 188 round 4a: THE external document narrowing on the archive ingest. The caller is
+        // a resolved internal systemuser unless a test states otherwise (IngestFromDocument_ExternalCaller_*).
+        Sprk.Bff.Api.Tests.TestInfrastructure.StatedNarrowingCaller.AddStatedNarrowingCaller(builder.Services, () => CallerMode, () => World);
+
         // IPostUploadIndexingEnqueuer is needed by PersistDocumentAsync (Phase 3a — sync OBO
         // post-upload indexing). Same registration pattern as SpeFileStore above — endpoint
         // parameter binding requires the type to resolve at startup; not exercised by upload tests.
@@ -897,6 +996,8 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
         DataverseMock.Reset();
         SpeMock.Reset();
         AuthzMock.Reset();
+        CallerMode = Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode.Internal;
+        World = new Sprk.Bff.Api.Tests.Services.Ai.Handlers.AppOnlyDocumentWorld();
         CacheCalls.Clear();
         DurableBlobs.Clear();
         PointerWorld.Items.Clear();
