@@ -443,3 +443,4 @@ Every v5.5 item closed (F1-a, F1-b, F1-c, F1-d, F2-a, F2-b, F2-c, Q1). The reuse
 
 uac-r2 checks the v5.8 diff only; then the model is ACCEPT from UAC.
 
+**uac-r2 on v5.8 (`eca8b52258..adb15bdb65`), 2026-10-21: ACCEPT from UAC.** All five items in. Two stale parentheticals from the retired "no source document" branch (model :334, :651) removed afterwards, no re-check needed.

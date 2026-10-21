@@ -331,7 +331,7 @@ Neither column confers access (section 5.2).
 - **Download (internal route):**
   1. **Refuse every caller with `sprk_isexternal = true`**, for every file kind (O-27; uac-r2 F1-e). Flagged-external users get invoice files only through the firm route (section 9.3). A fault reading the flag refuses.
   2. Check Read on the parent with the caller's own rights, the gate variant (`GetCallerRightsForRecordsAsync`, `CallerRecordAccessProbe.cs`; uac-r2 Q5).
-  3. For a Submit Invoice copy, apply **the copy rule**: the caller's own Read on the source document, gate variant (on the source communication for a mailbox-only copy; section 9.1, B; uac-r2 F4-2).
+  3. For a Submit Invoice copy, apply **the copy rule**: the caller's own Read on the source document, gate variant (section 9.1, B; uac-r2 F4-2).
   4. Check Status = Servable, the scan tag, and that the path's parent matches the row.
   5. Write the download audit event (O-29), then stream.
 - **Auditing (O-29):** Dataverse auditing on `sprk_procedureassignment` and `sprk_storedfile`; a download audit event per served file on both routes.
@@ -648,7 +648,7 @@ Unchanged at the core: the immutable policy version (clause and location), reaso
 
 **The two halves of J (owner: A + B).**
 - **A, file first.** When the communication is unfiled, Submit Invoice files it to the target core record M **before commit**, through `PATCH /api/communications/{id}/filing` with the caller's rights. The add-in's save then reports AlreadyFiled.
-- **B, the file follows its source.** On **every access** to the copy, the internal route applies **the copy rule: the caller's own Read on the source document**, gate variant (on the source communication when there is no source document), so a later refile, Restricted flag, internal-only flag or Open → Private change is honoured for the bytes (uac-r2 F4-2). External callers never get a copy (Firm-visible = No) and are also covered by (a′).
+- **B, the file follows its source.** On **every access** to the copy, the internal route applies **the copy rule: the caller's own Read on the source document**, gate variant, so a later refile, Restricted flag, internal-only flag or Open → Private change is honoured for the bytes (uac-r2 F4-2). External callers never get a copy (Firm-visible = No) and are also covered by (a′).
 
 **All or nothing (owner O), step by step:**
 
