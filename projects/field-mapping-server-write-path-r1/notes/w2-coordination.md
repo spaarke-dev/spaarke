@@ -138,5 +138,5 @@ touch DecisionCommitService. ebilling sends the shas when the range lands; rebas
 - **Task 040** (which deletes `ApplyMappingRule`'s Copy logic) must carry the skip into the engine's push path, has a
   criterion for it, and goes to UAC-r2 for review.
 - Dev has 0 mapping rules touching either access column (25 rules checked), so no owner decision is needed.
-- Open: whether D7 also needs the create path (014) to skip inheriting `sprk_accesspermission` onto documents.
-  Asked UAC-r2.
+- Resolved: UAC-r2 asked that 014 never map `sprk_document.sprk_accessinheritance` (skip with a warning, matching push)
+  while `sprk_accesspermission` stays fill-only. Criteria added to 014 and 040.

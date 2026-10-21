@@ -118,6 +118,12 @@
     <criterion testable="true">BFF build 0 errors; SecureChildOwnershipAiToolTests*, RefileWriterAfterRefileGuardTests and RouteAuthorizationGuardTests pass unchanged; publish-size delta, CVE result and /conflict-check result recorded in the task notes.</criterion>
     <criterion testable="true">From task 002 (2026-10-20): the mapping step passes `moneyAttributes` (the target table's Money columns, from attribute metadata) to `CreateTimeFieldMapping.ApplyFillOnly`, so a Default rule into a money column writes a `Money`; test it, then close #2124 (DI-001).</criterion>
     <criterion testable="true">From task 002 (2026-10-20): `ApplyFillOnly` never writes the regarding pair or resolver fields. Any create whose secure-root filing plan reads a pair that mapping supplied today (Office Project-under-Matter, task 158) gets the pair from the caller or derives it from the filed-under parent BEFORE mapping; SecureRootInheritanceWriterTests.OfficeCreate_* and SecureRootCreateRouteTests.OfficeQuickCreate_* pass unchanged.</criterion>
+    <criterion testable="true">From UAC-r2 D7 / #2169 (2026-10-21):
+      - `sprk_document.sprk_accessinheritance` is never a mapping target, at create or on push. It is a BFF-only record of the inherited floor and the document's own narrowing. A rule targeting it is skipped with a per-rule warning reason, matching the push skip. Prefer a protected-target entry on the sprk_document row of RecordTableRules (task 012) over a special case.
+      - `sprk_document.sprk_accesspermission` stays fill-only at create, unchanged.
+      - Tests: a must-fire case where accessinheritance is skipped at create with its warning, and a must-not-fire case where accesspermission is still filled on an empty new document.
+      - UAC-r2 reviews this part of the diff before merge.
+    </criterion>
   </acceptance-criteria>
 
   <notes>Spec FR-06 step 3, FR-08, NFR-01. Owner decision 2026-10-19: mapped values that fail AppendTo or field security are skipped with a warning and the create proceeds. Task 015 changes the owner step; do not touch it here.</notes>
