@@ -63,7 +63,7 @@
 |---|---|---|---|---|---|---|---|
 | 050 | [Resolve W5 open questions (marker, quick-create flags)](050-resolve-w5-open-questions.poml) | spec UQ 1–2 | sonnet / high | STANDARD | W5-A | 019 | 🔲 |
 | 051 | [Native UI: ribbon New, quick create off, Assign hidden](051-native-ui-redirect-quickcreate-assign.poml) | FR-24 | sonnet / high | FULL | W5-B | 050, 029 | 🔲 |
-| 052 | [Repair pass `IScheduledJob` + on-demand trigger](052-repair-pass-scheduled-job.poml) | FR-25 | opus / xhigh | FULL | W5-B | 016, 050 | 🔲 |
+| 052 | [Repair pass `IScheduledJob` + on-demand trigger](052-repair-pass-scheduled-job.poml) | FR-25 | opus / xhigh | FULL | W5-B | 016, 033, 050 | 🔲 |
 | 053 | [W5 deploy + live 5-row import check](053-w5-deploy-and-live-import-check.poml) | FR-24, FR-25 | sonnet / high | FULL | none | 051, 052 | 🔲 |
 
 ## Phase 6 — W6 Standard, guards, docs, retirement
