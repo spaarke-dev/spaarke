@@ -23,7 +23,8 @@ namespace Spaarke.ArchTests;
 /// <c>(await )?MappingSourceCallerMask.ApplyAsync(…)</c> (optionally <c>.ConfigureAwait(false)</c>, nothing else); (2) a null
 /// check; or (3) an engine call's source argument — and at least one assignment must be a mask call. Anything else (a helper
 /// argument, an alias, a cast, a parameter, a lambda, pattern or query binding, a deconstruction, a member or field access,
-/// a <c>ref</c>) fails, as do an expression source and a <c>using static</c> import of the engine.</para>
+/// a <c>ref</c>) fails, as do an expression source, a <c>using static</c> or <c>using</c>-alias import of the engine, and the
+/// engine's method taken as a method group (#2191 review).</para>
 /// <para><b>Known limits</b> (accepted, review pass 2): the scan strips a line from the first <c>//</c>, so a <c>//</c> inside
 /// a string hides the rest of that line; the mask call's arguments are not checked; the name inside a string literal is a
 /// fail-closed false positive.</para>
@@ -48,8 +49,15 @@ public class MappingSourceCallerMaskGuardTests
         @"\bCreateTimeFieldMapping\s*\.\s*(Apply|ApplyFillOnly)\s*\(",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-    private static readonly Regex StaticImport = new(
-        @"using\s+static\s+[\w.]*CreateTimeFieldMapping\s*;",
+    /// <summary>A <c>using static</c> import of the engine, or a <c>using</c> alias of it (#2191 review, F a) — either hides
+    /// its calls from <see cref="EngineCall"/>.</summary>
+    private static readonly Regex EngineImport = new(
+        @"using\s+(?:static\s+|\w+\s*=\s*)[\w.:]*CreateTimeFieldMapping\s*;",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    /// <summary>The engine's method taken as a method group, not called (#2191 review, F b): a delegate call hides the source.</summary>
+    private static readonly Regex EngineMethodGroup = new(
+        @"\bCreateTimeFieldMapping\s*\.\s*(Apply|ApplyFillOnly)\b(?!\s*\()",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     [Fact(DisplayName = "#2188: every source handed to the field-mapping engine was masked to the caller's view first")]
@@ -258,6 +266,21 @@ public class MappingSourceCallerMaskGuardTests
             using static Sprk.Bff.Api.Services.Dataverse.FieldMapping.CreateTimeFieldMapping;
             """
         },
+        {
+            "(#2191 review, F a) the engine imported under a using alias and called through it",
+            """
+            using Engine = Sprk.Bff.Api.Services.Dataverse.FieldMapping.CreateTimeFieldMapping;
+            Engine.Apply(rules, target, appRead, p, w, l);
+            """
+        },
+        {
+            "(#2191 review, F b) the engine's method taken as a method group and called through the delegate",
+            """
+            Action<IEnumerable<FieldMappingRuleEntity>, Entity, Entity?, IReadOnlySet<string>, List<string>, ILogger> f;
+            f = CreateTimeFieldMapping.Apply;
+            f(rules, target, appRead, p, w, l);
+            """
+        },
     };
 
     [Theory(DisplayName = "#2188 guard control: each bypass shape fires")]
@@ -317,9 +340,14 @@ public class MappingSourceCallerMaskGuardTests
     {
         var violations = new List<string>();
 
-        if (StaticImport.Match(code) is { Success: true } import)
+        foreach (Match import in EngineImport.Matches(code))
         {
-            violations.Add($"{SourceScan.LineOf(code, import.Index)}: imports the engine with using static, so its calls cannot be checked");
+            violations.Add($"{SourceScan.LineOf(code, import.Index)}: imports the engine with using static or a using alias, so its calls cannot be checked");
+        }
+
+        foreach (Match group in EngineMethodGroup.Matches(code))
+        {
+            violations.Add($"{SourceScan.LineOf(code, group.Index)}: takes CreateTimeFieldMapping.{group.Groups[1].Value} as a method group, so the source it is later called with cannot be checked");
         }
 
         // Every engine call's source argument, with where its text starts — the one sanctioned non-assignment use of the name.
