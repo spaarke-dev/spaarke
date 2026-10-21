@@ -15,9 +15,10 @@ namespace Spaarke.ArchTests;
 /// <para><b>The create tables.</b> Read from the compiled create paths, not from the registry (a set derived from the
 /// registry would make the guard pass by construction): the browser create route's accept-list
 /// (<see cref="ChildRecordEndpoints.CreateTables"/>) and the Office quick-create's Matter and Project
-/// (<see cref="RecordCreationService.MatterEntity"/>, <see cref="RecordCreationService.ProjectEntity"/>; its Invoice is on the
+/// (<see cref="OfficeRecordCreationService.MatterEntity"/>, <see cref="OfficeRecordCreationService.ProjectEntity"/>; its Invoice is on the
 /// route's list). The chat <c>dataverse.create_record</c> tool has no accept-list (any table but <c>sprk_document</c>), so
-/// it is not covered; task 013 adds the unified service's accepted set here when it exists.</para>
+/// it is not covered. The unified create service (task 013) accepts exactly the registry's tables — an unregistered table
+/// is refused (<c>record_creation.table_unsupported</c>) — so its accepted set needs no entry here.</para>
 /// <para><b>Controls.</b> <see cref="Guard_MustFire_ACreateTableWithNoEntry_IsReported"/> adds a fixture table the registry
 /// does not hold and requires the guard to report it, against the real registry and against a fixture lookup;
 /// <see cref="Guard_MustNotFire_EveryEntryPresent_ReportsNothing"/> is the same detector over a fixture where every table
@@ -30,8 +31,8 @@ public class RecordTableRulesRegistryGuardTests
     /// <summary>Every table on a server create path's fixed accept-list today.</summary>
     private static IReadOnlyList<string> CreateTables() =>
         ChildRecordEndpoints.CreateTables
-            .Append(RecordCreationService.MatterEntity)
-            .Append(RecordCreationService.ProjectEntity)
+            .Append(OfficeRecordCreationService.MatterEntity)
+            .Append(OfficeRecordCreationService.ProjectEntity)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(t => t, StringComparer.Ordinal)
             .ToList();
