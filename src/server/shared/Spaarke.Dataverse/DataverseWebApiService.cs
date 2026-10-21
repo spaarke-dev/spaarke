@@ -889,7 +889,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         var url =
             "sprk_fieldmappingprofiles?" +
             "$filter=statecode eq 0&" +
-            "$select=sprk_fieldmappingprofileid,sprk_name,_sprk_sourcerecordtype_value,_sprk_targetrecordtype_value,sprk_capabilitymode,sprk_defaultvalue,sprk_description,statecode&" +
+            $"$select={FieldMappingColumns.ProfileSelect}&" +
             "$orderby=sprk_name asc";
 
         _logger.LogDebug("Querying field mapping profiles (statecode=0)");
@@ -952,7 +952,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             var url =
                 $"sprk_fieldmappingprofiles?" +
                 $"$filter=_sprk_sourcerecordtype_value eq {sourceRefId} and _sprk_targetrecordtype_value eq {targetRefId} and statecode eq 0&" +
-                $"$select=sprk_fieldmappingprofileid,sprk_name,_sprk_sourcerecordtype_value,_sprk_targetrecordtype_value,sprk_capabilitymode,sprk_defaultvalue,sprk_description,statecode";
+                $"$select={FieldMappingColumns.ProfileSelect}";
 
             var response = await SendGetAsync(url, ct);
             response.EnsureSuccessStatusCode();
@@ -1039,7 +1039,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             ? $"$filter=_sprk_fieldmappingprofile_value eq {profileId} and sprk_isactive eq true&"
             : $"$filter=_sprk_fieldmappingprofile_value eq {profileId}&";
 
-        var url = $"sprk_fieldmappingrules?{filterQuery}$select=sprk_fieldmappingruleid,sprk_name,_sprk_fieldmappingprofile_value,sprk_sourcefield,sprk_sourcefieldtype,sprk_targetfield,sprk_targetfieldtype,sprk_mapping_type,sprk_compatibilitymode,sprk_isrequired,sprk_defaultvalue,sprk_expression,sprk_iscascadingsource,sprk_executionorder,sprk_isactive&$orderby=sprk_executionorder asc";
+        var url = $"sprk_fieldmappingrules?{filterQuery}$select={FieldMappingColumns.RuleSelect}&$orderby=sprk_executionorder asc";
 
         _logger.LogDebug("Getting field mapping rules for profile: {ProfileId}", profileId);
 
@@ -2259,14 +2259,14 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
 
             // Step 2: query profile + expand rules in one round-trip filtered by resolved GUIDs.
             // sprk_fieldmappingrule_FieldMappingProfile_sprk_fieldmappingprofile is the 1:N navigation property name.
-            var ruleSelect = "$select=sprk_fieldmappingruleid,sprk_name,_sprk_fieldmappingprofile_value,sprk_sourcefield,sprk_sourcefieldtype,sprk_targetfield,sprk_targetfieldtype,sprk_mapping_type,sprk_compatibilitymode,sprk_isrequired,sprk_defaultvalue,sprk_expression,sprk_iscascadingsource,sprk_executionorder,sprk_isactive";
+            var ruleSelect = $"$select={FieldMappingColumns.RuleSelect}";
             var ruleFilter = activeRulesOnly ? ";$filter=sprk_isactive eq true" : "";
             var ruleOrderBy = ";$orderby=sprk_executionorder asc";
 
             var url =
                 $"sprk_fieldmappingprofiles?" +
                 $"$filter=_sprk_sourcerecordtype_value eq {sourceRefId} and _sprk_targetrecordtype_value eq {targetRefId} and statecode eq 0" +
-                $"&$select=sprk_fieldmappingprofileid,sprk_name,_sprk_sourcerecordtype_value,_sprk_targetrecordtype_value,sprk_capabilitymode,sprk_defaultvalue,sprk_description,statecode" +
+                $"&$select={FieldMappingColumns.ProfileSelect}" +
                 $"&$expand=sprk_fieldmappingrule_FieldMappingProfile_sprk_fieldmappingprofile({ruleSelect}{ruleFilter}{ruleOrderBy})";
 
             var response = await SendGetAsync(url, ct);

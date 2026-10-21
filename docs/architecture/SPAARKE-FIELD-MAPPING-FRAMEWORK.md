@@ -21,7 +21,7 @@ This is the complete build surface. Every row is a distinct, live component; pat
 
 | Component | Path / location | Responsibility |
 |-----------|------|-----------------|
-| `sprk_fieldmappingprofile` (table) | Dataverse (`spaarkedev1`) · `infrastructure/dataverse/solutions/FieldMappingAdminSolution/Entities/sprk_FieldMappingProfile/` | One row per (source entity, target entity) pair: `sprk_sourcerecordtype`/`sprk_targetrecordtype` (**lookups to `sprk_recordtype_ref`**, not name strings), `sprk_compatibilitymode`, `sprk_description`, `sprk_name`, `statecode` (0=Active / 1=Inactive → `IsActive`) |
+| `sprk_fieldmappingprofile` (table) | Dataverse (`spaarkedev1`) · `infrastructure/dataverse/solutions/FieldMappingAdminSolution/Entities/sprk_FieldMappingProfile/` | One row per (source entity, target entity) pair: `sprk_sourcerecordtype`/`sprk_targetrecordtype` (**lookups to `sprk_recordtype_ref`**, not name strings), `sprk_capabilitymode` (selected, never read; see "Columns read but unused"), `sprk_description`, `sprk_name`, `statecode` (0=Active / 1=Inactive → `IsActive`) |
 | `sprk_fieldmappingrule` (table) | Dataverse (`spaarkedev1`) · `.../Entities/sprk_FieldMappingRule/` | Child rows of a profile (relationship `sprk_fieldmappingrule_FieldMappingProfile_n1`, referencing attribute `sprk_FieldMappingProfile`): `sprk_sourcefield`/`sprk_targetfield` + their `sprk_sourcefieldtype`/`sprk_targetfieldtype`, `sprk_mapping_type` (Copy0/Default1/Concat2/Template3), `sprk_defaultvalue` (`NVARCHAR(100)`), **`sprk_expression`** (`Memo`, max 2000 — added this project), `sprk_compatibilitymode` (Strict0/Resolve1), `sprk_isrequired`, `sprk_executionorder`, `sprk_isactive` |
 | `sprk_recordtype_ref` (table) | Dataverse (`spaarkedev1`) | The authoritative entity-catalog both profile lookups resolve through; `sprk_recordlogicalname` is the logical-name string the BFF maps ↔ GUID. A target entity **must** have a row here before a profile can reference it. Shared with the ADR-024 resolver ecosystem |
 
@@ -78,8 +78,24 @@ These are the option-set integer values a maker sees as labels on the form, and 
 |---|---|
 | `sprk_mapping_type` | `0`=Copy · `1`=Default · `2`=Concat · `3`=Template |
 | `sprk_sourcefieldtype` / `sprk_targetfieldtype` | `0`=Text · `1`=Lookup · `2`=OptionSet · `3`=Number · `4`=DateTime · `5`=Boolean · `6`=Memo |
-| `sprk_compatibilitymode` | `0`=Strict · `1`=Resolve |
+| `sprk_compatibilitymode` (rule table) | `0`=Strict · `1`=Resolve |
+| `sprk_capabilitymode` (profile table) | `100000000`=Strict · `100000001`=Resolve |
 | `statecode` (profile active flag) | `0`=Active · `1`=Inactive |
+
+### Columns read but unused (dormant)
+
+The profile and rule tables each carry a mode column under a **different** name, both deployed as written (Dataverse `describe` on spaarkedev1, 2026-10-21): `sprk_fieldmappingprofile.sprk_capabilitymode` and `sprk_fieldmappingrule.sprk_compatibilitymode`. They are two columns, not two spellings of one; neither is renamed. The profile table has no `sprk_syncmode` or `sprk_mappingdirection`. The read path's column lists live in one place, `Spaarke.Dataverse/FieldMappingColumns.cs`, and a unit test checks each against the solution's `Entity.xml`.
+
+Four columns are read, or declared, but **nothing branches on them**. The engine ignores them; do not rely on them to change behaviour until a task makes one live. Evidence (grep, 2026-10-21, `src/server`, `src/client`, `src/solutions`):
+
+| Column | What reads it | Engine behaviour |
+|---|---|---|
+| `sprk_mappingdirection` (rule) | Nothing. It is not in any `$select`. The profile model's `MappingDirection` is hard-coded `0` in `MapToFieldMappingProfileEntity` and no code reads it. | Not referenced by the engine. |
+| `sprk_isrequired` (rule) | `$select` into `FieldMappingRuleEntity.IsRequired`; `FieldMappingEndpoints` copies it to the DTO `isRequired`; `FieldMappingService.ts` passes it through. No `if`, `switch` or guard reads `.IsRequired` / `isRequired` on a rule. | Not referenced by the engine; a required rule is treated like any other rule. |
+| `sprk_iscascadingsource` (rule) | `$select` into `FieldMappingRuleEntity.IsCascadingSource`. No reader of the property exists (the DTO does not carry it). | Not referenced by the engine. |
+| `sprk_compatibilitymode` (rule) | `$select` into `CompatibilityMode`; `MapCompatibilityModeToString` copies it to the DTO; `FieldMappingService.ts` passes it through. No type-coercion code branches on `Strict` / `Resolve`. | Not referenced by the engine; coercion does not vary with it. |
+
+`sprk_capabilitymode` (profile) is also selected by every profile query and mapped nowhere; it is dormant for the same reason.
 
 ## Canonical Engine Semantics (server — `CreateTimeFieldMapping`)
 
