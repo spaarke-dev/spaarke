@@ -4,7 +4,7 @@
     <title>Read sprk_syncmode on rules + scripted migration of Copy rules to Manual Refresh (FR-05d)</title>
     <phase>1 W1 Canonical engine and configuration</phase>
     <gate>001 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in Spaarke.Dataverse and Sprk.Bff.Api; tags include bff-api and data-migration; adds a data-changing script and tests at KEEP paths.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -100,7 +100,9 @@
     <criterion testable="true">New rules default to One-time (0) and nothing in the BFF writes sprk_syncmode for rules created without it; BFF build 0 errors; existing tests pass; publish-size delta and CVE result recorded in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-05(d). Consumed by task 040 (/push selects Manual Refresh Copy rules).</notes>
+  <notes>Spec FR-05(d). Consumed by task 040 (/push selects Manual Refresh Copy rules).
+Completed 2026-10-21. Rules read SyncMode. scripts/Set-FieldMappingRuleSyncMode.ps1 defaults to a dry run. The dev dry run read 25 Copy rules: 21 would change (20 empty, 1 One-time) and 4 are already Manual Refresh. The live -Apply and its two live proofs (a second -Apply makes zero changes; -Verify exits 0) wait on the owner's OK. Seeder gap: DI-003 / #2181 (task 040). Details: notes/task-005-notes.md.
+rework: none task 005</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

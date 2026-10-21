@@ -10,8 +10,8 @@
 | 001 | [Promote canonical mapping engine](001-promote-canonical-mapping-engine.poml) | FR-01 | sonnet / high | FULL | W1-A | — | ✅ |
 | 002 | [Fill-only applier + pair/protected target guard](002-fill-only-applier-and-target-guard.poml) | FR-02, FR-05e | sonnet / high | FULL | W1-B | 001 | ✅ |
 | 003 | [Mapping-source resolver + Read-as-caller probe](003-mapping-source-resolver-and-read-probe.poml) | FR-03, FR-04 | opus / high | FULL | W1-B | 001 | ✅ |
-| 004 | [Config cleanup: mode column, dormant columns, seeder #1318](004-config-cleanup-mode-column-dormant-seeder.poml) | FR-05a-c | sonnet / high | FULL | W1-B | 001 | 🔲 |
-| 005 | [`sprk_syncmode` read + migration script](005-syncmode-read-and-migration-script.poml) | FR-05d | sonnet / high | FULL | W1-C | 001 | 🔲 |
+| 004 | [Config cleanup: mode column, dormant columns, seeder #1318](004-config-cleanup-mode-column-dormant-seeder.poml) | FR-05a-c | sonnet / high | FULL | W1-B | 001 | ✅ |
+| 005 | [`sprk_syncmode` read + migration script](005-syncmode-read-and-migration-script.poml) | FR-05d | sonnet / high | FULL | W1-C | 001 | ✅ |
 | 006 | [Remove OOB businessunit→sprk_matter map](006-remove-oob-businessunit-matter-entitymap.poml) | FR-05f | sonnet / medium | STANDARD | W1-C | — | ✅ |
 
 ## Phase 2 — W2 Unified `RecordCreationService`

@@ -94,7 +94,8 @@
     <criterion testable="true">The shared library and every dependent solution build with 0 errors; the library's tests pass.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-22. Client preview was superseded (owner Q4): none exists, so nothing replaces the engine.</notes>
+  <notes>Spec FR-22. Client preview was superseded (owner Q4): none exists, so nothing replaces the engine.
+2026-10-21 (task 004): FieldMappingHandler.ts:175 selects sprk_syncmode from sprk_fieldmappingprofile, which has no such column. This is pre-existing; deleting the engine removes it. If deletion is delayed, fix the $select.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

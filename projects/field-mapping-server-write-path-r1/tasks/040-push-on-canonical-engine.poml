@@ -104,7 +104,8 @@
   </acceptance-criteria>
 
   <notes>Spec FR-23, NFR-07. #2098 out of scope. The push web resource is unchanged unless it displays the error text.
-DI-002 / #2137 (2026-10-20): replace AuthorizePushSourceAsync's own Read check with MappingSourceReadProbe.CheckCallerReadAsync (timing-equalised; task 003). Close the push part of #2137.</notes>
+DI-002 / #2137 (2026-10-20): replace AuthorizePushSourceAsync's own Read check with MappingSourceReadProbe.CheckCallerReadAsync (timing-equalised; task 003). Close the push part of #2137.
+DI-003 / #2181 (2026-10-21): the provisioning seeder must set sprk_syncmode = Manual Refresh on seeded Copy rules, or /push skips them in new environments. Add a seeder test, and add a deployment-guide step to run Set-FieldMappingRuleSyncMode.ps1 after an upgrade.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

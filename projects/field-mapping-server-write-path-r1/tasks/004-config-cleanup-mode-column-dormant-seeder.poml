@@ -4,7 +4,7 @@
     <title>Profile mode-column reconcile, dormant columns documented, seeder #1318 fix (FR-05 a/b/c)</title>
     <phase>1 W1 Canonical engine and configuration</phase>
     <gate>001 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in Sprk.Bff.Api, Spaarke.Dataverse and the provisioning seeder; tags include bff-api and provisioning; adds or changes tests at KEEP paths.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -94,7 +94,9 @@
     <criterion testable="true">BFF and seeder projects build with 0 errors; existing tests pass; publish-size delta and CVE result recorded in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-05(a)(b)(c). The sprk_syncmode read and migration are task 005; the pair/protected-target guard is task 002.</notes>
+  <notes>Spec FR-05(a)(b)(c). The sprk_syncmode read and migration are task 005; the pair/protected-target guard is task 002.
+Completed 2026-10-21. The deployed mode columns are sprk_capabilitymode on the profile and sprk_compatibilitymode on the rule: two different columns, not one misspelling, so no rename or schema change. The $select lists are shared in FieldMappingColumns.cs and the seeder filters on _sprk_fieldmappingprofile_value (#1318). Details: notes/task-004-notes.md.
+rework: none task 004</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
