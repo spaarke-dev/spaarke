@@ -71,3 +71,17 @@ follows.
 - ebilling-r1 edits OwnedChildWrite.cs next to the moved `WhoAmIAsync`, so a visible merge conflict is expected for
   the second lander. ebilling calls none of the moved helpers.
 - 017 still goes to UAC before merge.
+
+## 2026-10-21 — UAC-r2 no-objection to 013 going to master
+
+UAC-r2 re-checked `fad68a797b..36d885f72f`: F-1 to F-3 are closed, and F-4 stays the owner's decision (FR-06 step 10).
+Their no-objection binds us to the items carried into later tasks:
+- K-2 → 014;
+- K-3 → 018;
+- K-4 → 017;
+- the narrower SystemPrincipal option;
+- the document access columns, in whichever of #2169 and 017 lands second;
+- no pre-create stamp writer is re-pointed until FR-06 step 10 is decided.
+
+017's diff goes to UAC-r2 for the same review. ebilling-r1 has no objection, subject to its re-check of the fix-round-2
+seam tests.
