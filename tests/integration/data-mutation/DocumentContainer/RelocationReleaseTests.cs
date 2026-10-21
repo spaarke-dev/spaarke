@@ -668,7 +668,7 @@ public class RelocationReleaseTests
         rig.DriveOf(T.DocumentId).Should().Be(R.SecondSecureContainer);
     }
 
-    [Fact(DisplayName = "slice 4 must fire: a descendant the shared lock-wait budget left without a release is named by id in the log, to re-file again")]
+    [Fact(DisplayName = "slice 4 must fire: a descendant the shared lock-wait budget left without a release is named by id in the log, with its retry queued")]
     public async Task ARefiledEvent_NamesADescendantLeftUnreleased()
     {
         var (world, rig) = RefiledToS2();
@@ -680,8 +680,27 @@ public class RelocationReleaseTests
 
         report!.IsolatedDocumentIds.Should().Contain(T.DocumentId);
         world.Updates.Should().BeEmpty("its lock was busy: no release");
-        logger.Lines.Should().ContainSingle(l => l.Level == LogLevel.Warning && l.Message.Contains("were NOT released"))
+        logger.Lines.Should().ContainSingle(l => l.Level == LogLevel.Warning && l.Message.Contains("a retry is queued for each"))
             .Which.Message.Should().Contain(T.DocumentId.ToString());
+        rig.Submitted.Should().ContainSingle("the #2159 fix round: retried durably, never left to a re-file that changes nothing");
+        logger.Lines.Should().NotContain(l => l.Message.Contains("re-file again", StringComparison.OrdinalIgnoreCase)
+                                              || l.Message.Contains("Re-file the row again", StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "fix round must fire: a descendant whose retry cannot be queued is named by id in an ERROR, with the recovery that works")]
+    public async Task ARefiledEvent_NamesADescendantWhoseRetryCouldNotBeQueued()
+    {
+        var (_, rig) = RefiledToS2();
+        rig.Locks.Held.Add(DocumentContainerRelocator.RelocationLockKey(T.DocumentId));
+        rig.SubmitFault = new InvalidOperationException("Service Bus unavailable");
+        var logger = new CapturingLogger();
+
+        await EventReconciler(rig, logger).AfterRefileAsync(
+            "sprk_event", Event, () => Task.FromResult(true), Reparent(Permit(S1)), CancellationToken.None);
+
+        logger.Lines.Should().ContainSingle(l => l.Level == LogLevel.Error && l.Message.Contains("no retry could be queued"))
+            .Which.Message.Should().Contain(T.DocumentId.ToString()).And.Contain(DocumentContainerRelocator.UnreleasedRecovery);
+        logger.Lines.Should().NotContain(l => l.Message.Contains("a retry is queued for each"));
     }
 
     [Fact(DisplayName = "slice 4 must not fire: a descendant released within the budget is not named as unreleased")]

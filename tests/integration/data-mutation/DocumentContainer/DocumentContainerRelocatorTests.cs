@@ -20,6 +20,7 @@
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
@@ -265,7 +266,50 @@ public class DocumentContainerRelocatorTests
         public DocumentContainerRelocator NewRelocator(
             Sprk.Bff.Api.Services.Jobs.IIdempotencyService? locks = null, IAccessDataSource? access = null, TimeProvider? time = null)
             => new(Resolver, World.EntityService!, Spe.Object, Indexing, locks ?? Locks, access ?? Access,
-                NullLogger<DocumentContainerRelocator>.Instance, Configuration, time, Attribution);
+                NullLogger<DocumentContainerRelocator>.Instance, Configuration, time, Attribution, JobServices);
+
+        /// <summary>
+        /// #2159 fix round: the jobs the relocator queued (a release retry), on a <see cref="JobSubmissionService"/> that
+        /// records instead of sending — Service Bus is the boundary. <see cref="SubmitFault"/> makes the send fail.
+        /// </summary>
+        public List<JobContract> Submitted { get; } = new();
+
+        /// <summary>When set, queuing a job FAULTS (Service Bus unavailable).</summary>
+        public Exception? SubmitFault { get; set; }
+
+        private IServiceProvider JobServices => _jobServices ??= BuildJobServices();
+
+        private IServiceProvider? _jobServices;
+
+        private IServiceProvider BuildJobServices()
+        {
+            var submitter = new Mock<JobSubmissionService>(
+                MockBehavior.Loose,
+                Options.Create(new Sprk.Bff.Api.Configuration.ServiceBusOptions
+                {
+                    QueueName = "test-jobs",
+                    ConnectionString = "Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=k;SharedAccessKey=v",
+                }),
+                Mock.Of<ILogger<JobSubmissionService>>(),
+                new Mock<Azure.Messaging.ServiceBus.ServiceBusClient>().Object);
+            submitter
+                .Setup(s => s.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
+                .Returns((JobContract job, CancellationToken _) =>
+                {
+                    if (SubmitFault is { } fault)
+                    {
+                        return Task.FromException(fault);
+                    }
+
+                    lock (Submitted)
+                    {
+                        Submitted.Add(job);
+                    }
+
+                    return Task.CompletedTask;
+                });
+            return new ServiceCollection().AddSingleton(submitter.Object).BuildServiceProvider();
+        }
 
         /// <summary>The host configuration the relocator reads (#2159: the Secure Record names — the defaults here).</summary>
         public static IConfiguration Configuration { get; } = new ConfigurationBuilder().Build();

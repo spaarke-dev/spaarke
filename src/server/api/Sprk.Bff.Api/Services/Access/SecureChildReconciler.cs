@@ -924,7 +924,9 @@ public sealed class SecureChildReconciler
     /// the re-file left at least one secure root with the caller's F3 permission, so the ONE ledger writer
     /// (<see cref="DocumentContainerRelocator.RecordReleaseAsync"/>) records it under the document's lock, after checking the
     /// file's secure record is one of those roots. Only a written re-file's own permission. Never throws — a release not
-    /// recorded (lock held, a fault, another secure record) leaves the file held where it is (fail closed); the re-file stands.
+    /// recorded inline (lock held, a fault) is retried through the job queue (<see cref="RelocationReleaseRetryJobHandler"/>);
+    /// until it is recorded, or when it cannot be (another secure record, no retry queued), the file stays held where it is
+    /// (fail closed); the re-file stands.
     /// </summary>
     private async Task RecordDescendantReleasesAsync(
         string table, Guid rowId, IReadOnlyList<Guid> documentIds, SecureExitPermit permit, CancellationToken ct)
@@ -947,8 +949,9 @@ public sealed class SecureChildReconciler
         {
             _logger.LogError(ex,
                 "[SECURE-CHILD-RECONCILE] {Table} {Id} was re-filed out of a secure record with F3, but the releases of the files "
-                + "of the documents filed under it could not be recorded ({Documents}); they stay held — re-file again to release "
-                + "them.", table, rowId, string.Join(", ", documentIds));
+                + "of the documents filed under it could not be recorded and no retry was queued ({Documents}); their files stay "
+                + "held where they are. Recovery for each: {Recovery}.", table, rowId, string.Join(", ", documentIds),
+                DocumentContainerRelocator.UnreleasedRecovery);
             return;
         }
 
@@ -960,17 +963,27 @@ public sealed class SecureChildReconciler
                 + "with F3: release {State} ({Detail}).", documentId, table, rowId, permit.RootsLeft.Count, release.State, release.Detail);
         }
 
-        // A file left held because its lock was busy or a write failed can be released only by a re-file: name them all.
+        // A file left held because its lock was busy or a write failed is retried through the job queue; one whose retry could
+        // not be queued is released only by a new F3 re-file out of the secure record holding it: name them all, by id.
         var notReleased = outcomes
             .Where(o => o.Outcome.State is RelocationReleaseState.LockHeld or RelocationReleaseState.Failed)
-            .Select(o => o.DocumentId)
             .ToList();
-        if (notReleased.Count > 0)
+        var queued = notReleased.Where(o => o.Outcome.RetryQueued).Select(o => o.DocumentId).ToList();
+        var stranded = notReleased.Where(o => !o.Outcome.RetryQueued).Select(o => o.DocumentId).ToList();
+        if (queued.Count > 0)
         {
             _logger.LogWarning(
                 "[SECURE-CHILD-RECONCILE] {Table} {Id} was re-filed with F3, but the files of {Count} document(s) filed under it "
-                + "were NOT released (a busy lock or a failed write) and stay held: {Documents}. Re-file the row again to release them.",
-                table, rowId, notReleased.Count, string.Join(", ", notReleased));
+                + "were not released yet (a busy lock or a failed write); a retry is queued for each: {Documents}.",
+                table, rowId, queued.Count, string.Join(", ", queued));
+        }
+
+        if (stranded.Count > 0)
+        {
+            _logger.LogError(
+                "[SECURE-CHILD-RECONCILE] {Table} {Id} was re-filed with F3, but the files of {Count} document(s) filed under it "
+                + "were NOT released and no retry could be queued; they stay held: {Documents}. Recovery for each: {Recovery}.",
+                table, rowId, stranded.Count, string.Join(", ", stranded), DocumentContainerRelocator.UnreleasedRecovery);
         }
     }
 
@@ -996,7 +1009,8 @@ public sealed class SecureChildReconciler
         {
             _logger.LogError(ex,
                 "[SECURE-CHILD-RECONCILE] sprk_document {Id} was re-filed out of a secure record with F3, but the release of its "
-                + "file could not be recorded; the file stays held where it is.", childId);
+                + "file could not be recorded and no retry was queued; the file stays held where it is. Recovery: {Recovery}.",
+                childId, DocumentContainerRelocator.UnreleasedRecovery);
         }
     }
 
