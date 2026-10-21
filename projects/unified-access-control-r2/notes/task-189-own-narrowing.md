@@ -371,7 +371,10 @@ Unchanged:
 | `f69b007da8` | Fix round C, K5: app-only generic writers refuse a document's Access Permission and record (§8.9) |
 | `abcf516022` | this file: §8.9 |
 | `7c7b245b10` | Fix round C, F1: every parented document gets its record (§8.9; committed on the main session's decision) |
-| (this commit) | this file: §8.9, F1 and the deploy-order gate |
+| `4546c0d6ed` | this file: §8.9, F1 and the deploy-order gate |
+| `c8c591777f` | Security pass 2, K1: the field-mapping push skips a document's Access Permission and record (§8.10) |
+| `48869bc7c5` | Security pass 2, F1: a BFF before the schema keeps its raises as the document's own; guide, notes, guard, script (§8.10) |
+| (this commit) | this file: §8.9 gate timed from the run's end (F4), §8.10 |
 
 ### 8.2 Tests
 
@@ -672,8 +675,9 @@ The pass came back FIX-ROUND-NEEDED. One commit per item, each with must-fire an
       minutes** after the deploy. A larger environment takes about max(rows / 1000, documents / 500) runs.
   - **Deploy-order gate (main session, 2026-10-21):**
     1. #2169 deploys before #2161.
-    2. #2161 deploys only after task 189's record backfill is complete, and then at least 60 minutes later (#2161's
-       first run looks back `InitialRecentChangesLookback`, 60 minutes).
+    2. #2161 deploys only after task 189's record backfill is complete, and then at least 70 minutes after the END of
+       the run that completed it: 60 for #2161's first-run look-back (`InitialRecentChangesLookback`) plus a 10-minute
+       margin (security pass 2, F4).
     3. Separately, #2161's pre-deploy gate includes a read-only count of misplaced files (the main session adds it).
   - **How to verify "backfill complete".** The field is `ResultJson.accessPermission.sweep.complete` of the
     `secure-child-reconciliation` job. Read it from `GET /api/admin/jobs/secure-child-reconciliation/status` (the last 10
@@ -688,8 +692,10 @@ The pass came back FIX-ROUND-NEEDED. One commit per item, each with must-fire an
     - `tablesWithoutColumn` not listing `sprk_document`. Otherwise documents are decided raise-only and no record is
       written.
 
-    `sweep.complete` stays `true` in the later runs of that instance. Wait 60 minutes after the start of the first run
-    meeting all of the above, then deploy #2161.
+    `sweep.complete` stays `true` in the later runs of that instance. **Time the wait from the END of the first run
+    meeting all of the above** (security pass 2, F4): that run can itself write up to 500 rows, each one a new
+    `modifiedon`. Take its `completedOn` in the status response, or its last `[CHILD-ACCESS-PERMISSION] set:` log line,
+    then wait **60 minutes (#2161's look-back) plus a 10-minute margin**, and only then deploy #2161.
   - **Why not "a run with zero record writes".**
     - There is no count of record-only writes: `accessPermission.recordsWritten` counts every record write, with or
       without a value change.
@@ -739,3 +745,64 @@ The pass came back FIX-ROUND-NEEDED. One commit per item, each with must-fire an
   - Filtered suite: **349, all pass**. With the writer suites: **481, all pass**.
   - ArchTests: **1211 / 1211**.
   - Wide run (the 20 namespaces): **10068 passed, 0 failed, 9 skipped** (10066 before F1, plus its 2 new tests; the skips already existed).
+
+### 8.10 Security pass 2 (main session, 2026-10-21): FIX-ROUND-NEEDED, no widening path found
+
+- **F1 (`48869bc7c5`). An operator-facing doc was wrong.** The guide said a document "keeps its stricter value until the
+  script has run" when the BFF lands before the schema. It keeps it for good:
+  1. while the column is missing, the raise-only path lifts the document to its parents' value;
+  2. it never lowers it, so when the parents widen it stays;
+  3. on the first run after the script, the value is stricter than its parents and there is no record, so the backfill
+     records it as the document's own and never widens it.
+
+  Fixed in `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §7.4 and its change log. The guide now says plainly that the schema goes
+  first, how to find such documents, and that the operator widens them by hand:
+  - the window's `set:` lines that say `own unknown`, and the refresh's missing-column warnings;
+  - then `ownKept`, with `own` above `inherited`, in the first runs after the script;
+  - an edit back to the inherited value removes the own narrowing (D3).
+
+  The same stale claims are corrected in:
+  - this file's §0, §2.2 (including the pre-F1 "the Standard majority never gets a write") and §2.8, and §8.7 item 3;
+  - the guard's reasons for `RunAsync` and `DecideDocumentAsync`;
+  - the schema script's notes (`-SelfTest`: 17 PASS);
+  - `docs/data-model/child-access-permission.md`.
+- **F4. The #2161 gate is timed from the END of the run that completes the sweep** (its `completedOn`, or its last
+  `set:` line), with 60 minutes plus a 10-minute margin, because that run can itself write up to 500 rows. See §8.9.
+- **K1 → fixed in scope (`c8c591777f`; the owner's D7 rule is "a child narrows, never widens").** A field-mapping push
+  could map a parent's `sprk_accesspermission` onto `sprk_document.sprk_accesspermission`, or write
+  `sprk_accessinheritance`. One push from a Standard matter then cleared the own narrowing of up to 500 child documents.
+  Before task 189, the reconciler reset such writes.
+  - `FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync` (it owns both the target table and the rules) asks
+    `InheritedAccessPermission.RefuseAppOnlyWrite` for each rule's target: the same table test and normalised column
+    list, with no second list.
+  - A rule naming either column on a document is reported `Skipped` with the reason, and the rest of the push applies. A
+    child whose only rule was skipped counts as skipped.
+  - To-dos and events are unchanged. `RefuseAppOnlyWrite`'s remarks and the data-model doc name the push.
+  - This **touches field-mapping code**, which the field-mapping project owns. The main session tells that session.
+  - Tests: `DocumentAccessPermissionPushTargetTests`, 3 methods and 6 cases. **4 red on the old code**, all pass after.
+    - Must fire: both columns, and a padded mixed-case name, are skipped while the document's other column is pushed. A
+      push of only the column writes nothing.
+    - Must not fire: the column on a to-do and on an event is pushed.
+
+  | # | Mutant | Red |
+  |---|---|---|
+  | P1 | skip the column on every table | 2 (to-do, event) |
+  | P2 | skip the whole child, not the rule | 3 |
+  | P3 | match the exact literal only (no normalisation, no record column) | 2 |
+  | P4 | no skipped result reported | 4 |
+
+  "No skip at all" is the old code, so it is covered by the 4-red run (as a mutant it did not compile: CS8519).
+- **K3 → filed as #2183** (not fixed here): an unreadable record row is carried forever. It blocks `carriedRows = 0`, and
+  more than 1000 such rows freeze the watermark. The suggested fix is to report such rows without carrying them. The
+  behaviour fails closed, and no real data does this today.
+- **Gates** (on `48869bc7c5`; the later commits change only the notes):
+  - Build: 0 warnings, 0 errors (BFF, unit tests, ArchTests).
+  - The filtered 189 suite: **355, all pass** (349 + 6).
+  - With the FieldMapping test classes: **491, all pass**. With the writer and push suites too (`RefilePathRestampTests`,
+    `UpdateRecord*`, `DataverseUpdateHandler*`, `OutputOrchestrator*`, `ActionSeam*`,
+    `AssignedAccessWriterTriggerTests`, `RefileWriterBindShapeTests`): **631, all pass**.
+  - ArchTests (full project): **1211 / 1211**.
+  - `git merge-tree` against `origin/master` (`44063b3473`): clean. #2161 (`2662545da2`): clean. #2170 and #2150: the
+    known one-hunk conflicts only. Of the open PRs, only #2161 and #2150 touch `FieldMappingEndpoints.cs`, and both merge
+    cleanly there.
+  - Publish size was not measured again: no type was added. The change is one check in `FieldMappingEndpoints.cs`.
