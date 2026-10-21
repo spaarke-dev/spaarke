@@ -370,3 +370,16 @@ Code checked at 70fc2cc616 and master a10e814d02. **Verdict: ACCEPT WITH CHANGES
 - **Conditions if the banner had been stored** (app-only marker write, never count or list, N3, N1 scope, N9) mostly fall away under (a).
 - **Stray wording:** reviews §7 (~:300) "invoice's own Access Permission" (now marked superseded); v5 §0 row 9 "through T7" (kept as history with a note).
 - **Owner round 116 (uac-r2 session27 notes), 2026-10-21:** F1-1's effect accepted (the invoice and everything derived from it are hidden from external callers, the firm included, while the source is internal-only or Restricted; reappears when lowered) and F1-4 confirmed (flagged-external systemuser firm match through the linked contact; no link → none). Both applied in `480d6fa027`. **K-3** (network Deny with a private endpoint, or a known limit) is still open; the container-scoped role is done regardless.
+
+## 12. uac-r2 re-check of v5.2 (b5872265be), 2026-10-21
+
+**ACCEPT-WITH-CHANGES.** The read-time banner design is sound; no design point reopened. N1, N4, N5, N6, N7, N8 closed; N2, N3, N9 partly closed via C1–C5. All applied in v5.3.
+- **C1.** No snapshot (pending) or a pre-v5 snapshot → a distinct "Not yet checked" state, never "no change". `BILL-SYSTEM-SUBMISSION`-only invoices exempt.
+- **C2.** The comparison runs app-only, like the evaluation (the 6.6 read models read as the caller, which would give a false banner or `0x8004d24d` for a user who cannot read a d1 parent). One banner state only, no diff, names or ids. K: one bit about a Secure d1 parent.
+- **C3.** One resolution per invoice; each row read once; work dates in memory; test that query count does not depend on line count; once per page load on one named route; 429 or timeout → "could not be checked".
+- **C4.** The internal single-invoice reads (`/api/finance/invoices/{id}/review` `InvoiceLineReviewEndpoints.cs:39`, `/context` `InvoiceContextEndpoints.cs:28`, `/api/finance/invoice-submissions/{id}` `InvoiceSubmissionEndpoints.cs:74`) are gated only by `AddFinanceAuthorizationFilter`, and `FinanceAuthorizationFilter` has no `sprk_isexternal` check. Only the review route computes the banner, only when the flag reads definitely false. Under owner round 113 the review route would also carry the 7.4 basis (override reasons, Procedure names) to flagged-external systemusers: step 0 on those Finance reads. **Our choice: in R1** (v5.3 §12, §13); uac-r2 confirms.
+- **C5.** Step 0 on every Procedure and override service operation, reads included; a fault refuses.
+- **C6.** K-3 wording everywhere: accepted as a known limit (owner round 117).
+- **C7.** Round-116 leftovers: (a′)'s effect accepted, covering Restricted as well as internal-only; F1-4 confirmed.
+- **Probes (no action beyond recording):** a publish/read race is benign since nothing is stored; a non-atomic publish can briefly show a false banner or fault into "could not be checked" (recorded as K); the comparison's fault log carries ids and counts only.
+- **Owner round 117 (K-3)** is recorded in uac-r2's session27 notes at `eff5f6c714`.

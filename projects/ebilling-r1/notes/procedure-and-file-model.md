@@ -1,6 +1,6 @@
 # Procedures and files — revised approach
 
-> **Status**: v5.2, 2026-10-21. v5.2 applies uac-r2's check of v5.1 (`ae690ec8a4`; the banner is now computed at read time, N1–N9). v5 (`70fc2cc616`) re-checked by ontology-r1 (findings, nothing blocking), uac-r2 (accept with changes) and word-add-in-r1 (§9.1 matches; three gaps); all folded in here, with the owner's re-check answer (ontology D-175). Waiting on the owner's answers in section 15, then the owner finalizes.
+> **Status**: v5.3, 2026-10-21. v5.3 applies uac-r2's re-check of v5.2 (`b5872265be`; C1–C7: snapshot states, app-only comparison, cost bound, one route, step 0 on Finance invoice reads and on every Procedure/override read). v5.2 applied uac-r2's check of v5.1 (`ae690ec8a4`; the banner is computed at read time, N1–N9). v5 (`70fc2cc616`) re-checked by ontology-r1 (findings, nothing blocking), uac-r2 (accept with changes) and word-add-in-r1 (§9.1 matches; three gaps); all folded in here, with the owner's re-check answer (ontology D-175). Waiting on the owner's answers in section 15, then the owner finalizes.
 > - v5 folded in the three peer reviews of v4 (`c260f9de11`) and the owner's answers A–R; v5.1 folds in the v5 re-checks (`procedure-model-reviews.md` §8, §9); v5.2 folds in uac-r2's check of v5.1 (§11). Section 0 lists what changed.
 > - Nothing is implemented. No schema, task or decision row has changed yet.
 > - Once the owner answers section 15 and finalizes, this note becomes decision **EB-D-148** plus revised POMLs for 079–087 and new tasks (section 13). The UI/UX is prototyped separately (O-14); the back end goes first.
@@ -54,7 +54,7 @@
 | 10 | Firm route: a flagged-external systemuser is matched to the firm through their linked contact's organisation; no link → no invoices (owner, uac-r2 round 116). | uac-r2 F1-4 |
 | 11 | Retire, publish, date changes and the banner-setting write: BFF-only, Write on the Procedure plus a billing-admin privilege, writes through `IRecordOwnershipResolver`, never a count or list of invoices the caller can't read. *(Banner write and the resolver wording superseded in v5.2: the banner is stored nowhere.)* | uac-r2 |
 | 12 | Global option sets from 100000000; the published-marker column named; ratchet as a baseline-plus-controls ArchTest; ExpenseRule split restated; AddedFee forms refused by the validator until extraction supports them. | ontology F3-a–c, §15 answer 3 |
-| 13 | K-1 (191 window), K-2 (pin test on the billing lookups), K-3 (container-scoped role now; network Deny to the owner). | uac-r2 K-1–K-3 |
+| 13 | K-1 (191 window), K-2 (pin test on the billing lookups), K-3: accepted as a known limit (owner round 117); network block at prod hardening; container-scoped role in R1. | uac-r2 K-1–K-3 |
 | 14 | "this matter" → "this record" in firm-facing text; 080 uses the shared core-record list; dev check of the assigned-firm columns; Type "Internal Standard" confirmed. | ontology F4-a, matter-only items, D-175 |
 
 ### What changed in v5.2
@@ -68,6 +68,18 @@
 | 5 | File id = f(submission id, source version), or f(submission id, the attachment's identity) when there is no source document, else a fixed 0, so a replay re-stages under the same id. | uac-r2 N6 |
 | 6 | §9.1 known-limits wording: (a′) reads the source's state "but not rule 1 (which roots the source is filed under)". | uac-r2 N5 |
 | 7 | §15(b) widened to switching off a record rule on override removal, not only Procedure retire; banner text question added. | uac-r2 N7, N8 |
+
+### What changed in v5.3
+
+| # | Change | Source |
+|---|---|---|
+| 1 | No snapshot, or a pre-v5 snapshot, shows a distinct **"Not yet checked"** state, never "no change". Invoices judged only by `BILL-SYSTEM-SUBMISSION` are exempt (no banner). | uac-r2 C1 |
+| 2 | The comparison runs **app-only**, like the evaluation, and returns one banner state only (no diff, names or ids). New K limit: one bit about a Secure distance-1 parent. | uac-r2 C2 |
+| 3 | Cost bound: one resolution per invoice, each row read once, work dates in memory; a test that the query count does not depend on line count; once per page load on `/api/finance/invoices/{id}/review` only; 429 or timeout → "could not be checked"; the fault log carries ids and counts only. | uac-r2 C3 |
+| 4 | Only that route computes the banner, and only when `sprk_isexternal` reads definitely false. **Step 0 on the internal Finance invoice reads** that expose Procedure or override content (`/review`, `/context`, `/api/finance/invoice-submissions/{id}`): refuse flagged-external systemusers; a fault refuses. A change to existing routes (sections 12 and 13). | uac-r2 C4; owner M and round 113 |
+| 5 | Step 0 covers **every** Procedure and override service operation, reads included (the 6.6 read models). | uac-r2 C5 |
+| 6 | K-3 wording everywhere: accepted as a known limit (owner round 117). Round-116 wording: (a′)'s effect accepted (Restricted and internal-only); F1-4 confirmed. | uac-r2 C6, C7 |
+| 7 | K: a non-atomic publish can briefly show a false banner, or two Active versions that fault into "could not be checked". | uac-r2 probes |
 
 ---
 
@@ -431,7 +443,7 @@ A work assignment filed under project P is subject to P's manual assignments and
 
 ### 6.6 The lists on the record (O-9; UX from the prototype)
 
-Two read models, both produced by the evaluation's own resolver, **read as the caller**, with their routes in the `RouteAuthorizationGuardTests` ledger (ontology O7):
+Two read models, both produced by the evaluation's own resolver, **read as the caller**, with their routes in the `RouteAuthorizationGuardTests` ledger (ontology O7). **Step 0 applies to both (uac-r2 C5):** every `sprk_isexternal` caller is refused, and a fault reading the flag refuses; they expose Procedure names, versions and overrides, which are internal-only (O-27, owner round 113):
 
 - **Procedures:** every Procedure the record is subject to (sources, inheritance) for its `sprk_billingfirm` by default, or a chosen firm; the version in force today; its overrides.
 - **Rules in force:** for a chosen date and firm, every rule with its source Procedure Version, marked displaced, excluded, changed, stale or base retired.
@@ -523,12 +535,16 @@ Unchanged at the core: the immutable policy version (clause and location), reaso
 - **Decided invoices stand:** Decision Records are append-only; Signals cite Version 1's policy versions.
 - **No automatic re-check (O-21, revised by the owner 2026-10-21, ontology D-175):** "the recheck needs to be an explicit decision by a user, not automatic". Removing an override, retiring a Procedure, and the end of a Procedure Version (superseded or withdrawn) re-check nothing. Today's triggers (`InvoiceSubmissionPersister.cs:248-251`, task 101 corrections) are unchanged.
 - **The banner (computed at read time; stored nowhere; uac-r2 N2 option a).** An open invoice (pending or In Review) shows "A new procedure that applies to this invoice has been published" (owner's text; section 15 has a neutral alternative) when its **current Procedure resolution differs from its evaluation snapshot** (7.4).
-  - **How:** on the invoice's own read (the review page and the invoice GET), for an internal caller, the BFF re-runs the resolver (7.1) for that invoice's lines and compares the result with the snapshot: the Procedure Versions chosen, the policy versions applied and the override content that decided them. Any difference shows the banner.
+  - **How:** on **one route only, `/api/finance/invoices/{id}/review`** (`InvoiceLineReviewEndpoints.cs:39`), once per page load, the BFF re-runs the resolver (7.1) for that invoice and compares the result with the snapshot: the Procedure Versions chosen, the policy versions applied and the override content that decided them. Any difference shows the banner.
+  - **Whose rights (uac-r2 C2):** the comparison runs **app-only**, exactly like the evaluation, so an internal user who cannot read a distance-1 parent gets neither a false banner nor a `0x8004d24d` fault. It returns **one banner state only** (changed / not changed / not yet checked / could not be checked): never a diff, names or ids.
+  - **Snapshot states (uac-r2 C1):** a pending invoice has no snapshot yet, and snapshots older than v5 lack the Procedure and override fields. Either shows a distinct **"Not yet checked"** state, never "no change". An invoice judged only by `BILL-SYSTEM-SUBMISSION` is exempt and shows no banner.
+  - **Cost bound (uac-r2 C3):** one resolution per invoice, not per line: the chain, the assignment and override rows, the Procedures and the versions are each read once, and every line's work date is resolved in memory against those rows. A test asserts the query count does not depend on the line count. A 429 or timeout shows "could not be checked".
   - **What it covers:** every trigger, because it compares outcomes: an override removed or added, a record rule switched off, a Procedure retired or newly assigned, a version ended, retired or newly published (a first version included), a date change. uac-r2 N1's scope falls out of it: a project's override that reached a work-assignment invoice at distance 1 is in that invoice's snapshot; an override for firm F never touches firm G's invoice.
-  - **Why full comparison, not only the snapshot-citation test:** the citation test (snapshot cites a removed override, a retired Procedure, an ended or retired version, or a record rule switched Off) misses a newly published first version and a newly added override (N8). The full comparison runs only on the single-invoice read, where the resolver's cost (a few reads, already paid at evaluation) is acceptable. **Invoice lists do not show the banner in R1** (a known limit, section 15).
-  - **A fault** in the comparison shows a short "Procedure changes could not be checked" note instead; it never blocks the page and never reads as "no change".
-  - **Who sees it (uac-r2 N3):** internal systemusers only. It is never computed for or returned to CIAM contacts or flagged-external systemusers, it is not in the firm findings DTO or the SPA invoice projection, and R3's negative test asserts its absence. It reveals nothing beyond the invoice the caller can already read: no counts, no other invoices, no override reasons or Procedure names in its text.
+  - **Why full comparison, not only the snapshot-citation test:** the citation test (snapshot cites a removed override, a retired Procedure, an ended or retired version, or a record rule switched Off) misses a newly published first version and a newly added override (N8). The full comparison runs only on the single-invoice review read, within the cost bound above. **Invoice lists do not show the banner in R1** (a known limit, section 15).
+  - **A fault** in the comparison shows a short "Procedure changes could not be checked" note instead; it never blocks the page and never reads as "no change". The fault log carries ids and counts only.
+  - **Who sees it (uac-r2 N3, C4):** internal systemusers only. The review route computes and returns the banner and the "could not be checked" note **only when `sprk_isexternal` reads definitely false**; a true flag or a read fault leaves the field out. It is never computed for CIAM contacts, never on the external `/invoice-submissions` routes or for export files, it is not in the firm findings DTO or the SPA invoice projection, and R3's negative test asserts its absence. It reveals nothing beyond the invoice the caller can already read: no counts, no other invoices, no override reasons or Procedure names in its text.
   - **Nothing is written:** no marker column, no field security, no banner write, no write scope to check, nothing to keep atomic with the change.
+  - **Known limits:** (K) an internal reader learns one bit, "something changed", about a Secure distance-1 parent they cannot read, with no content (uac-r2 C2). (K) A publish is not atomic, so a read during it can briefly show a false banner, or see two Active versions and fault into "could not be checked"; nothing is stored, so the next read is right (uac-r2 probe).
   - Decided invoices keep their snapshot and get no banner.
   - **ebilling-r2 owns the explicit re-check**, a user action that re-runs the check; the banner then disappears because the new snapshot matches.
 - **Publishing a new version does not re-check** In Review invoices (unchanged); invoices whose resolution it changes show the banner (above).
@@ -559,7 +575,7 @@ Unchanged at the core: the immutable policy version (clause and location), reaso
 - **Taint closure** carries it through the `SecureChildLineage.cs` edges (`:74-77`, `:142-165`) to lines, approval, submission, correction, external identifier, Signals, Decision Records and the Stored File.
 - **Surfaces, from R1** (not only after 191): the SPA invoice list and module, the firm findings DTO, the firm file route (invoice-level, the same 404), the external invoice-index retrieval, and the AI tools.
 - **Nothing is stored.** It heals automatically when the source is lowered (`CommunicationInternalOnlyFloor.cs:131-154`). A Private thread needs nothing more (internally Private narrows only chat overlays and fan-out; externally the 065 rule treats it as internal-only).
-- **Effect, with the owner via uac-r2:** the firm does not see its own invoice while its source is internal-only (section 15).
+- **Effect, accepted by the owner (uac-r2 round 116):** while its Submit Invoice source is internal-only **or Restricted**, the invoice and everything derived from it are hidden from external callers, the firm included; it reappears when the source is lowered.
 
 **The two halves of J (owner: A + B).**
 - **A, file first.** When the communication is unfiled, Submit Invoice files it to the target core record M **before commit**, through `PATCH /api/communications/{id}/filing` with the caller's rights. The add-in's save then reports AlreadyFiled.
@@ -613,7 +629,7 @@ Unchanged at the core: the immutable policy version (clause and location), reaso
 ### 9.3 Firm routes (settled with uac-r2 and R3)
 
 - **Routes:** `GET /api/v1/external/invoices/{id}/files` (list) and `GET .../files/{fileId}/content` (download). No upload route; uploads go through submission.
-- **Systemuser caller (036 path):** the same 036 machinery (`AccessibleRecordSetService`) gives the caller's Read on the invoice and its root, the I-14 Restricted veto (which covers flagged-external users here) and the task 187 invoice rule. Unknown rights (`0x8004d24d`) fail closed as 036 does. **Firm match for a flagged-external systemuser (uac-r2 F1-4; owner to confirm):** the invoice's `sprk_vendororg` must equal the organisation of the user's linked contact; no link, or a read fault, refuses. Otherwise firm G's flagged-external user on a matter shared with co-counsel could reach firm F's PDFs. Internal users are unchanged.
+- **Systemuser caller (036 path):** the same 036 machinery (`AccessibleRecordSetService`) gives the caller's Read on the invoice and its root, the I-14 Restricted veto (which covers flagged-external users here) and the task 187 invoice rule. Unknown rights (`0x8004d24d`) fail closed as 036 does. **Firm match for a flagged-external systemuser (uac-r2 F1-4; confirmed by the owner, round 116):** the invoice's `sprk_vendororg` must equal the organisation of the user's linked contact; no link, or a read fault, refuses. Otherwise firm G's flagged-external user on a matter shared with co-counsel could reach firm F's PDFs. Internal users are unchanged.
 - **(a′) at invoice level:** an invoice whose source is isolated is invisible here, with the same 404.
 - **CIAM contact:** the ReadOne firm match on `sprk_vendororg` (`ExternalInvoiceSubmissionAuthorizationFilter.cs:100-104`) → `RightsOn(core) ≥ Read` after vetoes → the task 187 rule.
 - **One file gate for both:** Invoice PDF + Firm-visible + Servable + scan clean + parent matches. Pending scan: listed as "Checking file…", content 409 `file_scan_pending`. Malicious: not listed, 404.
@@ -661,6 +677,7 @@ Unchanged at the core: the immutable policy version (clause and location), reaso
 | 102 (D-74 adjustment rule list) | Uses the resolver, not its own scope filter. |
 | 108 | Loads through the BFF download route. |
 | External invoice-document routes (R3 task 031, uac-r2 187) | Retired with the firm file routes (9.3). |
+| Internal Finance invoice reads (`/api/finance/invoices/{id}/review` `InvoiceLineReviewEndpoints.cs:39`, `/context` `InvoiceContextEndpoints.cs:28`, `/api/finance/invoice-submissions/{id}` `InvoiceSubmissionEndpoints.cs:74`) | **Step 0 added in R1:** refuse flagged-external systemusers; a fault reading the flag refuses (uac-r2 C4; owner M and round 113). `FinanceAuthorizationFilter` has no `sprk_isexternal` check today, so this changes existing routes; flagged-external callers use the firm route. uac-r2 confirms. |
 | Docs | "Procedure Library" retired (3.4). |
 | Dev data | Recreated, not migrated (O-13). |
 
@@ -677,6 +694,7 @@ Unchanged at the core: the immutable policy version (clause and location), reaso
 | 086 | What remains: secure child registration for invoice Stored Files. |
 | 087 | Dropped. |
 | New | File store service, control and orphan reconcile; Stored File schema; provisioning (storage account checks in 4.2, customer-provisioning hand-off); Submit Invoice (server contract; the add-in surface after the owner's process discussion); invoice submission and exports to files; firm file routes and retirement of the four document routes (uac-r2 review, task 188 entry, R3 deploy pairing); internal route's and upload's flagged-external refusals; the (a′) `ExternalMarker` predicate on `sprk_invoice` across the listed surfaces (with uac-r2); container-scoped storage role; the affected-invoice banner (8.2; the explicit re-check is ebilling-r2's); AddedFee and Discount types; docs clean-up. |
+| New (step 0 on Finance invoice reads) | Add the `sprk_isexternal` refusal (fault refuses) to `/api/finance/invoices/{id}/review`, `/context` and `/api/finance/invoice-submissions/{id}`, with must-fire and must-not-fire tests; the review route alone computes the banner (8.2). uac-r2 C4; uac-r2 confirms. |
 
 ## 14. Coordination
 
@@ -691,12 +709,13 @@ Unchanged at the core: the immutable policy version (clause and location), reaso
 - **No automatic re-check — scope (a).** ontology-r1 reads the owner's answer ("the recheck needs to be an explicit decision by a user, not automatic") as covering **every** automatic re-check, not only D and D2. v5.1 applies it to override removal, Procedure retire and Procedure Version end. Confirm.
 - **No automatic re-check — findings when a rule is switched Off (b).** Two operations switch policies Off and so trigger D-170's PolicyRetired sweep, which automatically closes their open findings on In Review invoices: I-P5's Procedure retire, and **removing a changed-rule override**, which switches its record rule Off (uac-r2 N7). With no re-check, should that still happen, or should those findings stay open, with the banner, until a reviewer decides?
 - **Banner text (uac-r2 N8).** The owner's text, "A new procedure that applies to this invoice has been published", reads wrong for an override removal or a Procedure retire. Suggested neutral text: "The procedures that apply to this invoice have changed; re-check to apply them." Owner to choose.
-- **Banner on lists (known limit).** R1 computes the banner only on the single-invoice read; invoice lists do not show it.
+- **Banner on lists (known limit).** R1 computes the banner only on the single-invoice review read; invoice lists do not show it.
+- **Banner known limits (uac-r2 C2, probes):** one bit about a Secure distance-1 parent; a brief false banner or "could not be checked" during a non-atomic publish (section 8.2).
 - **What counts as a gap (ontology F2-d; accepted by ontology-r1):** the reading in 7.1 (Draft-only is not Active; a Procedure applies from its first version's start; a gap is a hole between versions, or work dated after an end with no successor).
 - **Export files and "the related external user" (M wording):** an export batch spans many firms' invoices; v5.1 keeps export files internal (`ExternalMarker` Never). Did the owner mean firms see their own invoices, not the export file?
 - **Clearing a gap hold:** may an Override (D-24 / D-39) release an invoice held for no version in force, or must the Procedure be fixed and the invoice checked again?
 - **Decided by the owner (uac-r2 round 116, 2026-10-21):** F1-1 accepted — while the Submit Invoice source is internal-only or Restricted, the invoice and everything derived from it are hidden from external callers, the firm included, and reappear when the source is lowered. F1-4 confirmed — a flagged-external systemuser sees only invoices of the firm their linked contact belongs to; no link means none (fail closed); internal users unchanged.
-- **K-3 decided (owner, uac-r2 round 117):** network Allow on the storage account is a known limit until prod hardening (section 4). The container-scoped role is done in R1.
+- **K-3:** accepted as a known limit (owner round 117); network block at prod hardening; container-scoped role in R1 (section 4.2).
 
 **Engineering**
 - **The guard's version bump.** Live proof that the source-document guard's write moves `versionnumber` is still outstanding (050a K1 note).
