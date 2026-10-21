@@ -24,7 +24,7 @@ O-1 to O-17. Main points:
 
 ### Open owner questions
 - A–Q in `notes/procedure-model-reviews.md` §4/§5. **C, F, G and D (override removal) were answered by the owner in ontology-r1's session (ontology D-175, 2026-10-21); do not ask again.** D2 (ontology D-175 addendum), Q and Q2 (no migration; owner in SPA-r3's session) are answered too. Still open: A, B, E, H–P. H: the owner asked ontology why "guidance"; ontology relays the answer.
-- SPA-r3 asked which BFF routes we retire so the SPA drops the same. Proposed (final with D-148): the four `/external/invoices/{id}/documents…` routes in `ExternalProjectDataEndpoints.cs:378-412` (R3 task 031, uac-r2 187 F1) → replaced by the firm file routes (§6 of the reviews note). Submission routes stay; only their storage target changes.
+- SPA-r3 asked which BFF routes we retire so the SPA drops the same. Proposed (final with D-148): the four `/external/invoices/{id}/documents…` routes in `ExternalProjectDataEndpoints.cs:378-412` (R3 task 031, uac-r2 187 F1) → replaced by the firm file routes (§6 of the reviews note). Submission routes stay; only their storage target changes. **Agreed with R3 (R3 decisions d5267adb9):** the BFF change (files routes + retire the four + Stored File storage) is ours, as a task in the re-plan, reviewed by uac-r2 with the 188 guard entry; the SPA change is R4 (or R3). Dev deploy is BFF then SPA back to back through R3. Until the SPA ships, the old SPA's invoice-documents call 404s. R3 was told the 051 wizard is on our branch only.
 - Questions sent to SPA-r3 (2026-10-21): firm invoice-file route shape, the task 188 ArchTest, excluding the snapshot from the firm findings projection, what firms see while a scan is pending. Early views only.
 
 ### 050a (closed)
