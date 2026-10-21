@@ -538,6 +538,11 @@ public static class OfficeEndpoints
     /// Task 088 (UAT-5): <c>CanSaveAsVersion</c> is forced to <c>false</c> in the same breath, so a caller who
     /// cannot read the other document receives exactly the payload it received before task 088.
     /// Every other error passes through untouched.
+    /// Task 188 round 4c (F1): a document THE external document narrowing hides from the caller counts as unreadable
+    /// (the same withheld payload). Treating it as "no collision" instead would either fail the upload anyway (the
+    /// create upload is <c>ConflictBehavior.Fail</c>) or need a silent rename the user never chose; the refusal with no
+    /// identity is the shape a caller without Read already gets, so a hidden document cannot be told from an
+    /// unreadable one, and "Keep both" saves a new, uniquely named file.
     /// </summary>
     /// <remarks>
     /// <para><b>Why the id goes too.</b> It is already returned today with no authorization of any kind —
@@ -551,6 +556,9 @@ public static class OfficeEndpoints
     /// is absent rather than degrading to app-only), and this mirrors that posture instead of assuming the
     /// happy path.</para>
     /// </remarks>
+    /// <summary>The narrowing's log label for a save-from-Office name collision (no ids).</summary>
+    private const string CollisionNarrowingSurface = "office-save-collision";
+
     private static async Task<SaveError?> WithholdCollisionIdentityIfUnauthorizedAsync(
         SaveError? error,
         string userId,
@@ -585,13 +593,23 @@ public static class OfficeEndpoints
             rights = AccessRights.None;
         }
 
-        if (rights.HasFlag(AccessRights.Read))
+        // Task 188 round 4c (F1): Read is the root grant only. THE external document narrowing decides next, so a
+        // document it hides from a caller who is not an internal systemuser (own or ancestor Restricted, an internal-only
+        // communication's file, a narrowing or caller-lookup fault) is withheld exactly like an unreadable one: the
+        // refusal stays a refusal (nothing was written, nothing is overwritten), its identity and the version retry go.
+        // The retry itself is refused anyway: OfficeVersionSaveAuthorizationFilter is DocumentAuthorizationFilter, which
+        // narrows. Internal systemusers: no narrowing call, no app-only read.
+        if (rights.HasFlag(AccessRights.Read)
+            && (await InternalPlaneDocumentNarrowing.ForCallerAsync(
+                    context, new[] { (string?)collidingDocumentId.ToString("D") }, CollisionNarrowingSurface, logger))
+                .IsShown(collidingDocumentId.ToString("D")))
         {
             return error;
         }
 
         logger.LogInformation(
-            "Collision refusal for {FileName}: the caller holds no Read on the owning document, so its name "
+            "Collision refusal for {FileName}: the caller holds no Read on the owning document (or the external "
+            + "document narrowing hides it), so its name "
             + "and id are withheld. The pane offers \"Keep both\" only.",
             error.FileName);
 
