@@ -51,7 +51,7 @@
 | 7 | Record scope uses `sprk_ruleset.sprk_scope` = **Record (100000002)** or **Firm record (100000003)**; no `sprk_isexceptions`. Override rows carry a firm, so a change made for firm F touches only F's invoices. A record scope with no lookup applies to nothing. | ontology §15 answer 1, F2-b, F2-c |
 | 8 | Gap reading (Draft-only not Active; a Procedure applies from its first version's start; an end with no successor holds only work dated after it) — accepted by ontology, owner to confirm. | ontology F2-d, D-175 |
 | 9 | Submit Invoice: file id = f(submission id, source version); SHA check inside the flip; the undo also clears the submission's committed columns; step A's filing survives an undo (admin note); the no-source-document (flagged attachment) case. | uac-r2 F1-5, F2-1, F4-4, K-4; word-add-in-r1 1–3 |
-| 10 | Firm route: a flagged-external systemuser is matched to the firm through their linked contact's organisation (pending owner confirmation). | uac-r2 F1-4 |
+| 10 | Firm route: a flagged-external systemuser is matched to the firm through their linked contact's organisation; no link → no invoices (owner, uac-r2 round 116). | uac-r2 F1-4 |
 | 11 | Retire, publish, date changes and the banner-setting write: BFF-only, Write on the Procedure plus a billing-admin privilege, writes through `IRecordOwnershipResolver`, never a count or list of invoices the caller can't read. | uac-r2 |
 | 12 | Global option sets from 100000000; the published-marker column named; ratchet as a baseline-plus-controls ArchTest; ExpenseRule split restated; AddedFee forms refused by the validator until extraction supports them. | ontology F3-a–c, §15 answer 3 |
 | 13 | K-1 (191 window), K-2 (pin test on the billing lookups), K-3 (container-scoped role now; network Deny to the owner). | uac-r2 K-1–K-3 |
@@ -676,7 +676,8 @@ Unchanged at the core: the immutable policy version (clause and location), reaso
 - **What counts as a gap (ontology F2-d; accepted by ontology-r1):** the reading in 7.1 (Draft-only is not Active; a Procedure applies from its first version's start; a gap is a hole between versions, or work dated after an end with no successor).
 - **Export files and "the related external user" (M wording):** an export batch spans many firms' invoices; v5.1 keeps export files internal (`ExternalMarker` Never). Did the owner mean firms see their own invoices, not the export file?
 - **Clearing a gap hold:** may an Override (D-24 / D-39) release an invoice held for no version in force, or must the Procedure be fixed and the invoice checked again?
-- **Taken to the owner by uac-r2:** (a′)'s effect that the firm doesn't see its own invoice while its source is internal-only (F1-1); the flagged-external systemuser firm match through the linked contact's organisation (F1-4); network Deny with a private endpoint on the storage account, or a known limit (K-3).
+- **Decided by the owner (uac-r2 round 116, 2026-10-21):** F1-1 accepted — while the Submit Invoice source is internal-only or Restricted, the invoice and everything derived from it are hidden from external callers, the firm included, and reappear when the source is lowered. F1-4 confirmed — a flagged-external systemuser sees only invoices of the firm their linked contact belongs to; no link means none (fail closed); internal users unchanged.
+- **Still with the owner via uac-r2:** network Deny with a private endpoint on the storage account, or a known limit (K-3). The container-scoped role is done regardless.
 
 **Engineering**
 - **The guard's version bump.** Live proof that the source-document guard's write moves `versionnumber` is still outstanding (050a K1 note).
