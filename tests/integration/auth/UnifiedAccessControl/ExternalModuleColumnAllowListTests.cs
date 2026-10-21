@@ -198,10 +198,18 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
     private static readonly NonSecureRootReader NoFlags = (_, _) =>
         Task.FromResult(new NonSecureRootsRead(new HashSet<(ExternalGrantRootType Root, Guid Id)>()));
 
+    /// <summary>
+    /// Task 188: the REAL document narrowing. These column-guard rows carry no Access Permission, communication or parent
+    /// document, so it decides them on their own columns and makes no read; a read would be a surprise, so it throws.
+    /// </summary>
+    private static readonly DocumentNarrower Narrow = (_, rows, ct) =>
+        ExternalDocumentNarrowing.DecideAsync(
+            rows, (entitySet, _, _) => throw new InvalidOperationException($"unexpected narrowing read of {entitySet}"), ct);
+
     private static Task<IResult> Fetch(ExternalModuleRegistry registry, CallerPrincipal principal, string fetchXml, FetchDouble dataverse) =>
         ExternalModuleDataEndpoints.ExecuteScopedFetchCoreAsync(
             new FetchRequestDto(DocumentEntity, fetchXml, PagingCookie: null),
-            principal, registry, new FetchXmlEntityExtractor(), dataverse.Execute, NoFlags,
+            principal, registry, new FetchXmlEntityExtractor(), dataverse.Execute, NoFlags, Narrow,
             NullLogger.Instance, CancellationToken.None);
 
     private static void ShouldBeProblem(IResult result, int status, string errorCode)
@@ -911,7 +919,7 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         var control = new FetchDouble();
         var allowed = await ExternalModuleDataEndpoints.ExecuteScopedFetchCoreAsync(
             new FetchRequestDto(entity, gridFetch, PagingCookie: null), GrantedEverywhere(id), registry,
-            new FetchXmlEntityExtractor(), control.Execute, NoFlags, NullLogger.Instance, CancellationToken.None);
+            new FetchXmlEntityExtractor(), control.Execute, NoFlags, Narrow, NullLogger.Instance, CancellationToken.None);
         allowed.Should().BeOfType<Ok<FetchResponseDto>>();
         control.Calls.Should().Be(1);
 
@@ -921,7 +929,7 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
 
         var result = await ExternalModuleDataEndpoints.ExecuteScopedFetchCoreAsync(
             new FetchRequestDto(entity, withColumn, PagingCookie: null), GrantedEverywhere(id), registry,
-            new FetchXmlEntityExtractor(), dataverse.Execute, NoFlags, NullLogger.Instance, CancellationToken.None);
+            new FetchXmlEntityExtractor(), dataverse.Execute, NoFlags, Narrow, NullLogger.Instance, CancellationToken.None);
 
         ShouldBeProblem(result, StatusCodes.Status400BadRequest, ExternalModuleDataEndpoints.ErrorFetchXmlColumnNotPermitted);
         dataverse.Calls.Should().Be(0);

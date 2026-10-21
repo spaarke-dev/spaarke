@@ -2,6 +2,7 @@ using System.Security.Claims;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Moq;
@@ -58,6 +59,10 @@ public class ComposeDocumentAuthorizationFilterTests
         var http = new DefaultHttpContext
         {
             User = new ClaimsPrincipal(new ClaimsIdentity([new Claim("oid", Guid.NewGuid().ToString())], "Test")),
+            // Task 188 r3 slice B: the internal document routes' narrowing is not under test here (see DocumentRouteExternalNarrowingTests).
+            RequestServices = Sprk.Bff.Api.Tests.TestInfrastructure.AllVisibleDocumentNarrowing
+                .UseAllVisibleDocumentNarrowing(new Microsoft.Extensions.DependencyInjection.ServiceCollection())
+                .BuildServiceProvider(),
         };
         http.Request.Headers.Authorization = "Bearer caller-token";
         http.Request.RouteValues["documentSpeId"] = ItemId;

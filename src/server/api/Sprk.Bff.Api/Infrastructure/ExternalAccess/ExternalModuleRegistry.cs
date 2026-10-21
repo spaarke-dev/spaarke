@@ -207,6 +207,23 @@ public sealed class ExternalModuleDescriptor
             ? ExternalMultiRootRule.LiveParentLookupsOf(RecordEntity).Select(l => l.Column)
             : Enumerable.Empty<string>();
 
+    /// <summary>
+    /// Task 188 (D7, #2126): <c>true</c> for a module over <c>sprk_document</c>. DERIVED from <see cref="RecordEntity"/>, never
+    /// configured, so no documents module can leave the document narrowing out: the fetch pipeline applies
+    /// <see cref="ExternalDocumentNarrowing"/> to its rows after <see cref="ScopeRows"/>.
+    /// </summary>
+    public bool NarrowsDocuments =>
+        string.Equals(RecordEntity, ExternalDocumentNarrowing.DocumentTable, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Task 188: for a module that <see cref="NarrowsDocuments"/>, the attributes the narrowing reads (the primary id, the own
+    /// Access Permission, the related communication and the parent document). Projected server-side with the rule
+    /// attributes (the SDK omits a null attribute, so an unprojected one would read as "not set") and stripped from the
+    /// response unless the caller asked for them. Empty for any other module.
+    /// </summary>
+    public IEnumerable<string> NarrowingAttributes =>
+        NarrowsDocuments ? ExternalDocumentNarrowing.FetchAttributes : Enumerable.Empty<string>();
+
     /// <summary>Task 187: one module row's parent lookups (<see cref="LiveParentAttributes"/>) as live-parent read input.</summary>
     public LiveParentLookup[] LiveParents(IReadOnlyDictionary<string, object?> row)
     {
