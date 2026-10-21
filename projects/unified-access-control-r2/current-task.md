@@ -22,7 +22,13 @@
 
 ## Next actions (mine)
 1. **Task 190 (D7 T7b): start.** Link legacy add-in email documents to their communication using recorded keys only. Report-only first, and list unmatched documents for the owner. FULL rigor, Opus, fresh worktree from `origin/master`.
-2. **Task 191: design checkpoint.** The study is in `notes/2179-flagged-external-dataverse-design.md` (recommendation A: a separate External Collaborators BU, Basic depth, shares only, and an external-sharee mirror on one predicate). Owner questions are in §5 (Q1/Q2: auto-share to one External Collaborators team; Q3: taint rule; Q5: the window before the move). There is also a carried-in question (POML goal): scorecard, insights and workspace-AI exposure for flagged externals. Put the batched questions to the owner. Nothing gets built until the owner answers.
+2. **Task 191: design checkpoint.** The study is in `notes/2179-flagged-external-dataverse-design.md`. Its §5 questions were answered in rounds 114–115 (see the note's closing section):
+   - design A with automatic sharing to one External Collaborators team;
+   - Q3 taint = yes, using the SPA rule;
+   - Q4 = about 2 minutes;
+   - Q5 = a scheduled BFF move job, one-way.
+
+   **Still open:** the carried-in question (POML goal) on scorecard, Insights and WorkspaceAi exposure for flagged externals. The design must answer it before T191a (spikes) starts. Then T191a–h per §6.
 3. **Housekeeping:**
    - add #2193–#2217 to `notes/defer-issues.md`;
    - remove the merged worktrees when idle: C:/wt188, C:/wt188d, C:/wt189, C:/wt2143, C:/wt2159, plus the older C:/wt099b, C:/wt2103, C:/wt2091b, C:/wt2130, C:/wt2128, C:/wt036;
