@@ -562,6 +562,151 @@ public class ExternalDocumentNarrowingGuardTests
         IlCallScan.Outermost(caller) is var outermost
         && (outermost == typeof(ExternalModuleDescriptor) || outermost == typeof(ExternalCallerCommunicationGuard)
             || caller == typeof(ExternalDataService.DocumentScopeRead));
+
+    // ── Task 188 round 4a (security pass 2, F1-1): AI content primitives ───────────────────────────────────────────
+    // Self-contained: its own primitive list, scope, allow-list, facts and AiContentControl* fixtures (end of file).
+
+    /// <summary>The SPE content downloads (<see cref="Sprk.Bff.Api.Infrastructure.Graph.ISpeFileOperations"/> and
+    /// <see cref="Sprk.Bff.Api.Infrastructure.Graph.SpeFileStore"/>) that hand a document's bytes to their caller.</summary>
+    private static readonly string[] AiContentDownloadMembers =
+    {
+        "DownloadFileAsync", "DownloadFileAsUserAsync", "DownloadFileVersionAsync", "DownloadFileVersionAsUserAsync",
+    };
+
+    /// <summary>The AI routes' source namespaces: a download called from here feeds an AI surface.</summary>
+    private static readonly string[] AiContentScopes = { "Sprk.Bff.Api.Services.Ai.", "Sprk.Bff.Api.Api.Ai." };
+
+    /// <summary>
+    /// AI-side downloads that do not narrow THEMSELVES, each with its reason: the document was decided before the method
+    /// runs (by a grant that reaches the narrowing), or the bytes never reach a caller. A new download fails
+    /// <see cref="EveryAiDocumentGrantAndAiContentDownload_ReachesTheNarrowing"/> until it narrows or is listed here; an
+    /// entry that stops downloading, or starts narrowing, fails it too (the ratchet).
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> AiContentDownloadsDecidedElsewhere = new Dictionary<string, string>
+    {
+        ["Sprk.Bff.Api.Services.Ai.AnalysisDocumentLoader::ExtractDocumentTextAsync"] =
+            "Analysis execute: the route's AnalysisAuthorizationFilter (DocumentAccess) decided every body document through " +
+            "IAiAuthorizationService.AuthorizeAsync, which narrows, before the loader runs.",
+        ["Sprk.Bff.Api.Services.Ai.Chat.DocumentContextService::ExtractDocumentTextAsync"] =
+            "Chat document context: AiAuthorizationFilter decided the session's documents (DocumentId, AdditionalDocumentIds, " +
+            "an sprk_document host, the compose active document) through IAiAuthorizationService.AuthorizeAsync, which narrows.",
+        ["Sprk.Bff.Api.Services.Ai.AppOnlyAnalysisService::AnalyzeDocumentAsync"] =
+            "Unattended document profile (the AppOnlyDocumentAnalysis and ProfileSummary jobs, the Office profile worker; no " +
+            "caller): the profile fields go to Dataverse, which every read path narrows, never to a caller in this call.",
+        ["Sprk.Bff.Api.Services.Ai.AppOnlyAnalysisService::ExtractDocumentTextAsync"] =
+            "Unattended document profile / analysis pipeline (no caller): the text goes to Dataverse and the index, which every " +
+            "read path narrows (slice A trim, the dataverse.* tools), never to a caller in this call.",
+        ["Sprk.Bff.Api.Services.Ai.FileIndexingService::IndexFileAsync"] =
+            "Indexing: the bytes become index chunks, never a response; every retrieval of them is trimmed (slice A).",
+        ["Sprk.Bff.Api.Services.Ai.FileIndexingService::IndexFileAppOnlyAsync"] =
+            "Indexing (app-only): the bytes become index chunks, never a response; every retrieval of them is trimmed (slice A).",
+    };
+
+    [Fact(DisplayName = "Task 188 r4a: every AI document grant and every AI-side content download reaches THE document narrowing (or is listed)")]
+    public void EveryAiDocumentGrantAndAiContentDownload_ReachesTheNarrowing()
+    {
+        var types = BffTypes.Value;
+        var problems = AiContentProblems(
+            types, key => AiContentScopes.Any(s => key.StartsWith(s, StringComparison.Ordinal)), AiContentDownloadsDecidedElsewhere,
+            out var grants, out var downloads);
+
+        // Non-vacuity: the one grant implementation, the four sites that grant through it, and the downloads are all seen.
+        Assert.Contains("Sprk.Bff.Api.Services.Ai.AiAuthorizationService::AuthorizeAsync", grants);
+        Assert.Contains("Sprk.Bff.Api.Api.Ai.ChatDocumentEndpoints::IngestArchiveDocumentAsync", downloads);
+        Assert.Contains("Sprk.Bff.Api.Services.Ai.Chat.DocumentContextService::ExtractDocumentTextAsync", downloads);
+        var grantCallers = AiGrantCallers(types);
+        foreach (var site in new[]
+                 {
+                     "Sprk.Bff.Api.Api.Filters.AiAuthorizationFilter::AreChatContextChecksAllowedAsync",
+                     "Sprk.Bff.Api.Api.Filters.AnalysisAuthorizationFilter::AuthorizeDocumentAccessAsync",
+                     "Sprk.Bff.Api.Api.Ai.RagEndpoints::TrimToReadableDocumentsAsync",
+                     "Sprk.Bff.Api.Api.Ai.VisualizationEndpoints::AuthorizeRowsAsync",
+                 })
+        {
+            Assert.True(grantCallers.Contains(site), $"{site} should be seen granting through IAiAuthorizationService.AuthorizeAsync — the scan lost its signal.");
+        }
+
+        Assert.True(problems.Count == 0,
+            "An AI route grants document access through IAiAuthorizationService.AuthorizeAsync and downloads content through " +
+            "ISpeFileOperations / SpeFileStore. Every implementation of the grant, and every AI-side download, must reach THE " +
+            "external document narrowing (task 188 round 4a; InternalPlaneDocumentNarrowing.ForCallerAsync), or the download " +
+            "must be listed in AiContentDownloadsDecidedElsewhere with its reason:\n" + string.Join("\n", problems));
+    }
+
+    [Fact(DisplayName = "Task 188 r4a: negative control — a grant or an AI download that skips the narrowing is found; one that narrows (through a helper) is not")]
+    public void AiContentDetector_MustFireAndMustNotFire()
+    {
+        var fixtures = new[]
+        {
+            typeof(AiContentControlGrantSkipsTheNarrowing), typeof(AiContentControlGrantNarrowsThroughAHelper),
+            typeof(AiContentControlDownloadSkipsTheNarrowing), typeof(AiContentControlDownloadNarrows),
+            typeof(AiContentControlListedDownload),
+        };
+        var listed = new Dictionary<string, string>
+        {
+            [$"{typeof(AiContentControlListedDownload).FullName}::ReadAsync"] = "control: decided upstream",
+            [$"{typeof(AiContentControlDownloadNarrows).FullName}::ReadAsync"] = "control: a stale entry (it narrows)",
+        };
+
+        var problems = AiContentProblems(
+            fixtures.SelectMany(IlCallScan.WithNested),
+            key => key.StartsWith("Spaarke.ArchTests.AiContentControl", StringComparison.Ordinal), listed, out _, out _);
+
+        Assert.Equal(
+            new[]
+            {
+                $"NOT NARROWED (grant): {typeof(AiContentControlGrantSkipsTheNarrowing).FullName}::AuthorizeAsync",
+                $"NOT NARROWED (download): {typeof(AiContentControlDownloadSkipsTheNarrowing).FullName}::ReadAsync",
+                $"STALE entry {typeof(AiContentControlDownloadNarrows).FullName}::ReadAsync: it now reaches the narrowing — remove it (the ratchet).",
+            },
+            problems);
+    }
+
+    /// <summary>
+    /// The grant implementations (every concrete <see cref="Sprk.Bff.Api.Services.Ai.IAiAuthorizationService"/>'s
+    /// <c>AuthorizeAsync</c>) and the in-scope download callers that do not reach the narrowing, plus stale allow-list entries.
+    /// </summary>
+    private static List<string> AiContentProblems(
+        IEnumerable<Type> types, Func<string, bool> downloadScope, IReadOnlyDictionary<string, string> listed,
+        out IReadOnlyList<string> grants, out IReadOnlyList<string> downloads)
+    {
+        var list = types.ToList();
+        var scan = Scan(list, IsNarrowing, AiContentPrimitive);
+        grants = list
+            .Where(t => !t.IsInterface && !t.IsAbstract && typeof(Sprk.Bff.Api.Services.Ai.IAiAuthorizationService).IsAssignableFrom(t))
+            .Select(t => $"{IlCallScan.Outermost(t).FullName}::{nameof(Sprk.Bff.Api.Services.Ai.IAiAuthorizationService.AuthorizeAsync)}")
+            .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
+        downloads = scan.Surfaces.Keys.Where(downloadScope).Order(StringComparer.Ordinal).ToList();
+
+        var problems = new List<string>();
+        problems.AddRange(grants.Where(g => !scan.Reaches.Contains(g)).Select(g => $"NOT NARROWED (grant): {g}"));
+        problems.AddRange(downloads.Where(d => !scan.Reaches.Contains(d) && !listed.ContainsKey(d)).Select(d => $"NOT NARROWED (download): {d}"));
+        foreach (var entry in listed.Keys.Order(StringComparer.Ordinal))
+        {
+            if (!downloads.Contains(entry))
+                problems.Add($"STALE entry {entry}: it no longer downloads content — remove it.");
+            else if (scan.Reaches.Contains(entry))
+                problems.Add($"STALE entry {entry}: it now reaches the narrowing — remove it (the ratchet).");
+        }
+
+        return problems;
+    }
+
+    /// <summary>Every source method that calls <see cref="Sprk.Bff.Api.Services.Ai.IAiAuthorizationService.AuthorizeAsync"/>.</summary>
+    private static IReadOnlySet<string> AiGrantCallers(IEnumerable<Type> types) =>
+        IlCallScan.MethodReferences(types)
+            .Where(r => r.Target.DeclaringType == typeof(Sprk.Bff.Api.Services.Ai.IAiAuthorizationService)
+                && r.Target.Name == nameof(Sprk.Bff.Api.Services.Ai.IAiAuthorizationService.AuthorizeAsync))
+            .Select(r => SourceKey(r.Caller, r.CallerMethod))
+            .ToHashSet(StringComparer.Ordinal);
+
+    private static string? AiContentPrimitive(MethodBase method) =>
+        method.DeclaringType is { } declaring
+        && (declaring == typeof(Sprk.Bff.Api.Infrastructure.Graph.ISpeFileOperations)
+            || declaring == typeof(Sprk.Bff.Api.Infrastructure.Graph.SpeFileStore))
+        && AiContentDownloadMembers.Contains(method.Name)
+            ? $"{declaring.Name}.{method.Name}"
+            : null;
 }
 
 // Compiled control fixtures for ExternalDocumentNarrowingGuardTests.Detector_MustFireAndMustNotFire. Top-level types (the
@@ -706,4 +851,53 @@ internal sealed class SeamControlResolvesTheRouteSeam
 internal sealed class SeamControlBuildsTheSeam
 {
     internal static object Build() => (AppOnlyDocumentNarrowing)((_, _) => Task.FromResult<DocumentNarrowingResult>(null!));
+}
+
+// ── Task 188 round 4a: compiled control fixtures for AiContentDetector_MustFireAndMustNotFire (never run; IL only) ────
+
+/// <summary>MUST FIRE (r4a, grant): an AI document grant on Read alone.</summary>
+internal sealed class AiContentControlGrantSkipsTheNarrowing : Sprk.Bff.Api.Services.Ai.IAiAuthorizationService
+{
+    public Task<Sprk.Bff.Api.Services.Ai.AuthorizationResult> AuthorizeAsync(
+        System.Security.Claims.ClaimsPrincipal user, IReadOnlyList<Guid> documentIds,
+        Microsoft.AspNetCore.Http.HttpContext httpContext, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Sprk.Bff.Api.Services.Ai.AuthorizationResult.Authorized(documentIds));
+}
+
+/// <summary>MUST NOT FIRE (r4a, grant): narrows the granted ids through a helper.</summary>
+internal sealed class AiContentControlGrantNarrowsThroughAHelper(InternalRouteDocumentNarrowing narrow)
+    : Sprk.Bff.Api.Services.Ai.IAiAuthorizationService
+{
+    public async Task<Sprk.Bff.Api.Services.Ai.AuthorizationResult> AuthorizeAsync(
+        System.Security.Claims.ClaimsPrincipal user, IReadOnlyList<Guid> documentIds,
+        Microsoft.AspNetCore.Http.HttpContext httpContext, CancellationToken cancellationToken = default) =>
+        Sprk.Bff.Api.Services.Ai.AuthorizationResult.Authorized(await VisibleAsync(documentIds));
+
+    private async Task<IReadOnlyList<Guid>> VisibleAsync(IReadOnlyList<Guid> documentIds)
+    {
+        var decision = await narrow(documentIds, CancellationToken.None);
+        return documentIds.Where(decision.IsVisible).ToList();
+    }
+}
+
+/// <summary>MUST FIRE (r4a, download): downloads a document's bytes for an AI route without the narrowing.</summary>
+internal sealed class AiContentControlDownloadSkipsTheNarrowing(Sprk.Bff.Api.Infrastructure.Graph.ISpeFileOperations files)
+{
+    internal Task<Stream?> ReadAsync(string driveId, string itemId) => files.DownloadFileAsync(driveId, itemId);
+}
+
+/// <summary>MUST NOT FIRE (r4a, download): narrows before it downloads (and so is a STALE entry when listed).</summary>
+internal sealed class AiContentControlDownloadNarrows(
+    Sprk.Bff.Api.Infrastructure.Graph.ISpeFileOperations files, InternalRouteDocumentNarrowing narrow)
+{
+    internal async Task<Stream?> ReadAsync(Guid documentId, string driveId, string itemId) =>
+        (await narrow(new[] { documentId }, CancellationToken.None)).IsVisible(documentId)
+            ? await files.DownloadFileAsync(driveId, itemId)
+            : null;
+}
+
+/// <summary>MUST NOT FIRE (r4a, download): does not narrow, but is listed with its reason.</summary>
+internal sealed class AiContentControlListedDownload(Sprk.Bff.Api.Infrastructure.Graph.SpeFileStore files)
+{
+    internal Task<Stream?> ReadAsync(string driveId, string itemId) => files.DownloadFileAsync(driveId, itemId);
 }
