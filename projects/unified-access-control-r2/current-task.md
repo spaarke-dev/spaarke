@@ -43,7 +43,12 @@
   Also owed: 017/018 condition-(b) reviews, and 018 closes #1614/#1617.
 - **ebilling gates:**
   - **081, 086 (2 passes), 089, 090, 094, 095, 098 (2 passes), 117.** 098 must cover the message threads/feed (gate + (a′), fail closed) and GET /invoice-submissions (own firm + (a′), counts as the caller).
-  - **091:** check the Bicep and the live 403 proof for the custom role (Contributor + `blobs/tags/read`, RG scope, per container, scan time ≥ Last-Modified).
+  - **091:** the Bicep was ACCEPTED as authored (task/ebill-091-storage 8ff27228ef). Still open before 090 downloads are enabled anywhere:
+    - the what-if;
+    - `Test-EbillingFileStoreRole.ps1` run live;
+    - `test-ebilling-file-store-tag-write.sh` run as the identity, with its output recorded in the 091 notes.
+
+    090's code (scan time ≥ Last-Modified, with the overwrite pin) is reviewed when it arrives.
   - **Standing:** no role privilege on the Procedure tables before 191 without UAC review.
   - **Closed:** 099 accepted at 54524dead8; 080 is live on dev and verified (18 secured columns).
 - **word-add-in task 130:** two security passes when the PR arrives.
