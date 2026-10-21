@@ -97,13 +97,28 @@ on delete:
 
 (ii) would newly delete records and files the user did not select: a user-visible behaviour change.
 
-Follow-ups (not done here, scope):
-- The model-driven app's delete command treats every 409 as "checked out" (`sprk_DocumentOperations.js`, the
-  `response.status === 409` branch), so it will tell the user the document is checked out. It should read
-  `reasonCode === 'document_has_child_documents'` and say "delete its attachments first". Web resource change + deploy.
-- `CascadeArchive` stays RemoveLink on both relationships (the brief: leave other cascades alone). If Dataverse
-  long-term retention is ever enabled for sprk_communication or sprk_document, archiving a communication would clear the
-  link the same way. Not enabled today, as far as this task saw.
+Model-driven app message (coordinator, 2026-10-21; done in this PR). The delete command used to show every 409 as
+"checked out". `sprk_DocumentOperations.js` 1.28.2 (`Spaarke.Document.Utils.getDeleteConflictMessage`) handles the
+cases separately:
+- `document_has_child_documents`: "This document has N attached documents. Delete them first, then delete this
+  document."
+- `document_locked` (the checkout body's `error`): the checked-out message, as before.
+- Any other 409: a generic message plus the server's detail.
+
+Both copies are changed and stay identical: `src/client/webresources/js/` and
+`src/dataverse/solutions/SpaarkeMaster/WebResources/`. Test:
+`Spaarke.UI.Components/src/__tests__/documentOperations.deleteConflict.test.ts`.
+
+**Deploy step (manual, not run):**
+`scripts/Deploy-WebResourceInline.ps1 -DataverseUrl <env> -WebResourceName sprk_DocumentOperations.js
+-FilePath src/client/webresources/js/sprk_DocumentOperations.js -WebResourceType 3`. This uploads and publishes the
+one web resource. It is not in `Deploy-AllWebResources.ps1`, and it also ships in SpaarkeCore through
+`Import-SolutionScoped.ps1`.
+
+Archive cascade: filed as **#2187** (label `bug`). `CascadeArchive` stays RemoveLink on both relationships, because
+the brief said to leave other cascades alone. If Dataverse long-term retention is ever enabled for sprk_communication
+or sprk_document, archiving a communication would clear the link the same way. Retention is not enabled today.
+Dataverse's allowed Archive values must be checked before choosing a fix.
 
 ## 6. Live (spaarkedev1, read-only, 2026-10-21)
 
