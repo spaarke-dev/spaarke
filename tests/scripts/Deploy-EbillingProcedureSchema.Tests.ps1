@@ -7,8 +7,11 @@
 #      declarations, an empty list, a non-sprk_ name and a duplicate; a mere USE of FilingCores is not a declaration;
 #   2. the plan built from the parsed list (Resolve-Plan, metadata reads stubbed): one record lookup per core table on
 #      sprk_ruleset (RemoveLink), one typed lookup per core table on sprk_procedureassignment (Cascade), sprk_billingfirm and
-#      sprk_billingresponsible on every core table (RemoveLink), the Procedure Version -> Procedure lookup is parental, and no
-#      lookup whose target is a core table is Restrict. A fourth core table in the list adds its lookups (not hand-typed);
+#      sprk_billingresponsible on every core table (RemoveLink); every Cascade lookup (the assignment's core lookups and
+#      sprk_excludedpolicy, plus Procedure Version -> Procedure, which is NOT parental) carries the exact delete-only cascade
+#      configuration (Delete Cascade; Assign/Share/Unshare/Reparent/Merge/RollupView NoCascade), and Get-CascadeMismatches fires
+#      on any member that differs; no lookup whose target is a core table is Restrict. A fourth core table in the list adds its
+#      lookups (not hand-typed);
 #   3. the script text names no core table at all (no hand-typed list).
 #
 # Pester 3.4:  Import-Module Pester -RequiredVersion 3.4.0 ; Invoke-Pester tests/scripts/Deploy-EbillingProcedureSchema.Tests.ps1
@@ -28,7 +31,7 @@ if (-not ('EscalationException' -as [type])) {
 # Pull the functions under test out of the script (it cannot be dot-sourced: it runs on load).
 $errs = $null; $tokens = $null
 $script:Ast = [System.Management.Automation.Language.Parser]::ParseFile($script:ScriptPath, [ref]$tokens, [ref]$errs)
-foreach ($name in 'Get-FilingCores', 'New-LookupSpec', 'Get-NewTableRel', 'Get-ExpectedDelete', 'New-CreatorSpec', 'Resolve-Plan') {
+foreach ($name in 'Get-FilingCores', 'Get-CascadeDeleteOnly', 'New-LookupSpec', 'Get-NewTableRel', 'Get-ExpectedDelete', 'Get-ExpectedCascade', 'Get-CascadeMismatches', 'New-CreatorSpec', 'Resolve-Plan', 'Get-RequiredColumnSpecs', 'Get-RequiredLevelProblem', 'Get-PublishEntities', 'Get-MissingOptionValue') {
     $fn = $script:Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true) | Select-Object -First 1
     Invoke-Expression $fn.Extent.Text
 }
@@ -137,11 +140,34 @@ Describe 'Resolve-Plan (the plan follows the parsed list)' {
         $planted = @($three) + (New-LookupSpec 'sprk_procedureassignment' 'sprk_x' 'sprk_X' 'rel_x' 'sprk_matter' 'X' 'x' 'Restrict')
         @($planted | Where-Object { $_.Target -in 'sprk_matter', 'sprk_project', 'sprk_workassignment' -and $_.Delete -eq 'Restrict' }).Count | Should Be 1
     }
-    It 'makes Procedure Version -> Procedure parental (reads Cascade) and the planned Restrict lookups target a Procedure, a Version, a firm or nothing core' {
+    It 'makes Procedure Version -> Procedure a delete-only cascade (NOT parental)' {
         $p = @($three | Where-Object { $_.Table -eq 'sprk_procedureversion' -and $_.Column -eq 'sprk_procedure' })
         $p.Count | Should Be 1
-        $p[0].Parental | Should Be $true
+        $p[0].PSObject.Properties.Name -contains 'Parental' | Should Be $false
         (Get-ExpectedDelete $p[0]) | Should Be 'Cascade'
+        $p[0].Cascade.Delete | Should Be 'Cascade'
+        $p[0].Cascade.Reparent | Should Be 'NoCascade'
+    }
+    It 'gives EVERY Cascade lookup the exact custom configuration, and nothing else gets one' {
+        $exact = @{ Assign = 'NoCascade'; Delete = 'Cascade'; Merge = 'NoCascade'; Reparent = 'NoCascade'; Share = 'NoCascade'; Unshare = 'NoCascade'; RollupView = 'NoCascade' }
+        $cascade = @($three | Where-Object { $_.Delete -eq 'Cascade' })
+        # the three core-record lookups and sprk_excludedpolicy on the assignment, plus sprk_procedureversion.sprk_procedure
+        (@($cascade | ForEach-Object { "$($_.Table).$($_.Column)" } | Sort-Object) -join ',') | Should Be ((@('sprk_procedureassignment.sprk_matter', 'sprk_procedureassignment.sprk_project', 'sprk_procedureassignment.sprk_workassignment', 'sprk_procedureassignment.sprk_excludedpolicy', 'sprk_procedureversion.sprk_procedure') | Sort-Object) -join ',')
+        foreach ($c in $cascade) {
+            @(Get-CascadeMismatches $c.Cascade $exact).Count | Should Be 0
+            @(Get-CascadeMismatches $exact (Get-ExpectedCascade $c)).Count | Should Be 0
+            $c.Cascade.Keys.Count | Should Be 7
+        }
+        @($three | Where-Object { $_.Delete -ne 'Cascade' -and $_.Cascade }).Count | Should Be 0
+    }
+    It 'expects Assign / Share / Unshare / Reparent NoCascade on every non-cascade lookup too (none is parental)' {
+        foreach ($s in @($three | Where-Object { $_.Delete -ne 'Cascade' })) {
+            $e = Get-ExpectedCascade $s
+            $e.Delete | Should Be $s.Delete
+            foreach ($k in 'Assign', 'Share', 'Unshare', 'Reparent') { $e[$k] | Should Be 'NoCascade' }
+        }
+    }
+    It 'the restricted lookups target a Procedure, a Version, a firm or nothing core' {
         $restrict = @($three | Where-Object { $_.Delete -eq 'Restrict' } | ForEach-Object { "$($_.Table).$($_.Column)" } | Sort-Object)
         $expected = @('sprk_policyversion.sprk_procedureversion', 'sprk_procedureassignment.sprk_firm', 'sprk_procedureassignment.sprk_pinnedversion', 'sprk_procedureassignment.sprk_procedure', 'sprk_procedure.sprk_firm', 'sprk_ratecard.sprk_procedureversion', 'sprk_ruleset.sprk_procedure') | Sort-Object
         ($restrict -join ',') | Should Be ($expected -join ',')
@@ -162,7 +188,37 @@ Describe 'Resolve-Plan (the plan follows the parsed list)' {
             'sprk_procedureversion.sprk_effectivefrom', 'sprk_procedureversion.sprk_effectiveto', 'sprk_procedureversion.sprk_status', 'sprk_procedureversion.sprk_notconverted') {
             ($keys -contains $k) | Should Be $true
         }
-        $keys.Count | Should Be 13
+    }
+    It 'secures the five columns ontology F1-1 added, and the secured set is exactly 18 + one per core table beyond the three' {
+        $keys = @($threeSecured | ForEach-Object { "$($_.Table).$($_.Column)" })
+        foreach ($k in 'sprk_procedure.sprk_area', 'sprk_procedure.sprk_proceduretype', 'sprk_policyversion.sprk_procedureversion', 'sprk_policyversion.sprk_publishstate', 'sprk_ratecard.sprk_procedureversion') {
+            ($keys -contains $k) | Should Be $true
+        }
+        $keys.Count | Should Be 18
+        @($keys | Select-Object -Unique).Count | Should Be 18
+    }
+    It 'secures only columns the plan creates (with the right kind) plus the two existing rule set columns sprk_scope and sprk_firm' {
+        foreach ($sec in $threeSecured) {
+            if ($sec.Table -eq 'sprk_ruleset' -and $sec.Column -in 'sprk_scope', 'sprk_firm') { continue }
+            if ($sec.Kind -eq 'Lookup') { @($three | Where-Object { $_.Table -eq $sec.Table -and $_.Column -eq $sec.Column }).Count | Should Be 1 }
+            else { @($script:Columns | Where-Object { $_.Table -eq $sec.Table -and $_.Column -eq $sec.Column -and $_.Type -eq $sec.Kind }).Count | Should Be 1 }
+        }
+    }
+    It 'does not secure the columns that must stay writable (name, notes, firm-facing name, reason, mode, version number)' {
+        foreach ($c in 'sprk_name', 'sprk_notes', 'sprk_firmfacingname', 'sprk_reason', 'sprk_mode', 'sprk_versionnumber') {
+            @($threeSecured | Where-Object { $_.Column -eq $c }).Count | Should Be 0
+        }
+    }
+    It 'puts sprk_createdbyperson on exactly the six tables ontology F4-1 names, RemoveLink, and NOT on the rate card or its rates' {
+        $tables = @($three | Where-Object { $_.Column -eq 'sprk_createdbyperson' } | ForEach-Object { $_.Table } | Sort-Object)
+        ($tables -join ',') | Should Be ((@('sprk_policy', 'sprk_policyversion', 'sprk_procedure', 'sprk_procedureassignment', 'sprk_procedureversion', 'sprk_ruleset') | Sort-Object) -join ',')
+        @($three | Where-Object { $_.Column -eq 'sprk_createdbyperson' -and $_.Delete -ne 'RemoveLink' }).Count | Should Be 0
+        @($three | Where-Object { $_.Column -eq 'sprk_createdbyperson' -and $_.Table -in 'sprk_ratecard', 'sprk_ratecardrate' }).Count | Should Be 0
+        @($three | Where-Object { $_.Column -eq 'sprk_createdbyperson' -and $_.Target -ne 'systemuser' }).Count | Should Be 0
+    }
+    It 'names the policy and policy-version creator relationships by the D-173 shape' {
+        @($three | Where-Object { $_.Table -eq 'sprk_policy' -and $_.Column -eq 'sprk_createdbyperson' })[0].Rel | Should Be 'sprk_systemuser_sprk_policy_createdbyperson'
+        @($three | Where-Object { $_.Table -eq 'sprk_policyversion' -and $_.Column -eq 'sprk_createdbyperson' })[0].Rel | Should Be 'sprk_systemuser_sprk_policyversion_createdbyperson'
     }
     It 'does not secure sprk_createdbyperson (task 081 does)' {
         @($threeSecured | Where-Object { $_.Column -eq 'sprk_createdbyperson' }).Count | Should Be 0
@@ -181,7 +237,118 @@ Describe 'Resolve-Plan (the plan follows the parsed list)' {
     }
 }
 
+Describe 'Get-CascadeMismatches (the verify comparison)' {
+    $exact = @{ Assign = 'NoCascade'; Delete = 'Cascade'; Merge = 'NoCascade'; Reparent = 'NoCascade'; Share = 'NoCascade'; Unshare = 'NoCascade'; RollupView = 'NoCascade' }
+    It 'is silent on the exact configuration (must-not-fire)' {
+        @(Get-CascadeMismatches $exact $exact).Count | Should Be 0
+        @(Get-CascadeMismatches (Get-CascadeDeleteOnly) $exact).Count | Should Be 0
+    }
+    foreach ($m in 'Assign', 'Share', 'Unshare', 'Reparent') {
+        It "fires when $m is Cascade (must-fire)" {
+            $actual = $exact.Clone(); $actual[$m] = 'Cascade'
+            $r = @(Get-CascadeMismatches $actual $exact)
+            $r.Count | Should Be 1
+            ($r[0] -match $m) | Should Be $true
+        }
+    }
+    foreach ($m in 'Merge', 'RollupView') {
+        It "fires when $m is Cascade (must-fire)" {
+            $actual = $exact.Clone(); $actual[$m] = 'Cascade'
+            @(Get-CascadeMismatches $actual $exact).Count | Should Be 1
+        }
+    }
+    It 'fires when Delete is not Cascade, and on a parental configuration (must-fire)' {
+        $actual = $exact.Clone(); $actual.Delete = 'RemoveLink'
+        @(Get-CascadeMismatches $actual $exact).Count | Should Be 1
+        $parental = @{ Assign = 'Cascade'; Delete = 'Cascade'; Merge = 'Cascade'; Reparent = 'Cascade'; Share = 'Cascade'; Unshare = 'Cascade'; RollupView = 'Cascade' }
+        @(Get-CascadeMismatches $parental $exact).Count | Should Be 6
+    }
+    It 'fires when a member cannot be read back (must-fire)' {
+        $actual = $exact.Clone(); $actual.Remove('Share')
+        @(Get-CascadeMismatches $actual $exact).Count | Should Be 1
+    }
+}
+
+Describe 'required levels (ontology F4-2)' {
+    It 'raises exactly sprk_procedureversion.sprk_procedure (lookup) and sprk_versionnumber (integer) to SystemRequired' {
+        $r = @(Get-RequiredColumnSpecs)
+        $r.Count | Should Be 2
+        (@($r | ForEach-Object { "$($_.Table).$($_.Column):$($_.Kind):$($_.Level)" } | Sort-Object) -join ',') | Should Be 'sprk_procedureversion.sprk_procedure:Lookup:SystemRequired,sprk_procedureversion.sprk_versionnumber:Integer:SystemRequired'
+    }
+    $spec = @{ Table = 'sprk_procedureversion'; Column = 'sprk_versionnumber'; Kind = 'Integer'; Level = 'SystemRequired' }
+    It 'reads SystemRequired as no problem (must-not-fire)' {
+        (Get-RequiredLevelProblem $spec ([pscustomobject]@{ RequiredLevel = [pscustomobject]@{ Value = 'SystemRequired' } })) | Should BeNullOrEmpty
+    }
+    foreach ($lvl in 'None', 'Recommended', 'ApplicationRequired') {
+        It "fires when the level reads $lvl (must-fire)" {
+            $m = Get-RequiredLevelProblem $spec ([pscustomobject]@{ RequiredLevel = [pscustomobject]@{ Value = $lvl } })
+            ($m -match $lvl) | Should Be $true
+        }
+    }
+    It 'fires when the column cannot be read (must-fire)' {
+        (Get-RequiredLevelProblem $spec $null) | Should Not BeNullOrEmpty
+    }
+    It 'the module accepts Integer and exports Set-IntegerRequiredLevel' {
+        $mod = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts/ebilling/EbillingSchema.psm1') -Raw
+        ($mod -match "ValidateSet\('String', 'Lookup', 'Picklist', 'Integer'\)") | Should Be $true
+        ($mod -match "function Set-IntegerRequiredLevel") | Should Be $true
+        ($mod -match "'Set-IntegerRequiredLevel'") | Should Be $true
+    }
+}
+
+Describe 'the publish list' {
+    It 'is the three new tables, the rule set, policy version, rate card and the core tables - and nothing referenced-only' {
+        $script:Fixture = @('sprk_matter', 'sprk_project', 'sprk_workassignment')
+        Resolve-Plan @('sprk_matter', 'sprk_project', 'sprk_workassignment')
+        $list = @(Get-PublishEntities | Sort-Object)
+        ($list -join ',') | Should Be ((@('sprk_procedure', 'sprk_procedureversion', 'sprk_procedureassignment', 'sprk_ruleset', 'sprk_policyversion', 'sprk_ratecard', 'sprk_matter', 'sprk_project', 'sprk_workassignment') | Sort-Object) -join ',')
+    }
+    It 'never names contact, systemuser, sprk_organization or sprk_policy (must-fire if one comes back)' {
+        foreach ($t in 'contact', 'systemuser', 'sprk_organization', 'sprk_policy') { (@(Get-PublishEntities) -contains $t) | Should Be $false }
+    }
+    It 'follows the parsed core list' {
+        $script:Fixture = @('sprk_matter', 'sprk_agreement')
+        Resolve-Plan @('sprk_matter', 'sprk_agreement')
+        (@(Get-PublishEntities) -contains 'sprk_agreement') | Should Be $true
+        $script:Fixture = @('sprk_matter', 'sprk_project', 'sprk_workassignment', 'sprk_agreement')
+    }
+}
+
+Describe 'Get-MissingOptionValue (the sprk_scope re-read after securing)' {
+    $want = 100000000, 100000001, 100000002, 100000003
+    function New-Opt($vals) { return @($vals | ForEach-Object { [pscustomobject]@{ Value = $_; Label = "L$_" } }) }
+    It 'is empty when all four options are present (must-not-fire)' {
+        @(Get-MissingOptionValue (New-Opt $want) $want).Count | Should Be 0
+    }
+    It 'is empty when extra options exist (must-not-fire)' {
+        @(Get-MissingOptionValue (New-Opt ($want + 100000009)) $want).Count | Should Be 0
+    }
+    It 'names a lost option (must-fire)' {
+        $m = @(Get-MissingOptionValue (New-Opt (100000000, 100000001, 100000003)) $want)
+        $m.Count | Should Be 1
+        $m[0] | Should Be 100000002
+    }
+    It 'names every option when the re-read returns none (must-fire)' {
+        @(Get-MissingOptionValue @() $want).Count | Should Be 4
+    }
+}
+
 Describe 'the script text' {
+    It 'grants the writer profile before the reader (review K2)' {
+        $text = Get-Content -LiteralPath $script:ScriptPath -Raw
+        $w = $text.IndexOf('Id = $script:WriterId; Name = $WriterProfileName')
+        $r = $text.IndexOf('Id = $script:ReaderId; Name = $ReaderProfileName')
+        ($w -gt 0 -and $r -gt $w) | Should Be $true
+    }
+    It 'checks the scope options inside the secure-then-grant try, only when it just secured sprk_scope (review K4)' {
+        $text = Get-Content -LiteralPath $script:ScriptPath -Raw
+        $text -match 'if \(\$needSecure -and \$t -eq \$RuleSet -and \$c -eq \$ScopeColumn\) \{ Assert-ScopeOptionsIntact \}' | Should Be $true
+    }
+    It 'builds the publish list from Get-PublishEntities, not a typed list' {
+        $text = Get-Content -LiteralPath $script:ScriptPath -Raw
+        $text -match '\$entities = Get-PublishEntities' | Should Be $true
+        $text -match "RateCard, 'sprk_policy', 'sprk_organization'" | Should Be $false
+    }
     It 'names no core table: the list is parsed, never typed' {
         $text = Get-Content -LiteralPath $script:ScriptPath -Raw
         $text -match 'sprk_matter\b' | Should Be $false

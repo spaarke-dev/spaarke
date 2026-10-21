@@ -329,12 +329,15 @@ function Add-Column {
 
 # Lookup via a one-to-many relationship. -Parental makes the relationship parental (cascade delete, assign, share,
 # unshare, reparent). -RelSchema defaults to sprk_{target}_{table}_{column} (the task 010 / 012 naming).
+# -Cascade is an optional full CascadeConfiguration (Assign, Delete, Merge, Reparent, Share, Unshare, RollupView) that replaces
+# both built-in configurations (task 080: Delete = Cascade with everything else NoCascade, so a reassign or share of the parent
+# never cascades onto the child). Scripts that do not pass it are unchanged.
 # -RequiredLevel is what the create body asks for; Dataverse honours None and ApplicationRequired there, so a lookup that
 # must be SystemRequired is raised afterwards with Set-LookupRequiredLevel.
 function Add-Lookup {
     param(
         [string]$Column, [string]$SchemaName, [string]$RelSchema, [string]$Target, [string]$Display, [string]$Description,
-        [string]$DeleteBehavior = 'RemoveLink', [string]$RequiredLevel = 'None', [switch]$Parental
+        [string]$DeleteBehavior = 'RemoveLink', [string]$RequiredLevel = 'None', [switch]$Parental, [hashtable]$Cascade = $null
     )
     $table = $script:Entity
     $tally = Format-Tally $table $Column
@@ -353,8 +356,11 @@ function Add-Lookup {
     if (-not (Test-TableKnown $Target)) {
         throw "Lookup target table '$Target' for $Column does not exist in $($script:EnvironmentUrl)."
     }
-    if ($script:DryRun) { $script:Created.Add($tally); Write-Host "  WOULD CREATE $Column (Lookup -> $Target$(if ($Parental) { ', parental' }))" -ForegroundColor Cyan; return }
-    $cascade = if ($Parental) {
+    $note = if ($Cascade) { ', custom cascade: delete ' + $Cascade.Delete + ', assign/share/unshare/reparent ' + $Cascade.Assign + '/' + $Cascade.Share + '/' + $Cascade.Unshare + '/' + $Cascade.Reparent } elseif ($Parental) { ', parental' } else { '' }
+    if ($script:DryRun) { $script:Created.Add($tally); Write-Host "  WOULD CREATE $Column (Lookup -> $Target$note)" -ForegroundColor Cyan; return }
+    $cascade = if ($Cascade) {
+        $Cascade
+    } elseif ($Parental) {
         @{ Assign = 'Cascade'; Delete = 'Cascade'; Merge = 'NoCascade'; Reparent = 'Cascade'; Share = 'Cascade'; Unshare = 'Cascade' }
     } else {
         @{ Assign = 'NoCascade'; Delete = $DeleteBehavior; Merge = 'NoCascade'; Reparent = 'NoCascade'; Share = 'NoCascade'; Unshare = 'NoCascade' }
@@ -376,7 +382,7 @@ function Add-Lookup {
     $r = Invoke-DvCreate -Path 'RelationshipDefinitions' -Body $rel -Column $Column -ExpectedType 'Lookup'
     if ($r -eq 'exists') { $script:Skipped.Add($tally); Write-Host "  skipped  $Column (exists, found via create refusal)" -ForegroundColor Yellow; return }
     Wait-AttrVisible $Column
-    $script:Created.Add($tally); Write-Host "  CREATED  $Column (Lookup -> $Target$(if ($Parental) { ', parental' }))" -ForegroundColor Green
+    $script:Created.Add($tally); Write-Host "  CREATED  $Column (Lookup -> $Target$note)" -ForegroundColor Green
 }
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -611,11 +617,11 @@ $script:RequiredRank = @{ None = 0; Recommended = 1; ApplicationRequired = 2; Sy
 # Sets a column's required level with a read-back. Never LOWERS a level (a column already SystemRequired stays so when an
 # older call asks for ApplicationRequired). Raising to SystemRequired needs every existing row to hold a value: the null
 # rows are counted first and, when there are any, nothing is changed (a WARNING says so and the column is added to the
-# Deferred list for the script to report). -Kind is the attribute cast: String, Lookup or Picklist.
+# Deferred list for the script to report). -Kind is the attribute cast: String, Lookup, Picklist or Integer.
 function Set-ColumnRequiredLevel {
     param(
         [string]$Table, [string]$Column, [string]$Level,
-        [ValidateSet('String', 'Lookup', 'Picklist')][string]$Kind,
+        [ValidateSet('String', 'Lookup', 'Picklist', 'Integer')][string]$Kind,
         [string]$Tag = 'required', [string]$SkipText
     )
     $path = "EntityDefinitions(LogicalName='$Table')/Attributes(LogicalName='$Column')/Microsoft.Dynamics.CRM.${Kind}AttributeMetadata"
@@ -698,6 +704,11 @@ function Set-StringRequiredLevel([string]$Table, [string]$Column, [string]$Level
 # SystemRequired for a choice column that is a key column (same rules as Set-LookupRequiredLevel).
 function Set-PicklistRequiredLevel([string]$Table, [string]$Column, [string]$Level) {
     Set-ColumnRequiredLevel -Table $Table -Column $Column -Level $Level -Kind Picklist -Tag "required $Level" -SkipText "already $Level"
+}
+
+# SystemRequired for a whole-number column that is a key column (IntegerAttributeMetadata; same rules as Set-LookupRequiredLevel).
+function Set-IntegerRequiredLevel([string]$Table, [string]$Column, [string]$Level) {
+    Set-ColumnRequiredLevel -Table $Table -Column $Column -Level $Level -Kind Integer -Tag "required $Level" -SkipText "already $Level"
 }
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -816,6 +827,6 @@ Export-ModuleMember -Function @(
     'Add-Column', 'Add-Lookup', 'Add-LocalChoice', 'Get-PicklistLabels', 'Add-Table',
     'New-StringDef', 'New-MemoDef', 'New-MoneyDef', 'New-DateOnlyDef', 'New-DateTimeDef',
     'Get-RowCountExact', 'Set-PrimaryNameLength', 'Set-PrimaryNameRequired', 'Set-ColumnRequiredLevel',
-    'Set-LookupRequiredLevel', 'Set-StringRequiredLevel', 'Set-PicklistRequiredLevel',
+    'Set-LookupRequiredLevel', 'Set-StringRequiredLevel', 'Set-PicklistRequiredLevel', 'Set-IntegerRequiredLevel',
     'Get-Keys', 'Add-AlternateKey', 'Get-ManyToMany', 'Add-ManyToMany'
 )

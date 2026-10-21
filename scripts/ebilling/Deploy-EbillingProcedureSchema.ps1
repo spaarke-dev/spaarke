@@ -30,7 +30,8 @@
           sprk_policydomain, which must already exist), sprk_proceduretype, sprk_appliesto, sprk_firm (-> sprk_organization,
           Restrict), sprk_issuedby (-> sprk_organization, RemoveLink), sprk_externalcontact and sprk_internalcontact (-> contact,
           RemoveLink), sprk_status (sprk_procedurestatus), sprk_notes (memo), sprk_createdbyperson (-> systemuser, RemoveLink).
-      P3  Table sprk_procedureversion (user-owned, primary sprk_name, audited): sprk_procedure (-> sprk_procedure, PARENTAL),
+      P3  Table sprk_procedureversion (user-owned, primary sprk_name, audited): sprk_procedure (-> sprk_procedure, Cascade delete only:
+          NOT parental),
           sprk_versionnumber (whole number), alternate key sprk_procedure_versionnumber on (sprk_procedure, sprk_versionnumber),
           sprk_previousversion (-> sprk_procedureversion, RemoveLink), sprk_effectivefrom / sprk_effectiveto (DateOnly),
           sprk_status (sprk_procedureversionstatus), sprk_notconverted (two options, default No; task 116), sprk_createdbyperson.
@@ -42,19 +43,42 @@
       P5  sprk_ruleset: one record lookup per FilingCores table (RemoveLink), the sprk_scope options Record 100000002 and Firm
           record 100000003, sprk_procedure (-> sprk_procedure, Restrict), sprk_createdbyperson (S9).
       P6  sprk_policyversion: sprk_procedureversion (-> sprk_procedureversion, Restrict), sprk_publishstate (global
-          sprk_publishstate, optional, no default), sprk_basedonversion (-> sprk_policyversion, RemoveLink).
+          sprk_publishstate, optional, no default), sprk_basedonversion (-> sprk_policyversion, RemoveLink), sprk_createdbyperson
+          (D-173, ontology F4-1). Also sprk_policy.sprk_createdbyperson (F4-1). NOT on sprk_ratecard or sprk_ratecardrate.
       P7  sprk_ratecard: sprk_procedureversion (-> sprk_procedureversion, Restrict).
       P8  Every FilingCores table: sprk_billingfirm and sprk_billingresponsible (-> sprk_organization, RemoveLink, optional).
       P9  Field security (IsSecured true; Read for every user through the reader profile; Create / Update for the BFF application
-          user(s) only through the writer profile) on: sprk_procedure.sprk_appliesto, sprk_firm, sprk_status;
-          sprk_procedureversion.sprk_effectivefrom, sprk_effectiveto, sprk_status, sprk_notconverted; sprk_ruleset.sprk_scope,
-          sprk_firm, sprk_procedure and the P5 record lookups. sprk_createdbyperson is created UNSECURED (task 081 secures it).
+          user(s) only through the writer profile) on: sprk_procedure.sprk_area, sprk_proceduretype, sprk_appliesto, sprk_firm,
+          sprk_status; sprk_procedureversion.sprk_effectivefrom, sprk_effectiveto, sprk_status, sprk_notconverted;
+          sprk_policyversion.sprk_procedureversion, sprk_publishstate; sprk_ratecard.sprk_procedureversion; sprk_ruleset.sprk_scope,
+          sprk_firm, sprk_procedure and the P5 record lookups (ontology F1-1 added the five on sprk_procedure, sprk_policyversion and
+          sprk_ratecard). sprk_createdbyperson is created UNSECURED (task 081 secures it).
       P10 IsAuditEnabled on sprk_procedure, sprk_procedureversion and sprk_procedureassignment.
 
-    DELETE BEHAVIOUR. Restrict only on lookups to a Procedure, a Procedure Version or a firm, never to a core record (model 5.2).
+    DELETE BEHAVIOUR (see also CASCADE CONFIGURATION below). Restrict only on lookups to a Procedure, a Procedure Version or a firm, never to a core record (model 5.2).
     The two firm lookups' Restrict (sprk_procedure.sprk_firm, sprk_procedureassignment.sprk_firm) is this task's proposal: a nulled
     firm would widen a firm-only Procedure, or an override, to every firm. An existing lookup with another behaviour is never
     changed by script: the pre-flight stops (exit 2).
+
+    CASCADE CONFIGURATION (uac-r2 review). Every Cascade relationship (the four on sprk_procedureassignment: the core-record lookups
+    and sprk_excludedpolicy; and sprk_procedureversion.sprk_procedure, which is NOT parental) gets a custom configuration:
+    Delete = Cascade; Assign, Share, Unshare, Reparent, Merge and RollupView = NoCascade. A reassign or share of the parent must
+    not cascade onto these rows: RecordOwnershipResolver and the secure-child job (task 089) own their owner and shares. Every
+    other lookup is created Assign / Share / Unshare / Reparent NoCascade with its listed delete behaviour. The verify step reads
+    every member back.
+
+    REQUIRED LEVELS (ontology F4-2). sprk_procedureversion.sprk_procedure and sprk_versionnumber are raised to SystemRequired (the
+    alternate key columns; precedent Deploy-EbillingSubmissionSchema step 4b), then read back in the verify step.
+
+    PUBLISH. Only what this script changed and owns is published: the three new tables, sprk_ruleset, sprk_policyversion,
+    sprk_ratecard, the FilingCores tables and the five global choices. NOT contact, systemuser, sprk_organization or sprk_policy
+    (referenced only, or, for sprk_policy, a creator-person column that task 081 publishes when it secures it).
+
+    EXTERNAL PRIVILEGE CHECK (verify step, read only). The script finds every role held by any systemuser with sprk_isexternal =
+    true, directly and through team membership (including the business unit's default team), and asserts that none of those roles
+    holds any privilege on sprk_procedure, sprk_procedureversion or sprk_procedureassignment. Each role is named in the output.
+    No flagged-external user is a warning, not a pass; an unreadable query fails the verify. This script adds no role privilege
+    (tasks 081 and 089 own the role rows), so on a first run the check passes by construction; it is the guard for later runs.
 
     NEVER CREATED: a banner column; sprk_isexceptions; any business-unit column or N:N; sprk_ratecard.sprk_scope; sprk_storedfile
     (task 088). Never deleted or changed: sprk_ruleset.sprk_sourcedocument and the sprk_ratecard core lookups.
@@ -377,9 +401,18 @@ function New-ProcedureTable([string]$Table, [string]$Display, [string]$Plural, [
 
 # ---- lookups --------------------------------------------------------------------------------------------------------
 
-# One lookup to create. Rel is the relationship schema name. Delete is the delete behaviour the relationship must read.
-function New-LookupSpec([string]$Table, [string]$Column, [string]$Schema, [string]$Rel, [string]$Target, [string]$Display, [string]$Desc, [string]$Delete, [switch]$Parental) {
-    return [pscustomobject]@{ Table = $Table; Column = $Column; Schema = $Schema; Rel = $Rel; Target = $Target; Display = $Display; Desc = $Desc; Delete = $Delete; Parental = [bool]$Parental }
+# The custom CascadeConfiguration of every Cascade lookup (uac-r2 review): deleting the parent deletes the row, and nothing else
+# cascades. A reassign or share of the parent must NOT reach these rows, because RecordOwnershipResolver and the secure-child job
+# (task 089) own their owner and shares. Never the parental configuration (which cascades assign, share, unshare and reparent).
+function Get-CascadeDeleteOnly {
+    return @{ Assign = 'NoCascade'; Delete = 'Cascade'; Merge = 'NoCascade'; Reparent = 'NoCascade'; Share = 'NoCascade'; Unshare = 'NoCascade'; RollupView = 'NoCascade' }
+}
+
+# One lookup to create. Rel is the relationship schema name. Delete is the delete behaviour the relationship must read. A lookup
+# whose delete behaviour is Cascade gets the custom delete-only CascadeConfiguration above (Cascade = the full configuration).
+function New-LookupSpec([string]$Table, [string]$Column, [string]$Schema, [string]$Rel, [string]$Target, [string]$Display, [string]$Desc, [string]$Delete) {
+    $cascade = if ($Delete -eq 'Cascade') { Get-CascadeDeleteOnly } else { $null }
+    return [pscustomobject]@{ Table = $Table; Column = $Column; Schema = $Schema; Rel = $Rel; Target = $Target; Display = $Display; Desc = $Desc; Delete = $Delete; Cascade = $cascade }
 }
 
 # Relationship name for a lookup on a NEW table: {table}_{column}_{target}, sprk_ prefixes dropped from the column and the target
@@ -391,11 +424,28 @@ function Get-NewTableRel([string]$Table, [string]$Column, [string]$Target) {
 function Invoke-LookupSpec($s) {
     Set-EbEntity $s.Table
     $p = @{ Column = $s.Column; SchemaName = $s.Schema; RelSchema = $s.Rel; Target = $s.Target; Display = $s.Display; Description = $s.Desc; DeleteBehavior = $s.Delete }
-    if ($s.Parental) { Add-Lookup @p -Parental } else { Add-Lookup @p }
+    if ($s.Cascade) { $p.Cascade = $s.Cascade }
+    Add-Lookup @p
 }
 
 # The delete behaviour a created relationship must read.
-function Get-ExpectedDelete($s) { if ($s.Parental) { return 'Cascade' } else { return $s.Delete } }
+function Get-ExpectedDelete($s) { return $s.Delete }
+
+# The CascadeConfiguration members a relationship must read back. A Cascade lookup: all seven (Delete Cascade, the rest NoCascade).
+# Any other lookup: its delete behaviour, and Assign / Share / Unshare / Reparent NoCascade (the module's non-parental default).
+function Get-ExpectedCascade($s) {
+    if ($s.Cascade) { return $s.Cascade }
+    return @{ Delete = $s.Delete; Assign = 'NoCascade'; Share = 'NoCascade'; Unshare = 'NoCascade'; Reparent = 'NoCascade' }
+}
+
+# The members of an actual CascadeConfiguration that differ from the expected ones; empty when it is exactly as expected.
+function Get-CascadeMismatches($Actual, [hashtable]$Expected) {
+    $out = @()
+    foreach ($k in ($Expected.Keys | Sort-Object)) {
+        if ([string]$Actual.$k -ne [string]$Expected[$k]) { $out += "$k is '$($Actual.$k)', expected '$($Expected[$k])'" }
+    }
+    return $out
+}
 
 # The creator-person lookup spec (the shape ebilling task 013 gave the invoice family, copied from the old S9).
 function New-CreatorSpec([string]$Table) {
@@ -427,7 +477,7 @@ function Resolve-Plan([string[]]$CoreTables) {
     $lk.Add((New-CreatorSpec $Procedure))
 
     # P3 sprk_procedureversion
-    $lk.Add((New-LookupSpec $Version $Procedure 'sprk_Procedure' (Get-NewTableRel $Version $Procedure $Procedure) $Procedure 'Procedure' 'The Procedure this is one issue of. PARENTAL: deleting a Procedure deletes its versions, unless a policy version, rate card or stored file still references one (those links are Restrict).' 'Cascade' -Parental))
+    $lk.Add((New-LookupSpec $Version $Procedure 'sprk_Procedure' (Get-NewTableRel $Version $Procedure $Procedure) $Procedure 'Procedure' 'The Procedure this is one issue of. Deleting a Procedure deletes its versions, unless a policy version, rate card or stored file still references one (those links are Restrict). NOT the parental configuration: only Delete cascades; a reassign or share of the Procedure never reaches its versions (uac-r2 review).' 'Cascade'))
     $lk.Add((New-LookupSpec $Version 'sprk_previousversion' 'sprk_PreviousVersion' (Get-NewTableRel $Version 'sprk_previousversion' $Version) $Version 'Previous Version' 'The version this one replaces (model 3.2).' 'RemoveLink'))
     $lk.Add((New-CreatorSpec $Version))
 
@@ -451,6 +501,9 @@ function Resolve-Plan([string[]]$CoreTables) {
     # P6 sprk_policyversion
     $lk.Add((New-LookupSpec $PolicyVersion $Version 'sprk_ProcedureVersion' (Get-NewTableRel $PolicyVersion $Version $Version) $Version 'Procedure Version' 'The Procedure Version this policy version belongs to (model 7.2). RESTRICT: a Procedure Version with policy versions cannot be deleted; Signals cite them (I-P5).' 'Restrict'))
     $lk.Add((New-LookupSpec $PolicyVersion 'sprk_basedonversion' 'sprk_BasedOnVersion' (Get-NewTableRel $PolicyVersion 'sprk_basedonversion' $PolicyVersion) $PolicyVersion 'Based On Version' 'For a record rule: the base rule policy version it was copied from (model 6.3). REMOVELINK, never Restrict (ontology F2-a).' 'RemoveLink'))
+    # D-173 creator person (ontology F4-1): on the policy and its version only, never on sprk_ratecard or sprk_ratecardrate.
+    $lk.Add((New-CreatorSpec $PolicyVersion))
+    $lk.Add((New-CreatorSpec 'sprk_policy'))
 
     # P7 sprk_ratecard
     $lk.Add((New-LookupSpec $RateCard $Version 'sprk_ProcedureVersion' (Get-NewTableRel $RateCard $Version $Version) $Version 'Procedure Version' 'The Procedure Version whose published rate card this is (model 7.2). RESTRICT: a Procedure Version with a rate card cannot be deleted (I-P5).' 'Restrict'))
@@ -485,6 +538,8 @@ function Resolve-Plan([string[]]$CoreTables) {
 
     # P9: the columns that become field-secured. Reader: Read for every user; writer: Create / Update, BFF application user(s) only.
     $sec = @(
+        @{ Table = $Procedure; Column = 'sprk_area'; Kind = 'Picklist' }
+        @{ Table = $Procedure; Column = 'sprk_proceduretype'; Kind = 'Picklist' }
         @{ Table = $Procedure; Column = 'sprk_appliesto'; Kind = 'Picklist' }
         @{ Table = $Procedure; Column = 'sprk_firm'; Kind = 'Lookup' }
         @{ Table = $Procedure; Column = 'sprk_status'; Kind = 'Picklist' }
@@ -492,12 +547,42 @@ function Resolve-Plan([string[]]$CoreTables) {
         @{ Table = $Version; Column = 'sprk_effectiveto'; Kind = 'DateTime' }
         @{ Table = $Version; Column = 'sprk_status'; Kind = 'Picklist' }
         @{ Table = $Version; Column = 'sprk_notconverted'; Kind = 'Boolean' }
+        @{ Table = $PolicyVersion; Column = $Version; Kind = 'Lookup' }
+        @{ Table = $PolicyVersion; Column = 'sprk_publishstate'; Kind = 'Picklist' }
+        @{ Table = $RateCard; Column = $Version; Kind = 'Lookup' }
         @{ Table = $RuleSet; Column = $ScopeColumn; Kind = 'Picklist' }
         @{ Table = $RuleSet; Column = 'sprk_firm'; Kind = 'Lookup' }
         @{ Table = $RuleSet; Column = $Procedure; Kind = 'Lookup' }
     )
     foreach ($c in $cores) { $sec += @{ Table = $RuleSet; Column = $c.Table; Kind = 'Lookup' } }
     $script:Secured = @($sec)
+}
+
+# The columns raised to SystemRequired (ontology F4-2): the alternate key columns of sprk_procedureversion.
+function Get-RequiredColumnSpecs {
+    return @(
+        @{ Table = $Version; Column = $Procedure; Kind = 'Lookup'; Level = 'SystemRequired' }
+        @{ Table = $Version; Column = 'sprk_versionnumber'; Kind = 'Integer'; Level = 'SystemRequired' }
+    )
+}
+
+# Verify comparison for one required column: $null when the read-back level is the wanted one, else the problem text.
+function Get-RequiredLevelProblem($Spec, $Attribute) {
+    if (-not $Attribute) { return "$($Spec.Table).$($Spec.Column) was not found (required level not readable)" }
+    $actual = [string]$Attribute.RequiredLevel.Value
+    if ($actual -ne $Spec.Level) { return "$($Spec.Table).$($Spec.Column) required level is '$actual', expected '$($Spec.Level)'" }
+    return $null
+}
+
+# The entities PublishXml names: only what this script changed and owns (never contact, systemuser, sprk_organization or sprk_policy).
+function Get-PublishEntities {
+    return @($Procedure, $Version, $Assignment, $RuleSet, $PolicyVersion, $RateCard) + @($script:Cores.Table)
+}
+
+# The wanted option values a re-read of a choice no longer holds (empty when all are present).
+function Get-MissingOptionValue($Options, [int[]]$Wanted) {
+    $have = @($Options | ForEach-Object { [int]$_.Value })
+    return @($Wanted | Where-Object { $_ -notin $have })
 }
 
 # Nothing may change an existing lookup: an existing one must already target the right table with the right delete behaviour.
@@ -508,9 +593,11 @@ function Test-LookupSpecPreflight($s, [System.Collections.Generic.List[string]]$
         $lk = Get-DvOrNull "EntityDefinitions(LogicalName='$($s.Table)')/Attributes(LogicalName='$($s.Column)')/Microsoft.Dynamics.CRM.LookupAttributeMetadata?`$select=Targets"
         if ($lk -and $lk.Targets -and ($lk.Targets -notcontains $s.Target)) { $Problems.Add("$($s.Table).$($s.Column) exists as a lookup to '$($lk.Targets -join ',')', expected '$($s.Target)'") }
         $rel = Get-LookupRelationship $s.Table $s.Column
-        $want = Get-ExpectedDelete $s
-        if ($rel -and [string]$rel.CascadeConfiguration.Delete -ne $want) {
-            $Problems.Add("$($s.Table).$($s.Column) ($($rel.SchemaName)) has delete behaviour '$($rel.CascadeConfiguration.Delete)', expected $want. Changing it needs an owner decision; not changed")
+        if ($rel) {
+            $diff = @(Get-CascadeMismatches $rel.CascadeConfiguration (Get-ExpectedCascade $s))
+            if ($diff.Count -gt 0) {
+                $Problems.Add("$($s.Table).$($s.Column) ($($rel.SchemaName)) has a different CascadeConfiguration: $($diff -join '; '). Changing it needs an owner decision; not changed")
+            }
         }
     }
     else {
@@ -657,11 +744,26 @@ function Write-MaskedRecovery([string]$Table, [string]$Column, [string]$Cause) {
     Write-Host "  column: make.powerapps.com > Tables > $Table > Columns > $Column > Advanced options > clear 'Enable column security', save, publish $Table." -ForegroundColor Red
 }
 
+# Review K4: securing a choice sends its whole definition back. Right after sprk_ruleset.sprk_scope is secured, re-read its options and
+# fail when any of 100000000-100000003 is gone. Inside Invoke-ColumnSecurity's try, so a failure reverts the column to not secured.
+function Assert-ScopeOptionsIntact {
+    $want = (@($ScopeKnown.Keys) + @($ScopeNew.Keys)) | ForEach-Object { [int]$_ }
+    $missing = @()
+    for ($n = 0; $n -lt 3; $n++) {
+        $missing = @(Get-MissingOptionValue (Get-ScopeOptions) $want)
+        if ($missing.Count -eq 0) { break }
+        Start-Sleep -Seconds 3
+    }
+    if ($missing.Count -gt 0) { throw "securing $RuleSet.$ScopeColumn lost option value(s) $($missing -join ', ') (expected $($want -join ', ')). Stopping; the column is reverted to not secured, but the lost option must be restored by the owner." }
+    Write-Report 'OK' "$RuleSet.$ScopeColumn still holds options $($want -join ', ') after it was secured"
+}
+
 function Invoke-ColumnSecurity($spec) {
     $t = $spec.Table; $c = $spec.Column
     $tag = "$t.$c"
     $attr = Get-Attr $t $c 'LogicalName,AttributeType,IsSecured,CanBeSecuredForRead,CanBeSecuredForCreate,CanBeSecuredForUpdate,MetadataId'
-    $grants = @(@{ Id = $script:ReaderId; Name = $ReaderProfileName; Write = 0 }, @{ Id = $script:WriterId; Name = $WriterProfileName; Write = 4 })
+    # Writer first, then reader (review K2): a column that fails between the two grants is never left writable-by-nobody and readable-by-all.
+    $grants = @(@{ Id = $script:WriterId; Name = $WriterProfileName; Write = 4 }, @{ Id = $script:ReaderId; Name = $ReaderProfileName; Write = 0 })
 
     if (-not $attr) {
         if (-not $DryRun) { throw "$tag is missing after its create; cannot secure it." }
@@ -701,6 +803,7 @@ function Invoke-ColumnSecurity($spec) {
         $script:Changed.Add("secure $tag"); Write-Report 'DONE' "secured $tag"
     }
     try {
+        if ($needSecure -and $t -eq $RuleSet -and $c -eq $ScopeColumn) { Assert-ScopeOptionsIntact }
         foreach ($g in $missing) {
             Grant-FieldPermission $g.Id $t $c $g.Write
             $script:Created.Add("field permission $($g.Name) on $tag"); Write-Report 'DONE' "granted $($g.Name) on $tag (read=4 create=$($g.Write) update=$($g.Write))"
@@ -735,6 +838,81 @@ function Test-OtherProfiles {
         $otherWriters = @($rows | Where-Object { ($_.canupdate -eq 4 -or $_.cancreate -eq 4) -and $_.fieldsecurityprofileid.name -notin $WriterProfileName, 'System Administrator' })
         foreach ($o in $otherWriters) { Write-Report 'FAIL' "profile '$($o.fieldsecurityprofileid.name)' can also write $t.$c - only the BFF writer profile may" }
         if ($otherWriters.Count -eq 0) { Write-Report 'OK' "no profile besides '$WriterProfileName' and System Administrator can write $t.$c" }
+    }
+}
+
+# ---------------------------------------------------------------------------------------------------------------
+# External privilege check (verify step; read only)
+# ---------------------------------------------------------------------------------------------------------------
+
+# Every page of a GET collection.
+function Get-DvAll([string]$Path) {
+    $rows = [System.Collections.Generic.List[object]]::new()
+    $next = $Path
+    while ($next) {
+        $page = Invoke-Dv -Path $next
+        foreach ($v in @($page.value)) { $rows.Add($v) }
+        $next = $page.'@odata.nextLink'
+    }
+    return @($rows)
+}
+
+# Finds every role held by a systemuser with sprk_isexternal = true (directly, and through each team the user belongs to,
+# including the user's business unit default team) and returns a Problems list: one entry for any role holding any privilege
+# (Create, Read, Write, Delete, Append, AppendTo, Assign, Share) on one of $Tables, and one for any query that could not be read.
+# Each role is named in the output. No flagged-external user is a warning, not a pass. Never writes.
+function Test-ExternalRolePrivileges([string[]]$Tables) {
+    $problems = [System.Collections.Generic.List[string]]::new()
+    $roles = @{}   # roleid -> @{ Name; Via = list of 'user (direct | team T)' }
+    $pattern = '^prv(Create|Read|Write|Delete|Append|AppendTo|Assign|Share)(' + (($Tables | ForEach-Object { [regex]::Escape($_) }) -join '|') + ')$'
+    try {
+        $users = @(Get-DvAll "systemusers?`$select=systemuserid,fullname,_businessunitid_value&`$filter=sprk_isexternal eq true")
+        if ($users.Count -eq 0) {
+            Write-Host "  WARNING: no systemuser has sprk_isexternal = true in this environment, so no external role could be checked. This is NOT a pass: confirm by hand which role(s) flagged-external users will hold." -ForegroundColor DarkYellow
+            return [pscustomobject]@{ Users = 0; Roles = @(); Problems = $problems }
+        }
+        Write-Host "  flagged-external users: $($users.Count) ($(($users | ForEach-Object { $_.fullname }) -join ', '))"
+        $teamRoles = @{}   # teamid -> roles (cache)
+        $defaultTeams = @{}   # business unit id -> default teams (cache)
+        foreach ($u in $users) {
+            $uid = $u.systemuserid
+            foreach ($r in (Get-DvAll "systemusers($uid)/systemuserroles_association?`$select=roleid,name")) {
+                if (-not $roles.ContainsKey($r.roleid)) { $roles[$r.roleid] = @{ Name = $r.name; Via = [System.Collections.Generic.List[string]]::new() } }
+                $roles[$r.roleid].Via.Add("$($u.fullname) (direct)")
+            }
+            $teams = @{}
+            foreach ($t in (Get-DvAll "systemusers($uid)/teammembership_association?`$select=teamid,name")) { $teams[$t.teamid] = $t.name }
+            $bu = $u._businessunitid_value
+            if ($bu) {
+                if (-not $defaultTeams.ContainsKey($bu)) { $defaultTeams[$bu] = @(Get-DvAll "teams?`$select=teamid,name&`$filter=isdefault eq true and _businessunitid_value eq $bu") }
+                foreach ($t in $defaultTeams[$bu]) { $teams[$t.teamid] = $t.name }
+            }
+            foreach ($tid in $teams.Keys) {
+                if (-not $teamRoles.ContainsKey($tid)) { $teamRoles[$tid] = @(Get-DvAll "teams($tid)/teamroles_association?`$select=roleid,name") }
+                foreach ($r in $teamRoles[$tid]) {
+                    if (-not $roles.ContainsKey($r.roleid)) { $roles[$r.roleid] = @{ Name = $r.name; Via = [System.Collections.Generic.List[string]]::new() } }
+                    $roles[$r.roleid].Via.Add("$($u.fullname) (team '$($teams[$tid])')")
+                }
+            }
+        }
+        $result = @()
+        foreach ($id in $roles.Keys) {
+            $name = $roles[$id].Name
+            $held = @(Get-DvAll "roles($id)/roleprivileges_association?`$select=name" | Where-Object { $_.name -match $pattern } | ForEach-Object { $_.name })
+            $via = @($roles[$id].Via | Select-Object -Unique)
+            if ($held.Count -gt 0) {
+                $problems.Add("role '$name' ($id), held by flagged-external user(s) [$($via -join '; ')], holds privilege(s) on the Procedure tables: $($held -join ', ')")
+                Write-Host "  FAIL     role '$name' ($id): $($held -join ', ')" -ForegroundColor Red
+            }
+            else { Write-Host "  OK       role '$name' ($id) held by $($via.Count) flagged-external user/team path(s): no privilege on $($Tables -join ', ')" -ForegroundColor Green }
+            $result += [pscustomobject]@{ Id = $id; Name = $name; Privileges = $held }
+        }
+        if ($roles.Count -eq 0) { Write-Host "  WARNING: flagged-external users exist but hold no role (directly or through a team); nothing was checked beyond that." -ForegroundColor DarkYellow }
+        return [pscustomobject]@{ Users = $users.Count; Roles = $result; Problems = $problems }
+    }
+    catch {
+        $problems.Add("could not read the flagged-external users' roles ($($_.Exception.Message)); the external privilege check did not run")
+        return [pscustomobject]@{ Users = 0; Roles = @(); Problems = $problems }
     }
 }
 
@@ -794,7 +972,7 @@ try {
     }
     foreach ($s in $script:Lookups) { Test-LookupSpecPreflight $s $problems }
     # Never-created items that exist would be a surprise (the old script never ran): report, never touch.
-    foreach ($chk in @(@($RateCard, 'sprk_scope'), @($RuleSet, 'sprk_isexceptions'), @($RuleSet, 'sprk_allbusinessunits'))) {
+    foreach ($chk in @(@($RateCard, 'sprk_scope'), @($RuleSet, 'sprk_isexceptions'), @($RuleSet, 'sprk_allbusinessunits'), @($RateCard, $CreatorColumn), @('sprk_ratecardrate', $CreatorColumn))) {
         if (Get-Attr $chk[0] $chk[1]) { Write-Host "  NOTE: $($chk[0]).$($chk[1]) exists. This task never creates, changes or deletes it." -ForegroundColor Yellow }
     }
     if ($problems.Count -gt 0) {
@@ -826,9 +1004,10 @@ try {
     $pre = Test-ProfilePreconditions
 
     # The lookup plan, for the schema review: every lookup with its relationship name and the delete behaviour it must read.
-    Write-Host "  lookup plan ($($script:Lookups.Count) lookups): table.column -> target | relationship | delete behaviour" -ForegroundColor Cyan
+    Write-Host "  lookup plan ($($script:Lookups.Count) lookups): table.column -> target | relationship | delete behaviour | cascade (assign/share/unshare/reparent)" -ForegroundColor Cyan
     foreach ($s in $script:Lookups) {
-        Write-Host ("    {0}.{1} -> {2} | {3} | {4}{5}" -f $s.Table, $s.Column, $s.Target, $s.Rel, (Get-ExpectedDelete $s), $(if ($s.Parental) { ' (parental)' } else { '' }))
+        $c = Get-ExpectedCascade $s
+        Write-Host ("    {0}.{1} -> {2} | {3} | {4} | {5}/{6}/{7}/{8}{9}" -f $s.Table, $s.Column, $s.Target, $s.Rel, (Get-ExpectedDelete $s), $c.Assign, $c.Share, $c.Unshare, $c.Reparent, $(if ($s.Cascade) { " | custom: merge $($c.Merge), rollupview $($c.RollupView)" } else { '' }))
     }
 
     # --- 1. P1 global choices ------------------------------------------------------------------------------------------------
@@ -848,8 +1027,8 @@ try {
     Add-Column 'sprk_notes' (New-MemoDef 'sprk_Notes' 'Notes' 'Free-text notes about the Procedure.' 100000) 'Memo'
 
     # --- 3. P3 sprk_procedureversion -----------------------------------------------------------------------------------------
-    Write-Host "3. P3 table $Version (user-owned, audited, parental to $Procedure)" -ForegroundColor Cyan
-    New-ProcedureTable $Version 'Procedure Version' 'Procedure Versions' 'One issue of a Procedure: version number, effective dates, status, the policy versions it published and its rate card. Parental to its Procedure (ebilling-r1 EB-D-148, model 3.1).' 'Name of the version (for example "Version 2").'
+    Write-Host "3. P3 table $Version (user-owned, audited; deleted with its $Procedure, delete-only cascade)" -ForegroundColor Cyan
+    New-ProcedureTable $Version 'Procedure Version' 'Procedure Versions' 'One issue of a Procedure: version number, effective dates, status, the policy versions it published and its rate card. Deleted with its Procedure (delete-only cascade; ebilling-r1 EB-D-148, model 3.1).' 'Name of the version (for example "Version 2").'
     Set-EbEntity $Version
     foreach ($s in $script:Lookups | Where-Object { $_.Table -eq $Version -and $_.Column -eq $Procedure }) { Invoke-LookupSpec $s }
     Add-Column 'sprk_versionnumber' (New-WholeNumberDef 'sprk_VersionNumber' 'Version Number' 'Assigned by the BFF. With the Procedure it is the alternate key sprk_procedure_versionnumber.' 1 2147483647) 'Integer'
@@ -860,6 +1039,14 @@ try {
     Add-Column 'sprk_effectivefrom' (New-DateOnlyDef 'sprk_EffectiveFrom' 'Effective From' 'First work date this version covers. DateOnly, half-open [from, to) (I-P1). Written only by the BFF (field-secured).') 'DateTime'
     Add-Column 'sprk_effectiveto' (New-DateOnlyDef 'sprk_EffectiveTo' 'Effective To' 'Work date this version stops covering (exclusive). DateOnly, half-open [from, to) (I-P1). Written only by the BFF (field-secured).') 'DateTime'
     Add-GlobalChoiceColumn 'sprk_status' 'sprk_Status' 'Status' 'Draft, Active, Superseded or Retired. A custom choice, not statecode, so it can be field-secured. Written only by the BFF.' 'sprk_procedureversionstatus'
+    Write-Host "   required levels: $Version.$Procedure and sprk_versionnumber -> SystemRequired (the alternate key columns)" -ForegroundColor Cyan
+    foreach ($r in Get-RequiredColumnSpecs) {
+        if ($DryRun -and -not (Get-Attr $r.Table $r.Column 'LogicalName')) {
+            $script:Created.Add("required level $($r.Level) on $($r.Table).$($r.Column)"); Write-Host "  WOULD SET $($r.Table).$($r.Column) required level -> $($r.Level) after it is created" -ForegroundColor Cyan
+        }
+        elseif ($r.Kind -eq 'Lookup') { Set-LookupRequiredLevel $r.Table $r.Column $r.Level }
+        else { Set-IntegerRequiredLevel $r.Table $r.Column $r.Level }
+    }
     Add-Column 'sprk_notconverted' (New-TwoOptionDef 'sprk_NotConverted' 'Not Converted' 'Yes when drafting could not convert part of this version''s document into rules. Per-version marker for BillingRuleDraftJobHandler (task 116); the rule set keeps its own. Default No. Written only by the BFF (field-secured).' $false) 'Boolean'
 
     # --- 4. P4 sprk_procedureassignment --------------------------------------------------------------------------------------
@@ -905,8 +1092,8 @@ try {
     }
 
     # --- 6. P6 sprk_policyversion --------------------------------------------------------------------------------------------
-    Write-Host "6. P6 $PolicyVersion : sprk_procedureversion, sprk_publishstate, sprk_basedonversion" -ForegroundColor Cyan
-    foreach ($s in $script:Lookups | Where-Object { $_.Table -eq $PolicyVersion }) { Invoke-LookupSpec $s }
+    Write-Host "6. P6 $PolicyVersion : sprk_procedureversion, sprk_publishstate, sprk_basedonversion, sprk_createdbyperson; sprk_policy.sprk_createdbyperson" -ForegroundColor Cyan
+    foreach ($s in $script:Lookups | Where-Object { $_.Table -eq $PolicyVersion -or $_.Table -eq 'sprk_policy' }) { Invoke-LookupSpec $s }
     Set-EbEntity $PolicyVersion
     Add-GlobalChoiceColumn 'sprk_publishstate' 'sprk_PublishState' 'Publish State' 'Draft or Published. Only Published policy versions are loaded by the resolver (model 7.2). Optional, no default: existing rows stay empty (dev data is recreated, O-13).' 'sprk_publishstate'
 
@@ -930,7 +1117,7 @@ try {
     if ($DryRun) { Write-Host "  WhatIf: publish skipped" -ForegroundColor Cyan }
     elseif (-not $metaChanged) { Write-Host "  nothing changed - no publish" -ForegroundColor Yellow }
     else {
-        $entities = @($Procedure, $Version, $Assignment, $RuleSet, $PolicyVersion, $RateCard, 'sprk_policy', 'sprk_organization', 'contact', 'systemuser') + @($script:Cores.Table)
+        $entities = Get-PublishEntities
         $xml = "<importexportxml><entities>$(($entities | ForEach-Object { "<entity>$_</entity>" }) -join '')</entities><optionsets>$(($GlobalChoices | ForEach-Object { "<optionset>$($_.Name)</optionset>" }) -join '')</optionsets></importexportxml>"
         Invoke-Dv -Path 'PublishXml' -Method POST -Body @{ ParameterXml = $xml } | Out-Null
         Write-Host "  customizations published" -ForegroundColor Green
@@ -987,6 +1174,17 @@ try {
         $nc = Get-DvOrNull "EntityDefinitions(LogicalName='$Version')/Attributes(LogicalName='sprk_notconverted')/Microsoft.Dynamics.CRM.BooleanAttributeMetadata?`$select=DefaultValue"
         if (-not $nc -or $nc.DefaultValue -ne $false) { $bad.Add("$Version.sprk_notconverted default is not No") } else { Write-Host "  $Version.sprk_notconverted: two options, default No" }
 
+        # Required levels (ontology F4-2): both alternate key columns SystemRequired.
+        foreach ($r in Get-RequiredColumnSpecs) {
+            $prob = $null
+            for ($i = 0; $i -lt 4; $i++) {
+                $prob = Get-RequiredLevelProblem $r (Get-Attr $r.Table $r.Column 'LogicalName,RequiredLevel')
+                if (-not $prob) { break }
+                Start-Sleep -Seconds 3
+            }
+            if ($prob) { $bad.Add($prob) } else { Write-Host "  $($r.Table).$($r.Column): $($r.Level)" }
+        }
+
         # Alternate key Active.
         $key = Get-Keys $Version | Where-Object { $_.SchemaName -eq 'sprk_procedure_versionnumber' } | Select-Object -First 1
         if (-not $key) { $bad.Add("alternate key sprk_procedure_versionnumber missing") }
@@ -1005,14 +1203,13 @@ try {
         foreach ($s in $script:Lookups) {
             $rel = Get-LookupRelationship $s.Table $s.Column
             if (-not $rel) { $bad.Add("no many-to-one relationship for $($s.Table).$($s.Column)"); continue }
-            $want = Get-ExpectedDelete $s
-            Write-Host ("  {0}.{1} -> {2}: {3}  delete {4}" -f $s.Table, $s.Column, $s.Target, $rel.SchemaName, $rel.CascadeConfiguration.Delete)
-            if ($rel.CascadeConfiguration.Delete -ne $want) { $bad.Add("$($s.Table).$($s.Column) delete behaviour is $($rel.CascadeConfiguration.Delete), expected $want") }
-            if ($s.Target -in $coreSet -and $rel.CascadeConfiguration.Delete -eq 'Restrict') { $bad.Add("$($s.Table).$($s.Column) targets a core table and reads Restrict") }
+            $cc = $rel.CascadeConfiguration
+            Write-Host ("  {0}.{1} -> {2}: {3}  delete {4}, assign {5}, share {6}, unshare {7}, reparent {8}, merge {9}, rollupview {10}" -f $s.Table, $s.Column, $s.Target, $rel.SchemaName, $cc.Delete, $cc.Assign, $cc.Share, $cc.Unshare, $cc.Reparent, $cc.Merge, $cc.RollupView)
+            # Every CascadeConfiguration member read back: a Cascade lookup is Delete Cascade with all else NoCascade (never parental).
+            foreach ($m in @(Get-CascadeMismatches $cc (Get-ExpectedCascade $s))) { $bad.Add("$($s.Table).$($s.Column) CascadeConfiguration: $m") }
+            if ($s.Target -in $coreSet -and $cc.Delete -eq 'Restrict') { $bad.Add("$($s.Table).$($s.Column) targets a core table and reads Restrict") }
             if ($rel.SchemaName -ne $s.Rel) { $bad.Add("$($s.Table).$($s.Column) relationship is named $($rel.SchemaName), expected $($s.Rel)") }
         }
-        $par = Get-LookupRelationship $Version $Procedure
-        if ($par -and ($par.CascadeConfiguration.Reparent -ne 'Cascade')) { $bad.Add("$Version.$Procedure is not a parental relationship (reparent $($par.CascadeConfiguration.Reparent))") }
 
         # sprk_scope options exactly 100000000-100000003; one record lookup per FilingCores table.
         $now = Get-ScopeOptions
@@ -1045,24 +1242,18 @@ try {
         }
 
         # Negatives: items this task never creates.
-        foreach ($chk in @(@($RateCard, 'sprk_scope'), @($RuleSet, 'sprk_isexceptions'), @($RuleSet, 'sprk_allbusinessunits'))) {
+        foreach ($chk in @(@($RateCard, 'sprk_scope'), @($RuleSet, 'sprk_isexceptions'), @($RuleSet, 'sprk_allbusinessunits'), @($RateCard, $CreatorColumn), @('sprk_ratecardrate', $CreatorColumn))) {
             if (Get-Attr $chk[0] $chk[1]) { $bad.Add("$($chk[0]).$($chk[1]) exists; this task never creates it") }
         }
         foreach ($c in $script:Cores) { if (Get-Attr $c.Table 'sprk_securedfrombusinessunit') { $bad.Add("$($c.Table).sprk_securedfrombusinessunit exists; this task never creates it") } }
         if (Get-DvOrNull "RelationshipDefinitions(SchemaName='sprk_ruleset_businessunit')") { $bad.Add('N:N sprk_ruleset_businessunit exists; this task never creates it') }
         if (Get-DvOrNull "EntityDefinitions(LogicalName='sprk_storedfile')?`$select=LogicalName") { Write-Host "  note: sprk_storedfile exists (task 088's, not this script's)" -ForegroundColor Yellow }
 
-        # External Collaborator holds no privilege on the three new tables (read only; this script adds no role privilege).
-        try {
-            $roles = @((Invoke-Dv "roles?`$select=roleid,name&`$filter=name eq 'External Collaborator'").value)
-            foreach ($role in $roles) {
-                $privs = @((Invoke-Dv "roles($($role.roleid))/roleprivileges_association?`$select=name").value | Where-Object { $_.name -match "(?i)sprk_(procedure|procedureversion|procedureassignment)$" })
-                if ($privs.Count -gt 0) { $bad.Add("External Collaborator role $($role.roleid) holds privilege(s) on the new tables: $(($privs | ForEach-Object { $_.name }) -join ', ')") }
-            }
-            if ($roles.Count -eq 0) { Write-Host "  WARNING: no role named 'External Collaborator' exists in this environment (read 2026-10-21: none on dev), so nothing was checked. Confirm by hand which role(s) flagged-external users hold and that none has a privilege on the three new tables (uac-r2 task 191 / K-1)." -ForegroundColor DarkYellow }
-            else { Write-Host "  External Collaborator role(s) checked ($($roles.Count)): no privilege on the three new tables" -ForegroundColor Green }
-        }
-        catch { Write-Host "  WARNING: could not read the External Collaborator role privileges ($($_.Exception.Message)); check by hand." -ForegroundColor DarkYellow }
+        # No role held by a flagged-external user (directly or through a team) has a privilege on the three new tables.
+        # Read only; this script adds no role privilege. A read fault fails the verify; no flagged-external user is a warning.
+        Write-Host "  flagged-external users' roles (sprk_isexternal = true; direct and through teams incl. the business unit default team):"
+        $ext = Test-ExternalRolePrivileges @($Procedure, $Version, $Assignment)
+        foreach ($p in $ext.Problems) { $bad.Add($p) }
 
         if ($bad.Count -gt 0) { throw "Verification failed: $($bad -join '; ')" }
         Write-Host "  all $($script:Expect.Count) expected columns present with the right type and target; every check above passed" -ForegroundColor Green
