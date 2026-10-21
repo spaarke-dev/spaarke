@@ -23,13 +23,24 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// memberships or names could not be read. A reader treats an absent field as "eBilling off, not applicable, or unknown",
 /// never as "no firm". Only the caller's own firms are ever listed.
 /// </param>
+/// <param name="WriteAccessPerRecord">
+/// <see langword="true"/> for a caller whose access Dataverse decides (<c>CallerPrincipal.DataverseConfirmsWrites</c>,
+/// unified-access-control-r2 task 036 fix round 1, F4). Their <see cref="Projects"/> levels then say only what they may
+/// SEE (the impersonated set confers Read, so most read as ViewOnly); whether they may create under a record is decided
+/// per record, as Dataverse decides it in MDA. The client then takes its create/upload controls from the record's own
+/// list (<c>canCreate</c>) instead of the level. Omitted when <see langword="false"/>, so every other caller's response
+/// is byte-for-byte what it was.
+/// </param>
 public record ExternalUserContextResponse(
     Guid ContactId,
     string Email,
     IReadOnlyList<ProjectAccessEntry> Projects,
     Guid? SystemUserId = null,
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    IReadOnlyList<ExternalFirmEntry>? Firms = null);
+    IReadOnlyList<ExternalFirmEntry>? Firms = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    bool WriteAccessPerRecord = false);
 
 /// <summary>One firm the caller belongs to (see <see cref="ExternalUserContextResponse.Firms"/>).</summary>
 /// <param name="FirmId">The Dataverse <c>sprk_organizationid</c>; the value to send as <c>firmId</c> when submitting.</param>

@@ -40,6 +40,33 @@ public interface IGenericEntityService
     Task UpdateAsync(string entityLogicalName, Guid id, Dictionary<string, object> fields, CancellationToken ct = default);
 
     /// <summary>
+    /// <see cref="UpdateAsync"/>, applied only while the row's version is still <paramref name="rowVersion"/> (Dataverse
+    /// optimistic concurrency: <c>UpdateRequest.ConcurrencyBehavior = IfRowVersionMatches</c>). The field rules are
+    /// <see cref="UpdateAsync"/>'s exactly: a C# <c>null</c> value SKIPS that key, <see cref="DBNull.Value"/> CLEARS the
+    /// column, and an <see cref="EntityReference"/> sets a lookup — so a write built for <see cref="UpdateAsync"/> can be made
+    /// conditional unchanged.
+    /// </summary>
+    /// <remarks>
+    /// #2143 (unified-access-control-r2): the re-file's owner assignment and its compensating put-back
+    /// (<c>RecordOwnershipResolver.ReparentAsync</c>) must not overwrite a concurrent re-file. Component Justification
+    /// (CLAUDE.md §11): (1) Existing — <see cref="IFieldMappingDataverseService.UpdateRecordFieldsIfUnchangedAsync"/> is the
+    /// Web API conditional update; <c>OntologyWriterDataverseClient.UpdateIfRowVersionMatchesAsync</c> (Sprk.Bff.Api,
+    /// Services/Signals) is an SDK conditional update. (2) Extension — the first takes Web API payloads, so it cannot express
+    /// the SDK lookup sets and <see cref="DBNull"/> clears the resolver writes without each table's navigation-property names,
+    /// which the resolver does not have. The second authenticates as a DIFFERENT identity — the Signal writer's own managed
+    /// identity, deliberately unable to route through this service's credential — which holds no Write on the child tables a
+    /// re-file re-owns; re-owning through it would fail, and granting that identity Write there would break its isolation. (3) Cost of doing nothing — an unconditional owner write after a re-file can leave a row filed under a
+    /// secure record but owned in an ordinary business unit (fail-open, #2143), and the put-back can overwrite a newer filing.
+    /// </remarks>
+    /// <param name="rowVersion">The row's <c>versionnumber</c> (or <see cref="Entity.RowVersion"/>) as read.</param>
+    /// <exception cref="System.Data.DBConcurrencyException">The row changed since <paramref name="rowVersion"/> was read
+    /// (Dataverse <c>ConcurrencyVersionMismatch</c>, <c>0x80060882</c>); nothing was written. The same exception
+    /// <see cref="IFieldMappingDataverseService.UpdateRecordFieldsIfUnchangedAsync"/> throws for HTTP 412, so callers handle
+    /// one type.</exception>
+    Task UpdateIfRowVersionMatchesAsync(
+        string entityLogicalName, Guid id, string rowVersion, Dictionary<string, object> fields, CancellationToken ct = default);
+
+    /// <summary>
     /// Updates N records of ONE table in one request, <b>all-or-nothing</b>: every update is applied, or
     /// none is. Never a partial set.
     /// </summary>

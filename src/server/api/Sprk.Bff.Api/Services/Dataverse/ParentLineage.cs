@@ -463,9 +463,11 @@ internal sealed class ParentLineageWalk
 /// 81, extended by round 84): the MOST RESTRICTIVE <c>sprk_accesspermission</c> of the records at the top of its filing.
 /// </summary>
 /// <remarks>
-/// <para><b>Display only.</b> No access decision reads a child table's value (round 2 Q6; round 81): enforcement keeps
-/// reading the roots. A parentless child's own value is recorded only (owner, 2026-10-08: "This is fine (BUT in future we
-/// might need to revisit)").</para>
+/// <para><b>Display only on To Do, Event and Communication.</b> No access decision reads their value (round 2 Q6; round 81):
+/// enforcement keeps reading the roots. A parentless child's own value is recorded only (owner, 2026-10-08: "This is fine
+/// (BUT in future we might need to revisit)"). A DOCUMENT may narrow: under D7 (#2126) its own Restricted hides it from
+/// partners, so its stored value is max(own, inherited) and is never lowered below its own narrowing (task 189,
+/// <see cref="DecideDocument"/>).</para>
 /// <para><b>The rule.</b> Restricted over Limited over Standard; a null value, or a top whose table has no such column,
 /// counts as Standard. A row with no non-null filing lookup has no inherited value: its own value is the user's and is
 /// never overwritten. Written by the shared stamp path (<see cref="CoreAncestorResolver"/>) and kept in step by
@@ -539,4 +541,210 @@ internal static class InheritedAccessPermission
     /// <summary>A short "table id" list of the tops, for logs and the job report.</summary>
     internal static string Describe(IEnumerable<ParentTop> tops) =>
         string.Join(", ", tops.Select(t => $"{t.Table} {t.Id:D}"));
+
+    /// <summary>
+    /// Task 189 (D7 T7a, #2126): the tables whose rows RECORD their own narrowing in <see cref="AccessInheritance.Column"/>.
+    /// Only documents do: under D7 a document's own Restricted hides it from partners. On these tables the stored value is
+    /// max(own, inherited) (<see cref="DecideDocument"/>), and the BFF never lowers it below the own narrowing. On the other
+    /// three tables it stays equal to the inherited value, as before.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> RecordTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "sprk_document",
+    };
+
+    /// <summary>True when rows of <paramref name="table"/> record their own narrowing (<see cref="RecordTables"/>).</summary>
+    internal static bool RecordsOwnNarrowing(string? table) => table is not null && RecordTables.Contains(table);
+
+    /// <summary>
+    /// Task 189 fix round C (K5): the reason code when an app-only generic writer names a document's Access Permission or
+    /// its own-narrowing record (<see cref="RefuseAppOnlyWrite"/>).
+    /// </summary>
+    internal const string AppOnlyDocumentWriteReasonCode = "sdap.access.document_access_server_only";
+
+    /// <summary>
+    /// Task 189 fix round C (K5): an APP-ONLY generic writer never writes a document's <see cref="Column"/> or its
+    /// own-narrowing record (<see cref="AccessInheritance.Column"/>). These writers are the Update Record playbook node and
+    /// the action seam when they act for no person (<c>UpdateRecordActionCore</c>), and an AI output mapping
+    /// (<c>DataverseUpdateHandler</c>). A model or a configuration builds their payload, not a person. Only
+    /// <see cref="DecideDocument"/>'s writers keep the value at max(own, inherited). A payload that lowered it, or rewrote
+    /// the record, would show a user's Restricted document to partners (D7, task 188). This is the same refusal
+    /// <c>ChildRecordEndpoints.RootServerOwnedColumns</c> makes for a work assignment. A user's own write is not refused: the
+    /// form, the user-OBO chat tools, and an update impersonating its user all run as that user. The field-mapping push also
+    /// runs as its caller, but its rules are a configuration applied to every child it reaches, so it asks this too and
+    /// skips such a rule on a document (the rest of the push applies; security pass 2).
+    /// </summary>
+    /// <returns>The refusal (nothing is written), or <see langword="null"/> when the write may proceed.</returns>
+    internal static RecordOwnerResolution? RefuseAppOnlyWrite(string? table, IEnumerable<string> keys)
+    {
+        ArgumentNullException.ThrowIfNull(keys);
+        if (!RecordsOwnNarrowing(table?.Trim()))
+            return null;
+
+        var named = keys.Select(SecureRootInheritance.NormalizeColumn)
+            .FirstOrDefault(k => k is Column or AccessInheritance.Column);
+        return named is null
+            ? null
+            : RecordOwnerResolution.Refused(AppOnlyDocumentWriteReasonCode,
+                $"{named} of a document is set by Spaarke (it keeps the document's own narrowing), so it was not written");
+    }
+
+    /// <summary>What to hold and what to write on one row of a <see cref="RecordTables"/> table (task 189).</summary>
+    internal sealed record DocumentDecision
+    {
+        /// <summary>
+        /// Not null: the row's own narrowing, or its stored level, cannot be decided (fail closed). Holds the reason, which
+        /// names no person; callers log it and look at the row again. Causes: its record cannot be read, or its stored value is
+        /// not a known level. Its record is never written, and its value only by a raise (<see cref="RaiseOnly"/>).
+        /// </summary>
+        public string? Undetermined { get; init; }
+
+        /// <summary>
+        /// Task 189 fix round C (K1+K2): the row's own narrowing is not known (its record cannot be read, or this environment
+        /// has no record column), so its value is only RAISED to what its parents give, never lowered, and its record is
+        /// never written (<see cref="Record"/> is null). <see cref="Own"/> is null: it is not known.
+        /// </summary>
+        public bool RaiseOnly { get; init; }
+
+        /// <summary>The value the row holds after the decision: max(own, inherited), or its own value when it has no parent.</summary>
+        public int Target { get; init; }
+
+        /// <summary>The stored value differs from <see cref="Target"/>, so it is written. Never on a parentless row.</summary>
+        public bool WriteValue { get; init; }
+
+        /// <summary>The record to write in the same update, or <see langword="null"/> when the stored one is current.</summary>
+        public AccessInheritance? Record { get; init; }
+
+        /// <summary>The row's own narrowing after the decision (<see langword="null"/>: it follows its parents).</summary>
+        public int? Own { get; init; }
+
+        /// <summary>The own narrowing holds the value above what the parents give: the parents' value was NOT written over it.</summary>
+        public bool OwnKept { get; init; }
+    }
+
+    /// <summary>
+    /// Task 189 (D7 T7a): the ONE decision for a document's Access Permission, made by both of its BFF writers (the
+    /// reconcile job and the child-records create refresh). The stored value is max(own, inherited): inherited values follow
+    /// the parents both ways, and an own narrowing is never widened.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Own vs inherited</b> is task 175's classification, one copy (<see cref="AccessInheritance.OwnPermissionOf"/>):
+    /// a value set outside these writers (a user's edit, a BFF writer's narrowing) becomes the document's own when it is
+    /// stricter than the last inherited value or the live one; an edit at or below both removes the own narrowing and is put
+    /// back to the live inherited value. So a user's Limited set after a Restricted matter widened to Standard stays Limited
+    /// (the task 189 fix round's "K1 variant"). Without a
+    /// record (existing rows) a value stricter than the current inherited one is own, and one equal to it is inherited. That
+    /// is sound because task 173 kept every parented row equal to its parents before this task.</para>
+    /// <para><b>A re-file follows the new parents.</b> The task 173 contract is kept for every row without an own narrowing
+    /// (unlike task 175's "a re-file never loosens", which is for work assignments and projects).</para>
+    /// <para><b>A parentless row</b> keeps its own value, which is never written (round 81). When that value narrows, it is
+    /// RECORDED as its own, so a later filing keeps it.</para>
+    /// <para><b>Fail closed, never below the floor</b> (fix round C, K1+K2): an unreadable record decides no own narrowing
+    /// (<see cref="DocumentDecision.Undetermined"/>), so its row is decided by <see cref="DecideDocumentRaiseOnly"/>: only
+    /// raised to the live floor, and its record left as it is. A stored value that is not a known level decides
+    /// nothing.</para>
+    /// <para><b>Every parented row gets a record</b> (fix round C, F1). Without one, a user's narrowing made in the same window
+    /// as its parent tightening to the same level reads as inherited, and the document follows the parent's later widening.
+    /// With the record (the last inherited value) that edit is stricter than it, so it is the user's own. Each row without a
+    /// record is written once (the sweep reaches the legacy rows), then not again while nothing changes.</para>
+    /// </remarks>
+    /// <param name="stored">The row's stored <see cref="Column"/>.</param>
+    /// <param name="recordText">The row's stored <see cref="AccessInheritance.Column"/>.</param>
+    /// <param name="parents">The row's non-null filing parents (<see cref="ParentLineageWalk.ParentsOfAsync"/>).</param>
+    /// <param name="inherited">What its parents give it (<see cref="ResolveAsync"/>); ignored when it has none.</param>
+    internal static DocumentDecision DecideDocument(
+        int? stored, string? recordText, IReadOnlyCollection<(string Table, Guid Id)> parents, int? inherited)
+    {
+        ArgumentNullException.ThrowIfNull(parents);
+        var (record, unreadable) = AccessInheritance.Parse(recordText);
+        if (unreadable)
+            return DecideDocumentRaiseOnly(stored, parents, inherited, $"its own narrowing ({AccessInheritance.Column}) cannot be read");
+
+        var storedRank = SecureRootInheritance.RankOf(stored);
+        if (storedRank < 0)
+            return new DocumentDecision { Undetermined = UnknownStoredLevel };
+
+        if (parents.Count == 0)
+        {
+            var ownValue = storedRank > 0 ? stored : null;
+            var parentless = new AccessInheritance(Array.Empty<string>(), false, Standard, false, ownValue);
+            var writeParentless = record is null ? ownValue is not null : !parentless.SameAs(record);
+            return new DocumentDecision
+            {
+                Target = SecureRootInheritance.PermissionOf(storedRank),
+                Record = writeParentless ? parentless : null,
+                Own = ownValue,
+            };
+        }
+
+        var floorRank = SecureRootInheritance.RankOf(inherited);
+        if (inherited is null || floorRank < 0)
+            return new DocumentDecision { Undetermined = "what its parents give it could not be decided" };
+
+        var own = AccessInheritance.OwnPermissionOf(storedRank, stored, record, floorRank);
+        var targetRank = Math.Max(SecureRootInheritance.RankOf(own), floorRank);
+        var target = SecureRootInheritance.PermissionOf(targetRank);
+        var next = new AccessInheritance(
+            parents.Select(p => $"{p.Table.Trim().ToLowerInvariant()}:{p.Id:D}")
+                .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(k => k, StringComparer.Ordinal).ToList(),
+            false, SecureRootInheritance.PermissionOf(floorRank), false, own);
+        var writeRecord = record is null || !next.SameAs(record);
+        return new DocumentDecision
+        {
+            Target = target,
+            WriteValue = stored != target,
+            Record = writeRecord ? next : null,
+            Own = own,
+            OwnKept = targetRank > floorRank,
+        };
+    }
+
+    private const string UnknownStoredLevel = "it holds an Access Permission that is not Standard, Limited or Restricted";
+
+    /// <summary>
+    /// Task 189 fix round C (K1+K2): the decision for a document whose own narrowing cannot be known: its record cannot be
+    /// read (not JSON, another version, or a level inside it that is not known), or this environment has no record column
+    /// (the schema script has not run). Whatever its own narrowing is, max(own, inherited) is at least what its parents give,
+    /// so a stored value BELOW a decided floor is raised to the floor. Nothing else is written: a value at or above the floor
+    /// is kept (it may be the user's own narrowing), nothing is ever lowered, and the record is never written (an unreadable
+    /// one is left for a person to look at).
+    /// </summary>
+    /// <param name="stored">The row's stored <see cref="Column"/>. A level that is not known decides nothing.</param>
+    /// <param name="parents">The row's non-null filing parents. A parentless row has no floor: nothing is written.</param>
+    /// <param name="inherited">What its parents give it (<see cref="ResolveAsync"/>).</param>
+    /// <param name="undecided">Why the own narrowing is not known, reported as <see cref="DocumentDecision.Undetermined"/>
+    /// (the row is looked at again). Null when the reason is the environment (no record column): that is reported once per
+    /// run, not per row.</param>
+    internal static DocumentDecision DecideDocumentRaiseOnly(
+        int? stored, IReadOnlyCollection<(string Table, Guid Id)> parents, int? inherited, string? undecided)
+    {
+        ArgumentNullException.ThrowIfNull(parents);
+        var storedRank = SecureRootInheritance.RankOf(stored);
+        if (storedRank < 0)
+            return new DocumentDecision
+            {
+                Undetermined = undecided is null ? UnknownStoredLevel : $"{undecided}, and {UnknownStoredLevel}",
+                RaiseOnly = true,
+            };
+
+        var floorRank = SecureRootInheritance.RankOf(inherited);
+        if (parents.Count > 0 && (inherited is null || floorRank < 0))
+            return new DocumentDecision
+            {
+                Undetermined = undecided is null
+                    ? "what its parents give it could not be decided"
+                    : $"{undecided}, and what its parents give it could not be decided",
+                Target = SecureRootInheritance.PermissionOf(storedRank),
+                RaiseOnly = true,
+            };
+
+        var raise = parents.Count > 0 && storedRank < floorRank;
+        return new DocumentDecision
+        {
+            Undetermined = undecided,
+            Target = SecureRootInheritance.PermissionOf(raise ? floorRank : storedRank),
+            WriteValue = raise,
+            RaiseOnly = true,
+        };
+    }
 }

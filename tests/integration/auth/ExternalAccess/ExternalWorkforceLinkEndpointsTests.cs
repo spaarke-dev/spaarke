@@ -9,10 +9,12 @@
 //      AadIssuerValidator cannot be pointed at a test tenant here; NO test runs that validator — the live check is task
 //      074). Everything else is the host's real default-scheme configuration: Identity Web's audience validator and the AAD
 //      signing-key issuer check (IDX40004) stay in the path, and the audiences are the shape AuthorizationModule leaves in
-//      production (AzureAd:Audience = api://{app}, plus the Copilot audience). The validator's A9 inputs
-//      (AzureAd:TenantId / ClientId) come from an overlay configuration with a GUID tenant.
-//   The guest token is a v1 access token (aud api://{app}, iss sts.windows.net), the shape the stamp BFF app issues: its
-//   default scheme accepts the api:// audience only.
+//      production (AzureAd:Audience = api://{app}, the bare {app} id added by task 077, plus the Copilot audience; set
+//      here because the shared host's AzureAd:ClientId is not a GUID, so the 077 merge adds nothing). The validator's A9
+//      inputs (AzureAd:TenantId / ClientId) come from an overlay configuration with a GUID tenant.
+//   The guest token defaults to a v1 access token (aud api://{app}, iss sts.windows.net). ADR-028 A9 switches the BFF
+//   app to requestedAccessTokenVersion 2 (aud = the bare {app} id, iss login.microsoftonline.com/{tid}/v2.0); one case
+//   sends that shape through the route.
 
 using System.Net;
 using System.Security.Claims;
@@ -427,6 +429,22 @@ public sealed class ExternalWorkforceLinkEndpointsTests
         => _store.AddSystemUser(_systemUser, _guestOid, "mike.okafor_customer.example#EXT#@spaarke.onmicrosoft.com",
             disabled: disabled);
 
+    [Fact]
+    public async Task V2GuestToken_BareAppIdAudience_Returns200Linked()
+    {
+        // Task 077: after the BFF app switches to requestedAccessTokenVersion 2 the guest token carries aud = the bare
+        // app id and the v2 issuer.
+        SeedGuestSystemUser();
+        _fixture.Identity.Setup(x => x.ResolveAsync(_systemUser, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PersonIdentity(_systemUser));
+
+        var response = await Post(Body(GuestToken(
+            c => c["ver"] = "2.0", audience: LinkFixture.BffAppId, issuer: LinkFixture.SpaarkeIssuer)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        (await Json(response)).GetProperty("outcome").GetString().Should().Be("linked");
+    }
+
     private ClaimsPrincipal HomePrincipal()
         => new(new ClaimsIdentity(new[]
         {
@@ -438,7 +456,7 @@ public sealed class ExternalWorkforceLinkEndpointsTests
 
     private string GuestToken(
         Action<Dictionary<string, object>>? edit = null, SecurityKey? key = null, DateTime? expires = null,
-        string audience = LinkFixture.BffAudience)
+        string audience = LinkFixture.BffAudience, string issuer = LinkFixture.SpaarkeIssuerV1)
     {
         var claims = new Dictionary<string, object>
         {
@@ -458,7 +476,7 @@ public sealed class ExternalWorkforceLinkEndpointsTests
         var notBefore = exp.AddMinutes(-70);
         return new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
         {
-            Issuer = LinkFixture.SpaarkeIssuerV1,
+            Issuer = issuer,
             Audience = audience,
             IssuedAt = notBefore,
             NotBefore = notBefore,
@@ -547,7 +565,7 @@ public sealed class ExternalWorkforceLinkEndpointsTests
                     // The audience shape AuthorizationModule leaves when AgentToken:CopilotAudience is set (the singular
                     // folded into the plural list); Identity Web's own audience validator stays in the path.
                     options.TokenValidationParameters.ValidAudience = null;
-                    options.TokenValidationParameters.ValidAudiences = new[] { BffAudience, CopilotAudience };
+                    options.TokenValidationParameters.ValidAudiences = new[] { BffAudience, BffAppId, CopilotAudience };
                     options.TokenValidationParameters.IssuerValidator = (issuer, _, _) =>
                         string.Equals(issuer, SpaarkeIssuer, StringComparison.Ordinal)
                         || string.Equals(issuer, SpaarkeIssuerV1, StringComparison.Ordinal)

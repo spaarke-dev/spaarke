@@ -53,10 +53,15 @@ public class ReconciledEmailFilingTests
         /// <summary>Task 129: the thread resolver every step of the save reaches (capture, association, after-re-file).</summary>
         public Mock<IThreadResolver> Threads { get; } = new();
 
+        /// <summary>#2143 round 8: every thread reconcile asked for, through ANY overload.</summary>
+        public IReadOnlyList<Moq.IInvocation> ThreadReconciles() => Threads.Invocations
+            .Where(i => i.Method.Name == nameof(IThreadResolver.ReconcileThreadForFilingAsync))
+            .ToList();
+
         /// <summary>Task 129: the #1629 grant the capture issues for the thread its join returned.</summary>
         public Mock<Sprk.Bff.Api.Services.Communication.Access.IDirectThreadAccessService> Grants { get; } = new();
         public Mock<CallerRecordAccessProbe> Probe { get; } = new(
-            new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!)
+            new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!, null!)
         { CallBase = false };
 
         public World(bool reconciled, params DataverseEntity[] filingReads)
@@ -644,7 +649,8 @@ public class ReconciledEmailFilingTests
         var (_, result) = await world.SaveAsync(PaneSave(Matter()));
 
         result.Should().Be(ReconciledFilingResult.Filed);
-        world.Threads.Verify(t => t.ReconcileThreadForFilingAsync(CanonicalId, It.IsAny<CancellationToken>()), Times.Once);
+        world.ThreadReconciles().Should().ContainSingle("once, through any overload")
+            .Which.Arguments[0].Should().Be(CanonicalId);
         world.Threads.Verify(t => t.ResolveAndAssignAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()), Times.Never,
             "a save that reconciled to an existing row keeps that row's thread");
     }
@@ -658,7 +664,7 @@ public class ReconciledEmailFilingTests
         var (_, result) = await world.SaveAsync(PaneSave(Matter()));
 
         result.Should().Be(ReconciledFilingResult.NotPermitted);
-        world.Threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        world.ThreadReconciles().Should().BeEmpty("through any overload");
     }
 
     [Fact]
@@ -683,8 +689,7 @@ public class ReconciledEmailFilingTests
         asked.ChannelType.Should().Be(Sprk.Bff.Api.Services.Communication.Models.CommunicationType.Email);
         asked.Message.InternetMessageId.Should().Be("<CAF0a1b2c3@mail.example.com>", "the resolution receives the email's own envelope");
         world.Grants.Verify(g => g.GrantMessageAccessAsync(CanonicalId, assignment, It.IsAny<CancellationToken>()), Times.Once);
-        world.Threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never,
-            "a new row is not a re-file");
+        world.ThreadReconciles().Should().BeEmpty("a new row is not a re-file, through any overload");
     }
 
     [Fact]

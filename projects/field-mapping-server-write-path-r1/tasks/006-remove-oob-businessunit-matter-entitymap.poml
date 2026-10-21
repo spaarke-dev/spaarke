@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="006" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Remove the OOB businessunit to sprk_matter sprk_ai_search_index relationship map (FR-05f)</title>
+    <phase>1 W1 Canonical engine and configuration</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Solution XML change plus a live deploy; no .cs and no tests; tags dataverse, solution, deploy.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-file XML removal with a documented deploy procedure.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>W1-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>dataverse, solution, deploy</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Remove the out-of-the-box `businessunit` to `sprk_matter` entity map (attribute `sprk_ai_search_index` to `sprk_ai_search_index`) from the SpaarkeMaster solution's `Other/EntityMaps.xml`, deploy it with the dataverse-deploy skill, and verify through the Dataverse MCP that the attribute map is gone from the live environment. The search-index default is filled by the server from the owning BU (FR-10), so the OOB map must not also own it.</prompt>
+  <role>SPAARKE platform developer, Dataverse solution management. Follow ADRs strictly.</role>
+  <goal>`EntityMaps.xml` no longer contains a `sprk_matter` map; the deployed dev environment has no businessunit to sprk_matter attribute map for `sprk_ai_search_index`.</goal>
+
+  <context>
+    <background>spec.md FR-05(f), ADR-002 (no OOB relationship mapping as an invariant owner), spec MUST NOT rules. The file (src/dataverse/solutions/SpaarkeMaster/Other/EntityMaps.xml, 12 lines) holds one EntityMap with EntitySource `businessunit`, EntityTarget `sprk_matter` and an attribute map `sprk_ai_search_index`. `Other/Customizations.xml` has an empty `&lt;EntityMaps /&gt;` element, so the standalone file is the one carrying the map. Search-index defaults come from the owning BU at create time (task 015 / FR-10).</background>
+    <relevant-files>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Other/EntityMaps.xml</file>
+      <file role="canonical-reference">src/dataverse/solutions/SpaarkeMaster/Other/Customizations.xml (~:8 empty EntityMaps element; confirm no second copy of the map)</file>
+      <file role="canonical-reference">.claude/skills/dataverse-deploy/SKILL.md (deploy procedure)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisite; independent of the BFF tasks.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-002">Scope: invariant ownership. No OOB relationship map owns an invariant; the server owns the search-index default. This task removes the map and adds nothing in its place.</constraint>
+    <constraint source="project">Scope: the file. Remove only the businessunit to sprk_matter map. If the file would become empty, keep a valid empty `&lt;EntityMaps&gt;` root rather than deleting the file. Touch no other solution component.</constraint>
+    <constraint source="CLAUDE.md §5">Scope: deploy. Deploy to dev only. Beyond-dev environments are a separate owner decision; record the need in the notes, do not deploy.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse solution deploy; OOB entity maps</topic>
+    <files>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="relationship-navigation" location=".claude/patterns/dataverse/relationship-navigation.md">Relationship maps vs mapping rules.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare STANDARD rigor; read spec FR-05(f); grep the solution for other `sprk_ai_search_index` maps and for any component referencing the map.</step>
+    <step order="1">Edit EntityMaps.xml to remove the `businessunit` to `sprk_matter` EntityMap; keep a valid empty root element.</step>
+    <step order="2">Deploy through the dataverse-deploy skill to dev. If the import fails or any other component references the map, stop (see escalation).</step>
+    <step order="3">Verify live with the Dataverse MCP (describe or read_query on the entity-map metadata for `businessunit` one-to-many relationships to `sprk_matter`) that no attribute map for `sprk_ai_search_index` remains; record the evidence in the task notes.</step>
+    <step order="4">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="5">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the map is referenced by any other solution component, or the solution import fails, STOP and escalate per CLAUDE.md §6 with the failing component named.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="mcp__dataverse__describe">Verify the live relationship map is gone</tool>
+    <tool name="pac">Solution import via the dataverse-deploy skill</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/dataverse/solutions/SpaarkeMaster/Other/EntityMaps.xml</output>
+    <output type="docs">projects/field-mapping-server-write-path-r1/notes/ (live verification evidence)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`EntityMaps.xml` contains no `sprk_matter` entity map (grep for `sprk_matter` in the file returns nothing) and remains well-formed XML.</criterion>
+    <criterion testable="true">After deploy to dev, a Dataverse MCP query shows no attribute map `sprk_ai_search_index` on the businessunit to sprk_matter relationship; the evidence is in the task notes.</criterion>
+    <criterion testable="true">Negative: no other file in the solution changed except EntityMaps.xml; no other entity map was removed; the dev import reported success with no new warnings.</criterion>
+    <criterion testable="true">The solution folder still packs (a pack or import dry-run of SpaarkeMaster succeeds).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-05(f). Interacts with FR-10 (task 015): after this task the server is the only owner of the Matter search-index default.
+Completed 2026-10-20. EntityMaps.xml emptied; the solution packs; the dev attribute maps were deleted with owner approval (targeted delete instead of a solution import; deviation recorded). Beyond-dev environments still carry the map. Details: notes/task-006-notes.md.
+rework: none task 006</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

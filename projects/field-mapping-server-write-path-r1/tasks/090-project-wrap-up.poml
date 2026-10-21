@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Project wrap-up: test diet, lessons learned, README complete, worktree sync</title>
+    <phase>Wrap-up</phase>
+    <gate>all complete</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Documentation and bookkeeping; the test reconciliation itself is performed by the /test-diet skill (mandatory gate).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Runs skills and writes closing notes from recorded evidence.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Closes the project; must run alone after every other task, and edits shared index and README files.</parallel-reason>
+    <deps>061, 062, 063</deps>
+    <tags>wrap-up, docs</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close the project. Run the mandatory `/test-diet` gate (root CLAUDE.md §7) and produce `notes/test-diet-report.md`; write `notes/lessons-learned.md`; set the README status to Complete; update the `projects/INDEX.md` row; run `/worktree-sync`; run `devops-project-sync`.</prompt>
+  <role>SPAARKE project lead / platform developer closing a project per the task-execute wrap-up protocol.</role>
+  <goal>Every test added or modified by the project is classified (scaffolding deleted or maintained at a KEEP path), lessons are recorded, the project is marked Complete everywhere, and the worktree is fully synchronized.</goal>
+
+  <context>
+    <background>Root CLAUDE.md §7: task-execute Steps 10-11 own completion and the project-close /test-diet gate for 090-wrapup tasks. Test-diet classifies tests added or modified during the project as scaffolding (delete) vs maintain (keep) per ADR-038 build-vs-maintain criteria. Projects tracked in projects/INDEX.md; GitHub Project fields via devops-project-sync.</background>
+    <relevant-files>
+      <file role="new">projects/field-mapping-server-write-path-r1/notes/test-diet-report.md (output of /test-diet)</file>
+      <file role="new">projects/field-mapping-server-write-path-r1/notes/lessons-learned.md</file>
+      <file role="modify">projects/field-mapping-server-write-path-r1/README.md (status Complete; links to evidence)</file>
+      <file role="modify">projects/INDEX.md (this project's row: Complete)</file>
+      <file role="modify">projects/field-mapping-server-write-path-r1/tasks/TASK-INDEX.md (all tasks complete)</file>
+      <file role="canonical-reference">.claude/skills/test-diet/SKILL.md, .claude/skills/worktree-sync/SKILL.md, .claude/skills/devops-project-sync/SKILL.md</file>
+      <file role="canonical-reference">projects/field-mapping-server-write-path-r1/notes/ (decisions.md, defer-issues.md, live-check notes)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="061" status="pending">Guards in place.</dependency>
+      <dependency task="062" status="pending">Docs and root pointers merged.</dependency>
+      <dependency task="063" status="pending">Dead code removed; issues updated.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="root CLAUDE.md §7">Scope: test diet. /test-diet is MANDATORY for this wrap-up task and must produce notes/test-diet-report.md before the project is marked complete; do not skip or mark it N/A.</constraint>
+    <constraint source="docs/adr/ADR-038-testing-strategy.md">Scope: classification. Tests deleted as scaffolding or kept at KEEP paths only per the skill's criteria; guards from tasks 035 and 061 and the push parity, repair pass and ownership data-mutation tests are KEEP candidates; record the reasoning per file.</constraint>
+    <constraint source="root CLAUDE.md §3">Scope: .claude/. Sub-agents cannot write under .claude/; if the lessons imply a change to .claude/ files or root CLAUDE.md, the MAIN SESSION applies it (draft text in notes/).</constraint>
+    <constraint source="skill worktree-sync">Scope: sync. Run /worktree-sync to commit, push, merge and update from master; follow its confirmation gates; never use git stash pop/apply.</constraint>
+    <constraint source="project">Scope: honesty. Open or deferred items (e.g. #2098, prvAssign audit, wider rollout beyond dev) are listed as open in the README and lessons, not hidden.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Project close-out</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Reference only; no pattern is applied in this task.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare MINIMAL rigor; verify TASK-INDEX shows every other task complete; read the test-diet, worktree-sync and devops-project-sync skills.</step>
+    <step order="1">Run /test-diet over the tests this project added or modified; apply its deletions; write notes/test-diet-report.md; run the affected suites to confirm green after deletions.</step>
+    <step order="2">Write notes/lessons-learned.md: what worked, what slipped, coordination with UAC-r2 and ontology-r1, standing rules to promote (draft any .claude/ changes for the main session).</step>
+    <step order="3">Set README status to Complete with links to the spec, evidence notes, test-diet report and open follow-ups; update the projects/INDEX.md row.</step>
+    <step order="4">Run /worktree-sync; then run devops-project-sync so the GitHub Project Issue fields reflect completion.</step>
+    <step order="5">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="6">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If /test-diet recommends deleting a test that guards a security invariant (auth, tenant isolation, forward-only repair), STOP and escalate per CLAUDE.md §6 instead of deleting.</trigger>
+    <trigger>If /worktree-sync reports a merge conflict in a shared file (UAC-r2 or ontology-r1 overlap), stop and ask rather than resolving by overwrite.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Overlaps with nothing: test-diet-report.md and lessons-learned.md are the standard wrap-up artifacts; no project note covers them.</existing>
+    <extension>The /test-diet skill generates the report; lessons-learned.md is the single closing narrative and cannot live in decisions.md, which holds decisions only.</extension>
+    <cost-of-doing-nothing>Without the report the mandatory project-close gate (root CLAUDE.md §7) fails and scaffolding tests stay in the suite.</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="skills">test-diet, worktree-sync, devops-project-sync</tool></tools>
+
+  <outputs>
+    <output type="docs">projects/field-mapping-server-write-path-r1/notes/test-diet-report.md</output>
+    <output type="docs">projects/field-mapping-server-write-path-r1/notes/lessons-learned.md</output>
+    <output type="docs">projects/field-mapping-server-write-path-r1/README.md, projects/INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">notes/test-diet-report.md exists and classifies every test added or modified by the project (scaffolding deleted or maintain-at-KEEP-path) with a reason per file.</criterion>
+    <criterion testable="true">notes/lessons-learned.md exists and lists open follow-ups (#2098, prvAssign audit, any rollout beyond dev) as open.</criterion>
+    <criterion testable="true">README status is Complete and the projects/INDEX.md row shows Complete; TASK-INDEX.md shows every task complete.</criterion>
+    <criterion testable="true">Negative: no security-invariant test (auth, forward-only repair, ownership) was deleted by the diet without an owner decision; affected suites are green after deletions.</criterion>
+    <criterion testable="true">/worktree-sync completed (clean tree, pushed, up to date with master) and devops-project-sync updated the Project Issue.</criterion>
+  </acceptance-criteria>
+
+  <notes>Root CLAUDE.md §7 mandatory /test-diet gate. Closes the project.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

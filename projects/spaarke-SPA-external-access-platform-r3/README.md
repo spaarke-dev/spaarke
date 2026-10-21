@@ -1,5 +1,7 @@
 # Spaarke External Access Platform R3
 
+> **Portfolio**: [Project #1734](https://github.com/spaarke-dev/spaarke/issues/1734) · [Board #2](https://github.com/users/spaarke-dev/projects/2) · Epic [#2099 EXTERNAL ACCESS SPA](https://github.com/spaarke-dev/spaarke/issues/2099) — _registered 2026-10-12; Epic linked 2026-10-18_
+
 > **Last Updated**: 2026-10-10
 >
 > **Status**: In Progress (initialized by `/project-pipeline` 2026-10-10; execution not started)
@@ -63,7 +65,7 @@ The project is **complete** when (spec §Success Criteria):
 - [ ] 4. Grid columns match the owner's list (owner review).
 - [ ] 5. A message send on an accessible record appears in the thread; a send outside the set returns 403 (server negative test + E2E).
 - [ ] 6. A new employee of an allow-listed company self-registers from the join link and lands signed in; a non-listed tenant is refused (E2E with a test tenant) — or FR-14 is handed to R4 with a written path and the join page ships behind a flag.
-- [ ] 7. Browser and Teams sign-in use the single-tenant client, Spaarke-tenant authority and `user_impersonation`, for a member and a guest (token diagnostics + FR-21 live check).
+- [ ] 7. Workforce sign-in (browser and Teams) uses the A9 multitenant client at the customer's home directory with `user_impersonation`; licensed users resolve through the stored link; CIAM partners unchanged (token diagnostics + FR-21 live check).
 - [ ] 8. One SPA build reaches two different backends by run-time selection (dev test with two entries).
 - [ ] 9. No SPA page leaves the external plane; no mock identity in production (code test + E2E).
 - [ ] 10. Documents upload/download on Project, Matter, Work Assignment, Invoice and Service Request; ViewOnly cannot upload (server tests + E2E).

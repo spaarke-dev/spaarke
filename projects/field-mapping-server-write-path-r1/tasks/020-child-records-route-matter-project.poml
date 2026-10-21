@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Child-records route covers sprk_matter and sprk_project; optional mappingSource; secure-Project split (FR-15)</title>
+    <phase>3 W3 Product creators onto the service</phase>
+    <gate>019 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in Sprk.Bff.Api and .ts in the UI library; tags include bff-api, security, frontend, testing (TEST-MODIFYING override).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive route widening (auth, ownership of roots, secure-create plan) plus a contract change; needs architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W3-wizards</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits ChildRecordEndpoints.cs and bffChildWriteAdapter.ts, which every wizard task (021-029) builds on.</parallel-reason>
+    <deps>019</deps>
+    <tags>bff-api, security, frontend, testing</tags>
+    <estimated-effort>6-9 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Extend POST /api/v1/child-records/{table} and the client BFF_CHILD_CREATE_TABLES with sprk_matter and sprk_project, add an optional mappingSource request field, and route secure-Project creation through the secure-root plan. Do not migrate any wizard in this task (021-029 do that).</prompt>
+  <role>SPAARKE platform developer, React 18 / Fluent UI v9 code pages, Dataverse. Follow ADRs strictly.</role>
+  <goal>A browser caller can create a Matter or a Project through the child-records route; the route passes an optional mappingSource to the RecordCreationService (FR-03/FR-06); a secure Project is created into isolation by the service while provisionSecureProject keeps only the steps the service does not cover; the route-authorization ledger and contract tests are updated.</goal>
+
+  <context>
+    <background>spec.md FR-15, FR-03; design.md §4. Today CreateTables (ChildRecordEndpoints.cs ~:66-75) has no Matter or Project and the Matter and Project wizards create through Xrm.WebApi. The route already creates sprk_workassignment as a ROOT (ontology task 046), which is the pattern to copy. Tasks 013-017 delivered RecordCreationService and the re-pointed route. PR #1501 touches adjacent client code; coordinate.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ChildRecordEndpoints.cs (CreateTables ~:66-75; create handler ~:222; add mappingSource binding)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/utils/adapters/bffChildWriteAdapter.ts (BFF_CHILD_CREATE_TABLES ~:36-45; createChildRecordViaBff ~:184; createRecordViaBffWithWarnings ~:198)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/provisioningService.ts (provisionSecureProject: drop only the steps the service now covers)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests (RouteAuthorizationGuardTests ledger entry for the widened table set; grep for RouteAuthorizationGuardTests to find the file)</file>
+      <file role="new">tests/integration/seam/ChildRecords/ChildRecordMatterProjectCreateSeamTests.cs (Matter and Project create via the route (team-owned, mapped); secure Project into isolation)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs (created by task 013)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordTableRules.cs (created by task 012; Matter and Project rows must exist)</file>
+      <file role="canonical-reference">projects/field-mapping-server-write-path-r1/notes/design-review-2026-10-19.md (create-surface inventory)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="019" status="complete">W2 deployed and reviewed on dev; the service and re-pointed route are live.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: this wizard only. One wizard per task, live-verified on dev before the next starts (spec FR-16). Do not edit another wizard's files or bffChildWriteAdapter.ts beyond what task 020 delivered; if the adapter needs a change, stop and escalate.</constraint>
+    <constraint source="project">Scope: the create payload. The wizard sends ONLY values the user entered or picked (plus the filing/regarding keys the route needs). It must not call applyFieldMappings, read a mapping profile or pre-fill mapped fields; mapping, owner, search-index and I-1 stamp are applied by the server (FR-02, FR-06, FR-09, FR-10).</constraint>
+    <constraint source="ADR-012">Scope: the shared UI library. Edits stay in Spaarke.UI.Components (or the named package) and the wizard's code-page host; no copy of shared logic into the host.</constraint>
+    <constraint source="ADR-021">Scope: any UI touched by this task. Fluent v9 tokens only, no hard-coded colors, dark mode must render correctly.</constraint>
+    <constraint source="project">Scope: deployment. Deploy through the code-page-deploy skill (build with the host's own npm script, never a hand-edited web resource). Rollback is redeploying the previous bundle; no runtime flag is added (spec rollout decision).</constraint>
+    <constraint source="CLAUDE.md §9">Scope: auth. The wizard sends no owner, owning-team or impersonation value; the BFF decides ownership from the caller (FR-09). The route stays authenticated (existing authenticatedFetch).</constraint>
+    <constraint source="ADR-008">Scope: route authorization. Payload checks stay in CallerWriteAuthorization (path A: filters stay for route-level auth only); no new inline authorization in the endpoint.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: BFF publish. Placement Justification in the PR (extends an existing route); measure publish-size delta against a fresh master build; run `dotnet list package --vulnerable --include-transitive`.</constraint>
+    <constraint source="CLAUDE.md §11">Scope: mappingSource field. It is new request surface: answer existing/extension/cost in the PR; it is an optional entity-name plus id pair, validated by the resolver (task 003), never trusted on its own.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Child-records route; secure-root create plan; mapping source resolution</topic>
+    <files>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/webresource.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Lookup bind / option-set value shapes the payload still uses for user-entered fields.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; read spec FR-16 (and FR-15 and FR-03), the create-surface inventory in notes/design-review-2026-10-19.md, the BFF route and adapter (no wizard service in this task), and the existing tests listed in relevant-files. Re-grep the line numbers cited here before editing (they are approximate).</step>
+    <step order="1">Add sprk_matter and sprk_project to ChildRecordEndpoints.CreateTables and to BFF_CHILD_CREATE_TABLES; keep the two lists identical (add a test that asserts equality if none exists).</step>
+    <step order="2">Add optional `mappingSource` (entity logical name + id) to the create request DTO and pass it to RecordCreationService; an invalid or denied source yields no mapping plus a warning, never an error that reveals existence (FR-03).</step>
+    <step order="3">Route the secure-Project path through the service's secure-root plan (create into isolation) exactly as sprk_workassignment does; read provisionSecureProject and record in the task notes which steps remain client-called (container, memberships) and which the server now does.</step>
+    <step order="4">Update the RouteAuthorizationGuardTests ledger; add seam tests: Matter created via the route is team-owned and mapped; Project likewise; secure Project lands in isolation; a caller without Create right on the filing parent gets the uniform refusal.</step>
+    <step order="5">Build the BFF, run BFF unit and seam tests, run jest for bffChildWriteAdapter, measure publish-size delta and the CVE check; run /conflict-check against PR #1501 and record the outcome.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If provisionSecureProject cannot be split without changing the secure-Project provisioning contract (UAC-r2 owns closure and isolation), STOP and escalate per CLAUDE.md §6.</trigger>
+    <trigger>If widening CreateTables requires changing the route's request shape for existing tables, STOP: that is a breaking API contract change.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>ChildRecordEndpoints and RecordCreationService already create child tables and sprk_workassignment; no seam test covers Matter or Project through the route.</existing>
+    <extension>Extending an existing seam test file would mix unrelated tables; a dedicated file keeps the Matter/Project roots next to the secure-root cases.</extension>
+    <cost-of-doing-nothing>Without it the widened route (a security-relevant change: roots, ownership, isolation) ships with no proof of team ownership or isolation.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Route reachable from a wizard host"><steps><step>On dev, POST a Matter via the child-records route using the browser session (devtools) with only sprk_name</step></steps><expected>201 with an id; record is team-owned; mapped fields present.</expected></test>
+    <test name="ADR-021 dark mode (no UI change)"><steps><step>Open the Create Matter wizard in dark mode</step></steps><expected>Unchanged from before; this task changes no UI.</expected></test>
+    <test name="Render"><steps><step>Open the Create Project wizard</step></steps><expected>Renders unchanged (wizards stay on the old path until 021/022).</expected></test>
+  </ui-tests>
+
+  <tools><tool name="npm">Build/test the code page and shared library</tool><tool name="code-page-deploy">Deploy the wizard web resource to dev</tool><tool name="ui-test">Browser verification on dev</tool></tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ChildRecordEndpoints.cs</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/utils/adapters/bffChildWriteAdapter.ts</output>
+    <output type="test">tests/integration/seam/ChildRecords/ChildRecordMatterProjectCreateSeamTests.cs</output>
+    <output type="docs">task notes: provisionSecureProject split record</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">CreateTables and BFF_CHILD_CREATE_TABLES both contain sprk_matter and sprk_project, and a test asserts the two sets match.</criterion>
+    <criterion testable="true">The route accepts an optional mappingSource; an absent value behaves exactly as before for all existing tables.</criterion>
+    <criterion testable="true">A Matter and a Project created through the route are owned by the owning team per FR-09 and mapped fill-only per FR-02 (seam tests).</criterion>
+    <criterion testable="true">A secure Project created through the route is created into isolation by the service; the notes list the provisionSecureProject steps that remain.</criterion>
+    <criterion testable="true">Negative: a caller lacking Create/Append-To on the filing parent, and a caller supplying a mappingSource they cannot Read, get no mapping and no information about the parent's existence (uniform 403/404 and no mapped data respectively).</criterion>
+    <criterion testable="true">RouteAuthorizationGuardTests pass with the updated ledger; BFF build 0 errors; BFF and jest tests green; publish-size delta and CVE result recorded.</criterion>
+    <criterion testable="true">Negative: with a user value and a mapped value for the same field, the user value is stored; a mapped field the user never touched is populated on first load of the new record; the wizard payload contains no key the user did not enter.</criterion>
+    <criterion testable="true">Existing child-record route contract tests pass unchanged for the pre-existing tables.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-15, FR-03. Tasks 021-029 depend on this. Coordinate PR #1501 (conflict-check) before merging.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

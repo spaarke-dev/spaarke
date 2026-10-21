@@ -38,14 +38,14 @@ public class RecordCreationNumberReadBackTests
         var ownership = new Mock<IRecordOwnershipResolver>();
         ownership.Setup(o => o.ResolveOwningTeamAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Team);
-        var sut = new RecordCreationService(
+        var sut = new OfficeRecordCreationService(
             entities.Object,
             new Mock<IFieldMappingDataverseService>().Object,
             ownership.Object,
             IdentityNormalizationFixtures.WithContact(null).Object,
             Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(),
             Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(),
-            NullLogger<RecordCreationService>.Instance);
+            NullLogger<OfficeRecordCreationService>.Instance);
 
         var result = await sut.CreateAsync(
             new RecordCreationRequest { EntityType = type, Name = "Cancelled late", CallerUserId = "oid", OwnerSystemUserId = Caller.ToString("D") },
