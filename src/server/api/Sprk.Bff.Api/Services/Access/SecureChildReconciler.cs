@@ -972,9 +972,9 @@ public sealed class SecureChildReconciler
             // #2143 round 9 (F2): the removal could not be made before the thread move's #1629 grant, so it came off here —
             // and, as it revokes every direct share, the grant with it. Fail closed: an under-share, never a secure share left.
             _logger.LogWarning(
-                "[SECURE-CHILD-RECONCILE] {Table} {Id} left isolation with its thread move, but its secure-child mirror could not be " +
-                "taken off before that move's read grant, so it was taken off after it: every direct share on it was REVOKED, " +
-                "the grant to the record's members included. They cannot read it until it is granted again (#2143).",
+                "[SECURE-CHILD-RECONCILE] {Table} {Id} left isolation, but its secure-child mirror could not be taken off before " +
+                "its thread reconcile's read grant, so it was taken off after it: every direct share on it was REVOKED, including " +
+                "any read grant that move gave. The record's members cannot read it until it is granted again (#2143).",
                 table, childId);
         }
 

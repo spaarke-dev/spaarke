@@ -340,6 +340,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
         // isolated", and S's sharee kept Collaborate on an ordinary email filed to O.
         await RefileOffTheSecureThreadWithReadFaults(read => read == 1);
 
+        ShareWorld.TransientRowReadFaultsFired("sprk_communication", RefiledEmail).Should().Be(1,
+            "round 10: the isolation read before the reconcile faulted — never vacuous");
         EmailShareOf(Sharee).Should().BeNull("the secure-child mirror came off once the email left isolation");
         EmailShareOf(RecordMember).Should().Be(ReadMask, "it came off at the hook, before the thread move's grant");
         GrantRevokedWarnings().Should().BeEmpty();
@@ -365,16 +367,20 @@ public sealed partial class SecureChildOwnershipAiToolTests
     [Fact(DisplayName = "#2143 r9 F2 must-not-fire: a removal left to the last step on a re-file with no thread move revokes no grant, and says nothing of one")]
     public async Task FilingRoute_NoThreadMove_TheLastStepTakesTheMirrorOff_WithNoRevokedGrantWarning()
     {
-        // Already in O's thread, so the re-file to O moves no thread and runs no hook; the mirror's read of the row faults on
-        // the step before the reconcile, so the removal is left to the last step — and there was no grant for it to revoke.
+        // Already in O's thread, so the re-file to O moves no thread and runs no hook; the mirror's read of the row and (round
+        // 10, F2-b: a Failed mirror step goes on to the removal) all three removal reads fault on the step before the
+        // reconcile, so the removal is left to the last step — and there was no grant for it to revoke.
         AnEmailIn(SecureMatter, OrdinaryMattersThread, Directory.SecureBu, Directory.SecureNamedTeam);
         _shareTable.Seed("sprk_communication", RefiledEmail, DataversePrincipalRef.User(Sharee), CollaborateMask);
         _user.FullAccessOn.Add(SecureMatter);
-        ShareWorld.TransientRowReadFaultsOf("sprk_communication", RefiledEmail, read => read == 2);
+        ShareWorld.TransientRowReadFaultsOf("sprk_communication", RefiledEmail, read => read is >= 2 and <= 5);
 
         var result = await RefileTo(OrdinaryMatter);
 
         Status(result).Should().Be(Microsoft.AspNetCore.Http.StatusCodes.Status204NoContent, Detail(result));
+        ShareWorld.TransientRowReadFaultsFired("sprk_communication", RefiledEmail).Should().Be(4,
+            "round 10: the removal before the reconcile faulted on every attempt — never vacuous");
+        EmailRevokes().Should().Be(1, "the last step's removal");
         EmailShareOf(Sharee).Should().BeNull("the last step takes the mirror off");
         GrantRevokedWarnings().Should().BeEmpty("no thread move ran, so no grant was revoked");
     }
@@ -388,6 +394,52 @@ public sealed partial class SecureChildOwnershipAiToolTests
         EmailShareOf(Sharee).Should().BeNull();
         EmailShareOf(RecordMember).Should().Be(ReadMask);
         GrantRevokedWarnings().Should().BeEmpty();
+    }
+
+    // ---- #2143 round 10 (K1 pin): a mirror step that THROWS does not latch the mirror as removed ----
+
+    /// <summary>
+    /// The synchronizer's logger, recording into <see cref="_sharesLog"/>, that throws the FIRST time the synchronizer logs its
+    /// run summary (<c>[SECURE-CHILD-SHARES] scope=</c>) — the one fault that escapes <c>SyncChildAsync</c> to
+    /// <c>AfterRefileAsync</c>'s catch.
+    /// </summary>
+    private sealed class ThrowsOnTheFirstRunSummary(Microsoft.Extensions.Logging.ILogger<Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer> inner)
+        : Microsoft.Extensions.Logging.ILogger<Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer>
+    {
+        public int Thrown { get; private set; }
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => inner.BeginScope(state);
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state,
+            Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            inner.Log(logLevel, eventId, state, exception, formatter);
+            if (Thrown == 0 && formatter(state, exception).StartsWith("[SECURE-CHILD-SHARES] scope=", StringComparison.Ordinal))
+            {
+                Thrown++;
+                throw new InvalidOperationException("Test: the run summary's log sink faulted.");
+            }
+        }
+    }
+
+    [Fact(DisplayName = "#2143 r10 K1 pin: a mirror step that throws (its run summary's log faults) before the reconcile does not latch the mirror as removed: it comes off at the hook, and the grant stands")]
+    public async Task FilingRoute_AMirrorStepThatThrows_DoesNotLatchTheMirrorAsRemoved()
+    {
+        // The isolation read before the reconcile faults ("left"), the email is still Secure in S's thread, and mirroring it
+        // throws out of SyncChildAsync: AfterRefileAsync's catch answers false (nothing removed), so the hook still takes the
+        // mirror off. A catch answering true would latch it, and S's sharee would keep Collaborate on an ordinary email.
+        var sink = new ThrowsOnTheFirstRunSummary(_sharesLog);
+        _sharesLogger = sink;
+
+        await RefileOffTheSecureThreadWithReadFaults(read => read == 1);
+
+        sink.Thrown.Should().Be(1, "the mirror step threw");
+        ShareWorld.TransientRowReadFaultsFired("sprk_communication", RefiledEmail).Should().Be(1);
+        EmailShareOf(Sharee).Should().BeNull("the secure-child mirror came off once the email left isolation");
+        EmailShareOf(RecordMember).Should().Be(ReadMask, "it came off at the hook, before the thread move's grant");
     }
 
     // ---- #2143 round 10 (F2-a): every thread-reconcile path that grants runs the hook first ----
