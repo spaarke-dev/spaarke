@@ -732,30 +732,24 @@ public class PlaybookAuthorizationFilter : IEndpointFilter
             var operation = AnalysisAuthorizationFilter.RunCanWriteDocuments(nodes) ? "write" : "read";
             var callerToken = TokenHelper.ExtractBearerTokenOrNull(httpContext);
 
-            foreach (var documentId in documentIds)
+            if (documentIds.Any(id => id == Guid.Empty))
             {
-                if (documentId == Guid.Empty)
-                {
-                    _logger?.LogWarning("Playbook run documents DENIED for caller {UserId}: an empty document id", userId);
-                    return false;
-                }
+                _logger?.LogWarning("Playbook run documents DENIED for caller {UserId}: an empty document id", userId);
+                return false;
+            }
 
-                var result = await _authorizationService.AuthorizeAsync(new AuthorizationContext
-                {
-                    UserId = userId,
-                    ResourceId = documentId.ToString(),
-                    Operation = operation,
-                    CorrelationId = httpContext.TraceIdentifier,
-                    UserAccessToken = callerToken,
-                }, ct);
-
-                if (!result.IsAllowed)
-                {
-                    _logger?.LogWarning(
-                        "Playbook run documents DENIED: caller {UserId} lacks {Operation} on document {DocumentId} (reason {Reason})",
-                        userId, operation, documentId, result.ReasonCode);
-                    return false;
-                }
+            // The caller's own rights on every document, then (task 188 round 4b, F1-2) THE external document narrowing
+            // in the same helper: a run that would read a document the narrowing hides from a caller who is not an
+            // internal systemuser is denied exactly like a run on an unreadable document.
+            var documentsDecision = await InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync(
+                httpContext, _authorizationService, userId, documentIds, operation, callerToken, "playbook-run-documents",
+                _logger, ct);
+            if (!documentsDecision.IsAllowed)
+            {
+                _logger?.LogWarning(
+                    "Playbook run documents DENIED: caller {UserId} lacks {Operation} on a document of the run (reason {Reason})",
+                    userId, operation, documentsDecision.ReasonCode);
+                return false;
             }
 
             // Record parameters (owner round 16 item 3): the entity set comes from the existing allow-list, never by

@@ -468,6 +468,26 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
         /// <summary>When true, the secure-flag reads throw (a transport fault).</summary>
         public bool FlagReadThrows { get; set; }
 
+        /// <summary>
+        /// Task 188: the entity sets the document narrowing reads by primary key (<c>id eq a or id eq b ...</c>): a hop read of
+        /// parent documents, the 065 rule's communication and thread reads. Answered from the seeded rows whose key is one of
+        /// the ids, projected through <c>$select</c>.
+        /// </summary>
+        private static readonly IReadOnlyDictionary<string, string> KeyReadSets = new Dictionary<string, string>
+        {
+            ["sprk_documents"] = "sprk_documentid",
+            ["sprk_communications"] = "sprk_communicationid",
+            ["sprk_communicationthreads"] = "sprk_communicationthreadid",
+        };
+
+        /// <summary>Task 188: entity sets whose by-key reads answer this status (a narrowing read fault).</summary>
+        public Dictionary<string, HttpStatusCode> KeyReadFaults { get; } = new();
+
+        /// <summary>Task 188: every by-key read sent to one of <see cref="KeyReadSets"/> ("set?query", unescaped).</summary>
+        public IReadOnlyList<string> KeyReads(string set) =>
+            Urls.Where(u => u.Contains($"/{set}?", StringComparison.Ordinal) && u.Contains($"{KeyReadSets[set]} eq ", StringComparison.Ordinal))
+                .ToList();
+
         /// <summary>The root entity sets and their primary keys: the secure-flag reads (owner option B) query these.</summary>
         private static readonly IReadOnlyDictionary<string, string> RootSets = new Dictionary<string, string>
         {
@@ -551,6 +571,7 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             Fault = null;
             FlagFault = null;
             FlagReadThrows = false;
+            KeyReadFaults.Clear();
             FilingReadThrows = false;
             FilingFaultEntity = null;
         }
@@ -719,15 +740,59 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
         /// <summary>A Standard, non-secure root (<c>sprk_issecure = false</c>).</summary>
         public void AddOpenRoot(ExternalGrantRootType root, Guid id) => AddRoot(root, id, isSecure: false);
 
-        /// <summary>A REAL <see cref="ExternalDataService"/> over this fake, e.g. for its secure-flag read.</summary>
-        public ExternalDataService NewService(bool withFilingReader = true) => new(
+        /// <summary>
+        /// A REAL <see cref="ExternalDataService"/> over this fake, e.g. for its secure-flag read. Task 188: with
+        /// <paramref name="identity"/>, the document narrowing can tell an internal systemuser; without one every caller is
+        /// narrowed (the fail-closed default).
+        /// </summary>
+        public ExternalDataService NewService(
+            bool withFilingReader = true, Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver? identity = null) => new(
             new HttpClient(this),
             new ConfigurationBuilder()
                 .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://org.test" })
                 .Build(),
             new ExternalRecordDocumentRoutesTests.InMemoryExternalDataService.TestCredential(),
             NullLogger<ExternalDataService>.Instance,
-            withFilingReader ? FilingReader : null);
+            withFilingReader ? FilingReader : null,
+            columns: null,
+            identity: identity);
+
+        /// <summary>
+        /// Task 188: seeds a communication as the 065 rule reads it: <c>sprk_isinternalonly</c> (<c>null</c> stays null, which
+        /// hides) and its thread lookup (<c>null</c>: no thread, which hides). <paramref name="rawFlag"/>, when given, is
+        /// stored as the flag instead (an unreadable value).
+        /// </summary>
+        public void AddCommunication(Guid id, bool? internalOnly, Guid? thread, object? rawFlag = null) =>
+            Seed("sprk_communications", new Dictionary<string, object?>
+            {
+                ["sprk_communicationid"] = id.ToString(),
+                ["sprk_isinternalonly"] = rawFlag ?? internalOnly,
+                ["_sprk_communicationthread_value"] = thread?.ToString(),
+                ["sprk_subject"] = $"subject {id}",
+            });
+
+        /// <summary>Task 188: seeds a thread with its privacy (<c>sprk_privacystate</c>; Open = 100000000, Private = 100000001).</summary>
+        public void AddThread(Guid id, int? privacy) =>
+            Seed("sprk_communicationthreads", new Dictionary<string, object?>
+            {
+                ["sprk_communicationthreadid"] = id.ToString(),
+                ["sprk_privacystate"] = privacy,
+            });
+
+        /// <summary>
+        /// Task 188: seeds a document that is NOT under any route parent (an ancestor the narrowing's hop reads reach), with
+        /// its own Access Permission, communication link and parent document link. <paramref name="rawCommunication"/>, when
+        /// given, is stored as the communication link instead (an unreadable value: not a GUID, or an empty one).
+        /// </summary>
+        public void AddAncestorDocument(Guid id, int? accessPermission, Guid? communication, Guid? parent, object? rawCommunication = null) =>
+            Seed("sprk_documents", new Dictionary<string, object?>
+            {
+                ["sprk_documentid"] = id.ToString(),
+                ["sprk_documentname"] = $"ancestor {id}",
+                ["sprk_accesspermission"] = accessPermission,
+                ["_sprk_relatedcommunication_value"] = rawCommunication ?? communication?.ToString(),
+                ["_sprk_parentdocument_value"] = parent?.ToString(),
+            });
 
         private void Seed(string set, Dictionary<string, object?> row)
         {
@@ -936,6 +1001,34 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             }
 
             var set = request.RequestUri.AbsolutePath[(request.RequestUri.AbsolutePath.LastIndexOf('/') + 1)..];
+
+            // Task 188: a by-key read (`sprk_documents?$select=...&$filter=sprk_documentid eq {a} or ...&$top=n`) answers the
+            // seeded rows whose key is one of the ids, projected through $select (a null value comes back as null, as the Web
+            // API sends it).
+            if (KeyReadSets.TryGetValue(set, out var keyColumn) && url.Contains($"{keyColumn} eq ", StringComparison.Ordinal))
+            {
+                if (KeyReadFaults.TryGetValue(set, out var keyFault))
+                    return Task.FromResult(new HttpResponseMessage(keyFault));
+
+                var keys = Regex.Matches(url, $@"{keyColumn} eq ([0-9a-fA-F-]{{36}})")
+                    .Select(m => m.Groups[1].Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var keySelect = Regex.Match(url, @"\$select=([^&]*)");
+                var keyColumns = keySelect.Success ? keySelect.Groups[1].Value.Split(',').ToHashSet(StringComparer.Ordinal) : null;
+                List<Dictionary<string, object?>> keyed;
+                lock (_sets)
+                {
+                    keyed = (_sets.TryGetValue(set, out var seededKeyed) ? seededKeyed : new())
+                        .Where(r => r.TryGetValue(keyColumn, out var k) && k is string key && keys.Contains(key))
+                        .Select(r => r.Where(kv => keyColumns is null || keyColumns.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value))
+                        .ToList();
+                }
+
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(JsonSerializer.Serialize(new { value = keyed }), System.Text.Encoding.UTF8, "application/json"),
+                });
+            }
+
             var filter = Regex.Match(url, @"(_sprk_\w+_value) eq ([0-9a-fA-F-]{36})");
             var select = Regex.Match(url, @"\$select=([^&]*)");
             var columns = select.Success ? select.Groups[1].Value.Split(',').ToHashSet(StringComparer.Ordinal) : null;

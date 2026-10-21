@@ -88,6 +88,16 @@ Terms: **Spaarke tenant** = Spaarke's Entra directory; **customer's home directo
 
 > See: [`docs/architecture/sdap-auth-patterns.md` § Pattern 4 — Writer-Identity Matching Rule](../../docs/architecture/sdap-auth-patterns.md#writer-identity-matching-rule-binding--2026-06-08-post-phase-3a-uat-incident)
 
+### External document narrowing — D7 (binding — task 188, owner rounds 110/111, 2026-10-21; CLAUDE.md §6.5 path B)
+
+- ✅ **MUST** treat a child document's Access Permission as able to NARROW partner visibility, never widen it. A caller who is not a resolved internal systemuser sees a document only when ALL of these hold: the root rule allows it; its own value is not Restricted; no `sprk_parentdocument` ancestor within 3 hops is Restricted; and its communication passes the task 065 rule. The communication is the document's own link, else its parent's, else its grandparent's; the first link found decides. Cycles, a 4th hop and any unreadable value hide the document. Limited does NOT hide (owner round 111).
+- ✅ **MUST** apply the ONE predicate, `ExternalDocumentNarrowing`, on every surface that returns document rows or content to such a caller: the external plane, the AI tools and retrieval trim, `DocumentAuthorizationFilter` (with the routes that delegate to it), the bulk download, and the document list routes. A failed externality lookup counts as external.
+- ✅ **MUST** run the predicate's own reads app-only on every surface. **Path B amendment:** the AI tools' User-OBO-only rule (`IDataverseUserClient`) has exactly one exception, the injected `AppOnlyDocumentNarrowing` / `InternalRouteDocumentNarrowing`. These re-read documents by id and return ONLY a hide decision: never rows, never a widening.
+- ❌ **MUST NOT** add a second copy of the rule, or return rows or content from a new external document surface without classifying it in the guard.
+- Known limit (open, tracked as task 191): flagged-external systemusers with direct Dataverse access (MDA or Web API) are not narrowed there yet. Owner round 113 reversed round 111's #2179 (c): a systemuser with `sprk_isexternal` = true must reach no internal-only record in Dataverse either. Task 191 builds that Dataverse-side enforcement, so this limit is temporary, not accepted.
+- Deleting a communication, or a parent document that still has child documents, must not un-hide them (owner round 111, (a) Restrict). It is enforced by the `Restrict` cascade on `sprk_relatedcommunication` and `sprk_parentdocument` and by the BFF refusing such a delete (task 188 slice D). Until slice D ships, a delete un-links and un-hides those documents.
+- Enforced by: `ExternalDocumentNarrowingGuardTests` (every surface reaches the predicate; the core decision is called only from the app-only seams), plus task 188's route, handler and trim tests.
+
 ---
 
 ## MUST NOT Rules

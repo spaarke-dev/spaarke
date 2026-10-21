@@ -1068,6 +1068,8 @@ public class SecureChildOwnershipWriterTests
             builder.Services.AddScoped<Spaarke.Core.Auth.IAuthorizationRule, Spaarke.Core.Auth.Rules.OperationAccessRule>();
             builder.Services.AddScoped<Spaarke.Core.Auth.AuthorizationService>();
             builder.Services.AddSingleton<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>(new GateOpenProbe());
+            // Task 188 round 4b: the gate's document grant applies THE external document narrowing; nothing is hidden here.
+            Sprk.Bff.Api.Tests.TestInfrastructure.AllVisibleDocumentNarrowing.UseAllVisibleDocumentNarrowing(builder.Services);
 
             // Sibling handlers' services — registered so minimal-API parameter inference treats them as services.
             var cache = new InMemoryTenantCache();

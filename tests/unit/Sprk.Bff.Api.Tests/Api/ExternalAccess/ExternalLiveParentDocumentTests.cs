@@ -59,6 +59,15 @@ public sealed class ExternalLiveParentDocumentTests : IClassFixture<ExternalMult
     {
         _fixture.Principal = Reader(P);
         SeedParentUnder(table, E, O, secure: false);
+        if (table == "sprk_communication")
+        {
+            // Task 188: a document linked to a communication is visible only when that communication is (the 065 rule:
+            // shareable, on an Open thread), so the linked communication here is a visible one.
+            var thread = Guid.Parse("c1870000-0000-4000-8000-0000000000c1");
+            _fixture.Data.AddCommunication(E, internalOnly: false, thread);
+            _fixture.Data.AddThread(thread, (int)Sprk.Bff.Api.Services.Communication.Membership.ThreadPrivacyState.Open);
+        }
+
         var doc = _fixture.Data.AddDocument("projects", P, "Related to ordinary O", (column, E));
 
         (await List(P)).Value.Select(d => d.SprkDocumentid).Should().Equal(doc);

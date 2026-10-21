@@ -1163,6 +1163,10 @@ public class InsightsOrchestratorTests
         var trim = new RetrievalAccessTrim(
             new Microsoft.AspNetCore.Http.HttpContextAccessor { HttpContext = httpContext },
             new ReadableDocumentsUserClient(/* nothing readable */),
+            // Task 188 round 3: nothing is readable, so no externality lookup and no narrowing may run.
+            new Mock<Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver>(MockBehavior.Strict).Object,
+            new Mock<Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver>(MockBehavior.Strict).Object,
+            Sprk.Bff.Api.Tests.Services.Ai.Handlers.DocumentNarrowingReads.NeverCalled,
             NullLogger<RetrievalAccessTrim>.Instance);
         _ragServiceMock
             .Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))

@@ -563,6 +563,23 @@ internal static class InheritedAccessPermission
     internal const string AppOnlyDocumentWriteReasonCode = "sdap.access.document_access_server_only";
 
     /// <summary>
+    /// Task 188 round 4e: the reason code when an app-only generic writer names one of a document's D7 link columns
+    /// (<see cref="DocumentLinkColumns"/>; <see cref="RefuseAppOnlyWrite"/>).
+    /// </summary>
+    internal const string AppOnlyDocumentLinkWriteReasonCode = "sdap.access.document_link_server_only";
+
+    /// <summary>
+    /// Task 188 round 4e: the document columns THE external document narrowing walks (D7 rules 3 and 4): its parent document
+    /// and the communication it comes from. They are visibility inputs, so re-pointing or clearing either one can show a
+    /// hidden document to partners. The same constants the predicate reads, so the two cannot drift.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> DocumentLinkColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDocumentNarrowing.ParentDocumentAttribute,
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDocumentNarrowing.RelatedCommunicationAttribute,
+    };
+
+    /// <summary>
     /// Task 189 fix round C (K5): an APP-ONLY generic writer never writes a document's <see cref="Column"/> or its
     /// own-narrowing record (<see cref="AccessInheritance.Column"/>). These writers are the Update Record playbook node and
     /// the action seam when they act for no person (<c>UpdateRecordActionCore</c>), and an AI output mapping
@@ -573,20 +590,35 @@ internal static class InheritedAccessPermission
     /// form, the user-OBO chat tools, and an update impersonating its user all run as that user. The field-mapping push also
     /// runs as its caller, but its rules are a configuration applied to every child it reaches, so it asks this too and
     /// skips such a rule on a document (the rest of the push applies; security pass 2).
+    /// <para>Task 188 round 4e: the same writers never write a document's D7 link columns either
+    /// (<see cref="DocumentLinkColumns"/>, refused with <see cref="AppOnlyDocumentLinkWriteReasonCode"/>), in any form: set,
+    /// cleared (a null), <c>{nav}@odata.bind</c> or <c>_{column}_value</c>, any case. Legitimate link changes go through the
+    /// re-file routes (<c>RecordOwnershipResolver.ReparentAsync</c>, caller-checked), the Office create (I-19, the link in the
+    /// create) and the BFF's own typed writers, none of which uses these paths. Every caller of the generic update is held to
+    /// this by <c>ExternalDocumentNarrowingGuardTests</c> (round 4e).</para>
     /// </summary>
     /// <returns>The refusal (nothing is written), or <see langword="null"/> when the write may proceed.</returns>
     internal static RecordOwnerResolution? RefuseAppOnlyWrite(string? table, IEnumerable<string> keys)
     {
         ArgumentNullException.ThrowIfNull(keys);
-        if (!RecordsOwnNarrowing(table?.Trim()))
+        var trimmed = table?.Trim();
+        var narrows = RecordsOwnNarrowing(trimmed);
+        var links = string.Equals(trimmed, Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDocumentNarrowing.DocumentTable, StringComparison.OrdinalIgnoreCase);
+        if (!narrows && !links)
             return null;
 
-        var named = keys.Select(SecureRootInheritance.NormalizeColumn)
-            .FirstOrDefault(k => k is Column or AccessInheritance.Column);
-        return named is null
-            ? null
-            : RecordOwnerResolution.Refused(AppOnlyDocumentWriteReasonCode,
+        var columns = keys.Select(SecureRootInheritance.NormalizeColumn).ToList();
+        if (narrows && columns.FirstOrDefault(k => k is Column or AccessInheritance.Column) is { } named)
+        {
+            return RecordOwnerResolution.Refused(AppOnlyDocumentWriteReasonCode,
                 $"{named} of a document is set by Spaarke (it keeps the document's own narrowing), so it was not written");
+        }
+
+        var link = links ? columns.FirstOrDefault(DocumentLinkColumns.Contains) : null;
+        return link is null
+            ? null
+            : RecordOwnerResolution.Refused(AppOnlyDocumentLinkWriteReasonCode,
+                $"{link} of a document is set by Spaarke (it decides whether partners may see the document), so it was not written");
     }
 
     /// <summary>What to hold and what to write on one row of a <see cref="RecordTables"/> table (task 189).</summary>
