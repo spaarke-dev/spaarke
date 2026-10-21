@@ -2482,7 +2482,11 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         };
     }
 
-    private FieldMappingRuleEntity MapToFieldMappingRuleEntity(Dictionary<string, JsonElement> data)
+    /// <summary>
+    /// Maps one Dataverse sprk_fieldmappingrule row into the entity. Internal and static (InternalsVisibleTo the BFF unit tests,
+    /// ADR-038 Amendment A2): pure column-to-property mapping that no public surface can observe without an HTTP double.
+    /// </summary>
+    internal static FieldMappingRuleEntity MapToFieldMappingRuleEntity(Dictionary<string, JsonElement> data)
     {
         return new FieldMappingRuleEntity
         {
@@ -2507,7 +2511,9 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
                 ? expr.GetString() : null,
             IsCascadingSource = data.TryGetValue("sprk_iscascadingsource", out var cs) && cs.ValueKind != JsonValueKind.Null && cs.GetBoolean(),
             ExecutionOrder = data.TryGetValue("sprk_executionorder", out var eo) && eo.ValueKind != JsonValueKind.Null ? eo.GetInt32() : 0,
-            IsActive = data.TryGetValue("sprk_isactive", out var active) && active.ValueKind != JsonValueKind.Null && active.GetBoolean()
+            IsActive = data.TryGetValue("sprk_isactive", out var active) && active.ValueKind != JsonValueKind.Null && active.GetBoolean(),
+            // An empty sprk_syncmode (a rule created before the column was set) reads as One-time (0).
+            SyncMode = data.TryGetValue("sprk_syncmode", out var sm) && sm.ValueKind != JsonValueKind.Null ? sm.GetInt32() : Spaarke.Dataverse.SyncMode.OneTime
         };
     }
 

@@ -23,9 +23,9 @@ internal static class FieldMappingColumns
         "sprk_fieldmappingprofileid,sprk_name,_sprk_sourcerecordtype_value,_sprk_targetrecordtype_value,"
         + "sprk_capabilitymode,sprk_defaultvalue,sprk_description,statecode";
 
-    /// <summary>Columns selected from <c>sprk_fieldmappingrule</c>.</summary>
+    /// <summary>Columns selected from <c>sprk_fieldmappingrule</c>, including <c>sprk_syncmode</c> (task 005, FR-05d).</summary>
     internal const string RuleSelect =
         "sprk_fieldmappingruleid,sprk_name,_sprk_fieldmappingprofile_value,sprk_sourcefield,sprk_sourcefieldtype,"
         + "sprk_targetfield,sprk_targetfieldtype,sprk_mapping_type,sprk_compatibilitymode,sprk_isrequired,"
-        + "sprk_defaultvalue,sprk_expression,sprk_iscascadingsource,sprk_executionorder,sprk_isactive";
+        + "sprk_defaultvalue,sprk_expression,sprk_iscascadingsource,sprk_executionorder,sprk_isactive,sprk_syncmode";
 }
