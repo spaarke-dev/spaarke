@@ -1,11 +1,18 @@
 /**
  * Spaarke Document Operations
- * Version: 1.28.1
+ * Version: 1.28.2
  * Description: Document checkout/checkin operations via BFF API with MSAL authentication
  *
  * ADR-006 Exception: Approved for ribbon button invocation
  *
  * Dependencies: MSAL.js (loaded from CDN)
+ *
+ * Changes in 1.28.2:
+ * - Delete: a 409 is no longer always "checked out". The BFF refuses to delete a document that is
+ *   still the parent of other documents (an .eml and its attachments) with 409 reasonCode
+ *   document_has_child_documents (unified-access-control-r2 task 188 slice D); the dialog now says
+ *   how many attached documents to delete first. "Checked out" is shown only for the checkout code
+ *   (document_locked); any other 409 gets a generic message.
  *
  * Changes in 1.28.1:
  * - SendToIndex sends the environment tenant (sprk_TenantId, the tenant the user signed in
@@ -86,7 +93,7 @@ Spaarke.Document.Config = {
     },
 
     // Version
-    version: "1.28.1",
+    version: "1.28.2",
 
     // Document Status Codes (statuscode field values)
     statusCode: {
@@ -542,6 +549,43 @@ Spaarke.Document.Utils = {
             return false;
         }
     }
+};
+
+/**
+ * The message for a 409 answer to DELETE /api/documents/{id} (1.28.2, task 188 slice D).
+ * - reasonCode "document_has_child_documents": other documents (an email's attachments) name this one
+ *   as their parent; childCount says how many (absent = not stated).
+ * - error / reasonCode "document_locked": the document is checked out (checkedOutBy.name when given).
+ * - anything else: a generic conflict message, with the server's detail when it sent one.
+ * @param {object} errorData The parsed response body ({} when it could not be parsed)
+ * @returns {string} The message for Xrm.Navigation.openErrorDialog
+ */
+Spaarke.Document.Utils.getDeleteConflictMessage = function(errorData) {
+    var data = errorData || {};
+    var code = data.reasonCode || data.error;
+
+    if (code === "document_has_child_documents") {
+        var count = data.childCount;
+        if (typeof count === "number" && count === 1) {
+            return "This document has 1 attached document. Delete it first, then delete this document.";
+        }
+        if (typeof count === "number" && count > 1) {
+            return "This document has " + count + " attached documents. Delete them first, then delete this document.";
+        }
+        return "This document has attached documents. Delete them first, then delete this document.";
+    }
+
+    if (code === "document_locked") {
+        var lockedMessage = "This document is currently checked out and cannot be deleted.\n\n";
+        if (data.checkedOutBy && data.checkedOutBy.name) {
+            return lockedMessage + "Checked out by: " + data.checkedOutBy.name;
+        }
+        return lockedMessage + "Please wait for it to be checked in.";
+    }
+
+    var message = "This document could not be deleted because it conflicts with its current state.";
+    var reason = data.detail || data.title;
+    return reason ? message + "\n\n" + reason : message;
 };
 
 // =============================================================================
@@ -1152,16 +1196,9 @@ Spaarke.Document.deleteDocument = async function(primaryControl) {
 
             // Check for specific error types
             if (response.status === 409) {
-                // Document is locked (checked out)
-                var lockedMessage = "This document is currently checked out and cannot be deleted.\n\n";
-                if (errorData.checkedOutBy) {
-                    lockedMessage += "Checked out by: " + errorData.checkedOutBy.name;
-                } else {
-                    lockedMessage += "Please wait for it to be checked in.";
-                }
-
+                // Checked out, still the parent of attached documents, or another conflict (1.28.2)
                 await Xrm.Navigation.openErrorDialog({
-                    message: lockedMessage
+                    message: Spaarke.Document.Utils.getDeleteConflictMessage(errorData)
                 });
 
             } else if (response.status === 404) {
