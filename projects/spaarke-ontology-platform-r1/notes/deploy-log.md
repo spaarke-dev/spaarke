@@ -327,3 +327,16 @@ Criterion 89 (blank the writer client id, expect the writer-failure alert to fir
 - Ontology read-back: a local choice (not global) with 16 options. Ontology's 100000000 Threshold, 100000001 Switch and 100000002 Existence are unchanged, as are billing's 100000003–100000013.
 - 100000014 SubmissionIntegrity is still absent on dev; ebilling task 049's option script hasn't run.
 
+## 2026-10-21 — ebilling 080 Procedure schema on dev (ebilling owner OK + ontology PASS of 11ead6c938)
+
+- **ebilling's run:** exit 0; created 64, changed 20, skipped 40. Verbatim verify output: `projects/ebilling-r1/notes/080-dev-run-2026-10-21.md` on work/ebilling-r1.
+- **Ontology independent read-back** (metadata GETs, after the run):
+  - `sprk_procedureassignment`:
+    - core lookups `sprk_matter` (repaired from Cascade), `sprk_project` and `sprk_workassignment`: RemoveLink, Assign/Share/Unshare/Reparent NoCascade;
+    - `sprk_excludedpolicy`: Cascade, the only cascading relationship;
+    - `sprk_procedure`, `sprk_pinnedversion`, `sprk_firm`: Restrict;
+    - `sprk_createdbyperson`: RemoveLink.
+  - `sprk_procedureversion`: `sprk_procedure` Cascade is the only cascading relationship; `sprk_previousversion` and `sprk_createdbyperson` are RemoveLink.
+  - `sprk_ruleset`: the matter, project and work-assignment lookups are RemoveLink; `sprk_procedure` is Restrict.
+- **D-146 / #2132:** holds. No core-record delete reaches a Restrict or a cascade on the new tables.
+
