@@ -350,7 +350,7 @@ Code: `916ae9449` (item 1, D-140) and `a5dafd714` (items 2-5). Two commits follo
 
 ### Round 3 (uac-r2 round 2 review of 050a, head `857260dbb9`, 2026-10-20)
 
-Code: `bb6874f2f7` (F1-a and F1-b) and `3d071d2d3c` (F2). These notes come last. The branch was not rebased or merged with master (uac-r2 reviews the range as a diff).
+Code: `bf44f1728e` (F1-a and F1-b) and `1af1877dda` (F2). These notes come last. The branch was not rebased or merged with master (uac-r2 reviews the range as a diff).
 
 **Which F1-a version: the full one.** `SecureChildShareSynchronizer.SecureRootsAboveAsync` (uac-r2 task 147) is already `public` on this branch (`Services/Access/SecureChildShareSynchronizer.cs:665`), and so is `IsSecureOwnerTeamAsync`. No merge was needed and no uac-r2 file was changed or widened.
 
@@ -400,3 +400,43 @@ All 13 reverts were caught.
   - A confirm retry that finds its earlier submission (`AnswerWithEarlierAsync`) does not re-run the document checks. The job decides isolation at commit (F1-b).
   - The persister does not re-run the D-140 ordinary-record chain at commit. This was outside the brief. A document re-filed under another ORDINARY record after the confirm is committed under the confirm's record, a mismatch but not an isolation leak.
   - Undetermined includes "a parent row does not exist", so a document with a dangling lookup is refused (fail closed). Dataverse normally clears a lookup when its target is deleted.
+
+### Round 4 (uac-r2 round 3 review of 050a, base `38368ddbdc`, 2026-10-20)
+
+Code: `7635a1ff9b` (F3, tests only) and `e8fc8e6e91` (F1). These notes come last. Not rebased or merged with master.
+
+| # | Finding | Fix | Tests (fail before the fix) |
+|---|---|---|---|
+| F3 | The walk's Failed (an ambiguous Secure Record owner team) and NotApplicable (no Secure Record BU) branches of `ExistingDocumentIsolationCheck` were untested. `IsolationReadFaults_Is503` reached Unavailable through the catch, not through `default:`. A `default:` → Allowed mutant survived: with a duplicated owner team, every isolated document would pass at confirm and at commit. | Tests only. The production code was already right. | **Must fire:** `AmbiguousSecureOwnerTeam_AtConfirm_Is503_AndWritesNothing` (503 `record_unavailable`), `ConfirmSubmission_AmbiguousSecureOwnerTeam_IsRetry_NothingCommitted` (Retry `document_isolation_unreadable`, no transaction). **Must not fire:** `NoSecureRecordBusinessUnit_IsReceived` (`SecureChildShareWorld.WithoutSecureBusinessUnit()`). The ambiguous team is a second `Team(...)` with the owner team's name, type and business unit (`InvoiceSubmissionExistingDocumentTests.AddAmbiguousSecureOwnerTeam`). |
+| F1 (pre-existing) | The D-140 chain (`ResolveFilingAsync`) read only the communication's own `sprk_regarding{matter,project,workassignment}`. A firm's reply on ordinary matter S's thread, where the communication itself names no core record, read as unfiled. The isolation check found no secure root, so the invoice could be committed under M from S's email. | The communication hop also reads the communication's thread (`sprk_communicationthread`; the column comes from `SecureChildLineage`, the one map) and the thread's same three regarding columns. It takes the **union** of the communication's own core records and the thread's: the rule `SecureChildReconciler.ContextFor` applies (the code comment cites it). A thread that is gone files nothing. A thread read fault propagates to the chain's existing catch: 503 `record_unavailable`, exactly as a communication read fault does. The comment block at the top of `ExistingDocumentIsolationCheck.cs` now says what the chain reads. | **Must fire:** `ThreadOnlyReply_UnderAnotherMatter_Is409_AndWritesNothing`, `CommunicationRegardingM_OnSsThread_IsRefusedForMAndForS` (both directions), `ThreadUnreadable_Is503_AndWritesNothing`. **Must not fire:** `ThreadOnlyReply_UnderTheConfirmsMatter_IsReceived`, `ThreadGone_FilesNothing_IsReceived`. Against the round-3 service file, 3 of the new tests fail; the 2 must-not-fire tests pass. |
+
+**The union rule, and why (F1).** The brief asked for "the communication's own regarding wins; the thread only when the communication names none". `SecureChildReconciler.ContextFor` does not do that: it takes `ParentsOf(communication)` and then adds `ParentsOf(thread)`. So precedence would have made the two disagree, which is what uac-r2 asked to avoid. The coordinator chose the union.
+- The communication's lineage is the union of both parents. An invoice from it may only be filed where every parent agrees.
+- **A deliberate refusal:** a communication regarding M on S's thread is 409 `document_core_record_mismatch` whether it is confirmed onto M or onto S. The administrator re-files the communication (or its thread), or confirms the attachment onto the right record.
+- ContextFor itself is unchanged.
+- The D-140 precedence one level up stays: the document's own core lookups still decide before its communication.
+
+**K4: accepted known limit, hardening not done.** uac-r2's reasoning for accepting it:
+- The invoice has no document lookup in its lineage, so the reconciler never narrows the invoice.
+- The end state equals a legitimate thread join one second after the commit.
+- No check-time gate can enforce a stronger invariant.
+
+The optional hardening was tried and backed out, because it is not cheap. The idea: `InvoiceDocumentRefile` re-runs `ExistingDocumentIsolationCheck` against the invoice's core record before the re-file. That takes one constructor parameter and one read of the invoice's core lookups, with no new DI. But it runs ahead of the resolver, so it takes over refusals the resolver owns, and three existing re-file tests fail:
+- `Refile_DocumentUnderASecureMattersInvoice_IsNeverReleased_TheRealResolverRefusesWithoutF3` and `Refile_WhenTheRealResolverRefuses_NothingIsWritten` now answer `document_core_record_mismatch` instead of the resolver's own code (`record_owner_secure_parent_not_isolated`, …). Those tests prove the resolver backstop (no move out of a Secure record without F3), and they would stop exercising it.
+- `Refile_WhenTheIsolationReadFaultsTwice_WritesNothing` sees a different read order.
+
+That changes the re-file's refusal contract, and so the reason codes the administrator's note carries. Doing it properly needs a decision on which refusal wins, so it was not done. The race stays visible after the fact: the reconciler keeps the document isolated, and the invoice stands under its record.
+
+**K1 items uac-r2 accepted (no change).**
+- After a reparent fault, the administrator's note says the document is "NOT filed" while `sprk_invoice` may already be set (the link write landed and the owner assignment faulted). The action asked of the administrator (resolve the document, then resume) is still right. The note's wording was not changed: the text is pinned by the handler tests and is user-visible.
+- A confirm that lands while the record is mid "make secure" is Undetermined (a root flagged secure but not isolated). It is refused, so it fails closed.
+- `ExistingDocumentIsolationCheck` (around `:136`) resolves the Secure Record owner team a second time in `IsSecureOwnerTeamAsync`, after the walk resolved it once. The race between the two reads is negligible: renaming or adding an owner team is an administrator action.
+
+**Mutations (round 4).** Script `mut050a4.ps1` (scratchpad). It applies the revert in place, rebuilds `tests/unit/Sprk.Bff.Api.Tests`, and runs the brief's filter (`Finance|SecureChild|Submission|Isolation`). It then restores the file with `git checkout` and checks the restore with `git diff --quiet`. All restores were clean.
+
+| # | Reverted behaviour | Failed | Caught by |
+|---|---|---|---|
+| **R4-1 (seeded, F3)** | `ExistingDocumentIsolationCheck`: `default:` (walk Failed / Incomplete) returns Allowed | 2 | `AmbiguousSecureOwnerTeam_AtConfirm_Is503_…`, `ConfirmSubmission_AmbiguousSecureOwnerTeam_IsRetry_…` |
+| R4-2 | NotApplicable (no Secure Record owner team) answers Unavailable | 1 | `NoSecureRecordBusinessUnit_IsReceived` |
+| **R4-3 (seeded, F1)** | The thread hop removed (`Environment.TickCount64 < 0 &&`) | 3 | `ThreadOnlyReply_UnderAnotherMatter_Is409_…`, `CommunicationRegardingM_OnSsThread_IsRefusedForMAndForS`, `ThreadUnreadable_Is503_…` |
+| R4-4 | Precedence instead of the union (the thread read only when the communication names none) | 1 | `CommunicationRegardingM_OnSsThread_IsRefusedForMAndForS` |
