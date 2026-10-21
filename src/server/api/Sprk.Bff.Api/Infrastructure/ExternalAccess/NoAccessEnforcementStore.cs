@@ -349,13 +349,24 @@ public class NoAccessEnforcementStore
     /// The rights <paramref name="systemUserId"/> holds on the record, as Dataverse's <c>RetrievePrincipalAccess</c>
     /// reports them — evaluated for THAT principal (the function is bound to it), read with the app token.
     /// </summary>
+    /// <remarks>Also read by <see cref="AccessibleRecordSetService"/> for a systemuser's unconfirmed Secure records (#2121
+    /// option (b)), so the named-principal call stays implemented once. It throws on a non-success with the status in
+    /// <see cref="HttpRequestException.StatusCode"/>; that caller tells a 404 from a fault by it.</remarks>
+    /// <param name="systemUserId">The principal the question is bound to.</param>
+    /// <param name="entitySet">The record's entity set.</param>
+    /// <param name="recordId">The record.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <param name="failureLogLevel">The level this store logs a non-success at (#2121 round 1, F2). <see cref="LogLevel.Error"/>
+    /// by default — the enforcer's reads, where a failed read fails the run. The composer passes <see cref="LogLevel.Debug"/>:
+    /// it logs every outcome itself (a 404 at Information, a fault at Warning), so the store's Error would be a second,
+    /// misleading entry for the same answer.</param>
     internal virtual async Task<AccessRights> GetPrincipalRightsAsync(
-        Guid systemUserId, string entitySet, Guid recordId, CancellationToken ct)
+        Guid systemUserId, string entitySet, Guid recordId, CancellationToken ct, LogLevel failureLogLevel = LogLevel.Error)
     {
         var target = $"{{\"@odata.id\":\"{entitySet}({recordId})\"}}";
         using var doc = await GetAsync(
             $"systemusers({systemUserId})/Microsoft.Dynamics.CRM.RetrievePrincipalAccess(Target=@p1)" +
-            $"?@p1={Uri.EscapeDataString(target)}", ct);
+            $"?@p1={Uri.EscapeDataString(target)}", ct, failureLogLevel: failureLogLevel);
 
         var rights = doc.RootElement.TryGetProperty("AccessRights", out var r) && r.ValueKind == JsonValueKind.String
             ? r.GetString()
@@ -369,7 +380,10 @@ public class NoAccessEnforcementStore
     /// absolute URL is followed ONLY when it is under that root — the app token is never sent anywhere else).</param>
     /// <param name="ct">Cancellation token.</param>
     /// <param name="prefer">An optional <c>Prefer</c> header (the scan's page size).</param>
-    private async Task<JsonDocument> GetAsync(string relativeUrl, CancellationToken ct, string? prefer = null)
+    /// <param name="failureLogLevel">The level a non-success is logged at; <see cref="LogLevel.Error"/> unless a caller that
+    /// logs the outcome itself asks otherwise (<see cref="GetPrincipalRightsAsync"/>).</param>
+    private async Task<JsonDocument> GetAsync(
+        string relativeUrl, CancellationToken ct, string? prefer = null, LogLevel failureLogLevel = LogLevel.Error)
     {
         var url = ResolveRequestUrl(GetDataverseApiUrl(), relativeUrl);
         var token = await GetAppOnlyTokenAsync(ct).ConfigureAwait(false);
@@ -387,7 +401,7 @@ public class NoAccessEnforcementStore
         using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
-            _logger.LogError("[NO-ACCESS-ENFORCE] Dataverse read FAILED ({Status}): {Url}", response.StatusCode,
+            _logger.Log(failureLogLevel, "[NO-ACCESS-ENFORCE] Dataverse read FAILED ({Status}): {Url}", response.StatusCode,
                 relativeUrl.Split('?')[0]);
             throw new HttpRequestException($"Dataverse read failed: {(int)response.StatusCode}", null, response.StatusCode);
         }
