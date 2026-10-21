@@ -345,7 +345,10 @@ Unchanged:
 | `3629c9131a` | Fix round: the reconciler's remark (a document's value is not display only; D7, task 188) |
 | `7a71342215` | Fix round: deploy order (customer deployment guide §7.4), the data-model docs, I-16 |
 | `36527b2470` | Fix round: `DocumentAccessPermissionWriterGuardTests` (§8.7) |
-| (this commit) | this file: §2.6, §4, §8.7 |
+| `42e64bf51f` | this file: §2.6, §4, §8.7 |
+| `51cb5fb94b` | Fix round 2: documents fenced out of the stamp path (§8.8) and 5 test cases |
+| `7933cf456f` | Fix round 2: the guard's baseline is empty; the fenced stamp members are non-document writers |
+| (this commit) | this file: §8.8; the data-model doc and I-16 |
 
 ### 8.2 Tests
 
@@ -514,3 +517,49 @@ ArchTest source scan).
 - CVE: none; no package changed.
 - Conflicts (`git merge-tree`): #2170 has one hunk in I-16, as expected; #2150 has the known one hunk in
   `SecureChildShareWorld`.
+
+### 8.8 Fix round 2 (main session, 2026-10-20): the stamp path is fenced
+
+- **Decision.** The main session accepted the §8.7 deviation from the literal rule, the "no looser" clause and the
+  edit-below-floor behaviour. It asked for the stamp path to be fenced now rather than filed.
+- **The fence.** `CoreAncestorResolver.InheritedAccessPermissionAsync` is the helper that `StampAsync` (both overloads),
+  `DeriveForHostAsync`, `ApplyInheritedAccessPermissionAsync` and `ResolveInheritedAccessPermissionAsync` take the
+  inherited value from. It now returns none for a table that records its own narrowing
+  (`InheritedAccessPermission.RecordsOwnNarrowing`, i.e. `sprk_document`). `ResolveInheritedAccessPermissionAsync` returns
+  before it reads the row.
+- **Before → after.** A document passed through the stamp path:
+  - before: got the bare inherited value in its payload, which lowered an own narrowing (no caller did this today);
+  - after: gets none.
+
+  To Do, Event and Communication are unchanged.
+- **Why a fence and not the guard.** The guard sees write sites, not callers, so a new document caller of `StampAsync`
+  would pass it. The fence is what stops the bare-value write. The guard's ratchet baseline is now empty, and the
+  fenced members are listed as non-document writers with the fence as their reason.
+- **Tests (2 new methods, 5 cases, in `InheritedAccessPermissionStampTests`).**
+  - `StampAsync_UnderARestrictedMatter_CarriesTheInheritedValue_ExceptOnADocument`, a theory over both payload shapes:
+    - must fire: `sprk_document` gets no `sprk_accesspermission`;
+    - must not fire: `sprk_todo`, `sprk_event` and `sprk_communication` carry Restricted.
+  - `TheOtherStampPathMembers_GiveADocumentNoValue_AndResolveDoesNotReadIt`: Apply, Derive and Resolve give a document
+    none, and Resolve makes no read of the document.
+- **Mutants.**
+
+  | # | Perturbation | Red |
+  |---|---|---|
+  | M12 | remove the helper's fence | 2: the document theory case, the Apply/Derive/Resolve test |
+  | M13 | remove the Resolve fence | 1: Resolve reads the document |
+
+- **Guard mutants G0–G6**, re-run after the baseline change, all fail the guard as before. G3 is now a listed member
+  that no longer writes, which reports STALE.
+- **Accepted limit** (main session): the scan cannot see a key held in a local variable, or payloads from the generic
+  update writers and playbooks. It is listed in the guard's remarks and the PR body.
+- **Gates.**
+  - Build: 0 warnings, 0 errors.
+  - Filtered baseline suite: 325 → **330, all pass**.
+  - Wide run, first attempt: 1 failure. `ProvisionProjectIdempotencyTests.ProvisionProject_WhenRecordingTheContainerTimesOut_FailsLoudlyAndLogsTheContainerId`
+    hit its 30-second wall-clock wait while two publishes ran beside it. It passed 4 times alone. It is not in code
+    this task touches, and it is reported to the main session (not filed).
+  - Wide run, rerun without the load: **10049 passed, 0 failed, 9 skipped**.
+  - ArchTests: **1211 / 1211**.
+  - Publish size: master `3531ed65e3` (no `src/server` change since the base `4f5f22694c`) 39,314,243 B; branch
+    `7933cf456f` 39,320,170 B; delta **+5,927 B**.
+  - CVE: none.
