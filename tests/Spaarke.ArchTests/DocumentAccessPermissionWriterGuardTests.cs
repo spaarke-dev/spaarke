@@ -53,7 +53,8 @@ public class DocumentAccessPermissionWriterGuardTests
     {
         new Writer(Reconciler, "DecideDocumentAsync",
             "Task 189: the L4 pass. It writes a document's value only from InheritedAccessPermission.DecideDocument, with its " +
-            "record in the same update, after a re-read."),
+            "record in the same update, after a re-read; or, where the record cannot be known (unreadable, or no record " +
+            "column), from DecideDocumentRaiseOnly, which only raises the value and never lowers it."),
         new Writer(Resolver, "RefreshDocumentAccessPermissionAsync",
             "Task 189: the child-records create refresh (L1). Same decision, one update."),
     };
@@ -61,8 +62,8 @@ public class DocumentAccessPermissionWriterGuardTests
     private static readonly IReadOnlyList<Writer> NonDocumentWriters = new[]
     {
         new Writer(Reconciler, "RunAsync",
-            "Task 173: To Do, Event and Communication. A document goes to DecideDocumentAsync, or is not written at all where " +
-            "documents lack the record column (TablesWithoutColumn)."),
+            "Task 173: To Do, Event and Communication. A document always goes to DecideDocumentAsync, including where " +
+            "documents lack the record column (TablesWithoutColumn): it is then raised only, never lowered."),
         new Writer(Resolver, "RefreshInheritedAccessPermissionAsync",
             "Task 173: To Do, Event and Communication. A document returns through RefreshDocumentAccessPermissionAsync before " +
             "this write (InheritedAccessPermission.RecordsOwnNarrowing)."),

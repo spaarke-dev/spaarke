@@ -76,8 +76,10 @@
     OPERATOR-RUN ONLY: -Apply is the main session's manual gate. Run it BEFORE Set-InheritedAccessPermissionFormLock.ps1
     (which refuses COLUMN_MISSING until the column exists) and before a BFF with task 173 writes the column in a new
     environment (the BFF skips a table that lacks it, so the order is safe either way). Task 189: run it BEFORE a BFF with
-    task 189 - until the record column exists, that BFF writes no document's Access Permission (fail closed; the run
-    reports sprk_document in tablesWithoutColumn). Requires Azure CLI (`az login`).
+    task 189 - until the record column exists, that BFF only raises a document's Access Permission and never lowers it
+    (the run reports sprk_document in tablesWithoutColumn), and a raise it keeps is recorded as the document's own on the
+    first run after this script (SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md section 7.4 says how to find and widen those).
+    Requires Azure CLI (`az login`).
 
     Exit codes: 0 = done / nothing to do / dry run complete / VERIFY PASS / SELF-TEST PASS;
                 2 = refused (nothing was written); 1 = VERIFY FAIL, SELF-TEST FAIL, or an unexpected error.

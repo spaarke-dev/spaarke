@@ -23,8 +23,11 @@
 - **The rule for a document.** Its stored value is `max(own, inherited)`. Inherited values follow the parents both ways.
   An own narrowing is never widened by the BFF. Everything that is not an own narrowing behaves exactly as today. To Do,
   Event and Communication are untouched: the record lives on documents only.
-- **Fail closed.** An unreadable record, an unknown stored option, or a missing record column writes nothing for that row.
-  The row is logged with ids and reported.
+- **Fail closed, never below the parents.** An unknown stored option writes nothing for that row. An unreadable record,
+  or a missing record column, only RAISES the row to what its parents give and never lowers it (fix round C, K1+K2,
+  §8.9). The row is logged with ids and reported. **The schema goes before the BFF:** a document raised while the column
+  is missing, whose parents then widen, keeps the stricter value, and the first run after the script records it as the
+  document's own (security pass 2, §2.8).
 
 ## 1. Facts checked (master `4f5f22694` + read-only dev metadata, 2026-10-20)
 
@@ -99,8 +102,9 @@ existing rule. The own/inherited classification inside it is task 175's. I **ext
 `AccessInheritance.OwnPermissionOf(stored, record, floor)`. Both callers use it, and `Decide`'s existing tests prove that
 `Decide` is unchanged.
 
-1. The record cannot be parsed (bad JSON, wrong version, unknown option) → **undetermined**. Nothing is written; the row
-   is carried and logged with ids only (AC 3).
+1. The record cannot be parsed (bad JSON, wrong version, unknown option) → **undetermined**, carried and logged with ids
+   only (AC 3). Its value is only raised to what its parents give, never lowered, and the record is left as it is (fix
+   round C, K1+K2: `DecideDocumentRaiseOnly`; the first design wrote nothing).
 2. The stored option is not Standard, Limited or Restricted → undetermined, nothing written. Today this is overwritten;
    for documents that would be ranking an unknown value by guess.
 3. **Parentless:** the value is never written (round 81, as today). The record is written only when the stored value is
@@ -115,8 +119,9 @@ existing rule. The own/inherited classification inside it is task 175's. I **ext
      - looser → own unchanged, and the value is put back.
    - target = `max(own, F)`;
    - **write the value** when stored ≠ target;
-   - **write the record** when it differs from the stored one. Exception: no record exists and the new one says
-     "no own, floor Standard". Then nothing is written, so the Standard majority never gets a write (no `modifiedon` churn).
+   - **write the record** when there is none, or when it differs from the stored one. Every parented row gets its
+     record, the Standard majority too (fix round C, F1, §8.9; the first design skipped "no own, floor Standard" to save
+     the `modifiedon` churn).
    - Value and record go in **one** update, so they change together.
 6. **Re-read before a document write** (task 175's pattern, verifier c): just before the update, re-read the stored value
    and the record by id. If either changed since the listing, nothing is written: the row is counted
@@ -127,8 +132,10 @@ existing rule. The own/inherited classification inside it is task 175's. I **ext
 **Tables without the record column** (To Do, Event, Communication; and a document table in an environment where the
 schema has not landed):
 - **To Do / Event / Communication:** today's code path, byte-for-byte (AC 4).
-- **`sprk_document` without `sprk_accessinheritance`:** no document is written, and the table is reported in the run's
-  `tablesWithoutColumn` with a warning naming the record column. Fail closed: the own narrowing is unreadable (AC 3).
+- **`sprk_document` without `sprk_accessinheritance`:** decided raise-only (fix round C). A document below what its
+  parents give is raised to it (the value alone, `raisedOnly`), none is lowered, and the record column is neither read nor
+  written. The table is reported in the run's `tablesWithoutColumn` with a warning naming the record column. A raise made
+  then is kept, and recorded as the document's own once the column exists (§2.8).
 
 ### 2.3 What the rule gives (examples)
 
@@ -209,10 +216,20 @@ schema has not landed):
    - Mirror the attribute into `src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Document/Entity.xml` (as task 175
      did for work assignment and project, with `IsSecured 0`).
    - **The agent runs only `-SelfTest` and the dry run.** `-Apply` on dev is the main session's step after this checkpoint.
-2. **Deploy order.** Schema `-Apply` → `-Verify` (exit 0) → BFF (via R3). On its first run after the restart, the job's
-   sweep records the 26 parented Restricted rows (dev): about 26 record-only writes, inside the cap. Then `-Verify` again.
-   - **If the BFF lands before the schema,** documents are skipped and reported (fail closed). Nothing is widened or
-     narrowed on documents until the column exists.
+2. **Deploy order: the schema MUST go before the BFF.** Schema `-Apply` → `-Verify` (exit 0) → BFF (via R3). On its
+   first runs after the restart, the job's sweep gives every parented document its record (fix round C, F1: 279 on dev,
+   about 2 runs; §8.9). Then `-Verify` again.
+   - **If the BFF lands before the schema** (security pass 2 corrected this paragraph), documents are decided raise-only:
+     one below what its parents give is raised to it, none is lowered, and `sprk_document` is listed in
+     `tablesWithoutColumn`. A raised document whose parents then widen keeps the stricter value. On the first run after
+     the script, that value is stricter than what its parents give and the document has no record, so it is recorded as
+     the document's OWN narrowing and is never widened again.
+   - **Finding and fixing them** (`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §7.4): in that window, the job's `set:` lines on
+     `sprk_document` that say `own unknown` (counted in `raisedOnly`), and the child-records refresh's
+     `[INHERITED-ACCESS-PERMISSION]` warnings naming the missing record column. In the first runs after the script, each
+     of those whose `set:` line has an `own` value stricter than `inherited` (counted in `ownKept`) was kept by the raise,
+     not by a user. The operator widens each by hand: an edit back to the value its parents give removes the own
+     narrowing (D3).
 3. **Rollback.** A BFF without 189 ignores the column, and the column can stay.
 4. **Report and logs.** The job's `accessPermission` result gains `recordsWritten`, `ownKept` and `changedConcurrently`.
    Each `set:` log line gains `own={Own}`. The live gate checks that no `set:` line on a document goes below its `own`
@@ -508,7 +525,8 @@ ArchTest source scan).
 
 **3. Also.**
 - The deploy-order rule is in `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §7.4 and the PR body: the schema first, then the
-  BFF. Until the column exists, the BFF writes no document's Access Permission.
+  BFF. (Corrected since: until the column exists, the BFF only raises a document's Access Permission and never lowers
+  it, fix round C; and a raise kept then becomes the document's own once the column exists, security pass 2, §2.8.)
 - An un-filed document keeps its last value as its own. This is stated in the PR body and fails closed.
 - `ChildAccessPermissionReconciler`'s remark now says a document's value is not display only (D7, task 188). The I-16
   line conflicts textually with #2170, which carries the same meaning.
