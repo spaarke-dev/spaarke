@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-21 14:45Z. Dev BFF a10e814d02 (deployed 14:34Z for UAC) + 036 flag ON; dev SPA 3531ed65e; R4 design.md drafted.
+> **Last Updated**: 2026-10-21 17:15Z. Dev BFF 84291ecea8 (deployed 16:41Z for UAC #2161, plus #2177 and #2205) + 036 flag ON; dev SPA 3531ed65e; R4 design.md drafted.
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -10,7 +10,7 @@
 | Field | Value |
 |-------|-------|
 | **Task** | No task mid-implementation. Open, owner-driven: 070/071 (Teams), 074 (A9 probes), 002 (grid columns). R4 `design.md` drafted, waiting for owner review. |
-| **Status** | **Dev BFF = `a10e814d02`**, deployed 2026-10-21 14:34Z at UAC's request; the owner approved it here. It adds #2169, #2150, #2184 and ontology 042c to 4f5f22694. Record: `notes/task-078-notes.md`, last section. Flag `ExternalAccess__ImpersonatedRootSets__Enabled` has been **ON since 2026-10-20 23:51Z**; rollback is to delete the setting. BFF rollback is `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261021T143151Z`, which returns to 4f5f22694. **Dev SPA = `3531ed65e`**: run 39536100531, 2026-10-21 03:02Z, with the #2166 fix and the UAC #2078/#2122 SPA changes. Rollback tag: `external-spa-dev-rollback-28274e04e`. UAC's 036 flag-on gates passed (uac-r2 0a4fbaa38). |
+| **Status** | **Dev BFF = `84291ecea8`**, deployed 2026-10-21 16:41Z; owner-approved here. It adds #2161, #2177 and #2205 to a10e814d02. Record: `notes/task-078-notes.md`, last section. Flag `ExternalAccess__ImpersonatedRootSets__Enabled` has been **ON since 2026-10-20 23:51Z**; rollback is to delete the setting. BFF rollback is `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261021T164028Z`, which returns to a10e814d02. **Dev SPA = `3531ed65e`**: run 39536100531, 2026-10-21 03:02Z, with the #2166 fix and the UAC #2078/#2122 SPA changes. Rollback tag: `external-spa-dev-rollback-28274e04e`. UAC's 036 flag-on gates passed (uac-r2 0a4fbaa38). |
 | **Next Action** | Wait for the owner: (1) smoke of SPA 3531ed65e (list in `notes/task-070-deploy-record.md`, last section), then close #2166; (2) answers to R4 design §9; (3) Teams package upload in the **Dewey Cheatham** tenant (the Spaarke tenant gets "not set up" by design), then 071; (4) 002 columns. |
 
 ### Uncommitted files
@@ -51,7 +51,7 @@
   - Awaiting UAC's answer.
 - **UAC D7 T7 (task 188)** and word-add-in task 130 (T8) will need an R3-coordinated dev BFF deploy later.
 - **ebilling:** will send its PR when ready (after D-148). Deploy it paired with the R4/R3 SPA change.
-- **a10e814d02 follow-up:** the final 30-minute exception reading (15:05Z) goes to UAC. Ontology runs its validate smoke and gate check. Peers will ping when their fixes reach master: #2191 (field-mapping/UAC), #2032 (SPE admin), #2177 (word-add-in).
+- **84291ecea8 follow-up:** UAC gate item 4: the owner does two .eml saves, or it relies on real saves. word-add-in reads the rows back. Ontology re-checks its logs at the 02:30Z nightly run. Next routine deploy candidates: #2182 (word-add-in task 131), and #2191 when it merges.
 
 ## Next actions (in order)
 1. Owner smoke of SPA 3531ed65e, then close #2166.

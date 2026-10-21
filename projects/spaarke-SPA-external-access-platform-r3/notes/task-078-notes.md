@@ -325,3 +325,26 @@ Verification after the fix: `dotnet build` 0 warnings, 0 errors. Handler classes
   - Graph ODataError "Invalid hostname for this tenancy": existing background noise.
 - **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261021T143151Z` (= `4f5f22694`). The 059 floor still holds; 4f5f22694 contains 077.
 - **Final 30-minute reading** (15:05:38Z): no new exception class; the same three groups (ODataError n=7, noise). Reconciliation runs from 14:58 to 15:04Z succeeded with nothing to do. Sent to UAC; tasks 189 and #2143 close on it. Ontology smoke PASS. SPE admin verified the live version.
+
+## Dev BFF deploy of master 84291ecea8 (2026-10-21 16:41Z; owner: "yes, deploy 84291ecea8")
+
+- **Requested by** UAC for #2161. The build also contains #2177 (word-add-in task 130) and #2205 (SPE admin #2032; the owner had said it could wait, but it sits below #2161 on master).
+- **Peer OKs:** ebilling, word-add-in, ontology, SPE admin and field-mapping. Provisioning has a standing OK. UAC passed on the owner's "yes" from its session; it was not used, and the owner approved directly here.
+- **Pre-checks:**
+  - Live DLL `a10e814d02`, an ancestor. healthz 200.
+  - `sprk_document.sprk_accessinheritance` present (Memo), which #2177 needs.
+  - No e0df77339 (ebilling 015 stays blocked).
+  - #2188 is still open on dev (#2191 not merged).
+- **Rollback snapshot:** `deploy/rollback/wwwroot-20261021T164028Z` (222 files, DLL `a10e814d02`).
+- **Deploy:** `Deploy-BffApi.ps1` from detached `C:/wtbffe-842`. Package 37.61 MB; 4 critical files SHA-256 verified; CORS OK. No settings changed.
+- **Read-back** (16:42:49Z): `1.0.0+84291ecea8fa9c5148df04ae5ede2f185301a19e`. healthz and healthz/dataverse 200; `/api/me` anonymous 401.
+- **Reconciliation, 16:44–17:12Z:**
+  - Every run Succeeded.
+  - Re-file pass: listed and examined 0, heldIsolated, terminal and failed 0, windowDrained true, watermarkHeld false. No re-file has happened yet, so the move logic hasn't been exercised live.
+  - Access sweep complete at 16:46:08Z, nothing written.
+- **Exceptions to 17:12Z:** no new class. Only the Graph "Invalid hostname" noise (6, ISS-006). There were no restart BadImageFormat errors this time.
+  - T8 stager refusals: 0.
+  - DocumentRelocationReleaseRetry log lines: none.
+- **Ontology:** smoke PASS. SPE admin and ebilling were told the version.
+- **Open:** whether the owner does UAC gate item 4 (two .eml saves, read back by word-add-in) or it relies on the first real saves.
+- **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261021T164028Z` (= `a10e814d02`).
