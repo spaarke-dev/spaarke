@@ -80,7 +80,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 077 | ✅ [done] | Rule Review code page | STANDARD | sonnet / high | P3-C | 076 |
 | 078 | ✅ [done] | Rate card and timekeeper import and publish | STANDARD | sonnet / high | P2-B | 017, 028, 029 |
 | 079 | 🔲 [open] | Deploy WP3 to dev: Procedure and Stored File schema, rule types, storage settings, solution sync, BFF and SPA via SPA-r3 | STANDARD | sonnet / high | none (deploy) | 053, 080–083, 085, 086, 088–094, 098, 099, 115, 116, 117 |
-| 080 | 🔲 [open] | Procedure schema: Procedure, Procedure Version, assignments; rule-set record scope; policy-version and rate-card links | STANDARD | sonnet / high | P3-A | none |
+| 080 | 🟡 [wip] | Procedure schema: Procedure, Procedure Version, assignments; rule-set record scope; policy-version and rate-card links | STANDARD | sonnet / high | P3-A | none |
 | 081 | 🔲 [open] | Procedure and Procedure Version service: I-P1 to I-P5, copy-forward, publish, dates, retire with a caller-scoped preview | FULL | opus / high | P3-B (p-safe false) | 080, 088, 099 |
 | 082 | 🔲 [open] | Procedure resolver (7.1): firm condition, gaps and holds, re-keyed version selection (7.2), snapshot, ratchet ArchTest | FULL | opus / high | P3-D | 080, 081, 089 |
 | 083 | 🔲 [open] | Firm clause: GetFirmClauseAsync re-keyed to the invoice's snapshot, firm-facing name; 130-135 POML constraint lines | FULL | sonnet / high | P3-E | 082 |
@@ -91,7 +91,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 088 | 🔲 [open] | Stored File schema, the sprk_document submission marker (field-secured, app-only refusal) and invoice status Superseded | FULL | opus / high | P3-A | 080 |
 | 089 | 🔲 [open] | Assignment and override service (pin, exclude, change rule, removal preview); secure-child registration; K-2 pin test | FULL | opus / high | P3-C (p-safe false) | 080, 081 |
 | 090 | 🔲 [open] | File store service: staged blob, Not yet servable row, verified flip; internal download route; orphan reconcile job | FULL | opus / high | P3-B | 088, 099 |
-| 091 | 🔲 [open] | File store provisioning: blob containers, container-scoped role, malware-scan setting, customer-provisioning hand-off | FULL | opus / high | P3-A | none |
+| 091 | 🟡 [wip] | File store provisioning: blob containers, container-scoped role, malware-scan setting, customer-provisioning hand-off | FULL | opus / high | P3-A | none |
 | 092 | 🔲 [open] | Submission on the file store: uploads stage Stored Files, extraction reads the blob, review gets file id, 028 retires | FULL | opus / high | P3-C | 090 |
 | 093 | 🔲 [open] | Firm file routes GET /api/v1/external/invoices/{id}/files and …/content; the four invoice-document routes retire | FULL | opus / high | P3-D (p-safe false) | 090, 098 |
 | 094 | 🔲 [open] | Submit Invoice from a source Document: all-or-nothing steps 1-6, file first (A), copy rule (B), 050a re-file retired | FULL | opus / high | P3-E | 086, 090, 092, 098 |
@@ -99,10 +99,10 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 096 | 🔲 [open] | Remove the Office server legs for Invoice as a save target and invoice quick-create | FULL | sonnet / high | P3-F | 095 |
 | 097 | 🔲 [open] | Corrected invoice: the old invoice closes Superseded in step 4 (guarded) and its open Signals close Superseded | FULL | opus / high | P3-F (p-safe false) | 094, 104, 088 |
 | 098 | 🔲 [open] | (a′) on sprk_invoice: hide invoices with an isolated Submit Invoice source, and derived rows, from external callers | FULL | opus / high | P3-C (p-safe false) | 088, 090 |
-| 099 | 🔲 [open] | Finance step 0: refuse flagged-external callers on every /api/finance route (5.3; owner 2026-10-21) | FULL | opus / high | P3-A | none |
+| 099 | 🟡 [wip] | Finance step 0: refuse flagged-external callers on every /api/finance route (5.3; owner 2026-10-21) | FULL | opus / high | P3-A | none |
 | 113 | 🔲 [open] | Read-time Procedure-change banner on /review: app-only comparison with the snapshot, internal callers only | FULL | sonnet / high | P3-F | 082, 100 |
 | 114 | 🔲 [open] | Override releases a no-version-in-force gap hold for that invoice only, recorded through WriteBillingDecisionAsync | FULL | sonnet / high | P3-F | 082, 105 |
-| 115 | 🔲 [open] | AddedFee (100000015) and Discount (100000016) billing rule types: options, domain, schemas, validator refusals, handlers | FULL | opus / high | P3-A | none |
+| 115 | 🟡 [wip] | AddedFee (100000015) and Discount (100000016) billing rule types: options, domain, schemas, validator refusals, handlers | FULL | opus / high | P3-A | none |
 | 116 | 🔲 [open] | Procedure Version documents: drafting and readers keyed per version on its Stored File; sprk_sourcedocument retired | FULL | opus / high | P3-F (p-safe false) | 081, 085, 090 |
 | 117 | 🔲 [open] | Core-record delete and Procedures: retire sweep for unlinked record-scoped rule sets; delete lists agreed with uac-r2 | FULL | opus / high | P3-D (p-safe false) | 089 |
 | 118 | 🔲 [open] | Submit Invoice in the email UI: toolbar button (replaces Link Invoice), flagged attachments, Email Review Invoice tab | FULL | sonnet / high | P3-F | 094 |

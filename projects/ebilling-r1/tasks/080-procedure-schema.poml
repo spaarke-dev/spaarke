@@ -4,7 +4,7 @@
     <title>Procedure schema: Procedure, Procedure Version, assignments; rule-set record scope; policy-version and rate-card links</title>
     <phase>3 Rules (WP3) — Procedures and files (EB-D-148), wave P3-A</phase>
     <gate>Startable for steps 1-4 (script and -WhatIf). The real dev run (step 7) waits for ontology-r1's full schema-review PASS, both before-notices and the owner's OK for the run.</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New idempotent schema script on dev (three tables, five global choices, columns on five existing tables, field security); no file under src/ changes. Live dev write, owner-gated.</rigor-reason>
     <model-tier>sonnet</model-tier>

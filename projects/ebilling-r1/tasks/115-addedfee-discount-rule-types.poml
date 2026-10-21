@@ -4,7 +4,7 @@
     <title>AddedFee (100000015) and Discount (100000016) billing rule types: options, domain, schemas, validator refusals, handlers</title>
     <phase>3 Rules (WP3) — Procedures and files (EB-D-148), wave P3-A</phase>
     <gate>Startable. Code after step 2 (ontology-r1 review of the option values and the parameter design); the dev option run (step 9) after the owner's OK.</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds members to the closed RuleType set and two handlers in ontology-owned Services/Signals code; an unknown or unmapped type must fail closed (FR-24, security-class).</rigor-reason>
     <model-tier>opus</model-tier>
