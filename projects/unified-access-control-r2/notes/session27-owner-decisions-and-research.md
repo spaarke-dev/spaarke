@@ -1803,3 +1803,24 @@ ebilling v5.5. The Outlook add-in always saves the invoice email as a `.eml` on 
 1. **#2161 sign-off: yes, and deploy.** CLAUDE.md §6 security sign-off. Merged as `84291ecea8`, then a deploy request to R3 for master `84291ecea8`, which also carries #2177 and #2205. R3 needs the owner's approval in its own session.
 2. **Task 188 round 4e approach: ok.** App-only generic writers refuse `sprk_parentdocument` and `sprk_relatedcommunication` on `sprk_document`, because they are D7 visibility inputs. Link changes go through the caller-checked re-file routes.
 3. **#2191: ok.** Merges when UAC accepts the parser-based guard re-check and CI is green.
+
+## Round 120 (owner, 2026-10-21)
+
+Owner text, verbatim: "1. yes and go for deploy steps / 2. ok (do i need to do anything?) / 3. i'm not following-what is optional re-file?"
+
+1. **#2170 and #2186 sign-off: yes, with a go for the deploy steps.** This is the CLAUDE.md §6 security sign-off.
+   - #2170 merged as `446c83d927` and #2186 as `f1b3dadcf5`. #2186 was first updated from master; its 3 conflicts were resolved keeping both sides. The I-14 row's #2179 limit now reads open (task 191).
+   - Approved steps, in order:
+     1. the BFF at `f1b3dadcf5` via R3 (R3 needs the owner's go in its own session);
+     2. `Set-DocumentLinkDeleteRestrict.ps1 -Apply`;
+     3. `Set-DocumentNarrowingFieldSecurity.ps1 -Apply` (dev BFF app users `5967251e…`, `1e40baad…`);
+     4. the `sprk_DocumentOperations.js` 1.28.2 web resource.
+   - Dry runs on dev were clean: exactly the two cascade changes, and every field-security precondition p1–p7 OK.
+   - K4 impact on dev: 11 partner-reachable documents become hidden. All 11 are own-Restricted and sit under one matter (`b68299c6…`). Of 598 documents, 27 fail D7 in total.
+2. **The #2177 Outlook check: ok.** The owner saves two `.eml` files from the add-in:
+   - one email with a communication record, expected linked to it and with an empty access value;
+   - one email with no record, expected own-Restricted.
+   The owner sends the times or subjects, and R3 / word-add-in read the rows back.
+3. **The #2161 test re-file was explained** (an ordinary document re-filed from one matter to another, then R3 reads a moved count of 1). No decision yet.
+
+Filed this round: #2213, `CrossPathLink` re-points an archive document already linked to another communication, which can un-hide it under D7.
