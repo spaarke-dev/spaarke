@@ -1,9 +1,7 @@
 # Current Task State
 
-> **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-10-21 (checkpoint at context 85%)
-> **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
-> **Format**: CURRENT state only. Each checkpoint REWRITES this file; never prepend new blocks above old ones. Target ≤ 10 KB.
+> **Last Updated**: 2026-10-21 (context-handoff at 86%)
+> **Format**: CURRENT state only. Rewrite each checkpoint; target ≤ 10 KB.
 
 ---
 
@@ -11,18 +9,27 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | #1911 draft PR. **The Procedure and file model is FINAL (EB-D-148, owner 2026-10-21)** and the tasks are **re-planned** (brief `notes/replan-eb-d-148.md`): 079–086 rewritten, 087 cancelled, 088–099, 113–117, 189 added, 150 amended; 106 POMLs, validator and drift check clean. Start with wave W3-6 (080, 091, 099, 115) once its gates are met (TASK-INDEX Owner gates). |
-| **Design** | `notes/procedure-and-file-model.md`, now **v5.9**: every owner question answered (2026-10-21). v5.5 recorded the owner's Submit Invoice process (I, L) and the `from-email` contract (word-add-in-r1 reviewed it; folded in). v5.6 applies uac-r2's CHANGES-NEEDED review of v5.5 (reviews §14). **uac-r2: ACCEPT on v5.8** (the whole model). **FINAL (EB-D-148).** **Next:** re-plan 079–087 plus the new tasks from model §13 (task-create). All peer reviews are in `notes/procedure-model-reviews.md` §1–§14. |
-| **Peer status** | ontology-r1: **PASS** on v5.1 (reviews §10); ready for the 080 schema review. word-add-in-r1: §9.1 matches; its three flagged-attachment gaps are folded in. uac-r2: accepts with changes each round; v5.3 → v5.4 is text only. |
-| **Background** | **D-140 done:** `task/ebill-d140-parentsof` + uac-r2's arch fix (`task/ebill-d140-archfix`, af038b2bbd; uac-r2 ACCEPT) merged into work/ebilling-r1 as 13b310e1c4 and pushed. Combined tip: build 0 errors, ArchTests 1309/1309, broad filter 14256 passed / 2 failed under load (both pass alone, 77/77; unrelated; filed #2208). Agent worktrees `C:\code_files\spaarke\.claude\worktrees\agent-ac2cb36d489b624e8` and `agent-a63d1a942dbb89891` can be removed with Remove-WorktreeSafe.ps1. |
-| **Next Action** | uac-r2 task 188 (#2170, then #2186) awaits owner sign-off; it blocks 093/098. (1) Owner answers the five re-plan questions below. (2) W3-6: 099 (code-only, uac-r2 review) can start now; 080 / 115 need ontology-r1's schema review and notices first; 091 needs the owner's OK and the storage-role answer. (3) Peers: ontology-r1 full 080/088 schema review; uac-r2 registers the new tables in 191 and reviews per the gates. |
+| **Task** | Wave W3-6 in progress (080, 091, 099, 115), plus D-176 follow-ups. Model FINAL (EB-D-148); 108 POMLs; draft PR #1911. |
+| **Status** | Three owner decisions pending (below); 099 agent still running. |
+| **Next Action** | On the owner's answers: (1) re-run 080 on dev: `pwsh -NoProfile -File scripts/ebilling/Deploy-EbillingProcedureSchema.ps1` from the worktree root (dev default URL), log to scratchpad, then send the after-notice and verify output to ontology-r1 and uac-r2; (2) tell the 115 agent the D-39 precedence key; (3) on option A, resume 091 for ebilling-file-store.bicep + custom role. When ontology-r1 PASSes the 115 re-check, merge task/ebill-115-ruletypes, then run its option script on dev. |
 
-### Open owner questions (raised by the re-plan POMLs' escalation triggers)
-None. All five answered 2026-10-21 (model §15 tail): Q1 email UI = new task 118 (toolbar Submit Invoice, flagged attachments via profile `sprk_documenttype`, Email Review Invoice tab); Q2 inactive invoices 409 (097); Q3 step 0 on every `/api/finance` route (099); Q4 Override releases any hold (114); Q5 container-scoped storage in customer bicep (091).
-- **118 marking component:** agreed with word-add-in-r1 2026-10-21. 118 builds `InvoiceAttachmentMarking` in Spaarke.Communication.Components (file subpath export, pure validate/default functions, no submit callback); word-add-in-r1 reviews its PR and the add-in adopts it after 095. Non-invoice attachments default to 'supporting' (owner 2026-10-21); attachments with a disabledReason default to 'skip'. word-add-in-r1 creates its add-in Invoice task once 095 is built.
+### Lanes
+| Task | Branch / state | Waiting on |
+|---|---|---|
+| 080 Procedure schema | Merged on work/ebilling-r1 (934e41ec53 + K1 6232f7436e). **Dev is PARTIAL**: the five globals, sprk_procedure and sprk_procedureversion are complete; sprk_procedureassignment has only sprk_matter (Delete Cascade). Nothing is secured or published; 0 rows. The fix (core lookups RemoveLink, in-place repair of sprk_matter, order guard) has uac-r2 ACCEPT and ontology-r1 PASS. Pester 3.4: `Import-Module Pester -RequiredVersion 3.4.0` (85 pass). | **Owner OK to re-run** (the change from "Cascade" to "the planner" for assignment rows). |
+| 091 storage | task/ebill-091-storage f8eee9be4b (account-scope grants removed, ai-chunks container grant, template test). Not merged. customer-provisioning OK to merge (customer.json conflict = recompile, never hand-merge). | **Owner: option A** (custom role = Contributor + blobs/tags/read, RG scope, per container). uac-r2 ACCEPT A with 4 conditions (in 091/090 notes). |
+| 099 step 0 | Agent running (task/ebill-099-step0); last seen running the full unit suite. | Agent result, then uac-r2 review. |
+| 115 rule types | task/ebill-115-ruletypes eb0b042e5a (ontology FINDINGS fixed). Option script -WhatIf ok (GET-only). | ontology-r1 re-check; **owner: D-39 precedence for AddedFee** (RuleType alone vs RuleType+feeKind; recommend +feeKind). |
+| D-176 / #2118 | duplicateOf.invoiceId merged (f140542018). Ontology task 157 builds the SignalReadService check. New ebilling task 119 (/review read-time withholding) is gated on 157. | ontology 157 range for our review. |
 
-### Live dev state (080) — PARTIAL, 2026-10-21
-The first 080 dev run (script on work/ebilling-r1 4ca826aef8) stopped at sprk_procedureassignment.sprk_project. Dataverse allows only one parental relationship per table, and Delete = Cascade counts as parental (0x80047007). Created on dev: the five globals, sprk_procedure and sprk_procedureversion (complete), and sprk_procedureassignment with only sprk_matter (Cascade). Nothing is secured or published yet, and there are 0 rows. Proposed fix, sent to uac-r2 and ontology-r1: the three core lookups become RemoveLink (the delete planner plus the 117 sweep remove the rows; 082 ignores orphans), and sprk_excludedpolicy stays the one Cascade. The script PUTs the existing sprk_matter relationship to RemoveLink, then re-runs. Log: scratchpad 080-run1.log.
+### Open owner questions
+1. Re-run 080 on dev with the RemoveLink fix (recommended yes).
+2. AddedFee D-39 precedence key: RuleType + feeKind (recommended) or RuleType alone.
+3. 091 option A custom role (recommended yes).
+4. Ask spaarke-prototype to start the O-14 Procedure review prototype (084 UI blocked until then).
+
+### Filed this session
+#2215 (dead AttachmentClassificationJobHandler), #2216 / DEF-032 (AddedFee forms wait for extraction).
 
 ### Owner decisions already given
 - **2026-10-21 owner OKs (W3-6 live steps):** (1) dev schema runs of 080, 115 and 088, each after ontology-r1's review PASS of the final script and -WhatIf, with notices to ontology-r1 and uac-r2 before and after; (2) the dev Azure storage change of 091 (remove the account-scope grant, container-scoped grants), no Key Vault changes. (3) 084 UI: spaarke-prototype says the O-14 prototype is NOT started; it needs the owner to ask it (told the owner 2026-10-21). Its data-shape questions are in notes/084-prototype-questions.md, answered by 084 and 089. 096: word-add-in-r1 confirmed 2026-10-21 that no add-in Invoice task exists yet (their owner is asked to create it ahead of 095). Their release needs 118's component merged and 095 on dev, takes about a week, and production needs a manifest bump and an owner upload. 096 is one release later. 095's §9.1 shapes are frozen; any change goes to them first. (do not ask again)
@@ -33,7 +40,7 @@ The first 080 dev run (script on work/ebilling-r1 4ca826aef8) stopped at sprk_pr
 ### Agreed with peers
 - **R3:** we own the BFF change (firm file routes, retire the four `/external/invoices/{id}/documents…` routes, Stored File storage), reviewed by uac-r2 with the 188 guard entry. The SPA side goes to R4. Dev deploy is BFF then SPA through R3. The 051 wizard is on our branch only.
 - **field-mapping:** 013 is cleared (PR #2184, which renames the Office create service; check it at the #1911 merge). Reconcile review checklist: RegardingTrio tables get mapping-protected core lookups; the ratchet copy is replaced by the real `CoreRecordLookups`; 016/040 call `CheckGenericUpdateAsync`.
-- **Dev BFF:** master 583f90c1d9 (live 2026-10-21 18:04Z, via R3); includes #2177, so 095's "#2177 merged and deployed" gate is met on dev. The 015 delete stays blocked; `sprk_invoicestatus` still exists on dev.
+- **Dev BFF:** master 583f90c1d9 (live 2026-10-21 18:04Z, via R3; ebilling OK'd R3 deploying f1b3dadcf5 = +uac-r2 188 and #2186, SHA not yet confirmed); includes #2177, so 095's "#2177 merged and deployed" gate is met on dev. The 015 delete stays blocked; `sprk_invoicestatus` still exists on dev.
 
 ### 050a (closed)
 Round 4 passed. Under the new model the re-file is retired and Submit Invoice replaces it; the D-140 chain and isolation check are kept.
