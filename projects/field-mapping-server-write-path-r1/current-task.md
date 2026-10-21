@@ -7,7 +7,7 @@
 
 | Field | Value |
 |---|---|
-| **HEAD** | work branch with `task/fm-013` (bad3195920..123b632315) and fix round 2 `task/fm-013-r2` (fad68a797b..36d885f72f) merged. Verified: sln 0/0, ArchTests 1214, targeted suites 2208 passed / 7 skipped |
+| **HEAD** | PR #2184 MERGED to master at 2a38e6ce6c (tasks 001–006, 010–013); work branch even with master. Verified: sln 0/0, ArchTests 1214, targeted suites 2208, CI 42 pass / 5 skipping |
 | **Running** | the 014 agent (opus/xhigh, branch `task/fm-014`, base fad68a797b). It will need to merge with fix round 2: the Office file rename and the pipeline seam harness line |
 | **Next Action** | (1) Wait for the UAC-r2 and ebilling-r1 reviews of 013 (requested 2026-10-21). (2) Owner decisions: the 013 step-10 order, #1608, OWNER/017 and OWNER/017-018 (task-013-notes), and 005's -Apply. (3) Start **014** (deps 002, 003, 013 done; opus/xhigh): check its POML criteria, including the UAC-r2 D7 accessinheritance one, moneyAttributes for #2124, the Office pair, and FR-08 filing refusal |
 
