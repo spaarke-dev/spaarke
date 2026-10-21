@@ -18,13 +18,14 @@ using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Models.Office;
+using Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 // Models.Office declares its own EntityReference (the add-in's association DTO); every reference here is the SDK's.
 using EntityReference = Microsoft.Xrm.Sdk.EntityReference;
 
 namespace Sprk.Bff.Api.Services.Office;
 
 /// <summary>
-/// Input to <see cref="RecordCreationService.CreateAsync"/>.
+/// Input to <see cref="OfficeRecordCreationService.CreateAsync"/>.
 /// </summary>
 public sealed record RecordCreationRequest
 {
@@ -124,7 +125,7 @@ public enum RecordCreationFailureKind
 public sealed record RecordCreationFailure(RecordCreationFailureKind Kind, string Code, string Detail);
 
 /// <summary>
-/// Outcome of <see cref="RecordCreationService.CreateAsync"/>: the created record, or a
+/// Outcome of <see cref="OfficeRecordCreationService.CreateAsync"/>: the created record, or a
 /// <see cref="RecordCreationFailure"/>. A business outcome is never an exception.
 /// </summary>
 public sealed record RecordCreationResult
@@ -193,7 +194,7 @@ public sealed record RecordCreationResult
 /// <para><b>ADR-010</b>: concrete, one registration (<c>OfficeModule</c>). No interface — there is one
 /// implementation, and the contract test substitutes the Dataverse boundary, not this class.</para>
 /// </remarks>
-public sealed class RecordCreationService
+public sealed class OfficeRecordCreationService
 {
     internal const string MatterEntity = "sprk_matter";
     internal const string MatterNameAttribute = "sprk_mattername";
@@ -245,12 +246,13 @@ public sealed class RecordCreationService
     /// Task 133 (unified-access-control-r2, owner round 7 item 2) adds <c>sprk_createdbyperson</c>: the
     /// person who created the record is the caller, stamped by this service — a Copy rule from a source record would
     /// otherwise name that record's creator as this one's.
+    /// <para>Field-mapping-server-write-path-r1 task 012: a view over the matter's
+    /// <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordTableRule.MappingProtectedColumns"/> in the registry, the one
+    /// source; deleted when task 018 makes this path an adapter over the unified service. <c>internal</c> (was private) so
+    /// its content is asserted against the pre-registry list (ADR-038 A2).</para>
     /// </remarks>
-    private static readonly IReadOnlySet<string> MatterProtectedAttributes =
-        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            MatterNumberAttribute, OwnerAttribute, ContainerAttribute, Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.Column
-        };
+    internal static readonly IReadOnlySet<string> MatterProtectedAttributes =
+        Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.Get(MatterEntity).MappingProtectedColumns;
 
     /// <summary>
     /// The same three protections for a PROJECT, with <see cref="ProjectNumberAttribute"/> in place of the matter
@@ -260,15 +262,15 @@ public sealed class RecordCreationService
     /// The sets are deliberately PER ENTITY rather than one merged set. A merged set would newly skip-and-warn a rule
     /// targeting <c>sprk_projectnumber</c> on a MATTER create — a behaviour change to the path task 030 shipped,
     /// which task 031's acceptance criteria forbid.
+    /// <para>Task 158 r1: <see cref="SecureFlagAttribute"/> is the BFF's own (task 150 locks it; owner round 31 item 2 sets
+    /// it IN the create of a project filed under a secure record) — never a value a mapping rule copies.</para>
+    /// <para>Field-mapping-server-write-path-r1 task 012: a view over the project's
+    /// <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordTableRule.MappingProtectedColumns"/> in the registry, the one
+    /// source; deleted when task 018 makes this path an adapter over the unified service. <c>internal</c> (was private) so
+    /// its content is asserted against the pre-registry list (ADR-038 A2).</para>
     /// </remarks>
-    private static readonly IReadOnlySet<string> ProjectProtectedAttributes =
-        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ProjectNumberAttribute, OwnerAttribute, ContainerAttribute, Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.Column,
-            // Task 158 r1: sprk_issecure is the BFF's own (task 150 locks it; owner round 31 item 2 sets it IN the create of a
-            // project filed under a secure record) — never a value a mapping rule copies.
-            SecureFlagAttribute,
-        };
+    internal static readonly IReadOnlySet<string> ProjectProtectedAttributes =
+        Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.Get(ProjectEntity).MappingProtectedColumns;
 
     /// <summary>The secure flag (task 150: written only by the BFF).</summary>
     internal const string SecureFlagAttribute = "sprk_issecure";
@@ -302,7 +304,7 @@ public sealed class RecordCreationService
     private readonly Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService _identity;
     private readonly Sprk.Bff.Api.Services.Access.SecureRootFilingGate _rootFiling;
     private readonly Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer _assignedAccess;
-    private readonly ILogger<RecordCreationService> _logger;
+    private readonly ILogger<OfficeRecordCreationService> _logger;
     private readonly Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe? _callerAccess;
     private readonly Microsoft.AspNetCore.Http.IHttpContextAccessor? _http;
 
@@ -311,14 +313,14 @@ public sealed class RecordCreationService
     /// without the external-access module still composes this service; without it such a create is REFUSED (fail closed),
     /// never made unchecked.</param>
     /// <param name="http">The request whose bearer token the probe exchanges (same optionality).</param>
-    public RecordCreationService(
+    public OfficeRecordCreationService(
         IGenericEntityService entities,
         IFieldMappingDataverseService fieldMappings,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity,
         Sprk.Bff.Api.Services.Access.SecureRootFilingGate rootFiling,
         Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
-        ILogger<RecordCreationService> logger,
+        ILogger<OfficeRecordCreationService> logger,
         Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe? callerAccess = null,
         Microsoft.AspNetCore.Http.IHttpContextAccessor? http = null)
     {

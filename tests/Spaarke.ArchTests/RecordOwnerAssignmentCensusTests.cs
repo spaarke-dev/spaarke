@@ -320,6 +320,9 @@ public class RecordOwnerAssignmentCensusTests
             + "drafter recorded as sprk_sentby; an unfiled draft is still created as the user (E1)."),
         new UnscannedWriter("OwnedChildWrite.cs", "app-only create-by-upsert of a filed child (S1 / G5)",
             "The one owned-create path of the chat tools: as-the-caller checks, the resolver's owner, the app-only create."),
+        new UnscannedWriter("RecordCreationService.cs", "app-only create-by-upsert of any registered table (task 013, FR-06)",
+            "The unified create (Services/RecordCreation): the table is a parameter, so the scanner sees no create site; the "
+            + "owner is the resolver's (DecideOwnerAsync) or the secure-create plan's named team, after the as-the-caller checks."),
         new UnscannedWriter("DataverseUpdateRecordHandler.cs", "run-as-user PATCH of any table (lookups allowed)",
             "A lookup change on a CHILD table is a re-file (ReparentAsync: the caller's PATCH, then the owner assigned and "
             + "read back); any other table moved under a SECURE record is refused. Since task 147 r1 through the shared "
@@ -544,16 +547,25 @@ public class RecordOwnerAssignmentCensusTests
             "or the team is in the Secure Record business unit, or the row is user-owned. The write is a conditional Web API PATCH " +
             "(If-Match on the guard read's versionnumber; a 412 is Conflict, a 404 NotFound) that shares the pass's evict and " +
             "read-back (WriteOwnerAndReadBackAsync). No identity gains Write on a Decision Record."),
-        new OwnerWriteEntry("RecordCreationService.cs", "CreateMatterAsync", 1, OwnerWriteKind.Root,
+        new OwnerWriteEntry("OfficeRecordCreationService.cs", "CreateMatterAsync", 1, OwnerWriteKind.Root,
             "Office quick-create of a MATTER (a root) — owned by the resolver's team for the acting user (task 080)."),
-        new OwnerWriteEntry("RecordCreationService.cs", "CreateProjectAsync", 1, OwnerWriteKind.Root,
+        new OwnerWriteEntry("OfficeRecordCreationService.cs", "CreateProjectAsync", 1, OwnerWriteKind.Root,
             "Office quick-create of a PROJECT (a root) — owned by the resolver's team for the acting user (task 080)."),
-        new OwnerWriteEntry("RecordCreationService.cs", "IsolateProjectCreate", 1, OwnerWriteKind.Root,
+        new OwnerWriteEntry("OfficeRecordCreationService.cs", "IsolateProjectCreate", 1, OwnerWriteKind.Root,
             "Task 158 r1 (owner round 31 item 2): a PROJECT (a root) filed under a secure record is created INTO isolation, " +
             "owned by the named Secure Record Owners team provisioning's topology names (SecureRootInheritance.PlanCreateAsync)."),
         new OwnerWriteEntry("OwnedChildWrite.cs", "CreateIntoIsolationAsync", 1, OwnerWriteKind.Root,
             "Task 158 r1 (owner round 31 item 2): a chat-created work assignment / project (a root) filed under a secure record " +
             "is created INTO isolation, owned by the named team provisioning's topology names (SecureRootInheritance.PlanCreateAsync)."),
+        // field-mapping-server-write-path-r1 task 013: the unified create (Services/RecordCreation/RecordCreationService.cs)
+        // ports OwnedChildWrite's two owner writes unchanged; existing callers still call OwnedChildWrite until tasks 017/018
+        // re-point them. The Office create above is Services/Office/OfficeRecordCreationService.cs (renamed in fix round 2,
+        // UAC-r2 F-3: ServerFiles() keys files by NAME, so the two shared one name and one satisfied the other's checks).
+        new OwnerWriteEntry("RecordCreationService.cs", "OwnedCreateFields", 1, OwnerWriteKind.Routed,
+            "Task 013: the unified create of an OWNED row — the resolver's team (DecideOwnerAsync), after the as-the-caller checks."),
+        new OwnerWriteEntry("RecordCreationService.cs", "IsolatedCreateFields", 1, OwnerWriteKind.Root,
+            "Task 013: a work assignment / project (a root) filed under a secure record, created INTO isolation by the unified " +
+            "create — owned by the named team SecureRootFilingGate.PlanCreateAsync resolves (OwnedChildWrite.CreateIntoIsolationAsync's)."),
 
         new OwnerWriteEntry("ProvisionProjectEndpoint.cs", "MoveOwnerAsync", 1, OwnerWriteKind.Root,
             "Secure provisioning assigns the ROOT to the named Secure team (task 144), and its compensation moves the ROOT " +
@@ -2303,6 +2315,7 @@ public class RecordOwnerAssignmentCensusTests
     private static readonly IReadOnlyList<PersonBearingWriter> PersonBearingWriters = new[]
     {
         new PersonBearingWriter("OwnedChildWrite.cs", "CreateAsync", "the chat caller (WhoAmI) — dataverse.create_record, email.draft"),
+        new PersonBearingWriter("RecordCreationService.cs", "DecideOwnerAsync", "task 013: the caller (WhoAmI) or the system principal's RequestedBy"),
         new PersonBearingWriter("DataverseDocumentsEndpoints.cs", "CreateDocumentAsync", "POST /api/v1/documents caller (oid)"),
         new PersonBearingWriter("EventEndpoints.cs", "OwnershipContextFor", "POST /api/v1/events caller (oid)"),
         new PersonBearingWriter("EventEndpoints.cs", "CreateEventInDataverseAsync", "the event and its creation log row"),

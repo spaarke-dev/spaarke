@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Read sprk_syncmode on rules + scripted migration of Copy rules to Manual Refresh (FR-05d)</title>
+    <phase>1 W1 Canonical engine and configuration</phase>
+    <gate>001 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in Spaarke.Dataverse and Sprk.Bff.Api; tags include bff-api and data-migration; adds a data-changing script and tests at KEEP paths.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Read-path addition plus a script that copies an existing -WhatIf/-Apply/-Verify pattern; behaviour is fully specified.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W1-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>001</deps>
+    <tags>bff-api, dataverse, field-mapping, scripts, data-migration</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make the rule read path return `sprk_syncmode` (One-time 0 / Manual Refresh 1) and add `scripts/Set-FieldMappingRuleSyncMode.ps1`, an idempotent script that migrates every existing Copy rule to Manual Refresh (1) with `-WhatIf` as the default, `-Apply` to write and `-Verify` to report. New rules default to One-time (0). A live run is dev-only and needs the owner's explicit OK first.</prompt>
+  <role>SPAARKE platform developer, .NET 10 BFF plus PowerShell Dataverse scripting. Follow ADRs strictly.</role>
+  <goal>`FieldMappingRuleEntity.SyncMode` is populated from `sprk_syncmode` on every rule read; the script lists, applies and verifies the Copy-rule migration idempotently; `-Verify` reports every existing Copy rule equal to Manual Refresh.</goal>
+
+  <context>
+    <background>spec.md FR-05(d); decision Q3 (Copy only, by sprk_syncmode = Manual Refresh, used by /push in task 040). `sprk_syncmode` exists on sprk_FieldMappingRule (src/dataverse/solutions/SpaarkeMaster/Entities/sprk_FieldMappingRule/Entity.xml ~:1270, option set `sprk_fieldmappingrule_sprk_syncmode`). The profile model already has `SyncMode` (src/server/shared/Spaarke.Dataverse/Models.cs ~:1276) and constants `SyncMode.OneTime = 0`, `ManualRefresh = 1` (~:1352), but the rule `$select` lists (DataverseWebApiService.cs ~:1041 and ~:2135) and `MapToFieldMappingRuleEntity` (~:2358) do not read it. The Copy mapping-type integer must be confirmed by grep (`sprk_mapping_type`, FieldMappingType constants) before the script filters on it.</background>
+    <relevant-files>
+      <file role="modify">src/server/shared/Spaarke.Dataverse/Models.cs (~:1291 FieldMappingRuleEntity: add SyncMode)</file>
+      <file role="modify">src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs (~:1041, ~:2135 $select; ~:2358 MapToFieldMappingRuleEntity)</file>
+      <file role="new">scripts/Set-FieldMappingRuleSyncMode.ps1</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Dataverse/FieldMappingRuleSyncModeMappingTests.cs</file>
+      <file role="canonical-reference">scripts/Backfill-RecordOwnership.ps1 (param block ~:142; dry-run default and -Apply/-WhatIf/-SelfTest pattern; pattern only — no ownership backfill here)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/FieldMappings/FieldMappingEndpoints.cs (~:240 MapSyncModeToString; read only)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="required">Canonical engine promoted (the read path is shared infrastructure).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: migration. Forward-only data change limited to sprk_fieldmappingrule rows whose mapping type is Copy and whose syncmode is not already 1. Never touch Default/Concat/Template rules, never delete, never alter other columns. New rules default to One-time (0).</constraint>
+    <constraint source="CLAUDE.md §5">Scope: live runs. `-Apply` against a live environment happens ONLY on dev and ONLY after the owner's explicit OK; record the OK in the task notes. Default invocation is read-only.</constraint>
+    <constraint source="CLAUDE.md §9">Scope: secrets. The script takes its token the way Backfill-RecordOwnership.ps1 does (az CLI token); no secret is written to disk or to the script.</constraint>
+    <constraint source="ADR-038">Scope: tests added by this task. Unit tests under `tests/unit/Sprk.Bff.Api.Tests/`; no `Mock&lt;HttpMessageHandler&gt;`; no DI-registration tests. The script has a `-SelfTest` mode exercised in the task notes (not a CI test).</constraint>
+    <constraint source="CLAUDE.md §10">Scope: BFF publish. State Placement Justification in the PR; measure publish-size delta against a fresh master build per root CLAUDE.md §10.4; run `dotnet list package --vulnerable --include-transitive`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Field mapping sync mode; scripted Dataverse data migration</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+      <file>docs/guides/FIELD-MAPPING-ADMIN-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="web-api-client" location=".claude/patterns/dataverse/web-api-client.md">OData select, filter and PATCH for config rows.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; read spec FR-05(d); re-grep `SyncMode`, `sprk_syncmode` and the Copy mapping-type constant.</step>
+    <step order="1">Add `SyncMode` (int) to `FieldMappingRuleEntity`; add `sprk_syncmode` to both rule `$select` lists; read it in `MapToFieldMappingRuleEntity` (null maps to 0 / One-time).</step>
+    <step order="2">Write the unit test: a rule payload with `sprk_syncmode` 1 maps to SyncMode 1; absent or null maps to 0.</step>
+    <step order="3">Write `scripts/Set-FieldMappingRuleSyncMode.ps1` following Backfill-RecordOwnership.ps1: parameters `-Apply`, `-WhatIf`, `-Verify`, `-SelfTest`, an environment URL; default is a dry-run that prints every Copy rule not at Manual Refresh and writes nothing; `-Apply` PATCHes only those rules to 1; a second `-Apply` finds nothing to change (idempotent); `-Verify` exits non-zero if any Copy rule is not 1.</step>
+    <step order="4">Run `-SelfTest` and a read-only dry-run against dev; record the counts. Obtain the owner's explicit OK before any `-Apply`; if given, run `-Apply` then `-Verify` on dev and record the results.</step>
+    <step order="5">Build + run tests; measure publish size; run the CVE check.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the owner has not given explicit OK to run `-Apply` on dev, STOP after the dry-run and the `-Verify` baseline; mark the live step pending in the task notes rather than running it.</trigger>
+    <trigger>If the dry-run shows rules whose mapping type or syncmode is outside the known option values, STOP and escalate per CLAUDE.md §6 instead of guessing a mapping.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Grep for `sprk_syncmode` in scripts/ and src/server shows no script or rule read of the rule column; scripts/Backfill-RecordOwnership.ps1 is the only -WhatIf/-Apply/-Verify precedent and it migrates ownership, not field-mapping config.</existing>
+    <extension>The pattern is copied from Backfill-RecordOwnership.ps1 (spec §11 row "Native-surface -Verify script": new script, existing pattern); the read path extends FieldMappingRuleEntity and the existing $select lists rather than adding a reader.</extension>
+    <cost-of-doing-nothing>Task 040 selects /push rules by sprk_syncmode = Manual Refresh; without a scripted, verifiable migration every existing Copy rule stays One-time and /push silently applies nothing (or, if unfiltered, keeps the divergent legacy behaviour).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+    <tool name="pwsh">Run and self-test the migration script</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs</output>
+    <output type="code">scripts/Set-FieldMappingRuleSyncMode.ps1</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Dataverse/FieldMappingRuleSyncModeMappingTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every rule read returns `SyncMode` populated from `sprk_syncmode` (null maps to 0); a unit test proves both cases.</criterion>
+    <criterion testable="true">The script's default run writes nothing; `-Apply` sets only Copy rules not at 1 to 1; a second `-Apply` reports zero changes (idempotent).</criterion>
+    <criterion testable="true">`-Verify` exits 0 and reports every existing Copy rule = Manual Refresh after `-Apply`, and exits non-zero while any Copy rule is not 1.</criterion>
+    <criterion testable="true">Negative: Default, Concat and Template rules are never modified by the script; no rule is deleted; a live `-Apply` was run only on dev and only with the owner's OK recorded in the notes (or is marked pending).</criterion>
+    <criterion testable="true">New rules default to One-time (0) and nothing in the BFF writes sprk_syncmode for rules created without it; BFF build 0 errors; existing tests pass; publish-size delta and CVE result recorded in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-05(d). Consumed by task 040 (/push selects Manual Refresh Copy rules).
+Completed 2026-10-21. Rules read SyncMode. scripts/Set-FieldMappingRuleSyncMode.ps1 defaults to a dry run. The dev dry run read 25 Copy rules: 21 would change (20 empty, 1 One-time) and 4 are already Manual Refresh. The live -Apply and its two live proofs (a second -Apply makes zero changes; -Verify exits 0) wait on the owner's OK. Seeder gap: DI-003 / #2181 (task 040). Details: notes/task-005-notes.md.
+rework: none task 005</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
