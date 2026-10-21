@@ -84,4 +84,4 @@ Their no-objection binds us to the items carried into later tasks:
 - no pre-create stamp writer is re-pointed until FR-06 step 10 is decided.
 
 017's diff goes to UAC-r2 for the same review. ebilling-r1 has no objection, subject to its re-check of the fix-round-2
-seam tests.
+seam tests (re-checked 27bac15a42: no objection, 2026-10-21).
