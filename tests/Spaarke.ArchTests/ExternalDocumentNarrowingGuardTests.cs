@@ -344,6 +344,11 @@ public class ExternalDocumentNarrowingGuardTests
             "Slice A (F1-A): withholds an external caller's hidden document keys from AI retrieval.",
         ["Sprk.Bff.Api.Api.Filters.InternalPlaneDocumentNarrowing"] =
             "Slice B: the internal plane's document filter, bulk download and container lists refuse or drop hidden documents.",
+        // Round 4b (K7 hardening): direct callers of the app-only reader's narrowing entry points count as consumers.
+        ["Sprk.Bff.Api.Api.ExternalAccess.ExternalModuleDataEndpoints"] =
+            "External plane (round 1): the documents module fetch drops the rows ExternalDataService.NarrowDocumentsAsync hides.",
+        ["Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints"] =
+            "External plane (round 1): download and versions refuse a document ExternalDataService.IsDocumentVisibleAsync hides.",
     };
 
     [Fact(DisplayName = "Task 188 r3 C (K7): the app-only narrowing seams have only listed consumers")]
@@ -368,25 +373,54 @@ public class ExternalDocumentNarrowingGuardTests
         var fixtures = new[]
         {
             typeof(SeamControlTakesTheSeam), typeof(SeamControlResolvesTheRouteSeam), typeof(SeamControlBuildsTheSeam),
-            typeof(NarrowingGuardControlNoDocuments),
+            typeof(SeamControlDynamicInvokeByTypeToken), typeof(SeamControlCallsTheAppOnlyReaderDirectly),
+            typeof(SeamControlResolvesBySeamName), typeof(NarrowingGuardControlNoDocuments), typeof(SeamControlMentionsNoSeam),
         };
 
         var consumers = SeamConsumers(fixtures.SelectMany(IlCallScan.WithNested));
 
         Assert.Equal(
-            new[] { typeof(SeamControlBuildsTheSeam).FullName, typeof(SeamControlResolvesTheRouteSeam).FullName, typeof(SeamControlTakesTheSeam).FullName },
+            new[]
+            {
+                typeof(SeamControlBuildsTheSeam).FullName, typeof(SeamControlCallsTheAppOnlyReaderDirectly).FullName,
+                typeof(SeamControlDynamicInvokeByTypeToken).FullName, typeof(SeamControlResolvesBySeamName).FullName,
+                typeof(SeamControlResolvesTheRouteSeam).FullName, typeof(SeamControlTakesTheSeam).FullName,
+            }.Order(StringComparer.Ordinal).ToArray(),
             consumers.Keys.Order(StringComparer.Ordinal).ToArray());
+
+        // Round 4b: each of security pass 2's three bypass shapes is found by its own signal (not by a signature).
+        Assert.Contains("type token AppOnlyDocumentNarrowing", consumers[typeof(SeamControlDynamicInvokeByTypeToken).FullName!]);
+        Assert.Contains("calls ExternalDataService.ReadAndNarrowDocumentsAsync", consumers[typeof(SeamControlCallsTheAppOnlyReaderDirectly).FullName!]);
+        Assert.Contains("names a seam in a string", consumers[typeof(SeamControlResolvesBySeamName).FullName!]);
     }
 
     /// <summary>
+    /// The app-only reader's own narrowing entry points (task 188 round 4b, K7): a type that calls one of them directly
+    /// (injecting <see cref="ExternalDataService"/>) decides over the app-only reader exactly as a seam consumer does.
+    /// </summary>
+    private static readonly string[] AppOnlyReaderNarrowingMembers =
+    {
+        nameof(ExternalDataService.ReadAndNarrowDocumentsAsync), nameof(ExternalDataService.NarrowDocumentsAsync),
+        nameof(ExternalDataService.IsDocumentVisibleAsync),
+    };
+
+    /// <summary>A string constant that names a seam type: a reflection lookup (<c>Type.GetType("…Seam")</c>) is a reference.</summary>
+    private static bool NamesASeam(string value) =>
+        NarrowingSeams.Any(seam => value.Contains(seam.Name, StringComparison.Ordinal));
+
+    /// <summary>
     /// Every outermost type that holds a seam (a field, a parameter, a return), resolves one (a generic method instantiated
-    /// over it), invokes or builds one (a method of the delegate type) or calls a method that takes one.
+    /// over it), invokes or builds one (a method of the delegate type) or calls a method that takes one. Round 4b (K7
+    /// hardening, security pass 2): also every type that references a seam as an IL TYPE operand (<c>ldtoken</c> — a
+    /// <c>typeof</c> —, <c>castclass</c>, <c>isinst</c>, …), names one in a string constant (a reflection lookup by
+    /// name), or calls the app-only reader's narrowing entry points (<see cref="AppOnlyReaderNarrowingMembers"/>) directly.
+    /// <see cref="ExternalDataService"/> itself (the reader) and the seams are not consumers.
     /// </summary>
     private static IReadOnlyDictionary<string, HashSet<string>> SeamConsumers(IEnumerable<Type> types)
     {
         const BindingFlags all = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static
             | BindingFlags.DeclaredOnly;
-        var list = types.Where(t => !NarrowingSeams.Contains(t)).ToList();
+        var list = types.Where(t => !NarrowingSeams.Contains(t) && IlCallScan.Outermost(t) != typeof(ExternalDataService)).ToList();
         var found = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         void Add(Type type, string how)
         {
@@ -413,6 +447,20 @@ public class ExternalDocumentNarrowingGuardTests
                 || (target is MethodInfo { IsGenericMethod: true } generic && generic.GetGenericArguments().Any(MentionsSeam))
                 || target.GetParameters().Any(p => MentionsSeam(p.ParameterType)))
                 Add(caller, $"calls {target.DeclaringType?.Name}.{target.Name}");
+            if (target.DeclaringType == typeof(ExternalDataService) && AppOnlyReaderNarrowingMembers.Contains(target.Name))
+                Add(caller, $"calls ExternalDataService.{target.Name}");
+        }
+
+        foreach (var (caller, _, target) in IlCallScan.TypeReferences(list))
+        {
+            if (MentionsSeam(target))
+                Add(caller, $"type token {target.Name}");
+        }
+
+        foreach (var (caller, _, value) in IlCallScan.StringLoads(list))
+        {
+            if (NamesASeam(value))
+                Add(caller, "names a seam in a string");
         }
 
         return found;
@@ -707,6 +755,100 @@ public class ExternalDocumentNarrowingGuardTests
         && AiContentDownloadMembers.Contains(method.Name)
             ? $"{declaring.Name}.{method.Name}"
             : null;
+
+    // ── Task 188 round 4b (security pass 2, F1-2): every document-resource grant goes through THE helper ─────────────
+    // Self-contained: its own allow-list, ratchet baseline, facts and DocumentGrantControl* fixtures (end of file).
+
+    /// <summary>
+    /// The two places a direct document-resource <c>AuthorizeAsync</c> (<see cref="Spaarke.Core.Auth.AuthorizationService"/> /
+    /// <see cref="Spaarke.Core.Auth.IAuthorizationService"/>) belongs: THE helper, which narrows after it, and
+    /// <c>DocumentAuthorizationFilter</c>, which narrows in the filter (slice B).
+    /// </summary>
+    private static readonly string[] DocumentGrantOwners =
+    {
+        "Sprk.Bff.Api.Api.Filters.InternalPlaneDocumentNarrowing::AuthorizeDocumentsAsync",
+        "Sprk.Bff.Api.Api.Filters.DocumentAuthorizationFilter::InvokeAsync",
+    };
+
+    /// <summary>
+    /// The ratchet baseline: direct document-resource grants that remain outside the helper, each with its reason. A new
+    /// direct grant fails <see cref="EveryDocumentResourceGrant_GoesThroughTheNarrowingHelper"/>; an entry that stops
+    /// granting directly fails it too (remove it).
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> DirectDocumentGrantBaseline = new Dictionary<string, string>
+    {
+        ["Sprk.Bff.Api.Api.Filters.BulkDownloadAuthorizationFilter::InvokeAsync"] =
+            "Bulk download DROPS rather than refuses: it grants per id, then narrows the whole allowed set in ONE " +
+            "InternalPlaneDocumentNarrowing.ForCallerAsync call (slice B; pinned by TheInternalPlaneDocumentRoutes_ReachTheNarrowing " +
+            "and DocumentRouteExternalNarrowingTests' bulk cases). The helper's first-deny answer cannot express a partial set.",
+        ["Sprk.Bff.Api.Infrastructure.Authorization.ResourceAccessHandler::HandleRequirementAsync"] =
+            "The handler of the driveitem.* policies (canpreviewfiles, candownloadfiles, …, AuthorizationModule): no route " +
+            "requires any of them (scan 2026-10-21: no RequireAuthorization names one), and its resource id is a container, " +
+            "drive or route id. If a route ever requires one on a document id, it must go through the helper.",
+    };
+
+    [Fact(DisplayName = "Task 188 r4b (F1-2): every direct document-resource AuthorizeAsync is THE helper, DocumentAuthorizationFilter, or listed")]
+    public void EveryDocumentResourceGrant_GoesThroughTheNarrowingHelper()
+    {
+        var callers = DirectDocumentGrantCallers(BffTypes.Value);
+
+        // Non-vacuity: the helper and the filter are seen granting directly.
+        foreach (var owner in DocumentGrantOwners)
+            Assert.True(callers.Contains(owner), $"{owner} should be seen calling AuthorizationService.AuthorizeAsync — the scan lost its signal.");
+
+        var problems = DocumentGrantProblems(callers, DocumentGrantOwners, DirectDocumentGrantBaseline);
+        Assert.True(problems.Count == 0,
+            "A direct document-resource AuthorizeAsync (Spaarke.Core.Auth.AuthorizationService / IAuthorizationService) decides " +
+            "on the root grants only. Outside DocumentAuthorizationFilter it must go through " +
+            "InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync, which applies THE external document narrowing after it " +
+            "(task 188 round 4b, F1-2), or be listed in DirectDocumentGrantBaseline with its reason:\n" + string.Join("\n", problems));
+    }
+
+    [Fact(DisplayName = "Task 188 r4b (F1-2): negative control — a direct grant (class or interface) is found; one through the helper, or the record path, is not")]
+    public void DocumentGrantDetector_MustFireAndMustNotFire()
+    {
+        var fixtures = new[]
+        {
+            typeof(DocumentGrantControlDirect), typeof(DocumentGrantControlDirectThroughTheInterface),
+            typeof(DocumentGrantControlThroughTheHelper), typeof(DocumentGrantControlRecordPath),
+            typeof(DocumentGrantControlListed),
+        };
+        var listed = new Dictionary<string, string>
+        {
+            [$"{typeof(DocumentGrantControlListed).FullName}::GrantAsync"] = "control: listed",
+            [$"{typeof(DocumentGrantControlThroughTheHelper).FullName}::GrantAsync"] = "control: a stale entry (no direct grant)",
+        };
+
+        var problems = DocumentGrantProblems(DirectDocumentGrantCallers(fixtures.SelectMany(IlCallScan.WithNested)), Array.Empty<string>(), listed);
+
+        Assert.Equal(
+            new[]
+            {
+                $"DIRECT document grant: {typeof(DocumentGrantControlDirect).FullName}::GrantAsync",
+                $"DIRECT document grant: {typeof(DocumentGrantControlDirectThroughTheInterface).FullName}::GrantAsync",
+                $"STALE entry {typeof(DocumentGrantControlThroughTheHelper).FullName}::GrantAsync: it no longer grants directly — remove it (the ratchet).",
+            },
+            problems);
+    }
+
+    private static List<string> DocumentGrantProblems(
+        IReadOnlySet<string> callers, IReadOnlyCollection<string> owners, IReadOnlyDictionary<string, string> listed)
+    {
+        var problems = callers.Where(c => !owners.Contains(c) && !listed.ContainsKey(c)).Order(StringComparer.Ordinal)
+            .Select(c => $"DIRECT document grant: {c}").ToList();
+        problems.AddRange(listed.Keys.Where(k => !callers.Contains(k)).Order(StringComparer.Ordinal)
+            .Select(k => $"STALE entry {k}: it no longer grants directly — remove it (the ratchet)."));
+        return problems;
+    }
+
+    /// <summary>Every source method that calls the document-resource <c>AuthorizeAsync</c> of Spaarke.Core's authorization service.</summary>
+    private static IReadOnlySet<string> DirectDocumentGrantCallers(IEnumerable<Type> types) =>
+        IlCallScan.MethodReferences(types)
+            .Where(r => (r.Target.DeclaringType == typeof(Spaarke.Core.Auth.AuthorizationService)
+                         || r.Target.DeclaringType == typeof(Spaarke.Core.Auth.IAuthorizationService))
+                        && r.Target.Name == nameof(Spaarke.Core.Auth.IAuthorizationService.AuthorizeAsync))
+            .Select(r => SourceKey(r.Caller, r.CallerMethod))
+            .ToHashSet(StringComparer.Ordinal);
 }
 
 // Compiled control fixtures for ExternalDocumentNarrowingGuardTests.Detector_MustFireAndMustNotFire. Top-level types (the
@@ -900,4 +1042,79 @@ internal sealed class AiContentControlDownloadNarrows(
 internal sealed class AiContentControlListedDownload(Sprk.Bff.Api.Infrastructure.Graph.SpeFileStore files)
 {
     internal Task<Stream?> ReadAsync(string driveId, string itemId) => files.DownloadFileAsync(driveId, itemId);
+}
+
+// ── Task 188 round 4b: compiled control fixtures (never run; IL only) ────────────────────────────────────────────────
+
+/// <summary>MUST FIRE (r4b K7, security pass 2 shape 1): resolves a seam by a <c>typeof</c> and invokes it late-bound.</summary>
+internal sealed class SeamControlDynamicInvokeByTypeToken
+{
+    internal static object? Run(IServiceProvider services, IReadOnlyCollection<Guid> ids) =>
+        ((Delegate)services.GetService(typeof(AppOnlyDocumentNarrowing))!).DynamicInvoke(ids, CancellationToken.None);
+}
+
+/// <summary>MUST FIRE (r4b K7, shape 2): injects the app-only reader and calls its narrowing directly.</summary>
+internal sealed class SeamControlCallsTheAppOnlyReaderDirectly(ExternalDataService data)
+{
+    internal Task<DocumentNarrowingResult> RunAsync(IReadOnlyCollection<Guid> ids) =>
+        data.ReadAndNarrowDocumentsAsync(ids, CancellationToken.None);
+}
+
+/// <summary>MUST FIRE (r4b K7, shape 3): resolves a seam by its type NAME (reflection).</summary>
+internal sealed class SeamControlResolvesBySeamName
+{
+    internal static object? Run(IServiceProvider services) =>
+        services.GetService(Type.GetType("Sprk.Bff.Api.Infrastructure.ExternalAccess.InternalRouteDocumentNarrowing, Sprk.Bff.Api")!);
+}
+
+/// <summary>MUST NOT FIRE (r4b K7): resolves an unrelated service by a <c>typeof</c> and a name, and casts to Delegate.</summary>
+internal sealed class SeamControlMentionsNoSeam
+{
+    internal static object? Run(IServiceProvider services) =>
+        ((Delegate?)services.GetService(typeof(Func<int>)))?.DynamicInvoke() ?? services.GetService(Type.GetType("System.String")!);
+}
+
+/// <summary>MUST FIRE (r4b F1-2): a document grant on the root grants alone, through the class.</summary>
+internal sealed class DocumentGrantControlDirect(Spaarke.Core.Auth.AuthorizationService authorization)
+{
+    internal Task<Spaarke.Core.Auth.AuthorizationResult> GrantAsync(Guid id) =>
+        authorization.AuthorizeAsync(new Spaarke.Core.Auth.AuthorizationContext
+        {
+            UserId = "u", ResourceId = id.ToString(), Operation = "read", UserAccessToken = null,
+        });
+}
+
+/// <summary>MUST FIRE (r4b F1-2): the same through the interface.</summary>
+internal sealed class DocumentGrantControlDirectThroughTheInterface(Spaarke.Core.Auth.IAuthorizationService authorization)
+{
+    internal Task<Spaarke.Core.Auth.AuthorizationResult> GrantAsync(Guid id) =>
+        authorization.AuthorizeAsync(new Spaarke.Core.Auth.AuthorizationContext
+        {
+            UserId = "u", ResourceId = id.ToString(), Operation = "read", UserAccessToken = null,
+        });
+}
+
+/// <summary>MUST NOT FIRE (r4b F1-2): grants through THE helper.</summary>
+internal sealed class DocumentGrantControlThroughTheHelper(Spaarke.Core.Auth.AuthorizationService authorization)
+{
+    internal Task<Spaarke.Core.Auth.AuthorizationResult> GrantAsync(Microsoft.AspNetCore.Http.HttpContext http, Guid id) =>
+        Sprk.Bff.Api.Api.Filters.InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync(
+            http, authorization, "u", new[] { id }, "read", null, "control", null, CancellationToken.None);
+}
+
+/// <summary>MUST NOT FIRE (r4b F1-2): the entity-generic record path is not a document grant.</summary>
+internal sealed class DocumentGrantControlRecordPath(Spaarke.Core.Auth.AuthorizationService authorization)
+{
+    internal Task<Spaarke.Dataverse.AccessSnapshot> ReadAsync(Guid id) =>
+        authorization.GetCallerRecordAccessAsync("u", "sprk_matters", id, null);
+}
+
+/// <summary>MUST NOT FIRE (r4b F1-2): a direct grant listed in the baseline.</summary>
+internal sealed class DocumentGrantControlListed(Spaarke.Core.Auth.IAuthorizationService authorization)
+{
+    internal Task<Spaarke.Core.Auth.AuthorizationResult> GrantAsync(Guid id) =>
+        authorization.AuthorizeAsync(new Spaarke.Core.Auth.AuthorizationContext
+        {
+            UserId = "u", ResourceId = id.ToString(), Operation = "read", UserAccessToken = null,
+        });
 }
