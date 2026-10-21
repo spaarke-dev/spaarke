@@ -143,6 +143,34 @@ public class FinanceEndpointsAuthorizationContractTests
         host.StepZero.Queries.Should().BeEmpty();
     }
 
+    public static IEnumerable<object[]> RecalculateRefusedKinds =>
+        FinanceStepZeroCaller.Cross(
+            [["finance-matter-recalculate", Matters], ["finance-project-recalculate", Projects]], FinanceStepZeroCaller.RefusedKinds);
+
+    [Theory(DisplayName = "Task 099: a step-0 refusal on POST /api/finance/{matters|projects}/{id}/recalculate is indistinguishable from an internal caller's 404 for a record deleted after the check (the handler's own uniform 404)")]
+    [MemberData(nameof(RecalculateRefusedKinds))]
+    public async Task FinanceRecalculate_StepZeroRefusal_IsIndistinguishableFromAnInternalCallersNotFound(string route, string expectedSet, StepZeroCallerKind kind)
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var existingId = Guid.NewGuid();
+        var deletedId = Guid.NewGuid();
+        host.Access.Grant(expectedSet, existingId, AccessRights.Read);
+        host.Access.Grant(expectedSet, deletedId, AccessRights.Read);
+        host.Rollup.DeletedAfterCheck.Add(deletedId);
+        host.StepZero.Kind = kind;
+
+        var refused = await host.SendAsync(BuildRequest(route, existingId));
+        await host.StepZero.AssertRefusedAsync(refused, kind, uniformNotFound: true);
+        host.Access.Calls.Should().BeEmpty();
+        host.Rollup.Calls.Should().BeEmpty();
+
+        host.StepZero.Kind = StepZeroCallerKind.FlagFalse; // an INTERNAL caller, with the rights, whose record vanishes before the compute
+        var internalNotFound = await host.SendAsync(BuildRequest(route, deletedId));
+        host.Rollup.Calls.Should().Equal(deletedId); // the handler ran and produced its own 404
+
+        await Sprk.Bff.Api.Tests.Api.Filters.FinanceStepZeroTests.AssertIndistinguishableAsync(refused, internalNotFound);
+    }
+
     // =========================================================================================
     // Recalculate (finance + scorecard)
     // =========================================================================================

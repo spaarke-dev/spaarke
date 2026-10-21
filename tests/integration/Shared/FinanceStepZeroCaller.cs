@@ -122,6 +122,16 @@ public sealed class FinanceStepZeroCaller
 
         if (q.ColumnSet.Columns.Contains(IsExternalColumn))
         {
+            // The flag read must ask for THE CALLER's systemuser (the one the oid lookup returned): a read for any other
+            // systemuserid finds no row (and so refuses, fail closed). Without this, a production bug that passed the wrong
+            // id (the oid, Guid.Empty) would still get the caller's row and every must-not-fire test would stay green.
+            var asksForTheCallersRow = q.Criteria.Conditions.Any(c =>
+                c.AttributeName == "systemuserid" && c.Operator == ConditionOperator.Equal && c.Values.Count == 1 && c.Values[0] is Guid id && id == SystemUserId);
+            if (!asksForTheCallersRow)
+            {
+                return Task.FromResult(new EntityCollection());
+            }
+
             if (Kind == StepZeroCallerKind.FlagReadFault)
             {
                 return Task.FromException<EntityCollection>(new InvalidOperationException("sprk_isexternal read failed"));

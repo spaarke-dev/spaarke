@@ -118,23 +118,26 @@ public sealed class SubmissionOverrideEndpointsAuthorizationContractTests
         host.World.AssertNothingChanged();
     }
 
-    [Theory(DisplayName = "Task 099: a refused flagged-external caller gets a byte-identical /blocked body for an existing and a non-existent submission id")]
+    [Theory(DisplayName = "Task 099: a step-0 refusal of /blocked is indistinguishable from an internal caller's 404 for an absent submission id: same status, Content-Type and body but the correlation id")]
     [InlineData(StepZeroCallerKind.FlagTrue)]
     [InlineData(StepZeroCallerKind.NoSystemUserRow)]
     [InlineData(StepZeroCallerKind.FlagReadFault)]
-    public async Task StepZero_Blocked_IsTheSameForAnExistingAndAnAbsentId(StepZeroCallerKind kind)
+    [InlineData(StepZeroCallerKind.LookupFault)]
+    public async Task StepZero_Blocked_IsIndistinguishableFromAnInternalAbsentId(StepZeroCallerKind kind)
     {
         await using var host = await Host.StartAsync();
         host.GrantRights();
         host.StepZero.Kind = kind;
 
-        var existing = await host.SendAsync(Request("GET", Url("blocked")));
-        var absent = await host.SendAsync(Request("GET", Url("blocked", Guid.NewGuid())));
+        var refused = await host.SendAsync(Request("GET", Url("blocked")));
+        await host.StepZero.AssertRefusedAsync(refused, kind, uniformNotFound: true);
+        host.Access.Calls.Should().BeEmpty();
 
-        existing.StatusCode.Should().Be(HttpStatusCode.NotFound);
-        absent.StatusCode.Should().Be(HttpStatusCode.NotFound);
-        Sprk.Bff.Api.Tests.Api.Filters.FinanceStepZeroTests.WithoutTraceId(await absent.Content.ReadAsStringAsync())
-            .Should().Be(Sprk.Bff.Api.Tests.Api.Filters.FinanceStepZeroTests.WithoutTraceId(await existing.Content.ReadAsStringAsync()));
+        host.StepZero.Kind = StepZeroCallerKind.FlagFalse; // an INTERNAL caller asking for an id it holds no rights on (absent)
+        var absent = await host.SendAsync(Request("GET", Url("blocked", Guid.NewGuid())));
+        host.Access.Calls.Should().ContainSingle("the internal caller reached the route's own record check");
+
+        await Sprk.Bff.Api.Tests.Api.Filters.FinanceStepZeroTests.AssertIndistinguishableAsync(refused, absent);
         host.World.Entities.Invocations.Should().BeEmpty();
     }
 

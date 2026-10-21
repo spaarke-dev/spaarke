@@ -149,18 +149,51 @@ public sealed class FinanceStepZeroTests
         host.StepZero.Queries.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "Task 099: on a UniformNotFound route the refusal is byte-identical for an existing and an absent id")]
-    public async Task UniformNotFound_RefusalIsTheSameForAnExistingAndAnAbsentId()
+    public static TheoryData<StepZeroCallerKind> RefusedKindsOnly()
     {
-        await using var host = await Host.StartAsync(StepZeroCallerKind.FlagTrue);
+        var data = new TheoryData<StepZeroCallerKind>();
+        foreach (var kind in FinanceStepZeroCaller.RefusedKinds)
+        {
+            data.Add(kind);
+        }
+
+        return data;
+    }
+
+    [Theory(DisplayName = "Task 099: on a UniformNotFound route a step-0 refusal (existing id) is indistinguishable from an internal caller's 404 for an absent id: same status, Content-Type and body but the correlation id")]
+    [MemberData(nameof(RefusedKindsOnly))]
+    public async Task UniformNotFound_StepZeroRefusal_MatchesAnInternalCallersAbsentIdNotFound(StepZeroCallerKind kind)
+    {
+        await using var host = await Host.StartAsync(kind);
         host.Access.Grant(Set, RecordId, AccessRights.Read);
 
-        var existing = await host.SendAsync("/flagged/uniform/", RecordId);
-        var absent = await host.SendAsync("/flagged/uniform/", Guid.NewGuid());
+        var refused = await host.SendAsync("/flagged/uniform/", RecordId);
+        host.StepZero.Queries.Should().NotBeEmpty("the first response is a step-0 refusal");
+        host.Access.Calls.Should().BeEmpty("a step-0 refusal asks no rights question");
 
-        existing.StatusCode.Should().Be(HttpStatusCode.NotFound);
-        absent.StatusCode.Should().Be(existing.StatusCode);
-        WithoutTraceId(await absent.Content.ReadAsStringAsync()).Should().Be(WithoutTraceId(await existing.Content.ReadAsStringAsync()));
+        host.StepZero.Kind = StepZeroCallerKind.FlagFalse; // the same caller as an INTERNAL one, asking for an id nobody granted
+        var absent = await host.SendAsync("/flagged/uniform/", Guid.NewGuid());
+        host.Access.Calls.Should().ContainSingle("the internal caller reached the route's own rights check, which denied the absent id");
+
+        await AssertIndistinguishableAsync(refused, absent);
+    }
+
+    /// <summary>
+    /// Asserts <paramref name="stepZeroRefusal"/> and <paramref name="internalNotFound"/> are the same uniform 404: status,
+    /// Content-Type and body equal once the correlation / trace ids are removed; and not vacuously (a non-empty ProblemDetails
+    /// body carrying the record-unavailable reason code).
+    /// </summary>
+    internal static async Task AssertIndistinguishableAsync(HttpResponseMessage stepZeroRefusal, HttpResponseMessage internalNotFound)
+    {
+        stepZeroRefusal.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        internalNotFound.StatusCode.Should().Be(stepZeroRefusal.StatusCode);
+        internalNotFound.Content.Headers.ContentType?.ToString().Should().Be(stepZeroRefusal.Content.Headers.ContentType?.ToString());
+        stepZeroRefusal.Content.Headers.ContentType.Should().NotBeNull();
+
+        var refusedBody = await stepZeroRefusal.Content.ReadAsStringAsync();
+        var internalBody = await internalNotFound.Content.ReadAsStringAsync();
+        refusedBody.Should().Contain(FinanceAuthorizationFilter.RecordUnavailableReasonCode);
+        WithoutTraceId(internalBody).Should().Be(WithoutTraceId(refusedBody));
     }
 
     internal static string WithoutTraceId(string body)
