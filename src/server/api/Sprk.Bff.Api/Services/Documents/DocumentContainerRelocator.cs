@@ -1992,7 +1992,7 @@ public sealed class DocumentContainerRelocator
         }
     }
 
-    /// <summary>What the row says about a copy whose re-point was sent but did not answer.</summary>
+    /// <summary>What the row says about a copy whose re-point faulted (refused, or sent and did not answer).</summary>
     private enum CopyNamed
     {
         /// <summary>
@@ -2008,7 +2008,7 @@ public sealed class DocumentContainerRelocator
     }
 
     /// <summary>
-    /// After a re-point that was sent but did not answer (cancelled, timed out, a fault after send), reads the row again
+    /// After a re-point that faulted — refused (the client's last retry only), or sent and did not answer — reads the row again
     /// with <see cref="CancellationToken.None"/> — the move's own token may be the cancelled one — to learn whether it
     /// landed. Best effort: a read that faults or finds no row is <see cref="CopyNamed.Unknown"/>. Never throws.
     /// </summary>
@@ -2036,15 +2036,17 @@ public sealed class DocumentContainerRelocator
     /// <summary>
     /// PR #2161 re-check: did Dataverse DEFINITELY refuse a write, so it never commits? Only when it ANSWERED with a refusal
     /// — a service fault or a 4xx (the update's transaction rolled back; the <c>DecisionActionExecutors.IsClearRefusal</c>
-    /// rule) — or rejected it on concurrency. Looked for through the whole exception chain: the entity service wraps every
-    /// failure, a cancellation included, in an <see cref="InvalidOperationException"/>. A timeout, a cancellation, a
-    /// transport fault or a 5xx is not an answer: the write may have committed, or may still.
+    /// rule); a concurrency mismatch arrives as such a fault. Looked for through the whole exception chain: the entity
+    /// service wraps every failure, a cancellation included, in an <see cref="InvalidOperationException"/>. A timeout, a
+    /// cancellation, a transport fault or a 5xx is not an answer: the write may have committed, or may still. Even a
+    /// definite refusal is only the client's LAST attempt (it retries internally), so the caller still reads the row
+    /// again before removing anything.
     /// </summary>
     internal static bool IsDefiniteWriteRejection(Exception ex)
     {
         for (var e = ex; e is not null; e = e.InnerException)
         {
-            if (e is System.ServiceModel.FaultException<OrganizationServiceFault> or System.Data.DBConcurrencyException
+            if (e is System.ServiceModel.FaultException<OrganizationServiceFault>
                 || e is Microsoft.PowerPlatform.Dataverse.Client.Utils.DataverseOperationException
                 {
                     InnerException: Microsoft.Rest.HttpOperationException
@@ -2254,29 +2256,38 @@ public sealed class DocumentContainerRelocator
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            // PR #2161 re-check: only a DEFINITE refusal (Dataverse answered with a fault, or a concurrency rejection)
-            // proves the update never commits, so only then is the copy removed.
-            if (IsDefiniteWriteRejection(ex))
+            // The row is ALWAYS read again first, a definite refusal included: the Dataverse client retries an update
+            // internally (502/503, transient SQL codes, throttling), so the refusal it surfaces is only its LAST attempt's
+            // answer — an earlier attempt may have committed. A row that names the copy is a commit, whatever the exception.
+            var definite = IsDefiniteWriteRejection(ex);
+            var names = await RowNamesCopyAsync(documentId, targetDrive, copy.Id).ConfigureAwait(false);
+
+            // PR #2161 re-check: only a DEFINITE refusal (Dataverse answered with a fault or a 4xx) whose row was read and
+            // names something else proves the update never committed, so only then is the copy removed.
+            if (definite && names == CopyNamed.No)
             {
                 _logger.LogError(ex,
-                    "[DOCUMENT-RELOCATE] document {DocumentId}: Dataverse refused the re-point; nothing was written and the copy "
-                    + "is removed.", documentId);
+                    "[DOCUMENT-RELOCATE] document {DocumentId}: Dataverse refused the re-point and the row, read again, does not "
+                    + "name the copy; the copy {TargetDrive}/{TargetItem} is removed.", documentId, targetDrive, copy.Id);
                 await DeleteQuietlyAsync(targetDrive, copy.Id, CancellationToken.None).ConfigureAwait(false);
                 return MoveResult.Failed(DocumentRelocationOutcome.Of(
                     documentId, RelocationState.Failed, sourceDrive, sourceItem, targetDrive, null, "the row could not be re-pointed"));
             }
 
-            // Otherwise the write was SENT and its outcome is unknown (a timeout, a cancellation — the request's own token,
-            // wrapped by the entity service — a transport fault or a 5xx after send): it may have landed, or may still land
-            // after any re-read. The row is read again to recognise a commit; a row that does not name the copy (yet)
-            // proves nothing, so the copy is KEPT — a stray copy is recoverable, a row pointing at a deleted file is not.
-            var names = await RowNamesCopyAsync(documentId, targetDrive, copy.Id).ConfigureAwait(false);
+            // Otherwise the outcome is unknown: a refusal whose row could not be read again, or a write that was SENT and
+            // did not answer (a timeout, a cancellation — the request's own token, wrapped by the entity service — a
+            // transport fault or a 5xx after send), which may have landed or may still land after any re-read. A row that
+            // does not name the copy (yet) proves nothing, so the copy is KEPT — a stray copy is recoverable, a row pointing
+            // at a deleted file is not.
             if (names != CopyNamed.Yes)
             {
                 _logger.LogError(ex,
-                    "[DOCUMENT-RELOCATE] document {DocumentId}: the re-point did not answer and may still land ({Reread}); the "
-                    + "copy {TargetDrive}/{TargetItem} is kept — an administrator must check whether the row names it.",
-                    documentId, names == CopyNamed.Unknown ? "the row could not be read again" : "the row does not name it yet",
+                    "[DOCUMENT-RELOCATE] document {DocumentId}: {Answer} ({Reread}); the copy {TargetDrive}/{TargetItem} is kept "
+                    + "— an administrator must check whether the row names it.",
+                    documentId,
+                    definite ? "Dataverse refused the re-point, but an earlier attempt of the client's retries may have committed it"
+                             : "the re-point did not answer and may still land",
+                    names == CopyNamed.Unknown ? "the row could not be read again" : "the row does not name it yet",
                     targetDrive, copy.Id);
                 return MoveResult.Failed(DocumentRelocationOutcome.Of(
                     documentId, RelocationState.Failed, sourceDrive, sourceItem, targetDrive, null,

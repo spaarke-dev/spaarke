@@ -4,7 +4,8 @@
 //   - Justification: #2159 / PR #2161 security re-check — three write contracts of the relocator and its release retry:
 //     1 a pointer write whose outcome is UNKNOWN (a timeout, a cancellation — wrapped by the entity service as an
 //       InvalidOperationException — a transport fault) keeps its copy whatever an immediate re-read says, because the
-//       update may still commit; only a DEFINITE refusal removes it. And the settle never deletes a source unless the row's
+//       update may still commit; only a DEFINITE refusal whose row, read again, names something else removes it (the
+//       client retries internally, so a refusal may follow an earlier attempt that committed). And the settle never deletes a source unless the row's
 //       CURRENT file exists — the backstop that makes any pointer race survivable;
 //     2 a queued F3 release retry is bound to the source container, the secure record left and the target — never to the
 //       item, which the relocator itself re-points inside that container (an edited source closed in place);
@@ -53,13 +54,19 @@ public class RelocationRecheckFixTests
     /// The pointer write (the update that names the copy) is SENT but answers with <paramref name="fault"/> before it
     /// commits; <see cref="LateCommit"/> then lands it, as Dataverse does after the caller stopped waiting. Every other
     /// write applies at once. <paramref name="cancel"/> is cancelled as the write is sent (Make Secure's request ending).
+    /// <paramref name="committedFirst"/>: the update COMMITS and only then answers with <paramref name="fault"/> — the
+    /// Dataverse client's internal retry (502/503, transient SQL, throttling) surfacing its LAST attempt's refusal after an
+    /// earlier attempt landed.
     /// </summary>
     private sealed class LatePointerWrite
     {
         private readonly World _world;
         private Dictionary<string, object>? _pending;
 
-        public LatePointerWrite(World world, Exception fault, CancellationTokenSource? cancel = null)
+        /// <summary>The pointer write has been sent.</summary>
+        public bool Sent => _pending is not null;
+
+        public LatePointerWrite(World world, Exception fault, CancellationTokenSource? cancel = null, bool committedFirst = false)
         {
             _world = world;
             Mock.Get(world.EntityService!)
@@ -70,6 +77,8 @@ public class RelocationRecheckFixTests
                     if (pointerWrite && _pending is null)
                     {
                         _pending = fields;
+                        if (committedFirst)
+                            Apply(entity, id, fields);
                         cancel?.Cancel();
                         return Task.FromException(fault);
                     }
@@ -140,6 +149,51 @@ public class RelocationRecheckFixTests
         world.ItemFacts(T.CustomerBContainer, Item).Should().NotBeNull();
     }
 
+    /// <summary>
+    /// The production shape of a throttled update: <c>DataverseServiceClientImpl.UpdateAsync</c> wraps the client's final
+    /// <see cref="System.ServiceModel.FaultException{TDetail}"/> (service protection limit, -2147015902).
+    /// </summary>
+    private static Exception WrappedThrottlingFault()
+        => new InvalidOperationException(
+            $"Failed to update sprk_document record {T.DocumentId}: Number of requests exceeded the limit of 6000 over time window of 300 seconds.",
+            new System.ServiceModel.FaultException<OrganizationServiceFault>(
+                new OrganizationServiceFault { ErrorCode = -2147015902, Message = "Number of requests exceeded the limit of 6000 over time window of 300 seconds." },
+                new System.ServiceModel.FaultReason("Number of requests exceeded the limit of 6000 over time window of 300 seconds.")));
+
+    [Fact(DisplayName = "1 must fire: a re-point REFUSED on the client's last retry (throttling, production shape) after an earlier attempt committed keeps the copy, and the move is committed")]
+    public async Task ARefusalAfterAnEarlierAttemptCommitted_KeepsTheCopy_AndCommits()
+    {
+        var (world, rig) = InCustomerB();
+        _ = new LatePointerWrite(world, WrappedThrottlingFault(), committedFirst: true);
+
+        var outcome = await rig.Relocator.RelocateIfMisplacedAsync(T.DocumentId, apply: true, RelocationPurpose.LegacyMigration);
+
+        rig.Spe.Verify(s => s.DeleteFileAsync(T.CustomerA1Container, T.Rig.CopyItem, It.IsAny<CancellationToken>()), Times.Never,
+            "the row names the copy: deleting it would leave the row pointing at a file that no longer exists");
+        rig.ItemOf(T.DocumentId).Should().Be(T.Rig.CopyItem);
+        world.ItemFacts(T.CustomerA1Container, T.Rig.CopyItem).Should().NotBeNull("the file the row names exists");
+        outcome.State.Should().NotBe(RelocationState.Failed, outcome.Detail);
+        outcome.TargetItem.Should().Be(T.Rig.CopyItem, "the landed re-point is the move's commit");
+    }
+
+    [Fact(DisplayName = "1 must fire: a re-point REFUSED whose row cannot be read again keeps the copy (an earlier retry may have committed)")]
+    public async Task ARefusedRePointWithAnUnreadableRow_KeepsTheCopy()
+    {
+        var (world, rig) = InCustomerB();
+        var write = new LatePointerWrite(world, WrappedThrottlingFault());
+        world.RetrieveFault = (entity, _) => write.Sent && entity == "sprk_document"
+            ? new HttpRequestException("Dataverse is unreachable")
+            : null;
+
+        var outcome = await rig.Relocator.RelocateIfMisplacedAsync(T.DocumentId, apply: true, RelocationPurpose.LegacyMigration);
+
+        outcome.State.Should().Be(RelocationState.Failed);
+        outcome.Detail.Should().Contain("could not be read again").And.Contain("the copy is kept");
+        rig.Spe.Verify(s => s.DeleteFileAsync(T.CustomerA1Container, T.Rig.CopyItem, It.IsAny<CancellationToken>()), Times.Never,
+            "the row may name the copy");
+        world.ItemFacts(T.CustomerBContainer, Item).Should().NotBeNull("the source is never touched");
+    }
+
     public static TheoryData<string, Exception, bool> WriteFailures => new()
     {
         { "a cancellation, wrapped (production)", WrappedCancellation(), false },
@@ -151,12 +205,11 @@ public class RelocationRecheckFixTests
             new Microsoft.Rest.HttpOperationException("503") { Response = new Microsoft.Rest.HttpResponseMessageWrapper(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable), string.Empty) })), false },
         { "a service fault, wrapped (production)", new InvalidOperationException("x",
             new System.ServiceModel.FaultException<OrganizationServiceFault>(new OrganizationServiceFault())), true },
-        { "a concurrency rejection", new System.Data.DBConcurrencyException("412"), true },
         { "a 4xx", new InvalidOperationException("x", new Microsoft.PowerPlatform.Dataverse.Client.Utils.DataverseOperationException("x",
             new Microsoft.Rest.HttpOperationException("400") { Response = new Microsoft.Rest.HttpResponseMessageWrapper(new HttpResponseMessage(HttpStatusCode.BadRequest), string.Empty) })), true },
     };
 
-    [Theory(DisplayName = "1: only a DEFINITE refusal of the write (a Dataverse fault or 4xx, a concurrency rejection) counts as 'it never commits'")]
+    [Theory(DisplayName = "1: only a DEFINITE refusal of the write (a Dataverse fault or 4xx) counts as a refusal")]
     [MemberData(nameof(WriteFailures))]
     public void OnlyADefiniteRefusal_ProvesTheWriteNeverCommits(string what, Exception failure, bool definite)
         => DocumentContainerRelocator.IsDefiniteWriteRejection(failure).Should().Be(definite, what);
