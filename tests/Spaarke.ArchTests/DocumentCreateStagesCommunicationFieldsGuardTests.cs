@@ -134,7 +134,76 @@ public class DocumentCreateStagesCommunicationFieldsGuardTests
             + "sprk_accesspermission (task 130, #2126), and no Office test notices because they all mock the create.");
     }
 
+    // ── The own-narrowing record has one setter (#2177 UAC pass 1, K2) ─────────────────────────────────
+
+    /// <summary>The one member that may set <c>CreateDocumentRequest.AccessInheritanceRecord</c>.</summary>
+    private const string OutcomeFile = "src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs";
+    private const string OutcomeMethod = "ApplyEmailCommunicationOutcome";
+
+    private static readonly Regex RecordAssignment = new(
+        @"\bAccessInheritanceRecord\s*=(?![=>])", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// The <c>AccessInheritanceRecord</c> assignments in <paramref name="source"/> (code text) that are NOT inside
+    /// <see cref="OutcomeMethod"/>, when <paramref name="isOutcomeFile"/>; every assignment otherwise.
+    /// </summary>
+    internal static int RecordAssignmentsOutsideTheOutcome(string source, bool isOutcomeFile)
+    {
+        var total = RecordAssignment.Matches(SourceScan.CodeText(source.Split('\n'))).Count;
+        var inOutcome = isOutcomeFile && MethodBody(source, OutcomeMethod) is { } body ? RecordAssignment.Matches(body).Count : 0;
+        return total - inOutcome;
+    }
+
+    [Fact(DisplayName = "Task 130 (I-19): only ApplyEmailCommunicationOutcome sets a document's own-narrowing record")]
+    public void AccessInheritanceRecord_IsSetOnlyByTheEmailCommunicationOutcome()
+    {
+        // The stager writes a document's own Access Permission only with this record (task 189), so the one setter of the
+        // record is the one place a create can carry an own narrowing. A second setter would be a new document writer that
+        // 189's writer guard cannot see: it lists the stager, not the stager's callers.
+        var problems = new List<string>();
+        foreach (var file in SourceScan.ServerSourceFiles())
+        {
+            var relative = SourceScan.Relative(file).Replace('\\', '/');
+            var outside = RecordAssignmentsOutsideTheOutcome(System.IO.File.ReadAllText(file), relative == OutcomeFile);
+            if (outside > 0)
+                problems.Add($"{relative}: {outside} assignment(s) of AccessInheritanceRecord outside {OutcomeMethod}");
+        }
+
+        var outcomePath = Path.Combine(SourceScan.RepoRoot, OutcomeFile.Replace('/', Path.DirectorySeparatorChar));
+        Assert.True(
+            MethodBody(System.IO.File.ReadAllText(outcomePath), OutcomeMethod) is { } body && RecordAssignment.Matches(body).Count >= 2,
+            $"{OutcomeFile} {OutcomeMethod} should set AccessInheritanceRecord (linked and Restricted): the scan lost its signal.");
+        Assert.True(problems.Count == 0,
+            "CreateDocumentRequest.AccessInheritanceRecord is set only by OfficeDocumentPersistence.ApplyEmailCommunicationOutcome " +
+            "(write-path registry I-19, #2177). Decide a new own narrowing there, or add it to task 189's writer guard:\n" +
+            string.Join("\n", problems));
+    }
+
     // ── Controls ──────────────────────────────────────────────────────────────────────────────────────
+
+    [Fact(DisplayName = "Task 130 guard control: an own-narrowing record set outside the outcome is counted; reads are not")]
+    public void Control_RecordAssignmentOutsideTheOutcome()
+    {
+        const string source = """
+            internal static bool ApplyEmailCommunicationOutcome(CreateDocumentRequest create, Guid? id)
+            {
+                create.AccessInheritanceRecord = null;
+                create.AccessInheritanceRecord = AccessInheritance.OwnNarrowing(Restricted).Serialize();
+                return true;
+            }
+
+            void Elsewhere(CreateDocumentRequest create)
+            {
+                // create.AccessInheritanceRecord = "x";   (commented out: does not count)
+                var record = create.AccessInheritanceRecord;
+                if (create.AccessInheritanceRecord == null) { }
+                var request = new CreateDocumentRequest { AccessInheritanceRecord = "x" };
+            }
+            """;
+
+        Assert.Equal(1, RecordAssignmentsOutsideTheOutcome(source, isOutcomeFile: true));
+        Assert.Equal(3, RecordAssignmentsOutsideTheOutcome(source, isOutcomeFile: false));
+    }
 
     [Fact(DisplayName = "Task 130 guard control: a CreateDocumentAsync body without the stager call fails the scan")]
     public void Control_BodyWithoutTheCall_IsAViolation()

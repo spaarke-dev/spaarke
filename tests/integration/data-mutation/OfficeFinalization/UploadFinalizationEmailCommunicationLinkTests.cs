@@ -68,7 +68,8 @@ public class UploadFinalizationEmailCommunicationLinkTests
 
         outcome.IsSuccess.Should().BeTrue("a Restricted child is still created; the job still succeeds");
         fixture.Created.Should().HaveCount(2)
-            .And.OnlyContain(r => r.RelatedCommunicationId == null && r.AccessPermission == Restricted);
+            .And.OnlyContain(r => r.RelatedCommunicationId == null && r.AccessPermission == Restricted)
+            .And.OnlyContain(r => IsItsOwnRestriction(r), "task 189: each child's Restricted is written with its own-narrowing record");
         fixture.Logs.Lines.Where(l => l.Category == WorkerCategory && l.Level == LogLevel.Error)
             .Should().HaveCount(2).And.OnlyContain(l => l.Message.Contains("Restricted") && !l.Message.Contains(RfcId));
     }
@@ -88,6 +89,18 @@ public class UploadFinalizationEmailCommunicationLinkTests
         var created = fixture.Created.Should().ContainSingle().Subject;
         created.RelatedCommunicationId.Should().Be(identified ? CommunicationId : null);
         created.AccessPermission.Should().Be(identified ? null : Restricted);
+        if (identified)
+            created.AccessInheritanceRecord.Should().BeNull("no own narrowing to record");
+        else
+            IsItsOwnRestriction(created).Should().BeTrue("task 189: the Restricted is written with its own-narrowing record");
+    }
+
+    /// <summary>UAC-r2 task 189 (D7 T7a): the record that marks a Restricted as the document's OWN narrowing. This fixture
+    /// mocks the create, so the stager's refusal never runs here; the record is asserted on the request instead.</summary>
+    private static bool IsItsOwnRestriction(CreateDocumentRequest created)
+    {
+        var (record, unreadable) = Sprk.Bff.Api.Services.Access.AccessInheritance.Parse(created.AccessInheritanceRecord);
+        return !unreadable && record?.OwnPermission == Restricted;
     }
 
     [Theory]
