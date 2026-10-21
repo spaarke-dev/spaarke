@@ -431,13 +431,44 @@ public class ChildAccessPermissionReconcileTests
         RecordOf(job, document).OwnPermission.Should().BeNull("the edit below the floor removed the own narrowing");
     }
 
-    [Fact]
-    public async Task Run_ADocumentWhoseRecordCannotBeRead_IsNotWritten_AndIsCarried()
+    [Theory]
+    [InlineData("not json")]
+    [InlineData("an unknown level inside")]
+    public async Task Run_ADocumentWhoseRecordCannotBeRead_IsOnlyRaisedToItsFloor_ItsRecordUntouched_AndIsCarried(string record)
     {
-        // AC 3 (fail closed): an unreadable own narrowing is never guessed at.
+        // Must fire (fix round C, K1): an unreadable own narrowing is never guessed at, but whatever it is, max(own,
+        // inherited) is at least the live floor. Leaving Standard under a Restricted matter would show it to partners.
         var job = new Harness();
         var matter = job.Root("sprk_matter", Restricted);
         var document = job.Child("sprk_document", Standard, ("sprk_matter", "sprk_matter", matter));
+        var text = record == "not json"
+            ? "{not json"
+            : AccessInheritance.OwnNarrowing(Limited).Serialize().Replace(Limited.ToString(), "100000099");
+        AccessInheritance.Parse(text).Unreadable.Should().BeTrue("the control: this record cannot be read");
+        job.World.Set("sprk_document", document, Record, text);
+        job.World.Modified("sprk_document", document, job.Now.UtcDateTime);
+
+        var report = (await job.RunAsync()).GetProperty("accessPermission");
+
+        job.World.AccessPermissionWrites.Should().ContainSingle().Which.Should().Be(("sprk_document", document, Restricted));
+        job.World.AccessRecordWrites.Should().BeEmpty("the unreadable record is left for a person to look at");
+        job.World.ValueOf<string>("sprk_document", document, Record).Should().Be(text);
+        report.GetProperty("raisedOnly").GetInt32().Should().Be(1);
+        report.GetProperty("changed").GetInt32().Should().Be(1);
+        report.GetProperty("undetermined").GetInt32().Should().Be(1);
+        report.GetProperty("carriedRows").GetInt32().Should().Be(1);
+        report.GetProperty("problems").EnumerateArray().Single().GetString().Should().Contain(Record)
+            .And.NotContain(text, "the reason names the column, never the stored text");
+    }
+
+    [Fact]
+    public async Task Run_ADocumentWhoseRecordCannotBeRead_AboveItsFloor_IsNotWritten()
+    {
+        // Must not fire (fix round C, K1): a Restricted that may be the user's own narrowing is never lowered to a Standard
+        // matter's value while the record that would say so cannot be read.
+        var job = new Harness();
+        var matter = job.Root("sprk_matter", Standard);
+        var document = job.Child("sprk_document", Restricted, ("sprk_matter", "sprk_matter", matter));
         job.World.Set("sprk_document", document, Record, "{not json");
         job.World.Modified("sprk_document", document, job.Now.UtcDateTime);
 
@@ -445,10 +476,10 @@ public class ChildAccessPermissionReconcileTests
 
         job.World.AccessPermissionWrites.Should().BeEmpty();
         job.World.AccessRecordWrites.Should().BeEmpty();
+        ValueOf(job, document).Should().Be(Restricted);
+        report.GetProperty("raisedOnly").GetInt32().Should().Be(0);
         report.GetProperty("undetermined").GetInt32().Should().Be(1);
         report.GetProperty("carriedRows").GetInt32().Should().Be(1);
-        report.GetProperty("problems").EnumerateArray().Single().GetString().Should().Contain(Record)
-            .And.NotContain("{not json", "the reason names the column, never the stored text");
     }
 
     [Fact]
@@ -468,19 +499,33 @@ public class ChildAccessPermissionReconcileTests
     }
 
     [Fact]
-    public async Task Run_WhenDocumentsLackTheRecordColumn_NoDocumentIsWritten_AndTheOtherTablesAreReconciled()
+    public async Task Run_WhenDocumentsLackTheRecordColumn_ADocumentBelowItsFloorIsOnlyRaised_NoneIsLowered_AndTheOtherTablesAreReconciled()
     {
-        // AC 3 (fail closed) and AC 4: before the schema script runs, a document's own narrowing cannot be read.
+        // Fix round C (K2) and AC 4: before the schema script runs, a document's own narrowing cannot be read. Must fire: a
+        // Standard under a Restricted matter is raised (value only). Must not fire: a Restricted under a Standard matter (it
+        // may be the user's own) is never lowered. The world refuses any read or write naming the missing column.
         var job = new Harness();
         job.World.DocumentsLackAccessRecordColumn = true;
         var matter = job.Root("sprk_matter", Restricted);
-        var document = job.Child("sprk_document", Standard, ("sprk_matter", "sprk_matter", matter));
+        var open = job.Root("sprk_matter", Standard);
+        var below = job.Child("sprk_document", Standard, ("sprk_matter", "sprk_matter", matter));
+        var above = job.Child("sprk_document", Restricted, ("sprk_matter", "sprk_matter", open));
         var todo = job.Child("sprk_todo", Standard, ("sprk_regardingmatter", "sprk_matter", matter));
 
         var report = (await job.RunAsync()).GetProperty("accessPermission");
 
-        job.World.AccessPermissionWrites.Should().ContainSingle().Which.Should().Be(("sprk_todo", todo, Restricted));
-        ValueOf(job, document).Should().Be(Standard);
+        report.TryGetProperty("failure", out var failure).Should().BeTrue();
+        failure.ValueKind.Should().Be(JsonValueKind.Null, "the run never asks for the missing column");
+        job.World.AccessPermissionWrites.Should().BeEquivalentTo(new[]
+        {
+            ("sprk_document", below, Restricted),
+            ("sprk_todo", todo, Restricted),
+        });
+        job.World.AccessRecordWrites.Should().BeEmpty();
+        ValueOf(job, above).Should().Be(Restricted, "a value at or above the floor is never lowered");
+        report.GetProperty("raisedOnly").GetInt32().Should().Be(1);
+        report.GetProperty("undetermined").GetInt32().Should().Be(0, "the environment, not the row, is why: reported once");
+        report.GetProperty("failed").GetInt32().Should().Be(0);
         report.GetProperty("tablesWithoutColumn").EnumerateArray().Select(t => t.GetString())
             .Should().Contain("sprk_document");
     }

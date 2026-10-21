@@ -136,6 +136,6 @@ Restricted hides it from partners). Rule and writers: [child-access-permission.m
 | Caller-supplied writes | refused (`sdap.access.access_record_server_only`) | not refused (the caller could write the unsecured column directly); the Office fallback writes `AccessInheritance.OwnNarrowing(Restricted)` on purpose |
 | Writers | `FollowParentsAsync` | `ChildAccessPermissionReconciler` (in `SecureChildReconciliationJob`, every 2 minutes) and `CoreAncestorResolver.RefreshInheritedAccessPermissionAsync` (the child-records create and re-file), both through `InheritedAccessPermission.DecideDocument` |
 | Own vs inherited | `AccessInheritance.OwnPermissionOf` — ONE copy of the classification, shared | the same |
-| An unreadable record, or an unknown stored level | undetermined, nothing written | undetermined, nothing written, carried |
+| An unreadable record, or an unknown stored level | undetermined, nothing written | an unknown stored level: undetermined, nothing written, carried. An unreadable record (or no record column in the environment): the value only raised to the floor, never lowered, the record untouched; an unreadable one is also undetermined and carried (fix round C) |
 | No record yet | the backfill rule (stricter than the floor is own) | the same; a Standard row under a Standard floor gets no record at all |
 | Each write | re-read first; value and record compared | the same (the job); value and record in ONE update |

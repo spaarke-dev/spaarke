@@ -240,9 +240,17 @@ internal sealed class SecureChildShareWorld
 
     /// <summary>
     /// Task 189: this environment's documents lack the own-narrowing record column (<c>sprk_accessinheritance</c>) — the
-    /// schema script has not run. Read by the probe of <see cref="CoreAncestorsOver"/>.
+    /// schema script has not run. Read by the probe of <see cref="CoreAncestorsOver"/>. Fix round C (K2): a query, read or
+    /// write of a document that names the column then fails, as Dataverse refuses an attribute the table does not have.
     /// </summary>
     public bool DocumentsLackAccessRecordColumn { get; set; }
+
+    private void RefuseMissingAccessRecordColumn(string table, IEnumerable<string> columns)
+    {
+        if (DocumentsLackAccessRecordColumn && string.Equals(table, "sprk_document", StringComparison.OrdinalIgnoreCase)
+            && columns.Contains("sprk_accessinheritance", StringComparer.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Test: sprk_document has no sprk_accessinheritance in this environment.");
+    }
 
     private readonly List<(string Table, Guid Id, Action<SecureChildShareWorld> Change)> _beforeAccessRecordReads = new();
 
@@ -407,6 +415,7 @@ internal sealed class SecureChildShareWorld
     /// </summary>
     public void Update(string table, Guid id, Dictionary<string, object> fields)
     {
+        RefuseMissingAccessRecordColumn(table, fields.Keys);
         // Task 189 (D7 T7a): a document's value and its own-narrowing record, in ONE update. Both are recorded (in
         // AccessPermissionWrites and AccessRecordWrites) before a refusal of either throws; neither lands when one is refused.
         if (fields.Count == 2
@@ -501,6 +510,7 @@ internal sealed class SecureChildShareWorld
     public Entity Retrieve(string table, Guid id, string[]? columns)
     {
         RowReads++;
+        RefuseMissingAccessRecordColumn(table, columns ?? []);
         if (_failingRowReads.Contains((table, id)))
             throw new InvalidOperationException($"Test: this {table} row cannot be read.");
         if (!_rows.TryGetValue((table, id), out var row))
@@ -692,6 +702,7 @@ internal sealed class SecureChildShareWorld
     public EntityCollection Answer(QueryExpression query)
     {
         QueriedTables.Add(query.EntityName);
+        RefuseMissingAccessRecordColumn(query.EntityName, query.ColumnSet.Columns);
         foreach (var hook in _beforeAccessRecordReads.Where(h =>
                      string.Equals(h.Table, query.EntityName, StringComparison.OrdinalIgnoreCase)
                      && query.ColumnSet.Columns.Contains("sprk_accessinheritance")

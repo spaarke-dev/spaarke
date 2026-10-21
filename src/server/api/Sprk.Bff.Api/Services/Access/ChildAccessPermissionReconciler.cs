@@ -70,8 +70,9 @@ internal sealed record ChildAccessPermissionRun
     public bool SweepReachedEnd { get; init; }
 
     /// <summary>
-    /// Tables of the four that lack the column in this environment, or (a document, task 189) lack the own-narrowing record
-    /// column <see cref="AccessInheritance.Column"/>. Nothing is written to them.
+    /// Tables of the four that lack the column in this environment (nothing is written to them), or (a document, task 189)
+    /// lack the own-narrowing record column <see cref="AccessInheritance.Column"/>: their values are only raised to what
+    /// their parents give, never lowered, and no record is written (fix round C, K2; <see cref="RaisedOnly"/>).
     /// </summary>
     public IReadOnlyList<string> TablesWithoutColumn { get; init; } = [];
 
@@ -86,6 +87,13 @@ internal sealed record ChildAccessPermissionRun
     /// written; they are carried and decided again.
     /// </summary>
     public int ChangedConcurrently { get; init; }
+
+    /// <summary>
+    /// Task 189 fix round C (K1+K2): documents whose own narrowing could not be known (an unreadable record, or no record
+    /// column here) and whose value was below what their parents give: their value was raised to it, alone, and their
+    /// record left as it is. Also counted in <see cref="Changed"/>. Report-only: 0 (they are in <see cref="WouldChange"/>).
+    /// </summary>
+    public int RaisedOnly { get; init; }
 }
 
 /// <summary>
@@ -115,9 +123,11 @@ internal sealed record ChildAccessPermissionRun
 /// documents fail closed (below). A document's value is max(own, inherited), decided by
 /// <see cref="InheritedAccessPermission.DecideDocument"/> from its record (<see cref="AccessInheritance.Column"/>, read with
 /// the row). Value and record are written in ONE update, and only when they are still what the decision read: they are
-/// re-read just before the write, so a user's concurrent edit is never overwritten. It fails closed: an unreadable record,
-/// an unknown stored level, or an environment whose documents lack the record column writes nothing to the row. To Do,
-/// Event and Communication are reconciled exactly as before.</para>
+/// re-read just before the write, so a user's concurrent edit is never overwritten. It fails closed: an unknown stored
+/// level writes nothing. When a document's own narrowing cannot be known (an unreadable record, or an environment whose
+/// documents lack the record column) its value is only RAISED to what its parents give, never lowered, and its record is
+/// left as it is (fix round C, K1+K2; <see cref="InheritedAccessPermission.DecideDocumentRaiseOnly"/>). To Do, Event and
+/// Communication are reconciled exactly as before.</para>
 /// </remarks>
 internal sealed class ChildAccessPermissionReconciler
 {
@@ -142,6 +152,13 @@ internal sealed class ChildAccessPermissionReconciler
 
     /// <summary>Task 189: the tables of <see cref="InheritedAccessPermission.RecordTables"/> whose record column exists here.</summary>
     private readonly HashSet<string> _recordTables = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Task 189 fix round C (K2): the tables of <see cref="InheritedAccessPermission.RecordTables"/> whose record column does
+    /// NOT exist here. Their rows are decided raise-only (<see cref="InheritedAccessPermission.DecideDocumentRaiseOnly"/>),
+    /// and the record column is never asked for.
+    /// </summary>
+    private readonly HashSet<string> _raiseOnlyTables = new(StringComparer.OrdinalIgnoreCase);
 
     internal ChildAccessPermissionReconciler(
         IGenericEntityService dataverse, CoreAncestorResolver.EntityColumnProbe probe, ILogger logger)
@@ -176,6 +193,7 @@ internal sealed class ChildAccessPermissionReconciler
         (string Table, Guid Id)? sweepResume = null;
         var sweepEnd = false;
         _recordTables.Clear();
+        _raiseOnlyTables.Clear();
         try
         {
             foreach (var table in InheritedAccessPermission.Tables.OrderBy(t => t, StringComparer.Ordinal))
@@ -186,8 +204,9 @@ internal sealed class ChildAccessPermissionReconciler
                 }
                 else if (InheritedAccessPermission.RecordsOwnNarrowing(table))
                 {
-                    // Task 189: without its record column, a document's own narrowing cannot be read, so nothing is written
-                    // to the table (fail closed) until scripts/Set-DocumentAccessPermissionSchema.ps1 -Apply adds it.
+                    // Task 189: without its record column, a document's own narrowing cannot be read, so its value is only
+                    // raised to what its parents give, never lowered, and no record is written (fix round C, K2), until
+                    // scripts/Set-DocumentAccessPermissionSchema.ps1 -Apply adds it.
                     if ((await _probe(table, ct).ConfigureAwait(false)).Contains(AccessInheritance.Column))
                     {
                         _recordTables.Add(table);
@@ -195,9 +214,11 @@ internal sealed class ChildAccessPermissionReconciler
                     else
                     {
                         missingColumn.Add(table);
+                        _raiseOnlyTables.Add(table);
                         _logger.LogWarning(
                             "[CHILD-ACCESS-PERMISSION] {Table} has no {Column} (the own-narrowing record) in this environment; " +
-                            "nothing is written to it.", table, AccessInheritance.Column);
+                            "its values are only raised to what their parents give, never lowered, and no record is written.",
+                            table, AccessInheritance.Column);
                     }
                 }
             }
@@ -268,7 +289,7 @@ internal sealed class ChildAccessPermissionReconciler
 
         // Decide each row of the four tables.
         int examined = 0, correct = 0, changed = 0, would = 0, parentless = 0, undetermined = 0, failed = 0, deferred = 0;
-        int recordsWritten = 0, ownKept = 0, changedConcurrently = 0;
+        int recordsWritten = 0, ownKept = 0, changedConcurrently = 0, raisedOnly = 0;
         var attempted = 0;
         var problems = new List<string>();
         var changes = new List<(string, Guid, int?, int)>();
@@ -276,11 +297,11 @@ internal sealed class ChildAccessPermissionReconciler
         foreach (var ((table, id), row) in candidates.OrderBy(c => c.Key.Table, StringComparer.Ordinal).ThenBy(c => c.Key.Id))
         {
             ct.ThrowIfCancellationRequested();
-            if (missingColumn.Contains(table, StringComparer.OrdinalIgnoreCase))
+            if (missingColumn.Contains(table, StringComparer.OrdinalIgnoreCase) && !_raiseOnlyTables.Contains(table))
                 continue;
             examined++;
 
-            if (_recordTables.Contains(table))
+            if (_recordTables.Contains(table) || _raiseOnlyTables.Contains(table))
             {
                 await DecideDocumentAsync(table, id, row).ConfigureAwait(false); // task 189
                 continue;
@@ -354,11 +375,13 @@ internal sealed class ChildAccessPermissionReconciler
         }
 
         // Task 189 (D7 T7a, #2126): one document. Its value is max(own, inherited), never lowered below its own narrowing.
-        // Value and record are written in ONE update, only when both are still as read. Anything unreadable writes nothing.
+        // Value and record are written in ONE update, only when both are still as read. When its own narrowing cannot be
+        // known (an unreadable record, or no record column here) its value is only raised to the floor (fix round C).
         async Task DecideDocumentAsync(string table, Guid id, Entity row)
         {
+            var raiseOnly = _raiseOnlyTables.Contains(table);
             var stored = row.GetAttributeValue<OptionSetValue>(InheritedAccessPermission.Column)?.Value;
-            var recordText = row.GetAttributeValue<string>(AccessInheritance.Column);
+            var recordText = raiseOnly ? null : row.GetAttributeValue<string>(AccessInheritance.Column);
             var parents = await _walk.ParentsOfAsync(row, ct).ConfigureAwait(false);
 
             InheritedAccessPermission.Answer? answer = null;
@@ -378,16 +401,25 @@ internal sealed class ChildAccessPermissionReconciler
                 }
             }
 
-            var decision = InheritedAccessPermission.DecideDocument(stored, recordText, parents, answer?.Value);
+            var decision = raiseOnly
+                ? InheritedAccessPermission.DecideDocumentRaiseOnly(stored, parents, answer?.Value, undecided: null)
+                : InheritedAccessPermission.DecideDocument(stored, recordText, parents, answer?.Value);
             if (decision.Undetermined is { } why)
             {
                 undetermined++;
                 carry.Add((table, id));
                 if (problems.Count < MaxProblems)
                     problems.Add($"{table} {id:D}: {why}");
+                if (!decision.WriteValue)
+                {
+                    _logger.LogWarning(
+                        "[CHILD-ACCESS-PERMISSION] {Table} {Id}: {Reason}; nothing is written to it (fail closed).", table, id, why);
+                    return;
+                }
+
                 _logger.LogWarning(
-                    "[CHILD-ACCESS-PERMISSION] {Table} {Id}: {Reason}; nothing is written to it (fail closed).", table, id, why);
-                return;
+                    "[CHILD-ACCESS-PERMISSION] {Table} {Id}: {Reason}; its record is left as it is, and its value is only " +
+                    "raised to what its parents give.", table, id, why);
             }
 
             if (parents.Count == 0)
@@ -413,7 +445,7 @@ internal sealed class ChildAccessPermissionReconciler
             var from = stored?.ToString() ?? "null";
             var inheritedText = answer?.Value?.ToString() ?? "none";
             var tops = answer is null ? "no parent" : InheritedAccessPermission.Describe(answer.Tops);
-            var own = decision.Own?.ToString() ?? "none";
+            var own = decision.RaiseOnly ? "unknown" : decision.Own?.ToString() ?? "none";
             var recordAction = decision.Record is null ? "kept" : "written";
             if (!writes)
             {
@@ -428,7 +460,7 @@ internal sealed class ChildAccessPermissionReconciler
             attempted++;
             try
             {
-                if (!await StillAsReadAsync(table, id, stored, recordText, ct).ConfigureAwait(false))
+                if (!await StillAsReadAsync(table, id, stored, recordText, withRecord: !raiseOnly, ct).ConfigureAwait(false))
                 {
                     changedConcurrently++;
                     carry.Add((table, id));
@@ -448,6 +480,8 @@ internal sealed class ChildAccessPermissionReconciler
                     changed++;
                 if (decision.Record is not null)
                     recordsWritten++;
+                if (decision.RaiseOnly)
+                    raisedOnly++;
                 _logger.LogInformation(
                     "[CHILD-ACCESS-PERMISSION] set: {Table} {Id} {From} -> {To} (inherited {Inherited} from {Tops}; own {Own}; " +
                     "record {Record}).", table, id, from, decision.Target, inheritedText, tops, own, recordAction);
@@ -485,6 +519,7 @@ internal sealed class ChildAccessPermissionReconciler
             RecordsWritten = recordsWritten,
             OwnKept = ownKept,
             ChangedConcurrently = changedConcurrently,
+            RaisedOnly = raisedOnly,
         };
     }
 
@@ -588,20 +623,24 @@ internal sealed class ChildAccessPermissionReconciler
     /// <summary>
     /// Task 189: whether a document still holds what its decision read: its value and its record, re-read just before the
     /// write. This is task 175's pattern (verifier c), because the app-only writer has no conditional update. A row that is
-    /// gone answers false.
+    /// gone answers false. <paramref name="withRecord"/> false (no record column here, fix round C K2): the value alone.
     /// </summary>
-    private async Task<bool> StillAsReadAsync(string table, Guid id, int? stored, string? record, CancellationToken ct)
+    private async Task<bool> StillAsReadAsync(
+        string table, Guid id, int? stored, string? record, bool withRecord, CancellationToken ct)
     {
         var query = new QueryExpression(table.ToLowerInvariant())
         {
-            ColumnSet = new ColumnSet(InheritedAccessPermission.Column, AccessInheritance.Column),
+            ColumnSet = withRecord
+                ? new ColumnSet(InheritedAccessPermission.Column, AccessInheritance.Column)
+                : new ColumnSet(InheritedAccessPermission.Column),
         };
         query.Criteria.AddCondition(table.ToLowerInvariant() + "id", ConditionOperator.Equal, id);
         var now = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
         return now is not null
                && now.GetAttributeValue<OptionSetValue>(InheritedAccessPermission.Column)?.Value == stored
-               && string.Equals(now.GetAttributeValue<string>(AccessInheritance.Column) ?? string.Empty, record ?? string.Empty,
-                   StringComparison.Ordinal);
+               && (!withRecord
+                   || string.Equals(now.GetAttributeValue<string>(AccessInheritance.Column) ?? string.Empty,
+                       record ?? string.Empty, StringComparison.Ordinal));
     }
 
     private async Task<IReadOnlyList<Entity>> ReadAllAsync(QueryExpression query, CancellationToken ct)

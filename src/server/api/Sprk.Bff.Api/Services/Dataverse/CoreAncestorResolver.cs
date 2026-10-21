@@ -1046,7 +1046,8 @@ public sealed class CoreAncestorResolver
     /// <see cref="InheritedAccessPermission.DecideDocument"/> from its record (<see cref="AccessInheritance.Column"/>) — the
     /// same decision as the reconcile job. A document created Restricted under a Standard matter stays Restricted, and its
     /// narrowing is recorded as its own in the same update. A parentless document's value is never written; a narrowing on
-    /// it is recorded. Fail closed: no record column, an unreadable record or an unknown level writes nothing.</para>
+    /// it is recorded. Fail closed: an unknown level writes nothing; with no record column, or an unreadable record, its value
+    /// is only raised to what its parents give, never lowered, and no record is written (fix round C, K1+K2).</para>
     /// </summary>
     /// <returns>The value the row now holds (a document: max(own, inherited)), or <see langword="null"/> when it takes none
     /// from parents or it could not be decided.</returns>
@@ -1107,15 +1108,19 @@ public sealed class CoreAncestorResolver
     private async Task<int?> RefreshDocumentAccessPermissionAsync(
         string table, Guid recordId, ParentLineageWalk walk, IReadOnlyList<string> columns, CancellationToken ct)
     {
-        if (!(await _columnProbe(table, ct).ConfigureAwait(false)).Contains(AccessInheritance.Column))
+        // Fix round C (K2): without the record column the document's own narrowing cannot be known, so its value is only
+        // raised to what its parents give (never lowered), and the record column is neither read nor written.
+        var recordColumn = (await _columnProbe(table, ct).ConfigureAwait(false)).Contains(AccessInheritance.Column);
+        if (!recordColumn)
         {
             _logger.LogWarning(
                 "[INHERITED-ACCESS-PERMISSION] {Table} {Id}: this environment has no {Column} (the own-narrowing record), so " +
-                "nothing is written to it (fail closed).", table, recordId, AccessInheritance.Column);
-            return null;
+                "its value is only raised to what its parents give, never lowered, and no record is written.",
+                table, recordId, AccessInheritance.Column);
         }
 
-        var row = await _entityService.RetrieveAsync(table, recordId, [.. columns, AccessInheritance.Column], ct)
+        var row = await _entityService.RetrieveAsync(
+                table, recordId, recordColumn ? [.. columns, AccessInheritance.Column] : [.. columns], ct)
             .ConfigureAwait(false);
         var parents = await walk.ParentsOfAsync(row, ct).ConfigureAwait(false);
         InheritedAccessPermission.Answer? answer = null;
@@ -1131,17 +1136,24 @@ public sealed class CoreAncestorResolver
             }
         }
 
-        var decision = InheritedAccessPermission.DecideDocument(
-            row.GetAttributeValue<OptionSetValue>(InheritedAccessPermission.Column)?.Value,
-            row.GetAttributeValue<string>(AccessInheritance.Column),
-            parents,
-            answer?.Value);
+        var stored = row.GetAttributeValue<OptionSetValue>(InheritedAccessPermission.Column)?.Value;
+        var decision = recordColumn
+            ? InheritedAccessPermission.DecideDocument(
+                stored, row.GetAttributeValue<string>(AccessInheritance.Column), parents, answer?.Value)
+            : InheritedAccessPermission.DecideDocumentRaiseOnly(stored, parents, answer?.Value, undecided: null);
         if (decision.Undetermined is { } why)
         {
+            if (!decision.WriteValue)
+            {
+                _logger.LogWarning(
+                    "[INHERITED-ACCESS-PERMISSION] {Table} {Id}: {Reason}; nothing is written to it (fail closed), and the " +
+                    "secure-child reconciliation job looks at it again.", table, recordId, why);
+                return null;
+            }
+
             _logger.LogWarning(
-                "[INHERITED-ACCESS-PERMISSION] {Table} {Id}: {Reason}; nothing is written to it (fail closed), and the " +
-                "secure-child reconciliation job looks at it again.", table, recordId, why);
-            return null;
+                "[INHERITED-ACCESS-PERMISSION] {Table} {Id}: {Reason}; its record is left as it is, its value is only raised " +
+                "to what its parents give, and the secure-child reconciliation job looks at it again.", table, recordId, why);
         }
 
         var fields = new Dictionary<string, object>();

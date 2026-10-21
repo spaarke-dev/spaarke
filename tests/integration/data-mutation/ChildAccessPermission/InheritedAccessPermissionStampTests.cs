@@ -316,22 +316,59 @@ public class InheritedAccessPermissionStampTests
         RecordIn(_world.AccessRecordWrites.Should().ContainSingle().Subject.Text).OwnPermission.Should().Be(Restricted);
     }
 
-    [Fact]
-    public async Task RefreshInheritedAccessPermissionAsync_WhenDocumentsLackTheRecordColumn_NothingIsWritten()
+    [Theory]
+    [InlineData(Restricted, Standard, Restricted)] // must fire: below its floor, raised (value only)
+    [InlineData(Standard, Restricted, null)] // must not fire: above its floor, never lowered
+    [InlineData(Restricted, Restricted, null)] // at its floor: nothing to write
+    public async Task RefreshInheritedAccessPermissionAsync_WhenDocumentsLackTheRecordColumn_ItsValueIsOnlyRaised(
+        int matterValue, int documentValue, int? written)
     {
-        // Task 189 (fail closed): before the schema script runs, a document's own narrowing cannot be read.
-        var matter = Root("sprk_matter", Restricted);
-        var document = Row("sprk_document", Standard, ("sprk_matter", "sprk_matter", matter));
+        // Task 189 fix round C (K2): before the schema script runs, a document's own narrowing cannot be read, so its value
+        // is only raised to what its parents give. The world refuses any read or write naming the missing column.
+        _world.DocumentsLackAccessRecordColumn = true;
+        var matter = Root("sprk_matter", matterValue);
+        var document = Row("sprk_document", documentValue, ("sprk_matter", "sprk_matter", matter));
         var probe = Probe();
         var resolver = new CoreAncestorResolver(World(), async (table, ct) =>
             (await probe(table, ct)).Where(c => c != AccessInheritance.Column).ToHashSet(StringComparer.OrdinalIgnoreCase), _log);
 
         var level = await resolver.RefreshInheritedAccessPermissionAsync("sprk_document", document);
 
-        level.Should().BeNull();
-        _world.AccessPermissionWrites.Should().BeEmpty();
+        level.Should().Be(Math.Max(matterValue, documentValue), "the value the document now holds");
+        if (written is { } value)
+            _world.AccessPermissionWrites.Should().ContainSingle().Which.Should().Be(("sprk_document", document, value));
+        else
+            _world.AccessPermissionWrites.Should().BeEmpty();
         _world.AccessRecordWrites.Should().BeEmpty();
         _log.Warnings.Should().Contain(w => w.Contains(AccessInheritance.Column));
+    }
+
+    [Theory]
+    [InlineData(Restricted, Standard, Restricted)] // must fire: below its floor, raised (value only)
+    [InlineData(Standard, Restricted, null)] // must not fire: above its floor, never lowered
+    public async Task RefreshInheritedAccessPermissionAsync_ADocumentWhoseRecordCannotBeRead_IsOnlyRaised_ItsRecordUntouched(
+        int matterValue, int documentValue, int? written)
+    {
+        // Task 189 fix round C (K1): the create refresh makes the reconcile job's decision.
+        var matter = Root("sprk_matter", matterValue);
+        var document = Row("sprk_document", documentValue, ("sprk_matter", "sprk_matter", matter));
+        _world.Set("sprk_document", document, AccessInheritance.Column, "{not json");
+
+        var level = await Resolver().RefreshInheritedAccessPermissionAsync("sprk_document", document);
+
+        if (written is { } value)
+        {
+            level.Should().Be(value);
+            _world.AccessPermissionWrites.Should().ContainSingle().Which.Should().Be(("sprk_document", document, value));
+        }
+        else
+        {
+            level.Should().BeNull("nothing was decided");
+            _world.AccessPermissionWrites.Should().BeEmpty();
+        }
+
+        _world.AccessRecordWrites.Should().BeEmpty();
+        _world.ValueOf<string>("sprk_document", document, AccessInheritance.Column).Should().Be("{not json");
     }
 
     private static AccessInheritance RecordIn(string text)
