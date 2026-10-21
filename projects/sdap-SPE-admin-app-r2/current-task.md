@@ -17,7 +17,7 @@
 | **Blocked?** | Deploy: operator approves; R3 deploys from master. 090 held for UAT |
 
 ### Uncommitted files
-None. Dev BFF live = master `583f90c1d9` (R3, 2026-10-21 18:04Z, verified): includes #1910 and #2032. R3 rollback snapshot: `deploy/rollback/wwwroot-20261021T180216Z` (→ `84291ecea8`).
+None. Dev BFF live = master `f1b3dadcf5` (R3, 2026-10-21 21:45Z, verified): includes #1910 and #2032. R3 rollback snapshot: `deploy/rollback/wwwroot-20261021T214302Z` (→ `583f90c1d9`).
 
 ### Critical context
 SPE Admin no longer uses owning-app secrets: container work runs as the BFF managed identity
