@@ -107,9 +107,12 @@ internal sealed record ChildAccessPermissionRun
 /// one column, nothing else (a document: its value and its record, below). A write changes <c>modifiedon</c>, so the next run
 /// sees the row again and finds it correct.</para>
 /// <para><b>Fail safe.</b> A listing that cannot complete decides nothing (<see cref="ChildAccessPermissionRun.Failure"/>).
-/// An undecidable row is left as it is, logged as a warning and carried.</para>
-/// <para><b>Documents (task 189, D7 T7a, #2126).</b> A document's own Restricted hides it from partners, so its value is
-/// not display only. A document's value is max(own, inherited), decided by
+/// An undecidable row is left as it is, logged as a warning and carried. On To Do, Event and Communication the value is
+/// display only: no access decision reads it.</para>
+/// <para><b>Documents (task 189, D7 T7a, #2126).</b> A document's value is NOT display only. Under D7, task 188's external
+/// document narrowing (PR #2170) reads it: a Restricted value this reconciler writes on a document hides that document
+/// from partners, and lowering one shows it to them again. So a wrong write here can narrow or widen partner access, and
+/// documents fail closed (below). A document's value is max(own, inherited), decided by
 /// <see cref="InheritedAccessPermission.DecideDocument"/> from its record (<see cref="AccessInheritance.Column"/>, read with
 /// the row). Value and record are written in ONE update, and only when they are still what the decision read: they are
 /// re-read just before the write, so a user's concurrent edit is never overwritten. It fails closed: an unreadable record,
