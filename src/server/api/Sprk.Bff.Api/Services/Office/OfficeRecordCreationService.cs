@@ -1114,11 +1114,11 @@ public sealed class OfficeRecordCreationService
     /// The source's own <see cref="SecureFlagAttribute"/>, read app-only; <see langword="null"/> when it cannot be read — and,
     /// as the plan reads a parent's flag (owner round 17 item 3), when it reads EMPTY: "cannot be read", never "not secure".
     /// </summary>
-    private async Task<bool?> SourceIsSecureAsync(FiledUnderPair source, CancellationToken ct)
+    private async Task<bool?> SourceIsSecureAsync(FiledUnderPair parent, CancellationToken ct)
     {
         try
         {
-            var row = await _entities.RetrieveAsync(source.Table, source.Id, [SecureFlagAttribute], ct).ConfigureAwait(false);
+            var row = await _entities.RetrieveAsync(parent.Table, parent.Id, [SecureFlagAttribute], ct).ConfigureAwait(false);
             return row?.GetAttributeValue<bool?>(SecureFlagAttribute);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -1129,7 +1129,7 @@ public sealed class OfficeRecordCreationService
         {
             _logger.LogError(ex,
                 "[RECORD-CREATE] The secure flag of {Table} {RecordId} could not be read. Refused (fail closed).",
-                source.Table, source.Id);
+                parent.Table, parent.Id);
             return null;
         }
     }
