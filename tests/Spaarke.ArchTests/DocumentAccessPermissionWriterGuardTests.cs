@@ -19,13 +19,19 @@ namespace Spaarke.ArchTests;
 /// <item><see cref="DocumentWriters"/>: the approved document writers.</item>
 /// <item><see cref="NonDocumentWriters"/>: members whose write can never reach a document, each with the reason (code review
 /// checks the reason).</item>
-/// <item><see cref="KnownViolations"/>: the ratchet baseline. These are members that could write a document's value without
-/// the record. A new one fails, and an entry that no longer writes must be removed.</item>
+/// <item><see cref="KnownViolations"/>: the ratchet baseline, for members that could write a document's value without the
+/// record. It is empty. A new unlisted writer fails, and an entry that no longer writes must be removed.</item>
 /// </list>
+/// <para><b>The stamp path is fenced, not baselined.</b> The scan sees write sites, not callers, so a new document caller of
+/// <c>CoreAncestorResolver.StampAsync</c> would not show up here. What stops it is the fence: the helper the stamp-path
+/// members get their value from (<c>InheritedAccessPermissionAsync</c>, and <c>ResolveInheritedAccessPermissionAsync</c>)
+/// returns none for a document (<c>InheritedAccessPermission.RecordsOwnNarrowing</c>). It is pinned by
+/// <c>InheritedAccessPermissionStampTests</c>.</para>
 /// <para><b>Why text, not IL.</b> The table a write targets is a runtime value, and IL cannot tell a read of the column's
 /// constant from a write. The key at the write site is in the text.</para>
-/// <para><b>Limits.</b> The scan works per member, as the #2091 guard works per type. A key held in a local variable, a
-/// payload a caller hands in (the generic update writers, a playbook) and a write outside <c>src/server</c> are not seen.
+/// <para><b>Limits (accepted, task 189).</b> The scan works per member, as the #2091 guard works per type. A key held in a
+/// local variable, a payload a caller hands in (the generic update writers, a playbook) and a write outside
+/// <c>src/server</c> are not seen.
 /// The member detector is crude (a declaration line, brace depth with strings blanked); the controls below pin what it must
 /// and must not see.</para>
 /// <para><b>Controls.</b> <see cref="Detector_MustFireAndMustNotFire"/> runs the same detector over inline sources: each write
@@ -66,19 +72,17 @@ public class DocumentAccessPermissionWriterGuardTests
             "Task 173: the payload of a communication draft."),
         new Writer("src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs", "AddRegardingWriteSet",
             "Task 173: the payload of an event create."),
+        new Writer(Resolver, "StampAsync",
+            "Task 189's fence (both overloads): the value comes from InheritedAccessPermissionAsync, which returns none for " +
+            "a document (RecordsOwnNarrowing), so the stamp path never writes one, whoever calls it. Pinned by " +
+            "InheritedAccessPermissionStampTests."),
+        new Writer(Resolver, "ApplyInheritedAccessPermissionAsync",
+            "Task 189's fence: the same helper (its only caller today is the Office To Do create)."),
     };
 
-    /// <summary>The ratchet baseline: members that could write a document's value without its record.</summary>
-    private static readonly IReadOnlyList<Writer> KnownViolations = new[]
-    {
-        new Writer(Resolver, "StampAsync",
-            "Found by this guard (task 189). The shared stamp path writes the bare inherited value for any host that " +
-            "InheritedAccessPermission.AppliesTo admits, sprk_document included, without the record. On a document it would " +
-            "lower an own narrowing. It has no document caller as of 2026-10-20 (event, communication, To Do, decision " +
-            "record). Both overloads. Follow-up: fence documents out of the stamp path."),
-        new Writer(Resolver, "ApplyInheritedAccessPermissionAsync",
-            "Found by this guard (task 189): the same stamp path (its only caller is the Office To Do create). Same follow-up."),
-    };
+    /// <summary>The ratchet baseline: members that could write a document's value without its record. Empty since task
+    /// 189 fenced the stamp path; a listed entry must still write, or it is stale.</summary>
+    private static readonly IReadOnlyList<Writer> KnownViolations = Array.Empty<Writer>();
 
     /// <summary>The constants that hold the column, and the key form each is written with (the detector matches them).</summary>
     private static readonly IReadOnlyList<(string File, string Name)> KnownAliases = new[]
@@ -95,7 +99,7 @@ public class DocumentAccessPermissionWriterGuardTests
             .SelectMany(f => WritesIn(Normalize(SourceScan.Relative(f)), File.ReadAllLines(f)))
             .ToList();
 
-        // Non-vacuity: the approved writers and the stamp path are seen writing.
+        // Non-vacuity: the approved writers are seen writing (every other listed member is held by the STALE check).
         foreach (var writer in DocumentWriters.Concat(KnownViolations))
         {
             Assert.True(sites.Any(s => s.File == writer.File && s.Member == writer.Member),
