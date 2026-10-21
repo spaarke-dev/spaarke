@@ -297,7 +297,7 @@ So the post-commit re-run is not only for root-made-Secure: it is the main check
 2. The Restricted, internal-only and privacy reads also go into the **pre-transaction** check, so a source that is already isolated is refused up front instead of committed and undone.
 3. **Undo is complete or held:** delete the Stored File row and blob, then the approval, then the lines, then the invoice. If any delete fails, the submission stays Failed and the file stays not-yet-servable until compensation finishes.
 
-**Extracted fields after a later source change: UAC position, confirmed by the owner 2026-10-21 ("yes invoice stay readable"); a known limit in v5.** They do not follow the source. Once the re-run passes, the invoice is its own business record under the core record: its readers are the core record's readers, narrowed by the invoice's own Access Permission. Disclosure happened at submit, as with a download (uac-r2 K2). To hide an invoice later, set its own Access Permission to Restricted; D7 and uac-r2 task 191 then hide it from flagged-external users.
+**Extracted fields after a later source change: UAC position, confirmed by the owner 2026-10-21 ("yes invoice stay readable"); a known limit in v5.** They do not follow the source. Once the re-run passes, the invoice is its own business record under the core record: its readers are the core record's readers, narrowed by the invoice's own Access Permission *(superseded: `sprk_invoice` has no such column; see §9 F4-1 and (a′))*. Disclosure happened at submit, as with a download (uac-r2 K2). To hide an invoice later, set its own Access Permission to Restricted *(superseded by (a′): mark the source document Restricted or the communication internal-only)*; D7 and uac-r2 task 191 then hide it from flagged-external users.
 
 **For uac-r2 task 191:** v5 names each new table and the root column it hangs from, for all core types. uac-r2 updates its delete design §12 to keep record-scoped rule-set rows as secure child rows.
 
@@ -353,3 +353,20 @@ Code checked at 70fc2cc616 and master a10e814d02. **Verdict: ACCEPT WITH CHANGES
 ## 10. ontology-r1 re-check of v5.1 (ae690ec8a4), 2026-10-21
 
 **PASS.** All ontology findings are applied. The two owner points (whether "no automatic re-check" covers every case; the D-170 sweep on a Procedure retire) are with the owner, and leaving the sweep as it is meanwhile is fine with ontology. Ontology is ready for the 080 rewrite once the owner finalizes.
+
+## 11. uac-r2 check of v5.1 (ae690ec8a4), 2026-10-21
+
+**Verdict: CHANGES NEEDED, in the banner design only (§8.2, I-P5); text changes.** All 19 earlier UAC items are closed; F4-4 was half closed (N6). Applied in v5.2.
+
+- **N2 (F2).** Override delete/retire plus banner writes on N invoices are not atomic; a throttle leaves invoices unbannered with no detector. Options: (a) compute at read time, store nothing (recommended); (b) an idempotent ADR-004 job with retry and a detector. **v5.2 takes (a)**, generalised to comparing the current resolution with the snapshot on the invoice's own read.
+- **N1 (F1).** Scope too narrow: a project's override reaches work-assignment invoices at distance 1 (§6.4). Affected = open invoices on the record and its distance-1 children whose snapshot cites the override or the record rule it switched off, limited to the override's firm. Under (a) this is the snapshot test.
+- **N3 (F1/F4).** Nothing kept the banner from firms or flagged-external users (I-P2's "Read for every user" field security would show it in the MDA; reveals Procedure activity, D-66, O-27). Under (a): compute for internal callers only; out of the firm findings DTO and the SPA invoice projection; in R3's negative test.
+- **N4 (F4).** "Goes through IRecordOwnershipResolver" does nothing (it resolves owners on create and reparent only, `RecordOwnershipResolver.cs:102-130`); and §0 row 11 / I-P5 vs §8.2 disagreed on the caller check. Moot under (a); text removed.
+- **N5 (F4).** §9.1 known limits: "but not its roots" → "but not rule 1 (which roots the source is filed under)", so the roots' Restricted-state term stays.
+- **N6 (F4).** A mailbox attachment has no source version: file id = f(submission id, the attachment's identity, or a fixed 0).
+- **N7 (F4).** Removing a changed-rule override switches its record rule Off, and D-170 then closes open findings automatically: widen §15(b) beyond Procedure retire.
+- **N8 (owner wording).** "A new procedure … has been published" is wrong for override removal and retire, and publish of a first version or adding an override set no banner. Suggested neutral text; list triggers or take the gaps to the owner. Under v5.2's full comparison every trigger is covered; the text question is in §15.
+- **N9 (K).** The override and Procedure services must refuse `sprk_isexternal` callers explicitly (step 0, a fault refuses), not only through the role.
+- **Conditions if the banner had been stored** (app-only marker write, never count or list, N3, N1 scope, N9) mostly fall away under (a).
+- **Stray wording:** reviews §7 (~:300) "invoice's own Access Permission" (now marked superseded); v5 §0 row 9 "through T7" (kept as history with a note).
+- **Owner round 116 (uac-r2 session27 notes), 2026-10-21:** F1-1's effect accepted (the invoice and everything derived from it are hidden from external callers, the firm included, while the source is internal-only or Restricted; reappears when lowered) and F1-4 confirmed (flagged-external systemuser firm match through the linked contact; no link → none). Both applied in `480d6fa027`. **K-3** (network Deny with a private endpoint, or a known limit) is still open; the container-scoped role is done regardless.
