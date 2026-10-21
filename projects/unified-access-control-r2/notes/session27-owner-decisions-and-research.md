@@ -1824,3 +1824,21 @@ Owner text, verbatim: "1. yes and go for deploy steps / 2. ok (do i need to do a
 3. **The #2161 test re-file was explained** (an ordinary document re-filed from one matter to another, then R3 reads a moved count of 1). No decision yet.
 
 Filed this round: #2213, `CrossPathLink` re-points an archive document already linked to another communication, which can un-hide it under D7.
+
+### Round 120 gate record: task 188 on dev (2026-10-21)
+
+**Deploy and steps.** R3 deployed master `f1b3dadcf5` (#2170 + #2186) at 21:45:37Z. healthz, healthz/dataverse and anonymous `/api/me` 401 all answered as expected. Steps run in order:
+1. `Set-DocumentLinkDeleteRestrict.ps1 -Apply` → VERIFY PASS.
+2. `Set-DocumentNarrowingFieldSecurity.ps1 -Apply` → VERIFY PASS. Each link column was masked about 17 s.
+3. `sprk_DocumentOperations.js` 1.28.2 → published on the second attempt (the first hit another customization in progress); the live bytes equal master.
+
+**The 30-min reading** (21:44:30Z → 22:16Z) was clean:
+- no new exception class;
+- no narrowing exception;
+- no 0x80040227, 409, 403 or field-security error;
+- the reconciliation runs all Succeeded.
+
+**Not exercised in the window:** a partner document read and a BFF document create. Live checks for when traffic comes, from dev ids:
+- **Hidden:** matter `b68299c6-bafb-f011-8407-7c1e520aa4df`, partner contacts `8e9918a9…` / `2e419a4f…`. Its 11 own-Restricted documents should disappear from the partner list. A partner download or versions call on `aadbb740-bdfb-f011-8407-7c1e520aa4df` should get the not-under-parent refusal.
+- **Must-not-fire:** matter `86335ce3-4c18-f111-8343-7ced8d1dc988`; documents `0f67ada5…`, `6c112598…` and `73910392…` stay visible.
+- **Writer path:** the first email, Office or upload document create after 21:5xZ must succeed. The BFF app users are Writers.

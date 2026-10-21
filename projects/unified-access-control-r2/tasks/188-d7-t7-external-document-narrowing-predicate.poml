@@ -3,7 +3,7 @@
   <metadata>
     <title>D7 T7: one predicate hides internal-only and Restricted documents on every external document surface (#2126 / ISS-015)</title>
     <phase>Session 28: UAC (owner round 110, 2026-10-20)</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security: the external plane reads app-only, so this predicate IS the wall that keeps internal-only email documents from partners.</rigor-reason>
     <model-tier>opus</model-tier>
