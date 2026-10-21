@@ -77,7 +77,10 @@ endpoint filter. Route-level authorization stays in the routes' filters. Cite pa
    creates the row secure and shares it to the person it is made for, and the only check that the person may file under
    that parent is the caller's own AppendTo, which a system create does not have. Before the plan reads the parent
    nothing says whether it is secure, so the refusal also covers a system create filed under an ORDINARY record. A system
-   create of either table filed under nothing proceeds (tested). The round-0 wording ("refused when the plan would
+   create of either table filed under nothing proceeds (tested). "Filed under a record" is the gate's own test: the row
+   WRITES or CLEARS a filing column, so a system item that sets a filing column to null is refused too. A system item
+   that also names `sprk_accesspermission` or `sprk_issecure` beside a filing column now gets this 403 code instead of
+   the gate's `server_only` / `secure_flag` 403 (second-pass finding 4; both 403, both fail closed). The round-0 wording ("refused when the plan would
    isolate") was wrong: that branch was unreachable, because the plan itself refuses an empty creator first
    (`ProvisionProjectEndpoint.ReasonCreatorUnresolved`, 409), and with a named person it isolated the row and shared the
    secure root to that person unchecked (the reviewer's F4).
@@ -92,8 +95,12 @@ endpoint filter. Route-level authorization stays in the routes' filters. Cite pa
     that names the autonumber column is refused at step 2 as `BlockedColumn` 403 `record_creation.blocked_column`, the
     same refusal shape as the other server-owned columns ("Column 'sprk_matternumber' of a matter is set by Spaarke —
     omit it."). This matches the Office core's own rule (`sprk_matternumber` / `sprk_projectnumber` are never written
-    there), and the child-record route does not create matters or projects, so no existing path changes. A server
-    writer's mapped item that names a number is not retried: a retry cannot change a number the row itself names. Detection: HTTP 412 from `UpdateRecordFieldsAsync` or
+    there), and the child-record route does not create matters or projects. **It changes the chat create once 017
+    re-points it** (second-pass finding 1): `dataverse.create_record` creates matters and projects today through
+    `OwnedChildWrite.CreateAsync`, which does not refuse the number, and its tool description
+    (`DataverseCreateRecordHandler.cs:188`) lists `sprk_matternumber (text)` as a column the model may write. Through the
+    service that create is refused 403 — see OWNER/017. A server writer's mapped item that names a number is not
+    retried: a retry cannot change a number the row itself names (and the 412 then propagates as an exception, A2-6 below). Detection: HTTP 412 from `UpdateRecordFieldsAsync` or
     `DataverseServiceClientImpl.IsAlternateKeyDuplicate`. **Live check needed:** that a Web API PATCH upsert answers a
     duplicate autonumber with 412 and that a retry draws the next number (measured live only for a POST, by
     `ContactIdentityStore`). Any other create fault propagates, as before.
@@ -146,7 +153,7 @@ endpoint filter. Route-level authorization stays in the routes' filters. Cite pa
 | Isolated row removed | 500 its reason code | Undecided 500, same code and words |
 | Autonumber exhausted (Office) | 409 `record_number_unavailable` | Conflict 409, same code |
 | Owner / check fault | 500 (unhandled) | Unavailable 503 `record_creation.owner_unavailable` / `check_failed` |
-| Caller names the autonumber column | (no route creates a matter or project; Office never writes it) | BlockedColumn 403 `record_creation.blocked_column` |
+| Caller names the autonumber column | child-record route: no matter or project; Office: never written; **chat `dataverse.create_record`: written as given** | BlockedColumn 403 `record_creation.blocked_column` (a change for chat, OWNER/017) |
 | System create, table with a pre-write rule | (no system path today) | Forbidden 403 `record_creation.system_principal_unsupported`, before the rule runs |
 | System create, work assignment / project filed under a record | (no system path today) | Forbidden 403 `record_creation.system_principal_unsupported`, before the plan reads anything |
 
@@ -174,6 +181,15 @@ alternative is an app-only access check on `RequestedBy`: before the plan, check
 `RequestedBy` holds AppendTo on the parent (the check the caller's own token makes today), and pass that check as the
 plan's `callerMayFileUnder` callback. It needs an owner decision: an app-only read of another person's access is a new
 kind of check (ADR-028), and it must fail closed on an unresolved person exactly as the caller path does.
+
+## OWNER/017 — the chat create and the matter or project number
+
+Through the service, a caller payload naming `sprk_matternumber` / `sprk_projectnumber` is refused 403
+`record_creation.blocked_column` (decision 11). The chat `dataverse.create_record` tool writes it as given today, and its
+tool description offers it to the model. When 017 re-points chat, choose one: (a) keep the refusal and remove the number
+from the tool description in the same change (recommended: the platform's autonumber owns the number, as the Office
+core already says), or (b) exempt the chat path (the number then also escapes the retry, decision 11). This is the same
+kind of contract change decision 5 lists for the work assignment's server-owned columns.
 
 ## Files
 
@@ -207,7 +223,7 @@ New tests (all at KEEP paths, all pass):
 | Suite | Tests | Result |
 |---|---|---|
 | `tests/integration/seam/RecordCreation/RecordCreationServicePipelineSeamTests.cs` | 29 (18 + 11 in fix round 1) | 29 pass |
-| `tests/integration/seam/RecordCreation/RecordCreationServiceSecureRootSeamTests.cs` (fix round 1) | 4 | 4 pass |
+| `tests/integration/seam/RecordCreation/RecordCreationServiceSecureRootSeamTests.cs` (fix round 1) | 5 (4 + 1 after the second pass) | 5 pass |
 | `tests/unit/domain/Dataverse/RecordCreation/RecordCreationProblemMapTests.cs` | 33 | 33 pass |
 | `tests/Spaarke.ArchTests/OwnedChildWriteCallerWriteAuthorizationNameGuardTests.cs` (K2) | 3 | 3 pass |
 
@@ -236,7 +252,8 @@ script and log in the session scratchpad). 13 of 14 killed:
 | M12 | `CallerWriteAuthorization` declares a name `OwnedChildWrite` has | the K2 guard |
 | **M6b (survived)** | a post-create step's fault propagates | none — every post-create callee catches its own faults (`CoreAncestorRestamper` `when (!IsCallerCancellation)`, `RefreshInheritedAccessPermissionAsync`, `SyncChildAsync` returns a status) and runs with `CancellationToken.None`, so no real fault reaches `AfterCreateStepAsync`'s catch. Known limit (K): a defence-in-depth catch; the mirror test proves the Failed-status log path instead. |
 
-Fix round 1 mutants (script `mutations-013-r1.ps1`, same method). 17 of 17 killed:
+Fix round 1 mutants (script `mutations-013-r1.ps1`, same method). 18 of 18 killed (R1-17 added after the second pass;
+R1-03, R1-07 and R1-14 re-run after the secure-root tests were edited, still killed):
 
 | Mutant | Change | Killed by |
 |---|---|---|
@@ -256,6 +273,7 @@ Fix round 1 mutants (script `mutations-013-r1.ps1`, same method). 17 of 17 kille
 | R1-14 | the system filing refusal is removed | both system filing tests (pipeline and secure-root) |
 | R1-15 | the system refusal fires for every system create | the system filed-under-nothing test (must not fire) |
 | R1-16 | the table's own server-owned column check is dropped | the work-assignment blocked-column test |
+| R1-17 | the system filing refusal moved AFTER the plan | the system-for-nobody secure-root test (the plan would answer 409 `creator_unresolved`); the other 5 system tests survive it, as the second pass said |
 
 Existing suites, unchanged and passing:
 
@@ -266,6 +284,9 @@ Existing suites, unchanged and passing:
 - `DiGraphValidationTests` (the BFF DI graph with ValidateOnBuild + ValidateScopes, so the new registration resolves): 1 passed.
 - `tests/Spaarke.ArchTests` (full): 1214 passed, 0 failed (1211 before + the 3 K2 tests; the census passes 38/38 with the
   additions below, `RecordOwnerAssignmentCensusTests` otherwise unchanged).
+- Re-run after fix round 1 and the second pass (working tree at the final commit): `dotnet build Spaarke.sln` 0 warnings,
+  0 errors; ArchTests (rebuilt) 1214 passed; the first unit filter above 1504 passed, 7 skipped, 0 failed (1488 + the
+  16 new seam tests); the second filter plus `DiGraphValidationTests` 402 passed, 0 failed.
 
 ## Build, publish, CVE, gates
 
@@ -336,5 +357,20 @@ Known limits:
   documented "Never throws" (the gate catches and answers a failed result; the materializer leaves a fault to its job),
   and the child-record route calls them the same way today, so the exposure is the route's too. If either promise ever
   breaks, the create has landed and the caller sees a 500 for a row that exists.
+
+Pass 2 (opus) over the fix diff `c09c73c1f7..5f289763aa` plus its direct callers and callees. It found no way left for a
+system create to reach an isolated or secure-filing plan (`FilesUnderARecord` is the gate's own pre-read test over the
+same filing-column set), and the binding conditions hold (one production file; caller-path order and refusal codes
+unchanged; `RefileAsync` / `ReparentAsync` / `AfterRefileAsync` untouched; the pre-write runner stays at step 5½,
+before the new step-6 refusal).
+
+| # | Pass-2 finding | Class | Disposition |
+|---|---|---|---|
+| A2-1 | The notes said no existing path changes with the F3 number refusal; the chat create does change once 017 re-points it | F (notes / 017 contract) | Fixed in the notes: decision 11, the correspondence row, OWNER/017. No code change: the refusal is the coordinator's F3 instruction |
+| A2-2 | No test proved the system refusal runs BEFORE the plan (moving it after survived) | F (test proves nothing) | Fixed: `CreateAsync_AsTheSystem_ForNobody_…_IsRefusedBeforeThePlan_NotByIt`; mutant R1-17 killed |
+| A2-3 | `SharesOn(secure).NotContainKey(person)` was vacuous (the completion shares the new row, never the matter) | F (vacuous assert) | Fixed: asserts no share recorded at all (`Grants`, `Modifies`); the isolated-create test now asserts the completion's grant IS recorded, so the record is live |
+| A2-4 | The guard also refuses a system item that clears a filing column, and pre-empts the gate's `server_only` / `secure_flag` codes | K4 | Fails closed, no system caller exists; decision 8 reworded ("writes or clears") |
+| A2-5 | A hand-built `MappedItem` whose body binds a filing lookup its `Lookups` omits passes the guard and the plan alike; `Columns` omitting a number the body sets misreports a 409 | K1 | No system caller exists; for 017/018: build system items only through `DataverseWriteItemMapper` |
+| A2-6 | A system item that names a taken number surfaces the 412 as an `HttpRequestException`, not a typed refusal | K3 | No system caller exists; the adapter that adds a system writer maps it |
 
 rework: fix-round-1 task 013

@@ -88,6 +88,8 @@ public sealed class RecordCreationServiceSecureRootSeamTests : IClassFixture<Pro
         _creatorShareAtAssignedAccess.Should().Be(RecordShareLevels.MaskForRightsCsv(ProvisionProjectEndpoint.CreatorAccessRights),
             "the isolated completion runs before the \"Assigned *\" step");
 
+        _fixture.Grants.Should().Contain(g => g.RecordId == created && g.Principal == DataversePrincipalRef.User(Creator),
+            "the completion shares the new row to its creator through the recorded share service");
         _fixture.IsSecureOf(created).Should().BeTrue();
         _fixture.OwningTeamOf(created).Should().Be(SecureTeam);
         _fixture.ContainerIdOf(created).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId, "its own container");
@@ -158,7 +160,28 @@ public sealed class RecordCreationServiceSecureRootSeamTests : IClassFixture<Pro
         outcome.Refusal!.Code.Should().Be(RecordCreationRefusal.SystemPrincipalUnsupportedCode);
         Problem(outcome).Status.Should().Be(StatusCodes.Status403Forbidden);
         _writes.Should().BeEmpty();
-        _fixture.SharesOn(secure).Should().NotContainKey(DataversePrincipalRef.User(person));
+        _fixture.Grants.Should().BeEmpty("no share is made to anyone");
+        _fixture.Modifies.Should().BeEmpty("no share is made to anyone");
+    }
+
+    [Fact]
+    public async Task CreateAsync_AsTheSystem_ForNobody_AWorkAssignmentUnderASecureMatter_IsRefusedBeforeThePlan_NotByIt()
+    {
+        // Second-pass finding 2: the refusal comes BEFORE the plan reads the parent. Asked, the plan would refuse a create
+        // made for nobody under a secure parent itself (creator_unresolved, 409); this answer is the pre-plan 403.
+        var secure = Guid.NewGuid();
+        SecureMatter(_fixture, secure);
+
+        var outcome = await Service().CreateAsync(
+            await WorkAssignmentUnder(secure), RecordCreationPrincipal.ForSystem(), CancellationToken.None);
+
+        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.Forbidden);
+        outcome.Refusal.Code.Should().Be(RecordCreationRefusal.SystemPrincipalUnsupportedCode,
+            "refused before the plan, not by the plan's own creator_unresolved");
+        outcome.Refusal.OwnerDecision.Should().BeNull("the plan was not asked");
+        Problem(outcome).Status.Should().Be(StatusCodes.Status403Forbidden);
+        _writes.Should().BeEmpty();
+        _fixture.Grants.Should().BeEmpty();
     }
 
     // ── Harness ──────────────────────────────────────────────────────────────────────────────────────────────────────
