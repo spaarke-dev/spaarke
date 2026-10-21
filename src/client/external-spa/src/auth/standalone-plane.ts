@@ -49,6 +49,7 @@ import {
 } from './msal-config';
 import {
   acquireStandaloneBffToken,
+  isCiamAccount,
   isWorkforceHomeAccount,
   setActiveAccountFilter,
   setActiveAccountTenantId,
@@ -77,11 +78,11 @@ export interface StandalonePlane {
   loginScope?: string;
   /** True for the workforce HOME plane (A9): enables the registration gate and refuses a token request without a backend. */
   home?: boolean;
-  /** Account predicate (home plane): which cached accounts count as a workforce sign-in. CIAM keeps every account. */
+  /** Account predicate: which cached accounts count as this plane's sign-in (home: workforce accounts; CIAM: CIAM accounts). */
   accountFilter?: (account: { tenantId?: string }) => boolean;
   /**
-   * Workforce only: the signed-in tenant (account filter), the bridge page for the silent-iframe retry and the per-request
-   * token authority. Absent for CIAM, whose silent requests carry none of these and are unchanged on the wire.
+   * Workforce: the signed-in tenant (account filter), the bridge page for the silent-iframe retry and the per-request
+   * token authority. CIAM: only `accountFilter` (#2166), which MSAL never sees, so its requests are unchanged on the wire.
    */
   acquireOptions?: StandaloneAcquireOptions;
 }
@@ -98,7 +99,14 @@ export interface StandalonePlane {
  */
 export function resolveStandalonePlane(realm: Realm): StandalonePlane {
   if (realm === 'ciam') {
-    return { realm, instance: msalInstance, bffScope: activeBffScope('ciam') };
+    // Only CIAM accounts count and are used (#2166): a company account cached in this tab is not a partner sign-in.
+    return {
+      realm,
+      instance: msalInstance,
+      bffScope: activeBffScope('ciam'),
+      accountFilter: isCiamAccount,
+      acquireOptions: { accountFilter: isCiamAccount },
+    };
   }
 
   throw new Error(
@@ -346,7 +354,7 @@ export function applyStandalonePlane(plane: StandalonePlane): void {
   });
   setActiveLoginScope(plane.loginScope ?? plane.bffScope);
   // MSAL's account list is not client-scoped (both browser instances share the tab's sessionStorage), so the
-  // workforce plane only counts its own tenant's accounts; CIAM keeps every account (null = no filter).
+  // workforce plane only counts its own tenant's accounts and the CIAM plane only CIAM accounts (#2166).
   setActiveAccountTenantId(plane.acquireOptions?.tenantId ?? null);
   setActiveAccountFilter(plane.accountFilter ?? null);
   setWorkforceHomePlaneActive(plane.home === true);
