@@ -614,24 +614,13 @@ internal sealed partial class RecordCreationService
         try
         {
             var pair = OwnedChildWrite.PairOf(item);
-            // Only where the pair files the row on its own (a project); elsewhere a malformed pair is not an owner question.
-            var pairParent = pair.InvalidId && SecureRootInheritance.PairNamesAParentOnItsOwn(table)
-                ? (Parent: null, Undetermined: $"its {SecureRootInheritance.PairIdColumn} is not a record id")
-                : await PairParentAsync(_entities, table, pair.IdText, pair.TypeId, ct).ConfigureAwait(false);
-            if (pairParent.Undetermined is { } undetermined)
-            {
-                var refused = RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUndetermined,
-                    $"what it is filed under could not be told ({undetermined})");
-                return (null, new RecordCreationRefusal(RecordCreationRefusalKind.OwnerUnresolved, RecordOwnerRefusal.ParentUndetermined,
-                    refused.Reason!) { OwnerDecision = refused });
-            }
+            var resolved = await ResolveOwnerOverAsync(
+                    table, parents, pair.InvalidId, pair.IdText, pair.TypeId, callerObjectId, callerSystemUserId, requestedBy, ct)
+                .ConfigureAwait(false);
+            if (resolved.Refusal is { } undetermined)
+                return (null, undetermined);
 
-            if (pairParent.Parent is { } named)
-                parents = [.. parents, named];
-
-            owner = await _ownership.ResolveOwnerAsync(
-                RecordOwnershipContext.ForParents(parents, callerObjectId, callerSystemUserId) with { RequestedBy = requestedBy },
-                ct).ConfigureAwait(false);
+            owner = resolved.Owner!;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -645,6 +634,48 @@ internal sealed partial class RecordCreationService
                 $"The owner of the new {noun} could not be decided right now, so it was not created."));
         }
 
+        return OwnerDecided(table, owner);
+    }
+
+    /// <summary>
+    /// Step 7's resolution, shared by Create (<see cref="DecideOwnerAsync"/>) and Repair (task 016,
+    /// <see cref="RepairAsync"/>): the record the ADR-024 pair files the row under on its own (<see cref="PairParentAsync"/>,
+    /// a project) joins <paramref name="parents"/>, then the resolver's owner over them — the acting user's team when they
+    /// name nothing. A pair whose record cannot be told is refused (<see cref="RecordOwnerRefusal.ParentUndetermined"/>),
+    /// never read as "filed under nothing". A Dataverse fault propagates: each caller refuses it as the owner fault it is.
+    /// </summary>
+    private async Task<(RecordOwnerResolution? Owner, RecordCreationRefusal? Refusal)> ResolveOwnerOverAsync(
+        string table, IReadOnlyList<RecordOwnershipParent> parents, bool pairInvalidId, string? pairIdText, Guid? pairTypeId,
+        Guid? callerObjectId, Guid? callerSystemUserId, RecordRequester? requestedBy, CancellationToken ct)
+    {
+        // Only where the pair files the row on its own (a project); elsewhere a malformed pair is not an owner question.
+        var pairParent = pairInvalidId && SecureRootInheritance.PairNamesAParentOnItsOwn(table)
+            ? (Parent: null, Undetermined: $"its {SecureRootInheritance.PairIdColumn} is not a record id")
+            : await PairParentAsync(_entities, table, pairIdText, pairTypeId, ct).ConfigureAwait(false);
+        if (pairParent.Undetermined is { } undetermined)
+        {
+            var refused = RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUndetermined,
+                $"what it is filed under could not be told ({undetermined})");
+            return (null, new RecordCreationRefusal(RecordCreationRefusalKind.OwnerUnresolved, RecordOwnerRefusal.ParentUndetermined,
+                refused.Reason!) { OwnerDecision = refused });
+        }
+
+        if (pairParent.Parent is { } named)
+            parents = [.. parents, named];
+
+        var owner = await _ownership.ResolveOwnerAsync(
+            RecordOwnershipContext.ForParents(parents, callerObjectId, callerSystemUserId) with { RequestedBy = requestedBy },
+            ct).ConfigureAwait(false);
+        return (owner, null);
+    }
+
+    /// <summary>
+    /// Step 7's answer for a resolved owner, shared by Create and Repair (task 016): no owner is the resolver's refusal
+    /// (<see cref="RecordOwnerRefusal.NoOwnerSource"/> when it gave none); then the G5 core's two secure-filing refusals.
+    /// </summary>
+    private static (RecordOwnerResolution? Owner, RecordCreationRefusal? Refusal) OwnerDecided(
+        string table, RecordOwnerResolution owner)
+    {
         if (!owner.IsOwned)
         {
             var refused = owner.IsRefused
@@ -775,26 +806,18 @@ internal sealed partial class RecordCreationService
 
         try
         {
-            var team = await _entities.RetrieveAsync("team", owningTeam, ["businessunitid"], ct).ConfigureAwait(false);
-            if (team?.GetAttributeValue<EntityReference>("businessunitid") is not { } unit || unit.Id == Guid.Empty)
-                throw new InvalidOperationException($"The owner team {owningTeam:D} reported no business unit.");
-
-            var businessUnit = await _entities.RetrieveAsync(SearchIndexColumns.BusinessUnitEntity, unit.Id,
-                    [SearchIndexColumns.LegacyTextColumn, SearchIndexColumns.LookupColumn],
-                    ct)
-                .ConfigureAwait(false);
+            var unit = await TeamBusinessUnitAsync(owningTeam, ct).ConfigureAwait(false);
+            var defaults = await BusinessUnitSearchDefaultsAsync(unit, ct).ConfigureAwait(false);
 
             var fields = new Dictionary<string, object?>(StringComparer.Ordinal);
-            if (fillName && businessUnit?.GetAttributeValue<string>(SearchIndexColumns.LegacyTextColumn)?.Trim()
-                    is { Length: > 0 } indexName)
+            if (fillName && defaults.Name is { } indexName)
             {
                 fields[SearchIndexColumns.LegacyTextColumn] = indexName;
             }
 
-            if (fillLookup && businessUnit?.GetAttributeValue<EntityReference>(SearchIndexColumns.LookupColumn)
-                    is { } index && index.Id != Guid.Empty)
+            if (fillLookup && defaults.Index is { } index)
             {
-                fields[$"{SearchIndexNavigationProperty}@odata.bind"] = $"/{SearchIndexEntitySet}({index.Id:D})";
+                fields[$"{SearchIndexNavigationProperty}@odata.bind"] = $"/{SearchIndexEntitySet}({index:D})";
             }
 
             return new SearchIndexFill(
@@ -818,6 +841,36 @@ internal sealed partial class RecordCreationService
                 "Business-unit search defaults could not be read, so they were not applied. Document indexing for this " +
                 $"{noun} falls back to its business unit's settings.");
         }
+    }
+
+    /// <summary>
+    /// The business unit of <paramref name="owningTeam"/>, read app-only (steps 7 and 8; shared with Repair, task 016).
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The team reported no business unit.</exception>
+    private async Task<Guid> TeamBusinessUnitAsync(Guid owningTeam, CancellationToken ct)
+    {
+        var team = await _entities.RetrieveAsync("team", owningTeam, ["businessunitid"], ct).ConfigureAwait(false);
+        if (team?.GetAttributeValue<EntityReference>("businessunitid") is not { } unit || unit.Id == Guid.Empty)
+            throw new InvalidOperationException($"The owner team {owningTeam:D} reported no business unit.");
+        return unit.Id;
+    }
+
+    /// <summary>
+    /// A business unit's two search-index defaults (FR-10), read app-only by the columns
+    /// <see cref="Sprk.Bff.Api.Services.Ai.SearchIndexNameResolver"/> reads at index time: the trimmed name (none when blank)
+    /// and the catalog row (none when unset). Shared by step 8 and Repair (task 016).
+    /// </summary>
+    private async Task<(string? Name, Guid? Index)> BusinessUnitSearchDefaultsAsync(Guid businessUnit, CancellationToken ct)
+    {
+        var row = await _entities.RetrieveAsync(SearchIndexColumns.BusinessUnitEntity, businessUnit,
+                [SearchIndexColumns.LegacyTextColumn, SearchIndexColumns.LookupColumn],
+                ct)
+            .ConfigureAwait(false);
+        var name = row?.GetAttributeValue<string>(SearchIndexColumns.LegacyTextColumn)?.Trim() is { Length: > 0 } text ? text : null;
+        var index = row?.GetAttributeValue<EntityReference>(SearchIndexColumns.LookupColumn) is { } reference && reference.Id != Guid.Empty
+            ? reference.Id
+            : (Guid?)null;
+        return (name, index);
     }
 
     /// <summary>Whether the row carries a search index NAME already (a non-blank string; a <c>null</c> is no value).</summary>
