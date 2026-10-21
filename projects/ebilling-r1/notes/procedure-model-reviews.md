@@ -212,6 +212,19 @@ Three reviews of `procedure-and-file-model.md` v4. Each item is folded into v5 o
 - **"Secure family."** uac-r2's term for the set of child tables that inherit a Secure record's isolation (lineage, role row, census). It is a concept in code (`SecureChildLineage`), not a table, and v5 will say "secure child tables" to avoid the word.
 If the owner saw `sprk_family` somewhere else (a prototype or another project's design), we need the source to answer.
 
+### 4.x Owner answers on the Submit Invoice process (I, L), 2026-10-21
+
+Given in word-add-in-r1's session and relayed to us; checked in `projects/spaarkeai-word-add-in-r1/notes/ebilling-r1-review-2026-10-21.md` lines 66-75 before recording.
+
+1. **Explicit mark.** Each attachment is Invoice (exactly one; pre-selected when exactly one PDF), Supporting (default) or Don't save. The server never guesses and refuses without exactly one Invoice. If extraction finds the marked file is not an invoice, the submission fails with a clear message.
+2. **Separate Invoice module** in the add-in (ribbon "Submit Invoice", task-pane view like Add To Do). New invoice: core record required (Matter, Project, Work Assignment; pre-filled when the email is filed). Existing invoice: add supporting files, or submit a corrected invoice: a resubmission (D-34/D-37/D-43) that closes the old invoice as superseded and links the new one ({invoice}.{n}). No in-place PDF replacement. A correction is refused once Approved, Sent to AP or Paid (credit or adjustment instead; word-add-in-r1's recommendation, owner ok).
+3. **Removed from Save:** Invoice as a save target (`OfficeDocumentPersistence.cs:47`) and the blank "+New invoice" quick-create (`QuickCreateRequest.cs:180`).
+4. **Core records:** Matter, Project, Work Assignment in R1; Agreement with ebilling R2 (O-31); the add-in takes the list from ebilling.
+5. **The email is always saved** as its .eml in SPE, a Document filed to the core record, never an invoice file; only attachments go to the invoice's files. The save must not create the attachments as child Documents; ebilling defines the contract.
+6. **LEDES is out of scope.**
+
+Applied in model v5.5 (section 0 v5.5, 9.1, 13, 15). The contract word-add-in-r1 asked for is in 9.1 ("Email-only save").
+
 ## 5. SPA-r3: early views on the firm invoice-file route (not final; waits for the owner's go)
 
 - **Today.** The SPA reaches invoice PDFs as SharePoint Embedded Documents at `/api/v1/external/invoices/{id}/documents` (+ `/{documentId}/content`, `/versions`, POST upload; `ExternalProjectDataEndpoints.cs:384-418`, `RequireWorkforceCeiling`). Master has no SPA submission wizard and no findings display.
