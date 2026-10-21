@@ -1,7 +1,8 @@
 # Task 189 — D7 T7a: the reconciler never widens a document's own narrowing (#2126)
 
 > 2026-10-20 · branch `uac/189-own-narrowing` (worktree `C:/wt189`) from `origin/master` @ `4f5f22694`
-> Status: **DESIGN CHECKPOINT — awaiting the main session's review.** No code and no schema change has been made.
+> Status: design checkpoint **approved** by the main session (2026-10-20; decisions in §7). Implemented as §6 planned;
+> evidence (tests, mutation table, gates, schema read-back) in §8.
 > Read with `2119-manage-access-all-forms-design.md` §6 (D7) and `task-173-child-access-permission.md`.
 
 ## 0. Summary
@@ -142,6 +143,7 @@ schema has not landed):
 | A hand edit below the floor | reverted | reverted (never looser than the parents) |
 | Re-filed from a Restricted matter to a Standard one, no own | follows to Standard | follows to Standard (POML: keep the contract for rows without an own narrowing) |
 | Parentless Restricted, then filed under a Restricted matter that later widens | follows to Standard | **stays Restricted** (own recorded while parentless) |
+| Filed under a Restricted matter (inherited R), then un-filed | keeps R (round 81) | keeps R, and R is recorded as its own (§2.2 step 3), so a later filing under a Standard matter keeps it. Fails closed |
 | To Do / Event / Communication, any case | today | **identical** |
 
 ### 2.4 Why the record is not field-secured
@@ -247,7 +249,11 @@ refresh. Expected publish-size delta about 0, to be measured.
 
 - **K1 — a coinciding narrowing.** A user narrows a document to exactly the value its parent turns to within the same
   ≤ 2-minute window. The edit is classified inherited and follows a later widening. This needs two independent edits in one
-  window. The consequence is today's behaviour.
+  window. The consequence is today's behaviour. **The same window class (found in implementation):** an edit made after
+  the parents' value changed but before the next run is judged against the LAST inherited value. Example: the matter
+  goes Restricted → Standard and, before the run, a user sets the document to Limited; Limited is below the last inherited
+  Restricted, so it reads as "put back" and the document follows to Standard. Task 175 has the same behaviour (shared
+  classification, D2). The same edit made after that run is judged against the new value and kept.
 - **K2 — millisecond race.** The re-read narrows the listing-to-write race to milliseconds but cannot close it, because
   there is no conditional update.
 - **K3 — the form label.** The form still says "inherited from {parent}" on an own-narrowed filed document until T1/T5 read
@@ -262,7 +268,7 @@ refresh. Expected publish-size delta about 0, to be measured.
 | Q1 | The record column: reuse `sprk_accessinheritance` unsecured on `sprk_document` | **Yes** (§2.4). Alternatives: secured (needs task 175's read-proof machinery, no security gain), or a distinct name (a second record type for the same concept) |
 | Q2 | Extract the classification from `SecureRootInheritance.Decide` (touches task 175's file; its tests prove no change) | **Yes**: one owner of the rule. Alternative: a documented copy in `InheritedAccessPermission` |
 | Q3 | Who may remove an own narrowing | **Any user with Write**, by an edit (D7 note: "a user can widen it later only to the root's level"). Round 87's F3 for work assignment and project would need the stored value secured or a BFF route: a T5/T3 question, not 189 |
-| Q4 | A document's own narrowing does not reach the documents or To Dos filed under it. 173's rule reads only the TOPS of a filing, so a user's Restricted on a `.eml` does not hide its attachments | **Out of 189**: it would change the contract for rows without an own narrowing. Raise with the owner; 188's rule 3 covers the email-derived case only |
+| Q4 | A document's own narrowing does not reach the documents or To Dos filed under it. 173's rule reads only the TOPS of a filing, so a user's Restricted on a `.eml` does not hide its attachments | **Decided (D4): handled by task 188 at read time** — an ancestor document's own Restricted on the ≤ 3-hop `sprk_parentdocument` walk hides its descendants. 189 does not change the tops rule and adds no stored cascade |
 | Q5 | T8 contract | **Relay to word-add-in-r1:** T8's fallback writes `AccessInheritance.OwnNarrowing(Restricted)` in the same payload as stored Restricted (§2.5) |
 | Q6 | Order | 189 merges before T8 and before T5 unlocks the form pill. It is independent of 188: rule 2 reads the stored value, which 189 never lowers below an own narrowing, and a lagging inherited Restricted fails closed |
 
@@ -307,3 +313,96 @@ Unchanged:
 
 **Guard named, not built** (Step 9.5 rule 6): an ArchTest source scan that fails when code outside `DecideDocument` writes
 `sprk_accesspermission` on `sprk_document`. The stamp-path writers have no document caller today (§1.3).
+
+## 7. Decisions (main session, 2026-10-20, on design commit `0b0fe969ee`)
+
+| # | Decision |
+|---|---|
+| D1 | **Column approved:** `sprk_document.sprk_accessinheritance`, task 175's v1 format and `AccessInheritance` parser, **not field-secured**. Security justification (§2.4, §11): the stored value is `max(own, inherited)`, and the inherited part is always recomputed from the parents, never read from the record. So a user's edit — of the stored value or of the record — can only (a) remove their own narrowing, which D3 allows, or (b) add a narrowing. Neither can take a document below its parents' live value. Securing the record would add no protection and would add the hidden-read widening risk. |
+| D2 | **Classification:** extracted from `SecureRootInheritance.Decide` into ONE shared copy (`AccessInheritance.OwnPermissionOf`). Task 175's existing tests must pass unchanged. |
+| D3 | **Removing an own narrowing:** any user with Write (D7). A Full Access / creator (F3) gate belongs to T3/T5 (Manage Access), not 189. |
+| D4 | **A Restricted `.eml` and its attachments:** **handled by task 188 at read time.** An ancestor document's own Restricted, on the same ≤ 3-hop `sprk_parentdocument` walk, hides its descendants. Consistent with the owner's D7 answer ("follows its parent unless more restricted"). No stored cascade is needed, and 189 does not change the tops rule. |
+| D5 | **T8:** the main session relays to word-add-in-r1 that the fallback writer writes the own-narrowing record in the same payload as stored Restricted. 189 exposes `AccessInheritance.OwnNarrowing`. |
+| D6 | **Order:** 189 merges before T8 and before T5 unlocks the pill. It has no dependency on 188. |
+| — | **The second writer is in scope:** `CoreAncestorResolver.RefreshInheritedAccessPermissionAsync`, with a must-fire test (a create with Restricted under a Standard parent stays Restricted). |
+| — | **K1 accepted:** the same value set within the same 2-minute window. |
+| — | **Schema:** after code and tests are green, `-Apply` then `-Verify` on spaarkedev1 ONLY. Mirror into `sprk_Document/Entity.xml`. No other environment, and no field-security, role or app-setting change. Draft PR; no deploy. |
+
+## 8. Implementation and evidence (2026-10-20)
+
+### 8.1 Commits (branch `uac/189-own-narrowing`, base `origin/master` @ `4f5f22694c`)
+
+| Commit | What |
+|---|---|
+| `5b8811fbe1` | BFF: `AccessInheritance.OwnPermissionOf` (extracted from `SecureRootInheritance.Decide`) and `OwnNarrowing`; `InheritedAccessPermission.RecordTables` / `DecideDocument`; the reconciler's document path (one update, re-read, counters, record-column check); `CoreAncestorResolver.RefreshInheritedAccessPermissionAsync` for documents; the job's report and log; 15 tests and the fixture |
+| `d76897f23c` | Schema: `scripts/Set-DocumentAccessPermissionSchema.ps1` (the record column; `-SelfTest` 17 checks), `scripts/README.md`, `sprk_Document/Entity.xml` (`IsSecured 0`) |
+| `afad901388` | `docs/data-model/child-access-permission.md`, `docs/data-model/access-inheritance.md`, `DATAVERSE-WRITE-PATH-ARCHITECTURE.md` I-16 |
+| (this commit) | this file: §5 Q4 (D4), §2.3 un-file row, §4 K1 variant, §8 |
+
+### 8.2 Tests
+
+- **New:** 11 in `ChildAccessPermissionReconcileTests` (through the job, as the scheduler runs it) and 4 in
+  `InheritedAccessPermissionStampTests` (the inline refresh). The six existing reconciler tests and task 175's tests are
+  unchanged.
+- **Filtered suite** (the baseline filter: `ChildAccessPermission | InheritedAccessPermission | ChildAccessCascadeTests |
+  SecureRootInheritance | ParentLineageTests | SecureChildReconciliationJob | ChildRecordEndpoints`): **305 → 320, all
+  pass.**
+- **Every namespace that uses the fixture, the resolver or the reconciler** (20 namespaces): **10039 passed, 0 failed,
+  9 skipped** (the skips are existing `[Skip]` Office contract tests).
+- **ArchTests (full project): 1208 / 1208 pass.**
+- **Fails before.** The new tests call new APIs (`AccessInheritance.OwnNarrowing`, the fixture's two-column update), so
+  master's files cannot be copied back under them. The before-behaviour is reproduced instead by routing documents
+  through the old code path (M6, M7b below): every must-fire test turns red.
+
+### 8.3 Mutation table (each run: one perturbation, build, the two test classes, restore)
+
+| # | Perturbation | Red (of the 15 new) |
+|---|---|---|
+| M1 | `own := null` always (`DecideDocument`) | 6: own Restricted under Standard; parentless own survives filing + widening; Office fallback record; edited back to floor; narrowed mid-run; refresh create Restricted under Standard |
+| M2 | ignore the record (the backfill rule every run) | 3: inherited follows both ways; legacy row follows a widening; edited back to floor |
+| M3 | an unreadable record read as none | 1: unreadable record not written |
+| M4 | drop the re-read | 1: narrowed between listing and write |
+| M5 | drop the parentless record write | 2: parentless own survives filing + widening; refresh parentless narrowing recorded |
+| M6 | the refresh takes the old path for documents | 4: all four refresh tests |
+| M7 | `if (false && _recordTables.Contains(table))` | **invalid** (does not compile: CS8602 in the then-unreachable local function); replaced by M7b |
+| M7b | documents never take the record path (old reconciler behaviour) | 9 of 11 reconciler tests. The two that stay green are the ones whose old behaviour is correct: a hand edit below the floor is put back, and a missing record column skips documents (decided before the path) |
+
+Every new test is red under at least one perturbation.
+
+### 8.4 Gates
+
+- **Build:** `dotnet build src/server/api/Sprk.Bff.Api/` — 0 warnings, 0 errors.
+- **Publish size** (bff-hygiene item 4): `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`,
+  framework-dependent linux-x64, Release, `Compress-Archive -CompressionLevel Optimal` over `deploy/api-publish/*`,
+  PDBs included (4 each), from fresh detached worktrees `C:/wt189m` (master `4f5f22694c`) and `C:/wt189b` (`5b8811fbe1`).
+  192 files each. **Master 39,314,279 B (37.49 MB); branch 39,320,210 B (37.50 MB); delta +5,931 B (+0.006 MB).**
+- **CVE:** `dotnet list package --vulnerable --include-transitive` — no vulnerable packages. No package changed.
+- **ADR / constraints:** no endpoint, DI registration, package, job or timer added (ADR-001/010/036/052); no plugin
+  (ADR-002); the write stays in the existing job and the existing L1 refresh.
+
+### 8.5 Schema on dev (spaarkedev1 only, the main session's approval in §7)
+
+- `-SelfTest`: PASS, 17 checks.
+- Dry run, then `-Verify` before the apply: **VERIFY FAIL: record absent** (the check fires).
+- `-Apply`: `created sprk_document.sprk_accessinheritance (not secured) under SpaarkeCore`; `published sprk_document`;
+  exit 0.
+- `-Verify`: **VERIFY PASS**, exit 0 — Access Permission `match`, ships in SpaarkeCore (ViaTable); record
+  `match (type Memo, MaxLength 4000, IsSecured False)`, ships in SpaarkeCore; on no form.
+- Independent metadata read: `sprk_accessinheritance` / `sprk_AccessInheritance`, MetadataId `ac9462bf…`,
+  IsSecured false, MaxLength 4000, Format TextArea, audited, RequiredLevel None.
+- No other environment, no field-security, role, form or app-setting change. The deployed dev BFF (`4f5f22694c`) does not
+  read the column; nothing is deployed by this task.
+
+### 8.6 Found in implementation
+
+- **A K1 variant** (§4): an edit made inside the window in which the parents' value changed is judged against the last
+  inherited value. Same window class as K1; shared with task 175 by D2.
+- **An un-filed document's last value is recorded as its own** (§2.3 new row). It follows from §2.2 step 3; it fails
+  closed.
+- **Cost:** one extra column-metadata read per job run (the reconciler checks `sprk_document` for the record column), and
+  one per child-records document write (the refresh). The walk's column cache filters to the columns it selects, so it
+  cannot answer the question.
+- **Report-only mode** counts `wouldChange` for value writes only; a record-only plan is logged, not counted, and
+  `recordsWritten` stays 0.
+- **Deploy order** (§2.8): on dev the schema is in place, so a BFF with 189 reconciles documents from its first run. On
+  any other environment, run the schema script first.
