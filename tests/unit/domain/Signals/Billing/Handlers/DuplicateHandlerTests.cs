@@ -448,6 +448,93 @@ public class DuplicateHandlerTests
         }
     }
 
+    // ── D-176 / #2118: a finding that cites a prior submission carries that prior's invoice id, as evidence only ─────────
+
+    private static readonly Guid EarlierInvoice = Guid.Parse("0ABCDEF0-1234-4567-89AB-CDEF01234567");
+    private const string EarlierInvoiceText = "0abcdef0-1234-4567-89ab-cdef01234567";
+
+    private static BillingPriorSubmission WithEarlierInvoice(BillingPriorSubmission prior) => prior with { InvoiceId = EarlierInvoice };
+
+    private static void ShouldCiteTheEarlierInvoiceAsEvidenceOnly(BillingFinding finding)
+    {
+        finding.Value("duplicateOf.invoiceId").Value.Should().Be(EarlierInvoiceText, "a lowercase GUID in the D format");
+        finding.ValuesRead.Single(v => v.Name == "duplicateOf.invoiceId").ExtractedField.Should().BeNull("a reference, like the tracking number");
+        finding.FactValues.Keys.Should().NotContain("duplicateOf.invoiceId", "not a template fact: it is not in the fact snapshot");
+        finding.FactValues.Values.Should().NotContain(v => v.Contains(EarlierInvoiceText, StringComparison.Ordinal));
+        Render(finding).Should().NotContain(EarlierInvoiceText, "nor in the rendered sentence");
+        BillingRuleCatalogue.TemplateFactFields(RuleType.Duplicate).Should().NotContain("duplicateOf.invoiceId");
+    }
+
+    [Fact]
+    public void InvoiceLevel_AVisiblePrior_CarriesTheEarlierInvoiceId_AsAReference_D176()
+    {
+        var finding = Run(InvoiceNumberOnly, Header(WithEarlierInvoice(Prior("INV-100.1", "INV-100", 1)))).Should().ContainSingle().Subject;
+
+        ShouldCiteTheEarlierInvoiceAsEvidenceOnly(finding);
+        finding.Value("duplicateOf.trackingNumber").Value.Should().Be("INV-100.1");
+    }
+
+    [Fact]
+    public void LineLevel_DuplicateOfPriorSubmissionLine_CarriesTheEarlierInvoiceId_AsAReference_D176()
+    {
+        var earlier = WithEarlierInvoice(Prior("INV-099.1", "INV-099", 1, BillingPriorStatus.Active, new BillingPriorLine
+        {
+            Date = LineDate, TimekeeperName = "Jane Doe", TimekeeperId = Matched().TimekeeperId, Hours = 1.5m, Narrative = "draft motion",
+        }));
+
+        var finding = Run(LinesOnly, WithPriors(Facts(Entry(0)), earlier)).Should().ContainSingle().Subject;
+
+        finding.ReasonCode.Should().Be(BillingReasonCodes.DuplicateOfPriorSubmissionLine);
+        ShouldCiteTheEarlierInvoiceAsEvidenceOnly(finding);
+    }
+
+    [Fact]
+    public void LineLevel_DuplicateOfEarlierLine_CarriesNoEarlierInvoiceId_D176()
+    {
+        // The earlier line is on this very invoice, so there is no other invoice to cite, even when a prior has an id.
+        var facts = WithPriors(Facts(Entry(0), Entry(1)), WithEarlierInvoice(Prior("INV-100.1", "INV-100", 1)));
+
+        var finding = Run(LinesOnly, facts).Should().ContainSingle().Subject;
+
+        finding.ReasonCode.Should().Be(BillingReasonCodes.DuplicateOfEarlierLine);
+        finding.ValuesRead.Select(v => v.Name).Should().NotContain("duplicateOf.invoiceId");
+        Everything(finding).Should().NotContain(EarlierInvoiceText);
+    }
+
+    [Fact]
+    public void WithheldFindings_CarryNoEarlierInvoiceId_AtInvoiceOrLineLevel_D176()
+    {
+        var hiddenInvoicePrior = WithEarlierInvoice(WalledInvoicePrior(Roots(RootB)));
+        var hiddenLinePrior = WithEarlierInvoice(WalledLinePrior(Roots(RootB)));
+
+        var invoiceLevel = Run(InvoiceNumberOnly, InvoiceUnder(Roots(RootA), Header(hiddenInvoicePrior))).Should().ContainSingle().Subject;
+        var lineLevel = Run(LinesOnly, InvoiceUnder(Roots(RootA), WithPriors(Facts(MatchingLine()), hiddenLinePrior))).Should().ContainSingle().Subject;
+
+        foreach (var finding in new[] { invoiceLevel, lineLevel })
+        {
+            ShouldBeWithheld(finding);
+            finding.ValuesRead.Select(v => v.Name).Should().NotContain("duplicateOf.invoiceId");
+            Everything(finding).Should().NotContain(EarlierInvoiceText);
+        }
+    }
+
+    [Fact]
+    public void APriorWithNoInvoiceId_AddsNoReference_NeverAnEmptyOne_D176()
+    {
+        var earlier = Prior("INV-099.1", "INV-099", 1, BillingPriorStatus.Active, new BillingPriorLine
+        {
+            Date = LineDate, TimekeeperName = "Jane Doe", TimekeeperId = Matched().TimekeeperId, Hours = 1.5m, Narrative = "draft motion",
+        });
+        var invoiceLevel = Run(InvoiceNumberOnly, Header(Prior("INV-100.1", "INV-100", 1))).Should().ContainSingle().Subject;
+        var lineLevel = Run(LinesOnly, WithPriors(Facts(Entry(0)), earlier)).Should().ContainSingle().Subject;
+
+        invoiceLevel.ValuesRead.Select(v => v.Name).Should().NotContain("duplicateOf.invoiceId");
+        lineLevel.ValuesRead.Select(v => v.Name).Should().NotContain("duplicateOf.invoiceId");
+
+        var emptyId = Prior("INV-100.1", "INV-100", 1) with { InvoiceId = Guid.Empty };
+        Run(InvoiceNumberOnly, Header(emptyId)).Single().ValuesRead.Select(v => v.Name).Should().NotContain("duplicateOf.invoiceId");
+    }
+
     [Fact]
     public void TheWithheldVariant_NamesNoTokenAtAll_AndOnlyDuplicateHasOne_D112()
     {

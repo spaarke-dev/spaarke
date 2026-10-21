@@ -23,7 +23,9 @@ namespace Sprk.Bff.Api.Services.Signals.Billing.Handlers;
 /// <see cref="BillingRuleCatalogue.WithheldDuplicateTemplate"/>. When a match exists in a prior the viewer may see and in one
 /// across the wall, the visible one is cited. Within one wall nothing changes.</para>
 /// <para><b>Reads:</b> the invoice level reads FirmInvoiceNumber. The line level reads TimekeeperAsBilled and Date, the configured
-/// Hours, Narrative and Amount, and FirmInvoiceNumber (it is a template token). The original's tracking number is a reference value.</para>
+/// Hours, Narrative and Amount, and FirmInvoiceNumber (it is a template token). The original's tracking number is a reference value, and so is its invoice id
+/// (<c>duplicateOf.invoiceId</c>, D-176) when the prior has one: a finding that cites a prior submission carries it; a same-invoice repeat and a
+/// withheld finding do not.</para>
 /// </remarks>
 internal static class DuplicateHandler
 {
@@ -103,17 +105,31 @@ internal static class DuplicateHandler
             return;
         }
 
-        var values = new[]
+        var values = new List<BillingValueRead>
         {
             context.HeaderField("invoice.firmInvoiceNumber", BillingFieldNames.FirmInvoiceNumber, BillingText.Text(invoice.FirmInvoiceNumber)),
             HandlerContext.Reference("duplicateOf.trackingNumber", original.TrackingNumber),
         };
+        AddEarlierInvoiceId(values, original.InvoiceId);
 
         var facts = new FactValues()
             .Add("invoice.firmInvoiceNumber", BillingText.Text(invoice.FirmInvoiceNumber))
             .Add("duplicateOf.trackingNumber", original.TrackingNumber);
 
         findings.Add(context.Finding(BillingSubject.ForInvoice(), BillingReasonCodes.DuplicateInvoiceNumber, values, facts));
+    }
+
+    /// <summary>
+    /// D-176 / #2118: a finding that cites a prior submission also carries that submission's invoice id (lowercase GUID, "D" format) as the
+    /// <c>duplicateOf.invoiceId</c> reference, beside the tracking number, so a reader can test its access to the earlier invoice. Evidence
+    /// only: it is not a template fact and is never added to <see cref="FactValues"/>. A prior with no invoice adds nothing.
+    /// </summary>
+    private static void AddEarlierInvoiceId(List<BillingValueRead> values, Guid? invoiceId)
+    {
+        if (invoiceId is { } id && id != Guid.Empty)
+        {
+            values.Add(HandlerContext.Reference("duplicateOf.invoiceId", id.ToString("D")));
+        }
     }
 
     private static void LineLevel(
@@ -158,7 +174,7 @@ internal static class DuplicateHandler
 
             if (priorKeys.TryGetValue(key, out var original))
             {
-                findings.Add(LineFinding(context, line, lineFields, BillingReasonCodes.DuplicateOfPriorSubmissionLine, original.TrackingNumber, earlierLineIndex: null));
+                findings.Add(LineFinding(context, line, lineFields, BillingReasonCodes.DuplicateOfPriorSubmissionLine, original.TrackingNumber, earlierLineIndex: null, originalInvoiceId: original.InvoiceId));
             }
             else if (hiddenKeys.Contains(key))
             {
@@ -177,7 +193,7 @@ internal static class DuplicateHandler
 
     private static BillingFinding LineFinding(
         HandlerContext context, BillingLineFacts line, string[] lineFields, string reasonCode, string? originalTrackingNumber, int? earlierLineIndex,
-        bool detailWithheld = false)
+        bool detailWithheld = false, Guid? originalInvoiceId = null)
     {
         var invoice = context.Facts.Invoice;
         var values = new List<BillingValueRead> { context.LineTimekeeper(line), context.LineDate(line) };
@@ -196,6 +212,7 @@ internal static class DuplicateHandler
 
         values.Add(context.HeaderField("invoice.firmInvoiceNumber", BillingFieldNames.FirmInvoiceNumber, BillingText.Text(invoice.FirmInvoiceNumber)));
         values.Add(HandlerContext.Reference("duplicateOf.trackingNumber", originalTrackingNumber));
+        AddEarlierInvoiceId(values, originalInvoiceId);
         if (earlierLineIndex is { } earlier)
         {
             values.Add(HandlerContext.Reference("duplicateOf.lineIndex", BillingText.Number(earlier)));

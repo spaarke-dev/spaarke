@@ -318,6 +318,56 @@ public class BillingFindingSignalMapperTests
         row.GetAttributeValue<EntityReference>("sprk_regardinginvoice").Id.Should().Be(InvoiceRowId);
     }
 
+    private const string EarlierInvoiceText = "0abcdef0-1234-4567-89ab-cdef01234567";
+
+    [Fact]
+    public async Task AVisibleDuplicate_StoresTheEarlierInvoiceId_AsEvidenceOnly_NotInTheSnapshotOrTheSentence_D176()
+    {
+        var rule = Version("CD-DUPLICATE", RuleType.Duplicate, """{"type":"Duplicate","matchFields":["firmInvoiceNumber"]}""",
+            template: BillingRuleDraftTranslator.Wording(RuleType.Duplicate).Template);
+        var request = Request(Fee(0));
+        var prior = Prior("INV-100.1", "INV-100", 1) with { InvoiceId = Guid.Parse(EarlierInvoiceText) };
+        var result = Evaluator().Evaluate(request, Loaded(rule) with { PriorSubmissions = [prior] });
+        var subjects = SubjectsFor(request);
+        var mapping = BillingFindingSignalMapper.Map(result.Findings.Should().ContainSingle().Subject, rule, subjects);
+        var (writer, org) = Writer(subjects);
+
+        var written = await writer.WriteAsync(mapping.Request);
+
+        mapping.Request.EvidenceRefs!.Should().ContainSingle(e => e.Kind == BillingFindingSignalMapper.ReferenceEvidenceKind && e.Ref == "duplicateOf.invoiceId")
+            .Which.Text.Should().Be(EarlierInvoiceText);
+        mapping.Request.EvidenceRefs!.Should().Contain(e => e.Ref == "duplicateOf.trackingNumber" && e.Text == "INV-100.1");
+        mapping.Request.FactValues.Keys.Should().NotContain("duplicateOf.invoiceId");
+        var row = org.Rows[written.SignalId];
+        row.GetAttributeValue<string>("sprk_evidencerefs").Should().Contain(EarlierInvoiceText);
+        row.GetAttributeValue<string>("sprk_factsnapshot").Should().NotContain(EarlierInvoiceText);
+        row.GetAttributeValue<string>("sprk_sentence").Should().Be("Invoice INV-100 duplicates INV-100.1.");
+    }
+
+    [Fact]
+    public void AWithheldDuplicate_StoresNoEarlierInvoiceId_InItsEvidence_D176()
+    {
+        var rule = Version("CD-DUPLICATE", RuleType.Duplicate,
+            template: BillingRuleDraftTranslator.Wording(RuleType.Duplicate).Template);
+        var request = Request(Fee(0));
+        var acrossTheWall = Prior("INV-100.1", "INV-100", 1, BillingPriorStatus.Active,
+            new BillingPriorLine { Date = LineDate, TimekeeperId = Matched().TimekeeperId, Hours = 1.0m }) with
+        {
+            SecureRoots = Roots(Id("secure-matter")),
+            InvoiceId = Guid.Parse(EarlierInvoiceText),
+        };
+        var result = Evaluator().Evaluate(request, Loaded(rule) with { PriorSubmissions = [acrossTheWall] });
+        result.Findings.Should().HaveCount(2).And.OnlyContain(f => f.DetailWithheld);
+
+        foreach (var finding in result.Findings)
+        {
+            var evidence = BillingFindingSignalMapper.Map(finding, rule, SubjectsFor(request)).Request.EvidenceRefs!;
+
+            evidence.Should().NotContain(e => e.Ref == "duplicateOf.invoiceId");
+            evidence.Should().NotContain(e => (e.Text ?? string.Empty).Contains(EarlierInvoiceText, StringComparison.Ordinal));
+        }
+    }
+
     [Fact]
     public async Task AWithheldDuplicate_StoresNoTrackingNumber_InAnyFieldOfTheWrittenSignal_D112()
     {
