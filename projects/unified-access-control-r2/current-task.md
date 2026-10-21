@@ -23,8 +23,9 @@
 | **Peers** | Address by ListAgents session name (pipe ids don't resolve as `to`): R3 `spaarke-wt-spa-external-access-platform-05`, ebilling `spaarke-wt-ebilling-r1-5b`, word-add-in `spaarke-wt-spaarkeai-word-add-in-r1-a1`, field-mapping `spaarke-wt-field-mapping-server-write-pa-be`, provisioning `spaarke-wt-customer-provisioning-orchest-ff`. |
 
 ## In flight (agents)
-1. **036 post-flip live gates** (Opus, private folder `scratchpad/g036_flip_7c1a/`). Order: (vii) disabled/unlicensed/team-role FIRST (STOP condition → owner, never flip the flag myself) → Verify (`[WF-AUTHZ] … ImpersonatedRootSet`, `writeAccessPerRecord`) → (ii)–(v) server-side + owner SPA steps → regression since 23:51Z. (i) canary = PASS already.
-   - Next: paste the write-up into the gates note as "## 036 FR-20 flag-on live gates (2026-10-20)" → send to R3 → on PASS close #1074, #1567 → UAC builds D7 T7 (+T7a/T7b).
+1. **D7: task 188 (T7 predicate)**, C:/wt188, branch `uac/188-d7-document-narrowing` → draft PR → review (2 security passes) → owner sign-off → merge → R3 deploy → gate. **Task 189 (T7a)**, C:/wt189, stops at a DESIGN CHECKPOINT (own-narrowing record) for my review before any schema. **Task 190 (T7b)** starts after 188 merges.
+   - 036 flag-on gates DONE: PASS server-side (0a4fbaa38); #1567 closed; sent to R3; filed #2167 (privilege-after-RPA invariant), #2168 (disabled/unlicensed refusal surfaces as a fault). Owner SPA steps (ii)–(vi) are in the gates note.
+   - ebilling 050a r3: FIX-ROUND-NEEDED sent (F3 tests for walk-Failed / no-Secure-team; F1 pre-existing D-140 thread hop; K4 accepted as known limit). Re-check the fix diff when sent.
 2. **#2150 (#2143) round 7** (C:/wt2143, draft; head f81b616bd7 + R7a–e): F3 asked about every secure root removed from the row's own columns, plus caller plumbing (fixes the round-6 regression: re-file off a secure record left the email stuck).
    - Next: scoped re-check of the fix diff → owner sign-off → merge → R3 deploy → gate. Exception name unchanged: `RecordOwnerUnsettledException` → 409 `record_owner_unsettled` (tell ebilling at merge; K2: FinanceEndpoints :281 catch becomes dead code after both merge).
 3. **#2161 (#2159/#2151)** (C:/wt2159, draft; head d5a7cc5867): slices 1 → 4 in order, each reported; agent files the B5 over-250 MB issue.
