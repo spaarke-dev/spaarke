@@ -22,11 +22,12 @@
 | 115 rule types | task/ebill-115-ruletypes eb0b042e5a (ontology FINDINGS fixed). Option script -WhatIf ok (GET-only). | ontology-r1 re-check; **owner: D-39 precedence for AddedFee** (RuleType alone vs RuleType+feeKind; recommend +feeKind). |
 | D-176 / #2118 | duplicateOf.invoiceId merged (f140542018). Ontology task 157 builds the SignalReadService check. New ebilling task 119 (/review read-time withholding) is gated on 157. | ontology 157 range for our review. |
 
-### Open owner questions
-1. Re-run 080 on dev with the RemoveLink fix (recommended yes).
-2. AddedFee D-39 precedence key: RuleType + feeKind (recommended) or RuleType alone.
-3. 091 option A custom role (recommended yes).
-4. Ask spaarke-prototype to start the O-14 Procedure review prototype (084 UI blocked until then).
+### Owner answers 2026-10-21 (all as recommended) — in progress
+1. 080 dev re-run: running (log: scratchpad 080-rerun.log); before-notices sent; after-notice must include the P9 secured-column list + permission rows (uac-r2 asked).
+2. AddedFee D-39 key = RuleType + feeKind: agent eb-115-feekind on branch task/ebill-115-feekind; ontology-r1 reviews.
+3. 091 option A: agent eb-091-roleA on task/ebill-091-storage (template only; I run the dev deploy after uac-r2 review).
+4. O-14 prototype: spaarke-prototype started it (spaarke-prototype/projects/ebilling.r1); first cut to follow.
+Also running: eb-099-fix (uac-r2 F4 1-4 + registration assertion + multipart-in-handler + namespace guard selector); review of ontology 157 (c7659c6fe1..9d8fc886d4).
 
 ### Filed this session
 #2215 (dead AttachmentClassificationJobHandler), #2216 / DEF-032 (AddedFee forms wait for extraction).
