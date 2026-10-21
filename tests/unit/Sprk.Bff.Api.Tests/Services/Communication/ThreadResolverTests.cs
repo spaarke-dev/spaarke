@@ -2138,6 +2138,79 @@ public class ThreadResolverTests
                                           && e.Message.Contains(Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.NotPermittedReasonCode, StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// #2143 round 9 (K3): the email filed to a matter, alone in an inactive thread, so only the email moves to the matter's
+    /// default thread; <paramref name="refused"/> makes the S6 join refuse it. Runs the reconcile with a hook that records
+    /// its run in <paramref name="order"/>, as the grant does.
+    /// </summary>
+    private async Task ReconcileWithAHookBeforeTheGrant(bool refused, List<string> order, Guid communicationId, Guid recordThread)
+    {
+        _grants
+            .Setup(g => g.GrantMessageAccessAsync(It.IsAny<Guid>(), It.IsAny<ThreadAssignment>(), It.IsAny<CancellationToken>()))
+            .Callback(() => order.Add("grant"))
+            .Returns(Task.CompletedTask);
+        if (refused)
+        {
+            _owners.TeamId = null;
+            _owners.RefusalCode = Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.NotPermittedReasonCode;
+        }
+
+        await new ThreadResolver(Array.Empty<IThreadKeyStrategy>(), _entity.Object, _owners, NullLogger<ThreadResolver>.Instance,
+                _grants.Object, SecureNames)
+            .ReconcileThreadForFilingAsync(communicationId, FilingReconcileHost.AfterRefileStep, secureExitCaller: null,
+                beforeMessageGrant: _ =>
+                {
+                    order.Add("hook");
+                    return Task.CompletedTask;
+                },
+                CancellationToken.None);
+    }
+
+    private (Guid CommunicationId, Guid RecordThread) AnEmailAloneInAnInactiveThreadFiledToAMatter()
+    {
+        var communicationId = Guid.NewGuid();
+        var threadId = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        SetupFiledEmail(communicationId, threadId, "sprk_matter", matter);
+        var thread = OpenThread(threadId);
+        thread["statecode"] = new OptionSetValue(1); // Inactive: only the email can move
+        SetupReconcileThreadRead(threadId, thread);
+        SetupThreadMessagesForFiling(threadId, Message(communicationId, "sprk_matter", matter));
+        var recordThread = SetupRecordsDefaultThread("sprk_matter", matter);
+        _entity
+            .Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_communicationthread"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection { Entities = { new DataverseEntity("sprk_communicationthread") { Id = recordThread } } });
+        return (communicationId, recordThread);
+    }
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_WhenTheMoveIsJoined_TheHookRunsOnce_BeforeTheGrant()
+    {
+        // Must-fire (#2143 round 9, K3): the hook the step after a re-file passes (its mirror removal) runs between the join and
+        // the #1629 grant, once — never after the grant, which the removal would revoke.
+        var (communicationId, recordThread) = AnEmailAloneInAnInactiveThreadFiledToAMatter();
+        var order = new List<string>();
+
+        await ReconcileWithAHookBeforeTheGrant(refused: false, order, communicationId, recordThread);
+
+        VerifyAssigned(communicationId, recordThread, Times.Once());
+        order.Should().Equal(new[] { "hook", "grant" }, "the hook runs after the join and before the grant");
+    }
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_WhenTheJoinIsRefused_TheHookIsSkipped_AndNothingIsGranted()
+    {
+        // Must-not-fire (#2143 round 9, K3): a refused join leaves the email in its thread and isolation, so the hook (which
+        // takes off the mirror of an email that LEFT isolation) never runs, and nothing is granted.
+        var (communicationId, recordThread) = AnEmailAloneInAnInactiveThreadFiledToAMatter();
+        var order = new List<string>();
+
+        await ReconcileWithAHookBeforeTheGrant(refused: true, order, communicationId, recordThread);
+
+        VerifyAssigned(communicationId, recordThread, Times.Never());
+        order.Should().BeEmpty("a refused join runs neither the hook nor the grant");
+    }
+
     [Fact]
     public async Task ReconcileThreadForFiling_UnfiledEmail_InAThreadAnchoredToARecord_MovesToItsOwnersMasterThread_WithNoGrant()
     {
