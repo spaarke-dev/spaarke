@@ -398,3 +398,92 @@ rework: review pass 1 (F1-a, F1-b, F1-c, F3, K2) fixed; F1-d stopped. Review pas
 conditions, F3, K2) fixed. Pass 3: residual closed, work branch merged (twice), #2170 alignment done; #2170's
 stale-entry ratchet stopped for the coordinator. Open: escalation trigger 2, and the
 field-security approach for Repair (the #2188 guard fails on Repair by design until the owner decides).
+
+## Pass 4: the re-check's test gaps, and #2170 option (c)
+
+**Part A (commit `aa8e7a668f`).** New tests:
+- `ADecisionRecord_IsNeverRepaired_NoReadNoWrite` now asserts that nothing is read (`RecordQueries` is empty).
+- `DecidingTheSecureTeamFaults_CopiesNothing_FailClosed`: the fail-closed catch in `SourceMayBeCopiedAsync`.
+- With an ordinary owner, `ResolverAnswer = Owned(ChildTeam)`, two tests pin the gate alone:
+  - `ASourceWhoseFlagIsEmpty_IsNotCopiedIntoAnOrdinaryTeamsRow_TheGateAlone`;
+  - `ASecureTeamOwnedSource_IsNotCopiedIntoAnOrdinaryTeamsRow_TheGateAlone`.
+
+K4: the warning for an unreadable source now reads "The related record could not be read, so no fields were copied
+from it." (`RepairSourceUnreadableWarning`). A test asserts the text and that no warning says "you". Each mutant was
+applied alone, built, run and restored:
+
+| Mutant | Killed by |
+|---|---|
+| A1 the append-only skip runs after a row read | `ADecisionRecord_IsNeverRepaired_NoReadNoWrite` (both cases) |
+| A2 the gate's fault catch returns true | `DecidingTheSecureTeamFaults_CopiesNothing_FailClosed` |
+| M1 `!= false` becomes `== true` | `ASourceWhoseFlagIsEmpty_..._TheGateAlone` |
+| M3 the early return ignores the flag | `ASourceWhoseFlagIsEmpty_..._TheGateAlone` |
+| M4 a flagged source counts as isolated for any team-owned row | `ASourceWhoseFlagIsEmpty_..._TheGateAlone` |
+| M14 `isolated = rowTeamOwned` | `ASecureTeamOwnedSource_..._TheGateAlone`, `ASourceWhoseFlagIsEmpty_..._TheGateAlone` |
+
+**Part B: `EveryGenericUpdateWriter_AsksTheAppOnlyRefusal`, per member (UAC-r2 option c).**
+- The guard now keys by member (`SourceKey`): lambdas, local functions, state machines and `<>c` closures count for the
+  member they were written in.
+- `IGenericEntityService.UpdateIfRowVersionMatchesAsync` is scanned, matched on `IGenericEntityService`. `UpdateAsync`
+  is not scanned (#2213).
+- Exemptions are `Type::Member` keys with reasons.
+- `RepairAsync` now calls `RefuseAppOnlyWrite(table, patch.Keys)` itself, just before its write. If refused, nothing is
+  written and the outcome is Skipped with the refusal code. That cannot happen today, because the mapping already
+  refuses per rule.
+- Controls:
+  - must-fire: `GenericWriterControlTwoMembers::WritesWithoutRefusingAsync`, and a stale member entry
+    (`GenericWriterControlListed::ReadAsync`);
+  - must-not-fire: the refusing member, the lambda refusal, and the non-vacuity writers. Those are
+    `UpdateRecordActionCore::UpdateAsync`, `FieldMappingEndpoints::ApplyMappingsToChildRecordsAsync`,
+    `RecordCreationService::RepairAsync`, and `DataverseUpdateHandler` (`UpdateAsync` refuses, `WriteAsync` writes).
+
+Payload evidence for each member entry:
+- InvoiceReviewService:
+  - `CreateInvoiceRecordAsync`: a fresh-id create of `sprk_invoice`;
+  - `LinkDocumentOrCompensateAsync`: `sprk_document`, only `sprk_Invoice@odata.bind`;
+  - `MarkDocumentConfirmedAsync` and `RejectInvoiceAsync`: `sprk_document`, `BuildReviewStatusFields` (review status,
+    reviewed-on, notes).
+  - The old type reason ("sprk_invoice only") was inaccurate. These members do update documents, but only with literal
+    keys outside the refusal's set.
+- SignalEvaluationService `UpsertSignalAsync`: `sprk_spendsignal`.
+- FinanceRollupService `RecalculateForEntityAsync` and ScorecardCalculatorService `UpdateEntityGradesAsync`: rollup and
+  grade literals on a matter or project.
+- CommunicationEnrichmentService `AssignOwningTeamAsync`: `ownerid@odata.bind` only.
+- OwnedChildWrite:
+  - `CreateAsync` and `CreateIntoIsolationAsync`: fresh-Guid creates;
+  - `PatchWithBffManagedPairAsync`: only the `PairColumns` (regarding record id and type), picked out of the body by
+    name.
+- DataverseUpdateHandler `WriteAsync` and `UpdateWithOptimisticConcurrencyAsync`: private. They are reached only from
+  `UpdateAsync` (lines 104 and 115, then 156), which refuses the same `fields` at :59. Nothing changes the payload in
+  between.
+- RecordOwnershipResolver:
+  - `SettleOwnerAsync` (:1916) and `ReleaseOwnSecureWriteAsync` (:2121): only `ownerid` (a team reference).
+  - **`PutBackFilingAsync` (:2811): STOPPED, not exempted.** It writes `restore`, which `RecordOwnershipResolver` builds
+    with `Remember(column)` (:1422-1480). It holds every parent column the re-file moved, plus `AttachColumns`, and
+    `sprk_document` is an ownership parent. On a `sprk_document` re-file, `restore` can therefore hold
+    `sprk_parentdocument` (`ParentChangesOf` sets it, :833) and `sprk_relatedcommunication`, and writes back their prior
+    values. The guard reports this member, and it is left for the coordinator and UAC.
+- Signal writers: `DecisionCommitService` :2027, `SignalSuppressionService` :1305 and `SignalWriter`
+  :907/:985/:1038/:1079.
+  - They call `OntologyWriterDataverseClient.UpdateIfRowVersionMatchesAsync`, a concrete class that does not implement
+    `IGenericEntityService`. The scan, matched on `IGenericEntityService` as briefed, does not see them, so they have no
+    entry; an entry would be reported stale.
+  - Their payloads are all `sprk_signal` (the first argument is the literal `"sprk_signal"` or `SignalEntity`), so
+    seeing them would add exemptions, not findings.
+
+Guard mutants (each applied alone, built, run, restored):
+- B1 (no attribution of compiler-generated code; the key is `MoveNext`): both facts fail.
+- B1b (the per-type key): both facts fail.
+- B2 (the row-version update is not scanned): both facts fail.
+- B3 (`RepairAsync` does not refuse): the main fact fails ("RepairAsync should be seen calling RefuseAppOnlyWrite").
+  This is also the fail-before for the Repair change.
+
+**Runs, pass 4:**
+- `dotnet build Spaarke.sln`: 0 errors, 0 warnings.
+- ArchTests (built separately): 1340 passed, 2 failed.
+  - #2188 on Repair's `ApplyFillOnly` (now `Repair.cs:323`), as expected.
+  - #2170 on `RecordOwnershipResolver::PutBackFilingAsync`, the STOP above.
+- `RecordRepairModeTests`: 53 passed.
+- The filtered set: 2818 passed, 0 failed, 7 skipped.
+
+Part B is committed locally and NOT pushed, pending the coordinator's call on `PutBackFilingAsync`.

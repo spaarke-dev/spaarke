@@ -151,6 +151,17 @@ internal sealed partial class RecordCreationService
         if (await InvoiceFamilyUpdateRefusalAsync(table, id, patch, ct).ConfigureAwait(false) is { } refusedBy)
             return Outcome(RecordRepairStatus.Skipped, refusedBy);
 
+        // #2170: the write itself asks the app-only refusal over every column it sends (the per-member guard,
+        // EveryGenericUpdateWriter_AsksTheAppOnlyRefusal). The mapping already reports each document column it refuses
+        // (DocumentServerOwnedRefusal), so this only fires if a later step ever puts one in the patch: nothing is written.
+        if (InheritedAccessPermission.RefuseAppOnlyWrite(table, patch.Keys) is { } refusedWrite)
+        {
+            _logger.LogError("[RECORD-REPAIR] {Table} {Id}: the repair write names a column Spaarke sets ({Reason}); nothing " +
+                             "was written", table, id, refusedWrite.Reason);
+            return Outcome(RecordRepairStatus.Skipped,
+                refusedWrite.RefusalCode ?? InheritedAccessPermission.AppOnlyDocumentWriteReasonCode);
+        }
+
         var ownerWritten = patch.ContainsKey(OwnerColumn);
         try
         {
