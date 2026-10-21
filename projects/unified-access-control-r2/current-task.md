@@ -40,6 +40,10 @@
   - Repair's field-security option 1 (owner chose it; 5 conditions on task 033; 052 blocked until it lands);
   - Decision Records skipped entirely; the source-secure gate fails closed.
 
+  **016 status (2026-10-21):** the review found F1-1, F2-1, F3-1, F3-2, F4-1 and F4-2. Field-mapping is fixing them. Re-check the fix scope only.
+
+  **#2220 (Create mapping can write matter `sprk_issecure`, `sprk_accesspermission`, `sprk_accessinheritance` and `sprk_securitybu`):** triaged as fix now, in a separate field-mapping PR that skips and warns. Owed: a condition (b) review of that PR.
+
   Also owed: 017/018 condition-(b) reviews, and 018 closes #1614/#1617.
 - **ebilling gates:**
   - **081, 086 (2 passes), 089, 090, 094, 095, 098 (2 passes), 117.** 098 must cover the message threads/feed (gate + (a′), fail closed) and GET /invoice-submissions (own firm + (a′), counts as the caller).
