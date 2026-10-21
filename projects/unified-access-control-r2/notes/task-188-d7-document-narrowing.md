@@ -757,19 +757,39 @@ killed.** Runner: `.uac188/t188b_mutate.py` (untracked; deleted at the end).
 The ArchTest is the second net for M1, M2 and M4 (`TheInternalPlaneDocumentRoutes_ReachTheNarrowing`: 1 of 6 fails). M3, M5,
 M6 and M7 change the decision, not the wiring, so only the behaviour tests can see them.
 
-**`ExternalWorkforceLinkEndpointsTests` (coordinator condition 3).** One case
-(`GuestToken_FailingACheck_…(defect: "expired")`) failed twice, but only inside the long, heavily loaded broad runs: it got
-`guest_token_invalid` instead of `guest_token_expired`. It passes in isolation on `origin/master` `44063b3473` (35 of 35) and
-on this branch, and with the same filter on both (`AccessControl` | `ExternalAccess`: master 7,366 / 0 failed; branch
-7,536 / 0 failed). Slice B touches no guest-token or link code. So it is an intermittent, load-dependent failure, not a
-master failure and not caused here; no issue was filed (see the final run below).
+**`ExternalWorkforceLinkEndpointsTests` (coordinator condition 3): root cause found and fixed; no issue needed.**
+- Symptom: one case (`GuestToken_FailingACheck_…(defect: "expired")`) got `guest_token_invalid` instead of
+  `guest_token_expired`, in every broad branch run (3 of 3) and in a mid-size one, never in isolation. The identical broad
+  filter on `origin/master` `44063b3473` passed it (1 failed of 13,031, the timeout below), so per condition 3 it was ours.
+- Cause (a diagnostic printed the inner exception): the validator saw `AggregateException("An error occurred while writing
+  to logger(s)")` over `ObjectDisposedException` (`EventLogInternal`), not `SecurityTokenExpiredException`. IdentityModel's
+  logger is process-wide (`LogHelper.Logger`), and Identity Web binds it, once, to the logger of the FIRST host whose
+  JwtBearer options are built. In a test run that host is a fixture that is disposed when its class finishes; every later
+  IdentityModel log line (the expired path logs at Error) then writes into its disposed logger factory, the Windows EventLog
+  provider throws, and the token handler returns that as the failure. Which host is first depends on the test mix, so
+  slice B's added tests and hosts moved the order and exposed it. A latent test-isolation defect, not a production one
+  (a production process has one host).
+- Fix: `tests/unit/Sprk.Bff.Api.Tests/TestInfrastructure/IdentityModelLoggerIsolation.cs`, a `[ModuleInitializer]` that
+  pins `LogHelper.Logger` to a no-op, process-lifetime `IIdentityLogger` before any host is built (Identity Web leaves a
+  logger that is already set in place). No test asserts IdentityModel's own log lines.
+- Test: `IdentityModelLoggerIsolationTests.AnExpiredToken_StillReadsAsExpired_AfterAHostIsDisposed` builds a real
+  `LinkFixture` host, materializes its JwtBearer options, disposes it, and validates an expired token. Without the
+  initializer it fails (`AggregateException` … `ObjectDisposedException`); with it, it passes.
+- §11: (1) existing: `TestOutboundNetworkGuardModuleInitializer` is the assembly's other process-wide test setup, for a
+  different concern; (2) extension: it could host the line, but its file is about outbound network, and one concern per
+  initializer keeps each one's rationale next to it; (3) cost of doing nothing: any test that validates a token after the
+  first host is disposed gets a wrong verdict, depending on test order.
+
+**`ProvisionProjectIdempotencyTests.ProvisionProject_WhenRecordingTheContainerTimesOut_…`** times out (about 1 m 26 s) in
+broad runs on `origin/master` too, and its fixture uses `FakeAuthHandler` (no token validation), so it is a separate,
+pre-existing defect: filed as **#2185** (`bug`). It passed in the final branch run.
 
 **Gates (slice B)**, on the final sources:
 
 | Gate | Result |
 |---|---|
 | `dotnet build src/server/api/Sprk.Bff.Api/` | succeeded, 0 warnings |
-| Unit and integration, filtered (`AccessControl` \| `ContractTests` \| `Documents` \| `Filters` \| `FileAccess` \| `Office` \| `Compose` \| `Regression` \| `ExternalAccess` \| `UnifiedAccessControl` \| `Services.Ai.Handlers` \| `RetrievalAccessTrim`, `Category!=Live`) | 13,231 passed, 7 skipped, 2 failed: `ExternalWorkforceLinkEndpointsTests` (`expired`, above) and `ProvisionProjectIdempotencyTests.ProvisionProject_WhenRecordingTheContainerTimesOut_…` (a 1 m 26 s timeout under load). Neither touches slice B's code. The same filter on master is in the slice B report |
+| Unit and integration, filtered (`AccessControl` \| `ContractTests` \| `Documents` \| `Filters` \| `FileAccess` \| `Office` \| `Compose` \| `Regression` \| `ExternalAccess` \| `UnifiedAccessControl` \| `Services.Ai.Handlers` \| `RetrievalAccessTrim` \| `IdentityModelLoggerIsolation`, `Category!=Live`) | final sources: **13,234 passed, 0 failed, 7 skipped** (35 m 34 s). Before the logger fix: 13,231 passed, 2 failed (`ExternalWorkforceLinkEndpointsTests` `expired`, fixed above; #2185). The same filter on `origin/master` `44063b3473`: 13,023 passed, 1 failed (#2185), 7 skipped |
 | Same failing areas, smaller filter (`AccessControl` \| `ExternalAccess`) | master 7,366 / 0 failed; branch 7,536 / 0 failed |
 | `tests/Spaarke.ArchTests` (full project) | 1,214 passed, 0 failed (D-66 caught the first draft's dependency on `Services.Ai.Handlers.Dataverse`; fixed) |
 | Mutants | 8 of 8 killed; sources SHA-checked after every run |
