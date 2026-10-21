@@ -1,6 +1,8 @@
 # Task 091 — File store provisioning: inventory, tag-permission finding, escalation
 
 > Project: ebilling-r1 (model `procedure-and-file-model.md` §4.2; owner re-plan Q5, 2026-10-21). Session 1 (2026-10-21) was authoring only: no deploy, no what-if, no role-assignment change, no Key Vault change. **The session stopped at step 2 on the POML's second escalation trigger (§3).** No bicep was written.
+>
+> **Session 3 (2026-10-21): the §3 stop is lifted — owner chose option A; uac-r2 accepted it on four conditions.** `modules/ebilling-file-store.bicep` is authored with the custom role; tests, the operator verification scripts and the exact dev deploy commands are in §8. Still authoring only: no deploy, no what-if, no live role or assignment, no Key Vault change.
 
 ## 1. Owner decision this task carries
 
@@ -85,24 +87,158 @@ The §3 stop stays: no eBilling container, no `ebilling-file-store.bicep`, no eB
 - `src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionFileBlobStore.cs:558-560` exception message: "needs the 'Storage Blob Data Contributor' role on the storage account … 'appServicePrincipalId' is passed to the module".
 - `src/server/api/Sprk.Bff.Api/Api/Ai/ChatDocumentEndpoints.cs:100` doc comment (same assumption).
 
-## 6. Hand-off to customer-provisioning-orchestration-r1 (to file after §3 is decided)
+## 6. Hand-off to customer-provisioning-orchestration-r1 (§3 decided: option A)
 
-Not filed yet (step 7 depends on §3). Contents:
+Not filed yet (step 7; the owner/coordinator files it after review of §8). Contents:
 
-1. Wire `ebilling-file-store.bicep` into `customer.bicep` for the stamp UAMI, with the role chosen in §3 (custom role: create the definition per customer subscription before the module runs).
-2. The per-environment malware-scanning setting (Defender on-upload scanning with a monthly cap, or the explicit "Scanning not enabled" setting).
+1. Wire `modules/ebilling-file-store.bicep` into `customer.bicep` for the stamp UAMI (`principalId: uami.outputs.principalId`, `storageAccountName: storage.outputs.storageAccountName`, `scope: <stamp RG>`). The module itself creates the custom role definition at the stamp resource group (`assignableScopes` = that RG only; name `guid(resourceGroup().id, 'spaarke-ebilling-file-store-blob-role')`; role name made unique per RG with `uniqueString(resourceGroup().id)`, because custom role names are tenant-unique). The identity that deploys `customer.bicep` therefore needs `Microsoft.Authorization/roleDefinitions/write` and `roleAssignments/write` on the stamp RG (customer-provisioning note (e): the control-plane Worker can). Then recompile `customer.json` from the merged `customer.bicep` (never hand-merge). `CustomerStampKeylessTemplateTests.StampBlobDataRoles_AreContainerScoped` already recognises a custom role with blob data actions, so the wired grants are checked for container scope automatically; the exactness test (`FileStoreRole_IsExactlyContributorPlusTagRead`) reads `modules/ebilling-file-store.json`, which must be recompiled with any module edit.
+2. The per-environment malware-scanning setting: `enableMalwareScanning` has no default (on-upload scanning with `malwareScanningCapGBPerMonth`, or `false` = the explicit "Scanning not enabled" setting, which the BFF must also receive as task 090's `MalwareScanningEnabled=false`).
 3. The BFF config keys task 090 defines.
 4. Network `defaultAction: 'Deny'` / private endpoint at prod hardening (K-3, accepted by the owner).
-5. The container-scope-only rule for the stamp UAMI (§1), the `ai-chunks` grant, and the §2 inventory: a new blob consumer in the BFF needs its own container-scoped grant, or it fails with 403.
-6. This file's §3 finding.
+5. The container-scope-only rule for the stamp UAMI (§1), the `ai-chunks` grant (built-in Contributor, container scope — it needs no tag read), and the §2 inventory: a new blob consumer in the BFF needs its own container-scoped grant, or it fails with 403.
+6. Per-stamp verification: `scripts/ebilling/Test-EbillingFileStoreRole.ps1` (role exact against live built-in Contributor + tags/read; assignments per container only) and the data-plane tag-write proof `scripts/ebilling/test-ebilling-file-store-tag-write.sh` (§8.5 step 6); candidates for H13.
+7. Never remove the account-scope grant on ACME or any existing stamp from this project (customer-provisioning note (d)); that stays customer-provisioning's step with its owner.
 
 ## 7. Acceptance criteria status
 
 | Criterion | Status |
 |---|---|
-| Module builds clean, no secret | eBilling module not started (stopped at step 2); `storage-account.bicep` and `customer.bicep` build clean |
-| Notes record inventory, tag finding, what-if, owner OK | Tag finding and code inventory recorded; live az inventory (step 1), what-if and owner OK pending |
-| Containers + one container-scope assignment each on dev | Live step — needs owner OK |
-| Negative: no account/RG/subscription grant; network, soft delete, KV unchanged | Live step |
-| Defender matches owner's choice | Live step |
-| Hand-off issue filed and in `defer-issues.md` | Pending §3 |
+| Module builds clean, no secret | **Met (authored)**: `az bicep build` of `ebilling-file-store.bicep` exits 0 with no warning; no key, connection string or SAS in any output, parameter or property (`FileStoreTemplate_ContainsNoKeyMaterial`). |
+| Notes record inventory, tag finding, what-if, owner OK | Tag finding, code inventory and a read-only dev identity/account inventory (§8.4) recorded; owner chose option A (2026-10-21). What-if, scanning choice and the owner's OK on the what-if: pending (§8.5 commands). |
+| Containers + one container-scope assignment each on dev | Live step — commands in §8.5; the dev storage account is an open owner choice (§8.4). |
+| Negative: no account/RG/subscription grant; network, soft delete, KV unchanged | Template: enforced by `FileStoreRole_IsAssignedPerContainerOnly`. Live: before/after reads in §8.5. |
+| Defender matches owner's choice | Live step. |
+| Hand-off issue filed and in `defer-issues.md` | Contents ready (§6); not filed. |
+
+## 8. Option A — the file-store custom role (session 3, 2026-10-21)
+
+Owner decision 2026-10-21: option A. unified-access-control-r2 accepted it on four binding conditions (POML notes, SCAN-TAG ROLE). This section is the authored result. **Nothing here ran against Azure except the read-only queries in §8.4.**
+
+### 8.1 The role (as compiled in `modules/ebilling-file-store.json`; `description` omitted)
+
+```json
+{
+  "type": "Microsoft.Authorization/roleDefinitions",
+  "name": "[guid(resourceGroup().id, 'spaarke-ebilling-file-store-blob-role')]",
+  "properties": {
+    "roleName": "[format('Spaarke eBilling File Store Blob Data ({0})', uniqueString(resourceGroup().id))]",
+    "type": "customRole",
+    "permissions": [ {
+      "actions": [
+        "Microsoft.Storage/storageAccounts/blobServices/containers/delete",
+        "Microsoft.Storage/storageAccounts/blobServices/containers/read",
+        "Microsoft.Storage/storageAccounts/blobServices/containers/write",
+        "Microsoft.Storage/storageAccounts/blobServices/generateUserDelegationKey/action"
+      ],
+      "notActions": [],
+      "dataActions": [
+        "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/delete",
+        "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/read",
+        "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/write",
+        "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/move/action",
+        "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/add/action",
+        "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/tags/read"
+      ],
+      "notDataActions": []
+    } ],
+    "assignableScopes": [ "[resourceGroup().id]" ]
+  }
+}
+```
+
+The four actions and the first five dataActions are built-in Storage Blob Data Contributor's, verbatim (`az role definition list --name "Storage Blob Data Contributor"`, re-read 2026-10-21, same as §3). No `tags/write`, no wildcard, no condition.
+
+**Where it is assigned:** `fileStoreGrants`, one `Microsoft.Authorization/roleAssignments` per entry of `containerNames` (default `procedures`, `invoice-files`, `billing-exports`), `scope` = that container, name `guid(container id, principalId, role id)`, `principalType: ServicePrincipal`, principal = the module's `principalId` (the BFF identity: the stamp UAMI on a stamp, `mi-bff-api-dev` on dev). Nothing is assigned at the account, resource group or subscription. `ai-chunks` keeps its built-in Contributor container grant from `storage-account.bicep` (§4) — it reads no tags.
+
+**Module:** `infrastructure/bicep/modules/ebilling-file-store.bicep` (POML step 3): existing account + `default` blob service; the containers (`publicAccess: None`, no immutability); the role; the grants; Defender for Storage on-upload scanning (`Microsoft.Security/defenderForStorageSettings` `current`, `overrideSubscriptionLevelSettings: true`, sensitive data discovery off) only when `enableMalwareScanning`; outputs `containerNames` and `blobEndpoint` only. No network, soft-delete, key or Key Vault change.
+
+**Deviations from the POML's step 3 text (recorded, not silent):**
+- No `roleDefinitionId` parameter. Option A fixes the role; a parameter defaulting to built-in Contributor would make every download refuse (no tag read), and one that could be set to Owner would reintroduce tag write. The module creates and assigns its own role.
+- `enableMalwareScanning` has no default, so every environment states its choice (model 4.2 "explicit per-environment setting").
+- The compiled `modules/ebilling-file-store.json` is checked in (precedent `modules/bff-runtime-rbac.json`) because the ArchTest reads it; recompile with `az bicep build --file ebilling-file-store.bicep --outfile ebilling-file-store.json` after every edit.
+- `customer.bicep` / `storage-account.bicep` are not changed by this session (POML constraint; customer wiring is the §6 hand-off). After merging `origin/work/ebilling-r1` the committed `customer.json` equals a fresh Bicep 0.46.1 compile of `customer.bicep` (no diff apart from line endings and the template hash), so no recompile was needed.
+
+### 8.2 uac-r2 conditions — where each is met
+
+| # | Condition | Met by | State |
+|---|---|---|---|
+| 1 | The role is exact; must-fire on tags/write or any `*`; must-not-fire on the exact set | Template: `CustomerStampKeylessTemplateTests.FileStoreRole_IsExactlyContributorPlusTagRead` (the real compiled definition — the must-not-fire control on the real role), `FileStoreRole_ExactSet_IsAccepted` (exact set, any order), `FileStoreRole_Deviation_IsFlagged` (14 must-fire cases: tags/write, tags/*, blobs/*, an action wildcard, `*`, missing tags/read, missing action, extra action, notActions, notDataActions, a second block, a condition, subscription- and account-assignable). Live: `scripts/ebilling/Test-EbillingFileStoreRole.ps1` step 1 diffs the DEPLOYED role against the LIVE built-in Contributor + tags/read (Pester `tests/scripts/Test-EbillingFileStoreRole.Tests.ps1`). | Authored; tests pass. Live step not run. |
+| 2 | Live proof: under the role, Set Blob Tags and Put Blob with `x-ms-tags` are both 403 | `scripts/ebilling/test-ebilling-file-store-tag-write.sh`, run **as the identity** in the App Service SSH console (§8.5 step 6). Controls: Put Blob without tags 201, Get Blob Tags 200. | **Authored, NOT run** (an agent cannot act as the UAMI). |
+| 3 | Downloads need a clean scan time no earlier than the blob's Last-Modified | Task 090's code. 090's POML notes already state it: "The download serves only when the tag 'Malware Scanning scan result' = 'No threats found' AND the scan time is no earlier than the blob's Last-Modified. A missing tag, an unreadable tag or an older scan refuses. Pinned by a test: tagged clean, then Last-Modified later, then refused. Keep the time check even if dev shows an overwrite clears tags." Restated here as binding on 091's hand-off: the role keeps blob write, so the time check is what stops an overwritten blob inheriting an earlier clean verdict. | Stated in both; implementation is 090's. |
+| 4 | Per-container assignments only | Template: `FileStoreRole_IsAssignedPerContainerOnly` on the module, and the existing `StampBlobDataRoles_AreContainerScoped` on `customer.json` — `BlobDataRoleScopeViolations` now also counts a custom role defined in the same template with any blob data action, so an account-, RG- or deployment-scope grant of it fails (`CustomBlobRoleScope_NegativeControl`). Live: `Test-EbillingFileStoreRole.ps1` step 2 (every assignment of the role in the subscription is at one of the expected containers; the principal holds it on each). | Authored; tests pass. Live step not run. |
+
+**If step 3 of the data-plane proof returns 201** (Put Blob with `x-ms-tags` accepted under blob write alone), stop: an uploader could then write a forged "No threats found" tag and scan time at upload, which condition 3's time check does not catch. Report to uac-r2 before enabling downloads.
+
+### 8.3 Seeding proofs (2026-10-21)
+
+- Module edited to add `.../blobs/tags/write`, recompiled: `FileStoreRole_IsExactlyContributorPlusTagRead` fails ("dataActions has unexpected '…/tags/write'; tag write '…'"). Restored.
+- Module grant `scope` changed to the storage account, recompiled: `FileStoreRole_IsAssignedPerContainerOnly` fails. `scope` line removed (deployment = resource-group scope), recompiled: fails. Restored.
+- `BlobDataRoleScopeViolations` with custom-role recognition switched off (the session-2 rule): `FileStoreRole_IsAssignedPerContainerOnly` and `CustomBlobRoleScope_NegativeControl` fail. Restored.
+- `Test-EbillingFileStoreRole.ps1` with the dataActions comparison, the tag-write check and the scope check switched off: 7 Pester must-fire tests fail. Restored.
+
+### 8.4 Dev read-only inventory (2026-10-21, operator sign-in, nothing changed)
+
+- `spaarke-bff-dev` identity: user-assigned only — `mi-bff-api-dev` (in `spe-infrastructure-westus2`, principal `9fd47efb-7962-492b-ac44-e5ccd0268ebb`) and `mi-ontology-writer-dev`. The app settings `ManagedIdentity__ClientId` and `UAMI_CLIENT_ID` equal `mi-bff-api-dev`'s client id (compared in the query; values not printed). **The file store's principal on dev is `mi-bff-api-dev`.**
+- Neither identity holds any Storage role at any scope (`az role assignment list --assignee … --all`). There is no account-scope blob role to remove on dev; POML escalation trigger 1 does not fire on dev.
+- No `SessionFileStore__*` or `FileStore*` app setting on `spaarke-bff-dev`.
+- **`rg-spaarke-dev` has no storage account.** Accounts in the subscription: `insightsspaarkedevstg`, `sprkspaarkedevaifsa` (`spe-infrastructure-westus2`), `sprkcpartifactsdev` (`rg-spaarke-platform-dev`, control plane), `sharepointembeddedabc0`, `stspaarkewebsite` — all serve other workloads.
+
+**Open owner choice (POML escalation trigger 3, before any live step):** which account dev's file store uses. (a) A new dedicated keyless account in `rg-spaarke-dev` (§8.5 step 0) — recommended: nothing else shares it, and the role is assignable only in that RG. (b) An existing account — every candidate is shared with another workload, which the POML says needs the owner's explicit OK.
+
+### 8.5 Dev deploy and verify — the operator runs these
+
+PowerShell 7, `az login` as an identity with Owner or User Access Administrator on the target RG (the deployment writes a role definition and role assignments).
+
+```powershell
+$sub       = '484bc857-3802-427f-9ea5-ca47b43db0f0'      # Spaarke Development Environment
+$rg        = 'rg-spaarke-dev'                             # the account's RG (owner choice, §8.4)
+$account   = 'sprkspaarkedevebillsa'                      # owner choice, §8.4 (the name shown is option (a))
+$principal = '9fd47efb-7962-492b-ac44-e5ccd0268ebb'      # mi-bff-api-dev
+$scan      = 'false'                                      # owner's scanning choice: 'true' = scan with cap, 'false' = "Scanning not enabled"
+$cap       = 5000
+$module    = 'infrastructure/bicep/modules/ebilling-file-store.bicep'
+$params    = @("storageAccountName=$account", "principalId=$principal", "enableMalwareScanning=$scan", "malwareScanningCapGBPerMonth=$cap")
+
+# 0. Only for option (a): create the dedicated keyless account (owner OK first)
+az storage account create -n $account -g $rg --subscription $sub -l westus2 --sku Standard_LRS --kind StorageV2 `
+  --min-tls-version TLS1_2 --allow-blob-public-access false --allow-shared-key-access false --https-only true
+
+# 1. BEFORE reads (paste the output into this file)
+$accountId = az storage account show -n $account -g $rg --subscription $sub --query id -o tsv
+az storage account show --ids $accountId --query "{network:networkRuleSet.defaultAction,sharedKey:allowSharedKeyAccess,publicBlob:allowBlobPublicAccess}" -o json
+az storage account blob-service-properties show --account-name $account -g $rg --subscription $sub --query "{blobSoftDelete:deleteRetentionPolicy,containerSoftDelete:containerDeleteRetentionPolicy}" -o json
+az rest --method get --url "https://management.azure.com$accountId/providers/Microsoft.Security/defenderForStorageSettings/current?api-version=2022-12-01-preview" --query properties -o json
+az role assignment list --assignee $principal --all --query "[].{role:roleDefinitionName,scope:scope}" -o table
+
+# 2. Build, then what-if (save the output here; show the owner before step 3)
+az bicep build --file $module --stdout | Out-Null
+az deployment group what-if -g $rg --subscription $sub --name ebilling-file-store-dev --template-file $module --parameters @params
+
+# 3. Apply - only after the owner's OK on the what-if
+az deployment group create -g $rg --subscription $sub --name ebilling-file-store-dev --template-file $module --parameters @params
+
+# 4. Verify the role and the assignments (uac-r2 conditions 1 and 4); exit 0 expected
+./scripts/ebilling/Test-EbillingFileStoreRole.ps1 -SubscriptionId $sub -ResourceGroup $rg -StorageAccountName $account -PrincipalId $principal
+
+# 5. AFTER reads: containers private; repeat every step-1 read and compare (network, shared key, soft delete unchanged;
+#    Defender = the owner's choice; the principal's only storage roles are the three container-scope grants)
+az storage container-rm list --storage-account $account -g $rg --subscription $sub --query "[].{name:name,publicAccess:publicAccess}" -o table
+
+# 6. Data-plane proof AS THE IDENTITY (uac-r2 condition 2). Wait about 10 minutes after step 3 for RBAC to propagate.
+az webapp ssh -g rg-spaarke-dev -n spaarke-bff-dev --subscription $sub
+#   In the SSH shell: create /tmp/t.sh with the content of scripts/ebilling/test-ebilling-file-store-tag-write.sh
+#   (for example: cat > /tmp/t.sh, paste, Ctrl-D), then run it once per container:
+#     bash /tmp/t.sh sprkspaarkedevebillsa invoice-files
+#     bash /tmp/t.sh sprkspaarkedevebillsa procedures
+#     bash /tmp/t.sh sprkspaarkedevebillsa billing-exports
+#   Expected, each run:
+#     [PASS] 1 Put Blob (no tags) - control: HTTP 201
+#     [PASS] 2 Set Blob Tags - must be refused: HTTP 403 (AuthorizationPermissionMismatch)
+#     [PASS] 3 Put Blob with x-ms-tags - must be refused: HTTP 403 (AuthorizationPermissionMismatch)
+#     [PASS] 4 Get Blob Tags - control (tags/read granted): HTTP 200
+#     [PASS] 5 Delete probe a: HTTP 202
+#     RESULT: PASS ...
+#   Step 1 at 403 = RBAC not propagated yet (retry later), or the wrong identity or container. Step 3 at 201 = STOP (§8.2).
+```
+
+No Key Vault command and no account key, SAS or connection string anywhere above.
