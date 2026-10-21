@@ -244,17 +244,21 @@ internal static class TestRecordContainerResolver
         public string? FaultQueriesOf { get; set; }
 
         /// <summary>
-        /// #2159: the Secure Record owner team. Set, the Secure Record business unit and this team exist (the name queries
-        /// of <c>SecureChildShareSynchronizer.ResolveSecureOwnerTeamAsync</c> find them), and a row whose <c>owningteam</c>
-        /// is it is ISOLATED. Unset (the default), this environment has none and no row is isolated.
+        /// #2159 A2: the Secure Record business unit exists (the name query of
+        /// <c>SecureChildShareSynchronizer.ResolveSecureBusinessUnitAsync</c> finds <see cref="SecureRecordBusinessUnit"/>).
+        /// A row is ISOLATED when its own business unit is it, or its owning team's (<see cref="Teams"/>) is. Unset (the
+        /// default), this environment has none and no row is isolated.
         /// </summary>
-        public Guid? SecureOwnerTeam { get; set; }
+        public bool HasSecureRecordBusinessUnit { get; set; }
 
-        /// <summary>A SECOND team the team query finds (two teams carry the configured name: ambiguous).</summary>
-        public Guid? SecondSecureOwnerTeam { get; set; }
+        /// <summary>#2159 A2: TWO business units carry the Secure Record name (ambiguous).</summary>
+        public bool SecureRecordBusinessUnitAmbiguous { get; set; }
 
-        /// <summary>The Secure Record business unit the name query finds when <see cref="SecureOwnerTeam"/> is set.</summary>
+        /// <summary>The Secure Record business unit the name query finds.</summary>
         public static readonly Guid SecureRecordBusinessUnit = Guid.Parse("5ec0be00-0000-4000-8000-000000002159");
+
+        /// <summary>#2159 A2: teams and their business units (a team absent here cannot be read).</summary>
+        public Dictionary<Guid, Guid> Teams { get; } = new();
 
         /// <summary>Every RetrieveMultiple query the entity service answered, in order.</summary>
         public List<QueryExpression> Queries { get; } = new();
@@ -274,11 +278,14 @@ internal static class TestRecordContainerResolver
         /// <summary>The entity service the last <see cref="Build"/> created — the relocator shares it (task 166 f1).</summary>
         public IGenericEntityService? EntityService { get; private set; }
 
+        /// <summary>#2159 B9: what an item not in <see cref="Items"/> reports (unset: created by the pointer world's creator).</summary>
+        public SpeItemCreator? DefaultItem { get; set; }
+
         /// <summary>The SPE item reader the last <see cref="Build"/> created, over <see cref="Items"/>.</summary>
         public SpeItemCreator? ItemFacts(string drive, string item)
             => Items.TryGetValue((drive, item), out var creator)
                 ? creator
-                : new SpeItemCreator("file.pdf", PointerWorldCreatorObjectId.ToString("D"), PointerWorldBffApplicationId.ToString("D"), Size: 1234, QuickXorHash: "hash-1234");
+                : DefaultItem ?? new SpeItemCreator("file.pdf", PointerWorldCreatorObjectId.ToString("D"), PointerWorldBffApplicationId.ToString("D"), Size: 1234, QuickXorHash: "hash-1234");
 
         /// <summary>A document row created by <paramref name="createdBy"/> and owned in <paramref name="owningBusinessUnit"/>.</summary>
         public static Entity Document(Guid id, Guid? createdBy = null, Guid? owningBusinessUnit = null)
@@ -393,20 +400,28 @@ internal static class TestRecordContainerResolver
 
                     var collection = new EntityCollection();
 
-                    // #2159: the Secure Record owner team's resolution — the business unit by name, then the team.
-                    if (query.EntityName == "team"
-                        || (query.EntityName == "businessunit" && query.Criteria.Conditions.Any(c => c.AttributeName == "name")))
+                    // #2159 A2: the Secure Record business unit by name; a team's business unit by id.
+                    if (query.EntityName == "businessunit" && query.Criteria.Conditions.Any(c => c.AttributeName == "name"))
                     {
-                        if (SecureOwnerTeam is { } team)
+                        if (HasSecureRecordBusinessUnit || SecureRecordBusinessUnitAmbiguous)
                         {
-                            collection.Entities.Add(query.EntityName == "team"
-                                ? new Entity("team", team)
-                                : new Entity("businessunit", SecureRecordBusinessUnit));
+                            collection.Entities.Add(new Entity("businessunit", SecureRecordBusinessUnit));
                         }
 
-                        if (query.EntityName == "team" && SecondSecureOwnerTeam is { } second)
+                        if (SecureRecordBusinessUnitAmbiguous)
                         {
-                            collection.Entities.Add(new Entity("team", second));
+                            collection.Entities.Add(new Entity("businessunit", Guid.Parse("5ec0be00-0000-4000-8000-000000002160")));
+                        }
+
+                        return collection;
+                    }
+
+                    if (query.EntityName == "team")
+                    {
+                        var teamId = query.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "teamid")?.Values.FirstOrDefault();
+                        if (teamId is Guid id && Teams.TryGetValue(id, out var unit))
+                        {
+                            collection.Entities.Add(new Entity("team", id) { ["businessunitid"] = new EntityReference("businessunit", unit) });
                         }
 
                         return collection;

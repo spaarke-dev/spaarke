@@ -32,22 +32,24 @@ namespace Sprk.Bff.Api.Tests.DataMutation.DocumentContainer;
 
 public class RefileFileRelocationTests
 {
-    private const string Item = T.Item;
-    private const string ProcedureLibrary = "b!ebilling-procedure-library";
+    internal const string Item = T.Item;
+    internal const string ProcedureLibrary = "b!ebilling-procedure-library";
     private const string ProcedureLibraryKey = "Finance:ProcedureLibraryContainerId";
     private const string EbillingOutputKey = "Finance:EbillingOutputContainerId";
-    private const string SecondSecureContainer = "b!secure-matter-two-own-container";
-    private const string Bound = DocumentPointerBinding.BoundItemIdColumn;
+    internal const string SecondSecureContainer = "b!secure-matter-two-own-container";
+    internal const string Bound = DocumentPointerBinding.BoundItemIdColumn;
 
-    private static readonly Guid SecondSecureMatter = Guid.Parse("1c000000-0000-4000-8000-00000000f1a0");
+    internal static readonly Guid SecondSecureMatter = Guid.Parse("1c000000-0000-4000-8000-00000000f1a0");
 
     // ── The pointer world ───────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary><see cref="T.Environment"/> — two business units' containers, a secure matter S and a plain matter — plus a
-    /// second secure matter S2, with the strict rule and any declared home as asked.</summary>
-    private static World Env(bool strict = false, string? homeKey = null, string? home = ProcedureLibrary)
+    /// second secure matter S2, with the strict rule and any declared home as asked. An item it does not list was uploaded
+    /// by the BFF identity (a relocation copy, or a record-keyed upload) — #2159 B9's proof of a BFF-placed file.</summary>
+    internal static World Env(bool strict = false, string? homeKey = null, string? home = ProcedureLibrary)
     {
         var world = new World { ArchiveContainerId = T.ArchiveContainer, Strict = strict };
+        world.DefaultItem = new SpeItemCreator("file.pdf", null, T.BffApplication, Size: 1234, QuickXorHash: "hash-1234");
         var template = T.Environment();
         foreach (var (unit, value) in template.BusinessUnits)
             world.BusinessUnits[unit] = value;
@@ -67,11 +69,11 @@ public class RefileFileRelocationTests
         return world;
     }
 
-    /// <summary>A document owned in customer A, filed under <paramref name="matter"/> (none = unfiled), its file at
-    /// <paramref name="drive"/>/<see cref="Item"/>, bound by the BFF unless told otherwise.</summary>
-    private static Entity Doc(Guid id, Guid? matter, string drive, string? bound = Item)
+    /// <summary>A document the BFF created, owned in customer A, filed under <paramref name="matter"/> (none = unfiled), its
+    /// file at <paramref name="drive"/>/<see cref="Item"/>, bound by the BFF unless told otherwise.</summary>
+    internal static Entity Doc(Guid id, Guid? matter, string drive, string? bound = Item)
     {
-        var row = World.Document(id, null, T.CustomerA);
+        var row = World.Document(id, TestRecordContainerResolver.PointerWorldBffUser, T.CustomerA);
         if (matter is { } m)
             row["sprk_matter"] = new EntityReference("sprk_matter", m);
         row["sprk_graphdriveid"] = drive;
@@ -82,14 +84,25 @@ public class RefileFileRelocationTests
     }
 
     /// <summary>The Secure Record owner team of the pointer world (the job world's own, so the two worlds agree).</summary>
-    private static readonly Guid SecureTeam = SecureChildShareWorld.SecureTeam;
+    internal static readonly Guid SecureTeam = SecureChildShareWorld.SecureTeam;
 
-    /// <summary>The environment has the Secure Record owner team; the row is owned by it (ISOLATED) or by an ordinary team.</summary>
-    private static void Own(World world, Guid id, bool isolated)
+    /// <summary>#2159 A2: ANOTHER team in the Secure Record business unit (a secure family's own owner team, task 178).</summary>
+    internal static readonly Guid FamilyTeam = Guid.Parse("d9ec0b6f-0000-4000-8000-000000002162");
+
+    /// <summary>
+    /// The environment has the Secure Record business unit (with the owner team and a family team in it, and the ordinary
+    /// team in the root unit); the row is owned by the owner team (ISOLATED) or by the ordinary team.
+    /// </summary>
+    internal static void Own(World world, Guid id, bool isolated) => OwnBy(world, id, isolated ? SecureTeam : SecureChildShareWorld.GeneralTeam);
+
+    /// <summary>As <see cref="Own"/>, owned by <paramref name="team"/>.</summary>
+    internal static void OwnBy(World world, Guid id, Guid team)
     {
-        world.SecureOwnerTeam = SecureTeam;
-        world.Rows[("sprk_document", id)]["owningteam"] =
-            new EntityReference("team", isolated ? SecureTeam : SecureChildShareWorld.GeneralTeam);
+        world.HasSecureRecordBusinessUnit = true;
+        world.Teams[SecureTeam] = World.SecureRecordBusinessUnit;
+        world.Teams[FamilyTeam] = World.SecureRecordBusinessUnit;
+        world.Teams[SecureChildShareWorld.GeneralTeam] = TestRecordContainerResolver.PointerWorldRootBusinessUnit;
+        world.Rows[("sprk_document", id)]["owningteam"] = new EntityReference("team", team);
     }
 
     private static Task<DocumentRelocationOutcome> RefileAsync(
@@ -117,8 +130,8 @@ public class RefileFileRelocationTests
         rig.Steps.Should().Contain($"delete {T.CustomerBContainer}/{Item} (after re-point)");
     }
 
-    [Fact(DisplayName = "#2159: the re-file verifies its source by the BFF binding, not by who uploaded the item")]
-    public async Task Refile_ABoundItemAnotherPersonUploaded_IsMoved()
+    [Fact(DisplayName = "#2159 B9: a BOUND item another person uploaded is SourceUnverified under Refile — the binding alone is not proof")]
+    public async Task Refile_ABoundItemAnotherPersonUploaded_IsSourceUnverified()
     {
         var world = Env();
         world.Rows[("sprk_document", T.DocumentId)] = Doc(T.DocumentId, T.PlainMatter, T.CustomerBContainer);
@@ -127,8 +140,9 @@ public class RefileFileRelocationTests
 
         var outcome = await RefileAsync(rig, T.DocumentId, isolated: false);
 
-        outcome.State.Should().Be(RelocationState.Relocated, "the pointer is the item the BFF bound to the row");
-        rig.DriveOf(T.DocumentId).Should().Be(T.CustomerA1Container);
+        outcome.State.Should().Be(RelocationState.SourceUnverified, outcome.Detail);
+        world.Updates.Should().BeEmpty();
+        rig.Steps.Should().BeEmpty();
     }
 
     [Fact(DisplayName = "#2159 (d): a document that LEFT isolation (F3) moves out of the secure container into its new one")]
@@ -145,8 +159,8 @@ public class RefileFileRelocationTests
         rig.Steps.Should().Contain($"delete {T.SecureContainer}/{Item} (after re-point)", "the secure copy goes once moved");
     }
 
-    [Fact(DisplayName = "#2159 (e): an isolated document re-filed from secure S1 to secure S2 moves into S2's container")]
-    public async Task Refile_IsolatedFromOneSecureRecordToAnother_Moves()
+    [Fact(DisplayName = "#2159 (e) / A1: an isolated document re-filed from secure S1 to secure S2 outside the BFF is HELD (leaving S1 needs F3)")]
+    public async Task Refile_IsolatedFromOneSecureRecordToAnother_IsHeld()
     {
         var world = Env();
         world.Rows[("sprk_document", T.DocumentId)] = Doc(T.DocumentId, SecondSecureMatter, T.SecureContainer);
@@ -154,8 +168,10 @@ public class RefileFileRelocationTests
 
         var outcome = await RefileAsync(rig, T.DocumentId, isolated: true);
 
-        outcome.State.Should().Be(RelocationState.Relocated, outcome.Detail);
-        rig.DriveOf(T.DocumentId).Should().Be(SecondSecureContainer, "secure to secure stays isolated");
+        outcome.State.Should().Be(RelocationState.HeldIsolated, outcome.Detail);
+        rig.DriveOf(T.DocumentId).Should().Be(T.SecureContainer, "S1's bytes never reach S2's audience without F3");
+        world.Updates.Should().BeEmpty();
+        rig.Steps.Should().BeEmpty();
     }
 
     [Fact(DisplayName = "#2159/#2151: an unfiled document whose file is in ANOTHER business unit's container moves into its own unit's")]
@@ -247,7 +263,7 @@ public class RefileFileRelocationTests
         rig.Steps.Should().BeEmpty();
     }
 
-    [Theory(DisplayName = "#2159: an isolation that cannot be read (the Secure Record owner team unreadable) moves nothing, whatever the purpose")]
+    [Theory(DisplayName = "#2159: an isolation that cannot be read (the owning team's business unit unreadable) moves nothing, whatever the purpose")]
     [InlineData(RelocationPurpose.Refile)]
     [InlineData(RelocationPurpose.MakeSecure)]
     [InlineData(RelocationPurpose.LegacyMigration)]
@@ -266,14 +282,14 @@ public class RefileFileRelocationTests
         rig.Steps.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "#2159: two Secure Record owner teams (ambiguous) is an unreadable isolation: nothing moves")]
-    public async Task AnAmbiguousSecureTeam_MovesNothing()
+    [Fact(DisplayName = "#2159 A2: two Secure Record business units (ambiguous) is an unreadable isolation: nothing moves")]
+    public async Task AnAmbiguousSecureBusinessUnit_MovesNothing()
     {
         var world = Env();
         world.Rows[("sprk_document", T.DocumentId)] = Doc(T.DocumentId, T.PlainMatter, T.CustomerBContainer);
         Own(world, T.DocumentId, isolated: false);
         var rig = new T.Rig(world);
-        world.SecondSecureOwnerTeam = Guid.NewGuid();
+        world.SecureRecordBusinessUnitAmbiguous = true;
 
         var outcome = await rig.Relocator.RelocateIfMisplacedAsync(T.DocumentId, apply: true, RelocationPurpose.LegacyMigration);
 
