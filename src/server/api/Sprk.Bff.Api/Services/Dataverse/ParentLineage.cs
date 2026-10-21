@@ -570,7 +570,9 @@ internal static class InheritedAccessPermission
     /// <see cref="DecideDocument"/>'s writers keep the value at max(own, inherited). A payload that lowered it, or rewrote
     /// the record, would show a user's Restricted document to partners (D7, task 188). This is the same refusal
     /// <c>ChildRecordEndpoints.RootServerOwnedColumns</c> makes for a work assignment. A user's own write is not refused: the
-    /// form, the user-OBO chat tools, the field-mapping push, and an update impersonating its user all run as that user.
+    /// form, the user-OBO chat tools, and an update impersonating its user all run as that user. The field-mapping push also
+    /// runs as its caller, but its rules are a configuration applied to every child it reaches, so it asks this too and
+    /// skips such a rule on a document (the rest of the push applies; security pass 2).
     /// </summary>
     /// <returns>The refusal (nothing is written), or <see langword="null"/> when the write may proceed.</returns>
     internal static RecordOwnerResolution? RefuseAppOnlyWrite(string? table, IEnumerable<string> keys)
