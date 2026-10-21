@@ -849,6 +849,238 @@ public class ExternalDocumentNarrowingGuardTests
                         && r.Target.Name == nameof(Spaarke.Core.Auth.IAuthorizationService.AuthorizeAsync))
             .Select(r => SourceKey(r.Caller, r.CallerMethod))
             .ToHashSet(StringComparer.Ordinal);
+
+    // ── Task 188 round 4c (F1): document decisions the F1-2 rule could not see ───────────────────────────────────────
+    // Self-contained: its own primitives, ratchet baseline, facts and DocumentDecisionControl* fixtures (end of file).
+    // Two more shapes decide a document on the root grants alone: the rights SNAPSHOT
+    // (AuthorizationService.GetCallerAccessAsync — a capability answer or a Read test) and a RECORD-path check whose
+    // entity set is sprk_documents (GetCallerRecordAccessAsync, a FinanceAuthorizationCheck { Path = Record }, or a
+    // FinanceAuthorizationTargets.FromRoute / AddFinanceAuthorizationFilter(operation, entitySet, routeKey) declaration). A
+    // method that uses one must reach THE external document narrowing, or be listed with its reason.
+    // Limit (stated): a Record-path check is seen when sprk_documents is a LITERAL (a const inlines to one) set in the same
+    // initializer, or loaded anywhere in the calling method for the call and declaration shapes; an entity set computed at
+    // run time from a map is beyond a static scan (the shared EntityAccessFilter map holds no sprk_document).
+
+    private const string DocumentSetLiteral = "sprk_documents";
+
+    /// <summary>
+    /// The ratchet baseline of the two round-4c shapes, each with its reason. A new use fails
+    /// <see cref="EveryDocumentSnapshotAndRecordPathDocumentCheck_ReachesTheNarrowing"/>; an entry that stops using a shape,
+    /// or starts reaching the narrowing, fails it too (remove it).
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> DocumentDecisionBaseline = new Dictionary<string, string>
+    {
+        ["Sprk.Bff.Api.Api.Filters.SemanticSearchAuthorizationFilter::AuthorizeDocumentIdsScopeAsync"] =
+            "snapshot: results trimmed downstream by IRetrievalAccessTrim — POST /api/ai/search's rows go through " +
+            "SemanticSearchEndpoints.TrimToReadableDocumentsAsync, which applies THE narrowing (slice A). NOT true of " +
+            "POST /api/ai/search/count (scope=documentIds): it has no rows to trim — filed, see notes §19.",
+        ["Sprk.Bff.Api.Api.Finance.FinanceEndpoints::ResolveConfirmTargets"] =
+            "record path: finance.link_invoice on the confirmed document is declared AFTER the Document-path finance.confirm " +
+            "check on the SAME id in the same declaration; the filter evaluates in order and stops at the first deny, and the " +
+            "Document path narrows (round 4b, F1-2), so a hidden document never reaches the Record check.",
+        ["Sprk.Bff.Api.Api.Ai.RagEndpoints::ResolveIndexFileTargets"] =
+            "record path, WRITE: POST /api/ai/rag/index-file asks Write on the document it stamps; the bytes become index " +
+            "chunks that every retrieval trims (slice A). It answers a chunk count for a document the caller may write — " +
+            "filed with the other document write routes (notes §19).",
+        ["Sprk.Bff.Api.Api.Ai.RagEndpoints::SendToIndex"] =
+            "record path, WRITE: POST /api/ai/rag/send-to-index asks Write per document before indexing it; retrieval is " +
+            "trimmed (slice A). Its per-document result names the governing parent and a chunk count — filed with the other " +
+            "document write routes (notes §19).",
+        ["Sprk.Bff.Api.Api.DataverseDocumentsEndpoints::AuthorizeRefileTargetsAsync"] =
+            "record path, WRITE: a re-file asks AppendTo on each new parent, which may be a document; nothing of the target " +
+            "is returned, and a document filed under a hidden parent is itself hidden (Restricted ancestor). Filed with the " +
+            "other document write routes (notes §19).",
+    };
+
+    [Fact(DisplayName = "Task 188 r4c (F1): every document rights snapshot and every Record-path check on sprk_documents reaches THE narrowing (or is listed)")]
+    public void EveryDocumentSnapshotAndRecordPathDocumentCheck_ReachesTheNarrowing()
+    {
+        var problems = DocumentDecisionProblems(BffTypes.Value, DocumentDecisionBaseline, out var uses);
+
+        // Non-vacuity: the round-4c snapshot sites are seen using the shape.
+        foreach (var site in new[]
+                 {
+                     "Sprk.Bff.Api.Api.Office.OfficeEndpoints::WithholdCollisionIdentityIfUnauthorizedAsync",
+                     "Sprk.Bff.Api.Api.PermissionsEndpoints::GetDocumentPermissionsAsync",
+                     "Sprk.Bff.Api.Api.PermissionsEndpoints::GetBatchPermissionsAsync",
+                 })
+        {
+            Assert.True(uses.ContainsKey(site), $"{site} should be seen calling AuthorizationService.GetCallerAccessAsync — the scan lost its signal.");
+        }
+
+        Assert.True(problems.Count == 0,
+            "A document decided on the root grants alone — AuthorizationService.GetCallerAccessAsync (the rights snapshot), or a " +
+            "Record-path check on sprk_documents — must reach THE external document narrowing " +
+            "(InternalPlaneDocumentNarrowing.ForCallerAsync / AuthorizeDocumentsAsync; a FinanceAuthorizationCheck on a document " +
+            "takes FinanceCheckPath.Document), task 188 round 4c, or be listed in DocumentDecisionBaseline with its reason:\n" +
+            string.Join("\n", problems));
+    }
+
+    [Fact(DisplayName = "Task 188 r4c (F1): negative control — a snapshot or a Record-path document check that skips the narrowing is found; the Document path, a narrowed snapshot and a Record check on another set are not")]
+    public void DocumentDecisionDetector_MustFireAndMustNotFire()
+    {
+        var fixtures = new[]
+        {
+            typeof(DocumentDecisionControlSnapshotSkipsTheNarrowing), typeof(DocumentDecisionControlSnapshotNarrows),
+            typeof(DocumentDecisionControlRecordCheckOnADocument), typeof(DocumentDecisionControlRecordAccessOnDocuments),
+            typeof(DocumentDecisionControlDocumentPath), typeof(DocumentDecisionControlListed), typeof(DocumentGrantControlRecordPath),
+        };
+        var listed = new Dictionary<string, string>
+        {
+            [$"{typeof(DocumentDecisionControlListed).FullName}::ReadAsync"] = "control: listed",
+            [$"{typeof(DocumentDecisionControlSnapshotNarrows).FullName}::ReadAsync"] = "control: a stale entry (it narrows)",
+        };
+
+        var problems = DocumentDecisionProblems(fixtures.SelectMany(IlCallScan.WithNested), listed, out _);
+
+        Assert.Equal(
+            new[]
+            {
+                $"NOT NARROWED (record path on sprk_documents): {typeof(DocumentDecisionControlRecordAccessOnDocuments).FullName}::ReadAsync",
+                $"NOT NARROWED (record path on sprk_documents): {typeof(DocumentDecisionControlRecordCheckOnADocument).FullName}::Declare",
+                $"NOT NARROWED (snapshot): {typeof(DocumentDecisionControlSnapshotSkipsTheNarrowing).FullName}::ReadAsync",
+                $"STALE entry {typeof(DocumentDecisionControlSnapshotNarrows).FullName}::ReadAsync: it now reaches the narrowing — remove it (the ratchet).",
+            },
+            problems);
+    }
+
+    /// <summary>
+    /// The source methods that use a round-4c shape (with the shapes each uses), and the problems: a use that neither
+    /// reaches the narrowing nor is listed, and a listed entry that no longer uses a shape or now reaches the narrowing.
+    /// </summary>
+    private static List<string> DocumentDecisionProblems(
+        IEnumerable<Type> types, IReadOnlyDictionary<string, string> listed, out IReadOnlyDictionary<string, HashSet<string>> uses)
+    {
+        var list = types.ToList();
+        var scan = Scan(list, IsNarrowing, DocumentSnapshotPrimitive);
+        var found = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        foreach (var (key, used) in scan.Surfaces)
+            found[key] = new HashSet<string>(used, StringComparer.Ordinal);
+        foreach (var key in RecordPathDocumentChecks(list))
+        {
+            if (!found.TryGetValue(key, out var used))
+                found[key] = used = new HashSet<string>(StringComparer.Ordinal);
+            used.Add("record path on sprk_documents");
+        }
+
+        uses = found;
+        var problems = new List<string>();
+        foreach (var (key, used) in found)
+        {
+            if (!scan.Reaches.Contains(key) && !listed.ContainsKey(key))
+                problems.AddRange(used.Select(u => $"NOT NARROWED ({u}): {key}"));
+        }
+
+        problems.Sort(StringComparer.Ordinal);
+        foreach (var entry in listed.Keys.Order(StringComparer.Ordinal))
+        {
+            if (!found.ContainsKey(entry))
+                problems.Add($"STALE entry {entry}: it no longer decides a document this way — remove it.");
+            else if (scan.Reaches.Contains(entry))
+                problems.Add($"STALE entry {entry}: it now reaches the narrowing — remove it (the ratchet).");
+        }
+
+        return problems;
+    }
+
+    private static string? DocumentSnapshotPrimitive(MethodBase method) =>
+        method.DeclaringType == typeof(Spaarke.Core.Auth.AuthorizationService)
+        && method.Name == nameof(Spaarke.Core.Auth.AuthorizationService.GetCallerAccessAsync)
+            ? "snapshot"
+            : null;
+
+    private const BindingFlags DeclaredMembers =
+        BindingFlags.DeclaredOnly | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
+
+    /// <summary>
+    /// The source methods that ask a Record-path question about <c>sprk_documents</c>: a
+    /// <see cref="Sprk.Bff.Api.Api.Filters.FinanceAuthorizationCheck"/> initializer that sets <c>Path</c> to
+    /// <see cref="Sprk.Bff.Api.Api.Filters.FinanceCheckPath.Record"/> and <c>EntitySetName</c> to the literal; or a call of
+    /// <c>GetCallerRecordAccessAsync</c>, <c>FinanceAuthorizationTargets.FromRoute</c> or the
+    /// <c>AddFinanceAuthorizationFilter(operation, entitySet, routeKey)</c> overload in a method that loads the literal.
+    /// </summary>
+    private static IReadOnlySet<string> RecordPathDocumentChecks(IEnumerable<Type> types)
+    {
+        var checkType = typeof(Sprk.Bff.Api.Api.Filters.FinanceAuthorizationCheck);
+        var record = (int)Sprk.Bff.Api.Api.Filters.FinanceCheckPath.Record;
+        var loadsLiteral = new HashSet<string>(StringComparer.Ordinal);
+        var callsRecordPath = new HashSet<string>(StringComparer.Ordinal);
+        var found = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var type in types)
+        {
+            foreach (var method in type.GetMethods(DeclaredMembers).Cast<MethodBase>().Concat(type.GetConstructors(DeclaredMembers)))
+            {
+                var key = SourceKey(type, method);
+                int? path = null;
+                var documentSet = false;
+                IlCallScan.IlInstruction? previous = null;
+                foreach (var instruction in IlCallScan.Instructions(method))
+                {
+                    if (instruction.OpCode.OperandType == System.Reflection.Emit.OperandType.InlineString)
+                    {
+                        if (method.Module.ResolveString(instruction.Operand) == DocumentSetLiteral)
+                            loadsLiteral.Add(key);
+                    }
+                    else if (instruction.OpCode.OperandType == System.Reflection.Emit.OperandType.InlineMethod
+                             && IlCallScan.Resolve(method, instruction.Operand,
+                                 (module, token, ta, ma) => module.ResolveMethod(token, ta, ma)) is { } target)
+                    {
+                        if (target is ConstructorInfo && target.DeclaringType == checkType)
+                        {
+                            (path, documentSet) = (null, false);
+                        }
+                        else if (target.DeclaringType == checkType && target.Name == "set_Path")
+                        {
+                            path = previous is { } p ? IntConstant(p) : null;
+                        }
+                        else if (target.DeclaringType == checkType && target.Name == "set_EntitySetName")
+                        {
+                            documentSet = previous is { } p
+                                && p.OpCode.OperandType == System.Reflection.Emit.OperandType.InlineString
+                                && method.Module.ResolveString(p.Operand) == DocumentSetLiteral;
+                        }
+                        else if (IsRecordPathCall(target))
+                        {
+                            callsRecordPath.Add(key);
+                        }
+
+                        if (path == record && documentSet)
+                        {
+                            found.Add(key);
+                            (path, documentSet) = (null, false);
+                        }
+                    }
+
+                    previous = instruction;
+                }
+            }
+        }
+
+        found.UnionWith(callsRecordPath.Where(loadsLiteral.Contains));
+        return found;
+    }
+
+    private static bool IsRecordPathCall(MethodBase target) =>
+        (target.DeclaringType == typeof(Spaarke.Core.Auth.AuthorizationService)
+         && target.Name == nameof(Spaarke.Core.Auth.AuthorizationService.GetCallerRecordAccessAsync))
+        || (target.DeclaringType == typeof(Sprk.Bff.Api.Api.Filters.FinanceAuthorizationTargets) && target.Name == "FromRoute")
+        || (target.Name == "AddFinanceAuthorizationFilter"
+            && target.GetParameters().Count(p => p.ParameterType == typeof(string)) == 3);
+
+    /// <summary>The integer an <c>ldc.i4*</c> pushes, or null for any other instruction.</summary>
+    private static int? IntConstant(IlCallScan.IlInstruction instruction)
+    {
+        var op = instruction.OpCode;
+        if (op == System.Reflection.Emit.OpCodes.Ldc_I4 || op == System.Reflection.Emit.OpCodes.Ldc_I4_S)
+            return instruction.Operand;
+        if (op == System.Reflection.Emit.OpCodes.Ldc_I4_M1) return -1;
+        if (op == System.Reflection.Emit.OpCodes.Ldc_I4_0) return 0;
+        if (op == System.Reflection.Emit.OpCodes.Ldc_I4_1) return 1;
+        if (op == System.Reflection.Emit.OpCodes.Ldc_I4_2) return 2;
+        if (op == System.Reflection.Emit.OpCodes.Ldc_I4_3) return 3;
+        return null;
+    }
 }
 
 // Compiled control fixtures for ExternalDocumentNarrowingGuardTests.Detector_MustFireAndMustNotFire. Top-level types (the
@@ -1117,4 +1349,70 @@ internal sealed class DocumentGrantControlListed(Spaarke.Core.Auth.IAuthorizatio
         {
             UserId = "u", ResourceId = id.ToString(), Operation = "read", UserAccessToken = null,
         });
+}
+
+/// <summary>MUST FIRE (r4c F1): a capability / Read answer from the rights snapshot alone.</summary>
+internal sealed class DocumentDecisionControlSnapshotSkipsTheNarrowing(Spaarke.Core.Auth.AuthorizationService authorization)
+{
+    internal async Task<bool> ReadAsync(Guid id) =>
+        (await authorization.GetCallerAccessAsync("u", id.ToString(), "t")).AccessRights.HasFlag(Spaarke.Dataverse.AccessRights.Read);
+}
+
+/// <summary>MUST NOT FIRE (r4c F1): the snapshot, then THE narrowing (the control lists it as a stale entry).</summary>
+internal sealed class DocumentDecisionControlSnapshotNarrows(
+    Spaarke.Core.Auth.AuthorizationService authorization, InternalRouteDocumentNarrowing narrow)
+{
+    internal async Task<bool> ReadAsync(Guid id) =>
+        (await authorization.GetCallerAccessAsync("u", id.ToString(), "t")).AccessRights.HasFlag(Spaarke.Dataverse.AccessRights.Read)
+        && (await narrow(new HashSet<Guid> { id }, CancellationToken.None)).IsVisible(id);
+}
+
+/// <summary>MUST FIRE (r4c F1): a FinanceAuthorizationCheck on the Record path whose entity set is sprk_documents.</summary>
+internal static class DocumentDecisionControlRecordCheckOnADocument
+{
+    internal static Sprk.Bff.Api.Api.Filters.FinanceAuthorizationCheck Declare(Guid id) => new()
+    {
+        Path = Sprk.Bff.Api.Api.Filters.FinanceCheckPath.Record,
+        EntitySetName = Sprk.Bff.Api.Api.Filters.FinanceAuthorizationFilter.DocumentEntitySet,
+        RecordId = id,
+        Operation = "read",
+        Source = "control",
+    };
+}
+
+/// <summary>MUST FIRE (r4c F1): the entity-generic record read, asked of sprk_documents.</summary>
+internal sealed class DocumentDecisionControlRecordAccessOnDocuments(Spaarke.Core.Auth.AuthorizationService authorization)
+{
+    internal Task<Spaarke.Dataverse.AccessSnapshot> ReadAsync(Guid id) =>
+        authorization.GetCallerRecordAccessAsync("u", "sprk_documents", id, "t");
+}
+
+/// <summary>MUST NOT FIRE (r4c F1): a document on the Document path beside a Record-path check on another set (the
+/// round-4c workspace summary's shape).</summary>
+internal static class DocumentDecisionControlDocumentPath
+{
+    internal static Sprk.Bff.Api.Api.Filters.FinanceAuthorizationCheck Declare(Guid id, bool document) => document
+        ? new()
+        {
+            Path = Sprk.Bff.Api.Api.Filters.FinanceCheckPath.Document,
+            EntitySetName = Sprk.Bff.Api.Api.Filters.FinanceAuthorizationFilter.DocumentEntitySet,
+            RecordId = id,
+            Operation = "read",
+            Source = "control",
+        }
+        : new()
+        {
+            Path = Sprk.Bff.Api.Api.Filters.FinanceCheckPath.Record,
+            EntitySetName = Sprk.Bff.Api.Api.Filters.FinanceAuthorizationFilter.MatterEntitySet,
+            RecordId = id,
+            Operation = "read",
+            Source = "control",
+        };
+}
+
+/// <summary>MUST NOT FIRE (r4c F1): a snapshot listed in the baseline.</summary>
+internal sealed class DocumentDecisionControlListed(Spaarke.Core.Auth.AuthorizationService authorization)
+{
+    internal async Task<bool> ReadAsync(Guid id) =>
+        (await authorization.GetCallerAccessAsync("u", id.ToString(), "t")).AccessRights.HasFlag(Spaarke.Dataverse.AccessRights.Read);
 }
