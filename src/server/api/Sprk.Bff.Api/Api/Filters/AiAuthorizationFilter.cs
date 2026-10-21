@@ -790,6 +790,15 @@ public class AiAuthorizationFilter : IEndpointFilter
                             "[AI-AUTH-FILTER] Chat-context DENIED for caller {UserId}: SPE item not readable as the caller", userId);
                         return false;
                     }
+
+                    // Task 188 round 4b (R4a-1): when the item is a document's file, THE external document narrowing.
+                    if (!await IsSpeItemShownToCallerAsync(httpContext, itemId, ct))
+                    {
+                        _logger?.LogWarning(
+                            "[AI-AUTH-FILTER] Chat-context DENIED for caller {UserId}: the SPE item's document is hidden from the caller",
+                            userId);
+                        return false;
+                    }
                 }
             }
 
@@ -814,6 +823,64 @@ public class AiAuthorizationFilter : IEndpointFilter
             _logger?.LogError(ex, "[AI-AUTH-FILTER] Chat-context decision faulted for caller {UserId}; denying (fail closed)", userId);
             return false;
         }
+    }
+
+    /// <summary>The narrowing's log label for a chat SPE item (no ids).</summary>
+    private const string SpeItemNarrowingSurface = "chat-spe-item";
+
+    /// <summary>
+    /// Task 188 round 4b (R4a-1, the Compose Path B active document): slice A's drive-item rule for a chat context id that
+    /// is an SPE item. A caller who is not a resolved internal systemuser
+    /// (<see cref="InternalPlaneDocumentNarrowing.IsExternalOrUnknownCallerAsync"/>; a failed lookup counts as external)
+    /// reads, as THEMSELVES, the <c>sprk_document</c> rows on the item (<c>sprk_graphitemid</c> or
+    /// <c>sprk_driveitemid</c>); the item is shown only when at least one of those rows is visible after ONE
+    /// <see cref="InternalPlaneDocumentNarrowing.NarrowForExternalCallerAsync"/> call (a row with no usable id cannot be
+    /// shown; a narrowing fault shows none). An item with NO document row the caller can read keeps SPE's own check
+    /// (the caller's OBO read above), as before. A failed or malformed read denies (fail closed). An internal systemuser:
+    /// nothing is read. Logs counts only.
+    /// </summary>
+    private async Task<bool> IsSpeItemShownToCallerAsync(HttpContext httpContext, string itemId, CancellationToken ct)
+    {
+        if (!await InternalPlaneDocumentNarrowing.IsExternalOrUnknownCallerAsync(httpContext, SpeItemNarrowingSurface, _logger, ct))
+        {
+            return true;
+        }
+
+        var user = httpContext.RequestServices.GetService<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient>();
+        if (user is null)
+        {
+            _logger?.LogWarning("[AI-AUTH-FILTER] {Surface}: no user Dataverse client; denying (fail closed)", SpeItemNarrowingSurface);
+            return false;
+        }
+
+        var literal = Uri.EscapeDataString(itemId.Replace("'", "''"));
+        var response = await user.GetAsync(
+            $"sprk_documents?$select=sprk_documentid&$filter=sprk_graphitemid eq '{literal}' or sprk_driveitemid eq '{literal}'",
+            ct);
+        if (!response.IsSuccess
+            || response.Body is not { ValueKind: System.Text.Json.JsonValueKind.Object } body
+            || !body.TryGetProperty("value", out var rows)
+            || rows.ValueKind != System.Text.Json.JsonValueKind.Array)
+        {
+            _logger?.LogWarning("[AI-AUTH-FILTER] {Surface}: the item's document read failed; denying (fail closed)", SpeItemNarrowingSurface);
+            return false;
+        }
+
+        if (rows.GetArrayLength() == 0)
+        {
+            return true;
+        }
+
+        var documentIds = rows.EnumerateArray()
+            .Select(row => row.ValueKind == System.Text.Json.JsonValueKind.Object
+                           && row.TryGetProperty("sprk_documentid", out var id)
+                           && id.ValueKind == System.Text.Json.JsonValueKind.String
+                    ? id.GetString()
+                    : null)
+            .ToList();
+        var visibility = await InternalPlaneDocumentNarrowing.NarrowForExternalCallerAsync(
+            httpContext, documentIds, SpeItemNarrowingSurface, _logger);
+        return documentIds.Any(id => id is not null && visibility.IsShown(id));
     }
 
     /// <summary>
