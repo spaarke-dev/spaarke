@@ -139,7 +139,7 @@ public class OfficeQuickCreateProjectContractTests
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
         ArrangeBusinessUnit(factory);
-        ArrangeSourceRights(factory, AccessRights.Read);
+        ArrangeSourceRights(factory, AccessRights.Read | AccessRights.AppendTo); // #2191: the project is filed under its source, so AppendTo too
         var created = CaptureCreate(factory);
 
         // Source and target are both sprk_project: same-entity mapping is supported by the framework (no
@@ -167,7 +167,7 @@ public class OfficeQuickCreateProjectContractTests
             ["sprk_projectnumber"] = "PRJ-000123",
         });
 
-        var response = await factory.CreateClient().PostAsJsonAsync(Route, new QuickCreateRequest
+        var response = await BearerClient(factory).PostAsJsonAsync(Route, new QuickCreateRequest
         {
             Name = "Acme Phase 2",
             SourceEntityType = "sprk_project",
@@ -209,14 +209,14 @@ public class OfficeQuickCreateProjectContractTests
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
         ArrangeBusinessUnit(factory);
-        ArrangeSourceRights(factory, AccessRights.Read);
+        ArrangeSourceRights(factory, AccessRights.Read | AccessRights.AppendTo); // #2191: the project is filed under its source, so AppendTo too
         var created = CaptureCreate(factory);
         factory.FieldMappings
             .Setup(m => m.GetFieldMappingProfileWithRulesAsync(
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((FieldMappingProfileEntity?)null);
 
-        var response = await factory.CreateClient().PostAsJsonAsync(Route, new QuickCreateRequest
+        var response = await BearerClient(factory).PostAsJsonAsync(Route, new QuickCreateRequest
         {
             Name = "No Profile Project",
             SourceEntityType = "sprk_project",
@@ -240,13 +240,13 @@ public class OfficeQuickCreateProjectContractTests
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
         ArrangeBusinessUnit(factory);
-        ArrangeSourceRights(factory, AccessRights.Read);
+        ArrangeSourceRights(factory, AccessRights.Read | AccessRights.AppendTo); // #2191: the project is filed under its source, so AppendTo too
         var created = CaptureCreate(factory);
         ArrangeProfile(factory,
             Rule("blank-name", "", 0, "sprk_projectname", 0, mappingType: 3, order: 1, expression: "{sprk_notonsource}"));
         ArrangeSource(factory, new Entity("sprk_project", SourceProjectId));
 
-        var response = await factory.CreateClient().PostAsJsonAsync(Route, new QuickCreateRequest
+        var response = await BearerClient(factory).PostAsJsonAsync(Route, new QuickCreateRequest
         {
             Name = "Requested Name",
             SourceEntityType = "sprk_project",
@@ -311,6 +311,32 @@ public class OfficeQuickCreateProjectContractTests
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await ReadProblemAsync(response)).Should().ContainKey("errorCode").WhoseValue.Should().Be("OFFICE_022");
+        AssertNothingCreated(factory);
+    }
+
+    /// <summary>
+    /// UAC-r2 re-check of #2191, must fire: the caller can READ the source (the route's filter passes) but cannot AppendTo it. The
+    /// create is app-only, so Dataverse would file the project under it regardless: refused 403 with the plan's code, nothing created.
+    /// </summary>
+    [Fact]
+    public async Task Post_Project_WhenCallerCanReadButNotAppendToTheSourceRecord_Returns403_AndCreatesNothing()
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(factory);
+        ArrangeBusinessUnit(factory);
+        ArrangeSourceRights(factory, AccessRights.Read);
+        CaptureCreate(factory);
+
+        var response = await BearerClient(factory).PostAsJsonAsync(Route, new QuickCreateRequest
+        {
+            Name = "Not Fileable",
+            SourceEntityType = "sprk_project",
+            SourceRecordId = SourceProjectId,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var problem = await ReadProblemAsync(response);
+        problem.Should().ContainKey("errorCode").WhoseValue.Should().Be("caller_cannot_file_under_parent");
         AssertNothingCreated(factory);
     }
 
@@ -459,6 +485,17 @@ public class OfficeQuickCreateProjectContractTests
                 ["sprk_searchindexname"] = "spaarke-files-index",
                 ["sprk_ai_search_index"] = new EntityReference("sprk_aisearchindex", SearchIndexId),
             });
+    }
+
+    /// <summary>
+    /// #2191: the caller's bearer token, which the service hands to the rights probe for AppendTo on the source the project is
+    /// filed under (the host's default client sends none, and a caller that cannot be checked is refused).
+    /// </summary>
+    private static HttpClient BearerClient(OfficeQuickCreateTestWebAppFactory factory)
+    {
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "caller-token-2191");
+        return client;
     }
 
     private static void ArrangeSourceRights(OfficeQuickCreateTestWebAppFactory factory, AccessRights rights)

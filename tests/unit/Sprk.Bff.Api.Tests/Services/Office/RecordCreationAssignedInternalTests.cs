@@ -42,6 +42,7 @@ public class RecordCreationAssignedInternalTests
         var ownership = new Mock<IRecordOwnershipResolver>();
         ownership.Setup(o => o.ResolveOwningTeamAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Team);
+        var caller = OfficeCallerRightsSetup.Granting();
         return new OfficeRecordCreationService(
             _entities.Object,
             _fieldMappings.Object,
@@ -50,6 +51,7 @@ public class RecordCreationAssignedInternalTests
             Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(),
             Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(),
             NullLogger<OfficeRecordCreationService>.Instance,
+            callerAccess: caller.Probe, http: caller.Http, // #2191: the caller may AppendTo the source the project is filed under
             callerClient: MappingSourceCallerReadDouble.MirroringAppReads(_entities)); // #2188: the caller reads what the app read returned
     }
 

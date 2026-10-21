@@ -63,12 +63,14 @@ public class RecordCreatorPersonStampTests
         var ownership = new Mock<IRecordOwnershipResolver>();
         ownership.Setup(o => o.ResolveOwningTeamAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Team);
+        var caller = OfficeCallerRightsSetup.Granting(); // #2191: the caller may AppendTo the source the project is filed under
         return new OfficeRecordCreationService(
             _entities.Object, _fieldMappings.Object, ownership.Object,
             IdentityNormalizationFixtures.NoLinkedContact(),
             Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(),
             Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(),
-            NullLogger<OfficeRecordCreationService>.Instance);
+            NullLogger<OfficeRecordCreationService>.Instance,
+            caller.Probe, caller.Http);
     }
 
     [Theory]
