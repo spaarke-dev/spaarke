@@ -1625,7 +1625,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
         var result = await ChildRecordEndpoints.RefileAsync(
             "sprk_todo", Todo, Payload(new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})" }),
-            _user, ownership, Restamper(), Children(), HttpContextOfCaller(), NullLogger<Program>.Instance,
+            _user, ownership, Restamper(), Children(), AppEntities(), HttpContextOfCaller(), NullLogger<Program>.Instance,
             CancellationToken.None);
 
         Status(result).Should().Be(StatusCodes.Status409Conflict, Detail(result));
