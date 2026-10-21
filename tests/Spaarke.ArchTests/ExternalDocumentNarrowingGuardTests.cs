@@ -253,11 +253,223 @@ public class ExternalDocumentNarrowingGuardTests
             .Order(StringComparer.Ordinal)
             .ToArray();
 
+    // ── Task 188 round 3 slice C: rows that derive from a document (sprk_analysis, sprk_analysisoutput) ──────────────
+
+    /// <summary>The derived-row surfaces slice C wired; each must reach the hide-only overload.</summary>
+    private static readonly string[] DerivedRowSurfaces =
+    {
+        "Sprk.Bff.Api.Services.Ai.Handlers.DataverseReadQueryHandler::ExecuteChatAsync",
+        "Sprk.Bff.Api.Services.Ai.Handlers.DataverseSearchDataHandler::ExecuteChatAsync",
+    };
+
+    [Fact(DisplayName = "Task 188 r3 C: every surface that returns rows derived from a document reaches the hide-only overload")]
+    public void EveryDocumentDerivedSurface_ReachesTheHideOnlyOverload()
+    {
+        var scan = Scan(BffTypes.Value, IsDerivedNarrowing, DerivedSurfacePrimitive);
+
+        // Non-vacuity: the two tools are seen testing / reading derived rows AND reaching the overload.
+        foreach (var surface in DerivedRowSurfaces)
+        {
+            Assert.True(scan.Surfaces.ContainsKey(surface), $"{surface} should be seen reading derived rows — the scan lost its signal.");
+            Assert.True(scan.Reaches.Contains(surface), $"{surface} should be seen reaching the hide-only overload — the scan lost its signal.");
+        }
+
+        var problems = scan.Surfaces.Keys.Where(k => !scan.Reaches.Contains(k)).Order(StringComparer.Ordinal)
+            .Select(k => $"NEW derived-row surface without the narrowing: {k} (uses {string.Join(", ", scan.Surfaces[k].Order())})")
+            .ToList();
+        Assert.True(problems.Count == 0,
+            "A surface that returns rows derived from a document (an analysis, an analysis output) to an external caller must " +
+            "hide those whose source document is hidden or undecidable: read the sources with " +
+            "ExternalCallerCommunicationGuard.ReadSourceDocumentIdsAsync and decide them with " +
+            "AppOnlyDocumentNarrowing.HiddenDocumentIdsAsync (task 188 round 3 slice C):\n" + string.Join("\n", problems));
+    }
+
+    [Fact(DisplayName = "Task 188 r3 C: negative control — a derived-row read that skips the overload is found; one that uses it (through a helper) is not")]
+    public void DerivedRowDetector_MustFireAndMustNotFire()
+    {
+        var fixtures = new[]
+        {
+            typeof(DerivedGuardControlSkipsTheOverload), typeof(DerivedGuardControlNarrowsThroughAHelper),
+            typeof(DerivedGuardControlNarrowsOnlyDocuments), typeof(NarrowingGuardControlNoDocuments),
+        };
+        var scan = Scan(fixtures.SelectMany(IlCallScan.WithNested), IsDerivedNarrowing, DerivedSurfacePrimitive);
+
+        var flagged = scan.Surfaces.Keys.Where(k => !scan.Reaches.Contains(k)).Order(StringComparer.Ordinal).ToArray();
+        Assert.Equal(
+            new[]
+            {
+                $"{typeof(DerivedGuardControlNarrowsOnlyDocuments).FullName}::ReadAsync",
+                $"{typeof(DerivedGuardControlSkipsTheOverload).FullName}::ReadAsync",
+            },
+            flagged);
+        Assert.Contains($"{typeof(DerivedGuardControlNarrowsThroughAHelper).FullName}::ReadAsync", scan.Reaches);
+    }
+
+    private static bool IsDerivedNarrowing(MethodBase method) =>
+        method.DeclaringType == typeof(AppOnlyDocumentNarrowingExtensions)
+        && method.Name == nameof(AppOnlyDocumentNarrowingExtensions.HiddenDocumentIdsAsync);
+
+    private static string? DerivedSurfacePrimitive(MethodBase method) =>
+        method.DeclaringType == typeof(ExternalCallerCommunicationGuard)
+        && method.Name is nameof(ExternalCallerCommunicationGuard.IsDocumentDerivedTable)
+            or nameof(ExternalCallerCommunicationGuard.ReadSourceDocumentIdsAsync)
+            ? $"ExternalCallerCommunicationGuard.{method.Name}"
+            : null;
+
+    // ── K7: the consumers of the app-only narrowing seams are an allow-list ────────────────────────────────────────
+
+    /// <summary>The app-only narrowing seams (CLAUDE.md §6.5 path B, owner round 111: a hide decision only).</summary>
+    private static readonly Type[] NarrowingSeams = { typeof(AppOnlyDocumentNarrowing), typeof(InternalRouteDocumentNarrowing) };
+
+    /// <summary>
+    /// Every BFF type allowed to hold, resolve, invoke or build an app-only narrowing seam, with its reason. A new consumer
+    /// fails <see cref="TheAppOnlyNarrowingSeams_HaveOnlyListedConsumers"/> until it is listed here (and reviewed: each one
+    /// must use the seam for a hide decision only and return no app-only data).
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> AllowedSeamConsumers = new Dictionary<string, string>
+    {
+        ["Sprk.Bff.Api.Infrastructure.DI.ExternalAccessModule"] =
+            "The ONE registrar: binds both seams to ExternalDataService.ReadAndNarrowDocumentsAsync (app-only).",
+        ["Sprk.Bff.Api.Infrastructure.ExternalAccess.AppOnlyDocumentNarrowingExtensions"] =
+            "Slice C: the hide-only overload (returns the hidden id set; no rows, no reasons).",
+        ["Sprk.Bff.Api.Services.Ai.Handlers.DataverseReadQueryHandler"] =
+            "Assistant tool (path B): hides sprk_document rows and rows derived from a document from the user's own read.",
+        ["Sprk.Bff.Api.Services.Ai.Handlers.DataverseSearchDataHandler"] =
+            "Assistant tool (path B): drops document hits and hits derived from a document from the user's own search.",
+        ["Sprk.Bff.Api.Services.Ai.Handlers.DataverseDescribeHandler"] =
+            "Assistant tool (path B): answers a hidden sprk_document record like not-found.",
+        ["Sprk.Bff.Api.Services.Ai.PublicContracts.RetrievalAccessTrim"] =
+            "Slice A (F1-A): withholds an external caller's hidden document keys from AI retrieval.",
+        ["Sprk.Bff.Api.Api.Filters.InternalPlaneDocumentNarrowing"] =
+            "Slice B: the internal plane's document filter, bulk download and container lists refuse or drop hidden documents.",
+    };
+
+    [Fact(DisplayName = "Task 188 r3 C (K7): the app-only narrowing seams have only listed consumers")]
+    public void TheAppOnlyNarrowingSeams_HaveOnlyListedConsumers()
+    {
+        var consumers = SeamConsumers(BffTypes.Value);
+
+        var problems = consumers.Keys.Where(k => !AllowedSeamConsumers.ContainsKey(k)).Order(StringComparer.Ordinal)
+            .Select(k => $"NEW consumer of an app-only narrowing seam: {k} ({string.Join("; ", consumers[k].Order())})")
+            .Concat(AllowedSeamConsumers.Keys.Where(k => !consumers.ContainsKey(k)).Order(StringComparer.Ordinal)
+                .Select(k => $"STALE entry {k}: it no longer uses a seam — remove it (the ratchet)."))
+            .ToList();
+        Assert.True(problems.Count == 0,
+            "The app-only narrowing seams (AppOnlyDocumentNarrowing, InternalRouteDocumentNarrowing) are the ONE exception to " +
+            "the AI tools' User-OBO-only rule (owner round 111, CLAUDE.md §6.5 path B): a hide decision only. A new consumer " +
+            "must be reviewed for that and listed with its reason in AllowedSeamConsumers:\n" + string.Join("\n", problems));
+    }
+
+    [Fact(DisplayName = "Task 188 r3 C (K7): negative control — a type that takes, resolves or builds a seam is found; one that does not is not")]
+    public void SeamConsumerDetector_MustFireAndMustNotFire()
+    {
+        var fixtures = new[]
+        {
+            typeof(SeamControlTakesTheSeam), typeof(SeamControlResolvesTheRouteSeam), typeof(SeamControlBuildsTheSeam),
+            typeof(NarrowingGuardControlNoDocuments),
+        };
+
+        var consumers = SeamConsumers(fixtures.SelectMany(IlCallScan.WithNested));
+
+        Assert.Equal(
+            new[] { typeof(SeamControlBuildsTheSeam).FullName, typeof(SeamControlResolvesTheRouteSeam).FullName, typeof(SeamControlTakesTheSeam).FullName },
+            consumers.Keys.Order(StringComparer.Ordinal).ToArray());
+    }
+
+    /// <summary>
+    /// Every outermost type that holds a seam (a field, a parameter, a return), resolves one (a generic method instantiated
+    /// over it), invokes or builds one (a method of the delegate type) or calls a method that takes one.
+    /// </summary>
+    private static IReadOnlyDictionary<string, HashSet<string>> SeamConsumers(IEnumerable<Type> types)
+    {
+        const BindingFlags all = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static
+            | BindingFlags.DeclaredOnly;
+        var list = types.Where(t => !NarrowingSeams.Contains(t)).ToList();
+        var found = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        void Add(Type type, string how)
+        {
+            var key = IlCallScan.Outermost(type).FullName!;
+            if (!found.TryGetValue(key, out var hows))
+                found[key] = hows = new HashSet<string>(StringComparer.Ordinal);
+            hows.Add(how);
+        }
+
+        foreach (var type in list)
+        {
+            foreach (var field in type.GetFields(all).Where(f => MentionsSeam(f.FieldType)))
+                Add(type, $"field {field.FieldType.Name}");
+            foreach (var method in type.GetMethods(all).Cast<MethodBase>().Concat(type.GetConstructors(all)))
+            {
+                if (method.GetParameters().Any(p => MentionsSeam(p.ParameterType)) || (method is MethodInfo m && MentionsSeam(m.ReturnType)))
+                    Add(type, "signature");
+            }
+        }
+
+        foreach (var (caller, _, target) in IlCallScan.MethodReferences(list))
+        {
+            if (MentionsSeam(target.DeclaringType)
+                || (target is MethodInfo { IsGenericMethod: true } generic && generic.GetGenericArguments().Any(MentionsSeam))
+                || target.GetParameters().Any(p => MentionsSeam(p.ParameterType)))
+                Add(caller, $"calls {target.DeclaringType?.Name}.{target.Name}");
+        }
+
+        return found;
+    }
+
+    private static bool MentionsSeam(Type? type) =>
+        type is not null
+        && (NarrowingSeams.Contains(type)
+            || (type.IsGenericType && type.GetGenericArguments().Any(MentionsSeam))
+            || (type.HasElementType && MentionsSeam(type.GetElementType())));
+
+    // ── Option A condition 2: the all-visible test double never reaches production ────────────────────────────────
+
+    private const string AllVisibleDouble = "AllVisibleDocumentNarrowing";
+
+    private static bool ReferencesTheAllVisibleDouble(string source) => source.Contains(AllVisibleDouble, StringComparison.Ordinal);
+
+    [Fact(DisplayName = "Task 188 r3 (Option A, condition 2): the all-visible narrowing double is never referenced from src/, and production builds the real seams")]
+    public void TheAllVisibleTestDouble_NeverReachesProduction()
+    {
+        // Non-vacuity: the double still exists under this name in the tests.
+        Assert.Contains(SourceScan.TestSourceFiles(), f => ReferencesTheAllVisibleDouble(File.ReadAllText(f)));
+
+        var offenders = SourceScan.ServerSourceFiles().Where(f => ReferencesTheAllVisibleDouble(File.ReadAllText(f)))
+            .Select(f => Path.GetRelativePath(SourceScan.RepoRoot, f)).ToArray();
+        Assert.True(offenders.Length == 0,
+            $"src/ must never reference the test double {AllVisibleDouble} (it shows every document):\n" + string.Join("\n", offenders));
+
+        var testReferences = typeof(Program).Assembly.GetReferencedAssemblies()
+            .Select(a => a.Name ?? "").Where(n => n.EndsWith("Tests", StringComparison.OrdinalIgnoreCase)).ToArray();
+        Assert.True(testReferences.Length == 0, "The BFF must reference no test assembly: " + string.Join(", ", testReferences));
+
+        // The production seams are built in ONE place, over the app-only reader (the unit tests
+        // TheAssistantsNarrowing_IsRegistered_OverTheAppOnlyReader and TheInternalRoutesNarrowing_IsRegistered_OverTheAppOnlyReader
+        // resolve them from AddExternalAccess and see them read app-only and decide).
+        var builders = IlCallScan.MethodReferences(BffTypes.Value)
+            .Where(r => r.Target is ConstructorInfo && NarrowingSeams.Contains(r.Target.DeclaringType))
+            .Select(r => IlCallScan.Outermost(r.Caller).FullName!)
+            .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+        Assert.Equal(new[] { "Sprk.Bff.Api.Infrastructure.DI.ExternalAccessModule" }, builders);
+        Assert.Contains("Sprk.Bff.Api.Infrastructure.DI.ExternalAccessModule::AddExternalAccess", Scan(BffTypes.Value).Reaches);
+    }
+
+    [Fact(DisplayName = "Task 188 r3 (Option A, condition 2): negative control — a source that registers the double is found; the real registration is not")]
+    public void AllVisibleDoubleDetector_MustFireAndMustNotFire()
+    {
+        Assert.True(ReferencesTheAllVisibleDouble("services.UseAllVisibleDocumentNarrowing();"));
+        Assert.True(ReferencesTheAllVisibleDouble("services.AddSingleton(AllVisibleDocumentNarrowing.Instance);"));
+        Assert.False(ReferencesTheAllVisibleDouble(
+            "services.AddScoped<InternalRouteDocumentNarrowing>(sp => (ids, ct) => sp.GetRequiredService<ExternalDataService>().ReadAndNarrowDocumentsAsync(ids, ct));"));
+    }
+
     // ── detector ─────────────────────────────────────────────────────────────────────────────────────────────────
 
     private sealed record ScanResult(IReadOnlyDictionary<string, HashSet<string>> Surfaces, IReadOnlySet<string> Reaches);
 
-    private static ScanResult Scan(IEnumerable<Type> types)
+    private static ScanResult Scan(IEnumerable<Type> types) => Scan(types, IsNarrowing, SurfacePrimitive);
+
+    private static ScanResult Scan(IEnumerable<Type> types, Func<MethodBase, bool> isNarrowing, Func<MethodBase, string?> surfacePrimitive)
     {
         var surfaces = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         var calls = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
@@ -266,9 +478,9 @@ public class ExternalDocumentNarrowingGuardTests
         foreach (var (caller, callerMethod, target) in IlCallScan.MethodReferences(types))
         {
             var source = SourceKey(caller, callerMethod);
-            if (IsNarrowing(target))
+            if (isNarrowing(target))
                 reaches.Add(source);
-            if (SurfacePrimitive(target) is { } primitive && !IsPrimitiveOwner(caller))
+            if (surfacePrimitive(target) is { } primitive && !IsPrimitiveOwner(caller))
             {
                 if (!surfaces.TryGetValue(source, out var used))
                     surfaces[source] = used = new HashSet<string>(StringComparer.Ordinal);
@@ -444,4 +656,52 @@ internal sealed class InternalPlaneControlListsAndNarrows(
         var narrowing = await narrow(rows, ct);
         return rows.Count(narrowing.IsVisible);
     }
+}
+
+// Compiled control fixtures for the slice C facts (task 188 round 3). Never run; only their IL and signatures are read.
+
+/// <summary>MUST FIRE (derived rows): reads an analysis page's source documents and returns the rows unnarrowed.</summary>
+internal sealed class DerivedGuardControlSkipsTheOverload(Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient user)
+{
+    internal async Task<int> ReadAsync(IReadOnlyCollection<Guid> rows, CancellationToken ct) =>
+        (await ExternalCallerCommunicationGuard.ReadSourceDocumentIdsAsync(user, "sprk_analysis", rows, ct)).Count;
+}
+
+/// <summary>MUST FIRE (derived rows): tests the derived table, then narrows only through the whole-result seam call.</summary>
+internal sealed class DerivedGuardControlNarrowsOnlyDocuments(AppOnlyDocumentNarrowing narrow)
+{
+    internal async Task<bool> ReadAsync(string table, Guid id, CancellationToken ct) =>
+        ExternalCallerCommunicationGuard.IsDocumentDerivedTable(table) && (await narrow(new[] { id }, ct)).IsVisible(id);
+}
+
+/// <summary>MUST NOT FIRE (derived rows): reads the sources and hides through the overload, in a helper.</summary>
+internal sealed class DerivedGuardControlNarrowsThroughAHelper(
+    Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient user, AppOnlyDocumentNarrowing narrow)
+{
+    internal async Task<int> ReadAsync(IReadOnlyCollection<Guid> rows, CancellationToken ct)
+    {
+        var sources = await ExternalCallerCommunicationGuard.ReadSourceDocumentIdsAsync(user, "sprk_analysis", rows, ct);
+        return (await HiddenAsync(sources.Values, ct)).Count;
+    }
+
+    private Task<IReadOnlySet<Guid>> HiddenAsync(IEnumerable<Guid> ids, CancellationToken ct) => narrow.HiddenDocumentIdsAsync(ids, ct);
+}
+
+/// <summary>MUST FIRE (K7): takes the assistant's seam.</summary>
+internal sealed class SeamControlTakesTheSeam(AppOnlyDocumentNarrowing narrow)
+{
+    internal Task<DocumentNarrowingResult> RunAsync(Guid id) => narrow(new[] { id }, CancellationToken.None);
+}
+
+/// <summary>MUST FIRE (K7): resolves the internal routes' seam from the container, holding no field.</summary>
+internal sealed class SeamControlResolvesTheRouteSeam
+{
+    internal static object Resolve(IServiceProvider services) =>
+        Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<InternalRouteDocumentNarrowing>(services);
+}
+
+/// <summary>MUST FIRE (K7): builds a seam of its own.</summary>
+internal sealed class SeamControlBuildsTheSeam
+{
+    internal static object Build() => (AppOnlyDocumentNarrowing)((_, _) => Task.FromResult<DocumentNarrowingResult>(null!));
 }
