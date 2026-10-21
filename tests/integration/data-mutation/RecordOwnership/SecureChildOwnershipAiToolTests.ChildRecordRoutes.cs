@@ -97,7 +97,11 @@ public sealed partial class SecureChildOwnershipAiToolTests
     /// </summary>
     private SecureChildReconciler Children(Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null) =>
         SecureChildShareWorld.ReconcilerOver(
-            () => ShareWorld, _shareTable, null!, threads: threads, gateDecisionRecords: _gateOverShareWorld ?? _gate.Sharing);
+            () => ShareWorld, _shareTable, null!, threads: threads, gateDecisionRecords: _gateOverShareWorld ?? _gate.Sharing,
+            logger: _reconcilerLog);
+
+    /// <summary>#2143 round 9: what the reconciler's step after a re-file logged.</summary>
+    private readonly Sprk.Bff.Api.Tests.Services.Communication.CapturingLogger<SecureChildReconciler> _reconcilerLog = new();
 
     /// <summary>Ontology task 042b round 2 (D-169): the gate Decision Records the reconciler's after-re-file step re-owns (empty unless a
     /// test seeds it).</summary>

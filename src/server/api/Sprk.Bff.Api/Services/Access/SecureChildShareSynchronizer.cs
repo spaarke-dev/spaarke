@@ -367,7 +367,11 @@ public sealed class SecureChildShareSynchronizer
     /// </summary>
     /// <param name="wasIsolated">Whether the row was owned by the Secure team BEFORE the re-file (asked only when needed;
     /// a fault means "unknown": nothing is removed, and it is logged).</param>
-    public async Task AfterRefileAsync(string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, CancellationToken ct)
+    /// <returns>#2143 round 9 (F2): <c>true</c> only when this call took the row's mirror off and the removal COMPLETED;
+    /// <c>false</c> for every other outcome — still isolated (mirrored), never isolated, a read that faulted, a removal that
+    /// did not finish. A caller that runs it twice (<see cref="SecureChildReconciler"/>, around a thread move) decides from
+    /// this whether the mirror is gone.</returns>
+    public async Task<bool> AfterRefileAsync(string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(wasIsolated);
         SecureChildShareSyncStatus mirrored;
@@ -384,13 +388,15 @@ public sealed class SecureChildShareSynchronizer
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            _logger.LogWarning(ex, "[SECURE-CHILD-SHARES] {Table} {Id}: the share mirror after a re-file faulted; the two-minute " +
-                "reconcile completes it", childLogicalName, childId);
-            return;
+            _logger.LogWarning(ex, "[SECURE-CHILD-SHARES] {Table} {Id}: the share mirror after a re-file faulted, so NO share was " +
+                "added or removed. If it is still under a secure record the two-minute reconcile completes its mirror; if it " +
+                "left isolation, any mirrored shares it holds are still on it (that reconcile does not see an ordinary row).",
+                childLogicalName, childId);
+            return false;
         }
 
         if (mirrored != SecureChildShareSyncStatus.NotApplicable)
-            return;
+            return false;
 
         bool isolatedBefore;
         try
@@ -401,11 +407,11 @@ public sealed class SecureChildShareSynchronizer
         {
             _logger.LogError(ex, "[SECURE-CHILD-SHARES] {Table} {Id}: whether it was isolated before the re-file could not be " +
                 "read, so its mirrored shares (if any) were NOT removed", childLogicalName, childId);
-            return;
+            return false;
         }
 
         if (!isolatedBefore)
-            return;
+            return false;
 
         SecureChildMirrorRemoval? removal = null;
         for (var attempt = 1; attempt <= MirrorRemovalAttempts; attempt++)
@@ -414,7 +420,7 @@ public sealed class SecureChildShareSynchronizer
             {
                 removal = await RemoveMirrorAsync(childLogicalName, childId, ct).ConfigureAwait(false);
                 if (removal.IsComplete)
-                    return;
+                    return true;
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
@@ -427,6 +433,7 @@ public sealed class SecureChildShareSynchronizer
             "[SECURE-CHILD-SHARES] {Table} {Id} left its secure record, but its mirrored shares were not all removed after " +
             "{Attempts} attempts ({Status}: {Detail}) — the secure record's sharees may still open it", childLogicalName, childId,
             MirrorRemovalAttempts, removal?.Status, removal?.Detail);
+        return false;
     }
 
     /// <summary>Brings EVERY secure child in the environment into line — the scheduled reconcile.</summary>

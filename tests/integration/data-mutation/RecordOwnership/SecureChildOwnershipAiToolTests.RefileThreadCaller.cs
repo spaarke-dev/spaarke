@@ -300,6 +300,93 @@ public sealed partial class SecureChildOwnershipAiToolTests
         | AccessRights.Append | AccessRights.AppendTo
         | AccessRights.Delete | AccessRights.Share;
 
+    // ---- #2143 round 9 (F2): the mirror latch is set only by a removal that completed ----
+
+    /// <summary>The reconciler's Warnings that the mirror came off after the thread move's grant, revoking it.</summary>
+    private IReadOnlyList<string> GrantRevokedWarnings() => _reconcilerLog.Entries
+        .Where(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning && e.Message.Contains("REVOKED", StringComparison.Ordinal))
+        .Select(e => e.Message)
+        .ToList();
+
+    /// <summary>The share-table revokes of the email's shares, every principal.</summary>
+    private int EmailRevokes() =>
+        _shareTable.WriteLog.Count(w => w.Action == "RevokeAccess" && w.RecordId == RefiledEmail);
+
+    /// <summary>
+    /// The email re-filed off secure S, in S's thread, onto ordinary O by a Full Access holder on S, holding S's sharee's
+    /// mirror; the share world's by-id reads of the email for which <paramref name="faults"/> answers <c>true</c> fault
+    /// (counted from 1: the step's isolation read before the reconcile, then — on the hook — its isolation read, the mirror's
+    /// read of the row, the removal's read).
+    /// </summary>
+    private async Task RefileOffTheSecureThreadWithReadFaults(Func<int, bool> faults)
+    {
+        AnEmailIn(SecureMatter, SecureMattersThread, Directory.SecureBu, Directory.SecureNamedTeam);
+        _shareTable.Seed("sprk_communication", RefiledEmail, DataversePrincipalRef.User(Sharee), CollaborateMask);
+        _user.FullAccessOn.Add(SecureMatter);
+        ShareWorld.TransientRowReadFaultsOf("sprk_communication", RefiledEmail, faults);
+
+        var result = await RefileTo(OrdinaryMatter);
+
+        Status(result).Should().Be(Microsoft.AspNetCore.Http.StatusCodes.Status204NoContent, Detail(result));
+        _world.Row("sprk_communication", RefiledEmail).GetAttributeValue<EntityReference>("owningteam")?.Id
+            .Should().Be(Directory.ChildTeam, "it left isolation with its thread");
+    }
+
+    [Fact(DisplayName = "#2143 r9 F2 must-fire: a transient fault reading isolation before the reconcile does not latch the mirror as removed: it comes off at the hook, and the grant stands")]
+    public async Task FilingRoute_ATransientIsolationReadFaultBeforeTheReconcile_StillTakesTheMirrorOff_AndKeepsTheGrant()
+    {
+        // Before round 9: the faulted read answered "left isolation", the mirror step found the email still Secure and
+        // re-mirrored it, and the latch was set anyway — so the hook skipped the removal, the last step ran as "was not
+        // isolated", and S's sharee kept Collaborate on an ordinary email filed to O.
+        await RefileOffTheSecureThreadWithReadFaults(read => read == 1);
+
+        EmailShareOf(Sharee).Should().BeNull("the secure-child mirror came off once the email left isolation");
+        EmailShareOf(RecordMember).Should().Be(ReadMask, "it came off at the hook, before the thread move's grant");
+        GrantRevokedWarnings().Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "#2143 r9 F2 must-fire: a hook isolation-read fault followed by a mirror-read fault leaves no secure share: the last step takes the mirror off (the grant with it)")]
+    public async Task FilingRoute_AHookReadFaultThenAMirrorReadFault_TheLastStepTakesTheMirrorOff()
+    {
+        // Before round 9: the hook's faulted read answered "left", the mirror step could not read the row (Failed) and returned,
+        // and the latch was set anyway: the last step ran as "was not isolated" and S's sharee kept Collaborate. Now the last
+        // step removes the mirror — and, as the removal revokes every direct share, the grant the move gave (an under-share,
+        // logged: fail closed).
+        await RefileOffTheSecureThreadWithReadFaults(read => read is 2 or 3);
+
+        EmailShareOf(Sharee).Should().BeNull("no secure-child share outlives the email's isolation");
+        EmailShareOf(RecordMember).Should().BeNull("the removal after the grant revokes it too: an under-share, never an over-share");
+        GrantRevokedWarnings().Should().ContainSingle("the under-share is said plainly");
+    }
+
+    [Fact(DisplayName = "#2143 r9 F2 must-not-fire: a removal left to the last step on a re-file with no thread move revokes no grant, and says nothing of one")]
+    public async Task FilingRoute_NoThreadMove_TheLastStepTakesTheMirrorOff_WithNoRevokedGrantWarning()
+    {
+        // Already in O's thread, so the re-file to O moves no thread and runs no hook; the mirror's read of the row faults on
+        // the step before the reconcile, so the removal is left to the last step — and there was no grant for it to revoke.
+        AnEmailIn(SecureMatter, OrdinaryMattersThread, Directory.SecureBu, Directory.SecureNamedTeam);
+        _shareTable.Seed("sprk_communication", RefiledEmail, DataversePrincipalRef.User(Sharee), CollaborateMask);
+        _user.FullAccessOn.Add(SecureMatter);
+        ShareWorld.TransientRowReadFaultsOf("sprk_communication", RefiledEmail, read => read == 2);
+
+        var result = await RefileTo(OrdinaryMatter);
+
+        Status(result).Should().Be(Microsoft.AspNetCore.Http.StatusCodes.Status204NoContent, Detail(result));
+        EmailShareOf(Sharee).Should().BeNull("the last step takes the mirror off");
+        GrantRevokedWarnings().Should().BeEmpty("no thread move ran, so no grant was revoked");
+    }
+
+    [Fact(DisplayName = "#2143 r9 F2 must-not-fire: with no fault the mirror is removed exactly once, at the hook, and the grant stands")]
+    public async Task FilingRoute_WithNoFault_TheMirrorIsRemovedExactlyOnce_AndTheGrantStands()
+    {
+        await RefileOffTheSecureThreadWithReadFaults(_ => false);
+
+        EmailRevokes().Should().Be(1, "one removal, of the one mirrored share");
+        EmailShareOf(Sharee).Should().BeNull();
+        EmailShareOf(RecordMember).Should().Be(ReadMask);
+        GrantRevokedWarnings().Should().BeEmpty();
+    }
+
     private static readonly Guid SecondSecureMatter = Guid.Parse("a2143000-0000-4000-8000-0000000000a8");
     private static readonly Guid SecondSecureMattersThread = Guid.Parse("a2143000-0000-4000-8000-0000000000ea");
 

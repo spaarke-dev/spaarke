@@ -185,6 +185,18 @@ internal sealed class SecureChildShareWorld
         return this;
     }
 
+    private readonly Dictionary<(string Table, Guid Id), (Func<int, bool> Fails, int Reads)> _transientRowReadFaults = new();
+
+    /// <summary>
+    /// #2143 round 9: a TRANSIENT fault on the query reads of ONE row by its id (<c>&lt;table&gt;id = id</c>): the reads, counted
+    /// from 1 in the order they are asked, for which <paramref name="fails"/> answers <c>true</c> throw; every other read answers.
+    /// </summary>
+    public SecureChildShareWorld TransientRowReadFaultsOf(string table, Guid id, Func<int, bool> fails)
+    {
+        _transientRowReadFaults[(table, id)] = (fails, 0);
+        return this;
+    }
+
     private readonly HashSet<(string Table, Guid Id)> _failingIdListReads = new();
 
     /// <summary>
@@ -576,7 +588,8 @@ internal sealed class SecureChildShareWorld
         Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator? accessCacheInvalidator = null,
         Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null,
         Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker? ownerPrivileges = null,
-        Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing? gateDecisionRecords = null)
+        Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing? gateDecisionRecords = null,
+        Microsoft.Extensions.Logging.ILogger<SecureChildReconciler>? logger = null)
     {
         var entities = EntitiesOver(current).Object;
         var configuration = Configuration();
@@ -585,7 +598,7 @@ internal sealed class SecureChildShareWorld
         var synchronizer = new SecureChildShareSynchronizer(
             entities, shares, noAccessGuard ?? NobodyWalled(), configuration, NullLogger<SecureChildShareSynchronizer>.Instance);
         return new SecureChildReconciler(
-            entities, resolver, synchronizer, webApi, configuration, NullLogger<SecureChildReconciler>.Instance,
+            entities, resolver, synchronizer, webApi, configuration, logger ?? NullLogger<SecureChildReconciler>.Instance,
             gateDecisionRecords ?? new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing, // ontology 042b: a gate-record double over an empty world
             accessCacheInvalidator, threads, ownerPrivileges);
     }
@@ -667,6 +680,16 @@ internal sealed class SecureChildShareWorld
                 c.AttributeName == query.EntityName + "id" && c.Operator == ConditionOperator.Equal
                 && c.Values.Single() is Guid id && _failingRowReads.Contains((query.EntityName, id))))
             throw new InvalidOperationException($"Test: this {query.EntityName} row cannot be read.");
+        if (query.Criteria.Conditions.FirstOrDefault(c =>
+                c.AttributeName == query.EntityName + "id" && c.Operator == ConditionOperator.Equal) is { } byId
+            && byId.Values.Single() is Guid readId
+            && _transientRowReadFaults.TryGetValue((query.EntityName, readId), out var transient))
+        {
+            var read = transient.Reads + 1;
+            _transientRowReadFaults[(query.EntityName, readId)] = (transient.Fails, read);
+            if (transient.Fails(read))
+                throw new InvalidOperationException($"Test: read {read} of this {query.EntityName} row faulted (transient).");
+        }
 
         if (query.Criteria.Conditions.Any(c =>
                 c.AttributeName == query.EntityName + "id" && c.Operator == ConditionOperator.In

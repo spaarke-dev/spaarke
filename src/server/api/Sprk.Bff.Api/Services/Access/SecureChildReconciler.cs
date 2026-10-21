@@ -923,18 +923,20 @@ public sealed class SecureChildReconciler
         // re-owns the email to that record's owner, a Secure one included.
         var reconcilesThread = table == CommunicationTable && _threads is not null && thread == RefileThreadStep.Reconcile;
         var mirrorTakenOff = false;
+        var aGrantFollowedTheHook = false;
 
         // The one thing the mirror did first that must stay first: a row that LEFT isolation loses every direct share it holds
         // (SecureChildShareSynchronizer.RemoveMirrorAsync), so taken off after the reconcile it would also take off the #1629
         // read grant the reconcile gives the record the email now sits under. Once, before the reconcile when the re-file
         // itself took the row out; else (#2143 round 8, F1-A) inside the reconcile, between the join that took it out and
         // that grant — a re-file off S while the email sits in S's thread keeps it Secure until its thread follows the filing.
+        // Round 9 (F2): latched only by a removal that COMPLETED — a read that faulted, a row still isolated (mirrored again)
+        // or a removal that did not finish leaves it open, so the next chance (the hook, then the last step) tries again.
         async Task TakeTheMirrorOffIfItLeftIsolationAsync()
         {
             if (mirrorTakenOff || before != true || !await LeftIsolationAsync(table, childId, ct).ConfigureAwait(false))
                 return;
-            await _shares.AfterRefileAsync(table, childId, isolatedBefore, ct).ConfigureAwait(false);
-            mirrorTakenOff = true;
+            mirrorTakenOff = await _shares.AfterRefileAsync(table, childId, isolatedBefore, ct).ConfigureAwait(false);
         }
 
         if (reconcilesThread)
@@ -947,7 +949,12 @@ public sealed class SecureChildReconciler
             {
                 await _threads!.ReconcileThreadForFilingAsync(
                     childId, Sprk.Bff.Api.Services.Communication.FilingReconcileHost.AfterRefileStep, secureExitCaller,
-                    _ => TakeTheMirrorOffIfItLeftIsolationAsync(), CancellationToken.None).ConfigureAwait(false);
+                    _ =>
+                    {
+                        aGrantFollowedTheHook = true;
+                        return TakeTheMirrorOffIfItLeftIsolationAsync();
+                    },
+                    CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -958,8 +965,18 @@ public sealed class SecureChildReconciler
 
         // (1) The row's own mirror, on the owner and thread the reconcile left — one implementation (task 149's synchronizer);
         // it logs a fault reading `before`. After the removal above it only mirrors a row a join took back into isolation.
-        await _shares.AfterRefileAsync(
+        var removedNow = await _shares.AfterRefileAsync(
             table, childId, mirrorTakenOff ? static () => Task.FromResult(false) : isolatedBefore, ct).ConfigureAwait(false);
+        if (removedNow && aGrantFollowedTheHook)
+        {
+            // #2143 round 9 (F2): the removal could not be made before the thread move's #1629 grant, so it came off here —
+            // and, as it revokes every direct share, the grant with it. Fail closed: an under-share, never a secure share left.
+            _logger.LogWarning(
+                "[SECURE-CHILD-RECONCILE] {Table} {Id} left isolation with its thread move, but its secure-child mirror could not be " +
+                "taken off before that move's read grant, so it was taken off after it: every direct share on it was REVOKED, " +
+                "the grant to the record's members included. They cannot read it until it is granted again (#2143).",
+                table, childId);
+        }
 
         if (!SecureChildLineage.IsChild(table))
             return null;
