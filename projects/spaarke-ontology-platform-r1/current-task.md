@@ -37,7 +37,8 @@
 2. 105 UAT with the owner: 102 wizard browser tests + keyboard/screen-reader; 064 §6.1 non-admin checks and UI tests (D-164); the 055 Next step To Do.
 3. Re-run `SignalReadRouteLiveTests` as the non-Console user (DI-83 #1882), then close #1882.
 4. 114 after 111; 090 wrap-up.
-5. Cleanup via `scripts/worktree/Remove-WorktreeSafe.ps1`: `C:\wts-102b`, `C:\wts-eb015`, `C:\wts-eb074`, `C:\wts-eb070`, `C:\wts-eb026`, `C:\wts-sync`, `C:\wts-di107`, `C:\wts-049b`, `C:\wts-064`, `C:\wts-102a`, `C:\wts-102`, `C:\wb126-pub`, `C:\wts-126-pub`, `C:\wts-042b`, `C:\wts-042b-r2`, `C:\wts-2102a`, `C:\wts-2102b`, `C:\wts-eb072`.
+5. Worktree cleanup: the 18 finished ones were removed 2026-10-21 (Remove-WorktreeSafe, exit 0). 107 older `C:\wts-*` worktrees remain; ask the owner before vetting and removing them. Non-worktree folders are left alone (`C:\wb126-pub`, `C:\wts-126-pub`, `C:\wts-103-seed`, `C:\wts-132-out`, `C:\wts-132m-out`, `C:\wts-r1609`, `C:\wts-r1609c`, `C:\wts-rc046b`, `C:\wts-rc1653`).
+6. Task 157 (#2118, D-176), lane `C:\wts-157` on `task/ontology-157-duplicate-hide`, implementer running. Then: independent review, a fix round, ebilling review, and a PR to docs. Follow-up once both 157 and ebilling's billing code are on master: an equality guard test that ontology's withheld-sentence const equals `BillingRuleCatalogue.WithheldDuplicateTemplate` (ontology owns it, agreed with ebilling 2026-10-21).
 
 ## Dev state (spaarkedev1 / spaarke-bff-dev)
 
@@ -61,7 +62,7 @@
 - **R3** owns the dev BFF line and the external SPA: message first for any BFF change.
 - **word-add-in**: before/after notices for any Console or BFF change (and before any landing-tab revert).
 - **uac-r2**: before/after notices for live role or schema changes; #2084 decision when the owner gives it.
-- **ebilling**: re-check 074 fix range; review 049.
+- **ebilling**: re-check the 115 fix range `9f412274c5..eb0b042e5a` (agent running); check the 080 rerun's verify output; send the 157 range for review. They are mapping every ebilling path that shows Duplicate text outside SignalReadService and will say which calls our check.
 
 ## Peers (current session names)
 
