@@ -349,3 +349,7 @@ Code checked at 70fc2cc616 and master a10e814d02. **Verdict: ACCEPT WITH CHANGES
 - **K-3.** Blob storage still has `defaultAction: 'Allow'` (`storage-account.bicep:55-66`) and an account-scope role (`:171-179`). Do the **container-scoped role** now (cheap). Network Deny with a private endpoint: do it, or the owner accepts a known limit. **uac-r2 takes to the owner.**
 - **K-4.** Step A's communication filing survives an undo; it is the caller's own authorized filing. Say so in the admin note.
 - **§0 status against v4.** Closed: F1-a–f, F2-b, F2-c, F4-a, F4-c, K1 order and condition 1, K2–K6, Q1, Q4, Q6. Half-closed (now closed by this round's items): F2-a (F2-1), F4-b (F4-5), condition 2 (F1-1), condition 3 (F1-5), Q5 blob items (K-3). Dropped: none.
+
+## 10. ontology-r1 re-check of v5.1 (ae690ec8a4), 2026-10-21
+
+**PASS.** All ontology findings are applied. The two owner points (whether "no automatic re-check" covers every case; the D-170 sweep on a Procedure retire) are with the owner, and leaving the sweep as it is meanwhile is fine with ontology. Ontology is ready for the 080 rewrite once the owner finalizes.
