@@ -1598,7 +1598,25 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             if (await RecoverFromFailedAssignmentAsync(request, restore, parents, resolution, before, observed, assignFailure)
                     .ConfigureAwait(false) is { } landed)
             {
-                return WithExitPermit(landed); // the assignment landed despite the failure report: filing and owner agree
+                // The assignment landed despite the failure report: the re-file stands.
+                if (landed.FilingIsOwn)
+                {
+                    return WithExitPermit(landed.Answer); // filing and owner agree, on the filing this call made
+                }
+
+                // PR #2161 round 5 (K1): the filing could not be read back, so the answer stands (#2150) on a filing nobody
+                // confirmed as this call's own. The F3 permission rides only on a confirmed one (round 4's FilingIsOwn rule):
+                // no permit, and a file held in the root it left stays held (fail closed).
+                if (exitPermit is not null)
+                {
+                    _logger.LogWarning(
+                        "Re-file of {Entity} {RecordId}: its owner assignment landed but its filing could not be read back, so "
+                        + "the filing could not be confirmed as this re-file's own; the F3 permission to leave {Count} secure "
+                        + "record(s) is not carried to it.",
+                        request.EntityLogicalName, request.RecordId, exitPermit.RootsLeft.Count);
+                }
+
+                return landed.Answer;
             }
 
             throw;
@@ -2462,8 +2480,13 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// </list>
     /// A restore that itself fails is logged <see cref="ReparentLeftInconsistent"/>.
     /// </remarks>
-    /// <returns>The resolution the row's owner turned out to match (the assignment landed), or <c>null</c>.</returns>
-    private async Task<RecordOwnerResolution?> RecoverFromFailedAssignmentAsync(
+    /// <returns>
+    /// The resolution the row's owner turned out to match (the assignment landed), or <c>null</c>. With it (PR #2161 round 5,
+    /// K1), whether the filing was CONFIRMED as this call's own — read back filed exactly as this call resolved it, with the
+    /// lineage-only lookups it left (<see cref="StillFiledAsResolvedAsync"/> answered <c>true</c>): the same notion as
+    /// <see cref="SettleOwnerAsync"/>'s. A filing that could not be read back keeps the answer (#2150) but is not confirmed.
+    /// </returns>
+    private async Task<(RecordOwnerResolution Answer, bool FilingIsOwn)?> RecoverFromFailedAssignmentAsync(
         RecordReparent request, IReadOnlyDictionary<string, object> restore,
         IReadOnlyCollection<RecordOwnershipParent> resolvedFrom, RecordOwnerResolution resolution, RowBeforeChange before,
         AfterChangeObservation observed, Exception assignFailure)
@@ -2484,7 +2507,10 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             landed = null;
         }
 
-        if (landed == true && await StillFiledAsResolvedAsync(request, resolvedFrom, before).ConfigureAwait(false) == false)
+        var filedAsResolved = landed == true
+            ? await StillFiledAsResolvedAsync(request, resolvedFrom, before).ConfigureAwait(false)
+            : null;
+        if (filedAsResolved == false)
         {
             // #2143: the owner is the resolved team, but the row is no longer filed under the parents it was resolved from —
             // another writer re-filed it. Filing and owner do NOT agree; the filing is left to that writer below.
@@ -2499,7 +2525,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 "Re-file of {Entity} {RecordId}: the owner assignment to team {TeamId} reported a failure, but the owner reads "
                 + "back as that team — the assignment landed (lost response); the re-file stands (task 146).",
                 request.EntityLogicalName, request.RecordId, teamId);
-            return target;
+            return (target, filedAsResolved == true);
         }
 
         if (landed is null && !target.IsSecureOwner)
