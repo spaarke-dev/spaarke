@@ -85,3 +85,14 @@
 | timezoneruleversionnumber             | TimeZoneRuleVersionNumber             | Time Zone Rule Version Number | Whole number     | For internal use only.                                          | False            | Simple | Minimum value: -1<br><br>Maximum value: 2147483647                                                                                                                        |
 | utcconversiontimezonecode             | UTCConversionTimeZoneCode             | UTC Conversion Time Zone Code | Whole number     | Time zone code that was in use when the record was created.     | False            | Simple | Minimum value: -1<br><br>Maximum value: 2147483647                                                                                                                        |
 | versionnumber                         | VersionNumber                         | Version Number                | BigInt           | Version Number                                                  | False            | Simple | Minimum value: -9223372036854775808<br><br>Maximum value: 9223372036854775807                                                                                             |
+
+## eBilling billing columns (ebilling-r1 task 080, EB-D-148)
+
+> **Status**: created by `scripts/ebilling/Deploy-EbillingProcedureSchema.ps1`, authored 2026-10-21 and **not yet run on dev** until ontology-r1's schema review passes and the owner approves. Verify against live metadata before relying on this section. The column dump above predates it.
+
+| Logical name | Display name | Type | Notes |
+|---|---|---|---|
+| `sprk_billingfirm` | Billing Firm | Lookup -> `sprk_organization` (delete RemoveLink, optional) | The law firm whose Procedures the record's list shows by default. Not used for evaluation or submission eligibility (`sprk_assignedlawfirm1/2` stays). Relationship `sprk_workassignment_billingfirm_organization`. |
+| `sprk_billingresponsible` | Billing Responsible | Lookup -> `sprk_organization` (delete RemoveLink, optional) | The client's billing entity. No R1 consumer. Relationship `sprk_workassignment_billingresponsible_organization`. |
+
+**Neither column confers access** (not in the access registry; no grant or share path reads them). The same two columns are added to `sprk_matter` and `sprk_project`; see `sprk_matter-related-tables.md` section 4. The Work Assignment main form has **no Billing tab** on dev (read 2026-10-21: tabs Overview, Events, Search); the matter and project main forms do. Adding it is task 079's.
