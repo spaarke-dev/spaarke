@@ -241,7 +241,8 @@ public static class AccessFollowsParent
 /// "own" marker alone cannot tell, from the stored values, a user's edit from a parent's change (a stored Restricted above a
 /// Standard floor is either "the parent just loosened" or "a user just tightened it"), nor a re-file from a parent loosening
 /// (verifier F1's class). So the record also keeps the floor the stored values were derived from and the parents it came
-/// from: a stored value that differs from max(own, last floor) is a user's edit; a parent set that differs is a re-file (which
+/// from: a stored value that differs from max(own, last floor) is a user's edit (classified against the last AND the live
+/// floor, <see cref="OwnPermissionOf"/>); a parent set that differs is a re-file (which
 /// never loosens); a floor that moved with the same parents is the parent's change (inherited values follow it, both ways).
 /// One versioned JSON column (the relocation ledger's precedent, <c>sprk_relocationpending</c>) instead of five columns.</para>
 /// <para><b>On <c>sprk_document</c> (task 189, D7 T7a).</b> The same record carries a document's own narrowing. The rule is
@@ -326,10 +327,18 @@ internal sealed record AccessInheritance(
     /// <see cref="InheritedAccessPermission.DecideDocument"/> (task 189) both call it.
     /// </summary>
     /// <remarks>
-    /// <para><b>With a record.</b> A stored value that differs from max(own, last floor) was set outside the inherited-value
-    /// writers: a user's edit, or a BFF writer's own narrowing. If it is stricter than the last floor, it is the record's own.
-    /// If it equals the last floor, there is no own value. If it is below the last floor, it is not the record's own: the own
-    /// value is unchanged and the stored value is put back.</para>
+    /// <para><b>With a record.</b> A stored value equal to max(own, last floor) is unchanged since the record was written: the
+    /// own value stands, and the inherited part follows the LIVE floor (<paramref name="floorRank"/>) both ways. Any other
+    /// stored value was set outside the inherited-value writers: a user's edit, or a BFF writer's own narrowing.</para>
+    /// <list type="bullet">
+    /// <item>An edit stricter than the last floor OR the live one is the record's own. Comparing it with the last floor alone
+    /// (the rule before the task 189 fix round) put back a user's Limited set after a Restricted parent widened to Standard,
+    /// and the record went to Standard (the "K1 variant").</item>
+    /// <item>An edit at or below both floors is put back to the live floor. The own value is cleared (a user with Write removes
+    /// an own narrowing, D7 D3), unless it is no looser than the edit. That case is task 175's own write: it stores the
+    /// value first and its record last, so a record write that fails after it followed a lower floor leaves exactly
+    /// max(own, live floor) there.</item>
+    /// </list>
     /// <para><b>Without one</b> (existing rows), the backfill rule applies: a value stricter than the current floor is own;
     /// one equal to it is inherited. A re-file is the caller's to handle (task 175's rule; documents follow their new
     /// parents).</para>
@@ -340,17 +349,13 @@ internal sealed record AccessInheritance(
             return storedRank > floorRank ? storedPermission : null;
 
         var own = record.OwnPermission;
+        var ownRank = SecureRootInheritance.RankOf(own);
         var lastFloorRank = SecureRootInheritance.RankOf(record.FloorPermission);
-        if (storedRank != Math.Max(SecureRootInheritance.RankOf(own), lastFloorRank))
-        {
-            if (storedRank > lastFloorRank)
-                own = storedPermission;
-            else if (storedRank == lastFloorRank)
-                own = null;
-            // below the last floor: not the record's own; put back below
-        }
-
-        return own;
+        if (storedRank == Math.Max(ownRank, lastFloorRank))
+            return own;
+        if (storedRank > Math.Min(lastFloorRank, floorRank))
+            return storedPermission;
+        return ownRank <= storedRank ? own : null;
     }
 
     /// <summary>
@@ -503,8 +508,8 @@ public sealed partial class SecureRootInheritance
     /// <remarks>
     /// <para><b>Own and inherited.</b> With an access record: a stored value that differs from max(own, last floor) is a
     /// user's edit (a flag set by Make Secure, or cleared by an F3 unsecure; an Access Permission chosen on the form) — it
-    /// becomes the record's own (an Access Permission at or below the last floor is "none set"; one below the floor is put
-    /// back). A flag that turned secure while the floor is secure is the floor's (the securing loop), not an own act. Without
+    /// becomes the record's own when it is stricter than the last or the live floor; otherwise it is put back to the live
+    /// floor (<see cref="AccessInheritance.OwnPermissionOf"/>, the one copy of the Access Permission rule). A flag that turned secure while the floor is secure is the floor's (the securing loop), not an own act. Without
     /// one (existing rows): the backfill rule — a value stricter than the current floor is own, one equal to it inherited.</para>
     /// <para><b>A re-file never loosens</b> (round 87 item 5, verifier F1): when the parents differ from the record's, whatever
     /// the stored values hold beyond the NEW floor becomes the record's own.</para>

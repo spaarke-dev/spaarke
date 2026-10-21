@@ -589,7 +589,9 @@ internal static class InheritedAccessPermission
     /// <remarks>
     /// <para><b>Own vs inherited</b> is task 175's classification, one copy (<see cref="AccessInheritance.OwnPermissionOf"/>):
     /// a value set outside these writers (a user's edit, a BFF writer's narrowing) becomes the document's own when it is
-    /// stricter than the last inherited value; an edit back to that value removes it; an edit below it is put back. Without a
+    /// stricter than the last inherited value or the live one; an edit at or below both removes the own narrowing and is put
+    /// back to the live inherited value. So a user's Limited set after a Restricted matter widened to Standard stays Limited
+    /// (the task 189 fix round's "K1 variant"). Without a
     /// record (existing rows) a value stricter than the current inherited one is own, and one equal to it is inherited. That
     /// is sound because task 173 kept every parented row equal to its parents before this task.</para>
     /// <para><b>A re-file follows the new parents.</b> The task 173 contract is kept for every row without an own narrowing

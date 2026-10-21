@@ -346,6 +346,92 @@ public class ChildAccessPermissionReconcileTests
     }
 
     [Fact]
+    public async Task Run_ALimitedSetAfterItsMatterWidened_IsKeptAsTheDocumentsOwn()
+    {
+        // Task 189 fix round, the "K1 variant" (must fire): the matter goes Restricted -> Standard and, before the next run, a
+        // user sets the document to Limited. Limited is below the last inherited value but above the live one, so it is the
+        // user's own narrowing. Compared with the last inherited value alone, it was put back to Standard.
+        // Must not fire beside it: an unchanged inherited Restricted follows the matter back to Standard.
+        var job = new Harness();
+        var matter = job.Root("sprk_matter", Restricted);
+        var document = job.Child("sprk_document", Restricted, ("sprk_matter", "sprk_matter", matter));
+        var inherited = job.Child("sprk_document", Restricted, ("sprk_matter", "sprk_matter", matter));
+        await job.RunAsync(); // the sweep records {floor R, own none} on both
+        RecordOf(job, document).OwnPermission.Should().BeNull();
+
+        job.World.Set("sprk_matter", matter, Column, new OptionSetValue(Standard));
+        job.World.Modified("sprk_matter", matter, job.Now.UtcDateTime);
+        job.World.Set("sprk_document", document, Column, new OptionSetValue(Limited));
+        job.World.Modified("sprk_document", document, job.Now.UtcDateTime);
+        var widened = (await job.RunAsync()).GetProperty("accessPermission");
+
+        ValueOf(job, document).Should().Be(Limited, "the user's Limited is above the live inherited Standard");
+        RecordOf(job, document).OwnPermission.Should().Be(Limited);
+        RecordOf(job, document).FloorPermission.Should().Be(Standard);
+        ValueOf(job, inherited).Should().Be(Standard, "an unchanged inherited Restricted follows its matter back");
+        RecordOf(job, inherited).OwnPermission.Should().BeNull();
+        widened.GetProperty("ownKept").GetInt32().Should().Be(1);
+
+        // It is the document's own: the matter going Restricted and back to Standard brings it back to Limited.
+        job.World.Set("sprk_matter", matter, Column, new OptionSetValue(Restricted));
+        job.World.Modified("sprk_matter", matter, job.Now.UtcDateTime);
+        await job.RunAsync();
+        job.World.Set("sprk_matter", matter, Column, new OptionSetValue(Standard));
+        job.World.Modified("sprk_matter", matter, job.Now.UtcDateTime);
+        await job.RunAsync();
+        ValueOf(job, document).Should().Be(Limited);
+        ValueOf(job, inherited).Should().Be(Standard);
+    }
+
+    [Fact]
+    public async Task Run_ARestrictedSetWhileItsMatterTightened_IsKeptAsTheDocumentsOwn()
+    {
+        // Task 189 fix round (must fire): a user narrows the document Limited -> Restricted while its matter goes Limited ->
+        // Restricted. The edit is stricter than the last inherited value, so it is the user's own, although it only equals
+        // the live one. Judged against the live value alone, it would be cleared and widened when the matter loosens.
+        var job = new Harness();
+        var matter = job.Root("sprk_matter", Limited);
+        var document = job.Child("sprk_document", Limited, ("sprk_matter", "sprk_matter", matter));
+        await job.RunAsync(); // the sweep records {floor L, own none}
+        RecordOf(job, document).FloorPermission.Should().Be(Limited);
+
+        job.World.Set("sprk_matter", matter, Column, new OptionSetValue(Restricted));
+        job.World.Modified("sprk_matter", matter, job.Now.UtcDateTime);
+        job.World.Set("sprk_document", document, Column, new OptionSetValue(Restricted));
+        job.World.Modified("sprk_document", document, job.Now.UtcDateTime);
+        await job.RunAsync();
+        RecordOf(job, document).OwnPermission.Should().Be(Restricted);
+
+        job.World.Set("sprk_matter", matter, Column, new OptionSetValue(Limited));
+        job.World.Modified("sprk_matter", matter, job.Now.UtcDateTime);
+        await job.RunAsync();
+        ValueOf(job, document).Should().Be(Restricted, "the user's own narrowing is never widened");
+    }
+
+    [Fact]
+    public async Task Run_ADocumentEditedBelowItsFloor_DropsItsOwnNarrowing_AndIsPutBackToTheFloor()
+    {
+        // Task 189 fix round (must fire): an own Restricted under a Limited matter, edited to Standard (below the floor). A
+        // user with Write removes their own narrowing (D3), so the document is put back to the live inherited Limited, not
+        // kept at Restricted: a looser edit never ends stricter than an edit to the floor itself.
+        var job = new Harness();
+        var matter = job.Root("sprk_matter", Limited);
+        var document = job.Child("sprk_document", Limited, ("sprk_matter", "sprk_matter", matter));
+        await job.RunAsync();
+        job.World.Set("sprk_document", document, Column, new OptionSetValue(Restricted));
+        job.World.Modified("sprk_document", document, job.Now.UtcDateTime);
+        await job.RunAsync();
+        RecordOf(job, document).OwnPermission.Should().Be(Restricted);
+
+        job.World.Set("sprk_document", document, Column, new OptionSetValue(Standard));
+        job.World.Modified("sprk_document", document, job.Now.UtcDateTime);
+        await job.RunAsync();
+
+        ValueOf(job, document).Should().Be(Limited, "put back to the live inherited value");
+        RecordOf(job, document).OwnPermission.Should().BeNull("the edit below the floor removed the own narrowing");
+    }
+
+    [Fact]
     public async Task Run_ADocumentWhoseRecordCannotBeRead_IsNotWritten_AndIsCarried()
     {
         // AC 3 (fail closed): an unreadable own narrowing is never guessed at.

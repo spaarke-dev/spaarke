@@ -222,6 +222,13 @@ internal sealed class SecureChildShareWorld
         return this;
     }
 
+    /// <summary>Task 189: access-record writes to THIS row succeed again.</summary>
+    public SecureChildShareWorld AcceptingAccessRecordWritesOf(Guid id)
+    {
+        _refusedAccessRecordWrites.Remove(id);
+        return this;
+    }
+
     /// <summary>Task 173: every <c>sprk_accesspermission</c> write, in order.</summary>
     public List<(string Table, Guid Id, int Value)> AccessPermissionWrites { get; } = new();
 
