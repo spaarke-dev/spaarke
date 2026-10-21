@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Census guards: server creates via the service, no client createRecord of registry tables, no client field mapping (FR-27)</title>
+    <phase>6 W6 Standard, guards, docs, retirement</phase>
+    <gate>035+036 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds and modifies tests under tests/** (TEST-MODIFYING override); guards enforce a security invariant.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Extends an existing census test with a known shape and adds source-scan guards with controls.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W6</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>035, 036</deps>
+    <tags>testing, arch-tests, bff-api, frontend</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Extend `RecordOwnerAssignmentCensusTests.cs` so every server create of a registry table goes through `RecordCreationService` or is a named exception, and add a client guard so no `Xrm.WebApi.createRecord` / `dataService.createRecord` of a registry table exists outside the BFF adapter. The "no client field mapping" guard shipped in task 035; verify it, do not duplicate it. Every guard has a must-fire and a must-not-fire control, and a ratchet baseline if existing violations are found.</prompt>
+  <role>SPAARKE platform developer, ArchTests/source-scan guards, ADR-038.</role>
+  <goal>Three guards enforce FR-27 with negative controls: server creates, client createRecord, and (verified) client field mapping.</goal>
+
+  <context>
+    <background>spec.md FR-27; root CLAUDE.md §16 enforcement ladder (source-scan guard, ratchet baseline, must-fire/must-not-fire controls). The census test already has fixture-based controls (e.g. "Seed.cs" and "internal sealed class Seeded" fixtures) to copy. The registry is RecordTableRules.cs (task 012). Wizards are migrated (021-029) and the client engine deleted (035); the BFF adapter is UIC/utils/adapters/bffChildWriteAdapter.ts.</background>
+    <relevant-files>
+      <file role="modify">tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs (extend: server creates of registry tables via RecordCreationService or named exception)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordTableRules.cs (registry = the table list)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/utils/adapters/bffChildWriteAdapter.ts (the only allowed client create path)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/__tests__/architecture/noClientFieldMapping.test.ts (task 035 guard; verify only)</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/__tests__/architecture/noClientRegistryCreate.test.ts (client guard; copy the task 035 guard shape)</file>
+      <file role="canonical-reference">projects/field-mapping-server-write-path-r1/notes/decisions.md (named exceptions from tasks 033/034/060)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="035" status="pending">Client engine deleted and its guard in place.</dependency>
+      <dependency task="036" status="pending">W3 server paths deployed and verified; all server creators routed.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="root CLAUDE.md §16 / ADR-038">Scope: each new guard. Ships with a must-fire control (a fixture violating the rule is detected) and a must-not-fire control (a compliant or exception fixture passes); deterministic, no network; lives at a KEEP path; record "Enforced by: ..." in the notes.</constraint>
+    <constraint source="project">Scope: ratchet. If the guard finds existing violations, list them in a baseline that fails on any NEW violation and shrinks as they are worked down; each baseline entry carries an owner note. Any violation on a real path is fixed in scope or filed and reported (root CLAUDE.md §8.5), never baselined silently.</constraint>
+    <constraint source="project">Scope: exceptions. A named exception must exist in the registry with a rationale (task 060); the guard reads the registry, it does not hold a second list.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: BFF. Test-only change in BFF-adjacent projects: no production surface added; state this in the PR; no publish-size effect expected (record that it was checked).</constraint>
+    <constraint source="UAC-r2 coordination">Scope: shared test file. RecordOwnerAssignmentCensusTests.cs is also touched by UAC-r2; run /conflict-check and rebase rather than overwrite.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Census / architecture guards; enforcement ladder</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/skills/conflict-check/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">What a direct create looks like in server code.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; read spec FR-27, the census test's fixture/control structure, the registry; /conflict-check on the census file.</step>
+    <step order="1">Server guard: detect `CreateAsync`/create-record calls against registry tables outside `RecordCreationService` and the named exceptions; write the must-fire and must-not-fire fixtures first.</step>
+    <step order="2">Client guard: scan `src/` (excluding node_modules, tests, and the BFF adapter) for `Xrm.WebApi.createRecord` and `dataService.createRecord` whose entity argument is a registry table; fixtures for both controls.</step>
+    <step order="3">Verify the task 035 guard still fires on a reintroduced `applyFieldMappings` fixture; add nothing duplicate.</step>
+    <step order="4">Run the full census and client test suites; fix or file any real violation; baseline only with owner note.</step>
+    <step order="5">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="6">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a guard finds a real server or client create of a registry table that bypasses the service and cannot be fixed within this task's scope, STOP, file it via /project-defer-issue-tracking and escalate per CLAUDE.md §6; do not baseline it silently.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Overlaps with RecordOwnerAssignmentCensusTests.cs (server side, extended in place) and the task 035 noClientFieldMapping guard (client engine only).</existing>
+    <extension>The server guard extends the census file. The client createRecord guard is a separate source scan because the census is C#/Roslyn and the client code is TypeScript; it copies the task 035 guard shape.</extension>
+    <cost-of-doing-nothing>Without the client createRecord guard a wizard can again create registry rows straight from Xrm, bypassing server mapping and owner resolution (FR-27 acceptance, WP-1/WP-2).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Wizard create path smoke (light and dark, ADR-021)"><steps><step>Open Create Matter and Create Event wizards in light then dark mode and submit one record each</step></steps><expected>Both create through the BFF adapter; no UI change from the guard work; dark mode renders unchanged.</expected></test>
+  </ui-tests>
+
+  <tools><tool name="dotnet">Run Spaarke.ArchTests</tool><tool name="npm">Run shared library tests (--legacy-peer-deps)</tool></tools>
+
+  <outputs>
+    <output type="test">tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/__tests__/architecture/noClientRegistryCreate.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The server census guard passes on master code and lists each routed creator; every exception it allows is a named registry rule with a rationale.</criterion>
+    <criterion testable="true">The client guard passes on master code: no `Xrm.WebApi.createRecord` or `dataService.createRecord` of a registry table outside `bffChildWriteAdapter.ts`.</criterion>
+    <criterion testable="true">Each guard has a must-fire control (violating fixture detected) and a must-not-fire control (compliant or exception fixture passes); the task 035 guard still fires on a reintroduced `applyFieldMappings`.</criterion>
+    <criterion testable="true">Negative: adding a direct create of a registry table to a server fixture, and a client `createRecord` of a registry table to a client fixture, each make the corresponding guard fail.</criterion>
+    <criterion testable="true">ArchTests and client tests green; any baseline entries have owner notes; no violation baselined silently.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-27, NFR-06. Guards are the enforcement ladder's "ArchTest / source-scan" rung.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -118,6 +118,7 @@ public static class DataverseDocumentsEndpoints
             // Task 147 r1c: set when this update re-filed the document (the reparent wrote) — the after-re-file step below.
             Func<Task<bool>>? refiledFromIsolation = null;
             Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution? refiledBy = null;
+            Sprk.Bff.Api.Services.Access.SecureRemovalCaller? secureExitCaller = null;
 
             try
             {
@@ -212,7 +213,8 @@ public static class DataverseDocumentsEndpoints
                             // secure root — an un-secure. The resolver asks THIS caller's F3 rights (Full Access on the
                             // root, or the document's creator) before anything is written; a refusal is the unsecure
                             // endpoint's 403 ProblemDetails.
-                            SecureExitCaller = Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForRequest(callerAccessProbe, context),
+                            SecureExitCaller = secureExitCaller =
+                                Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForRequest(callerAccessProbe, context),
                         },
                         token => dataverseService.UpdateDocumentAsync(id, request, token),
                         context.RequestAborted);
@@ -245,8 +247,11 @@ public static class DataverseDocumentsEndpoints
                 // moved out of every secure record → the mirror goes — and task 148's pass over everything filed under it.
                 if (refiledFromIsolation is not null)
                 {
+                    // #2143 round 7 (F1): every person's re-file hands the step its caller (a document has no thread to move).
                     // #2159 slice 2: with the reparent's answer, so an F3 move from S1 to S2 records its file's release.
-                    await children.AfterRefileAsync("sprk_document", Guid.Parse(id), refiledFromIsolation, refiledBy, CancellationToken.None);
+                    await children.AfterRefileAsync(
+                        "sprk_document", Guid.Parse(id), refiledFromIsolation,
+                        Sprk.Bff.Api.Services.Access.RefileThreadStep.Reconcile, secureExitCaller, refiledBy, CancellationToken.None);
                 }
 
                 var updatedDocument = await dataverseService.GetDocumentAsync(id);
@@ -268,6 +273,13 @@ public static class DataverseDocumentsEndpoints
             {
                 logger.LogWarning(ex, "Invalid document update request");
                 return ProblemDetailsHelper.ValidationError(ex.Message);
+            }
+            catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnsettledException)
+            {
+                // #2143: a concurrent writer kept the re-filed document's owner from settling. The change was written and its
+                // filing put back or superseded (RecordOwnerUnsettledException remarks) — reload and retry, never a 500.
+                logger.LogWarning("Document {DocumentId} re-file: its owner could not be settled against concurrent writers", id);
+                return ProblemDetailsHelper.RecordOwnerUnsettled("document", traceId);
             }
             catch (Exception ex)
             {

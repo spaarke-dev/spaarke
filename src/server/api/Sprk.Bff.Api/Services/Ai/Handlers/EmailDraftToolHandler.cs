@@ -363,14 +363,14 @@ public sealed class EmailDraftToolHandler : IToolHandler
                 // resolved" for a missing record, a stamp for an existing one) would otherwise tell a caller who may not
                 // file under it that it exists. A missing record, one they cannot see and one they may not append to are
                 // the same denial.
-                var me = await OwnedChildWrite.WhoAmIAsync(_dataverse, cancellationToken).ConfigureAwait(false);
+                var me = await CallerWriteAuthorization.WhoAmIAsync(_dataverse, cancellationToken).ConfigureAwait(false);
                 if (me.Failure is { } whoAmIFailure)
                 {
                     return LogOutcome(context, args, MapClientError(tool, whoAmIFailure, startedAt), stopwatch);
                 }
 
                 caller = me.SystemUserId;
-                var regardingAccess = await OwnedChildWrite.CheckCallerMayAppendToRecordAsync(
+                var regardingAccess = await CallerWriteAuthorization.CheckCallerMayAppendToRecordAsync(
                     _dataverse, me.SystemUserId, args.RegardingTable, ancestorTargetId, cancellationToken).ConfigureAwait(false);
                 if (regardingAccess.ClientFailure is { } accessFailure)
                 {
@@ -417,7 +417,7 @@ public sealed class EmailDraftToolHandler : IToolHandler
             {
                 if (caller is null)
                 {
-                    var me = await OwnedChildWrite.WhoAmIAsync(_dataverse, cancellationToken).ConfigureAwait(false);
+                    var me = await CallerWriteAuthorization.WhoAmIAsync(_dataverse, cancellationToken).ConfigureAwait(false);
                     if (me.Failure is { } whoAmIFailure)
                     {
                         return LogOutcome(context, args, MapClientError(tool, whoAmIFailure, startedAt), stopwatch);

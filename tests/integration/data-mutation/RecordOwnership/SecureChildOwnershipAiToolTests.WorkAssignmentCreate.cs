@@ -168,7 +168,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _user.Posts.Should().BeEmpty();
     }
 
-    // ── The ADR-024 pair on this route is decided by the core alone (uac-r2 #1612, OwnedChildWrite.PairTargetAsync) ──────────
+    // ── The ADR-024 pair on this route is decided by the core alone (uac-r2 #1612, CallerWriteAuthorization.PairTargetAsync) ──────────
 
     private static Dictionary<string, object?> PairOnly(Dictionary<string, object?> payload)
     {
@@ -184,7 +184,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
     /// <summary>
     /// A TYPED pair naming a matter counts on a work assignment only when its typed lookup (<c>sprk_RegardingMatter</c>)
-    /// repeats it (uac-r2 #1628, <c>OwnedChildWrite.PairTargetAsync</c>). A pair-only payload naming a secure matter the caller
+    /// repeats it (uac-r2 #1628, <c>CallerWriteAuthorization.PairTargetAsync</c>). A pair-only payload naming a secure matter the caller
     /// cannot append to, a missing one, and a typed lookup to one matter beside a pair naming another all answer the SAME
     /// uniform 400 <c>child_record.invalid_payload</c> — no answer depends on whether the record exists or is secure. (The
     /// AppendTo 404 on a repeated pair is <see cref="WorkAssignmentCreate_WithoutAppendToOnTheRegardingMatter_IsTheSame404AsAMissingMatter_AndNothingIsCreated"/>.)

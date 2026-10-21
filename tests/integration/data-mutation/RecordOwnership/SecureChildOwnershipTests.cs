@@ -69,7 +69,7 @@ public class SecureChildOwnershipTests
         var documentId = Guid.NewGuid();
         var world = World().WithRecord("sprk_document", documentId, Directory.ChildBu, owningTeam: Directory.ChildTeam,
             extra: new() { ["sprk_project"] = new EntityReference("sprk_project", OrdinaryProject) });
-        var (handler, writes) = UpdateHandler(world.Resolver());
+        var (handler, writes) = UpdateHandler(world.Resolver(), world);
 
         await handler.UpdateAsync("sprk_document", documentId,
             new Dictionary<string, object?> { ["sprk_relatedproject"] = new EntityReference("sprk_project", SecureProject) },
@@ -91,7 +91,7 @@ public class SecureChildOwnershipTests
         var documentId = Guid.NewGuid();
         var world = World().WithRecord("sprk_document", documentId, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam,
             extra: new() { ["sprk_project"] = new EntityReference("sprk_project", SecureProject) });
-        var (handler, writes) = UpdateHandler(world.Resolver());
+        var (handler, writes) = UpdateHandler(world.Resolver(), world);
 
         var act = () => handler.UpdateAsync("sprk_document", documentId,
             new Dictionary<string, object?> { ["sprk_project"] = new EntityReference("sprk_project", OrdinaryProject) },
@@ -108,7 +108,7 @@ public class SecureChildOwnershipTests
     {
         var documentId = Guid.NewGuid();
         var world = World().WithRecord("sprk_document", documentId, Directory.ChildBu, owningTeam: Directory.ChildTeam);
-        var (handler, writes) = UpdateHandler(world.Resolver());
+        var (handler, writes) = UpdateHandler(world.Resolver(), world);
 
         var act = () => handler.UpdateAsync("sprk_document", documentId,
             new Dictionary<string, object?> { ["sprk_project"] = new EntityReference("sprk_project", FlaggedNotIsolatedProject) },
@@ -125,7 +125,7 @@ public class SecureChildOwnershipTests
     {
         var documentId = Guid.NewGuid();
         var world = World().WithRecord("sprk_document", documentId, Directory.ChildBu, owningTeam: Directory.ChildTeam);
-        var (handler, writes) = UpdateHandler(world.Resolver(fault: new TimeoutException("throttled")));
+        var (handler, writes) = UpdateHandler(world.Resolver(fault: new TimeoutException("throttled")), world);
 
         var act = () => handler.UpdateAsync("sprk_document", documentId,
             new Dictionary<string, object?> { ["sprk_project"] = new EntityReference("sprk_project", SecureProject) },
@@ -148,7 +148,7 @@ public class SecureChildOwnershipTests
                 ["sprk_project"] = new EntityReference("sprk_project", SecureProject),
                 ["sprk_matter"] = new EntityReference("sprk_matter", OrdinaryMatter),
             });
-        var (handler, writes) = UpdateHandler(world.Resolver());
+        var (handler, writes) = UpdateHandler(world.Resolver(), world);
 
         var act = () => handler.UpdateAsync("sprk_document", documentId,
             new Dictionary<string, object?> { ["sprk_project"] = null, ["sprk_documentdescription"] = null },
@@ -166,7 +166,7 @@ public class SecureChildOwnershipTests
         var documentId = Guid.NewGuid();
         var world = World().WithRecord("sprk_document", documentId, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam,
             extra: new() { ["sprk_project"] = new EntityReference("sprk_project", SecureProject) });
-        var (handler, writes) = UpdateHandler(world.Resolver());
+        var (handler, writes) = UpdateHandler(world.Resolver(), world);
 
         await handler.UpdateAsync("sprk_document", documentId,
             new Dictionary<string, object?> { ["sprk_documentdescription"] = null },
@@ -181,7 +181,7 @@ public class SecureChildOwnershipTests
     {
         // A root's ownership is provisioning's (task 144 / owner S6) — a generic update never re-owns it.
         var world = World();
-        var (handler, writes) = UpdateHandler(world.Resolver());
+        var (handler, writes) = UpdateHandler(world.Resolver(), world);
 
         await handler.UpdateAsync("sprk_workassignment", Guid.NewGuid(),
             new Dictionary<string, object?> { ["sprk_regardingproject"] = new EntityReference("sprk_project", SecureProject) },
@@ -220,7 +220,7 @@ public class SecureChildOwnershipTests
     public async Task PlaybookUpdate_ImpersonatingAFullAccessHolder_MovesTheDocumentOutOfItsSecureProject_AskedAsThatUser()
     {
         var (world, documentId) = SecureDocument();
-        var (core, writes, rights) = ActionCore(world.Resolver());
+        var (core, writes, rights) = ActionCore(world.Resolver(), world);
         rights.Grant(ImpersonatedUser, SecureProject, FullAccessRights);
 
         await core.UpdateAsync(MoveToOrdinaryProject(documentId, ImpersonatedUser), CancellationToken.None);
@@ -235,7 +235,7 @@ public class SecureChildOwnershipTests
     public async Task PlaybookUpdate_ImpersonatingAWriteOnlyHolder_IsRefusedNotPermitted_AndNothingIsWritten()
     {
         var (world, documentId) = SecureDocument();
-        var (core, writes, rights) = ActionCore(world.Resolver());
+        var (core, writes, rights) = ActionCore(world.Resolver(), world);
         rights.Grant(ImpersonatedUser, SecureProject, CollaborateRights);
 
         var act = () => core.UpdateAsync(MoveToOrdinaryProject(documentId, ImpersonatedUser), CancellationToken.None);
@@ -251,7 +251,7 @@ public class SecureChildOwnershipTests
     public async Task PlaybookUpdate_ImpersonatingNobody_IsTrulyPersonLess_AndRefusedUnverifiable()
     {
         var (world, documentId) = SecureDocument();
-        var (core, writes, rights) = ActionCore(world.Resolver());
+        var (core, writes, rights) = ActionCore(world.Resolver(), world);
 
         var act = () => core.UpdateAsync(MoveToOrdinaryProject(documentId, impersonate: null), CancellationToken.None);
 
@@ -423,7 +423,16 @@ public class SecureChildOwnershipTests
         var previousThread = new EntityReference("sprk_communicationthread", Guid.NewGuid());
         var world = World().WithRecord("sprk_communication", communicationId, Directory.ChildBu, owningTeam: Directory.ChildTeam,
             extra: new() { ["sprk_communicationthread"] = previousThread });
-        world.AssignmentFault = new InvalidOperationException("Read Privilege Check For Owner failed");
+        // #2143 round 6: the resolver reads both threads (RecordThreadFiling) — the Direct one the message leaves, and the secure
+        // record's thread it joins, which files it under that record.
+        world.WithRecord("sprk_communicationthread", previousThread.Id, Directory.ChildBu, extra: new() { ["sprk_threadtype"] = new OptionSetValue(100000001) }) // #2143 r7d: Direct
+            .WithRecord("sprk_communicationthread", threadId, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam, extra: new()
+            {
+                ["sprk_threadtype"] = new OptionSetValue(100000000), // #2143 r7d: a record thread
+                ["sprk_regardingmatter"] = new EntityReference("sprk_matter", SecureMatter),
+            });
+        var assignFailure = new InvalidOperationException("Read Privilege Check For Owner failed");
+        world.AssignmentFault = assignFailure;
         var threads = new Mock<IGenericEntityService>();
         threads
             .Setup(e => e.RetrieveAsync("sprk_communicationthread", threadId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
@@ -442,7 +451,8 @@ public class SecureChildOwnershipTests
             },
             CancellationToken.None);
 
-        await act.Should().ThrowAsync<InvalidOperationException>();
+        (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Should().BeSameAs(assignFailure,
+            "the owner assignment failed (not a thread read)");
         world.Row("sprk_communication", communicationId).GetAttributeValue<EntityReference>("sprk_communicationthread")
             .Should().Be(previousThread, "the JOIN is undone with its failed owner assignment");
     }
@@ -597,7 +607,7 @@ public class SecureChildOwnershipTests
     // =====================================================================================
 
     private static (DataverseUpdateHandler Handler, List<Dictionary<string, object?>> Writes) UpdateHandler(
-        IRecordOwnershipResolver ownership)
+        IRecordOwnershipResolver ownership, Directory? world = null)
     {
         var writes = new List<Dictionary<string, object?>>();
         var fields = new Mock<IFieldMappingDataverseService>(MockBehavior.Strict);
@@ -605,7 +615,11 @@ public class SecureChildOwnershipTests
             .Setup(f => f.UpdateRecordFieldsAsync(
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(),
                 It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
-            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((_, _, f, _, _) => writes.Add(f))
+            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((t, id, f, _, _) =>
+            {
+                writes.Add(f);
+                world?.ApplyPatch(t, id, f); // #2143: the PATCH lands — the resolver reads the row after it
+            })
             .Returns(Task.CompletedTask);
 
         var handler = new DataverseUpdateHandler(
@@ -630,7 +644,7 @@ public class SecureChildOwnershipTests
     /// registered in the scope the core resolves its services from.
     /// </summary>
     private static (UpdateRecordActionCore Core, List<(Guid? As, Dictionary<string, object?> Fields)> Writes, RightsAsUser Rights)
-        ActionCore(IRecordOwnershipResolver ownership)
+        ActionCore(IRecordOwnershipResolver ownership, Directory? world = null)
     {
         var writes = new List<(Guid? As, Dictionary<string, object?> Fields)>();
         var fields = new Mock<IFieldMappingDataverseService>(MockBehavior.Strict);
@@ -638,7 +652,11 @@ public class SecureChildOwnershipTests
             .Setup(f => f.UpdateRecordFieldsAsync(
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(),
                 It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
-            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((_, _, f, _, impersonate) => writes.Add((impersonate, f)))
+            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((t, id, f, _, impersonate) =>
+            {
+                writes.Add((impersonate, f));
+                world?.ApplyPatch(t, id, f); // #2143: the PATCH lands — the resolver reads the row after it
+            })
             .Returns(Task.CompletedTask);
 
         var rights = new RightsAsUser();

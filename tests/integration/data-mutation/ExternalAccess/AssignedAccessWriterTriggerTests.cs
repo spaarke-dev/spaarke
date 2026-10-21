@@ -55,7 +55,7 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
     // RecordCreationService (Office quick-create: matter, project) — incl. owner A7: the maker is assigned
     // ─────────────────────────────────────────────────────────────────────────────
 
-    private RecordCreationService OfficeCreator(Guid createdId, Guid? makersContact, AssignedAccessMaterializer? materializer = null)
+    private OfficeRecordCreationService OfficeCreator(Guid createdId, Guid? makersContact, AssignedAccessMaterializer? materializer = null)
     {
         var entities = new Mock<IGenericEntityService>(MockBehavior.Loose);
         entities.Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
@@ -74,10 +74,10 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
         ownership.Setup(o => o.ResolveOwningTeamAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Guid.NewGuid());
 
-        return new RecordCreationService(
+        return new OfficeRecordCreationService(
             entities.Object, new Mock<IFieldMappingDataverseService>().Object, ownership.Object,
             IdentityNormalizationFixtures.WithContact(makersContact).Object, Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), materializer ?? _h.Materializer,
-            NullLogger<RecordCreationService>.Instance);
+            NullLogger<OfficeRecordCreationService>.Instance);
     }
 
     [Theory]
