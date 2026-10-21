@@ -72,6 +72,15 @@ public static class OfficeModule
         // unconditional GraphModule singletons — no §10 F.1 asymmetry.
         services.AddScoped<OfficeRecordCreationService>();
 
+        // field-mapping-server-write-path-r1 task 013: the ONE server create pipeline (FR-06), merging the Office create
+        // above and OwnedChildWrite.CreateAsync; both stay until tasks 017/018 re-point their callers, then the Office
+        // registration above goes. Concrete (ADR-010: one implementation, no seam), SCOPED because
+        // SecureChildShareSynchronizer is (ExternalAccessModule; the caller's client arrives as an argument) and UNCONDITIONAL:
+        // every dependency (IRecordOwnershipResolver, IFieldMappingDataverseService, IGenericEntityService,
+        // SecureRootFilingGate, CoreAncestorRestamper, SecureChildShareSynchronizer, IMembershipEventPublisher) is
+        // registered unconditionally — no §10 F.1 asymmetry. §11 answers: notes/task-013-notes.md.
+        services.AddScoped<Sprk.Bff.Api.Services.RecordCreation.RecordCreationService>();
+
         // spaarkeai-word-add-in-r1 task 121 (owner 2026-10-09, "file it if unfiled"): an email save that reconciles to an
         // existing, unfiled communication files it to the save's record through the association engine's existing-row
         // write. Concrete (ADR-010), SCOPED because SecureChildReconciler is; every dependency (IncomingAssociationResolver,
