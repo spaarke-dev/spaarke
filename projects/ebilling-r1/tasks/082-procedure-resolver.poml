@@ -119,7 +119,7 @@
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Two adversarial-review passes (tenant isolation). 083, 084, 085 and 113 consume ProcedureResolver; 114 releases the gap hold. Firm-facing projections never show the basis (130's allow-list DTO).</notes>
+  <notes>Two adversarial-review passes (tenant isolation). 083, 084, 085 and 113 consume ProcedureResolver; 114 releases the gap hold. Firm-facing projections never show the basis (130's allow-list DTO). 080 PARENTAL LIMIT (2026-10-21, uac-r2 ACCEPT): Dataverse allows one parental (Delete = Cascade) relationship per table, so sprk_procedureassignment's three core lookups are RemoveLink and sprk_excludedpolicy is its only Cascade. Must-not-fire test: an assignment row with all three core lookups empty never selects, pins or excludes anything.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
