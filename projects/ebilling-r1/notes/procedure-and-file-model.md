@@ -716,7 +716,7 @@ Unchanged at the core: the immutable policy version (clause and location), reaso
 | D-44 | Invoice PDFs move to invoice files. The structured invoice index is unchanged. |
 | D-55, D-67 | Containers and keys retire from code; the dev containers stay (O-13). |
 | D-145 | Withdrawn. |
-| D-146 | Deleting a core record deletes its assignment rows and retires its record-scoped rule set and record rules (O-17). Reusable Procedures, rule sets and rate cards are untouched. |
+| D-146 | Deleting a core record deletes its assignment rows; its record-scoped rule set and record rules are unlinked (RemoveLink) and then retired by the no-plugin sweep (O-17, task 117), never by the delete job, so the rule-set lifecycle keeps one writer (agreed with uac-r2). Reusable Procedures, rule sets and rate cards are untouched. |
 | D-120 | Rate cards are no longer tied to a core record. |
 | BU filter: D-171 pts 4 and 6, D-172 Q13, D-141 Q1, S3, S4, S8, 087 | Dropped (O-12). Nothing of uac-r2's relies on S8 (uac-r2 Q7). |
 | D-141 Q11 | Kept for **record-scoped rule sets** (O-18). |
