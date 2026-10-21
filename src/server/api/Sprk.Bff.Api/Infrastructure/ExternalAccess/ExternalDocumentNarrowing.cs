@@ -445,6 +445,38 @@ internal readonly record struct DocumentNarrowingCost(int Rows, int HopLevels, i
 public delegate Task<DocumentNarrowingResult> AppOnlyDocumentNarrowing(IReadOnlyCollection<Guid> documentIds, CancellationToken ct);
 
 /// <summary>
+/// Task 188 round 3 slice C: the hide-only overload of <see cref="AppOnlyDocumentNarrowing"/> for rows that DERIVE from a
+/// document (an <c>sprk_analysis</c> row's source document, and through it an <c>sprk_analysisoutput</c>'s).
+/// </summary>
+/// <remarks>
+/// Owner round 111 (CLAUDE.md §6.5 path B, approved): the AI tools' one app-only exception is this seam, and it returns a hide
+/// decision only. This overload narrows that further: it returns the SET of hidden document ids, no rows and no reasons.
+/// </remarks>
+internal static class AppOnlyDocumentNarrowingExtensions
+{
+    /// <summary>
+    /// The ids among <paramref name="documentIds"/> that an external caller may NOT see: the documents are re-read by id
+    /// APP-ONLY and decided by THE narrowing in ONE call (the seam's own batched reads). <see cref="Guid.Empty"/> (no document)
+    /// is never in the set. <see cref="ExternalDocumentNarrowing.UnreadableLink"/> (a document id that cannot be decided) is
+    /// always in it, without a read; so is a document that does not come back. A failed read THROWS (fail closed: the caller
+    /// returns no data). No id at all: no call.
+    /// </summary>
+    internal static async Task<IReadOnlySet<Guid>> HiddenDocumentIdsAsync(
+        this AppOnlyDocumentNarrowing narrowing, IEnumerable<Guid> documentIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(narrowing);
+        ArgumentNullException.ThrowIfNull(documentIds);
+        var asked = documentIds.Where(id => id != Guid.Empty).ToHashSet();
+        var decidable = asked.Where(id => id != ExternalDocumentNarrowing.UnreadableLink).ToList();
+        if (decidable.Count == 0)
+            return asked; // nothing to read: only the undecidable sentinel (hidden), or nothing at all
+
+        var decision = await narrowing(decidable, ct).ConfigureAwait(false);
+        return asked.Where(id => !decision.IsVisible(id)).ToHashSet();
+    }
+}
+
+/// <summary>
 /// Task 188 round 3 slice B: THE document narrowing for the internal plane's document routes
 /// (<c>Api/Filters/InternalPlaneDocumentNarrowing</c>: the document filter, the bulk download and the container lists). The
 /// same app-only read and decision as <see cref="AppOnlyDocumentNarrowing"/> (<see cref="ExternalDataService.ReadAndNarrowDocumentsAsync"/>);

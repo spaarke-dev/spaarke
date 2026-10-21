@@ -36,12 +36,16 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// </para>
 /// <para>
 /// <b>The "User-OBO ONLY" rule is AMENDED for ONE dependency — unified-access-control-r2 task 188, main-session decision
-/// 2026-10-20 (CLAUDE.md §6.5 path B; owner sign-off pending on the PR)</b>: an EXTERNAL caller's <c>sprk_document</c> rows
+/// 2026-10-20 (CLAUDE.md §6.5 path B; APPROVED, owner round 111, 2026-10-21)</b>: an EXTERNAL caller's <c>sprk_document</c> rows
 /// are decided by THE external document narrowing through <see cref="AppOnlyDocumentNarrowing"/>, which re-reads those
 /// documents BY ID under the BFF's app-only identity (the external plane's reader) and returns ONLY a hide decision: a
 /// link field security masks for the user can never read as "no link". It can only HIDE a row the user's own read returned;
 /// no app-only data reaches the result, and nothing else of the app-only reader is reachable (a delegate). Every query whose
 /// rows reach the model still runs as the user.
+/// Task 188 round 3 slice C: an external caller's <c>sprk_analysis</c> and <c>sprk_analysisoutput</c> rows are hidden when
+/// their source document is (or cannot be decided), through the same seam's hide-only overload
+/// (<see cref="AppOnlyDocumentNarrowingExtensions.HiddenDocumentIdsAsync"/>); their source links are read as the user
+/// (<see cref="ExternalCallerCommunicationGuard.ReadSourceDocumentIdsAsync"/>).
 /// </para>
 /// <para>
 /// <b>ADR-015 / NFR-07</b>: telemetry carries query LENGTH + entity filter + result count +
@@ -277,6 +281,7 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
             var citations = new List<ToolResultCitation>();
             var droppedHits = 0;
             var hiddenDocumentIds = new List<Guid>();
+            var hiddenDerivedSources = new List<Guid>();
             DocumentNarrowingResult? narrowing = null;
             var value = FindResultsArray(response.Body);
             if (value is { } resultsArray)
@@ -316,6 +321,27 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
                     narrowing = await _narrowDocuments(documentIds, cancellationToken).ConfigureAwait(false);
                 }
 
+                // Task 188 round 3 slice C: for an external caller, a hit on a table that derives from a document
+                // (sprk_analysis; sprk_analysisoutput through its analysis) is dropped silently when its source document is
+                // hidden or cannot be decided. The hits' source links are read BY ID as the user (one batched read per table
+                // and level), then the hide-only overload decides every source document of the page APP-ONLY in ONE call.
+                // A hit with no source document is unaffected. A fault throws into the error result below (no data).
+                var derivedSources = new Dictionary<string, IReadOnlyDictionary<Guid, Guid>>(StringComparer.OrdinalIgnoreCase);
+                IReadOnlySet<Guid>? hiddenSources = null;
+                var derivedHits = hits.Where(h => ExternalCallerCommunicationGuard.IsDocumentDerivedTable(h.EntityName)).ToList();
+                if (derivedHits.Count > 0 && await IsExternalCallerAsync().ConfigureAwait(false))
+                {
+                    foreach (var table in derivedHits.GroupBy(h => h.EntityName, StringComparer.OrdinalIgnoreCase))
+                    {
+                        derivedSources[table.Key] = await ExternalCallerCommunicationGuard.ReadSourceDocumentIdsAsync(
+                            _dataverse, table.Key, table.Select(h => h.RecordId).ToList(), cancellationToken).ConfigureAwait(false);
+                    }
+
+                    hiddenSources = await _narrowDocuments.HiddenDocumentIdsAsync(
+                        derivedSources.Values.SelectMany(sources => sources.Values), cancellationToken)
+                        .ConfigureAwait(false);
+                }
+
                 foreach (var (hit, entityName, recordId) in hits)
                 {
                     if (narrowing is not null &&
@@ -323,6 +349,16 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
                         !narrowing.IsVisible(recordId))
                     {
                         hiddenDocumentIds.Add(recordId);
+                        continue;
+                    }
+
+                    if (hiddenSources is not null &&
+                        ExternalCallerCommunicationGuard.IsDocumentDerivedTable(entityName) &&
+                        ExternalCallerCommunicationGuard.IsDerivedRowHidden(
+                            recordId, derivedSources.GetValueOrDefault(entityName), hiddenSources,
+                            out var source))
+                    {
+                        hiddenDerivedSources.Add(source);
                         continue;
                     }
 
@@ -374,6 +410,14 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
                     "[dataverse.search_data] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
                     ExternalCallerCommunicationGuard.DocumentTable,
                     narrowing!.HiddenSummary(hiddenDocumentIds), context.DecisionId);
+            }
+            if (hiddenDerivedSources.Count > 0)
+            {
+                // ADR-015: reason codes with counts only — never the query, ids or hit content.
+                _logger.LogInformation(
+                    "[dataverse.search_data] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
+                    "document-derived",
+                    ExternalCallerCommunicationGuard.DerivedHiddenSummary(hiddenDerivedSources), context.DecisionId);
             }
 
             stopwatch.Stop();

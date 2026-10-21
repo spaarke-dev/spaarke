@@ -610,6 +610,70 @@ public sealed class ExternalDocumentNarrowingTests
             "thread read");
     }
 
+    // ── Owner round 111: Limited does NOT hide (only Restricted does) ──────────────────────────────────────────
+
+    [Fact]
+    public async Task OwnLimited_StaysVisible_ToAnExternalCaller_OnTheByIdRead_EvenUnderALimitedParentAndAVisibleLink()
+    {
+        var limitedParent = _world.Document(permission: Limited);
+        var limited = _world.Document(permission: Limited, communication: _world.VisibleCommunication(), parent: limitedParent);
+        var limitedAlone = _world.Document(permission: Limited);
+
+        var result = await ExternalDocumentNarrowing.ReadAndDecideAsync(new[] { limited, limitedAlone }, _world.Query, CancellationToken.None);
+
+        result.IsVisible(limited).Should().BeTrue("owner round 111: Limited does not hide; only Restricted does");
+        result.IsVisible(limitedAlone).Should().BeTrue();
+        (await _world.Narrowing.HiddenDocumentIdsAsync(new[] { limited, limitedAlone }, CancellationToken.None))
+            .Should().BeEmpty("the hide-only overload hides no Limited document either");
+    }
+
+    // ── Task 188 round 3 slice C: the hide-only overload ──────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task HiddenDocumentIds_ReturnsOnlyTheHiddenSet_InOneCall_UndecidableIncluded_NoDocumentNever()
+    {
+        var visible = _world.Document();
+        var restricted = _world.Document(permission: Restricted);
+        var underInternalOnly = _world.Document(communication: _world.Communication(internalOnly: true, _world.Thread(Open)));
+        var missing = Guid.NewGuid();
+
+        var hidden = await _world.Narrowing.HiddenDocumentIdsAsync(
+            new[] { visible, restricted, underInternalOnly, missing, ExternalDocumentNarrowing.UnreadableLink, Guid.Empty, restricted },
+            CancellationToken.None);
+
+        hidden.Should().BeEquivalentTo(new[] { restricted, underInternalOnly, missing, ExternalDocumentNarrowing.UnreadableLink },
+            "own Restricted, an internal-only email, a document that does not come back and an undecidable id are hidden; " +
+            "no document (Guid.Empty) and a visible one are not");
+        _world.NarrowingCalls.Should().Be(1, "ONE call for the whole set");
+        _world.ReadsOf("sprk_documents")[0].Should().NotContain(ExternalDocumentNarrowing.UnreadableLink.ToString("D"),
+            "an undecidable id is never sent to Dataverse");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task HiddenDocumentIds_NothingDecidable_MakesNoCall(bool onlyUndecidable)
+    {
+        var ids = onlyUndecidable ? new[] { ExternalDocumentNarrowing.UnreadableLink, Guid.Empty } : new[] { Guid.Empty };
+
+        var hidden = await _world.Narrowing.HiddenDocumentIdsAsync(ids, CancellationToken.None);
+
+        hidden.Should().BeEquivalentTo(onlyUndecidable ? new[] { ExternalDocumentNarrowing.UnreadableLink } : Array.Empty<Guid>());
+        _world.NarrowingCalls.Should().Be(0);
+        _world.Reads.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task HiddenDocumentIds_AFailedRead_Throws()
+    {
+        var doc = _world.Document(parent: _world.Document());
+        _world.Fault = "sprk_documents";
+
+        var act = () => _world.Narrowing.HiddenDocumentIdsAsync(new[] { doc }, CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>("a failed read never turns into 'nothing hidden'");
+    }
+
     // ── Row parsing ────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -707,6 +771,17 @@ public sealed class ExternalDocumentNarrowingTests
         public string? Fault { get; set; }
 
         public IReadOnlyList<string> ReadsOf(string set) => Reads.Where(r => r.Set == set).Select(r => r.OData).ToList();
+
+        private int _narrowingCalls;
+
+        /// <summary>The app-only seam over this world (the by-id read and decision), counting its calls.</summary>
+        public AppOnlyDocumentNarrowing Narrowing => (ids, ct) =>
+        {
+            Interlocked.Increment(ref _narrowingCalls);
+            return ExternalDocumentNarrowing.ReadAndDecideAsync(ids, Query, ct);
+        };
+
+        public int NarrowingCalls => Volatile.Read(ref _narrowingCalls);
 
         public Task<IReadOnlyList<Dictionary<string, JsonElement>>> Query(string set, string odata, CancellationToken ct)
         {

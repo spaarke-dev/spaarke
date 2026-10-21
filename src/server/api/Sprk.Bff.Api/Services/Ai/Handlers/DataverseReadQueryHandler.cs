@@ -31,12 +31,16 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// </para>
 /// <para>
 /// <b>The "User-OBO ONLY" rule is AMENDED for ONE dependency — unified-access-control-r2 task 188, main-session decision
-/// 2026-10-20 (CLAUDE.md §6.5 path B; owner sign-off pending on the PR)</b>: an EXTERNAL caller's <c>sprk_document</c> rows
+/// 2026-10-20 (CLAUDE.md §6.5 path B; APPROVED, owner round 111, 2026-10-21)</b>: an EXTERNAL caller's <c>sprk_document</c> rows
 /// are decided by THE external document narrowing through <see cref="AppOnlyDocumentNarrowing"/>, which re-reads those
 /// documents BY ID under the BFF's app-only identity (the external plane's reader) and returns ONLY a hide decision: a
 /// link field security masks for the user can never read as "no link". It can only HIDE a row the user's own read returned;
 /// no app-only data reaches the result, and nothing else of the app-only reader is reachable (a delegate). Every query whose
 /// rows reach the model still runs as the user.
+/// Task 188 round 3 slice C: an external caller's <c>sprk_analysis</c> and <c>sprk_analysisoutput</c> rows are hidden when
+/// their source document is (or cannot be decided), through the same seam's hide-only overload
+/// (<see cref="AppOnlyDocumentNarrowingExtensions.HiddenDocumentIdsAsync"/>); their source links are read as the user
+/// (<see cref="ExternalCallerCommunicationGuard.ReadSourceDocumentIdsAsync"/>).
 /// </para>
 /// <para>
 /// <b>Grounding (ADR-039)</b>: every returned row carries the table's primary id (added to
@@ -175,14 +179,21 @@ public sealed class DataverseReadQueryHandler : IToolHandler
             // communication (review round 1, F1).
             var guardCommunications = false;
             var guardDocuments = false;
+            var guardDerived = false;
             if ((ExternalCallerCommunicationGuard.IsCommunicationFamily(translation.EntityLogicalName) ||
-                 ExternalCallerCommunicationGuard.IsDocumentTable(translation.EntityLogicalName)) &&
+                 ExternalCallerCommunicationGuard.IsDocumentTable(translation.EntityLogicalName) ||
+                 ExternalCallerCommunicationGuard.IsDocumentDerivedTable(translation.EntityLogicalName)) &&
                 await ExternalCallerCommunicationGuard.IsExternalCallerAsync(
                     _httpContextAccessor, _callerResolver, _identityResolver, cancellationToken).ConfigureAwait(false))
             {
                 if (ExternalCallerCommunicationGuard.IsDocumentTable(translation.EntityLogicalName))
                 {
                     guardDocuments = true;
+                }
+                else if (ExternalCallerCommunicationGuard.IsDocumentDerivedTable(translation.EntityLogicalName))
+                {
+                    // Task 188 round 3 slice C: decided after the read by row id; nothing is injected into the query.
+                    guardDerived = true;
                 }
                 else if (!ExternalCallerCommunicationGuard.IsCommunicationTable(translation.EntityLogicalName))
                 {
@@ -315,10 +326,32 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                 narrowing = await _narrowDocuments(documentIds, cancellationToken).ConfigureAwait(false);
             }
 
+            // Task 188 round 3 slice C: a row that derives from a document (sprk_analysis; sprk_analysisoutput through its
+            // analysis) is hidden when its source document is. The source links are read BY ROW ID as the user (one batched
+            // read per level), then the hide-only overload decides the documents APP-ONLY in ONE call for the page. A row that
+            // has a source the BFF cannot decide is hidden; a row with no source document is unaffected. Faults throw (no rows).
+            IReadOnlyDictionary<Guid, Guid>? derivedSources = null;
+            IReadOnlySet<Guid>? hiddenSources = null;
+            if (guardDerived &&
+                response.Body is { } derivedBody && derivedBody.TryGetProperty("value", out var derivedValue) &&
+                derivedValue.ValueKind == JsonValueKind.Array)
+            {
+                var rowIds = derivedValue.EnumerateArray()
+                    .Select(record => RecordIdOf(record, primaryIdAttribute))
+                    .Where(id => id != Guid.Empty)
+                    .Distinct()
+                    .ToList();
+                derivedSources = await ExternalCallerCommunicationGuard.ReadSourceDocumentIdsAsync(
+                    _dataverse, translation.EntityLogicalName!, rowIds, cancellationToken).ConfigureAwait(false);
+                hiddenSources = await _narrowDocuments.HiddenDocumentIdsAsync(derivedSources.Values, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
             var rows = new List<Dictionary<string, object?>>();
             var citations = new List<ToolResultCitation>();
             var hiddenRows = 0;
             var hiddenDocuments = new List<Guid>();
+            var hiddenDerivedSources = new List<Guid>();
             if (response.Body is { } body && body.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.Array)
             {
                 foreach (var record in value.EnumerateArray())
@@ -336,6 +369,14 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                         (narrowing is null || !narrowing.IsVisible(documentId)))
                     {
                         hiddenDocuments.Add(documentId);
+                        continue;
+                    }
+
+                    if (guardDerived &&
+                        RecordIdOf(record, primaryIdAttribute) is var derivedId &&
+                        ExternalCallerCommunicationGuard.IsDerivedRowHidden(derivedId, derivedSources, hiddenSources, out var source))
+                    {
+                        hiddenDerivedSources.Add(source);
                         continue;
                     }
 
@@ -397,6 +438,15 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                     "[dataverse.read_query] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
                     translation.EntityLogicalName,
                     narrowing?.HiddenSummary(hiddenDocuments) ?? DocumentNarrowingResult.CodeOf(DocumentNarrowingReason.ReadFailed),
+                    context.DecisionId);
+            }
+            if (hiddenDerivedSources.Count > 0)
+            {
+                // ADR-015: entity + reason codes with counts only — never query text, ids or row content.
+                _logger.LogInformation(
+                    "[dataverse.read_query] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
+                    translation.EntityLogicalName,
+                    ExternalCallerCommunicationGuard.DerivedHiddenSummary(hiddenDerivedSources),
                     context.DecisionId);
             }
 

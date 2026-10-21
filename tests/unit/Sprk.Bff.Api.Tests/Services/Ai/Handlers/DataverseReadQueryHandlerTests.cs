@@ -1169,6 +1169,199 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
         _appOnly.Calls.Should().Be(0);
     }
 
+    // ── Task 188 round 3 slice C: rows that derive from a document (sprk_analysis, sprk_analysisoutput) ──
+
+    private static readonly Guid AnOwnRestricted = Guid.Parse("a1880000-0000-0000-0000-000000000001");
+    private static readonly Guid AnInternalOnly = Guid.Parse("a1880000-0000-0000-0000-000000000002");
+    private static readonly Guid AnUndecidable = Guid.Parse("a1880000-0000-0000-0000-000000000003");
+    private static readonly Guid AnVisible = Guid.Parse("a1880000-0000-0000-0000-000000000004");
+    private static readonly Guid AnNoDocument = Guid.Parse("a1880000-0000-0000-0000-000000000005");
+    private static readonly Guid AnUnreadableLink = Guid.Parse("a1880000-0000-0000-0000-000000000006");
+    private static readonly Guid AnNotReturned = Guid.Parse("a1880000-0000-0000-0000-000000000007");
+    private static readonly Guid DocNeverSeeded = Guid.Parse("d1880000-0000-0000-0000-0000000000ff");
+
+    private static readonly Guid OutOfRestricted = Guid.Parse("0a180000-0000-0000-0000-000000000001");
+    private static readonly Guid OutOfVisible = Guid.Parse("0a180000-0000-0000-0000-000000000002");
+    private static readonly Guid OutNoAnalysis = Guid.Parse("0a180000-0000-0000-0000-000000000003");
+    private static readonly Guid OutAnalysisNotReturned = Guid.Parse("0a180000-0000-0000-0000-000000000004");
+
+    /// <summary>The source links the USER's client returns, by derived table: row id → raw lookup value (absent: not returned).</summary>
+    private readonly Dictionary<string, Dictionary<Guid, object?>> _userSourceLinks = new()
+    {
+        ["sprk_analysises"] = new(),
+        ["sprk_analysisoutputs"] = new(),
+    };
+
+    private void SetupDerivedMetadata(string table, string set, string pk) =>
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith($"EntityDefinitions(LogicalName='{table}')")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson($$"""
+                {
+                  "EntitySetName": "{{set}}",
+                  "PrimaryIdAttribute": "{{pk}}",
+                  "Attributes": [ { "LogicalName": "sprk_name", "AttributeType": "String" } ]
+                }
+                """)));
+
+    /// <summary>
+    /// The user's client: the model's query of <paramref name="set"/> answers <paramref name="rowsJson"/>; a source-link read
+    /// (by id, <c>$select={pk},{link}</c>) answers from <see cref="_userSourceLinks"/>. Records every request.
+    /// </summary>
+    private List<string> CaptureDerivedReads(string set, string rowsJson)
+    {
+        var captured = new List<string>();
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_analysis")), It.IsAny<CancellationToken>()))
+            .Callback<string, CancellationToken>((p, _) => captured.Add(p))
+            .ReturnsAsync((string p, CancellationToken _) =>
+            {
+                var path = Uri.UnescapeDataString(p);
+                var linkRead = System.Text.RegularExpressions.Regex.Match(path, @"^(\w+)\?\$select=(\w+),(_\w+_value)&\$filter=");
+                if (!linkRead.Success)
+                    return p.StartsWith(set + "?") ? DataverseUserResponse.Ok(200, ParseJson(rowsJson)) : DataverseUserResponse.Ok(200, ParseJson("""{ "value": [] }"""));
+                var (linkSet, pk, link) = (linkRead.Groups[1].Value, linkRead.Groups[2].Value, linkRead.Groups[3].Value);
+                var rows = System.Text.RegularExpressions.Regex.Matches(path, $@"{pk} eq ([0-9a-f-]{{36}})")
+                    .Select(m => Guid.Parse(m.Groups[1].Value))
+                    .Where(_userSourceLinks[linkSet].ContainsKey)
+                    .Select(id => new Dictionary<string, object?> { [pk] = id.ToString("D"), [link] = _userSourceLinks[linkSet][id] });
+                return DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new { value = rows }));
+            });
+        return captured;
+    }
+
+    /// <summary>
+    /// Analyses (as the user reads their source link) over the app-only truth: own Restricted; under an internal-only email;
+    /// a document the BFF cannot read back (never seeded); visible; no document; a link that is not a GUID; and one whose
+    /// link read does not return it.
+    /// </summary>
+    private void SeedAnalyses()
+    {
+        SeedMixedAppOnlyWorld();
+        _appOnly.Document(DocOwnRestricted, permission: RestrictedPermission);
+        var links = _userSourceLinks["sprk_analysises"];
+        links[AnOwnRestricted] = DocOwnRestricted.ToString("D");
+        links[AnInternalOnly] = DocInternal.ToString("D");
+        links[AnUndecidable] = DocNeverSeeded.ToString("D");
+        links[AnVisible] = DocShared.ToString("D");
+        links[AnNoDocument] = null;
+        links[AnUnreadableLink] = "not-a-guid";
+    }
+
+    private static string AnalysisRow(Guid id) => $$"""{ "sprk_analysisid": "{{id:D}}", "sprk_name": "Analysis {{id:N}}" }""";
+
+    private static IEnumerable<string?> AnalysisRowIds(ToolResult result, string pk = "sprk_analysisid") =>
+        result.Data!.Value.GetProperty("rows").EnumerateArray().Select(r => r.GetProperty(pk).GetString());
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerOnAnalysis_HidesRowsWhoseSourceDocumentIsHiddenOrUndecidable_KeepsTheRest()
+    {
+        AsExternalCaller();
+        SetupDerivedMetadata("sprk_analysis", "sprk_analysises", "sprk_analysisid");
+        SeedAnalyses();
+        var reads = CaptureDerivedReads("sprk_analysises", DocRows(
+            AnalysisRow(AnOwnRestricted), AnalysisRow(AnInternalOnly), AnalysisRow(AnUndecidable), AnalysisRow(AnVisible),
+            AnalysisRow(AnNoDocument), AnalysisRow(AnUnreadableLink), AnalysisRow(AnNotReturned)));
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args("SELECT sprk_name FROM sprk_analysis"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        AnalysisRowIds(result).Should().Equal(new[] { AnVisible.ToString("D"), AnNoDocument.ToString("D") },
+            because: "an analysis of an own-Restricted document, of an internal-only email's document, of a document the BFF " +
+                     "cannot decide, with an unreadable link, or whose link does not come back is hidden; a visible source and " +
+                     "no source are unaffected");
+        reads.Should().HaveCount(2, "the model's query, then ONE batched read of the page's source links as the user");
+        reads[0].Should().Be("sprk_analysises?$select=sprk_analysisid,sprk_name&$top=50", "nothing is injected into the user's query");
+        Uri.UnescapeDataString(reads[1]).Should().StartWith("sprk_analysises?$select=sprk_analysisid,_sprk_documentid_value&$filter=");
+        _appOnly.Calls.Should().Be(1, "ONE hide-only narrowing call for the page");
+        _appOnly.Reads("sprk_documents")[0].Should().Contain(DocOwnRestricted.ToString("D")).And.Contain(DocNeverSeeded.ToString("D"))
+            .And.NotContain("not-a-guid");
+        DocumentNarrowingReads.VerifyNoNarrowingReadAsTheUser(_dataverse);
+        CapturedLogMessages.Should().Contain(m =>
+            m.FormattedMessage.Contains(ExternalCallerCommunicationGuard.LogEvent) &&
+            m.FormattedMessage.Contains("entity=sprk_analysis") &&
+            m.FormattedMessage.Contains("source_document_hidden=3") &&
+            m.FormattedMessage.Contains("source_document_undecidable=2"));
+        AssertTelemetryRespectsAdr015(AnOwnRestricted.ToString("D"), DocOwnRestricted.ToString("D"), $"Analysis {AnOwnRestricted:N}");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerOnAnalysisOutput_HidesOutputsWhoseAnalysisSourceIsHidden_ThroughTheAnalysis()
+    {
+        AsExternalCaller();
+        SetupDerivedMetadata("sprk_analysisoutput", "sprk_analysisoutputs", "sprk_analysisoutputid");
+        SeedAnalyses();
+        var outputs = _userSourceLinks["sprk_analysisoutputs"];
+        outputs[OutOfRestricted] = AnOwnRestricted.ToString("D");
+        outputs[OutOfVisible] = AnVisible.ToString("D");
+        outputs[OutNoAnalysis] = null;
+        outputs[OutAnalysisNotReturned] = AnNotReturned.ToString("D");
+        var reads = CaptureDerivedReads("sprk_analysisoutputs", DocRows(
+            $$"""{ "sprk_analysisoutputid": "{{OutOfRestricted:D}}" }""", $$"""{ "sprk_analysisoutputid": "{{OutOfVisible:D}}" }""",
+            $$"""{ "sprk_analysisoutputid": "{{OutNoAnalysis:D}}" }""", $$"""{ "sprk_analysisoutputid": "{{OutAnalysisNotReturned:D}}" }"""));
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args("SELECT sprk_name FROM sprk_analysisoutput"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        AnalysisRowIds(result, "sprk_analysisoutputid").Should().Equal(new[] { OutOfVisible.ToString("D"), OutNoAnalysis.ToString("D") },
+            because: "an output follows its analysis's source document; an analysis that does not come back cannot be decided");
+        reads.Should().HaveCount(3, "the query, the outputs' analysis links, then the analyses' document links");
+        _appOnly.Calls.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_InternalCallerOnAnalysis_Unchanged_NoSourceReadAndNoNarrowing()
+    {
+        SetupDerivedMetadata("sprk_analysis", "sprk_analysises", "sprk_analysisid");
+        SeedAnalyses();
+        var reads = CaptureDerivedReads("sprk_analysises", DocRows(AnalysisRow(AnOwnRestricted), AnalysisRow(AnInternalOnly)));
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args("SELECT sprk_name FROM sprk_analysis"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.Data!.Value.GetProperty("rowCount").GetInt32().Should().Be(2, "the narrowing is for external callers only");
+        reads.Should().ContainSingle().Which.Should().Be("sprk_analysises?$select=sprk_analysisid,sprk_name&$top=50");
+        _appOnly.Calls.Should().Be(0);
+        _appOnly.AllReads.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerOnAnalysis_SourceLinkReadFails_ErrorWithNoData()
+    {
+        AsExternalCaller();
+        SetupDerivedMetadata("sprk_analysis", "sprk_analysises", "sprk_analysisid");
+        SeedAnalyses();
+        CaptureDerivedReads("sprk_analysises", DocRows(AnalysisRow(AnVisible)));
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.Contains("_sprk_documentid_value")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Fail(503, DataverseUserClientErrorCodes.ServiceError, "down"));
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args("SELECT sprk_name FROM sprk_analysis"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeFalse("a source-link read fault never turns into 'show it'");
+        result.ErrorCode.Should().Be(ToolErrorCodes.InternalError);
+        result.Data.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerOnAnalysis_AnAppOnlyReadFails_ErrorWithNoData()
+    {
+        AsExternalCaller();
+        SetupDerivedMetadata("sprk_analysis", "sprk_analysises", "sprk_analysisid");
+        SeedAnalyses();
+        _appOnly.Faults["sprk_documents"] = System.Net.HttpStatusCode.ServiceUnavailable;
+        CaptureDerivedReads("sprk_analysises", DocRows(AnalysisRow(AnVisible)));
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args("SELECT sprk_name FROM sprk_analysis"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeFalse("a narrowing fault never shows an analysis");
+        result.Data.Should().BeNull();
+    }
+
     // ═════════════════════════════════════════════════════════════════════════════
     // shared plumbing
     // ═════════════════════════════════════════════════════════════════════════════

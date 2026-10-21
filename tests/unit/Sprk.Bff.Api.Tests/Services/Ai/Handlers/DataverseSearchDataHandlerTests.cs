@@ -786,6 +786,147 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
         DocumentNarrowingReads.VerifyNoNarrowingReadAsTheUser(_dataverse);
     }
 
+    // ── Task 188 round 3 slice C: hits on tables that derive from a document (sprk_analysis, sprk_analysisoutput) ──
+
+    private static readonly Guid AnOwnRestricted = Guid.Parse("a1880000-0000-0000-0000-000000000011");
+    private static readonly Guid AnInternalOnly = Guid.Parse("a1880000-0000-0000-0000-000000000012");
+    private static readonly Guid AnUndecidable = Guid.Parse("a1880000-0000-0000-0000-000000000013");
+    private static readonly Guid AnVisible = Guid.Parse("a1880000-0000-0000-0000-000000000014");
+    private static readonly Guid AnNoDocument = Guid.Parse("a1880000-0000-0000-0000-000000000015");
+    private static readonly Guid AnStaleHit = Guid.Parse("a1880000-0000-0000-0000-000000000016");
+    private static readonly Guid OutOfRestricted = Guid.Parse("0a180000-0000-0000-0000-000000000011");
+    private static readonly Guid OutOfVisible = Guid.Parse("0a180000-0000-0000-0000-000000000012");
+    private static readonly Guid DocNeverSeeded = Guid.Parse("d1880000-0000-0000-0000-0000000000fe");
+
+    private static string DerivedHitsJson => $$"""
+        {
+          "value": [
+            { "entityname": "sprk_matter", "objectid": "{{MatterHit:D}}" },
+            { "entityname": "sprk_analysis", "objectid": "{{AnOwnRestricted:D}}", "highlights": { "sprk_name": ["Restricted analysis text"] } },
+            { "entityname": "sprk_analysis", "objectid": "{{AnInternalOnly:D}}" },
+            { "entityname": "sprk_analysis", "objectid": "{{AnUndecidable:D}}" },
+            { "entityname": "sprk_analysis", "objectid": "{{AnVisible:D}}" },
+            { "entityname": "sprk_analysis", "objectid": "{{AnNoDocument:D}}" },
+            { "entityname": "sprk_analysis", "objectid": "{{AnStaleHit:D}}" },
+            { "entityname": "sprk_analysisoutput", "objectid": "{{OutOfRestricted:D}}" },
+            { "entityname": "sprk_analysisoutput", "objectid": "{{OutOfVisible:D}}" }
+          ]
+        }
+        """;
+
+    /// <summary>
+    /// The user's source-link reads (by id): analyses → their document; outputs → their analysis. AnStaleHit is not returned
+    /// (deleted since it was indexed, or no longer readable).
+    /// </summary>
+    private List<string> SeedDerivedSources()
+    {
+        SeedAppOnlyDocuments();
+        _appOnly.Document(DocOwnRestricted, permission: 100000002);
+        var analyses = new Dictionary<Guid, string?>
+        {
+            [AnOwnRestricted] = DocOwnRestricted.ToString("D"),
+            [AnInternalOnly] = DocInternal.ToString("D"),
+            [AnUndecidable] = DocNeverSeeded.ToString("D"),
+            [AnVisible] = DocShared.ToString("D"),
+            [AnNoDocument] = null,
+        };
+        var outputs = new Dictionary<Guid, string?> { [OutOfRestricted] = AnOwnRestricted.ToString("D"), [OutOfVisible] = AnVisible.ToString("D") };
+        var captured = new List<string>();
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_analysis")), It.IsAny<CancellationToken>()))
+            .Callback<string, CancellationToken>((p, _) => captured.Add(p))
+            .ReturnsAsync((string p, CancellationToken _) =>
+            {
+                var (seed, pk, link) = p.StartsWith("sprk_analysisoutputs?")
+                    ? (outputs, "sprk_analysisoutputid", "_sprk_analysisid_value")
+                    : (analyses, "sprk_analysisid", "_sprk_documentid_value");
+                var rows = System.Text.RegularExpressions.Regex.Matches(Uri.UnescapeDataString(p), $@"{pk} eq ([0-9a-f-]{{36}})")
+                    .Select(m => Guid.Parse(m.Groups[1].Value))
+                    .Where(seed.ContainsKey)
+                    .Select(id => new Dictionary<string, object?> { [pk] = id.ToString("D"), [link] = seed[id] });
+                return DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new { value = rows }));
+            });
+        return captured;
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerDerivedHits_DropsAnalysesAndOutputsWhoseSourceDocumentIsHiddenOrUndecidable()
+    {
+        AsExternalCaller();
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(DerivedHitsJson)));
+        var userReads = SeedDerivedSources();
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"query":"contoso"}""");
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.Data!.Value.GetProperty("results").EnumerateArray()
+            .Select(r => r.GetProperty("recordId").GetString())
+            .Should().Equal(new[] { MatterHit.ToString("D"), AnVisible.ToString("D"), AnNoDocument.ToString("D"), OutOfVisible.ToString("D") },
+                because: "an analysis (or an output, through its analysis) of an own-Restricted document, of an internal-only " +
+                         "email's document, of a document the BFF cannot decide, or one the source read does not return is " +
+                         "dropped; a visible source and no source are unaffected");
+        result.Data!.Value.GetProperty("count").GetInt32().Should().Be(4, because: "the count is the post-filter count");
+        result.Warnings.Should().BeEmpty(because: "nothing tells the model that hits were dropped");
+        userReads.Should().HaveCount(3, "one batched source read of the analysis hits, one of the output hits, one of their analyses");
+        _appOnly.Calls.Should().Be(1, "ONE hide-only narrowing call for every source document of the page");
+        DocumentNarrowingReads.VerifyNoNarrowingReadAsTheUser(_dataverse);
+        CapturedLogMessages.Should().Contain(m =>
+            m.FormattedMessage.Contains(ExternalCallerCommunicationGuard.LogEvent) &&
+            m.FormattedMessage.Contains("source_document_hidden=4") &&
+            m.FormattedMessage.Contains("source_document_undecidable=1"));
+        AssertTelemetryRespectsAdr015("Restricted analysis text", AnOwnRestricted.ToString("D"));
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_InternalCallerDerivedHits_UnchangedAndNoExtraRead()
+    {
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(DerivedHitsJson)));
+        SeedDerivedSources();
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"query":"contoso"}""");
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.Data!.Value.GetProperty("count").GetInt32().Should().Be(9);
+        _dataverse.Verify(d => d.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never,
+            "an internal caller's search makes no extra Dataverse read");
+        _appOnly.Calls.Should().Be(0, "an internal caller is not narrowed");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerDerivedHits_SourceReadFails_ErrorWithNoData()
+    {
+        AsExternalCaller();
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(DerivedHitsJson)));
+        SeedDerivedSources();
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_analysises?")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Fail(503, DataverseUserClientErrorCodes.ServiceError, "down"));
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"query":"contoso"}""");
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
+
+        result.Success.Should().BeFalse("a source read fault never turns into 'show it'");
+        result.ErrorCode.Should().Be(ToolErrorCodes.InternalError);
+        result.Data.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerDerivedHits_NarrowingFails_ErrorWithNoData()
+    {
+        AsExternalCaller();
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(DerivedHitsJson)));
+        SeedDerivedSources();
+        _appOnly.Faults["sprk_documents"] = System.Net.HttpStatusCode.InternalServerError;
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"query":"contoso"}""");
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
+
+        result.Success.Should().BeFalse("a narrowing fault never shows an analysis");
+        result.Data.Should().BeNull();
+    }
+
     // ═════════════════════════════════════════════════════════════════════════════
     // shared plumbing
     // ═════════════════════════════════════════════════════════════════════════════
