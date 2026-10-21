@@ -585,6 +585,25 @@ public sealed class RecordRepairModeTests
     }
 
     [Fact]
+    public async Task ASourceOwnedByTheSecureTeam_ThatIsNoRoot_IsNotCopiedIntoARowItDoesNotIsolate()
+    {
+        // No secure flag anywhere, and a unit the resolver reads as ordinary: only the source's owner (the Secure Record
+        // owner team) says its data is secure — the belt-and-braces check, independent of the owner gate.
+        var communication = _world.CommunicationOwnedByTheSecureTeam("Secret subject");
+        _world.MapTheCommunicationOntoTheEvent();
+        var id = _world.RowOf("sprk_event", Directory.ChildBu, new Dictionary<string, object>
+        {
+            ["ownerid"] = new EntityReference("systemuser", RepairWorld.PersonInChild),
+            ["sprk_regardingcommunication"] = new EntityReference("sprk_communication", communication),
+        });
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain(RepairWorld.CommunicationMappedTarget);
+        outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.Mapping && f.ReasonCode == RecordRepairReason.MappingSourceSecure);
+    }
+
+    [Fact]
     public async Task ASourceReadThatFaults_CopiesNothing_FailClosed()
     {
         var id = _world.EventUnderTheMatter(clientName: null, practiceArea: null, priority: null);
@@ -1061,6 +1080,20 @@ internal sealed class RepairWorld
                 ["sprk_subject"] = subject,
             });
         _stamps.Row("sprk_communication", SecureCommunication, [("sprk_regardingmatter", "sprk_matter", SecureMatter)]);
+    }
+
+    /// <summary>
+    /// A communication filed under nothing, owned by the Secure Record owner team, with a subject — its business unit read
+    /// as the child unit, so the resolver (which reads the unit) does not see it as secure and only the source gate's own
+    /// owner check (review F1-e (ii)) can. Dataverse keeps the two consistent; the gate does not rely on it.
+    /// </summary>
+    public Guid CommunicationOwnedByTheSecureTeam(string subject)
+    {
+        var id = Guid.NewGuid();
+        Directory.WithRecord("sprk_communication", id, Directory.ChildBu, owningTeam: Directory.SecureNamedTeam,
+            extra: new Dictionary<string, object> { ["sprk_subject"] = subject });
+        _stamps.Row("sprk_communication", id, []);
+        return id;
     }
 
     /// <summary>Replaces (or adds) the <paramref name="source"/> → <paramref name="target"/> profile.</summary>
