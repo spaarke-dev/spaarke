@@ -1791,3 +1791,9 @@ Owner text, verbatim: "1. yes that's fine / 2. yes / 3. invoice file storage wil
 
 1. **ebilling K-3 (invoice-file blob storage network Allow): accept as a known limit.** Invoice files are reachable only through the invoice record and its gated file route. A network block (private endpoint, or public access denied) is due at prod hardening. Revisit if an invoice-file search is added. Relayed to ebilling.
 2. **Record family: open question, not a decision.** The owner asks whether an explicit "record family" would simplify UAC across related records, and how communications are associated today. Example: an email with invoice content is filed to the invoice rather than the matter. Is it then missing from the matter's messages view? Answer pending a code map of the communication regarding lookups and view queries.
+
+## Round 118 (owner, 2026-10-21)
+
+ebilling v5.5. The Outlook add-in always saves the invoice email as a `.eml` on the core record.
+1. **Invoice email exposure, option (i).** The from-email `.eml` is saved own-Restricted, with a recorded marker that the submission wrote that narrowing. ebilling (a′) skips only a marked narrowing, so firm F still sees its own invoice through the firm route, and other partners on the matter cannot open the invoice email.
+2. **An email the add-in can't identify: refuse with a retryable "try again".** No `.eml` and no submission are saved. It is all-or-nothing, as ebilling K1 requires. Relayed to ebilling.
