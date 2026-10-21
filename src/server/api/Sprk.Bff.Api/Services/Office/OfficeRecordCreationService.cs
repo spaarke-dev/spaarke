@@ -86,6 +86,9 @@ public sealed record RecordCreationRequest
     /// 🔴 The source record is read <b>app-only</b>. The CALLER'S Read right on it MUST already have been
     /// established upstream — <c>QuickCreateSourceAccessFilter</c> does that for the quick-create route. A new
     /// caller of this service must do the same, or it turns this into a way to copy fields out of any record.
+    /// <para>#2188: that Read check is record-level, so the app-only read is then masked to the columns the CALLER can read
+    /// (<see cref="Sprk.Bff.Api.Services.Dataverse.FieldMapping.MappingSourceCallerMask"/>, one OBO read of the same row): a
+    /// field-secured column the caller cannot read is treated as empty and never copied.</para>
     /// </remarks>
     public string? SourceEntityLogicalName { get; init; }
 
@@ -167,7 +170,8 @@ public sealed record RecordCreationResult
 ///   <item><description>BU defaults from the OWNER's business unit — <c>sprk_searchindexname</c> (INV-5 guarded) and
 ///   the <c>sprk_ai_search_index</c> lookup — mirroring <c>EntityCreationService.applyUserBuDefaults</c>.
 ///   <c>sprk_containerid</c> is deliberately NOT written (unified-access-control-r2 task 076, W1).</description></item>
-///   <item><description>Field Mapping Framework — one profile read, one source read, rules applied by
+///   <item><description>Field Mapping Framework — one profile read, one source read (app-only, then masked to what the
+///   caller can read by <see cref="MappingSourceCallerMask"/> — #2188), rules applied by
 ///   <see cref="CreateTimeFieldMapping"/>; a missing profile is a silent no-op.</description></item>
 ///   <item><description>Assigned To Internal — the contact the request names, else a mapped value, else the maker's
 ///   linked contact (task 152; task 100 added the request's contact).</description></item>
@@ -307,12 +311,17 @@ public sealed class OfficeRecordCreationService
     private readonly ILogger<OfficeRecordCreationService> _logger;
     private readonly Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe? _callerAccess;
     private readonly Microsoft.AspNetCore.Http.IHttpContextAccessor? _http;
+    private readonly IDataverseUserClient? _callerClient;
 
     /// <param name="callerAccess">Task 158 r1 (owner round 31 item 2): the OBO probe a project created INTO isolation is
     /// checked with AS THE CALLER first (G5: Create on the table, AppendTo on every secure parent). Optional so a host
     /// without the external-access module still composes this service; without it such a create is REFUSED (fail closed),
     /// never made unchecked.</param>
     /// <param name="http">The request whose bearer token the probe exchanges (same optionality).</param>
+    /// <param name="callerClient">#2188: the caller-context (OBO) Dataverse client the field-mapping source is masked through
+    /// (<see cref="MappingSourceCallerMask"/>). Registered unconditionally (<c>SpaarkeCore</c>). Optional so a host without it
+    /// still composes this service; without it a mapping source is UNAVAILABLE (nothing copied, fail closed), never copied
+    /// unmasked.</param>
     public OfficeRecordCreationService(
         IGenericEntityService entities,
         IFieldMappingDataverseService fieldMappings,
@@ -322,10 +331,12 @@ public sealed class OfficeRecordCreationService
         Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
         ILogger<OfficeRecordCreationService> logger,
         Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe? callerAccess = null,
-        Microsoft.AspNetCore.Http.IHttpContextAccessor? http = null)
+        Microsoft.AspNetCore.Http.IHttpContextAccessor? http = null,
+        IDataverseUserClient? callerClient = null)
     {
         _callerAccess = callerAccess;
         _http = http;
+        _callerClient = callerClient;
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _fieldMappings = fieldMappings ?? throw new ArgumentNullException(nameof(fieldMappings));
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
@@ -1238,9 +1249,10 @@ public sealed class OfficeRecordCreationService
         Entity? source = null;
         if (sourceColumns.Count > 0)
         {
+            Entity? appRead = null;
             try
             {
-                source = await _entities
+                appRead = await _entities
                     .RetrieveAsync(sourceEntity, sourceRecordId, sourceColumns.ToArray(), ct)
                     .ConfigureAwait(false);
             }
@@ -1253,13 +1265,33 @@ public sealed class OfficeRecordCreationService
                 _logger.LogWarning(ex,
                     "[RECORD-CREATE] Source record {Source}({SourceId}) could not be read for field mapping.",
                     sourceEntity, sourceRecordId);
-                warnings.Add(
-                    "The related record could not be read, so its Copy/Concat/Template field mappings were skipped.");
+                warnings.Add(SourceUnreadableWarning);
+            }
+
+            if (appRead is not null)
+            {
+                // #2188: the app-only read is not subject to field-level security, so it is masked down to the columns the
+                // CALLER can read (one OBO read of the same row) before any rule sees it. A caller read that fails makes the
+                // source unavailable — the same single warning as an app read that fails, never the app-read values.
+                source = await MappingSourceCallerMask
+                    .ApplyAsync(_callerClient, sourceEntity, sourceRecordId, appRead, sourceColumns, _logger, ct)
+                    .ConfigureAwait(false);
+                if (source is null)
+                {
+                    warnings.Add(SourceUnreadableWarning);
+                }
             }
         }
 
         CreateTimeFieldMapping.Apply(rules, target, source, protectedAttributes, warnings, _logger);
     }
+
+    /// <summary>
+    /// The ONE source-level warning when the mapping source could not be used — the app read failed, or the caller read
+    /// (#2188, <see cref="MappingSourceCallerMask"/>) failed. Copy/Concat/Template rules are then skipped; Defaults still apply.
+    /// </summary>
+    internal const string SourceUnreadableWarning =
+        "The related record could not be read, so its Copy/Concat/Template field mappings were skipped.";
 
     private static bool TryParseGuid(string? value, out Guid id)
         => Guid.TryParse(value?.Trim(), out id) && id != Guid.Empty;

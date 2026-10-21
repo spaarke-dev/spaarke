@@ -48,7 +48,8 @@ public class RecordCreationAssignedInternalTests
             identity.Object,
             Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(),
             Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(),
-            NullLogger<OfficeRecordCreationService>.Instance);
+            NullLogger<OfficeRecordCreationService>.Instance,
+            callerClient: MappingSourceCallerReadDouble.MirroringAppReads(_entities)); // #2188: the caller reads what the app read returned
     }
 
     private OfficeRecordCreationService Sut(Guid? makersContact) => Sut(IdentityNormalizationFixtures.WithContact(makersContact));

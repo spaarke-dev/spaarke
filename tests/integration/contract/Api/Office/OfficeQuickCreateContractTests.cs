@@ -1003,8 +1003,17 @@ public sealed class OfficeQuickCreateTestWebAppFactory : OfficeTestWebAppFactory
         "prvCreatesprk_Matter", "prvCreatesprk_Project", "prvCreatesprk_Invoice",
     };
 
+    /// <summary>
+    /// #2188: the caller-context (OBO) read the creation service masks the mapping source through. Default: a caller who
+    /// reads every column the app-only read returned, so every pre-existing test keeps its meaning; a test marks a column
+    /// <see cref="MappingSourceCallerReadDouble.Secured"/> or fails the read to model field security or a fault.
+    /// </summary>
+    public MappingSourceCallerReadDouble CallerRead { get; }
+
     public OfficeQuickCreateTestWebAppFactory()
     {
+        CallerRead = MappingSourceCallerReadDouble.MirroringAppReads(Entities);
+
         // uac-r2 task 166 (S-69): the filter's second half asks the CALLER's table Create privilege through the
         // probe's virtual privilege seam. Answered from HeldPrivileges. (The Office test clients send no bearer
         // token — TestAuthHandler authenticates without one — so the seam does not model the real probe's
@@ -1039,6 +1048,9 @@ public sealed class OfficeQuickCreateTestWebAppFactory : OfficeTestWebAppFactory
 
             services.RemoveAll<CallerRecordAccessProbe>();
             services.AddSingleton(AccessProbe.Object);
+
+            services.RemoveAll<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient>();
+            services.AddSingleton<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient>(CallerRead);
         });
     }
 }

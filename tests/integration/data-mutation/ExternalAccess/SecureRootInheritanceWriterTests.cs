@@ -615,7 +615,8 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
         return new OfficeRecordCreationService(entities.Object, fieldMappings.Object, ownership.Object,
             IdentityNormalizationFixtures.NoLinkedContact(), _gate,
             Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(), NullLogger<OfficeRecordCreationService>.Instance,
-            _officeProbe.Object, new HttpContextAccessor { HttpContext = withBearerToken ? CallerRequest() : new DefaultHttpContext() });
+            _officeProbe.Object, new HttpContextAccessor { HttpContext = withBearerToken ? CallerRequest() : new DefaultHttpContext() },
+            MappingSourceCallerReadDouble.MirroringAppReads(entities)); // #2188: the caller reads what the app read returned
     }
 
     /// <summary>

@@ -1,0 +1,224 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Security.Claims;
+using FluentAssertions;
+using Microsoft.Xrm.Sdk;
+using Moq;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Models.Office;
+using Sprk.Bff.Api.Services.Ai.Context;
+using Sprk.Bff.Api.Services.Office;
+using Sprk.Bff.Api.Tests.Api.Office;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
+using Xunit;
+using EntityReference = Microsoft.Xrm.Sdk.EntityReference;
+
+namespace Sprk.Bff.Api.Tests.Auth.Office;
+
+/// <summary>
+/// #2188 (field-mapping-server-write-path-r1 DI-004) — <c>POST /api/office/quickcreate/matter</c> never copies a source column
+/// the CALLER cannot read. The source is read app-only (after the record-level Read check in
+/// <c>QuickCreateSourceAccessFilter</c>, unchanged), then masked through one caller read of the same row
+/// (<c>MappingSourceCallerMask</c>) before any field-mapping rule sees it.
+/// </summary>
+/// <remarks>
+/// The real pipeline runs end to end (<see cref="OfficeQuickCreateTestWebAppFactory"/>); the caller's own Dataverse is
+/// <see cref="MappingSourceCallerReadDouble"/>, which masks a field-secured column as null the way Dataverse does.
+/// </remarks>
+public class OfficeQuickCreateSourceFieldSecurityTests
+{
+    private const string Route = "/api/office/quickcreate/matter";
+
+    private static readonly Guid OwnerId = Guid.Parse("7d0e8a41-3b5c-4f2e-9a10-5c2b7e4f1a02");
+    private static readonly Guid MatterTypeId = Guid.Parse("b2c4e6a8-1d3f-4a5b-8c7d-9e0f1a2b3c02");
+    private static readonly Guid SourceProjectId = Guid.Parse("1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b2188");
+    private static readonly Guid AccountId = Guid.Parse("9f8e7d6c-5b4a-4c3d-8e2f-1a0b9c8d7e02");
+    private static readonly Guid CreatedMatterId = Guid.Parse("00000000-0000-0000-0000-00000000c188");
+
+    private const string Secret = "TOP-SECRET-FEE-ARRANGEMENT";
+
+    /// <summary>Copy a readable text column, copy a lookup, copy the secured column, and template the secured column.</summary>
+    private static readonly FieldMappingRuleEntity[] Profile =
+    {
+        Rule("copy-ref", "sprk_clientreference", 0, "sprk_clientreference", 0, mappingType: 0, order: 1),
+        Rule("copy-client", "sprk_client", 1, "sprk_client", 1, mappingType: 0, order: 2),
+        Rule("copy-secret", "sprk_feearrangement", 0, "sprk_matterdescription", 6, mappingType: 0, order: 3),
+        Rule("template-secret", "", 0, "sprk_matternotes", 6, mappingType: 3, order: 4,
+            expression: "Fee: {sprk_feearrangement}"),
+    };
+
+    private static Entity Source(bool withSecret = true, bool withClient = true)
+    {
+        var source = new Entity("sprk_project", SourceProjectId) { ["sprk_clientreference"] = "ACME-REF" };
+        if (withClient)
+        {
+            source["sprk_client"] = new EntityReference("account", AccountId);
+        }
+
+        if (withSecret)
+        {
+            source["sprk_feearrangement"] = Secret;
+        }
+
+        return source;
+    }
+
+    // ── must fire ───────────────────────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Post_Matter_AFieldSecuredSourceColumnTheCallerCannotRead_IsNotCopied_AndWarnsExactlyAsAnEmptyColumn()
+    {
+        var secured = await CreateAsync(Source(withSecret: true), caller => caller.Secured.Add("sprk_feearrangement"));
+        var empty = await CreateAsync(Source(withSecret: false));
+
+        secured.Status.Should().Be(HttpStatusCode.Created);
+        secured.Matter!.Attributes.Values.OfType<string>().Should().NotContain(v => v.Contains(Secret),
+            "a column the caller cannot read is never copied, by Copy or by Template");
+        secured.Matter.Contains("sprk_matterdescription").Should().BeFalse();
+        secured.Matter.GetAttributeValue<string>("sprk_matternotes").Should().Be("Fee: ");
+        secured.Matter.GetAttributeValue<string>("sprk_clientreference").Should().Be("ACME-REF", "readable columns still copy");
+
+        secured.Warnings.Should().Equal(empty.Warnings,
+            "a masked column must be indistinguishable from an empty one: same texts, same count, same order");
+        secured.Warnings.Should().ContainSingle(w => w.Contains("{sprk_feearrangement}") && w.Contains("left blank"));
+        secured.Matter.Attributes.Should().BeEquivalentTo(empty.Matter!.Attributes);
+    }
+
+    [Fact]
+    public async Task Post_Matter_ALookupTheCallerCannotRead_IsNotCopied_AndWarnsExactlyAsAnEmptyLookup()
+    {
+        var secured = await CreateAsync(Source(), caller => caller.Secured.Add("sprk_client"));
+        var empty = await CreateAsync(Source(withClient: false));
+
+        secured.Status.Should().Be(HttpStatusCode.Created);
+        secured.Matter!.Contains("sprk_client").Should().BeFalse();
+        secured.Warnings.Should().Equal(empty.Warnings);
+    }
+
+    public static TheoryData<string> CallerReadFailures() => new() { "403", "404", "500", "0", "fault", "timeout" };
+
+    [Theory]
+    [MemberData(nameof(CallerReadFailures))]
+    public async Task Post_Matter_WhenTheCallerReadDoesNotAnswer_CopiesNothing_AndGivesTheOneSourceLevelWarning(string failure)
+    {
+        var result = await CreateAsync(Source(), caller =>
+        {
+            switch (failure)
+            {
+                case "fault": caller.Throw = new HttpRequestException("connection reset"); break;
+                case "timeout": caller.Throw = new TaskCanceledException("HttpClient.Timeout elapsed"); break;
+                default: caller.FailWithStatus = int.Parse(failure, System.Globalization.CultureInfo.InvariantCulture); break;
+            }
+        });
+        var appReadFailed = await CreateAsync(source: null);
+
+        result.Status.Should().Be(HttpStatusCode.Created, "the create proceeds without the mapped values");
+        result.Matter!.Contains("sprk_clientreference").Should().BeFalse("never a fallback to the app-read values");
+        result.Matter.Contains("sprk_client").Should().BeFalse();
+        result.Matter.Contains("sprk_matterdescription").Should().BeFalse();
+        result.Matter.Contains("sprk_matternotes").Should().BeFalse();
+        result.Warnings.Should().ContainSingle(w => w == OfficeRecordCreationService.SourceUnreadableWarning);
+        result.Warnings.Should().Equal(appReadFailed.Warnings,
+            "a source the caller read could not use reads exactly like one the app read could not (missing, denied or faulted)");
+        result.AppSourceReads.Should().Be(1, "the source is read app-only once; a failed caller read is never retried app-only");
+    }
+
+    // ── must not fire ───────────────────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Post_Matter_ReadableScalarAndLookupColumns_AreCopied_ThroughOneCallerRead()
+    {
+        var result = await CreateAsync(Source());
+
+        result.Status.Should().Be(HttpStatusCode.Created);
+        result.Matter!.GetAttributeValue<string>("sprk_clientreference").Should().Be("ACME-REF");
+        result.Matter.GetAttributeValue<EntityReference>("sprk_client").Should().BeEquivalentTo(new EntityReference("account", AccountId));
+        result.Matter.GetAttributeValue<string>("sprk_matterdescription").Should().Be(Secret, "a column the caller CAN read copies");
+        result.Matter.GetAttributeValue<string>("sprk_matternotes").Should().Be($"Fee: {Secret}");
+        result.CallerReads.Should().ContainSingle().Which.Should().StartWith($"sprk_projects({SourceProjectId:D})?$select=");
+    }
+
+    // ── harness ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+    private sealed record Outcome(
+        HttpStatusCode Status, Entity? Matter, IReadOnlyList<string> Warnings, int AppSourceReads, IReadOnlyList<string> CallerReads);
+
+    /// <param name="source">The app-only read's answer; <see langword="null"/> makes the app read fault.</param>
+    /// <param name="arrangeCaller">Shapes the caller's own read (default: reads everything the app read returned).</param>
+    private static async Task<Outcome> CreateAsync(Entity? source, Action<MappingSourceCallerReadDouble>? arrangeCaller = null)
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        factory.CallerResolver
+            .Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CallerSystemUserResolution.Resolved(OwnerId.ToString("D")));
+        factory.Entities
+            .Setup(e => e.RetrieveAsync("sprk_mattertype_ref", MatterTypeId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_mattertype_ref", MatterTypeId));
+        factory.AccessProbe
+            .Setup(p => p.GetCallerRightsAsync(It.IsAny<string>(), "sprk_projects", SourceProjectId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AccessRights.Read);
+        factory.FieldMappings
+            .Setup(m => m.GetFieldMappingProfileWithRulesAsync("sprk_project", "sprk_matter", true, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FieldMappingProfileEntity
+            {
+                Id = Guid.NewGuid(), Name = "Project to Matter", SourceEntity = "sprk_project", TargetEntity = "sprk_matter",
+                IsActive = true, Rules = Profile.ToList(),
+            });
+
+        var sourceRead = factory.Entities
+            .Setup(e => e.RetrieveAsync("sprk_project", SourceProjectId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()));
+        if (source is null)
+        {
+            sourceRead.ThrowsAsync(new InvalidOperationException("Dataverse unavailable"));
+        }
+        else
+        {
+            sourceRead.ReturnsAsync(source);
+        }
+
+        Entity? created = null;
+        factory.Entities
+            .Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((entity, _) => created = entity)
+            .ReturnsAsync(CreatedMatterId);
+        factory.Entities
+            .Setup(e => e.RetrieveAsync("sprk_matter", CreatedMatterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_matter", CreatedMatterId) { ["sprk_matternumber"] = "MAT-002188" });
+
+        arrangeCaller?.Invoke(factory.CallerRead);
+
+        var response = await factory.CreateClient().PostAsJsonAsync(Route, new QuickCreateRequest
+        {
+            Name = "Acme Fee Review",
+            MatterTypeId = MatterTypeId,
+            SourceEntityType = "sprk_project",
+            SourceRecordId = SourceProjectId,
+        });
+
+        var body = response.StatusCode == HttpStatusCode.Created
+            ? await response.Content.ReadFromJsonAsync<QuickCreateResponse>()
+            : null;
+        var appSourceReads = factory.Entities.Invocations.Count(i =>
+            i.Method.Name == nameof(IGenericEntityService.RetrieveAsync) && Equals(i.Arguments[0], "sprk_project"));
+
+        return new Outcome(response.StatusCode, created, body?.Warnings ?? Array.Empty<string>(), appSourceReads,
+            factory.CallerRead.Paths.ToList());
+    }
+
+    private static FieldMappingRuleEntity Rule(
+        string name, string sourceField, int sourceType, string targetField, int targetType,
+        int mappingType, int order, string? defaultValue = null, string? expression = null) => new()
+        {
+            Id = Guid.NewGuid(),
+            Name = name,
+            SourceField = sourceField,
+            SourceFieldType = sourceType,
+            TargetField = targetField,
+            TargetFieldType = targetType,
+            MappingType = mappingType,
+            ExecutionOrder = order,
+            DefaultValue = defaultValue,
+            Expression = expression,
+            IsActive = true,
+        };
+}

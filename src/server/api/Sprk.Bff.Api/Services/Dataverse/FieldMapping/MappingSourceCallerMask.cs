@@ -1,0 +1,193 @@
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using Microsoft.Extensions.Logging;
+using Microsoft.Xrm.Sdk;
+using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
+
+namespace Sprk.Bff.Api.Services.Dataverse.FieldMapping;
+
+/// <summary>
+/// #2188 (field-mapping-server-write-path-r1 DI-004) — masks an app-only mapping-source read down to the columns the CALLER can
+/// read, so a column under column-level (field) security that the caller cannot see is never copied into a record the caller
+/// can see.
+/// </summary>
+/// <remarks>
+/// <para><b>Why.</b> The mapping source is read app-only (typed SDK values the rule engine needs). An app-only read is not
+/// subject to field-level security, so a record-level Read check alone (<see cref="QuickCreateSourceAccessFilter"/>) let a
+/// secured source column the caller cannot read be copied into the new record. Dataverse masks secured columns itself on a
+/// read made AS THE CALLER (it returns them as null), so this helper makes ONE caller read of the same row through
+/// <see cref="IDataverseUserClient"/> (OBO, no app-only fallback) and keeps only the app-read columns that read as non-null
+/// to the caller. No per-column field-security logic is built here: Dataverse answers it.</para>
+///
+/// <para><b>The one test: null versus not-null, failing closed</b> (UAC-r2 condition 1). For each mapped column the app read
+/// returned a value for:</para>
+/// <list type="bullet">
+/// <item>a lookup (<see cref="EntityReference"/>) is asked as <c>_col_value</c> and kept only when that is non-null — the id
+/// only; the target type of a polymorphic lookup is never compared;</item>
+/// <item>a scalar (text, whole/decimal/float number, money, choice, yes/no, date) is asked by its logical name and kept only
+/// when non-null;</item>
+/// <item>a <see cref="Guid"/> is kept only for the source's own primary key (<c>{table}id</c>); any other GUID-valued column
+/// may be a file column and is UNREADABLE;</item>
+/// <item>everything else — file, image (<c>byte[]</c>), party list (<see cref="EntityCollection"/>), multi-select choice
+/// (<see cref="OptionSetValueCollection"/>, whose Web API shape differs), and any type not listed — is UNREADABLE and never
+/// copied, and so is a column whose name is not a plain logical name or that is ABSENT from the caller's response.</item>
+/// </list>
+/// <para>Calculated and rollup columns need no case of their own: they come back in the same shape as their result type on
+/// both reads, and field security masks them the same way.</para>
+///
+/// <para><b>A removed column looks exactly like an empty one</b> (UAC-r2 condition 3). It is simply absent from the returned
+/// entity, which is how the SDK presents an empty column, so the unchanged rule engine
+/// (<see cref="CreateTimeFieldMapping"/>) skips a Copy silently and gives a Concat/Template placeholder its ordinary
+/// "left blank" warning — word for word the empty-column text. Nothing here logs, counts or reports which columns were
+/// removed: the only log line is the source-level one when the caller read fails.</para>
+///
+/// <para><b>Unavailable</b> (UAC-r2 condition 5). A missing client, an unresolvable table, a fault, a non-success status
+/// (403, 404, 5xx, OBO failure), an unparseable body or a timeout make the whole source unavailable: the method returns
+/// <see langword="null"/> and the caller records its single source-level warning. There is never a fallback to the app-read
+/// values. A cancellation of the caller's own token is rethrown.</para>
+///
+/// <para><b>Known limit — the race between the two reads</b> (UAC-r2 condition 2). The app read and the caller read are two
+/// requests. A column that changes between them (filled, emptied, or its field-security profile changed) is judged by the
+/// caller read's null/not-null answer but copied with the app read's value. The window is the length of one request; this
+/// helper deliberately does not re-read to close it.</para>
+///
+/// <para><b>Every source handed to the rule engine passes through here</b> (UAC-r2 condition 4) — enforced by
+/// <c>tests/Spaarke.ArchTests/MappingSourceCallerMaskGuardTests.cs</c>.</para>
+///
+/// <para>ADR-010: static, no DI registration, no interface (the <see cref="MappingSourceReadProbe"/> pattern).</para>
+/// </remarks>
+internal static partial class MappingSourceCallerMask
+{
+    [GeneratedRegex(@"^[a-z][a-z0-9_]*$", RegexOptions.CultureInvariant)]
+    private static partial Regex LogicalNameRegex();
+
+    /// <summary>
+    /// The app-read <paramref name="appRead"/> reduced to the <paramref name="mappedColumns"/> the caller can read, or
+    /// <see langword="null"/> when the caller read could not be made or answered (the source is then unavailable — nothing is
+    /// copied). Never throws except a cancellation of <paramref name="ct"/>.
+    /// </summary>
+    /// <param name="caller">The caller-context (OBO) client; <see langword="null"/> makes the source unavailable.</param>
+    /// <param name="sourceEntityLogicalName">The source table's logical name (as the app read used it).</param>
+    /// <param name="sourceRecordId">The source row.</param>
+    /// <param name="appRead">The app-only read of the source's mapped columns.</param>
+    /// <param name="mappedColumns">The profile's source columns (<see cref="CreateTimeFieldMapping.CollectSourceColumns"/>).</param>
+    /// <param name="logger">Optional logger; it never receives a column name or a column count.</param>
+    /// <param name="ct">Cancellation; its cancellation propagates.</param>
+    internal static async Task<Entity?> ApplyAsync(
+        IDataverseUserClient? caller,
+        string sourceEntityLogicalName,
+        Guid sourceRecordId,
+        Entity appRead,
+        IReadOnlyCollection<string> mappedColumns,
+        ILogger? logger,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(appRead);
+        ArgumentNullException.ThrowIfNull(mappedColumns);
+
+        if (caller is null)
+        {
+            logger?.LogWarning(
+                "[FIELD-MAPPING-SOURCE] No caller-context Dataverse client for {EntityType}({RecordId}); the source is unavailable.",
+                sourceEntityLogicalName, sourceRecordId);
+            return null;
+        }
+
+        if (!EntityAccessFilter.TryResolveEntitySet(sourceEntityLogicalName, out var entitySet))
+        {
+            logger?.LogWarning(
+                "[FIELD-MAPPING-SOURCE] {EntityType} has no entity-set mapping, so it cannot be read as the caller; the source is unavailable.",
+                sourceEntityLogicalName);
+            return null;
+        }
+
+        var mapped = new HashSet<string>(mappedColumns, StringComparer.OrdinalIgnoreCase);
+        var primaryKey = sourceEntityLogicalName.Trim().ToLowerInvariant() + "id";
+
+        // Every candidate: (the app read's attribute key, the Web API property the caller read must answer non-null).
+        var candidates = new List<(string Key, string Property)>();
+        foreach (var attribute in appRead.Attributes)
+        {
+            if (!mapped.Contains(attribute.Key) || attribute.Value is null)
+            {
+                continue; // not mapped, or already empty — nothing to copy either way
+            }
+
+            if (WebApiPropertyFor(attribute.Key, attribute.Value, primaryKey) is { } property)
+            {
+                candidates.Add((attribute.Key, property));
+            }
+
+            // else UNREADABLE by kind: not a candidate, so it is never copied.
+        }
+
+        // The row's primary key is always selected, so the caller read is made — and has the same shape — whatever the
+        // source's columns hold (an empty column and a masked one cost the same request).
+        var select = candidates.Select(c => c.Property).Append(primaryKey).Distinct(StringComparer.Ordinal);
+        var path = $"{entitySet}({sourceRecordId:D})?$select={string.Join(",", select)}";
+
+        DataverseUserResponse response;
+        try
+        {
+            response = await caller.GetAsync(path, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // A timeout (a cancellation that is not the caller's) and any fault: unavailable, never the app-read values.
+            logger?.LogWarning(ex,
+                "[FIELD-MAPPING-SOURCE] The caller read of {EntityType}({RecordId}) failed; the source is unavailable.",
+                sourceEntityLogicalName, sourceRecordId);
+            return null;
+        }
+
+        if (!response.IsSuccess || response.Body is not { ValueKind: JsonValueKind.Object } body)
+        {
+            logger?.LogWarning(
+                "[FIELD-MAPPING-SOURCE] The caller read of {EntityType}({RecordId}) answered {StatusCode} {ErrorCode}; the source is unavailable.",
+                sourceEntityLogicalName, sourceRecordId, response.StatusCode, response.ErrorCode);
+            return null;
+        }
+
+        var masked = new Entity(appRead.LogicalName, appRead.Id);
+        foreach (var (key, property) in candidates)
+        {
+            if (!body.TryGetProperty(property, out var value) || value.ValueKind == JsonValueKind.Null)
+            {
+                continue; // secured (masked) or absent to the caller: left out — exactly what an empty column looks like
+            }
+
+            masked[key] = appRead[key];
+            if (appRead.FormattedValues.TryGetValue(key, out var label))
+            {
+                masked.FormattedValues[key] = label;
+            }
+        }
+
+        return masked;
+    }
+
+    /// <summary>
+    /// The Web API property the caller read must answer non-null for an app-read value, or <see langword="null"/> when the
+    /// column is UNREADABLE by kind (never copied). Internal for the kind table's tests (ADR-038 A2).
+    /// </summary>
+    internal static string? WebApiPropertyFor(string column, object value, string primaryKey)
+    {
+        if (!LogicalNameRegex().IsMatch(column))
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            EntityReference => $"_{column}_value",
+            Guid => string.Equals(column, primaryKey, StringComparison.Ordinal) ? column : null,
+            string or int or long or decimal or double or bool or DateTime or OptionSetValue or Money => column,
+            _ => null, // file, image, party list, multi-select choice, anything unlisted
+        };
+    }
+}
