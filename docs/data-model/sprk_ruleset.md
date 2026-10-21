@@ -1,8 +1,9 @@
 # sprk_ruleset and the billing columns on the policy store
 
 > **Project**: ebilling-r1, task 019 (FR-09, FR-27, FR-28, D-26, D-66, D-79)
-> **Last Updated**: 2026-10-19
+> **Last Updated**: 2026-10-21 (task 080 additions below; script authored, **not yet run on dev** until ontology-r1's schema review passes and the owner approves: verify against live metadata before relying on them)
 > **Scripts**: `scripts/ebilling/Deploy-EbillingPolicyStoreSchema.ps1` and, for `sprk_rejectionreason` (task 077, D-113), `scripts/ebilling/Deploy-EbillingRuleRejectionReasonSchema.ps1` (both idempotent, additive; a second run changes nothing)
+> **Task 080 script**: `scripts/ebilling/Deploy-EbillingProcedureSchema.ps1` (EB-D-148: the Procedure, Procedure Version and Procedure Assignment tables, the record scope and links below, the billing columns on the core records). Table docs for the three new tables are task 189's.
 > **Owner of the policy tables**: spaarke-ontology-platform-r1 (`Services/Signals/**`). This task only adds columns to them.
 
 Billing rules share the ontology policy store (D-23, D-30): one rules system, two strategies. A **policy** (`sprk_policy`) holds what is stable across versions, a **policy version** (`sprk_policyversion`) holds one immutable published rule body, and the new **rule set** (`sprk_ruleset`) groups the policies drafted from one guideline, rate card or procedure document so that they can be published, scoped to a client default or a firm, cited and shown to firms as a unit (FR-28). Created additively in dev on 2026-10-15; no plugin, business rule or calculated column (ADR-002). Admin forms and views are task 029's.
@@ -26,9 +27,12 @@ User-owned (like `sprk_policy`), entity set `sprk_rulesets`, primary name `sprk_
 | `sprk_name` | Text (200), primary name, application-required | Shown to firms when the rule set is visible to firms (D-66). Required by the BFF write path (task 076), not enforced on API writes: Dataverse enforces ApplicationRequired on forms only. |
 | `sprk_domain` | Choice, global `sprk_policydomain` | Billing in R1. |
 | `sprk_sourcedocument` | Lookup -> `sprk_document` (delete RemoveLink) | The Procedure Library document the rules were drafted from. Internal only (D-63): never exposed to firm users. Relationship `sprk_document_ruleset_sourcedocument`. |
-| `sprk_scope` | Choice (local) | Client default = 100000000, Firm = 100000001. |
+| `sprk_scope` | Choice (local) | Client default = 100000000, Firm = 100000001, **Record = 100000002, Firm record = 100000003** (task 080). A **record-scoped** rule set (Record / Firm record) holds one record's rule changes (model 6.3). **A Record / Firm record set with no record lookup applies to nothing**: the loader requires the scope value *and* a non-null record lookup, so a set unlinked by a record delete can never read as firm-wide. **Field-secured (BFF-only writes)**: Read for every user, Create / Update for the BFF application user only. |
 | `sprk_firm` | Lookup -> `sprk_organization` (delete RemoveLink) | Set only when the scope is Firm. **Enforced by task 076, not by schema.** Relationship `sprk_organization_ruleset_firm`. |
 | `sprk_visibletofirms` | Two-option, default **No** | See "Firm visibility" below. |
+| `sprk_matter`, `sprk_project`, `sprk_workassignment` | Lookup -> the core table (delete **RemoveLink**, optional) | Task 080: one record lookup per core table in `InvoiceFamilyCoreRecordGuard.FilingCores` (read from that source by the script; a core record added there gets its lookup on the next run). Exactly one is set on a Record / Firm record rule set (BFF-enforced). Deleting the record clears the lookup and the set then applies to nothing (D-172). Relationships `sprk_matter_ruleset_matter`, `sprk_project_ruleset_project`, `sprk_workassignment_ruleset_workassignment`. **Field-secured (BFF-only writes).** |
+| `sprk_procedure` | Lookup -> `sprk_procedure` (delete **Restrict**, optional) | Task 080: the Procedure this rule set belongs to. Restrict: a Procedure with a rule set cannot be deleted (retire it), because Signals cite its rules. Relationship `sprk_ruleset_procedure_procedure`. **Field-secured (BFF-only writes).** |
+| `sprk_createdbyperson` | Lookup -> `systemuser` (delete RemoveLink) | Task 080 (O-23, S9): the person who asked for the record; the BFF stamps it. Created unsecured; task 081 secures it. Relationship `sprk_systemuser_sprk_ruleset_createdbyperson`. |
 | `sprk_effectivefrom` / `sprk_effectiveto` | Date only | In-force window (D-74: the rules applied to an invoice are those of rule sets in force on the invoice date). `sprk_effectiveto` empty = open ended. |
 | `sprk_notconverted` | Multiline text (100,000) | JSON list of guideline text the drafting Action (`billing-rule-draft`, task 075) could not convert into a supported rule. |
 
@@ -59,6 +63,7 @@ Existing columns are unchanged. Added:
 |---|---|---|
 | `sprk_domain` | Choice, global `sprk_policydomain` | Empty = Ontology. Billing policies set Billing. |
 | `sprk_ruleset` | Lookup -> `sprk_ruleset` (delete RemoveLink) | The rule set the policy belongs to. Stable across versions. Relationship `sprk_ruleset_policy_ruleset`. |
+| `sprk_createdbyperson` | Lookup -> `systemuser` (delete RemoveLink) | Task 080 (D-173, ontology F4-1): the person who asked for the policy; the BFF stamps it. Created unsecured; task 081 secures it. Relationship `sprk_systemuser_sprk_policy_createdbyperson`. |
 
 ## sprk_policyversion (additive)
 
@@ -78,6 +83,15 @@ Existing columns are unchanged. Added; clause and consequence sit on the version
 
 SubmissionIntegrity is the marker of the seeded policy `BILL-SYSTEM-SUBMISSION` (`scripts/ebilling/Seed-BillingSystemPolicy.ps1`): lane Decide, subject type Invoice, severity Info, domain Billing, **no rule set and no matter**, enabled, one version in force from 2026-10-19 with no end date, consequence Flag, body `{}`. It backs the findings task 049 creates directly: `submission.invoice_number_mismatch` (D-91) and the 047 coding findings `coding.refused_code`, `coding.firm_code_mismatch`, `coding.code_set_needs_review`. Two of its reasons are the variants used when firm-supplied text is not safe to quote (task 049 F1-3; the value is left out, never shortened): `coding.firm_code_mismatch_not_shown` (the billed code is not code-shaped, `BillingRuleCatalogue.IsCodeShaped`; headline "Unrecognised billed code differs from the suggested code") and `submission.invoice_number_mismatch_not_shown` (the number read from the document is not invoice-number-shaped, `BillingRuleCatalogue.IsInvoiceNumberShaped`; the sentence cites only the typed number; headline "Invoice number read differs from the submission"). Both are flag-only like the rest; the invoice-number variant keeps the D-91 reason's precedence (it titles a shared Signal ahead of the coding notes). It is **never authorable** (absent from the drafting Action's options; `PolicyVersionValidator.ValidateBilling` and `ValidateForAuthoring` refuse it as `rule_type_unsupported`, "system rule; not authorable"), never evaluated from a body (no handler; the evaluator skips a stored row), flag-only (`AllowedConsequences` = Flag). An administrator may turn it off (`sprk_enabled`); new versions are refused on every BFF route (the model-driven app has no such refusal); deletion is refused only by the Dataverse privilege on `sprk_policy` (no code-level refusal), so deleting the row in the model-driven app stops these Signals and the ontology sweep closes the open ones as PolicyRetired; the findings stay in the submission's findings JSON either way.
 
+Added by task 080 (EB-D-148, model 7.2):
+
+| Logical name | Type | Notes |
+|---|---|---|
+| `sprk_procedureversion` | Lookup -> `sprk_procedureversion` (delete **Restrict**, optional) | The Procedure Version this policy version belongs to. Restrict: a Procedure Version with policy versions cannot be deleted. Relationship `sprk_policyversion_procedureversion_procedureversion`. **Field-secured (BFF-only writes).** |
+| `sprk_publishstate` | Choice, global `sprk_publishstate` (Draft 100000000, Published 100000001), optional, **no default** | Only Published versions are loaded by the resolver. Existing rows stay empty (dev data is recreated, O-13). **Field-secured (BFF-only writes).** |
+| `sprk_basedonversion` | Lookup -> `sprk_policyversion` (delete **RemoveLink**) | For a record rule: the base rule's policy version it was copied from. Never Restrict (ontology F2-a). Relationship `sprk_policyversion_basedonversion_policyversion`. |
+| `sprk_createdbyperson` | Lookup -> `systemuser` (delete RemoveLink) | Task 080 (D-173, ontology F4-1): the person who asked for the version; the BFF stamps it. Created unsecured; task 081 secures it. Relationship `sprk_systemuser_sprk_policyversion_createdbyperson`. |
+
 The predecessor of a version is its sibling under the same `sprk_policy` with the next-lower `sprk_versionnumber`; there is no extra link column.
 
 ### Existing columns billing rows must still fill
@@ -89,6 +103,9 @@ The predecessor of a version is its sibling under the same `sprk_policy` with th
 The Signals readers of `sprk_policy` select **every enabled, active policy** regardless of subject or domain (`SignalReevaluationJob.ReadEnabledPoliciesAsync`, `PolicyScopeResolver.LoadEnabledPoliciesAsync`). An enabled billing policy would therefore be picked up by the nightly pass and the event-trigger pass; see `projects/ebilling-r1/notes/019-policy-store-ruleset.md` for the reader inventory and what 070 must do.
 
 ## Gotchas
+
+- **Deleting or merging an organization fails while a Procedure or a Procedure Assignment names it** (task 080): `sprk_procedure.sprk_firm` and `sprk_procedureassignment.sprk_firm` are Restrict, because a nulled firm would widen a firm-only Procedure or override to every firm. Retire or re-point the Procedure first.
+- **Parental limit (task 080, dev run 2026-10-21).** Dataverse counts Delete = Cascade as a *parental* relationship and a table can have only **one**. So `sprk_procedureversion.sprk_procedure` (the version's only parental relationship) and `sprk_procedureassignment.sprk_excludedpolicy` (the assignment's only parental relationship) are delete-only cascades (Delete Cascade; assign, share, unshare, reparent, merge and rollup view all NoCascade), and the assignment's three core-record lookups (`sprk_matter`, `sprk_project`, `sprk_workassignment`, one per `FilingCores` table) are **RemoveLink** with nothing cascading. **Deleting a core record therefore does not delete its assignment rows by itself**: the core-record delete planner (task 117) removes them first, with the 117 sweep as the backstop. A reassign or share of a parent never reaches these rows (the record owner resolver and the secure-child job own their owner and shares).
 
 - The primary-name `MaxLength` and `RequiredLevel` in an entity-create body are ignored (850 / None); the script shortens `sprk_name` to 200 (only while the table has no rows) and sets it to ApplicationRequired right after creating the table (DEF-007).
 - The status relabel is safe because the table is new and empty; the script refuses (exit 2) if value 1 or 2 carries any label other than the system or the target one.

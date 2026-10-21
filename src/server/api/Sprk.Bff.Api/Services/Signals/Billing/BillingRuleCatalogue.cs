@@ -6,7 +6,8 @@ using Sprk.Bff.Api.Services.Finance;
 namespace Sprk.Bff.Api.Services.Signals.Billing;
 
 /// <summary>
-/// The eleven billing rule types of spec FR-24 / design.md 6.1 (ebilling-r1 task 070): their catalogue order, embedded
+/// The authorable billing rule types: the eleven of spec FR-24 / design.md 6.1 (ebilling-r1 task 070) plus AddedFee and Discount
+/// (task 115, procedure-and-file-model.md 6.3): their catalogue order, embedded
 /// schema, template fact-field set and describer sentence. Closed: every member is a switch over
 /// <see cref="RuleType"/> (a throwing default for a non-billing type), never a registry, a reflection scan or a data row (D-27).
 /// </summary>
@@ -20,7 +21,8 @@ namespace Sprk.Bff.Api.Services.Signals.Billing;
 /// </remarks>
 public static class BillingRuleCatalogue
 {
-    /// <summary>FR-24 order. Position N (1-based) is FR-26's numbering; its option value is 100000002 + N.</summary>
+    /// <summary>FR-24 order, then the task 115 types. Position N (1-based) is FR-26's numbering; for positions 1-11 its option value is
+    /// 100000002 + N. AddedFee (12) and Discount (13) are 100000015 and 100000016: 100000014 is the system type, which has no position.</summary>
     public static IReadOnlyList<RuleType> Types { get; } = new[]
     {
         RuleType.ApprovedTimekeeper,
@@ -34,6 +36,8 @@ public static class BillingRuleCatalogue
         RuleType.Duplicate,
         RuleType.RequiredData,
         RuleType.AiObservation,
+        RuleType.AddedFee,
+        RuleType.Discount,
     };
 
     /// <summary>
@@ -47,6 +51,50 @@ public static class BillingRuleCatalogue
 
     /// <summary>The refusal text of a system type at an authoring or save path (D-125). Names no rule content.</summary>
     public const string SystemRuleRefusal = "SubmissionIntegrity is a system rule; not authorable.";
+
+    /// <summary>AddedFee's <c>allowance</c> values (the schema's closed vocabulary). Only <see cref="AllowanceCap"/> is evaluated (task 115).</summary>
+    public const string AllowanceNotAllowed = "notAllowed";
+
+    /// <inheritdoc cref="AllowanceNotAllowed"/>
+    public const string AllowanceCap = "cap";
+
+    /// <inheritdoc cref="AllowanceNotAllowed"/>
+    public const string AllowanceAfterDays = "afterDays";
+
+    /// <summary>The refusal of an AddedFee "not allowed" body: no fact says which lines carry a fee kind.</summary>
+    public const string AddedFeeNotAllowedRefusal =
+        "An AddedFee rule with allowance 'notAllowed' cannot be evaluated yet: it needs the fee kind of each invoice line, which invoice " +
+        "extraction does not return. Use allowance 'cap' with feeCodes and capAmount or capPercent.";
+
+    /// <summary>The refusal of an AddedFee "after N days" body: no fact gives a per-line fee kind or the invoice due date.</summary>
+    public const string AddedFeeAfterDaysRefusal =
+        "An AddedFee rule with allowance 'afterDays' cannot be evaluated yet: it needs the fee kind of each invoice line and the invoice " +
+        "due date, which the billing facts do not carry. Use allowance 'cap' with feeCodes and capAmount or capPercent.";
+
+    /// <summary>
+    /// Task 115 (procedure model 6.3, v5.1 row 12): the refusal of a schema-valid body whose form its type cannot evaluate from
+    /// <see cref="BillingFactSet"/>, or <c>null</c>. Today only AddedFee's <c>notAllowed</c> and <c>afterDays</c> allowances, until
+    /// extraction returns a per-line fee kind and the due date. Called after the schema has passed (the body parses and the
+    /// allowance is one of the three); any other type returns <c>null</c>.
+    /// </summary>
+    internal static string? UnsupportedFormRefusal(RuleType ruleType, string? ruleBodyJson)
+    {
+        if (ruleType != RuleType.AddedFee || string.IsNullOrWhiteSpace(ruleBodyJson))
+        {
+            return null;
+        }
+
+        using var document = JsonDocument.Parse(ruleBodyJson);
+        var allowance = document.RootElement.TryGetProperty("allowance", out var a) && a.ValueKind == JsonValueKind.String ? a.GetString() : null;
+        return allowance switch
+        {
+            AllowanceCap => null,
+            AllowanceNotAllowed => AddedFeeNotAllowedRefusal,
+            AllowanceAfterDays => AddedFeeAfterDaysRefusal,
+            // Unreachable after the schema; fail closed all the same.
+            _ => $"An AddedFee rule must have allowance '{AllowanceCap}'.",
+        };
+    }
 
     /// <summary>The 1-based FR-24 / FR-26 catalogue position of a billing type.</summary>
     /// <exception cref="ArgumentOutOfRangeException">Not a billing type.</exception>
@@ -73,6 +121,8 @@ public static class BillingRuleCatalogue
         RuleType.RequiredData => Suffix("required-data"),
         RuleType.AiObservation => Suffix("ai-observation"),
         RuleType.SubmissionIntegrity => Suffix("submission-integrity"),
+        RuleType.AddedFee => Suffix("added-fee"),
+        RuleType.Discount => Suffix("discount"),
         _ => throw new ArgumentOutOfRangeException(nameof(ruleType), ruleType, "Not a billing rule type."),
     };
 
@@ -176,6 +226,12 @@ public static class BillingRuleCatalogue
         RuleType.SubmissionIntegrity => Fields(
             "submission.invoiceNumber", "invoice.invoiceNumber", "line.codeKind", "line.refusedCode", "line.firmCode", "line.suggestedCode",
             "codeSet.name"),
+        // Task 115: AddedFee's cap form only (the other two allowances are refused before evaluation); feeTotal / feeLimit are amounts.
+        // AddedFee's finding is invoice level (ontology-r1 115 review F3-6), so it has no line token; rule.feeKind is the kind's label.
+        RuleType.AddedFee => Fields("feeTotal", "feeLimit", "rule.feeKind"),
+        // discountedRate is rack x (1 - discount); discountLimit adds the tolerance and is what the rate is compared with (review F2-1).
+        RuleType.Discount => Fields(
+            "line.date", "line.timekeeperName", "line.rate", "rackRate", "discountedRate", "discountLimit", "rule.discountPercent"),
         _ => throw new ArgumentOutOfRangeException(nameof(ruleType), ruleType, "Not a billing rule type."),
     };
 
@@ -234,8 +290,26 @@ public static class BillingRuleCatalogue
         BillingEvaluationReasons.CurrencyMissing => RatesNotCheckedPrefix + "missing.",
         BillingEvaluationReasons.CurrencyUnreliable => RatesNotCheckedPrefix + "unclear.",
         BillingEvaluationReasons.CurrencyNotUsd => RatesNotCheckedPrefix + "not USD.",
+        BillingReasonCodes.DiscountNotCheckedNoRackRate => DiscountNotCheckedTemplate,
+        BillingReasonCodes.AddedFeeNotChecked => AddedFeeNotCheckedTemplate,
         _ => null,
     };
+
+    // ── Task 115 "not checked" reasons (ontology-r1 115 review F2-3, F2-4; the D-115 pattern): flag only, invoice level, no token. ──
+
+    /// <summary>The message of <see cref="BillingReasonCodes.DiscountNotCheckedNoRackRate"/>.</summary>
+    public const string DiscountNotCheckedTemplate =
+        "The agreed discount was not checked on every fee line: at least one line has no standard (rack) rate on the rate card.";
+
+    /// <summary>The title of <see cref="BillingReasonCodes.DiscountNotCheckedNoRackRate"/>'s Signal.</summary>
+    public const string DiscountNotCheckedHeadline = "Discount not checked: no rack rate";
+
+    /// <summary>The message of <see cref="BillingReasonCodes.AddedFeeNotChecked"/>.</summary>
+    public const string AddedFeeNotCheckedTemplate =
+        "The added-fee limit was not checked: it is a percent of the invoice's other lines, and their total is zero or less or a line has no amount.";
+
+    /// <summary>The title of <see cref="BillingReasonCodes.AddedFeeNotChecked"/>'s Signal.</summary>
+    public const string AddedFeeNotCheckedHeadline = "Added-fee limit not checked";
 
     // ── System reasons (D-125). Each claims only what was compared, never that a document is "invalid". ───────────────────────────
 
@@ -355,6 +429,8 @@ public static class BillingRuleCatalogue
         BillingReasonCodes.CodingUnavailable => CodingUnavailableHeadline,
         BillingEvaluationReasons.CurrencyMissing or BillingEvaluationReasons.CurrencyUnreliable or BillingEvaluationReasons.CurrencyNotUsd
             => RatesNotCheckedHeadline,
+        BillingReasonCodes.DiscountNotCheckedNoRackRate => DiscountNotCheckedHeadline,
+        BillingReasonCodes.AddedFeeNotChecked => AddedFeeNotCheckedHeadline,
         _ => null,
     };
 
@@ -376,6 +452,8 @@ public static class BillingRuleCatalogue
             or BillingReasonCodes.SubmissionInvoiceNumberMismatchNotShown or BillingReasonCodes.CodingFirmCodeMismatchNotShown
             or BillingReasonCodes.CodingNoCodeSet or BillingReasonCodes.CodingUnavailable => true,
         BillingEvaluationReasons.CurrencyMissing or BillingEvaluationReasons.CurrencyUnreliable or BillingEvaluationReasons.CurrencyNotUsd => true,
+        // Task 115: "not checked" is a fact about the invoice's data, not a breach (as D-115).
+        BillingReasonCodes.DiscountNotCheckedNoRackRate or BillingReasonCodes.AddedFeeNotChecked => true,
         _ => false,
     };
 
@@ -392,6 +470,8 @@ public static class BillingRuleCatalogue
             or RuleType.CoreRecordWindow or RuleType.Duplicate or RuleType.RequiredData => true,
         RuleType.TimeIncrement or RuleType.DailyHoursCap or RuleType.NonBillableActivity or RuleType.AiObservation
             or RuleType.SubmissionIntegrity => false,
+        // Task 115 (the FR-26 list is unchanged): an added fee over its cap and a discount not applied are for a reviewer, never a rejection.
+        RuleType.AddedFee or RuleType.Discount => false,
         _ => throw new ArgumentOutOfRangeException(nameof(ruleType), ruleType, "Not a billing rule type."),
     };
 
@@ -423,6 +503,8 @@ public static class BillingRuleCatalogue
         RuleType.RequiredData => Consequences(BillingConsequence.Reject, BillingConsequence.Flag),
         RuleType.AiObservation => Consequences(BillingConsequence.Flag),
         RuleType.SubmissionIntegrity => Consequences(BillingConsequence.Flag),
+        RuleType.AddedFee => Consequences(BillingConsequence.Flag),
+        RuleType.Discount => Consequences(BillingConsequence.Flag),
         _ => throw new ArgumentOutOfRangeException(nameof(ruleType), ruleType, "Not a billing rule type."),
     };
 
@@ -445,6 +527,8 @@ public static class BillingRuleCatalogue
         {
             RuleType.AiObservation => "an AI observation never rejects a submission (I-5)",
             RuleType.SubmissionIntegrity => "a submission-integrity finding holds the invoice for review and never rejects or adjusts it (D-125)",
+            RuleType.AddedFee => "an added fee over its allowance is flagged for review, never rejected or adjusted (FR-26)",
+            RuleType.Discount => "a discount rule is a check only: it flags a line rate above the agreed discounted rate and never rejects or adjusts",
             RuleType.ApprovedTimekeeper when chosen == BillingConsequence.Reject => "an unapproved timekeeper holds the invoice for review and never rejects it (D-89)",
             _ when chosen == BillingConsequence.Reject => "this rule type may not reject a submission (FR-26)",
             _ => "this rule type does not suggest adjustments (design.md 6.1)",
@@ -474,7 +558,7 @@ public static class BillingRuleCatalogue
         RuleType.Duplicate => RejectCapable(BillingReasonCodes.DuplicateInvoiceNumber),
         RuleType.RequiredData => RejectCapable(BillingReasonCodes.RequiredFieldMissing),
         RuleType.ApprovedTimekeeper or RuleType.TimeIncrement or RuleType.DailyHoursCap or RuleType.NonBillableActivity
-            or RuleType.AiObservation or RuleType.SubmissionIntegrity => RejectCapable(),
+            or RuleType.AiObservation or RuleType.SubmissionIntegrity or RuleType.AddedFee or RuleType.Discount => RejectCapable(),
         _ => throw new ArgumentOutOfRangeException(nameof(ruleType), ruleType, "Not a billing rule type."),
     };
 
@@ -525,6 +609,8 @@ public static class BillingRuleCatalogue
         RuleType.SubmissionIntegrity => (
             "System rule: the submission's invoice number and the line coding are compared, and a difference is flagged for review.",
             "SubmissionIntegrity()"),
+        RuleType.AddedFee => DescribeAddedFee(root),
+        RuleType.Discount => DescribeDiscount(root),
         _ => throw new ArgumentOutOfRangeException(nameof(ruleType), ruleType, "Not a billing rule type."),
     };
 
@@ -547,6 +633,47 @@ public static class BillingRuleCatalogue
         }
 
         return ($"No expense line {string.Join(" or ", parts)}.", $"ExpenseRule({string.Join(", ", formal)})");
+    }
+
+    private static (string, string) DescribeAddedFee(JsonElement root)
+    {
+        var kind = root.GetProperty("feeKind").GetString();
+        var label = FeeKindLabel(kind);
+        switch (root.GetProperty("allowance").GetString())
+        {
+            case "cap" when root.TryGetProperty("capAmount", out _):
+                return (
+                    $"The {label} lines (expense codes {List(root, "feeCodes")}) total at most {Num(root, "capAmount")} on an invoice.",
+                    $"AddedFee(feeKind={kind}, allowance=cap, feeCodes=[{List(root, "feeCodes")}], capAmount={Num(root, "capAmount")})");
+            case "cap":
+                return (
+                    $"The {label} lines (expense codes {List(root, "feeCodes")}) total at most {Num(root, "capPercent")} percent of the invoice's other lines.",
+                    $"AddedFee(feeKind={kind}, allowance=cap, feeCodes=[{List(root, "feeCodes")}], capPercent={Num(root, "capPercent")})");
+            case "afterDays":
+                // Refused before it is saved or evaluated (rule_form_not_supported); described only so the closed switch has an answer.
+                return (
+                    $"A {label} is allowed only {Num(root, "afterDays")} days after the invoice due date.",
+                    $"AddedFee(feeKind={kind}, allowance=afterDays, afterDays={Num(root, "afterDays")})");
+            default:
+                return ($"No {label} may be billed.", $"AddedFee(feeKind={kind}, allowance=notAllowed)");
+        }
+    }
+
+    /// <summary>The words for an AddedFee <c>feeKind</c> (the schema's closed vocabulary): what a description or a finding shows, never the raw value.</summary>
+    internal static string FeeKindLabel(string? feeKind) => feeKind switch
+    {
+        "lateFee" => "late fee",
+        "administrativeFee" => "administrative fee",
+        "interest" => "interest",
+        _ => "added fee",
+    };
+
+    private static (string, string) DescribeDiscount(JsonElement root)
+    {
+        var tolerance = root.TryGetProperty("tolerancePercent", out var t) ? t.GetRawText() : "0";
+        return (
+            $"Each fee line's billed rate is at most the rack rate less the agreed discount of {Num(root, "discountPercent")} percent, plus {tolerance} percent.",
+            $"Discount(discountPercent={Num(root, "discountPercent")}, tolerancePercent={tolerance})");
     }
 
     private static int IndexOf(RuleType ruleType)

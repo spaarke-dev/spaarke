@@ -119,7 +119,7 @@
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Internal route only; flagged-external users get invoice files through 093's firm route. 092 wires uploads, extraction and the review page's file id; 094 the Submit Invoice copy; 150 export files; 086 the secure family. 079 sets dev values after 091.</notes>
+  <notes>Internal route only; flagged-external users get invoice files through 093's firm route. 092 wires uploads, extraction and the review page's file id; 094 the Submit Invoice copy; 150 export files; 086 the secure family. 079 sets dev values after 091. SCAN-TAG (uac-r2 condition 3, 2026-10-21): the BFF keeps blob write, so it can overwrite a scanned blob. The download serves only when the tag 'Malware Scanning scan result' = 'No threats found' AND the scan time is no earlier than the blob's Last-Modified. A missing tag, an unreadable tag or an older scan refuses. Pinned by a test: tagged clean, then Last-Modified later, then refused. Keep the time check even if dev shows an overwrite clears tags.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

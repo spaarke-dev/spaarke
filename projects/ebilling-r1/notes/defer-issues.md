@@ -1000,3 +1000,16 @@ Each restamps afterwards, but none refuses any of these:
 **Description**: `sprk_findingsjson` has no field security, and Core User has Write Deep. A planted junk set makes every Override or Return answer 409 `findings_unreadable`. Fix: field security that lets only the writer identity write the column, or move the set to a writer-owned row.
 
 ---
+
+### DEF-032 — 115: AddedFee 'not allowed' and 'after N days' wait for extraction of fee kind and due date
+
+| Field | Value |
+|---|---|
+| **Status** | Open (deferred to ebilling-r2) |
+| **Urgency** | low |
+| **Filed** | 2026-10-21 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2216 |
+
+**Description**: Task 115 runs only the AddedFee cap form. The other two forms are refused at save and at evaluation (`rule_form_not_supported`) until extraction gives a per-line fee kind and the invoice due date. Known limit: fee lines are matched on expense codes only.
+
+---

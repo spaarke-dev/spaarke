@@ -138,7 +138,7 @@
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>The superseded 084 (rule-set scope, record and business-unit pickers) is dropped with the BU filter and record-scoped rule-set assignment (O-12, EB-D-148). Deployment of Part B is 079's or a later deploy task's. P3-E beside 083 and 085: no shared files except the shared append points.</notes>
+  <notes>The superseded 084 (rule-set scope, record and business-unit pickers) is dropped with the BU filter and record-scoped rule-set assignment (O-12, EB-D-148). Deployment of Part B is 079's or a later deploy task's. P3-E beside 083 and 085: no shared files except the shared append points. spaarke-prototype 2026-10-21: the UI prototype (O-14) is not started; it starts when the owner asks. Answer questions a-g (and h where the read is 084's) from notes/084-prototype-questions.md in this task's DTO notes, and send the notes path to spaarke-prototype.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

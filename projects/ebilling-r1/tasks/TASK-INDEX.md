@@ -1,7 +1,7 @@
 # TASK-INDEX — ebilling-r1
 
 > **Last Updated**: 2026-10-21 (re-plan after EB-D-148: 079–086 rewritten, 087 cancelled, 088–099, 113–117 and 189 added, 150 amended; brief `../notes/replan-eb-d-148.md`)
-> **Task count**: 107 · **Spec**: [`../spec.md`](../spec.md) · **Plan**: [`../plan.md`](../plan.md) · **Decomposition brief**: [`../notes/drafts/task-decomposition.md`](../notes/drafts/task-decomposition.md)
+> **Task count**: 108 · **Spec**: [`../spec.md`](../spec.md) · **Plan**: [`../plan.md`](../plan.md) · **Decomposition brief**: [`../notes/drafts/task-decomposition.md`](../notes/drafts/task-decomposition.md)
 > **Legend**: 🔲 [open] not started · 🟡 [wip] in progress · ⏸ [wip] waiting on an owner decision · ✅ [done] completed · 🔄 needs retry · ⏭️ [deferred]. The bracketed ASCII token is what `scripts/check-task-status-drift.ps1` reads (`[blocked]` there means blocked-shipped, a closed state, so it is not used for open blocks).
 
 ## Quick Recovery
@@ -106,6 +106,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 116 | 🔲 [open] | Procedure Version documents: drafting and readers keyed per version on its Stored File; sprk_sourcedocument retired | FULL | opus / high | P3-F (p-safe false) | 081, 085, 090 |
 | 117 | 🔲 [open] | Core-record delete and Procedures: retire sweep for unlinked record-scoped rule sets; delete lists agreed with uac-r2 | FULL | opus / high | P3-D (p-safe false) | 089 |
 | 118 | 🔲 [open] | Submit Invoice in the email UI: toolbar button (replaces Link Invoice), flagged attachments, Email Review Invoice tab | FULL | sonnet / high | P3-F | 094 |
+| 119 | 🔲 [open] | Read-time Duplicate withholding on /review: hide an earlier invoice the reader cannot read (D-176, #2118) | FULL | opus / high | P4-A | 100 |
 
 ### Phase 4 — Review and approval (WP4)
 
@@ -123,7 +124,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 109 | ✅ [done] | ConsoleKit additions: outcome cards, count filters, disclosure, status labels | STANDARD | sonnet / high | P4-A | none |
 | 110 | 🔲 [open] | Invoice Review code page — lines, review pane, corrections, bulk, by-rule | STANDARD | opus / high | P4-C | 100, 101, 102, 108, 109 |
 | 111 | 🔲 [open] | Invoice decision wizard and context / related / history panes | STANDARD | sonnet / high | none | 110, 103, 104, 105, 106, 107 |
-| 112 | 🔲 [open] | Deploy WP4 to dev | STANDARD | sonnet / high | none (deploy) | 052, 100, 101, 102, 103, 104, 105, 106, 107, 110, 111, 079, 095, 096, 097, 113, 114, 118 |
+| 112 | 🔲 [open] | Deploy WP4 to dev | STANDARD | sonnet / high | none (deploy) | 052, 100, 101, 102, 103, 104, 105, 106, 107, 110, 111, 079, 095, 096, 097, 113, 114, 118, 119 |
 
 ### Phase 5 — Firm feedback (WP5)
 
@@ -250,13 +251,14 @@ joined at 049 by `029 → 070 → 071 → 072 → 073 → 049`, and WP1 `029` ga
 | 103 | F-2 — approve with undecided Clean lines (assumed: allowed, implicitly Accepted in bulk) |
 | 104, 105 | F-7 — non-privileged Return of a blocked internal submission |
 | 162 | Any missed NFR-04 – NFR-06 target needs a recorded owner decision |
-| 080, 088, 115 | New schema under EB-D-148 (D-144 covered the old one): ontology-r1 full schema review PASS on the final script and -WhatIf; notices to ontology-r1 and uac-r2 before and after; owner OK for each dev run. 088's real run follows 080's |
-| 091 | Owner OK for any live Azure change; no Key Vault changes. **Escalation:** the stamp identity already holds Storage Blob Data Contributor at account scope (`storage-account.bicep:156-180`), so a container-scoped grant restricts nothing and K-3's mitigation does not hold; 091 stops and asks the owner if dev shows the same |
+| 080, 088, 115 | New schema under EB-D-148 (D-144 covered the old one): ontology-r1 full schema review PASS on the final script and -WhatIf; notices to ontology-r1 and uac-r2 before and after; owner OK for each dev run — **given 2026-10-21** (still after ontology-r1 PASS and notices). 088's real run follows 080's |
+| 091 | Owner OK for any live Azure change — **given 2026-10-21** for the dev storage change; no Key Vault changes. **Escalation:** the stamp identity already holds Storage Blob Data Contributor at account scope (`storage-account.bicep:156-180`), so a container-scoped grant restricts nothing and K-3's mitigation does not hold; 091 stops and asks the owner if dev shows the same |
 | 081, 086, 089, 090, 094, 095, 098, 099, 117 | uac-r2 review (auth / secure family / tenant isolation; 086 and 098 two adversarial passes) |
 | 093, 098 (external gate) | uac-r2 task 188 (`ExternalDocumentNarrowing`) merged. **Met: merged on master 446c83d927 (#2170), 2026-10-21.** 093 also R3 deploy pairing (BFF then SPA; SPA side is R4's) |
 | 095 (external gate) | #2177 merged and deployed — met on dev 2026-10-21 (master 84291ecea8) |
 | 096 | word-add-in-r1 removes the add-in side first; server legs one release later |
 | 084 | UI half waits for the prototype (O-14) |
 | 116 | The `sprk_sourcedocument` column delete runs only after 079, with the owner's OK |
+| 119 (external gate) | ontology-r1 task 157 (SignalReadService Duplicate read check) merged; the same rule is reused |
 | 118 | Builds the shared InvoiceAttachmentMarking component (file subpath export, agreed with word-add-in-r1 2026-10-21); word-add-in-r1 reviews that PR |
 | 163 | UAT sign-off |

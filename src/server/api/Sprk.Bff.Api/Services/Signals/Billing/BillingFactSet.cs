@@ -283,6 +283,13 @@ public sealed record BillingPriorSubmission
 
     public string? FirmInvoiceNumber { get; init; }
 
+    /// <summary>
+    /// The earlier <c>sprk_invoice</c> this submission belongs to (the submission's invoice lookup); <c>null</c> when it has none.
+    /// A visible Duplicate finding carries it as the <c>duplicateOf.invoiceId</c> evidence reference (D-176 / #2118), so a reader can test
+    /// its access to the earlier invoice. Evidence only: never a template fact, never in the fact snapshot.
+    /// </summary>
+    public Guid? InvoiceId { get; init; }
+
     public BillingPriorStatus Status { get; init; }
 
     /// <summary>

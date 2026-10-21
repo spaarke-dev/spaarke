@@ -1213,6 +1213,16 @@
                   <label description="SubmissionIntegrity" languagecode="1033" />
                 </labels>
               </option>
+              <option value="100000015" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="AddedFee" languagecode="1033" />
+                </labels>
+              </option>
+              <option value="100000016" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="Discount" languagecode="1033" />
+                </labels>
+              </option>
             </options>
           </optionset>
           <displaynames>

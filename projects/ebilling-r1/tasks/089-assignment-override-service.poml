@@ -48,6 +48,7 @@
     <constraint source="model 5.2 K-2">sprk_billingfirm and sprk_billingresponsible are not in the access-conferring registry and no grant or share path reads them; ExternalModuleRegistry gains none of the new tables.</constraint>
     <constraint source="project">Not in this task: the resolver and its precedence (082); the 6.6 read models (084); the O-17 sweep that retires record-scoped sets whose record is gone (model 5.2, not assigned in the re-plan; raise it to the main session); delete code (uac-r2's planner and 080's cascade).</constraint>
     <constraint source=".claude/constraints/bff-extensions.md, ADR-010">Concrete service in AddFinanceModule; publish-size delta; no package; no new HIGH CVE.</constraint>
+    <constraint source="uac-r2 2026-10-21 (round 113 item 3; task 191)">Procedures are internal-only. Flagged-external systemusers on dev hold the same roles as internal users (Spaarke Basic User, Spaarke Console User, Spaarke Office Add In User) through their business unit's default team. So until uac-r2 task 191 lands, this task adds NO role privilege on sprk_procedure, sprk_procedureversion or sprk_procedureassignment without uac-r2's agreement; all access goes through the BFF.</constraint>
   </constraints>
 
   <knowledge>
@@ -120,7 +121,7 @@
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Two adversarial-review passes (auth, tenant isolation). Role rows and creator-person columns must be live on dev before 079 deploys the BFF; 079 re-runs both -Verify runs. 086 registers invoice Stored Files on the same files afterwards.</notes>
+  <notes>Two adversarial-review passes (auth, tenant isolation). Role rows and creator-person columns must be live on dev before 079 deploys the BFF; 079 re-runs both -Verify runs. 086 registers invoice Stored Files on the same files afterwards. spaarke-prototype 2026-10-21: answer questions h-j of notes/084-prototype-questions.md (removal-preview read, the typed parameter schema per rule type for change-rule, the request shapes of pin, exclude and change) in this task's notes, and send the path to spaarke-prototype. ontology-r1 080 review 2026-10-21: sprk_procedureversion.sprk_procedure is an alternate-key column and cannot be field-secured, so this task pins (test over the role privileges) that no non-BFF role holds Create or Write on sprk_procedureversion or sprk_procedureassignment. 080 PARENTAL LIMIT (2026-10-21, uac-r2 ACCEPT): Dataverse allows one parental (Delete = Cascade) relationship per table, so sprk_procedureassignment's three core lookups are RemoveLink and sprk_excludedpolicy is its only Cascade. The write validator's 'exactly one core lookup' rule applies to writes only. A stored row with zero core lookups is a sweep candidate, never a validation fault that makes it unreadable or stops a resolver run or the sweep.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

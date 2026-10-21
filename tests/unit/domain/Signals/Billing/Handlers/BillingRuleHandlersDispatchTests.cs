@@ -30,6 +30,8 @@ public class BillingRuleHandlersDispatchTests
         [RuleType.Duplicate] = """{"type":"Duplicate","matchFields":["firmInvoiceNumber","timekeeper","lineDate","hours"]}""",
         [RuleType.RequiredData] = """{"type":"RequiredData","fields":["taskCode"]}""",
         [RuleType.AiObservation] = """{"type":"AiObservation","observation":"blockBilling","minConfidence":0.85}""",
+        [RuleType.AddedFee] = """{"type":"AddedFee","feeKind":"lateFee","allowance":"cap","feeCodes":["E101","E109"],"capAmount":100}""",
+        [RuleType.Discount] = """{"type":"Discount","discountPercent":10}""",
     };
 
     /// <summary>A fact set on which every one of the eleven sample rules fires at least once.</summary>
@@ -90,12 +92,12 @@ public class BillingRuleHandlersDispatchTests
     }
 
     [Fact]
-    public void TheDispatch_CoversExactlyTheElevenBillingTypesOfTheCatalogue()
+    public void TheDispatch_CoversExactlyTheAuthorableBillingTypesOfTheCatalogue()
     {
         var handled = Enum.GetValues<RuleType>().Where(BillingRuleHandlers.HasHandler).ToArray();
 
         handled.Should().BeEquivalentTo(BillingRuleCatalogue.Types);
-        handled.Should().HaveCount(11);
+        handled.Should().HaveCount(13, "the eleven of task 071 plus AddedFee and Discount (task 115)");
         SampleBodies.Keys.Should().BeEquivalentTo(BillingRuleCatalogue.Types);
     }
 
@@ -107,6 +109,7 @@ public class BillingRuleHandlersDispatchTests
     [InlineData((RuleType)0)]
     [InlineData((RuleType)999)]
     [InlineData((RuleType)100000014)] // the next option value after the eleven: a billing type added without a handler
+    [InlineData((RuleType)100000017)] // the next free option value after Discount (task 115)
     public void ATypeWithNoHandler_IsRefusedWithAStableCode_NeverEvaluatedAndNeverHolds(RuleType type)
     {
         var rule = Rule(SampleBodies[RuleType.ApprovedTimekeeper]);
@@ -191,6 +194,8 @@ public class BillingRuleHandlersDispatchTests
     [InlineData(RuleType.InvoiceAge, nameof(BillingRuleDefinition.MaxAgeDays))]
     [InlineData(RuleType.CoreRecordWindow, nameof(BillingRuleDefinition.GraceDays))]
     [InlineData(RuleType.AiObservation, nameof(BillingRuleDefinition.MinConfidence))]
+    [InlineData(RuleType.Discount, nameof(BillingRuleDefinition.DiscountPercent))]
+    [InlineData(RuleType.AddedFee, nameof(BillingRuleDefinition.CapAmount))]
     public void ARuleThatLacksTheParameterItsTypeNeeds_IsRefused_NotEvaluatedAsIfItHeld(RuleType type, string property)
     {
         var rule = Corrupt(Rule(SampleBodies[type]), property, null);
@@ -204,6 +209,7 @@ public class BillingRuleHandlersDispatchTests
     [InlineData(RuleType.NonBillableActivity, nameof(BillingRuleDefinition.Codes))]
     [InlineData(RuleType.Duplicate, nameof(BillingRuleDefinition.MatchFields))]
     [InlineData(RuleType.RequiredData, nameof(BillingRuleDefinition.Fields))]
+    [InlineData(RuleType.AddedFee, nameof(BillingRuleDefinition.FeeCodes))]
     public void ARuleWithAnEmptyListItsTypeNeeds_IsRefused(RuleType type, string property)
     {
         var rule = Corrupt(Rule(SampleBodies[type]), property, Array.Empty<string>());

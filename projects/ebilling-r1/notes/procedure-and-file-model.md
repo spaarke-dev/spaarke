@@ -396,10 +396,10 @@ Neither column confers access (section 5.2).
 | List | Tables |
 |---|---|
 | **Hard-deny** (never deleted by a core-record delete) | `sprk_procedure`, `sprk_procedureversion`, `sprk_storedfile` |
-| **Delete** with the record (Cascade or the planner) | `sprk_procedureassignment` |
+| **Delete** with the record (**the planner**; Dataverse allows one parental relationship per table, so the core lookups are RemoveLink, 2026-10-21) | `sprk_procedureassignment` |
 | **Unlink-only** (RemoveLink; kept as secure child rows, retired by the sweep) | record-scoped `sprk_ruleset` and its `sprk_policy` / `sprk_policyversion` |
 
-- **No Restrict is reachable from a core-record delete** on the record-scoped path: the set's record lookups and the record rule's "based on" link are RemoveLink (D-172, #2132). Assignment-row lookups: the record lookups cascade; the rule lookup cascades or faults (a nulled rule must never read as a Procedure-level Exclude); the pinned-version lookup is Restrict, which only stops deleting a pinned Procedure Version, never a core record.
+- **No Restrict is reachable from a core-record delete** on the record-scoped path: the set's record lookups and the record rule's "based on" link are RemoveLink (D-172, #2132). Assignment-row lookups: the record lookups are **RemoveLink** (080 dev run 2026-10-21 hit Dataverse's one-parental-relationship limit; uac-r2 ACCEPT, ontology PASS). The core-record delete planner (117) deletes the rows in the same delete and counts them in the preview. The O-17 sweep (117) removes orphans, and is the only cleanup after a native model-driven delete. **An orphan row (no core lookup) applies to nothing**: 082 ignores it, and it never reads as "applies to all". Known limit: until the sweep runs, an orphan keeps its owner and its reason text. `sprk_excludedpolicy` is the table's one parental relationship (Delete Cascade, the rest NoCascade); a nulled rule must never read as a Procedure-level Exclude; the pinned-version lookup is Restrict, which only stops deleting a pinned Procedure Version, never a core record.
 - **A record scope with no lookup applies to nothing** (ontology F2-b): the loader requires the scope value **and** a non-null record lookup, so a set unlinked by a delete can never read as firm-wide. The sweep is cleanup only.
 - **The deliberate Restrict on the Stored File's source lookups** blocks deleting a source *document*, not a core record. It fits because a core record whose invoices exist can't be deleted anyway (D-120). For a document delete: the BFF single-document delete answers **409** when a Stored File references the document (pattern `document_has_child_documents`), and S's delete preview shows a block and never unlinks. A communication delete only deactivates it, so the copy rule still reads it (uac-r2 answer B).
 - The retire writer is a named reconcile (I-P5).
@@ -472,7 +472,7 @@ A **rule** is a `sprk_policy` in a rule set. It keeps its identity across the Pr
 **Rule types the examples need (ontology 6):**
 
 - **AddedFee (O-16).** Fee kind (late fee, administrative fee, interest …) and an allowance: not allowed, a cap (amount or percent), or allowed after N days. Option value 100000015 (`RuleType.cs:93`), mapped in `RuleDomains.DomainOf` (an unmapped value throws), pinning test extended, PR to ontology-r1. **The validator refuses "not allowed" and "after N days"** until extraction returns the fee kind per line and the due date, with a test on each refusal; the cap form ships now. Today `InvoiceExtractionToolHandler` returns the header due date but no per-line fee kind (ontology §15 answer 3; the reference is ebilling's D-27, closed typed templates).
-- **Discount.** Option value 100000016. **A check only:** "agreed discount not applied".
+- **Discount.** Option value 100000016. **A check only:** "rate above the agreed discounted rate" (per line; ontology-r1 115 review: a firm may discount at invoice level, so the check never claims the discount was not applied). A line with no rack rate gives one "Discount not checked: no rack rate" finding.
 - Catalogue additions go through D-27 and ontology-r1. "Approve travel" works today through ExpenseRule.
 
 ### 6.4 Inheritance: direct association only (unchanged)

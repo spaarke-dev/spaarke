@@ -1259,7 +1259,7 @@ public class SubmissionRejectionRuleTests
         var result = Evaluator().Evaluate(request, loaded);
 
         result.Refusals.Should().BeEmpty();
-        result.Findings.Select(f => f.RuleType).Distinct().Should().HaveCount(11);
+        result.Findings.Select(f => f.RuleType).Distinct().Should().HaveCount(13);
         SubmissionRejectionRule.Decide(result.Findings, v => result.RulesByVersion[v].Consequence, Settings())
             .Outcome.Should().Be(SubmissionOutcome.Accepted, "no version states a consequence, so nothing is a Reject");
     }
@@ -1270,11 +1270,11 @@ public class SubmissionRejectionRuleTests
     public void FR26_RejectEligibility_IsCataloguePositions_1_2_6_7_8_9_10()
     {
         var eligible = BillingRuleCatalogue.Types.ToArray();
-        eligible.Should().HaveCount(11);
+        eligible.Should().HaveCount(13, "the eleven of FR-24 plus AddedFee (12) and Discount (13), task 115; the FR-26 list is unchanged");
 
         foreach (var type in eligible)
         {
-            var position = (int)type - 100000002; // ApprovedTimekeeper = position 1 ... AiObservation = position 11
+            var position = BillingRuleCatalogue.CataloguePosition(type); // ApprovedTimekeeper = 1 ... AiObservation = 11, AddedFee 12, Discount 13
             BillingRuleCatalogue.IsRejectEligible(type).Should().Be(
                 position is 1 or 2 or 6 or 7 or 8 or 9 or 10, $"{type} is catalogue position {position}");
         }

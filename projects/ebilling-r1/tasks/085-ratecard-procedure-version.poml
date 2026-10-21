@@ -101,7 +101,7 @@
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>The superseded 085 (explicit card scope, direct inheritance, #2132) is dropped: cards are no longer tied to a core record (D-120 revised). 086 is now invoice Stored Files only; a card no longer hangs from a core record, so its owner has no parents (model 5.2 lists no rate-card lineage edge). P3-E beside 083 and 084: no shared files.</notes>
+  <notes>The superseded 085 (explicit card scope, direct inheritance, #2132) is dropped: cards are no longer tied to a core record (D-120 revised). 086 is now invoice Stored Files only; a card no longer hangs from a core record, so its owner has no parents (model 5.2 lists no rate-card lineage edge). P3-E beside 083 and 084: no shared files. ontology-r1 080 review 2026-10-21: InvoiceContextService.cs:977 hand-types the core tables (sprk_matter, sprk_project, sprk_workassignment) to classify a rate card as core-scoped. Re-keying cards to Procedure Version removes that card scope; delete or replace this code in this task (never a second hand-typed core list; use FilingCores if a core list is still needed). ontology-r1 D-176 2026-10-21: ApprovedRate and Discount Signals quote rate-card rows and are treated as inside the invoice's family, because rate cards carry no record-level security of their own. If rate cards ever get record-level security (matter-restricted or Secure) that differs from the invoice's, tell ontology-r1 so D-176 is reopened.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

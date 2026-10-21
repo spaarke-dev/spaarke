@@ -37,6 +37,8 @@ internal static class BillingEvaluationKit
         [RuleType.Duplicate] = """{"type":"Duplicate","matchFields":["firmInvoiceNumber","timekeeper","lineDate","hours"]}""",
         [RuleType.RequiredData] = """{"type":"RequiredData","fields":["taskCode"]}""",
         [RuleType.AiObservation] = """{"type":"AiObservation","observation":"blockBilling","minConfidence":0.85}""",
+        [RuleType.AddedFee] = """{"type":"AddedFee","feeKind":"lateFee","allowance":"cap","feeCodes":["E101","E109"],"capAmount":100}""",
+        [RuleType.Discount] = """{"type":"Discount","discountPercent":10}""",
     };
 
     /// <summary>A deterministic id from a label, so equal inputs build equal candidates.</summary>
