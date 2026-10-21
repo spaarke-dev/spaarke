@@ -43,8 +43,9 @@ and the admin trigger belong to task 052.
 
 ## How it works
 
-`RepairAsync(table, id, ct)` makes one whole-row read (`ColumnSet(true)`, `NoLock = false`, the reparent's read). Steps 3,
-7, 8 and 10 then each add to one patch:
+`RepairAsync(table, id, ct)` makes one whole-row read (`ColumnSet(true)`, `NoLock = false`, the reparent's read). Steps 7,
+3, 8 and 10 then each add to one patch. Since review pass 1 (F1-b) the owner runs FIRST, because it can block the
+mapping; see "Review pass 1 fix round".
 
 - **Step 3, mapping.**
   - The source is resolved by `MappingSourceResolver` from the row's filing. When the row is filed under an
@@ -129,7 +130,8 @@ The write:
 - **K-2. Children's stamps and secure isolation are not cascaded.** These belong to the jobs:
   `CoreAncestorStampReconciliationJob` and `SecureChildReconciliationJob`.
 - **K-3. I-16 inherited Access Permission is not refreshed after a stamp fill.** The create does this after a create.
-  It is not in the POML's step list, and adding it would mean a second write. Flagged for task 052.
+  It is not in the POML's step list, and adding it would mean a second write. **Flagged for task 052**: a row whose
+  missing I-1 stamp Repair fills keeps its old inherited Access Permission until the I-16 refresh runs for it.
 
 ## ebilling-r1 criterion: PARTLY met
 
@@ -154,7 +156,7 @@ value written is the resolver's team.
 
 ## Tests
 
-`tests/integration/data-mutation/RecordOwnership/RecordRepairModeTests.cs` has 17 facts, `[Trait("status","new")]`.
+`tests/integration/data-mutation/RecordOwnership/RecordRepairModeTests.cs` has 27 tests (29 cases with the two theories), `[Trait("status","new")]`; 17 from the first round, 10 from the review-pass-1 fix round.
 
 - The row store is `OwnershipDirectory`: whole-row reads, and a conditional update applied with a version check.
 - The stamp source is `StampWorld`.
@@ -213,4 +215,68 @@ Also covered: `ARowChangedAfterItWasRead_IsNotWritten_AndNotRetried` (NFR-03),
 `AMappedLookupThatWouldFileTheRowUnderARecord_IsNotWritten`, and
 `ATableThisServiceDoesNotCreate_IsSkipped_WithNothingRead`.
 
-rework: none yet. Escalation trigger 2 is awaiting the owner's decision, and adversarial review has not run.
+## Review pass 1 fix round
+
+| Item | Fix | Test (fail-before proof) |
+|---|---|---|
+| F1-a | On a secure-flagged root (matter, project, work assignment) the owner is kept unless `sprk_issecure` reads an explicit `false`; empty counts as flagged. Reason `record_repair.owner_root_secure`. The other fields are still repaired | `AUserOwnedSecureFlaggedRoot_KeepsItsOwner_AndItsOtherFieldsAreStillRepaired(true / null)`; must-not-fire `AUserOwnedRootFlaggedExplicitlyNotSecure_IsReOwnedToItsUnitsTeam` |
+| F1-b | `RepairOwnerAsync` runs before the mapping and resolves a FILED row's filing whatever happens to the owner (kept, refused, BU-guarded). If the resolution is a Secure owner and that team does not own the row, nothing is mapped (`record_repair.mapping_source_secure`). If the filing cannot be decided (refusal or fault), nothing is mapped (`record_repair.mapping_filing_undecided`), fail closed. A mapping fault now removes only the columns the mapping added, because the patch may already hold `ownerid` | `AUserOwnedEventUnderASecureMatter_GetsNothingMapped_FromTheSecureMatter`; must-not-fire `AnEventAlreadyOwnedByTheSecureTeam_IsStillMapped_TheGateDoesNotFire` |
+| F1-c | A blank or whitespace mapped string is `MappingNoValue` and never written | `ATemplateThatYieldsABlankString_IsNeverWritten_TwoRepairsWriteNothing` |
+| F1-d | **STOPPED, not implemented.** See below | — |
+| F3 | Tests added | `AStampedChild_IsMappedFromItsSource_ItsStampIsACopyNotASecondFiling`; `AWriteThatFaults_WithTheOwnerInIt_IsEvictedFor_AndReportsNoExceptionText`; `AnOwnerResolverFault_LeavesTheOwner_AndMapsNothing_FailClosed`; `AMappingFault_MapsNothing_AndTheOwnerIsStillRepaired(profile unreadable / rule faults)`; `ALeafRowInAnotherBusinessUnit_IsReOwned_NoRowInheritsAccessThroughIt` |
+| K2 | Census wording: the BU clause holds on ownership-parent tables only; secure-flagged roots named | `RecordOwnerAssignmentCensusTests` entry text |
+
+The F1-b gate reads the OWNER resolution of the row's filing, not the mapping source's flag directly. Both come from the
+row's own filing lookups; a filing under a secure root, or under an intermediate whose root is secure, resolves to the
+Secure team (I-2). A row the resolver cannot decide maps nothing.
+
+**Eviction on a faulted write (the contract the test pins):** when the patch held `ownerid`, a write that throws (other
+than `DBConcurrencyException`) is evicted for anyway, because the write may have landed (a lost response). The reason is
+`record_repair.write_failed`; no exception text reaches the outcome (ADR-019).
+
+**Why a leaf table may move business units:** the trigger-2 guard protects rows that inherit access THROUGH the row
+being moved. A leaf table (`sprk_signal`, `sprk_decisionrecord`, `sprk_budgetrevision`: not in
+`RecordOwnershipResolver.OwnershipParentEntities`) has no rows filed under it, so its re-own changes only its own access, exactly as
+Create would have owned it. Ownership-parent tables keep the fail-closed skip until the owner decides.
+
+### F1-d: STOPPED (no app-only metadata source without new surface)
+
+Create's metadata filter (`ValidForUpdate`, `MaxLength`, Money) reads `EntityDefinitions` through the CALLER's
+`IDataverseUserClient`. Repair has no caller, and the brief forbids reading as one. The only app-only reader,
+`MetadataService`, does not return `IsValidForUpdate` or `MaxLength`. Using it needs either a DTO extension (the DataGrid
+metadata contract) or a new dependency / scope-resolved service in `RecordCreationService`: new surface either way. K-1
+stands; per the coordinator, task 052 becomes hard-blocked on task 033.
+
+### Owner questions (for the owner, not decided here)
+
+1. **Should Repair re-own roots at all?** It now keeps every secure-flagged root, but still re-owns a user-owned root
+   explicitly flagged not secure to the owner's business-unit default team.
+2. **Built-in SYSTEM and INTEGRATION users.** They have no `applicationid`, so `ApplicationUserCheck` treats them as
+   people. Their unfiled rows (I-6) move to the default team of the root business unit, where those users sit. Should
+   they be treated like application users (refused, `record_owner_no_source`)?
+3. Trigger 2 (above) is still open for ownership-parent tables.
+
+### Fail-before evidence, fix round (mutants; each applied alone, built, run, restored)
+
+| Mutant | Killed by |
+|---|---|
+| F1-M1 root secure-flag check removed | `AUserOwnedSecureFlaggedRoot_...(true)`, `(null)` |
+| F1-M2 mapping gate removed (RepairAsync) | `AUserOwnedEventUnderASecureMatter_...`, `AnOwnerResolverFault_...` |
+| F1-M3 secure-owner condition removed (RepairOwnerAsync) | `AUserOwnedEventUnderASecureMatter_...` |
+| F1-M4 blank-string skip removed | `ATemplateThatYieldsABlankString_...` |
+| F3-M5 I-1 copy-column exclusion removed | `AStampedChild_IsMappedFromItsSource_...` |
+| F3-M6 mapping fault removes every patch key (drops the owner) | `AMappingFault_...(rule faults)` |
+| F3-M7 no eviction on a faulted write | `AWriteThatFaults_WithTheOwnerInIt_...` |
+| F3-M8 BU guard on every table (leaf move refused) | `ALeafRowInAnotherBusinessUnit_...` |
+
+The full old files could not be copied back, because the new tests name the new reason codes. Each fix was instead
+removed alone, with the result above. Create is unchanged: the fix round edits only the Repair members.
+
+### Runs, fix round
+
+- `dotnet build Spaarke.sln`: 0 errors, 0 warnings.
+- ArchTests: 1232 passed, 0 failed.
+- `RecordRepairModeTests`: 29 passed.
+- The same filtered `Sprk.Bff.Api.Tests` set as above: 2663 passed, 0 failed, 7 skipped (the same pre-existing skips).
+
+rework: review pass 1 (F1-a, F1-b, F1-c, F3, K2) fixed; F1-d stopped (above). Escalation trigger 2 still awaits the owner.
