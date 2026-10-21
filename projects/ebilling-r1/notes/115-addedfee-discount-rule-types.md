@@ -196,3 +196,16 @@ GET-ONLY GUARD: 1 GET request(s), no other method attempted.
 - Both new reasons have their own message and title (`ReasonTemplate`, `ReasonHeadline`) and are flag-only (`IsFlagOnlyReason`), as D-115's "Rates and expense caps were not checked".
 - The output schema's `capPercent` description changed, so the deployed drafting Action picks it up with the 079 mirror redeploy (§6 item 8).
 - Design-model text that still says "agreed discount not applied" (`procedure-and-file-model.md` §6.3, `procedure-model-reviews.md` §1 item 6) is ontology-r1's / the design owner's to update; not changed here.
+
+## 13. Follow-up 2026-10-21: precedence key RuleType + feeKind (owner)
+
+The owner decided (2026-10-21) that the D-39 replacement key for AddedFee is **the rule type plus the fee kind**, not the rule type alone. Before, a firm AddedFee rule removed every client-default AddedFee rule, whatever its kind. Now a firm cap on one kind replaces only the client default's cap on that kind; the client default's caps on other kinds stay in force. Every other rule type, Discount included, keeps the rule type alone as its key. Branch `task/ebill-115-feekind`.
+
+| Item | Detail |
+|---|---|
+| Where | `BillingRuleDefinition.PrecedenceKey` (new: `(RuleType, FeeKind)` for AddedFee, `(RuleType, null)` for every other type); `InvoiceComplianceEvaluator` step 4 builds `firmKeys` from it instead of a set of rule types. The generalised rank in `rule-set-scope-design.md` section 3.3 (not built yet) reads "rule type t" as this key. |
+| feeKind comparison | Exact (ordinal). The handler does no trim or case folding: `feeKind` is a closed vocabulary (`lateFee`, `administrativeFee`, `interest`, `other`; schema enum), `FeeKindLabel` is an exact switch, and the gate refuses anything else before a definition exists. So "differing only in case or whitespace" cannot produce a second key: `LateFee`, ` lateFee`, blank and missing kinds are all gate-refused, and a refused firm version never displaces the client default (B2). A test pins each. No new normalisation was invented. |
+| Blank or missing kind | The model text is silent. It is not reachable (the schema requires the kind and restricts it to the vocabulary). `PrecedenceKey` still gives a null kind a key of its own (blank only replaces blank), should the schema ever allow it. |
+| Known limit | `other` is one kind: a firm `other` cap replaces every client-default `other` cap, whatever the caps' fee codes. Telling them apart would need a finer key (for example the fee codes); not asked for. |
+| Scope today | The evaluator has only firm over client default. The four-level model (D-136) is designed, not built; the key applies at every level when it is. |
+| Tests | `InvoiceComplianceEvaluatorFeeKindTests` (10 cases): different kinds both effective; same kind, only the firm's; a firm cap replaces only its own kind among two client-default kinds; five out-of-vocabulary kinds are refused and the client default stays; Discount and ApprovedRate keep rule-type-only replacement. Seeding: with the key reverted to rule type alone, the two "both effective" tests fail (2 failed, 8 passed). |

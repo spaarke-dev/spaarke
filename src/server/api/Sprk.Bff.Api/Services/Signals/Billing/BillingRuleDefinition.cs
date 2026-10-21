@@ -89,6 +89,15 @@ public sealed class BillingRuleDefinition
     /// <summary>AddedFee: the fee kind (closed vocabulary in the schema). Describes the rule; no fact carries a per-line fee kind.</summary>
     public string? FeeKind { get; }
 
+    /// <summary>
+    /// The D-39 replacement key: a more specific rule replaces a broader one with the same key. The rule type, and for AddedFee the
+    /// rule type plus <see cref="FeeKind"/> (owner, 2026-10-21), so a firm cap on one fee kind replaces only the client default's cap
+    /// on that kind. Every other type keys on the rule type alone. The fee kind is compared as stored (ordinal, no trim or case
+    /// folding): it is a closed vocabulary the schema enforces before a definition exists, and the handler reads it with the same
+    /// exact match (<see cref="BillingRuleCatalogue.FeeKindLabel"/>). A null kind (not reachable through the gate) is a key of its own.
+    /// </summary>
+    internal (RuleType RuleType, string? FeeKind) PrecedenceKey => (RuleType, RuleType == RuleType.AddedFee ? FeeKind : null);
+
     /// <summary>AddedFee: <c>cap</c> on a definition (the gate refuses <c>notAllowed</c> and <c>afterDays</c>, task 115).</summary>
     public string? Allowance { get; }
 
