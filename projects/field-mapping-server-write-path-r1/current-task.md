@@ -1,18 +1,18 @@
 # Current Task — field-mapping-server-write-path-r1
 
-> **Last updated**: 2026-10-21 (checkpoint after #2191 merged and the 014 step-3 mask)
-> **Phase**: Wave 2. Done (12/43): 001–006, 010–015. On master: 001–006, 010–013 (PR #2184) and the #2188 Office hotfix
-> (PR #2191, 583f90c1d9; live on dev). 014 + 015 are on the work branch, waiting on UAC-r2's scoped check of the step-3
-> mask, then a PR to master. 016 is in fix round 2.
+> **Last updated**: 2026-10-21 (checkpoint at 85%: 014 + 015 on master, 016 fix rounds done)
+> **Phase**: Wave 2. Done (12/43): 001–006, 010–015. ALL on master: 001–006, 010–013 (#2184), #2191 (583f90c1d9,
+> live on dev), 014 + 015 (#2214, cf0886360a). #2188 is CLOSED. 016 has finished fix round 2 and is blocked on two
+> ArchTest decisions (below).
 
 ## Quick Recovery
 
 | Field | Value |
 |---|---|
-| **HEAD** | work branch `859752c0b1`: master 583f90c1d9 + 014 + 015 + the 014 step-3 mask (`task/fm-014-mask`). Verified: sln 0/0, ArchTests 1317/1317, related suites 2650 passed / 7 skipped. Pushed |
-| **Running** | **016 fix round 2**: implementer agent, branch `task/fm-016`, worktree `C:\code_files\spaarke\.claude\worktrees\agent-a10e5fe383a4dfcd2`. Items: F1-e (map only from a parent the owner step resolved over, plus a gate on the source's own secure status, fail closed on a fault); F1-f (`sprk_decisionrecord` skipped ENTIRELY by Repair: append-only); UAC condition 2 (never write `sprk_accesspermission`, `sprk_accessinheritance`, `sprk_parentdocument` or `sprk_relatedcommunication` on a document, through `InheritedAccessPermission.RefuseAppOnlyWrite`); six surviving mutants; K2 notes; a reachability answer (no caller of `RepairAsync`) |
-| **Waiting on** | UAC-r2's scoped check of `dfebc69803..859752c0b1` (014 step-3 mask, with guard before/after). The owner's answer on Repair field security (below) |
-| **Next Action** | (a) UAC passes the mask → open the PR work branch → master for 014 + 015 (ADR-008 path A cited; Placement Justification; publish delta against a fresh master; CVE check) → CI full rollup → merge → close #2188 citing 583f90c1d9 and the PR merge SHA; close #1617/#1614 per the 014 notes once on master. (b) 016 fix round 2 reports → verify → scoped re-check → merge `task/fm-016` into the work branch. The Roslyn guard WILL fail on Repair's `ApplyFillOnly` call until the owner decides (see below) → send the 016 diff to UAC-r2 (condition b: Decision Record exception, owner outcomes) → mark 016. (c) Then 017/018 (blocking criteria in their POMLs) |
+| **HEAD** | work branch `3583ac04cb` = master 446c83d927 + docs. Verified: sln 0/0, ArchTests 1337/1337, related suites 2693 passed / 7 skipped. Pushed. Master is now f1b3dadcf5 (#2186, not in our files) |
+| **016 state** | branch `task/fm-016` head `d80f27ea7e` (worktree `C:\code_files\spaarke\.claude\worktrees\agent-a10e5fe383a4dfcd2`, implementer agent a10e5fe383a4dfcd2), with the work branch 3583ac04cb merged in. Done: F1-a..f, the source gate fail-closed (including a missing Secure team, via the `SecureOwnerTeamAsync` wrapper), Decision Records skipped entirely (`table_append_only`), the four document columns via `RefuseAppOnlyWrite`, `RecordRepairReachabilityTests` (no production caller). RecordRepairModeTests 50/50; filtered 2815 passed / 7 skipped. **ArchTests has exactly 2 failures:** (1) the #2188 guard at `Repair.cs:307` `read.Record`, waiting on the OWNER (field-security option 1 vs 3); (2) #2170 `EveryGenericUpdateWriter_AsksTheAppOnlyRefusal`. It judges per TYPE, so Repair's refusal call makes Create's step-11 exemption look stale. Asked UAC-r2 to choose (a) remove the exemption (weakens their guard), (b) a separate type, or (c, recommended) key by member |
+| **Running** | Scoped Sonnet re-check of 016 fix round 2 (agent ab3d877a1cb7c706b) over the non-merge commits `559b75828b..d80f27ea7e` |
+| **Next Action** | (1) The re-check reports → fix any F. (2) UAC answers on #2170 → implement it on `task/fm-016`. (3) The owner answers field security → option 1: a per-occurrence guard allow-list entry for Repair's `ApplyFillOnly`, with UAC's 5 conditions recorded (the `IsSecured` skip lands in 033; 052 stays blocked) / option 3: Repair maps nothing. (4) ArchTests green → merge `task/fm-016` into the work branch (--no-ff) → full verify (ArchTests AND related suites) → send the 016 diff to UAC-r2 (condition b) → mark 016 → PR to master. (5) Then 017/018 |
 
 ## Key facts since the last checkpoint
 
@@ -25,7 +25,10 @@
   - The guard is a Roslyn syntax walker (`Microsoft.CodeAnalysis.CSharp` 5.9.0 in ArchTests).
   - A mask inside a local function, lambda or anonymous method doesn't count outside it.
   - `global using` and csproj `<Using>` imports of the engine are violations.
-- **#2188 stays OPEN** until the 014 PR lands (UAC-r2). The closing note cites both merge SHAs.
+- **#2188 CLOSED** citing 583f90c1d9 and cf0886360a. #1614/#1617 stay OPEN deliberately (no live route uses the
+  unified create yet; the Office mapped-X gap is live until 018); closing them is an 018 criterion.
+- **R3 deploy OKs given:** 84291ecea8, 583f90c1d9 (live), 446c83d927, f1b3dadcf5. The 30-minute reading after #2191
+  was clean, with 0 new refusals logged (no Office quick-create run yet).
 - **014 step 3** (`RecordCreationService.Mapping.cs`) now masks the source through `MappingSourceCallerMask.ApplyAsync`
   (`KnownCallSites` = 2).
 - **015:** UAC-r2 ACCEPT on condition (b). K1 (a step-7 catalog fault test) and K3 (the search-index bind-key case) are
@@ -74,7 +77,7 @@
 ## Cross-project obligations
 
 - **UAC-r2:**
-  - checking the 014 mask diff now;
+  - ACCEPTed the 014 mask (merged in #2214); deciding on the #2170 per-type ratchet vs 016;
   - reviews the 016 diff before merge (Decision Record exception, document column skip, owner outcomes);
   - reviews 017/018 on condition (b);
   - holds #2190 and #2169;
