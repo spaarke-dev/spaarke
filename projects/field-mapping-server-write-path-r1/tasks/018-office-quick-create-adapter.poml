@@ -18,19 +18,19 @@
     <estimated-effort>10-14 hours</estimated-effort>
   </metadata>
 
-  <prompt>Make Office quick-create for Matter, Project AND Invoice a thin adapter that maps `QuickCreateRequest` to `RecordCreationService` (caller principal) and maps the result back to the existing `QuickCreateResponse` and Office error codes. Then delete `Services/Office/RecordCreationService.cs` (or its renamed `OfficeRecordCreationService`, task 013). Keep the quick-create defaults endpoint (`ResolveDefaultAssigneeAsync`) working by moving only that method to a small home that survives the deletion.</prompt>
+  <prompt>Make Office quick-create for Matter, Project AND Invoice a thin adapter that maps `QuickCreateRequest` to `RecordCreationService` (caller principal) and maps the result back to the existing `QuickCreateResponse` and Office error codes. Then delete `Services/Office/OfficeRecordCreationService.cs` (the class renamed in task 013; its file renamed in task 013 fix round 2). Keep the quick-create defaults endpoint (`ResolveDefaultAssigneeAsync`) working by moving only that method to a small home that survives the deletion.</prompt>
   <role>SPAARKE platform developer, .NET 10 BFF, Office add-in API contracts. Follow ADRs strictly.</role>
   <goal>Office quick-create creates only through the unified service; the Office contract tests pass with unchanged error codes; the old Office creation core is deleted; no Office create path is left that writes without the service.</goal>
 
   <context>
-    <background>spec.md FR-13 (part 2), FR-12, NFR-07. `OfficeService.QuickCreateAsync` (~:1868) already has a Matter/Project leg `QuickCreateViaCreationServiceAsync` (~:2001) that calls the Office core `_recordCreation.CreateAsync` (~:2009), and an Invoice leg that creates directly through `_genericEntityService.CreateAsync` (~:1966) with `ownerid` set from the matter's team (~:1963). Another consumer of the Office class exists: `OfficeEndpoints.GetQuickCreateDefaultsAsync` (Api/Office/OfficeEndpoints.cs ~:1432) takes it for `ResolveDefaultAssigneeAsync` (Services/Office/RecordCreationService.cs ~:433). The Office error codes live in the Office adapter (spec FR-12: "The Office adapter keeps its existing Office error codes").</background>
+    <background>spec.md FR-13 (part 2), FR-12, NFR-07. `OfficeService.QuickCreateAsync` (~:1868) already has a Matter/Project leg `QuickCreateViaCreationServiceAsync` (~:2001) that calls the Office core `_recordCreation.CreateAsync` (~:2009), and an Invoice leg that creates directly through `_genericEntityService.CreateAsync` (~:1966) with `ownerid` set from the matter's team (~:1963). Another consumer of the Office class exists: `OfficeEndpoints.GetQuickCreateDefaultsAsync` (Api/Office/OfficeEndpoints.cs ~:1432) takes it for `ResolveDefaultAssigneeAsync` (Services/Office/OfficeRecordCreationService.cs ~:433). The Office error codes live in the Office adapter (spec FR-12: "The Office adapter keeps its existing Office error codes").</background>
     <relevant-files>
       <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs (QuickCreateAsync ~:1868, QuickCreateViaCreationServiceAsync ~:2001, Invoice leg ~:1909-1975; fields ~:77 and ctor ~:107)</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs (GetQuickCreateDefaultsAsync ~:1432)</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/OfficeModule.cs (remove the Office core registration ~:73 and add the home for ResolveDefaultAssigneeAsync if it needs one)</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs (only to receive Office-specific defaults that the old core owned and that belong to the table rules; prefer RecordTableRules entries)</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/FieldMapping/CreateTimeFieldMapping.cs (no change expected; verify no remaining Office-namespace reference)</file>
-      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Office/RecordCreationService.cs (1264 lines; read in full before deleting; itemize every behaviour in the task notes)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Office/OfficeRecordCreationService.cs (1264 lines; read in full before deleting; itemize every behaviour in the task notes)</file>
       <file role="canonical-reference">tests/integration/contract/Api/Office/OfficeQuickCreateContractTests.cs</file>
       <file role="canonical-reference">tests/integration/contract/Api/Office/OfficeQuickCreateProjectContractTests.cs</file>
       <file role="canonical-reference">tests/integration/contract/Api/Office/OfficeQuickCreateFieldsContractTests.cs</file>
@@ -111,7 +111,7 @@
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">`src/server/api/Sprk.Bff.Api/Services/Office/RecordCreationService.cs` (and any `OfficeRecordCreationService` rename) no longer exists, and nothing in src/ or tests/ references it.</criterion>
+    <criterion testable="true">`src/server/api/Sprk.Bff.Api/Services/Office/OfficeRecordCreationService.cs` (the class `OfficeRecordCreationService`) no longer exists, and nothing in src/ or tests/ references it.</criterion>
     <criterion testable="true">Office quick-create for Matter, Project and Invoice each call `RecordCreationService` (caller principal); `OfficeService` has no direct `_genericEntityService.CreateAsync` for Invoice.</criterion>
     <criterion testable="true">OfficeQuickCreateContractTests, OfficeQuickCreateProjectContractTests and OfficeQuickCreateFieldsContractTests pass with unchanged assertions and unchanged Office error codes.</criterion>
     <criterion testable="true">The quick-create defaults endpoint still returns the caller's linked contact prefill (same response), with `ResolveDefaultAssigneeAsync` moved intact.</criterion>
@@ -122,8 +122,7 @@
   </acceptance-criteria>
 
   <notes>Spec FR-13 part 2, FR-12, NFR-07. Office todo and document save are task 030 (not here). Release note: Office Project-under-Matter owner changes (task 015); Office Invoice becomes team-owned.
-From task 002 (2026-10-20): the Office Project-under-Matter regarding pair came from the Matter→Project mapping profile via legacy CreateTimeFieldMapping.Apply; ApplyFillOnly never writes a pair, so the adapter must pass the pair (or let the service derive it from the filed-under Matter) before the secure-root filing plan reads it. Keep SecureRootInheritanceWriterTests.OfficeCreate_* / SecureRootCreateRouteTests.OfficeQuickCreate_* green. Deleting the Office service also deletes the last caller of legacy Apply; remove Apply then if nothing else uses it.
-From task 013 fix round 1 (K1, 2026-10-21): re-verify RecordOwnerAssignmentCensusTests ServerFiles() name join once Office RecordCreationService.cs is deleted; key entries on relative path. (The census reads files by NAME, so today the new Services/RecordCreation/RecordCreationService.cs and the Office file of the same name are read as one; its entries for the new service cannot fail on their own until then.)</notes>
+From task 002 (2026-10-20): the Office Project-under-Matter regarding pair came from the Matter→Project mapping profile via legacy CreateTimeFieldMapping.Apply; ApplyFillOnly never writes a pair, so the adapter must pass the pair (or let the service derive it from the filed-under Matter) before the secure-root filing plan reads it. Keep SecureRootInheritanceWriterTests.OfficeCreate_* / SecureRootCreateRouteTests.OfficeQuickCreate_* green. Deleting the Office service also deletes the last caller of legacy Apply; remove Apply then if nothing else uses it.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
