@@ -794,6 +794,9 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
     private static readonly Guid AnVisible = Guid.Parse("a1880000-0000-0000-0000-000000000014");
     private static readonly Guid AnNoDocument = Guid.Parse("a1880000-0000-0000-0000-000000000015");
     private static readonly Guid AnStaleHit = Guid.Parse("a1880000-0000-0000-0000-000000000016");
+    private static readonly Guid AnOutputFileHidden = Guid.Parse("a1880000-0000-0000-0000-000000000017");
+    private static readonly Guid AnOutputFileUndecidable = Guid.Parse("a1880000-0000-0000-0000-000000000018");
+    private static readonly Guid AnOutputFileVisible = Guid.Parse("a1880000-0000-0000-0000-000000000019");
     private static readonly Guid OutOfRestricted = Guid.Parse("0a180000-0000-0000-0000-000000000011");
     private static readonly Guid OutOfVisible = Guid.Parse("0a180000-0000-0000-0000-000000000012");
     private static readonly Guid DocNeverSeeded = Guid.Parse("d1880000-0000-0000-0000-0000000000fe");
@@ -815,8 +818,8 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
         """;
 
     /// <summary>
-    /// The user's source-link reads (by id): analyses → their document; outputs → their analysis. AnStaleHit is not returned
-    /// (deleted since it was indexed, or no longer readable).
+    /// The user's source-link reads (by id): analyses → their document and output file; outputs → their analysis. AnStaleHit
+    /// is not returned (deleted since it was indexed, or no longer readable).
     /// </summary>
     private List<string> SeedDerivedSources()
     {
@@ -829,6 +832,15 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
             [AnUndecidable] = DocNeverSeeded.ToString("D"),
             [AnVisible] = DocShared.ToString("D"),
             [AnNoDocument] = null,
+            [AnOutputFileHidden] = DocShared.ToString("D"),
+            [AnOutputFileUndecidable] = DocShared.ToString("D"),
+            [AnOutputFileVisible] = null,
+        };
+        var outputFiles = new Dictionary<Guid, string?>
+        {
+            [AnOutputFileHidden] = DocOwnRestricted.ToString("D"),
+            [AnOutputFileUndecidable] = DocNeverSeeded.ToString("D"),
+            [AnOutputFileVisible] = DocShared.ToString("D"),
         };
         var outputs = new Dictionary<Guid, string?> { [OutOfRestricted] = AnOwnRestricted.ToString("D"), [OutOfVisible] = AnVisible.ToString("D") };
         var captured = new List<string>();
@@ -843,10 +855,46 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
                 var rows = System.Text.RegularExpressions.Regex.Matches(Uri.UnescapeDataString(p), $@"{pk} eq ([0-9a-f-]{{36}})")
                     .Select(m => Guid.Parse(m.Groups[1].Value))
                     .Where(seed.ContainsKey)
-                    .Select(id => new Dictionary<string, object?> { [pk] = id.ToString("D"), [link] = seed[id] });
+                    .Select(id =>
+                    {
+                        var row = new Dictionary<string, object?> { [pk] = id.ToString("D"), [link] = seed[id] };
+                        if (Uri.UnescapeDataString(p).Contains(",_sprk_outputfileid_value&"))
+                            row["_sprk_outputfileid_value"] = outputFiles.GetValueOrDefault(id);
+                        return row;
+                    });
                 return DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new { value = rows }));
             });
         return captured;
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerAnalysisHits_DropsThoseWhoseOutputFileIsHiddenOrUndecidable_OdC1()
+    {
+        AsExternalCaller();
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson($$"""
+            {
+              "value": [
+                { "entityname": "sprk_analysis", "objectid": "{{AnVisible:D}}" },
+                { "entityname": "sprk_analysis", "objectid": "{{AnOutputFileHidden:D}}" },
+                { "entityname": "sprk_analysis", "objectid": "{{AnOutputFileUndecidable:D}}" },
+                { "entityname": "sprk_analysis", "objectid": "{{AnOutputFileVisible:D}}" }
+              ]
+            }
+            """)));
+        var userReads = SeedDerivedSources();
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"query":"contoso"}""");
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.Data!.Value.GetProperty("results").EnumerateArray()
+            .Select(r => r.GetProperty("recordId").GetString())
+            .Should().Equal(new[] { AnVisible.ToString("D"), AnOutputFileVisible.ToString("D") },
+                because: "an analysis whose OUTPUT FILE is hidden or cannot be decided is dropped even when its source document " +
+                         "is visible; a visible output file is unaffected");
+        Uri.UnescapeDataString(userReads.Should().ContainSingle().Which).Should().StartWith(
+            "sprk_analysises?$select=sprk_analysisid,_sprk_documentid_value,_sprk_outputfileid_value&$filter=");
+        _appOnly.Calls.Should().Be(1);
     }
 
     [Fact]

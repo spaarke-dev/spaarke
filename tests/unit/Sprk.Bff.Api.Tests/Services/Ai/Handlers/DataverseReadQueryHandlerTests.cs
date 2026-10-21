@@ -1178,6 +1178,10 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
     private static readonly Guid AnNoDocument = Guid.Parse("a1880000-0000-0000-0000-000000000005");
     private static readonly Guid AnUnreadableLink = Guid.Parse("a1880000-0000-0000-0000-000000000006");
     private static readonly Guid AnNotReturned = Guid.Parse("a1880000-0000-0000-0000-000000000007");
+    private static readonly Guid AnOutputFileHidden = Guid.Parse("a1880000-0000-0000-0000-000000000008");
+    private static readonly Guid AnOutputFileUndecidable = Guid.Parse("a1880000-0000-0000-0000-000000000009");
+    private static readonly Guid AnOutputFileUnreadable = Guid.Parse("a1880000-0000-0000-0000-00000000000a");
+    private static readonly Guid AnOutputFileVisible = Guid.Parse("a1880000-0000-0000-0000-00000000000b");
     private static readonly Guid DocNeverSeeded = Guid.Parse("d1880000-0000-0000-0000-0000000000ff");
 
     private static readonly Guid OutOfRestricted = Guid.Parse("0a180000-0000-0000-0000-000000000001");
@@ -1192,6 +1196,9 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
         ["sprk_analysisoutputs"] = new(),
     };
 
+    /// <summary>The OUTPUT FILE link (<c>_sprk_outputfileid_value</c>) the user's client returns for an analysis (absent: null).</summary>
+    private readonly Dictionary<Guid, object?> _userOutputFiles = new();
+
     private void SetupDerivedMetadata(string table, string set, string pk) =>
         _dataverse
             .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith($"EntityDefinitions(LogicalName='{table}')")), It.IsAny<CancellationToken>()))
@@ -1205,7 +1212,8 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
 
     /// <summary>
     /// The user's client: the model's query of <paramref name="set"/> answers <paramref name="rowsJson"/>; a source-link read
-    /// (by id, <c>$select={pk},{link}</c>) answers from <see cref="_userSourceLinks"/>. Records every request.
+    /// (by id, <c>$select={pk},{links}</c>) answers from <see cref="_userSourceLinks"/> (the first link) and
+    /// <see cref="_userOutputFiles"/> (an analysis's output file). Records every request.
     /// </summary>
     private List<string> CaptureDerivedReads(string set, string rowsJson)
     {
@@ -1216,14 +1224,20 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
             .ReturnsAsync((string p, CancellationToken _) =>
             {
                 var path = Uri.UnescapeDataString(p);
-                var linkRead = System.Text.RegularExpressions.Regex.Match(path, @"^(\w+)\?\$select=(\w+),(_\w+_value)&\$filter=");
+                var linkRead = System.Text.RegularExpressions.Regex.Match(path, @"^(\w+)\?\$select=(\w+),(_\w+_value(?:,_\w+_value)*)&\$filter=");
                 if (!linkRead.Success)
                     return p.StartsWith(set + "?") ? DataverseUserResponse.Ok(200, ParseJson(rowsJson)) : DataverseUserResponse.Ok(200, ParseJson("""{ "value": [] }"""));
-                var (linkSet, pk, link) = (linkRead.Groups[1].Value, linkRead.Groups[2].Value, linkRead.Groups[3].Value);
+                var (linkSet, pk, links) = (linkRead.Groups[1].Value, linkRead.Groups[2].Value, linkRead.Groups[3].Value.Split(','));
                 var rows = System.Text.RegularExpressions.Regex.Matches(path, $@"{pk} eq ([0-9a-f-]{{36}})")
                     .Select(m => Guid.Parse(m.Groups[1].Value))
                     .Where(_userSourceLinks[linkSet].ContainsKey)
-                    .Select(id => new Dictionary<string, object?> { [pk] = id.ToString("D"), [link] = _userSourceLinks[linkSet][id] });
+                    .Select(id =>
+                    {
+                        var row = new Dictionary<string, object?> { [pk] = id.ToString("D"), [links[0]] = _userSourceLinks[linkSet][id] };
+                        foreach (var link in links.Skip(1))
+                            row[link] = link == "_sprk_outputfileid_value" ? _userOutputFiles.GetValueOrDefault(id) : null;
+                        return row;
+                    });
                 return DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new { value = rows }));
             });
         return captured;
@@ -1272,7 +1286,8 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
                      "no source are unaffected");
         reads.Should().HaveCount(2, "the model's query, then ONE batched read of the page's source links as the user");
         reads[0].Should().Be("sprk_analysises?$select=sprk_analysisid,sprk_name&$top=50", "nothing is injected into the user's query");
-        Uri.UnescapeDataString(reads[1]).Should().StartWith("sprk_analysises?$select=sprk_analysisid,_sprk_documentid_value&$filter=");
+        Uri.UnescapeDataString(reads[1]).Should().StartWith(
+            "sprk_analysises?$select=sprk_analysisid,_sprk_documentid_value,_sprk_outputfileid_value&$filter=");
         _appOnly.Calls.Should().Be(1, "ONE hide-only narrowing call for the page");
         _appOnly.Reads("sprk_documents")[0].Should().Contain(DocOwnRestricted.ToString("D")).And.Contain(DocNeverSeeded.ToString("D"))
             .And.NotContain("not-a-guid");
@@ -1283,6 +1298,39 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
             m.FormattedMessage.Contains("source_document_hidden=3") &&
             m.FormattedMessage.Contains("source_document_undecidable=2"));
         AssertTelemetryRespectsAdr015(AnOwnRestricted.ToString("D"), DocOwnRestricted.ToString("D"), $"Analysis {AnOwnRestricted:N}");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerOnAnalysis_HidesRowsWhoseOutputFileIsHiddenOrUndecidable_OdC1()
+    {
+        AsExternalCaller();
+        SetupDerivedMetadata("sprk_analysis", "sprk_analysises", "sprk_analysisid");
+        SeedAnalyses();
+        var links = _userSourceLinks["sprk_analysises"];
+        foreach (var id in new[] { AnOutputFileHidden, AnOutputFileUndecidable, AnOutputFileUnreadable })
+            links[id] = DocShared.ToString("D");
+        links[AnOutputFileVisible] = null;
+        _userOutputFiles[AnOutputFileHidden] = DocOwnRestricted.ToString("D");
+        _userOutputFiles[AnOutputFileUndecidable] = DocNeverSeeded.ToString("D");
+        _userOutputFiles[AnOutputFileUnreadable] = "not-a-guid";
+        _userOutputFiles[AnOutputFileVisible] = DocShared.ToString("D");
+        CaptureDerivedReads("sprk_analysises", DocRows(
+            AnalysisRow(AnVisible), AnalysisRow(AnOutputFileHidden), AnalysisRow(AnOutputFileUndecidable),
+            AnalysisRow(AnOutputFileUnreadable), AnalysisRow(AnOutputFileVisible)));
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args("SELECT sprk_name FROM sprk_analysis"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        AnalysisRowIds(result).Should().Equal(new[] { AnVisible.ToString("D"), AnOutputFileVisible.ToString("D") },
+            because: "an analysis whose OUTPUT FILE is hidden, cannot be decided, or is not a GUID is hidden even when its " +
+                     "source document is visible; a visible output file (and a null one) is unaffected");
+        _appOnly.Calls.Should().Be(1, "source documents and output files are decided in ONE hide-only call");
+        CapturedLogMessages.Should().Contain(m =>
+            m.FormattedMessage.Contains("entity=sprk_analysis") &&
+            m.FormattedMessage.Contains("source_document_hidden=2") &&
+            m.FormattedMessage.Contains("source_document_undecidable=1"),
+            "the Restricted and the never-readable output files are decided hidden; the non-GUID link is undecidable");
     }
 
     [Fact]

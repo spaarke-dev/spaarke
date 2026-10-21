@@ -59,7 +59,8 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// <c>sprk_communication</c>, before any Dataverse request; a <c>sprk_communication</c> record they may not see under the
 /// task 065 rule, or a <c>sprk_document</c> whose related communication they may not see, answers with the same code and
 /// message as a missing one (a guarded not-found is normalised to that answer). Table list and schema paths carry no
-/// row content and are unchanged.
+/// row content and are unchanged. Task 188 slice C (F-C1, OD-C1): an <c>sprk_analysis</c> whose source document or output
+/// file is hidden or undecidable, and an <c>sprk_analysisoutput</c> whose analysis is, answer the same way.
 /// See <see cref="ExternalCallerCommunicationGuard"/>. Internal callers are unchanged.
 /// </para>
 /// </remarks>
@@ -359,20 +360,27 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
             return Error(tool, $"'{recordIdRaw}' is not a valid record GUID.", ToolErrorCodes.ValidationFailed, startedAt);
         }
 
-        // ISS-010 (task 078): externality is decided ONLY for a communication-family or sprk_document record, so every
-        // other request is byte-identical. An external caller is refused any family table but sprk_communication BEFORE
-        // any Dataverse request (the metadata GET included); a sprk_document is checked by its related communication
-        // (review round 1, F1).
+        // ISS-010 (task 078): externality is decided ONLY for a communication-family, sprk_document or document-derived
+        // (task 188 slice C) record, so every other request is byte-identical. An external caller is refused any family
+        // table but sprk_communication BEFORE any Dataverse request (the metadata GET included); a sprk_document is checked
+        // by its related communication (review round 1, F1).
         var guardCommunication = false;
         var guardDocument = false;
+        var guardDerived = false;
         if ((ExternalCallerCommunicationGuard.IsCommunicationFamily(logicalName) ||
-             ExternalCallerCommunicationGuard.IsDocumentTable(logicalName)) &&
+             ExternalCallerCommunicationGuard.IsDocumentTable(logicalName) ||
+             ExternalCallerCommunicationGuard.IsDocumentDerivedTable(logicalName)) &&
             await ExternalCallerCommunicationGuard.IsExternalCallerAsync(
                 _httpContextAccessor, _callerResolver, _identityResolver, ct).ConfigureAwait(false))
         {
             if (ExternalCallerCommunicationGuard.IsDocumentTable(logicalName))
             {
                 guardDocument = true;
+            }
+            else if (ExternalCallerCommunicationGuard.IsDocumentDerivedTable(logicalName))
+            {
+                // Task 188 slice C (F-C1): an analysis or analysis output follows the documents it derives from.
+                guardDerived = true;
             }
             else if (!ExternalCallerCommunicationGuard.IsCommunicationTable(logicalName))
             {
@@ -408,7 +416,7 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
         {
             // ISS-010 review K4: on a guarded path a real not-found answers with the SAME code and message as a hidden
             // record below, so the answer never tells an external caller that a hidden record exists.
-            if ((guardCommunication || guardDocument) &&
+            if ((guardCommunication || guardDocument || guardDerived) &&
                 recordResponse.ErrorCode == DataverseUserClientErrorCodes.NotFound)
             {
                 return RecordNotVisible(tool, startedAt);
@@ -419,7 +427,7 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
         // ISS-010 (task 078): the task 065 rule on the one record — flag explicitly false AND a thread that reads Open
         // now; for a document, THE external document predicate (task 188). A hidden record answers with
         // the same code and message as a guarded not-found above; a read fault throws (no data).
-        if (guardCommunication || guardDocument)
+        if (guardCommunication || guardDocument || guardDerived)
         {
             var record = recordResponse.Body!.Value;
             bool visible;
@@ -430,6 +438,17 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
                     (await CommunicationOpenThreadGate.ReadOpenThreadIdsAsync(
                         new[] { threadId }, ExternalCallerCommunicationGuard.ThreadQueryOver(_dataverse), ct).ConfigureAwait(false))
                     .Contains(threadId);
+            }
+            else if (guardDerived)
+            {
+                // Task 188 slice C (F-C1, OD-C1): an analysis is hidden when its source document OR its output file is
+                // hidden or undecidable; an output follows its analysis. The links are read as the user; only the hide
+                // decision on the documents runs app-only (the hide-only overload). A read fault throws (no data).
+                var sources = await ExternalCallerCommunicationGuard.ReadSourceDocumentIdsAsync(
+                    _dataverse, logicalName, new[] { recordId }, ct).ConfigureAwait(false);
+                var hidden = await _narrowDocuments.HiddenDocumentIdsAsync(
+                    sources.Values.SelectMany(documents => documents), ct).ConfigureAwait(false);
+                visible = !ExternalCallerCommunicationGuard.IsDerivedRowHidden(recordId, sources, hidden, out _);
             }
             else
             {

@@ -672,6 +672,197 @@ public sealed class DataverseDescribeHandlerTests : TypedToolHandlerTestFixture
         _appOnly.Calls.Should().Be(0, "an internal caller is not narrowed");
     }
 
+    // ── Task 188 round 3 slice C (F-C1, OD-C1): analysis and analysis-output records for an external caller ──
+    //
+    // An analysis follows its source document AND its output file; an output follows its analysis. The links are read as
+    // the user (the mocked client); only the hide decision on the documents runs in the app-only world (_appOnly).
+
+    private static readonly Guid AnalysisId = Guid.Parse("a1880000-0000-0000-0000-0000000000d1");
+    private static readonly Guid AnalysisOutputId = Guid.Parse("0a180000-0000-0000-0000-0000000000d1");
+    private static readonly Guid OutputFileId = Guid.Parse("d0f00000-0000-0000-0000-0000000000d1");
+
+    /// <summary>
+    /// The user's client for the two derived tables: metadata, the record reads, and the by-id link reads. An analysis's
+    /// links are <paramref name="sourceJson"/> and <paramref name="outputFileJson"/> (raw JSON); <paramref name="linkReturned"/>
+    /// false: the link read does not return the analysis. Records every request.
+    /// </summary>
+    private List<string> SetupDerivedRecords(string sourceJson, string outputFileJson = "null", bool linkReturned = true)
+    {
+        var requests = new List<string>();
+        void Answer(Func<string, bool> match, string json) =>
+            _dataverse
+                .Setup(d => d.GetAsync(It.Is<string>(p => match(p)), It.IsAny<CancellationToken>()))
+                .Callback<string, CancellationToken>((p, _) => requests.Add(p))
+                .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson(json)));
+
+        Answer(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_analysis')"),
+            """{ "EntitySetName": "sprk_analysises", "PrimaryIdAttribute": "sprk_analysisid" }""");
+        Answer(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_analysisoutput')"),
+            """{ "EntitySetName": "sprk_analysisoutputs", "PrimaryIdAttribute": "sprk_analysisoutputid" }""");
+        Answer(p => p.StartsWith("sprk_analysises("),
+            $$"""{ "sprk_analysisid": "{{AnalysisId:D}}", "sprk_name": "Analysis text" }""");
+        Answer(p => p.StartsWith("sprk_analysisoutputs("),
+            $$"""{ "sprk_analysisoutputid": "{{AnalysisOutputId:D}}", "sprk_name": "Output text" }""");
+        Answer(p => p.StartsWith("sprk_analysises?"), linkReturned
+            ? $$"""{ "value": [ { "sprk_analysisid": "{{AnalysisId:D}}", "_sprk_documentid_value": {{sourceJson}}, "_sprk_outputfileid_value": {{outputFileJson}} } ] }"""
+            : """{ "value": [] }""");
+        Answer(p => p.StartsWith("sprk_analysisoutputs?"),
+            $$"""{ "value": [ { "sprk_analysisoutputid": "{{AnalysisOutputId:D}}", "_sprk_analysisid_value": "{{AnalysisId:D}}" } ] }""");
+        return requests;
+    }
+
+    /// <summary>
+    /// A document link by kind: "restricted" / "visible" (seeded app-only, own Restricted or not), "unseeded" (the BFF
+    /// cannot read it back), "notguid" (present but not a GUID), "null" (not set). Returns the raw JSON of the link.
+    /// </summary>
+    private string SeedLink(Guid id, string kind)
+    {
+        switch (kind)
+        {
+            case "restricted":
+                _appOnly.Document(id, permission: 100000002);
+                return $"\"{id:D}\"";
+            case "visible":
+                _appOnly.Document(id);
+                return $"\"{id:D}\"";
+            case "unseeded":
+                return $"\"{id:D}\"";
+            case "notguid":
+                return "\"not-a-guid\"";
+            default:
+                return "null";
+        }
+    }
+
+    private Task<ToolResult> DescribeDerivedAsync(string table, Guid id) =>
+        CreateHandler().ExecuteChatAsync(
+            BuildChatInvocationContext(toolArgumentsJson: $$"""{"path":"tables/{{table}}/records/{{id:D}}"}"""),
+            BuildDescribeTool(), CancellationToken.None);
+
+    [Theory]
+    [InlineData("restricted", "null", true)]      // source document own Restricted
+    [InlineData("unseeded", "null", true)]        // source document undecidable
+    [InlineData("notguid", "null", true)]         // source link not a GUID
+    [InlineData("visible", "restricted", true)]   // OD-C1: output file own Restricted, source visible
+    [InlineData("visible", "unseeded", true)]     // OD-C1: output file undecidable
+    [InlineData("null", "notguid", true)]         // OD-C1: output file link not a GUID
+    [InlineData("visible", "null", false)]        // the link read does not return the analysis
+    public async Task ExecuteChatAsync_ExternalCallerAnalysis_Task188SliceC_HiddenOrUndecidableDocument_AnswersLikeNotFound(
+        string source, string outputFile, bool linkReturned)
+    {
+        AsExternalCaller();
+        SetupDerivedRecords(SeedLink(DocumentId, source), SeedLink(OutputFileId, outputFile), linkReturned);
+
+        ShouldAnswerLikeNotFound(await DescribeDerivedAsync("sprk_analysis", AnalysisId));
+        DocumentNarrowingReads.VerifyNoNarrowingReadAsTheUser(_dataverse);
+        CapturedLogMessages.Should().Contain(m =>
+            m.FormattedMessage.Contains(ExternalCallerCommunicationGuard.LogEvent) &&
+            m.FormattedMessage.Contains("entity=sprk_analysis") && m.FormattedMessage.Contains("reason=record_hidden"));
+        CapturedLogMessages.Should().NotContain(m => m.FormattedMessage.Contains("Analysis text"));
+    }
+
+    [Theory]
+    [InlineData("restricted", "null")]  // the analysis's source document
+    [InlineData("visible", "restricted")] // OD-C1: the analysis's output file
+    public async Task ExecuteChatAsync_ExternalCallerAnalysisOutput_Task188SliceC_AnalysisDocumentHidden_AnswersLikeNotFound(
+        string source, string outputFile)
+    {
+        AsExternalCaller();
+        var requests = SetupDerivedRecords(SeedLink(DocumentId, source), SeedLink(OutputFileId, outputFile));
+
+        ShouldAnswerLikeNotFound(await DescribeDerivedAsync("sprk_analysisoutput", AnalysisOutputId));
+        requests.Should().Contain(p => p.StartsWith("sprk_analysisoutputs?"))
+            .And.Contain(p => p.StartsWith("sprk_analysises?"), "an output follows its analysis's documents");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerMissingAnalysis_AnswersExactlyLikeHiddenAnalysis()
+    {
+        AsExternalCaller();
+        SetupDerivedRecords("null");
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_analysises(")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "Not found."));
+
+        ShouldAnswerLikeNotFound(await DescribeDerivedAsync("sprk_analysis", AnalysisId));
+        _appOnly.Calls.Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData("visible", "null")]
+    [InlineData("visible", "visible")]
+    [InlineData("null", "null")]
+    public async Task ExecuteChatAsync_ExternalCallerAnalysis_Task188SliceC_VisibleOrNoDocument_ReturnsRecord(
+        string source, string outputFile)
+    {
+        AsExternalCaller();
+        var requests = SetupDerivedRecords(SeedLink(DocumentId, source), SeedLink(OutputFileId, outputFile));
+
+        var result = await DescribeDerivedAsync("sprk_analysis", AnalysisId);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.Data!.Value.GetProperty("fields").GetProperty("sprk_name").GetString().Should().Be("Analysis text");
+        Uri.UnescapeDataString(requests.Last()).Should().Be(
+            "sprk_analysises?$select=sprk_analysisid,_sprk_documentid_value,_sprk_outputfileid_value" +
+            $"&$filter=sprk_analysisid eq {AnalysisId:D}&$top=1");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerAnalysisOutput_Task188SliceC_VisibleAnalysis_ReturnsRecord()
+    {
+        AsExternalCaller();
+        SetupDerivedRecords(SeedLink(DocumentId, "visible"), SeedLink(OutputFileId, "visible"));
+
+        var result = await DescribeDerivedAsync("sprk_analysisoutput", AnalysisOutputId);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.Data!.Value.GetProperty("fields").GetProperty("sprk_name").GetString().Should().Be("Output text");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_InternalCallerAnalysis_Task188SliceC_RestrictedSource_UnchangedAndNoExtraRead()
+    {
+        var requests = SetupDerivedRecords(SeedLink(DocumentId, "restricted"), SeedLink(OutputFileId, "restricted"));
+
+        var result = await DescribeDerivedAsync("sprk_analysis", AnalysisId);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        requests.Should().Equal(
+            "EntityDefinitions(LogicalName='sprk_analysis')?$select=EntitySetName,PrimaryIdAttribute",
+            $"sprk_analysises({AnalysisId:D})");
+        _appOnly.Calls.Should().Be(0, "an internal caller is not narrowed");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerAnalysis_Task188SliceC_LinkReadFails_ErrorWithNoData()
+    {
+        AsExternalCaller();
+        SetupDerivedRecords(SeedLink(DocumentId, "visible"));
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_analysises?")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Fail(503, DataverseUserClientErrorCodes.ServiceError, "down"));
+
+        var result = await DescribeDerivedAsync("sprk_analysis", AnalysisId);
+
+        result.Success.Should().BeFalse("a link read fault never turns into 'show it'");
+        result.ErrorCode.Should().Be(ToolErrorCodes.InternalError);
+        result.Data.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerAnalysis_Task188SliceC_AppOnlyReadFails_ErrorWithNoData()
+    {
+        AsExternalCaller();
+        SetupDerivedRecords(SeedLink(DocumentId, "visible"));
+        _appOnly.Faults["sprk_documents"] = System.Net.HttpStatusCode.InternalServerError;
+
+        var result = await DescribeDerivedAsync("sprk_analysis", AnalysisId);
+
+        result.Success.Should().BeFalse("a narrowing fault never shows an analysis");
+        result.ErrorCode.Should().Be(ToolErrorCodes.InternalError);
+        result.Data.Should().BeNull();
+    }
+
     [Fact]
     public async Task ExecuteChatAsync_ExternalCallerThreadPrivacyReadFails_ReturnsErrorWithNoData()
     {

@@ -43,7 +43,7 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// no app-only data reaches the result, and nothing else of the app-only reader is reachable (a delegate). Every query whose
 /// rows reach the model still runs as the user.
 /// Task 188 round 3 slice C: an external caller's <c>sprk_analysis</c> and <c>sprk_analysisoutput</c> rows are hidden when
-/// their source document is (or cannot be decided), through the same seam's hide-only overload
+/// their source document or an analysis's output file is (or cannot be decided), through the same seam's hide-only overload
 /// (<see cref="AppOnlyDocumentNarrowingExtensions.HiddenDocumentIdsAsync"/>); their source links are read as the user
 /// (<see cref="ExternalCallerCommunicationGuard.ReadSourceDocumentIdsAsync"/>).
 /// </para>
@@ -326,7 +326,7 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
                 // hidden or cannot be decided. The hits' source links are read BY ID as the user (one batched read per table
                 // and level), then the hide-only overload decides every source document of the page APP-ONLY in ONE call.
                 // A hit with no source document is unaffected. A fault throws into the error result below (no data).
-                var derivedSources = new Dictionary<string, IReadOnlyDictionary<Guid, Guid>>(StringComparer.OrdinalIgnoreCase);
+                var derivedSources = new Dictionary<string, IReadOnlyDictionary<Guid, IReadOnlyList<Guid>>>(StringComparer.OrdinalIgnoreCase);
                 IReadOnlySet<Guid>? hiddenSources = null;
                 var derivedHits = hits.Where(h => ExternalCallerCommunicationGuard.IsDocumentDerivedTable(h.EntityName)).ToList();
                 if (derivedHits.Count > 0 && await IsExternalCallerAsync().ConfigureAwait(false))
@@ -338,7 +338,7 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
                     }
 
                     hiddenSources = await _narrowDocuments.HiddenDocumentIdsAsync(
-                        derivedSources.Values.SelectMany(sources => sources.Values), cancellationToken)
+                        derivedSources.Values.SelectMany(sources => sources.Values.SelectMany(documents => documents)), cancellationToken)
                         .ConfigureAwait(false);
                 }
 

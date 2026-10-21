@@ -38,7 +38,7 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// no app-only data reaches the result, and nothing else of the app-only reader is reachable (a delegate). Every query whose
 /// rows reach the model still runs as the user.
 /// Task 188 round 3 slice C: an external caller's <c>sprk_analysis</c> and <c>sprk_analysisoutput</c> rows are hidden when
-/// their source document is (or cannot be decided), through the same seam's hide-only overload
+/// their source document or an analysis's output file is (or cannot be decided), through the same seam's hide-only overload
 /// (<see cref="AppOnlyDocumentNarrowingExtensions.HiddenDocumentIdsAsync"/>); their source links are read as the user
 /// (<see cref="ExternalCallerCommunicationGuard.ReadSourceDocumentIdsAsync"/>).
 /// </para>
@@ -330,7 +330,7 @@ public sealed class DataverseReadQueryHandler : IToolHandler
             // analysis) is hidden when its source document is. The source links are read BY ROW ID as the user (one batched
             // read per level), then the hide-only overload decides the documents APP-ONLY in ONE call for the page. A row that
             // has a source the BFF cannot decide is hidden; a row with no source document is unaffected. Faults throw (no rows).
-            IReadOnlyDictionary<Guid, Guid>? derivedSources = null;
+            IReadOnlyDictionary<Guid, IReadOnlyList<Guid>>? derivedSources = null;
             IReadOnlySet<Guid>? hiddenSources = null;
             if (guardDerived &&
                 response.Body is { } derivedBody && derivedBody.TryGetProperty("value", out var derivedValue) &&
@@ -343,7 +343,7 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                     .ToList();
                 derivedSources = await ExternalCallerCommunicationGuard.ReadSourceDocumentIdsAsync(
                     _dataverse, translation.EntityLogicalName!, rowIds, cancellationToken).ConfigureAwait(false);
-                hiddenSources = await _narrowDocuments.HiddenDocumentIdsAsync(derivedSources.Values, cancellationToken)
+                hiddenSources = await _narrowDocuments.HiddenDocumentIdsAsync(derivedSources.Values.SelectMany(documents => documents), cancellationToken)
                     .ConfigureAwait(false);
             }
 

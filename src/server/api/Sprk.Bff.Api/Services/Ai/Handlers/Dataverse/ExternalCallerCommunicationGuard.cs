@@ -27,10 +27,12 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 /// parent-document walk, hides it. The handlers reach it only through <see cref="AppOnlyDocumentNarrowing"/>, which
 /// re-reads the documents by id app-only, so none of its reads runs over the caller's user client. A row that DERIVES from a
 /// document (<see cref="AnalysisTable"/>, and <see cref="AnalysisOutputTable"/> through its analysis; task 188 round 3 slice C)
-/// is hidden when its source document is, or when it has one that cannot be decided: its source link is read as the user
+/// is hidden when its source document or its output file is, or when it has one that cannot be decided (all three tools,
+/// <c>describe</c> included): its links are read as the user
 /// (<see cref="ReadSourceDocumentIdsAsync"/>), the documents are decided by the hide-only overload
 /// (<see cref="AppOnlyDocumentNarrowingExtensions.HiddenDocumentIdsAsync"/>). A row with no source document is unaffected.</para>
-/// <para><b>Who is external.</b> Decided only when the request touches the communication family or <c>sprk_document</c>,
+/// <para><b>Who is external.</b> Decided only when the request touches the communication family, <c>sprk_document</c> or a
+/// document-derived table,
 /// so other requests are byte-identical. The request principal → <see cref="ICallerSystemUserResolver"/> →
 /// <see cref="ISystemUserIdentityResolver.IsExternalAsync"/>. A caller with no principal, no oid or no active systemuser
 /// is EXTERNAL (fail closed); a caller whose lookup FAILED (a swallowed Dataverse or cache fault) makes the tool call fail
@@ -123,40 +125,44 @@ internal static class ExternalCallerCommunicationGuard
     internal const string AnalysisOutputTable = "sprk_analysisoutput";
 
     /// <summary>
-    /// How a derived table reaches its source document: its entity set and primary id, the lookup it is read through, and
-    /// the derived table that lookup targets (<c>null</c>: the lookup IS the source document).
+    /// How a derived table reaches its documents: its entity set and primary id, the lookups it is read through, and the
+    /// derived table those lookups target (<c>null</c>: each lookup IS a document). A row is hidden when ANY of its documents
+    /// is hidden or cannot be decided.
     /// </summary>
-    private sealed record DerivedTable(string EntitySet, string IdColumn, string LinkValue, string? Via);
+    private sealed record DerivedTable(string EntitySet, string IdColumn, IReadOnlyList<string> LinkValues, string? Via);
 
     /// <summary>
-    /// Tables whose rows carry a document's content or text derived from it, keyed to their source document (task 188 notes
-    /// §16, the surface classification). Entity sets and lookups as read live (<c>SecureChildLineage</c>: note
-    /// <c>sprk_analysises</c>).
+    /// Tables whose rows carry a document's content or text derived from it, keyed to the documents they derive from (task 188
+    /// notes §16, the surface classification). An analysis follows its SOURCE document (<c>sprk_documentid</c>) AND its saved
+    /// OUTPUT FILE (<c>sprk_outputfileid</c>, the same text as a document; coordinator decision OD-C1); an output follows its
+    /// analysis. Entity sets and lookups as read live (<c>SecureChildLineage</c>: note <c>sprk_analysises</c>).
     /// </summary>
     private static readonly IReadOnlyDictionary<string, DerivedTable> DocumentDerivedTables =
         new Dictionary<string, DerivedTable>(StringComparer.OrdinalIgnoreCase)
         {
-            [AnalysisTable] = new("sprk_analysises", "sprk_analysisid", "_sprk_documentid_value", Via: null),
-            [AnalysisOutputTable] = new("sprk_analysisoutputs", "sprk_analysisoutputid", "_sprk_analysisid_value", Via: AnalysisTable),
+            [AnalysisTable] = new("sprk_analysises", "sprk_analysisid",
+                new[] { "_sprk_documentid_value", "_sprk_outputfileid_value" }, Via: null),
+            [AnalysisOutputTable] = new("sprk_analysisoutputs", "sprk_analysisoutputid",
+                new[] { "_sprk_analysisid_value" }, Via: AnalysisTable),
         };
 
     /// <summary>
     /// True for a table whose rows derive from a document (<see cref="AnalysisTable"/>, <see cref="AnalysisOutputTable"/>):
-    /// an external caller's row is hidden when its source document is (<see cref="ReadSourceDocumentIdsAsync"/>, then
+    /// an external caller's row is hidden when one of its documents is (<see cref="ReadSourceDocumentIdsAsync"/>, then
     /// <see cref="AppOnlyDocumentNarrowingExtensions.HiddenDocumentIdsAsync"/>).
     /// </summary>
     internal static bool IsDocumentDerivedTable(string? logicalName) =>
         logicalName is not null && DocumentDerivedTables.ContainsKey(logicalName);
 
     /// <summary>
-    /// The source document of each derived row in <paramref name="rowIds"/>, read BY ID over the caller's own user client
-    /// (the rows are the user's; only the hide decision on the documents runs app-only): <see cref="Guid.Empty"/> when the row
-    /// has no source document (it is unaffected), <see cref="ExternalDocumentNarrowing.UnreadableLink"/> when it HAS one that
-    /// cannot be decided — the row (or, for an output, its analysis) does not come back, or its lookup is present but not a
+    /// The documents each derived row in <paramref name="rowIds"/> derives from, read BY ID over the caller's own user client
+    /// (the rows are the user's; only the hide decision on the documents runs app-only). An EMPTY list: the row has no
+    /// document (it is unaffected). <see cref="ExternalDocumentNarrowing.UnreadableLink"/> in the list: the row HAS a document
+    /// that cannot be decided — the row (or, for an output, its analysis) does not come back, or a lookup is present but not a
     /// GUID — so the caller hides it (fail closed). One batched read per level (OR filter, chunks of
     /// <see cref="CommunicationOpenThreadGate.ChunkSize"/>); an output adds the level of its analyses. A failed read THROWS.
     /// </summary>
-    internal static async Task<IReadOnlyDictionary<Guid, Guid>> ReadSourceDocumentIdsAsync(
+    internal static async Task<IReadOnlyDictionary<Guid, IReadOnlyList<Guid>>> ReadSourceDocumentIdsAsync(
         IDataverseUserClient dataverse, string logicalName, IReadOnlyCollection<Guid> rowIds, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(dataverse);
@@ -165,9 +171,9 @@ internal static class ExternalCallerCommunicationGuard
             throw new ArgumentOutOfRangeException(nameof(logicalName), logicalName, "Not a document-derived table.");
 
         var distinct = rowIds.Where(id => id != Guid.Empty).Distinct().ToList();
-        var links = new Dictionary<Guid, Guid>();
+        var links = new Dictionary<Guid, IReadOnlyList<Guid>>();
         var chunks = await CommunicationOpenThreadGate.ReadChunksAsync(distinct, (chunk, c) => ReadRowsAsync(dataverse,
-            $"{table.EntitySet}?$select={table.IdColumn},{table.LinkValue}" +
+            $"{table.EntitySet}?$select={table.IdColumn},{string.Join(",", table.LinkValues)}" +
             $"&$filter={string.Join(" or ", chunk.Select(id => $"{table.IdColumn} eq {id:D}"))}&$top={chunk.Length}",
             $"{logicalName} source link", c), ct).ConfigureAwait(false);
         foreach (var (chunk, rows) in chunks)
@@ -176,37 +182,56 @@ internal static class ExternalCallerCommunicationGuard
             foreach (var row in rows)
             {
                 if (LinkOf(row, table.IdColumn) is { } id && id != ExternalDocumentNarrowing.UnreadableLink && asked.Contains(id))
-                    links[id] = LinkOf(row, table.LinkValue) ?? Guid.Empty;
+                {
+                    links[id] = table.LinkValues
+                        .Select(column => LinkOf(row, column))
+                        .Where(link => link is not null)
+                        .Select(link => link!.Value)
+                        .Distinct()
+                        .ToList();
+                }
             }
         }
 
-        // A row that did not come back has a source the caller cannot decide.
-        var result = distinct.ToDictionary(id => id, id => links.TryGetValue(id, out var link) ? link : ExternalDocumentNarrowing.UnreadableLink);
+        // A row that did not come back has a document the caller cannot decide.
+        IReadOnlyList<Guid> undecidable = new[] { ExternalDocumentNarrowing.UnreadableLink };
+        var result = distinct.ToDictionary(id => id, id => links.TryGetValue(id, out var found) ? found : undecidable);
         if (table.Via is null)
             return result;
 
-        var viaIds = result.Values.Where(IsUsableId).Distinct().ToList();
+        var viaIds = result.Values.SelectMany(v => v).Where(IsUsableId).Distinct().ToList();
         var viaSources = await ReadSourceDocumentIdsAsync(dataverse, table.Via, viaIds, ct).ConfigureAwait(false);
-        return result.ToDictionary(kv => kv.Key, kv => IsUsableId(kv.Value) ? viaSources[kv.Value] : kv.Value);
+        return result.ToDictionary(
+            kv => kv.Key,
+            kv => (IReadOnlyList<Guid>)kv.Value
+                .SelectMany(via => IsUsableId(via) ? viaSources[via] : new[] { via })
+                .Distinct()
+                .ToList());
     }
 
     /// <summary>
-    /// Whether the derived row <paramref name="rowId"/> is hidden, given its source documents
-    /// (<see cref="ReadSourceDocumentIdsAsync"/>) and the hidden set
-    /// (<see cref="AppOnlyDocumentNarrowingExtensions.HiddenDocumentIdsAsync"/>). A row with no source document is not; a row
-    /// that was not resolved (no usable id, or no decision at all) is, as undecidable (fail closed).
-    /// <paramref name="source"/> is what hid it, for the log summary.
+    /// Whether the derived row <paramref name="rowId"/> is hidden, given its documents (<see cref="ReadSourceDocumentIdsAsync"/>)
+    /// and the hidden set (<see cref="AppOnlyDocumentNarrowingExtensions.HiddenDocumentIdsAsync"/>): hidden when ANY of its
+    /// documents is. A row with no document is not; a row that was not resolved (no usable id, or no decision at all) is, as
+    /// undecidable (fail closed). <paramref name="source"/> is what hid it, for the log summary.
     /// </summary>
     internal static bool IsDerivedRowHidden(
-        Guid rowId, IReadOnlyDictionary<Guid, Guid>? sources, IReadOnlySet<Guid>? hidden, out Guid source)
+        Guid rowId, IReadOnlyDictionary<Guid, IReadOnlyList<Guid>>? sources, IReadOnlySet<Guid>? hidden, out Guid source)
     {
-        if (sources is null || hidden is null || !sources.TryGetValue(rowId, out source))
-        {
-            source = ExternalDocumentNarrowing.UnreadableLink;
+        source = ExternalDocumentNarrowing.UnreadableLink;
+        if (sources is null || hidden is null || !sources.TryGetValue(rowId, out var documents))
             return true;
+
+        foreach (var document in documents)
+        {
+            if (hidden.Contains(document))
+            {
+                source = document;
+                return true;
+            }
         }
 
-        return source != Guid.Empty && hidden.Contains(source);
+        return false;
     }
 
     private static bool IsUsableId(Guid id) => id != Guid.Empty && id != ExternalDocumentNarrowing.UnreadableLink;
