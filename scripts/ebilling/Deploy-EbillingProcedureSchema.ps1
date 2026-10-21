@@ -509,6 +509,10 @@ function Get-CascadeFixBody($Relationship, [hashtable]$Expected) {
         if (-not $Expected.ContainsKey($k)) { throw "Get-CascadeFixBody: the expected configuration has no '$k'." }
         $Relationship.CascadeConfiguration.$k = $Expected[$k]
     }
+    # A read through the cast path carries @odata.context but no @odata.type; without the type the PUT is read as
+    # RelationshipMetadataBase and refused (0x80048d19 "Invalid property 'ReferencedAttribute'"). Name the type; drop the context.
+    $Relationship | Add-Member -NotePropertyName '@odata.type' -NotePropertyValue 'Microsoft.Dynamics.CRM.OneToManyRelationshipMetadata' -Force
+    $Relationship.PSObject.Properties.Remove('@odata.context')
     return $Relationship
 }
 

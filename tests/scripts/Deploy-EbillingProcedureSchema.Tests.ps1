@@ -409,7 +409,7 @@ Describe 'the parental limit (one Delete Cascade relationship per table, dev run
         $spec = @($plan | Where-Object { $_.Table -eq 'sprk_procedureassignment' -and $_.Column -eq 'sprk_matter' })[0]
         function New-ReadRel {
             return [pscustomobject]@{
-                '@odata.type' = '#Microsoft.Dynamics.CRM.OneToManyRelationshipMetadata'; MetadataId = 'e460e4bf-8ecd-f111-a05d-3833c5e9614d'
+                '@odata.context' = 'https://example.invalid/api/data/v9.2/$metadata#RelationshipDefinitions/Microsoft.Dynamics.CRM.OneToManyRelationshipMetadata/$entity'; MetadataId = 'e460e4bf-8ecd-f111-a05d-3833c5e9614d'
                 SchemaName = 'sprk_matter_procedureassignment_matter'; ReferencedEntity = 'sprk_matter'; ReferencingAttribute = 'sprk_matter'
                 CascadeConfiguration = [pscustomobject]@{ Assign = 'NoCascade'; Delete = 'Cascade'; Archive = 'RemoveLink'; Merge = 'NoCascade'; Reparent = 'NoCascade'; Share = 'NoCascade'; Unshare = 'NoCascade'; RollupView = 'NoCascade' }
             }
@@ -423,7 +423,9 @@ Describe 'the parental limit (one Delete Cascade relationship per table, dev run
             $body.CascadeConfiguration.RollupView | Should Be 'NoCascade'
             $body.MetadataId | Should Be $before.MetadataId
             $body.SchemaName | Should Be $before.SchemaName
-            $body.'@odata.type' | Should Be $before.'@odata.type'
+            # The cast-path read has no @odata.type (the dev run of 2026-10-21 was refused 0x80048d19 without it).
+            $body.'@odata.type' | Should Be 'Microsoft.Dynamics.CRM.OneToManyRelationshipMetadata'
+            @($body.PSObject.Properties.Name) -contains '@odata.context' | Should Be $false
             @($body.PSObject.Properties.Name).Count | Should Be @($before.PSObject.Properties.Name).Count
         }
         It 'reads back clean against the six expected members (must-not-fire) and would be caught if Delete stayed Cascade (must-fire)' {
