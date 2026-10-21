@@ -67,17 +67,22 @@ None of them takes a token or fact (`BillingFindingSignalMapper.cs:342-351` on `
 ## Known limits
 
 - **Surfaces not covered (POML):**
-  - The native model-driven `sprk_signal` form and views read `sprk_sentence` and `sprk_evidencerefs` directly. This BFF check does not cover them.
+  - Any read of `sprk_signal` made directly as the user (native form, views, or any generic endpoint) returns `sprk_sentence` and `sprk_evidencerefs` as stored. This BFF check does not cover it.
   - ebilling's own invoice-review surfaces must apply the same rule; ebilling task 119 is to use `EarlierInvoiceReadability`.
 - **Rate cards (agreed with ebilling 2026-10-21):** ApprovedRate and Discount rate-card quotes are inside the family. They are not touched.
 - **Evidence that is not a JSON array**, or has colliding property names, cannot be parsed. Such a row is not detected as a Duplicate, so its sentence is returned as stored. (9) still returns its evidence as null. SignalWriter never writes such evidence (K4).
 - **Pairing ids with numbers:** when a row carries at least one `duplicateOf.invoiceId` GUID, its tracking numbers are not resolved. ebilling writes the id beside the number of the same prior; it omits the id only for `DuplicateOfEarlierLine` and withheld findings. A merged row mixing an id-bearing prior with a different, id-less number does not occur under ebilling's merge-by-subject (K4).
 - **Inactive submissions** are not filtered (the POML names no state filter). A withdrawn submission still counts toward "exactly one".
+- **D-123 stored-evidence sweep:** `SignalReevaluationJob.RedactPoliciesNotInForceAsync` / `RedactSignalsOfDeletedPoliciesAsync` → `SignalSuppressionService.StoredEvidenceToRedactAsync` strips the text of `duplicateOf.*` lines on Signals of an Off, Retired or deleted policy where a Secure team exists. Such a row is then withheld from every reader. Fails closed.
+- **A prior submission with no invoice link** (no `duplicateOf.invoiceId`, and the submission's `_sprk_invoice_value` is null): the Duplicate is withheld for everyone. Fails closed.
+- **Id path vs tracking-number path:** the id path checks only the earlier invoice. The tracking-number path also needs the caller to read the submission, the current invoice and (line-level) the billing event. So an older Signal can be withheld where a newer one about the same prior is shown. Accepted under D-176.
+- **URL length:** about 200 very long tracking numbers in one vendor org could exceed Dataverse's URL limit. The read then faults and the page's Duplicates are withheld (fail closed). Real numbers are about 20 characters.
+- **"Two submissions → withhold"** cannot occur live (the Active alternate key on tracking number + vendor org); it is defensive.
 
 ## Tests
 
 New tests, all in the task's scope:
-- **`SignalReadRouteTests`, section "D-176 (task 157)": 9 methods, 12 cases.**
+- **`SignalReadRouteTests`, section "D-176 (task 157)": 11 methods, 14 cases.**
   - `D176_ADuplicateWhoseEarlierInvoiceTheCallerReads_KeepsItsSentenceAndEvidence`
   - `D176_ADuplicateWhoseEarlierInvoiceTheCallerCannotRead_IsWithheld_InEbillingsWriteTimeShape`
   - `D176_ATrackingNumberOnly_IsResolvedThroughTheOneSubmissionOfTheCurrentInvoicesVendorOrg`: readable / unreadable / zero / two / an unreadable submission. **Beyond the criteria:** a matter subject → withheld, because it is the POML constraint "any other subject type with only a tracking number withholds".
@@ -87,6 +92,8 @@ New tests, all in the task's scope:
   - `D176_ALineLevelRepeatOfAnEarlierLine_IsKeptWhenTheCallerReadsItsEventAndInvoice_AndWithheldWhenNotTheEvent`
   - `D176_ALineLevelRepeatOfAPriorSubmissionLine_WithAnInvoiceId_IsJudgedByThatInvoice`
   - `D176_ReadsAreBatched_OneOfEachPerRequest_AndOneSubmissionReadPerVendorOrg_InListsOfAtMost200Ids`
+  - `D176_ADuplicateWhoseEvidenceUsesOtherCasing_AndWhoseEarlierInvoiceIsUnreadable_IsWithheld`: added in the fix round. Justification: a security filter whose comparison mode (OrdinalIgnoreCase) could regress to Ordinal silently, which would let a differently-cased `Billing.Reference` / `DUPLICATEOF.INVOICEID` line pass undetected.
+  - `D176_ADuplicateNamingTwoEarlierInvoices_OneReadableAndOneNot_IsWithheld`: added in the fix round. Justification: a security filter whose quantifier (`All`, not `Any`) could regress silently, which would show a Duplicate when only one of its priors is readable.
 - **Fake world additions (test-only):**
   - catalog entry `sprk_billingevent`;
   - `Invoice` / `BillingEvent` / `Submission` builders;
@@ -107,7 +114,7 @@ New tests, all in the task's scope:
 
 | Suite | Result |
 |---|---|
-| `SignalReadRouteTests` | 81/81 (69 existing + 12 new) |
+| `SignalReadRouteTests` | 83/83 (69 existing + 14 new) |
 | Unit `Sprk.Bff.Api.Tests.Services.Signals` | 382/382 |
 | ArchTests | 1093/1093 (full) |
 | BFF build with `-warnaserror` | 0 warnings |
@@ -119,6 +126,8 @@ New tests, all in the task's scope:
 - **(b)** A fault in the invoice read returns every ref readable → all 4 cases of `D176_WhenTheEarlierInvoiceReadFaults_…` fail.
 
 Both were restored and the D176 tests rerun: 12/12.
+- **(c)** Fix round: the four case-insensitive comparisons in `SignalReadService` (kind, the two `duplicateOf` refs, the `duplicateOf.` prefix strip) changed to `Ordinal` → `D176_ADuplicateWhoseEvidenceUsesOtherCasing_…` fails (the sentence is returned as stored). Restored.
+- **(d)** Fix round: `references.All(readable.Contains)` changed to `Any` → `D176_ADuplicateNamingTwoEarlierInvoices_…` fails (the sentence is returned as stored). Restored.
 
 ## BFF hygiene (CLAUDE.md §10)
 

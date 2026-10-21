@@ -1127,6 +1127,46 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
     }
 
     [Fact]
+    public async Task D176_ADuplicateWhoseEvidenceUsesOtherCasing_AndWhoseEarlierInvoiceIsUnreadable_IsWithheld()
+    {
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        var current = world.Invoice([Alice], VendorOrg);
+        var earlier = world.Invoice([Bob], VendorOrg);
+        var lines = BillingEvidence();
+        // One casing per object (a line with both "ref" and "Ref" cannot be judged); the kind, the ref and every property name differ in case.
+        lines.Add(new() { ["Kind"] = "Billing.Reference", ["Ref"] = "DUPLICATEOF.INVOICEID", ["Tier"] = "Fact", ["Text"] = earlier.ToString("D") });
+        var s = BillingSignal(world, m, (NotCoreType, current), JsonSerializer.Serialize(lines));
+
+        var body = await OkAsync(world, Alice);
+        Ids(body).Should().Equal(s);
+        Item(body, s).GetProperty("sentence").GetString().Should().Be(EarlierInvoiceReadability.WithheldSentence);
+        Item(body, s).GetProperty("evidenceRefs").GetString().Should().NotContain(earlier.ToString("D"));
+        var kept = EvidenceOf(body, s);
+        kept.Should().HaveCount(3).And.OnlyContain(l => IsWithheldLine(l));
+        world.Requests.Count(r => r.StartsWith(EarlierInvoiceRead, StringComparison.Ordinal)).Should().Be(1, "the cased line is recognised as a Duplicate reference");
+    }
+
+    [Fact]
+    public async Task D176_ADuplicateNamingTwoEarlierInvoices_OneReadableAndOneNot_IsWithheld()
+    {
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        var current = world.Invoice([Alice], VendorOrg);
+        var readable = world.Invoice([Alice], VendorOrg);
+        var unreadable = world.Invoice([Bob], VendorOrg);
+        var lines = BillingEvidence();
+        lines.Add(new() { ["kind"] = "billing.reference", ["ref"] = "duplicateOf.invoiceId", ["tier"] = "Fact", ["text"] = readable.ToString("D") });
+        lines.Add(new() { ["kind"] = "billing.reference", ["ref"] = "duplicateOf.invoiceId", ["tier"] = "Fact", ["text"] = unreadable.ToString("D") });
+        var s = BillingSignal(world, m, (NotCoreType, current), JsonSerializer.Serialize(lines));
+
+        var body = await OkAsync(world, Alice);
+        Ids(body).Should().Equal(s);
+        ShouldWithholdTheEarlierInvoice(body, s, unreadable.ToString("D"));
+        Item(body, s).GetProperty("evidenceRefs").GetString().Should().NotContain(readable.ToString("D"));
+    }
+
+    [Fact]
     public async Task D176_ATrackingNumberOnly_IsResolvedThroughTheOneSubmissionOfTheCurrentInvoicesVendorOrg()
     {
         var world = new World();
