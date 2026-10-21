@@ -291,6 +291,181 @@ public sealed class RecordRepairModeTests
         _world.Directory.RecordQueries.Should().BeEmpty();
     }
 
+    // =====================================================================================
+    // Review pass 1 — F1-a: a secure-flagged root is never re-owned (empty counts as flagged)
+    // =====================================================================================
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(null)]
+    public async Task AUserOwnedSecureFlaggedRoot_KeepsItsOwner_AndItsOtherFieldsAreStillRepaired(bool? flag)
+    {
+        var id = _world.MatterOwnedBy(RepairWorld.PersonInChild, flag);
+
+        var outcome = await _world.RepairAsync("sprk_matter", id);
+
+        Field(outcome, RecordRepairPart.Owner, "ownerid").ReasonCode.Should().Be(RecordRepairReason.OwnerRootSecure);
+        var write = _world.Writes.Should().ContainSingle().Subject;
+        write.Fields.Should().NotContainKey("ownerid", "a secure root is provisioned by task 144, never re-owned (owner S6)");
+        write.Fields["sprk_searchindexname"].Should().Be(RepairWorld.ChildIndexName);
+        _world.Directory.Row("sprk_matter", id).GetAttributeValue<EntityReference>("ownerid")
+            .Should().Be(new EntityReference("systemuser", RepairWorld.PersonInChild));
+        _world.Evictions.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AUserOwnedRootFlaggedExplicitlyNotSecure_IsReOwnedToItsUnitsTeam()
+    {
+        var id = _world.MatterOwnedBy(RepairWorld.PersonInChild, isSecure: false);
+
+        var outcome = await _world.RepairAsync("sprk_matter", id);
+
+        _world.Writes.Should().ContainSingle().Which.Fields["ownerid"].Should().Be(new EntityReference("team", Directory.ChildTeam));
+        Field(outcome, RecordRepairPart.Owner, "ownerid").State.Should().Be(RecordRepairFieldState.Repaired);
+    }
+
+    // =====================================================================================
+    // Review pass 1 — F1-b: the owner is decided BEFORE the mapping; a secure source never maps into a row it does not own
+    // =====================================================================================
+
+    [Fact]
+    public async Task AUserOwnedEventUnderASecureMatter_GetsNothingMapped_FromTheSecureMatter()
+    {
+        _world.SecureMatterHolding("Secret Client", "Secret Practice");
+        var id = _world.EventUnderTheSecureMatter(new EntityReference("systemuser", RepairWorld.PersonInChild), Directory.ChildBu);
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain(["sprk_clientname", "sprk_practicearea", "sprk_priorityname"]);
+        var row = _world.Directory.Row("sprk_event", id);
+        row.Attributes.Should().NotContainKey("sprk_clientname");
+        row.Attributes.Should().NotContainKey("sprk_practicearea");
+        outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.Mapping && f.Column == null
+            && f.ReasonCode == RecordRepairReason.MappingSourceSecure);
+        outcome.Fields.Should().NotContain(f => f.Part == RecordRepairPart.Mapping && f.State == RecordRepairFieldState.Repaired);
+    }
+
+    [Fact]
+    public async Task AnEventAlreadyOwnedByTheSecureTeam_IsStillMapped_TheGateDoesNotFire()
+    {
+        _world.SecureMatterHolding("Secret Client", "Secret Practice");
+        var id = _world.EventUnderTheSecureMatter(new EntityReference("team", Directory.SecureNamedTeam), Directory.SecureBu);
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        var write = _world.Writes.Should().ContainSingle().Subject;
+        write.Fields["sprk_clientname"].Should().Be("Secret Client");
+        write.Fields["sprk_practicearea"].Should().Be("Secret Practice");
+        write.Fields.Should().NotContainKey("ownerid");
+        Field(outcome, RecordRepairPart.Mapping, "sprk_clientname").State.Should().Be(RecordRepairFieldState.Repaired);
+    }
+
+    // =====================================================================================
+    // Review pass 1 — F1-c: a blank mapped string is no value (NFR-03)
+    // =====================================================================================
+
+    [Fact]
+    public async Task ATemplateThatYieldsABlankString_IsNeverWritten_TwoRepairsWriteNothing()
+    {
+        var id = _world.EventUnderTheMatter(clientName: "Acme", practiceArea: "Tax", priority: "Urgent",
+            owner: new EntityReference("team", Directory.ChildTeam), owningUnit: Directory.ChildBu);
+        _world.MapABlankTemplateOntoTheEvent();
+
+        var first = await _world.RepairAsync("sprk_event", id);
+        var second = await _world.RepairAsync("sprk_event", id);
+
+        _world.Writes.Should().BeEmpty("a blank string reads as unset again, so writing it would write on every pass");
+        first.Status.Should().Be(RecordRepairStatus.NothingToRepair);
+        second.Status.Should().Be(RecordRepairStatus.NothingToRepair);
+        Field(first, RecordRepairPart.Mapping, RepairWorld.BlankTemplateTarget).ReasonCode.Should().Be(RecordRepairReason.MappingNoValue);
+    }
+
+    // =====================================================================================
+    // Review pass 1 — F3: the stamped child's mapping, the fault paths, the leaf-table move
+    // =====================================================================================
+
+    [Fact]
+    public async Task AStampedChild_IsMappedFromItsSource_ItsStampIsACopyNotASecondFiling()
+    {
+        // Filed under the communication, holding its I-1 stamp of the matter: read as two filings, the source would be
+        // undetermined and nothing mapped.
+        var id = _world.EventUnderTheCommunication(heldMatterStamp: RepairWorld.Matter);
+        _world.MapTheCommunicationOntoTheEvent();
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        _world.Writes.Should().ContainSingle().Which.Fields[RepairWorld.CommunicationMappedTarget]
+            .Should().Be(RepairWorld.CommunicationSubject);
+        Field(outcome, RecordRepairPart.Mapping, RepairWorld.CommunicationMappedTarget).State.Should().Be(RecordRepairFieldState.Repaired);
+    }
+
+    [Fact]
+    public async Task AWriteThatFaults_WithTheOwnerInIt_IsEvictedFor_AndReportsNoExceptionText()
+    {
+        var id = _world.EventUnderTheMatter(clientName: null, practiceArea: "Tax", priority: "Urgent");
+        _world.WriteFault = new InvalidOperationException("SECRET-DETAIL from Dataverse");
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        outcome.Status.Should().Be(RecordRepairStatus.Failed);
+        outcome.ReasonCode.Should().Be(RecordRepairReason.WriteFailed);
+        outcome.Wrote.Should().BeFalse();
+        _world.Writes.Should().ContainSingle().Which.Fields.Should().ContainKey("ownerid");
+        // The contract: the write may have landed (a lost response), so an owner change is evicted for anyway.
+        _world.Evictions.Should().ContainSingle().Which.Should().Be(("sprk_event", "sprk_events", id));
+        outcome.ReasonCode.Should().NotContain("SECRET");
+        outcome.Fields.Should().OnlyContain(f => f.ReasonCode == null || !f.ReasonCode.Contains("SECRET"), "ADR-019");
+        outcome.Fields.Should().NotContain(f => f.State == RecordRepairFieldState.Repaired);
+    }
+
+    [Fact]
+    public async Task AnOwnerResolverFault_LeavesTheOwner_AndMapsNothing_FailClosed()
+    {
+        var id = _world.EventUnderTheMatter(clientName: null, practiceArea: null, priority: null);
+        _world.ResolverFault = new InvalidOperationException("SECRET-DETAIL resolver");
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        outcome.OwnerRefusal.Should().NotBeNull();
+        outcome.OwnerRefusal!.Code.Should().Be(RecordCreationRefusal.OwnerUnavailableCode);
+        outcome.OwnerRefusal.Detail.Should().NotContain("SECRET");
+        outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.Mapping
+            && f.ReasonCode == RecordRepairReason.MappingFilingUndecided);
+        _world.Writes.Should().BeEmpty("an undecided filing could be a secure one");
+        _world.Directory.Row("sprk_event", id).GetAttributeValue<EntityReference>("ownerid")
+            .Should().Be(new EntityReference("systemuser", RepairWorld.PersonInChild));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AMappingFault_MapsNothing_AndTheOwnerIsStillRepaired(bool profileUnreadable)
+    {
+        var id = _world.EventUnderTheMatter(clientName: null, practiceArea: null, priority: null);
+        _world.MappingFault = profileUnreadable ? RepairWorld.MappingFaultKind.ProfileUnreadable : RepairWorld.MappingFaultKind.RuleFaults;
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        var write = _world.Writes.Should().ContainSingle().Subject;
+        write.Fields.Keys.Should().Equal("ownerid");
+        write.Fields["ownerid"].Should().Be(new EntityReference("team", Directory.ChildTeam));
+        outcome.Fields.Should().ContainSingle(f => f.Part == RecordRepairPart.Mapping)
+            .Which.ReasonCode.Should().Be(RecordRepairReason.MappingUnavailable);
+    }
+
+    [Fact]
+    public async Task ALeafRowInAnotherBusinessUnit_IsReOwned_NoRowInheritsAccessThroughIt()
+    {
+        // A Signal is no ownership parent: nothing is filed under it, so moving it moves no one else's access.
+        var id = _world.SignalUnderTheMatterOwnedBy(Directory.CallerUserId, Directory.GeneralBu);
+
+        var outcome = await _world.RepairAsync("sprk_signal", id);
+
+        _world.Writes.Should().ContainSingle().Which.Fields["ownerid"].Should().Be(new EntityReference("team", Directory.ChildTeam));
+        Field(outcome, RecordRepairPart.Owner, "ownerid").State.Should().Be(RecordRepairFieldState.Repaired);
+        _world.Evictions.Should().ContainSingle().Which.Should().Be(("sprk_signal", "sprk_signals", id));
+    }
+
     private static RecordRepairField Field(RecordRepairOutcome outcome, RecordRepairPart part, string column) =>
         outcome.Fields.Should().ContainSingle(f => f.Part == part && f.Column == column).Subject;
 }
@@ -315,6 +490,18 @@ internal sealed class RepairWorld
     public const string MatterClient = "Acme Corp";
     public const string MatterPracticeArea = "Litigation";
     public const string DefaultPriority = "Normal";
+    public static readonly Guid SecureMatter = Guid.Parse("a0160000-0000-4000-8000-000000000007");
+    public const string CommunicationSubject = "Re: the Acme hearing";
+    public const string CommunicationMappedTarget = "sprk_description";
+    public const string BlankTemplateTarget = "sprk_eventdescription";
+
+    /// <summary>How the mapping step faults: the profile read throws, or a rule the mapping cannot read throws inside it.</summary>
+    public enum MappingFaultKind
+    {
+        None,
+        ProfileUnreadable,
+        RuleFaults,
+    }
 
     private readonly Dictionary<(string Source, string Target), FieldMappingProfileEntity> _profiles = new();
     private readonly StampWorld _stamps = new();
@@ -333,7 +520,11 @@ internal sealed class RepairWorld
                 })
             .WithOrdinaryRoot("sprk_matter", OtherMatter)
             .WithRecord("sprk_communication", Communication, Directory.ChildBu, owningTeam: Directory.ChildTeam,
-                extra: new Dictionary<string, object> { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", Matter) });
+                extra: new Dictionary<string, object>
+                {
+                    ["sprk_regardingmatter"] = new EntityReference("sprk_matter", Matter),
+                    ["sprk_subject"] = CommunicationSubject,
+                });
         _stamps.Row("sprk_communication", Communication, [("sprk_regardingmatter", "sprk_matter", Matter)]);
 
         SearchIndexDefaults[Directory.GeneralBu] = (GeneralIndexName, GeneralIndex);
@@ -366,6 +557,15 @@ internal sealed class RepairWorld
 
     /// <summary>Runs once, just before the update reaches the row (another writer's change lands in between).</summary>
     public Action? BeforeWrite { get; set; }
+
+    /// <summary>When set, the repair's update is recorded and then throws it (not applied).</summary>
+    public Exception? WriteFault { get; set; }
+
+    /// <summary>When set, every owner decision asked of the resolver throws it.</summary>
+    public Exception? ResolverFault { get; set; }
+
+    /// <summary>How the mapping step faults, if at all.</summary>
+    public MappingFaultKind MappingFault { get; set; }
 
     public Task<RecordRepairOutcome> RepairAsync(string table, Guid id) => Service().RepairAsync(table, id, CancellationToken.None);
 
@@ -447,6 +647,68 @@ internal sealed class RepairWorld
         return id;
     }
 
+    /// <summary>A matter in the child unit owned by a user (natively created), with the secure flag given (null: empty).</summary>
+    public Guid MatterOwnedBy(Guid user, bool? isSecure)
+    {
+        var id = Guid.NewGuid();
+        Directory.WithRecord("sprk_matter", id, Directory.ChildBu, isSecure: isSecure ?? false,
+            extra: new Dictionary<string, object> { ["ownerid"] = new EntityReference("systemuser", user) });
+        if (isSecure is null)
+            Directory.Row("sprk_matter", id).Attributes.Remove("sprk_issecure"); // masked, as WithMaskedSecureFlag
+        return id;
+    }
+
+    /// <summary>The secure matter, isolated (Secure Record unit, its named team, flagged), holding the mapped columns.</summary>
+    public void SecureMatterHolding(string clientName, string practiceArea)
+    {
+        Directory.WithRecord("sprk_matter", SecureMatter, Directory.SecureBu, isSecure: true, owningTeam: Directory.SecureNamedTeam,
+            extra: new Dictionary<string, object> { ["sprk_clientname"] = clientName, ["sprk_practicearea"] = practiceArea });
+    }
+
+    /// <summary>An event filed under the secure matter, with nothing mapped yet.</summary>
+    public Guid EventUnderTheSecureMatter(EntityReference owner, Guid owningUnit)
+    {
+        var id = Guid.NewGuid();
+        var extra = new Dictionary<string, object>
+        {
+            ["ownerid"] = owner,
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", SecureMatter),
+        };
+        if (owner is { LogicalName: "team" })
+            extra["owningteam"] = owner;
+        Directory.WithRecord("sprk_event", id, owningUnit, extra: extra);
+        return id;
+    }
+
+    /// <summary>A Signal (a leaf: no ownership parent) filed under the matter, owned by a user in the unit given.</summary>
+    public Guid SignalUnderTheMatterOwnedBy(Guid user, Guid owningUnit)
+    {
+        var id = Guid.NewGuid();
+        Directory.WithRecord("sprk_signal", id, owningUnit, extra: new Dictionary<string, object>
+        {
+            ["ownerid"] = new EntityReference("systemuser", user),
+            ["sprk_matter"] = new EntityReference("sprk_matter", Matter),
+        });
+        return id;
+    }
+
+    /// <summary>A communication → event profile copying the communication's subject.</summary>
+    public void MapTheCommunicationOntoTheEvent() =>
+        _profiles[("sprk_communication", "sprk_event")] = Profile("sprk_communication", "sprk_event",
+            Copy("sprk_subject", CommunicationMappedTarget, 1));
+
+    /// <summary>Adds a Template rule whose placeholder the matter does not hold: it yields an empty string.</summary>
+    public void MapABlankTemplateOntoTheEvent()
+    {
+        var profile = _profiles[("sprk_matter", "sprk_event")];
+        profile.Rules = [.. profile.Rules!, new FieldMappingRuleEntity
+        {
+            Id = Guid.NewGuid(), Name = "blank", SourceField = string.Empty, TargetField = BlankTemplateTarget,
+            TargetFieldType = CreateTimeFieldMapping.FieldTypeText, MappingType = CreateTimeFieldMapping.MappingTypeTemplate,
+            Expression = "{sprk_nosuchfield}", ExecutionOrder = 5, IsActive = true,
+        }];
+    }
+
     /// <summary>Adds a rule copying the matter's project lookup into the event's project filing column.</summary>
     public void MapMattersProjectOntoTheEvent()
     {
@@ -467,8 +729,15 @@ internal sealed class RepairWorld
         var appOnly = new Mock<IFieldMappingDataverseService>(MockBehavior.Strict);
         appOnly
             .Setup(a => a.GetFieldMappingProfileWithRulesAsync(It.IsAny<string>(), It.IsAny<string>(), true, It.IsAny<CancellationToken>()))
-            .Returns((string source, string target, bool _, CancellationToken _) =>
-                Task.FromResult(_profiles.TryGetValue((source, target), out var profile) ? profile : null));
+            .Returns((string source, string target, bool _, CancellationToken _) => MappingFault switch
+            {
+                MappingFaultKind.ProfileUnreadable =>
+                    Task.FromException<FieldMappingProfileEntity?>(new InvalidOperationException("Test: profile read faulted.")),
+                // A rule the mapping cannot read: it throws inside the mapping step, after nothing was mapped.
+                MappingFaultKind.RuleFaults => Task.FromResult<FieldMappingProfileEntity?>(
+                    Profile(source, target, Copy("sprk_clientname", "sprk_clientname", 1), null!)),
+                _ => Task.FromResult(_profiles.TryGetValue((source, target), out var profile) ? profile : null),
+            });
 
         var invalidator = new Mock<IMembershipCacheInvalidator>();
         invalidator
@@ -480,7 +749,7 @@ internal sealed class RepairWorld
             .GetRequiredService<IServiceScopeFactory>();
 
         return new RecordCreationService(
-            new CapturingResolver(Directory.Resolver(), OwnerContexts), appOnly.Object, entities,
+            new CapturingResolver(Directory.Resolver(), OwnerContexts, () => ResolverFault), appOnly.Object, entities,
             SecureRootFilingGateFixtures.Over(entities),
             new CoreAncestorRestamper(_stamps.Service, _stamps.Resolver, NullLogger<CoreAncestorRestamper>.Instance),
             SecureChildShareWorld.SynchronizerOver(SecureChildShareWorld.Standard, new FakeRecordShareTable()),
@@ -511,7 +780,9 @@ internal sealed class RepairWorld
                 BeforeWrite = null;
                 var current = Directory.Version(table, id).ToString(System.Globalization.CultureInfo.InvariantCulture);
                 var applied = current == version;
-                Writes.Add((table, id, version, new Dictionary<string, object>(fields), applied));
+                Writes.Add((table, id, version, new Dictionary<string, object>(fields), applied && WriteFault is null));
+                if (WriteFault is { } fault)
+                    throw fault;
                 if (!applied)
                     throw new DBConcurrencyException($"Test: {table} {id} is at version {current}, not {version}.");
                 Directory.Write(table, id, fields.ToDictionary(f => f.Key, f => (object?)f.Value));
@@ -586,19 +857,20 @@ internal sealed class RepairWorld
         ExecutionOrder = order, IsActive = true,
     };
 
-    /// <summary>The REAL resolver, recording every owner decision asked of it.</summary>
-    private sealed class CapturingResolver(IRecordOwnershipResolver inner, List<RecordOwnershipContext> asked) : IRecordOwnershipResolver
+    /// <summary>The REAL resolver, recording every owner decision asked of it; throwing the fault given, when one is.</summary>
+    private sealed class CapturingResolver(
+        IRecordOwnershipResolver inner, List<RecordOwnershipContext> asked, Func<Exception?> fault) : IRecordOwnershipResolver
     {
         public Task<Guid?> ResolveOwningTeamAsync(RecordOwnershipContext context, CancellationToken ct)
         {
             asked.Add(context);
-            return inner.ResolveOwningTeamAsync(context, ct);
+            return fault() is { } thrown ? Task.FromException<Guid?>(thrown) : inner.ResolveOwningTeamAsync(context, ct);
         }
 
         public Task<RecordOwnerResolution> ResolveOwnerAsync(RecordOwnershipContext context, CancellationToken ct)
         {
             asked.Add(context);
-            return inner.ResolveOwnerAsync(context, ct);
+            return fault() is { } thrown ? Task.FromException<RecordOwnerResolution>(thrown) : inner.ResolveOwnerAsync(context, ct);
         }
 
         public Task<RecordOwnerResolution> ReparentAsync(

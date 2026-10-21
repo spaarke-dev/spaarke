@@ -89,8 +89,18 @@ internal sealed partial class RecordCreationService
         var report = new List<RecordRepairField>();
         var warnings = new List<string>();
 
-        await RepairMappingAsync(table, rule, row, patch, report, warnings, ct).ConfigureAwait(false);
+        // Review F1-b: the owner (and what the row's filing resolves to) is decided BEFORE the mapping, which it may block.
         var owner = await RepairOwnerAsync(table, rule, row, patch, report, ct).ConfigureAwait(false);
+        if (owner.MappingBlocked is { } blocked)
+        {
+            _logger.LogInformation("[RECORD-REPAIR] {Table} {Id}: nothing was mapped ({Reason})", table, id, blocked);
+            report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, null, blocked));
+        }
+        else
+        {
+            await RepairMappingAsync(table, rule, row, patch, report, warnings, ct).ConfigureAwait(false);
+        }
+
         await RepairSearchIndexAsync(table, rule, row, owner.BusinessUnit, patch, report, ct).ConfigureAwait(false);
         await RepairStampAsync(table, row, patch, report, ct).ConfigureAwait(false);
 
@@ -187,6 +197,7 @@ internal sealed partial class RecordCreationService
             return;
         }
 
+        var mappedHere = new List<string>(); // the patch's mapping columns, removed again on a fault (the owner may be in it)
         try
         {
             // A stamped child's I-1 stamp columns are COPIES of its source's root, not filings: leaving them in would read the
@@ -273,7 +284,16 @@ internal sealed partial class RecordCreationService
                         continue;
                     }
 
+                    if (value is string text && string.IsNullOrWhiteSpace(text))
+                    {
+                        // Review F1-c (NFR-03): a blank mapped string is no value — written, it would read as unset again and be
+                        // written on every pass.
+                        report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, column, RecordRepairReason.MappingNoValue));
+                        continue;
+                    }
+
                     patch[column] = value;
+                    mappedHere.Add(column);
                     report.Add(RecordRepairField.Repaired(RecordRepairPart.Mapping, column));
                 }
                 else if (HoldsValue(row, column))
@@ -293,7 +313,7 @@ internal sealed partial class RecordCreationService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "[RECORD-REPAIR] mapping {Table} {Id} faulted; nothing was mapped", table, row.Id);
-            foreach (var mapped in patch.Keys.ToArray())
+            foreach (var mapped in mappedHere)
                 patch.Remove(mapped);
             report.RemoveAll(f => f.Part == RecordRepairPart.Mapping);
             warnings.Add(MappingFaulted);
@@ -655,6 +675,15 @@ internal static class RecordRepairReason
     internal const string OwnerUnknown = "record_repair.owner_unknown";
     internal const string OwnerTeamOwned = "record_repair.owner_team_owned";
     internal const string OwnerKeptByException = "record_repair.owner_kept_by_exception";
+
+    /// <summary>Review F1-a: a secure-flagged root (flag not an explicit false) is provisioned by task 144, never re-owned here.</summary>
+    internal const string OwnerRootSecure = "record_repair.owner_root_secure";
+
+    /// <summary>Review F1-b: the row's filing resolves to the Secure team, which does not own the row yet — nothing is mapped.</summary>
+    internal const string MappingSourceSecure = "record_repair.mapping_source_secure";
+
+    /// <summary>Review F1-b: the owner of what the row is filed under could not be decided — nothing is mapped (fail closed).</summary>
+    internal const string MappingFilingUndecided = "record_repair.mapping_filing_undecided";
 
     /// <summary>Task 016 escalation trigger 2: the owner would move the row to another business unit (fail closed).</summary>
     internal const string OwnerMovesBusinessUnit = "record_repair.owner_moves_business_unit";

@@ -716,13 +716,17 @@ internal sealed partial class RecordCreationService
     // (ResolveOwnerOverAsync, OwnerDecided) and the owner-write census (RecordOwnerAssignmentCensusTests) proves a Routed
     // write against the resolver calls of its own file. The rest of Repair is RecordCreationService.Repair.cs. ──────────
 
-    /// <summary>What step 7 decided for a repair: the business unit the row is owned in afterwards, and the owner refusal.</summary>
-    private sealed record OwnerRepair(Guid? BusinessUnit, RecordCreationRefusal? Refusal);
+    /// <summary>
+    /// What step 7 decided for a repair: the business unit the row is owned in afterwards, the owner refusal, and — review
+    /// F1-b — why the row's mapping must not run (its filing resolves to the Secure team that does not own it yet, or its
+    /// filing's owner could not be decided), or <c>null</c>.
+    /// </summary>
+    private sealed record OwnerRepair(Guid? BusinessUnit, RecordCreationRefusal? Refusal, string? MappingBlocked = null);
 
     /// <summary>
-    /// Step 7 for an existing row (Repair, task 016; FR-09): only a systemuser-owned row (user- or application-owned) is
-    /// re-owned; a team-owned row keeps its owner. The parents are the row's own
-    /// (<see cref="RecordOwnershipContext.ParentsOf(Entity)"/>, plus a message's record-thread filing,
+    /// Step 7 for an existing row (Repair, task 016; FR-09), decided BEFORE the mapping (review F1-b). Only a
+    /// systemuser-owned row (user- or application-owned) is re-owned; a team-owned row keeps its owner. The parents are the
+    /// row's own (<see cref="RecordOwnershipContext.ParentsOf(Entity)"/>, plus a message's record-thread filing,
     /// <see cref="RecordThreadFiling"/>, as the reconciler and the reparent read them) and the create's resolution decides
     /// (<see cref="ResolveOwnerOverAsync"/>, <see cref="OwnerDecided"/>). A row filed under nothing is owned by the team of
     /// the PERSON who owns it (I-6, the acting user); an application-owned one has no such person and is refused
@@ -730,9 +734,18 @@ internal sealed partial class RecordCreationService
     /// exception (an unfiled communication keeps its creator, E1) keeps the owner. Nothing is written here: the owner joins
     /// the repair's one patch.
     /// </summary>
-    /// <remarks><b>Escalation (task 016 trigger 2), fail closed until the owner decides:</b> an owner in another business
-    /// unit than the row's is NOT written on a table whose rows can have children inheriting access (every ownership-parent
-    /// table) — the move would carry those children's access with it.</remarks>
+    /// <remarks>
+    /// <para><b>A secure-flagged root is never re-owned</b> (review F1-a): a matter, project or work assignment whose
+    /// <c>sprk_issecure</c> is not an explicit <c>false</c> (empty reads as flagged, as the resolver reads it) is
+    /// provisioned by task 144's transition, never by a bare re-own (owner S6).</para>
+    /// <para><b>The mapping gate</b> (review F1-b): a FILED row's filing is resolved whatever happens to its owner. When it
+    /// resolves to the Secure team (I-2) and that team does not own the row yet, or it cannot be decided, the mapping is
+    /// blocked — Create never copies a secure record's data into a row that is not isolated.</para>
+    /// <para><b>Escalation (task 016 trigger 2), fail closed until the owner decides:</b> an owner in another business unit
+    /// than the row's is NOT written on a table whose rows can have children inheriting access (every ownership-parent
+    /// table) — the move would carry those children's access with it. A leaf table (no rows filed under it) is re-owned:
+    /// the move is the row's own.</para>
+    /// </remarks>
     private async Task<OwnerRepair> RepairOwnerAsync(
         string table, RecordTableRule rule, Entity row, Dictionary<string, object> patch, List<RecordRepairField> report,
         CancellationToken ct)
@@ -741,44 +754,49 @@ internal sealed partial class RecordCreationService
             ? unit.Id
             : (Guid?)null;
         var current = row.GetAttributeValue<EntityReference>(OwnerColumn);
-        if (current is null || current.Id == Guid.Empty)
-        {
-            report.Add(RecordRepairField.Skipped(RecordRepairPart.Owner, OwnerColumn, RecordRepairReason.OwnerUnknown));
-            return new OwnerRepair(rowUnit, null);
-        }
 
-        if (!string.Equals(current.LogicalName, "systemuser", StringComparison.OrdinalIgnoreCase))
-        {
-            report.Add(RecordRepairField.Present(RecordRepairPart.Owner, OwnerColumn, RecordRepairReason.OwnerTeamOwned));
-            return new OwnerRepair(rowUnit, null);
-        }
+        // Why the owner is kept, when it is (state, reason); null when this repair may re-own the row.
+        (RecordRepairFieldState State, string Reason)? keep = null;
+        if (current is null || current.Id == Guid.Empty)
+            keep = (RecordRepairFieldState.Skipped, RecordRepairReason.OwnerUnknown);
+        else if (!string.Equals(current.LogicalName, "systemuser", StringComparison.OrdinalIgnoreCase))
+            keep = (RecordRepairFieldState.Present, RecordRepairReason.OwnerTeamOwned);
+        else if (rule.Kind == RecordTableKind.Root && row.GetAttributeValue<bool?>(AccessFollowsParent.SecureFlagColumn) != false)
+            keep = (RecordRepairFieldState.Skipped, RecordRepairReason.OwnerRootSecure);
 
         var noun = NounOf(table);
+        var filed = false;
         RecordOwnerResolution owner;
         try
         {
             var threadParents = await RecordThreadFiling.ParentsAsync(_entities, table, RecordThreadFiling.ThreadOf(row), ct)
                 .ConfigureAwait(false);
             var parents = RecordOwnershipContext.ParentsOf(row).Concat(threadParents).Distinct().ToArray();
-            if (rule.OwnershipException is not null && parents.Length == 0)
-            {
-                report.Add(RecordRepairField.Skipped(RecordRepairPart.Owner, OwnerColumn, RecordRepairReason.OwnerKeptByException));
-                return new OwnerRepair(rowUnit, null);
-            }
+            var pairId = row.GetAttributeValue<string>(SecureRootInheritance.PairIdColumn);
+            filed = parents.Length > 0 || !string.IsNullOrWhiteSpace(pairId);
+            if (keep is null && rule.OwnershipException is not null && parents.Length == 0)
+                keep = (RecordRepairFieldState.Skipped, RecordRepairReason.OwnerKeptByException);
+
+            if (keep is { } kept && !filed)
+                return OwnerKept(rowUnit, kept, null, report); // nothing to re-own, and no filing to gate the mapping on
 
             // I-6 for an unfiled row: the PERSON who owns it acts. An application user, or one that cannot be told, is no one.
-            Guid? actingUser = parents.Length == 0
-                && await ApplicationUserCheck.IsApplicationUserAsync(_entities, current.Id, _logger, ct).ConfigureAwait(false) == false
+            Guid? actingUser = keep is null && parents.Length == 0
+                && await ApplicationUserCheck.IsApplicationUserAsync(_entities, current!.Id, _logger, ct).ConfigureAwait(false) == false
                     ? current.Id
                     : null;
 
             var resolved = await ResolveOwnerOverAsync(
-                    table, parents, pairInvalidId: false, row.GetAttributeValue<string>(SecureRootInheritance.PairIdColumn),
+                    table, parents, pairInvalidId: false, pairId,
                     row.GetAttributeValue<EntityReference>(SecureRootInheritance.PairTypeColumn)?.Id, callerObjectId: null,
                     callerSystemUserId: actingUser, requestedBy: null, ct)
                 .ConfigureAwait(false);
             if (resolved.Refusal is { } undetermined)
-                return OwnerRefused(row, undetermined, report);
+            {
+                return keep is { } keptOnRefusal
+                    ? OwnerKept(rowUnit, keptOnRefusal, RecordRepairReason.MappingFilingUndecided, report)
+                    : OwnerRefused(row, undetermined, report, filed ? RecordRepairReason.MappingFilingUndecided : null);
+            }
 
             owner = resolved.Owner!;
         }
@@ -789,12 +807,25 @@ internal sealed partial class RecordCreationService
         catch (Exception ex)
         {
             _logger.LogError(ex, "[RECORD-REPAIR] the owner of {Table} {Id} could not be decided (fault); it was not changed", table, row.Id);
-            return OwnerRefused(row, OwnerUnavailable(noun), report);
+            var blockedOnFault = filed ? RecordRepairReason.MappingFilingUndecided : null;
+            return keep is { } keptOnFault
+                ? OwnerKept(rowUnit, keptOnFault, blockedOnFault, report)
+                : OwnerRefused(row, OwnerUnavailable(noun), report, blockedOnFault);
         }
+
+        // F1-b: a filing that resolves to the Secure team which does not own the row yet — or to no owner at all.
+        var mappingBlocked = !owner.IsOwned
+            ? (filed ? RecordRepairReason.MappingFilingUndecided : null)
+            : owner.IsSecureOwner && !(current is { LogicalName: "team" } && current.Id == owner.OwningTeamId)
+                ? RecordRepairReason.MappingSourceSecure
+                : null;
+
+        if (keep is { } keptAfterResolution)
+            return OwnerKept(rowUnit, keptAfterResolution, mappingBlocked, report);
 
         var (decided, refusal) = OwnerDecided(table, owner);
         if (refusal is not null)
-            return OwnerRefused(row, refusal, report);
+            return OwnerRefused(row, refusal, report, mappingBlocked);
 
         var team = decided!.OwningTeamId!.Value;
         Guid teamUnit;
@@ -810,7 +841,7 @@ internal sealed partial class RecordCreationService
         {
             _logger.LogError(ex, "[RECORD-REPAIR] the business unit of the owner team {Team} of {Table} {Id} could not be read; " +
                                  "the owner was not changed", team, table, row.Id);
-            return OwnerRefused(row, OwnerUnavailable(noun), report);
+            return OwnerRefused(row, OwnerUnavailable(noun), report, mappingBlocked);
         }
 
         if (rowUnit != teamUnit && RecordOwnershipResolver.IsOwnershipParent(table))
@@ -819,23 +850,32 @@ internal sealed partial class RecordCreationService
                 "[RECORD-REPAIR] ESCALATION (task 016 trigger 2): re-owning {Table} {Id} would move it from business unit {From} " +
                 "to {To} while rows filed under it inherit its access; the owner was not changed", table, row.Id, rowUnit, teamUnit);
             report.Add(RecordRepairField.Skipped(RecordRepairPart.Owner, OwnerColumn, RecordRepairReason.OwnerMovesBusinessUnit));
-            return new OwnerRepair(rowUnit, null);
+            return new OwnerRepair(rowUnit, null, mappingBlocked);
         }
 
         patch[OwnerColumn] = new EntityReference("team", team);
         report.Add(RecordRepairField.Repaired(RecordRepairPart.Owner, OwnerColumn));
-        return new OwnerRepair(teamUnit, null);
+        return new OwnerRepair(teamUnit, null, mappingBlocked);
+    }
+
+    /// <summary>The owner is kept for <paramref name="kept"/>'s reason; the row stays in its own business unit.</summary>
+    private static OwnerRepair OwnerKept(
+        Guid? rowUnit, (RecordRepairFieldState State, string Reason) kept, string? mappingBlocked, List<RecordRepairField> report)
+    {
+        report.Add(new RecordRepairField(RecordRepairPart.Owner, OwnerColumn, kept.State, kept.Reason));
+        return new OwnerRepair(rowUnit, null, mappingBlocked);
     }
 
     /// <summary>The owner is unchanged, so the row stays in its own business unit; the refusal is reported, typed.</summary>
-    private OwnerRepair OwnerRefused(Entity row, RecordCreationRefusal refusal, List<RecordRepairField> report)
+    private OwnerRepair OwnerRefused(
+        Entity row, RecordCreationRefusal refusal, List<RecordRepairField> report, string? mappingBlocked)
     {
         _logger.LogInformation("[RECORD-REPAIR] the owner of {Table} {Id} was not changed: {Code}", row.LogicalName, row.Id, refusal.Code);
         report.Add(RecordRepairField.Refused(RecordRepairPart.Owner, OwnerColumn, refusal.Code));
         var unit = row.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn) is { } held && held.Id != Guid.Empty
             ? held.Id
             : (Guid?)null;
-        return new OwnerRepair(unit, refusal);
+        return new OwnerRepair(unit, refusal, mappingBlocked);
     }
 
     private static RecordCreationRefusal OwnerUnavailable(string noun) => new(
