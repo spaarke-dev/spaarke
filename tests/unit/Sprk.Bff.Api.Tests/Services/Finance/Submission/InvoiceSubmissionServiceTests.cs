@@ -540,6 +540,30 @@ public sealed class InvoiceSubmissionServiceTests
         h.JobsSent.Should().ContainSingle();
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task External_entry_refuses_a_systemuser_403_use_internal_route_before_any_read_or_write(bool linkedToAContact)
+    {
+        var h = new Harness();
+        var systemUser = new CallerPrincipal
+        {
+            Plane = CallerPrincipalPlane.Workforce,
+            SystemUserId = Guid.NewGuid(),
+            ContactId = linkedToAContact ? ContactId : Guid.Empty,
+            ProjectAccess = Array.Empty<CallerProjectAccess>(),
+        };
+
+        var outcome = await h.Build().SubmitAsync(Spa() with { ExternalCaller = systemUser }, CancellationToken.None);
+
+        outcome.Should().Match<InvoiceSubmissionOutcome>(o =>
+            o.StatusCode == StatusCodes.Status403Forbidden && o.ErrorCode == InvoiceSubmissionErrors.UseInternalRoute);
+        h.Writes.Should().Be(0);
+        h.DocumentUpdates.Should().BeEmpty();
+        h.Entities.Invocations.Should().BeEmpty("a systemuser costs no read on the external entry point");
+        h.LinkReads.Should().BeEmpty();
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // Refusals before any write
     // ═══════════════════════════════════════════════════════════════════════════

@@ -145,6 +145,16 @@ public class InvoiceSubmissionService
         var file = request.File!;
         var core = request.CoreRecord;
         var spaCaller = request.Channel == InvoiceSubmissionChannel.Spa ? request.ExternalCaller : null;
+        if (spaCaller?.SystemUserId is not null)
+        {
+            // Defence in depth for the external route's filter (ExternalInvoiceSubmissionAuthorizationFilter, same code and status): a workforce
+            // systemuser submits through the internal route, and no external contact rule applies to it. Refused before any read or write
+            // (fail closed), so a route that ever skipped the filter still cannot file under a contact's firm membership.
+            _logger.LogWarning("Invoice submission refused: systemuser {SystemUserId} called the external entry point", spaCaller.SystemUserId);
+            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status403Forbidden, InvoiceSubmissionErrors.UseInternalRoute,
+                "This is the external invoice submission. As an internal user, submit invoices through the internal route instead.");
+        }
+
         if (request.Channel == InvoiceSubmissionChannel.Spa && (spaCaller is null || spaCaller.ContactId == Guid.Empty))
         {
             // The SPA route's filter guarantees a contact; reaching here without one is a caller bug, refused before any write.
