@@ -382,4 +382,32 @@ describe('the denied state shows the server guidance (owner Q9)', () => {
     expect(deniedDetailOf(new ApiError(403, 'not json'))).toBeNull();
     expect(deniedDetailOf(new Error('x'))).toBeNull();
   });
+
+  it('a 403 workforce_guest_use_home_signin yields the server detail (UAC #2128); a 401 or a blank detail yields null', async () => {
+    vi.resetModules();
+    const { deniedDetailOf, DENY_WORKFORCE_GUEST_USE_HOME_SIGNIN } =
+      await import('../src/components/auth/BffAccessState');
+    const { ApiError } = await import('../src/types');
+    const guidance =
+      "You're signed in as a guest of the Spaarke directory. Sign in with your own organization's work account instead: " +
+      'open the portal in a browser and choose your work or school account.';
+
+    expect(DENY_WORKFORCE_GUEST_USE_HOME_SIGNIN).toBe('sdap.access.deny.workforce_guest_use_home_signin');
+    expect(
+      deniedDetailOf(
+        new ApiError(403, JSON.stringify({ reasonCode: DENY_WORKFORCE_GUEST_USE_HOME_SIGNIN, detail: ` ${guidance} ` }))
+      )
+    ).toBe(guidance);
+    expect(
+      deniedDetailOf(
+        new ApiError(401, JSON.stringify({ reasonCode: DENY_WORKFORCE_GUEST_USE_HOME_SIGNIN, detail: guidance }))
+      )
+    ).toBeNull();
+    expect(
+      deniedDetailOf(
+        new ApiError(403, JSON.stringify({ reasonCode: DENY_WORKFORCE_GUEST_USE_HOME_SIGNIN, detail: '  ' }))
+      )
+    ).toBeNull();
+    expect(deniedDetailOf(new ApiError(403, JSON.stringify({ reasonCode: 42, detail: guidance })))).toBeNull();
+  });
 });

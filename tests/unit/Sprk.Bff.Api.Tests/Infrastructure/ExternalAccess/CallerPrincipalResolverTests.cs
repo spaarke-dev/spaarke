@@ -210,6 +210,43 @@ public class CallerPrincipalResolverTests
         body.Should().NotContain("Mike").And.NotContain("mike@customer.example");
     }
 
+    [Fact]
+    public async Task WorkforceStrategy_CustomerTenantGuest_Is403_WithTheExactReasonCodeAndHomeSignInDetail()
+    {
+        // #2128: the shape of the CIAM plane's contact_not_invited (ProblemDetailsHelper.Forbidden + a detail). The SPA
+        // (R3) keys on this reasonCode; the detail names no tenant, id or address and makes sense inside Teams.
+        const string ExpectedDetail =
+            "You're signed in as a guest of the Spaarke directory. Sign in with your own organization's work account "
+            + "instead: open the portal in a browser and choose your work or school account.";
+        var resolver = new Mock<IWorkforcePrincipalResolver>();
+        resolver.Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(WorkforcePrincipalResolution.Denied(
+                WorkforceDenyReason.PrincipalNotResolved, WorkforceMembershipTest.DenyGuestUseHomeSignin));
+        var strategy = new WorkforcePrincipalStrategy(
+            resolver.Object, new Mock<IAccessibleRecordSetService>(MockBehavior.Strict).Object,
+            Mock.Of<ILogger<WorkforcePrincipalStrategy>>());
+        var http = new DefaultHttpContext
+        {
+            User = Principal(("oid", Guid.NewGuid().ToString()), ("acct", "1"), ("email", "new.hire@customer.example")),
+            RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider(),
+        };
+        http.Response.Body = new MemoryStream();
+
+        var body = await DenyBodyAsync(await strategy.ResolveAsync(http, CancellationToken.None), http);
+
+        http.Response.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        using var json = System.Text.Json.JsonDocument.Parse(body);
+        json.RootElement.GetProperty("reasonCode").GetString()
+            .Should().Be("sdap.access.deny.workforce_guest_use_home_signin");
+        json.RootElement.GetProperty("title").GetString().Should().Be("Forbidden");
+        var detail = json.RootElement.GetProperty("detail").GetString();
+        detail.Should().Be(ExpectedDetail);
+        detail.Should().NotContain("@");
+        System.Text.RegularExpressions.Regex.IsMatch(detail!, "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-")
+            .Should().BeFalse("the detail carries no tenant or object id");
+        body.Should().NotContain("new.hire@customer.example");
+    }
+
     // ── Workforce strategy: Tier-2 record scope = accessible set (NFR-08) ────────────────────────
 
     [Fact]
@@ -261,6 +298,46 @@ public class CallerPrincipalResolverTests
         // Record scope is composed for sprk_project — the Tier-2 predicate, not an unfiltered list.
         accessible.Verify(s => s.ComposeAsync(
             It.IsAny<WorkforcePrincipal>(), "sprk_project", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory(DisplayName = "Task 036: the strategy marks a Dataverse-decided systemuser for write confirmation and carries a truncated set (NFR-03)")]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(false, false)]
+    public async Task WorkforceStrategy_CarriesTheDataverseDecisionAndTheTruncation(bool impersonated, bool matterCapped)
+    {
+        var project = Guid.NewGuid();
+        var resolver = new Mock<IWorkforcePrincipalResolver>();
+        resolver.Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(WorkforcePrincipalResolution.ForSystemUser(
+                Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid().ToString(), WorkforceTenantId));
+
+        var accessible = new Mock<IAccessibleRecordSetService>();
+        accessible.Setup(s => s.ComposeAsync(It.IsAny<WorkforcePrincipal>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((WorkforcePrincipal _, string entity, CancellationToken _) => new AccessibleRecordSet
+            {
+                PrincipalKind = WorkforcePrincipalKind.SystemUser,
+                EntityType = entity,
+                Rights = entity == "sprk_project" ? RightsOf(project) : RightsOf(),
+                Capped = matterCapped && entity == "sprk_matter",
+                Sources = new AccessibleRecordSetSources(
+                    SystemUserMembership: !impersonated, ContactGrants: false, StandingGrantMembership: false,
+                    ImpersonatedRootSet: impersonated),
+            });
+
+        var strategy = new WorkforcePrincipalStrategy(
+            resolver.Object, accessible.Object, Mock.Of<ILogger<WorkforcePrincipalStrategy>>());
+
+        var result = await strategy.ResolveAsync(
+            new DefaultHttpContext { User = Principal(("email", "staff@contoso.com")) }, CancellationToken.None);
+
+        result.IsResolved.Should().BeTrue();
+        result.Principal!.DataverseConfirmsWrites.Should().Be(impersonated,
+            "only a principal whose own access Dataverse decided has its writes confirmed against Dataverse");
+        result.Principal.TruncatedRootEntityTypes.Should().BeEquivalentTo(
+            matterCapped ? new[] { "sprk_matter" } : Array.Empty<string>(),
+            "a capped set is carried to the responses that list through it, never dropped (NFR-03)");
     }
 
     [Fact]

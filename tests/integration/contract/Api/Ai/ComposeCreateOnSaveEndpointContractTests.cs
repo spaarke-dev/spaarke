@@ -1155,7 +1155,7 @@ public sealed class ComposeCreateOnSaveFixture : WebApplicationFactory<Program>
             new HttpClient(),
             new ConfigurationBuilder().Build(),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>.Instance,
-            null!)
+            null!, null!)
         { CallBase = false };
 
     /// <summary>Resets the boundary mocks between tests (xUnit runs a class's tests sequentially).</summary>

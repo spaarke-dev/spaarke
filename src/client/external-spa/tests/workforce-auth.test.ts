@@ -1,10 +1,17 @@
 // Workforce client switch (spaarke-SPA-external-access-platform-r3 task 040, FR-16; ADR-028 Amendment A8).
 //
-// The workforce plane (browser "My organization" and the Teams tab) signs in through ONE single-tenant Spaarke
+// RETARGETED by task 075 (ADR-028 A9 Teams amendment): the Teams BFF token now comes from the MULTITENANT home client on
+// authority /{Teams context tid} (see tests/teams-home-auth.test.ts); the Teams cases below keep their assertions with the
+// home client id and the per-request authority. The single-tenant A8 client stays tenant-pinned (guest-token link).
+//
+// The Teams tab (and the stored-link guest token) signs in through ONE single-tenant Spaarke
 // client: authority https://login.microsoftonline.com/{Spaarke tenant id} (never /organizations or /common), scope
 // api://{customer BFF app id}/user_impersonation (the A2-era scope is retired). In Teams: NAA first, then an MSAL
 // popup that lands on /auth-callback.html; Teams SSO (getAuthToken) and the manifest's webApplicationInfo are gone.
-// The CIAM plane is unchanged.
+// The CIAM plane is unchanged. The browser "company account" sign-in is NOT on this client any more (ADR-028 A9,
+// task 058): it uses a separate multitenant client and is tested in workforce-home-auth.test.ts; the shared
+// token-acquisition mechanics below are exercised here with the home plane's shape (signed-in tenant + per-request
+// authority).
 //
 // MSAL and Teams JS are mocked: every MSAL instance the code creates is recorded with its configuration, and every
 // token request it makes is recorded with its scopes, so the tests assert what the code ASKS for, not a stub's echo.
@@ -14,8 +21,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const SPAARKE_TENANT = 'a221a95e-6abc-4434-aecc-e48338a1b2f2';
 const CLIENT_ID = '11111111-2222-3333-4444-555555555555';
+// The multitenant home client (task 075: the Teams BFF token client). Different from the A8 client above.
+const HOME_CLIENT_ID = '66666666-7777-8888-9999-000000000001';
 const BFF_SCOPE = 'api://99999999-8888-7777-6666-555555555555/user_impersonation';
 const AUTHORITY = `https://login.microsoftonline.com/${SPAARKE_TENANT}`;
+// The Teams context tenant of the Teams tests: a customer's directory, NOT Spaarke's (production refuses the Spaarke tid in
+// Teams: validateHomeTenantIds), so every Teams authority assertion below is on this tid.
+const TEAMS_TID = 'c0c0c0c0-0000-4000-8000-000000000001';
+const TEAMS_AUTHORITY = `https://login.microsoftonline.com/${TEAMS_TID}`;
 // The retired A2-era scope name, assembled so that this file, too, passes the "nowhere in the SPA" grep.
 const RETIRED_SCOPE = ['access', 'as', 'user'].join('_');
 
@@ -132,15 +145,23 @@ function stubWorkforceEnv(overrides: Partial<Record<string, string>> = {}): void
     VITE_TEAMS_MSAL_CLIENT_ID: CLIENT_ID,
     VITE_TEAMS_MSAL_TENANT_ID: SPAARKE_TENANT,
     VITE_TEAMS_MSAL_BFF_SCOPE: BFF_SCOPE,
+    VITE_WORKFORCE_HOME_MSAL_CLIENT_ID: HOME_CLIENT_ID,
     ...overrides,
   } as Record<string, string>;
   for (const [key, value] of Object.entries(values)) vi.stubEnv(key, value);
 }
 
-const teamsCfg = { clientId: CLIENT_ID, tenantId: SPAARKE_TENANT, bffScope: BFF_SCOPE };
+// Teams config (A9): the multitenant client, and the Teams context tid (a customer's tenant, never Spaarke's).
+const teamsCfg = { clientId: HOME_CLIENT_ID, tenantId: TEAMS_TID, bffScope: BFF_SCOPE };
+// The single-tenant A8 client config (the guest-token link; tenant-pinned to Spaarke).
+const a8Cfg = { clientId: CLIENT_ID, tenantId: SPAARKE_TENANT, bffScope: BFF_SCOPE };
+// A Teams token result modelled on NAA (msal-browser 5.5.0): `tenantId` and the account come from the HOST's account, the
+// token's own tenant is the `tid` claim.
 const token = (n: string) => ({
   accessToken: `token-${n}`,
-  account: { homeAccountId: n, username: `${n}@spaarke.test`, tenantId: SPAARKE_TENANT },
+  tenantId: TEAMS_TID,
+  idTokenClaims: { tid: TEAMS_TID },
+  account: { homeAccountId: n, username: `${n}@contoso.test`, tenantId: TEAMS_TID },
 });
 const failing = (message: string) => async () => {
   throw new Error(message);
@@ -168,6 +189,8 @@ beforeEach(() => {
   h.naaRecommended.mockReset();
   h.naaRecommended.mockReturnValue(true);
   h.accountQueries.length = 0;
+  // The Teams strategy builds its MSAL configuration for the multitenant home client (task 075).
+  vi.stubEnv('VITE_WORKFORCE_HOME_MSAL_CLIENT_ID', HOME_CLIENT_ID);
 });
 
 afterEach(() => {
@@ -190,7 +213,7 @@ function expectOnlyUserImpersonationRequests(): void {
 describe('Workforce authority is pinned to the Spaarke tenant (A8)', () => {
   it('builds https://login.microsoftonline.com/{tenant id} with the configured client id', async () => {
     const { msalConfig } = await loadAuth();
-    const descriptor = msalConfig.workforceAuthorityConfig(teamsCfg);
+    const descriptor = msalConfig.workforceAuthorityConfig(a8Cfg);
     expect(descriptor).toEqual({ kind: 'workforce', clientId: CLIENT_ID, bffScope: BFF_SCOPE, authority: AUTHORITY });
 
     const built = msalConfig.buildMsalConfiguration(descriptor);
@@ -204,7 +227,7 @@ describe('Workforce authority is pinned to the Spaarke tenant (A8)', () => {
     'refuses the tenant %j — no multi-tenant alias, no non-GUID tenant',
     async tenantId => {
       const { msalConfig } = await loadAuth();
-      expect(() => msalConfig.workforceAuthorityConfig({ ...teamsCfg, tenantId })).toThrow(/tenant/i);
+      expect(() => msalConfig.workforceAuthorityConfig({ ...a8Cfg, tenantId })).toThrow(/tenant/i);
     }
   );
 
@@ -281,36 +304,27 @@ describe('Workforce configuration comes from Spaarke-owned env config and fails 
   });
 });
 
-describe('Browser "My organization" plane', () => {
-  it('builds its MSAL instance on the Spaarke-tenant authority and signs in for the user_impersonation scope', async () => {
+describe('Browser workforce plane is no longer built on the single-tenant A8 client (A9, task 058)', () => {
+  it('resolveStandalonePlane refuses the workforce realm and builds no MSAL instance (prepareWorkforceHomePlane prepares it)', async () => {
     stubWorkforceEnv();
     vi.resetModules();
     const plane = await import('../src/auth/standalone-plane');
-    const msalAuth = await import('../src/auth/msal-auth');
-
-    const resolved = plane.resolveStandalonePlane('workforce');
-    const created = h.pcas.find(p => p.instance === resolved.instance);
-    expect(created).toBeDefined();
-    expect(created!.config.auth.authority).toBe(AUTHORITY);
-    expect(created!.config.auth.clientId).toBe(CLIENT_ID);
-    // The browser plane keeps the redirect flow: it returns to the SPA's origin, not to the popup page.
-    expect(created!.config.auth.redirectUri).toBe(window.location.origin);
-    expect(resolved.bffScope).toBe(BFF_SCOPE);
-
-    plane.applyStandalonePlane(resolved);
-    expect(msalAuth.getActiveLoginScope()).toBe(BFF_SCOPE);
-
-    // A first BFF call with no account starts the sign-in redirect for exactly the user_impersonation scope.
-    await expect(msalAuth.acquireActiveBffToken()).rejects.toThrow(/redirecting/);
-    expectOnlyUserImpersonationRequests();
-    expect(h.requests.map(r => r.call)).toEqual(['acquireTokenRedirect']);
+    expect(() => plane.resolveStandalonePlane('workforce')).toThrow(/prepareWorkforceHomePlane/);
+    // (The CIAM singleton is built when msal-config loads; no instance exists for the A8 workforce client.)
+    expect(h.pcas.filter(p => p.config.auth.clientId === CLIENT_ID)).toEqual([]);
   });
 
-  it('refuses to build when the tenant is organizations (never signs a guest into the home tenant)', async () => {
-    stubWorkforceEnv({ VITE_TEAMS_MSAL_TENANT_ID: 'organizations' });
-    vi.resetModules();
-    const plane = await import('../src/auth/standalone-plane');
-    expect(() => plane.resolveStandalonePlane('workforce')).toThrow(/tenant id/);
+  it('the A8 client stays tenant-pinned: the builder still refuses organizations for it, although a multitenant client now exists', async () => {
+    stubWorkforceEnv({ VITE_WORKFORCE_HOME_MSAL_CLIENT_ID: '66666666-7777-8888-9999-000000000001' });
+    const { msalConfig } = await loadAuth();
+    expect(() =>
+      msalConfig.buildMsalConfiguration({
+        kind: 'workforce',
+        clientId: CLIENT_ID,
+        bffScope: BFF_SCOPE,
+        authority: 'https://login.microsoftonline.com/organizations',
+      })
+    ).toThrow(/tenant-pinned/);
   });
 });
 
@@ -319,18 +333,18 @@ describe('Browser "My organization" plane', () => {
 // ---------------------------------------------------------------------------------------------------------------
 
 describe('Teams workforce sign-in', () => {
-  it('uses NAA first, on the Spaarke-tenant authority, and does not build the popup fallback when NAA succeeds', async () => {
+  it('uses NAA first, on the Teams-tenant authority (multitenant client), and does not build the popup fallback when NAA succeeds', async () => {
     const { msalAuth } = await loadAuth();
     h.nestable = async config => makeFakeInstance('naa', { sso: async () => token('naa') }, config);
 
     await expect(msalAuth.acquireTeamsWorkforceBffToken(teamsCfg)).resolves.toBe('token-naa');
 
     expect(h.nestableConfigs).toHaveLength(1);
-    expect(h.nestableConfigs[0].auth.authority).toBe(AUTHORITY);
-    expect(h.nestableConfigs[0].auth.clientId).toBe(CLIENT_ID);
+    expect(h.nestableConfigs[0].auth.authority).toBe(TEAMS_AUTHORITY);
+    expect(h.nestableConfigs[0].auth.clientId).toBe(HOME_CLIENT_ID);
     expect(h.nestableConfigs[0].auth.redirectUri).toBe(`${window.location.origin}/auth-callback.html`);
     // Only the CIAM singleton was built as a standard PCA; no popup fallback instance.
-    expect(h.pcas.filter(p => p.config.auth.authority === AUTHORITY)).toHaveLength(0);
+    expect(h.pcas.filter(p => p.config.auth.authority === TEAMS_AUTHORITY)).toHaveLength(0);
     expect(h.requests.map(r => `${r.instance}:${r.call}`)).toEqual(['naa:ssoSilent']);
     expectOnlyUserImpersonationRequests();
     expect(h.getAuthToken).not.toHaveBeenCalled();
@@ -349,15 +363,16 @@ describe('Teams workforce sign-in', () => {
       'naa:ssoSilent',
       'pca:acquireTokenPopup',
     ]);
-    const popupPca = h.pcas.find(p => p.config.auth.authority === AUTHORITY);
+    const popupPca = h.pcas.find(p => p.config.auth.authority === TEAMS_AUTHORITY);
     expect(popupPca).toBeDefined();
-    expect(popupPca!.config.auth.clientId).toBe(CLIENT_ID);
+    expect(popupPca!.config.auth.clientId).toBe(HOME_CLIENT_ID);
     expect(popupPca!.config.auth.redirectUri).toBe(`${window.location.origin}/auth-callback.html`);
     expect(popupPca!.config.cache.cacheLocation).toBe('sessionStorage');
     expect(popupPca!.instance.initialize).toHaveBeenCalled();
     // No cached account: the popup asks the user to pick one (OfficeNaaStrategy._tryAcquireWith).
     expect(popupPca!.instance.acquireTokenPopup).toHaveBeenCalledWith({
       scopes: [BFF_SCOPE],
+      authority: TEAMS_AUTHORITY,
       loginHint: undefined,
       prompt: 'select_account',
     });
@@ -443,10 +458,10 @@ describe('Teams workforce sign-in', () => {
       const { createTeamsHostAdapter } = await import('../src/host/TeamsHostAdapter');
       const msalAuth = await import('../src/auth/msal-auth');
 
-      const adapter = createTeamsHostAdapter();
+      const adapter = createTeamsHostAdapter(TEAMS_TID);
       await adapter.initialize();
 
-      const popupPca = h.pcas.find(p => p.config.auth.authority === AUTHORITY);
+      const popupPca = h.pcas.find(p => p.config.auth.authority === TEAMS_AUTHORITY);
       expect(adapter.getMsalInstance()).toBe(popupPca!.instance);
       // The active BFF acquirer is the Teams strategy: a BFF call resolves a user_impersonation token.
       await expect(msalAuth.acquireActiveBffToken()).resolves.toBe('token-popup-silent');
@@ -585,7 +600,12 @@ describe('Browser silent renewal: CIAM requests are unchanged on the wire; the w
     bffScope: 'api://bbbbbbbb-0000-0000-0000-00000000000b/user_impersonation',
   } as const;
   const OTHER_TENANT = '7052feba-bfc4-43e0-b09e-65014b429131';
-  const account = { homeAccountId: 'u', username: 'u@spaarke.test', tenantId: SPAARKE_TENANT };
+  /** The CIAM tenant of the test build (vitest.config.ts VITE_MSAL_TENANT_ID). */
+  const CIAM_TENANT = '00000000-0000-0000-0000-000000000141';
+  // A9: the browser workforce plane is the signed-in user's OWN directory (the home tenant), not the Spaarke tenant.
+  const HOME_TENANT = 'c0c0c0c0-0000-4000-8000-000000000001';
+  const HOME_AUTHORITY = `https://login.microsoftonline.com/${HOME_TENANT}`;
+  const account = { homeAccountId: 'u', username: 'u@contoso.test', tenantId: HOME_TENANT };
 
   function browserInstance(silent: (req: any) => Promise<any>, accounts: any[] = [account]) {
     return {
@@ -604,10 +624,13 @@ describe('Browser silent renewal: CIAM requests are unchanged on the wire; the w
   }
 
   describe('CIAM plane (acquireBffToken)', () => {
+    /** A partner account: its tenant is the CIAM tenant (vitest.config.ts VITE_MSAL_TENANT_ID). */
+    const ciamAccount = { homeAccountId: 'p', username: 'p@partner.test', tenantId: CIAM_TENANT };
+
     /** acquireBffToken() against the CIAM singleton, with its MSAL calls replaced by spies. */
-    async function ciam(silent: (req: any) => Promise<any>) {
+    async function ciam(silent: (req: any) => Promise<any>, accounts: any[] = [ciamAccount]) {
       const { msalAuth, msalConfig } = await loadAuth();
-      const stub = browserInstance(silent);
+      const stub = browserInstance(silent, accounts);
       Object.assign(msalConfig.msalInstance, stub);
       return { msalAuth, instance: msalConfig.msalInstance as any };
     }
@@ -618,9 +641,9 @@ describe('Browser silent renewal: CIAM requests are unchanged on the wire; the w
       expect(instance.acquireTokenSilent).toHaveBeenCalledTimes(1);
       expect(instance.acquireTokenSilent.mock.calls[0][0]).toStrictEqual({
         scopes: [import.meta.env.VITE_MSAL_BFF_SCOPE],
-        account,
+        account: ciamAccount,
       });
-      // The CIAM account list is not tenant-filtered either.
+      // MSAL is asked for every account (no tenant filter on the wire); the CIAM predicate is applied in the SPA.
       expect(instance.getAllAccounts).toHaveBeenCalledWith();
       expect(instance.acquireTokenRedirect).not.toHaveBeenCalled();
     });
@@ -636,7 +659,7 @@ describe('Browser silent renewal: CIAM requests are unchanged on the wire; the w
       expect(instance.acquireTokenRedirect).toHaveBeenCalledTimes(1);
       expect(instance.acquireTokenRedirect.mock.calls[0][0]).toMatchObject({
         scopes: [import.meta.env.VITE_MSAL_BFF_SCOPE],
-        account,
+        account: ciamAccount,
       });
       // The interactive redirect keeps the instance's own (origin) redirect URI: no per-request override.
       expect(instance.acquireTokenRedirect.mock.calls[0][0]).not.toHaveProperty('redirectUri');
@@ -666,23 +689,76 @@ describe('Browser silent renewal: CIAM requests are unchanged on the wire; the w
       await expect(msalAuth.acquireActiveBffToken(CIAM_BACKEND, { forceRefresh: true })).resolves.toBe('tok-fresh');
       expect(instance.acquireTokenSilent.mock.calls[0][0]).toStrictEqual({
         scopes: [CIAM_BACKEND.bffScope],
-        account,
+        account: ciamAccount,
         forceRefresh: true,
       });
       // ... and a normal call through the same seam sends no forceRefresh key at all.
       await msalAuth.acquireActiveBffToken(CIAM_BACKEND);
-      expect(instance.acquireTokenSilent.mock.calls[1][0]).toStrictEqual({ scopes: [CIAM_BACKEND.bffScope], account });
+      expect(instance.acquireTokenSilent.mock.calls[1][0]).toStrictEqual({
+        scopes: [CIAM_BACKEND.bffScope],
+        account: ciamAccount,
+      });
     });
 
-    it('the browser CIAM plane carries no acquire options (no tenant filter, no iframe redirect URI)', async () => {
+    it('the browser CIAM plane carries only the CIAM account filter (no tenant filter, no iframe redirect URI, no authority)', async () => {
       vi.resetModules();
       const plane = await import('../src/auth/standalone-plane');
-      expect(plane.resolveStandalonePlane('ciam').acquireOptions).toBeUndefined();
+      const msalAuth = await import('../src/auth/msal-auth');
+      const resolved = plane.resolveStandalonePlane('ciam');
+      expect(resolved.acquireOptions).toStrictEqual({ accountFilter: msalAuth.isCiamAccount });
+      expect(resolved.accountFilter).toBe(msalAuth.isCiamAccount);
+    });
+
+    // #2166: MSAL's account list is shared by every client in the tab. A company account left by the home plane
+    // ("Sign in with your company account" -> "not set up" -> "choose a different sign-in" -> Partner) was used for the
+    // CIAM token, and msal-browser refused it with authority_mismatch.
+    it('#2166: a cached company account alone is not a partner sign-in - no silent call with it; the CIAM sign-in redirect starts', async () => {
+      const { msalAuth, instance } = await ciam(async () => ({ accessToken: 'must-not-be-used' }), [account]);
+      await expect(msalAuth.acquireBffToken()).rejects.toThrow(/No authenticated account/);
+      expect(instance.acquireTokenSilent).not.toHaveBeenCalled();
+      expect(instance.acquireTokenRedirect).toHaveBeenCalledTimes(1);
+      expect(instance.acquireTokenRedirect.mock.calls[0][0]).toStrictEqual({
+        scopes: [import.meta.env.VITE_MSAL_BFF_SCOPE],
+      });
+    });
+
+    it('#2166: with a company account cached FIRST, the partner account is the one used', async () => {
+      const { msalAuth, instance } = await ciam(async () => ({ accessToken: 'tok' }), [account, ciamAccount]);
+      await expect(msalAuth.acquireBffToken()).resolves.toBe('tok');
+      expect(instance.acquireTokenSilent).toHaveBeenCalledTimes(1);
+      expect(instance.acquireTokenSilent.mock.calls[0][0].account).toBe(ciamAccount);
+    });
+
+    it('#2166: the plane seam (applyStandalonePlane) filters the same way, also on the 401 forced refresh', async () => {
+      const { msalAuth, instance } = await ciam(async () => ({ accessToken: 'tok' }), [account, ciamAccount]);
+      const plane = await import('../src/auth/standalone-plane');
+      plane.applyStandalonePlane(plane.resolveStandalonePlane('ciam'));
+      await expect(msalAuth.acquireActiveBffToken(CIAM_BACKEND)).resolves.toBe('tok');
+      await expect(msalAuth.acquireActiveBffToken(CIAM_BACKEND, { forceRefresh: true })).resolves.toBe('tok');
+      expect(instance.acquireTokenSilent.mock.calls.map((c: any[]) => c[0].account)).toEqual([
+        ciamAccount,
+        ciamAccount,
+      ]);
+      expect(instance.acquireTokenSilent.mock.calls[1][0]).toStrictEqual({
+        scopes: [CIAM_BACKEND.bffScope],
+        account: ciamAccount,
+        forceRefresh: true,
+      });
+    });
+
+    it('isCiamAccount: only the CIAM tenant (any case); another GUID, a non-GUID or no tenant is not a partner account', async () => {
+      const { msalAuth } = await loadAuth();
+      expect(msalAuth.isCiamAccount({ tenantId: CIAM_TENANT })).toBe(true);
+      expect(msalAuth.isCiamAccount({ tenantId: CIAM_TENANT.toUpperCase() })).toBe(true);
+      expect(msalAuth.isCiamAccount({ tenantId: HOME_TENANT })).toBe(false);
+      expect(msalAuth.isCiamAccount({ tenantId: OTHER_TENANT })).toBe(false);
+      expect(msalAuth.isCiamAccount({ tenantId: 'organizations' })).toBe(false);
+      expect(msalAuth.isCiamAccount({})).toBe(false);
     });
   });
 
   describe('workforce browser plane', () => {
-    const options = () => ({ tenantId: SPAARKE_TENANT, silentRedirectUri: callbackUri() });
+    const options = () => ({ tenantId: HOME_TENANT, silentRedirectUri: callbackUri(), authority: HOME_AUTHORITY });
 
     it('a forced refresh (the 401 retry) adds only forceRefresh: true to the first silent call; the plane seam passes it through', async () => {
       const { msalAuth } = await loadAuth();
@@ -693,6 +769,7 @@ describe('Browser silent renewal: CIAM requests are unchanged on the wire; the w
         realm: 'workforce',
         instance,
         bffScope: WORKFORCE_BACKEND.bffScope,
+        home: true,
         acquireOptions: options(),
       } as any);
 
@@ -704,12 +781,14 @@ describe('Browser silent renewal: CIAM requests are unchanged on the wire; the w
         account,
         cacheLookupPolicy: CacheLookupPolicy.AccessTokenAndRefreshToken,
         forceRefresh: true,
+        authority: HOME_AUTHORITY,
       });
       await msalAuth.acquireActiveBffToken(WORKFORCE_BACKEND);
       expect(instance.acquireTokenSilent.mock.calls[1][0]).toStrictEqual({
         scopes: [WORKFORCE_BACKEND.bffScope],
         account,
         cacheLookupPolicy: CacheLookupPolicy.AccessTokenAndRefreshToken,
+        authority: HOME_AUTHORITY,
       });
     });
 
@@ -725,6 +804,7 @@ describe('Browser silent renewal: CIAM requests are unchanged on the wire; the w
         scopes: [BFF_SCOPE],
         account,
         cacheLookupPolicy: CacheLookupPolicy.AccessTokenAndRefreshToken,
+        authority: HOME_AUTHORITY,
       });
       expect(instance.acquireTokenRedirect).not.toHaveBeenCalled();
     });
@@ -747,6 +827,7 @@ describe('Browser silent renewal: CIAM requests are unchanged on the wire; the w
         account,
         cacheLookupPolicy: CacheLookupPolicy.Skip,
         redirectUri: callbackUri(),
+        authority: HOME_AUTHORITY,
       });
       expect(instance.acquireTokenRedirect).not.toHaveBeenCalled();
     });
@@ -787,7 +868,11 @@ describe('Browser silent renewal: CIAM requests are unchanged on the wire; the w
       );
       expect(instance.acquireTokenSilent).toHaveBeenCalledTimes(1);
       expect(instance.acquireTokenRedirect).toHaveBeenCalledTimes(1);
-      expect(instance.acquireTokenRedirect.mock.calls[0][0]).toMatchObject({ scopes: [BFF_SCOPE], account });
+      expect(instance.acquireTokenRedirect.mock.calls[0][0]).toMatchObject({
+        scopes: [BFF_SCOPE],
+        account,
+        authority: HOME_AUTHORITY,
+      });
       expect(instance.acquireTokenRedirect.mock.calls[0][0]).not.toHaveProperty('redirectUri');
     });
 
@@ -831,15 +916,7 @@ describe('Browser silent renewal: CIAM requests are unchanged on the wire; the w
       expect(instance.acquireTokenRedirect).not.toHaveBeenCalled();
     });
 
-    it('the browser workforce plane supplies the tenant filter and the bridge page; its acquirer uses them', async () => {
-      stubWorkforceEnv();
-      vi.resetModules();
-      const plane = await import('../src/auth/standalone-plane');
-      const resolved = plane.resolveStandalonePlane('workforce');
-      expect(resolved.acquireOptions).toEqual({ tenantId: SPAARKE_TENANT, silentRedirectUri: callbackUri() });
-    });
-
-    it('only counts accounts of the Spaarke tenant: a cached CIAM account is not a workforce sign-in', async () => {
+    it('only counts accounts of the signed-in tenant: a cached CIAM account is not a workforce sign-in', async () => {
       const { msalAuth } = await loadAuth();
       const ciamAccount = { homeAccountId: 'c', username: 'c@partner.test', tenantId: OTHER_TENANT };
       const instance = browserInstance(async () => ({ accessToken: 'must-not-be-used' }), [ciamAccount]);
@@ -848,13 +925,16 @@ describe('Browser silent renewal: CIAM requests are unchanged on the wire; the w
         /No authenticated account/
       );
 
-      expect(instance.getAllAccounts).toHaveBeenCalledWith({ tenantId: SPAARKE_TENANT });
+      expect(instance.getAllAccounts).toHaveBeenCalledWith({ tenantId: HOME_TENANT });
       expect(instance.acquireTokenSilent).not.toHaveBeenCalled();
       expect(instance.acquireTokenRedirect).toHaveBeenCalledTimes(1);
-      expect(instance.acquireTokenRedirect.mock.calls[0][0]).toStrictEqual({ scopes: [BFF_SCOPE] });
+      expect(instance.acquireTokenRedirect.mock.calls[0][0]).toStrictEqual({
+        scopes: [BFF_SCOPE],
+        authority: HOME_AUTHORITY,
+      });
     });
 
-    it('picks the Spaarke-tenant account when a CIAM account is cached next to it', async () => {
+    it('picks the signed-in tenant account when a CIAM account is cached next to it', async () => {
       const { msalAuth } = await loadAuth();
       const ciamAccount = { homeAccountId: 'c', username: 'c@partner.test', tenantId: OTHER_TENANT };
       const instance = browserInstance(async () => ({ accessToken: 'tok' }), [ciamAccount, account]);
@@ -862,20 +942,32 @@ describe('Browser silent renewal: CIAM requests are unchanged on the wire; the w
       expect(instance.acquireTokenSilent.mock.calls[0][0].account).toBe(account);
     });
 
-    it('AuthGuard / portal-user account lists are scoped to the plane: workforce keeps only Spaarke-tenant accounts, CIAM keeps all', async () => {
+    it("AuthGuard / portal-user account lists are scoped to the plane: the home plane keeps only the signed-in tenant's accounts, CIAM only CIAM accounts (#2166)", async () => {
       stubWorkforceEnv();
       vi.resetModules();
       const plane = await import('../src/auth/standalone-plane');
       const msalAuth = await import('../src/auth/msal-auth');
-      const ciamAccount = { homeAccountId: 'c', tenantId: OTHER_TENANT };
-      const spaarkeAccount = { homeAccountId: 's', tenantId: SPAARKE_TENANT.toUpperCase() };
+      const otherTenantAccount = { homeAccountId: 'c', tenantId: OTHER_TENANT };
+      const homeAccount = { homeAccountId: 's', tenantId: HOME_TENANT.toUpperCase() };
 
-      plane.applyStandalonePlane(plane.resolveStandalonePlane('workforce'));
-      expect(msalAuth.accountsForActivePlane([ciamAccount, spaarkeAccount])).toEqual([spaarkeAccount]);
-      expect(msalAuth.accountsForActivePlane([ciamAccount])).toEqual([]);
+      plane.applyStandalonePlane({
+        realm: 'workforce',
+        instance: browserInstance(async () => ({ accessToken: 'unused' })),
+        bffScope: WORKFORCE_BACKEND.bffScope,
+        home: true,
+        accountFilter: msalAuth.isWorkforceHomeAccount,
+        acquireOptions: options(),
+      } as any);
+      expect(msalAuth.accountsForActivePlane([otherTenantAccount, homeAccount])).toEqual([homeAccount]);
+      expect(msalAuth.accountsForActivePlane([otherTenantAccount])).toEqual([]);
 
       plane.applyStandalonePlane(plane.resolveStandalonePlane('ciam'));
-      expect(msalAuth.accountsForActivePlane([ciamAccount, spaarkeAccount])).toEqual([ciamAccount, spaarkeAccount]);
+      const partnerAccount = { homeAccountId: 'p', tenantId: CIAM_TENANT };
+      expect(msalAuth.accountsForActivePlane([homeAccount, partnerAccount, otherTenantAccount])).toEqual([
+        partnerAccount,
+      ]);
+      // A company account alone does not count as signed in, so AuthGuard starts the CIAM sign-in.
+      expect(msalAuth.accountsForActivePlane([homeAccount])).toEqual([]);
     });
   });
 });
@@ -931,7 +1023,7 @@ describe('Teams NAA step is skipped on a bridge-less host; a cancelled sign-in o
     // No window was opened. (The standard popup instance is built ahead of time so the "Sign in" click does not
     // wait on initialize(), but nothing is asked of it.)
     expect(h.requests.map(r => r.call)).toEqual(['ssoSilent']);
-    const prewarmed = h.pcas.filter(p => p.config.auth.authority === AUTHORITY);
+    const prewarmed = h.pcas.filter(p => p.config.auth.authority === TEAMS_AUTHORITY);
     expect(prewarmed).toHaveLength(1);
     expect(prewarmed[0].instance.acquireTokenPopup).not.toHaveBeenCalled();
   });
@@ -1033,7 +1125,7 @@ describe('Teams error screen: a "Sign in" button runs the popup path on click (u
       };
       const { createTeamsHostAdapter } = await import('../src/host/TeamsHostAdapter');
       const msalAuth = await import('../src/auth/msal-auth');
-      const adapter = createTeamsHostAdapter();
+      const adapter = createTeamsHostAdapter(TEAMS_TID);
       await expect(adapter.initialize()).rejects.toBeInstanceOf(msalAuth.TeamsWorkforceAuthError);
       expect(popupAttempts).toBe(1);
       expect(() => adapter.getMsalInstance()).toThrow();
@@ -1063,9 +1155,22 @@ describe('Teams error screen: a "Sign in" button runs the popup path on click (u
       await waitFor(() => expect(signedIn).toHaveBeenCalledTimes(1));
 
       expect(popupAttempts).toBe(2);
-      const popupPca = h.pcas.find(p => p.config.auth.authority === AUTHORITY);
+      const popupPca = h.pcas.find(p => p.config.auth.authority === TEAMS_AUTHORITY);
       expect(adapter.getMsalInstance()).toBe(popupPca!.instance);
       expect(adapter.isInitialized()).toBe(true);
+      // The recovery path wires the Teams tab as the home plane exactly like initialize() does (review F3): the registration
+      // gate flag, the signed-in-tenant account filter and the Teams guest-link host. The Teams tid is NOT Spaarke's tenant.
+      expect(TEAMS_TID).not.toBe(SPAARKE_TENANT);
+      expect(msalAuth.isWorkforceHomePlaneActive()).toBe(true);
+      const own = { homeAccountId: 'own', tenantId: TEAMS_TID };
+      const spaarkeGuest = { homeAccountId: 'spaarke', tenantId: SPAARKE_TENANT };
+      const noTenant = { homeAccountId: 'none' };
+      expect(msalAuth.accountsForActivePlane([own, spaarkeGuest, noTenant])).toEqual([own]);
+      // The guest-link host is 'teams': the silent guest token goes through a NAA (nestable) instance of the A8 client; the
+      // browser host would build none.
+      const nestableBefore = h.nestableConfigs.length;
+      await msalAuth.acquireSpaarkeGuestToken('silent', 'jane@contoso.test', BFF_SCOPE);
+      expect(h.nestableConfigs.slice(nestableBefore).map(c => c.auth.clientId)).toEqual([CLIENT_ID]);
       // The active BFF acquirer is the Teams strategy now (popup path: silent from the signed-in account).
       await expect(msalAuth.acquireActiveBffToken()).resolves.toBe('token-popup-silent');
       expect(h.getAuthToken).not.toHaveBeenCalled();
@@ -1080,7 +1185,7 @@ describe('Teams error screen: a "Sign in" button runs the popup path on click (u
     await expect(msalAuth.signInTeamsWorkforceViaPopup(teamsCfg)).resolves.toBe('token-popup');
     await expect(msalAuth.signInTeamsWorkforceViaPopup(teamsCfg)).resolves.toBe('token-popup');
     expect(h.requests.map(r => r.call)).toEqual(['acquireTokenPopup', 'acquireTokenPopup']);
-    expect(h.requests[1].request).toMatchObject({ loginHint: 'popup@spaarke.test' });
+    expect(h.requests[1].request).toMatchObject({ loginHint: 'popup@contoso.test' });
   });
 
   it('the bootstrap (non-click) popup path still tries the cached account silently first', async () => {

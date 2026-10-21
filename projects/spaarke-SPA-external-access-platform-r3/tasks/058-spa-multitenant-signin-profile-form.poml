@@ -4,7 +4,7 @@
     <title>SPA multitenant browser sign-in, tid → backend, silent/interactive link, profile form (replaces 056 hand-off), landing wording</title>
     <phase>4b A9 workforce home sign-in</phase>
     <gate>after 047 and 048 (BFF contracts merged)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags auth, frontend; client sign-in code</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -1335,6 +1335,12 @@ public class FieldMappingRuleEntity
 
     /// <summary>Is active</summary>
     public bool IsActive { get; set; }
+
+    /// <summary>
+    /// Sync mode of this rule (sprk_syncmode): OneTime (0) or ManualRefresh (1). An empty column reads as OneTime.
+    /// /push re-applies only Copy rules at ManualRefresh (field-mapping-server-write-path-r1 FR-05d).
+    /// </summary>
+    public int SyncMode { get; set; }
 }
 
 /// <summary>

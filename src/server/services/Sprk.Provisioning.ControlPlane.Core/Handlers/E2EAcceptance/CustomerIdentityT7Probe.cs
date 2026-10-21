@@ -214,7 +214,7 @@ public sealed class CustomerIdentityT7Probe : ITrapProbe
                 $"{CustomerWorkforceTenantsRule.AppSettingBaseName}__N " +
                 (expected.Count == 0
                     ? "— but this run carries no customerWorkforceTenantIds (it predates T255): the stamp denies every " +
-                      "first sign-in of a customer employee (workforce_tenant_list_empty). Start a new run with the value. "
+                      "sign-in of a customer employee without an enabled systemuser (workforce_tenant_list_empty). Start a new run with the value. "
                     : $"[{string.Join(", ", expected)}]. ") +
                 $"Observed: production {productionWorkforce ?? "[OK]"}; {DefaultStagingSlotName} {stagingWorkforce ?? "[OK]"}. " +
                 "H4b writes the list to both slots and removes stale indices — re-run H4b (a new run if its idempotency key " +
@@ -246,7 +246,7 @@ public sealed class CustomerIdentityT7Probe : ITrapProbe
 
         if (values.Count == 0)
         {
-            return $"[MISSING — no {CustomerWorkforceTenantsRule.AppSettingBaseName}__N setting: every first sign-in is denied]";
+            return $"[MISSING — no {CustomerWorkforceTenantsRule.AppSettingBaseName}__N setting: every customer-employee sign-in without an enabled systemuser is denied]";
         }
 
         var parsed = new List<Guid>(values.Count);

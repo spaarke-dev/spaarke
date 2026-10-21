@@ -35,7 +35,7 @@ public static class ExternalInvoiceSubmissionEndpoints
             .RequireWorkforceCeiling(WorkforceRoleCeilingGate.SubmitInvoiceToMatter)
             .RequireEbillingEnabled()
             .DisableAntiforgery() // multipart upload; auth is the bearer token + the caller's record rights, not a form token
-            .WithMetadata(new RequestSizeLimitAttribute(InvoiceSubmissionEndpoints.MaxRequestBodyBytes))
+            .WithMetadata(new RequestSizeLimitAttribute(InvoiceSubmissionHttp.MaxRequestBodyBytes))
             .RequireRateLimiting("dataverse-query")
             .WithName("SubmitExternalInvoiceForMatter")
             .WithSubmitContract("matter");
@@ -45,7 +45,7 @@ public static class ExternalInvoiceSubmissionEndpoints
             .RequireWorkforceCeiling(WorkforceRoleCeilingGate.SubmitInvoiceToProject)
             .RequireEbillingEnabled()
             .DisableAntiforgery()
-            .WithMetadata(new RequestSizeLimitAttribute(InvoiceSubmissionEndpoints.MaxRequestBodyBytes))
+            .WithMetadata(new RequestSizeLimitAttribute(InvoiceSubmissionHttp.MaxRequestBodyBytes))
             .RequireRateLimiting("dataverse-query")
             .WithName("SubmitExternalInvoiceForProject")
             .WithSubmitContract("project");
@@ -55,7 +55,7 @@ public static class ExternalInvoiceSubmissionEndpoints
             .RequireWorkforceCeiling(WorkforceRoleCeilingGate.SubmitInvoiceToWorkAssignment)
             .RequireEbillingEnabled()
             .DisableAntiforgery()
-            .WithMetadata(new RequestSizeLimitAttribute(InvoiceSubmissionEndpoints.MaxRequestBodyBytes))
+            .WithMetadata(new RequestSizeLimitAttribute(InvoiceSubmissionHttp.MaxRequestBodyBytes))
             .RequireRateLimiting("dataverse-query")
             .WithName("SubmitExternalInvoiceForWorkAssignment")
             .WithSubmitContract("work assignment");
@@ -102,7 +102,7 @@ public static class ExternalInvoiceSubmissionEndpoints
         http.Items[ExternalInvoiceSubmissionScope.HttpContextItemsKey] as ExternalInvoiceSubmissionScope;
 
     private static IResult NoScope() =>
-        InvoiceSubmissionEndpoints.Refused(StatusCodes.Status403Forbidden, InvoiceSubmissionErrors.RecordForbidden, "Your access could not be determined.");
+        InvoiceSubmissionHttp.Refused(StatusCodes.Status403Forbidden, InvoiceSubmissionErrors.RecordForbidden, "Your access could not be determined.");
 
     private static async Task<IResult> SubmitAsync(HttpContext http, InvoiceSubmissionService service, CancellationToken ct)
     {
@@ -112,7 +112,7 @@ public static class ExternalInvoiceSubmissionEndpoints
             return NoScope();
         }
 
-        var form = await InvoiceSubmissionEndpoints.ReadSubmissionFormAsync(http.Request, service, ct);
+        var form = await InvoiceSubmissionHttp.ReadSubmissionFormAsync(http.Request, service, StatusUrl, ct);
         if (form.Refusal is { } refusal)
         {
             return refusal;
@@ -130,7 +130,7 @@ public static class ExternalInvoiceSubmissionEndpoints
             CorrelationId = http.TraceIdentifier,
         }, ct);
 
-        return InvoiceSubmissionEndpoints.ToResult(outcome, StatusUrl, http.TraceIdentifier);
+        return InvoiceSubmissionHttp.ToResult(outcome, StatusUrl, http.TraceIdentifier);
     }
 
     private static IResult GetAsync(HttpContext http) =>
@@ -252,7 +252,7 @@ public static class ExternalInvoiceSubmissionEndpoints
         }
         catch (SdapProblemException ex)
         {
-            return InvoiceSubmissionEndpoints.ReadFault(ex);
+            return InvoiceSubmissionHttp.ReadFault(ex);
         }
     }
 }

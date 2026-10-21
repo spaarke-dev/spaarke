@@ -145,6 +145,16 @@ public class InvoiceSubmissionService
         var file = request.File!;
         var core = request.CoreRecord;
         var spaCaller = request.Channel == InvoiceSubmissionChannel.Spa ? request.ExternalCaller : null;
+        if (spaCaller?.SystemUserId is not null)
+        {
+            // Defence in depth for the external route's filter (ExternalInvoiceSubmissionAuthorizationFilter, same code and status): a workforce
+            // systemuser submits through the internal route, and no external contact rule applies to it. Refused before any read or write
+            // (fail closed), so a route that ever skipped the filter still cannot file under a contact's firm membership.
+            _logger.LogWarning("Invoice submission refused: systemuser {SystemUserId} called the external entry point", spaCaller.SystemUserId);
+            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status403Forbidden, InvoiceSubmissionErrors.UseInternalRoute,
+                "This is the external invoice submission. As an internal user, submit invoices through the internal route instead.");
+        }
+
         if (request.Channel == InvoiceSubmissionChannel.Spa && (spaCaller is null || spaCaller.ContactId == Guid.Empty))
         {
             // The SPA route's filter guarantees a contact; reaching here without one is a caller bug, refused before any write.
@@ -236,14 +246,21 @@ public class InvoiceSubmissionService
 
     /// <summary>
     /// 050a review round 4 (uac-r2 F1): a communication's link to its thread, from the lineage map (<c>SecureChildLineage</c>, the column
-    /// <c>SecureChildReconciler.ContextFor</c> follows). The thread carries the same three regarding columns as the communication
-    /// (<see cref="CommunicationCoreColumns"/>; the map's thread entry), so they are read from it unchanged.
+    /// <see cref="RecordThreadFiling"/> and <c>SecureChildReconciler.ContextFor</c> follow). The thread carries the same three regarding
+    /// columns as the communication (<see cref="CommunicationCoreColumns"/>; the map's thread entry), so they are read from it unchanged.
     /// </summary>
     private static readonly string CommunicationThread =
         Sprk.Bff.Api.Services.Access.SecureChildLineage.Children[CommunicationEntity].Lookups.Single(l => l.Value == ThreadEntity).Key;
 
     /// <summary>D-140: the communication hop's columns: its regarding core columns and its thread (round 4).</summary>
     private static readonly string[] CommunicationHopColumns = [.. CommunicationCoreColumns.Select(c => c.Column), CommunicationThread];
+
+    /// <summary>
+    /// D-140: the thread row's columns <see cref="RecordThreadFiling.ParentsOf"/> needs here: its type (<c>sprk_threadtype</c>, which decides
+    /// whether it files its messages at all) and the three core regarding columns it carries (the only parents compared as core records).
+    /// </summary>
+    private static readonly string[] ThreadHopColumns =
+        [RecordThreadFiling.ThreadTypeColumn, .. CommunicationCoreColumns.Select(c => c.Column)];
 
     /// <summary>D-140: a document's link to the communication it came from (every email archive / attachment writer stamps it).</summary>
     private static readonly string DocumentRelatedCommunication =
@@ -580,7 +597,7 @@ public class InvoiceSubmissionService
     /// D-140: the core records <paramref name="document"/> is EFFECTIVELY filed under, each with the column that names it. In order, the first
     /// that names any core record decides: (1) the document's own core lookups (both families, <see cref="DocumentCoreColumns"/>); (2) else its
     /// communication's (<c>sprk_relatedcommunication</c>) regarding matter / project / work assignment, together with its thread's
-    /// (<c>sprk_communicationthread</c>, round 4: the union, as <c>SecureChildReconciler.ContextFor</c> takes it): an email attachment is
+    /// (<c>sprk_communicationthread</c>, round 4: the union, with the parents <see cref="RecordThreadFiling.ParentsOf"/> returns for it): an email attachment is
     /// created with only that link, and its isolation follows the communication; (3) else its parent document (<c>sprk_parentdocument</c>),
     /// the same way.
     /// Empty: nothing in the chain is filed (a truly unfiled document, allowed, D-139); a row of the chain that no longer exists files nothing.
@@ -601,15 +618,26 @@ public class InvoiceSubmissionService
             {
                 filed = CoreRecordsOf(communication, CommunicationCoreColumns, CommunicationEntity);
 
-                // 050a review round 4 (uac-r2 F1): the communication's thread files it too. The SAME rule as
-                // SecureChildReconciler.ContextFor, so the filing check and the ownership resolver cannot disagree: the communication's
-                // parents are the UNION of its own regarding columns and its thread's (never "the thread only when the communication names
-                // none"). A communication regarding M on S's thread is filed under both, so it is refused for M and for S alike (an invoice
-                // from it may only be filed where every parent agrees). A thread that is gone files nothing; a read fault propagates (503).
+                // 050a review round 4 (uac-r2 F1): the communication's thread files it too, by the ONE shared rule
+                // RecordThreadFiling.ParentsOf (#2143 round 7d), so the filing check and the ownership resolver cannot disagree:
+                // the communication's parents are the UNION of its own regarding columns and the parents its thread files its
+                // messages under (never "the thread only when the communication names none"). A RECORD thread (and a thread whose
+                // type is not set or not known: fail closed) contributes every parent it carries, so a communication regarding M on
+                // S's thread is filed under both and is refused for M and for S alike (an invoice from it may only be filed where
+                // every parent agrees). A DIRECT thread (1:1, the per-user master) files its messages under nothing whatever
+                // lookups it carries, so it contributes nothing. Only a parent that is a core record (matter, project, work
+                // assignment) is compared here; any other ownership parent is the isolation check's. A thread that is gone files
+                // nothing; a read fault propagates (503).
                 if (communication.GetAttributeValue<EntityReference>(CommunicationThread) is { Id: var threadId } && threadId != Guid.Empty
-                    && await ReadChainRowAsync(ThreadEntity, threadId, CommunicationCoreColumns.Select(c => c.Column).ToArray(), ct) is { } thread)
+                    && await ReadChainRowAsync(ThreadEntity, threadId, ThreadHopColumns, ct) is { } thread)
                 {
-                    filed.AddRange(CoreRecordsOf(thread, CommunicationCoreColumns, ThreadEntity));
+                    foreach (var threadParent in RecordThreadFiling.ParentsOf(thread))
+                    {
+                        if (CoreRecordKindOfTable(threadParent.EntityLogicalName) is { } kind)
+                        {
+                            filed.Add(($"{ThreadEntity}.{CommunicationCoreColumns.First(c => c.Kind == kind).Column}", kind, threadParent.RecordId));
+                        }
+                    }
                 }
             }
 

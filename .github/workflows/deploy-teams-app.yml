@@ -42,9 +42,11 @@ name: Deploy Teams App Package
 #   environment=prod -> GitHub environment `external-spa-prod`, packages appPackage/manifest.prod.json
 # The prod manifest carries a ${{TEAMS_APP_ID}} placeholder; the job renders it from the environment variable
 # TEAMS_APP_ID (the owner-supplied production Teams app id) into build/stage/manifest.json. Both manifests must declare
-# NO webApplicationInfo (ADR-028 A8). The sanity build reads the same VITE_* environment variables as
-# deploy-external-spa.yml; no environment-specific identifier, URL or scope is written in this file. The variables the
-# owner must create are listed in projects/spaarke-SPA-external-access-platform-r3/notes/task-043-notes.md.
+# NO webApplicationInfo (ADR-028 A8/A9). The sanity build reads the same VITE_* environment variables as
+# deploy-external-spa.yml, checked before the build by the same preflight; no environment-specific identifier, URL or
+# scope is written in this file. The variables the owner must create are listed in
+# projects/spaarke-SPA-external-access-platform-r3/notes/task-043-notes.md, plus VITE_WORKFORCE_HOME_MSAL_CLIENT_ID
+# (the ADR-028 A9 multitenant client; tasks 058/059/076).
 on:
   workflow_dispatch:
     inputs:
@@ -92,6 +94,76 @@ jobs:
         with:
           node-version: "20"
 
+      # Fail closed BEFORE building or packaging (task 076): no package is published from an environment whose identity
+      # variables are missing or mis-shaped. The same checks as deploy-external-spa.yml; values are read from the
+      # environment, never interpolated into the script, and no identifier is named here. NOTE: the zip carries only the
+      # manifest and icons, so this does not decide what the tab runs: the tab loads the bundle deploy-external-spa.yml
+      # last put on the Static Web App, and THAT workflow's preflight and deploy are the authoritative check (deploy the
+      # SPA before publishing a package that depends on it).
+      - name: Check required environment variables
+        env:
+          TARGET: ${{ inputs.environment }}
+          VITE_BFF_API_URL: ${{ vars.VITE_BFF_API_URL }}
+          VITE_BACKENDS: ${{ vars.VITE_BACKENDS }}
+          VITE_MSAL_AUTHORITY: ${{ vars.VITE_MSAL_AUTHORITY }}
+          VITE_MSAL_CLIENT_ID: ${{ vars.VITE_MSAL_CLIENT_ID }}
+          VITE_MSAL_TENANT_ID: ${{ vars.VITE_MSAL_TENANT_ID }}
+          VITE_MSAL_BFF_SCOPE: ${{ vars.VITE_MSAL_BFF_SCOPE }}
+          VITE_TEAMS_MSAL_CLIENT_ID: ${{ vars.VITE_TEAMS_MSAL_CLIENT_ID }}
+          VITE_TEAMS_MSAL_TENANT_ID: ${{ vars.VITE_TEAMS_MSAL_TENANT_ID }}
+          VITE_TEAMS_MSAL_BFF_SCOPE: ${{ vars.VITE_TEAMS_MSAL_BFF_SCOPE }}
+          VITE_WORKFORCE_HOME_MSAL_CLIENT_ID: ${{ vars.VITE_WORKFORCE_HOME_MSAL_CLIENT_ID }}
+          TEAMS_APP_ID: ${{ vars.TEAMS_APP_ID }}
+        run: |
+          fail=0
+          guid='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+          scope='^api://[0-9a-fA-F-]{36}/user_impersonation$'
+          # https URL whose path is one tenant GUID segment (optional trailing slash); no query or fragment. The host is
+          # not constrained: the SPA accepts any https authority host (src/auth/msal-config.ts).
+          authority='^https://[^/?#[:space:]]+/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/?$'
+          need() { if [ -z "${!1}" ]; then echo "::error::GitHub environment variable $1 is not set for the '$TARGET' environment"; fail=1; fi; }
+          match() { if [ -n "${!1}" ] && ! [[ ${!1} =~ $2 ]]; then echo "::error::$1 has the wrong format ($3)"; fail=1; fi; }
+          for k in VITE_MSAL_AUTHORITY VITE_MSAL_CLIENT_ID VITE_MSAL_TENANT_ID VITE_MSAL_BFF_SCOPE \
+                   VITE_TEAMS_MSAL_CLIENT_ID VITE_TEAMS_MSAL_TENANT_ID VITE_TEAMS_MSAL_BFF_SCOPE \
+                   VITE_WORKFORCE_HOME_MSAL_CLIENT_ID; do need "$k"; done
+          # Backend: VITE_BACKENDS (a JSON list) or the one-entry VITE_BFF_API_URL fallback - at least one.
+          if [ -z "$VITE_BACKENDS" ] && [ -z "$VITE_BFF_API_URL" ]; then
+            echo "::error::Set VITE_BACKENDS or VITE_BFF_API_URL for the '$TARGET' environment"; fail=1
+          fi
+          match VITE_MSAL_CLIENT_ID "$guid" "GUID"
+          match VITE_MSAL_TENANT_ID "$guid" "GUID"
+          match VITE_TEAMS_MSAL_CLIENT_ID "$guid" "GUID"
+          match VITE_TEAMS_MSAL_TENANT_ID "$guid" "GUID"
+          match VITE_WORKFORCE_HOME_MSAL_CLIENT_ID "$guid" "GUID"
+          # prod renders the package id from TEAMS_APP_ID (the stage step checks it again before rendering).
+          if [ "$TARGET" = "prod" ]; then
+            need TEAMS_APP_ID
+            match TEAMS_APP_ID "$guid" "GUID"
+            if [ "$TEAMS_APP_ID" = "00000000-0000-0000-0000-000000000000" ]; then echo "::error::TEAMS_APP_ID is the all-zero placeholder"; fail=1; fi
+          fi
+          # The multitenant home client (ADR-028 A9; the Teams tab signs in with it through NAA) and the single-tenant A8
+          # client (the guest-token link only) are separate applications: the SPA refuses the pair at run time
+          # (config.ts getWorkforceHomeClientConfig), so refuse it here, before building.
+          if [ -n "$VITE_WORKFORCE_HOME_MSAL_CLIENT_ID" ] && [ "$(printf '%s' "$VITE_WORKFORCE_HOME_MSAL_CLIENT_ID" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s' "$VITE_TEAMS_MSAL_CLIENT_ID" | tr '[:upper:]' '[:lower:]')" ]; then
+            echo "::error::VITE_WORKFORCE_HOME_MSAL_CLIENT_ID must differ from VITE_TEAMS_MSAL_CLIENT_ID (separate applications, ADR-028 A8/A9)"; fail=1
+          fi
+          match VITE_MSAL_BFF_SCOPE "$scope" "api://{app id}/user_impersonation, ADR-028 A8"
+          match VITE_TEAMS_MSAL_BFF_SCOPE "$scope" "api://{app id}/user_impersonation, ADR-028 A8"
+          match VITE_MSAL_AUTHORITY "$authority" "https://{host}/{tenant GUID}, no query or fragment"
+          # The Partner (CIAM) plane counts only accounts of VITE_MSAL_TENANT_ID (#2166), so it must be the authority's
+          # tenant: on a mismatch every partner would go round the sign-in redirect with no end and no message.
+          if [ -n "$VITE_MSAL_AUTHORITY" ] && [ -n "$VITE_MSAL_TENANT_ID" ]; then
+            authority_tid=$(printf '%s' "${VITE_MSAL_AUTHORITY%/}" | sed 's#.*/##' | tr '[:upper:]' '[:lower:]')
+            if [ "$authority_tid" != "$(printf '%s' "$VITE_MSAL_TENANT_ID" | tr '[:upper:]' '[:lower:]')" ]; then
+              echo "::error::VITE_MSAL_TENANT_ID must be the tenant in VITE_MSAL_AUTHORITY (the Partner plane counts only that tenant's accounts, #2166)"; fail=1
+            fi
+          fi
+          if [ -n "$VITE_BFF_API_URL" ]; then match VITE_BFF_API_URL '^https://' "https URL"; fi
+          if [ -n "$VITE_BACKENDS" ] && ! printf '%s' "$VITE_BACKENDS" | python3 -c 'import json,sys; assert isinstance(json.load(sys.stdin), list)'; then
+            echo "::error::VITE_BACKENDS must be a JSON list"; fail=1
+          fi
+          exit "$fail"
+
       # Vite solution: use npm install --legacy-peer-deps (NOT npm ci) per root CLAUDE.md §12.
       - name: Install dependencies
         working-directory: src/client/external-spa
@@ -107,18 +179,26 @@ jobs:
         working-directory: src/client/external-spa
         env:
           # GitHub environment variables (dev values in external-spa-dev, prod values in external-spa-prod) - same
-          # names and meaning as in deploy-external-spa.yml; both planes request api://{app id}/user_impersonation
-          # (ADR-028 A8). Unset optional values (VITE_BACKENDS) arrive as empty strings, which the SPA treats as unset.
+          # names and meaning as in deploy-external-spa.yml; both planes request api://{app id}/user_impersonation.
+          # Unset optional values (VITE_BACKENDS) arrive as empty strings, which the SPA treats as unset.
           VITE_BFF_API_URL: ${{ vars.VITE_BFF_API_URL }}
           VITE_BACKENDS: ${{ vars.VITE_BACKENDS }}
           VITE_MSAL_AUTHORITY: ${{ vars.VITE_MSAL_AUTHORITY }}
           VITE_MSAL_CLIENT_ID: ${{ vars.VITE_MSAL_CLIENT_ID }}
           VITE_MSAL_TENANT_ID: ${{ vars.VITE_MSAL_TENANT_ID }}
           VITE_MSAL_BFF_SCOPE: ${{ vars.VITE_MSAL_BFF_SCOPE }}
-          # Workforce plane (Teams host): single-tenant Spaarke public client, authority pinned to Spaarke's tenant.
+          # VITE_TEAMS_MSAL_CLIENT_ID is the single-tenant Spaarke public client (ADR-028 A8), authority pinned to
+          # Spaarke's tenant (VITE_TEAMS_MSAL_TENANT_ID, which also marks Spaarke's tenant as never a customer's home
+          # directory): under A9 the client is used only for the guest-token link, never for the Teams sign-in itself.
+          # VITE_TEAMS_MSAL_BFF_SCOPE feeds the one-entry backend fallback when VITE_BACKENDS is unset.
           VITE_TEAMS_MSAL_CLIENT_ID: ${{ vars.VITE_TEAMS_MSAL_CLIENT_ID }}
           VITE_TEAMS_MSAL_TENANT_ID: ${{ vars.VITE_TEAMS_MSAL_TENANT_ID }}
           VITE_TEAMS_MSAL_BFF_SCOPE: ${{ vars.VITE_TEAMS_MSAL_BFF_SCOPE }}
+          # Multitenant home public client (ADR-028 A9): the Teams tab signs in with it through NAA at the Teams context
+          # tenant (task 075), and the browser company-account sign-in uses it too. Its id lives in the SPA bundle (the
+          # one deploy-external-spa.yml ships), never in the manifest: a Teams manifest names a client only through
+          # webApplicationInfo, which A8/A9 forbid.
+          VITE_WORKFORCE_HOME_MSAL_CLIENT_ID: ${{ vars.VITE_WORKFORCE_HOME_MSAL_CLIENT_ID }}
         run: npm run build
 
       # Pick the manifest by environment and stage it as build/stage/manifest.json (the file name Teams requires at
@@ -150,8 +230,13 @@ jobs:
           jq -e '.id != null and .id != ""' manifest.json > /dev/null || { echo "::error::manifest.json missing id"; exit 1; }
           jq -e '.staticTabs != null and (.staticTabs | length) > 0' manifest.json > /dev/null || { echo "::error::manifest.json missing staticTabs"; exit 1; }
           jq -e '.validDomains != null and (.validDomains | length) > 0' manifest.json > /dev/null || { echo "::error::manifest.json missing validDomains"; exit 1; }
-          # ADR-028 Amendment A8 (MUST NOT): the manifest declares NO webApplicationInfo (no Teams-SSO fallback).
-          jq -e 'has("webApplicationInfo") | not' manifest.json > /dev/null || { echo "::error::manifest.json must NOT declare webApplicationInfo (ADR-028 A8: NAA then MSAL popup, no Teams SSO)"; exit 1; }
+          # ADR-028 Amendments A8/A9 (MUST NOT): the manifest declares NO webApplicationInfo (no Teams-SSO fallback, and
+          # so no client id in the manifest).
+          jq -e 'has("webApplicationInfo") | not' manifest.json > /dev/null || { echo "::error::manifest.json must NOT declare webApplicationInfo (ADR-028 A8/A9: NAA then MSAL popup, no Teams SSO)"; exit 1; }
+          # The SPA's domain (the host of every static tab's https contentUrl) must be in validDomains (task 076, design
+          # section 12).
+          jq -e 'all(.staticTabs[].contentUrl; startswith("https://"))' manifest.json > /dev/null || { echo "::error::every staticTabs contentUrl must be an https URL"; exit 1; }
+          jq -e '[.staticTabs[].contentUrl | sub("^https://"; "") | sub("[/?#:].*$"; "")] - .validDomains | length == 0' manifest.json > /dev/null || { echo "::error::manifest.json validDomains must contain the host of every staticTabs contentUrl (the SPA domain)"; exit 1; }
           # No unrendered placeholder may reach a package.
           if grep -Eq '[$][{][{]' manifest.json; then echo "::error::manifest.json still contains an unrendered placeholder"; exit 1; fi
           echo "Manifest validation passed."

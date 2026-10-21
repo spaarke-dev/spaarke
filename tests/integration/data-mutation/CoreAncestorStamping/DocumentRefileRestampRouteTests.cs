@@ -54,6 +54,24 @@ public class DocumentRefileRestampRouteTests : IClassFixture<DocumentRefileResta
             "the Office carrier to-do's matter is the user's direct choice, not a copy");
     }
 
+    [Fact(DisplayName = "#2143 route: a re-file whose owner cannot be settled against concurrent writers answers 409 record_owner_unsettled, not 500")]
+    public async Task Put_WhenTheRefiledOwnerCannotBeSettled_Answers409ReloadAndRetry()
+    {
+        _fixture.Ownership.FaultAfterChange = new RecordOwnerUnsettledException("sprk_document", Document, "test: unsettled");
+        using var client = _fixture.CreateClientWithRights("ReadAccess,WriteAccess,AppendToAccess");
+
+        var response = await client.PutAsJsonAsync($"/api/v1/documents/{Document}", new { matterLookup = MatterB });
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body);
+        using var problem = System.Text.Json.JsonDocument.Parse(body);
+        problem.RootElement.GetProperty("reasonCode").GetString().Should().Be(RecordOwnerUnsettledException.ReasonCode);
+        problem.RootElement.GetProperty("detail").GetString().Should().Contain("Reload it and try again")
+            .And.NotContain(Document.ToString("D"), "the detail names no row");
+        _fixture.World.Lookup("sprk_todo", TodoUnderDocument, "sprk_regardingmatter").Should().NotBe(MatterB,
+            "an unsettled re-file runs no step after one");
+    }
+
     [Fact(DisplayName = "Task 156 route: a document update that does not touch its root (a rename) re-stamps nothing and reads nothing")]
     public async Task Put_RenamingTheDocument_RestampsNothing()
     {
@@ -102,7 +120,11 @@ public sealed class DocumentRefileRestampFixture : DocumentDestroyAuthorizationT
     {
         var fresh = RefilePathRestampTests.DocumentWorld();
         World.ReplaceWith(fresh);
+        Ownership.FaultAfterChange = null;
     }
+
+    /// <summary>The ownership double the route re-files through (#2143: a test makes it fail after the change).</summary>
+    internal Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble Ownership { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -116,7 +138,7 @@ public sealed class DocumentRefileRestampFixture : DocumentDestroyAuthorizationT
             // Batch 4 integration (task 146): the re-file is owned through the one resolver before the write — a module
             // boundary here (the double applies the write); the owner decision is not this test's subject.
             services.RemoveAll<IRecordOwnershipResolver>();
-            services.AddSingleton<IRecordOwnershipResolver>(new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble());
+            services.AddSingleton<IRecordOwnershipResolver>(Ownership);
         });
     }
 }

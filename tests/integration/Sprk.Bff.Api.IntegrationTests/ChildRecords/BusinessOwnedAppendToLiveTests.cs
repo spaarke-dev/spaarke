@@ -180,7 +180,7 @@ public sealed class BusinessOwnedAppendToLiveTests
         var teamBu = foreignTeams[0].Bu;
         using (var body = JsonDocument.Parse(reported))
         {
-            Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.PrivilegeGrantsIn(body.RootElement.Clone(), "prvAppendToUser")
+            Sprk.Bff.Api.Services.Dataverse.CallerWriteAuthorization.PrivilegeGrantsIn(body.RootElement.Clone(), "prvAppendToUser")
                 .Should().Contain(g => g.Anchor == teamBu, "Dataverse reports the team-inherited grant anchored at the team's business unit");
         }
 
@@ -215,7 +215,7 @@ public sealed class BusinessOwnedAppendToLiveTests
         _out.WriteLine($"[K1] user {user}: prvAppendToTeam as Dataverse reports it: {reported}");
         using (var body = JsonDocument.Parse(reported))
         {
-            if (!Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.PrivilegeGrantsIn(body.RootElement.Clone(), "prvAppendToTeam")
+            if (!Sprk.Bff.Api.Services.Dataverse.CallerWriteAuthorization.PrivilegeGrantsIn(body.RootElement.Clone(), "prvAppendToTeam")
                     .Any(g => g.Depth == Sprk.Bff.Api.Infrastructure.Dataverse.PrivilegeDepth.Basic))
             {
                 _out.WriteLine("[K1] K1 leg not configured: the user holds no Basic prvAppendToTeam grant " +
@@ -232,7 +232,7 @@ public sealed class BusinessOwnedAppendToLiveTests
         await factory.ActAsAsync(user);
         using var scope = factory.Services.CreateScope();
         var caller = scope.ServiceProvider.GetRequiredService<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient>();
-        var outcome = await Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.CheckCallerMayAppendToRecordAsync(
+        var outcome = await Sprk.Bff.Api.Services.Dataverse.CallerWriteAuthorization.CheckCallerMayAppendToRecordAsync(
             caller, user, "team", team, CancellationToken.None);
         _out.WriteLine($"[K1] AppendTo on the user's BU default team {team}: succeeded={outcome.Succeeded} " +
                        $"parentUnavailable={outcome.ParentUnavailable} denied={outcome.Denied}");

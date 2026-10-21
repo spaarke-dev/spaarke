@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>W2 coordination gate: UAC-r2 sign-off, ontology-r1 awareness, conflict-check (NFR-08)</title>
+    <phase>2 W2 Unified RecordCreationService</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>No code and no tests; coordination and a written decision only.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Reading PR state and recording a sequencing decision; no judgment beyond reporting what the other projects say.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>W2-gate</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>coordination, planning</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Before any W2 code, establish with UAC-r2 and ontology-r1 how the shared hot files (`OwnedChildWrite.cs`, the census tests, `ChildRecordEndpoints.cs`, the decision cores) will be sequenced. Locate the open UAC-r2 PRs (#2110, #2078, #2104) and the ontology-r1 PRs that touch the same files, run `/conflict-check`, and record the agreed sequencing and the sign-off (or "blocked") in `notes/decisions.md`. Write the full picture to `notes/w2-coordination.md`. Write no code.</prompt>
+  <role>SPAARKE project coordinator with repo and GitHub literacy. Follow the project's coordination rules (NFR-08).</role>
+  <goal>`notes/w2-coordination.md` states, per hot file, who edits it when; `notes/decisions.md` records the resolution of the spec Unresolved Question "UAC-r2 timing" with a sign-off or an explicit "blocked"; task 011 can start or is knowingly held.</goal>
+
+  <context>
+    <background>spec.md NFR-08 and Unresolved Questions ("UAC-r2 timing for the OwnedChildWrite refactor and census changes. Blocks: W2 start date"); Prerequisites section (UAC-r2 sign-off, ontology-r1 awareness). W2 moves the create half of `OwnedChildWrite.cs` and extracts `CallerWriteAuthorization`; UAC-r2 PR #2110 also edits `OwnedChildWrite`/`ChildRecordEndpoints` and `CommunicationService`; PR #2104 edits `closureService.ts`/`CloseProjectDialog.tsx` (touch-nothing for task 022); PR #2078 and the ontology-r1 PRs touch census tests, role definitions or the chat/decision cores.</background>
+    <relevant-files>
+      <file role="modify">projects/field-mapping-server-write-path-r1/notes/decisions.md (add the coordination decision entry)</file>
+      <file role="new">projects/field-mapping-server-write-path-r1/notes/w2-coordination.md</file>
+      <file role="canonical-reference">.claude/skills/conflict-check/SKILL.md (procedure)</file>
+      <file role="canonical-reference">projects/INDEX.md (active projects and hot-path registry; locate the UAC-r2 and ontology-r1 rows)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/OwnedChildWrite.cs (the hot file)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Independent; gates tasks 011, 012 and everything after.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §6">Scope: decisions. If UAC-r2 objects to this project moving OwnedChildWrite's create half, that is a conflicting-requirements escalation to the human; the agent records the objection and does not resolve it.</constraint>
+    <constraint source="project">Scope: no code. No file under src/ or tests/ is changed. No comment is posted on another project's PR and no PR is merged or closed; read state only.</constraint>
+    <constraint source="NFR-08">Scope: sequencing. Cover OwnedChildWrite, the census tests, role definitions (UAC-r2) and the chat/decision/Signal re-pointing (ontology-r1). `/conflict-check` runs before each W2 task, not only this one.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Cross-project sequencing</topic>
+    <files>
+      <file>.claude/skills/conflict-check/SKILL.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare MINIMAL rigor; read spec NFR-08, Prerequisites and Unresolved Questions; read projects/INDEX.md for the UAC-r2 and ontology-r1 project rows.</step>
+    <step order="1">Locate PRs #2110, #2078 and #2104 (gh pr view, read-only) and the ontology-r1 PRs that touch OwnedChildWrite, ChildRecordEndpoints, the census tests, DataverseCreateRecordHandler, EmailDraftToolHandler, BudgetInquiryExecutor, SignalWriter or DecisionRecordWriter. For each: state, files touched, merge status.</step>
+    <step order="2">Run the conflict-check skill against the files W2 will touch (OwnedChildWrite.cs, ChildRecordEndpoints.cs, OfficeModule.cs, OfficeService.cs, CommunicationService.cs, the three ArchTests files named in the spec). Record the output.</step>
+    <step order="3">Write notes/w2-coordination.md: a table of file, owner project, PR, planned order, and the rule each project follows for rebasing; list which of tasks 011, 017, 028 and 060 are affected.</step>
+    <step order="4">Record in notes/decisions.md: the agreed sequencing, the sign-off from UAC-r2 (or "blocked" plus what is needed), and the resolution of the "UAC-r2 timing" Unresolved Question. If sign-off is not yet available, state that task 011 is held.</step>
+    <step order="5">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="6">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If UAC-r2 objects to moving OwnedChildWrite's create half, or its PRs cannot be sequenced before W2 without a rewrite of either side, STOP and raise a Human Input Required per CLAUDE.md §6 with options and a recommendation.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The only new file is a project note; grep notes/ shows decisions.md holds decisions but no per-file sequencing table, and projects/INDEX.md lists projects, not hot-file order.</existing>
+    <extension>The decision itself goes into the existing notes/decisions.md; the sequencing table is too long for that file, so it gets one companion note.</extension>
+    <cost-of-doing-nothing>Task 011 edits OwnedChildWrite.cs while UAC-r2 PR #2110 edits it too; without a recorded order the two projects produce a semantic merge conflict on the authorization boundary.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="gh">Read-only PR state</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/field-mapping-server-write-path-r1/notes/w2-coordination.md</output>
+    <output type="docs">projects/field-mapping-server-write-path-r1/notes/decisions.md (new entry)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`notes/w2-coordination.md` exists and lists, for each of OwnedChildWrite.cs, ChildRecordEndpoints.cs, CommunicationService.cs, the census tests and the ontology-owned cores, the competing PR (or "none open"), its state and the agreed order.</criterion>
+    <criterion testable="true">`notes/decisions.md` has a dated entry recording the UAC-r2 sign-off or an explicit "blocked" with the missing item, and states whether task 011 may start.</criterion>
+    <criterion testable="true">The `/conflict-check` output is recorded and every reported overlap appears in the coordination table.</criterion>
+    <criterion testable="true">Negative: no file under src/ or tests/ changed, and no PR comment, merge or close was performed (git status shows only notes/ and TASK-INDEX.md).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec NFR-08 and the "UAC-r2 timing" Unresolved Question. Gate for tasks 011 and 012.
+Completed 2026-10-19 (MINIMAL). Read-only PR/branch survey plus cross-session answers from UAC-r2, ebilling-r1 and ontology-r1; see notes/w2-coordination.md and the notes/decisions.md 2026-10-19 entry.
+Outcome: UAC-r2 conditional no-objection. Task 011 is HELD on two owner decisions: (1) UAC condition (c), a failed mapped FILING lookup refuses (FR-08 amendment); (2) the W2 order vs ebilling #1911, a new overlap with no merge date.
+No src/ or tests/ change by this task; no PR comment, merge or close.
+rework: none task 010</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

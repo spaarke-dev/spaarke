@@ -15,7 +15,8 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// </summary>
 public class ExternalParticipationService
 {
-    private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(60);
+    // internal (#2121 round 1, F1): AccessibleRecordSetService caches its Dataverse rights answers for the same TTL.
+    internal static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(60);
     // Resource identifier for ITenantCache (FR-05). Cached value is per-Contact participation
     // data (project list), not an authorization decision per ADR-009.
     //
@@ -1970,8 +1971,8 @@ public class ExternalParticipationService
         var token = await GetAppOnlyTokenAsync(ct).ConfigureAwait(false);
         string? next = $"{GetDataverseApiUrl()}/sprk_contactorganizations" +
                        $"?$filter={BuildColleagueByEmailFilter(organizationIds, email)}" +
-                       $"&$select={ColleagueByEmailSelect}" +
-                       $"&$expand={ColleagueByEmailExpand}";
+                       "&$select=" + ColleagueByEmailSelect +
+                       "&$expand=" + ColleagueByEmailExpand;
 
         var rows = new List<ColleagueMembershipRow>();
         var pages = 0;

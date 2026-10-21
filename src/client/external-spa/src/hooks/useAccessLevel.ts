@@ -109,6 +109,11 @@ export interface UseAccessLevelResult {
   canCreate: boolean;
   canUseAi: boolean;
   canInvite: boolean;
+  /**
+   * `true` when `/me` says the caller's write access is decided per record (task 036 fix round 1). The level above then
+   * says only what the caller may see: create/upload controls must follow the record's list `canCreate`, not the level.
+   */
+  writeAccessPerRecord: boolean;
 }
 
 /**
@@ -153,5 +158,6 @@ export function useAccessLevel(projectId: string | undefined | null): UseAccessL
     canCreate: canCreate(accessLevel),
     canUseAi: canUseAi(accessLevel),
     canInvite: canInvite(accessLevel),
+    writeAccessPerRecord: context?.writeAccessPerRecord === true,
   };
 }

@@ -1,6 +1,9 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
+using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Services.Identity;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
@@ -34,6 +37,14 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// <b>ADR-015 / NFR-07</b>: telemetry carries entity + column COUNT + row COUNT + duration —
 /// never querytext (may embed user-authored literals), never row content.
 /// </para>
+/// <para>
+/// <b>ISS-010 quick fix (external-access r3 task 078)</b>: for an EXTERNAL caller (systemuser flagged
+/// <c>sprk_isexternal</c>, or unresolvable — fail closed) a <c>sprk_communication</c> query is ANDed with the task 065
+/// rule (the Open-thread half through the thread navigation property) and re-checked after the read (flag and Open
+/// thread); any other communication-family table (the prefix plus the content tables outside it) is refused before any
+/// Dataverse request; a <c>sprk_document</c> whose related communication fails the rule is dropped after the read. See
+/// <see cref="ExternalCallerCommunicationGuard"/>. Internal callers and other tables are unchanged.
+/// </para>
 /// </remarks>
 public sealed class DataverseReadQueryHandler : IToolHandler
 {
@@ -41,13 +52,22 @@ public sealed class DataverseReadQueryHandler : IToolHandler
 
     private readonly IDataverseUserClient _dataverse;
     private readonly ILogger<DataverseReadQueryHandler> _logger;
+    private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly ICallerSystemUserResolver _callerResolver;
+    private readonly ISystemUserIdentityResolver _identityResolver;
 
     public DataverseReadQueryHandler(
         IDataverseUserClient dataverse,
-        ILogger<DataverseReadQueryHandler> logger)
+        ILogger<DataverseReadQueryHandler> logger,
+        IHttpContextAccessor httpContextAccessor,
+        ICallerSystemUserResolver callerResolver,
+        ISystemUserIdentityResolver identityResolver)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
+        _callerResolver = callerResolver ?? throw new ArgumentNullException(nameof(callerResolver));
+        _identityResolver = identityResolver ?? throw new ArgumentNullException(nameof(identityResolver));
     }
 
     /// <inheritdoc />
@@ -128,6 +148,35 @@ public sealed class DataverseReadQueryHandler : IToolHandler
 
         try
         {
+            // ISS-010 (task 078): externality is decided ONLY for a communication-family table or sprk_document, so every
+            // other request is byte-identical. An external caller is refused any family table but sprk_communication
+            // BEFORE any Dataverse request (the metadata GET included); sprk_document is row-filtered by its related
+            // communication (review round 1, F1).
+            var guardCommunications = false;
+            var guardDocuments = false;
+            if ((ExternalCallerCommunicationGuard.IsCommunicationFamily(translation.EntityLogicalName) ||
+                 ExternalCallerCommunicationGuard.IsDocumentTable(translation.EntityLogicalName)) &&
+                await ExternalCallerCommunicationGuard.IsExternalCallerAsync(
+                    _httpContextAccessor, _callerResolver, _identityResolver, cancellationToken).ConfigureAwait(false))
+            {
+                if (ExternalCallerCommunicationGuard.IsDocumentTable(translation.EntityLogicalName))
+                {
+                    guardDocuments = true;
+                }
+                else if (!ExternalCallerCommunicationGuard.IsCommunicationTable(translation.EntityLogicalName))
+                {
+                    _logger.LogInformation(
+                        "[dataverse.read_query] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
+                        translation.EntityLogicalName, "family_table_refused", context.DecisionId);
+                    return Error(tool, ExternalCallerCommunicationGuard.RefusalMessage,
+                        DataverseUserClientErrorCodes.AccessDenied, startedAt);
+                }
+                else
+                {
+                    guardCommunications = true;
+                }
+            }
+
             // Resolve entity-set + primary id from metadata (under the user's token — a table
             // invisible to this user 404s here, which is the correct fail-closed behavior).
             // R5-C (2026-07-07): also fetch attribute types so LOOKUP columns can be rewritten
@@ -159,7 +208,37 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                 .Where(lookupAttributes.Contains)
                 .ToList();
             string odataQuery;
-            if (mappedLookups.Count > 0 ||
+            var threadColumnInjected = false;
+            var internalOnlyColumnInjected = false;
+            var relatedCommunicationColumnInjected = false;
+            if (guardCommunications || guardDocuments)
+            {
+                // ISS-010 (task 078): on sprk_communication the task 065 rule rides in the query: the model's whole
+                // predicate in parentheses, ANDed with flag-false, thread-set and thread-Open (review K1). The thread and
+                // flag columns are selected so both are re-checked after the read (review K4). On sprk_document the
+                // related-communication lookup is selected so each row's communication can be checked after the read.
+                var guardedColumns = translation.Columns!
+                    .Select(c => lookupAttributes.Contains(c) ? ToValueForm(c) : c)
+                    .ToList();
+                if (guardCommunications)
+                {
+                    threadColumnInjected = AddColumnIfAbsent(guardedColumns, CommunicationOpenThreadGate.MessageThreadLookupValue);
+                    internalOnlyColumnInjected = AddColumnIfAbsent(guardedColumns, CommunicationInternalOnlyFloor.InternalOnlyField);
+                }
+                else
+                {
+                    relatedCommunicationColumnInjected = AddColumnIfAbsent(
+                        guardedColumns, ExternalCallerCommunicationGuard.RelatedCommunicationLookupValue);
+                }
+
+                var rewrittenFilter = RewriteLookupReferences(translation.RawFilter, lookupAttributes);
+                odataQuery = DataverseSqlQueryTranslator.AssembleODataQuery(
+                    guardedColumns,
+                    guardCommunications ? ExternalCallerCommunicationGuard.ApplyFilter(rewrittenFilter) : rewrittenFilter,
+                    RewriteLookupReferences(translation.RawOrderBy, lookupAttributes),
+                    translation.Top);
+            }
+            else if (mappedLookups.Count > 0 ||
                 ContainsAnyLookup(translation.RawFilter, lookupAttributes) ||
                 ContainsAnyLookup(translation.RawOrderBy, lookupAttributes))
             {
@@ -190,12 +269,58 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                 return MapClientError(tool, response, startedAt);
             }
 
+            // ISS-010 (task 078): the Open-thread half of the rule, checked after the read (thread privacy lives on another
+            // table). One batched read of the distinct threads; a fault throws into the error result below (no rows).
+            HashSet<Guid>? openThreads = null;
+            if (guardCommunications &&
+                response.Body is { } guardedBody && guardedBody.TryGetProperty("value", out var guardedValue) &&
+                guardedValue.ValueKind == JsonValueKind.Array)
+            {
+                openThreads = await CommunicationOpenThreadGate.ReadOpenThreadIdsAsync(
+                    guardedValue.EnumerateArray().Select(ExternalCallerCommunicationGuard.ThreadIdOf).ToList(),
+                    ExternalCallerCommunicationGuard.ThreadQueryOver(_dataverse),
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            // ISS-010 review round 1 (F1): a document whose related communication the caller may not see is hidden. One
+            // batched read of the related communications, then one thread-privacy read; a communication that does not
+            // come back is hidden; a fault throws into the error result below (no rows).
+            HashSet<Guid>? visibleCommunications = null;
+            if (guardDocuments &&
+                response.Body is { } documentBody && documentBody.TryGetProperty("value", out var documentValue) &&
+                documentValue.ValueKind == JsonValueKind.Array)
+            {
+                visibleCommunications = await ExternalCallerCommunicationGuard.ReadVisibleCommunicationIdsAsync(
+                    _dataverse,
+                    documentValue.EnumerateArray().Select(ExternalCallerCommunicationGuard.RelatedCommunicationIdOf).ToList(),
+                    cancellationToken).ConfigureAwait(false);
+            }
+
             var rows = new List<Dictionary<string, object?>>();
             var citations = new List<ToolResultCitation>();
+            var hiddenRows = 0;
+            var hiddenDocuments = 0;
             if (response.Body is { } body && body.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.Array)
             {
                 foreach (var record in value.EnumerateArray())
                 {
+                    if (guardCommunications &&
+                        (!ExternalCallerCommunicationGuard.IsExplicitlyShareable(record) ||
+                         openThreads is null || !openThreads.Contains(ExternalCallerCommunicationGuard.ThreadIdOf(record))))
+                    {
+                        hiddenRows++;
+                        continue;
+                    }
+
+                    if (guardDocuments &&
+                        ExternalCallerCommunicationGuard.RelatedCommunicationIdOf(record) is var relatedCommunicationId &&
+                        relatedCommunicationId != Guid.Empty &&
+                        (visibleCommunications is null || !visibleCommunications.Contains(relatedCommunicationId)))
+                    {
+                        hiddenDocuments++;
+                        continue;
+                    }
+
                     var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
                     Guid recordId = Guid.Empty;
                     foreach (var property in record.EnumerateObject())
@@ -221,6 +346,20 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                         }
                     }
 
+                    // The model did not ask for these columns; they were selected only for the guard.
+                    if (threadColumnInjected)
+                    {
+                        row.Remove(FromValueForm(CommunicationOpenThreadGate.MessageThreadLookupValue, lookupAttributes));
+                    }
+                    if (internalOnlyColumnInjected)
+                    {
+                        row.Remove(CommunicationInternalOnlyFloor.InternalOnlyField);
+                    }
+                    if (relatedCommunicationColumnInjected)
+                    {
+                        row.Remove(FromValueForm(ExternalCallerCommunicationGuard.RelatedCommunicationLookupValue, lookupAttributes));
+                    }
+
                     if (recordId != Guid.Empty)
                     {
                         row["@citation.path"] = DataverseRecordCitations.RecordPath(translation.EntityLogicalName!, recordId);
@@ -228,6 +367,21 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                     }
                     rows.Add(row);
                 }
+            }
+
+            if (hiddenRows > 0)
+            {
+                // ADR-015: entity + reason code only — never query text or row content.
+                _logger.LogInformation(
+                    "[dataverse.read_query] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
+                    translation.EntityLogicalName, "thread_not_open", context.DecisionId);
+            }
+            if (hiddenDocuments > 0)
+            {
+                // ADR-015: entity + reason code only — never query text or row content.
+                _logger.LogInformation(
+                    "[dataverse.read_query] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
+                    translation.EntityLogicalName, "related_communication_hidden", context.DecisionId);
             }
 
             stopwatch.Stop();
@@ -326,6 +480,14 @@ public sealed class DataverseReadQueryHandler : IToolHandler
         }
 
         return result;
+    }
+
+    /// <summary>Adds <paramref name="column"/> to the select list when absent; true when it was added (strip it from rows).</summary>
+    private static bool AddColumnIfAbsent(List<string> columns, string column)
+    {
+        if (columns.Contains(column, StringComparer.OrdinalIgnoreCase)) return false;
+        columns.Add(column);
+        return true;
     }
 
     /// <summary>The Web API address form of a lookup column (<c>_{name}_value</c>).</summary>

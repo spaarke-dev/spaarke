@@ -117,6 +117,21 @@ public sealed class InvoiceSubmissionServiceTests
         /// <summary>050a round 4 (F1): the communication threads a communication of the chain links (absent: not found).</summary>
         public readonly Dictionary<Guid, Entity> Threads = new();
 
+        /// <summary>
+        /// A thread read answers only the columns it asked for (as Dataverse does), so a read that omits one (the thread's type, say)
+        /// sees it unset.
+        /// </summary>
+        private static Entity OnlyColumns(Entity row, string[] columns)
+        {
+            var copy = new Entity(row.LogicalName, row.Id);
+            foreach (var column in columns.Where(row.Contains))
+            {
+                copy[column] = row[column];
+            }
+
+            return copy;
+        }
+
         /// <summary>050a round 4 (F1): non-null, a thread read throws this.</summary>
         public Exception? ThreadReadFailure;
 
@@ -280,7 +295,7 @@ public sealed class InvoiceSubmissionServiceTests
                 .ReturnsAsync(new Entity("sprk_recordtype_ref", RecordTypeId) { [RegardingRecordType.RecordNumberFieldColumn] = "sprk_matternumber" });
 
             Entities.Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string entity, Guid id, string[] _, CancellationToken _) => entity switch
+                .ReturnsAsync((string entity, Guid id, string[] columns, CancellationToken _) => entity switch
                 {
                     "sprk_organization" => FirmReadFailure is { } firmFailure ? throw firmFailure : Firm!,
                     "sprk_matter" => MatterReadFailure is { } failure ? throw failure : Matter!,
@@ -295,7 +310,7 @@ public sealed class InvoiceSubmissionServiceTests
                         : Communications.TryGetValue(id, out var communication) ? communication : throw NotFound(),
                     "sprk_communicationthread" => ThreadReadFailure is { } threadFailure
                         ? throw threadFailure
-                        : Threads.TryGetValue(id, out var thread) ? thread : throw NotFound(),
+                        : Threads.TryGetValue(id, out var thread) ? OnlyColumns(thread, columns) : throw NotFound(),
                     _ => null!,
                 });
             // The SPA document create stamps the uploaded item on the row (sprk_graphitemid): a committed row is found by it.
@@ -523,6 +538,30 @@ public sealed class InvoiceSubmissionServiceTests
         ((OptionSetValue)fields["sprk_channel"]).Value.Should().Be((int)InvoiceSubmissionChannel.Internal);
         fields.Keys.Should().NotContain("sprk_submitter");
         h.JobsSent.Should().ContainSingle();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task External_entry_refuses_a_systemuser_403_use_internal_route_before_any_read_or_write(bool linkedToAContact)
+    {
+        var h = new Harness();
+        var systemUser = new CallerPrincipal
+        {
+            Plane = CallerPrincipalPlane.Workforce,
+            SystemUserId = Guid.NewGuid(),
+            ContactId = linkedToAContact ? ContactId : Guid.Empty,
+            ProjectAccess = Array.Empty<CallerProjectAccess>(),
+        };
+
+        var outcome = await h.Build().SubmitAsync(Spa() with { ExternalCaller = systemUser }, CancellationToken.None);
+
+        outcome.Should().Match<InvoiceSubmissionOutcome>(o =>
+            o.StatusCode == StatusCodes.Status403Forbidden && o.ErrorCode == InvoiceSubmissionErrors.UseInternalRoute);
+        h.Writes.Should().Be(0);
+        h.DocumentUpdates.Should().BeEmpty();
+        h.Entities.Invocations.Should().BeEmpty("a systemuser costs no read on the external entry point");
+        h.LinkReads.Should().BeEmpty();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

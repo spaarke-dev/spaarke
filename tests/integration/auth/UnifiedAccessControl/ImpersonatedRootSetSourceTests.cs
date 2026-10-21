@@ -123,6 +123,23 @@ public sealed class ImpersonatedRootSetSourceTests
     // Truncation — never silent (NFR-03 groundwork)
     // =====================================================================
 
+    [Theory(DisplayName = "Task 036 decision (f): the capped read orders by modifiedon desc, so a capped set keeps the most recently modified records")]
+    [InlineData("sprk_project")]
+    [InlineData("sprk_matter")]
+    [InlineData("sprk_workassignment")]
+    public async Task GetAsync_OrdersByMostRecentlyModified_SoACappedSetKeepsTheNewest(string entityType)
+    {
+        var query = new StubImpersonatedQuery();
+
+        await Build(query).GetAsync(User, entityType);
+
+        query.LastODataQuery.Should().Contain("$orderby=modifiedon desc",
+            "without an order Dataverse's default order decides which records a capped set keeps (owner, 2026-10-18)");
+        query.LastODataQuery.Should().Contain($"$top={ImpersonatedRootSetSource.RowCap}", "the cap itself is unchanged");
+        ImpersonatedRootSetSource.CacheVersion.Should().BeGreaterThanOrEqualTo(2,
+            "the query shape changed, so a set cached under the unordered v1 query must not be served");
+    }
+
     [Fact]
     public async Task GetAsync_WhenTheRowCapIsHit_FlagsTruncated()
     {

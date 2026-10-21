@@ -74,7 +74,7 @@ public class OfficeService : IOfficeService
     private readonly IGenericEntityService _genericEntityService;
     // FR-13 (spaarkeai-word-add-in-r1 task 030): the Matter quick-create path. Required (ADR-032): its registration
     // is unconditional, so an absent one is a startup fault, never a per-request 403.
-    private readonly RecordCreationService _recordCreation;
+    private readonly OfficeRecordCreationService _recordCreation;
     // Task 067 (finding F5): resolves the calling user's Dataverse systemuserid so the job row can record
     // WHO asked for it (sprk_initiatedby). Reused, not reinvented (CLAUDE.md §11) — this is the same
     // ICallerSystemUserResolver the Communication read path and task 062's picker already depend on,
@@ -104,7 +104,7 @@ public class OfficeService : IOfficeService
         IMembershipEventPublisher membershipEventPublisher,
         RecordContainerResolver containerResolver,
         Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver coreAncestors,
-        RecordCreationService recordCreation,
+        OfficeRecordCreationService recordCreation,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownershipResolver,
         OfficeSearchService search,
         EmailUploadCaptureService emailUploadCapture,
@@ -1851,7 +1851,7 @@ public class OfficeService : IOfficeService
     /// "New record" for the add-in "Related to" picker. Scope = <b>Matter, Project, Invoice</b>; other types
     /// return null (endpoint 403s) until built out.</para>
     /// <para><b>Matter</b> (task 030, FR-13) and <b>Project</b> (task 031, FR-13) are created complete by
-    /// <see cref="RecordCreationService"/>: the caller as a <b>load-bearing</b> owner, business-unit defaults, the
+    /// <see cref="OfficeRecordCreationService"/>: the caller as a <b>load-bearing</b> owner, business-unit defaults, the
     /// Field Mapping Framework, the matter-type and practice-area lookups (Matter) or the project-type lookup
     /// (Project) when supplied, and the Assigned To contact (task 100). Neither writes its entity's number — the
     /// platform's autonumber assigns <c>sprk_matternumber</c> / <c>sprk_projectnumber</c> (task 076, interim).
@@ -1985,14 +1985,14 @@ public class OfficeService : IOfficeService
 
     /// <summary>
     /// The Matter (task 030) and Project (task 031) leg of <see cref="QuickCreateAsync"/>, FR-13: delegates to
-    /// <see cref="RecordCreationService"/> and adapts its outcome to this method's contract.
+    /// <see cref="OfficeRecordCreationService"/> and adapts its outcome to this method's contract.
     /// </summary>
     /// <remarks>
     /// <para>A structured <see cref="RecordCreationFailure"/> is surfaced as the codebase's typed-problem exception
     /// (<see cref="Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException"/>) because
     /// <see cref="IOfficeService.QuickCreateAsync"/> returns <c>QuickCreateResponse?</c> and its signature cannot
     /// change here: the shared <c>Phase2EndToEndFixture</c> mocks it. The endpoint renders that exception in the
-    /// Office ProblemDetails shape. <see cref="RecordCreationService"/> itself returns the failure as data — that is
+    /// Office ProblemDetails shape. <see cref="OfficeRecordCreationService"/> itself returns the failure as data — that is
     /// the contract the wizard-migration evaluation consumes.</para>
     /// <para>Owner attribution is LOAD-BEARING for both (an unresolved caller is refused, 403), unlike the
     /// best-effort posture the Invoice leg keeps. Every optional field is passed through for both; each path reads

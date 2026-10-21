@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Delete the client mapping engine (applyFieldMappings + FieldMappingHandler) and add a client arch rule (FR-22)</title>
+    <phase>3 W3 Product creators onto the service</phase>
+    <gate>029 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deletes shared client files and adds a guard (tags include refactor, testing; TEST-MODIFYING and deletion override apply).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deletion plus a source-scan guard with a known shape; no security boundary.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deletes shared client files every wizard migration (021-029) imported; must run after all of them and alone.</parallel-reason>
+    <deps>029</deps>
+    <tags>frontend, refactor, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Delete `applyFieldMappings` from `FieldMappingService.ts` (keep only symbols another file still imports) and delete `FieldMappingHandler.ts`. Add a guard that fails if `applyFieldMappings` reappears anywhere under `src/`, with a must-fire and a must-not-fire control.</prompt>
+  <role>SPAARKE platform developer, TypeScript/React shared components, ADR-012 shared library discipline.</role>
+  <goal>No `applyFieldMappings` symbol exists in `src/`, `FieldMappingHandler.ts` is gone, every wizard still builds, and a guard with a negative control prevents the client mapping engine from returning.</goal>
+
+  <context>
+    <background>spec.md FR-22; design.md §4. Tasks 021-029 moved every wizard to the server mapping path, so the client engine has no remaining caller. Re-grep importers before deleting; any still-imported symbol stays.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts (remove applyFieldMappings; keep only still-imported symbols; delete the file if nothing remains)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/services/FieldMappingHandler.ts (delete)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/index.ts (remove re-exports of deleted symbols)</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/__tests__/architecture/noClientFieldMapping.test.ts (source-scan guard; copy the shape of an existing UIC source-scan test — grep for one)</file>
+      <file role="canonical-reference">projects/field-mapping-server-write-path-r1/notes/design-review-2026-10-19.md §2 (client engine evidence)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="029" status="pending">All wizards migrated; no client caller of applyFieldMappings remains.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Scope: shared library exports. Remove deleted symbols from `index.ts`; do not leave deprecated aliases. If an external consumer outside this repo's `src/` is found, escalate instead of keeping an alias.</constraint>
+    <constraint source="ADR-038">Scope: the new guard. It lives at a KEEP path, is a deterministic source scan (no network, no Dataverse), and ships with a must-fire control (a fixture containing the forbidden symbol is detected) and a must-not-fire control (a clean fixture passes).</constraint>
+    <constraint source="project">Scope: deletion only. Do not touch closureService.ts / CloseProjectDialog.tsx (UAC-r2 PR #2104) or any wizard logic; a wizard that still imports a deleted symbol means a prior migration task is incomplete — stop and escalate.</constraint>
+    <constraint source="root CLAUDE.md §16">Scope: enforcement. The guard follows the enforcement ladder (source-scan guard, Stop hook and CI); record "Enforced by: noClientFieldMapping.test.ts" in the task notes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Client field mapping retirement; shared component library</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Confirms create value shaping now lives server-side.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; read spec FR-22; grep `applyFieldMappings`, `FieldMappingHandler`, `FieldMappingService` across `src/` (exclude node_modules) and list every importer.</step>
+    <step order="1">Remove `applyFieldMappings` (and helpers used only by it); delete `FieldMappingHandler.ts`; fix `index.ts` exports. Keep a symbol only if a non-test file still imports it.</step>
+    <step order="2">Add the source-scan guard: fails when `applyFieldMappings` appears in any `.ts`/`.tsx` under `src/` (excluding node_modules and the guard's own fixtures). Add the must-fire and must-not-fire controls.</step>
+    <step order="3">Run the shared-library build and tests and the build of every solution that imports the library (grep importers).</step>
+    <step order="4">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="5">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any non-test file outside the deleted set still imports a symbol that only exists to apply mappings client-side, STOP and escalate per CLAUDE.md §6 (a wizard migration is incomplete); do not keep the engine.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Overlaps with existing UIC source-scan/architecture tests, if any; grep `__tests__` for a "forbidden import" scan before writing.</existing>
+    <extension>Extend an existing source-scan test file if one exists; a separate file is used only when none fits (spec §11, FR-22 acceptance requires a rule that fails on reappearance).</extension>
+    <cost-of-doing-nothing>Without the guard a future wizard can re-add a client mapping engine, recreating the divergent third engine this project removes (FR-22, WP-1/WP-2).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Wizard smoke after engine deletion"><steps><step>Build the code pages that import the shared library; open Create Matter and Create Event wizards (light and dark mode, ADR-021) and submit with a Matter parent</step></steps><expected>Wizards render and create; mapped fields appear from the server path; no console error about a missing field-mapping export; dark mode renders unchanged.</expected></test>
+  </ui-tests>
+
+  <tools><tool name="npm">Build and test the shared library and dependent solutions (npm install --legacy-peer-deps --no-audit --no-fund)</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts (reduced or deleted)</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/__tests__/architecture/noClientFieldMapping.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep for `applyFieldMappings` over `src/` (excluding node_modules) returns zero hits outside the guard's own fixtures; `FieldMappingHandler.ts` no longer exists.</criterion>
+    <criterion testable="true">The guard has a must-fire control (a fixture containing `applyFieldMappings` is reported) and a must-not-fire control (a clean fixture passes).</criterion>
+    <criterion testable="true">Negative: reintroducing `applyFieldMappings` in any `src/` file makes the guard fail (demonstrated once in the task notes, then reverted).</criterion>
+    <criterion testable="true">No deprecated alias or empty re-export for the deleted symbols remains in `index.ts`.</criterion>
+    <criterion testable="true">The shared library and every dependent solution build with 0 errors; the library's tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-22. Client preview was superseded (owner Q4): none exists, so nothing replaces the engine.
+2026-10-21 (task 004): FieldMappingHandler.ts:175 selects sprk_syncmode from sprk_fieldmappingprofile, which has no such column. This is pre-existing; deleting the engine removes it. If deletion is delayed, fix the $select.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
