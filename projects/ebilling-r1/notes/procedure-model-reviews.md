@@ -209,3 +209,27 @@ Three reviews of `procedure-and-file-model.md` v4. Each item is folded into v5 o
 |---|---|---|
 | Q | Firm sees a pending-scan file as "Checking file…", or the file is hidden until clean | Show it as pending (R3's view): no download until clean. |
 | R | Licensed (systemuser) SPA users on the firm file route | Serve them under their own rights, the 036 way, once reconciled with uac-r2. |
+
+## 6. uac-r2 and SPA-r3: settled rule for the firm file route (item R, 2026-10-21)
+
+uac-r2 withdrew "workforce systemuser → 403 UseInternalRoute" (it pre-dates 036). Agreed with R3, for v5:
+
+- **Systemuser caller (036 path):**
+  1. Resolve the invoice through the same 036 machinery (ImpersonatedRootSet / `AccessibleRecordSetService`). There is no second implementation. This gives:
+     - the caller's own Read on the invoice and its root;
+     - the Restricted veto (an external-flagged systemuser has no SPA access to a Restricted record, I-14, which covers F1-e here);
+     - the task 187 invoice rule.
+  2. Then the same file gate as the contact path: Firm-visible + Servable + clean + parent matches. Internal-only files stay on the internal route (F1-e).
+  3. Unknown rights (`0x8004d24d`) fail closed exactly as 036 does.
+- **CIAM contact:** the ReadOne firm match on `sprk_vendororg` → `RightsOn(core) ≥ Read` after vetoes → the task 187 rule → the same file gate.
+- **Both paths:**
+  - one gate function returns the visible file set;
+  - an invisible invoice or file gets the same 404 after the same work, and a read fault gets 503;
+  - no upload route;
+  - the routes are `GET /api/v1/external/invoices/{id}/files` and `.../files/{fileId}/content`;
+  - no SAS: the managed identity reads the blob only after the gate.
+- **ArchTest:** task 188's external-surface guard names this route's gate method, with must-fire and must-not-fire controls. The entry is added in the PR that builds the route. Must-fire tests:
+  - a systemuser without Read gets 404;
+  - an external-flagged systemuser on a Restricted root gets 404.
+
+Item R is settled (owner informed, no decision needed).
