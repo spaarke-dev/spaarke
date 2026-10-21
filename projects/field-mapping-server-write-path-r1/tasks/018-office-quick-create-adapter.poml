@@ -122,7 +122,8 @@
   </acceptance-criteria>
 
   <notes>Spec FR-13 part 2, FR-12, NFR-07. Office todo and document save are task 030 (not here). Release note: Office Project-under-Matter owner changes (task 015); Office Invoice becomes team-owned.
-From task 002 (2026-10-20): the Office Project-under-Matter regarding pair came from the Matter→Project mapping profile via legacy CreateTimeFieldMapping.Apply; ApplyFillOnly never writes a pair, so the adapter must pass the pair (or let the service derive it from the filed-under Matter) before the secure-root filing plan reads it. Keep SecureRootInheritanceWriterTests.OfficeCreate_* / SecureRootCreateRouteTests.OfficeQuickCreate_* green. Deleting the Office service also deletes the last caller of legacy Apply; remove Apply then if nothing else uses it.</notes>
+From task 002 (2026-10-20): the Office Project-under-Matter regarding pair came from the Matter→Project mapping profile via legacy CreateTimeFieldMapping.Apply; ApplyFillOnly never writes a pair, so the adapter must pass the pair (or let the service derive it from the filed-under Matter) before the secure-root filing plan reads it. Keep SecureRootInheritanceWriterTests.OfficeCreate_* / SecureRootCreateRouteTests.OfficeQuickCreate_* green. Deleting the Office service also deletes the last caller of legacy Apply; remove Apply then if nothing else uses it.
+From task 013 fix round 1 (K1, 2026-10-21): re-verify RecordOwnerAssignmentCensusTests ServerFiles() name join once Office RecordCreationService.cs is deleted; key entries on relative path. (The census reads files by NAME, so today the new Services/RecordCreation/RecordCreationService.cs and the Office file of the same name are read as one; its entries for the new service cannot fail on their own until then.)</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

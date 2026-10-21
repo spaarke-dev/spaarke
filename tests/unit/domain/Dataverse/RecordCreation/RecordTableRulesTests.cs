@@ -40,25 +40,25 @@ public class RecordTableRulesTests
     [Fact]
     public void MatterProtectedAttributes_View_EqualsThePreRegistryList()
     {
-        RecordCreationService.MatterProtectedAttributes.Should().BeEquivalentTo(
+        OfficeRecordCreationService.MatterProtectedAttributes.Should().BeEquivalentTo(
             "sprk_matternumber", "ownerid", "sprk_containerid", "sprk_createdbyperson");
-        RecordCreationService.MatterProtectedAttributes.Contains("SPRK_MatterNumber").Should().BeTrue("the list was case-insensitive");
+        OfficeRecordCreationService.MatterProtectedAttributes.Contains("SPRK_MatterNumber").Should().BeTrue("the list was case-insensitive");
     }
 
     [Fact]
     public void ProjectProtectedAttributes_View_EqualsThePreRegistryList()
     {
-        RecordCreationService.ProjectProtectedAttributes.Should().BeEquivalentTo(
+        OfficeRecordCreationService.ProjectProtectedAttributes.Should().BeEquivalentTo(
             "sprk_projectnumber", "ownerid", "sprk_containerid", "sprk_createdbyperson", "sprk_issecure");
-        RecordCreationService.ProjectProtectedAttributes.Contains("Sprk_IsSecure").Should().BeTrue("the list was case-insensitive");
+        OfficeRecordCreationService.ProjectProtectedAttributes.Contains("Sprk_IsSecure").Should().BeTrue("the list was case-insensitive");
     }
 
     [Fact]
     public void MatterAndProjectProtectedAttributes_StayPerTable_NotMerged()
     {
         // Task 031: a merged set would newly skip a mapping rule targeting sprk_projectnumber on a MATTER create.
-        RecordCreationService.MatterProtectedAttributes.Should().NotContain("sprk_projectnumber").And.NotContain("sprk_issecure");
-        RecordCreationService.ProjectProtectedAttributes.Should().NotContain("sprk_matternumber");
+        OfficeRecordCreationService.MatterProtectedAttributes.Should().NotContain("sprk_projectnumber").And.NotContain("sprk_issecure");
+        OfficeRecordCreationService.ProjectProtectedAttributes.Should().NotContain("sprk_matternumber");
     }
 
     [Fact]

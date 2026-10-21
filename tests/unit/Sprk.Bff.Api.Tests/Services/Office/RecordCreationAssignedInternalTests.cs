@@ -36,22 +36,22 @@ public class RecordCreationAssignedInternalTests
             .ReturnsAsync(Guid.NewGuid());
     }
 
-    private RecordCreationService Sut(Mock<IIdentityNormalizationService> identity)
+    private OfficeRecordCreationService Sut(Mock<IIdentityNormalizationService> identity)
     {
         var ownership = new Mock<IRecordOwnershipResolver>();
         ownership.Setup(o => o.ResolveOwningTeamAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Team);
-        return new RecordCreationService(
+        return new OfficeRecordCreationService(
             _entities.Object,
             _fieldMappings.Object,
             ownership.Object,
             identity.Object,
             Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(),
             Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(),
-            NullLogger<RecordCreationService>.Instance);
+            NullLogger<OfficeRecordCreationService>.Instance);
     }
 
-    private RecordCreationService Sut(Guid? makersContact) => Sut(IdentityNormalizationFixtures.WithContact(makersContact));
+    private OfficeRecordCreationService Sut(Guid? makersContact) => Sut(IdentityNormalizationFixtures.WithContact(makersContact));
 
     [Theory]
     [InlineData(QuickCreateEntityType.Matter)]

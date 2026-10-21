@@ -409,7 +409,7 @@ public static class ChildRecordEndpoints
     /// request, or no On-Behalf-Of token for them — the codes <c>SignalCoreRecordAccess</c> reads as unresolved (D-29).
     /// Throttling, a 5xx or a transport fault says nothing about who they are and stays their own error.
     /// </summary>
-    private static bool IsUnresolvedCaller(DataverseUserResponse failure) =>
+    internal static bool IsUnresolvedCaller(DataverseUserResponse failure) =>
         failure.ErrorCode is DataverseUserClientErrorCodes.AccessDenied
             or DataverseUserClientErrorCodes.UserContextRequired
             or DataverseUserClientErrorCodes.OboExchangeFailed
