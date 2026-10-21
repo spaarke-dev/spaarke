@@ -163,7 +163,7 @@ public sealed class RecordRepairModeTests
     }
 
     [Fact]
-    public async Task AnUnresolvableOwner_IsLeftUnchanged_WithATypedRefusal_AndTheOtherFieldsAreStillRepaired()
+    public async Task AnUnresolvableOwner_IsLeftUnchanged_WithATypedRefusal_AndNoSearchIndexIsFilled()
     {
         // An APPLICATION-owned document filed under nothing: there is no person to act (I-6), so no owner can be decided —
         // and it is never given the application user's own team.
@@ -174,11 +174,73 @@ public sealed class RecordRepairModeTests
         outcome.OwnerRefusal.Should().NotBeNull();
         outcome.OwnerRefusal!.Code.Should().Be(RecordOwnerRefusal.NoOwnerSource);
         Field(outcome, RecordRepairPart.Owner, "ownerid").State.Should().Be(RecordRepairFieldState.Refused);
-        var write = _world.Writes.Should().ContainSingle().Subject;
-        write.Fields.Should().NotContainKey("ownerid");
-        write.Fields["sprk_searchindexname"].Should().Be(RepairWorld.GeneralIndexName, "the row's own unit, owner unchanged");
+        // UAC-r2 condition (b) F2-1: the owner refused, so the search index is not filled from the row's current unit.
+        _world.Writes.Should().BeEmpty();
+        Field(outcome, RecordRepairPart.SearchIndex, "sprk_searchindexname").ReasonCode
+            .Should().Be(RecordRepairReason.SearchIndexOwnerUnsettled);
+        Field(outcome, RecordRepairPart.SearchIndex, "sprk_ai_search_index").ReasonCode
+            .Should().Be(RecordRepairReason.SearchIndexOwnerUnsettled);
         _world.Directory.Row("sprk_document", id).GetAttributeValue<EntityReference>("ownerid")
             .Should().Be(new EntityReference("systemuser", RepairWorld.AppUser));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AnUnfiledRowWhoseOwnersStatusCannotBeTold_IsNotReOwned_NoOwnerSource(bool readFaults)
+    {
+        // UAC-r2 condition (b) F3-2: the application-user check answers "unknown" (the read faults, or no row comes back) —
+        // that is no person to act for (I-6), never "a person".
+        var id = _world.UnfiledDocumentOwnedBy(RepairWorld.PersonInChild, Directory.ChildBu);
+        if (readFaults)
+            _world.SystemUserReadFault = new InvalidOperationException("Test: systemuser read faulted.");
+        else
+            _world.MissingSystemUsers.Add(RepairWorld.PersonInChild);
+
+        var outcome = await _world.RepairAsync("sprk_document", id);
+
+        outcome.OwnerRefusal.Should().NotBeNull();
+        outcome.OwnerRefusal!.Code.Should().Be(RecordOwnerRefusal.NoOwnerSource);
+        _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain("ownerid");
+        _world.Directory.Row("sprk_document", id).GetAttributeValue<EntityReference>("ownerid")
+            .Should().Be(new EntityReference("systemuser", RepairWorld.PersonInChild));
+    }
+
+    [Fact]
+    public async Task AnOwnerKeptInItsUnitByTheBusinessUnitSkip_GetsNoSearchIndex()
+    {
+        // UAC-r2 condition (b) F2-1: a user-owned document in the GENERAL unit, filed under the matter of the CHILD unit — the
+        // move is refused (trigger 2), so the owner is not settled and the general unit's index is never written.
+        var id = _world.RowOf("sprk_document", Directory.GeneralBu, new Dictionary<string, object>
+        {
+            ["ownerid"] = new EntityReference("systemuser", Directory.CallerUserId),
+            ["sprk_matter"] = new EntityReference("sprk_matter", RepairWorld.Matter),
+        });
+
+        var outcome = await _world.RepairAsync("sprk_document", id);
+
+        Field(outcome, RecordRepairPart.Owner, "ownerid").ReasonCode.Should().Be(RecordRepairReason.OwnerMovesBusinessUnit);
+        _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain(["sprk_searchindexname", "sprk_ai_search_index"]);
+        Field(outcome, RecordRepairPart.SearchIndex, "sprk_searchindexname").ReasonCode
+            .Should().Be(RecordRepairReason.SearchIndexOwnerUnsettled);
+    }
+
+    [Fact]
+    public async Task AUserOwnedRowReOwnedInThisPatch_GetsTheSearchIndexOfItsNewOwnersUnit()
+    {
+        // Must not fire (F2-1): the owner is settled on a team in this same patch.
+        var id = _world.RowOf("sprk_document", Directory.ChildBu, new Dictionary<string, object>
+        {
+            ["ownerid"] = new EntityReference("systemuser", RepairWorld.PersonInChild),
+            ["sprk_matter"] = new EntityReference("sprk_matter", RepairWorld.Matter),
+        });
+
+        var outcome = await _world.RepairAsync("sprk_document", id);
+
+        var write = _world.Writes.Should().ContainSingle().Subject;
+        write.Fields["ownerid"].Should().Be(new EntityReference("team", Directory.ChildTeam));
+        write.Fields["sprk_searchindexname"].Should().Be(RepairWorld.ChildIndexName);
+        Field(outcome, RecordRepairPart.SearchIndex, "sprk_searchindexname").State.Should().Be(RecordRepairFieldState.Repaired);
     }
 
     [Fact]
@@ -298,16 +360,18 @@ public sealed class RecordRepairModeTests
     [Theory]
     [InlineData(true)]
     [InlineData(null)]
-    public async Task AUserOwnedSecureFlaggedRoot_KeepsItsOwner_AndItsOtherFieldsAreStillRepaired(bool? flag)
+    public async Task AUserOwnedSecureFlaggedRoot_KeepsItsOwner_AndGetsNoSearchIndexUntilItsOwnerIsSettled(bool? flag)
     {
         var id = _world.MatterOwnedBy(RepairWorld.PersonInChild, flag);
 
         var outcome = await _world.RepairAsync("sprk_matter", id);
 
         Field(outcome, RecordRepairPart.Owner, "ownerid").ReasonCode.Should().Be(RecordRepairReason.OwnerRootSecure);
-        var write = _world.Writes.Should().ContainSingle().Subject;
-        write.Fields.Should().NotContainKey("ownerid", "a secure root is provisioned by task 144, never re-owned (owner S6)");
-        write.Fields["sprk_searchindexname"].Should().Be(RepairWorld.ChildIndexName);
+        // A secure root is provisioned by task 144, never re-owned (owner S6); UAC-r2 condition (b) F2-1: with its owner
+        // unsettled, its search index is not filled either.
+        _world.Writes.Should().BeEmpty();
+        Field(outcome, RecordRepairPart.SearchIndex, "sprk_searchindexname").ReasonCode
+            .Should().Be(RecordRepairReason.SearchIndexOwnerUnsettled);
         _world.Directory.Row("sprk_matter", id).GetAttributeValue<EntityReference>("ownerid")
             .Should().Be(new EntityReference("systemuser", RepairWorld.PersonInChild));
         _world.Evictions.Should().BeEmpty();
@@ -776,13 +840,61 @@ public sealed class RecordRepairModeTests
 
         outcome.Fields.Should().NotContain(f => f.ReasonCode == InheritedAccessPermission.AppOnlyDocumentWriteReasonCode
             || f.ReasonCode == InheritedAccessPermission.AppOnlyDocumentLinkWriteReasonCode);
-        var written = _world.Writes.Should().ContainSingle().Subject.Fields;
-        written["sprk_accessinheritance"].Should().Be("from-matter");
-        written["sprk_accesspermission"].Should().Be("100000001");
+        // UAC-r2 condition (b) F1-1: the access columns are Repair's never-mapped set on every table (not the document gate).
+        _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain(["sprk_accessinheritance", "sprk_accesspermission"]);
+        Field(outcome, RecordRepairPart.Mapping, "sprk_accessinheritance").ReasonCode.Should().Be(RecordRepairReason.MappedValueConfersAccess);
+        Field(outcome, RecordRepairPart.Mapping, "sprk_accesspermission").ReasonCode.Should().Be(RecordRepairReason.MappedValueConfersAccess);
         // The links are lookups to ownership parents here: not written because Repair never re-files a row — the
         // document gate is not what stops them.
         Field(outcome, RecordRepairPart.Mapping, "sprk_parentdocument").ReasonCode.Should().Be(RecordRepairReason.MappedValueWouldRefile);
         Field(outcome, RecordRepairPart.Mapping, "sprk_relatedcommunication").ReasonCode.Should().Be(RecordRepairReason.MappedValueWouldRefile);
+    }
+
+    // =====================================================================================
+    // UAC-r2 condition (b) F1-1: columns that decide access or filing are never mapped, on any table
+    // =====================================================================================
+
+    [Fact]
+    public async Task AMattersBlankSecureFlag_IsNeverFilledFromItsProject_ScenarioA()
+    {
+        var id = _world.MatterUnderAnOrdinaryProject();
+        _world.Map("sprk_project", "sprk_matter", RepairWorld.CopyBoolean("sprk_issecure", "sprk_issecure", 1));
+
+        var outcome = await _world.RepairAsync("sprk_matter", id);
+
+        _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain("sprk_issecure",
+            "a blank flag reads as secure; a mapped false would expose the matter's children");
+        Field(outcome, RecordRepairPart.Mapping, "sprk_issecure").ReasonCode.Should().Be(RecordRepairReason.MappedValueConfersAccess);
+        _world.Directory.Row("sprk_matter", id).Attributes.Should().NotContainKey("sprk_issecure");
+    }
+
+    [Fact]
+    public async Task AMattersEmptyAssignedLawFirm_IsNeverFilledFromItsProject_ScenarioB()
+    {
+        var id = _world.MatterUnderAnOrdinaryProject();
+        _world.Map("sprk_project", "sprk_matter", RepairWorld.CopyLookup("sprk_assignedlawfirm1", "sprk_assignedlawfirm1", 1));
+
+        var outcome = await _world.RepairAsync("sprk_matter", id);
+
+        _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain("sprk_assignedlawfirm1",
+            "an Assigned outside-counsel value is a Collaborate grant (AssignedAccessMaterializer)");
+        Field(outcome, RecordRepairPart.Mapping, "sprk_assignedlawfirm1").ReasonCode.Should().Be(RecordRepairReason.MappedValueAssignsAccess);
+    }
+
+    [Fact]
+    public async Task AnOrdinaryColumn_IsStillFilledFromTheProject_F1_1MustNotFire()
+    {
+        var id = _world.MatterUnderAnOrdinaryProject();
+        _world.Map("sprk_project", "sprk_matter",
+            RepairWorld.CopyBoolean("sprk_issecure", "sprk_issecure", 1),
+            RepairWorld.Expression(CreateTimeFieldMapping.MappingTypeTemplate, "{sprk_clientname}", "sprk_clientname", 2));
+
+        var outcome = await _world.RepairAsync("sprk_matter", id);
+
+        var written = _world.Writes.Should().ContainSingle().Subject.Fields;
+        written["sprk_clientname"].Should().Be(RepairWorld.ProjectClient);
+        written.Should().NotContainKey("sprk_issecure");
+        Field(outcome, RecordRepairPart.Mapping, "sprk_clientname").State.Should().Be(RecordRepairFieldState.Repaired);
     }
 
     // =====================================================================================
@@ -979,6 +1091,12 @@ internal sealed class RepairWorld
 
     /// <summary>The share world the synchronizer reads the Secure Record owner team from (standard: present).</summary>
     public Func<SecureChildShareWorld> ShareWorld { get; set; } = SecureChildShareWorld.Standard;
+
+    /// <summary>When set, reading a systemuser row (the application-user check, I-6) throws it.</summary>
+    public Exception? SystemUserReadFault { get; set; }
+
+    /// <summary>Systemuser ids whose row reads back as none (the application-user check cannot tell).</summary>
+    public HashSet<Guid> MissingSystemUsers { get; } = [];
 
     /// <summary>When set, reading a mapping source's columns throws it.</summary>
     public Exception? SourceReadFault { get; set; }
@@ -1200,6 +1318,38 @@ internal sealed class RepairWorld
         DefaultValue = value, ExecutionOrder = order, IsActive = true,
     };
 
+    public static readonly Guid OrdinaryProject = Guid.Parse("a0160000-0000-4000-8000-00000000000a");
+    public static readonly Guid OutsideCounsel = Guid.Parse("a0160000-0000-4000-8000-00000000000b");
+    public const string ProjectClient = "Project Client";
+
+    /// <summary>
+    /// UAC-r2 condition (b) F1-1: an ordinary project (flag false, owned by the child unit's team) holding an outside-counsel
+    /// firm and a client name, and a matter filed under it, owned by the same team, whose secure flag is BLANK.
+    /// </summary>
+    public Guid MatterUnderAnOrdinaryProject()
+    {
+        Directory.WithRecord("sprk_project", OrdinaryProject, Directory.ChildBu, isSecure: false, owningTeam: Directory.ChildTeam,
+            extra: new Dictionary<string, object>
+            {
+                ["sprk_clientname"] = ProjectClient,
+                ["sprk_assignedlawfirm1"] = new EntityReference("sprk_organization", OutsideCounsel),
+            });
+        var id = Guid.NewGuid();
+        Directory.WithRecord("sprk_matter", id, Directory.ChildBu, owningTeam: Directory.ChildTeam,
+            extra: new Dictionary<string, object> { ["sprk_project"] = new EntityReference("sprk_project", OrdinaryProject) });
+        Directory.Row("sprk_matter", id).Attributes.Remove("sprk_issecure"); // blank: the resolver reads it as secure
+        return id;
+    }
+
+    /// <summary>A Copy rule of a two-option (boolean) column.</summary>
+    public static FieldMappingRuleEntity CopyBoolean(string source, string target, int order) => new()
+    {
+        Id = Guid.NewGuid(), Name = $"{source} -> {target}", SourceField = source,
+        SourceFieldType = CreateTimeFieldMapping.FieldTypeBoolean, TargetField = target,
+        TargetFieldType = CreateTimeFieldMapping.FieldTypeBoolean, MappingType = CreateTimeFieldMapping.MappingTypeCopy,
+        ExecutionOrder = order, IsActive = true,
+    };
+
     /// <summary>The matter holds lookups to a document and the communication (sources of the D7-link rules).</summary>
     public void MatterLinksTo()
     {
@@ -1320,6 +1470,10 @@ internal sealed class RepairWorld
 
             case "systemuser":
             {
+                if (SystemUserReadFault is { } userFault)
+                    throw userFault;
+                if (MissingSystemUsers.Contains(id))
+                    return null!; // no such row: the application-user check cannot tell
                 var user = new Entity("systemuser", id);
                 if (id == AppUser)
                     user[ApplicationUserCheck.ApplicationIdAttribute] = Guid.Parse("a0160000-0000-4000-8000-0000000000ff");

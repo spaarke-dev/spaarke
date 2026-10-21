@@ -73,8 +73,9 @@ public class MappingSourceCallerMaskGuardTests
             ["src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.Repair.cs|RecordCreationService.RepairMappingAsync"] = (1,
                 "Repair runs as the system principal with no caller to mask against (owner decision 2026-10-21, option 1; UAC-r2 " +
                 "concurs). Secure sources are never mapped into a row that isn't isolated (Repair source gate, fail closed). " +
-                "Field-secured source columns are skipped by Repair using the app-only metadata reader from task 033, failing " +
-                "closed when metadata is unavailable; the document access and D7 link columns are refused through " +
+                "Field-secured source columns will be skipped by Repair using the app-only metadata reader from task 033 (TODO " +
+                "task 033), failing closed when metadata is unavailable; no production caller until then " +
+                "(RecordRepairReachabilityTests; 052 hard-blocked on 033); the document access and D7 link columns are refused through " +
                 "RefuseAppOnlyWrite. Repair has no production caller until task 052, which is hard-blocked on 033 " +
                 "(RecordRepairReachabilityTests)."),
         };

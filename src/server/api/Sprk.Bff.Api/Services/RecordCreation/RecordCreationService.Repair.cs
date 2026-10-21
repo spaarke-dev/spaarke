@@ -1,5 +1,7 @@
 using System.Data;
 using System.Globalization;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
@@ -319,9 +321,15 @@ internal sealed partial class RecordCreationService
             foreach (var (column, value) in row.Attributes)
                 target[column] = value;
 
+            // UAC-r2 condition (b) F1-1: on top of Create's protected set (unchanged), the columns Repair never maps on any table.
+            var neverMapped = ColumnsRepairNeverMaps(table);
+            var protectedColumns = new HashSet<string>(ProtectedFromMapping(table, rule, serverSetLookupColumns: null),
+                StringComparer.OrdinalIgnoreCase);
+            protectedColumns.UnionWith(neverMapped.Keys);
+
             var written = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             CreateTimeFieldMapping.ApplyFillOnly(
-                rules, target, read.Record, ProtectedFromMapping(table, rule, serverSetLookupColumns: null), warnings, _logger,
+                rules, target, read.Record, protectedColumns, warnings, _logger,
                 moneyAttributes: null, mappedColumns: written);
 
             var columns = rules
@@ -337,6 +345,15 @@ internal sealed partial class RecordCreationService
                     // UAC-r2: a document's access record and its D7 links are Spaarke's. Fill-only does not make a write safe:
                     // filling an empty link changes who sees the document.
                     report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, column, serverOwned));
+                    continue;
+                }
+
+                if (neverMapped.TryGetValue(column, out var neverReason))
+                {
+                    // F1-1: never filled, even where empty — the value would decide access or filing, not describe the row.
+                    report.Add(HoldsValue(row, column)
+                        ? RecordRepairField.Present(RecordRepairPart.Mapping, column)
+                        : RecordRepairField.Skipped(RecordRepairPart.Mapping, column, neverReason));
                     continue;
                 }
 
@@ -407,6 +424,55 @@ internal sealed partial class RecordCreationService
     {
         _ = sourceTable;
         return mappedSourceColumns;
+    }
+
+    /// <summary>A secure root's security business unit (provisioning's; it decides where the record's access lives).</summary>
+    private const string SecurityBusinessUnitColumn = "sprk_securitybu";
+
+    /// <summary>A record's SharePoint Embedded container (provisioning's; it decides where its documents' access lives).</summary>
+    private const string ContainerColumn = "sprk_containerid";
+
+    /// <summary>
+    /// UAC-r2 condition (b) F1-1: the target columns Repair's mapping never fills on <paramref name="table"/>, each with its
+    /// reason — on EVERY table, not only where Create's protected set names them (Create's set is unchanged). The secure flag,
+    /// the access record, the access inheritance, the security unit and the container decide access
+    /// (<see cref="RecordRepairReason.MappedValueConfersAccess"/>); the regarding pair decides the filing
+    /// (<see cref="RecordRepairReason.MappedValueWouldRefilePair"/>); the table's Assigned / access-conferring columns grant
+    /// access (<see cref="RecordRepairReason.MappedValueAssignsAccess"/>), from BOTH the canonical registry
+    /// (<see cref="MembershipOptionsDefaults.CanonicalAccessConferringRegistry"/>) and the bound one
+    /// (<see cref="MembershipOptions.AccessConferringRoles"/>, which <c>AssignedAccessMaterializer.RegistryFor</c> reads), so
+    /// neither can be widened past the other. A fault reading the bound registry propagates to the mapping step, which then
+    /// maps nothing (fail closed).
+    /// </summary>
+    private IReadOnlyDictionary<string, string> ColumnsRepairNeverMaps(string table)
+    {
+        // A column → reason map of what is NOT written (never a payload): built from column lists.
+        var columns = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        string[] confersAccess =
+        [
+            AccessFollowsParent.SecureFlagColumn, InheritedAccessPermission.Column, AccessInheritance.Column,
+            SecurityBusinessUnitColumn, ContainerColumn,
+        ];
+        foreach (var column in confersAccess)
+            columns.TryAdd(column, RecordRepairReason.MappedValueConfersAccess);
+        foreach (var column in new[] { SecureRootInheritance.PairIdColumn, SecureRootInheritance.PairTypeColumn })
+            columns.TryAdd(column, RecordRepairReason.MappedValueWouldRefilePair);
+
+        var conferring = new List<AccessConferringColumn>();
+        if (MembershipOptionsDefaults.CanonicalAccessConferringRegistry.TryGetValue(table, out var canonical))
+            conferring.AddRange(canonical);
+        using (var scope = _scopes.CreateScope())
+        {
+            if (scope.ServiceProvider.GetService<IOptions<MembershipOptions>>()?.Value.AccessConferringRoles.Entities
+                    .TryGetValue(table, out var bound) == true && bound is not null)
+            {
+                conferring.AddRange(bound);
+            }
+        }
+
+        foreach (var field in conferring.Select(c => c?.Field?.Trim()).Where(f => !string.IsNullOrEmpty(f)))
+            columns.TryAdd(field!, RecordRepairReason.MappedValueAssignsAccess);
+        return columns;
     }
 
     /// <summary>The source columns Repair reads to tell whether it may copy from it (review F1-e (ii)).</summary>
@@ -548,6 +614,24 @@ internal sealed partial class RecordCreationService
             report.Add(RecordRepairField.Present(RecordRepairPart.SearchIndex, lookup));
         if (holdsName && holdsLookup)
             return;
+
+        // UAC-r2 condition (b) F2-1: filled only once the owner is settled on a team — already team-owned, or re-owned in this
+        // patch (step 7 writes only a team). A held column overrides SearchIndexNameResolver's own choice for good, so it is
+        // never filled from the unit of an owner Repair did not settle (kept in another unit, refused, or unknown).
+        var rowOwner = row.GetAttributeValue<EntityReference>(OwnerColumn);
+        var ownerIsTeam = patch.ContainsKey(OwnerColumn)
+            || (rowOwner is { } held && held.Id != Guid.Empty
+                && string.Equals(held.LogicalName, "team", StringComparison.OrdinalIgnoreCase));
+        if (!ownerIsTeam)
+        {
+            _logger.LogInformation("[RECORD-REPAIR] {Table} {Id}: the owner is not settled on a team; no search index filled",
+                table, row.Id);
+            if (!holdsName)
+                report.Add(RecordRepairField.Skipped(RecordRepairPart.SearchIndex, name, RecordRepairReason.SearchIndexOwnerUnsettled));
+            if (!holdsLookup)
+                report.Add(RecordRepairField.Skipped(RecordRepairPart.SearchIndex, lookup, RecordRepairReason.SearchIndexOwnerUnsettled));
+            return;
+        }
 
         (string? Name, Guid? Index) defaults;
         try
@@ -830,6 +914,22 @@ internal static class RecordRepairReason
     internal const string MappingSourceUnreadable = "record_repair.mapping_source_unreadable";
     internal const string MappingNoValue = "record_repair.mapping_no_value";
     internal const string MappedValueWouldRefile = "record_repair.mapped_value_would_refile";
+
+    /// <summary>UAC-r2 condition (b) F1-1: a column that decides access (the secure flag, the access record, the access
+    /// inheritance, the security unit, the container) — never filled by Repair's mapping, on any table.</summary>
+    internal const string MappedValueConfersAccess = "record_repair.mapped_value_confers_access";
+
+    /// <summary>UAC-r2 condition (b) F1-1: an Assigned / access-conferring registry column (a value there is a grant) —
+    /// never filled by Repair's mapping.</summary>
+    internal const string MappedValueAssignsAccess = "record_repair.mapped_value_assigns_access";
+
+    /// <summary>UAC-r2 condition (b) F1-1: the ADR-024 regarding pair — filling it would change what the row is filed under
+    /// (its stamp source), so Repair's mapping never fills it.</summary>
+    internal const string MappedValueWouldRefilePair = "record_repair.mapped_value_would_refile_pair";
+
+    /// <summary>UAC-r2 condition (b) F2-1: the owner is not settled on a team, so the search index is not filled from the
+    /// row's current unit (the column would override the resolver's own choice for good).</summary>
+    internal const string SearchIndexOwnerUnsettled = "record_repair.search_index_owner_unsettled";
 
     internal const string OwnerUnknown = "record_repair.owner_unknown";
     internal const string OwnerTeamOwned = "record_repair.owner_team_owned";
