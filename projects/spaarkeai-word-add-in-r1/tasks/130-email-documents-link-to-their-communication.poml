@@ -3,7 +3,7 @@
   <metadata>
     <title>Every document saved from an Outlook email links to that email's communication (#2126 / R3 ISS-015, UAC D7 T8)</title>
     <phase>8 — UAT findings and cross-project fixes</phase>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF code on the Office save path; partner and AI-tool visibility of documents (access control, tenant data exposure).</rigor-reason>
     <model-tier>opus</model-tier>

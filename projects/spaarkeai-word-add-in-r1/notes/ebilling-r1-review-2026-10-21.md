@@ -63,6 +63,34 @@ Open questions:
 
 The owner chose to discuss the process before anything is sent.
 
+**Owner decisions after the discussion (2026-10-21; sent to ebilling-r1):**
+1. **An explicit invoice mark.** One attachment is Invoice, the rest Supporting or Don't save; pre-selected when there is exactly one PDF.
+2. **Corrections are resubmissions** (ebilling D-34/D-37/D-43): the old invoice closes as superseded, and a new linked invoice ({invoice}.{n}) keeps the history. No in-place PDF replacement. A correction is refused once the invoice is Approved, Sent to AP or Paid (our recommendation; the owner said ok).
+3. **A separate "Invoice" task-pane view**, opened by a "Submit Invoice" ribbon button, like Add To Do:
+   - new invoice, with the core record required;
+   - existing invoice: add supporting files, or submit a corrected invoice.
+4. **Removed from the normal Save flow:** Invoice as a save target, and the blank "+New invoice" quick-create.
+5. **Core records:** Matter, Project and Work Assignment; Agreement when ebilling R2 adds it. The list comes from ebilling.
+6. **The email is always saved as the .eml file in SPE**, filed to the core record. It is not optional and never an invoice file. That save must not create the attachments as child Documents; ebilling defines the contract.
+7. **LEDES is out of scope.**
+
+**ebilling v5.7 (`ef9b1a9e9b`), relayed 2026-10-21:**
+- **Finding the .eml.** They took our fix for v5.6 point 1. A plain "exactly one Document linked to the communication" breaks after task 130. The .eml is now found in three steps:
+  1. `sprk_isemailarchive = true`;
+  2. then the target core record, with no parent;
+  3. then the SHA-256 of the file marked Invoice.
+
+  If no Document matches, or more than one, the server refuses and the user can retry. ebilling adds a list version of `GetEmailArchiveByCommunicationAsync`.
+- **Owner picks that change what the add-in shows:**
+  - **F1-a (i):** an .eml created by `from-email` is saved Restricted on its own, with a submission marker. The firm still sees its invoice; other outside participants can't open the email.
+  - **F1-c:** if the email can't be identified (no Message-ID, a failed Graph read, or no communication), `from-email` refuses with a retryable "try again" and saves nothing. The Invoice view shows a retry, and suggests the internal upload route if it keeps failing.
+- ebilling lists our re-save gap #2209 (ISS-022) as a known limit.
+
+**Work for this project (not yet a task)**, once ebilling's endpoint contract exists:
+- the Invoice view and ribbon button;
+- removing Invoice from Save and quick-create;
+- the email-only .eml save.
+
 ## Effect on this project
 
 None until the owner settles the process in decision 1. Tasks 130 and 131 are unaffected.
