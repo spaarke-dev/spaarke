@@ -132,7 +132,7 @@
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Two adversarial-review passes (auth, security). 089 reuses the shared selection method and the preview counting for override removal; copy the counting into one internal helper here so 089 calls it. The old 081 (rule-set scope, BU writes, secure family for every set) is superseded by EB-D-148; its secure-child work for record-scoped sets is 089's.</notes>
+  <notes>Two adversarial-review passes (auth, security). 089 reuses the shared selection method and the preview counting for override removal; copy the counting into one internal helper here so 089 calls it. The old 081 (rule-set scope, BU writes, secure family for every set) is superseded by EB-D-148; its secure-child work for record-scoped sets is 089's. ontology-r1 080 review 2026-10-21: sprk_procedureversion.sprk_procedure is an alternate-key column and cannot be field-secured, so this task pins (test over the role privileges) that no non-BFF role holds Create or Write on sprk_procedureversion or sprk_procedureassignment.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
