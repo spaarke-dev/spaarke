@@ -3,9 +3,11 @@ using System.Text.Json;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 using Sprk.Bff.Api.Services.ExternalAccess;
 
 namespace Sprk.Bff.Api.Services.RecordCreation;
@@ -22,8 +24,9 @@ namespace Sprk.Bff.Api.Services.RecordCreation;
 /// rule and the same refusal codes; the post-create steps are <c>ChildRecordEndpoints.CreateAsync</c>'s
 /// (<c>CompleteRootCreateAsync</c>, the I-1 re-stamp, I-16, the sharee mirror) and the Office create's (the autonumber
 /// retry and its number read-back, the membership event), in their order. Existing callers still call those cores: tasks
-/// 017 and 018 re-point them. Field mapping (step 3) and the search-index default (step 8) are recorded no-op seams that
-/// tasks 014 and 015 fill; the owner decision is ONE private method (<see cref="DecideOwnerAsync"/>) that task 015 swaps.</para>
+/// 017 and 018 re-point them. Field mapping (step 3) is task 014's (the partial <c>RecordCreationService.Mapping.cs</c>);
+/// the search-index default (step 8) is a recorded no-op seam that task 015 fills; the owner decision is ONE private
+/// method (<see cref="DecideOwnerAsync"/>) that task 015 swaps.</para>
 /// <para><b>Step 10 runs after the create.</b> Spec FR-06 places "I-1 stamp + I-16 derived into the payload" before the
 /// create; every existing path (the child-record route, the chat create's G5 core) derives both AFTER the create through
 /// <see cref="CoreAncestorRestamper"/>. Porting kept that order, so step 10 is recorded <see cref="RecordCreationStepState.Deferred"/>
@@ -48,7 +51,7 @@ namespace Sprk.Bff.Api.Services.RecordCreation;
 /// callers. Cost of doing nothing — the same row filed under the same parent gets a different owner, stamp and checks by
 /// surface, and field mapping reaches 2 of about 30 create paths (spec §11).</para>
 /// </remarks>
-internal sealed class RecordCreationService
+internal sealed partial class RecordCreationService
 {
     /// <summary>Creates attempted per record on an autonumber table before the number is reported unavailable.</summary>
     internal const int MaxNumberAttempts = 3;
@@ -119,7 +122,9 @@ internal sealed class RecordCreationService
     /// post-create warnings), or the refusal. Every step is recorded in <see cref="RecordCreationOutcome.Steps"/>, in order.
     /// </summary>
     /// <exception cref="ArgumentException">A system principal with a Web API payload — only a caller's payload is mapped
-    /// (as the caller); a server writer passes a mapped item.</exception>
+    /// (as the caller); a server writer passes a mapped item. Or a system principal with a
+    /// <see cref="RecordCreationRequest.Mapping"/>: field mapping is applied for a caller only (task 014; a system
+    /// principal's mapping needs an app-only metadata reader, which task 033 adds with the first system creator).</exception>
     internal async Task<RecordCreationOutcome> CreateAsync(
         RecordCreationRequest request, RecordCreationPrincipal principal, CancellationToken ct)
     {
@@ -131,6 +136,13 @@ internal sealed class RecordCreationService
         {
             throw new ArgumentException(
                 "A system create passes a mapped item: a Web API payload is mapped as the caller, and a system principal has none.",
+                nameof(request));
+        }
+
+        if (principal is RecordCreationPrincipal.SystemPrincipal && request.Mapping is not null)
+        {
+            throw new ArgumentException(
+                "Field mapping is applied to a caller's create only: the merged row is mapped and checked as the caller.",
                 nameof(request));
         }
 
@@ -224,9 +236,13 @@ internal sealed class RecordCreationService
 
         trace.Record(RecordCreationStep.PostCreate, RecordCreationStepState.Ran, warnings.Count == 0 ? null : $"{warnings.Count} warning(s)");
         _logger.LogInformation(
-            "[RECORD-CREATE] created {Table} {Id} (owner team {Team}, isolated={Isolated}, warnings={Warnings}, correlationId={CorrelationId})",
-            table, id, decision.OwningTeamId, decision.IsolatedFor is not null, warnings.Count, correlationId);
-        return trace.Created(id, decision.OwningTeamId, decision.IsolatedFor is not null, warnings);
+            "[RECORD-CREATE] created {Table} {Id} (owner team {Team}, isolated={Isolated}, warnings={Warnings}, mapping " +
+            "warnings={MappingWarnings}, correlationId={CorrelationId})",
+            table, id, decision.OwningTeamId, decision.IsolatedFor is not null, warnings.Count, decision.MappingWarnings.Count,
+            correlationId);
+        // The mapping step's warnings first (step 3 ran before the create), then the post-create ones.
+        return trace.Created(id, decision.OwningTeamId, decision.IsolatedFor is not null,
+            [.. decision.MappingWarnings.Select(w => w.Detail), .. warnings], decision.MappingWarnings);
     }
 
     /// <summary>What steps 1 to 10 decided: a refusal, or the fields to create and the facts step 12 needs.</summary>
@@ -241,6 +257,9 @@ internal sealed class RecordCreationService
         public Guid? IsolatedFor { get; init; }
 
         public string? GrantorOid { get; init; }
+
+        /// <summary>Step 3's and step 5's warnings about the mapped values (task 014): what was not mapped, and why.</summary>
+        public IReadOnlyList<RecordCreationWarning> MappingWarnings { get; init; } = [];
 
         public static Decision Refuse(RecordCreationRefusal refusal) => new() { Refusal = refusal };
     }
@@ -350,15 +369,52 @@ internal sealed class RecordCreationService
             trace.Record(RecordCreationStep.TableRules, RecordCreationStepState.Ran, "no server-owned column in the caller's payload");
         }
 
-        // ── Step 3: field mapping — a no-op seam (task 014) ───────────────────────────────────────────────────────────
+        // ── Step 3: field mapping (task 014) — fill-only, the source read as the caller; the mapped values' origin kept ──
+        trace.Begin(RecordCreationStep.FieldMapping);
+        var mappingWarnings = new List<RecordCreationWarning>();
+        var callerItem = item;
+        IReadOnlyDictionary<string, JsonElement> mappedValues = NoMappedValues;
         if (rule.MappingExclusion is { } exclusion)
+        {
             trace.Record(RecordCreationStep.FieldMapping, RecordCreationStepState.Skipped, $"not mapped ({exclusion.Name})");
+        }
+        else if (request.Mapping is not { } mapping || user is null)
+        {
+            // Nothing asked: nothing read, nothing merged (a system principal never gets here with a mapping: CreateAsync).
+            trace.Record(RecordCreationStep.FieldMapping, RecordCreationStepState.NoOp, "no field mapping was asked for");
+        }
         else
-            trace.Record(RecordCreationStep.FieldMapping, RecordCreationStepState.NoOp, "seam: task 014 applies the table's mapping profile here");
+        {
+            MappingStep mapped;
+            try
+            {
+                mapped = await MapFieldsAsync(table, rule, request, mapping, user, callerItem, mappingWarnings, ct)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // Mapping fails closed by mapping NOTHING (NFR-01): the caller's own row is still created, and told so —
+                // once: what the faulted step had already said about single rules or values no longer applies.
+                _logger.LogWarning(ex, "[RECORD-CREATE] field mapping for {Table} faulted; nothing was mapped", table);
+                mappingWarnings.Clear();
+                mappingWarnings.Add(new RecordCreationWarning(RecordCreationWarning.MappingUnavailableCode, null, MappingFaulted));
+                mapped = MappingStep.Unmapped(callerItem);
+            }
 
-        // ── Step 4: the merged payload, mapped (nothing merged yet: the caller's or the server's own item) ──────────────
+            // ebilling-r1's review of 013, item 1: the SAME local — the pre-write rules (5½) and the create (11) read this item.
+            item = mapped.Item ?? callerItem;
+            mappedValues = mapped.Values;
+            trace.Record(RecordCreationStep.FieldMapping, RecordCreationStepState.Ran,
+                $"{mappedValues.Count} column(s) mapped (fill-only), {mappingWarnings.Count} warning(s)");
+        }
+
+        // ── Step 4: the merged payload, mapped (the caller's or the server's item, with the mapped values merged in) ────
         trace.Record(RecordCreationStep.MapPayload, RecordCreationStepState.Ran,
-            $"{item.Columns.Count} column(s), {item.Lookups.Count} lookup(s)");
+            $"{item.Columns.Count} column(s) ({mappedValues.Count} mapped), {item.Lookups.Count} lookup(s)");
 
         // ── Step 5: the caller checks on the merged payload (CallerWriteAuthorization, ADR-008 path A) ──────────────────
         trace.Begin(RecordCreationStep.CallerChecks);
@@ -368,13 +424,35 @@ internal sealed class RecordCreationService
         }
         else
         {
-            var check = await CallerWriteAuthorization.CheckCallerMayCreateAsync(
-                user, callerSystemUserId!.Value, table, item, request.ServerSetLookupColumns, ct).ConfigureAwait(false);
-            if (!check.Succeeded)
-                return Decision.Refuse(CallerCheckRefused(check, noun));
+            // UAC-r2's review of 013 (K-2): a server-set lookup costs no AppendTo, so a FILING lookup is never one.
+            if (ServerSetFilingColumn(table, request.ServerSetLookupColumns) is { } serverSetFiling)
+                return Decision.Refuse(ServerSetFilingRefused(serverSetFiling, noun));
 
-            trace.Record(RecordCreationStep.CallerChecks, RecordCreationStepState.Ran,
-                "Create/Append, AppendTo on every record named, no field-secured column");
+            if (mappedValues.Count == 0)
+            {
+                var check = await CallerWriteAuthorization.CheckCallerMayCreateAsync(
+                    user, callerSystemUserId!.Value, table, item, request.ServerSetLookupColumns, ct).ConfigureAwait(false);
+                if (!check.Succeeded)
+                    return Decision.Refuse(CallerCheckRefused(check, noun));
+
+                trace.Record(RecordCreationStep.CallerChecks, RecordCreationStepState.Ran,
+                    "Create/Append, AppendTo on every record named, no field-secured column");
+            }
+            else
+            {
+                var checkedMerge = await CheckMergedPayloadAsync(
+                    table, user, callerSystemUserId!.Value, callerItem, item, mappedValues, request.ServerSetLookupColumns, noun,
+                    mappingWarnings, ct).ConfigureAwait(false);
+                if (checkedMerge.Refusal is { } mergedRefusal)
+                    return Decision.Refuse(mergedRefusal);
+
+                var dropped = mappedValues.Count - checkedMerge.Values.Count;
+                item = checkedMerge.Item!; // the SAME local again: what survived the checks is what is written
+                mappedValues = checkedMerge.Values;
+                trace.Record(RecordCreationStep.CallerChecks, RecordCreationStepState.Ran,
+                    "Create/Append, AppendTo on every record named, no field-secured column — on the merged payload" +
+                    (dropped == 0 ? string.Empty : $"; {dropped} mapped value(s) dropped"));
+            }
         }
 
         // ── Step 5½: the table's pre-write rules, on the row as it will be written (ebilling-r1 recipe) ────────────────
@@ -407,6 +485,26 @@ internal sealed class RecordCreationService
                     $"A {noun} filed under another record may be filed under a secure record, and is then created secure " +
                     "and shared to the person it is made for once that person's own access is checked. This create acts " +
                     "for no caller whose access can be checked, so it was not created."));
+            }
+
+            // UAC-r2's review of 013 (K-2), task 014 review rounds 1 and 2: a filing lookup the SERVER set skipped step 5's
+            // AppendTo, and the plan asks it only on a secure record — so it is asked here, as the caller, whatever the
+            // record, and BEFORE the plan reads it app-only (a plan refusal given first, such as an unreadable flag, would
+            // tell a record that exists from a missing one). Refused as the plan's own AppendTo callback refuses: the
+            // uniform not-found, the same body as step 5's for an unmarked lookup.
+            if (user is not null
+                && ServerSetRootFilingLookups(table, item, request.ServerSetLookupColumns) is { Length: > 0 } serverSetFiling)
+            {
+                var appendTo = await CallerWriteAuthorization.CheckCallerMayAppendToAsync(user, creatorPerson, serverSetFiling, ct)
+                    .ConfigureAwait(false);
+                if (appendTo.ClientFailure is not null)
+                    return Decision.Refuse(CallerCheckRefused(appendTo, noun));
+                if (!appendTo.Succeeded)
+                {
+                    return Decision.Refuse(PlanRefused(
+                        RecordOwnerResolution.Refused(DataverseUserClientErrorCodes.AccessDenied, appendTo.Denied ?? NotAvailableToFileUnder),
+                        noun));
+                }
             }
 
             var plan = await _rootFiling.PlanCreateAsync(table, OwnedChildWrite.WritesOf(item), creatorPerson, ct,
@@ -467,6 +565,7 @@ internal sealed class RecordCreationService
             OwningTeamId = isolatedTeam ?? owner!.OwningTeamId,
             IsolatedFor = isolatedTeam is null ? null : creatorPerson,
             GrantorOid = grantorOid,
+            MappingWarnings = mappingWarnings,
         };
     }
 
@@ -882,12 +981,15 @@ internal sealed class RecordCreationService
             CorrelationId = correlationId,
         };
 
-        public RecordCreationOutcome Created(Guid id, Guid? owningTeamId, bool isolated, IReadOnlyList<string> warnings) => new()
+        public RecordCreationOutcome Created(
+            Guid id, Guid? owningTeamId, bool isolated, IReadOnlyList<string> warnings,
+            IReadOnlyList<RecordCreationWarning> mappingWarnings) => new()
         {
             CreatedId = id,
             OwningTeamId = owningTeamId,
             Isolated = isolated,
             Warnings = warnings,
+            MappingWarnings = mappingWarnings,
             Steps = _steps.ToArray(),
             CorrelationId = correlationId,
         };
@@ -902,6 +1004,66 @@ internal sealed record RecordCreationRequest(string Table, RecordCreationPayload
 
     /// <summary>The request's trace id (the ProblemDetails <c>correlationId</c>); a fresh one when absent.</summary>
     public string? CorrelationId { get; init; }
+
+    /// <summary>
+    /// Task 014: the field mapping this create asks for (step 3), or <c>null</c> for none — step 3 then does nothing and
+    /// asks nothing. A caller's create only (a system principal with one is refused as an argument error).
+    /// </summary>
+    public RecordCreationMapping? Mapping { get; init; }
+}
+
+/// <summary>
+/// The field mapping a caller's create asks for (FR-03, FR-04): the caller's own Read probe on the source, and the
+/// explicit <c>mappingSource</c> when the caller names one (else the source is inferred from the row: the regarding pair,
+/// then the single typed parent).
+/// </summary>
+/// <remarks>A class, not a record, and built only by <see cref="ForCaller"/>: it carries the caller's token (inside
+/// <see cref="MappingSourceReader"/>), so it has no generated <c>ToString</c> or equality that could print it, and no way
+/// to hold the system reader (which skips the Read probe).</remarks>
+internal sealed class RecordCreationMapping
+{
+    private RecordCreationMapping(MappingSourceReader reader, string? sourceTable, Guid? sourceId)
+    {
+        Reader = reader;
+        SourceTable = sourceTable;
+        SourceId = sourceId;
+    }
+
+    /// <summary>Who reads the source: always the caller (Read-as-caller first, FR-04).</summary>
+    internal MappingSourceReader Reader { get; }
+
+    /// <summary>The explicit <c>mappingSource</c> table, if the caller named one.</summary>
+    internal string? SourceTable { get; }
+
+    /// <summary>The explicit <c>mappingSource</c> id, if the caller named one.</summary>
+    internal Guid? SourceId { get; }
+
+    /// <summary>Mapping read as the caller: <paramref name="probe"/> asks their Read on the source under their token.</summary>
+    internal static RecordCreationMapping ForCaller(
+        CallerRecordAccessProbe probe, string? callerBearerToken, string? sourceTable = null, Guid? sourceId = null) =>
+        new(MappingSourceReader.ForCaller(probe, callerBearerToken), sourceTable, sourceId);
+}
+
+/// <summary>
+/// A warning about a create that stands (task 014, ADR-019): a stable <see cref="Code"/>, the <see cref="Column"/> it is
+/// about when there is one, and a user-facing <see cref="Detail"/> that names no source record and carries no value.
+/// </summary>
+internal sealed record RecordCreationWarning(string Code, string? Column, string Detail)
+{
+    /// <summary>The mapping source is missing, not readable by the caller, or could not be read — one outcome (FR-04).</summary>
+    internal const string MappingSourceUnavailableCode = "record_creation.mapping_source_unavailable";
+
+    /// <summary>Something was named as the source, but no single record can be told from it (FR-03).</summary>
+    internal const string MappingSourceUndeterminedCode = "record_creation.mapping_source_undetermined";
+
+    /// <summary>The field-mapping configuration or the table's column metadata could not be read: nothing was mapped.</summary>
+    internal const string MappingUnavailableCode = "record_creation.mapping_unavailable";
+
+    /// <summary>A field-mapping rule was skipped (a protected or regarding target, a rule that failed, a profile with no rules).</summary>
+    internal const string MappingRuleSkippedCode = "record_creation.mapping_rule_skipped";
+
+    /// <summary>A mapped value was not written (FR-08): the caller may not set it, it could not be checked, or the column cannot take it.</summary>
+    internal const string MappedValueDroppedCode = "record_creation.mapped_value_dropped";
 }
 
 /// <summary>The payload of a create: a caller's Dataverse Web API body, or an item already mapped (a chat tool, a server writer).</summary>
@@ -947,7 +1109,7 @@ internal enum RecordCreationStep
     /// <summary>2 — the table's rules: refuse a server-owned column in the caller's payload (caller only).</summary>
     TableRules,
 
-    /// <summary>3 — field mapping (task 014; a recorded no-op seam here).</summary>
+    /// <summary>3 — field mapping (task 014): fill-only, from the source the caller may read; a no-op when none is asked for.</summary>
     FieldMapping,
 
     /// <summary>4 — the merged payload, mapped.</summary>
@@ -1013,8 +1175,18 @@ internal sealed record RecordCreationOutcome
 
     public RecordCreationRefusal? Refusal { get; init; }
 
-    /// <summary>Post-create conditions the caller is told about (the create stands).</summary>
+    /// <summary>
+    /// What the caller is told about a create that stands: the mapping step's warnings (their
+    /// <see cref="RecordCreationWarning.Detail"/>, in <see cref="MappingWarnings"/> order) and then the post-create conditions.
+    /// </summary>
     public IReadOnlyList<string> Warnings { get; init; } = [];
+
+    /// <summary>
+    /// Task 014 (FR-06 step 3, FR-08; ADR-019): the mapping step's warnings with their stable codes and, for a dropped mapped
+    /// value, the column — never the source record's id, name or any value. Empty when nothing was mapped or a create was
+    /// refused.
+    /// </summary>
+    public IReadOnlyList<RecordCreationWarning> MappingWarnings { get; init; } = [];
 
     public IReadOnlyList<RecordCreationStepRecord> Steps { get; init; } = [];
 

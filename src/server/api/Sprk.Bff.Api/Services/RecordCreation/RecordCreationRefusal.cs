@@ -90,6 +90,13 @@ internal sealed record RecordCreationRefusal
     /// <summary>Every number the autonumber issued was already held (the Office create's code, kept for its clients).</summary>
     internal const string NumberUnavailableCode = "record_number_unavailable";
 
+    /// <summary>
+    /// Task 014 (unified-access-control-r2's review of 013, K-2): a server writer marked a lineage or ownership-parent lookup
+    /// as server-set, which would skip the caller's AppendTo on the record it files the row under. Refused, nothing written
+    /// (500: the writer's defect, not the caller's input).
+    /// </summary>
+    internal const string ServerSetFilingLookupCode = "record_creation.server_set_filing_lookup";
+
     public RecordCreationRefusal(RecordCreationRefusalKind kind, string code, string detail)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(code);
