@@ -1,6 +1,6 @@
 # Procedures and files — revised approach
 
-> **Status**: v2, 2026-10-21. The owner answered v1's questions on 2026-10-21 (section 2); one question waits on the owner (Q1, section 15). Next come peer review (ontology-r1, uac-r2, word-add-in-r1) and one top-tier design review. Nothing is implemented, and no schema, task or decision row has changed yet.
+> **Status**: v3, 2026-10-21. All owner questions are answered (section 2). Next come one top-tier design review and then peer review (ontology-r1, uac-r2, word-add-in-r1). Nothing is implemented, and no schema, task or decision row has changed yet.
 > Once peers align, this note becomes decision D-148 plus revised POMLs for 079–087 and new tasks. The UI/UX is prototyped separately (O-14); the back end goes first.
 > **Supersedes, once agreed:** D-44 (in part), D-55 (in part), D-67, D-145, D-146 (in part), D-171 point 3 / D-141 Q1 (the business-unit filter), and most of `rule-set-scope-design.md`.
 
@@ -11,8 +11,8 @@
 A **Procedure** (`sprk_procedure`) is the internal record for any document that drives policy or rules: client billing guidelines, a firm's rate card, special billing instructions for one matter, an internal procedure, and non-billing policy documents later.
 
 - **Its file:** each Procedure carries its details and one file in **our own Azure Blob storage**. A Procedure is not a Document, and there is no document management.
-- **Versions:** a new version is a new Procedure record in the same *family*, and v2 replaces v1 from v2's effective date.
-- **Rules:** a family's rules live in one rule set. Each Procedure version publishes its own versions of those rules, so a rule keeps its identity across Procedure versions. A rate card imported from a workbook belongs to its Procedure version.
+- **Versions:** a Procedure (the document) has Procedure Versions (each issue, with its file and effective dates). v2 replaces v1 from v2's effective date.
+- **Rules:** a Procedure's rules live in one rule set. Each Procedure Version publishes its own versions of those rules, so a rule keeps its identity across Procedure Versions. A rate card imported from a workbook belongs to its Procedure Version.
 
 **How a record becomes subject to Procedures.** A matter, project or work assignment is subject to Procedures, not to rule sets directly, in three ways:
 
@@ -30,7 +30,7 @@ A **Procedure** (`sprk_procedure`) is the internal record for any document that 
 **Files for invoices and exports.** Invoices and billing exports keep their files in the same file store, not as Documents. An emailed invoice still arrives as a Document. **Submit Invoice** on the attachment copies its bytes into the invoice's files.
 
 ```
-Procedure family "Acme outside counsel guidelines"              rule set (one per family)
+Procedure "Acme outside counsel guidelines"                     rule set (one per Procedure)
  ├─ v1 (effective 2025-01-01) ── file ─┐                          ├─ rule "Travel"   : versions for v1, v2
  └─ v2 (effective 2026-01-01) ── file ─┴── publishes versions of ─┼─ rule "Late fee" : versions for v1, v2
                                                                   └─ rule "Block billing" : v2 only (new in v2)
@@ -40,7 +40,7 @@ Procedure family "Acme outside counsel guidelines"              rule set (one pe
                  │
  Invoice on M from firm F, line dated 2026-03-10
    → resolver → rules in force → evaluation → Signals / Decision Records (cite policy versions)
-   → snapshot: each rule's policy version, Procedure version, source, and the overrides that decided it
+   → snapshot: each rule's policy version, Procedure Version, source, and the overrides that decided it
 ```
 
 ---
@@ -63,30 +63,48 @@ Procedure family "Acme outside counsel guidelines"              rule set (one pe
 | O-12 | (2026-10-21) Q4: one shared file table. Q5: the version is chosen by **work date** matched to the Procedure's effective dates. Q6: **v2 copies v1's rules for editing and revising.** Q7: firm = the **invoice's firm** (organization). Q8: **no business-unit filter.** Q9: blob immutability and scanning if not difficult. Q10: whatever is easiest. |
 | O-13 | **No migration of dev containers or files** (2026-10-21). Existing dev rule sets, rate cards, invoices and their SharePoint Embedded files are dev artifacts. |
 | O-14 | **UI/UX is prototyped separately** and drives the matching tasks (2026-10-21). Back-end work proceeds first. |
+| O-15 | **Two tables: Procedure and Procedure Version** (2026-10-21, after the owner asked whether two tables are better; section 3.1). |
+| O-16 | **A late fee is just an added fee**, and the Procedure and its rules decide whether it is allowed (2026-10-21; section 6.3). |
+| O-17 | **A deleted core record's exceptions Procedure and record rules are retired** (2026-10-21). |
 
 ---
 
 ## 3. The Procedure
 
-### 3.1 Versions and the family (Q1, recommended; owner to confirm after the explanation)
+### 3.1 Two tables: Procedure and Procedure Version (O-15)
 
-Each version is its own Procedure record (O-1, O-4). The system still has to know which records are versions of the same document, for three reasons:
+- **`sprk_procedure` (Procedure)** is the document as a lasting thing, for example "Acme outside counsel guidelines". It holds what is true of every version:
+  - name, area and type;
+  - **Applies to** and **Firm** (who it governs);
+  - Issued By and the two contacts.
 
-- A matter assigned "Acme guidelines" moves to v2 automatically.
-- An override can pin "Acme rate card, 2025 version".
-- Evaluation can pick the version in force on a work date.
+  Assignments and overrides point to it. Its rule set is attached to it.
+- **`sprk_procedureversion` (Procedure Version)** is one issue of that document. It holds:
+  - version number;
+  - effective from / to;
+  - status: Draft · Active · Superseded · Retired;
+  - **its file**;
+  - the policy versions it published;
+  - its rate card.
 
-**Recommended: a lookup on each Procedure, "Family"** (`sprk_family`). It points to the first version, and is empty on the first version itself. Three more columns sit beside it:
+  "Version 2" is a new Procedure Version under the same Procedure.
 
-- **Version number**: 1, 2, 3 …
-- **Previous version**: a lookup.
-- **Effective from / to**: publishing v2 with effective-from D sets v1's effective-to to D − 1, so a family's versions never overlap. The BFF owns that invariant (ADR-002).
+Why two tables beat one table with a "family" self-lookup (the v1 recommendation, withdrawn):
 
-**Status:** Draft · Active · Superseded · Retired.
+- **Applicability lives in exactly one place.** The resolver needs Applies to and Firm before it can pick a version by date. On one table, each version carries its own copy, so v2 could say Firm and v1 All matters, and the resolver must first decide which copy governs. That is circular, and it is a determinism hazard. With two tables there is one row and one answer. A change of who a Procedure governs is a single audited edit, not a side effect of uploading a new file.
+- **The document's identity never depends on version 1's row.** On one table the family is "v1's id": retiring or deleting v1 breaks it, and every query needs "family = X or id = X".
+- **Every link has a clear target.** Assignment → Procedure. Pin → Procedure Version. Rule set → Procedure. Policy version → Procedure Version. Rate card → Procedure Version. File → Procedure Version.
+- **It is more flexible later.** Metadata can be corrected without a new version. Versions can be listed under their document. Future version-level data (approval, signed date, superseded reason) has a home.
 
-**The alternative not recommended:** a separate parent table ("Procedure", the document) with a child table ("Procedure Version", each file). It is cleaner on paper, but it is one more table, and the "new Procedure record for version 2" model becomes a "new Procedure Version record".
+The cost is one more table and two forms. Each Procedure owns its versions, and deleting a Procedure is refused while any version has published rules (Signals cite them).
+
+**Invariant (BFF-owned, ADR-002):** a Procedure's Active versions never overlap in effective dates. Publishing v2 with effective-from D sets the previous version's effective-to to D − 1, in one BFF operation.
+
+Model-driven forms bypass the BFF, so effective dates, status and the file are field-secured: Create and Update for the BFF application user only, Read for everyone. They are changed only through the BFF, as S7 does for rule-set scope today.
 
 ### 3.2 Metadata
+
+**Procedure** (the document):
 
 | Column | Type | Notes |
 |---|---|---|
@@ -98,10 +116,20 @@ Each version is its own Procedure record (O-1, O-4). The system still has to kno
 | Issued By | lookup `sprk_organization` | O-11. Who issued the document: the client, a firm, or the legal department. |
 | External Contact | lookup `contact` | O-11. |
 | Internal Contact | lookup `contact` | O-11. |
-| Family, version number, previous version, effective from / to, status | (section 3.1) | |
-| File | (section 4) | One file per version; optional, because a matter's exceptions may have no file (section 6.3). |
 | Created by person | lookup `systemuser` | The S9 / D-173 pattern. |
 | Notes | multiline | |
+
+**Procedure Version** (one issue):
+
+| Column | Type | Notes |
+|---|---|---|
+| Procedure | lookup `sprk_procedure` | Parental. |
+| Version number | whole number | 1, 2, 3 … assigned by the BFF. |
+| Previous version | lookup `sprk_procedureversion` | |
+| Effective from / to | date | Field-secured, BFF-owned (section 3.1). |
+| Status | choice | Draft · Active · Superseded · Retired. Field-secured. |
+| File | (section 4) | One file per version. Optional: a record's exceptions Procedure has no file (section 6.3). |
+| Created by person | lookup `systemuser` | |
 
 Firm and Issued By are separate on purpose. A rate card is usually issued by the firm whose invoices it governs. Client guidelines are issued by the client and govern every firm, with Applies to = All matters.
 
@@ -120,7 +148,7 @@ Firm and Issued By are separate on purpose. A rate card is usually issued by the
 ### 4.1 One file table, one service, one control (O-12 Q4)
 
 - **Table `sprk_storedfile`** ("Stored File"; final name to be confirmed with ontology-r1). One row per file.
-  - **Parent:** exactly one lookup is set: `sprk_procedure`, `sprk_invoice` or `sprk_billingexport` (more parents later).
+  - **Parent:** exactly one lookup is set: `sprk_procedureversion`, `sprk_invoice` or `sprk_billingexport` (more parents later).
   - **Purpose:** Procedure source · Invoice PDF · Invoice supporting file · Export file.
   - **File details:** file name, content type, size, SHA-256 fingerprint.
   - **Blob path:** field-secured, read by the server only.
@@ -139,7 +167,7 @@ Firm and Issued By are separate on purpose. A rate card is usually issued by the
 
 - **Containers:** separate containers per purpose, `procedures`, `invoice-files` and `billing-exports`, so each can have its own retention.
 - **Path:** `{tenantId}/{parent table}/{parent id}/{file id}`.
-- **Write-once:** a file is never overwritten. A new file is a new row, and a new Procedure version is a new Procedure.
+- **Write-once:** a file is never overwritten. A new file is a new row, and a new issue of a Procedure is a new Procedure Version.
 - **Protection:**
   - soft delete on;
   - a version-level immutability policy and Defender for Storage malware scanning where not difficult (O-12 Q9);
@@ -167,10 +195,11 @@ Firm and Issued By are separate on purpose. A rate card is usually issued by the
 | Row | Owner and visibility | Notes |
 |---|---|---|
 | Procedure | Owned by the uploader's business unit; read by internal users at the depth their roles give. Internal only. | Not in the secure family: a Procedure is reusable across matters, including Secure ones (O-6). Users who review a Secure matter's invoices need Read on its Procedures, so internal roles get org-level Read on `sprk_procedure` (or the depth that achieves it). **uac-r2 to confirm.** |
-| Rule set, policy, policy version | Unchanged ownership. | The rule set belongs to a Procedure family (section 7.2). The planned record-scoped ownership routing (081, D-141) goes away with record scope. |
+| Procedure Version | Follows its Procedure (parental). | |
+| Rule set, policy, policy version | Unchanged ownership. | The rule set belongs to a Procedure (section 7.2). The planned record-scoped ownership routing (081, D-141) goes away with record scope. |
 | Assignment / override (section 6) | A child of the core record it names, in the **secure family**. | An override's existence on a Secure matter is the matter's information. It joins uac-r2's lineage, census and creator-person lists (D-173 pattern). |
 | Stored File (invoice, export) | A child of its invoice or export, in the secure family. | Access follows the invoice. |
-| Stored File (Procedure) | Follows the Procedure. | |
+| Stored File (Procedure Version) | Follows its Procedure Version, and so its Procedure. | |
 | Matter-exception Procedure (section 6.3) | Like any Procedure. | Readable internally (O-6). If a Secure matter's exceptions turn out to be sensitive, this is where the O-6 fallback (secure per-matter Procedures) would apply. |
 
 ---
@@ -183,7 +212,7 @@ Firm and Issued By are separate on purpose. A rate card is usually issued by the
 |---|---|---|
 | **All matters** | Procedure Applies to = All matters (today's "client default" level). | No: computed |
 | **Firm** | Procedure Applies to = Firm and its firm = **the invoice's firm** (`sprk_invoice.sprk_vendororg`; O-5, O-12 Q7). | No: computed |
-| **Manual** | An assignment row: Procedure family (or a version) → matter, project or work assignment. | Yes |
+| **Manual** | An assignment row: Procedure → matter, project or work assignment. | Yes |
 
 **Firm matches are computed at evaluation time, not copied onto matters.** Copying would need a trigger whenever a matter's firm changes or a new firm Procedure is published. Without plugins (ADR-002), that means a reconcile job and a stale window. Computing is always current, and deterministic, because it reads only stored rows.
 
@@ -195,13 +224,13 @@ These are rows of the assignment table, with a mode:
 
 | Mode | Meaning | Example |
 |---|---|---|
-| **Follow latest** (default for a manual assignment) | The family's version in force on the work date (section 8.2). | Matter-specific instructions; v2 applies from its effective date. |
-| **Pinned to version** | This version, whatever is newer. | Matter grandfathered on firm F's 2025 rate card. |
+| **Follow latest** (default for a manual assignment) | The Procedure's version in force on the work date (section 8.2). | Matter-specific instructions; v2 applies from its effective date. |
+| **Pinned to version** | This Procedure Version, whatever is newer. | Matter grandfathered on firm F's 2025 rate card. |
 | **Excluded** | A Procedure that would apply by "all matters" or "firm" does not apply to this record. | The firm's standard travel policy is waived for this matter. |
 
 ### 6.3 Rule-level overrides (O-10)
 
-A **rule** here is a `sprk_policy` in a family's rule set. It keeps its identity across the family's versions (section 7.2), so a rule-level override survives a new Procedure version.
+A **rule** here is a `sprk_policy` in a Procedure's rule set. It keeps its identity across the Procedure's versions (section 7.2), so a rule-level override survives a new Procedure Version.
 
 | Action on the record | What is stored | Effect |
 |---|---|---|
@@ -224,9 +253,9 @@ Why "change" means copy, edit and exclude, rather than storing new parameters on
 **Rule types the examples need (to be decided):**
 
 - **Late fees and discounts are not billing rule types today.** The 11 R1 types are listed in `rule-set-scope-design.md` §3.3.
-- A **negotiated discount** fits the invoice adjustments of D-42 (a percent applied after line adjustments). It would be a new rule type that proposes an adjustment.
-- A **late fee** needs its meaning confirmed before it can be designed. It could be a firm's interest charge to be refused, or a penalty on late submission.
-- Both need a catalogue addition (D-27, closed set; ontology-r1 reviews). The override mechanism covers them once they exist.
+- **A late fee is an added fee on the invoice (O-16).** The Procedure's rules decide whether it is allowed and how much: not allowed, allowed up to an amount or a percent, or allowed after N days. One additive-fee type covers late fees and other added charges (administrative fee, interest), with the fee kind as a parameter. Today it would need a code in the non-billable or expense checklist, which matches only when the firm codes it that way.
+- **A negotiated discount** fits the invoice adjustments of D-42 (a percent applied after line adjustments). It would be a rule type that checks the firm applied it, or proposes the adjustment (to decide with ontology-r1).
+- **Both are catalogue additions** (D-27, a closed set; ontology-r1 reviews). The override mechanism covers them once they exist.
 - "Approve travel" works today, through ExpenseRule.
 
 ### 6.4 Inheritance: direct association only (unchanged rule)
@@ -238,7 +267,7 @@ The rule of D-172 stays. A work assignment filed under project P is subject to P
 The back end provides two read models, which the prototype's UI will use:
 
 - **Procedures:** every Procedure the record is subject to, from all-matters, firm (the assigned outside counsel by default; any firm selectable), manual and inherited sources. Each shows the version in force today, its source, and any Procedure-level override. Actions: assign, create (an exceptions Procedure for this record), pin, exclude, remove.
-- **Rules in force:** for a chosen date and firm, every rule with its source Procedure version. It marks rules displaced by precedence and rules excluded or changed by a rule-level override. Actions: exclude, change, remove an override.
+- **Rules in force:** for a chosen date and firm, every rule with its source Procedure Version. It marks rules displaced by precedence and rules excluded or changed by a rule-level override. Actions: exclude, change, remove an override.
 
 Both are produced by the same resolver that evaluation uses (section 7.1), so what users see is exactly what evaluation would use.
 
@@ -252,15 +281,17 @@ Both are produced by the same resolver that evaluation uses (section 7.1), so wh
 
 ```
 chain     = CoreRecordChain(record)                       // record (d0) + direct parents (d1), section 6.4
-families  = Procedures with Applies to = All matters
+procs     = Procedures with Applies to = All matters
           ∪ Procedures with Applies to = Firm AND firm = invoice firm
-          ∪ manual assignments on any chain record
-          − families Excluded on the chain                 // the nearer override wins
-for each family:
-    procVersion = the pinned version (nearer override wins)  OR  the family's version in force on workDate
+          ∪ Procedures manually assigned on any chain record
+          − Procedures Excluded on the chain               // the nearer override wins
+for each procedure:
+    procVersion = the pinned Procedure Version (nearer override wins)
+                  OR  the Active Procedure Version whose effective dates contain workDate
+                  (none in force on that date → the Procedure contributes nothing for that subject)
     level       = Manual d0 | Manual d1 | Firm | All matters
-    rules      += the policy versions of the family's rule set that belong to procVersion
-                   (rules the family has retired by that version are absent)
+    rules      += the policy versions of the Procedure's rule set that belong to procVersion
+                   (rules retired by that version are absent)
     rateCard    = procVersion's published rate card, if any
 rules     −= rules Excluded on the chain (rule-level, nearer wins)
              // a "changed" rule is its general rule excluded plus the record rule,
@@ -272,16 +303,16 @@ It replaces today's rule-set eligibility (`BillingFactLoader`, ClientDefault and
 
 ### 7.2 Drafting rules from a Procedure (O-12 Q6)
 
-- **One rule set per Procedure family.** `sprk_ruleset` gets a `sprk_procedure` lookup to the family's first version, replacing `sprk_sourcedocument`.
-- **Each Procedure version publishes policy versions.** `sprk_policyversion` gets a `sprk_procedureversion` lookup (name to be decided) to the Procedure version it came from. Its in-force dates follow that version's effective dates.
+- **One rule set per Procedure.** `sprk_ruleset` gets a `sprk_procedure` lookup, replacing `sprk_sourcedocument`.
+- **Each Procedure Version publishes policy versions.** `sprk_policyversion` gets a `sprk_procedureversion` lookup to the Procedure Version it came from. Its in-force dates follow that version's effective dates.
 - **Drafting v1:** the existing drafting job (`BillingRuleDraftJobHandler`, Action `billing-rule-draft`) reads the file from the file store and proposes rules, each with a quoted clause and its location.
 - **Creating v2 copies v1's rules** as v2 drafts. The reviewer edits, removes and adds, optionally re-running the drafting job on v2's file to highlight changes. On publish:
   - an edited or unchanged rule becomes a new version of the **same** policy (same rule identity, so rule-level overrides carry over);
   - a removed rule is retired from v2's effective date;
   - a new rule is a new policy.
-- **Rate cards:** importing a workbook (`RateCardImportService`) creates the rate card of that Procedure version. `sprk_ratecard` gets `sprk_procedureversion` in place of its three core-record lookups and the planned scope column. v2's card can likewise start as a copy of v1's.
+- **Rate cards:** importing a workbook (`RateCardImportService`) creates the rate card of that Procedure Version. `sprk_ratecard` gets `sprk_procedureversion` in place of its three core-record lookups and the planned scope column. v2's card can likewise start as a copy of v1's.
 - **Review and improve:** the Rule Review page is reached from the Procedure.
-  - Correcting a published rule without a new file makes a new policy version for the same Procedure version, as today.
+  - Correcting a published rule without a new file makes a new policy version for the same Procedure Version, as today.
   - Policy versions are immutable, and decisions already made keep the version they cited (section 8).
 
 ### 7.3 Several Procedures on one record
@@ -298,7 +329,7 @@ All Procedures the resolver picks are evaluated together, with the precedence al
 ### 7.4 Determinism and audit
 
 - **Before evaluation:** the record's "rules in force" read model (section 6.5).
-- **After evaluation:** each evaluation saves a **snapshot**. For each rule applied, it records the policy version, the Procedure version, the source and level, the Procedure-level and rule-level overrides that decided it, and each rule displaced or excluded.
+- **After evaluation:** each evaluation saves a **snapshot**. For each rule applied, it records the policy version, the Procedure Version, the source and level, the Procedure-level and rule-level overrides that decided it, and each rule displaced or excluded.
   - It is stored with the submission's findings: `sprk_invoicesubmission.sprk_findingsjson` already carries the clause.
   - Its fact summary also goes on the Decision Record.
   - Later edits to Procedures or overrides never change an earlier evaluation's story.
@@ -311,14 +342,14 @@ All Procedures the resolver picks are evaluated together, with the precedence al
 
 Unchanged at the core: each Signal and Decision Record cites the **policy version**, which is immutable and carries the quoted clause and its location, plus reason codes and facts. Added:
 
-- the **Procedure version** in the evaluation facts, so an internal reviewer can open the source file (download through the BFF);
+- the **Procedure Version** in the evaluation facts, so an internal reviewer can open the source file (download through the BFF);
 - the **basis** (source, level, override ids) in the facts.
 
 Firms still see only the clause text, subject to the visible-to-firms flag (D-66, D-79), never the Procedure or its file.
 
 ### 8.2 Versions over time (O-12 Q5: by work date)
 
-- **Which version applies:** a line is judged by the Procedure version whose effective dates contain the line's work date. Without a line date, the invoice date is used (today's per-subject date rule). So 2025 work billed in 2026 is judged on v1, and 2026 work on v2.
+- **Which version applies:** a line is judged by the Procedure Version whose effective dates contain the line's work date. Without a line date, the invoice date is used (today's per-subject date rule). So 2025 work billed in 2026 is judged on v1, and 2026 work on v2.
 - **Decisions already made under v1 stand.** Decision Records are append-only, Signals cite v1's policy versions, and a decided invoice is never re-evaluated.
 - **An invoice still In Review** when v2 is published is re-evaluated by the same rule, and its snapshot shows which version judged which line.
 - **A pinned override** keeps its version for that record, whatever the dates.
@@ -374,18 +405,18 @@ The billing export (`sprk_billingexport`, 023) gets its file as a Stored File, p
 | D-44 | Invoice PDFs move from SharePoint Embedded to invoice files. The structured invoice index is unchanged. |
 | D-55, D-67 | Procedure Library and E-Billing Output Files containers and keys retire from code. The dev containers are left for the owner (O-13). |
 | D-145 | Withdrawn: nothing is filed under a matter. |
-| D-146 | Simpler: deleting a core record removes its assignment and override rows. Procedures, rule sets and rate cards are never touched. A record rule in a record's exceptions Procedure stays with that Procedure (to be decided: retire it). |
+| D-146 | Simpler: deleting a core record removes its assignment and override rows. Procedures, rule sets and rate cards are never touched. The record's exceptions Procedure and its record rules are retired (O-17). |
 | D-120 | Rate cards are no longer tied to a core record. |
 | D-171 point 3 / D-141 Q1 / S3, S4, S8 | Business-unit filter dropped (O-12 Q8). The S8 snapshot and its writer (087) are dropped. Check with uac-r2 that nothing of theirs relies on S8. |
 | D-140 | Kept (the email route). |
 | D-172 | Direct-association inheritance kept. Explicit record scope on rule sets and rate cards replaced by assignments. The rate-card S6 backfill and ontology D-174 / D-147 become moot. |
 | `rule-set-scope-design.md` | Kept: §3.1 chain, §3.3 precedence (re-keyed). Replaced: §2 S1–S4, S6, S8; §4.1–4.5; §5.2–5.4. S9 creator person carries over to the new tables. |
-| 019 / 076 / 077 rule-set store, endpoints, Rule Review | Rule set gains `sprk_procedure` and loses `sprk_sourcedocument`. Policy version gains the Procedure version. Creation starts from a Procedure. Rule Review is reached from the Procedure. |
+| 019 / 076 / 077 rule-set store, endpoints, Rule Review | Rule set gains `sprk_procedure` and loses `sprk_sourcedocument`. Policy version gains the Procedure Version. Creation starts from a Procedure. Rule Review is reached from the Procedure. |
 | 028 containers | Replaced by the blob containers. |
 | 044 / 049 / 051 submission | The upload target changes to the file store. Processing reads bytes from the file store. |
 | 050a confirm | Becomes Submit Invoice (copy). The re-file is retired. The D-140 chain and the isolation check are kept. |
 | 075 drafting job | Reads the file from the file store. |
-| 078 rate-card import | The card belongs to a Procedure version. |
+| 078 rate-card import | The card belongs to a Procedure Version. |
 | 108 viewer | Loads through the BFF download route. |
 | Dev data | Recreated, not migrated (O-13). |
 
@@ -393,24 +424,24 @@ The billing export (`sprk_billingexport`, 023) gets its file as a Stored File, p
 
 | Task | Becomes |
 |---|---|
-| 080 schema | New schema: `sprk_procedure`, the assignment/override table, `sprk_storedfile`; `sprk_procedure` on rule set; the Procedure version on policy version and rate card; creator person on the new tables. Dropped: S1–S4, S6, S8. ontology-r1 reviews the schema again. |
-| 081 rule-set service | Procedure service (versions, effective dates, the family invariant, copy-forward of rules and rate cards) plus the assignment and override service, including "change rule for this record". |
+| 080 schema | New schema: `sprk_procedure`, `sprk_procedureversion`, the assignment/override table, `sprk_storedfile`; `sprk_procedure` on rule set; `sprk_procedureversion` on policy version and rate card; creator person on the new tables. Dropped: S1–S4, S6, S8. ontology-r1 reviews the schema again. |
+| 081 rule-set service | Procedure service (versions, effective dates, the no-overlap invariant, copy-forward of rules and rate cards) plus the assignment and override service, including "change rule for this record". |
 | 082 selection | The resolver (section 7.1), reusing `CoreRecordChain`. |
 | 083 firm clause | Uses the resolver. |
 | 084 Rule Review UI | Waits for the prototype (O-14). The back end exposes the two read models of section 6.5. |
 | 085 rate cards | Rate-card tiers re-keyed to resolver levels. The scope column and backfill are dropped. |
 | 086 rate-card secure family, workbook filed under record | Mostly obsolete. What remains is the secure-family rows for the assignment table and invoice Stored Files. |
 | 087 BU snapshot writer | Dropped (O-12 Q8). |
-| New | File store service and control; Stored File schema; storage provisioning hand-off; Submit Invoice; moving invoice submission and exports to files; possibly new rule types (discount, late fee; section 6.3). |
+| New | File store service and control; Stored File schema; storage provisioning hand-off; Submit Invoice; moving invoice submission and exports to files; possibly new rule types (added fee, discount; section 6.3). |
 
 ## 14. Coordination (review requested 2026-10-21)
 
 - **ontology-r1:**
   - the Procedure name and Area/Type values (ontology component model §3);
-  - the rule set per family and the policy-version → Procedure-version link;
+  - the rule set per Procedure and the policy-version → Procedure Version link;
   - the resolver's levels;
   - rule-level overrides (exclude, change);
-  - new rule types for discount and late fee (D-27);
+  - new rule types for added fees (late fee and similar) and discount (D-27);
   - the drafting source change;
   - a full schema re-review (it replaces the 080 work they reviewed);
   - whether they need a Procedures search index;
@@ -431,8 +462,7 @@ The billing export (`sprk_billingexport`, 023) gets its file as a Stored File, p
 
 ## 15. Questions still open
 
-- **Q1 (owner):** versions as one Procedure table with a "Family" lookup (recommended, section 3.1) or a Procedure + Procedure Version pair?
-- **Q16 (owner):** what "late fee" means: a firm's interest charge to refuse, or a penalty on late submission? And is a negotiated discount an automatic adjustment, or a check that the firm applied it?
-- **Q17 (owner, small):** when a core record is deleted, are its exceptions Procedure and record rules retired (recommended), or kept?
+- Q1, Q16 and Q17 are answered: O-15, O-16, O-17.
+- **Q19 (ontology-r1):** is a discount rule a check that the firm applied it, or does it propose the adjustment (D-42)?
 - **Q18 (ontology-r1):** the overlap with ontology's matter-scoped rules (section 14).
 - UI/UX (v1 Q11–Q15) moves to the prototype (O-14).
