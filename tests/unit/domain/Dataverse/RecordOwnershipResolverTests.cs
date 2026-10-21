@@ -1584,6 +1584,62 @@ public class RecordOwnershipResolverTests
         MessageOwnerOf(directory, messageId).Should().Be(ChildTeam);
     }
 
+    [Theory]
+    [InlineData(false)] // the move lands before the owner write: the put-back reads it again
+    [InlineData(true)] // the move lands right after the change, before the first read: the put-back's own observation
+    public async Task Reparent_WhenAnotherWriterMovesTheMessageToAnotherThreadWithTheSameParents_BeforeThePutBack_ItIsNotReverted(
+        bool beforeTheFirstRead)
+    {
+        // Must-fire (#2143 round 8): as in the F4 test the change re-files the message into the secure matter and its thread,
+        // and the owner assignment fails, so the change is put back. But before the put-back ANOTHER writer moved the message
+        // to a second thread regarding the same secure matter: the parents are what this call resolved, the owner is the one
+        // before the change — yet the filing is that writer's, not this call's. Before round 8 the put-back checked only the
+        // parents and the owner, and reverted the other writer's move; it now also requires the lineage-only lookups (the
+        // thread) this call left, and leaves the row to the newer writer.
+        var (directory, messageId) = MessageWorld(MatterId, ChildBu, ChildTeam, threadId: OrdinaryThreadId);
+        var otherSecureThread = Guid.NewGuid();
+        directory.WithRecord("sprk_communicationthread", otherSecureThread, SecureBu, owningTeam: SecureNamedTeam, extra: new()
+        {
+            ["sprk_threadtype"] = new OptionSetValue(100000000),
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", SecureThreadMatterId),
+        });
+        var assignFailure = new InvalidOperationException("missing prvReadsprk_Communication");
+        directory.AssignmentFault = assignFailure;
+        var moved = false;
+        void MoveIt(FakeDirectory world)
+        {
+            moved = true;
+            world.Write("sprk_communication", messageId, new()
+            {
+                ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", otherSecureThread),
+            });
+        }
+
+        if (!beforeTheFirstRead)
+            directory.BeforeWrite = (world, fields) => { if (!moved && fields.ContainsKey("ownerid")) MoveIt(world); };
+        var request = new RecordReparent
+        {
+            EntityLogicalName = "sprk_communication",
+            RecordId = messageId,
+            ParentChanges = new Dictionary<string, EntityReference?>
+            {
+                ["sprk_regardingmatter"] = new EntityReference("sprk_matter", SecureThreadMatterId),
+                ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", SecureThreadId),
+            },
+        };
+
+        var act = () => Build(directory).ReparentAsync(
+            request, Applies(directory, request, beforeTheFirstRead ? () => MoveIt(directory) : null), CancellationToken.None);
+
+        await act.Should().ThrowAsync<Exception>();
+        moved.Should().BeTrue("the other writer's move landed before the put-back");
+        var row = directory.Row("sprk_communication", messageId);
+        row.GetAttributeValue<EntityReference>("sprk_communicationthread")?.Id
+            .Should().Be(otherSecureThread, "the other writer's thread move is never reverted");
+        row.GetAttributeValue<EntityReference>("sprk_regardingmatter")?.Id
+            .Should().Be(SecureThreadMatterId, "the filing is left to the newer writer whole");
+    }
+
     [Fact]
     public async Task Reparent_WhenAnAttachColumnIsALineageOnlyLookupNotNamedInParentChanges_ThrowsArgumentException_BeforeAnyReadOrWrite()
     {

@@ -1579,6 +1579,9 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         /// <summary>The team that owned the row at that read (K2: a put-back requires it to be the pre-change owner).</summary>
         public Guid? OwningTeam { get; set; }
 
+        /// <summary>#2143 round 8: the row's lineage-only lookups at that read (a put-back requires them to be this call's).</summary>
+        public IReadOnlyDictionary<string, Guid> LineageLookups { get; set; } = new Dictionary<string, Guid>();
+
         /// <summary>
         /// The owner the settle loop last decided to write (F1-a re-derives it on every attempt, so it can differ from the
         /// answer resolved before the change): what a recovery checks "the assignment landed" against.
@@ -1776,6 +1779,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 observed.Version = state.Version;
                 observed.ParentsAsResolved = parentsAsResolved;
                 observed.OwningTeam = state.OwningTeam;
+                observed.LineageLookups = state.LineageLookups;
             }
 
             // F1-a: re-derived on EVERY attempt, from the parents read now — never the answer from before the change, which a
@@ -2621,7 +2625,9 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// attempt uses the version the first read after the change observed; a later one reads the row again. App-only, no
     /// cancellation (recovery). A failure other than a version mismatch propagates to <see cref="RestoreFilingAsync"/>.
     /// K2: the filing is put back only while the row is still owned by its PRE-change owner (<paramref name="before"/>) — the
-    /// owner the restored filing belongs to; a row another writer (or the reconcile) re-owned is left to it.
+    /// owner the restored filing belongs to; a row another writer (or the reconcile) re-owned is left to it. Round 8: and only
+    /// while it holds the lineage-only lookups this call left (<see cref="RowBeforeChange.LineageLookups"/>) — another
+    /// writer's move to a different thread with the same parents is that writer's filing, and is never reverted.
     /// </summary>
     private async Task<PutBackOutcome> PutBackFilingAsync(
         RecordReparent request, IReadOnlyDictionary<string, object> restore,
@@ -2635,7 +2641,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             if (attempt == 1 && observed.Read)
             {
                 version = observed.Version;
-                filedAsResolved = observed.ParentsAsResolved && observed.OwningTeam == before.OwningTeam;
+                filedAsResolved = observed.ParentsAsResolved && observed.OwningTeam == before.OwningTeam
+                    && SameLineage(before.LineageLookups, observed.LineageLookups);
             }
             else
             {
@@ -2674,7 +2681,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 version = state?.Version;
                 filedAsResolved = state is not null
                     && FiledAsResolved(state, resolvedFrom)
-                    && state.OwningTeam == before.OwningTeam;
+                    && state.OwningTeam == before.OwningTeam
+                    && SameLineage(before.LineageLookups, state.LineageLookups);
             }
 
             if (!filedAsResolved)
