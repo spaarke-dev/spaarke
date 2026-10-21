@@ -167,6 +167,132 @@ public sealed partial class SecureChildOwnershipAiToolTests
             "a row that was never isolated has no mirror to take off");
     }
 
+    // ---- #2143 round 8 (F1-B): the Office-save filing acts for the person who saved ----
+
+    /// <summary>The systemuser the Office save's bearer token names.</summary>
+    private static readonly Guid OfficeSaver = Guid.Parse("a2143000-0000-4000-8000-0000000000b9");
+
+    /// <summary>
+    /// An UNFILED email sitting in secure S's thread (as an unlink leaves it, #2165), owned by the Secure team: what an Office
+    /// save of the same email onto an ordinary matter reconciles to.
+    /// </summary>
+    private void AnUnfiledEmailInTheSecureRecordsThread()
+    {
+        AnEmailIn(SecureMatter, SecureMattersThread, Directory.SecureBu, Directory.SecureNamedTeam);
+        _world.Row("sprk_communication", RefiledEmail).Attributes.Remove("sprk_regardingmatter");
+    }
+
+    /// <summary>
+    /// The REAL <see cref="Sprk.Bff.Api.Services.Office.ReconciledEmailFiling"/> filing the email under
+    /// <paramref name="matter"/>, as an Office save by <see cref="OfficeSaver"/> holding <paramref name="rightsOnS"/> on S
+    /// (and Write on the email): the REAL association write (the resolver's reparent), the REAL reconciler with the REAL thread
+    /// resolver after it.
+    /// </summary>
+    private Task<Sprk.Bff.Api.Services.Office.ReconciledFilingResult> OfficeSaveFiles(
+        Guid matter, AccessRights rightsOnS)
+    {
+        var dataverse = new Mock<IDataverseService>();
+        dataverse
+            .Setup(d => d.RetrieveAsync("sprk_communication", RefiledEmail, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => _world.Row("sprk_communication", RefiledEmail));
+        dataverse
+            .Setup(d => d.UpdateAsync("sprk_communication", RefiledEmail, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, _, fields, _) =>
+            {
+                foreach (var (column, value) in fields)
+                    _world.Row("sprk_communication", RefiledEmail)[column] = value;
+            })
+            .Returns(Task.CompletedTask);
+
+        var probe = new Mock<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>(
+            new HttpClient(), new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
+            NullLogger<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>.Instance, null!) { CallBase = false };
+        probe.Setup(p => p.GetCallerSystemUserIdAsync("office-token", It.IsAny<CancellationToken>())).ReturnsAsync(OfficeSaver);
+        probe.Setup(p => p.GetCallerRightsAsync("office-token", "sprk_communications", RefiledEmail, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AccessRights.Read | AccessRights.Write);
+        probe.Setup(p => p.GetCallerRightsAsync("office-token", "sprk_matters", SecureMatter, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(rightsOnS);
+
+        var options = new Sprk.Bff.Api.Configuration.AutoFileOptions { Enabled = true, Threshold = 0.85 };
+        var mapper = new Sprk.Bff.Api.Services.Communication.Engine.AssociationStatusMapper(
+            new Sprk.Bff.Api.Services.Communication.Engine.AutoFileGate(
+                Mock.Of<Microsoft.Extensions.Options.IOptionsMonitor<Sprk.Bff.Api.Configuration.AutoFileOptions>>(m => m.CurrentValue == options)),
+            NullLogger<Sprk.Bff.Api.Services.Communication.Engine.AssociationStatusMapper>.Instance);
+        var threads = ThreadsOverTheDirectory();
+        var association = new IncomingAssociationResolver(
+            Array.Empty<Sprk.Bff.Api.Services.Communication.Engine.IAssociationRung>(), dataverse.Object, dataverse.Object, mapper,
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), _world.Resolver(),
+            NullLogger<IncomingAssociationResolver>.Instance, threads);
+        var filing = new Sprk.Bff.Api.Services.Office.ReconciledEmailFiling(
+            association, dataverse.Object, probe.Object, Children(threads), Restamper(),
+            NullLogger<Sprk.Bff.Api.Services.Office.ReconciledEmailFiling>.Instance);
+
+        var target = new EntityReference("sprk_matter", matter);
+        var decision = new Sprk.Bff.Api.Services.Communication.Engine.AssociationDecision
+        {
+            Status = Sprk.Bff.Api.Services.Communication.Engine.AssociationStatusCodes.Resolved,
+            RegardingWrites = new Dictionary<string, EntityReference> { ["sprk_regardingmatter"] = target },
+            AutoFiled = false,
+            Provenance = new Sprk.Bff.Api.Services.Communication.Engine.AssociationProvenance
+            {
+                Direction = "Incoming",
+                Decision = new Sprk.Bff.Api.Services.Communication.Engine.AssociationDecisionTrace
+                {
+                    Status = "Resolved", AutoFiled = false, KillSwitchEnabled = true, AutoFileThreshold = 0.85,
+                    TopDeterministicConfidence = 1, TopConfidence = 1, AiInvolved = false, Reason = "caller-supplied",
+                },
+                RungsFired = Array.Empty<string>(),
+                Candidates = Array.Empty<Sprk.Bff.Api.Services.Communication.Engine.CandidateTrace>(),
+                Signals = Array.Empty<Sprk.Bff.Api.Services.Communication.Engine.SignalTrace>(),
+            },
+        };
+        var request = new Sprk.Bff.Api.Models.Office.SaveRequest
+        {
+            ContentType = Sprk.Bff.Api.Models.Office.SaveContentType.Email,
+            TargetEntity = new Sprk.Bff.Api.Models.Office.SaveEntityReference { EntityType = "Matter", EntityId = matter },
+        };
+        return filing.FileIfUnfiledAsync(
+            request, new EmailCaptureOutcome(RefiledEmail, ReconciledToExisting: true, decision), "office-token",
+            CancellationToken.None);
+    }
+
+    [Fact(DisplayName = "#2143 r8 F1-B must-fire: an Office save by a Full Access holder on S files an unfiled email in S's thread onto ordinary O, and it ends in O's thread owned by O's team")]
+    public async Task OfficeSave_ByAFullAccessHolderOnTheSecureRecordItsThreadHolds_FilesTheUnfiledEmail_AndItsThreadFollows()
+    {
+        // Before round 8 the save passed no caller: R7b asks F3 about S (the thread the reconcile leaves), and with nobody to
+        // ask F3 answers Unverifiable, so every such save was refused, logged, and the email left unfiled.
+        AnUnfiledEmailInTheSecureRecordsThread();
+
+        var result = await OfficeSaveFiles(OrdinaryMatter, FullAccessOnTheRecord);
+
+        result.Should().Be(Sprk.Bff.Api.Services.Office.ReconciledFilingResult.Filed);
+        var email = _world.Row("sprk_communication", RefiledEmail);
+        email.GetAttributeValue<EntityReference>("sprk_regardingmatter")?.Id.Should().Be(OrdinaryMatter);
+        email.GetAttributeValue<EntityReference>(ThreadResolver.ThreadLookupOnCommunication)?.Id
+            .Should().Be(OrdinaryMattersThread, "the thread move acted for the person who saved");
+        email.GetAttributeValue<EntityReference>("owningteam")?.Id.Should().Be(Directory.ChildTeam, "O's team");
+    }
+
+    [Fact(DisplayName = "#2143 r8 F1-B must-not-fire: an Office save by a caller with no rights on S leaves the unfiled email in S's thread unfiled")]
+    public async Task OfficeSave_ByACallerWithNoRightsOnTheSecureRecordItsThreadHolds_IsNotFiled()
+    {
+        AnUnfiledEmailInTheSecureRecordsThread();
+
+        var result = await OfficeSaveFiles(OrdinaryMatter, AccessRights.None);
+
+        result.Should().Be(Sprk.Bff.Api.Services.Office.ReconciledFilingResult.Failed, "the reparent refused it before the write");
+        var email = _world.Row("sprk_communication", RefiledEmail);
+        email.GetAttributeValue<EntityReference>("sprk_regardingmatter").Should().BeNull("nothing is written");
+        email.GetAttributeValue<EntityReference>(ThreadResolver.ThreadLookupOnCommunication)?.Id.Should().Be(SecureMattersThread);
+        _world.Assignments.Should().BeEmpty();
+    }
+
+    /// <summary>Full Access on a record, as <c>RetrievePrincipalAccess</c> reports it (Write and Delete among the rights).</summary>
+    private const AccessRights FullAccessOnTheRecord =
+        AccessRights.Read | AccessRights.Write
+        | AccessRights.Append | AccessRights.AppendTo
+        | AccessRights.Delete | AccessRights.Share;
+
     private static readonly Guid SecondSecureMatter = Guid.Parse("a2143000-0000-4000-8000-0000000000a8");
     private static readonly Guid SecondSecureMattersThread = Guid.Parse("a2143000-0000-4000-8000-0000000000ea");
 
