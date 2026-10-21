@@ -63,7 +63,27 @@ Branch `task/ebill-099-step0` (from `origin/work/ebilling-r1` at `14a0cdf82c`). 
 
 ## Publish size, CVE, conflict check
 
-See the "Publish size" section below; it is filled in after measurement.
+**Publish size.** Measured from fresh exports at short paths: base `14a0cdf82c` (`origin/work/ebilling-r1`) against this branch's head.
+
+| | Size |
+|---|---|
+| Base | 40,126,927 B (38.268 MB) |
+| Branch | 40,128,321 B (38.269 MB) |
+| Delta | **+1,394 B** |
+| `Sprk.Bff.Api.dll` | +3,072 B |
+
+- **Convention:** `dotnet publish -c Release … -r linux-x64 --self-contained false` (framework-dependent), then `Compress-Archive -CompressionLevel Optimal` over the output, PDBs included.
+- **Comparison point:** the branch base, not master. A master comparison would measure the whole ebilling branch, not this task.
+- **Ceiling:** well under 60 MB.
+
+**CVE.** No package or project reference changed (the csproj is untouched), so no new CVE exposure. The vulnerable-package listing was not run.
+
+**Conflict check.** `/conflict-check` was not run. It is for the main session before the PR; no PR was opened.
+
+**Full unit suite.** 30761 passed, 77 failed, 28 skipped.
+- None of the 77 failures is a Finance or step-0 test.
+- Every failure was a multi-minute timeout, from running alongside the publish and the reviewer on the same machine.
+- Rerun alone, the 48 affected classes passed 795 out of 795.
 
 ## Known limits (adversarial review pass 1; not fix-now)
 
