@@ -135,3 +135,19 @@ seam tests (re-checked 27bac15a42: no objection, 2026-10-21).
   - K3: normalise a lowercase `sprk_ai_search_index@odata.bind` explicit null, so no case-duplicate keys reach the payload.
 - #2206 (filed by UAC-r2): a stamped `sprk_ai_search_index` is not re-derived when the owner changes. Pre-existing on master; 015's default inherits it.
 - 017/018, where a project takes its pair-named matter's BU team, go to UAC-r2 for condition (b).
+
+## 2026-10-21 — Owner: Repair field security, option 1 (UAC-r2 concurs)
+
+- **Problem:** Repair (task 016) applies mapping as the system principal, with no caller to mask against (#2188 design D
+  masks to the caller's view).
+- **Decision:** option 1. Repair skips field-secured source columns using the app-only metadata reader from task 033.
+  The #2188 Roslyn guard gets a per-occurrence allow-list entry for Repair's single `ApplyFillOnly` call.
+- **UAC-r2 conditions:**
+  1. fail closed on metadata, with a distinct reason;
+  2. never write the document access or D7 link columns (done in 016 through `RefuseAppOnlyWrite`);
+  3. a per-occurrence allow-list entry;
+  4. tests;
+  5. 052 stays blocked until 033 lands with the skip.
+- **Rejected:** option 2 (matching security profiles); it adds a comparison and gains nothing. Option 3 (Repair never
+  maps) is the fallback if 033 slips past 052's need date.
+- **Safety until 033:** nothing calls Repair (`RecordRepairReachabilityTests`); 052 is hard-blocked on 033.
