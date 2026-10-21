@@ -311,3 +311,13 @@ Criterion 89 (blank the writer client id, expect the writer-failure alert to fir
 - ~14:36Z: POL-MATTER-NOBUDGET (`00000000-0000-4000-8000-000000006301`) `sprk_enabled` = Yes (PATCH with If-Match *, read back; unscoped; current version `…6311`) (D-163).
 - 14:38Z: dev landing tab switched to the Worklist by `scripts/Set-DefaultWorkspaceLayout.ps1 -To Worklist` (WhatIf first, verified) (D-164). Peers notified before and after.
 - Same day, R3 deployed dev BFF `1.0.0+9721819ed…` (14:32:19Z): master `88b3ecb1f` (sync #2073: 063, 102a, 102, 064) + UAC #2074. Console from `88b3ecb1f` at 07:32:56Z.
+
+## 2026-10-21 — task 130 live proof (dev, spaarkedev1): scoped PublishXml, owner-approved (D-176)
+
+- **What ran:** `scripts/Publish-ThemeIcons.ps1` from origin/master (git-archive copy, with `scripts/lib/Publish-SolutionComponents.ps1`), `-DataverseUrl https://spaarkedev1.crm.dynamics.com`. 20:28:43–20:28:58Z. One `PublishXml` built by `New-PublishParameterXml -WebResources` for six web resources: `sprk_ThemeMenu.js`, `sprk_ThemeMenu16.svg`, `sprk_ThemeMenu32.svg`, `sprk_ThemeAuto16.svg`, `sprk_ThemeLight16.svg`, `sprk_ThemeDark16.svg` (all six "Found:"). Output "Published successfully!", exit 0. No import, no PublishAllXml.
+- **Before snapshot** (unmanaged web resources 640, saved queries 1001, sitemaps 8, app modules 5): **0 pending** in every set. The run was only allowed to proceed because nothing was pending.
+- **After snapshot:** 0 pending everywhere. **0** published-stamp changes on web resources, sitemaps and app modules. Sentinel content hashes (`sprk_spaarkeai`, `sprk_ThemeMenu.js`) are unchanged.
+- **Saved queries 1001 → 1008:** the seven new rows are the default system views of `sprk_procedureversion` (Active, Inactive, My, Advanced Find, Associated, Lookup, Quick Find). That table was being created by ebilling's concurrent task 080 schema run, which owns them; the web-resource publish created none of them.
+- **Peer notices:** R3, uac-r2, word-add-in and ebilling, before and after.
+- **Limit:** this proves the web-resource branch of the scoped publish. The entity, ribbon, app-module and sitemap branches are covered by the module's unit tests (`tests/scripts/Publish-SolutionComponents.Tests.ps1`). ebilling's `Deploy-Ebilling*` scripts use the same module for their entity publishes.
+

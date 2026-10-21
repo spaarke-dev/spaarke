@@ -1,6 +1,6 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-20 (main session; dev BFF on master `4f5f22694` (R3, 23:34Z), ontology smoke PASS, rollback `0b976628e`; 080 schema review FINDINGS sent, waiting for ebilling's revision; D-173 recorded). State only — history is in git log,
+> **Last Updated**: 2026-10-21 20:35Z (main session; task 130 DONE: owner-approved live proof (D-176), a scoped PublishXml for six web resources on spaarkedev1, nothing unrelated published; #2118 answers exchanged with ebilling (invoiceId on new Duplicate Signals, tracking-number fallback; rate card inside the family)). State only — history is in git log,
 > task `<completion>` blocks and `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (D-106 critical path;
 > D-123 secure family; D-126 deploys from master; D-127 MVP first; D-129/D-130 team ownership; D-138 owner approvals; D-139; D-140) and §6.
 > Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-173). Deferred work: one self-contained GitHub issue per item, label
