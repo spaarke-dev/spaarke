@@ -1,6 +1,7 @@
 using System.Reflection;
-using System.Text;
-using System.Text.RegularExpressions;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Xunit;
 
 namespace Spaarke.ArchTests;
@@ -17,28 +18,27 @@ namespace Spaarke.ArchTests;
 /// record-creation service's mapping step among them, when it merges — must reuse the mask, and this makes that a red build
 /// rather than a review comment.</para>
 ///
-/// <para><b>The rule.</b> At each call of <c>CreateTimeFieldMapping.Apply(</c> or <c>.ApplyFillOnly(</c> under
-/// <c>src/server/**</c>, the <c>source</c> argument (third positional, or named <c>source:</c>) is either the literal
+/// <para><b>The rule.</b> At each call of <c>CreateTimeFieldMapping.Apply</c> / <c>ApplyFillOnly</c> under <c>src/server/**</c> —
+/// qualified, fully qualified, through a <c>using X = …CreateTimeFieldMapping</c> alias or a <c>using static</c> import, with or
+/// without a verbatim <c>@</c> — the <c>source</c> argument (third positional, or named <c>source:</c>) is either the literal
 /// <c>null</c> / <c>default</c> (nothing read, nothing copied), or a plain local name. For a local name the rule is an
-/// ALLOW-LIST per occurrence (review pass 2, F3): every occurrence of that name in the file must be (1) an assignment or
-/// declaration, at the start of its statement, of <c>null</c>, <c>default</c> or exactly
-/// <c>(await )?MappingSourceCallerMask.ApplyAsync(…)</c> (optionally <c>.ConfigureAwait(false)</c>, nothing else); (2) a null
-/// check; or (3) an engine call's source argument — and at least one assignment must be a mask call. Anything else (a helper
-/// argument, an alias, a cast, a parameter, a lambda, pattern or query binding, a deconstruction, a member or field access,
-/// a <c>ref</c>) fails, as do an expression source, a <c>using static</c> or <c>using</c>-alias import of the engine, and the
-/// engine's method taken as a method group (#2191 review).</para>
-/// <para><b>Known limits</b> (accepted, review pass 2): the mask call's arguments are not checked; the name inside a string
-/// literal is a fail-closed false positive. A call made through REFLECTION (<c>GetMethod("Apply").Invoke</c>) is not seen by any
-/// text scan; <see cref="TheEngine_OffersNoOtherPathThatTakesASourceEntity"/> keeps the engine's own surface to the two guarded
-/// entry points, which is what makes a reflective call the only way round.</para>
-/// <para><b>Comments and strings</b> (UAC-r2 re-check of #2191, F3): ONE pass, <see cref="StripComments"/>, blanks every <c>//</c>
-/// and <c>/* */</c> comment while tracking regular, verbatim, interpolated and raw strings and char literals, so neither a
-/// <c>//</c> nor a <c>/*</c> inside a string can hide code. <see cref="Scan"/> is the single entry point — the file loop and both
-/// control theories use it. <b>Spellings tolerated:</b> a verbatim identifier (<c>CreateTimeFieldMapping.@Apply(</c>) and a block
-/// comment between any two tokens the patterns match.</para>
+/// ALLOW-LIST per occurrence, decided on syntax nodes in the SAME member body (method, constructor, accessor or local function):
+/// every occurrence of that name there must be (1) a declaration or a statement-level assignment of <c>null</c>, <c>default</c>
+/// or exactly <c>(await )?MappingSourceCallerMask.ApplyAsync(…)</c> (optionally <c>.ConfigureAwait(false)</c>, nothing else);
+/// (2) a null check; or (3) an engine call's source argument — and at least one assignment must be a mask call. Anything else (a
+/// helper argument, an alias, a cast, a parameter, a lambda, pattern or query binding, a deconstruction, a member access, a
+/// <c>ref</c>, a field, property or base-class member declared outside the body) fails, as does an expression source and the
+/// engine's method taken as a method group (assigned, passed, <c>new Func&lt;…&gt;(…)</c>).</para>
+/// <para><b>Parsed with Roslyn (a syntax tree); comments and string contents cannot hide or fake a call.</b> The sources are read
+/// by <c>CSharpSyntaxTree.ParseText</c>, so a <c>//</c>, <c>/*</c>, quote or brace inside any kind of string or char literal,
+/// or inside a comment, is never mistaken for code. A tree with syntax errors is still walked, node by node; real sources
+/// compile, and a control that does not parse as a file is parsed as a script (statements and members at the top level).</para>
+/// <para><b>Known limits</b> (accepted): the mask call's arguments are not checked. A call made through REFLECTION
+/// (<c>GetMethod("Apply").Invoke</c>) is not seen by any syntax scan; <see cref="TheEngine_OffersNoOtherPathThatTakesASourceEntity"/>
+/// keeps the engine's own surface to the two guarded entry points, which is what makes a reflective call the only way round.</para>
 ///
-/// <para>Crude by design (<see cref="SourceScan"/>): text, not syntax. Paired with must-fire controls (a bypass in each shape
-/// fails) and must-not-fire controls (the masked Office shape and a literal null pass).</para>
+/// <para>Paired with must-fire controls (a bypass in each shape fails) and must-not-fire controls (the masked Office shape, a
+/// literal null, a call in a comment or a string pass), all fed through the same <see cref="Scan"/> as the real tree.</para>
 /// </remarks>
 public class MappingSourceCallerMaskGuardTests
 {
@@ -53,20 +53,13 @@ public class MappingSourceCallerMaskGuardTests
             "to the private ApplyAll — that is not a call site that reads a source.",
     };
 
-    private static readonly Regex EngineCall = new(
-        @"\bCreateTimeFieldMapping\s*\.\s*@?(Apply|ApplyFillOnly)\s*\(",
-        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    /// <summary>The engine's simple type name, and its two guarded entry points.</summary>
+    private const string EngineType = "CreateTimeFieldMapping";
 
-    /// <summary>A <c>using static</c> import of the engine, or a <c>using</c> alias of it (#2191 review, F a) — either hides
-    /// its calls from <see cref="EngineCall"/>.</summary>
-    private static readonly Regex EngineImport = new(
-        @"using\s+(?:static\s+|\w+\s*=\s*)[\w.:]*CreateTimeFieldMapping\s*;",
-        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly string[] EngineMethods = ["Apply", "ApplyFillOnly"];
 
-    /// <summary>The engine's method taken as a method group, not called (#2191 review, F b): a delegate call hides the source.</summary>
-    private static readonly Regex EngineMethodGroup = new(
-        @"\bCreateTimeFieldMapping\s*\.\s*@?(Apply|ApplyFillOnly)\b(?!\s*\()",
-        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    /// <summary>The engine call sites in the tree today (the Office quick-create's mapping step); the scan must see at least these.</summary>
+    private const int KnownCallSites = 1;
 
     [Fact(DisplayName = "#2188: every source handed to the field-mapping engine was masked to the caller's view first")]
     public void EverySourceHandedToTheMappingEngine_PassedThroughTheCallerMask()
@@ -87,7 +80,8 @@ public class MappingSourceCallerMaskGuardTests
             offenders.AddRange(scan.Violations.Select(v => $"{relative}:{v}"));
         }
 
-        Assert.True(callSites > 0, "The scan found no call of the field-mapping engine at all — the pattern no longer matches.");
+        Assert.True(callSites >= KnownCallSites,
+            $"The scan found {callSites} call(s) of the field-mapping engine, fewer than the {KnownCallSites} known — it no longer sees them.");
         Assert.True(offenders.Count == 0,
             "A source entity reaches CreateTimeFieldMapping.Apply/ApplyFillOnly without MappingSourceCallerMask (#2188). The " +
             "source is read app-only, which ignores field-level security; mask it first:\n" +
@@ -314,9 +308,10 @@ public class MappingSourceCallerMaskGuardTests
             """
         },
         {
-            "an engine imported with using static",
+            "an engine imported with using static and called by its bare name",
             """
             using static Sprk.Bff.Api.Services.Dataverse.FieldMapping.CreateTimeFieldMapping;
+            Apply(rules, target, appRead, p, w, l);
             """
         },
         {
@@ -392,6 +387,78 @@ public class MappingSourceCallerMaskGuardTests
             """
         },
         {
+            "(UAC-r2 re-check, F3-1) a char literal quote inside an interpolation hole, a stray brace, then a call (as UAC wrote it)",
+            """
+            var a = $"{n.Trim('"')}"; } var u = "http://x"; CreateTimeFieldMapping.Apply(rules, target, appRead, p, w, l);
+            """
+        },
+        {
+            "(UAC-r2 re-check, F3-1) the same, well formed",
+            """
+            var a = $"{n.Trim('"')}"; var u = "http://x"; CreateTimeFieldMapping.Apply(rules, target, appRead, p, w, l);
+            """
+        },
+        {
+            "(UAC-r2 re-check, F3-1) the $@ variant with a stray brace and the call on the next line",
+            """
+            var a = $@"{n.Trim('"')}"; }
+            CreateTimeFieldMapping.Apply(rules, target, appRead, p, w, l);
+            """
+        },
+        {
+            "(UAC-r2 re-check, F3-1) the $@ variant, well formed",
+            """
+            var a = $@"{n.Trim('"')}";
+            CreateTimeFieldMapping.Apply(rules, target, appRead, p, w, l);
+            """
+        },
+        {
+            "(UAC-r2 re-check, F3-2) a verbatim string ending in a backslash, a // in a string, then a call",
+            """
+            var dir = @"C:	emp\"; var u = "http://x"; CreateTimeFieldMapping.Apply(rules, target, appRead, p, w, l);
+            """
+        },
+        {
+            "(UAC-r2 re-check, F3-2) a // inside a nested string in an interpolation hole, then a call",
+            """
+            var s = $"{(x ? "//" : "")}"; CreateTimeFieldMapping.Apply(rules, target, appRead, p, w, l);
+            """
+        },
+        {
+            "(UAC-r2 re-check, F3-3) a string that spells a mask assignment does not satisfy the allow-list for a base-class member",
+            """
+            class Svc : Base
+            {
+                async Task M()
+                {
+                    var doc = "x; Source = await MappingSourceCallerMask.ApplyAsync(a);";
+                    CreateTimeFieldMapping.Apply(rules, target, Source, p, w, l);
+                }
+            }
+            """
+        },
+        {
+            "(UAC-r2 re-check) a source declared outside the member (a field) and used as the argument",
+            """
+            class Svc
+            {
+                private Entity? source;
+                void M() { CreateTimeFieldMapping.Apply(rules, target, source, p, w, l); }
+            }
+            """
+        },
+        {
+            "(UAC-r2 re-check) a source declared outside the member (a property of a partial) assigned elsewhere",
+            """
+            partial class Svc
+            {
+                Entity? Source { get; set; }
+                async Task Read() { Source = await MappingSourceCallerMask.ApplyAsync(a); }
+                void M() { CreateTimeFieldMapping.Apply(rules, target, Source, p, w, l); }
+            }
+            """
+        },
+        {
             "(#2191 review, F b) the engine's method taken as a method group and called through the delegate",
             """
             Action<IEnumerable<FieldMappingRuleEntity>, Entity, Entity?, IReadOnlySet<string>, List<string>, ILogger> f;
@@ -404,7 +471,7 @@ public class MappingSourceCallerMaskGuardTests
     [Theory(DisplayName = "#2188 guard control: each bypass shape fires")]
     [MemberData(nameof(Bypasses))]
     public void TheGuardFires_OnEveryBypassShape(string shape, string snippet)
-        => Assert.True(Scan(snippet).Violations.Count > 0, $"The guard did not fire on: {shape}.");
+        => Assert.True(Scan(snippet, SourceCodeKind.Script).Violations.Count > 0, $"The guard did not fire on: {shape}.");
 
     public static TheoryData<string, string> SanctionedShapes() => new()
     {
@@ -461,6 +528,29 @@ public class MappingSourceCallerMaskGuardTests
             """
         },
         {
+            "(UAC-r2 re-check) a call spelled inside a string literal is text, not a call",
+            """
+            var doc = "CreateTimeFieldMapping.Apply(rules, target, appRead, p, w, l);";
+            var raw = @"CreateTimeFieldMapping.ApplyFillOnly(rules, target, appRead, p, w, l);";
+            CreateTimeFieldMapping.ApplyFillOnly(rules, target, null, p, w, l);
+            """
+        },
+        {
+            "(UAC-r2 re-check) a masked local inside a member of a class",
+            """
+            class Svc
+            {
+                async Task M()
+                {
+                    Entity? source = null;
+                    source = await MappingSourceCallerMask.ApplyAsync(c, t, i, appRead, cols, _logger, ct).ConfigureAwait(false);
+                    if (source is null) { }
+                    CreateTimeFieldMapping.Apply(rules, target, source, p, w, l);
+                }
+            }
+            """
+        },
+        {
             "a named, masked source",
             """
             var masked = await MappingSourceCallerMask.ApplyAsync(caller, table, id, appRead, columns, _logger, ct);
@@ -472,418 +562,257 @@ public class MappingSourceCallerMaskGuardTests
     [Theory(DisplayName = "#2188 guard control: the sanctioned shapes do not fire")]
     [MemberData(nameof(SanctionedShapes))]
     public void TheGuardDoesNotFire_OnTheSanctionedShapes(string shape, string snippet)
-        => Assert.True(Scan(snippet).Violations.Count == 0,
-            $"The guard fired on the sanctioned shape: {shape}: {string.Join("; ", Scan(snippet).Violations)}");
+        => Assert.True(Scan(snippet, SourceCodeKind.Script).Violations.Count == 0,
+            $"The guard fired on the sanctioned shape: {shape}: {string.Join("; ", Scan(snippet, SourceCodeKind.Script).Violations)}");
 
     // ── the detector ──────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The one entry point: comments blanked once (<see cref="StripComments"/>), then the engine's call sites counted and every
-    /// violation found in the SAME text. The file loop and both control theories call this, so the controls exercise the pipeline
-    /// the real tree goes through.
+    /// The one entry point: parse <paramref name="text"/> and walk the tree for the engine's call sites and violations. The file
+    /// loop (<see cref="SourceCodeKind.Regular"/>) and both control theories (<see cref="SourceCodeKind.Script"/>, so a snippet of
+    /// statements and members parses without a wrapper) call it. A tree with syntax errors is walked as it stands.
     /// </summary>
-    internal static (int CallSites, List<string> Violations) Scan(string text)
+    internal static (int CallSites, List<string> Violations) Scan(string text, SourceCodeKind kind = SourceCodeKind.Regular)
     {
-        var code = StripComments(text);
-        return (EngineCall.Matches(code).Count, Violations(code));
-    }
-
-    /// <summary>Each violation in <paramref name="code"/> (comments already stripped) as "line: reason".</summary>
-    private static List<string> Violations(string code)
-    {
+        var tree = CSharpSyntaxTree.ParseText(text, new CSharpParseOptions(LanguageVersion.Latest, kind: kind));
+        var root = tree.GetRoot();
         var violations = new List<string>();
 
-        foreach (Match import in EngineImport.Matches(code))
-        {
-            violations.Add($"{SourceScan.LineOf(code, import.Index)}: imports the engine with using static or a using alias, so its calls cannot be checked");
-        }
+        // How the engine can be named: its own name, a using alias of it, or (bare Apply) a using static import of it.
+        var imports = root.DescendantNodes().OfType<UsingDirectiveSyntax>().Where(u => LastName(u.NamespaceOrType) == EngineType).ToList();
+        var aliases = imports.Where(u => u.Alias is not null).Select(u => u.Alias!.Name.Identifier.ValueText).ToHashSet(StringComparer.Ordinal);
+        var staticImport = imports.Any(u => u.StaticKeyword.IsKind(SyntaxKind.StaticKeyword));
 
-        foreach (Match group in EngineMethodGroup.Matches(code))
+        bool IsEngineType(ExpressionSyntax e) => e switch
         {
-            violations.Add($"{SourceScan.LineOf(code, group.Index)}: takes CreateTimeFieldMapping.{group.Groups[1].Value} as a method group, so the source it is later called with cannot be checked");
-        }
+            IdentifierNameSyntax id => id.Identifier.ValueText == EngineType || aliases.Contains(id.Identifier.ValueText),
+            MemberAccessExpressionSyntax ma => ma.Name.Identifier.ValueText == EngineType,
+            _ => false,
+        };
 
-        // Every engine call's source argument, with where its text starts — the one sanctioned non-assignment use of the name.
-        var calls = new List<(int Line, string Source, int At)>();
-        foreach (Match call in EngineCall.Matches(code))
+        bool NamesEngineMethod(ExpressionSyntax callee) => callee switch
         {
-            var line = SourceScan.LineOf(code, call.Index);
-            if (SourceArgument(ArgumentsAt(code, call.Index + call.Length - 1)) is not { } source)
+            MemberAccessExpressionSyntax ma => EngineMethods.Contains(ma.Name.Identifier.ValueText) && IsEngineType(ma.Expression),
+            IdentifierNameSyntax id => staticImport && EngineMethods.Contains(id.Identifier.ValueText),
+            _ => false,
+        };
+
+        var calls = root.DescendantNodes().OfType<InvocationExpressionSyntax>().Where(c => NamesEngineMethod(c.Expression)).ToList();
+
+        // The engine's method taken as a method group, not called: a delegate call hides the source.
+        foreach (var node in root.DescendantNodes().Where(n => n is MemberAccessExpressionSyntax or IdentifierNameSyntax))
+        {
+            var isCallee = node.Parent is InvocationExpressionSyntax inv && inv.Expression == node;
+            var isMemberName = node.Parent is MemberAccessExpressionSyntax parent && parent.Name == node;
+            if (node is ExpressionSyntax expression && !isCallee && !isMemberName && node.Parent is not NameColonSyntax
+                && NamesEngineMethod(expression))
             {
-                violations.Add($"{line}: the source argument could not be found");
+                violations.Add($"{Line(node)}: takes CreateTimeFieldMapping.{LastName(expression)} as a method group, so the source it is later called with cannot be checked");
+            }
+        }
+
+        // Every call's source argument node, first: the one sanctioned non-assignment use of a masked local's name.
+        var sourceArguments = new HashSet<SyntaxNode>();
+        foreach (var call in calls)
+        {
+            if (SourceArgument(call) is { Expression: IdentifierNameSyntax id })
+            {
+                sourceArguments.Add(id);
+            }
+        }
+
+        var analysed = new HashSet<(SyntaxNode Scope, string Name)>();
+        foreach (var call in calls)
+        {
+            var argument = SourceArgument(call);
+            if (argument is null)
+            {
+                violations.Add($"{Line(call)}: the source argument could not be found");
                 continue;
             }
 
-            if (source.Text is "null" or "default")
+            switch (argument.Expression)
             {
-                continue;
-            }
-
-            if (!Regex.IsMatch(source.Text, @"^@?[A-Za-z_]\w*$"))
-            {
-                violations.Add($"{line}: the source is the expression '{Shorten(source.Text)}', not a masked local");
-                continue;
-            }
-
-            var verbatim = source.Text.StartsWith('@') ? 1 : 0;
-            calls.Add((line, source.Text[verbatim..], source.At + verbatim));
-        }
-
-        foreach (var name in calls.Select(c => c.Source).Distinct(StringComparer.Ordinal))
-        {
-            var engineArguments = calls.Where(c => c.Source == name).Select(c => c.At).ToHashSet();
-            var line = calls.First(c => c.Source == name).Line;
-            violations.AddRange(UnsanctionedUses(code, name, engineArguments).Select(reason => $"{line}: '{name}' {reason}"));
-        }
-
-        return violations;
-    }
-
-    /// <summary>
-    /// Review pass 2 (F3): an ALLOW-LIST per occurrence. Every occurrence of <paramref name="name"/> in the file must be one
-    /// of: (1) an assignment or declaration, at the start of its statement, whose right-hand side is <c>null</c>,
-    /// <c>default</c> or exactly a mask call; (2) a null check (<c>is null</c>, <c>is not null</c>, <c>== null</c>,
-    /// <c>!= null</c>); (3) an engine call's source argument. Anything else — a helper argument, an alias, a cast, a lambda,
-    /// pattern or query binding, a deconstruction, a member access, a <c>ref</c>, a parameter, a field write — is a violation.
-    /// </summary>
-    private static IEnumerable<string> UnsanctionedUses(string code, string name, IReadOnlySet<int> engineArguments)
-    {
-        var id = Regex.Escape(name);
-        var assigned = false;
-
-        foreach (Match use in Regex.Matches(code, $@"(?<!\w)@?{id}\b"))
-        {
-            var at = use.Value.StartsWith('@') ? use.Index + 1 : use.Index;
-            var line = SourceScan.LineOf(code, use.Index);
-            var after = code[(use.Index + use.Length)..];
-
-            if (use.Index > 0 && code[use.Index - 1] == '.')
-            {
-                yield return $"is used as a member at line {line} ('.{name}') — a field or another object's member is not the masked local";
-                continue;
-            }
-
-            // (3) the engine's source argument.
-            if (engineArguments.Contains(at))
-            {
-                continue;
-            }
-
-            // (2) a null check.
-            if (Regex.IsMatch(after, @"^\s*(?:is\s+(?:not\s+)?null\b|[!=]=\s*null\b)"))
-            {
-                continue;
-            }
-
-            // (1) an assignment or declaration at the start of a statement, of exactly null / default / the mask call.
-            var assignment = Regex.Match(after, @"^\s*=(?![=>])");
-            if (assignment.Success && StartsAStatement(code, use.Index))
-            {
-                var rhs = RightHandSide(code, use.Index + use.Length + assignment.Length);
-                if (rhs is "null" or "default" || IsExactlyAMaskCall(rhs))
-                {
-                    assigned = true;
-                    continue;
-                }
-
-                yield return $"is assigned from '{Shorten(rhs)}' at line {line}, not exactly from MappingSourceCallerMask.ApplyAsync(…)";
-                continue;
-            }
-
-            var from = Math.Max(0, use.Index - 25);
-            yield return $"has an unsanctioned use at line {line}: '{Shorten(code[from..Math.Min(code.Length, use.Index + use.Length + 25)])}'";
-        }
-
-        if (!assigned)
-        {
-            yield return "is never assigned from the mask in this file (a parameter or field?) — mask the source where it is read";
-        }
-    }
-
-    /// <summary>
-    /// True when the occurrence at <paramref name="index"/> begins its statement: only whitespace, or a declaration's type
-    /// (<c>var</c>, <c>Entity?</c>, a qualified name), lies between it and the previous <c>;</c>, <c>{</c> or <c>}</c>.
-    /// </summary>
-    private static bool StartsAStatement(string code, int index)
-    {
-        var start = index - 1;
-        while (start >= 0 && code[start] is not (';' or '{' or '}'))
-        {
-            start--;
-        }
-
-        var lead = code[(start + 1)..index].Trim();
-        return lead.Length == 0 || Regex.IsMatch(lead, @"^(?:var|[A-Za-z_][\w.]*\??)$");
-    }
-
-    /// <summary>The right-hand side of an assignment starting at <paramref name="start"/>, up to its top-level <c>;</c>.</summary>
-    private static string RightHandSide(string code, int start)
-    {
-        var depth = 0;
-        var end = start;
-        for (; end < code.Length; end++)
-        {
-            var c = code[end];
-            if (c is '(' or '[' or '{')
-            {
-                depth++;
-            }
-            else if (c is ')' or ']' or '}')
-            {
-                if (depth == 0)
-                {
+                case var e when IsNullOrDefault(e):
                     break;
-                }
 
-                depth--;
-            }
-            else if (c == ';' && depth == 0)
-            {
-                break;
-            }
-        }
+                case IdentifierNameSyntax id:
+                    var scope = ScopeOf(call);
+                    var name = id.Identifier.ValueText;
+                    if (analysed.Add((scope, name)))
+                    {
+                        violations.AddRange(UnsanctionedUses(scope, name, sourceArguments).Select(reason => $"{Line(call)}: '{name}' {reason}"));
+                    }
 
-        return code[start..end].Trim();
-    }
-
-    /// <summary>
-    /// True only for <c>(await )?MappingSourceCallerMask.ApplyAsync(&lt;balanced args&gt;)</c>, optionally followed by
-    /// <c>.ConfigureAwait(false)</c>, and nothing else (no <c>?? appRead</c>, no further member access — review pass 1, F3 a).
-    /// Its arguments are not checked (known limit).
-    /// </summary>
-    private static bool IsExactlyAMaskCall(string rhs)
-    {
-        var head = Regex.Match(rhs, @"^(?:await\s+)?MappingSourceCallerMask\s*\.\s*ApplyAsync\s*\(");
-        if (!head.Success)
-        {
-            return false;
-        }
-
-        var depth = 0;
-        var close = -1;
-        for (var i = head.Length - 1; i < rhs.Length; i++)
-        {
-            if (rhs[i] == '(')
-            {
-                depth++;
-            }
-            else if (rhs[i] == ')' && --depth == 0)
-            {
-                close = i;
-                break;
-            }
-        }
-
-        return close > 0 && Regex.IsMatch(rhs[(close + 1)..], @"^\s*(?:\.\s*ConfigureAwait\s*\(\s*false\s*\))?\s*$");
-    }
-
-    /// <summary>The top-level arguments of the call whose '(' is at <paramref name="open"/>: each trimmed, with where it starts.</summary>
-    private static List<(string Text, int At)> ArgumentsAt(string code, int open)
-    {
-        var arguments = new List<(string Text, int At)>();
-        var depth = 0;
-        var start = open + 1;
-
-        void Add(int end)
-        {
-            var raw = code[start..end];
-            arguments.Add((raw.Trim(), start + (raw.Length - raw.TrimStart().Length)));
-        }
-
-        for (var i = open; i < code.Length; i++)
-        {
-            var c = code[i];
-            if (c is '(' or '[' or '{')
-            {
-                depth++;
-            }
-            else if (c is ')' or ']' or '}')
-            {
-                depth--;
-                if (depth == 0)
-                {
-                    Add(i);
                     break;
-                }
-            }
-            else if (c == ',' && depth == 1)
-            {
-                Add(i);
-                start = i + 1;
+
+                default:
+                    violations.Add($"{Line(call)}: the source is the expression '{Shorten(argument.Expression.ToString())}', not a masked local");
+                    break;
             }
         }
 
-        return arguments;
+        return (calls.Count, violations);
     }
 
-    /// <summary>The <c>source</c> argument (its value, and where the value starts): named <c>source:</c>, else the third positional one.</summary>
-    private static (string Text, int At)? SourceArgument(IReadOnlyList<(string Text, int At)> arguments)
+    /// <summary>The <c>source</c> argument: named <c>source:</c>, else the third positional one.</summary>
+    private static ArgumentSyntax? SourceArgument(InvocationExpressionSyntax call)
     {
-        foreach (var (text, at) in arguments)
+        var arguments = call.ArgumentList.Arguments;
+        var named = arguments.FirstOrDefault(a => a.NameColon?.Name.Identifier.ValueText == "source");
+        if (named is not null)
         {
-            var named = Regex.Match(text, @"^source\s*:\s*");
-            if (named.Success)
-            {
-                return (text[named.Length..].Trim(), at + named.Length);
-            }
+            return named;
         }
 
-        return arguments.Count > 2 && !Regex.IsMatch(arguments[2].Text, @"^\w+\s*:") ? arguments[2] : null;
+        return arguments.Count > 2 && arguments[2].NameColon is null ? arguments[2] : null;
     }
 
     /// <summary>
-    /// <paramref name="code"/> with every <c>//</c> and <c>/* ... */</c> comment blanked to spaces (newlines kept, so offsets and
-    /// line numbers do not move). ONE string-aware pass: a comment marker inside a regular, verbatim (<c>@"…"</c>, <c>""</c> escape),
-    /// interpolated (<c>$"…{…}…"</c>, the holes included) or raw (<c>"""…"""</c>) string, or a char literal, is text, and a quote
-    /// inside a comment opens nothing. Strings keep their text.
+    /// The member body a name is judged in: the nearest local function, accessor or member declaration around the call, else the
+    /// whole unit (a script's top-level statements).
     /// </summary>
-    internal static string StripComments(string code)
+    private static SyntaxNode ScopeOf(SyntaxNode call)
+        => call.Ancestors().FirstOrDefault(a => a is LocalFunctionStatementSyntax or AccessorDeclarationSyntax
+                                                || (a is MemberDeclarationSyntax and not GlobalStatementSyntax))
+           ?? call.SyntaxTree.GetRoot();
+
+    /// <summary>
+    /// An ALLOW-LIST per occurrence, on syntax nodes. Every identifier token spelled <paramref name="name"/> (a verbatim
+    /// <c>@name</c> is the same name) in <paramref name="scope"/> must be one of: (1) a local declaration or a statement-level
+    /// assignment whose value is <c>null</c>, <c>default</c> or exactly a mask call; (2) a null check; (3) an engine call's source
+    /// argument. Anything else — a helper argument, an alias, a cast, a lambda, pattern or query binding, a deconstruction, a member
+    /// access, a parameter, a <c>??=</c> — is a violation; so is a name never assigned from the mask in this body (a field, a
+    /// property or a base-class member declared outside it).
+    /// </summary>
+    private static IEnumerable<string> UnsanctionedUses(SyntaxNode scope, string name, ISet<SyntaxNode> sourceArguments)
     {
-        var result = new StringBuilder(code.Length);
-        var i = 0;
-        while (i < code.Length)
+        var maskAssigned = false;
+        var tokens = scope.DescendantTokens().Where(t => t.IsKind(SyntaxKind.IdentifierToken) && t.ValueText == name).ToList();
+
+        foreach (var token in tokens)
         {
-            var c = code[i];
-            var next = i + 1 < code.Length ? code[i + 1] : '\0';
-            if (c == '/' && next == '/')
+            var line = Line(token.Parent!);
+            switch (token.Parent)
             {
-                var end = code.IndexOf('\n', i);
-                i = Blank(code, i, end < 0 ? code.Length : end, result);
-            }
-            else if (c == '/' && next == '*')
-            {
-                var close = code.IndexOf("*/", i + 2, StringComparison.Ordinal);
-                i = Blank(code, i, close < 0 ? code.Length : close + 2, result);
-            }
-            else if (c == '"')
-            {
-                var end = EndOfString(code, i);
-                result.Append(code, i, end - i);
-                i = end;
-            }
-            else if (c == '\'' && i + 2 < code.Length)
-            {
-                // A char literal: 'x' or '\x' - consumed whole so '"' does not open a string.
-                var end = code[i + 1] == '\\' ? i + 3 : i + 2;
-                end = end < code.Length && code[end] == '\'' ? end + 1 : i + 1;
-                result.Append(code, i, end - i);
-                i = end;
-            }
-            else
-            {
-                result.Append(c);
-                i++;
-            }
-        }
+                case IdentifierNameSyntax { Parent: NameColonSyntax }:
+                    continue; // a named argument's label, not a use of the local
 
-        return result.ToString();
-    }
-
-    /// <summary>Appends spaces for <c>code[from..to]</c>, keeping line breaks; returns <paramref name="to"/>.</summary>
-    private static int Blank(string code, int from, int to, StringBuilder result)
-    {
-        for (var i = from; i < to; i++)
-        {
-            result.Append(code[i] is '\n' or '\r' ? code[i] : ' ');
-        }
-
-        return to;
-    }
-
-    /// <summary>The index just past the string literal whose opening quote is at <paramref name="quote"/>.</summary>
-    private static int EndOfString(string code, int quote)
-    {
-        var prefix = quote;
-        while (prefix > 0 && code[prefix - 1] is '@' or '$')
-        {
-            prefix--;
-        }
-
-        var verbatim = code[prefix..quote].Contains('@');
-        var interpolated = code[prefix..quote].Contains('$');
-
-        var quotes = 1;
-        while (quote + quotes < code.Length && code[quote + quotes] == '"')
-        {
-            quotes++;
-        }
-
-        if (quotes >= 3)
-        {
-            // A raw string literal: up to the same number of quotes again.
-            var close = code.IndexOf(new string('"', quotes), quote + quotes, StringComparison.Ordinal);
-            return close < 0 ? code.Length : close + quotes;
-        }
-
-        var i = quote + 1;
-        while (i < code.Length)
-        {
-            var ch = code[i];
-            var next = i + 1 < code.Length ? code[i + 1] : '\0';
-            if (!verbatim && ch == '\\')
-            {
-                i += 2;
-            }
-            else if (ch == '"')
-            {
-                if (verbatim && next == '"')
-                {
-                    i += 2;
+                case IdentifierNameSyntax { Parent: MemberAccessExpressionSyntax access } id when access.Name == id:
+                    yield return $"is used as a member at line {line} ('.{name}') — a field or another object's member is not the masked local";
                     continue;
-                }
 
-                return i + 1;
-            }
-            else if (interpolated && ch == '{')
-            {
-                i = next == '{' ? i + 2 : EndOfHole(code, i + 1);
-            }
-            else if (ch == '\n' && !verbatim)
-            {
-                return i; // an unterminated regular string: stop at the line, never run on
-            }
-            else
-            {
-                i++;
+                case IdentifierNameSyntax id when sourceArguments.Contains(id) || IsNullCheck(id):
+                    continue;
+
+                case IdentifierNameSyntax { Parent: AssignmentExpressionSyntax assignment } id
+                    when assignment.IsKind(SyntaxKind.SimpleAssignmentExpression) && assignment.Left == id
+                         && assignment.Parent is ExpressionStatementSyntax:
+                    if (IsNullOrDefault(assignment.Right))
+                    {
+                        continue;
+                    }
+
+                    if (IsMaskCall(assignment.Right))
+                    {
+                        maskAssigned = true;
+                        continue;
+                    }
+
+                    yield return $"is assigned from '{Shorten(assignment.Right.ToString())}' at line {line}, not exactly from MappingSourceCallerMask.ApplyAsync(…)";
+                    continue;
+
+                // A local; or, in a script, a top-level declaration (Roslyn reads it as a field of the script class).
+                case VariableDeclaratorSyntax { Parent.Parent: LocalDeclarationStatementSyntax or FieldDeclarationSyntax { Parent: CompilationUnitSyntax } } declarator
+                    when declarator.Identifier == token:
+                    var value = declarator.Initializer?.Value;
+                    if (value is not null && IsNullOrDefault(value))
+                    {
+                        continue;
+                    }
+
+                    if (value is not null && IsMaskCall(value))
+                    {
+                        maskAssigned = true;
+                        continue;
+                    }
+
+                    yield return $"is declared at line {line} {(value is null ? "without a value" : $"from '{Shorten(value.ToString())}'")}, not exactly from MappingSourceCallerMask.ApplyAsync(…)";
+                    continue;
+
+                default:
+                    yield return $"has an unsanctioned use at line {line}: '{Shorten(token.Parent!.Parent?.ToString() ?? token.Parent!.ToString())}'";
+                    continue;
             }
         }
 
-        return code.Length;
-    }
-
-    /// <summary>The index just past the interpolation hole whose first character is at <paramref name="start"/>; strings inside it are skipped whole.</summary>
-    private static int EndOfHole(string code, int start)
-    {
-        var depth = 1;
-        var i = start;
-        while (i < code.Length)
+        if (!maskAssigned)
         {
-            var ch = code[i];
-            if (ch == '"')
-            {
-                i = EndOfString(code, i);
-            }
-            else if (ch == '{')
-            {
-                depth++;
-                i++;
-            }
-            else if (ch == '}' && --depth == 0)
-            {
-                return i + 1;
-            }
-            else
-            {
-                i++;
-            }
+            yield return "is never assigned from the mask in this member body (a parameter, a field, a property or a base-class member?) — mask the source where it is read";
+        }
+    }
+
+    /// <summary>True for <c>x is null</c>, <c>x is not null</c>, <c>x == null</c>, <c>x != null</c> (and the mirrored comparisons).</summary>
+    private static bool IsNullCheck(IdentifierNameSyntax id)
+    {
+        switch (id.Parent)
+        {
+            case IsPatternExpressionSyntax pattern when pattern.Expression == id:
+                var inner = pattern.Pattern is UnaryPatternSyntax unary ? unary.Pattern : pattern.Pattern;
+                return inner is ConstantPatternSyntax constant && constant.Expression.IsKind(SyntaxKind.NullLiteralExpression);
+
+            case BinaryExpressionSyntax binary when binary.IsKind(SyntaxKind.EqualsExpression) || binary.IsKind(SyntaxKind.NotEqualsExpression):
+                var other = binary.Left == id ? binary.Right : binary.Left;
+                return other.IsKind(SyntaxKind.NullLiteralExpression);
+
+            default:
+                return false;
+        }
+    }
+
+    private static bool IsNullOrDefault(ExpressionSyntax e)
+        => e.IsKind(SyntaxKind.NullLiteralExpression) || e.IsKind(SyntaxKind.DefaultLiteralExpression) || e is DefaultExpressionSyntax;
+
+    /// <summary>
+    /// True only for <c>(await )?MappingSourceCallerMask.ApplyAsync(…)</c>, optionally followed by <c>.ConfigureAwait(false)</c>, and
+    /// nothing else (no <c>?? appRead</c>, no switch, no further member access). Its arguments are not checked (known limit).
+    /// </summary>
+    private static bool IsMaskCall(ExpressionSyntax e)
+    {
+        if (e is AwaitExpressionSyntax awaited)
+        {
+            e = awaited.Expression;
         }
 
-        return code.Length;
+        if (e is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax configure } configured
+            && configure.Name.Identifier.ValueText == "ConfigureAwait"
+            && configured.ArgumentList.Arguments.Count == 1
+            && configured.ArgumentList.Arguments[0].Expression.IsKind(SyntaxKind.FalseLiteralExpression))
+        {
+            e = configure.Expression;
+        }
+
+        return e is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax apply }
+               && apply.Name.Identifier.ValueText == "ApplyAsync"
+               && LastName(apply.Expression) == "MappingSourceCallerMask";
     }
+
+    /// <summary>The last identifier of a (qualified, alias-qualified or member-access) name, normalised: <c>@Apply</c> is <c>Apply</c>.</summary>
+    private static string? LastName(SyntaxNode? node) => node switch
+    {
+        IdentifierNameSyntax id => id.Identifier.ValueText,
+        SimpleNameSyntax simple => simple.Identifier.ValueText,
+        QualifiedNameSyntax q => q.Right.Identifier.ValueText,
+        AliasQualifiedNameSyntax a => a.Name.Identifier.ValueText,
+        MemberAccessExpressionSyntax m => m.Name.Identifier.ValueText,
+        _ => null,
+    };
+
+    private static int Line(SyntaxNode node) => node.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
 
     private static string Shorten(string text)
     {
-        var flat = Regex.Replace(text, @"\s+", " ");
+        var flat = string.Join(" ", text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
         return flat.Length <= 80 ? flat : flat[..80] + "…";
     }
 }
