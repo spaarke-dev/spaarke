@@ -48,12 +48,17 @@ public record SaveResponse
     /// Task 131 (#2171): what the save did about FILING the email it reconciled to. Present only on a new-save success
     /// response for an email save (or an attachment save, whose parent email is filed with it) that reconciled to an
     /// existing communication. Omitted from the JSON (<c>null</c>) whenever there is nothing to report: the save created
-    /// its own communication, named no record, saved a Word document, or is an idempotent replay (which returns before
-    /// any filing). Additive: clients that do not know the field ignore it.
+    /// its own communication, named no record, or saved a Word document. Additive: clients that do not know the field
+    /// ignore it.
     /// </summary>
     /// <remarks>
-    /// Never fails the save and never names the record the communication is filed under: the client can tell the user
-    /// the email was not filed, not what it is filed to.
+    /// <para>Never fails the save and never names the record the communication is filed under: the client can tell the
+    /// user the email was not filed, not what it is filed to.</para>
+    /// <para><b>A repeat of the same save does not re-file.</b> Within the idempotency window (24 h), a repeat with the
+    /// same <c>X-Idempotency-Key</c> is answered by <c>IdempotencyFilter</c> with the ORIGINAL response replayed, this
+    /// field included, and nothing runs again. After the window, the job-duplicate reply (<see cref="Duplicate"/>) returns
+    /// before any filing and carries no <c>emailFiling</c>. So a refused or failed filing is never retried by saving again;
+    /// the user files the email from Spaarke.</para>
     /// </remarks>
     [JsonConverter(typeof(JsonStringEnumConverter))]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

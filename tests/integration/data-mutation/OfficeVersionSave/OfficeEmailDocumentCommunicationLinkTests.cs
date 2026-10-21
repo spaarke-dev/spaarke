@@ -509,6 +509,33 @@ public class OfficeEmailDocumentCommunicationLinkTests
         await AssertNoEmailFilingAsync(retry);
     }
 
+    [Fact]
+    public async Task RepeatOfAnEmailSave_UnderTheSameIdempotencyKey_ReplaysTheOriginalOutcome_AndFilesNothingAgain()
+    {
+        // What a real client does on a retry: the same key. Within the idempotency window the cached 202 is replayed —
+        // emailFiling included — and the save does not run again, so no second filing attempt is made.
+        var store = new CommunicationStore();
+        var communicationId = store.Seed(RfcId);
+        store.DenyWrite();
+        var world = new OfficeVersionSaveWorld();
+        using var factory = Host(world, store);
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CallerToken);
+        var request = EmailSave();
+
+        var first = await PostWithKeyAsync(client, request, "same-key");
+        (await EmailFilingWireAsync(first)).Should().Be("NotPermitted", "precondition: the first save reported the refusal");
+        var repeat = await PostWithKeyAsync(client, request, "same-key");
+
+        repeat.StatusCode.Should().Be(HttpStatusCode.Accepted, "the original response is replayed as it was");
+        (await EmailFilingWireAsync(repeat)).Should().Be("NotPermitted", "the replay carries the original filing outcome");
+        store.Probe.Verify(
+            p => p.GetCallerRightsAsync(CallerToken, "sprk_communications", communicationId, It.IsAny<CancellationToken>()),
+            Times.Once, "the repeat ran no second filing attempt");
+        store.CommunicationWrites.Should().BeEmpty();
+        world.Jobs.Should().ContainSingle("the repeat created no second job");
+    }
+
     [Theory]
     [InlineData(ReconciledFilingResult.NotApplicable, null)]
     [InlineData(ReconciledFilingResult.Filed, EmailFilingOutcome.Filed)]

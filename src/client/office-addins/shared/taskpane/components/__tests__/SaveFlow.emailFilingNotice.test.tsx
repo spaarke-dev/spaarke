@@ -4,7 +4,7 @@
  * and `Failed`; nothing extra for `Filed` / `AlreadyFiled` / absent / a value from a newer server.
  *
  * Real SaveFlow + real useSaveFlow; only fetch, SSE and the Profile / Related-to sections are doubled (the harness of
- * SaveFlow.savedState.test.tsx). The notice is host-neutral, so the Word harness drives it.
+ * SaveFlow.copyRecordLink.test.tsx), driven as the Outlook pane — the only host whose server saves can report a filing.
  */
 import { render, screen, fireEvent } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
@@ -35,8 +35,9 @@ const MATTER = {
   name: 'Gamma Merger',
 };
 
-const NOT_PERMITTED = "Saved. The email wasn't filed to this record because you don't have permission to change it.";
-const FAILED = "Saved. The email couldn't be filed to this record. Try again later.";
+const NOT_PERMITTED =
+  "The email wasn't added to this record's communications because you don't have permission to change it.";
+const FAILED = "The email couldn't be added to this record's communications. File it from Spaarke.";
 
 type FakeResponse = { ok: boolean; status: number; text: () => Promise<string>; json: () => Promise<unknown> };
 const json = (status: number, body: unknown): FakeResponse => ({
@@ -72,11 +73,10 @@ async function saveToTheMatter(): Promise<void> {
   render(
     <FluentProvider theme={webLightTheme}>
       <SaveFlow
-        hostType="word"
-        itemId="https://contoso.sharepoint.com/Brief.docx"
-        itemName="Brief.docx"
-        canProvideDocumentName
-        captureDocumentContent={jest.fn().mockResolvedValue('UEsDBBQ=')}
+        hostType="outlook"
+        itemId="<msg-131@contoso.com>"
+        itemName="Re: Filing"
+        senderEmail="counsel@contoso.com"
         getAccessToken={jest.fn().mockResolvedValue('token')}
         apiBaseUrl="https://bff"
       />
@@ -102,7 +102,17 @@ describe('SaveFlow — the email was saved but not filed (task 131)', () => {
     expect(screen.getByText('Saved to Spaarke')).toBeInTheDocument(); // the save itself still shows as done
   });
 
-  it('Failed: a warning says the email could not be filed, try again later', async () => {
+  it('the notice is announced once, by the MessageBar: no extra announce() of the same sentence', async () => {
+    serverAnswers({ emailFiling: 'NotPermitted' });
+
+    await saveToTheMatter();
+
+    await screen.findByText(NOT_PERMITTED);
+    // The pane's own live region says only that the save succeeded; the warning text comes from Fluent's MessageBar.
+    expect(document.body.textContent?.split(NOT_PERMITTED).length).toBe(2); // the sentence appears exactly once
+  });
+
+  it('Failed: a warning says the email could not be added and points to filing it from Spaarke', async () => {
     serverAnswers({ emailFiling: 'Failed' });
 
     await saveToTheMatter();
@@ -127,7 +137,7 @@ describe('SaveFlow — the email was saved but not filed (task 131)', () => {
 
       await saveToTheMatter();
 
-      expect(screen.queryByText(/wasn't filed|couldn't be filed/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/wasn't added|couldn't be added/)).not.toBeInTheDocument();
       expect(screen.getByText('Saved to Spaarke')).toBeInTheDocument();
     }
   );

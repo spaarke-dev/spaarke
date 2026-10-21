@@ -6,6 +6,7 @@
 import { apiClient } from '@shared/services';
 import { cleanGuid } from '@spaarke/ui-components/guid';
 import type { QuickSaveSavedDocument } from '@shared/taskpane/services/quickSaveHelpers';
+import type { EmailFilingOutcome } from '@shared/taskpane/services/emailFilingNotice';
 
 /** How many times Quick Save reads its job for the saved document, and how long it waits between reads. */
 const JOB_READ_ATTEMPTS = 3;
@@ -21,7 +22,7 @@ export interface QuickSaveResponse {
    * "NotPermitted" | "Failed"`); omitted when there is nothing to report. Read through `readEmailFilingProblem`, so a value
    * this build does not know is ignored.
    */
-  emailFiling?: string;
+  emailFiling?: EmailFilingOutcome;
 }
 
 /** The fields of `GET /api/office/jobs/{id}` that Quick Save reads (server `JobStatusResponse`). */

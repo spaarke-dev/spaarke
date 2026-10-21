@@ -17,9 +17,12 @@ export type EmailFilingOutcome = 'Filed' | 'AlreadyFiled' | 'NotPermitted' | 'Fa
 /** The outcomes the user is told about. Filed / AlreadyFiled / absent / unknown say nothing extra. */
 export type EmailFilingProblem = 'NotPermitted' | 'Failed';
 
+// The EXPLANATION only: each surface supplies its own "saved" context (the pane's "Saved to Spaarke" bar, Quick Save's
+// "Saved to Spaarke and filed to <record>." sentence). "Try again" is deliberately absent: a repeat of the same save reuses
+// its idempotency key, so it replays the original response (within 24 h) or is a duplicate (after) — it never re-files.
 const NOT_PERMITTED_NOTICE =
-  "Saved. The email wasn't filed to this record because you don't have permission to change it.";
-const FAILED_NOTICE = "Saved. The email couldn't be filed to this record. Try again later.";
+  "The email wasn't added to this record's communications because you don't have permission to change it.";
+const FAILED_NOTICE = "The email couldn't be added to this record's communications. File it from Spaarke.";
 
 /**
  * The outcome to tell the user about, or `null` for filed / already filed / absent / any value this build does not know.
@@ -38,7 +41,7 @@ export function readEmailFilingProblem(value: unknown): EmailFilingProblem | nul
   }
 }
 
-/** The sentence for a problem outcome. */
+/** The explanation sentence for a problem outcome (no "Saved." prefix; see the note above). */
 export function describeEmailFilingProblem(problem: EmailFilingProblem): string {
   return problem === 'NotPermitted' ? NOT_PERMITTED_NOTICE : FAILED_NOTICE;
 }

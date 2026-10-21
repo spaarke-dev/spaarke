@@ -694,10 +694,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           // of right now.
           contentChangedSinceSave: false,
         }));
-        announce(
-          emailFilingProblem ? describeEmailFilingProblem(emailFilingProblem) : 'Document saved successfully',
-          'polite'
-        );
+        announce('Document saved successfully', 'polite');
         onComplete?.(docId, docUrl);
       },
       onError: error => {
@@ -1746,9 +1743,11 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
 
   // Task 131 (#2171): the save worked, but the email it reconciled to could not be filed to the chosen record. A
   // non-blocking warning beside the confirmation — never an error (the save succeeded) and never naming the record.
+  // Fluent's MessageBar announces its own text to screen readers when it mounts (its aria-live announcer), so this notice
+  // is deliberately NOT also announce()d — one channel only.
   const renderEmailFilingNotice = (problem: EmailFilingProblem | undefined) =>
     problem ? (
-      <MessageBar intent="warning" layout="multiline" role="status">
+      <MessageBar intent="warning" layout="multiline">
         <MessageBarBody>{describeEmailFilingProblem(problem)}</MessageBarBody>
       </MessageBar>
     ) : null;

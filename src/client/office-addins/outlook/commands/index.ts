@@ -115,9 +115,9 @@ function skippedNotice(content: EmailContentCapture | undefined): string {
 /**
  * The result-dialog text for a saved email. Names how many attachments were left out — never silent.
  *
- * Task 131 (#2171): when the save worked but the email it reconciled to could not be filed to the record, the dialog says
- * so instead of "filed to <record>" — which would be untrue. It stays a success dialog (the save succeeded); the sentence
- * is the same one the task pane shows and names no record.
+ * Task 131 (#2171): when the save worked but the email it reconciled to could not be filed to the record, the usual
+ * "Saved to Spaarke and filed to <target>." sentence (the save's own target) stays, and the explanation the task pane
+ * shows is appended. It stays a success dialog (the save succeeded); the explanation names no record the email is under.
  */
 function describeEmailSaved(
   target: { name: string } | null,
@@ -128,12 +128,10 @@ function describeEmailSaved(
   if (duplicate) {
     return 'This email is already saved in Spaarke. Nothing new was saved.';
   }
-  if (emailFilingProblem) {
-    return `${describeEmailFilingProblem(emailFilingProblem)}${skippedNotice(content)}`;
-  }
-  return target
+  const base = target
     ? `Saved to Spaarke and filed to ${target.name}.${skippedNotice(content)}`
     : `Saved to Spaarke — not filed to a record. Open Spaarke to file it.${skippedNotice(content)}`;
+  return emailFilingProblem ? `${base} ${describeEmailFilingProblem(emailFilingProblem)}` : base;
 }
 
 /**
