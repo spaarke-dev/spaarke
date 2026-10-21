@@ -773,6 +773,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 // #1616 fix round / task 046 r3: the Create Work Assignment wizard also files under an invoice or an event.
                 ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
                 ("sprk_regardingevent", "sprk_event", "sprk_RegardingEvent"),
+                // Field mapping task 014 fix round 3 (F-B): an ownership-parent lookup no filing list names (#2190).
+                ("sprk_regardingcommunication", "sprk_communication", "sprk_RegardingCommunication"),
                 ("sprk_assignedto", "contact", "sprk_AssignedTo"),
                 ("sprk_assignedtointernal", "contact", "sprk_AssignedToInternal"),
                 ("sprk_createdbyperson", "systemuser", "sprk_CreatedByPerson"),

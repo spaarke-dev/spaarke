@@ -102,8 +102,10 @@ Every merged-payload check is `CallerWriteAuthorization.CheckCallerMayCreateAsyn
   5. The row as written, once more. A failure refuses.
 
   `item` is reassigned to what survived: the SAME local reaches the pre-write rules (5½), the plan and the create.
-- **K-2 guard** (before step 5's checks): a lineage or ownership-parent lookup in `ServerSetLookupColumns` is refused
-  with `record_creation.server_set_filing_lookup` (500, nothing written).
+- **K-2 guard** (before step 3 since fix round 3; recorded as a `CallerChecks` refusal): a lineage or ownership-parent
+  lookup in `ServerSetLookupColumns` is refused with `record_creation.server_set_filing_lookup` (500, nothing written).
+  Since fix round 3 this also covers any lookup the owner decision files the row under (`OwnedChildWrite.ParentsOf`),
+  on every table except a work assignment or project.
 - **Step 6, after the plan** (fix round 1): a work assignment's or project's own filing lookup in
   `ServerSetLookupColumns` is asked AppendTo as the caller. The plan asks AppendTo only on a secure record. A refusal is
   step 5's uniform answer.
@@ -365,4 +367,105 @@ The round-2 fix is the reviewer's own verified fix. I re-checked it against its 
 
 POML step 7 (TASK-INDEX) was not done: the coordinator owns `TASK-INDEX.md`, `current-task.md` and the POML status.
 
-rework: fix-round-2 task 014
+## Fix round 3 (UAC-r2 review)
+
+Branch `task/fm-014-r3`, cut from `58d1a3548d`. Commits: `faf7a373f4` (F-A), `584f06cb14` (F-B and K-1).
+
+### Scope change (coordinator, mid-round)
+
+The DI-004 / #2188 mapping half (read the source as the caller) was **held**. `IDataverseUserClient` returns Web API
+JSON, `CreateTimeFieldMapping` needs a typed SDK `Entity`, and there is no OBO SDK client. The agreed design is a shared
+caller mask: keep the app-only typed read, read the mapped columns once as the caller, drop any column that is non-null
+for the app but null for the caller, and make a caller-read fault `Unavailable`. It lands on master first, as a helper
+under `Services/Dataverse/FieldMapping/` (the Office hotfix), and step 3 reuses it afterwards. Step 3's source read and
+`CreateTimeFieldMapping` are **unchanged** in this round. DI-004's mapping half is pending the shared caller-mask helper
+(Office hotfix first), and it still blocks 017. No read-as-caller code was written, so there was nothing to revert.
+
+### F-A — the plan callback's (table, id) key
+
+- 013-r2's `CreateAsync_AssignedToAContactWithASecureMattersId_AndFiledUnderThatMatterByTheServer_...` is refused by
+  014's pre-plan check, so it never reaches the callback. Its summary and because-text now say so.
+- New: `CreateAsync_AssignedToAContactWithASecureMattersId_AndFiledUnderAnInvoiceOfThatMatter_IsTheUniformNotFound_AndCreatesNothing`
+  (secure-root seam). The work assignment is filed under an invoice of a secure matter and assigned to a contact with
+  that matter's id. Nothing is server-set. Only the callback asks the matter's AppendTo.
+- It passes at HEAD and fails under mutant MA (an id-only `checkedRecords` key and `Contains`).
+
+### F-B — one definition of "filing"
+
+- `IsFilingLookup(table, MappedLookup)` is the old column lists OR `FilesUnderOwnershipParent`. That method CALLS
+  `OwnedChildWrite.ParentsOf` on a one-lookup item; it does not copy its predicate.
+- It is a union: a lineage-only lookup (a message's thread) stays filing, as the existing unit theory pins.
+- Server-set, on any table except a work assignment or project: refused with `record_creation.server_set_filing_lookup`.
+- Server-set, on a work assignment or project: `ServerSetRootFilingLookups` asks AppendTo before the plan.
+- Mapped: `CheckMergedPayloadAsync` treats it as filing. A failed AppendTo refuses (uniform 404) rather than dropping
+  the value. This closes K-5.
+- The plan's filing columns are unchanged: #2190 is UAC's.
+
+### K-1 — the guard moved before step 3
+
+It is now evaluated after step 2, on the caller's item. Server-set columns are protected from mapping, so the caller's
+item has every server-set lookup. A refused create reads no profile and no source. The step record is
+`CallerChecks / Refused`. The step-5 call site is removed.
+
+### K-4 — not changed (owner / 017)
+
+The "from chat" text and the technical 500 detail stay with the owner and task 017.
+
+### Tests
+
+| File | Test | Kind |
+|---|---|---|
+| `RecordCreationServiceSecureRootSeamTests.cs` | `..._FiledUnderAnInvoiceOfThatMatter_...` | F-A must-fire (pins the key) |
+| `RecordCreationServiceMappingSeamTests.cs` | `AWorkAssignmentsRegardingCommunicationMarkedServerSet_IsAskedAppendToBeforeThePlan_AndRefused` | F-B must-fire (root, server-set) |
+| same | `AMappedWorkAssignmentRegardingCommunicationTheCallerCannotAppendTo_IsRefused_NotDropped` | F-B must-fire (mapped) |
+| same | `AChildsOwnershipParentLookupNoListNames_MarkedServerSet_IsRefusedBeforeMappingReadsAnything` | F-B must-fire (child, `sprk_invoice.sprk_regardingworkassignment`) and K-1 |
+| same | `ACitationLookupMarkedServerSet_IsNotAFilingLookup_AndPassesTheGuard` | must-not-fire (citation) |
+| same | `AWorkAssignmentsAssignedToMarkedServerSet_IsNotAFilingLookup_AndCostsNoAppendTo` | must-not-fire (`sprk_assignedto`) |
+| `RecordCreationMappedValueTests.cs` | `IsFilingLookup_OfALookup_IsTheListsOrTheOwnerDecisionsOwnTest` (6 cases) | both |
+
+The shared `ScriptedUserClient` gained one metadata row: `sprk_workassignment.sprk_regardingcommunication`.
+
+**Fail-before.** The pre-fix production files (`58d1a3548d`) were run with a one-line column-only shim, so the new unit
+overload compiled. Five tests fail: the three seam must-fire tests and the two unit must-fire cases. All must-not-fire
+tests pass. The F-A test passes pre-fix, as it should: it pins existing behaviour, and MA kills it.
+
+**Mutants** (each applied alone, built, run, then restored; the tree was clean afterwards):
+
+| Mutant | Change | Killed by |
+|---|---|---|
+| MA | callback key by id only | the F-A invoice test |
+| MB2 | `FilesUnderOwnershipParent` ignores citations | citation seam test, unit `sprk_signal` case |
+| MB3 | every lookup files | both `sprk_assignedto` controls, citation, the #1617 drop and mapped-fault tests |
+| MB4 | root server-set uses the lists only | the WA server-set communication test |
+| MB5 | mapped filing uses the lists only | the WA mapped communication test |
+| MB6 | child server-set uses the lists only | the invoice test |
+| MK1 | the guard back at step 5 | the invoice test (profile and probe were read) |
+
+### Adversarial review (one opus pass, fix diff plus direct callers and callees)
+
+No F-class finding.
+
+| # | Finding | Class | Disposition |
+|---|---|---|---|
+| R3-1 | The server-set sites compare columns differently. `CallerWriteAuthorization` and the plan callback use the set's own comparer on raw strings; the guards and `ProtectedFromMapping` trim and ignore case. This can only over-refuse (500), never let something through | K1 | No production caller sets `ServerSetLookupColumns` yet. For 017/018: normalise once (trimmed, lower-case, case-insensitive) where the request is built |
+| R3-2 | On a work assignment or project, a server-set filing lookup can be the implicit mapping source, so step 3 probes and reads it before step 6 asks AppendTo. The probe is as the caller, missing and denied are one outcome, step 6 still refuses with a 404, and nothing is written | K2 | K-1 holds for every other table. Moving step 6's pre-plan AppendTo before step 3 would reorder it ahead of step 5's refusals, which is not trivial. OWNER/UAC |
+| R3-3 | #2190: the plan's filing columns omit `sprk_regardingcommunication`, so a WA under a secure communication gets step 7's 409 | K3 | UAC-owned, already filed; not changed here |
+
+### Checks
+
+- `dotnet build Spaarke.sln`: 0 warnings, 0 errors.
+- ArchTests: 1214 passed.
+- The required suites, run as one filter (RecordCreation*, SecureRoot*, MappingSource*, FieldMapping*, Office*,
+  SecureChildOwnershipAiToolTests*, RefileWriterAfterRefileGuardTests, RouteAuthorizationGuardTests) on `584f06cb14`:
+  2019 passed, 7 skipped, 0 failed.
+- The three directly affected classes: 84 passed. Before the fix, 5 of them fail.
+- No publish-size or package change: two production files, no new package, endpoint or registration.
+
+**§11 (new surface).** `IsFilingLookup(string, MappedLookup)` and the private `FilesUnderOwnershipParent` are new
+methods in an existing file.
+1. Existing: `IsFilingLookup(string, string)` and `OwnedChildWrite.ParentsOf`.
+2. Extension: they extend the first by calling the second; no new definition.
+3. Cost of doing nothing: a server-set or mapped `sprk_regardingcommunication` files a work assignment under a
+   communication with no AppendTo asked.
+
+rework: fix-round-3 task 014

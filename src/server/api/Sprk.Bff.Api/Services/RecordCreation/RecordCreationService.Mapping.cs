@@ -30,7 +30,7 @@ namespace Sprk.Bff.Api.Services.RecordCreation;
 /// <para><b>Step 5 — the merged payload, by origin</b> (owner decision 2026-10-19; FR-08 amendment 2026-10-20). The
 /// caller's own values are asked first, alone, exactly as with no mapping: a failure refuses unchanged, a fault propagates.
 /// Then the merged row is asked whole. If that fails or faults, the CALLER's values — together with every mapped FILING lookup
-/// (<see cref="IsFilingLookup"/>), which files the row as a caller's lookup would — are asked: a failure refuses with the
+/// (<see cref="IsFilingLookup(string, DataverseWriteItemMapper.MappedLookup)"/>), which files the row as a caller's lookup would — are asked: a failure refuses with the
 /// unchanged uniform outcome, and a fault propagates (refused, NFR-01). Every other mapped value is then asked on its own:
 /// one that fails AppendTo, Append or field security, or whose check faults, is dropped with a warning and never written.
 /// The row as it will be written is asked whole once more; a failure then is no single value's, so it refuses. With
@@ -93,6 +93,25 @@ internal sealed partial class RecordCreationService
         IsChildFilingLookup(table, column)
         || (SecureRootInheritance.Inherits(table) && SecureRootInheritance.FilingColumnsOf(table).Contains(column));
 
+    /// <summary>
+    /// Task 014 fix round 3 (UAC-r2 review, F-B; closes review K-5): <see cref="IsFilingLookup(string, string)"/>'s column
+    /// lists, OR the owner decision's own test (<see cref="FilesUnderOwnershipParent"/>) — so every lookup step 7 files the row
+    /// under is a filing lookup here too, whatever its column (e.g. <c>sprk_workassignment.sprk_regardingcommunication</c>,
+    /// which no list names). A union, not a replacement: a lineage lookup that is no ownership parent (a message's thread)
+    /// stays a filing lookup, as before.
+    /// </summary>
+    internal static bool IsFilingLookup(string table, DataverseWriteItemMapper.MappedLookup lookup) =>
+        IsFilingLookup(table, lookup.Column) || FilesUnderOwnershipParent(table, lookup);
+
+    /// <summary>
+    /// Whether the owner decision (step 7, <see cref="OwnedChildWrite.ParentsOf"/>) files a row of <paramref name="table"/>
+    /// under <paramref name="lookup"/>'s record: a lookup to an ownership-parent table that does not merely cite it. Asked of
+    /// <see cref="OwnedChildWrite.ParentsOf"/> itself, never a copy of its predicate, so the two cannot drift.
+    /// </summary>
+    private static bool FilesUnderOwnershipParent(string table, DataverseWriteItemMapper.MappedLookup lookup) =>
+        OwnedChildWrite.ParentsOf(table, new DataverseWriteItemMapper.MappedItem("{}", [lookup.Column]) { Lookups = [lookup] })
+            .Count > 0;
+
     /// <summary>A child's lineage or ownership-parent lookup (the K-2 guard's set; see <see cref="ServerSetFilingColumn"/>).</summary>
     private static bool IsChildFilingLookup(string table, string column) =>
         (SecureChildLineage.Children.TryGetValue(table, out var lineage) && lineage.Lookups.ContainsKey(column))
@@ -101,17 +120,34 @@ internal sealed partial class RecordCreationService
     /// <summary>
     /// UAC-r2's review of 013 (K-2): a lookup the SERVER set costs no AppendTo at step 5
     /// (<see cref="RecordCreationRequest.ServerSetLookupColumns"/>), so a lineage or ownership-parent lookup must never be one
-    /// — it would file the row under a record nobody asked about. The first such column, or <c>null</c>. A work assignment's
-    /// or project's own filing column is not refused here: <see cref="ServerSetRootFilingLookups"/> has it asked AppendTo,
-    /// as the caller, at step 6 before the plan (refused in the plan's own not-found shape, which task 013's secure-parent
-    /// test pins).
+    /// — it would file the row under a record nobody asked about. The first such column, or <c>null</c>. Fix round 3 (F-B):
+    /// on any table other than a work assignment or project, a server-set lookup of <paramref name="item"/> that the owner
+    /// decision files the row under (<see cref="FilesUnderOwnershipParent"/>) is refused too, whatever its column. A work
+    /// assignment's or project's own filing lookup is not refused here: <see cref="ServerSetRootFilingLookups"/> has it asked
+    /// AppendTo, as the caller, at step 6 before the plan (refused in the plan's own not-found shape, which task 013's
+    /// secure-parent test pins). Server-set columns are never mapped (<see cref="ProtectedFromMapping"/>), so the caller's
+    /// item and the merged one carry the same server-set lookups.
     /// </summary>
-    private static string? ServerSetFilingColumn(string table, IReadOnlySet<string>? serverSetLookupColumns) =>
-        serverSetLookupColumns?.FirstOrDefault(c => IsChildFilingLookup(table, c.Trim().ToLowerInvariant()));
+    private static string? ServerSetFilingColumn(
+        string table, DataverseWriteItemMapper.MappedItem item, IReadOnlySet<string>? serverSetLookupColumns)
+    {
+        if (serverSetLookupColumns is not { Count: > 0 })
+            return null;
+
+        if (serverSetLookupColumns.FirstOrDefault(c => IsChildFilingLookup(table, c.Trim().ToLowerInvariant())) is { } listed)
+            return listed;
+
+        if (SecureRootInheritance.Inherits(table))
+            return null;
+
+        var serverSet = serverSetLookupColumns.Select(c => c.Trim()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return item.Lookups.FirstOrDefault(l => serverSet.Contains(l.Column) && FilesUnderOwnershipParent(table, l))?.Column;
+    }
 
     /// <summary>
     /// UAC-r2's review of 013 (K-2), task 014 review rounds 1 and 2: the lookups of <paramref name="item"/> that file a work
-    /// assignment or project (<see cref="SecureRootInheritance.FilingColumnsOf"/>) and that the SERVER set. Step 5 skipped
+    /// assignment or project (<see cref="SecureRootInheritance.FilingColumnsOf"/>, and — fix round 3, F-B — every lookup the
+    /// owner decision files it under, <see cref="FilesUnderOwnershipParent"/>) and that the SERVER set. Step 5 skipped
     /// their AppendTo and the plan asks it on a secure record only, so step 6 asks it, as the caller, whatever the record and
     /// before the plan reads it — none is ever filed under unasked. Empty for any other table, and when the server set
     /// nothing.
@@ -124,7 +160,9 @@ internal sealed partial class RecordCreationService
 
         var serverSet = serverSetLookupColumns.Select(c => c.Trim()).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var filing = SecureRootInheritance.FilingColumnsOf(table);
-        return item.Lookups.Where(l => serverSet.Contains(l.Column) && filing.Contains(l.Column)).ToArray();
+        return item.Lookups
+            .Where(l => serverSet.Contains(l.Column) && (filing.Contains(l.Column) || FilesUnderOwnershipParent(table, l)))
+            .ToArray();
     }
 
     private static RecordCreationRefusal ServerSetFilingRefused(string column, string noun) => new(
@@ -390,7 +428,7 @@ internal sealed partial class RecordCreationService
         // The caller's values, with every mapped FILING lookup (FR-08 amendment): a failure refuses, as with no mapping; a
         // fault propagates and is refused (NFR-01). With no mapped filing lookup this is the check above, already passed.
         var filing = merged.Lookups
-            .Where(l => mappedValues.ContainsKey(l.Column) && IsFilingLookup(table, l.Column))
+            .Where(l => mappedValues.ContainsKey(l.Column) && IsFilingLookup(table, l))
             .ToArray();
         if (filing.Length > 0)
         {
