@@ -124,6 +124,13 @@ public sealed class CommunicationAttachmentTextService
         //    pointer, so an attachment whose document is invisible to the caller degrades to not-extractable.
         var pointers = await QueryDocumentPointersAsync(attachments, callerSystemUserId, cancellationToken).ConfigureAwait(false);
 
+        // 2') uac-r2 task 188 round 4b (F1-4): THE external document narrowing over the documents the caller's own read
+        //     returned. For a caller who is not a resolved internal systemuser, a document it hides (own Restricted, a
+        //     Restricted ancestor, an internal-only communication) is dropped, so its attachment reads as
+        //     Extractable=false exactly like one whose document the caller cannot see; a narrowing fault drops them all
+        //     (fail closed). An internal systemuser: no narrowing call and no app-only read.
+        pointers = await NarrowForCallerAsync(pointers, httpContext).ConfigureAwait(false);
+
         // 3) Download + extract per attachment (app-only after the pointer check; the extractor's own Redis cache makes
         //    repeats cheap).
         var items = new List<CommunicationAttachmentTextItem>(attachments.Count);
@@ -233,6 +240,34 @@ public sealed class CommunicationAttachmentTextService
                 "Impersonated document read failed while resolving {Count} attachment document(s); degrading to not-extractable", docIds.Count);
             return EmptyPointers;
         }
+    }
+
+    /// <summary>
+    /// Task 188 round 4b (F1-4): the pointers whose documents THE external document narrowing shows the caller
+    /// (<see cref="Sprk.Bff.Api.Api.Filters.InternalPlaneDocumentNarrowing.ForCallerAsync"/>: one call; an internal
+    /// systemuser is not narrowed and nothing is read; a fault shows none). Logs counts only.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<Guid, DocPointer>> NarrowForCallerAsync(
+        IReadOnlyDictionary<Guid, DocPointer> pointers, HttpContext httpContext)
+    {
+        if (pointers.Count == 0)
+            return pointers;
+
+        var visibility = await Sprk.Bff.Api.Api.Filters.InternalPlaneDocumentNarrowing.ForCallerAsync(
+            httpContext, pointers.Keys.Select(id => (string?)id.ToString()), "communication-attachment-text", _logger)
+            .ConfigureAwait(false);
+        if (!visibility.Narrowed)
+            return pointers;
+
+        var shown = pointers.Where(p => visibility.IsShown(p.Key.ToString())).ToDictionary(p => p.Key, p => p.Value);
+        if (shown.Count != pointers.Count)
+        {
+            _logger.LogInformation(
+                "[ATTACHMENT-TEXT] {Hidden} of {Count} attachment document(s) withheld by the external document narrowing",
+                pointers.Count - shown.Count, pointers.Count);
+        }
+
+        return shown;
     }
 
     /// <summary>

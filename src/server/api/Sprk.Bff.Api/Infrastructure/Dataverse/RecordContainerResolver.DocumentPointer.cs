@@ -50,8 +50,25 @@ public sealed partial class RecordContainerResolver
     /// </summary>
     internal const string UnfiledDefaultContainerKey = "EmailProcessing:DefaultContainerId";
 
+    /// <summary>
+    /// #2151: the configuration keys whose containers are DECLARED HOMES of an unfiled document — a container another owner
+    /// stores unfiled documents in on purpose (ebilling-r1: the Procedure Library's rule-set guidelines and rate-card
+    /// workbooks of Firm or ClientDefault scope, internal-only and CIAM-denied, D-63; and the generated eBilling outputs).
+    /// An UNFILED document whose pointer is the item the BFF bound to it (<see cref="Spaarke.Dataverse.DocumentPointerBinding"/>)
+    /// and whose drive is one of these containers derives to that container (<see cref="DeriveDocumentContainersAsync"/>):
+    /// the strict rule serves it there, and no relocation pulls it into a business unit's container. A third owner adds
+    /// its key here. A key that is unset or blank declares nothing.
+    /// </summary>
+    internal static readonly string[] DeclaredUnfiledHomeContainerKeys =
+    [
+        "Finance:ProcedureLibraryContainerId", "Finance:EbillingOutputContainerId",
+    ];
+
     /// <summary>An email attachment is a child document of the email document; its file lives where the email's does.</summary>
     private const string ParentDocumentColumn = "sprk_parentdocument";
+
+    /// <summary>The drive (container) half of a document's pointer — read by the declared-home derivation (#2151).</summary>
+    private const string PointerDriveColumn = "sprk_graphdriveid";
 
     /// <summary>The system column naming the identity that CREATED the row.</summary>
     private const string CreatedByColumn = "createdby";
@@ -108,6 +125,9 @@ public sealed partial class RecordContainerResolver
     /// <summary><see cref="UnfiledDefaultContainerKey"/>, when configured.</summary>
     private readonly string? _unfiledDefaultContainerId;
 
+    /// <summary>The containers under <see cref="DeclaredUnfiledHomeContainerKeys"/> that are configured (#2151).</summary>
+    private readonly IReadOnlyList<string> _declaredUnfiledHomes;
+
     // Per-SCOPE memo of the two directory reads every interim check repeats (task 166 f1, verifier item 13): the
     // resolver is registered Scoped, so this lives for one request (a bulk download of N documents reads the hierarchy
     // once, not N times) or one job run. Only SUCCESSFUL answers are kept — a faulted read is dropped, so a later call in
@@ -134,6 +154,17 @@ public sealed partial class RecordContainerResolver
 
         return ids;
     }
+
+    /// <summary>The non-blank containers under <see cref="DeclaredUnfiledHomeContainerKeys"/> (trimmed, distinct); none without configuration.</summary>
+    internal static IReadOnlyList<string> DeclaredUnfiledHomesFrom(Microsoft.Extensions.Configuration.IConfiguration? configuration)
+        => configuration is null
+            ? []
+            : DeclaredUnfiledHomeContainerKeys
+                .Select(key => configuration[key]?.Trim())
+                .Where(container => !string.IsNullOrEmpty(container))
+                .Select(container => container!)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
 
     /// <summary><see cref="StrictDerivedContainerKey"/> as a boolean; absent, blank or unparseable = the interim rule.</summary>
     internal static bool StrictDerivedContainerFrom(Microsoft.Extensions.Configuration.IConfiguration? configuration)
@@ -502,8 +533,10 @@ public sealed partial class RecordContainerResolver
     /// owns no content and is not consulted.</item>
     /// <item>No such link: the PARENT document's derivation (one level — an email attachment lives where its email
     /// does).</item>
-    /// <item>Still nothing (an unfiled document): the container of the document's OWNING business unit — where the
-    /// record-less upload routes put the bytes — else <see cref="UnfiledDefaultContainerKey"/>.</item>
+    /// <item>Still nothing (an unfiled document): a DECLARED HOME container (<see cref="DeclaredUnfiledHomeContainerKeys"/>,
+    /// #2151) when the document's own pointer names one and is the item the BFF bound to it; else the container of the
+    /// document's OWNING business unit — where the record-less upload routes put the bytes — else
+    /// <see cref="UnfiledDefaultContainerKey"/>.</item>
     /// </list>
     /// <para><b>A secure answer dominates.</b> If any link resolves to a SECURE container, that container is the ONLY
     /// allowed one (two different secure containers are ambiguous and undecidable). Otherwise every non-secure answer is
@@ -584,6 +617,9 @@ public sealed partial class RecordContainerResolver
         var columns = DocumentLinkFields.LogicalNames
             .Append(ParentDocumentColumn)
             .Append(OwningBusinessUnitColumn)
+            .Append(PointerDriveColumn)
+            .Append(Spaarke.Dataverse.DocumentPointerBinding.ItemIdColumn)
+            .Append(Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn)
             .Distinct(StringComparer.Ordinal)
             .ToArray();
         var row = await _entityService.RetrieveAsync("sprk_document", documentId, columns, ct).ConfigureAwait(false);
@@ -674,24 +710,71 @@ public sealed partial class RecordContainerResolver
                 $"its records ({string.Join(", ", consulted)}) resolve to no container (their business units stamp none)");
         }
 
+        // #2151: unfiled, in a DECLARED HOME container, and the pointer is the item the BFF bound to this row — that
+        // container is where it belongs (its owner stores it there on purpose; D-63). The document's OWN pointer only
+        // (depth 0): a child document follows its parent's filing, never its parent's home.
+        if (depth == 0 && DeclaredUnfiledHomeOf(row) is { } home)
+        {
+            return new DocumentContainerDerivation(
+                true, [home], home, IsSecure: false,
+                "a declared home container of unfiled documents (its file was placed there by the BFF)")
+            { Unfiled = true, DeclaredHome = true };
+        }
+
         // Unfiled: the owning business unit's container — where the record-less upload routes store the bytes.
         var ownerContainer = await ResolveOwningBusinessUnitContainerAsync(row, "sprk_document", documentId, ct).ConfigureAwait(false);
         if (!string.IsNullOrWhiteSpace(ownerContainer))
         {
             return new DocumentContainerDerivation(
                 true, [ownerContainer.Trim()], ownerContainer.Trim(), IsSecure: false,
-                "the owning business unit's container (unfiled document)");
+                "the owning business unit's container (unfiled document)")
+            { Unfiled = true };
         }
 
         if (!string.IsNullOrWhiteSpace(_unfiledDefaultContainerId))
         {
             return new DocumentContainerDerivation(
                 true, [_unfiledDefaultContainerId.Trim()], _unfiledDefaultContainerId.Trim(), IsSecure: false,
-                $"{UnfiledDefaultContainerKey} (unfiled document; its business unit stamps no container)");
+                $"{UnfiledDefaultContainerKey} (unfiled document; its business unit stamps no container)")
+            { Unfiled = true };
         }
 
         return DocumentContainerDerivation.Undecided("it is unfiled and its business unit stamps no container");
     }
+
+    /// <summary>
+    /// #2151: the declared home container (<see cref="DeclaredUnfiledHomeContainerKeys"/>) the row's file sits in, when
+    /// the row's pointer is the item the BFF bound to it — else <see langword="null"/>. An empty or differing bound copy
+    /// is never a home: only a file the BFF placed there is. <paramref name="row"/> must carry the pointer and its copy.
+    /// </summary>
+    private string? DeclaredUnfiledHomeOf(Entity row)
+    {
+        if (_declaredUnfiledHomes.Count == 0)
+        {
+            return null;
+        }
+
+        var drive = row.GetAttributeValue<string>(PointerDriveColumn)?.Trim();
+        var item = row.GetAttributeValue<string>(Spaarke.Dataverse.DocumentPointerBinding.ItemIdColumn)?.Trim();
+        if (string.IsNullOrEmpty(drive) || string.IsNullOrEmpty(item)
+            || Spaarke.Dataverse.DocumentPointerBinding.Compare(
+                row.GetAttributeValue<string>(Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn), item)
+               != Spaarke.Dataverse.DocumentPointerBinding.BindingState.Bound)
+        {
+            return null;
+        }
+
+        return _declaredUnfiledHomes.FirstOrDefault(home => IsSameContainer(home, drive));
+    }
+
+    /// <summary>
+    /// #2159: does a business unit stamp <paramref name="drive"/> as its container (<c>businessunit.sprk_containerid</c>)?
+    /// The re-file relocation asks it before it moves an UNFILED document's file into its business unit's container: a
+    /// file in no business unit's container (a record's own, another owner's) is never pulled into one. Faults propagate
+    /// (the caller moves nothing).
+    /// </summary>
+    internal async Task<bool> IsBusinessUnitContainerAsync(string drive, CancellationToken ct = default)
+        => !string.IsNullOrWhiteSpace(drive) && (await BusinessUnitsClaimingAsync(drive.Trim(), ct).ConfigureAwait(false)).Count > 0;
 
     /// <summary>
     /// The relocation source check of the legacy migration (task 166 f1, owner round 26 item 3): may the BFF move this
@@ -1146,4 +1229,13 @@ public sealed record DocumentContainerDerivation(
     /// <summary>Is <paramref name="drive"/> one of the allowed containers? Never true when not decided.</summary>
     public bool Allows(string? drive)
         => Decided && AllowedContainers.Any(c => RecordContainerResolver.IsSameContainerId(c, drive));
+
+    /// <summary>
+    /// #2159: derived for an UNFILED document (no record link and no parent document's filing applied): its owning business
+    /// unit's container, the unfiled default, or a declared home (<see cref="DeclaredHome"/>).
+    /// </summary>
+    public bool Unfiled { get; init; }
+
+    /// <summary>#2151: the derivation is a declared home container of unfiled documents (the file was placed there by the BFF).</summary>
+    public bool DeclaredHome { get; init; }
 }

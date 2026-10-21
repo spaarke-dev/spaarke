@@ -115,6 +115,37 @@ public class RecordTableRulesTests
         rule.MappingProtectedColumns.Should().Contain(column, "a mapped number would pre-empt the platform sequence (task 076)");
     }
 
+    [Theory]
+    [InlineData("sprk_invoice")]
+    [InlineData("sprk_billingevent")]
+    public void MappingProtectedColumns_TheInvoiceFamilysCoreLookups_AreNeverMapped(string table)
+    {
+        // Task 014 (ebilling-r1's review of 013, item 3): InvoiceFamilyCoreRecordGuard.CoreRecordLookups on work/ebilling-r1
+        // (TypedMatterProjectPlusRegardingWorkAssignment) — a row names exactly ONE core record, the caller's.
+        RecordTableRules.Get(table).MappingProtectedColumns
+            .Should().BeEquivalentTo("sprk_matter", "sprk_project", "sprk_regardingworkassignment");
+        RecordTableRules.Get(table).MappingProtectedColumns.Contains("SPRK_Matter").Should().BeTrue("case-insensitive, as every list");
+    }
+
+    [Fact]
+    public void MappingProtectedColumns_ADocumentsAccessInheritance_IsNeverMapped_ItsAccessPermissionStaysFillOnly()
+    {
+        // Task 014 (unified-access-control-r2 D7 / #2169): the BFF writes sprk_accessinheritance; sprk_accesspermission is a
+        // value a mapping may fill when the caller left it empty.
+        var document = RecordTableRules.Get("sprk_document");
+
+        document.MappingProtectedColumns.Should().BeEquivalentTo(Sprk.Bff.Api.Services.Access.AccessInheritance.Column);
+        document.MappingProtectedColumns.Should().NotContain("sprk_accesspermission");
+        Sprk.Bff.Api.Services.Access.AccessInheritance.Column.Should().Be("sprk_accessinheritance");
+    }
+
+    [Fact]
+    public void MappingProtectedColumns_AreDeclaredOnlyOnTheTablesThatNeedThem()
+    {
+        RecordTableRules.All.Where(r => r.MappingProtectedColumns.Count > 0).Select(r => r.Table)
+            .Should().BeEquivalentTo("sprk_matter", "sprk_project", "sprk_invoice", "sprk_billingevent", "sprk_document");
+    }
+
     [Fact]
     public void Kind_TheThreeSecureRootsAreRoots_EveryOtherTableIsAChild()
     {

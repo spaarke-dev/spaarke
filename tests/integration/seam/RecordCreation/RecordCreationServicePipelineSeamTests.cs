@@ -110,6 +110,16 @@ public sealed partial class RecordCreationServicePipelineSeamTests
             .Callback(() => _journal.Add("readback"))
             .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) =>
                 new Entity(table, id) { ["sprk_matternumber"] = "MAT-000013" });
+
+        // Task 015 (step 8, FR-10): a search-indexed table's owner team is read for its business unit, and that unit for its
+        // search-index defaults — none set in this world, so nothing is filled (SearchIndexDefaultTests covers the fill).
+        _readBack
+            .Setup(e => e.RetrieveAsync("team", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) =>
+                new Entity(table, id) { ["businessunitid"] = new EntityReference("businessunit", Directory.ChildBu) });
+        _readBack
+            .Setup(e => e.RetrieveAsync("businessunit", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) => new Entity(table, id));
     }
 
     // =====================================================================================

@@ -1341,6 +1341,7 @@ public class ExternalAccessReconciliationTests
         public Task<Entity> RetrieveAsync(string e, Guid id, string[] c, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Guid> CreateAsync(Entity e, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<(Guid Id, bool Created)> UpsertAsync(Entity e, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task UpdateIfRowVersionMatchesAsync(string entityLogicalName, Guid id, string rowVersion, Dictionary<string, object> fields, CancellationToken ct = default) => throw new NotSupportedException();
         public Task UpdateAsync(string e, Guid id, Dictionary<string, object> f, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Entity> RetrieveByAlternateKeyAsync(string e, KeyAttributeCollection k, string[]? c = null, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<string> GetEntitySetNameAsync(string e, CancellationToken ct = default) => throw new NotSupportedException();

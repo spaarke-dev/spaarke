@@ -68,6 +68,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
 
     public SecureChildOwnershipAiToolTests()
     {
+        // #2143: a PATCH Dataverse accepted is on the row when the resolver reads it after the change.
+        _user.OnPatch = _world.ApplyPatch;
         _appOnly
             .Setup(a => a.UpdateRecordFieldsAsync(
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), null))
@@ -84,6 +86,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
 
                 _appCreates.Add((t, id, f));
                 MaterializeInShareWorld(t, id, f);
+                _world.ApplyPatch(t, id, f); // #2143: an app-only PATCH to an existing row lands too
             })
             .Returns(Task.CompletedTask);
     }
@@ -773,6 +776,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 // #1616 fix round / task 046 r3: the Create Work Assignment wizard also files under an invoice or an event.
                 ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
                 ("sprk_regardingevent", "sprk_event", "sprk_RegardingEvent"),
+                // Field mapping task 014 fix round 3 (F-B): an ownership-parent lookup no filing list names (#2190).
+                ("sprk_regardingcommunication", "sprk_communication", "sprk_RegardingCommunication"),
                 ("sprk_assignedto", "contact", "sprk_AssignedTo"),
                 ("sprk_assignedtointernal", "contact", "sprk_AssignedToInternal"),
                 ("sprk_createdbyperson", "systemuser", "sprk_CreatedByPerson"),
@@ -958,6 +963,10 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         public int PatchStatus { get; set; } = 204;
         public List<(string Path, string Body)> Posts { get; } = new();
         public List<(string Path, string Body)> Patches { get; } = new();
+
+        /// <summary>#2143: called with every PATCH Dataverse accepted — the harness lands it on its rows, because the resolver
+        /// reads the row after the change.</summary>
+        public Action<string, string>? OnPatch { get; set; }
 
         /// <summary>Task 147 r1c-v1: every write Dataverse refused because its body named a property the type does not declare.</summary>
         public List<(string Path, string Property)> RefusedBodies { get; } = new();
@@ -1234,6 +1243,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 return Task.FromResult(secured);
 
             Patches.Add((relativePath, jsonBody));
+            OnPatch?.Invoke(relativePath, jsonBody);
             return Task.FromResult(DataverseUserResponse.Ok(204, null));
         }
 

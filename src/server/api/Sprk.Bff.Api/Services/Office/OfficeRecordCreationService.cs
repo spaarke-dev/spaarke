@@ -86,6 +86,9 @@ public sealed record RecordCreationRequest
     /// 🔴 The source record is read <b>app-only</b>. The CALLER'S Read right on it MUST already have been
     /// established upstream — <c>QuickCreateSourceAccessFilter</c> does that for the quick-create route. A new
     /// caller of this service must do the same, or it turns this into a way to copy fields out of any record.
+    /// <para>#2188: that Read check is record-level, so the app-only read is then masked to the columns the CALLER can read
+    /// (<see cref="Sprk.Bff.Api.Services.Dataverse.FieldMapping.MappingSourceCallerMask"/>, one OBO read of the same row): a
+    /// field-secured column the caller cannot read is treated as empty and never copied.</para>
     /// </remarks>
     public string? SourceEntityLogicalName { get; init; }
 
@@ -167,7 +170,8 @@ public sealed record RecordCreationResult
 ///   <item><description>BU defaults from the OWNER's business unit — <c>sprk_searchindexname</c> (INV-5 guarded) and
 ///   the <c>sprk_ai_search_index</c> lookup — mirroring <c>EntityCreationService.applyUserBuDefaults</c>.
 ///   <c>sprk_containerid</c> is deliberately NOT written (unified-access-control-r2 task 076, W1).</description></item>
-///   <item><description>Field Mapping Framework — one profile read, one source read, rules applied by
+///   <item><description>Field Mapping Framework — one profile read, one source read (app-only, then masked to what the
+///   caller can read by <see cref="MappingSourceCallerMask"/> — #2188), rules applied by
 ///   <see cref="CreateTimeFieldMapping"/>; a missing profile is a silent no-op.</description></item>
 ///   <item><description>Assigned To Internal — the contact the request names, else a mapped value, else the maker's
 ///   linked contact (task 152; task 100 added the request's contact).</description></item>
@@ -307,12 +311,17 @@ public sealed class OfficeRecordCreationService
     private readonly ILogger<OfficeRecordCreationService> _logger;
     private readonly Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe? _callerAccess;
     private readonly Microsoft.AspNetCore.Http.IHttpContextAccessor? _http;
+    private readonly IDataverseUserClient? _callerClient;
 
     /// <param name="callerAccess">Task 158 r1 (owner round 31 item 2): the OBO probe a project created INTO isolation is
     /// checked with AS THE CALLER first (G5: Create on the table, AppendTo on every secure parent). Optional so a host
     /// without the external-access module still composes this service; without it such a create is REFUSED (fail closed),
     /// never made unchecked.</param>
     /// <param name="http">The request whose bearer token the probe exchanges (same optionality).</param>
+    /// <param name="callerClient">#2188: the caller-context (OBO) Dataverse client the field-mapping source is masked through
+    /// (<see cref="MappingSourceCallerMask"/>). Registered unconditionally (<c>SpaarkeCore</c>). Optional so a host without it
+    /// still composes this service; without it a mapping source is UNAVAILABLE (nothing copied, fail closed), never copied
+    /// unmasked.</param>
     public OfficeRecordCreationService(
         IGenericEntityService entities,
         IFieldMappingDataverseService fieldMappings,
@@ -322,10 +331,12 @@ public sealed class OfficeRecordCreationService
         Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
         ILogger<OfficeRecordCreationService> logger,
         Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe? callerAccess = null,
-        Microsoft.AspNetCore.Http.IHttpContextAccessor? http = null)
+        Microsoft.AspNetCore.Http.IHttpContextAccessor? http = null,
+        IDataverseUserClient? callerClient = null)
     {
         _callerAccess = callerAccess;
         _http = http;
+        _callerClient = callerClient;
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _fieldMappings = fieldMappings ?? throw new ArgumentNullException(nameof(fieldMappings));
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
@@ -742,6 +753,10 @@ public sealed class OfficeRecordCreationService
     /// owner (an unresolved caller is refused; task 030 left Project best-effort and named task 031 as the decider —
     /// notes/031 §4), business-unit defaults, and the Field Mapping Framework. <c>sprk_containerid</c> is never
     /// written (task 076 W1).</para>
+    /// <para><b>Filed under its source</b> (#2191 review K2, UAC-r2): a project created from a matter or project carries the
+    /// regarding pair naming that record, derived from the request before mapping (<see cref="FileUnderSourceAsync"/>), so
+    /// whether it is created into isolation never depends on a mapping read succeeding. A mapped pair is fill-only over it, and
+    /// under a secure source may only repeat it. This is what field-mapping-server-write-path-r1 task 018 plans for this path.</para>
     /// </remarks>
     private async Task<RecordCreationResult> CreateProjectAsync(RecordCreationRequest request, CancellationToken ct)
     {
@@ -782,6 +797,22 @@ public sealed class OfficeRecordCreationService
 
         await ApplyBusinessUnitDefaultsAsync(entity, ownerId, "project", warnings, ct).ConfigureAwait(false);
 
+        // #2191 review K2 (UAC-r2): a project created FROM a matter or project is filed under it. The pair is derived from the
+        // request's own source here — before, and independent of, field mapping — so a mapping source that could not be read
+        // (a 429, a 5xx, the caller read's bound; #2188 made that window wider) can no longer leave a project under a SECURE
+        // record unfiled and NOT isolated. Mapping no longer decides isolation. No pair can be derived: refused, nothing created.
+        FiledUnderPair? filedUnder = null;
+        if (IsFiledUnderItsSource(request, out var parentTable, out var parentId))
+        {
+            var (derived, retryable) = await DeriveFiledUnderPairAsync(parentTable, parentId, ct).ConfigureAwait(false);
+            if (derived is null)
+            {
+                return FiledUnderUndetermined(retryable);
+            }
+
+            filedUnder = derived;
+        }
+
         if (!string.IsNullOrWhiteSpace(request.SourceEntityLogicalName)
             && request.SourceRecordId is { } sourceRecordId
             && sourceRecordId != Guid.Empty)
@@ -791,6 +822,13 @@ public sealed class OfficeRecordCreationService
                 .ConfigureAwait(false);
 
             KeepRequestedNameIfMappingBlankedIt(entity, ProjectNameAttribute, name, "project", warnings);
+        }
+
+        // A pair the mapping wrote is fill-only over the derived one, and never lowers a secure source's isolation.
+        if (filedUnder is { } pair
+            && await FileUnderSourceAsync(entity, pair, ct).ConfigureAwait(false) is { } filingRefusal)
+        {
+            return filingRefusal;
         }
 
         // Owner A7 (task 152): the project is FOR its maker — after field mapping, so a mapped value is kept — unless
@@ -809,9 +847,9 @@ public sealed class OfficeRecordCreationService
         // Task 133 (owner round 7 item 2): the app-only create's person, as for Matter.
         Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.Stamp(entity, ownerId);
 
-        // Task 158 r1 (owner rounds 6 + 31): a project the field mapping filed under a SECURE matter or project (its
-        // polymorphic pair) is created INTO isolation — owned by the named Secure Record Owners team, flagged in the create,
-        // its sprk_createdbyperson the caller — never as an ordinary row of the caller's business unit first. Decided before
+        // Task 158 r1 (owner rounds 6 + 31): a project filed under a SECURE matter or project (its polymorphic pair — since
+        // #2191 K2 derived from the record it is created from, above, not left to the field mapping) is created INTO
+        // isolation — owned by the named Secure Record Owners team, flagged in the create, its sprk_createdbyperson the caller — never as an ordinary row of the caller's business unit first. Decided before
         // any write: an unreadable parent flag, or a caller walled off (or not checkable against) the No Access list of a
         // secure parent or of the record itself, refuses with nothing created; then the caller's own rights (G5).
         var plan = await _rootFiling.PlanCreateAsync(
@@ -927,18 +965,281 @@ public sealed class OfficeRecordCreationService
 
         foreach (var parent in parents)
         {
-            var rights = await _callerAccess.GetCallerRightsAsync(
-                    token, Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.EntitySetFor(parent.Table), parent.Id, ct)
-                .ConfigureAwait(false);
-            if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.AppendTo))
+            if (await CallerCannotAppendToAsync(token, parent.Table, parent.Id, ct).ConfigureAwait(false) is { } refusal)
             {
-                return Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution.Refused(CallerCannotFileUnderParent,
-                    "you do not have permission to file a project under the secure record it names");
+                return refusal;
             }
         }
 
         return null;
     }
+
+    /// <summary>
+    /// AS THE CALLER: AppendTo on <paramref name="table"/> <paramref name="id"/> - the right a project needs on the record it is
+    /// filed under, which the app-only create never asks Dataverse for. The refusal is the plan's own
+    /// (<see cref="CallerCannotFileUnderParent"/>, the same text), whatever the record is: a record the caller cannot see, a
+    /// record that does not exist and a rights read that could not answer all read <see cref="Spaarke.Dataverse.AccessRights.None"/>,
+    /// so it leaks neither. <c>null</c>: allowed.
+    /// </summary>
+    private async Task<Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution?> CallerCannotAppendToAsync(
+        string token, string table, Guid id, CancellationToken ct)
+    {
+        var rights = await _callerAccess!.GetCallerRightsAsync(
+                token, Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.EntitySetFor(table), id, ct)
+            .ConfigureAwait(false);
+        return rights.HasFlag(Spaarke.Dataverse.AccessRights.AppendTo)
+            ? null
+            : Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution.Refused(CallerCannotFileUnderParent,
+                "you do not have permission to file a project under the secure record it names");
+    }
+
+    /// <summary>
+    /// #2191 K2 (UAC-r2 re-check): the project is created app-only, so Dataverse never checks AppendTo on the record it is filed
+    /// under - and for an ORDINARY source nothing else does either (the plan asks only for secure parents). Asked here, for every
+    /// source, once the pair is derived. A caller that cannot be checked (no probe or token) is refused, as the plan refuses it.
+    /// </summary>
+    private async Task<RecordCreationResult?> CallerMayFileUnderAsync(FiledUnderPair derived, CancellationToken ct)
+    {
+        var token = _http?.HttpContext is { } context
+            ? Sprk.Bff.Api.Infrastructure.Auth.TokenHelper.ExtractBearerTokenOrNull(context)
+            : null;
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution? refusal;
+        if (_callerAccess is null || string.IsNullOrWhiteSpace(token))
+        {
+            _logger.LogError(
+                "[RECORD-CREATE] A project filed under {Table} {RecordId} cannot be checked against the caller's own rights here " +
+                "(probe or token unavailable). Refused (fail closed).", derived.Table, derived.Id);
+            refusal = Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution.Refused(CallerRightsUnverifiable,
+                "your permission to create a project under the record it is created from could not be checked");
+        }
+        else
+        {
+            refusal = await CallerCannotAppendToAsync(token, derived.Table, derived.Id, ct).ConfigureAwait(false);
+        }
+
+        return refusal is null
+            ? null
+            : RecordCreationResult.Failed(new RecordCreationFailure(
+                KindFor(refusal.RefusalCode),
+                refusal.RefusalCode ?? CallerCannotFileUnderParent,
+                $"The project was not created: {refusal.Reason}."));
+    }
+
+    // ── #2191 review K2: the project is filed under the record it is created from ─────────────────────────────────────
+
+    /// <summary>The ADR-024 record-type catalog: the pair's type names one of its rows.</summary>
+    internal const string RecordTypeEntity = "sprk_recordtype_ref";
+
+    /// <summary>The catalog column naming the table a record type is.</summary>
+    internal const string RecordTypeLogicalNameAttribute = "sprk_recordlogicalname";
+
+    /// <summary>
+    /// #2191 review K2 (UAC-r2 refinement): the record a project is created from is SECURE, and the field mapping would file
+    /// the new project under a different record (or only half a pair). 403. The same refusal whatever that other record is —
+    /// it says nothing about whether it exists or is secure.
+    /// </summary>
+    internal const string SecureSourceFilingMismatch = "secure_source_filing_mismatch";
+
+    /// <summary>The pair a project created from <see cref="Table"/> <see cref="Id"/> carries: that record and its catalog type.</summary>
+    private readonly record struct FiledUnderPair(string Table, Guid Id, Guid TypeId);
+
+    /// <summary>
+    /// True when the request creates the project FROM a matter or project (the tables that pass security on,
+    /// <see cref="Sprk.Bff.Api.Services.Access.SecureRootInheritance.IsParent"/>) — the record it is then filed under. Any other
+    /// source only supplies mapped values and is left as it was.
+    /// </summary>
+    private static bool IsFiledUnderItsSource(RecordCreationRequest request, out string table, out Guid id)
+    {
+        table = request.SourceEntityLogicalName?.Trim().ToLowerInvariant() ?? string.Empty;
+        id = request.SourceRecordId ?? Guid.Empty;
+        return id != Guid.Empty && Sprk.Bff.Api.Services.Access.SecureRootInheritance.IsParent(table);
+    }
+
+    /// <summary>
+    /// The pair naming <paramref name="table"/> <paramref name="id"/>: the id, and the active <see cref="RecordTypeEntity"/>
+    /// row for the table (the lookup <c>OfficeSearchService.ResolveRegardingRecordTypeIdAsync</c> makes for a To Do). One
+    /// app-only catalog read; no pair when there is no such row (a configuration gap — retrying will not help) or it cannot be
+    /// read (<c>Retryable</c>) — never a guess.
+    /// </summary>
+    private async Task<(FiledUnderPair? Pair, bool Retryable)> DeriveFiledUnderPairAsync(string table, Guid id, CancellationToken ct)
+    {
+        try
+        {
+            var query = new Microsoft.Xrm.Sdk.Query.QueryExpression(RecordTypeEntity)
+            {
+                ColumnSet = new Microsoft.Xrm.Sdk.Query.ColumnSet(RecordTypeEntity + "id"),
+                TopCount = 1,
+            };
+            query.Criteria.AddCondition(RecordTypeLogicalNameAttribute, Microsoft.Xrm.Sdk.Query.ConditionOperator.Equal, table);
+            query.Criteria.AddCondition("statecode", Microsoft.Xrm.Sdk.Query.ConditionOperator.Equal, 0);
+
+            var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            if (rows?.Entities.FirstOrDefault() is { } row && row.Id != Guid.Empty)
+            {
+                return (new FiledUnderPair(table, id, row.Id), false);
+            }
+
+            _logger.LogError(
+                "[RECORD-CREATE] No active {Catalog} row names {Table}, so a project created from it cannot be filed under it. "
+                + "Refused (fail closed).", RecordTypeEntity, table);
+            return (null, false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "[RECORD-CREATE] The {Catalog} row for {Table} could not be read, so a project created from it cannot be filed "
+                + "under it. Refused (fail closed).", RecordTypeEntity, table);
+            return (null, true);
+        }
+    }
+
+    /// <summary>
+    /// Files the project under <paramref name="derived"/> before the plan reads the pair. A pair the field mapping wrote is
+    /// FILL-ONLY over it: no pair → the derived one is written; the derived pair itself → kept. Any OTHER pair (a different
+    /// record, or half a pair) may not lower isolation (UAC-r2 refinement): the source's own secure flag is read, and a secure
+    /// source — or one whose flag cannot be read — refuses; an ordinary source keeps the mapped pair, as before #2191.
+    /// <see langword="null"/>: go on.
+    /// </summary>
+    /// <remarks>
+    /// Option (b) of the refinement — accepting another pair when it names a record that is itself secure and the caller may
+    /// file under — is NOT taken: that record's sharees and No Access lists are not the source's, so "secure" alone does not
+    /// keep the source's isolation, and proving more is not a cheap check. A secure source accepts only its own pair.
+    /// </remarks>
+    private async Task<RecordCreationResult?> FileUnderSourceAsync(Entity entity, FiledUnderPair derived, CancellationToken ct)
+    {
+        // The caller's own AppendTo on the record the project is filed under: every source, ordinary or secure, before the
+        // pair is written or any other refusal is weighed (one answer whatever the record is; no existence leak).
+        if (await CallerMayFileUnderAsync(derived, ct).ConfigureAwait(false) is { } appendRefusal)
+        {
+            return appendRefusal;
+        }
+
+        var pairId = Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairIdColumn;
+        var pairType = Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairTypeColumn;
+
+        var mappedId = entity.Contains(pairId) ? entity[pairId] : null;
+        var mappedType = entity.Contains(pairType) ? entity[pairType] : null;
+        var idSet = mappedId is not null && !(mappedId is string text && string.IsNullOrWhiteSpace(text));
+        var typeSet = mappedType is not null && !(mappedType is EntityReference { Id: var empty } && empty == Guid.Empty);
+
+        if (!idSet && !typeSet)
+        {
+            entity[pairId] = derived.Id.ToString("D").ToLowerInvariant();
+            entity[pairType] = new EntityReference(RecordTypeEntity, derived.TypeId);
+            return null;
+        }
+
+        var sameId = mappedId switch
+        {
+            Guid guid => guid == derived.Id,
+            string value => Guid.TryParse(value.Trim(), out var parsed) && parsed == derived.Id,
+            _ => false,
+        };
+        if (sameId && mappedType is EntityReference type && type.Id == derived.TypeId)
+        {
+            // The derived pair itself: written in the canonical spelling (lower-case "D"), whatever case or braces it was
+            // mapped in, so a text-equality reader of the pair's id matches it too.
+            entity[pairId] = derived.Id.ToString("D").ToLowerInvariant();
+            return null;
+        }
+
+        switch (await SourceIsSecureAsync(derived, ct).ConfigureAwait(false))
+        {
+            case SourceFlag.Ordinary:
+                return null; // an ordinary source: the mapped pair is kept, as before
+
+            case SourceFlag.Unreadable:
+                return FiledUnderUndetermined(retryable: true);
+
+            case SourceFlag.Empty:
+                // Not a fault: reading it again returns the same empty value, so "Try again" would be a lie. The plan's own
+                // reason for a parent whose flag is empty (SecureRootInheritance), in its refusal's shape.
+                return RecordCreationResult.Failed(new RecordCreationFailure(
+                    KindFor(Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ParentUndetermined),
+                    Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ParentUndetermined,
+                    $"The project was not created: the {derived.Table} it is filed under has no secure flag value "
+                    + "(empty is never read as not secure)."));
+
+            default:
+                _logger.LogWarning(
+                    "[RECORD-CREATE] Refusing a project created from secure {Table} {RecordId}: the field mapping would file it "
+                    + "under a different record than the one it is created from ({Code}). Nothing was created.",
+                    derived.Table, derived.Id, SecureSourceFilingMismatch);
+                return RecordCreationResult.Failed(new RecordCreationFailure(
+                    RecordCreationFailureKind.SecureFilingRefused,
+                    SecureSourceFilingMismatch,
+                    "The project was not created: the record it is created from is secure, so the project can only be filed "
+                    + "under that record, and its field mapping would file it elsewhere. Ask an administrator to check the "
+                    + "field mapping."));
+        }
+    }
+
+    /// <summary>What the source's own secure flag says (<see cref="SourceIsSecureAsync"/>).</summary>
+    private enum SourceFlag
+    {
+        /// <summary>The flag reads <c>false</c>.</summary>
+        Ordinary,
+
+        /// <summary>The flag reads <c>true</c>.</summary>
+        Secure,
+
+        /// <summary>The flag reads EMPTY: not "not secure" (owner round 17 item 3), and not a fault - a retry reads it empty again.</summary>
+        Empty,
+
+        /// <summary>The read faulted (or returned no row): worth trying again.</summary>
+        Unreadable,
+    }
+
+    /// <summary>
+    /// The source's own <see cref="SecureFlagAttribute"/>, read app-only. An empty flag and a read that faulted are told apart:
+    /// both refuse (as the plan reads a parent's flag, owner round 17 item 3: empty is never "not secure"), but only a fault
+    /// is worth retrying.
+    /// </summary>
+    private async Task<SourceFlag> SourceIsSecureAsync(FiledUnderPair parent, CancellationToken ct)
+    {
+        try
+        {
+            var row = await _entities.RetrieveAsync(parent.Table, parent.Id, [SecureFlagAttribute], ct).ConfigureAwait(false);
+            if (row is null)
+            {
+                return SourceFlag.Unreadable;
+            }
+
+            return row.GetAttributeValue<bool?>(SecureFlagAttribute) switch
+            {
+                true => SourceFlag.Secure,
+                false => SourceFlag.Ordinary,
+                null => SourceFlag.Empty,
+            };
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "[RECORD-CREATE] The secure flag of {Table} {RecordId} could not be read. Refused (fail closed).",
+                parent.Table, parent.Id);
+            return SourceFlag.Unreadable;
+        }
+    }
+
+    /// <summary>
+    /// What the project would be filed under cannot be determined — the plan's own refusal for that, and its kind. A read that
+    /// failed says "try again"; a missing record-type row (configuration) says to ask an administrator, since a retry never helps.
+    /// </summary>
+    private static RecordCreationResult FiledUnderUndetermined(bool retryable) =>
+        RecordCreationResult.Failed(new RecordCreationFailure(
+            KindFor(Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ParentUndetermined),
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ParentUndetermined,
+            "The project was not created: whether the record it is created from is secure could not be determined, and a "
+            + "project filed under a secure record must be created secure. "
+            + (retryable ? "Try again." : "Ask an administrator to check the record types configured in this environment.")));
 
     /// <summary>
     /// Task 158 r1 (owner round 31 item 2): a project — a ROOT — filed under a secure record is created INTO isolation: owned
@@ -964,7 +1265,7 @@ public sealed class OfficeRecordCreationService
     private static RecordCreationFailureKind KindFor(string? code) => code switch
     {
         Sprk.Bff.Api.Api.ExternalAccess.ProvisionProjectEndpoint.ReasonCreatorNoAccess => RecordCreationFailureKind.SecureFilingRefused,
-        CallerCannotCreate or CallerCannotFileUnderParent => RecordCreationFailureKind.SecureFilingRefused,
+        CallerCannotCreate or CallerCannotFileUnderParent or SecureSourceFilingMismatch => RecordCreationFailureKind.SecureFilingRefused,
         CallerRightsUnverifiable => RecordCreationFailureKind.SecureFilingFailed,
         Sprk.Bff.Api.Api.ExternalAccess.ProvisionProjectEndpoint.ReasonCreatorNoAccessUnverifiable => RecordCreationFailureKind.SecureFilingFailed,
         Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.SecureOwnerTeamUnresolved => RecordCreationFailureKind.SecureFilingFailed,
@@ -1238,9 +1539,10 @@ public sealed class OfficeRecordCreationService
         Entity? source = null;
         if (sourceColumns.Count > 0)
         {
+            Entity? appRead = null;
             try
             {
-                source = await _entities
+                appRead = await _entities
                     .RetrieveAsync(sourceEntity, sourceRecordId, sourceColumns.ToArray(), ct)
                     .ConfigureAwait(false);
             }
@@ -1253,13 +1555,33 @@ public sealed class OfficeRecordCreationService
                 _logger.LogWarning(ex,
                     "[RECORD-CREATE] Source record {Source}({SourceId}) could not be read for field mapping.",
                     sourceEntity, sourceRecordId);
-                warnings.Add(
-                    "The related record could not be read, so its Copy/Concat/Template field mappings were skipped.");
+                warnings.Add(SourceUnreadableWarning);
+            }
+
+            if (appRead is not null)
+            {
+                // #2188: the app-only read is not subject to field-level security, so it is masked down to the columns the
+                // CALLER can read (one OBO read of the same row) before any rule sees it. A caller read that fails makes the
+                // source unavailable — the same single warning as an app read that fails, never the app-read values.
+                source = await MappingSourceCallerMask
+                    .ApplyAsync(_callerClient, sourceEntity, sourceRecordId, appRead, sourceColumns, _logger, ct)
+                    .ConfigureAwait(false);
+                if (source is null)
+                {
+                    warnings.Add(SourceUnreadableWarning);
+                }
             }
         }
 
         CreateTimeFieldMapping.Apply(rules, target, source, protectedAttributes, warnings, _logger);
     }
+
+    /// <summary>
+    /// The ONE source-level warning when the mapping source could not be used — the app read failed, or the caller read
+    /// (#2188, <see cref="MappingSourceCallerMask"/>) failed. Copy/Concat/Template rules are then skipped; Defaults still apply.
+    /// </summary>
+    internal const string SourceUnreadableWarning =
+        "The related record could not be read, so its Copy/Concat/Template field mappings were skipped.";
 
     private static bool TryParseGuid(string? value, out Guid id)
         => Guid.TryParse(value?.Trim(), out id) && id != Guid.Empty;

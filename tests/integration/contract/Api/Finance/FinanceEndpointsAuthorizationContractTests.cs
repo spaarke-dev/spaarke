@@ -1,3 +1,6 @@
+using Sprk.Bff.Api.Tests.AccessControl;
+using Sprk.Bff.Api.Tests.Services.Ai.Handlers;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -508,6 +511,32 @@ public class FinanceEndpointsAuthorizationContractTests
         json["reasonCode"]!.GetValue<string>().Should().Be("sdap.finance.invoice_review.document_linked_elsewhere");
     }
 
+    [Fact]
+    public async Task Confirm_WhenTheDocumentsOwnerCannotBeSettledUnderItsInvoice_Is409RecordOwnerUnsettled_NotA500()
+    {
+        // #2143 round 2: a RESUMED confirmation re-files the document under its invoice after the status write, outside the
+        // service's own failure wrapping. A concurrent writer that keeps the owner from settling answers 409 reload-and-retry
+        // (the invoice and its link stand; a retry resumes from them), never the generic 500.
+        await using var host = await FinanceAuthHost.StartAsync();
+        var body = ConfirmBody.New();
+        host.GrantFullConfirm(body);
+        host.Review.Setup(r => r.ConfirmInvoiceAsync(It.IsAny<InvoiceReviewConfirmRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnsettledException(
+                "sprk_document", body.DocumentId, $"The sprk_document {body.DocumentId:D} could not be settled (#2143)."));
+
+        var response = await host.SendAsync(Confirm(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        var text = await response.Content.ReadAsStringAsync();
+        text.Should().NotContain(body.DocumentId.ToString(), "the problem names no row");
+        var json = JsonNode.Parse(text)!.AsObject();
+        json["reasonCode"]!.GetValue<string>().Should().Be(Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnsettledException.ReasonCode);
+        json["detail"]!.GetValue<string>().Should().Contain("Reload it and try again");
+        // #2143 round 3 (K3): the id under the key every other Finance problem carries it under, never traceId.
+        json["correlationId"]!.GetValue<string>().Should().NotBeNullOrWhiteSpace();
+        json.Should().NotContainKey("traceId");
+    }
+
     public static TheoryData<InvoiceReviewFailure, HttpStatusCode, bool> ConfirmFailures => new()
     {
         { InvoiceReviewFailure.DocumentNotFound, HttpStatusCode.NotFound, false },
@@ -677,6 +706,116 @@ public class FinanceEndpointsAuthorizationContractTests
         var response = await host.SendAsync(request);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    // ── Task 188 round 4b (F1-2): the Document path goes through THE external document narrowing ──────────────────
+
+    private const int RestrictedPermission = 100000002;
+
+    /// <summary>
+    /// Arranges a must-fire case on <paramref name="host"/> and returns the body document (the caller holds Read and Write
+    /// on it, so only the narrowing can deny).
+    /// </summary>
+    private static Guid ArrangeHiddenFinanceDocument(FinanceAuthHost host, string @case)
+    {
+        host.NarrowingMode = NarrowingCallerMode.External;
+        var world = host.World;
+        Guid documentId;
+        switch (@case)
+        {
+            case "own-restricted":
+                documentId = world.Document(Guid.NewGuid(), permission: RestrictedPermission);
+                break;
+            case "internal-only-communication":
+                var communication = Guid.NewGuid();
+                var thread = Guid.NewGuid();
+                world.Thread(thread, 100000000);
+                world.Communication(communication, internalOnly: true, thread);
+                documentId = world.Document(Guid.NewGuid(), communication: communication);
+                break;
+            case "restricted-parent":
+                documentId = world.Document(Guid.NewGuid(), parent: world.Document(Guid.NewGuid(), permission: RestrictedPermission));
+                break;
+            case "narrowing-fault":
+                documentId = world.Document(Guid.NewGuid());
+                world.Faults["sprk_documents"] = HttpStatusCode.ServiceUnavailable;
+                break;
+            case "lookup-fault":
+                host.NarrowingMode = NarrowingCallerMode.LookupFault;
+                documentId = world.Document(Guid.NewGuid(), permission: RestrictedPermission);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(@case), @case, null);
+        }
+
+        host.Access.Grant(Documents, documentId, AccessRights.Read | AccessRights.Write);
+        return documentId;
+    }
+
+    private static HttpRequestMessage RejectRequest(Guid documentId)
+    {
+        var request = Authenticated(HttpMethod.Post, "/api/finance/invoice-review/reject");
+        request.Content = JsonContent.Create(new { documentId });
+        return request;
+    }
+
+    [Theory(DisplayName = "Task 188 r4b F1-2: finance reject — a body document the narrowing hides is denied exactly like an unreadable one; the write never runs")]
+    [InlineData("own-restricted")]
+    [InlineData("internal-only-communication")]
+    [InlineData("restricted-parent")]
+    [InlineData("narrowing-fault")]
+    [InlineData("lookup-fault")]
+    public async Task Reject_ExternalCaller_HiddenDocument_IsDeniedLikeAnUnreadableOne(string @case)
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var hidden = ArrangeHiddenFinanceDocument(host, @case);
+        var unreadable = Guid.NewGuid(); // no rights at all
+
+        var hiddenResponse = await host.SendAsync(RejectRequest(hidden));
+        var unreadableResponse = await host.SendAsync(RejectRequest(unreadable));
+
+        hiddenResponse.StatusCode.Should().Be(unreadableResponse.StatusCode);
+        hiddenResponse.StatusCode.Should().BeOneOf(HttpStatusCode.Forbidden, HttpStatusCode.NotFound);
+        var hiddenBody = await hiddenResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var unreadableBody = await unreadableResponse.Content.ReadFromJsonAsync<JsonElement>();
+        (hiddenBody.TryGetProperty("reasonCode", out var hr) ? hr.GetString() : null)
+            .Should().Be(unreadableBody.TryGetProperty("reasonCode", out var ur) ? ur.GetString() : null,
+                "a hidden document cannot be told from an unreadable one");
+        host.Review.Verify(r => r.RejectInvoiceAsync(It.IsAny<InvoiceReviewRejectRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact(DisplayName = "Task 188 r4b F1-2: must not fire — an external caller rejects a VISIBLE document as today (one narrowing call)")]
+    public async Task Reject_ExternalCaller_VisibleDocument_IsAllowed()
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        host.NarrowingMode = NarrowingCallerMode.External;
+        var documentId = host.World.Document(Guid.NewGuid());
+        host.Access.Grant(Documents, documentId, AccessRights.Read | AccessRights.Write);
+        host.Review.Setup(r => r.RejectInvoiceAsync(
+                It.Is<InvoiceReviewRejectRequest>(q => q.DocumentId == documentId), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new InvoiceReviewRejectResult { DocumentId = documentId });
+
+        var response = await host.SendAsync(RejectRequest(documentId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.World.Calls.Should().Be(1);
+    }
+
+    [Fact(DisplayName = "Task 188 r4b F1-2: must not fire — an internal caller (ebilling) rejects a Restricted document with no narrowing call and no app-only read")]
+    public async Task Reject_InternalCaller_RestrictedDocument_IsNotNarrowed()
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var documentId = host.World.Document(Guid.NewGuid(), permission: RestrictedPermission);
+        host.Access.Grant(Documents, documentId, AccessRights.Read | AccessRights.Write);
+        host.Review.Setup(r => r.RejectInvoiceAsync(
+                It.Is<InvoiceReviewRejectRequest>(q => q.DocumentId == documentId), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new InvoiceReviewRejectResult { DocumentId = documentId });
+
+        var response = await host.SendAsync(RejectRequest(documentId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.World.Calls.Should().Be(0);
+        host.World.AllReads.Should().BeEmpty();
     }
 
     [Fact]
@@ -932,6 +1071,12 @@ public class FinanceEndpointsAuthorizationContractTests
 
         public RecordingAccessDataSource Access { get; } = new();
         public RecordingPrivilegeProbe Probe { get; } = new();
+
+        /// <summary>Task 188 round 4b: who the caller is for the narrowing (Internal unless a test says otherwise).</summary>
+        public NarrowingCallerMode NarrowingMode { get; set; } = NarrowingCallerMode.Internal;
+
+        /// <summary>Task 188 round 4b: what the BFF's app-only identity reads (the REAL predicate behind the real seam).</summary>
+        internal AppOnlyDocumentWorld World { get; } = new();
         public Mock<IInvoiceReviewService> Review { get; } = new(MockBehavior.Strict);
         public Mock<IInvoiceSearchService> Search { get; } = new(MockBehavior.Strict);
         public Mock<IFinanceSummaryService> Summary { get; } = new(MockBehavior.Strict);
@@ -971,6 +1116,10 @@ public class FinanceEndpointsAuthorizationContractTests
             builder.Services.AddSingleton<IAccessDataSource>(Access);
             builder.Services.AddScoped<IAuthorizationRule, OperationAccessRule>();
             builder.Services.AddScoped<AuthorizationService>();
+            // Task 188 round 4b: WHO the caller is for THE external document narrowing and what the app-only identity
+            // reads (StatedNarrowingCaller). Internal by default (no narrowing call, no read); the round 4b must-fire
+            // tests state an external caller and seed the world.
+            builder.Services.AddStatedNarrowingCaller(() => NarrowingMode, () => World);
             if (registerProbe)
             {
                 builder.Services.AddSingleton<CallerRecordAccessProbe>(Probe);

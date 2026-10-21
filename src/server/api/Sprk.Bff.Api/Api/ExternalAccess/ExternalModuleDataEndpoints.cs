@@ -210,7 +210,7 @@ public static class ExternalModuleDataEndpoints
 
         return await ExecuteScopedFetchCoreAsync(
             request, principal, registry, entityExtractor, fetchService.ExecuteAsync, dataService.GetNonSecureRootsAsync,
-            logger, ct, dataService.GetLiveParentRootsAsync).ConfigureAwait(false);
+            dataService.NarrowDocumentsAsync, logger, ct, dataService.GetLiveParentRootsAsync).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -238,11 +238,13 @@ public static class ExternalModuleDataEndpoints
 
     /// <summary>
     /// The module fetch pipeline: module lookup → FetchXML guard (entity, join, COLUMN) → Tier-2 scope
-    /// injection → app-only execution → <c>ScopeRows</c> → column strip. Separated from the route handler
-    /// only so the pipeline can be driven with a test double for <paramref name="executeFetch"/> (the
+    /// injection → app-only execution → <c>ScopeRows</c> → (task 188) document narrowing → column strip. Separated from
+    /// the route handler only so the pipeline can be driven with a test double for <paramref name="executeFetch"/> (the
     /// shared <see cref="FetchService"/> needs a live ServiceClient). The handler passes
     /// <c>FetchService.ExecuteAsync</c> unchanged; there is no other caller.
     /// </summary>
+    /// <param name="narrowDocuments">Task 188: the document narrowing a documents module's rows go through
+    /// (<see cref="ExternalDataService.NarrowDocumentsAsync"/>). Required, so a caller cannot leave it out.</param>
     internal static async Task<IResult> ExecuteScopedFetchCoreAsync(
         FetchRequestDto? request,
         CallerPrincipal principal,
@@ -250,11 +252,13 @@ public static class ExternalModuleDataEndpoints
         IFetchXmlEntityExtractor entityExtractor,
         Func<FetchRequestDto, CancellationToken, Task<FetchResponseDto>> executeFetch,
         NonSecureRootReader readNonSecureRoots,
+        DocumentNarrower narrowDocuments,
         ILogger logger,
         CancellationToken ct,
         LiveParentRootReader? readLiveParents = null)
     {
         ArgumentNullException.ThrowIfNull(readNonSecureRoots);
+        ArgumentNullException.ThrowIfNull(narrowDocuments);
         if (request is null || string.IsNullOrWhiteSpace(request.EntityName) ||
             string.IsNullOrWhiteSpace(request.FetchXml))
         {
@@ -335,10 +339,16 @@ public static class ExternalModuleDataEndpoints
             // AFTER the column guard. Dataverse omits a null attribute, so a link the query did not read looks "not filed"
             // and ScopeRows would let a row filed to a hidden root through: the projection must cover every attribute the
             // rule reads (RootRuleAttributes). The ones the caller did not ask for are removed from the response below.
+            // Task 188: a documents module also projects what the document narrowing reads (NarrowingAttributes), for the
+            // same reason, and strips them the same way.
             IReadOnlyList<string> serverProjected = Array.Empty<string>();
-            if (module.RequireReadOnSecureRoots)
+            var ruleAttributes = (module.RequireReadOnSecureRoots ? module.RootRuleAttributes : Enumerable.Empty<string>())
+                .Concat(module.NarrowingAttributes)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (ruleAttributes.Count > 0)
                 scopedFetchXml = Tier2ScopeFilterInjector.EnsureProjected(
-                    scopedFetchXml, module.RootRuleAttributes, out serverProjected);
+                    scopedFetchXml, ruleAttributes, out serverProjected);
             var scopedRequest = request with { FetchXml = scopedFetchXml };
 
             // App-only execution (broker-only, no OBO), then Tier-2 scope the rows to the caller's set
@@ -360,6 +370,27 @@ public static class ExternalModuleDataEndpoints
                     logger, ct).ConfigureAwait(false)
                 : SecureRootFlags.None;
             var scoped = module.ScopeRows(principal, result.Entities, secureRootFlags, liveParents);
+            // Task 188 (D7, #2126): THE document narrowing, after the root rule (own or ancestor Restricted, or an
+            // internal-only / non-Open communication on the bounded parent walk). A failed read hides every row and the
+            // response says truncated.
+            var narrowingTruncated = false;
+            if (module.NarrowsDocuments && scoped.Count > 0)
+            {
+                var candidates = scoped.Select(ExternalDocumentNarrowing.FromFetch).ToList();
+                var narrowing = await narrowDocuments(principal, candidates, ct).ConfigureAwait(false);
+                var narrowed = scoped.Where((_, i) => narrowing.IsVisible(candidates[i])).ToList();
+                if (narrowed.Count != scoped.Count)
+                {
+                    logger.LogInformation(
+                        "[EXT-MODULE] Fetch module={Module}: {Hidden} of {Total} document(s) hidden by the document narrowing ({Reasons}).",
+                        module.Name, scoped.Count - narrowed.Count, scoped.Count,
+                        narrowing.HiddenSummary(candidates));
+                    narrowingTruncated = narrowing.Faulted;
+                }
+
+                scoped = narrowed;
+            }
+
             // The response carries the readable columns the CALLER requested: a root column the server projected only for
             // the rule (serverProjected) is not one of them, even when it is on the module's readable list.
             var returnable = new HashSet<string>(module.ReadableColumns, StringComparer.OrdinalIgnoreCase);
@@ -377,7 +408,7 @@ public static class ExternalModuleDataEndpoints
             // notes/grid-widget-empty-diagnosis.md.
             return Results.Ok(new FetchResponseDto(projected, MoreRecords: false, PagingCookie: null)
             {
-                Truncated = scopeTruncated,
+                Truncated = scopeTruncated || narrowingTruncated,
             });
         }
         catch (FetchXmlParseException)

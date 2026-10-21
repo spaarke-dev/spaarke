@@ -882,7 +882,8 @@ public class ExternalParticipationService
     /// The same option set backs <c>sprk_accesspermission</c> on To Do, Event, Communication and Document, where it is
     /// a DISPLAY copy of the parent's value (task 173, owner round 81; the communication column was to be retired by
     /// task 138, round 81 keeps it). A child's access comes from its parent root (owner Q6): no access decision reads
-    /// a child table's own copy.
+    /// a child table's own copy, EXCEPT the external document narrowing (unified-access-control-r2 task 188, D7: I-14 as
+    /// amended), where a document's stored value, or an ancestor document's, may HIDE it from partners. It never widens.
     /// </remarks>
     internal const int AccessPermissionRestricted = 100000002;
 

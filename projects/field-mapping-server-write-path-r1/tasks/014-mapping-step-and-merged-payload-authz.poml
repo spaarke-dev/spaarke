@@ -4,7 +4,7 @@
     <title>Wire field mapping (step 3) and caller checks on the merged payload; close #1614 and #1617 (FR-06 step 3, FR-08)</title>
     <phase>2 W2 Unified RecordCreationService</phase>
     <gate>002+003+013 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in Sprk.Bff.Api; tags include bff-api, security, authorization; adds tests at KEEP paths (TEST-MODIFYING override); mapped values must never bypass AppendTo (NFR-01).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -126,7 +126,18 @@
     </criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-06 step 3, FR-08, NFR-01. Owner decision 2026-10-19: mapped values that fail AppendTo or field security are skipped with a warning and the create proceeds. Task 015 changes the owner step; do not touch it here.</notes>
+  <notes>Spec FR-06 step 3, FR-08, NFR-01. Owner decision 2026-10-19: mapped values that fail AppendTo or field security are skipped with a warning and the create proceeds. Task 015 changes the owner step; do not touch it here.
+Completed 2026-10-21.
+- What landed: mapping is opt-in per request (RecordCreationRequest.Mapping) and fill-only; the source is probed for the caller's Read first; moneyAttributes and protected sets are honoured; caller checks run on the merged payload by origin; a mapped filing lookup refuses; other mapped failures drop with record_creation.mapped_value_dropped; a server-set filing lookup is asked AppendTo before the plan (new code record_creation.server_set_filing_lookup); D7 accessinheritance is never mapped; ebilling items 1-3 are met.
+- Reviews: two opus passes, every F fixed. Pass 2 caught a pre-plan ordering existence oracle.
+- Tests: 134 in the task test classes; mutants M1-M18 killed except M12 (equivalent).
+- Publish: +60,395 B for 011-014.
+- Open items:
+  - #2124: Money form to be verified in 018;
+  - DI-004 / #2188: source field security, blocks 017;
+  - OWNER: a mapped filing lookup failing field security refuses (403); kept (fail closed).
+- Details: notes/task-014-notes.md.
+rework: fix-round-2 task 014</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

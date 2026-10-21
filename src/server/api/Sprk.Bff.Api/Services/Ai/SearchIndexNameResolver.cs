@@ -101,20 +101,21 @@ public interface ISearchIndexNameResolver
 /// <inheritdoc cref="ISearchIndexNameResolver"/>
 public sealed class SearchIndexNameResolver : ISearchIndexNameResolver
 {
-    // Source-entity columns
-    private const string LookupColumn = "sprk_ai_search_index";              // lookup on source entities (Matter/Project/Doc/...)
-    private const string LegacyTextColumn = "sprk_searchindexname";          // deprecated text column on source entities
+    // Source-entity columns. Internal (field-mapping-server-write-path-r1 task 015): the unified create's search-index default
+    // (RecordCreationService step 8, FR-10) fills these same columns from the owning business unit, by these names.
+    internal const string LookupColumn = "sprk_ai_search_index";              // lookup on source entities (Matter/Project/Doc/...)
+    internal const string LegacyTextColumn = "sprk_searchindexname";          // deprecated text column on source entities
     private const string OwningBusinessUnitAttribute = "owningbusinessunit";
 
     // Catalog table (target of the lookup)
-    private const string CatalogEntity = "sprk_aisearchindex";
+    internal const string CatalogEntity = "sprk_aisearchindex";
     private const string CatalogPrimaryKey = "sprk_aisearchindexid";         // PK of catalog table — stays as-is
     private const string CatalogNameColumn = "sprk_searchindexname";         // physical Azure AI Search index name
     private const string AliasedIndexNameAttribute = "idx.sprk_searchindexname";
 
     // Source entities for each step
     private const string DocumentEntity = "sprk_document";
-    private const string BusinessUnitEntity = "businessunit";
+    internal const string BusinessUnitEntity = "businessunit";
 
     private readonly IGenericEntityService _entityService;
     private readonly AiSearchOptions _aiSearchOptions;

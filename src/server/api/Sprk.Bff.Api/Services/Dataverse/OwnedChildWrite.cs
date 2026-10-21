@@ -922,6 +922,12 @@ internal static class OwnedChildWrite
         /// </summary>
         public bool ParentsUnchanged { get; init; }
 
+        /// <summary>
+        /// <see cref="Written"/>: the reparent's answer, which the step after the re-file takes
+        /// (<c>SecureChildReconciler.AfterRefileAsync</c>; #2159 slice 2 — its F3 permission, <see cref="RecordOwnerResolution.SecureExitPermitted"/>).
+        /// </summary>
+        public RecordOwnerResolution? Resolution { get; init; }
+
         /// <summary>The caller's own rights refused it (no AppendTo on a record named) — nothing written.</summary>
         public string? Denied { get; init; }
 
@@ -942,6 +948,13 @@ internal static class OwnedChildWrite
 
         /// <summary>The ADR-024 pair the update leaves disagrees with itself (<see cref="Outcome.Invalid"/>) — nothing written.</summary>
         public string? Invalid { get; init; }
+
+        /// <summary>
+        /// #2143 round 7 (F1): with <see cref="Written"/>, the person the re-file's F3 check acted for — what the writer hands the
+        /// step after the re-file (<see cref="Sprk.Bff.Api.Services.Access.SecureChildReconciler.AfterRefileAsync(string, Guid, Func{Task{bool}}, Sprk.Bff.Api.Services.Access.RefileThreadStep, Sprk.Bff.Api.Services.Access.SecureRemovalCaller?, CancellationToken)"/>),
+        /// so the thread that follows the filing moves on the same rights.
+        /// </summary>
+        public Sprk.Bff.Api.Services.Access.SecureRemovalCaller? SecureExitCaller { get; init; }
     }
 
     /// <summary>The caller's PATCH was refused by Dataverse inside the re-file — carried out so no owner is assigned.</summary>
@@ -991,6 +1004,11 @@ internal static class OwnedChildWrite
             // A cleared column may be a cleared lookup — the row cannot tell a generic writer which (ReparentAsync reads it).
             foreach (var column in item.ClearedColumns)
                 changes.TryAdd(column, null);
+
+            // #2143 round 7c: a message's thread set by the update re-files it (RecordReparent.IsThreadFilingColumn), so a
+            // thread-only update is decided by the reparent (F3 included), never sent as an ordinary PATCH.
+            foreach (var lookup in item.Lookups.Where(l => RecordReparent.IsThreadFilingColumn(table, l.Column)))
+                changes.TryAdd(lookup.Column, new Microsoft.Xrm.Sdk.EntityReference(lookup.RelatedTable, lookup.RecordId));
         }
 
         if (changes.Count == 0 || (!isChild && newParents.Length == 0))
@@ -1026,9 +1044,9 @@ internal static class OwnedChildWrite
                 : new RefileOutcome { NotARefile = true };
         }
 
-        // #2110 (ontology K3): a lineage lookup the update sets that files the row under no ownership parent — a message's
-        // thread — rides along, so the reparent can tell whether this change moved it (RecordOwnerResolution.ParentsUnchanged).
-        // It decides no owner, and it made no update a re-file above.
+        // #2110 (ontology K3): a lineage lookup the update sets that files the row under no ownership parent rides along, so the
+        // reparent can tell whether this change moved it (RecordOwnerResolution.ParentsUnchanged). It decides no owner, and —
+        // but for a message's thread (#2143 round 7c, above) — it made no update a re-file.
         foreach (var lookup in item.Lookups.Where(l => RecordReparent.LineageOnlyTargetOf(table, l.Column) is not null))
             changes.TryAdd(lookup.Column, new Microsoft.Xrm.Sdk.EntityReference(lookup.RelatedTable, lookup.RecordId));
 
@@ -1037,6 +1055,17 @@ internal static class OwnedChildWrite
             $"{entitySetName}({recordId:D})?$select={primaryIdAttribute ?? table + "id"}", ct).ConfigureAwait(false);
         if (!row.IsSuccess)
             return new RefileOutcome { ClientFailure = row };
+
+        // Owner round 10 item 7 (task 146 c1): a re-file that moves the row OUT of a secure root is an un-secure. F3 is asked AS
+        // THE CALLER — WhoAmI above, RetrievePrincipalAccess under their own token — before anything is written.
+        var secureExitCaller = new Sprk.Bff.Api.Services.Access.SecureRemovalCaller(
+            _ => Task.FromResult<Guid?>(me.SystemUserId),
+            (record, token) => RightsOnAsync(
+                user,
+                me.SystemUserId,
+                Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.EntitySetFor(record.EntityLogicalName),
+                record.RecordId,
+                token));
 
         try
         {
@@ -1052,17 +1081,7 @@ internal static class OwnedChildWrite
                     WhenUnfiled = string.Equals(table, "sprk_communication", StringComparison.OrdinalIgnoreCase)
                         ? UnfiledOwnership.KeepCreator
                         : UnfiledOwnership.ActingUserTeam,
-                    // Owner round 10 item 7 (task 146 c1): a re-file that moves the row OUT of a secure root is an
-                    // un-secure. F3 is asked AS THE CALLER — WhoAmI above, RetrievePrincipalAccess under their own token —
-                    // before anything is written.
-                    SecureExitCaller = new Sprk.Bff.Api.Services.Access.SecureRemovalCaller(
-                        _ => Task.FromResult<Guid?>(me.SystemUserId),
-                        (record, token) => RightsOnAsync(
-                            user,
-                            me.SystemUserId,
-                            Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.EntitySetFor(record.EntityLogicalName),
-                            record.RecordId,
-                            token)),
+                    SecureExitCaller = secureExitCaller,
                 },
                 async token =>
                 {
@@ -1078,7 +1097,13 @@ internal static class OwnedChildWrite
             {
                 { IsForbidden: true } => new RefileOutcome { Forbidden = resolution },
                 { IsRefused: true } => new RefileOutcome { OwnerRefusal = resolution },
-                _ => new RefileOutcome { Written = true, ParentsUnchanged = resolution.ParentsUnchanged },
+                _ => new RefileOutcome
+                {
+                    Written = true,
+                    ParentsUnchanged = resolution.ParentsUnchanged,
+                    SecureExitCaller = secureExitCaller,
+                    Resolution = resolution,
+                },
             };
         }
         catch (CallerWriteFailedException failed)
