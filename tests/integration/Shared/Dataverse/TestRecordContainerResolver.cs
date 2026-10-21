@@ -226,6 +226,23 @@ internal static class TestRecordContainerResolver
         public List<(string Entity, Guid Id, Dictionary<string, object> Fields)> Updates { get; } = new();
 
         /// <summary>
+        /// #2159 slice 2c: a retrieve returns a COPY of the row, as Dataverse does — so a caller that keeps a row it read sees
+        /// a later write only through what it does to that copy itself. Off by default (the rows are shared).
+        /// </summary>
+        public bool CopiesOnRetrieve { get; set; }
+
+        private static Entity Copy(Entity row)
+        {
+            var copy = new Entity(row.LogicalName, row.Id);
+            foreach (var (column, value) in row.Attributes)
+            {
+                copy[column] = value;
+            }
+
+            return copy;
+        }
+
+        /// <summary>
         /// The environment does not have <c>sprk_document.sprk_relocationpending</c> yet (task 166 f1-v1: the relocation
         /// ledger's schema gate) — any read naming it throws, as Dataverse does.
         /// </summary>
@@ -347,7 +364,7 @@ internal static class TestRecordContainerResolver
 
                     if (Rows.TryGetValue((entity, id), out var row) || people.TryGetValue((entity, id), out row))
                     {
-                        return row;
+                        return CopiesOnRetrieve ? Copy(row) : row;
                     }
 
                     if (entity == "businessunit" && BusinessUnits.TryGetValue(id, out var unit))

@@ -6,6 +6,9 @@
 //     (SecureChildReconciler.AfterRefileAsync → DocumentContainerRelocator.RecordReleaseAsync, under the document's lock);
 //     the widening guard honours it only on an exact match (this item, into this container, unexpired) and the re-point
 //     consumes it. A missing, unreadable, stale or mismatched release holds the move. Each pins a write contract.
+//     Slice 2c: a release is valid only while the row's file is its item AND the row derives to its target — any locked
+//     pass that finds either changed drops it (so a move away and back never reuses it); the files of the documents filed
+//     under a re-filed row are released by the same F3 act; an expired release is reported by the job.
 //
 // Doubles are module boundaries only (ADR-038 §4): the REAL RecordContainerResolver and relocator over task 166's
 // document-pointer world, and the REAL SecureChildReconciler over task 148's world.
@@ -161,8 +164,8 @@ public class RelocationReleaseTests
         LedgerOf(world)!.Release.Should().NotBeNull("report-only consumes nothing");
     }
 
-    [Fact(DisplayName = "slice 2 must not fire: a release for a DIFFERENT target holds the move (and is kept: it is still current)")]
-    public async Task AReleaseForADifferentTarget_IsHeld()
+    [Fact(DisplayName = "slice 2c must not fire: a release for a DIFFERENT target holds the move, and the locked pass drops it (the row no longer derives to it)")]
+    public async Task AReleaseForADifferentTarget_IsHeld_AndDropped()
     {
         var (world, rig) = RefiledToS2();
         Store(world, AReleaseFor(target: T.CustomerAContainer));
@@ -170,9 +173,24 @@ public class RelocationReleaseTests
         var outcome = await RelocateAsync(rig, RelocationPurpose.Refile);
 
         outcome.State.Should().Be(RelocationState.HeldIsolated, outcome.Detail);
+        outcome.Detail.Should().Contain("no F3 re-file released this move", "the hold reads the ledger the drop left");
+        outcome.ReleaseExpired.Should().BeFalse("it was invalid, not expired");
+        world.Updates.Should().ContainSingle().Which.Fields.Should().ContainKey(LedgerColumn)
+            .WhoseValue.Should().Be(DBNull.Value, "dropped, and nothing else owed: the column is cleared");
+        NoFileStep(rig);
+    }
+
+    [Fact(DisplayName = "slice 2c must not fire: report-only still holds a release for a DIFFERENT target, and drops nothing")]
+    public async Task ReportOnly_AReleaseForADifferentTarget_IsHeld()
+    {
+        var (world, rig) = RefiledToS2();
+        Store(world, AReleaseFor(target: T.CustomerAContainer));
+
+        var outcome = await RelocateAsync(rig, RelocationPurpose.Refile, apply: false);
+
+        outcome.State.Should().Be(RelocationState.HeldIsolated, outcome.Detail);
         outcome.Detail.Should().Contain("for another move, or has expired");
         world.Updates.Should().BeEmpty();
-        NoFileStep(rig);
     }
 
     [Fact(DisplayName = "slice 2 must not fire: a release for ANOTHER item holds the move, and the locked pass drops it (spent)")]
@@ -184,6 +202,7 @@ public class RelocationReleaseTests
         var outcome = await RelocateAsync(rig, RelocationPurpose.Refile);
 
         outcome.State.Should().Be(RelocationState.HeldIsolated, outcome.Detail);
+        outcome.ReleaseExpired.Should().BeFalse();
         world.Updates.Should().ContainSingle().Which.Fields.Should().ContainKey(LedgerColumn)
             .WhoseValue.Should().Be(DBNull.Value, "a spent release, and nothing else owed: the column is cleared");
         NoFileStep(rig);
@@ -198,9 +217,14 @@ public class RelocationReleaseTests
         var outcome = await RelocateAsync(rig, RelocationPurpose.Refile);
 
         outcome.State.Should().Be(RelocationState.HeldIsolated, outcome.Detail);
+        outcome.ReleaseExpired.Should().BeTrue("slice 2c: the job lists it for an administrator");
         LedgerOf(world)!.Release.Should().BeNull("dropped under the lock");
         NoFileStep(rig);
     }
+
+    [Fact(DisplayName = "slice 2c: the release lifetime is 30 days (a backstop only)")]
+    public void TheReleaseLifetime_IsThirtyDays()
+        => DocumentContainerRelocator.ReleaseLifetime.Should().Be(TimeSpan.FromDays(30));
 
     [Fact(DisplayName = "slice 2: a release inside its lifetime still moves (the lifetime boundary)")]
     public async Task AReleaseInsideItsLifetime_Moves()
@@ -433,5 +457,248 @@ public class RelocationReleaseTests
             "sprk_event", T.DocumentId, () => Task.FromResult(true), Reparent(Permit(S1)), CancellationToken.None);
 
         world.Updates.Should().BeEmpty();
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // Slice 2c — a release is valid only while the row still derives to its target (and its file is its item)
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+    private static void CheckOut(World world)
+        => world.Rows[("sprk_document", T.DocumentId)][DocumentContainerRelocator.CheckedOutByColumn] =
+            new EntityReference("systemuser", TestRecordContainerResolver.PointerWorldCreator);
+
+    private static void CheckIn(World world)
+    {
+        var row = world.Rows[("sprk_document", T.DocumentId)];
+        row.Attributes.Remove(DocumentContainerRelocator.CheckedOutByColumn);
+        row.Attributes.Remove(DocumentContainerRelocator.CheckedOutDateColumn);
+    }
+
+    private static void FileUnder(World world, Guid matter)
+        => world.Rows[("sprk_document", T.DocumentId)]["sprk_matter"] = new EntityReference("sprk_matter", matter);
+
+    [Theory(DisplayName = "slice 2c must not fire: a BFF F3 re-file to S2 held, then an outside edit S2→S1→S2 — the old release never authorises the second, F3-less move")]
+    [InlineData(true)]  // held because it is checked out: the drop runs BEFORE the checkout check
+    [InlineData(false)] // held for any other reason, or simply not reached before the edits
+    public async Task AMoveAwayAndBack_NeverReusesTheOldRelease(bool checkedOut)
+    {
+        var (world, rig) = RefiledToS2();
+        (await rig.Relocator.RecordReleaseAsync(T.DocumentId, Permit(S1))).State.Should().Be(RelocationReleaseState.Recorded);
+        if (checkedOut)
+        {
+            CheckOut(world);
+            (await RelocateAsync(rig, RelocationPurpose.Refile)).State.Should().Be(RelocationState.CheckedOut);
+            LedgerOf(world)!.Release.Should().NotBeNull("still valid: the row still derives to its target");
+        }
+
+        // Outside the BFF: back under S1 — a locked pass finds the row no longer derives to the release's target.
+        FileUnder(world, T.SecureMatter);
+        var away = await RelocateAsync(rig, RelocationPurpose.Refile);
+        away.State.Should().Be(checkedOut ? RelocationState.CheckedOut : RelocationState.InPlace, away.Detail);
+        (LedgerOf(world)?.Release).Should().BeNull("the release was dropped");
+
+        // Outside the BFF again: to S2, checked in. No F3 act made THIS move.
+        FileUnder(world, R.SecondSecureMatter);
+        CheckIn(world);
+        var back = await RelocateAsync(rig, RelocationPurpose.Refile);
+
+        back.State.Should().Be(RelocationState.HeldIsolated, back.Detail);
+        back.Detail.Should().Contain("no F3 re-file released this move");
+        NoFileStep(rig);
+    }
+
+    [Fact(DisplayName = "slice 2c must not fire: a CURRENT release on a checked-out row is kept — the move waits for the check-in")]
+    public async Task ACheckedOutRow_KeepsItsValidRelease_AndMovesAfterCheckIn()
+    {
+        var (world, rig) = RefiledToS2();
+        (await rig.Relocator.RecordReleaseAsync(T.DocumentId, Permit(S1))).State.Should().Be(RelocationReleaseState.Recorded);
+        CheckOut(world);
+        var updatesBefore = world.Updates.Count;
+
+        (await RelocateAsync(rig, RelocationPurpose.Refile)).State.Should().Be(RelocationState.CheckedOut);
+        world.Updates.Count.Should().Be(updatesBefore, "nothing is dropped or written");
+
+        CheckIn(world);
+        (await RelocateAsync(rig, RelocationPurpose.Refile)).State.Should().Be(RelocationState.Relocated);
+        rig.DriveOf(T.DocumentId).Should().Be(R.SecondSecureContainer);
+    }
+
+    [Fact(DisplayName = "slice 2c must not fire: a derivation that cannot be read decides nothing — the release is kept and nothing moves")]
+    public async Task AnUndecidedDerivation_KeepsTheRelease()
+    {
+        var (world, rig) = RefiledToS2();
+        Store(world, AReleaseFor());
+        world.RetrieveFault = (table, _) => table == "sprk_matter" ? new TimeoutException("Dataverse unavailable") : null;
+
+        var outcome = await RelocateAsync(rig, RelocationPurpose.Refile);
+
+        outcome.State.Should().NotBe(RelocationState.Relocated, outcome.Detail);
+        world.Updates.Should().BeEmpty();
+        world.RetrieveFault = null;
+        LedgerOf(world)!.Release.Should().NotBeNull("an unread derivation drops nothing");
+        NoFileStep(rig);
+    }
+
+    [Fact(DisplayName = "slice 2c must not fire: a drop whose lock is lost writes nothing (the guard's exact match still holds the move)")]
+    public async Task ADropThatLosesItsLock_WritesNothing()
+    {
+        var (world, rig) = RefiledToS2();
+        Store(world, AReleaseFor(target: T.CustomerAContainer));
+        rig.Locks.FailRenewalsFrom = 2; // 1 = the confirmation at the take; the next (before the drop) finds it lost
+
+        var outcome = await RelocateAsync(rig, RelocationPurpose.Refile);
+
+        outcome.State.Should().NotBe(RelocationState.Relocated, outcome.Detail);
+        world.Updates.Should().BeEmpty();
+        LedgerOf(world)!.Release.Should().NotBeNull();
+        NoFileStep(rig);
+    }
+
+    [Fact(DisplayName = "slice 2c: a drop keeps every entry an earlier move still owes")]
+    public async Task ADrop_KeepsWhatTheLedgerOwes()
+    {
+        var (world, rig) = RefiledToS2();
+        var owed = new DocumentContainerRelocator.RelocationLedgerEntry
+        {
+            SourceDrive = "b!an-earlier-container",
+            SourceItem = "01EARLIER",
+            Source = DocumentContainerRelocator.LedgerSourceState.Removed,
+            Indexed = DocumentContainerRelocator.LedgerIndexScope.Own, // settled by this call: the settle writes the ledger back
+        };
+        world.Rows[("sprk_document", T.DocumentId)][LedgerColumn] =
+            (new Ledger([owed]) { Release = AReleaseFor(target: T.CustomerAContainer) }).Serialize();
+        world.CopiesOnRetrieve = true; // as Dataverse: the row this call read is its own copy
+
+        await RelocateAsync(rig, RelocationPurpose.Refile);
+
+        var written = world.Updates.First().Fields[LedgerColumn].Should().BeOfType<string>().Subject;
+        var ledger = Ledger.Parse(written)!;
+        ledger.Release.Should().BeNull();
+        ledger.Entries.Should().ContainSingle().Which.SourceItem.Should().Be("01EARLIER");
+        (LedgerOf(world)?.Release).Should().BeNull("no later write of this call puts the dropped release back");
+    }
+
+    // ── The job lists a release that expired unused (ids only) ──────────────────────────────────────────────────
+
+    [Fact(DisplayName = "slice 2c: the Make Secure backstop lists a document whose F3 release expired unused (still held)")]
+    public async Task TheBackstop_ListsAnExpiredRelease()
+    {
+        var (pointer, rig) = RefiledToS2();
+        Store(pointer, AReleaseFor(at: DateTimeOffset.UtcNow - DocumentContainerRelocator.ReleaseLifetime - TimeSpan.FromHours(1)));
+        var world = R.JobWorld((T.DocumentId, T.SecureContainer, true));
+        world.Set("sprk_document", T.DocumentId, LedgerColumn, pointer.Rows[("sprk_document", T.DocumentId)][LedgerColumn]);
+
+        var (_, refile, makeSecure) = await new R.JobHarness(world, rig).RunAsync();
+
+        R.Ids(makeSecure, "releaseExpiredDocuments").Should().Equal(T.DocumentId);
+        makeSecure.GetProperty("counts").GetProperty(nameof(RelocationState.HeldIsolated)).GetInt32().Should().Be(1);
+        R.Ids(refile, "releaseExpiredDocuments").Should().BeEmpty("the backstop took it; the re-file pass skips it");
+        rig.DriveOf(T.DocumentId).Should().Be(T.SecureContainer);
+    }
+
+    [Fact(DisplayName = "slice 2c: the re-file pass lists a document whose F3 release expired unused (still held)")]
+    public async Task TheRefilePass_ListsAnExpiredRelease()
+    {
+        // The backstop's cap of one spends itself on a lower id, so the re-file pass reaches the expired one.
+        var first = Guid.Parse("0a000000-0000-4000-8000-00000000f1a0");
+        var (pointer, rig) = RefiledToS2();
+        pointer.Rows[("sprk_document", first)] = R.Doc(first, T.PlainMatter, T.CustomerA1Container);
+        pointer.Rows[("sprk_document", first)][LedgerColumn] = "{\"v\":1}";
+        Store(pointer, AReleaseFor(at: DateTimeOffset.UtcNow - DocumentContainerRelocator.ReleaseLifetime - TimeSpan.FromHours(1)));
+        var world = R.JobWorld((first, T.CustomerA1Container, false), (T.DocumentId, T.SecureContainer, true));
+        world.Set("sprk_document", first, LedgerColumn, "{\"v\":1}");
+        world.Set("sprk_document", T.DocumentId, LedgerColumn, pointer.Rows[("sprk_document", T.DocumentId)][LedgerColumn]);
+
+        var (_, refile, makeSecure) = await new R.JobHarness(world, rig).RunAsync(maxRelocations: "1");
+
+        R.Ids(makeSecure, "releaseExpiredDocuments").Should().BeEmpty();
+        R.Ids(refile, "releaseExpiredDocuments").Should().Equal(T.DocumentId);
+        R.Ids(refile, "heldIsolatedDocuments").Should().Equal(T.DocumentId);
+    }
+
+    [Fact(DisplayName = "slice 2c must not fire: a release that is merely INVALID (not expired) is not listed as expired")]
+    public async Task TheBackstop_DoesNotListAnInvalidRelease()
+    {
+        var (pointer, rig) = RefiledToS2();
+        Store(pointer, AReleaseFor(target: T.CustomerAContainer));
+        var world = R.JobWorld((T.DocumentId, T.SecureContainer, true));
+        world.Set("sprk_document", T.DocumentId, LedgerColumn, pointer.Rows[("sprk_document", T.DocumentId)][LedgerColumn]);
+
+        var (_, _, makeSecure) = await new R.JobHarness(world, rig).RunAsync();
+
+        R.Ids(makeSecure, "releaseExpiredDocuments").Should().BeEmpty();
+        (LedgerOf(pointer)?.Release).Should().BeNull("dropped all the same");
+    }
+
+    // ── The descendants of a re-filed row (the same F3 act) ─────────────────────────────────────────────────────
+
+    private static readonly Guid Event = Guid.Parse("1f000000-0000-4000-8000-0000000e2159");
+
+    /// <summary>S3 — a third secure matter, the one the re-file did NOT leave.</summary>
+    private static readonly Guid ThirdSecureMatter = Guid.Parse("1c000000-0000-4000-8000-00000000f1a3");
+
+    private const string ThirdSecureContainer = "b!secure-matter-three-own-container";
+
+    /// <summary>The REAL reconciler over task 148's world: an event filed under S2 (re-filed there from S1), with the
+    /// document filed under the event, both isolated.</summary>
+    private static SecureChildReconciler EventReconciler(T.Rig rig)
+    {
+        var shareWorld = SecureChildShareWorld.Standard()
+            .SecureRoot("sprk_matter", R.SecondSecureMatter)
+            .SecureChild("sprk_event", Event, ("sprk_regardingmatter", "sprk_matter", R.SecondSecureMatter))
+            .SecureChild("sprk_document", T.DocumentId, ("sprk_relatedevent", "sprk_event", Event));
+        return SecureChildShareWorld.ReconcilerOver(() => shareWorld, new FakeRecordShareTable(), null!, relocator: rig.Relocator);
+    }
+
+    [Fact(DisplayName = "slice 2c must fire: an EVENT re-filed S1→S2 with F3 releases the file of the document filed under it, which then moves into S2")]
+    public async Task ARefiledEvent_ReleasesItsDocumentsFile()
+    {
+        var (world, rig) = RefiledToS2();
+
+        var report = await EventReconciler(rig).AfterRefileAsync(
+            "sprk_event", Event, () => Task.FromResult(true), Reparent(Permit(S1)), CancellationToken.None);
+
+        report!.IsolatedDocumentIds.Should().Contain(T.DocumentId, "the pass found the document under the event");
+        var recorded = LedgerOf(world)!.Release!;
+        recorded.TargetContainer.Should().Be(R.SecondSecureContainer);
+        recorded.SourceRecordId.Should().Be(T.SecureMatter);
+
+        (await RelocateAsync(rig, RelocationPurpose.Refile)).State.Should().Be(RelocationState.Relocated);
+        rig.DriveOf(T.DocumentId).Should().Be(R.SecondSecureContainer);
+    }
+
+    [Fact(DisplayName = "slice 2c must not fire: a descendant whose file is isolated under ANOTHER secure record (S3) the re-file did not leave stays held")]
+    public async Task ARefiledEvent_DoesNotReleaseAFileOfAnotherSecureRecord()
+    {
+        var (world, rig) = RefiledToS2();
+        world.SecureClaims[ThirdSecureContainer] = ("sprk_matter", ThirdSecureMatter);
+        world.Rows[("sprk_matter", ThirdSecureMatter)] = new Entity("sprk_matter", ThirdSecureMatter)
+        {
+            ["sprk_issecure"] = true,
+            ["sprk_containerid"] = ThirdSecureContainer,
+            ["owningbusinessunit"] = new EntityReference("businessunit", T.CustomerA),
+        };
+        world.Rows[("sprk_document", T.DocumentId)]["sprk_graphdriveid"] = ThirdSecureContainer;
+
+        await EventReconciler(rig).AfterRefileAsync(
+            "sprk_event", Event, () => Task.FromResult(true), Reparent(Permit(S1)), CancellationToken.None);
+
+        world.Updates.Should().BeEmpty("NotCovered: its file's secure record is not one the re-file left");
+        var outcome = await RelocateAsync(rig, RelocationPurpose.Refile);
+        outcome.State.Should().Be(RelocationState.HeldIsolated, outcome.Detail);
+        rig.DriveOf(T.DocumentId).Should().Be(ThirdSecureContainer);
+    }
+
+    [Fact(DisplayName = "slice 2c must not fire: an event re-filed WITHOUT a permit (outside the BFF's F3) releases no descendant's file")]
+    public async Task ARefiledEventWithoutAPermit_ReleasesNothing()
+    {
+        var (world, rig) = RefiledToS2();
+
+        var report = await EventReconciler(rig).AfterRefileAsync(
+            "sprk_event", Event, () => Task.FromResult(true), Reparent(permit: null), CancellationToken.None);
+
+        report!.IsolatedDocumentIds.Should().Contain(T.DocumentId);
+        world.Updates.Should().BeEmpty();
+        (await RelocateAsync(rig, RelocationPurpose.Refile)).State.Should().Be(RelocationState.HeldIsolated);
     }
 }

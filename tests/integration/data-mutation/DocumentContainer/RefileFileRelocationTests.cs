@@ -667,7 +667,7 @@ public class RefileFileRelocationTests
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
     /// <summary>The job over task 148's world and the REAL relocator and resolver over task 166's world.</summary>
-    private sealed class JobHarness
+    internal sealed class JobHarness
     {
         private readonly IConfigurationRoot _configuration = new ConfigurationBuilder().AddInMemoryCollection().Build();
         private readonly SecureChildReconciliationJob _job;
@@ -704,7 +704,7 @@ public class RefileFileRelocationTests
     }
 
     /// <summary>The job's view of the documents: each just modified, its pointer's drive and owner as given.</summary>
-    private static SecureChildShareWorld JobWorld(params (Guid Id, string Drive, bool Isolated)[] documents)
+    internal static SecureChildShareWorld JobWorld(params (Guid Id, string Drive, bool Isolated)[] documents)
     {
         var world = SecureChildShareWorld.Standard();
         world.Add("businessunit", T.CustomerA, ("sprk_containerid", T.CustomerAContainer));
@@ -719,7 +719,7 @@ public class RefileFileRelocationTests
         return world;
     }
 
-    private static Guid[] Ids(JsonElement refile, string list)
+    internal static Guid[] Ids(JsonElement refile, string list)
         => refile.GetProperty(list).EnumerateArray().Select(e => e.GetGuid()).ToArray();
 
     [Fact(DisplayName = "#2159: the job moves a re-filed document's file within its run, with purpose Refile, and reports it")]

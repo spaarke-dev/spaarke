@@ -880,8 +880,25 @@ public sealed class SecureChildReconciler
         string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, RefileThreadStep thread,
         RecordOwnerResolution? reparent, CancellationToken ct)
     {
-        await RecordFileReleaseAsync(childLogicalName, childId, reparent, ct).ConfigureAwait(false);
+        var permit = reparent?.SecureExitPermitted is { RootsLeft.Count: > 0 } given ? given : null;
+        if (permit is not null && string.Equals(childLogicalName.Trim(), DocumentTable, StringComparison.OrdinalIgnoreCase))
+        {
+            await RecordFileReleaseAsync(childId, permit, "re-filed", ct).ConfigureAwait(false);
+        }
+
         var report = await RefileStepsAsync(childLogicalName, childId, wasIsolated, thread, ct).ConfigureAwait(false);
+
+        // #2159 slice 2c: the documents filed under the re-filed row followed it out of S1 under the same F3 act (owner round
+        // 24 item 2), so each of their files is released the same way — each checked by the relocator against the roots
+        // this re-file left (a document isolated under another secure record stays held).
+        if (permit is not null && report is { IsolatedDocumentIds.Count: > 0 })
+        {
+            foreach (var documentId in report.IsolatedDocumentIds.Where(id => id != childId))
+            {
+                await RecordFileReleaseAsync(documentId, permit, $"filed under re-filed {childLogicalName.Trim()} {childId:D}", ct)
+                    .ConfigureAwait(false);
+            }
+        }
 
         // Ontology task 042b (D-169, uac-r2 choice A): after UAC's own steps, on EVERY communication re-file, its gate Decision Records
         // still owned by a user are re-owned to the resolver's team (a Secure answer is left to this engine). Never thrown.
@@ -902,19 +919,14 @@ public sealed class SecureChildReconciler
     }
 
     /// <summary>
-    /// #2159 slice 2 — the F3 release of a re-filed document's file: when the reparent left at least one secure root with
-    /// the caller's F3 permission, the ONE ledger writer (<see cref="DocumentContainerRelocator.RecordReleaseAsync"/>) records
-    /// it under the document's lock. Only a document; only a written re-file's own permission. Never throws — a release not
-    /// recorded (lock held, a fault) leaves the file held in S1 (fail closed) and the re-file stands.
+    /// #2159 slice 2 — the F3 release of one document's file (the re-filed document, or one filed under the re-filed row):
+    /// the re-file left at least one secure root with the caller's F3 permission, so the ONE ledger writer
+    /// (<see cref="DocumentContainerRelocator.RecordReleaseAsync"/>) records it under the document's lock, after checking the
+    /// file's secure record is one of those roots. Only a written re-file's own permission. Never throws — a release not
+    /// recorded (lock held, a fault, another secure record) leaves the file held where it is (fail closed); the re-file stands.
     /// </summary>
-    private async Task RecordFileReleaseAsync(string childLogicalName, Guid childId, RecordOwnerResolution? reparent, CancellationToken ct)
+    private async Task RecordFileReleaseAsync(Guid childId, SecureExitPermit permit, string how, CancellationToken ct)
     {
-        if (!string.Equals(childLogicalName.Trim(), DocumentTable, StringComparison.OrdinalIgnoreCase)
-            || reparent?.SecureExitPermitted is not { RootsLeft.Count: > 0 } permit)
-        {
-            return;
-        }
-
         if (_relocator is null)
         {
             _logger.LogWarning(
@@ -928,8 +940,8 @@ public sealed class SecureChildReconciler
             var release = await _relocator.RecordReleaseAsync(childId, permit, ct).ConfigureAwait(false);
             _logger.Log(
                 release.State is RelocationReleaseState.Recorded or RelocationReleaseState.NotNeeded ? LogLevel.Information : LogLevel.Warning,
-                "[SECURE-CHILD-RECONCILE] sprk_document {Id} re-filed out of {Count} secure record(s) with F3: release {State} ({Detail}).",
-                childId, permit.RootsLeft.Count, release.State, release.Detail);
+                "[SECURE-CHILD-RECONCILE] sprk_document {Id} ({How}) left {Count} secure record(s) with F3: release {State} ({Detail}).",
+                childId, how, permit.RootsLeft.Count, release.State, release.Detail);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {

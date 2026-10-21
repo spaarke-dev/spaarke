@@ -106,11 +106,13 @@ public sealed class DocumentContainerRelocator
     internal const int MaxLedgerEntries = 8;
 
     /// <summary>
-    /// #2159 slice 2: how long an F3 release (<see cref="RelocationRelease"/>) stays usable after the re-file that recorded
-    /// it. The re-file pass and the backstop move a released file within minutes; an older release is stale — it holds,
-    /// and the next locked pass drops it. A file still held after that needs the move made again through the BFF.
+    /// #2159 slice 2c: the AGE bound of an F3 release (<see cref="RelocationRelease"/>) — a backstop only. A release is valid
+    /// only while the row's file is still the item it names AND the row still derives to its target; any locked pass that
+    /// finds either changed drops it (<see cref="DropInvalidReleaseAsync"/>), so an edit that moves the document away and
+    /// back never reuses it. Long enough that a long checkout does not strand the file; a document still held when its
+    /// release expires is reported (<see cref="DocumentRelocationOutcome.ReleaseExpired"/>).
     /// </summary>
-    internal static readonly TimeSpan ReleaseLifetime = TimeSpan.FromDays(7);
+    internal static readonly TimeSpan ReleaseLifetime = TimeSpan.FromDays(30);
 
     /// <summary>
     /// #2159 slice 2: how long recording a release waits for the document's relocation lock (another relocation of it is
@@ -704,7 +706,10 @@ public sealed class DocumentContainerRelocator
 
         try
         {
-            return await RelocateCoreAsync(documentId, apply, purpose, expectedTargetContainer, ct).ConfigureAwait(false);
+            var releaseCheck = new ReleaseCheck();
+            var outcome = await RelocateCoreAsync(documentId, apply, purpose, expectedTargetContainer, ct, releaseCheck)
+                .ConfigureAwait(false);
+            return releaseCheck.Expired ? outcome with { ReleaseExpired = true } : outcome;
         }
         finally
         {
@@ -712,8 +717,16 @@ public sealed class DocumentContainerRelocator
         }
     }
 
+    /// <summary>What the locked release check of one call found (#2159 slice 2c).</summary>
+    private sealed class ReleaseCheck
+    {
+        /// <summary>The row's F3 release had expired and was dropped.</summary>
+        public bool Expired { get; set; }
+    }
+
     private async Task<DocumentRelocationOutcome> RelocateCoreAsync(
-        Guid documentId, bool apply, RelocationPurpose purpose, string? expectedTargetContainer, CancellationToken ct)
+        Guid documentId, bool apply, RelocationPurpose purpose, string? expectedTargetContainer, CancellationToken ct,
+        ReleaseCheck? releaseCheck = null)
     {
         var row = await ReadRowAsync(documentId, ct).ConfigureAwait(false);
         var sourceDrive = row?.GetAttributeValue<string>(DriveColumn)?.Trim();
@@ -736,6 +749,17 @@ public sealed class DocumentContainerRelocator
                 bindingRefusal + " — an administrator must repair it; it is not moved");
         }
 
+        // #2159 slice 2c: an F3 release is valid only while the row's file is its item AND the row derives to its target. A
+        // locked pass that finds either changed (or the release expired) drops it — BEFORE the checkout check, so a document
+        // moved away and back while checked out never reuses an old release for a move that had no F3.
+        if (apply && RelocationLedger.Parse(row!.GetAttributeValue<string>(RelocationLedgerColumn))?.Release is { } release
+            && await DropInvalidReleaseAsync(documentId, row!, release, sourceDrive, sourceItem, ct).ConfigureAwait(false)
+                is ReleaseDrop.Expired
+            && releaseCheck is not null)
+        {
+            releaseCheck.Expired = true;
+        }
+
         // #2159 B4: a CHECKED-OUT document is left alone, whatever the purpose: its holder is editing THIS item, so a copy,
         // a re-point or a source delete (or a ledger re-copy, which re-points) would strand or lose those edits. Check-in
         // clears the checkout and modifies the row, so a later pass (the re-file window, the backstop's listing, the
@@ -750,10 +774,6 @@ public sealed class DocumentContainerRelocator
         // An earlier move of this row may still owe something (round 37 / F2): settle it BEFORE anything else, so a
         // repeat call completes it whatever the file's placement is now.
         var ledger = RelocationLedger.Parse(row!.GetAttributeValue<string>(RelocationLedgerColumn));
-        if (apply && ledger?.Release is { } release && release.IsSpent(sourceDrive, sourceItem, _time.GetUtcNow()))
-        {
-            ledger = await DropSpentReleaseAsync(documentId, ledger, release, ct).ConfigureAwait(false);
-        }
 
         var prior = await SettleOrReportAsync(documentId, row, sourceDrive, sourceItem, ledger, purpose, apply, ct)
             .ConfigureAwait(false);
@@ -1322,35 +1342,77 @@ public sealed class DocumentContainerRelocator
         return ledger is null ? (null, true) : (ledger.Release, false);
     }
 
-    /// <summary>
-    /// Drops a release that can release nothing again (<see cref="RelocationRelease.IsSpent"/>), under the confirmed lock, so
-    /// the row leaves the backstop's "ledger owes" listing. A failed or unlocked write leaves it; it holds either way.
-    /// </summary>
-    private async Task<RelocationLedger> DropSpentReleaseAsync(
-        Guid documentId, RelocationLedger ledger, RelocationRelease release, CancellationToken ct)
+    /// <summary>Why <see cref="DropInvalidReleaseAsync"/> dropped a release, if it did.</summary>
+    private enum ReleaseDrop
     {
-        var without = ledger with { Release = null };
-        if (!await StillLockedAsync(documentId, ct).ConfigureAwait(false))
+        Kept,
+        Expired,
+        Invalid,
+    }
+
+    /// <summary>
+    /// #2159 slice 2c — drops the row's F3 release, under the confirmed lock, when it can no longer release the move it was
+    /// recorded for: it expired (<see cref="ReleaseLifetime"/>), the row's file is no longer its item, or the row derives to
+    /// another container now (a derivation that cannot be read decides nothing: it is kept, and the guard holds the move).
+    /// The row read in memory is updated with what was written. A failed or unlocked write leaves it; the guard's exact
+    /// match holds the move either way.
+    /// </summary>
+    private async Task<ReleaseDrop> DropInvalidReleaseAsync(
+        Guid documentId, Entity row, RelocationRelease release, string currentDrive, string currentItem, CancellationToken ct)
+    {
+        string? why = null;
+        var expired = !release.IsCurrent(_time.GetUtcNow());
+        if (expired)
         {
-            return ledger;
+            why = $"it expired (recorded {release.At:o}, lifetime {ReleaseLifetime.TotalDays:0} days)";
+        }
+        else if (!SameItem(release.SourceDrive, release.SourceItem, currentDrive, currentItem))
+        {
+            why = "the row's file is no longer the item it names";
+        }
+        else
+        {
+            var derivation = await _resolver.DeriveDocumentContainersAsync(documentId, ct).ConfigureAwait(false);
+            if (derivation.Decided && !RecordContainerResolver.IsSameContainerId(release.TargetContainer, derivation.PrimaryContainer))
+            {
+                why = $"the row derives to another container now ({derivation.PrimaryContainer})";
+            }
         }
 
+        if (why is null || RelocationLedger.Parse(row.GetAttributeValue<string>(RelocationLedgerColumn)) is not { } ledger
+            || !await StillLockedAsync(documentId, ct).ConfigureAwait(false))
+        {
+            return ReleaseDrop.Kept;
+        }
+
+        var without = ledger with { Release = null };
         try
         {
             await _dataverse.UpdateAsync(DocumentEntity, documentId, new Dictionary<string, object>
             {
                 [RelocationLedgerColumn] = without.IsEmpty ? DBNull.Value : without.Serialize(),
             }, ct).ConfigureAwait(false);
-            _logger.LogInformation(
-                "[DOCUMENT-RELOCATE] Dropped the spent F3 release of document {DocumentId} ({SourceDrive}/{SourceItem} into "
-                + "{Target}, recorded {At}).", documentId, release.SourceDrive, release.SourceItem, release.TargetContainer, release.At);
-            return without;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            _logger.LogWarning(ex, "[DOCUMENT-RELOCATE] The spent F3 release of document {DocumentId} could not be dropped.", documentId);
-            return ledger;
+            _logger.LogWarning(ex, "[DOCUMENT-RELOCATE] The invalid F3 release of document {DocumentId} could not be dropped.", documentId);
+            return ReleaseDrop.Kept;
         }
+
+        if (without.IsEmpty)
+        {
+            row.Attributes.Remove(RelocationLedgerColumn);
+        }
+        else
+        {
+            row[RelocationLedgerColumn] = without.Serialize();
+        }
+
+        _logger.LogWarning(
+            "[DOCUMENT-RELOCATE] Dropped the F3 release of document {DocumentId} ({SourceDrive}/{SourceItem} into {Target}, by "
+            + "{Caller} at {At}): {Why}. Leaving its secure record now needs a new F3 re-file.", documentId, release.SourceDrive,
+            release.SourceItem, release.TargetContainer, release.AuthorizedBy, release.At, why);
+        return expired ? ReleaseDrop.Expired : ReleaseDrop.Invalid;
     }
 
     /// <summary>
@@ -2861,10 +2923,6 @@ public sealed class DocumentContainerRelocator
             => IsCurrent(now)
                && SameItem(SourceDrive, SourceItem, sourceDrive, sourceItem)
                && RecordContainerResolver.IsSameContainerId(TargetContainer, target);
-
-        /// <summary>It can release nothing again: the row's file is no longer the item it named, or it expired.</summary>
-        public bool IsSpent(string currentDrive, string currentItem, DateTimeOffset now)
-            => !IsCurrent(now) || !SameItem(SourceDrive, SourceItem, currentDrive, currentItem);
     }
 
     /// <summary>
@@ -3153,6 +3211,13 @@ public sealed record DocumentRelocationOutcome(
 {
     /// <summary>What is still owed (<c>source-pending</c>, <c>index-pending</c>, <c>rekey-pending</c>, …); empty when settled.</summary>
     public IReadOnlyList<string> Pending { get; init; } = [];
+
+    /// <summary>
+    /// #2159 slice 2c: the row's F3 release had EXPIRED (<see cref="DocumentContainerRelocator.ReleaseLifetime"/>) and this call
+    /// dropped it — the move it released never happened, so the document stays held until a new F3 re-file. Reported once by
+    /// the job (<c>releaseExpiredDocuments</c>), for an administrator.
+    /// </summary>
+    public bool ReleaseExpired { get; init; }
 
     /// <summary>Sources kept because rows of other records still use them.</summary>
     public IReadOnlyList<KeptSource> KeptForOtherRecords { get; init; } = [];

@@ -680,6 +680,8 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                     sourceChangedAfterMove = relocations.Files?.SourceChangedAfterMove ?? 0,
                     versionsTruncated = relocations.Files?.VersionsTruncated ?? 0,
                     sourceKeptForOtherRecords = relocations.Files?.SourceKeptForOtherRecords ?? 0,
+                    // #2159 slice 2c: documents whose F3 release expired this run, unused — still held (ids only).
+                    releaseExpiredDocuments = relocations.ReleaseExpired.Take(MaxSampledRefileIds).ToArray(),
                     passComplete = relocations.PassComplete,
                     failure = relocations.Failure,
                 },
@@ -716,6 +718,7 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                     undecidableDocuments = refile.Undecidable.Take(MaxSampledRefileIds).ToArray(),
                     failedDocuments = refile.Failed.Take(MaxSampledRefileIds).ToArray(),
                     deferredDocuments = refile.Deferred.Take(MaxSampledRefileIds).ToArray(),
+                    releaseExpiredDocuments = refile.ReleaseExpired.Take(MaxSampledRefileIds).ToArray(),
                     failure = refile.Failure,
                 },
                 // Task 173 (owner rounds 81/84): To Do, Event, Communication and Document show the most restrictive Access
@@ -856,6 +859,9 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     {
         /// <summary>#2159: the documents this run handed to the relocator — the re-file pass does not relocate them again.</summary>
         public IReadOnlySet<Guid> Taken { get; init; } = new HashSet<Guid>();
+
+        /// <summary>#2159 slice 2c: the documents whose F3 release had expired, unused, and was dropped this run.</summary>
+        public IReadOnlyList<Guid> ReleaseExpired { get; init; } = [];
     }
 
     /// <summary>
@@ -917,12 +923,24 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         }
 
         var files = MakeSecureFilesSummary.From(DocumentRelocationBatchResult.From(outcomes));
+        var releaseExpired = outcomes.Where(o => o.ReleaseExpired).Select(o => o.DocumentId).ToList();
+        if (releaseExpired.Count > 0)
+        {
+            _logger.LogWarning(
+                "[SECURE-CHILD-RECONCILE] make-secure-relocations: the F3 release of {Count} document(s) expired unused; they "
+                + "stay held until a new F3 re-file: {Documents}", releaseExpired.Count, string.Join(", ", releaseExpired));
+        }
+
         _logger.Log(
             files.Incomplete == 0 ? LogLevel.Information : LogLevel.Warning,
             "[SECURE-CHILD-RECONCILE] make-secure-relocations mode={Mode} ledgerOwing={LedgerOwing} stranded={Stranded} " +
             "examined={Examined} moved={Moved} incomplete={Incomplete} unresolvable={Unresolvable} passComplete={PassComplete}",
             mode, owing.Count, stranded.Count, files.Examined, files.Moved, files.Incomplete, files.Unresolvable, passComplete);
-        return new MakeSecureRelocationRun(mode, owing.Count, stranded.Count, files, passComplete, null) { Taken = take.ToHashSet() };
+        return new MakeSecureRelocationRun(mode, owing.Count, stranded.Count, files, passComplete, null)
+        {
+            Taken = take.ToHashSet(),
+            ReleaseExpired = releaseExpired,
+        };
     }
 
     /// <summary>What the re-file pass did in one run (#2159). Lists hold document ids (at most <see cref="MaxSampledRefileIds"/> each).</summary>
@@ -944,6 +962,9 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         public List<Guid> Undecidable { get; } = new();
         public List<Guid> Failed { get; } = new();
         public List<Guid> Deferred { get; } = new();
+
+        /// <summary>#2159 slice 2c: documents whose F3 release had expired, unused, and was dropped — still held.</summary>
+        public List<Guid> ReleaseExpired { get; } = new();
         public int Carried { get; set; }
         public bool CapReached { get; set; }
         public string? Failure { get; init; }
@@ -1101,6 +1122,13 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                 "[SECURE-CHILD-RECONCILE] refile run={RunId} mode={Mode} document={DocumentId} state={State} " +
                 "from={SourceDrive} to={TargetDrive}: {Detail}",
                 runId, mode, documentId, outcome.State, outcome.SourceDrive, outcome.TargetDrive, outcome.Detail);
+            if (outcome.ReleaseExpired)
+            {
+                _logger.LogWarning(
+                    "[SECURE-CHILD-RECONCILE] refile run={RunId}: the F3 release of document {DocumentId} expired unused; it "
+                    + "stays held until a new F3 re-file.", runId, documentId);
+                run.ReleaseExpired.Add(documentId);
+            }
 
             switch (outcome.State)
             {
