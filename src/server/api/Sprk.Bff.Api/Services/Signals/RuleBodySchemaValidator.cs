@@ -369,7 +369,8 @@ public sealed class RuleBodySchemaValidator
         RuleType.Threshold => ThresholdSchema.Value,
         RuleType.ApprovedTimekeeper or RuleType.ApprovedRate or RuleType.TimeIncrement or RuleType.DailyHoursCap
             or RuleType.NonBillableActivity or RuleType.ExpenseRule or RuleType.InvoiceAge or RuleType.CoreRecordWindow
-            or RuleType.Duplicate or RuleType.RequiredData or RuleType.AiObservation or RuleType.SubmissionIntegrity => BillingSchemas[ruleType].Value,
+            or RuleType.Duplicate or RuleType.RequiredData or RuleType.AiObservation or RuleType.SubmissionIntegrity
+            or RuleType.AddedFee or RuleType.Discount => BillingSchemas[ruleType].Value,
         RuleType.Switch => throw new NotSupportedException(
             $"Schema validation for rule type '{ruleType}' has not been authored: Switch is deferred (D-16); " +
             "the shipped types are Existence and Threshold."),

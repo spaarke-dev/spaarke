@@ -173,6 +173,10 @@ public static class BillingReasonCodes
     public const string AiBlockBilling = "ai_observation.block_billing";
     public const string AiVagueDescription = "ai_observation.vague_description";
 
+    // Task 115 (procedure model 6.3). Flag only: neither type is reject-eligible and neither suggests an adjustment.
+    public const string AddedFeeOverCap = "added_fee.over_cap";
+    public const string DiscountNotApplied = "discount.not_applied";
+
     // SubmissionIntegrity (D-125): findings task 049 creates directly, never from a rule body. Flag only.
     public const string SubmissionInvoiceNumberMismatch = "submission.invoice_number_mismatch";
 

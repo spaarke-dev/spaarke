@@ -586,6 +586,32 @@ public class InvoiceComplianceEvaluatorTests
         notChecked.RuleType.Should().Be(RuleType.ExpenseRule);
     }
 
+    [Theory]
+    [InlineData("USD", true)]
+    [InlineData("EUR", false)]
+    public void Discount_AndAnAddedFeeAmountCap_AreMoney_SoNotJudgedOnANonUsdInvoice_ButAPercentCapIs_D20_Task115(string currency, bool judged)
+    {
+        var discount = Version("DISCOUNT", RuleType.Discount);
+        var amountCap = Version("FEE-AMOUNT", RuleType.AddedFee,
+            """{"type":"AddedFee","feeKind":"lateFee","allowance":"cap","feeCodes":["E120"],"capAmount":100}""");
+        var percentCap = Version("FEE-PERCENT", RuleType.AddedFee,
+            """{"type":"AddedFee","feeKind":"lateFee","allowance":"cap","feeCodes":["E120"],"capPercent":5}""");
+        // The fee line bills 700 against a rack rate of 675 less 10 percent (607.50); the E120 late fee of 150 is over 100 and over
+        // 5 percent of the other lines (700 + 40 = 740, so 37.00).
+        var request = Request(Fee(0) with { BilledRate = 700m, Amount = 700m }, Expense(1), Expense(2) with { BilledExpenseCode = "E120", Amount = 150m })
+            with { Currency = currency };
+
+        var result = Evaluate(request, Loaded(discount, amountCap, percentCap));
+        var byPolicy = result.Findings.ToLookup(f => f.PolicyCode);
+
+        byPolicy["FEE-PERCENT"].Should().ContainSingle("a percent cap compares the invoice's own amounts, in any currency")
+            .Which.ReasonCode.Should().Be(BillingReasonCodes.AddedFeeOverCap);
+        byPolicy["DISCOUNT"].Any(f => f.ReasonCode == BillingReasonCodes.DiscountNotApplied).Should().Be(judged);
+        byPolicy["FEE-AMOUNT"].Any(f => f.ReasonCode == BillingReasonCodes.AddedFeeOverCap).Should().Be(judged);
+        result.Skips.Select(s => s.PolicyCode).Should().BeEquivalentTo(judged ? [] : new[] { "DISCOUNT", "FEE-AMOUNT" });
+        result.Findings.Count(f => f.ReasonCode == BillingEvaluationReasons.CurrencyNotUsd).Should().Be(judged ? 0 : 1, "D-115: one 'not checked' finding");
+    }
+
     // ── 049 rule 5: the D-115 reason is never merged into a Reject (072 part W, A5 placement) ────────────────────
 
     /// <summary>The money rules a combination draws from, each with the strongest consequence its type may carry.</summary>

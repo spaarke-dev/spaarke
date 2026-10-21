@@ -83,8 +83,9 @@ public sealed record BillingEvaluationResult
 /// A version whose body the gate refuses is still refused. A downgraded FIRM version runs (as a Flag) but does not displace the
 /// client default of its type (D-39, D-116; 072 W review F1-b): the client default stays in force beside it.</para>
 /// <para><b>Currency (D-20, D-115).</b> R1 judges money in USD only (<c>"$"</c>, <c>"US$"</c> and <c>"USD$"</c> are read as USD). When the currency is missing, is
-/// not USD, or its confidence (<c>HeaderConfidence["Currency"]</c>) is unknown or below the reliability threshold, ApprovedRate is
-/// not run and ExpenseRule's amount-cap findings are dropped (its code check still runs); each such skip is logged with its reason
+/// not USD, or its confidence (<c>HeaderConfidence["Currency"]</c>) is unknown or below the reliability threshold, ApprovedRate and
+/// Discount (task 115) are not run, ExpenseRule's amount-cap findings are dropped (its code check still runs) and so are an AddedFee
+/// amount cap's (task 115; a percent cap still runs); each such skip is logged with its reason
 /// and listed in <see cref="BillingEvaluationResult.Skips"/>. When anything was skipped, ONE invoice-level finding says so (D-115:
 /// "Rates and expense caps were not checked: the invoice currency is missing / unclear / not USD"), whether or not a RequiredData
 /// rule is in force. Its reason (<see cref="BillingEvaluationReasons.CurrencyMissing"/>, <see cref="BillingEvaluationReasons.CurrencyUnreliable"/>,
@@ -233,7 +234,7 @@ public sealed class InvoiceComplianceEvaluator
                 return done is not null;
             }
 
-            if (definition.RuleType == RuleType.ApprovedRate && currencySkip is not null)
+            if (IsRateComparison(definition.RuleType) && currencySkip is not null)
             {
                 judgedByVersion[candidate.PolicyVersionId] = [];
                 return true;
@@ -306,7 +307,7 @@ public sealed class InvoiceComplianceEvaluator
             var definition = accepted[candidate.PolicyVersionId];
             var applies = subjectsByVersion[candidate.PolicyVersionId];
 
-            if (definition.RuleType == RuleType.ApprovedRate && currencySkip is not null)
+            if (IsRateComparison(definition.RuleType) && currencySkip is not null)
             {
                 Skip(candidate, definition.RuleType, currencySkip, skips);
                 continue;
@@ -322,6 +323,13 @@ public sealed class InvoiceComplianceEvaluator
                 {
                     Skip(candidate, definition.RuleType, currencySkip, skips);
                 }
+            }
+
+            if (definition.RuleType == RuleType.AddedFee && definition.CapAmount is not null && currencySkip is not null)
+            {
+                // Task 115, D-20: an amount cap is a USD amount. A percent cap compares the invoice's own amounts and still runs.
+                kept = kept.Where(f => f.ReasonCode != BillingReasonCodes.AddedFeeOverCap);
+                Skip(candidate, definition.RuleType, currencySkip, skips);
             }
 
             foreach (var finding in kept)
@@ -401,6 +409,10 @@ public sealed class InvoiceComplianceEvaluator
             .ThenByDescending(v => v.VersionNumber)
             .ThenBy(v => v.PolicyVersionId)
             .FirstOrDefault();
+
+    /// <summary>D-20: a type whose every check compares a billed rate with a rate-card rate (ApprovedRate; Discount, task 115). It is not
+    /// run at all on an invoice whose currency cannot be judged.</summary>
+    private static bool IsRateComparison(RuleType ruleType) => ruleType is RuleType.ApprovedRate or RuleType.Discount;
 
     /// <summary>
     /// D-20: why money cannot be judged on this invoice, or <c>null</c> when it can (USD, read reliably). USD is decided by the one

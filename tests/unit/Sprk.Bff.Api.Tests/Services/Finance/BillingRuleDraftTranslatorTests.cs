@@ -47,12 +47,12 @@ public sealed class BillingRuleDraftTranslatorTests
     // ── the closed list ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void RuleTypeOptions_AreTheElevenCatalogueTypes_InOrder_EachWithADescriptionAndAParameterSchema()
+    public void RuleTypeOptions_AreTheCatalogueTypes_InOrder_EachWithADescriptionAndAParameterSchema()
     {
         var options = BillingRuleDraftTranslator.RuleTypeOptions();
 
         options.Select(o => o.RuleType).Should().Equal(BillingRuleCatalogue.Types.Select(t => t.ToString()));
-        options.Should().HaveCount(11);
+        options.Should().HaveCount(13);
         foreach (var option in options)
         {
             option.Description.Should().NotBeNullOrWhiteSpace(option.RuleType);
