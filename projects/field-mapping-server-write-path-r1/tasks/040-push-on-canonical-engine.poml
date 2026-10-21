@@ -96,6 +96,7 @@
 
   <acceptance-criteria>
     <criterion testable="true">`ApplyMappingRule` contains no Copy value-application logic of its own; push calls the canonical engine's Copy logic.</criterion>
+    <criterion testable="true">UAC-r2 #2169 (D7 T7a) is preserved: a push whose target table is sprk_document skips rules targeting sprk_accesspermission or sprk_accessinheritance, reports a per-rule skip reason, and applies the rest. The same columns on other target tables still apply. The skip moves with the Copy logic into the canonical engine's push path, never back into ApplyMappingRule. A test pins both the document case and a non-document case. UAC-r2 reviews this part of the diff before merge.</criterion>
     <criterion testable="true">The parity test passes: create-time Copy into an empty field and push Copy give identical values for the same profile and source, across text, option set, date, lookup and money targets.</criterion>
     <criterion testable="true">Push selects only Manual Refresh Copy rules; a Default/Concat/Template rule and a One-time Copy rule are not applied on push (tested).</criterion>
     <criterion testable="true">The #1437 regression test passes: a failing child yields the fixed actionable text and the response contains no exception message, Dataverse error or id.</criterion>

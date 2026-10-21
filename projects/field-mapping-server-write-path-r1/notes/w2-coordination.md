@@ -129,3 +129,14 @@ touch DecisionCommitService. ebilling sends the shas when the range lands; rebas
 3. UAC-r2 adversarially reviews the 011 and 017 diffs (send the ranges).
 4. ebilling-r1 reviews 025/032 and the invoice-family registry rule.
 5. #1911 leaving draft: ebilling messages this project.
+
+## 2026-10-21 — UAC-r2 #2169 (D7 T7a) in `FieldMappingEndpoints.ApplyMappingRule`
+
+- UAC-r2 lands a skip on push: on a `sprk_document` target, rules targeting `sprk_accesspermission` or
+  `sprk_accessinheritance` are skipped with a per-rule skip reason. Other target tables are unchanged.
+- No collision with in-flight work: 013, 004 and 005 do not touch `FieldMappingEndpoints.cs`.
+- **Task 040** (which deletes `ApplyMappingRule`'s Copy logic) must carry the skip into the engine's push path, has a
+  criterion for it, and goes to UAC-r2 for review.
+- Dev has 0 mapping rules touching either access column (25 rules checked), so no owner decision is needed.
+- Open: whether D7 also needs the create path (014) to skip inheriting `sprk_accesspermission` onto documents.
+  Asked UAC-r2.
