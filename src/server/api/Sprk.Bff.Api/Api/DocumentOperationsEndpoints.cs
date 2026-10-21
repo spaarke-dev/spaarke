@@ -493,9 +493,10 @@ public static class DocumentOperationsEndpoints
                     checkedOut.CheckedOutError,
                     statusCode: 409
                 ),
-                // Task 188 slice D: still the parent of other documents; nothing was deleted.
+                // Task 188 slice D: still the parent of other documents. From the pre-check nothing was deleted; from
+                // Dataverse's Restrict at the row (a child created after the count) the file is gone and the row kept.
                 HasChildDocumentsDeleteResult hasChildren =>
-                    ProblemDetailsHelper.DocumentHasChildDocuments(hasChildren.ChildCount, correlationId),
+                    ProblemDetailsHelper.DocumentHasChildDocuments(hasChildren.ChildCount, correlationId, hasChildren.FileGone),
                 FailedDeleteResult failed => TypedResults.Problem(
                     statusCode: 500,
                     title: "Delete Failed",

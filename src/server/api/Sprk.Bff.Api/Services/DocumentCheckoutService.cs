@@ -830,7 +830,9 @@ public class DocumentCheckoutService
             return new HasChildDocumentsDeleteResult(childCount, correlationId);
         }
 
-        // 2. Delete file from SPE first
+        // 2. Delete file from SPE first. fileGone records whether the row's file is gone after this step (deleted now or
+        // already missing), for the step-3 Restrict refusal below (task 188 slice D).
+        var fileGone = false;
         if (filePolicy == DocumentFileDeletePolicy.VerifiedFileFirstKeepRowOnFailure)
         {
             // Task 032 (FR-26): the file must be gone before the row goes. Any failure here KEEPS the row, so a later
@@ -840,6 +842,8 @@ public class DocumentCheckoutService
             {
                 return fileRefusal;
             }
+
+            fileGone = !string.IsNullOrEmpty(document.DriveId) && !string.IsNullOrEmpty(document.ItemId);
         }
         else
         {
@@ -849,6 +853,7 @@ public class DocumentCheckoutService
                 if (!string.IsNullOrEmpty(document.DriveId) && !string.IsNullOrEmpty(document.ItemId))
                 {
                     var deleted = await _speFileStore.DeleteFileAsync(document.DriveId, document.ItemId, ct);
+                    fileGone = true;
                     if (!deleted)
                     {
                         _logger.LogWarning(
@@ -881,6 +886,23 @@ public class DocumentCheckoutService
             if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
                 return DeleteResult.NotFound(correlationId);
+            }
+
+            // Task 188 slice D: a child document created after step 1b (the email pipeline writing attachments) makes
+            // Dataverse's Restrict refuse the row. The file step has already run and is not undone (file before row is
+            // deliberate: a row deleted before its file would leave an unreachable file), so the row is kept and the
+            // caller gets the same 409 as the pre-check, not a 500. Matched on the error code, never the message.
+            if (!response.IsSuccessStatusCode
+                && IsCannotDeleteDueToAssociation(
+                    Sprk.Bff.Api.Infrastructure.ExternalAccess.DataverseContactIdentityStore.ErrorCodeOf(
+                        await response.Content.ReadAsStringAsync(ct))))
+            {
+                _logger.LogWarning(
+                    "Dataverse refused the row delete of document {DocumentId} ({ErrorCode} CannotDeleteDueToAssociation): a "
+                    + "child document was created after the child check. The row is kept; file already gone: {FileGone} "
+                    + "[{CorrelationId}]",
+                    documentId, CannotDeleteDueToAssociationCode, fileGone, correlationId);
+                return new HasChildDocumentsDeleteResult(null, correlationId, fileGone);
             }
 
             response.EnsureSuccessStatusCode();
@@ -982,6 +1004,41 @@ public class DocumentCheckoutService
     /// other documents (an .eml and its attachments), so it is not deleted (task 188 slice D).
     /// </summary>
     public const string HasChildDocumentsCode = "document_has_child_documents";
+
+    /// <summary>
+    /// Dataverse's <c>CannotDeleteDueToAssociation</c> error code ("The object you tried to delete is associated with
+    /// another object and cannot be deleted"), the Restrict cascade's refusal of a delete: the Web API's
+    /// <c>error.code</c> string. Source: Microsoft Learn, "Web service error codes (Microsoft Dataverse)". For
+    /// <c>sprk_document</c> the only Restrict relationship it is the parent of is <c>sprk_document_ParentDocument</c>
+    /// (solution XML), so on a document delete this code means "child documents exist" (task 188 slice D).
+    /// </summary>
+    public const string CannotDeleteDueToAssociationCode = "0x80040227";
+
+    /// <summary><see cref="CannotDeleteDueToAssociationCode"/> as <see cref="Microsoft.Xrm.Sdk.OrganizationServiceFault.ErrorCode"/> exposes it (signed).</summary>
+    private const int CannotDeleteDueToAssociationErrorCode = unchecked((int)0x80040227);
+
+    /// <summary>Is a Web API <c>error.code</c> the Restrict refusal (<see cref="CannotDeleteDueToAssociationCode"/>)?</summary>
+    internal static bool IsCannotDeleteDueToAssociation(string? webApiErrorCode)
+        => string.Equals(webApiErrorCode, CannotDeleteDueToAssociationCode, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Is an SDK exception (or one it wraps) the Restrict refusal: a
+    /// <see cref="System.ServiceModel.FaultException{TDetail}"/> of <see cref="Microsoft.Xrm.Sdk.OrganizationServiceFault"/>
+    /// whose <c>ErrorCode</c> is <c>0x80040227</c>? Typed on the code, never the (localized) message.
+    /// </summary>
+    internal static bool IsCannotDeleteDueToAssociation(Exception ex)
+    {
+        for (var current = ex; current is not null; current = current.InnerException)
+        {
+            if (current is System.ServiceModel.FaultException<Microsoft.Xrm.Sdk.OrganizationServiceFault> fault
+                && fault.Detail?.ErrorCode == CannotDeleteDueToAssociationErrorCode)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>The most child documents <see cref="CountChildDocumentsAsync"/> counts; any count above zero refuses.</summary>
     private const int ChildDocumentCountCap = 5000;
@@ -1646,11 +1703,19 @@ public record FileNotDeletedDeleteResult(string Code, int FailureStatusCode, str
 }
 
 /// <summary>
-/// The document is still the parent (<c>sprk_parentdocument</c>) of <paramref name="ChildCount"/> other documents, so
-/// NOTHING was deleted: neither its file nor its row (task 188 slice D; the relationship is Delete = Restrict). Code
-/// <see cref="DocumentCheckoutService.HasChildDocumentsCode"/>, 409.
+/// The document is still the parent (<c>sprk_parentdocument</c>) of other documents, so its ROW was not deleted (task
+/// 188 slice D; the relationship is Delete = Restrict). Code <see cref="DocumentCheckoutService.HasChildDocumentsCode"/>,
+/// 409.
 /// </summary>
-public record HasChildDocumentsDeleteResult(int ChildCount, string CorrelationId)
+/// <param name="ChildCount">How many, when the pre-check counted them; <see langword="null"/> when Dataverse's Restrict
+/// refused the row delete instead (a child created after the count), which names no count.</param>
+/// <param name="CorrelationId">The request's correlation id.</param>
+/// <param name="FileGone"><see langword="false"/> when NOTHING was deleted (the pre-check). <see langword="true"/> when
+/// the refusal came at the row, after the file step had removed the file (or found it already gone): the row is kept
+/// without its file. Once the children are gone, a later internal (<see cref="DocumentFileDeletePolicy.BestEffort"/>)
+/// delete treats the missing file as deleted and removes the row; the external route's pointer check refuses a missing
+/// item, so there a retry is refused (the task 032 known limit).</param>
+public record HasChildDocumentsDeleteResult(int? ChildCount, string CorrelationId, bool FileGone = false)
     : DeleteResult(false, CorrelationId)
 {
     public new int StatusCode => 409;

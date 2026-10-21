@@ -170,6 +170,76 @@ public class DocumentDestroyAuthorizationTests
             "the refusal comes before IDocumentDataverseService.DeleteDocumentAsync, so Dataverse's Restrict never fires");
     }
 
+    // Security pass 2: a child created AFTER the count makes Dataverse's Restrict refuse the row itself. That refusal is the
+    // same 409 on both routes, never a 500.
+
+    private const int CannotDeleteDueToAssociation = unchecked((int)0x80040227);
+
+    [Fact]
+    public async Task DeleteDocument_WhenRestrictRefusesTheRowAfterTheFile_Is409_WithoutACount_NotA500()
+    {
+        _fixture.RowDeleteFaultCodes[DocumentId] = CannotDeleteDueToAssociation;
+        using var client = _fixture.CreateClientWithRights("ReadAccess,DeleteAccess");
+
+        var response = await client.DeleteAsync($"/api/documents/{DocumentId}");
+
+        using var problem = await ShouldBeHasChildDocumentsWithoutACount(response);
+        problem.RootElement.GetProperty("detail").GetString().Should().Contain("file was deleted",
+            "the file step ran before the refusal; the detail must not say nothing was deleted");
+    }
+
+    [Fact]
+    public async Task DeleteDataverseDocument_WhenRestrictRefusesTheRow_Is409_WithoutACount_NotA500()
+    {
+        _fixture.RowDeleteFaultCodes[DocumentId] = CannotDeleteDueToAssociation;
+        using var client = _fixture.CreateClientWithRights("ReadAccess,DeleteAccess");
+
+        var response = await client.DeleteAsync($"/api/v1/documents/{DocumentId}");
+
+        using var problem = await ShouldBeHasChildDocumentsWithoutACount(response);
+        problem.RootElement.GetProperty("detail").GetString().Should().Contain("Nothing was deleted",
+            "this route deletes no file");
+        _fixture.DeletedDataverseDocumentIds.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DeleteDataverseDocument_Retry_AfterTheChildrenAreDeleted_Is204()
+    {
+        _fixture.RowDeleteFaultCodes[DocumentId] = CannotDeleteDueToAssociation;
+        using var client = _fixture.CreateClientWithRights("ReadAccess,DeleteAccess");
+        (await client.DeleteAsync($"/api/v1/documents/{DocumentId}")).StatusCode.Should().Be(HttpStatusCode.Conflict);
+
+        _fixture.RowDeleteFaultCodes.TryRemove(DocumentId, out _); // the attachments are deleted
+        var retry = await client.DeleteAsync($"/api/v1/documents/{DocumentId}");
+
+        retry.StatusCode.Should().Be(HttpStatusCode.NoContent, await retry.Content.ReadAsStringAsync());
+        _fixture.DeletedDataverseDocumentIds.Should().ContainSingle().Which.Should().Be(DocumentId.ToString());
+    }
+
+    [Fact]
+    public async Task DeleteDataverseDocument_WhenTheRowDeleteFailsWithAnotherFaultCode_IsStill500()
+    {
+        // Must-not-fire: only 0x80040227 is the Restrict refusal (0x80040220 is a privilege fault).
+        _fixture.RowDeleteFaultCodes[DocumentId] = unchecked((int)0x80040220);
+        using var client = _fixture.CreateClientWithRights("ReadAccess,DeleteAccess");
+
+        var response = await client.DeleteAsync($"/api/v1/documents/{DocumentId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        _fixture.DeletedDataverseDocumentIds.Should().BeEmpty();
+    }
+
+    private static async Task<System.Text.Json.JsonDocument> ShouldBeHasChildDocumentsWithoutACount(HttpResponseMessage response)
+    {
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body);
+        var problem = System.Text.Json.JsonDocument.Parse(body);
+        problem.RootElement.GetProperty("reasonCode").GetString()
+            .Should().Be(Sprk.Bff.Api.Services.DocumentCheckoutService.HasChildDocumentsCode);
+        problem.RootElement.TryGetProperty("childCount", out _).Should().BeFalse("Dataverse's refusal names no count");
+        return problem;
+    }
+
     private static async Task ShouldBeHasChildDocuments(HttpResponseMessage response, int expectedCount)
     {
         var body = await response.Content.ReadAsStringAsync();

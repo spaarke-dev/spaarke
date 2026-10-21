@@ -253,7 +253,10 @@ public static partial class ProblemDetailsHelper
     /// <param name="childCount">How many child documents, or <see langword="null"/> to name none (the external plane,
     /// where a child the caller cannot see must not be counted to them). Never their ids.</param>
     /// <param name="traceId">Optional correlation id for support.</param>
-    public static IResult DocumentHasChildDocuments(int? childCount, string? traceId = null)
+    /// <param name="fileGone"><see langword="true"/> when Dataverse refused the ROW after the file was deleted (a child
+    /// created after the pre-check): the detail then says the file is gone and the record was kept, not "nothing was
+    /// deleted".</param>
+    public static IResult DocumentHasChildDocuments(int? childCount, string? traceId = null, bool fileGone = false)
     {
         var extensions = new Dictionary<string, object?>
         {
@@ -271,7 +274,10 @@ public static partial class ProblemDetailsHelper
         return Results.Problem(
             title: "Document has child documents",
             statusCode: StatusCodes.Status409Conflict,
-            detail: childCount is { } n
+            detail: fileGone
+                ? "The document's file was deleted, but its record was kept: other documents, such as an email's " +
+                  "attachments, now name it as their parent. Delete those documents first, then remove this record."
+                : childCount is { } n
                 ? $"The document was not deleted: {n} other document(s), such as an email's attachments, name it as their " +
                   "parent. Delete those documents first. Nothing was deleted."
                 : "The document was not deleted: other documents, such as an email's attachments, name it as their parent. " +

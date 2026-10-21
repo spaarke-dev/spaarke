@@ -632,6 +632,91 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
     }
 
     // =====================================================================
+    // Task 188 slice D, security pass 2: a child created AFTER the count (the email pipeline writing attachments) makes
+    // Dataverse's Restrict refuse the row once the file is gone. The refusal maps to the same 409, never a 500.
+    // =====================================================================
+
+    [Fact]
+    public async Task Document_WhenAChildAppearsAfterTheCount_TheRestrictRefusal_Is409_NotA500_AndTheRowIsKept()
+    {
+        var id = _fixture.Seed(DeletableKind.Document, contact: CallerContact, parents: Project(RecordA));
+        _fixture.Principal = ContactOn(RecordA, ExternalAccessLevel.Collaborate);
+        Guid? child = null;
+        _fixture.DuringFileDelete = () => child = _fixture.Dataverse.AddChild(id);
+
+        using var response = await Delete("documents", id);
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body);
+        ProblemCode(body).Should().Be(DocumentCheckoutService.HasChildDocumentsCode);
+        body.Should().NotContain("childCount", "the external plane never counts children")
+            .And.Contain("file was deleted", "the detail must not claim nothing was deleted");
+        _fixture.Steps.Should().Equal(new[] { $"file-delete:drive-{id:N}/item-{id:N}" },
+            "the file goes first (by design) and the row delete is refused");
+        _fixture.Exists(DeletableKind.Document, id).Should().BeTrue("Restrict kept the row, and with it the link");
+        _fixture.Dataverse.Contains(child!.Value).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest)]
+    [InlineData(HttpStatusCode.InternalServerError)]
+    public async Task InternalDelete_WhenAChildAppearsAfterTheCount_IsHasChildDocuments_WithTheFileGone(HttpStatusCode restrictStatus)
+    {
+        // Matched on Dataverse's error code, whatever HTTP status carries it.
+        var id = _fixture.Seed(DeletableKind.Document, contact: CallerContact, parents: Project(RecordA));
+        _fixture.Dataverse.RestrictStatus = restrictStatus;
+        _fixture.DuringFileDelete = () => _fixture.Dataverse.AddChild(id);
+        var service = _fixture.Services.GetRequiredService<DocumentCheckoutService>();
+
+        var result = await service.DeleteAsync(id, "corr-188d-race");
+
+        var refused = result.Should().BeOfType<HasChildDocumentsDeleteResult>().Subject;
+        refused.ChildCount.Should().BeNull("Dataverse's refusal names no count");
+        refused.FileGone.Should().BeTrue();
+        _fixture.Steps.Should().Equal($"file-delete:drive-{id:N}/item-{id:N}");
+        _fixture.Exists(DeletableKind.Document, id).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task InternalDelete_Retry_AfterTheChildrenAreDeleted_DeletesTheRowWhoseFileIsGone()
+    {
+        var id = _fixture.Seed(DeletableKind.Document, contact: CallerContact, parents: Project(RecordA));
+        Guid? child = null;
+        _fixture.DuringFileDelete = () => child = _fixture.Dataverse.AddChild(id);
+        var service = _fixture.Services.GetRequiredService<DocumentCheckoutService>();
+        (await service.DeleteAsync(id, "corr-188d-race")).Should().BeOfType<HasChildDocumentsDeleteResult>();
+
+        // The attachment is deleted, and the parent's file is now missing in SharePoint Embedded.
+        _fixture.DuringFileDelete = null;
+        _fixture.Dataverse.Remove(child!.Value);
+        _fixture.FileAlreadyGone = true;
+
+        var retry = await service.DeleteAsync(id, "corr-188d-retry");
+
+        retry.Should().BeOfType<SuccessDeleteResult>("a missing file counts as deleted, so the row may go");
+        _fixture.Exists(DeletableKind.Document, id).Should().BeFalse();
+        _fixture.Steps.Should().Equal(
+            $"file-delete:drive-{id:N}/item-{id:N}",
+            $"file-delete:drive-{id:N}/item-{id:N}",
+            $"row-delete:{id}");
+    }
+
+    [Fact]
+    public async Task Document_WhenTheRowDeleteFailsWithAnotherDataverseCode_IsStill500()
+    {
+        // Must-not-fire: only 0x80040227 is the Restrict refusal.
+        var id = _fixture.Seed(DeletableKind.Document, contact: CallerContact, parents: Project(RecordA));
+        _fixture.Principal = ContactOn(RecordA, ExternalAccessLevel.Collaborate);
+        _fixture.Dataverse.RowDeleteStatus = HttpStatusCode.Forbidden;
+        _fixture.Dataverse.RowDeleteErrorCode = "0x80040220";
+
+        using var response = await Delete("documents", id);
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        ProblemCode(await response.Content.ReadAsStringAsync()).Should().Be("document_row_not_deleted");
+    }
+
+    // =====================================================================
     // Faults: "could not tell" is a 503, never a 403 and never a delete
     // =====================================================================
 
@@ -1067,6 +1152,12 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
         /// <summary>Set to make <see cref="SpeFileStore.DeleteFileAsync"/> report the item as already gone.</summary>
         public bool FileAlreadyGone { get; set; }
 
+        /// <summary>
+        /// Runs inside <see cref="SpeFileStore.DeleteFileAsync"/>, i.e. after the child-document count and before the row
+        /// delete (task 188 slice D): the race window in which the email pipeline creates an attachment.
+        /// </summary>
+        public Action? DuringFileDelete { get; set; }
+
         public CallerPrincipal? Principal
         {
             get => _principals.Principal;
@@ -1085,6 +1176,7 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
             Principal = null;
             FileFault = null;
             FileAlreadyGone = false;
+            DuringFileDelete = null;
         }
 
         /// <summary>Seeds a deletable row with the given stamps and parents; a document also gets a row and a file.</summary>
@@ -1157,6 +1249,7 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
             public override Task<bool> DeleteFileAsync(string driveId, string itemId, CancellationToken ct = default)
             {
                 _fixture.Steps.Enqueue($"file-delete:{driveId}/{itemId}");
+                _fixture.DuringFileDelete?.Invoke();
                 if (_fixture.FileFault is { } fault)
                     return Task.FromException<bool>(fault);
                 return Task.FromResult(!_fixture.FileAlreadyGone);
@@ -1177,6 +1270,16 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
         /// <summary>Set to make the row DELETE fail with this status.</summary>
         public HttpStatusCode? RowDeleteStatus { get; set; }
 
+        /// <summary>With <see cref="RowDeleteStatus"/>: the Dataverse <c>error.code</c> its body carries (none when null).</summary>
+        public string? RowDeleteErrorCode { get; set; }
+
+        /// <summary>
+        /// The status Dataverse answers a Restrict refusal with (task 188 slice D): a DELETE of a row that another row names
+        /// as <c>sprk_parentdocument</c> fails with <c>0x80040227</c> CannotDeleteDueToAssociation, as
+        /// <c>sprk_document_ParentDocument</c> (Delete = Restrict) makes the platform do.
+        /// </summary>
+        public HttpStatusCode RestrictStatus { get; set; } = HttpStatusCode.BadRequest;
+
         /// <summary>Set to make the document row GET throw this (an HttpClient timeout is a TaskCanceledException).</summary>
         public Exception? ReadFault { get; set; }
 
@@ -1187,9 +1290,23 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
         {
             _rows.Clear();
             RowDeleteStatus = null;
+            RowDeleteErrorCode = null;
+            RestrictStatus = HttpStatusCode.BadRequest;
             ReadFault = null;
             ChildReadStatus = null;
         }
+
+        /// <summary>Removes a row (a child document deleted elsewhere).</summary>
+        public void Remove(Guid id) => _rows.TryRemove(id, out _);
+
+        private static HttpResponseMessage DataverseError(HttpStatusCode status, string? code) => code is null
+            ? new HttpResponseMessage(status)
+            : new HttpResponseMessage(status)
+            {
+                Content = new StringContent(
+                    JsonSerializer.Serialize(new { error = new { code, message = "Dataverse error (test double)" } }),
+                    System.Text.Encoding.UTF8, "application/json"),
+            };
 
         /// <summary>Adds a document whose <c>sprk_parentdocument</c> is <paramref name="parentId"/> (an attachment).</summary>
         public Guid AddChild(Guid parentId)
@@ -1254,7 +1371,11 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
             if (request.Method == HttpMethod.Delete)
             {
                 if (RowDeleteStatus is { } status)
-                    return Task.FromResult(new HttpResponseMessage(status));
+                    return Task.FromResult(DataverseError(status, RowDeleteErrorCode));
+                // Delete = Restrict on sprk_document_ParentDocument: refused while any row names this one as its parent.
+                if (_rows.Values.Any(r => r.TryGetValue("_sprk_parentdocument_value", out var p)
+                                          && string.Equals(p as string, id.ToString(), StringComparison.OrdinalIgnoreCase)))
+                    return Task.FromResult(DataverseError(RestrictStatus, DocumentCheckoutService.CannotDeleteDueToAssociationCode));
                 Steps.Enqueue($"row-delete:{id}");
                 return Task.FromResult(new HttpResponseMessage(
                     _rows.TryRemove(id, out _) ? HttpStatusCode.NoContent : HttpStatusCode.NotFound));

@@ -351,7 +351,21 @@ public static class DataverseDocumentsEndpoints
                     return ProblemDetailsHelper.DocumentHasChildDocuments(childCount, traceId);
                 }
 
-                await dataverseService.DeleteDocumentAsync(id);
+                try
+                {
+                    await dataverseService.DeleteDocumentAsync(id);
+                }
+                catch (Exception ex) when (Sprk.Bff.Api.Services.DocumentCheckoutService.IsCannotDeleteDueToAssociation(ex))
+                {
+                    // Task 188 slice D: a child document created after the count above (the email pipeline writing
+                    // attachments) makes Dataverse's Restrict refuse the row (0x80040227). This route deletes no file, so
+                    // nothing was deleted: the same 409, without a count.
+                    logger.LogWarning(
+                        "Delete refused by Dataverse for document {DocumentId} ({ErrorCode} CannotDeleteDueToAssociation): a "
+                        + "child document was created after the child check. Nothing was deleted (this route deletes no file)",
+                        id, Sprk.Bff.Api.Services.DocumentCheckoutService.CannotDeleteDueToAssociationCode);
+                    return ProblemDetailsHelper.DocumentHasChildDocuments(childCount: null, traceId);
+                }
 
                 logger.LogInformation("Document deleted successfully: {DocumentId}", id);
 

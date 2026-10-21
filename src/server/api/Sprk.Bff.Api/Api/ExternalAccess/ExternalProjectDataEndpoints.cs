@@ -2639,11 +2639,15 @@ public static class ExternalProjectDataEndpoints
                     detail: "This document is being edited, so it cannot be deleted now. Nothing was deleted.",
                     extensions: new Dictionary<string, object?> { ["reasonCode"] = "document_locked" });
 
-            case HasChildDocumentsDeleteResult:
-                // Task 188 slice D: other documents name this one as their parent; nothing was deleted. No count on this
-                // plane: a child the caller cannot see (D7) must not be counted to them.
-                logger.LogInformation("[EXT-DELETE] Document {DocumentId}: refused, it has child documents", id);
-                return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.DocumentHasChildDocuments(childCount: null);
+            case HasChildDocumentsDeleteResult hasChildren:
+                // Task 188 slice D: other documents name this one as their parent. No count on this plane: a child the
+                // caller cannot see (D7) must not be counted to them. FileGone: Dataverse's Restrict refused the row
+                // after the file went (a child created after the pre-check); the row is kept.
+                logger.LogInformation(
+                    "[EXT-DELETE] Document {DocumentId}: refused, it has child documents; file already gone: {FileGone}",
+                    id, hasChildren.FileGone);
+                return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.DocumentHasChildDocuments(
+                    childCount: null, fileGone: hasChildren.FileGone);
 
             case FileNotDeletedDeleteResult notDeleted:
                 return Results.Problem(statusCode: notDeleted.FailureStatusCode, title: "Document not deleted",

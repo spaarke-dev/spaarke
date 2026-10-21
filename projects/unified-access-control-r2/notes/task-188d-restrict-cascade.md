@@ -158,3 +158,79 @@ expected and does not mean nothing was un-hidden. The already-unhidden set is am
 communication link (and their attachments), but that set also holds archives created before communications existed,
 so it is an upper bound, not a count. The 70 communication deletes in audit bound how many communications could have
 released documents.
+
+## 7. Security pass 2: the delete race (known limit, now a clean failure)
+
+**The race.** A child document can be created between `CountChildDocumentsAsync` (step 1b) and the row delete (step 3).
+The email pipeline opens this window when it creates attachments. Before this fix, the file was already deleted, then
+Restrict refused the row. The internal route answered 500 "Delete Failed", the external route answered 500
+`document_row_not_deleted`, and the legacy v1 route answered a generic 500. The row was kept without its file.
+Security held: the link was kept.
+
+**The fix.** Each of the three routes maps Dataverse's Restrict refusal at the row delete to the same 409
+`document_has_child_documents`:
+
+- **The error code.** The fix matches the error code, never the message text (messages are localized). The code is
+  `0x80040227` (`-2147220953`), `CannotDeleteDueToAssociation`: "The object you tried to delete is associated with
+  another object and cannot be deleted." The source is Microsoft Learn, "Web service error codes (Microsoft Dataverse)"
+  (`power-apps/developer/data-platform/reference/web-service-error-codes`). In the solution XML, the only Restrict
+  relationship that has `sprk_document` as its parent is `sprk_document_ParentDocument`. So on a document delete, this
+  code means that child documents exist.
+- **Web API path** (`DocumentCheckoutService.DeleteCoreAsync`, internal and external routes). The fix reads
+  `error.code` from the failed DELETE's body with the existing `DataverseContactIdentityStore.ErrorCodeOf`, whatever the
+  HTTP status. A match returns `HasChildDocumentsDeleteResult(ChildCount: null, FileGone: true|false)`.
+  - `FileGone` is true when the file step removed the file or found it already missing.
+  - The log entry records the document id, the code and `FileGone`. It records no names.
+- **SDK path** (legacy `DELETE /api/v1/documents/{id}`, `ServiceClient`). The route catches a
+  `FaultException<OrganizationServiceFault>` whose `ErrorCode` is `0x80040227`, in the exception or any inner exception,
+  and answers the 409. This route deletes no file, so nothing was deleted.
+- **The response.**
+  - It never includes a count, because Dataverse's refusal names none. The external route also never counts children.
+  - When `FileGone` is true, the detail says "The document's file was deleted, but its record was kept …" instead of
+    "Nothing was deleted", because that would be false.
+  - The model-driven app shows its no-count message, "This document has attached documents …".
+- **Order unchanged.** The file is still deleted first, then the row. A row deleted before its file would leave an
+  unreachable file.
+
+**Retrying after the children are deleted:**
+
+| Route | Retry | Why |
+|---|---|---|
+| Internal `DELETE /api/documents/{id}` (BestEffort; the model-driven app's delete) | Succeeds | `SpeFileStore.DeleteFileAsync` returns false for a 404, which counts as already deleted, so the row is removed. Test: `InternalDelete_Retry_AfterTheChildrenAreDeleted_DeletesTheRowWhoseFileIsGone` |
+| Legacy `DELETE /api/v1/documents/{id}` | Succeeds | No file step. Test: `DeleteDataverseDocument_Retry_AfterTheChildrenAreDeleted_Is204` |
+| External `DELETE /api/v1/external/documents/{id}` (VerifiedFileFirst) | **Refused** with 409 `document_storage_unverified` | The pointer check (`EnsureDocumentPointerContainerAsync`, interim and strict rules) refuses an item that is not in the drive ("the item is not in the drive the row names") before `DeleteFileOrRefuseAsync` reaches `DeleteFileAsync`. This is the existing task 032 known limit (`ExternalProjectDataEndpoints.DeleteOwnDocument` remarks), and a staff delete through the internal route clears the row. This fix does not change it. The fixture's test resolver does not model the missing item, so no external retry test claims success. |
+
+**Tests** (`ExternalDeleteOwnTests`, `DocumentDestroyAuthorizationTests`):
+
+- Must-fire:
+  - `Document_WhenAChildAppearsAfterTheCount_TheRestrictRefusal_Is409_NotA500_AndTheRowIsKept`: external, real service,
+    the child is created during the file delete.
+  - `InternalDelete_WhenAChildAppearsAfterTheCount_IsHasChildDocuments_WithTheFileGone` with Restrict status 400 and
+    500.
+  - `DeleteDocument_WhenRestrictRefusesTheRowAfterTheFile_Is409_WithoutACount_NotA500`: internal route mapping.
+  - `DeleteDataverseDocument_WhenRestrictRefusesTheRow_Is409_WithoutACount_NotA500`: v1, with an SDK fault.
+- Must-not-fire:
+  - `Document_WhenTheRowDeleteFailsWithAnotherDataverseCode_IsStill500` (`0x80040220`).
+  - `DeleteDataverseDocument_WhenTheRowDeleteFailsWithAnotherFaultCode_IsStill500`.
+- The test double `DocumentRowsHandler` now enforces Restrict on DELETE, as the live schema does.
+
+**Mutants:**
+
+| Mutant | Result |
+|---|---|
+| M1: service mapping removed | 4 tests fail. The external route answers 500 `document_row_not_deleted` |
+| M2: v1 catch removed | 2 tests fail. v1 answers 500 |
+| M3: detail ignores `FileGone` | 2 tests fail |
+
+### CLAUDE.md §11 (new surface)
+
+`CannotDeleteDueToAssociationCode`, the two `IsCannotDeleteDueToAssociation` predicates, `FileGone` and `fileGone`:
+
+1. **Existing.** `RecordContainerResolver.IsRecordNotFound` and `DocumentUrlIdentityResolution.IsAlternateKeyRecordDoesNotExist`
+   match other codes. `DataverseContactIdentityStore.ErrorCodeOf` parses a Web API error body, and it is reused here.
+   Nothing matched `0x80040227`.
+2. **Extension.** The predicates sit beside the one delete that needs them and are shared with the v1 route.
+   `HasChildDocumentsDeleteResult` and `ProblemDetailsHelper.DocumentHasChildDocuments` are extended with optional
+   members, not duplicated.
+3. **Cost of doing nothing.** The race answers 500 on every route. On the external route, the detail calls the
+   document "not fully deleted" and gives no reason.

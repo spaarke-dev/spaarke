@@ -67,6 +67,14 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
     public ConcurrentDictionary<Guid, int> ChildDocumentCounts { get; } = new();
 
     /// <summary>
+    /// Task 188 slice D (security pass 2): document ids whose ROW delete Dataverse refuses with this SDK fault code, as if a
+    /// child appeared after the count (<c>0x80040227</c> CannotDeleteDueToAssociation). C3's double throws it from
+    /// <c>DeleteDocumentAsync</c>; C2's double answers <see cref="HasChildDocumentsDeleteResult"/> with the file gone
+    /// for <c>0x80040227</c>. Absent = the delete succeeds.
+    /// </summary>
+    public ConcurrentDictionary<Guid, int> RowDeleteFaultCodes { get; } = new();
+
+    /// <summary>
     /// A document id for which the access check THROWS. ADR-003 requires an errored check to deny;
     /// this is the only way a test can reach that catch block.
     /// </summary>
@@ -85,6 +93,7 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
         UpdatedDataverseDocumentIds.Clear();
         DownloadedItemIds.Clear();
         ChildDocumentCounts.Clear();
+        RowDeleteFaultCodes.Clear();
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -127,13 +136,14 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
                 sp.GetRequiredService<TokenCredential>(),
                 NullLogger<DocumentCheckoutService>.Instance,
                 DeletedDocumentIds,
-                ChildDocumentCounts));
+                ChildDocumentCounts,
+                RowDeleteFaultCodes));
 
             // C3's destroy path.
             services.RemoveAll<IDocumentDataverseService>();
             services.AddSingleton<IDocumentDataverseService>(
                 new RecordingDocumentDataverseService(
-                    DeletedDataverseDocumentIds, UpdatedDataverseDocumentIds, ChildDocumentCounts));
+                    DeletedDataverseDocumentIds, UpdatedDataverseDocumentIds, ChildDocumentCounts, RowDeleteFaultCodes));
 
             // C1's byte source. Substituted so a bulk-download test can assert WHICH documents' bytes
             // reached the zip — the only assertion that actually distinguishes "excluded by
@@ -332,6 +342,7 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
     {
         private readonly ConcurrentBag<Guid> _deleted;
         private readonly ConcurrentDictionary<Guid, int> _childCounts;
+        private readonly ConcurrentDictionary<Guid, int> _rowDeleteFaults;
 
         public RecordingCheckoutService(
             HttpClient httpClient,
@@ -340,13 +351,15 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
             TokenCredential credential,
             ILogger<DocumentCheckoutService> logger,
             ConcurrentBag<Guid> deleted,
-            ConcurrentDictionary<Guid, int> childCounts)
+            ConcurrentDictionary<Guid, int> childCounts,
+            ConcurrentDictionary<Guid, int> rowDeleteFaults)
             : base(httpClient, speFileStore, configuration, credential, new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), logger,
                 // Only DeleteAsync is exercised (overridden); no preview/edit URL is minted.
                 TestRecordContainerResolver.ForBusinessUnitContainers())
         {
             _deleted = deleted;
             _childCounts = childCounts;
+            _rowDeleteFaults = rowDeleteFaults;
         }
 
         public override Task<DeleteResult> DeleteAsync(
@@ -355,6 +368,11 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
             // The real service refuses a parent BEFORE deleting anything (task 188 slice D).
             if (_childCounts.TryGetValue(documentId, out var children) && children > 0)
                 return Task.FromResult<DeleteResult>(new HasChildDocumentsDeleteResult(children, correlationId));
+
+            // ... and maps Dataverse's Restrict refusal at the row, after the file went, to the same result with no count.
+            if (_rowDeleteFaults.TryGetValue(documentId, out var code)
+                && code == unchecked((int)0x80040227))
+                return Task.FromResult<DeleteResult>(new HasChildDocumentsDeleteResult(null, correlationId, FileGone: true));
 
             _deleted.Add(documentId);
 
@@ -377,13 +395,16 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
         private readonly ConcurrentBag<string> _deleted;
         private readonly ConcurrentBag<string> _updated;
         private readonly ConcurrentDictionary<Guid, int> _childCounts;
+        private readonly ConcurrentDictionary<Guid, int> _rowDeleteFaults;
 
         public RecordingDocumentDataverseService(
-            ConcurrentBag<string> deleted, ConcurrentBag<string> updated, ConcurrentDictionary<Guid, int> childCounts)
+            ConcurrentBag<string> deleted, ConcurrentBag<string> updated, ConcurrentDictionary<Guid, int> childCounts,
+            ConcurrentDictionary<Guid, int> rowDeleteFaults)
         {
             _deleted = deleted;
             _updated = updated;
             _childCounts = childCounts;
+            _rowDeleteFaults = rowDeleteFaults;
         }
 
         // Task 188 slice D: C3 counts a document's children before its delete.
@@ -393,6 +414,12 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
 
         public Task DeleteDocumentAsync(string id, CancellationToken ct = default)
         {
+            // Task 188 slice D: the SDK's refusal, as ServiceClient raises it (a typed fault carrying the error code).
+            if (Guid.TryParse(id, out var guid) && _rowDeleteFaults.TryGetValue(guid, out var code))
+                throw new System.ServiceModel.FaultException<Microsoft.Xrm.Sdk.OrganizationServiceFault>(
+                    new Microsoft.Xrm.Sdk.OrganizationServiceFault { ErrorCode = code, Message = "Dataverse fault (test double)" },
+                    new System.ServiceModel.FaultReason("Dataverse fault (test double)"));
+
             _deleted.Add(id);
             return Task.CompletedTask;
         }
