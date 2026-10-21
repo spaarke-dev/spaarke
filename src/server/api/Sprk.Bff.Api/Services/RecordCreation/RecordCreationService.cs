@@ -608,7 +608,8 @@ internal sealed partial class RecordCreationService
         try
         {
             var pair = OwnedChildWrite.PairOf(item);
-            var pairParent = pair.InvalidId
+            // Only where the pair files the row on its own (a project); elsewhere a malformed pair is not an owner question.
+            var pairParent = pair.InvalidId && SecureRootInheritance.PairNamesAParentOnItsOwn(table)
                 ? (Parent: null, Undetermined: $"its {SecureRootInheritance.PairIdColumn} is not a record id")
                 : await PairParentAsync(_entities, table, pair.IdText, pair.TypeId, ct).ConfigureAwait(false);
             if (pairParent.Undetermined is { } undetermined)
@@ -684,11 +685,12 @@ internal sealed partial class RecordCreationService
     /// FR-09 (task 015): the record a row's ADR-024 pair files it under ON ITS OWN — only on a table whose pair is
     /// BFF-managed (<see cref="SecureRootInheritance.PairNamesAParentOnItsOwn"/>: a project, whose only filing is the pair) —
     /// as an ownership parent. Its record type is read app-only from the catalog, as the secure-root plan reads it before
-    /// this (one row, its <c>sprk_recordlogicalname</c>). The Office create shares it, so a project filed under a matter by
-    /// either path is owned through that matter.
+    /// this (one row, its <c>sprk_recordlogicalname</c>). Only a table the plan reads as a parent
+    /// (<see cref="SecureRootInheritance.IsParent"/>: a matter or project) is returned, so the owner and the secure-root plan
+    /// see the same filing.
     /// </summary>
     /// <returns>No parent: the table's pair files nothing on its own, the pair names nothing, or it names a table that is not
-    /// an ownership parent (<see cref="RecordOwnershipContext.ForParents"/> leaves it out). <c>Undetermined</c>: the pair
+    /// a secure-root parent (a document, an event: the plan reads such a pair as no filing). <c>Undetermined</c>: the pair
     /// names a record that cannot be told — an id that is not one, no record type, or a type that names no table — which
     /// the caller refuses (fail closed), never reads as "filed under nothing".</returns>
     /// <remarks>A Dataverse fault propagates: the caller's owner step refuses it as the owner fault it is.</remarks>
@@ -713,9 +715,13 @@ internal sealed partial class RecordCreationService
         query.Criteria.AddCondition(RecordTypeTable + "id", Microsoft.Xrm.Sdk.Query.ConditionOperator.Equal, type);
         var row = (await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
         var named = row?.GetAttributeValue<string>(OwnedChildWrite.RecordTypeLogicalNameColumn)?.Trim().ToLowerInvariant();
-        return string.IsNullOrEmpty(named)
-            ? (null, "its record type names no table")
-            : (new RecordOwnershipParent(named, id), null);
+        if (string.IsNullOrEmpty(named))
+            return (null, "its record type names no table");
+
+        // Review F3: the plan files a project under its pair only when the pair names a matter or project; a pair typed to
+        // anything else files it under nothing, and the owner must agree (else a document's unit would own the project, or
+        // DecideOwnerAsync's consistency check would refuse, "Try again", a create the plan admitted).
+        return SecureRootInheritance.IsParent(named) ? (new RecordOwnershipParent(named, id), null) : (null, null);
     }
 
     /// <summary>The search-index lookup's navigation property on the search-indexed tables (matter, project, document) —

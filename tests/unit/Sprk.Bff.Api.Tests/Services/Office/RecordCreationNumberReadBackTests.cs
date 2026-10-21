@@ -36,8 +36,8 @@ public class RecordCreationNumberReadBackTests
         entities.Setup(e => e.RetrieveAsync(logicalName, Created, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new OperationCanceledException(cts.Token));
         var ownership = new Mock<IRecordOwnershipResolver>();
-        ownership.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(RecordOwnerResolution.Owned(Team)); // task 015: record-first (FR-09)
+        ownership.Setup(o => o.ResolveOwningTeamAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Team);
         var sut = new OfficeRecordCreationService(
             entities.Object,
             new Mock<IFieldMappingDataverseService>().Object,

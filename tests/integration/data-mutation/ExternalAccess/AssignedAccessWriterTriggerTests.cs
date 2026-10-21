@@ -71,8 +71,8 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
             .ReturnsAsync(createdId);
 
         var ownership = new Mock<IRecordOwnershipResolver>();
-        ownership.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(RecordOwnerResolution.Owned(Guid.NewGuid())); // task 015: record-first (FR-09)
+        ownership.Setup(o => o.ResolveOwningTeamAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Guid.NewGuid());
 
         return new OfficeRecordCreationService(
             entities.Object, new Mock<IFieldMappingDataverseService>().Object, ownership.Object,

@@ -609,23 +609,9 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
                 ],
             });
 
-        // Task 015 (FR-09): an ordinary project is owned record-first, through the record its pair names — so the Office create
-        // reads the pair's record type from the catalog (this fixture's).
-        entities
-            .Setup(e => e.RetrieveMultipleAsync(
-                It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => q.EntityName == "sprk_recordtype_ref"), It.IsAny<CancellationToken>()))
-            .Returns((Microsoft.Xrm.Sdk.Query.QueryExpression query, CancellationToken _) =>
-            {
-                var id = (Guid)query.Criteria.Conditions.Single().Values.Single();
-                var named = _fixture.ChildWorld.ValueOf<string>("sprk_recordtype_ref", id, "sprk_recordlogicalname");
-                return Task.FromResult(new EntityCollection(named is null
-                    ? new List<Entity>()
-                    : new List<Entity> { new("sprk_recordtype_ref", id) { ["sprk_recordlogicalname"] = named } }));
-            });
-
         var ownership = new Mock<IRecordOwnershipResolver>();
-        ownership.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(RecordOwnerResolution.Owned(SecureChildShareWorld.GeneralTeam)); // task 015: record-first (FR-09)
+        ownership.Setup(o => o.ResolveOwningTeamAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SecureChildShareWorld.GeneralTeam);
         return new OfficeRecordCreationService(entities.Object, fieldMappings.Object, ownership.Object,
             IdentityNormalizationFixtures.NoLinkedContact(), _gate,
             Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(), NullLogger<OfficeRecordCreationService>.Instance,

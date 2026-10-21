@@ -6,70 +6,118 @@ namespace Spaarke.ArchTests;
 /// <summary>
 /// field-mapping-server-write-path-r1 task 015 (FR-09): every create resolves its owner with
 /// <c>IRecordOwnershipResolver.ResolveOwnerAsync</c>, the record-first resolution that also reports refusals and the
-/// person who asked. No create path may call <c>ResolveOwningTeamAsync</c>, the older answer that collapses a refusal
-/// to <see langword="null"/>; the Office quick-create used it for roots, so the same Project under the same Matter got
-/// a different owner on Office than on the child route.
+/// person who asked. No create path may use <c>ResolveOwningTeamAsync</c>, the older answer that collapses a refusal to
+/// <see langword="null"/>.
 /// </summary>
 /// <remarks>
-/// Enforced here rather than by deleting the interface member: test doubles and the census still name it.
-/// A NON-create caller may be listed in <see cref="Allowlist"/> with a reason a reviewer can check.
+/// <para>Any mention of the name in server code counts — a call, a method group, a delegate, a call split across lines, a
+/// <c>nameof</c> — except the member's own declaration in <c>RecordOwnershipResolver.cs</c> and the files in
+/// <see cref="Allowlist"/>. Whole-line comments are not code and are skipped. Enforced here rather than by deleting the
+/// interface member: test doubles and the census still name it.</para>
+/// <para>An allow-list entry is keyed by repo-relative path, carries the reason and when it expires, and must still match
+/// (<see cref="EveryAllowlistEntry_StillUsesTheName"/>): an entry whose use is gone is removed, so the list only shrinks.</para>
 /// </remarks>
 public class CreateOwnerResolutionGuardTests
 {
-    /// <summary>Files under <c>src/server</c> allowed to call <c>ResolveOwningTeamAsync</c>, with why. Empty today.</summary>
-    public static readonly IReadOnlyDictionary<string, string> Allowlist = new Dictionary<string, string>();
+    /// <summary>Repo-relative paths allowed to use <c>ResolveOwningTeamAsync</c>, with why and until when.</summary>
+    public static readonly IReadOnlyDictionary<string, string> Allowlist = new Dictionary<string, string>
+    {
+        ["src/server/api/Sprk.Bff.Api/Services/Office/OfficeRecordCreationService.cs"] =
+            "Office root owner moves to ResolveOwnerAsync in task 018 via the unified service; #1614. Expires at 018.",
+    };
 
-    /// <summary>A member-access CALL; the interface declaration and the implementation have no dot before the name.</summary>
-    internal static readonly Regex CallPattern = new(@"\.ResolveOwningTeamAsync\s*\(", RegexOptions.Compiled);
+    /// <summary>The file that declares the member (the interface and its implementation).</summary>
+    internal const string DeclaringFile = "src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs";
+
+    internal static readonly Regex NamePattern = new(@"\bResolveOwningTeamAsync\b", RegexOptions.Compiled);
+
+    /// <summary>The member's declaration: the interface member or the implementation's signature.</summary>
+    internal static readonly Regex DeclarationPattern = new(
+        @"^\s*(?:public\s+)?(?:async\s+)?Task<Guid\?>\s+ResolveOwningTeamAsync\s*\(", RegexOptions.Compiled);
 
     private static readonly string RepoRoot = FindRepoRoot();
 
     [Fact]
-    public void NoServerCodeCallsResolveOwningTeamAsync()
+    public void NoServerCodeUsesResolveOwningTeamAsync()
     {
-        var serverRoot = Path.Combine(RepoRoot, "src", "server");
         var offenders = new List<string>();
-        foreach (var file in Directory.EnumerateFiles(serverRoot, "*.cs", SearchOption.AllDirectories))
+        foreach (var (path, lines) in ServerFiles())
         {
-            if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
-                || file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
-                || Allowlist.ContainsKey(Path.GetFileName(file)))
+            if (Allowlist.ContainsKey(path))
                 continue;
 
-            var lines = File.ReadAllLines(file);
             for (var i = 0; i < lines.Length; i++)
             {
-                if (IsCall(lines[i]))
-                    offenders.Add($"{Path.GetRelativePath(RepoRoot, file)}:{i + 1}: {lines[i].Trim()}");
+                if (IsUse(lines[i], declaringFile: path == DeclaringFile))
+                    offenders.Add($"{path}:{i + 1}: {lines[i].Trim()}");
             }
         }
 
         Assert.True(
             offenders.Count == 0,
             "A create must resolve its owner with ResolveOwnerAsync (record-first; refusals typed), not "
-            + "ResolveOwningTeamAsync (FR-09, task 015). Offending calls:\n" + string.Join("\n", offenders));
+            + "ResolveOwningTeamAsync (FR-09, task 015). Offending uses:\n" + string.Join("\n", offenders));
+    }
+
+    [Fact]
+    public void EveryAllowlistEntry_StillUsesTheName()
+    {
+        var files = ServerFiles().ToDictionary(f => f.Path, f => f.Lines);
+        var stale = Allowlist.Keys
+            .Where(path => !files.TryGetValue(path, out var lines) || !lines.Any(l => IsUse(l, declaringFile: false)))
+            .ToList();
+
+        Assert.True(stale.Count == 0,
+            "Remove these allow-list entries: the file no longer uses ResolveOwningTeamAsync (or is gone):\n"
+            + string.Join("\n", stale));
     }
 
     [Theory]
     [InlineData("        var team = await _ownership.ResolveOwningTeamAsync(Context(id), ct);")]
     [InlineData("        return await ownershipResolver.ResolveOwningTeamAsync (")]
-    [InlineData("        var t = await resolver!.ResolveOwningTeamAsync(context, ct) ?? Guid.Empty;")]
-    public void TheRule_FiresOnACall(string line) => Assert.True(IsCall(line), line);
+    [InlineData("        Func<RecordOwnershipContext, CancellationToken, Task<Guid?>> ask = _ownership.ResolveOwningTeamAsync;")] // method group
+    [InlineData("            .ResolveOwningTeamAsync(context, ct)")] // the second line of a call split across lines
+    [InlineData("        var name = nameof(IRecordOwnershipResolver.ResolveOwningTeamAsync);")]
+    [InlineData("    Task<Guid?> ResolveOwningTeamAsync(RecordOwnershipContext context, CancellationToken ct);")] // declared elsewhere
+    public void TheRule_FiresOnAnyUse(string line) => Assert.True(IsUse(line, declaringFile: false), line);
 
     [Theory]
     [InlineData("    Task<Guid?> ResolveOwningTeamAsync(RecordOwnershipContext context, CancellationToken ct);")]
     [InlineData("    public async Task<Guid?> ResolveOwningTeamAsync(RecordOwnershipContext context, CancellationToken ct)")]
+    public void TheRule_DoesNotFireOnTheDeclaration_InTheDeclaringFile(string line) =>
+        Assert.False(IsUse(line, declaringFile: true), line);
+
+    [Fact]
+    public void TheRule_FiresOnACall_EvenInTheDeclaringFile() =>
+        Assert.True(IsUse("        var team = await ResolveOwningTeamAsync(context, ct);", declaringFile: true));
+
+    [Theory]
     [InlineData("        var resolution = await _ownership.ResolveOwnerAsync(context, ct);")]
     [InlineData("    /// <see cref=\"IRecordOwnershipResolver.ResolveOwningTeamAsync\"/> is not used for creates.")]
     [InlineData("        // _ownership.ResolveOwningTeamAsync(context, ct) was the old call.")]
-    public void TheRule_DoesNotFireOnADeclarationAnotherMethodOrAComment(string line) => Assert.False(IsCall(line), line);
+    [InlineData("        var t = await _ownership.ResolveOwningTeamAsyncLegacy(context, ct);")]
+    public void TheRule_DoesNotFireOnAnotherMethodOrAComment(string line) => Assert.False(IsUse(line, declaringFile: false), line);
 
-    private static bool IsCall(string line)
+    private static bool IsUse(string line, bool declaringFile)
     {
         var code = line.TrimStart();
-        return !code.StartsWith("//", StringComparison.Ordinal)
-            && !code.StartsWith('*')
-            && CallPattern.IsMatch(line);
+        if (code.StartsWith("//", StringComparison.Ordinal) || code.StartsWith('*'))
+            return false;
+        if (declaringFile && DeclarationPattern.IsMatch(line))
+            return false;
+        return NamePattern.IsMatch(line);
+    }
+
+    private static IEnumerable<(string Path, string[] Lines)> ServerFiles()
+    {
+        var serverRoot = Path.Combine(RepoRoot, "src", "server");
+        foreach (var file in Directory.EnumerateFiles(serverRoot, "*.cs", SearchOption.AllDirectories))
+        {
+            var path = Path.GetRelativePath(RepoRoot, file).Replace('\\', '/');
+            if (path.Contains("/obj/", StringComparison.Ordinal) || path.Contains("/bin/", StringComparison.Ordinal))
+                continue;
+            yield return (path, File.ReadAllLines(file));
+        }
     }
 
     private static string FindRepoRoot()

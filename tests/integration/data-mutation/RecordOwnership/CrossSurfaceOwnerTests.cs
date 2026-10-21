@@ -26,13 +26,17 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 
 /// <summary>
 /// field-mapping-server-write-path-r1 task 015 (spec FR-09, owner decision Q9: record-first everywhere) — the SAME project
-/// filed under the SAME matter gets the SAME owner through every create surface: the Office quick-create (its field mapping
-/// files the project under the matter it is created from), the browser route's Web API body, the chat create's mapped item
-/// and a decision follow-on's core-derived pair. Then the owner order (secure ancestor → the named Secure Record Owners
-/// team; else the filed-under record's business-unit team; else the acting user's), the refusals (an unresolved owner is
-/// the typed refusal with NO create), and the registry exception (an unfiled communication is never team-owned).
+/// filed under the SAME matter gets the SAME owner from the unified create whatever surface's input it is given: the Office
+/// quick-create's (its field mapping files the project under the matter it is created from), the browser route's Web API
+/// body, the chat create's mapped item and a decision follow-on's core-derived pair. Then the owner order (secure ancestor →
+/// the named Secure Record Owners team; else the filed-under record's business-unit team; else the acting user's), the
+/// refusals (an unresolved owner is the typed refusal with NO create), and the registry exception (an unfiled
+/// communication is never team-owned).
 /// </summary>
 /// <remarks>
+/// <para>The LIVE Office quick-create keeps its pre-015 owner (the acting user's team) until task 018 routes it through the
+/// unified create, whose step-5 AppendTo checks gate a filing the owner then follows (review round 1, #1614); one test pins
+/// that so 018 changes it on purpose.</para>
 /// The REAL <see cref="RecordCreationService"/> and <see cref="OfficeRecordCreationService"/>, the REAL
 /// <see cref="RecordOwnershipResolver"/> over <see cref="Directory"/>, the REAL <see cref="SecureRootFilingGate"/> reading the
 /// same directory, and the REAL caller checks over the caller's scripted Dataverse. Only the Dataverse module boundaries are
@@ -48,21 +52,29 @@ public sealed class CrossSurfaceOwnerTests
     // =====================================================================================
 
     [Fact]
-    public async Task TheSameProjectUnderTheSameMatter_GetsTheMattersBusinessUnitTeam_ThroughEverySurface()
+    public async Task TheSameProjectUnderTheSameMatter_GetsTheMattersBusinessUnitTeam_ThroughEverySurfacesInput()
     {
         var owners = new Dictionary<string, Guid>
         {
-            ["office"] = await _world.OfficeProjectOwnerAsync(CreateWorld.OrdinaryMatter),
+            ["office"] = await _world.UnifiedOwnerAsync(CreateWorld.OfficeStyleProject(CreateWorld.OrdinaryMatter)),
             ["browser route"] = await _world.UnifiedOwnerAsync(_world.BrowserRouteProject(CreateWorld.OrdinaryMatter)),
             ["chat"] = await _world.UnifiedOwnerAsync(await _world.ChatProjectAsync(CreateWorld.OrdinaryMatter)),
             ["decision follow-on"] = await _world.UnifiedOwnerAsync(_world.DecisionFollowOnProject(CreateWorld.OrdinaryMatter)),
         };
 
         owners.Values.Should().AllBeEquivalentTo(Directory.ChildTeam,
-            "every surface owns a project filed under a matter by the matter's business-unit team — never by the caller's " +
-            "(the caller sits in the general unit): {0}", string.Join(", ", owners.Select(o => $"{o.Key}={o.Value:D}")));
-        _world.Creates.Should().HaveCount(3, "one create per unified surface");
-        _world.OfficeCreates.Should().ContainSingle("and one Office create");
+            "every surface's project filed under a matter is owned by the matter's business-unit team — never by the " +
+            "caller's (the caller sits in the general unit): {0}", string.Join(", ", owners.Select(o => $"{o.Key}={o.Value:D}")));
+        _world.Creates.Should().HaveCount(4, "one create per surface's input");
+    }
+
+    [Fact]
+    public async Task TheLiveOfficeQuickCreate_KeepsTheActingUsersTeam_ForAProjectUnderAMatter_UntilTask018()
+    {
+        var office = await _world.OfficeProjectOwnerAsync(CreateWorld.OrdinaryMatter);
+
+        office.Should().Be(Directory.GeneralTeam,
+            "review round 1: the Office owner moves to record-first only through the unified create (task 018, #1614)");
     }
 
     // =====================================================================================
@@ -105,7 +117,7 @@ public sealed class CrossSurfaceOwnerTests
     // =====================================================================================
 
     [Fact]
-    public async Task AFiledUnderRecordWhoseBusinessUnitHasNoDefaultTeam_IsRefused_OnEverySurface_AndNothingIsCreated()
+    public async Task AFiledUnderRecordWhoseBusinessUnitHasNoDefaultTeam_IsRefused_AndNothingIsCreated()
     {
         var unified = await _world.CreateAsync(await _world.ChatProjectAsync(CreateWorld.TeamlessMatter));
 
@@ -115,14 +127,7 @@ public sealed class CrossSurfaceOwnerTests
         var problem = RecordCreationProblemMap.ToProblemDetails(unified.Refusal, "sprk_project", unified.CorrelationId);
         problem.Extensions["errorCode"].Should().Be(RecordOwnerRefusal.NoDefaultOwnerTeam, "ADR-019: a stable code");
 
-        var office = await _world.OfficeCreateProjectAsync(CreateWorld.TeamlessMatter);
-
-        office.Succeeded.Should().BeFalse();
-        office.Failure!.Kind.Should().Be(RecordCreationFailureKind.OwnerUnresolved);
-        office.Failure.Code.Should().Be(RecordOwnerRefusal.NoDefaultOwnerTeam);
-
         _world.Creates.Should().BeEmpty("an unresolved owner never falls back to a user- or app-owned row");
-        _world.OfficeCreates.Should().BeEmpty();
     }
 
     [Fact]
@@ -161,6 +166,44 @@ public sealed class CrossSurfaceOwnerTests
         undetermined.Should().NotBeNull("an unreadable record type is a refusal, never \"filed under nothing\"");
     }
 
+    [Theory]
+    [InlineData(false, "an ordinary document in the child unit")]
+    [InlineData(true, "a document owned in the Secure BU")]
+    public async Task AProjectWhosePairNamesADocument_IsFiledUnderNothing_AsThePlanReadsIt(bool secureDocument, string because)
+    {
+        var document = secureDocument ? CreateWorld.SecureDocument : CreateWorld.OrdinaryDocument;
+
+        var (parent, undetermined) = await RecordCreationService.PairParentAsync(
+            _world.EntitiesForTest(), "sprk_project", document.ToString("D"), CreateWorld.DocumentType, CancellationToken.None);
+        parent.Should().BeNull("only a matter or project is a parent the pair names (SecureRootInheritance.IsParent)");
+        undetermined.Should().BeNull();
+
+        var outcome = await _world.CreateAsync(_world.BrowserRouteProject(document, CreateWorld.DocumentType));
+
+        outcome.Succeeded.Should().BeTrue($"{because}: the plan filed it under nothing, so the owner must agree, " +
+            $"never \"Try again\" ({outcome.Refusal?.Code}: {outcome.Refusal?.Detail})");
+        outcome.OwningTeamId.Should().Be(Directory.GeneralTeam, "the acting user's team, never the document's unit");
+    }
+
+    [Fact]
+    public async Task AMalformedPair_OnATableWhosePairIsNotAParent_IsNotAnOwnerRefusal()
+    {
+        var unified = CreateWorld.Mapped("sprk_event", new Dictionary<string, object?>
+        {
+            ["sprk_eventname"] = "Hearing",
+            ["sprk_regardingrecordid"] = 42, // not text: OwnedChildWrite.PairOf reads it as an invalid id
+        });
+
+        // As the system for nobody, so no caller check refuses the pair first and step 7 is reached.
+        var outcome = await _world.CreateAsync(unified, system: true);
+
+        outcome.Steps.Should().Contain(s => s.Step == RecordCreationStep.Owner, "step 7 is reached");
+        outcome.Refusal!.Code.Should().NotBe(RecordOwnerRefusal.ParentUndetermined,
+            "an event's pair files nothing on its own (PairNamesAParentOnItsOwn), so step 7 never asks about it");
+        outcome.Refusal.Code.Should().Be(RecordOwnerRefusal.NoOwnerSource,
+            "the answer before task 015: an unfiled row made for nobody has no owner source");
+    }
+
     // =====================================================================================
     // The registry's ownership exception
     // =====================================================================================
@@ -193,6 +236,9 @@ internal sealed class CreateWorld
     public static readonly Guid TeamlessMatter = Guid.Parse("a0150000-0000-4000-8000-000000000003");
     public static readonly Guid TeamlessBu = Guid.Parse("a0150000-0000-4000-8000-000000000004");
     public static readonly Guid MatterType = Guid.Parse("a0150000-0000-4000-8000-000000000005");
+    public static readonly Guid DocumentType = Guid.Parse("a0150000-0000-4000-8000-000000000006");
+    public static readonly Guid OrdinaryDocument = Guid.Parse("a0150000-0000-4000-8000-000000000007");
+    public static readonly Guid SecureDocument = Guid.Parse("a0150000-0000-4000-8000-000000000008");
 
     private readonly SecureChildOwnershipAiToolTests.ScriptedUserClient _caller = new(Directory.CallerUserId);
     private Directory _directory;
@@ -202,6 +248,7 @@ internal sealed class CreateWorld
     {
         _directory = NewDirectory(withCaller: true);
         _caller.RecordTypes[MatterType] = "sprk_matter";
+        _caller.RecordTypes[DocumentType] = "sprk_document";
     }
 
     /// <summary>Every app-only create the unified service asked for.</summary>
@@ -231,7 +278,11 @@ internal sealed class CreateWorld
             .WithSecureRoot("sprk_matter", SecureMatter)
             .WithRecord("sprk_matter", TeamlessMatter, TeamlessBu, isSecure: false)
             .WithRecord("sprk_recordtype_ref", MatterType, owningBusinessUnit: null,
-                extra: new Dictionary<string, object> { ["sprk_recordlogicalname"] = "sprk_matter" });
+                extra: new Dictionary<string, object> { ["sprk_recordlogicalname"] = "sprk_matter" })
+            .WithRecord("sprk_recordtype_ref", DocumentType, owningBusinessUnit: null,
+                extra: new Dictionary<string, object> { ["sprk_recordlogicalname"] = "sprk_document" })
+            .WithRecord("sprk_document", OrdinaryDocument, Directory.ChildBu, owningTeam: Directory.ChildTeam)
+            .WithRecord("sprk_document", SecureDocument, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam);
     }
 
     /// <summary>The standard units and teams, but no user: the acting user has no business unit to own anything by.</summary>
@@ -260,13 +311,26 @@ internal sealed class CreateWorld
     // ── The four surfaces' inputs ──────────────────────────────────────────────────────────────────────────────
 
     /// <summary>The browser route: the Create Project wizard's Web API body, the pair typed by its record-type bind.</summary>
-    public UnifiedCreateRequest BrowserRouteProject(Guid matter) => WebApi("sprk_project", new Dictionary<string, object?>
+    public UnifiedCreateRequest BrowserRouteProject(Guid matter, Guid? recordType = null) => WebApi("sprk_project", new Dictionary<string, object?>
     {
         ["sprk_projectname"] = "Phase 2",
         ["sprk_regardingrecordid"] = matter.ToString("D"),
         ["sprk_regardingrecordname"] = "Acme v. Widget",
-        ["sprk_RegardingRecordType@odata.bind"] = $"/sprk_recordtype_refs({MatterType:D})",
+        ["sprk_RegardingRecordType@odata.bind"] = $"/sprk_recordtype_refs({recordType ?? MatterType:D})",
     });
+
+    /// <summary>
+    /// The Office quick-create's input as task 018 hands it to the unified create: the row its matter → project mapping
+    /// profile builds (the pair from the matter's id and record type), as a server-built mapped item.
+    /// </summary>
+    public static UnifiedCreateRequest OfficeStyleProject(Guid matter) => Mapped("sprk_project",
+        new Dictionary<string, object?>
+        {
+            ["sprk_projectname"] = "Phase 2",
+            ["sprk_regardingrecordid"] = matter.ToString("D"),
+            ["sprk_RegardingRecordType@odata.bind"] = $"/sprk_recordtype_refs({MatterType:D})",
+        },
+        new DataverseWriteItemMapper.MappedLookup("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_recordtype_refs", MatterType));
 
     /// <summary>A decision follow-on: the pair the commit route derives from the Signal's core record (upper-case id text).</summary>
     public UnifiedCreateRequest DecisionFollowOnProject(Guid matter) => WebApi("sprk_project", new Dictionary<string, object?>
@@ -307,8 +371,13 @@ internal sealed class CreateWorld
 
     // ── The unified create ────────────────────────────────────────────────────────────────────────────────────────
 
-    public Task<RecordCreationOutcome> CreateAsync(UnifiedCreateRequest request) =>
-        UnifiedService().CreateAsync(request, RecordCreationPrincipal.ForCaller(_caller, Directory.CallerOid), CancellationToken.None);
+    public Task<RecordCreationOutcome> CreateAsync(UnifiedCreateRequest request, bool system = false) =>
+        UnifiedService().CreateAsync(request,
+            system ? RecordCreationPrincipal.ForSystem() : RecordCreationPrincipal.ForCaller(_caller, Directory.CallerOid),
+            CancellationToken.None);
+
+    /// <summary>The app-only reader the services here use, for a test that calls a static step directly.</summary>
+    public IGenericEntityService EntitiesForTest() => Entities();
 
     public async Task<Guid> UnifiedOwnerAsync(UnifiedCreateRequest request)
     {

@@ -60,8 +60,8 @@ public class RecordCreatorPersonStampTests
     private OfficeRecordCreationService OfficeCreator()
     {
         var ownership = new Mock<IRecordOwnershipResolver>();
-        ownership.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(RecordOwnerResolution.Owned(Team)); // task 015: record-first (FR-09)
+        ownership.Setup(o => o.ResolveOwningTeamAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Team);
         return new OfficeRecordCreationService(
             _entities.Object, _fieldMappings.Object, ownership.Object,
             IdentityNormalizationFixtures.NoLinkedContact(),

@@ -26,7 +26,6 @@ public sealed class SearchIndexDefaultTests
     private static readonly Guid GeneralIndex = Guid.Parse("a0150000-0000-4000-8000-0000000000a1");
     private static readonly Guid ChildIndex = Guid.Parse("a0150000-0000-4000-8000-0000000000a2");
     private static readonly Guid ExplicitIndex = Guid.Parse("a0150000-0000-4000-8000-0000000000a3");
-
     private const string NameColumn = "sprk_searchindexname";
     private const string LookupBind = "sprk_AI_Search_Index@odata.bind";
 
@@ -74,6 +73,9 @@ public sealed class SearchIndexDefaultTests
         Text(fields, NameColumn).Should().Be(ChildIndexName);
         Text(fields, LookupBind).Should().Be($"/sprk_aisearchindexes({ChildIndex:D})");
     }
+
+    // A project created INTO isolation takes the Secure BU's defaults: RecordCreationServiceSecureRootSeamTests (it needs
+    // the provisioning fixture's plan, which this world does not carry).
 
     // =====================================================================================
     // Explicit → kept (fill-only)
