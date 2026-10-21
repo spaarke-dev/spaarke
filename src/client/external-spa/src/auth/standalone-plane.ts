@@ -322,9 +322,9 @@ export async function prepareWorkforceHomePlane(options: PrepareHomePlaneOptions
  * downstream BFF call (`bff-client.ts` → `acquireActiveBffToken`) and the `AuthGuard` sign-in
  * redirect target the correct authority. Idempotent per bootstrap.
  *
- * For CIAM this is a no-op equivalence (the acquirer + scope defaults ALREADY are CIAM), so the CIAM
- * path remains byte-for-byte unchanged; it is applied uniformly only for clarity + determinism
- * across the login redirect (main() re-resolves from the stored realm on every load).
+ * For CIAM the acquirer + scope match the defaults (the token request is unchanged on the wire); applying the plane also
+ * sets the CIAM account filter ({@link isCiamAccount}, #2166). It is applied uniformly for determinism across the login
+ * redirect (main() re-resolves from the stored realm on every load).
  */
 export function applyStandalonePlane(plane: StandalonePlane): void {
   // `scope` is the active backend's scope passed by bff-client.ts (the same record as the request URL); the plane's

@@ -132,8 +132,8 @@ export function captureTeamsDeepLink(subPageId: string | undefined | null): void
 }
 
 /**
- * Options for a standalone acquisition. The CIAM plane passes only `accountFilter` (#2166), which MSAL never sees,
- * so the token REQUEST it sends is unchanged from before task 040 (`{ scopes, account }`, no redirect URI,
+ * Options for a standalone acquisition. The CIAM plane passes `accountFilter` (#2166), which is never sent to MSAL, and
+ * `forceRefresh` / `noInteraction` only when set, so the token REQUEST it sends is unchanged from before task 040 (`{ scopes, account }`, no redirect URI,
  * no cache policy). Its error routing differs in one deliberate way: a `timed_out` silent renewal now
  * falls back to the interactive redirect (see {@link isInteractionNeeded}).
  */
@@ -374,7 +374,7 @@ function assertRedirectAllowed(instance: IPublicClientApplication): void {
  *
  * @param instance The standalone `PublicClientApplication` (from msal-config.ts) to acquire against.
  * @param bffScope The BFF API OAuth scope for the instance's authority.
- * @param options Workforce-browser-only options (tenant account filter, iframe redirect URI).
+ * @param options Account scoping (CIAM: `accountFilter` only; workforce: tenant, iframe redirect URI, authority).
  * @returns Access token string, ready for `Authorization: Bearer {token}` header.
  * @throws If silent acquisition fails for a non-interaction reason (network error, etc.).
  */
@@ -642,8 +642,8 @@ export function getActiveLoginScope(): string {
 }
 
 /**
- * Active account TENANT seam (same shape as the login-scope seam). Null for CIAM (every cached account
- * belongs to the CIAM instance's authority, behaviour unchanged). The workforce browser plane sets
+ * Active account TENANT seam (same shape as the login-scope seam). Null for CIAM, whose accounts are scoped by the
+ * {@link isCiamAccount} predicate instead (#2166: a company account cached in the tab is not a partner sign-in). The workforce browser plane sets
  * Spaarke's tenant id so a CIAM account cached in the same tab's sessionStorage is never treated as a
  * workforce sign-in by `AuthGuard` or the portal-user lookup.
  */
@@ -698,7 +698,7 @@ export function isWorkforceHomePlaneActive(): boolean {
   return workforceHomePlaneActive;
 }
 
-/** The accounts that belong to the currently-selected browser plane (all of them for CIAM). */
+/** The accounts that belong to the currently-selected browser plane (CIAM: CIAM-tenant accounts only, #2166). */
 export function accountsForActivePlane<T extends { tenantId?: string }>(accounts: readonly T[]): T[] {
   let result = [...accounts];
   if (activeAccountTenantId) {

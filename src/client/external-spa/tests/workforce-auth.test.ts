@@ -947,7 +947,7 @@ describe('Browser silent renewal: CIAM requests are unchanged on the wire; the w
       vi.resetModules();
       const plane = await import('../src/auth/standalone-plane');
       const msalAuth = await import('../src/auth/msal-auth');
-      const ciamAccount = { homeAccountId: 'c', tenantId: OTHER_TENANT };
+      const otherTenantAccount = { homeAccountId: 'c', tenantId: OTHER_TENANT };
       const homeAccount = { homeAccountId: 's', tenantId: HOME_TENANT.toUpperCase() };
 
       plane.applyStandalonePlane({
@@ -958,12 +958,14 @@ describe('Browser silent renewal: CIAM requests are unchanged on the wire; the w
         accountFilter: msalAuth.isWorkforceHomeAccount,
         acquireOptions: options(),
       } as any);
-      expect(msalAuth.accountsForActivePlane([ciamAccount, homeAccount])).toEqual([homeAccount]);
-      expect(msalAuth.accountsForActivePlane([ciamAccount])).toEqual([]);
+      expect(msalAuth.accountsForActivePlane([otherTenantAccount, homeAccount])).toEqual([homeAccount]);
+      expect(msalAuth.accountsForActivePlane([otherTenantAccount])).toEqual([]);
 
       plane.applyStandalonePlane(plane.resolveStandalonePlane('ciam'));
       const partnerAccount = { homeAccountId: 'p', tenantId: CIAM_TENANT };
-      expect(msalAuth.accountsForActivePlane([homeAccount, partnerAccount, ciamAccount])).toEqual([partnerAccount]);
+      expect(msalAuth.accountsForActivePlane([homeAccount, partnerAccount, otherTenantAccount])).toEqual([
+        partnerAccount,
+      ]);
       // A company account alone does not count as signed in, so AuthGuard starts the CIAM sign-in.
       expect(msalAuth.accountsForActivePlane([homeAccount])).toEqual([]);
     });
