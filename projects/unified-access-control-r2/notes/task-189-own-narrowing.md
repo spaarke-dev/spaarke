@@ -250,9 +250,9 @@ refresh. Expected publish-size delta about 0, to be measured.
 
 ## 4. Known limits (K-class, stated up front)
 
-- **K1 — a coinciding narrowing on a row with no record.** A user narrows a document that has no record yet (it has
-  only inherited Standard, or the sweep has not reached it) to exactly the value its parent turns to, within the same
-  ≤ 2-minute window. The backfill rule reads the edit as inherited, and it follows a later widening. This needs two
+- **K1 — a coinciding narrowing on a row with no record.** A user narrows a document that has no record yet (since
+  fix round C, F1, only a legacy row the sweep has not reached; before it, also one that only inherited Standard) to
+  exactly the value its parent turns to, within the same ≤ 2-minute window. The backfill rule reads the edit as inherited, and it follows a later widening. This needs two
   independent edits in one window, and the consequence is today's behaviour. With a record, the same edit is stricter
   than the last inherited value and is kept.
 - **Not a known limit: the "K1 variant"** (an edit after the parents' value changed, before the next run, judged against
@@ -352,7 +352,9 @@ Unchanged:
 | `c20e9882aa` | Fix round C, F3: the writer guard finds a multi-line dictionary initializer entry (§8.9) |
 | `b7f74100f3` | Fix round C, K1+K2: raise only when a document's own narrowing cannot be known (§8.9) |
 | `f69b007da8` | Fix round C, K5: app-only generic writers refuse a document's Access Permission and record (§8.9) |
-| (this commit) | this file: §8.9 |
+| `abcf516022` | this file: §8.9 |
+| `7c7b245b10` | Fix round C, F1: every parented document gets its record (§8.9; committed on the main session's decision) |
+| (this commit) | this file: §8.9, F1 and the deploy-order gate |
 
 ### 8.2 Tests
 
@@ -601,50 +603,89 @@ The pass came back FIX-ROUND-NEEDED. One commit per item, each with must-fire an
       since task 166), and the form.
   - The chat create tool already blocks documents. No other app-only payload writer reaches a document: the create node
     executors write notifications and tasks only.
-- **F1: prepared and verified, NOT committed. Stopped and reported.** The change: write the record for every parented
-  document, `writeRecord = record is null || !next.SameAs(record)`.
+- **F1 (`7c7b245b10`). Every parented document gets its own-narrowing record.** First prepared and held back, because
+  its churn feeds #2161's re-file pass (below). The main session then decided to commit it and to handle #2161 by deploy
+  order and a gate.
+  - The change: `writeRecord = record is null || !next.SameAs(record)` in `DecideDocument`.
+  - Before: a parented document with no record, no own narrowing and a Standard inherited value got none. If its user
+    set it Restricted in the window its Standard matter tightened to Restricted, the run read the edit as inherited
+    (`{own none, floor Restricted}`). The document then followed the matter back to Standard.
+  - After: the record (last inherited Standard) exists before the edit. So the edit is stricter than it, is the user's
+    own, and survives the widening. Each row without a record is written once, then not again while nothing changes.
+    K1 narrows to legacy rows the sweep has not reached yet.
   - Tests:
-    - the main session's sequence as a must-fire test: D Restricted and M Restricted in one window, then M widens, D stays
-      Restricted;
+    - the main session's sequence (must fire);
     - the create refresh gives a Standard document under a Standard matter its record;
-    - the one assertion that said the Standard majority gets no record is updated (it was the only one).
-  - Before: 3 red. After: 349 pass. The docs and the K1 known limit are narrowed.
-  - Saved as `.uac189/t189_f1.patch` in this worktree. It applies cleanly on `f69b007da8`.
+    - the one "Standard majority gets no record" assertion is updated. It was the only one.
+
+    3 red on the old line, all pass after.
   - **What reacts to a document's `modifiedon` change:**
-    - Re-index or re-profile: nothing, on master.
+    - **Re-index or re-profile: nothing, on master.**
       - RAG indexing (`BulkRagIndexingJobHandler`, `ScheduledRagIndexingService`, which is off by default) picks
         `sprk_ragindexedon eq null` only.
       - Profile and index triggers are event-driven (upload, create).
       - `RecordSyncJob` and `DataverseIndexSyncService` do not include `sprk_document`.
       - No plugin step, flow or AI Search indexer over Dataverse exists in source.
-    - Audit: both columns are audited and the entity's audit is on. Each legacy parented document gets one entry, once,
-      and then none while nothing changes.
-    - The reconciler: record writes share `MaxAccessPermissionWritesPerRun` (500). A backfill of N legacy documents takes
-      about N/500 runs (2 minutes each). Meanwhile value writes share the cap and converge more slowly (deferred rows keep
-      the window).
+    - **Audit:** both columns are audited and the entity's audit is on. Each parented document gets one entry, once, when
+      its record is first written. After that an entry is written only on a real change (a re-file, a parent's level
+      changing, a user's edit).
+    - **The reconciler: about N/500 runs.**
+      - Record writes share `MaxAccessPermissionWritesPerRun` (default 500) with value writes, and the sweep reads
+        `MaxAccessPermissionRowsPerRun` (default 1000) rows a run across the four tables.
+      - While the backfill fills the cap, value fixes (a matter that turned Restricted) are deferred. The run keeps its
+        window and the next run takes them, so their convergence slows by the number of capped runs, never more.
     - **#2161** (open, head `2662545da2`), the re-file pass `RelocateRefiledDocumentsAsync`. It lists documents with
-      `modifiedon` at or after its watermark. Its own remarks name "any write to the row" as the way to put a row back in
-      the window. Per run it examines at most 500 (60-second slice), and each examination derives the document's
-      containers (Dataverse reads).
+      `modifiedon` at or after its watermark; its remarks name "any write to the row" as the way back into its window.
+      Per run it examines at most 500 (60-second slice), deriving each document's containers.
       - A document whose drive is allowed counts `inPlace`: reads only.
       - A document whose drive is NOT allowed is moved by `RelocateIfMisplacedAsync(..., Refile)` (at most 25 relocator
         calls a run).
       - An undecidable derivation fails the run, is carried, and is dropped after 5 runs.
 
-      **So with F1 and #2161 both deployed, the churn does more than cost runs.** Each legacy document F1 writes enters
-      the re-file window once. A document whose file already sits outside its derived containers is relocated, and an
-      undecidable one fails runs. I cannot confirm "never re-files anything".
-  - Options (for the main session):
-    1. Size the misplaced backlog first: #2161's pass report-only (`wouldMove`), or the operator-run
-       `DocumentContainerMigrationJob` report, on dev. If it is zero (or the moves are wanted), commit the patch.
-    2. Sequence it: deploy F1 and let the backfill finish before #2161's pass goes live. A new instance looks back
-       only 60 minutes, so a backfill that finished earlier is not listed.
-    3. Accept the moves as #2161's intended repair (capped at 25 a run), and commit now.
+      So the backfill churn, seen by a live #2161, would move every already-misplaced file. That is handled by the gate
+      below.
+  - **N on dev (spaarkedev1, read-only aggregate counts, 2026-10-21):**
+    - `sprk_document`: 596 rows, of which **279 parented** (any of the 14 filing lookups set), **0 with a record**. So
+      the backfill writes 279 records.
+    - 0 parentless documents hold Limited or Restricted, so no parentless record is written.
+    - The sweep's four tables: 319 communications, 596 documents, 83 events and 66 to-dos, 1,064 rows in all.
+    - **Cadence:** the job runs every 2 minutes (`*/2 * * * *`). With the default caps the sweep needs 2 runs (1,000 + 64
+      rows). Its 279 record writes fit one run's cap of 500, so the backfill on dev completes in **2 runs, about 4
+      minutes** after the deploy. A larger environment takes about max(rows / 1000, documents / 500) runs.
+  - **Deploy-order gate (main session, 2026-10-21):**
+    1. #2169 deploys before #2161.
+    2. #2161 deploys only after task 189's record backfill is complete, and then at least 60 minutes later (#2161's
+       first run looks back `InitialRecentChangesLookback`, 60 minutes).
+    3. Separately, #2161's pre-deploy gate includes a read-only count of misplaced files (the main session adds it).
+  - **How to verify "backfill complete".** The field is `ResultJson.accessPermission.sweep.complete` of the
+    `secure-child-reconciliation` job. Read it from `GET /api/admin/jobs/secure-child-reconciliation/status` (the last 10
+    runs), or from the log line `[CHILD-ACCESS-PERMISSION] run=… sweepComplete=True`. The backfill is complete when it is
+    `true` in a run on the instance carrying #2169, and that run also has:
+    - `accessPermission.mode` = `"write"`;
+    - `accessPermission.failure` = null and `writeCapReached` = false (the sweep advances only in such a run);
+    - `failed` = 0 and `carriedRows` = 0. The sweep advances past a row it could not decide or write (`undetermined`,
+      `failed`, `changedConcurrently`) and carries it; each run retries it, and it gets its record, and a new
+      `modifiedon`, when it succeeds. A nonzero `carriedRows` that stays is looked at by id (the run's `problems`)
+      before the gate passes;
+    - `tablesWithoutColumn` not listing `sprk_document`. Otherwise documents are decided raise-only and no record is
+      written.
+
+    `sweep.complete` stays `true` in the later runs of that instance. Wait 60 minutes after the start of the first run
+    meeting all of the above, then deploy #2161.
+  - **Why not "a run with zero record writes".**
+    - There is no count of record-only writes: `accessPermission.recordsWritten` counts every record write, with or
+      without a value change.
+    - A zero in one run proves nothing. The sweep walks the tables in order (communication, document, event, to-do), so
+      a run whose window holds only communications writes no record while every document is still to come.
+    - Record writes continue in the steady state (a re-file, a parent's level changing, a new document).
+
+    `sweep.complete` is the signal that every row was reached in runs that wrote and were not capped. It is per instance:
+    after a restart the sweep runs again, and a document that already has its record is not written again.
 - **Accepted known limits (main session; in the PR body).**
   - K3: a Limited edit with two parent moves in one window is misread. The partner predicate is unaffected, because it
     reads Restricted only.
   - K4: the race between the re-read and the write can write a stale value. It corrects itself on the next run.
-- **Mutants** (`.uac189/t189_mutate.py`, filter: the reconcile, stamp, cascade, root-inheritance and app-only writer
+- **Mutants** (a scratch runner, since deleted; filter: the reconcile, stamp, cascade, root-inheritance and app-only writer
   classes). All killed.
 
   | # | Perturbation | Red |
@@ -675,3 +716,8 @@ The pass came back FIX-ROUND-NEEDED. One commit per item, each with must-fire an
   - Merge: `origin/master` `44063b3473` and #2161 (`2662545da2`) merge cleanly. #2170 (`c3da0a5d0e`) has one hunk
     on I-16, as before. #2150 (`0ba86217e2`) has one hunk in `SecureChildShareWorld.Answer`; keep both sides. Its
     `UpdateRecordActionCore` and `DataverseUpdateHandler` merge cleanly.
+- **Gates after F1 (on `7c7b245b10`).**
+  - Build: 0 warnings, 0 errors.
+  - Filtered suite: **349, all pass**. With the writer suites: **481, all pass**.
+  - ArchTests: **1211 / 1211**.
+  - Wide run (the 20 namespaces): **10068 passed, 0 failed, 9 skipped** (10066 before F1, plus its 2 new tests; the skips already existed).
