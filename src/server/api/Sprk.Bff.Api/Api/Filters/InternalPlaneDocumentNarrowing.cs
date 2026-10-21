@@ -66,6 +66,23 @@ internal static class InternalPlaneDocumentNarrowing
             return CallerDocumentVisibility.NotNarrowed;
         }
 
+        return await NarrowForExternalCallerAsync(httpContext, asked, surface, logger).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The narrowing step of <see cref="ForCallerAsync"/> for a caller ALREADY known not to be an internal systemuser
+    /// (<see cref="IsExternalOrUnknownCallerAsync"/> answered true): one <see cref="InternalRouteDocumentNarrowing"/> call
+    /// over the distinct GUID ids; a non-GUID id is not shown; a fault shows none. Task 188 round 4a: for a surface that
+    /// must read the document ids app-only only after it knows the caller is narrowed (the analysis routes).
+    /// </summary>
+    internal static async Task<CallerDocumentVisibility> NarrowForExternalCallerAsync(
+        HttpContext httpContext, IEnumerable<string?> documentIds, string surface, ILogger? logger)
+    {
+        ArgumentNullException.ThrowIfNull(httpContext);
+        ArgumentNullException.ThrowIfNull(documentIds);
+        var ct = httpContext.RequestAborted;
+        var asked = documentIds.ToList();
+
         var ids = new HashSet<Guid>();
         foreach (var raw in asked)
         {
@@ -117,7 +134,7 @@ internal static class InternalPlaneDocumentNarrowing
     /// "lookup-failed throws" and "unresolved is external" give the same answer, so a lookup that fails (an unresolved
     /// <c>lookup-failed</c>, a throw, or a resolver that cannot be resolved) counts as external and the narrowing applies.
     /// </summary>
-    private static async Task<bool> IsExternalOrUnknownCallerAsync(
+    internal static async Task<bool> IsExternalOrUnknownCallerAsync(
         HttpContext httpContext, string surface, ILogger? logger, CancellationToken ct)
     {
         try
