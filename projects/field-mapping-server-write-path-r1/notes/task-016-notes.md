@@ -156,7 +156,7 @@ value written is the resolver's team.
 
 ## Tests
 
-`tests/integration/data-mutation/RecordOwnership/RecordRepairModeTests.cs` has 27 tests (29 cases with the two theories), `[Trait("status","new")]`; 17 from the first round, 10 from the review-pass-1 fix round.
+`tests/integration/data-mutation/RecordOwnership/RecordRepairModeTests.cs` has 44 tests (49 cases with the theories), `[Trait("status","new")]`: 17 from the first round, 10 from review pass 1 and 17 from review pass 2.
 
 - The row store is `OwnershipDirectory`: whole-row reads, and a conditional update applied with a version check.
 - The stamp source is `StampWorld`.
@@ -234,10 +234,13 @@ Secure team (I-2). A row the resolver cannot decide maps nothing.
 than `DBConcurrencyException`) is evicted for anyway, because the write may have landed (a lost response). The reason is
 `record_repair.write_failed`; no exception text reaches the outcome (ADR-019).
 
-**Why a leaf table may move business units:** the trigger-2 guard protects rows that inherit access THROUGH the row
-being moved. A leaf table (`sprk_signal`, `sprk_decisionrecord`, `sprk_budgetrevision`: not in
-`RecordOwnershipResolver.OwnershipParentEntities`) has no rows filed under it, so its re-own changes only its own access, exactly as
-Create would have owned it. Ownership-parent tables keep the fail-closed skip until the owner decides.
+**Why a non-ownership-parent table may move business units** (corrected in review pass 2, K2): the trigger-2 guard
+protects rows whose access follows the OWNER of the row being moved. `sprk_signal` and `sprk_budgetrevision` are not in
+`RecordOwnershipResolver.OwnershipParentEntities`, so no row's owner is derived from theirs. That is not the same as "no
+rows filed under it": a Decision Record is a lineage parent of Signals (`sprk_signal.sprk_decisionrecord`). Even so, no
+access is inherited through its owner, because the share mirror walks lookups up to the roots, not owners. Re-owning
+such a row changes only its own access, as Create would have owned it. Ownership-parent tables keep the fail-closed skip
+until the owner decides. Decision Records are not re-owned at all now: Repair skips them entirely (review pass 2).
 
 ### F1-d: STOPPED (no app-only metadata source without new surface)
 
@@ -279,4 +282,66 @@ removed alone, with the result above. Create is unchanged: the fix round edits o
 - `RecordRepairModeTests`: 29 passed.
 - The same filtered `Sprk.Bff.Api.Tests` set as above: 2663 passed, 0 failed, 7 skipped (the same pre-existing skips).
 
-rework: review pass 1 (F1-a, F1-b, F1-c, F3, K2) fixed; F1-d stopped (above). Escalation trigger 2 still awaits the owner.
+## Review pass 2 fix round (with the UAC-r2 conditions)
+
+| Item | Fix | Tests |
+|---|---|---|
+| F1-e (i) | The mapping source must be one of the records the owner step resolved over: the row's parents and thread parents, plus the pair's record only where the pair files the row on its own (a project; `PairParentAsync`, now read once in `RepairOwnerAsync` and handed to the resolution as a parent). Otherwise nothing is mapped (`record_repair.mapping_source_undetermined`) | `APairOnlyEventNamingASecureMatter_CopiesNothingFromIt_ProbeP1`, `ATypedOrdinaryMatterPlusAPairNamingASecureMatter_CopiesNothing_ProbeP2`, `APairNamingAnotherOrdinaryRecord_IsNotCopiedFrom_...`; must-not-fire `ATypedOrdinaryMatterThePairAgreesWith_IsStillTheSource_AndMaps` |
+| F1-e (ii) | The source's owner (and, on a root, `sprk_issecure`) is read in the same single source read. A flag that is not an explicit `false`, or a source owned by the Secure Record owner team (`SecureChildShareSynchronizer.IsSecureOwnerTeamAsync`), maps only into a row owned by that Secure team. Otherwise, and when the source's owner does not come back or deciding the team faults, the reason is `record_repair.mapping_source_secure`. A source read that faults maps nothing, with the existing `record_repair.mapping_source_unreadable` | `ASecureFlaggedMatterNotYetIsolated_...`, `AMatterOwnedByTheSecureTeam_FlaggedFalse_...`, `ASourceReadThatFaults_CopiesNothing_FailClosed`, `ASourceWhoseOwnerDidNotComeBack_CopiesNothing_FailClosed`; must-not-fire `AnOrdinaryMatterFlaggedFalse_OwnedByItsUnitsTeam_StillMaps`, `AnEventAlreadyOwnedByTheSecureTeam_IsStillMapped_...` |
+| F1-f + UAC-r2 1 | A Decision Record is append-only: `RepairAsync` returns `Skipped` / `record_repair.table_append_only` before any read, with no update call. This is Repair's own set, NOT the registry's `OwnershipException`: Create's `DecideOwnerAsync` reads that flag and refuses an unfiled create with it, so a registry entry would change Create | `ADecisionRecord_IsNeverRepaired_NoReadNoWrite` (P3; and a filed one with a missing stamp and a profile) |
+| UAC-r2 document columns | On `sprk_document`, a rule targeting `sprk_accesspermission` or `sprk_accessinheritance` is Skipped (`InheritedAccessPermission.RefuseAppOnlyWrite`, the push's call; reason `sdap.access.document_access_server_only`). A rule targeting `sprk_parentdocument` or `sprk_relatedcommunication` is Skipped (`record_repair.document_link_server_owned`). `RefuseAppOnlyWrite` covers only the two access columns, so the D7 links are Repair's own set; extending it would change its other callers | `ADocumentsAccessRecordAndD7Links_AreNeverMapped`; must-not-fire `TheSameColumnsOnAnotherTable_AreNotRefusedAsADocuments(event / todo)`: the access columns are written there. The links are not written on those tables either, but because they would re-file the row (`mapped_value_would_refile`), not because of the document gate |
+| F3 | Tests for the six pass-1 survivors | see the mutant table |
+| K2 | Leaf-table sentence corrected (above) | — |
+
+**Repair's write path:** `IGenericEntityService.UpdateIfRowVersionMatchesAsync`, not `UpdateRecordFieldsAsync`,
+`UpdateExistingRecordFieldsAsync` or `UpdateRecordFieldsIfUnchangedAsync`. Whether the pending
+`EveryGenericUpdateWriter_AsksTheAppOnlyRefusal` ArchTest (#2170) covers this method is for that task. Repair asks the
+refusal per rule in its mapping step, and no exemption was added.
+
+**Not added (owner decision pending):** the field-security skip, and a Roslyn-guard allow-list entry.
+
+**Owner outcome of P1 (observation, not changed):** a pair-only event is still re-owned to its person's team, because
+its pair files nothing on its own on an event (the same answer Create gives). Only the mapping was the leak, and it is
+closed.
+
+**Residual:** an AMBIGUOUS or absent Secure Record owner team makes `IsSecureOwnerTeamAsync` answer "no", so (ii) then
+relies on the flag and on the owner gate (I-2) alone.
+
+### Reachability (UAC-r2 condition 5)
+
+Nothing in production reaches `RecordCreationService.RepairAsync` today:
+- it is `internal`, on an `internal` class;
+- no endpoint, job or service calls it (the other `RepairAsync` names are private methods of
+  `CoreAncestorStampReconciliationJob` and `TodoAssigneeOwnerReconciliationJob`);
+- the class is the existing scoped registration, and no registration or endpoint was added.
+
+Pinned by `tests/Spaarke.ArchTests/RecordRepairReachabilityTests.cs`: no `x.RepairAsync(` call under `src/server` outside
+an empty allow list, with must-fire and must-not-fire controls. Task 052 must list itself there.
+
+### Fail-before evidence, pass 2 (mutants; each applied alone, built, run, restored)
+
+| Mutant | Killed by |
+|---|---|
+| MA team-id check → `true` (`RepairOwnerAsync`) | `AnEventOwnedByAnOrdinaryTeam_FiledUnderASecureRecord_GetsNoMapping` |
+| MB not-owned and filed → `null` | `AFiledRowTheResolverCannotOwn_GetsNoMapping` |
+| MC `IsNullOrWhiteSpace` → `IsNullOrEmpty` | `AConcatThatYieldsOnlyASpace_IsNeverWritten_TwoRepairsWriteNothing` |
+| MD kept row plus refusal → `null` | **Survives: equivalent since F1-e (i).** `ResolveOwnerOverAsync` refuses only a project's pair it cannot tell. That pair is then not among the owner's parents, and a project has no typed filing lookup, so (i) (or `MappingSourceResolver` itself) maps nothing either way |
+| ME Root narrowed to `sprk_matter` | `EverySecureFlaggedRootTable_KeepsAUserOwner(project / work assignment)` |
+| MF `&& !filed` removed | `AnEventOwnedByAnOrdinaryTeam_FiledUnderASecureRecord_GetsNoMapping` |
+| N1 F1-e (i) source-in-parents check removed | P1, P2, `APairNamingAnotherOrdinaryRecord_...` |
+| N2 F1-e (ii) source gate removed | `ASourceWhoseOwnerDidNotComeBack_CopiesNothing_FailClosed` |
+| N3 F1-e (ii) Secure-team owner ignored | `ASourceOwnedByTheSecureTeam_ThatIsNoRoot_IsNotCopiedIntoARowItDoesNotIsolate`. On consistent data the owner gate catches this case first: the resolver reads a parent held in the Secure Record unit as secure. So this test seeds the source's unit as ordinary, to pin (ii) independently of the resolver |
+| N4 append-only skip removed | `ADecisionRecord_IsNeverRepaired_NoReadNoWrite` (both cases) |
+| N5 document server-owned gate removed | `ADocumentsAccessRecordAndD7Links_AreNeverMapped` |
+
+### Runs, pass 2
+
+- `dotnet build Spaarke.sln`: 0 errors, 0 warnings.
+- ArchTests (built and run from its own project; it is not in `Spaarke.sln`): 1237 passed, 0 failed, including the 5 new
+  reachability cases.
+- `RecordRepairModeTests`: 49 passed.
+- The same filtered `Sprk.Bff.Api.Tests` set: 2683 passed, 0 failed, 7 skipped (the same pre-existing skips).
+- Create is unchanged: the diff to `RecordCreationService.cs` lies inside `RepairOwnerAsync` only.
+
+rework: review pass 1 (F1-a, F1-b, F1-c, F3, K2) fixed; F1-d stopped. Review pass 2 (F1-e, F1-f, the UAC-r2
+conditions, F3, K2) fixed. Escalation trigger 2 still awaits the owner.
