@@ -52,7 +52,11 @@ A per-value "own" marker alone cannot tell, from the stored values, a user's edi
 Restricted above a Standard floor means either "the parent just loosened" or "a user just tightened it". The marker also
 cannot tell a re-file from a parent loosening, which is verifier F1's class of bug. The last floor and the last parents
 make each case decidable:
-- a stored value that differs from max(own, last floor) is a user's edit;
+- a stored value that differs from max(own, last floor) is a user's edit. The edit is the record's own when it is
+  stricter than the last floor OR the live one; otherwise it is put back to the live floor and the own value is cleared,
+  unless the own value is no looser than the edit (task 175 writes the value first and the record last, so a failed
+  record write leaves max(own, live floor)). Task 189's fix round added the live floor: compared with the last floor
+  alone, a user's Limited set after a Restricted parent widened to Standard was put back to Standard (`AccessInheritance.OwnPermissionOf`);
 - a different parent set is a re-file, which never loosens;
 - a floor that moved under the same parents is the parent's change, which inherited values follow.
 
