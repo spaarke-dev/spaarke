@@ -6,6 +6,8 @@
 > the field-security `-Apply` are main-session or owner steps (§10).
 > Round 2 (main-session decisions on #2170, 2026-10-20): every ancestor is checked; every read the predicate makes runs
 > app-only on every surface; the cost is measured, logged and bounded (§1, §4, §6, §11).
+> Round 3 slice A (security pass 1, F1-A, 2026-10-21): the AI retrieval trim applies the narrowing for external callers
+> (§14). Slices B and C are separate.
 
 ## 1. The rule (as built)
 
@@ -461,3 +463,103 @@ cites it; code review must approve it explicitly.
 - **`.claude/` edits** (the ADR-034 / auth constraint text, §12). Main session.
 - **Merge order.** Task 189 edits the same I-16 row; a line conflict is expected and the second to merge resolves it.
 - The task exceeded the ~100-step size guideline, through the mutation runs, the guard and two rounds of decisions.
+
+## 14. Round 3 slice A — the AI retrieval trim (F1-A, security pass 1)
+
+Commit `f1263870c0`. Slices B (content routes) and C (`sprk_analysis`, the ArchTest allow-list) are not touched here.
+
+**The defect.** `RetrievalAccessTrim.TrimByRecordAsync` checked only the caller's own Dataverse Read. Every AI retrieval
+path depends on it: `DocumentSearchHandler`, `KnowledgeRetrievalHandler`, `SemanticSearchToolHandler`, `/api/ai/search`,
+Insights, `IndexRetrieveNode` and the playbook chat context. So a systemuser flagged `sprk_isexternal`, with a share on
+matter M, got the chunks of the .eml of an internal-only email filed to M.
+
+**The fix** (main-session decision; `Services/Ai/PublicContracts/RetrievalAccessTrim.cs`):
+1. After the Read check, and only when at least one DOCUMENT key is readable, the trim asks whether the caller is a
+   resolved internal systemuser (`ExternalCallerCommunicationGuard.IsExternalCallerAsync`, reused: flagged external,
+   unresolved, or no principal is external). For any other caller, every document key passes through THE narrowing
+   (`AppOnlyDocumentNarrowing`, one call per page, app-only, hide-only).
+2. **Document-id keys** are narrowed directly.
+3. **Drive-item keys** (`sprk_driveitemid`, `IndexRetrieveNode` evidence refs): the caller's own read now selects
+   `sprk_driveitemid,sprk_documentid`. The key passes only when at least one row on the item that the caller's read
+   returned is shown. A returned row with no usable `sprk_documentid` cannot be shown (fail closed).
+4. **Parent-record keys** (matter, project, invoice, work assignment) are unchanged and trigger no lookup.
+5. **Faults.** A failed externality lookup (the guard throws on `lookup-failed` or on an `IsExternalAsync` fault) counts as
+   EXTERNAL: the narrowing applies, so an internal user loses only hidden documents. A failed narrowing withholds every
+   document key; parent-record keys stay, and the outcome stays `Evaluated`. Logs: counts and reason codes.
+6. Internal callers: no narrowing call and no app-only read. Unattended runs with no caller: unchanged (`NoVerifiedCaller`
+   before any of this).
+
+| | Before | After |
+|---|---|---|
+| External caller with Read on an internal-only .eml, an own-Restricted document or one under a Restricted parent | Chunk returned | Withheld (both key kinds) |
+| External caller, visible document | Returned | Returned |
+| Internal user, any document they can Read | Returned | Returned; no narrowing, no app-only read |
+| Externality lookup fails | n/a | Narrowing applies; visible documents still returned |
+| Narrowing read fails, external caller | n/a | Document keys withheld; parent records returned |
+
+**Component justification (§11)** for the three new constructor dependencies (`ICallerSystemUserResolver`,
+`ISystemUserIdentityResolver`, `AppOnlyDocumentNarrowing`):
+1. *Existing:* the externality rule (`ExternalCallerCommunicationGuard.IsExternalCallerAsync`) and the narrowing seam are
+   reused as they are; nothing is copied.
+2. *Extension:* the trim is the ONE seam every AI retrieval path applies, so narrowing it there covers every consumer.
+3. *Cost of doing nothing:* an external systemuser's chat, Insights or playbook retrieval returns an internal-only email's
+   text or a Restricted document (F1-A).
+- All three are registered unconditionally (`CommunicationModule`, `NotificationsModule`, `AddExternalAccess`);
+  `GateCombinationConstructibilityTests` resolves them under every gate combination. Two new internal helpers on
+  `RetrievalRecordKey` (`IsDocumentIdKey`, `IsDriveItemKey`) name the two document key kinds; `DocumentIdField` is now
+  internal for the drive-item `$select`.
+
+**Rule amendment.** The trim now takes `AppOnlyDocumentNarrowing`, the same one app-only dependency as the round-2
+amendment of the `dataverse.*` tools (§11, CLAUDE.md §6.5 path B, owner sign-off pending on the PR). Stated in the class
+remarks.
+
+**Tests.**
+- `RetrievalAccessTrimTests` (new cases over the real predicate behind the real app-only seam, `AppOnlyDocumentWorld`):
+  - must fire: `AnExternalCaller_WithReadOnAHiddenDocument_GetsNoChunkOfIt` (internal-only communication, own Restricted,
+    Restricted parent × document-id and drive-item key); `AFailedExternalityLookup_AppliesTheNarrowing_ItDoesNotRefuseEverything`
+    (resolver `lookup-failed` and a throwing `IsExternalAsync` × both key kinds); `AFailedNarrowing_WithholdsTheDocumentKeys_ParentRecordsStay`;
+    `ADriveItem_WhoseOnlyVisibleRowTheCallerCannotRead_IsWithheld`; `ADriveItemRowWithoutADocumentId_IsWithheld_ForAnExternalCaller`.
+  - must not fire: `AnInternalUser_ResultsAreUnchanged_AndNothingIsNarrowed`, `AnExternalCaller_OnAVisibleDocument_KeepsIt`
+    (both key kinds); `ADriveItem_WithOneHiddenAndOneVisibleReadableRow_Passes`;
+    `AnExternalCaller_ParentRecordKeys_AreNotNarrowed_AndNothingIsLookedUp`.
+- `Issue1511_AiRetrievalAccessTrimTests` (handlers over the real trim): `InternalOnlyEmailDocument_TheCallerCanRead_ReachesDocumentSearch_OnlyForAnInternalCaller`
+  (external: withheld; internal: unchanged) and `ExternalCaller_ObservationQuotingAnInternalOnlyEmailItem_DoesNotReachIndexRetrieve`
+  (drive-item key).
+- `ExternalDocumentNarrowingGuardTests`: one line pins that `RetrievalAccessTrim::TrimByRecordAsync` reaches the narrowing.
+- Constructor sites updated to an internal caller: `InsightsOrchestratorTests` (strict mocks; nothing readable),
+  `SemanticSearchAuthorizationTests` (Spe.Integration.Tests), `ClassifierRecallLiveHarness` (strict; no caller on that
+  path). The shared fake `ReadableDocumentsUserClient` accepts a two-column `$select` and models document rows per drive
+  item (`AllowDocumentOnDriveItem`).
+
+**Before → after.** The original trim, given only the new constructor signature so the tests compile: 19 failed, 95
+passed (of 114 in the trim, #1511 and Insights classes). After: 114 passed.
+
+**Mutants** (runner `.uac188/t188a_mutate.py`, untracked; the source SHA-1 was checked after every run):
+
+| Id | Mutation | Failing tests | Killed by (representative) |
+|---|---|---|---|
+| M1 | narrowing removed | 18 (+ the ArchTest guard: 1 of 4 in the class fails) | `AnExternalCaller_WithReadOnAHiddenDocument_GetsNoChunkOfIt` |
+| M2 | drive-item keys skipped | 10 | `AnExternalCaller_WithReadOnAHiddenDocument_GetsNoChunkOfIt(…DriveItem)`, `ExternalCaller_ObservationQuotingAnInternalOnlyEmailItem_DoesNotReachIndexRetrieve` |
+| M3 | a lookup fault counts as internal | 4 | `AFailedExternalityLookup_AppliesTheNarrowing_ItDoesNotRefuseEverything` |
+| M4 | a narrowing fault counts as visible | 2 | `AFailedNarrowing_WithholdsTheDocumentKeys_ParentRecordsStay` |
+
+**Gates** (on `f1263870c0`):
+
+| Gate | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/ --no-incremental` | succeeded, 0 warnings |
+| Unit tests, filtered (`Services.Ai` \| `Regression.Ai` \| `Seam.Ai` \| `ExternalAccess` \| `UnifiedAccessControl` \| `Communication` \| `Insights` \| `SemanticSearch`, `Category!=Live`) | 11382 passed, 3 skipped (pre-existing), 0 failed |
+| `Spe.Integration.Tests` `SemanticSearchAuthorizationTests` | 49 passed |
+| `tests/Spaarke.ArchTests` (full project) | 1212 passed, 0 failed |
+| Test projects that compile the changed files (unit, ArchTests, Spe.Integration.Tests, Sprk.Bff.Api.IntegrationTests) | build, 0 warnings |
+| Publish size (canonical: `dotnet publish -c Release`, framework-dependent linux-x64, `Compress-Archive -CompressionLevel Optimal`, PDBs included, 4 PDBs each side, fresh worktrees) | branch `f1263870c0` 39,331,381 B vs master `4f5f22694c` (the merge base) 39,314,223 B: **+17,158 B (+0.02 MB)**; raw +49,516 B. Slice A alone (vs `c3da0a5d0e`, 39,328,661 B): +2,720 B. Total 39.3 MB |
+| `dotnet list package --vulnerable --include-transitive` | no vulnerable packages; no package changes |
+| `git merge-tree` against `origin/master` `44063b3473` | clean |
+
+**Known limits (K).**
+- A narrowing fault for an external caller withholds the document keys with outcome `Evaluated`, so the tool result does
+  not say "withheld" (the brief's decision: parent-record keys must survive, which `CheckFailed` would not allow). The
+  warning log carries it.
+- Cost: every trim with a readable document key now makes one externality lookup (both resolvers cache); an external
+  caller adds one narrowing call per page (§4: + ⌈N/50⌉ by-id app-only reads, then the hop and communication levels).
+- Not run: the full unfiltered unit suite and the `Category=Live` harnesses (by the brief).
