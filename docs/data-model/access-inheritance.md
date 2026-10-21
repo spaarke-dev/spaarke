@@ -1,8 +1,12 @@
-# sprk_accessinheritance — what a filed work assignment's or project's access was derived from
+# sprk_accessinheritance — what a filed work assignment's, project's or document's access was derived from
 
 > Owner: unified-access-control-r2 task 175 (owner rounds 84 and 87). Schema: `scripts/Set-AccessInheritanceSchema.ps1`.
 > Writer: the BFF only (`SecureRootInheritance.FollowParentsAsync`). Never on a form. Field-secured: only the BFF
 > application users (task 133's "Spaarke BFF-Managed Field Writers" profile) can read or write it.
+>
+> **Documents (task 189, D7 T7a):** the same column and format on `sprk_document`, NOT field-secured, schema
+> `scripts/Set-DocumentAccessPermissionSchema.ps1`. See [Documents](#documents-task-189) — the sections above it are about
+> work assignments and projects.
 
 ## The rule it serves (owner round 87)
 
@@ -113,3 +117,21 @@ can remove the designation, as on a parentless record.
   this column only decides what the stored values should be.
 - **Display:** `GET /can-manage-access` reports `followsParents`, `floorSecure` and `floorAccessPermission`. The forms and
   Manage Access say "inherited from {parent}" or "set on this record" by comparing the value with the floor.
+
+## Documents (task 189)
+
+`sprk_document.sprk_accessinheritance` records a document's OWN narrowing of `sprk_accesspermission` (D7: a document's own
+Restricted hides it from partners). Rule and writers: [child-access-permission.md](child-access-permission.md#documents-their-own-narrowing-task-189).
+
+| | Work assignment / project (task 175) | Document (task 189) |
+|---|---|---|
+| Values recorded | `sprk_issecure` and `sprk_accesspermission` | `sprk_accesspermission` only (`floorSecure` and `ownSecure` are always `false`) |
+| `floorPermission` | the floor through task 174's walk | the value task 173's rule gives it: the most restrictive of the TOPS of its filing |
+| A re-file | never loosens (what it held beyond the new floor becomes its own) | follows the new parents (task 173's contract) for a row without an own narrowing; an own narrowing stays |
+| Field security | secured; the BFF's read proven before an empty record is trusted | **not secured** (decision D1): the inherited part is always recomputed from the parents, never read from the record, so an edit of the record can only remove the user's own narrowing or add one. Securing would add no protection and would add the hidden-read widening risk above |
+| Caller-supplied writes | refused (`sdap.access.access_record_server_only`) | not refused (the caller could write the unsecured column directly); the Office fallback writes `AccessInheritance.OwnNarrowing(Restricted)` on purpose |
+| Writers | `FollowParentsAsync` | `ChildAccessPermissionReconciler` (in `SecureChildReconciliationJob`, every 2 minutes) and `CoreAncestorResolver.RefreshInheritedAccessPermissionAsync` (the child-records create and re-file), both through `InheritedAccessPermission.DecideDocument` |
+| Own vs inherited | `AccessInheritance.OwnPermissionOf` — ONE copy of the classification, shared | the same |
+| An unreadable record, or an unknown stored level | undetermined, nothing written | undetermined, nothing written, carried |
+| No record yet | the backfill rule (stricter than the floor is own) | the same; a Standard row under a Standard floor gets no record at all |
+| Each write | re-read first; value and record compared | the same (the job); value and record in ONE update |

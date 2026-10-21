@@ -1,7 +1,7 @@
 # Child Access Permission — `sprk_accesspermission` on To Do, Event, Communication and Document
 
-> **Last Reviewed**: 2026-10-08
-> **Reviewed By**: unified-access-control-r2 task 173 (owner rounds 81 and 84, GitHub #1423)
+> **Last Reviewed**: 2026-10-20
+> **Reviewed By**: unified-access-control-r2 task 173 (owner rounds 81 and 84, GitHub #1423); task 189 (D7 T7a, GitHub #2126: a document's own narrowing)
 > **Status**: Current (BFF and scripts in source; live rollout is the main session's gate)
 > **Solution**: `SpaarkeCore` (the column ships with each table: rootcomponentbehavior 0)
 
@@ -11,8 +11,9 @@
 |---|---|---|---|
 | **Has a parent** (any non-null filing lookup) | The MOST RESTRICTIVE own value of the records at the TOP of its filing: Restricted (100000002) over Limited (100000001) over Standard (100000000). A null, or a top whose table has no such column, counts as Standard | The BFF only: the shared stamp path at create (`CoreAncestorResolver`), and `SecureChildReconciliationJob` every 2 minutes for everything else | Locked, with the info notification "Access permission is inherited from {parent}" |
 | **No parent** | The value its user set | The user | Editable |
+| **A Document with a parent** (task 189) | The STRICTER of its own narrowing and the value above: max(own, inherited). Its own narrowing is never widened; the inherited part follows its parents both ways | The same two BFF writers, from its record `sprk_accessinheritance` ([below](#documents-their-own-narrowing-task-189)) | Locked on a filed document today; T5 lets its pill be set to Restricted |
 
-- **Display only.** No access decision reads a child table's `sprk_accesspermission`. A child's access comes from its parent root (`sprk_project`, `sprk_matter`, `sprk_workassignment`): `ExternalParticipationService.GetRootRecordFlagsAsync` and the secure-root path read the ROOT flags (owner Q6, 2026-09-30). A parentless child's own value is recorded only — owner, 2026-10-08: "This is fine (BUT in future we might need to revisit)".
+- **Display only — except on a document (D7).** Under D7 a document's own Restricted hides it from partners (task 188's read predicate, D7 T7, reads the stored value), so the BFF keeps a document's own narrowing (task 189, below). On To Do, Event and Communication, no access decision reads a child table's `sprk_accesspermission`. A child's access comes from its parent root (`sprk_project`, `sprk_matter`, `sprk_workassignment`): `ExternalParticipationService.GetRootRecordFlagsAsync` and the secure-root path read the ROOT flags (owner Q6, 2026-09-30). A parentless child's own value is recorded only — owner, 2026-10-08: "This is fine (BUT in future we might need to revisit)".
 - **The top of a filing.** Walk the record's filing lookups up to records that have no filing parent of their own: a root (project, matter, work assignment), or a parentless child (a document under nothing, an unfiled invoice, a thread with no regarding). A To Do under a document under a Restricted matter is Restricted; a To Do under a parentless document whose own value is Restricted is Restricted.
 - **Un-filing keeps the last value.** A record whose last parent is removed keeps the value it had, which becomes editable (round 81).
 - **Undecidable filings are left alone.** A parent that cannot be read, does not exist, a filing deeper than 6 levels, or one that loops without reaching a record that has no parent: nothing is written and a warning is logged (`[INHERITED-ACCESS-PERMISSION]` at create, `[CHILD-ACCESS-PERMISSION]` in the job). The create never fails because of it.
@@ -42,7 +43,9 @@ All four are Choice columns bound to the GLOBAL choice `sprk_accesspermission` (
 | Event | sprk_event | sprk_accesspermission | sprk_AccessPermission | Access Permission | Choice | As above | True | Simple | Same global choice |
 | Communication | sprk_communication | sprk_accesspermission | sprk_AccessPermission | Access Permission | Choice | As above. Was to be retired by task 138 (owner Q6); round 81 keeps it as a display copy | True | Simple | Same global choice |
 
-`scripts/Set-DocumentAccessPermissionSchema.ps1 -Verify` checks the document column: it exists, is bound to the roots' choice, and ships in SpaarkeCore.
+| Document | sprk_document | sprk_accessinheritance | sprk_AccessInheritance | Access Inheritance (system) | Multiple lines of text | Task 189: what the document's Access Permission was derived from (its parents, the value they give it, its own narrowing) — task 175's v1 JSON ([access-inheritance.md](access-inheritance.md#documents-task-189)). Written by the BFF. NOT field-secured (decision D1). On no form | True | Simple | MaxLength 4000, audited, not required |
+
+`scripts/Set-DocumentAccessPermissionSchema.ps1 -Verify` checks both document columns: the Access Permission exists, is bound to the roots' choice, and ships in SpaarkeCore; the record exists, is Memo (MaxLength ≥ 1000), is NOT field-secured, ships in SpaarkeCore and is on no `sprk_document` form.
 
 ## Where it is written, and how fast
 
@@ -51,12 +54,30 @@ All four are Choice columns bound to the GLOBAL choice `sprk_accesspermission` (
 | Every BFF create through `CoreAncestorResolver.StampAsync` / `DeriveForHostAsync` (Office To Do, workspace To Do builder, AI task action, communication service, AI email draft, event create) and the inbound association update | Inline, in the same payload | At create |
 | Every other create or re-file: documents (all paths), client `Xrm.WebApi` and model-driven forms, imports, flows, BFF re-file routes (`PATCH /api/v1/child-records`, event and communication filing, `PUT /api/v1/documents/{id}`) | `SecureChildReconciliationJob` → `ChildAccessPermissionReconciler`: rows changed since its watermark and everything filed under them | Within one 2-minute run |
 | A parent's value changes (a matter turns Restricted) | The same pass walks DOWN from every changed row (at most 6 levels) | Within one run |
-| A hand edit of a parented child | The same pass (the row changed) | Reverted within one run |
+| A hand edit of a parented child | The same pass (the row changed) | Reverted within one run. A document (task 189): an edit stricter than what its parents give it is kept as its own; one back to that value removes its own narrowing; one below it is put back |
 | Rows nobody changed (created before task 173; drift after a restart) | The same pass's capped sweep window (`SecureChild:Reconciliation:MaxAccessPermissionRowsPerRun`, default 1000) until the instance has covered every row once | Within ceil(rows / cap) runs of a start |
 
-Report: the job's `ResultJson.accessPermission` (`changed`, `parentless`, `undetermined`, `deferred`, `writeCapReached`, `changes[]`, `sweep`). A listing fault or a failed write makes the run unsuccessful; an undecidable row is reported and carried.
+Report: the job's `ResultJson.accessPermission` (`changed`, `parentless`, `undetermined`, `deferred`, `writeCapReached`, `changes[]`, `sweep`; task 189: `recordsWritten`, `ownKept`, `changedConcurrently`). A listing fault or a failed write makes the run unsuccessful; an undecidable row is reported and carried.
 
 **Write cap.** At most `SecureChild:Reconciliation:MaxAccessPermissionWritesPerRun` writes per run (default 500). A run that reaches it stops writing and keeps its window (the watermark and the sweep cursor stay), so the next run lists the same rows and writes the next ones; only differing rows are written, so a matter with thousands of children converges over several runs. The pass runs after the secure pass has saved its own cursor and watermark.
+
+## Documents: their own narrowing (task 189)
+
+D7 rule 2: a document's own Restricted hides it from partners. A document may therefore be stricter than its parents, and the BFF must never reset that to the parents' value. It holds **max(own narrowing, inherited)**:
+
+- **Own vs inherited** is recorded in `sprk_document.sprk_accessinheritance` (task 175's v1 JSON: the parents, the value they last gave it as `floorPermission`, and `ownPermission`). The rule is task 175's classification, ONE copy (`AccessInheritance.OwnPermissionOf`), applied by `InheritedAccessPermission.DecideDocument` for both writers (`ChildAccessPermissionReconciler` and `CoreAncestorResolver.RefreshInheritedAccessPermissionAsync`, the child-records create and re-file):
+  - a stored value that differs from max(own, last inherited) was set outside these writers (a user's edit, a BFF writer's narrowing): stricter than the last inherited value → its own; equal to it → its own narrowing is removed; looser → put back;
+  - no record (rows written before task 189): stricter than the current inherited value → its own; otherwise inherited. Sound because task 173 kept every parented row equal to its parents before.
+- **The inherited part follows the parents both ways**, and a re-file follows the new parents (task 173's contract), for every row without an own narrowing. A document with its own Restricted stays Restricted when its matter widens.
+- **A parentless document** keeps its own value, never written (round 81). A Limited or Restricted value on it is RECORDED as its own (`{parents: [], floorPermission: Standard, ownPermission: …}`), so a later filing keeps it. An un-filed document's last value is likewise recorded as its own.
+- **Who may remove it:** any user with Write, by an edit back to the inherited value (D3). A Full Access gate belongs to Manage Access (T3/T5).
+- **A BFF writer that narrows** (the Office fallback, T8) writes `AccessInheritance.OwnNarrowing(Restricted)` in the same payload as the stored Restricted. Under a Restricted matter a narrowing equal to the inherited value is otherwise read as inherited and follows a widening.
+- **One update** carries the value and the record. The job re-reads both just before writing; a row that changed since its listing is not written (`changedConcurrently`) and is decided again next run.
+- **Fail closed:** an unreadable record, a stored value that is not a known level, or an environment whose documents lack the record column writes nothing to the document (the run reports `undetermined`, or `sprk_document` in `tablesWithoutColumn`). Run `scripts/Set-DocumentAccessPermissionSchema.ps1 -Apply` before deploying a BFF with task 189.
+- **The Standard majority gets no record** (no `modifiedon` churn): a row with no record, no own narrowing and a Standard inherited value is left unwritten.
+- **Not field-secured** (D1): the inherited part is always recomputed from the parents and never read from the record, so an edit of the record can only remove the user's own narrowing or add one — never take the document below its parents.
+- **Known limit (K1):** a user who narrows a document to exactly the value its parent turns to, inside the same 2-minute window, is read as inherited and follows a later widening.
+- **Out of scope:** a document's own narrowing does not reach the records filed under it (the tops rule is unchanged). A Restricted `.eml`'s attachments are hidden at read time by task 188 (D4).
 
 ## The form
 
