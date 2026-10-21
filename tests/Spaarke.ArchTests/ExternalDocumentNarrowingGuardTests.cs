@@ -1089,6 +1089,12 @@ public class ExternalDocumentNarrowingGuardTests
         ["Sprk.Bff.Api.Services.Finance.InvoiceReviewService"] =
             "Writes sprk_invoice only (InvoiceEntity), a create by upsert on a fresh id.",
         ["Sprk.Bff.Api.Services.Finance.SignalEvaluationService"] = "Writes sprk_spendsignal only (SignalEntity).",
+        ["Sprk.Bff.Api.Services.Finance.FinanceRollupService"] =
+            "Writes its own rollup fields to sprk_matter or sprk_project only (UpdateExistingRecordFieldsAsync).",
+        ["Sprk.Bff.Api.Services.ScorecardCalculatorService"] =
+            "Writes its own grade fields to sprk_matter or sprk_project only (UpdateExistingRecordFieldsAsync).",
+        ["Sprk.Bff.Api.Services.Communication.CommunicationEnrichmentService"] =
+            "Writes only ownerid on sprk_communication (UpdateRecordFieldsIfUnchangedAsync, the routed owning team).",
         ["Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite"] =
             "Creates only (a fresh Guid upserted): a link set in a create can only HIDE the new row (D7 narrows, never widens), " +
             "and no existing document is re-pointed or un-linked.",
@@ -1116,7 +1122,8 @@ public class ExternalDocumentNarrowingGuardTests
 
         var problems = GenericWriterProblems(scan, GenericWritersThatUpdateNoDocument);
         Assert.True(problems.Count == 0,
-            "A type that calls the generic update (IFieldMappingDataverseService.UpdateRecordFieldsAsync) writes a payload it may " +
+            "A type that calls a generic update (IFieldMappingDataverseService.UpdateRecordFieldsAsync, UpdateExistingRecordFieldsAsync " +
+            "or UpdateRecordFieldsIfUnchangedAsync) writes a payload it may " +
             "not have built. It must ask InheritedAccessPermission.RefuseAppOnlyWrite before the write, so a document's D7 link " +
             "columns (sprk_parentdocument, sprk_relatedcommunication) and its Access Permission are never written by it (task 188 " +
             "round 4e, task 189 K5), or be listed in GenericWritersThatUpdateNoDocument with the reason it never updates an " +
@@ -1181,8 +1188,16 @@ public class ExternalDocumentNarrowingGuardTests
         return uses;
     }
 
+    // All three generic app-only updates of an existing row (re-check K2): each writes whatever payload its caller built.
+    private static readonly HashSet<string> GenericUpdateNames = new(StringComparer.Ordinal)
+    {
+        nameof(Spaarke.Dataverse.IFieldMappingDataverseService.UpdateRecordFieldsAsync),
+        nameof(Spaarke.Dataverse.IFieldMappingDataverseService.UpdateExistingRecordFieldsAsync),
+        nameof(Spaarke.Dataverse.IFieldMappingDataverseService.UpdateRecordFieldsIfUnchangedAsync),
+    };
+
     private static bool IsGenericUpdate(MethodBase method) =>
-        method.Name == nameof(Spaarke.Dataverse.IFieldMappingDataverseService.UpdateRecordFieldsAsync)
+        GenericUpdateNames.Contains(method.Name)
         && method.DeclaringType is { } declaring
         && typeof(Spaarke.Dataverse.IFieldMappingDataverseService).IsAssignableFrom(declaring);
 

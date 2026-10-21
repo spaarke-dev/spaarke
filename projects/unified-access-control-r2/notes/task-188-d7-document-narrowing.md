@@ -1778,8 +1778,11 @@ through:
 
 There are no others.
 
-Every write of either column in `src/server`: each is a typed BFF writer that CREATES the row, so none goes through a
-generic update path:
+Every write of either column in `src/server` is a typed BFF writer, so none goes through a generic update path. All but
+one CREATE the row; the exception, `CrossPathLink.cs:108` (`FindAndLinkArchiveDocumentsAsync`, from
+`IncomingCommunicationProcessor.cs:349`), UPDATES an existing email-archive document's `sprk_relatedcommunication` app-only,
+and its guard (:101-103) re-points a row already linked to a different communication. That can un-hide an archive
+document under D7; filed as #2213 (re-check of rounds 4c–4e). The creating writers:
 - `sprk_relatedcommunication`: `CommunicationService.cs:519/2736/3019`, `IncomingCommunicationProcessor.cs:1128/1347`,
   `MessageAttachmentMaterializer.cs:279` (all `IGenericEntityService.CreateAsync`).
 - `sprk_parentdocument`: `DataverseServiceClientImpl.cs:1023` (`CreateDocumentAsync`, from `EmailAttachmentProcessor.cs:332`
@@ -1873,7 +1876,7 @@ non-constant null.
 |---|---|
 | Build `--no-incremental` after the merge: BFF, unit tests, ArchTests | 0 errors, 0 warnings each |
 | Unit, filtered (UpdateRecord, Playbook, DataverseUpdate, FieldMapping, AccessPermission, ParentLineage, InheritedAccess, UnifiedAccessControl, ExternalAccess, Document; `Category!=Live`) | 2,368 passed, 0 failed, 1 skipped |
-| ArchTests, full project | 1,129 passed, 0 failed |
+| ArchTests, full project | 1,250 passed, 0 failed |
 | Merge `origin/master` `733c65063c` | clean, no conflicts (`19f72e1017`); master added no new caller of the generic update |
 
 Not run, by the brief: the full unfiltered unit suite, any deploy, field security `-Apply`, and any Dataverse, Azure or
