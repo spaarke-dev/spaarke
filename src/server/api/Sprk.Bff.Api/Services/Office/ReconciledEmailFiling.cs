@@ -56,7 +56,8 @@ public enum ReconciledFilingResult
 /// and the thread move after it act for the caller (<see cref="SecureRemovalCaller.ForBearerToken"/>, #2143 round 8 F1-B):
 /// a Full Access holder on that record is permitted; anyone else is refused, and the communication is left unfiled.</para>
 /// <para><b>Never fails the save.</b> A refusal or a failure leaves the communication as it was and is logged; the document
-/// still saves and links. <see cref="SaveResponse"/> has no warnings channel, so nothing is reported to the client.</para>
+/// still saves and links. The outcome is returned in <see cref="SaveResponse.EmailFiling"/> (task 131), so the client can tell
+/// the user the email was not filed.</para>
 /// <para><b>Concurrency.</b> The filing is read again immediately before the write; a communication filed in between is left
 /// alone. The generic Dataverse seam has no conditional update, so a filing that lands in the milliseconds between that
 /// re-read and the write is not detected (the engine's write is additive, so it would add the save's record beside it).</para>
