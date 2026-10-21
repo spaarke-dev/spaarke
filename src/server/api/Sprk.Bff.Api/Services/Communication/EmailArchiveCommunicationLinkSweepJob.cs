@@ -29,6 +29,10 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// rows, active or inactive, with <c>sprk_isemailarchive = true</c> and no <c>sprk_relatedcommunication</c>. Each candidate
 /// gets exactly one reason (<see cref="LinkReason"/>):</para>
 /// <list type="bullet">
+/// <item><c>hasParent</c> — the archive itself has a <c>sprk_parentdocument</c>: never linked, whatever its key. The
+/// narrowing takes the FIRST communication link on its parent walk, so an own link on such an archive could pre-empt a
+/// parent's internal-only link and SHOW it to partners. No writer creates such archives today; leaving them unlinked keeps
+/// "this sweep can only hide, never show" true in every case;</item>
 /// <item><c>noKey</c> — no <c>sprk_emailmessageid</c>;</item>
 /// <item><c>exchangeItemId</c> — a mailbox item id saved before word-add-in-r1 task 121, not an RFC 5322 Message-ID
 /// (<see cref="OfficeEmailEnricher.IsRfcMessageId"/>, reused): it names the message in one mailbox only and is joined to
@@ -69,7 +73,9 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// schedule as the standing safety net (it heals an archive whose best-effort link failed later). No endpoint was added.</para>
 ///
 /// <para><b>Batches.</b> A run examines at most <see cref="MaxDocumentsPerRunKey"/> candidates (default
-/// <see cref="DefaultMaxDocumentsPerRun"/>); the next run continues after the last row (<c>startAfter</c> / <c>endAt</c>), and a
+/// <see cref="DefaultMaxDocumentsPerRun"/>, which is <see cref="MaxListedPerRun"/>). A configured value above
+/// <see cref="MaxListedPerRun"/> is clamped to it and the report says so (<c>batch.clamped</c>), so every run's id lists are
+/// complete; the next run continues after the last row (<c>startAfter</c> / <c>endAt</c>), and a
 /// run that reaches the end reports <c>passComplete</c> and starts the next pass at the top. The cursor is per instance (as
 /// <see cref="CommunicationThreadFilingSweepJob"/>'s): a restart or another instance starts a pass over, which repeats only
 /// reads — a linked row is no longer a candidate.</para>
@@ -80,6 +86,17 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// set. Rule 4: a candidate read that faults is a FAILED run (the slice was not examined), never "nothing to do"; a per-row
 /// fault (its communication query or its write) is counted and the run continues; the next pass revisits both, so the job
 /// does not throw. Rule 5: one heartbeat per attempt. Rule 6: <c>AddScheduledJob</c> in <c>CommunicationModule</c>.</para>
+///
+/// <para><b>Changed and failed rows</b> (<c>changedSinceRead</c>, <c>failed</c>) are counted only, not listed; the next pass
+/// revisits them, since a row that was not linked is still a candidate.</para>
+///
+/// <para><b>Container derivation and the task 166 migration.</b> Linking a document changes the container
+/// <c>RecordContainerResolver.DeriveDocumentContainersAsync</c> derives for it (its communication's answer is consulted, and a
+/// secure answer dominates). Under the interim pointer rule a new link only ADDS admissions to its two halves (the archive
+/// path and the secure-record test), but the round-37 disjunct that serves a file the BFF identity placed follows the derived
+/// container, so a file the BFF relocated BEFORE the link was set can be refused after it. Run this job's Apply BEFORE task 166's gate-24 migration pass and its <c>-Verify</c>. If Apply runs
+/// after gate 24, re-run the migration pass and <c>-Verify</c> before the strict flip (gate 25): the migration's
+/// <c>-Verify</c> (<c>wouldNewlyRefuse</c>) is the existing check that catches a file left outside its derived container.</para>
 ///
 /// <para><b>Status.</b> <c>ok</c> only when nothing failed: a per-row fault, a row changed since it was read, or a child
 /// count that could not be read makes the run <c>partial</c>; a candidate read that faults makes it <c>error</c>.</para>
@@ -102,7 +119,7 @@ public sealed class EmailArchiveCommunicationLinkSweepJob : IScheduledJob
     /// <summary>Candidates examined per run (<c>EmailArchiveLinkSweep__MaxDocumentsPerRun</c>).</summary>
     public const string MaxDocumentsPerRunKey = "EmailArchiveLinkSweep:MaxDocumentsPerRun";
 
-    internal const int DefaultMaxDocumentsPerRun = 500;
+    internal const int DefaultMaxDocumentsPerRun = MaxListedPerRun;
 
     /// <summary>Rows per candidate query. Settable only so a test can reach the paging.</summary>
     internal int ScanPageSize { get; init; } = 100;
@@ -171,7 +188,9 @@ public sealed class EmailArchiveCommunicationLinkSweepJob : IScheduledJob
 
         var started = _timeProvider.GetTimestamp();
         var apply = bool.TryParse(_configuration[ApplyKey], out var a) && a;
-        var maxDocuments = PositiveInt(_configuration[MaxDocumentsPerRunKey], DefaultMaxDocumentsPerRun);
+        // K2: the batch never exceeds what one report lists, so every run's id lists are complete.
+        var configuredBatch = PositiveInt(_configuration[MaxDocumentsPerRunKey], DefaultMaxDocumentsPerRun);
+        var maxDocuments = Math.Min(configuredBatch, MaxListedPerRun);
         var report = new LinkReport();
         var problems = new List<string>();
         var status = StatusOk;
@@ -215,11 +234,11 @@ public sealed class EmailArchiveCommunicationLinkSweepJob : IScheduledJob
         _logger.Log(
             level,
             "{Prefix} heartbeat status={Status} mode={Mode} examined={Examined} matched={Matched} linked={Linked} "
-            + "noKey={NoKey} exchangeItemId={ExchangeItemId} noCommunication={NoCommunication} ambiguous={Ambiguous} "
+            + "hasParent={HasParent} noKey={NoKey} exchangeItemId={ExchangeItemId} noCommunication={NoCommunication} ambiguous={Ambiguous} "
             + "changedSinceRead={ChangedSinceRead} failed={Failed} childrenCovered={ChildrenCovered} "
             + "childrenOfUnmatched={ChildrenOfUnmatched} passComplete={PassComplete} attempt={Attempt} durationMs={DurationMs} "
             + "trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
-            LogPrefix, status, mode, report.Examined, report.Matched, report.Linked, report.NoKey.Count, report.ExchangeItemId.Count,
+            LogPrefix, status, mode, report.Examined, report.Matched, report.Linked, report.HasParent.Count, report.NoKey.Count, report.ExchangeItemId.Count,
             report.NoCommunication.Count, report.Ambiguous.Count, report.ChangedSinceRead, report.Failed, report.ChildrenCovered,
             report.ChildrenOfUnmatched, report.PassComplete, context.Attempt, (long)duration.TotalMilliseconds, context.Trigger,
             context.RunId, context.CorrelationId);
@@ -230,7 +249,15 @@ public sealed class EmailArchiveCommunicationLinkSweepJob : IScheduledJob
             ProcessedItems: report.Examined,
             Duration: duration,
             ResultJson: JsonSerializer.Serialize(
-                new { status, mode, apply, attempt = context.Attempt, archives = report.ToJson(apply) },
+                new
+                {
+                    status,
+                    mode,
+                    apply,
+                    attempt = context.Attempt,
+                    batch = new { configured = configuredBatch, effective = maxDocuments, clamped = configuredBatch > maxDocuments },
+                    archives = report.ToJson(apply),
+                },
                 ResultJsonOptions));
     }
 
@@ -329,7 +356,7 @@ public sealed class EmailArchiveCommunicationLinkSweepJob : IScheduledJob
     {
         var query = new QueryExpression(DocumentTable)
         {
-            ColumnSet = new ColumnSet(CrossPathLink.EmailMessageIdAttribute, VersionNumberField),
+            ColumnSet = new ColumnSet(CrossPathLink.EmailMessageIdAttribute, ParentDocumentField, VersionNumberField),
             TopCount = take,
         };
         query.Criteria.AddCondition(CrossPathLink.IsEmailArchiveAttribute, ConditionOperator.Equal, true);
@@ -359,6 +386,9 @@ public sealed class EmailArchiveCommunicationLinkSweepJob : IScheduledJob
     {
         /// <summary>Exactly one communication came back and its internet message id equals the key exactly.</summary>
         Matched,
+
+        /// <summary>The archive has a parent document: never linked (an own link could pre-empt the parent's).</summary>
+        HasParent,
 
         /// <summary>The document records no message id.</summary>
         NoKey,
@@ -402,6 +432,11 @@ public sealed class EmailArchiveCommunicationLinkSweepJob : IScheduledJob
     private async Task<(LinkReason Reason, Guid CommunicationId)> ClassifyAsync(
         IGenericEntityService entityService, Entity document, JobRunContext context, CancellationToken ct)
     {
+        // K1: an archive with a parent is never linked — D7 takes the FIRST link on the walk, so its own link could pre-empt a
+        // parent's internal-only link. Decided before the key, so no communication query is made for it.
+        if (document.GetAttributeValue<EntityReference>(ParentDocumentField) is { Id: var parentId } && parentId != Guid.Empty)
+            return (LinkReason.HasParent, Guid.Empty);
+
         var key = document.GetAttributeValue<string>(CrossPathLink.EmailMessageIdAttribute);
         var keyOnly = Classify(key, null);
         if (keyOnly.Reason is LinkReason.NoKey or LinkReason.ExchangeItemId)
@@ -563,6 +598,7 @@ public sealed class EmailArchiveCommunicationLinkSweepJob : IScheduledJob
         public int Failed { get; set; }
         public int ChildrenCovered { get; set; }
         public int ChildrenOfUnmatched { get; set; }
+        public CountedIds HasParent { get; } = new();
         public CountedIds NoKey { get; } = new();
         public CountedIds ExchangeItemId { get; } = new();
         public CountedIds NoCommunication { get; } = new();
@@ -573,6 +609,7 @@ public sealed class EmailArchiveCommunicationLinkSweepJob : IScheduledJob
         {
             var list = reason switch
             {
+                LinkReason.HasParent => HasParent,
                 LinkReason.NoKey => NoKey,
                 LinkReason.ExchangeItemId => ExchangeItemId,
                 LinkReason.NoCommunication => NoCommunication,
@@ -597,6 +634,7 @@ public sealed class EmailArchiveCommunicationLinkSweepJob : IScheduledJob
             examined = Examined,
             linked = apply ? Linked : 0,
             wouldLink = apply ? 0 : Matched,
+            hasParent = HasParent.Count,
             noKey = NoKey.Count,
             exchangeItemId = ExchangeItemId.Count,
             noCommunication = NoCommunication.Count,
@@ -610,6 +648,7 @@ public sealed class EmailArchiveCommunicationLinkSweepJob : IScheduledJob
             linkedDocuments = LinkedSample,
             unmatched = new
             {
+                hasParent = HasParent.ToJson(),
                 noKey = NoKey.ToJson(),
                 exchangeItemId = ExchangeItemId.ToJson(),
                 noCommunication = NoCommunication.ToJson(),

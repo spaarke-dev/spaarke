@@ -46,7 +46,7 @@ public class EmailArchiveCommunicationLinkSweepJobTests
                 var source = q.EntityName == "sprk_communication" ? _communications : _documents;
                 return new EntityCollection(
                     source.Where(r => Matches(r, q.Criteria)).OrderBy(r => r.Id).Take(q.TopCount ?? int.MaxValue)
-                        .Select(Copy).ToList());
+                        .Select(r => Copy(r, q.ColumnSet)).ToList());
             });
 
         // Dataverse's conditional update: applied only while the row's version is still the one given, else
@@ -73,12 +73,19 @@ public class EmailArchiveCommunicationLinkSweepJobTests
 
     private Guid? FailWriteFor { get; set; }
 
-    /// <summary>A detached copy, as a read returns: a later write to the store does not change what the job read.</summary>
-    private static DataverseEntity Copy(DataverseEntity row)
+    /// <summary>
+    /// A detached copy, as a read returns: a later write to the store does not change what the job read. Only the columns
+    /// the query asked for come back (as Dataverse returns them), so a query that forgets a column it reads fails its test.
+    /// </summary>
+    private static DataverseEntity Copy(DataverseEntity row, ColumnSet columns)
     {
         var copy = new DataverseEntity(row.LogicalName) { Id = row.Id };
         foreach (var attribute in row.Attributes)
-            copy[attribute.Key] = attribute.Value;
+        {
+            if (columns.AllColumns || columns.Columns.Contains(attribute.Key))
+                copy[attribute.Key] = attribute.Value;
+        }
+
         return copy;
     }
 
@@ -185,12 +192,14 @@ public class EmailArchiveCommunicationLinkSweepJobTests
     private static Guid[] Listed(JsonElement archives, string reason) =>
         archives.GetProperty("unmatched").GetProperty(reason).GetProperty("documentIds").EnumerateArray().Select(e => e.GetGuid()).ToArray();
 
+    /// <summary>
+    /// Exhaustive (F3): the job made query reads and NOTHING else on the Dataverse seam — no write of any shape (conditional,
+    /// plain, bulk, create, delete, associate…), because every call that is not a verified read fails VerifyNoOtherCalls.
+    /// </summary>
     private void VerifyNoWrite()
     {
-        _entity.Verify(e => e.UpdateIfRowVersionMatchesAsync(
-            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()), Times.Never);
-        _entity.Verify(e => e.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()), Times.Never);
-        _entity.Verify(e => e.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()), Times.Never);
+        _entity.Verify(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+        _entity.VerifyNoOtherCalls();
     }
 
     // ── The match ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -347,6 +356,74 @@ public class EmailArchiveCommunicationLinkSweepJobTests
         VerifyNoWrite();
     }
 
+    [Fact]
+    public async Task AnArchiveWithAParent_IsHasParent_AndIsNeverLinked_EvenOnAnExactMatch()
+    {
+        // K1 must fire: D7 takes the FIRST communication link on the walk, so an own link could pre-empt the parent's.
+        AddArchive(9, "<parent@example.test>");
+        var withParent = AddArchive(1, Rfc);
+        withParent["sprk_parentdocument"] = new EntityReference("sprk_document", Id(109));
+        AddCommunication(1, Rfc);
+
+        var result = await RunAsync(apply: true);
+
+        var archives = Archives(result);
+        archives.GetProperty("hasParent").GetInt32().Should().Be(1);
+        Listed(archives, "hasParent").Should().Equal(Id(101));
+        LinkOf(1).Should().BeNull();
+        _writes.Should().BeEmpty();
+        _queries.Should().NotContain(q => q.EntityName == "sprk_communication"
+            && q.Criteria.Conditions.Any(c => Equals(c.Values[0], Rfc)), "decided before the key: no communication query");
+    }
+
+    [Fact]
+    public async Task TheSameArchiveWithoutAParent_IsLinked()
+    {
+        // K1 must not fire: the control for the test above.
+        AddArchive(1, Rfc);
+        AddCommunication(1, Rfc);
+
+        var archives = Archives(await RunAsync(apply: true));
+
+        archives.GetProperty("hasParent").GetInt32().Should().Be(0);
+        archives.GetProperty("linked").GetInt32().Should().Be(1);
+        LinkOf(1).Should().Be(Id(301));
+    }
+
+    [Fact]
+    public async Task TheBatch_IsClampedToTheListCap_SoEveryListIsComplete_AndTheReportSaysSo()
+    {
+        var over = EmailArchiveCommunicationLinkSweepJob.MaxListedPerRun + 5;
+        for (var n = 1; n <= over; n++)
+            AddArchive(n, null);
+
+        var result = await RunAsync(apply: false, maxDocuments: 1000);
+
+        using var doc = JsonDocument.Parse(result.ResultJson!);
+        var batch = doc.RootElement.GetProperty("batch");
+        batch.GetProperty("configured").GetInt32().Should().Be(1000);
+        batch.GetProperty("effective").GetInt32().Should().Be(EmailArchiveCommunicationLinkSweepJob.MaxListedPerRun);
+        batch.GetProperty("clamped").GetBoolean().Should().BeTrue();
+        var archives = Archives(result);
+        archives.GetProperty("examined").GetInt32().Should().Be(EmailArchiveCommunicationLinkSweepJob.MaxListedPerRun);
+        var noKey = archives.GetProperty("unmatched").GetProperty("noKey");
+        noKey.GetProperty("listed").GetInt32().Should().Be(noKey.GetProperty("total").GetInt32(), "the list is complete");
+    }
+
+    [Fact]
+    public async Task TheDefaultBatch_IsTheListCap_NotClamped()
+    {
+        AddArchive(1, null);
+
+        var result = await RunAsync(apply: false);
+
+        using var doc = JsonDocument.Parse(result.ResultJson!);
+        var batch = doc.RootElement.GetProperty("batch");
+        batch.GetProperty("effective").GetInt32().Should().Be(EmailArchiveCommunicationLinkSweepJob.MaxListedPerRun);
+        batch.GetProperty("configured").GetInt32().Should().Be(EmailArchiveCommunicationLinkSweepJob.MaxListedPerRun);
+        batch.GetProperty("clamped").GetBoolean().Should().BeFalse();
+    }
+
     // ── Candidates ────────────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -381,7 +458,7 @@ public class EmailArchiveCommunicationLinkSweepJobTests
         query.Criteria.Conditions.Should().Contain(c => c.AttributeName == "sprk_relatedcommunication" && c.Operator == ConditionOperator.Null);
         query.Criteria.Conditions.Should().Contain(c => c.AttributeName == "sprk_documentid" && c.Operator == ConditionOperator.GreaterThan && Equals(c.Values[0], after));
         query.Criteria.Conditions.Should().NotContain(c => c.AttributeName == "statecode", "active or inactive");
-        query.ColumnSet.Columns.Should().Contain(new[] { "sprk_emailmessageid", "versionnumber" });
+        query.ColumnSet.Columns.Should().Contain(new[] { "sprk_emailmessageid", "sprk_parentdocument", "versionnumber" });
         query.Orders.Should().ContainSingle(o => o.AttributeName == "sprk_documentid" && o.OrderType == OrderType.Ascending);
     }
 
@@ -411,7 +488,7 @@ public class EmailArchiveCommunicationLinkSweepJobTests
                 var row = _documents.Single(d => d.Id == Id(101));
                 row["sprk_relatedcommunication"] = new EntityReference("sprk_communication", meanwhile);
                 row["versionnumber"] = 9999L;
-                return new EntityCollection(_communications.Where(c => Matches(c, q.Criteria)).Select(Copy).ToList());
+                return new EntityCollection(_communications.Where(c => Matches(c, q.Criteria)).Select(c => Copy(c, q.ColumnSet)).ToList());
             });
 
         var result = await RunAsync(apply: true);
@@ -478,6 +555,17 @@ public class EmailArchiveCommunicationLinkSweepJobTests
         archives.GetProperty("childCountFailed").GetBoolean().Should().BeFalse();
         linkedElsewhere.Should().NotBeNull();
         VerifyNoWrite();
+    }
+
+    [Fact]
+    public void TheChildQuery_ReadsTheParentColumn_ForTheGivenParents()
+    {
+        var query = EmailArchiveCommunicationLinkSweepJob.BuildChildQuery(new[] { Id(101), Id(102), Id(101) });
+
+        query.EntityName.Should().Be("sprk_document");
+        query.ColumnSet.Columns.Should().Contain("sprk_parentdocument");
+        var parents = query.Criteria.Conditions.Should().ContainSingle(c => c.AttributeName == "sprk_parentdocument" && c.Operator == ConditionOperator.In).Subject;
+        parents.Values.Cast<Guid>().Should().BeEquivalentTo(new[] { Id(101), Id(102) });
     }
 
     // ── Paging ────────────────────────────────────────────────────────────────────────────────────────────────────
