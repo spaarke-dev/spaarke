@@ -108,7 +108,7 @@
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>079 sets the cron and switches Apply on with the owner's OK, then checks on dev with throwaway rows: delete a test matter that has an assignment and a changed rule; its assignment rows are gone, its set is unlinked and, after one run, Retired with its record rules Off; the Procedure, its rule set and any rate card are unchanged.</notes>
+  <notes>079 sets the cron and switches Apply on with the owner's OK, then checks on dev with throwaway rows: delete a test matter that has an assignment and a changed rule; its assignment rows are gone, its set is unlinked and, after one run, Retired with its record rules Off; the Procedure, its rule set and any rate card are unchanged.Delete-list gate CLEARED 2026-10-21: uac-r2 accepted the six dispositions and recorded them in core-record-delete design §14 and §1.3 (work/unified-access-control-r2 4138f5ec81), with must-fire (assignment rows deleted) and must-not-fire (no Delete of rule sets, policies, policy versions, procedures or procedure versions; no rule-set status written by the plan) tests. The O-17 sweep is the only rule-set retire writer. </notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
