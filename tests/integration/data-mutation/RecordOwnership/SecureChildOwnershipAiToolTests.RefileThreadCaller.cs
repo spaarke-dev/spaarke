@@ -7,6 +7,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Communication.Threads;
+using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 using Xunit;
 using Directory = Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory;
 
@@ -110,6 +111,62 @@ public sealed partial class SecureChildOwnershipAiToolTests
         email.GetAttributeValue<EntityReference>("owningteam")?.Id.Should().Be(Directory.GeneralTeam, "the second matter's team");
     }
 
+    // ---- #2143 round 8 (F1-A): the thread move's #1629 grant survives the mirror's removal ----
+
+    /// <summary>A member of the ordinary matters the email is re-filed onto, outside their owning teams: the #1629 grantee.</summary>
+    private static readonly Guid RecordMember = Guid.Parse("a2143000-0000-4000-8000-0000000000b8");
+
+    private const int ReadMask = 1;
+
+    private int? EmailShareOf(Guid user) =>
+        _shareTable.MaskOf("sprk_communication", RefiledEmail, DataversePrincipalRef.User(user));
+
+    [Fact(DisplayName = "#2143 r8 F1-A must-fire: an email re-filed off secure S, in S's thread, onto ordinary O keeps the grant its thread move gives O's members; its mirror is still taken off")]
+    public async Task FilingRoute_AnEmailRefiledOffItsSecureRecordsThread_KeepsTheGrantItsThreadMoveGives_AndLosesItsMirror()
+    {
+        // Before round 8 the email stayed Secure through the re-file (its thread still held S), left isolation inside the
+        // thread move, was granted to O's members there — and then the mirror step, still seeing "was isolated", took every
+        // direct share off it, that grant included: O's members saw the thread but could not read the email.
+        AnEmailIn(SecureMatter, SecureMattersThread, Directory.SecureBu, Directory.SecureNamedTeam);
+        _shareTable.Seed("sprk_communication", RefiledEmail, DataversePrincipalRef.User(Sharee), CollaborateMask); // its mirror
+        _user.FullAccessOn.Add(SecureMatter);
+
+        var result = await RefileTo(OrdinaryMatter);
+
+        Status(result).Should().Be(Microsoft.AspNetCore.Http.StatusCodes.Status204NoContent, Detail(result));
+        _world.Row("sprk_communication", RefiledEmail).GetAttributeValue<EntityReference>(ThreadResolver.ThreadLookupOnCommunication)
+            ?.Id.Should().Be(OrdinaryMattersThread);
+        EmailShareOf(RecordMember).Should().Be(ReadMask, "the thread move's #1629 grant to O's members stands");
+        EmailShareOf(Sharee).Should().BeNull("the email left isolation, so its secure-child mirror came off");
+    }
+
+    [Fact(DisplayName = "#2143 r8 F1-A must-fire: an email re-filed between ordinary records while in secure S2's thread keeps the grant its thread move gives")]
+    public async Task FilingRoute_AnOrdinaryRefileOfAnEmailInASecureRecordsThread_KeepsTheGrantItsThreadMoveGives()
+    {
+        AnEmailIn(OrdinaryMatter, SecureMattersThread, Directory.SecureBu, Directory.SecureNamedTeam);
+        _shareTable.Seed("sprk_communication", RefiledEmail, DataversePrincipalRef.User(Sharee), CollaborateMask);
+        _user.FullAccessOn.Add(SecureMatter);
+
+        var result = await RefileTo(SecondOrdinaryMatter);
+
+        Status(result).Should().Be(Microsoft.AspNetCore.Http.StatusCodes.Status204NoContent, Detail(result));
+        EmailShareOf(RecordMember).Should().Be(ReadMask, "the thread move's #1629 grant stands");
+        EmailShareOf(Sharee).Should().BeNull("its secure-child mirror came off");
+    }
+
+    [Fact(DisplayName = "#2143 r8 F1-A must-not-fire: an ordinary-to-ordinary re-file is granted to the new record's members and nothing is revoked")]
+    public async Task FilingRoute_AnOrdinaryToOrdinaryRefile_IsGrantedToTheNewRecordsMembers_AndRevokesNothing()
+    {
+        AnEmailIn(OrdinaryMatter, OrdinaryMattersThread, Directory.ChildBu, Directory.ChildTeam);
+
+        var result = await RefileTo(SecondOrdinaryMatter);
+
+        Status(result).Should().Be(Microsoft.AspNetCore.Http.StatusCodes.Status204NoContent, Detail(result));
+        EmailShareOf(RecordMember).Should().Be(ReadMask);
+        _shareTable.WriteLog.Should().NotContain(w => w.Action == "RevokeAccess" && w.RecordId == RefiledEmail,
+            "a row that was never isolated has no mirror to take off");
+    }
+
     private static readonly Guid SecondSecureMatter = Guid.Parse("a2143000-0000-4000-8000-0000000000a8");
     private static readonly Guid SecondSecureMattersThread = Guid.Parse("a2143000-0000-4000-8000-0000000000ea");
 
@@ -175,6 +232,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
             ["sprk_communicationtype"] = new OptionSetValue((int)CommunicationType.Email),
             ["createdby"] = new EntityReference("systemuser", Guid.Parse("a2143000-0000-4000-8000-0000000000ee")),
         });
+        _user.OwningTeamOf[RefiledEmail] = owningTeam; // #2143 r8: as the caller reads it before the write
         if (owningTeam == Directory.SecureNamedTeam)
             ShareWorld.SecureChild("sprk_communication", RefiledEmail, ("sprk_regardingmatter", "sprk_matter", matter));
         else
@@ -222,8 +280,23 @@ public sealed partial class SecureChildOwnershipAiToolTests
                     _world.Row("sprk_communication", RefiledEmail)[column] = value;
             })
             .Returns(Task.CompletedTask);
+        // #2143 round 8 (F1-A): the REAL #1629 grant service, over the share world and the same share table the mirror writes,
+        // so a grant the thread move gives and a mirror removal after it meet in one place. The ordinary matters' grantee is
+        // RecordMember.
+        var members = new Mock<Sprk.Bff.Api.Services.Communication.Membership.IThreadMembershipDerivationService>();
+        members
+            .Setup(m => m.DeriveAnchorGranteeUserIdsAsync(
+                "sprk_matter", It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, Guid matter, Guid? _, CancellationToken _) =>
+                matter == OrdinaryMatter || matter == SecondOrdinaryMatter ? new[] { RecordMember } : Array.Empty<Guid>());
+        var grants = new Sprk.Bff.Api.Services.Communication.Access.DirectThreadAccessService(
+            SecureChildShareWorld.EntitiesOver(() => ShareWorld).Object, _shareTable,
+            new Lazy<Sprk.Bff.Api.Services.Communication.Membership.IThreadMembershipDerivationService>(() => members.Object),
+            SecureChildShareWorld.Configuration(),
+            NullLogger<Sprk.Bff.Api.Services.Communication.Access.DirectThreadAccessService>.Instance, _gate.Sharing);
         return new ThreadResolver(
-            Array.Empty<IThreadKeyStrategy>(), entities.Object, _world.Resolver(), NullLogger<ThreadResolver>.Instance);
+            Array.Empty<IThreadKeyStrategy>(), entities.Object, _world.Resolver(), NullLogger<ThreadResolver>.Instance,
+            grants);
     }
 
     /// <summary>A default-thread lookup (FindDefaultThreadAsync: keyed on <c>sprk_regardingrecordid</c>) answers the matter's thread.</summary>

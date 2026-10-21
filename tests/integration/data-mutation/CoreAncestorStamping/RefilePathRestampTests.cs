@@ -181,7 +181,7 @@ public class RefilePathRestampTests
 
         // Outside the after-re-file step (no reconciler in this host), so the reconcile runs Standalone (#2110 re-check K2).
         threads.Verify(t => t.ReconcileThreadForFilingAsync(
-            Communication, Sprk.Bff.Api.Services.Communication.FilingReconcileHost.Standalone, It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<CancellationToken>()), Times.Once);
+            Communication, Sprk.Bff.Api.Services.Communication.FilingReconcileHost.Standalone, It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Once);
         threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
         threads.Verify(t => t.ReconcileThreadForFilingAsync(
             It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<CancellationToken>()), Times.Never,
@@ -206,7 +206,8 @@ public class RefilePathRestampTests
 
         threads.Verify(t => t.ReconcileThreadForFilingAsync(
             Communication, Sprk.Bff.Api.Services.Communication.FilingReconcileHost.Standalone,
-            It.Is<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(c => (c != null) == impersonates), It.IsAny<CancellationToken>()),
+            It.Is<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(c => (c != null) == impersonates),
+            It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -229,9 +230,9 @@ public class RefilePathRestampTests
                 LegacyFields: new Dictionary<string, string?> { ["sprk_triagesummary"] = "x" }, Lookups: null),
             CancellationToken.None);
 
-        threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<CancellationToken>()), Times.Never);
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Never);
         threads.Verify(t => t.ReconcileThreadForFilingAsync(
-            It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact(DisplayName = "Task 129: the playbook output orchestrator's DataverseUpdateHandler re-filing a communication reconciles its thread once")]
@@ -249,14 +250,14 @@ public class RefilePathRestampTests
             "sprk_communication", Communication,
             new Dictionary<string, object?> { ["sprk_triagesummary"] = "x" }, ConcurrencyMode.None, maxRetries: 1,
             CancellationToken.None);
-        threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<CancellationToken>()), Times.Never,
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Never,
             "a write that files nothing is not a re-file");
 
         await handler.UpdateAsync(
             "sprk_communication", Communication,
             new Dictionary<string, object?> { ["sprk_regardingmatter"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", MatterB) },
             ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
-        threads.Verify(t => t.ReconcileThreadForFilingAsync(Communication, It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<CancellationToken>()), Times.Once);
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(Communication, It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     private static UpdateRecordActionCore CoreWith(

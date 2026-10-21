@@ -242,7 +242,7 @@ public sealed class RefileWriterBindShapeTests
         (updated, failed).Should().Be((1, 0));
         _world.QueriedTables.Should().BeEmpty("no isolation read, no reparent, no step");
         _world.OwnerWrites.Should().BeEmpty();
-        _threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<CancellationToken>()), Times.Never);
+        _threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact(DisplayName = "#2091 r3: a field-mapping push that re-files a child on a host that cannot re-own it fails THAT child and writes nothing")]
@@ -295,7 +295,7 @@ public sealed class RefileWriterBindShapeTests
         error.Error.Should().NotContain(Communication.ToString("D"))
             .And.NotContain("Secure Record").And.NotContain("#2143").And.NotContain("sprk_communication");
         error.Error.Should().Contain("Reload it and push again");
-        _threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<CancellationToken>()), Times.Never,
+        _threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Never,
             "no step after the re-file runs for a row whose owner was not settled");
     }
 
@@ -339,7 +339,7 @@ public sealed class RefileWriterBindShapeTests
         errors.Should().BeEmpty();
         (updated, failed).Should().Be((1, 0));
         _world.OwnerWrites.Should().BeEmpty("nothing moved, so nothing is re-owned");
-        _threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<CancellationToken>()), Times.Never,
+        _threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Never,
             "the step after a re-file did not run (it reconciles a communication's thread)");
         _shares.MaskOf("sprk_todo", TodoUnderCommunication, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask);
     }
@@ -370,7 +370,7 @@ public sealed class RefileWriterBindShapeTests
             + $"[{string.Join(", ", _world.QueriedTables.GroupBy(t => t).Select(g => $"{g.Key} {g.Count()}"))}] + {rowReads} row reads + "
             + $"{_writes.Count} PATCHes + {_world.OwnerWrites.Count} owner writes + {_world.StampWrites.Count} stamp writes");
         _world.OwnerWrites.Should().BeEmpty();
-        _threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<CancellationToken>()), Times.Never);
+        _threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Never);
         _world.QueriedTables.Should().NotContain("sprk_todo", "no descendant pass ran over what is filed under any child");
         ((double)total / count).Should().BeLessThanOrEqualTo(5, "a no-op child costs its isolation read, its reparent's row read and its write — not a pass");
     }
@@ -438,7 +438,7 @@ public sealed class RefileWriterBindShapeTests
             CancellationToken.None);
 
         _writes.Should().ContainSingle();
-        _threads.Verify(t => t.ReconcileThreadForFilingAsync(Communication, It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.Is<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(c => c != null), It.IsAny<CancellationToken>()), Times.Once,
+        _threads.Verify(t => t.ReconcileThreadForFilingAsync(Communication, It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.Is<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(c => c != null), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Once,
             "one column moved, so the step after a re-file ran (it reconciles a communication's thread), acting for the person the node impersonates (#2143 r7)");
         _world.OwnerOf("sprk_communication", Communication).Should().Be(Secure, "the secure matter is still held");
         _world.OwnerOf("sprk_todo", TodoUnderCommunication).Should().Be(Secure);
@@ -457,7 +457,7 @@ public sealed class RefileWriterBindShapeTests
 
         _writes.Should().ContainSingle();
         _world.OwnerWrites.Should().BeEmpty("nothing moved, so nothing is re-owned");
-        _threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<CancellationToken>()), Times.Never);
+        _threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Never);
         _shares.MaskOf("sprk_todo", TodoUnderCommunication, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask);
     }
 
@@ -569,7 +569,7 @@ public sealed class RefileWriterBindShapeTests
 
         _writes.Should().ContainSingle();
         _world.ValueOf<EntityReference>("sprk_communication", Communication, "sprk_communicationthread").Should().BeNull();
-        _threads.Verify(t => t.ReconcileThreadForFilingAsync(Communication, It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<CancellationToken>()), Times.Once,
+        _threads.Verify(t => t.ReconcileThreadForFilingAsync(Communication, It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Once,
             "the held thread was cleared, so the step after a re-file ran once (it reconciles a communication's thread)");
         _world.OwnerOf("sprk_communication", Communication).Should().Be(Secure, "the thread decides no owner; the secure matter is still held");
     }
@@ -609,7 +609,7 @@ public sealed class RefileWriterBindShapeTests
             AssertTheThreadMoveRanTheStepOnce();
             // #2143 round 7 (F1): the push hands the step the person it acts as.
             _threads.Verify(t => t.ReconcileThreadForFilingAsync(
-                Communication, It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.Is<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(c => c != null),
+                Communication, It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.Is<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(c => c != null), It.IsAny<Func<CancellationToken, Task>?>(),
                 It.IsAny<CancellationToken>()), Times.Once);
         }
         else
@@ -633,7 +633,7 @@ public sealed class RefileWriterBindShapeTests
 
         _writes.Should().ContainSingle();
         _world.ValueOf<EntityReference>("sprk_communication", Communication, "sprk_regardingproject").Should().BeNull();
-        _threads.Verify(t => t.ReconcileThreadForFilingAsync(Communication, It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<CancellationToken>()), Times.Once,
+        _threads.Verify(t => t.ReconcileThreadForFilingAsync(Communication, It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Once,
             "a parent was removed, so the step after a re-file ran once (it reconciles a communication's thread)");
         _world.OwnerOf("sprk_communication", Communication).Should().Be(Secure, "the secure matter is still held");
         _world.OwnerOf("sprk_todo", TodoUnderCommunication).Should().Be(Secure);
@@ -643,7 +643,7 @@ public sealed class RefileWriterBindShapeTests
     {
         _writes.Should().ContainSingle();
         _world.ValueOf<EntityReference>("sprk_communication", Communication, "sprk_communicationthread")!.Id.Should().Be(ThreadB);
-        _threads.Verify(t => t.ReconcileThreadForFilingAsync(Communication, It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<CancellationToken>()), Times.Once,
+        _threads.Verify(t => t.ReconcileThreadForFilingAsync(Communication, It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Once,
             "the thread moved, so the step after a re-file ran once (it reconciles a communication's thread)");
         _world.OwnerOf("sprk_communication", Communication).Should().Be(Secure, "the thread decides no owner; the secure matter is still held");
         _world.OwnerOf("sprk_todo", TodoUnderCommunication).Should().Be(Secure);
@@ -654,7 +654,7 @@ public sealed class RefileWriterBindShapeTests
     {
         _writes.Should().ContainSingle();
         _world.OwnerWrites.Should().BeEmpty("nothing moved, so nothing is re-owned");
-        _threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<CancellationToken>()), Times.Never,
+        _threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Never,
             "the step after a re-file did not run (it reconciles a communication's thread)");
         _shares.MaskOf("sprk_todo", TodoUnderCommunication, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask);
         _stamps.PatchesTo("sprk_todo", TodoUnderCommunication).Should().NotBeEmpty(

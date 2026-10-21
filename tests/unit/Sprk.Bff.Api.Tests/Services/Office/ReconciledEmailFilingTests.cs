@@ -644,7 +644,7 @@ public class ReconciledEmailFilingTests
         var (_, result) = await world.SaveAsync(PaneSave(Matter()));
 
         result.Should().Be(ReconciledFilingResult.Filed);
-        world.Threads.Verify(t => t.ReconcileThreadForFilingAsync(CanonicalId, It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<CancellationToken>()), Times.Once);
+        world.Threads.Verify(t => t.ReconcileThreadForFilingAsync(CanonicalId, It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Once);
         world.Threads.Verify(t => t.ResolveAndAssignAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()), Times.Never,
             "a save that reconciled to an existing row keeps that row's thread");
     }
@@ -658,7 +658,7 @@ public class ReconciledEmailFilingTests
         var (_, result) = await world.SaveAsync(PaneSave(Matter()));
 
         result.Should().Be(ReconciledFilingResult.NotPermitted);
-        world.Threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<CancellationToken>()), Times.Never);
+        world.Threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -683,7 +683,7 @@ public class ReconciledEmailFilingTests
         asked.ChannelType.Should().Be(Sprk.Bff.Api.Services.Communication.Models.CommunicationType.Email);
         asked.Message.InternetMessageId.Should().Be("<CAF0a1b2c3@mail.example.com>", "the resolution receives the email's own envelope");
         world.Grants.Verify(g => g.GrantMessageAccessAsync(CanonicalId, assignment, It.IsAny<CancellationToken>()), Times.Once);
-        world.Threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<CancellationToken>()), Times.Never,
+        world.Threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Never,
             "a new row is not a re-file");
     }
 

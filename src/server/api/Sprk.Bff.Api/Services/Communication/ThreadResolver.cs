@@ -723,13 +723,14 @@ public sealed class ThreadResolver : IThreadResolver
 
     /// <inheritdoc />
     public Task ReconcileThreadForFilingAsync(Guid communicationId, FilingReconcileHost host, CancellationToken ct = default) =>
-        ReconcileThreadForFilingAsync(communicationId, host, secureExitCaller: null, ct);
+        ReconcileThreadForFilingAsync(communicationId, host, secureExitCaller: null, beforeMessageGrant: null, ct);
 
     /// <inheritdoc />
     public async Task ReconcileThreadForFilingAsync(
         Guid communicationId,
         FilingReconcileHost host,
         Sprk.Bff.Api.Services.Access.SecureRemovalCaller? secureExitCaller,
+        Func<CancellationToken, Task>? beforeMessageGrant,
         CancellationToken ct = default)
     {
         try
@@ -850,7 +851,8 @@ public sealed class ThreadResolver : IThreadResolver
                 return;
             }
 
-            if (await MoveToRecordDefaultThreadAsync(threadId, communicationId, regarding, secureExitCaller, ct) && retireIfEmpty)
+            if (await MoveToRecordDefaultThreadAsync(
+                    threadId, communicationId, regarding, secureExitCaller, beforeMessageGrant, ct) && retireIfEmpty)
                 await RetireIfEmptyAsync(threadId, ct);
         }
         catch (Exception ex)
@@ -1200,11 +1202,14 @@ public sealed class ThreadResolver : IThreadResolver
     /// Rule 3: moves the email to R's per-record default thread (Tier 2) through the S6 join, then grants it to R's
     /// members — the Tier-2 audience, from the email's own regarding (#1629 F-C), never a re-read of the thread. Answers
     /// whether the email left <paramref name="fromThreadId"/>. #2143 round 7 (F1): the join acts for
-    /// <paramref name="secureExitCaller"/>, the person whose re-file this move follows (<c>null</c>: nobody).
+    /// <paramref name="secureExitCaller"/>, the person whose re-file this move follows (<c>null</c>: nobody). Round 8 (F1-A):
+    /// <paramref name="beforeMessageGrant"/> runs between the join and the grant (the step after a re-file takes the email's
+    /// mirror off there when the join took it out of isolation, so the removal never revokes this grant).
     /// </summary>
     private async Task<bool> MoveToRecordDefaultThreadAsync(
         Guid fromThreadId, Guid communicationId, RegardingAnchor regarding,
-        Sprk.Bff.Api.Services.Access.SecureRemovalCaller? secureExitCaller, CancellationToken ct)
+        Sprk.Bff.Api.Services.Access.SecureRemovalCaller? secureExitCaller,
+        Func<CancellationToken, Task>? beforeMessageGrant, CancellationToken ct)
     {
         var recordThreadId = await FindOrCreateDefaultThreadAsync(
             regarding.RecordType, regarding.RecordId, regarding, requireOpen: false, ct);
@@ -1233,6 +1238,9 @@ public sealed class ThreadResolver : IThreadResolver
         _logger.LogInformation(
             "Filing reconcile moved {CommunicationId} from thread {FromThreadId} to the default thread {ThreadId} of " +
             "{RecordType}:{RecordId}", communicationId, fromThreadId, recordThreadId, regarding.RecordType, regarding.RecordId);
+
+        if (beforeMessageGrant is not null)
+            await beforeMessageGrant(ct);
 
         if (AssignmentFor(recordThreadId, regarding) is { } assignment)
             await GrantAsync(communicationId, assignment, ct);

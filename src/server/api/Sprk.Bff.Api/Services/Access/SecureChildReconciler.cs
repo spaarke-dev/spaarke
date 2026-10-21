@@ -923,16 +923,23 @@ public sealed class SecureChildReconciler
         // re-owns the email to that record's owner, a Secure one included.
         var reconcilesThread = table == CommunicationTable && _threads is not null && thread == RefileThreadStep.Reconcile;
         var mirrorTakenOff = false;
+
+        // The one thing the mirror did first that must stay first: a row that LEFT isolation loses every direct share it holds
+        // (SecureChildShareSynchronizer.RemoveMirrorAsync), so taken off after the reconcile it would also take off the #1629
+        // read grant the reconcile gives the record the email now sits under. Once, before the reconcile when the re-file
+        // itself took the row out; else (#2143 round 8, F1-A) inside the reconcile, between the join that took it out and
+        // that grant — a re-file off S while the email sits in S's thread keeps it Secure until its thread follows the filing.
+        async Task TakeTheMirrorOffIfItLeftIsolationAsync()
+        {
+            if (mirrorTakenOff || before != true || !await LeftIsolationAsync(table, childId, ct).ConfigureAwait(false))
+                return;
+            await _shares.AfterRefileAsync(table, childId, isolatedBefore, ct).ConfigureAwait(false);
+            mirrorTakenOff = true;
+        }
+
         if (reconcilesThread)
         {
-            // The one thing the mirror did first that must stay first: a row that LEFT isolation in this re-file loses every
-            // direct share it holds (SecureChildShareSynchronizer.RemoveMirrorAsync), so taken off after the reconcile it would
-            // also take off the #1629 read grant the reconcile gives the record the email now sits under.
-            if (before == true && await LeftIsolationAsync(table, childId, ct).ConfigureAwait(false))
-            {
-                await _shares.AfterRefileAsync(table, childId, isolatedBefore, ct).ConfigureAwait(false);
-                mirrorTakenOff = true;
-            }
+            await TakeTheMirrorOffIfItLeftIsolationAsync().ConfigureAwait(false);
 
             // Guarded (#2110 ontology re-check K3): it now runs before the mirror, the pass and the gate step, so a fault here
             // must not skip them. The resolver is best-effort and does not throw today; a fault leaves the thread for the sweep.
@@ -940,7 +947,7 @@ public sealed class SecureChildReconciler
             {
                 await _threads!.ReconcileThreadForFilingAsync(
                     childId, Sprk.Bff.Api.Services.Communication.FilingReconcileHost.AfterRefileStep, secureExitCaller,
-                    CancellationToken.None).ConfigureAwait(false);
+                    _ => TakeTheMirrorOffIfItLeftIsolationAsync(), CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
             {

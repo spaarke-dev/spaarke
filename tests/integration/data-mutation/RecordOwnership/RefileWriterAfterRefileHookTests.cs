@@ -327,7 +327,7 @@ public sealed class RefileWriterAfterRefileHookTests
     private void AssertTheWriteStoodAndNothingWasReleased()
     {
         _writes.Should().ContainSingle("an HttpClient timeout is not the caller cancelling the update");
-        _threads.Verify(t => t.ReconcileThreadForFilingAsync(Communication, It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<CancellationToken>()), Times.Once,
+        _threads.Verify(t => t.ReconcileThreadForFilingAsync(Communication, It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Once,
             "the step after the re-file still ran, handed the faulted read");
         _world.OwnerOf("sprk_todo", TodoUnderCommunication).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam),
             "whether the row WAS isolated is unknown, so nothing is released");
@@ -344,14 +344,14 @@ public sealed class RefileWriterAfterRefileHookTests
             "the step's pass released the to-do isolated only through the communication — it may only when the row WAS isolated");
         _shares.MaskOf("sprk_todo", TodoUnderCommunication, DataversePrincipalRef.User(Sharee)).Should().BeNull(
             "the released to-do loses its mirror with it");
-        _threads.Verify(t => t.ReconcileThreadForFilingAsync(Communication, It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<CancellationToken>()), Times.Once,
+        _threads.Verify(t => t.ReconcileThreadForFilingAsync(Communication, It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Once,
             "the step ran exactly once (it reconciles a communication's thread), and the writer did not reconcile it again");
-        _threads.Verify(t => t.ReconcileThreadForFilingAsync(It.Is<Guid>(id => id != Communication), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<CancellationToken>()), Times.Never);
+        _threads.Verify(t => t.ReconcileThreadForFilingAsync(It.Is<Guid>(id => id != Communication), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     private void AssertTheStepDidNotRun(bool readsAllowed)
     {
-        _threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<CancellationToken>()), Times.Never);
+        _threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Never);
         _world.OwnerWrites.Should().BeEmpty("no pass ran over what is filed under the communication");
         _shares.MaskOf("sprk_communication", Communication, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask);
         _shares.MaskOf("sprk_todo", TodoUnderCommunication, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask);

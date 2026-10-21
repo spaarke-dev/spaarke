@@ -292,7 +292,7 @@ internal sealed class UpdateRecordActionCore
         if (scope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Communication.IThreadResolver>() is { } threads)
             await threads.ReconcileThreadForFilingAsync(
                 recordId, Sprk.Bff.Api.Services.Communication.FilingReconcileHost.Standalone, secureExitCaller,
-                CancellationToken.None).ConfigureAwait(false);
+                beforeMessageGrant: null, CancellationToken.None).ConfigureAwait(false);
     }
 
     /// <summary>

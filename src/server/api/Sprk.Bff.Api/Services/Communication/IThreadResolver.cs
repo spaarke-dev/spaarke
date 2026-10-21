@@ -120,11 +120,16 @@ public interface IThreadResolver
     /// to its record's thread, so a move off a secure record's thread is decided on that person's F3 rights — the move the
     /// re-file was already permitted to make. <c>null</c> (the other overloads) acts for nobody: a move out of a secure
     /// record's thread is refused and the email keeps the thread's isolation.
+    /// <para>#2143 round 8 (F1-A): <paramref name="beforeMessageGrant"/>, when given, runs once the join that moves the email
+    /// to its record's thread has landed and BEFORE the email's #1629 grant to that record's members — the step after a re-file
+    /// takes the email's secure-child mirror off there when that join took it out of isolation, so the mirror's removal (every
+    /// direct share) never revokes the grant the move gives. <c>null</c>: nothing runs.</para>
     /// </summary>
     Task ReconcileThreadForFilingAsync(
         Guid communicationId,
         FilingReconcileHost host,
         Sprk.Bff.Api.Services.Access.SecureRemovalCaller? secureExitCaller,
+        Func<CancellationToken, Task>? beforeMessageGrant,
         CancellationToken ct = default);
 
     /// <summary>
