@@ -1730,6 +1730,6 @@ The full record is in `notes/185-invite-code-design.md` §11.
    - D7's "derived at read time, never stamped" (option (b)'s permanent stamp would contradict it);
    - delete design D1's intent that a delete outside the BFF must not quietly change access.
 
-   Restrict applies to `sprk_communication → sprk_document` (`sprk_relatedcommunication`) and `sprk_document → sprk_document` (`sprk_parentdocument`). Every BFF delete path deletes or unlinks the child documents first. The core-record delete deletes documents (children first) before their communication.
+   Restrict applies to `sprk_communication → sprk_document` (`sprk_relatedcommunication`) and `sprk_document → sprk_document` (`sprk_parentdocument`). (Main-session implementation note, not owner text, corrected 2026-10-21:) the core-record delete deletes child documents first; a single-document delete of a parent that still has child documents is refused with 409 `document_has_child_documents`. Unlinking the children would un-hide them, so the BFF never unlinks. The core-record delete deletes documents (children first) before their communication.
 4. **Limited does not hide from partners.** D7 stays as written: only Restricted hides. A must-not-fire test pins it.
 5. **#2179: (c), accept and document.** Flagged-external systemusers who hold direct Dataverse access are trusted with it. D7's guarantee covers contacts (CIAM) and every BFF surface, not direct Dataverse access by flagged-external systemusers. This sits beside I-14's round-77 known limit.
