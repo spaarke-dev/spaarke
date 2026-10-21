@@ -171,15 +171,18 @@ Three reviews of `procedure-and-file-model.md` v4. Each item is folded into v5 o
 
 ## 4. Owner decisions needed (consolidated)
 
+> **2026-10-21:** the owner answered C, F, G and the override half of D directly in ontology-r1's session (ontology D-175, `notes/decisions.md` in that worktree). Do not ask them again. Still open: A, B, D2, E, H–Q.
+
 | # | Question | Recommendation |
 |---|---|---|
 | A | Where matter-specific rule changes live (uac-r2 F1-a) | Option 1: a **record-scoped rule set** in the matter's secure family, not an "exceptions Procedure". Procedures stay reusable documents only. |
 | B | Default firm field for a record's Procedures list | `sprk_assignedlawfirm1/2` (the submission rule). Evaluation always uses the invoice's firm. |
-| C | Firm condition on every source, manual assignments included | Yes: a Procedure naming firm F applies only to F's invoices. |
-| D | In Review invoices when an override is removed or a Procedure is retired | Re-check the In Review invoices of the affected record(s) with a targeted re-evaluation job. |
+| C | Firm condition on every source, manual assignments included | **Answered (ontology D-175 (1)):** yes. A Procedure naming firm F applies only to F's invoices, from every source. Rank key (Level, −Distance, FirmSpecific). |
+| D | In Review invoices when an override is removed | **Answered (ontology D-175 (2)):** re-check. The general rule re-judges invoices still in review, so none is left unjudged. |
+| D2 | Retiring a whole Procedure: may it close findings on undecided invoices (ontology D-170 reading)? | Re-check the In Review invoices, as for D. Their findings from the retired Procedure close on that re-check; decided invoices keep their snapshot. |
 | E | No version in force for a work date | **Hold** the invoice. |
-| F | Creator person on the new tables | Yes. |
-| G | Ontology's matter rules stay separate in R1 | Yes. |
+| F | Creator person on the new tables | **Answered (ontology D-175 (4)):** `sprk_createdbyperson` on Procedure, Procedure Version, assignment and Stored File, D-173 shape and protection; replaces "uploaded by". 081 adds the tables to `Set-ChildRecordCreatorPersonSchema.ps1` (`$Tables`, `$SolutionHomes`) and `StampedChildTables`, and asserts zero non-null values before securing. |
+| G | Ontology's matter rules stay separate in R1 | **Answered (ontology D-175 (3)):** yes. Ontology-area Procedures are document-only in R1; a validator refuses `sprk_procedureversion` on Ontology-domain policies. Ontology files a post-R1 convergence issue. |
 | H | Type "Internal guidance"; Area reuses `sprk_policydomain` | Yes. |
 | I | The Outlook add-in offers Submit Invoice | Not in R1: offer it in the communication UI. Later, as its own endpoint. |
 | J | File an unfiled email to the invoice's matter first | Yes. |

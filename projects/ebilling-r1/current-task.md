@@ -23,7 +23,7 @@ O-1 to O-17. Main points:
 - **Other:** a late fee is an added fee (AddedFee type); exceptions are retired with their record; no dev migration; the UI is prototyped separately and the back end goes first.
 
 ### Open owner questions
-- A–P in `notes/procedure-model-reviews.md` §4.
+- A–Q in `notes/procedure-model-reviews.md` §4/§5. **C, F, G and D (override removal) were answered by the owner in ontology-r1's session (ontology D-175, 2026-10-21); do not ask again.** Still open: A, B, D2 (retiring a whole Procedure), E, H–Q.
 - Questions sent to SPA-r3 (2026-10-21): firm invoice-file route shape, the task 188 ArchTest, excluding the snapshot from the firm findings projection, what firms see while a scan is pending. Early views only.
 
 ### 050a (closed)
