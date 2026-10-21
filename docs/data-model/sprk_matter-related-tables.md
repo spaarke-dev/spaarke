@@ -201,7 +201,7 @@ Below is the unfiltered `EntityDefinitions` dump of `sprk_matter`, `sprk_matters
 
 ## 4. eBilling billing columns on every core record (ebilling-r1 task 080, EB-D-148)
 
-> **Status**: created by `scripts/ebilling/Deploy-EbillingProcedureSchema.ps1`, authored 2026-10-21 and **not yet run on dev** until ontology-r1's schema review passes and the owner approves. Verify against live metadata before relying on this section.
+> **Status**: created by `scripts/ebilling/Deploy-EbillingProcedureSchema.ps1`, run on dev 2026-10-21 and verified against live metadata (projects/ebilling-r1/notes/080-dev-run-2026-10-21.md).
 
 `sprk_matter`, `sprk_project` and `sprk_workassignment` (every table in `InvoiceFamilyCoreRecordGuard.FilingCores`, which the script reads at run time) each get two optional lookups to `sprk_organization`, delete **RemoveLink**:
 

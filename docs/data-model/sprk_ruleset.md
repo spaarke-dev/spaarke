@@ -1,7 +1,7 @@
 # sprk_ruleset and the billing columns on the policy store
 
 > **Project**: ebilling-r1, task 019 (FR-09, FR-27, FR-28, D-26, D-66, D-79)
-> **Last Updated**: 2026-10-21 (task 080 additions below; script authored, **not yet run on dev** until ontology-r1's schema review passes and the owner approves: verify against live metadata before relying on them)
+> **Last Updated**: 2026-10-21 (task 080 additions below; run on dev 2026-10-21 and verified against live metadata: projects/ebilling-r1/notes/080-dev-run-2026-10-21.md)
 > **Scripts**: `scripts/ebilling/Deploy-EbillingPolicyStoreSchema.ps1` and, for `sprk_rejectionreason` (task 077, D-113), `scripts/ebilling/Deploy-EbillingRuleRejectionReasonSchema.ps1` (both idempotent, additive; a second run changes nothing)
 > **Task 080 script**: `scripts/ebilling/Deploy-EbillingProcedureSchema.ps1` (EB-D-148: the Procedure, Procedure Version and Procedure Assignment tables, the record scope and links below, the billing columns on the core records). Table docs for the three new tables are task 189's.
 > **Owner of the policy tables**: spaarke-ontology-platform-r1 (`Services/Signals/**`). This task only adds columns to them.

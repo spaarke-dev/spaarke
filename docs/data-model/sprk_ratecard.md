@@ -4,7 +4,7 @@
 > **Last Updated**: 2026-10-15 (classification and stub-lookup decisions applied; D-84: `sprk_timekeeperrole` is LEDES-only, user-profile role has its own choice)
 > **Script**: `scripts/ebilling/Deploy-EbillingTimekeeperRateCardSchema.ps1` (idempotent; `-WhatIf`; `-RemoveStubInvoiceLookup` for the owner-approved delete); D-84 follow-up: `scripts/ebilling/Deploy-EbillingUserProfileRoleChoice.ps1`
 > **Notes**: `projects/ebilling-r1/notes/017-timekeeper-ratecard-schema.md`
-> **Task 080 (2026-10-21)**: adds `sprk_procedureversion` to `sprk_ratecard` (script `scripts/ebilling/Deploy-EbillingProcedureSchema.ps1`; authored, **not yet run on dev** until ontology-r1's schema review passes and the owner approves).
+> **Task 080 (2026-10-21)**: adds `sprk_procedureversion` to `sprk_ratecard` (script `scripts/ebilling/Deploy-EbillingProcedureSchema.ps1`; run on dev 2026-10-21 and verified).
 
 A **rate card** carries the provenance (source document) and effective period for many **rates**. A rate is the approved hourly rate (and the firm rack rate) for one timekeeper or one classification within an effective period. The ApprovedTimekeeper and ApprovedRate rules (task 071) and roster resolution (task 046) read these tables; the rate import (task 078) writes them and enforces the overlap rule. No plugin, business rule or calculated column (ADR-002). Both tables were created additively in dev on 2026-10-15 and are in the unmanaged `SpaarkeMaster` solution; forms, views and security-role privileges arrive with task 029.
 

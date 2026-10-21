@@ -88,7 +88,7 @@
 
 ## eBilling billing columns (ebilling-r1 task 080, EB-D-148)
 
-> **Status**: created by `scripts/ebilling/Deploy-EbillingProcedureSchema.ps1`, authored 2026-10-21 and **not yet run on dev** until ontology-r1's schema review passes and the owner approves. Verify against live metadata before relying on this section. The column dump above predates it.
+> **Status**: created by `scripts/ebilling/Deploy-EbillingProcedureSchema.ps1`, run on dev 2026-10-21 and verified against live metadata (projects/ebilling-r1/notes/080-dev-run-2026-10-21.md). The column dump above predates it.
 
 | Logical name | Display name | Type | Notes |
 |---|---|---|---|
