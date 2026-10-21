@@ -65,3 +65,24 @@ The census was run with the operator's own token and printed counts only. The sc
   - Two app-only lookups by communication reveal only that an archive exists: chat ingest (404 vs 403) and the archive route's `ArchiveDocumentId`. This was already true before 190, and it is filed as **#2222**.
   - D7 can only hide a newly linked archive, never show one.
 - **Known limit:** the children counts in the report are direct children only. The D7 walk goes up to 3 hops.
+
+## 4. Fix round 1 (head 6c034fe88d) and the container question
+
+- **Review pass 1 fixes, all in:**
+  - **`hasParent`:** an archive with a parent is never linked, so linking can only hide, never show, in every case.
+  - **Dry-run proof:** `VerifyNoOtherCalls`; the reviewer's `BulkUpdateAsync` mutant is now killed.
+  - **Child-count column:** pinned, with a projecting test store.
+  - **Batch:** clamped to the 200-row list cap, so every run's lists are complete.
+  - **I-19:** names the writer.
+- **Container derivation (F4 → K2).**
+  - Linking changes what `DeriveCoreAsync` derives (`RecordContainerResolver.DocumentPointer.cs:615-692`).
+  - Under the interim rule, both halves only ADD admissions (`DocumentHangsOffAsync` :1155-1208; `IsArchivePathItem` :952-961). But the round-37 branch for BFF-placed files (:352-361) defers to the strict test, which can newly refuse.
+  - The result is a refused download (fail closed), never exposure.
+  - **Dev facts (read-only, 2026-10-21):** of the 29 matched archives, none touches a secure root on either the document or the communication side; 28 are unfiled and 1 is filed to a non-secure record. All 29 sit in the same container as 10 already-linked archives.
+- **Gate procedure (binding for the Apply run, every environment):**
+  1. Trigger `document-container-migration` report-only and save its lists.
+  2. Trigger this job's Apply.
+  3. Trigger `document-container-migration` report-only again.
+  4. Any linked id that newly appears among the interim-refused documents is relocated by that job's own write mode (an owner go), or reported.
+
+  Also: run this job's Apply BEFORE task 166's gate-24 migration pass and its `-Verify`. If it runs after, re-run them before the strict flip (gate 25).
