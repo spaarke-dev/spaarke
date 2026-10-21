@@ -2729,7 +2729,9 @@ public class RecordOwnershipResolverTests
                     break;
             }
         };
-        var request = MoveMessageIntoTheSecureMatter(messageId);
+        // Round 7b: the re-file leaves the thread's secure matter for another (the thread reconcile moves the message to the new
+        // matter's thread), so F3 is asked about it - A holds Full Access.
+        var request = MoveMessageIntoTheSecureMatter(messageId) with { SecureExitCaller = CallerHolding(FullAccess) };
 
         var resolution = await Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
 
@@ -2743,17 +2745,45 @@ public class RecordOwnershipResolverTests
     }
 
     [Fact]
-    public async Task Reparent_WhenAMessageInASecureRecordsThreadIsMovedOffItsOtherSecureParent_ItStaysSecure_AndF3IsAskedAboutTheParentItLeavesOnly()
+    public async Task Reparent_WhenAMessageInASecureRecordsThreadIsMovedOffItsOtherSecureParent_ByAnS1OnlyHolder_IsRefused_F3AskedAboutBoth()
     {
-        // Must-fire (round 6, (b) — the pre-existing gap): the message regards secure matter S1 and sits in a thread regarding
-        // secure matter S2. A caller holding F3 on S1 only re-files its regarding to the ordinary matter O. It stays in S2's
-        // thread, so it is still filed under S2: the owner stays the Secure team (secure-if-any), nothing is assigned, and F3
-        // is asked about S1 — the only secure parent it leaves. (Before round 6 the thread was unresolved: the parents gave O's
-        // team, F3 on S1 permitted it, and the message was given an ordinary owner in a secure record's thread.)
+        // Must-fire (round 6 (b), re-pinned round 7b): the message regards secure matter S1 and sits in a thread regarding secure
+        // matter S2. A caller holding F3 on S1 only re-files its regarding to the ordinary matter O. The thread reconcile that
+        // follows moves it off S2's thread (it is no longer filed to S2), so the re-file leaves S2 too: F3 is asked about both
+        // and the caller is refused before anything is written.
         var (directory, messageId) = MessageWorld(OtherSecureMatterId, SecureBu, SecureNamedTeam, threadId: SecureThreadId);
         var asked = new List<Guid>();
         var caller = CallerHolding(Collaborate,
             perRecord: new Dictionary<Guid, AccessRights> { [OtherSecureMatterId] = FullAccess }, asked: asked);
+        var request = MoveMessageTo(messageId, MatterId, caller);
+        var applied = false;
+
+        var resolution = await Build(directory).ReparentAsync(
+            request,
+            _ =>
+            {
+                applied = true;
+                return Task.CompletedTask;
+            },
+            CancellationToken.None);
+
+        resolution.IsRefused.Should().BeTrue();
+        resolution.RefusalCode.Should().Be(Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.NotPermittedReasonCode);
+        asked.Should().BeEquivalentTo(new[] { OtherSecureMatterId, SecureThreadMatterId });
+        applied.Should().BeFalse("refused before anything is written");
+        directory.Assignments.Should().BeEmpty();
+        MessageOwnerOf(directory, messageId).Should().Be(SecureNamedTeam);
+    }
+
+    [Fact]
+    public async Task Reparent_WhenAMessageInASecureRecordsThreadIsMovedOffItsOtherSecureParent_ByAHolderOfBoth_ItStaysSecure_UntilTheThreadFollows()
+    {
+        // Must-NOT-fire control (round 6 (b), round 7b): the same re-file by a caller holding F3 on S1 AND S2 is permitted and
+        // written; the message stays in S2's thread until the thread reconcile follows the filing, so its owner stays the
+        // Secure team (secure-if-any) and nothing is assigned here.
+        var (directory, messageId) = MessageWorld(OtherSecureMatterId, SecureBu, SecureNamedTeam, threadId: SecureThreadId);
+        var asked = new List<Guid>();
+        var caller = CallerHolding(FullAccess, asked: asked);
         var request = MoveMessageTo(messageId, MatterId, caller);
 
         var resolution = await Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
@@ -2764,7 +2794,7 @@ public class RecordOwnershipResolverTests
         MessageOwnerOf(directory, messageId).Should().Be(SecureNamedTeam, "unchanged: still in S2's thread");
         directory.Assignments.Should().BeEmpty();
         NoOrdinaryOwnerEverSent(directory);
-        asked.Should().Equal(new[] { OtherSecureMatterId }, "S1 is the only secure parent it leaves");
+        asked.Should().BeEquivalentTo(new[] { OtherSecureMatterId, SecureThreadMatterId }, "S1, and S2's thread the reconcile leaves");
         directory.Row("sprk_communication", messageId).GetAttributeValue<EntityReference>("sprk_regardingmatter").Id
             .Should().Be(MatterId, "the re-file itself stands");
     }

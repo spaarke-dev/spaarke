@@ -1213,7 +1213,23 @@ public sealed class ThreadResolver : IThreadResolver
 
         // #2091: the S6 join without the step after a re-file — inside that step this IS its thread reconcile, and from the sweep
         // (#2110) it adds no parent either: the default thread is R's, the record the email is already filed to.
-        await AssignThreadReconcilingOwnerAsync(communicationId, recordThreadId, secureExitCaller, ct);
+        try
+        {
+            await AssignThreadReconcilingOwnerAsync(communicationId, recordThreadId, secureExitCaller, ct);
+        }
+        catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException refused)
+        {
+            // #2143 round 7b: the re-file this move follows asked F3 about every secure record the move leaves (the resolver,
+            // before the re-file wrote), so a refusal here is only a race — the thread was re-filed between that check and this
+            // move — or a reconcile no person's re-file started. Fail-safe: the email keeps the thread and its owner (an
+            // isolated email stays isolated), named here for an operator; the filing sweep retries it.
+            _logger.LogError(
+                "Filing reconcile could not move {CommunicationId} from thread {FromThreadId} to the default thread {ThreadId} of " +
+                "{RecordType}:{RecordId}: the move was refused ({Code}). The email keeps its thread and its owner (#2143).",
+                communicationId, fromThreadId, recordThreadId, regarding.RecordType, regarding.RecordId, refused.RefusalCode);
+            throw;
+        }
+
         _logger.LogInformation(
             "Filing reconcile moved {CommunicationId} from thread {FromThreadId} to the default thread {ThreadId} of " +
             "{RecordType}:{RecordId}", communicationId, fromThreadId, recordThreadId, regarding.RecordType, regarding.RecordId);

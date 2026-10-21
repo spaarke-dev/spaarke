@@ -79,6 +79,37 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _user.FullAccessOn.Should().BeEmpty("no Full Access is needed: no secure record is left");
     }
 
+    [Fact(DisplayName = "#2143 r7b: re-filing an email between ordinary records while it sits in secure S2's thread, by a caller without Full Access on S2, is refused 403 not_permitted and nothing is written")]
+    public async Task FilingRoute_AnOrdinaryRefileOfAnEmailInASecureRecordsThread_ByACallerWithoutFullAccessOnIt_IsRefused()
+    {
+        AnEmailIn(OrdinaryMatter, SecureMattersThread, Directory.SecureBu, Directory.SecureNamedTeam);
+
+        var result = await RefileTo(SecondOrdinaryMatter);
+
+        Status(result).Should().Be(Microsoft.AspNetCore.Http.StatusCodes.Status403Forbidden, Detail(result));
+        ReasonCode(result).Should().Be(Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.NotPermittedReasonCode);
+        _user.Patches.Should().BeEmpty("refused before the caller's PATCH: the thread move it would cause leaves S2");
+        _world.Assignments.Should().BeEmpty();
+        var email = _world.Row("sprk_communication", RefiledEmail);
+        email.GetAttributeValue<EntityReference>("sprk_regardingmatter")?.Id.Should().Be(OrdinaryMatter);
+        email.GetAttributeValue<EntityReference>(ThreadResolver.ThreadLookupOnCommunication)?.Id.Should().Be(SecureMattersThread);
+    }
+
+    [Fact(DisplayName = "#2143 r7b: the same re-file by a Full Access holder on S2 ends in the new record's thread, owned by its team")]
+    public async Task FilingRoute_AnOrdinaryRefileOfAnEmailInASecureRecordsThread_ByAFullAccessHolderOnIt_EndsInTheNewRecordsThread()
+    {
+        AnEmailIn(OrdinaryMatter, SecureMattersThread, Directory.SecureBu, Directory.SecureNamedTeam);
+        _user.FullAccessOn.Add(SecureMatter);
+
+        var result = await RefileTo(SecondOrdinaryMatter);
+
+        Status(result).Should().Be(Microsoft.AspNetCore.Http.StatusCodes.Status204NoContent, Detail(result));
+        var email = _world.Row("sprk_communication", RefiledEmail);
+        email.GetAttributeValue<EntityReference>("sprk_regardingmatter")?.Id.Should().Be(SecondOrdinaryMatter);
+        email.GetAttributeValue<EntityReference>(ThreadResolver.ThreadLookupOnCommunication)?.Id.Should().Be(SecondOrdinaryMattersThread);
+        email.GetAttributeValue<EntityReference>("owningteam")?.Id.Should().Be(Directory.GeneralTeam, "the second matter's team");
+    }
+
     // ── harness ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>

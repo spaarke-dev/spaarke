@@ -1343,12 +1343,14 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         var threadBefore = await RecordThreadFiling.ParentsAsync(
             _dataverse, request.EntityLogicalName, RecordThreadFiling.ThreadOf(current), ct).ConfigureAwait(false);
         var threadAfter = threadBefore;
+        var namesAnotherThread = false;
         if (RecordThreadFiling.AppliesTo(request.EntityLogicalName)
             && request.ParentChanges.FirstOrDefault(change =>
                     string.Equals(change.Key, RecordThreadFiling.ThreadColumn, StringComparison.OrdinalIgnoreCase))
                 is { Key: not null } threadChange
             && (threadChange.Value?.Id ?? Guid.Empty) != (RecordThreadFiling.ThreadOf(current) ?? Guid.Empty))
         {
+            namesAnotherThread = true;
             threadAfter = await RecordThreadFiling.ParentsAsync(
                 _dataverse, request.EntityLogicalName, threadChange.Value?.Id, ct).ConfigureAwait(false);
         }
@@ -1451,8 +1453,16 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // limit applies". A change that takes the row out from under a secure root — to no secure root, or to a
         // different one — needs the caller's F3 rights on every secure root it leaves, decided BEFORE anything is
         // written, by the same check the unsecure endpoint makes (SecureDesignationRemoval).
+        // #2143 round 7b: a change to the message's OWN filing that leaves its thread as it is will be followed by the thread
+        // reconcile (ThreadResolver.ReconcileThreadForFilingAsync), which moves the message off a thread anchored to a record it
+        // is no longer filed to. That move is this re-file's: the thread's parents are what it leaves.
+        var ownAfter = byColumn.Values.Distinct().ToArray();
+        var threadTheReconcileMayLeave = RecordThreadFiling.AppliesTo(request.EntityLogicalName) && !namesAnotherThread
+                                         && !ownBefore.ToHashSet().SetEquals(ownAfter)
+            ? threadBefore
+            : Array.Empty<RecordOwnershipParent>();
         var (exitRefusal, permittedToLeaveSecure) = await RefuseUnlessPermittedToLeaveSecureRootsAsync(
-            request, current, filedUnderBefore, parents, ownBefore, byColumn.Values.Distinct().ToArray(), resolution, ct)
+            request, current, filedUnderBefore, parents, ownBefore, ownAfter, threadTheReconcileMayLeave, resolution, ct)
             .ConfigureAwait(false);
         if (exitRefusal is not null)
         {
@@ -2111,6 +2121,10 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// columns hold before the change, less those above what they hold after it (<paramref name="ownBefore"/>,
     /// <paramref name="ownAfter"/>) — even while the row's record thread still files it under that root: the thread follows
     /// the filing after the write, so the move out is this re-file's.</para>
+    /// <para><b>Off the message's thread</b> (#2143 round 7b). A change to a message's own filing that names no other thread is
+    /// followed by the thread reconcile, which moves it off a thread anchored to a record it is no longer filed to: every
+    /// secure root above <paramref name="threadTheReconcileMayLeave"/>, less those above <paramref name="ownAfter"/>, is left
+    /// too. Asked whatever the reconcile then decides (a private thread keeps the message): the safe side.</para>
     /// <para><b>Who may.</b> <see cref="Sprk.Bff.Api.Services.Access.SecureDesignationRemoval"/> — the unsecure endpoint's
     /// F3 check — with Full Access asked on EVERY secure root left and the creator counted on the ROW
     /// (<c>sprk_createdbyperson</c>, else <c>createdby</c>). A writer that acts for no person
@@ -2123,7 +2137,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     private async Task<(RecordOwnerResolution? Refusal, bool PermittedToLeave)> RefuseUnlessPermittedToLeaveSecureRootsAsync(
         RecordReparent request, Entity current, IReadOnlyCollection<RecordOwnershipParent> filedUnderBefore,
         IReadOnlyCollection<RecordOwnershipParent> filedUnderAfter, IReadOnlyCollection<RecordOwnershipParent> ownBefore,
-        IReadOnlyCollection<RecordOwnershipParent> ownAfter, RecordOwnerResolution resolution, CancellationToken ct)
+        IReadOnlyCollection<RecordOwnershipParent> ownAfter, IReadOnlyCollection<RecordOwnershipParent> threadTheReconcileMayLeave,
+        RecordOwnerResolution resolution, CancellationToken ct)
     {
         // Two cheap facts first, so the many re-files that leave nothing (a thread JOIN, an invoice link, additive inbound
         // filing) cost no read: a change that removes none of the row's parents leaves no root (both walks would read the
@@ -2133,7 +2148,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // row under it — the move a re-file makes; the thread follows it after the write.
         var removesAnOwnParent = ownBefore.Any(parent => !ownAfter.Contains(parent));
         var mayLeaveIsolation = !resolution.IsSecureOwner && resolution.Outcome != RecordOwnerOutcome.Unchanged;
-        if (!removesAParent && !removesAnOwnParent && !mayLeaveIsolation)
+        if (!removesAParent && !removesAnOwnParent && threadTheReconcileMayLeave.Count == 0 && !mayLeaveIsolation)
         {
             return (null, false);
         }
@@ -2179,6 +2194,25 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             }
 
             left.AddRange(ownRootsBefore.Roots.Where(root => !ownRootsAfter.Roots.Contains(root) && !left.Contains(root)));
+        }
+
+        // #2143 round 7b: every secure root above the thread the reconcile will move the message off, less those its own new
+        // parents keep it under — asked here, before anything is written, of the person whose re-file the move follows (the
+        // thread move acts for the same person, round 7a). A caller without Full Access on it is refused.
+        if (threadTheReconcileMayLeave.Count > 0)
+        {
+            var threadRoots = await SecureRootsAboveAsync(threadTheReconcileMayLeave, secureBu.Id, ct).ConfigureAwait(false);
+            var keptByOwn = await SecureRootsAboveAsync(ownAfter, secureBu.Id, ct).ConfigureAwait(false);
+            if ((threadRoots.TooDeepAt ?? keptByOwn.TooDeepAt) is { } threadTooDeep)
+            {
+                return (RecordOwnerResolution.Refused(
+                    RecordOwnerRefusal.ParentUnresolved,
+                    $"the record's filing runs through more than {MaxLineageDepth} levels of records (still unresolved at "
+                    + $"{threadTooDeep.EntityLogicalName} {threadTooDeep.RecordId:D}), so whether the change leaves a secure "
+                    + "record cannot be decided"), false);
+            }
+
+            left.AddRange(threadRoots.Roots.Where(root => !keptByOwn.Roots.Contains(root) && !left.Contains(root)));
         }
 
         // Held in the Secure Record business unit, about to leave its isolation, yet no secure root above it can be named.

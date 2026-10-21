@@ -2093,6 +2093,39 @@ public class ThreadResolverTests
     }
 
     [Fact]
+    public async Task ReconcileThreadForFiling_WhenTheMoveToTheRecordsThreadIsRefused_LogsAnErrorNamingTheEmail_AndLeavesItInItsThread()
+    {
+        // #2143 round 7b (K-limit): the re-file asked F3 about every secure record the thread move leaves, so a refused move is
+        // only a race (the thread re-filed between that check and this move) or a reconcile no person's re-file started. It is
+        // never silent: an Error names the email and the threads, and the email keeps its thread (nothing is assigned or granted).
+        var communicationId = Guid.NewGuid();
+        var threadId = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        SetupFiledEmail(communicationId, threadId, "sprk_matter", matter);
+        var thread = OpenThread(threadId);
+        thread["statecode"] = new OptionSetValue(1); // Inactive: only the email can move
+        SetupReconcileThreadRead(threadId, thread);
+        SetupThreadMessagesForFiling(threadId, Message(communicationId, "sprk_matter", matter));
+        var recordThread = SetupRecordsDefaultThread("sprk_matter", matter);
+        _entity
+            .Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_communicationthread"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection { Entities = { new DataverseEntity("sprk_communicationthread") { Id = recordThread } } });
+        _owners.TeamId = null;
+        _owners.RefusalCode = Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.NotPermittedReasonCode;
+        var log = new CapturingLogger<ThreadResolver>();
+
+        await new ThreadResolver(Array.Empty<IThreadKeyStrategy>(), _entity.Object, _owners, log, _grants.Object, SecureNames)
+            .ReconcileThreadForFilingAsync(communicationId, CancellationToken.None);
+
+        VerifyAssigned(communicationId, recordThread, Times.Never());
+        VerifyNoGrant();
+        log.Entries.Should().Contain(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Error
+                                          && e.Message.Contains(communicationId.ToString(), StringComparison.Ordinal)
+                                          && e.Message.Contains(threadId.ToString(), StringComparison.Ordinal)
+                                          && e.Message.Contains(Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.NotPermittedReasonCode, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task ReconcileThreadForFiling_UnfiledEmail_InAThreadAnchoredToARecord_MovesToItsOwnersMasterThread_WithNoGrant()
     {
         // F3 (unlink): clearing the regarding left the email on the old record's panel. It moves to the thread the unfiled
