@@ -32,7 +32,7 @@
 ### Agreed with peers
 - **R3:** we own the BFF change (firm file routes, retire the four `/external/invoices/{id}/documents…` routes, Stored File storage), reviewed by uac-r2 with the 188 guard entry. The SPA side goes to R4. Dev deploy is BFF then SPA through R3. The 051 wizard is on our branch only.
 - **field-mapping:** 013 is cleared (PR #2184, which renames the Office create service; check it at the #1911 merge). Reconcile review checklist: RegardingTrio tables get mapping-protected core lookups; the ratchet copy is replaced by the real `CoreRecordLookups`; 016/040 call `CheckGenericUpdateAsync`.
-- **Dev BFF:** master 84291ecea8 (live 2026-10-21 16:42Z, via R3); includes #2177, so 095's "#2177 merged and deployed" gate is met on dev. The 015 delete stays blocked; `sprk_invoicestatus` still exists on dev.
+- **Dev BFF:** master 583f90c1d9 (live 2026-10-21 18:04Z, via R3); includes #2177, so 095's "#2177 merged and deployed" gate is met on dev. The 015 delete stays blocked; `sprk_invoicestatus` still exists on dev.
 
 ### 050a (closed)
 Round 4 passed. Under the new model the re-file is retired and Submit Invoice replaces it; the D-140 chain and isolation check are kept.
