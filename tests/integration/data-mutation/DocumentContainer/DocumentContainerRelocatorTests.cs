@@ -262,11 +262,12 @@ public class DocumentContainerRelocatorTests
             Relocator = NewRelocator();
         }
 
-        /// <summary>A relocator over this rig's world, SPE facade and indexing — with another lock store, access source or clock.</summary>
+        /// <summary>A relocator over this rig's world, SPE facade and indexing — with another lock store, access source, clock or logger.</summary>
         public DocumentContainerRelocator NewRelocator(
-            Sprk.Bff.Api.Services.Jobs.IIdempotencyService? locks = null, IAccessDataSource? access = null, TimeProvider? time = null)
+            Sprk.Bff.Api.Services.Jobs.IIdempotencyService? locks = null, IAccessDataSource? access = null, TimeProvider? time = null,
+            ILogger<DocumentContainerRelocator>? logger = null)
             => new(Resolver, World.EntityService!, Spe.Object, Indexing, locks ?? Locks, access ?? Access,
-                NullLogger<DocumentContainerRelocator>.Instance, Configuration, time, Attribution, JobServices);
+                logger ?? NullLogger<DocumentContainerRelocator>.Instance, Configuration, time, Attribution, JobServices);
 
         /// <summary>
         /// #2159 fix round: the jobs the relocator queued (a release retry), on a <see cref="JobSubmissionService"/> that
@@ -935,11 +936,14 @@ public class DocumentContainerRelocatorTests
     }
 
     [Fact]
-    public async Task Relocate_WhenTheRepointFails_RemovesTheCopy_AndKeepsTheSource()
+    public async Task Relocate_WhenTheRepointIsRefused_RemovesTheCopy_AndKeepsTheSource()
     {
+        // PR #2161 re-check: only a DEFINITE refusal removes the copy — Dataverse answered with a fault (production shape:
+        // the entity service wraps it). A write whose outcome is unknown keeps it (RelocationRecheckFixTests).
         var world = Environment();
         world.Rows[("sprk_document", DocumentId)] = Doc(drive: CustomerBContainer, item: Item);
-        world.UpdateFault = new HttpRequestException("Dataverse unavailable");
+        world.UpdateFault = new InvalidOperationException("Failed to update sprk_document",
+            new System.ServiceModel.FaultException<OrganizationServiceFault>(new OrganizationServiceFault { ErrorCode = -2147220891 }));
         var rig = new Rig(world);
 
         var outcome = await rig.Relocator.RelocateIfMisplacedAsync(DocumentId, apply: true);

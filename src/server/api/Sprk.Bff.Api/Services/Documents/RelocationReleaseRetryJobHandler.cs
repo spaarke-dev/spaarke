@@ -89,7 +89,24 @@ public sealed class RelocationReleaseRetryJobHandler : IJobHandler
                 job.Attempt, TimeProvider.System.GetElapsedTime(started));
         }
 
-        var outcome = await _relocator.RecordQueuedReleaseAsync(payload, LockWait, ct).ConfigureAwait(false);
+        RelocationReleaseOutcome outcome;
+        try
+        {
+            outcome = await _relocator.RecordQueuedReleaseAsync(payload, LockWait, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // PR #2161 re-check: a fault that escapes the relocator (anything it does not classify itself) is NOT left to the processor,
+            // which would dead-letter the job without the one recovery. It is a failed delivery: retried, then poisoned below.
+            _logger.LogError(ex,
+                "[DOCUMENT-RELOCATE] Queued F3 release of document {DocumentId} faulted (delivery {Delivery}); its file stays held "
+                + "until a delivery records it. Recovery if none does: resubmit the dead-lettered job within {Days} days of the "
+                + "re-file, or {Recovery}.", payload.DocumentId, job.Attempt, DocumentContainerRelocator.ReleaseLifetime.TotalDays,
+                DocumentContainerRelocator.UnreleasedRecovery);
+            outcome = new RelocationReleaseOutcome(RelocationReleaseState.Failed,
+                $"the release retry faulted ({ex.GetType().Name}); no release was recorded");
+        }
+
         var elapsed = TimeProvider.System.GetElapsedTime(started);
         switch (outcome.State)
         {
@@ -124,14 +141,15 @@ public sealed class RelocationReleaseRetryJobHandler : IJobHandler
 
 /// <summary>
 /// The <see cref="RelocationReleaseRetryJobHandler.JobTypeName"/> payload: the move a BFF re-file with F3 permitted — the
-/// document's file (<see cref="SourceDrive"/>/<see cref="SourceItem"/>) into <see cref="TargetContainer"/>, read right after
-/// the re-file — and the permission's facts the release records: the secure roots it left, who (<see cref="AuthorizedBy"/>,
-/// a <c>systemuserid</c>), on what basis, and when (<see cref="PermittedAt"/>, which the release keeps).
+/// document's file out of the container holding it (<see cref="SourceDrive"/>) into <see cref="TargetContainer"/>, read
+/// right after the re-file — and the permission's facts the release records: the secure roots it left, who
+/// (<see cref="AuthorizedBy"/>, a <c>systemuserid</c>), on what basis, and when (<see cref="PermittedAt"/>, which the
+/// release keeps). Not bound to the item (PR #2161 re-check): the relocator re-points the row inside the source container
+/// when it closes an edited source in place, and the release must survive that.
 /// </summary>
 public sealed record RelocationReleaseRetryPayload(
     Guid DocumentId,
     string SourceDrive,
-    string SourceItem,
     string TargetContainer,
     IReadOnlyList<RecordOwnershipParent> RootsLeft,
     Guid AuthorizedBy,
@@ -141,8 +159,7 @@ public sealed record RelocationReleaseRetryPayload(
     /// <summary>Every fact the release is bound to or records is present, and the basis is one F3 permits on.</summary>
     [JsonIgnore]
     public bool IsWellFormed
-        => DocumentId != Guid.Empty && !string.IsNullOrWhiteSpace(SourceDrive) && !string.IsNullOrWhiteSpace(SourceItem)
-           && !string.IsNullOrWhiteSpace(TargetContainer) && RootsLeft is { Count: > 0 } && RootsLeft.All(r => r is { IsSpecified: true })
+        => DocumentId != Guid.Empty && !string.IsNullOrWhiteSpace(SourceDrive) && !string.IsNullOrWhiteSpace(TargetContainer) && RootsLeft is { Count: > 0 } && RootsLeft.All(r => r is { IsSpecified: true })
            && AuthorizedBy != Guid.Empty && Basis is SecureRemovalBasis.Creator or SecureRemovalBasis.FullAccess
            && PermittedAt != default;
 }

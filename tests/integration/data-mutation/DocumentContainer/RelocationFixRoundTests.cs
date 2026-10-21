@@ -9,7 +9,8 @@
 //        permitted, and never records what the inline path would refuse;
 //     F4 a Make Secure move OUT of another secure record's own container needs the source proven the row's own;
 //     F5 a move cancelled after its copy exists removes the copy (never one the row may already name); a re-point that
-//        FAULTS is checked the same way — the copy is deleted only when the re-read row provably does not name it.
+//        was SENT and did not answer (cancelled, timed out, a transport fault) keeps the copy whatever a re-read says — it
+//        may still land (PR #2161 re-check); only a DEFINITE refusal (a Dataverse fault, a concurrency rejection) removes it.
 //
 // Doubles are module boundaries only (ADR-038 §4): the REAL RecordContainerResolver and relocator over task 166's
 // document-pointer world; Service Bus is the boundary of the job queue.
@@ -253,11 +254,11 @@ public class RelocationFixRoundTests
     private static RelocationReleaseRetryJobHandler Handler(T.Rig rig, TimeSpan? lockWait = null)
         => new(rig.Relocator, NullLogger<RelocationReleaseRetryJobHandler>.Instance) { LockWait = lockWait ?? TimeSpan.Zero };
 
-    private static RelocationReleaseRetryPayload APayload(
-        string item = Item, string target = R.SecondSecureContainer, DateTimeOffset? at = null, RecordOwnershipParent? left = null)
-        => new(T.DocumentId, T.SecureContainer, item, target, [left ?? S1], Caller, SecureRemovalBasis.FullAccess, at ?? DateTimeOffset.UtcNow);
+    internal static RelocationReleaseRetryPayload APayload(
+        string drive = T.SecureContainer, string target = R.SecondSecureContainer, DateTimeOffset? at = null, RecordOwnershipParent? left = null)
+        => new(T.DocumentId, drive, target, [left ?? S1], Caller, SecureRemovalBasis.FullAccess, at ?? DateTimeOffset.UtcNow);
 
-    [Fact(DisplayName = "F3 must fire: a lock held past the wait queues a durable retry, bound to the file, the target and the time of the re-file")]
+    [Fact(DisplayName = "F3 must fire: a lock held past the wait queues a durable retry, bound to the file's container, the target and the time of the re-file")]
     public async Task F3_AHeldLock_QueuesARetry()
     {
         var (world, rig) = RefiledToS2();
@@ -276,7 +277,6 @@ public class RelocationFixRoundTests
         {
             DocumentId = T.DocumentId,
             SourceDrive = T.SecureContainer,
-            SourceItem = Item,
             TargetContainer = R.SecondSecureContainer,
             AuthorizedBy = Caller,
             Basis = SecureRemovalBasis.FullAccess,
@@ -363,7 +363,7 @@ public class RelocationFixRoundTests
 
     public static TheoryData<string, Func<RelocationReleaseRetryPayload>> RefusedRetries => new()
     {
-        { "the row's file is no longer the item", () => APayload(item: "01ANOTHERFILE") },
+        { "the row's file is no longer in the source container", () => APayload(drive: T.CustomerAContainer) },
         { "the row no longer derives to the target", () => APayload(target: T.CustomerAContainer) },
         { "the re-file's permission is older than 30 days", () => APayload(at: DateTimeOffset.UtcNow.AddDays(-31)) },
         { "the re-file did not leave the record holding the file", () => APayload(left: new RecordOwnershipParent("sprk_matter", T.PlainMatter)) },
@@ -407,14 +407,29 @@ public class RelocationFixRoundTests
         world.Updates.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "F3: a payload that names no complete release is dead-lettered without a read")]
-    public async Task F3_AnIncompletePayload_IsPoisoned()
+    public static TheoryData<string, Func<RelocationReleaseRetryPayload>> IncompletePayloads => new()
+    {
+        { "no root left", () => APayload() with { RootsLeft = [] } },
+        { "an unspecified root", () => APayload() with { RootsLeft = [S1, new RecordOwnershipParent("sprk_matter", Guid.Empty)] } },
+        { "a basis F3 refuses on", () => APayload() with { Basis = SecureRemovalBasis.NotFullAccessOrCreator } },
+        { "an unknown caller's basis", () => APayload() with { Basis = SecureRemovalBasis.CallerUnknown } },
+        { "no caller", () => APayload() with { AuthorizedBy = Guid.Empty } },
+        { "no time of permission", () => APayload() with { PermittedAt = default } },
+        { "no source container", () => APayload(drive: " ") },
+        { "no target", () => APayload(target: " ") },
+        { "no document", () => APayload() with { DocumentId = Guid.Empty } },
+    };
+
+    [Theory(DisplayName = "F3: a payload that names no complete release is dead-lettered without a read")]
+    [MemberData(nameof(IncompletePayloads))]
+    public async Task F3_AnIncompletePayload_IsPoisoned(string why, Func<RelocationReleaseRetryPayload> payload)
     {
         var (world, rig) = RefiledToS2();
-        var job = RelocationReleaseRetryJobHandler.NewJob(APayload() with { RootsLeft = [] });
+        var job = RelocationReleaseRetryJobHandler.NewJob(payload());
 
-        (await Handler(rig).ProcessAsync(job, CancellationToken.None)).Status.Should().Be(JobStatus.Poisoned);
-        world.Updates.Should().BeEmpty();
+        (await Handler(rig).ProcessAsync(job, CancellationToken.None)).Status.Should().Be(JobStatus.Poisoned, why);
+        world.Updates.Should().BeEmpty(why);
+        LedgerOf(world)?.Release.Should().BeNull(why);
     }
 
     [Fact(DisplayName = "F3: the retry waits up to two minutes per delivery, every five seconds")]
@@ -565,8 +580,8 @@ public class RelocationFixRoundTests
         return cts;
     }
 
-    [Fact(DisplayName = "F5 must fire: a re-point cancelled before it reached Dataverse removes the copy")]
-    public async Task F5_ACancelledRePointThatDidNotLand_RemovesTheCopy()
+    [Fact(DisplayName = "F5 must fire: a re-point cancelled before the row names the copy KEEPS the copy — the write was sent and may still land")]
+    public async Task F5_ACancelledRePointThatDidNotLand_KeepsTheCopy()
     {
         var (world, rig) = WithThreeVersions();
         using var cts = CancelThePointerWrite(world, landed: false);
@@ -574,8 +589,11 @@ public class RelocationFixRoundTests
         var move = () => rig.Relocator.RelocateIfMisplacedAsync(T.DocumentId, apply: true, RelocationPurpose.LegacyMigration, cts.Token);
 
         await move.Should().ThrowAsync<OperationCanceledException>();
-        rig.Spe.Verify(s => s.DeleteFileAsync(T.CustomerA1Container, T.Rig.CopyItem, CancellationToken.None), Times.Once);
+        rig.Spe.Verify(s => s.DeleteFileAsync(T.CustomerA1Container, T.Rig.CopyItem, It.IsAny<CancellationToken>()), Times.Never,
+            "a re-read that does not name the copy proves nothing for a write that did not answer");
+        world.ItemFacts(T.CustomerA1Container, T.Rig.CopyItem).Should().NotBeNull();
         rig.DriveOf(T.DocumentId).Should().Be(T.CustomerBContainer);
+        world.ItemFacts(T.CustomerBContainer, Item).Should().NotBeNull("the source is never touched");
     }
 
     [Fact(DisplayName = "F5 must not fire: a re-point cancelled AFTER it landed keeps the copy the row now names (its ledger owes the rest)")]
@@ -665,8 +683,8 @@ public class RelocationFixRoundTests
         world.ItemFacts(T.CustomerBContainer, Item).Should().NotBeNull("the source is never touched");
     }
 
-    [Fact(DisplayName = "F5 must not fire: a re-point that faults and did NOT land (the row still names the source) removes the copy")]
-    public async Task F5_AFaultedRePointThatDidNotLand_RemovesTheCopy()
+    [Fact(DisplayName = "F5 must fire: a re-point that TIMES OUT and whose row does not name the copy yet keeps the copy — the outcome is unknown")]
+    public async Task F5_ATimedOutRePointThatDidNotLand_KeepsTheCopy()
     {
         var (world, rig) = WithThreeVersions();
         FailThePointerWrite(world, landed: false, rereadFails: false);
@@ -674,8 +692,8 @@ public class RelocationFixRoundTests
         var outcome = await rig.Relocator.RelocateIfMisplacedAsync(T.DocumentId, apply: true, RelocationPurpose.LegacyMigration);
 
         outcome.State.Should().Be(RelocationState.Failed);
-        outcome.Detail.Should().Be("the row could not be re-pointed");
-        rig.Spe.Verify(s => s.DeleteFileAsync(T.CustomerA1Container, T.Rig.CopyItem, It.IsAny<CancellationToken>()), Times.Once);
+        outcome.Detail.Should().Contain("may still land").And.Contain("the copy is kept");
+        rig.Spe.Verify(s => s.DeleteFileAsync(T.CustomerA1Container, T.Rig.CopyItem, It.IsAny<CancellationToken>()), Times.Never);
         rig.DriveOf(T.DocumentId).Should().Be(T.CustomerBContainer);
         world.ItemFacts(T.CustomerBContainer, Item).Should().NotBeNull();
     }
