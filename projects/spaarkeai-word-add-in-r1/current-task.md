@@ -8,9 +8,9 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **130 ✅** merged 2026-10-21 16:11Z (#2177, `4e36c1929d`). **131 🔄** (FULL, sonnet/high): #2182, now based on master. |
-| **Status** | #2182 retargeted to master. Master merged into `work/spaarkeai-word-add-in-r1-131` (C:\wt131, `0c6f90d97a`, clean; not yet pushed while the guard and email-filing tests run). |
-| **Next Action** | 1. When the C:\wt131 tests pass: push the 131 branch, `gh pr ready 2182`, `gh pr merge 2182 --auto --merge` (131's gates are done; it merges under the owner's 2026-10-21 sign-off).<br>2. After #2182 merges: Step 10 for 131 (POML, TASK-INDEX ✅, drift check), merge master into the work branch, then remove C:\wt131 with `pwsh -NoProfile -Command "& ./scripts/worktree/Remove-WorktreeSafe.ps1 -Path 'C:\wt131'"`.<br>3. Dev deploy of 130+131: only on the owner's go, coordinated with R3; the build must contain 077. |
+| **Task** | No code task active. **130 ✅** (#2177, `4e36c1929d`) and **131 ✅** (#2182, `733c65063c`) merged 2026-10-21; C:\wt131 removed. Open: 042 (UAT), 125 (guest live check), 090 (wrap-up). |
+| **Status** | 130 is live on the dev BFF (`84291ecea8`); 131 is not yet. The owner gave the go (2026-10-21) to deploy in coordination with the other projects. |
+| **Next Action** | 1. When a dev BFF containing `733c65063c` is live (R3's or UAC's next routine deploy; check its ProductVersion), redeploy the Outlook add-in (`/office-addins-deploy`) so 131's notice shows. Before that, merge master into the work branch.<br>2. When R3 sends the owner's two .eml save times or subjects, read the sprk_document rows back and report them to UAC and R3.<br>3. Owner live checks (below), then 090. |
 
 ## Task 130 (#2126 / R3 ISS-015 / UAC D7 T8): what is in #2177
 - Every Office email-derived `sprk_document` (the .eml, each attachment child, a single attachment, the worker fallback) is created linked to its `sprk_communication`, or Restricted. Restricted carries `sprk_accessinheritance` = `AccessInheritance.OwnNarrowing(Restricted)` in the same create (UAC 189); the stager refuses a value without its record.
@@ -19,7 +19,7 @@
 - **Deploy dependency:** a BFF with T8 REQUIRES `sprk_document.sprk_accessinheritance` (`Set-DocumentAccessPermissionSchema.ps1`, guide §7.4). It is applied in dev; prod needs it before any BFF with 189 or T8. A deploy needs the owner's go, coordinated with R3, and the build must contain 077.
 
 ## Live in dev
-- **BFF `spaarke-bff-dev`: master `1.0.0+a10e814d02`** since 2026-10-21 14:35:33Z (deployed by R3; contains UAC #2169/189, #2150, #2184, and 077; healthz 200). Our task 130 is NOT in it.
+- **BFF `spaarke-bff-dev`: master `1.0.0+84291ecea8`** since 2026-10-21 16:42:49Z (deployed by R3 on our OK and the owner's go; contains #2177 / task 130, 077, and `a10e814d02`; healthz 200; `sprk_accessinheritance` confirmed before the swap). Task 131 (#2182) is NOT in it. R3 reads App Insights at 30 min for the stager refusal ("created with its sprk_accessinheritance record"). UAC's gate (one identified and one unidentifiable .eml save) waits on the owner; when R3 sends times or subjects, read the sprk_document rows back (relatedcommunication, accesspermission, accessinheritance).
 - **Console `sprk_spaarkeai`:** `deploy-spaarke-ai.yml` auto-publishes on every master push touching SpaarkeAi or the shared UI packages; read `modifiedon` to know which build is live. Default landing tab is Worklist (ontology data change 2026-10-17; Daily Briefing is in the Workspaces dropdown).
 - The add-ins are current (`05356cbf7`).
 
