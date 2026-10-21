@@ -705,7 +705,7 @@ A customer employee whose Entra user has no Email gets a token with no `email` c
 
 | Field | Value |
 |---|---|
-| **Status** | Open (fix in R3, auth-tagged) |
+| **Status** | Fixed: PR #2175 (`3531ed65e`), dev SPA run 39536100531 (2026-10-21); owner smoke pending |
 | **Urgency** | before 072 |
 | **Filed** | 2026-10-20 |
 | **Source** | Owner live check on dev SPA `28274e04e` (ralph.schroeder@spaarke.com) |
