@@ -78,6 +78,13 @@
   - reviews 017/018 on condition (b);
   - holds #2190 and #2169;
   - pending ArchTest #2170 (`EveryGenericUpdateWriter_AsksTheAppOnlyRefusal`) will cover Repair's write.
+  - **#2221 (UAC task 190, draft) vs 016's member-keyed #2170 guard:** whoever merges second adds the member exemption
+    `EmailArchiveCommunicationLinkSweepJob.LinkAsync` with UAC's reason verbatim: "the BFF's own typed link writer:
+    sets a NULL sprk_relatedcommunication to the exactly-one communication whose internet message id ordinal-equals
+    the document's recorded key; never clears or re-points; conditional on row version (uac-r2 task 190)".
+  - **#2220 (widened to matter + project, UAC 2026-10-21):** separate PR off master, branch
+    `fix/fm-2220-matter-protected`; UAC reviews the diff (condition b: Office matter/project quick-create skip-and-warn;
+    dev 0 rules).
 - **ebilling-r1:** the reconcile commit before 017; 016 and 040 call `CheckGenericUpdateAsync` once #1911 lands. 016
   has a `TODO(#1911)` seam that skips invoice and billing-event rows.
 - **R3 (external-access-r3):** deploys master to dev. Asks OK/HOLD per deploy; told when #2191 merged.
