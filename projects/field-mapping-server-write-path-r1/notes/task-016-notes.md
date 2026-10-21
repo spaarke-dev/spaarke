@@ -487,3 +487,13 @@ Guard mutants (each applied alone, built, run, restored):
 - The filtered set: 2818 passed, 0 failed, 7 skipped.
 
 Part B is committed locally and NOT pushed, pending the coordinator's call on `PutBackFilingAsync`.
+
+**Pass 4 resolution (UAC-r2's answers to the three open items):**
+1. `RecordOwnershipResolver::PutBackFilingAsync` is now a member exemption, with UAC's reason verbatim: it is a
+   row-version-conditional rollback of the re-file's own failed write, back to the row's prior values.
+2. Signal writers: the scan is not widened and they get no entries. Their payloads are fixed `sprk_signal`, written
+   through `OntologyWriterDataverseClient`.
+3. `DataverseUpdateHandler` `WriteAsync` and `UpdateWithOptimisticConcurrencyAsync` are accepted, with the reason
+   "private; sole caller UpdateAsync, which refuses first".
+
+ArchTests after this: 1341 passed, 1 failed. The failure is #2188 at `Repair.cs:323`, as expected. Part B is pushed.

@@ -1115,9 +1115,14 @@ public class ExternalDocumentNarrowingGuardTests
             "Writes only the BFF-managed pair columns (PairColumns: sprk_regardingrecordid, sprk_regardingrecordtype), picked " +
             "out of the body by name; every other column goes in the caller's own PATCH.",
         ["Sprk.Bff.Api.Services.Dataverse.DataverseUpdateHandler::WriteAsync"] =
-            "Private; reached only from UpdateAsync, which asks RefuseAppOnlyWrite over the same fields before it.",
+            "private; sole caller UpdateAsync, which refuses first",
         ["Sprk.Bff.Api.Services.Dataverse.DataverseUpdateHandler::UpdateWithOptimisticConcurrencyAsync"] =
-            "Private; reached only from WriteAsync (so from UpdateAsync, which asks RefuseAppOnlyWrite over the same fields).",
+            "private; sole caller UpdateAsync, which refuses first",
+        ["Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver::PutBackFilingAsync"] =
+            "Rollback of this re-file's own failed write (#2143): writes back only the values this row held before the re-file " +
+            "(`restore`, read from the row before the write), and only while the row is still filed as the re-file left it " +
+            "(row-version conditional; `FiledAsResolved`). It never writes a link value the row did not already hold, so D7's " +
+            "inputs return to their prior, authorized state.",
         ["Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver::SettleOwnerAsync"] =
             "Writes only ownerid (the team the row's parents resolve to), conditioned on the row version.",
         ["Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver::ReleaseOwnSecureWriteAsync"] =
