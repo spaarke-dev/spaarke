@@ -468,9 +468,10 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
     [Fact]
     public async Task EmailDraft_RegardingASecureMatter_IsCreatedByTheAppOwnedByTheNamedTeam_WithTheDrafterAsSender()
     {
+        var (visibility, visibilityAccessor) = new Sprk.Bff.Api.Tests.TestInfrastructure.CommunicationVisibilityFixtures().Build();
         var handler = new EmailDraftToolHandler(
             _user, Mock.Of<IEmailDraftAi>(), CoreAncestorResolverFixtures.Inert(), CreateLogger<EmailDraftToolHandler>(),
-            _world.Resolver(), _appOnly.Object);
+            _world.Resolver(), _appOnly.Object, visibility, visibilityAccessor);
         var args = JsonSerializer.Serialize(new
         {
             subject = "Settlement",
@@ -498,9 +499,10 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
     {
         // An unfiled draft keeps its creator — the resolver's own answer for an unfiled communication (E1): a team-owned
         // draft would show one person's unsent email to their whole business unit.
+        var (visibility, visibilityAccessor) = new Sprk.Bff.Api.Tests.TestInfrastructure.CommunicationVisibilityFixtures().Build();
         var handler = new EmailDraftToolHandler(
             _user, Mock.Of<IEmailDraftAi>(), CoreAncestorResolverFixtures.Inert(), CreateLogger<EmailDraftToolHandler>(),
-            _world.Resolver(), _appOnly.Object);
+            _world.Resolver(), _appOnly.Object, visibility, visibilityAccessor);
         var args = JsonSerializer.Serialize(new { subject = "Hello", body = "Draft.", to = new[] { "a@b.example" } });
 
         var result = await handler.ExecuteChatAsync(
@@ -705,6 +707,10 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["sprk_recordtype_ref"] = "sprk_recordtype_refs", ["sprk_organization"] = "sprk_organizations",
             // Ontology task 126: the business-owned lookup targets.
             ["team"] = "teams", ["businessunit"] = "businessunits",
+            // #2084 round 2: a Signal and the rule it cites.
+            ["sprk_signal"] = "sprk_signals", ["sprk_policy"] = "sprk_policies",
+            // #2110: a communication's thread.
+            ["sprk_communicationthread"] = "sprk_communicationthreads",
         };
 
         /// <summary>
@@ -780,6 +786,10 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
                 ("sprk_sentby", "systemuser", "sprk_SentBy"),
                 ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
+                // #2091 (b): a communication's project filing (SecureChildLineage: sprk_communication.sprk_regardingproject).
+                ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
+                // #2110: a communication's thread — a lineage parent, not an ownership parent (SecureChildLineage).
+                ("sprk_communicationthread", "sprk_communicationthread", "sprk_CommunicationThread"),
             },
             ["sprk_document"] = new[]
             {
@@ -839,6 +849,12 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
                 // A person the event is assigned to — not a column the pair's readers match the pair against.
                 ("sprk_assignedto", "contact", "sprk_AssignedTo"),
+            },
+            // #2084 round 2: a Signal's core matter (sprk_signal.sprk_matter) and the rule it CITES (sprk_signal.sprk_policy).
+            ["sprk_signal"] = new[]
+            {
+                ("sprk_matter", "sprk_matter", "sprk_Matter"),
+                ("sprk_policy", "sprk_policy", "sprk_Policy"),
             },
             // Task 147 r1 E2 (the secure-record ribbon's "New Budget"): sprk_Matter_Budget_1n, live 2026-10-04.
             ["sprk_budget"] = new[]

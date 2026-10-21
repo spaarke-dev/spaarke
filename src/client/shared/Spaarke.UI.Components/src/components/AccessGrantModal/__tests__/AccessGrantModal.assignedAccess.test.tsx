@@ -12,6 +12,7 @@
 
 import * as React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { confirmRevoke } from '../../../__tests__/helpers/confirmDialog';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import {
   AccessGrantModal,
@@ -27,7 +28,11 @@ const renderWithTheme = (ui: React.ReactElement) => render(<FluentProvider theme
 
 function json(body: unknown, ok = true, status = ok ? 200 : 500): Response {
   // A BFF ProblemDetails always carries `status`.
-  return { ok, status, json: async () => (ok ? body : { status, ...(body as Record<string, unknown>) }) } as unknown as Response;
+  return {
+    ok,
+    status,
+    json: async () => (ok ? body : { status, ...(body as Record<string, unknown>) }),
+  } as unknown as Response;
 }
 
 const PENDING_CONTACT: IAssignedAccessEntry = {
@@ -123,12 +128,18 @@ describe('AccessGrantModal — Assigned-To suggestions on a secure record (task 
 
     fireEvent.click(await screen.findByRole('button', { name: 'Grant Pat Paralegal' }));
 
+    // Task 099c: an external grant carries the record's Expiration — with no share yet, the default UTC today + 90.
+    const now = new Date();
+    const defaultExpiry = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 90))
+      .toISOString()
+      .slice(0, 10);
     await waitFor(() =>
       expect(bodyOf(fetchMock, '/api/v1/external-access/grant')).toEqual({
         contactId: 'contact-1',
         accessLevel: 100000001,
         recordType: 'matter',
         recordId: 'matter-1',
+        expiryDate: defaultExpiry,
       })
     );
     expect(await screen.findByText(/suggested from Assigned Paralegal 1/)).toBeInTheDocument();
@@ -315,8 +326,7 @@ describe('AccessGrantModal — removing an automatic grant that a read-time term
     await screen.findByText(/Automatic — Assigned Attorney 1/);
     fireEvent.click(screen.getByRole('button', { name: 'Revoke' }));
     expect(await screen.findByText('Revoke access?')).toBeInTheDocument();
-    const revokeButtons = screen.getAllByRole('button', { name: 'Revoke' });
-    fireEvent.click(revokeButtons[revokeButtons.length - 1]);
+    await confirmRevoke(); // G-21-safe: clicks Revoke inside the confirm dialog
 
     expect(
       await screen.findByText(/Revoked Sam Standing's grant\. Sam Standing still reaches this record/)

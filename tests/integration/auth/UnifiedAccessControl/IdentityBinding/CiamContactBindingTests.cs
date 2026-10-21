@@ -230,22 +230,61 @@ public class CiamContactBindingTests
     }
 
     /// <summary>
-    /// Task 185 (design §7): the workforce plane's bind stays the plain bind, byte-identical — even onto a contact that
-    /// carries an invite-code hash, it never clears or reads it.
+    /// #2005 (supersedes task 185 design §7's "the workforce bind is the plain bind"): the workforce plane's email bind
+    /// consumes a pending invite-code hash in its ONE conditional write — a granted contact is auto-invited (185 §11), so a
+    /// B2B guest binding it would otherwise leave a live code on a bound contact. Where the hash column is not provisioned,
+    /// the bind is exactly the plain bind. The intent (marker and hash) is still never read on this plane.
+    /// MUTATION PROOF: the binder calling <c>BindOidAsync</c> here fails the provisioned case.
     /// </summary>
-    [Fact]
-    public async Task TheWorkforcePlane_BindPayloadIsUnchanged_AndNeverTouchesAnInviteCodeHash()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task TheWorkforcePlane_EmailBind_ConsumesAPendingInviteCodeHash_InTheSameWrite(bool hashColumnProvisioned)
     {
         var oid = Guid.NewGuid();
         var invite = InviteCode.Create(ContactA);
-        _store.AddContact(ContactA, email: "person@customer.example", invitedOn: Now, inviteCodeHash: invite.StoredValue);
+        _store.AddContact(ContactA, email: "person@customer.example", invitedOn: hashColumnProvisioned ? Now : null,
+            inviteCodeHash: hashColumnProvisioned ? invite.StoredValue : null);
+        _store.InviteCodeHashColumnMissing = !hashColumnProvisioned;
 
         var result = await Binder(_store).ResolveWorkforceCallerAsync(
             WorkforceUser(oid, tid: CustomerTenant), oid, stampTenantId: null, CancellationToken.None);
 
-        result.Action.Should().Be(BindingAction.BindByEmail);
-        _store.Writes.Should().ContainSingle().Which.Should().Be(("bind", (Guid?)ContactA, $"{oid:D}|{IdentityPlaneMarker.Workforce}"));
-        _store.Contacts[ContactA].InviteCodeHash.Should().Be(invite.StoredValue);
+        result.Should().Be(new ContactBindingResult(ContactA, null, BindingAction.BindByEmail, Wrote: true));
+        _store.Writes.Should().ContainSingle().Which.Should().Be(("bind", (Guid?)ContactA, hashColumnProvisioned
+            ? $"{oid:D}|{IdentityPlaneMarker.Workforce}|invite-code-hash=null"
+            : $"{oid:D}|{IdentityPlaneMarker.Workforce}"));
+        _store.Contacts[ContactA].Oid.Should().Be(oid.ToString("D"));
+        _store.Contacts[ContactA].InviteCodeHash.Should().BeNull();
+        _store.Reads.Should().NotContain("intent");
+    }
+
+    /// <summary>
+    /// #2005, the reported scenario: a B2B guest email-binds a granted contact that was auto-invited, an operator unbinds
+    /// it within the marker's 30 days, and someone holding the forwarded invite link signs up a CIAM account with the
+    /// email. The code was consumed by the workforce bind, so E11 denies it and nothing is bound.
+    /// MUTATION PROOF: the binder calling <c>BindOidAsync</c> on the workforce plane binds the CIAM account here.
+    /// </summary>
+    [Fact]
+    public async Task AWorkforceBind_ThenAnOperatorUnbind_LeavesTheForwardedInviteCodeDenied()
+    {
+        var guestOid = Guid.NewGuid();
+        var invite = InviteCode.Create(ContactA);
+        _store.AddContact(ContactA, email: "person@customer.example", invitedOn: Now, inviteCodeHash: invite.StoredValue);
+        (await Binder(_store).ResolveWorkforceCallerAsync(
+                WorkforceUser(guestOid, tid: CustomerTenant), guestOid, stampTenantId: null, CancellationToken.None))
+            .Action.Should().Be(BindingAction.BindByEmail);
+        var row = _store.Contacts[ContactA];
+        row.Oid = null;
+        row.KeyMirror = null;
+        row.Plane = null;
+        _store.Touch(row);
+
+        var replay = await Binder(_store).ResolveCiamCallerAsync(CiamOid.ToString(), "person@customer.example",
+            invite.Code, CancellationToken.None);
+
+        replay.DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited, "the workforce bind consumed the code");
+        _store.Contacts[ContactA].Oid.Should().BeNull();
     }
 
     [Fact]

@@ -10,12 +10,17 @@
   <options>
     <option value="100000000" ExternalValue="" IsHidden="0">
       <labels>
-        <label description="" languagecode="1033" />
+        <label description="External" languagecode="1033" />
       </labels>
     </option>
     <option value="100000001" ExternalValue="" IsHidden="0">
       <labels>
-        <label description="" languagecode="1033" />
+        <label description="Workforce" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000002" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="WorkforceHome" languagecode="1033" />
       </labels>
     </option>
   </options>

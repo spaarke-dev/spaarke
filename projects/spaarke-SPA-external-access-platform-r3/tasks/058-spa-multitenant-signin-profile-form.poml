@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="058" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>SPA multitenant browser sign-in, tid → backend, silent/interactive link, profile form (replaces 056 hand-off), landing wording</title>
+    <phase>4b A9 workforce home sign-in</phase>
+    <gate>after 047 and 048 (BFF contracts merged)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags auth, frontend; client sign-in code</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Design fixes the contract and the BFF responses; follows existing msal-config/backend-selection patterns</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shares src/client/external-spa/src/auth/* and App.tsx with 075</parallel-reason>
+    <deps>047, 048</deps>
+    <tags>auth, frontend, react, fluent-ui, testing</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Move the SPA's browser "My organization" sign-in to the multitenant client as notes/a9-bff-design.md §7 specifies, handle registration_required with the silent link then the profile form, and replace the 056 registration-service hand-off.</prompt>
+  <role>SPAARKE platform developer. MSAL.js and React/Fluent v9 frontend developer. Follow ADRs strictly.</role>
+  <goal>A workforce contact signs in with their company account, lands on the profile form (or binds their existing record after confirming the email), and reaches the workspace; a licensed user is linked silently (or by popup on licensed_user_link_required) and resolves to their systemuser; an unknown tid shows "your organization is not set up for Spaarke" and sends no token.</goal>
+
+  <context>
+    <background>Design note §5 (SPA link acquisition) and §7. Code: msal-config.ts (:65-100 assertTenantPinnedWorkforceAuthority, :238-251), backend-selection.ts, config.ts (:203-226), RealmChooser.tsx (:73-76), JoinPage.tsx + registration-client.ts (056, VITE_REGISTRATION_SERVICE_URL), BffAccessState.tsx. The A8 client (9f1da340) stays for the silent link acquisition (ssoSilent, authority = Spaarke tenant, loginHint = home account). Directory entries gain homeTenantIds (VITE_BACKENDS until the T240c directory ships). Teams is task 075; do not change TeamsHostAdapter.ts here.</background>
+    <relevant-files>
+      <file role="modify">src/client/external-spa/src/auth/msal-config.ts</file>
+      <file role="modify">src/client/external-spa/src/auth/msal-auth.ts</file>
+      <file role="modify">src/client/external-spa/src/auth/standalone-plane.ts</file>
+      <file role="modify">src/client/external-spa/src/auth/backend-selection.ts</file>
+      <file role="modify">src/client/external-spa/src/auth/registration-client.ts (point at /api/v1/external/registration; remove VITE_REGISTRATION_SERVICE_URL)</file>
+      <file role="modify">src/client/external-spa/src/config.ts</file>
+      <file role="modify">src/client/external-spa/src/pages/JoinPage.tsx (becomes the profile form)</file>
+      <file role="modify">src/client/external-spa/src/components/auth/BffAccessState.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/auth/RealmChooser.tsx</file>
+      <file role="modify">src/client/external-spa/.env.example</file>
+      <file role="modify">.github/workflows/deploy-external-spa.yml (new VITE variable for the multitenant client id; fail-closed check like the others)</file>
+      <file role="new-artifact">src/client/external-spa/tests/workforce-home-auth.test.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028 A9">The multitenant client uses authority organizations only for discovery; the BFF token is requested with authority https://login.microsoftonline.com/{tid} and scope api://{bffAppId}/user_impersonation from the directory entry for that tid. A new assert allows organizations and login.microsoftonline.com/{GUID} ONLY for the multitenant client id; assertTenantPinnedWorkforceAuthority stays for the A8 client.</constraint>
+    <constraint source="design §7">Unknown tid → the not-set-up page; no token is requested for any BFF and no BFF call is made.</constraint>
+    <constraint source="design §5">registration_required → ssoSilent with the A8 client (Spaarke authority, loginHint) → on success POST /api/v1/external/workforce/link with the guest access token in the body → re-call /me. Silent failure → profile form. licensed_user_link_required → the same acquisition with acquireTokenPopup. The guest token is held in memory only for the call (never stored, logged or put in a URL).</constraint>
+    <constraint source="design §4/§7">Profile form: first name, last name (required, ≤50), department (optional, ≤100), prefilled from the 403 extensions; email read-only. 409 existing_record_found → show "We found your existing record" with the email and a confirm action that resubmits with confirmExistingRecord: true. registration_contact_conflict → "An administrator must resolve your record" message; registration_owner_unconfigured / other 5xx → generic error with retry.</constraint>
+    <constraint source="design §7">RealmChooser: "Spaarke employee? Sign in with your work account" becomes "Work for {customer}? Sign in with your company account" ({customer} from the directory entry when known, else "your organization"); the "Spaarke employee" wording goes. "Continue as Partner" (CIAM) is unchanged.</constraint>
+    <constraint source="ADR-021 / ADR-012">Fluent v9 semantic tokens only; dark mode correct; mirror the existing JoinPage.tsx layout and Field/Input components (visual anchor).</constraint>
+    <constraint source="project">The CIAM plane is unchanged. No access_as_user or /common string is introduced.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/notes/a9-bff-design.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge; read the relevant files; declare rigor/tier.</step>
+    <step order="1">Write vitest tests for the acceptance criteria (mock MSAL and fetch); confirm they fail.</step>
+    <step order="2">Add the multitenant client config and assert; tid → directory entry (homeTenantIds) in backend-selection.</step>
+    <step order="3">AuthGuard/BffAccessState: registration_required → silent link → form; licensed_user_link_required → popup link.</step>
+    <step order="4">Turn JoinPage into the profile form; point registration-client at the BFF route; remove the registration-service hand-off.</step>
+    <step order="5">RealmChooser wording; .env.example + workflow variable.</step>
+    <step order="6">typecheck, lint, vitest, build, check:dist; notes/task-058-notes.md; adversarial pass; status + drift check.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If ssoSilent with loginHint across tenants cannot work in a standard browser (third-party cookie block) per MSAL docs, STOP and escalate with the evidence before changing the link flow.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Profile form (new contact)">
+      <url>https://{swa-host}/</url>
+      <steps><step>Sign in with a company account from a listed directory that has no record</step><step>Check the form prefill and read-only email</step><step>Submit</step></steps>
+      <expected>Workspace loads as the new contact; no console errors</expected>
+    </test>
+    <test name="Existing record">
+      <steps><step>Sign in as a person whose contact already exists with the same email</step><step>Confirm the email</step></steps>
+      <expected>"We found your existing record" shown; after confirming, the existing grants are visible</expected>
+    </test>
+    <test name="Licensed user link">
+      <steps><step>Sign in with the company account of a licensed guest</step></steps>
+      <expected>No form; workspace resolves to the systemuser (silent, or one popup)</expected>
+    </test>
+    <test name="Unknown directory">
+      <steps><step>Sign in from an unlisted directory</step></steps>
+      <expected>"Not set up" page; network panel shows no BFF call</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Switch to dark theme</step><step>Open the profile form and the landing page</step></steps>
+      <expected>No white backgrounds or black text; colours from Fluent v9 tokens</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">typecheck, lint, vitest, build (npm install --legacy-peer-deps --no-audit --no-fund)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/ (files listed)</output>
+    <output type="test">src/client/external-spa/tests/workforce-home-auth.test.ts</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r3/notes/task-058-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Listed tid → BFF token requested with authority login.microsoftonline.com/{tid} and api://{bffAppId}/user_impersonation from that directory entry.</criterion>
+    <criterion testable="true">Unlisted tid → not-set-up page, zero BFF token requests and zero BFF calls.</criterion>
+    <criterion testable="true">registration_required + silent success → link POST with the guest token in the body, then /me; silent failure → profile form with prefill.</criterion>
+    <criterion testable="true">licensed_user_link_required → popup acquisition → link POST; popup cancelled → form stays with an explanation, no registration POST.</criterion>
+    <criterion testable="true">409 existing_record_found → confirm screen; confirm resubmits with confirmExistingRecord true; registration_contact_conflict → administrator message.</criterion>
+    <criterion testable="true">The multitenant assert rejects organizations/common for the A8 client id and accepts them only for the multitenant client id.</criterion>
+    <criterion testable="true">No VITE_REGISTRATION_SERVICE_URL, access_as_user or "Spaarke employee" string remains in src/; CIAM tests pass unchanged.</criterion>
+    <criterion testable="true">typecheck 0, lint 0, vitest all pass, build 0, check:dist clean.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Design note §5/§7. Supersedes 056's registration-service hand-off.
+
+    UAC task 185 (PR #1827) also edits src/client/external-spa: new src/auth/invite-code.ts (first line of main()), bff-client.ts sends X-Spaarke-Invite-Code on CIAM calls, small edits to BffAccessState.tsx, WorkspaceHomePage.tsx and App.tsx. Start this task only after #1827 is merged into R3, and keep the invite-code header on CIAM calls only (never on home-token calls).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="075" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>SPA Teams strategy → multitenant client via NAA (Teams context tid), registration and link in Teams</title>
+    <phase>4b A9 workforce home sign-in</phase>
+    <gate>after 058</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags auth, frontend; client sign-in code</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Reuses 058's flows; NAA pattern exists in OfficeNaaStrategy.ts</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shares src/client/external-spa/src/auth/* with 058</parallel-reason>
+    <deps>058</deps>
+    <tags>auth, frontend, react, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Switch the SPA's Teams sign-in to the multitenant client through NAA with authority = the Teams context tid, for both populations, as ADR-028 A9 (Teams amendment) and notes/a9-bff-design.md §7/§12 specify, reusing 058's registration and link flows.</prompt>
+  <role>SPAARKE platform developer. Teams JS, NAA and MSAL.js. Follow ADRs strictly.</role>
+  <goal>In Teams, everyone (workforce contacts and licensed users) gets a home token from the multitenant client via createNestablePublicClientApplication with authority login.microsoftonline.com/{context tid}, falling back to the popup; registration_required and licensed_user_link_required follow the same flows as the browser; the silent link uses NAA against the Spaarke tenant with the A8 client, falling back to the popup.</goal>
+
+  <context>
+    <background>ADR-028 A9 Teams amendment (63b7c575b): Teams covers both populations via NAA with the Teams-context tid; Office add-ins stay on A8. Design §12: no backend change; silent link via NAA against the Spaarke tenant is undocumented, so popup fallback. Today's Teams path (task 040): TeamsHostAdapter.ts + msal-auth.ts acquireTeamsWorkforceBffToken (NAA then popup, A8 client, Spaarke authority).</background>
+    <relevant-files>
+      <file role="modify">src/client/external-spa/src/host/TeamsHostAdapter.ts</file>
+      <file role="modify">src/client/external-spa/src/auth/msal-auth.ts</file>
+      <file role="modify">src/client/external-spa/src/auth/msal-config.ts</file>
+      <file role="modify">src/client/external-spa/src/components/auth/TeamsHostContext.tsx</file>
+      <file role="new-artifact">src/client/external-spa/tests/teams-home-auth.test.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028 A9">The Teams token for the BFF comes only from the multitenant client with authority = the Teams context tid; the A8 client is used in Teams only for the silent link acquisition. An unlisted tid shows the not-set-up page and sends no token.</constraint>
+    <constraint source="design §5">The guest token for linking is held in memory for the link call only.</constraint>
+    <constraint source="project">No webApplicationInfo / Teams SSO getAuthToken is reintroduced. Browser behaviour from 058 is unchanged (its tests pass).</constraint>
+    <constraint source="ADR-021">Any screen shown in Teams uses Fluent v9 tokens and follows the Teams theme.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/notes/a9-bff-design.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge; declare rigor/tier.</step>
+    <step order="1">Write vitest tests (mock Teams context and NAA); confirm they fail.</step>
+    <step order="2">Implement the Teams strategy on the multitenant client; route registration/link through 058's flows.</step>
+    <step order="3">typecheck, lint, vitest, build, check:dist; notes/task-075-notes.md; adversarial pass; status + drift check.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If NAA with a tenant-specific authority other than the host's is refused by the Teams NAA bridge in documentation or tests, STOP and escalate before choosing another flow.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Teams contact">
+      <steps><step>Open the dev Teams app as a Dewey Cheatham member with no record</step></steps>
+      <expected>Profile form in Teams; after submit, workspace loads</expected>
+    </test>
+    <test name="Teams licensed user">
+      <steps><step>Open the dev Teams app as the licensed guest's company account</step></steps>
+      <expected>Linked (silent or popup); resolves to the systemuser</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Switch Teams to dark theme</step><step>Open the form and workspace</step></steps>
+      <expected>Colours from Fluent v9 tokens</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">typecheck, lint, vitest, build</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/ (files listed)</output>
+    <output type="test">src/client/external-spa/tests/teams-home-auth.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">In a Teams context with tid T (listed), the BFF token is requested from the multitenant client with authority login.microsoftonline.com/T via NAA; NAA failure → popup.</criterion>
+    <criterion testable="true">Teams context with an unlisted tid → not-set-up page; zero BFF token requests.</criterion>
+    <criterion testable="true">registration_required in Teams → silent link via NAA (A8 client, Spaarke authority) → popup → form, in that order.</criterion>
+    <criterion testable="true">No getAuthToken call and no webApplicationInfo in appPackage.</criterion>
+    <criterion testable="true">058's browser tests and the CIAM tests pass unchanged; typecheck/lint/build/check:dist clean.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>ADR-028 A9 Teams amendment; design §7/§12. Live verification is task 071. Carry-over from 058 (2026-10-19): remove the stale /join comment (TeamsHostAdapter.ts:149) and the now-unused notifyTeamsSuccess export (:153); fix the /join wording in spec.md and design.md. Reuse 058 pieces: acquireSpaarkeGuestToken (account-scoped cleanup only, never no-account clearCache), WorkforceHomeGate, RegistrationPage.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

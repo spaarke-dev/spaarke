@@ -305,6 +305,20 @@ public class SpeContainerMembershipSyncTests
         _rights.Verify(r => r.GetPrincipalRightsOrUnknownAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    [Fact(DisplayName = "Issue #1576: a JIT grant whose holder row carries NO isdisabled value is removed (fail closed), without asking for rights")]
+    public async Task Jit_HolderWithoutIsDisabledValue_IsRemoved()
+    {
+        SecureContainerWithJitGrant(Alice);
+        _dataverse.Setup(d => d.RetrieveAsync("systemuser", Alice, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("systemuser", Alice) { ["sprk_isexternal"] = false });
+
+        var result = await Sut().RemoveRevokedJitGrantsAsync(CancellationToken.None);
+
+        RemovalVerified(SecureContainer, Alice, Membership.JitWriterMarkerPrefix, Times.Once());
+        result.Removed.Should().Be(1);
+        _rights.Verify(r => r.GetPrincipalRightsOrUnknownAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     [Fact(DisplayName = "Task 171: a JIT grant on a RESTRICTED record held by a user flagged external is removed (round 67)")]
     public async Task Jit_RestrictedRecord_ExternalHolder_IsRemoved()
     {

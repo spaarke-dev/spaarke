@@ -176,6 +176,12 @@ export interface CommunicationTimelinePrefill {
   subject?: string;
   body?: string;
   bodyFormat?: EmailComposerBodyFormat;
+  /**
+   * Start the compose box's "Internal Only" switch on (task 068) - set when the draft replies to / quotes an item
+   * the host already knows is internal-only. Only ever raises the switch: leave it undefined (never pass `false`
+   * to mean "no opinion") so a user's own toggle is not reset by an unrelated prefill.
+   */
+  isInternalOnly?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -258,6 +264,13 @@ export interface CommunicationTimelineThreadModeProps extends CommunicationTimel
 
   /** Recipient directory lookup, forwarded to the compose box's `RecipientField`. */
   onSearchRecipients?: (query: string) => Promise<ILookupItem[]>;
+
+  /**
+   * The thread is KNOWN to be Private (task 068): the compose box's "Internal Only" switch shows on and disabled
+   * and every send carries `isInternalOnly: true`. Pass it only when the host already holds the thread's
+   * privacy - never read it from Dataverse just for this (the BFF floor, task 065, covers the rest).
+   */
+  threadIsPrivate?: boolean;
 
   /** Entity associations to stamp on any message sent from this timeline. */
   associations?: ICommunicationAssociation[];

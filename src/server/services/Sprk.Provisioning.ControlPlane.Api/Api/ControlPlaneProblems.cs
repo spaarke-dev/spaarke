@@ -55,6 +55,13 @@ internal static class ControlPlaneErrorCodes
     public const string ReasonRequired = "reason-required";
     public const string RunNotQuarantined = "run-not-quarantined";
     public const string RunConcurrentlyModified = "run-concurrently-modified";
+    public const string RunNotResumable = "run-not-resumable";
+    public const string RunNotPreflightable = "run-not-preflightable";
+    public const string RunNotCancellable = "run-not-cancellable";
+    public const string RunNotWaitingOnGate = "run-not-waiting-on-gate";
+    public const string GateNotFound = "gate-not-found";
+    public const string GateNotAdvanceable = "gate-not-advanceable";
+    public const string HandlerEnqueueFailed = "handler-enqueue-failed";
     public const string PhaseIdRequired = "phase-id-required";
     public const string PhaseNotCompleted = "phase-not-completed";
 }
@@ -95,6 +102,7 @@ internal static class ControlPlaneProblems
             StatusCodes.Status404NotFound => ("Not Found", "https://tools.ietf.org/html/rfc7231#section-6.5.4"),
             StatusCodes.Status409Conflict => ("Conflict", "https://tools.ietf.org/html/rfc7231#section-6.5.8"),
             StatusCodes.Status502BadGateway => ("Bad Gateway", "https://tools.ietf.org/html/rfc7231#section-6.6.3"),
+            StatusCodes.Status503ServiceUnavailable => ("Service Unavailable", "https://tools.ietf.org/html/rfc7231#section-6.6.4"),
             _ => ((string?)null, (string?)null),
         };
 

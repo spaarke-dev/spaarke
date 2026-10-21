@@ -644,6 +644,31 @@ public sealed class CommunicationRecordAuthorizationFilter : IEndpointFilter
                 targets.Add((set, association.EntityId));
             }
 
+            // (3b) Task 065 fix round 3 (F3): a send into a thread with no association of its own is filed against the
+            //      thread's regarding record (CommunicationService.ApplyTargetThreadAsync). The record written is the
+            //      record checked: the thread's anchor, read as the caller, in the priority order the send uses. A thread
+            //      that cannot be read is a deny (fail closed); a thread with no regarding adds no target.
+            if (threadId is { } regardingThreadId && associations is not { Length: > 0 })
+            {
+                CommunicationThreadReadService.ThreadRegardingTarget? threadRegarding = null;
+                var threadRead = await Safely("thread regarding read", async () =>
+                {
+                    threadRegarding = await Required<CommunicationThreadReadService>()
+                        .ReadVisibleThreadRegardingAsync(regardingThreadId, User, Ct);
+                    return threadRegarding is not null;
+                });
+                if (!threadRead)
+                    return Forbidden(reasonCode);
+
+                if (threadRegarding!.EntityType is { } threadRecordType && threadRegarding.RecordId is { } threadRecordId)
+                {
+                    var set = RegardingNameFields.EntitySetName(threadRecordType);
+                    if (set is null)
+                        return Forbidden(reasonCode); // a thread regarding we cannot address is never guessed
+                    targets.Add((set, threadRecordId));
+                }
+            }
+
             if (inheritFrom is { } sourceId)
             {
                 var lookupColumns = RegardingFieldMap.All.Select(x => $"_{x.RegardingField}_value").ToArray();

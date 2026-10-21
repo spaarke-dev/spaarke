@@ -49,6 +49,9 @@ internal sealed class SecureChildShareWorld
     private readonly HashSet<Guid> _ignoredOwnerWrites = new();
     private readonly List<(string Table, int AfterCount, Action<SecureChildShareWorld> Change)> _afterQueries = new();
 
+    /// <summary>#2091 round 4: how many single-row reads (<see cref="Retrieve"/>) this world answered.</summary>
+    public int RowReads { get; private set; }
+
     /// <summary>Every table queried, in order.</summary>
     public List<string> QueriedTables { get; } = new();
 
@@ -95,6 +98,10 @@ internal sealed class SecureChildShareWorld
     /// <summary>A systemuser in a business unit — what a user-owned row's <c>owningbusinessunit</c> derives from (task 148).</summary>
     public SecureChildShareWorld User(Guid id, Guid businessUnit) =>
         Add("systemuser", id, ("businessunitid", new EntityReference("businessunit", businessUnit)));
+
+    /// <summary>#2072: a DISABLED systemuser — Dataverse keeps its oid and business unit, and the BFF must never resolve it (#1576).</summary>
+    public SecureChildShareWorld DisabledUser(Guid id, Guid businessUnit) =>
+        Add("systemuser", id, ("businessunitid", new EntityReference("businessunit", businessUnit)), ("isdisabled", true));
 
     /// <summary>An environment with no Secure Record BU at all.</summary>
     public static SecureChildShareWorld WithoutSecureBusinessUnit()
@@ -145,6 +152,10 @@ internal sealed class SecureChildShareWorld
         string table, Guid id, (string, object) owner, (string Column, string Target, Guid TargetId)[] lookups)
         => Add(table, id, lookups.Select(l => (l.Column, (object)new EntityReference(l.Target, l.TargetId)))
             .Prepend(owner).ToArray());
+
+    /// <summary>#2091 round 3: what a query of a <see cref="FailingQueriesOf"/> table throws instead of the Dataverse fault
+    /// (a <see cref="TaskCanceledException"/> models an HttpClient timeout).</summary>
+    public Func<Exception>? QueryFault { get; set; }
 
     /// <summary>Makes every query of one table throw (a Dataverse fault).</summary>
     public SecureChildShareWorld FailingQueriesOf(string table)
@@ -230,6 +241,18 @@ internal sealed class SecureChildShareWorld
         return this;
     }
 
+    private readonly Dictionary<Guid, Exception> _ownerWriteFaults = new();
+
+    /// <summary>
+    /// UAC task 099b review round 5: an owner write to THIS row throws <paramref name="fault"/> (recorded first) — Dataverse
+    /// refusing the re-own with a specific fault, e.g. the Web API client's bare 403 on a privilege check.
+    /// </summary>
+    public SecureChildShareWorld RefusingOwnerWritesOf(Guid id, Exception fault)
+    {
+        _ownerWriteFaults[id] = fault;
+        return this;
+    }
+
     /// <summary>Task 148: an owner write to THIS row is accepted (recorded) but not applied — the read-back must catch it.</summary>
     public SecureChildShareWorld IgnoringOwnerWritesOf(Guid id)
     {
@@ -242,6 +265,7 @@ internal sealed class SecureChildShareWorld
     {
         _refusedOwnerWrites.Clear();
         _ignoredOwnerWrites.Clear();
+        _ownerWriteFaults.Clear();
         return this;
     }
 
@@ -383,6 +407,8 @@ internal sealed class SecureChildShareWorld
         OwnerWrites.Add((table, id, principal, Sequence?.Invoke() ?? 0));
         if (_refusedOwnerWrites.Contains(id))
             throw new InvalidOperationException("Test: Dataverse refused the re-own.");
+        if (_ownerWriteFaults.TryGetValue(id, out var fault))
+            throw fault;
         if (_ignoredOwnerWrites.Contains(id))
             return;
         MoveOwner(table, id, principal);
@@ -420,8 +446,10 @@ internal sealed class SecureChildShareWorld
     /// Ontology task 144: one row by id with the requested columns only (an empty list answers the row with none), or
     /// Dataverse's ObjectDoesNotExist fault — an <see cref="IGenericEntityService.RetrieveAsync"/> of this world.
     /// </summary>
+    /// <remarks>#2091 round 4: counted in <see cref="RowReads"/>.</remarks>
     public Entity Retrieve(string table, Guid id, string[]? columns)
     {
+        RowReads++;
         if (_failingRowReads.Contains((table, id)))
             throw new InvalidOperationException($"Test: this {table} row cannot be read.");
         if (!_rows.TryGetValue((table, id), out var row))
@@ -434,11 +462,24 @@ internal sealed class SecureChildShareWorld
     public SecureChildShareWorld Add(string table, Guid id, params (string Column, object Value)[] columns)
     {
         var row = new Entity(table, id);
+        // #1943: a project, matter or work assignment always has a modifiedon in Dataverse, and the reconciliation job's
+        // recent-changes pass reconciles a secure record whose own modifiedon is in its window (one with none counts as
+        // changed). A record a test does not touch was therefore last modified long ago; Modified() moves it.
+        if (SecureChildLineage.IsRoot(table))
+            row["modifiedon"] = RecordsLastModified;
         foreach (var (column, value) in columns)
             row[column] = value;
+        // #2072: Dataverse ALWAYS returns isdisabled on a systemuser, and the BFF's user queries filter isdisabled = false
+        // (#1576). A seeded user that carries no value for it would never match that condition (Matches treats an absent
+        // column as no match), so the user must say "enabled" unless the test marked it disabled.
+        if (table == "systemuser" && !row.Attributes.ContainsKey("isdisabled"))
+            row["isdisabled"] = false;
         _rows[(table, id)] = row;
         return this;
     }
+
+    /// <summary>#1943: when a project, matter or work assignment a test does not touch was last modified.</summary>
+    public static readonly DateTime RecordsLastModified = new(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
     private static EntityReference TeamRef(Guid id) => new("team", id);
 
@@ -504,6 +545,7 @@ internal sealed class SecureChildShareWorld
         Spaarke.Dataverse.DataverseWebApiClient webApi, SecureShareNoAccessGuard? noAccessGuard = null,
         Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator? accessCacheInvalidator = null,
         Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null,
+        Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker? ownerPrivileges = null,
         Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing? gateDecisionRecords = null)
     {
         var entities = EntitiesOver(current).Object;
@@ -515,7 +557,7 @@ internal sealed class SecureChildShareWorld
         return new SecureChildReconciler(
             entities, resolver, synchronizer, webApi, configuration, NullLogger<SecureChildReconciler>.Instance,
             gateDecisionRecords ?? new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing, // ontology 042b: a gate-record double over an empty world
-            accessCacheInvalidator, threads);
+            accessCacheInvalidator, threads, ownerPrivileges);
     }
 
     /// <summary>
@@ -589,7 +631,7 @@ internal sealed class SecureChildShareWorld
     {
         QueriedTables.Add(query.EntityName);
         if (_failingTables.Contains(query.EntityName))
-            throw new InvalidOperationException($"Test: {query.EntityName} cannot be read.");
+            throw QueryFault?.Invoke() ?? new InvalidOperationException($"Test: {query.EntityName} cannot be read.");
         if (query.Criteria.Conditions.Any(c =>
                 c.AttributeName == query.EntityName + "id" && c.Operator == ConditionOperator.Equal
                 && c.Values.Single() is Guid id && _failingRowReads.Contains((query.EntityName, id))))

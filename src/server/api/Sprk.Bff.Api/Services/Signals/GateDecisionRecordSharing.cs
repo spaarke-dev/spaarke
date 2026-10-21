@@ -566,7 +566,7 @@ public sealed class GateDecisionRecordSharing
     /// communication regarding only a contact, an account or an organization is unfiled.
     /// </summary>
     private static bool IsFiled(Entity communication, Guid communicationId) =>
-        RecordOwnershipContext.ParentsOf(communication.Attributes)
+        RecordOwnershipContext.ParentsOf(communication.Attributes, CommunicationTable) // #2084: keyed by the row's table (a communication cites nothing)
             .Any(parent => parent != new RecordOwnershipParent(CommunicationTable, communicationId));
 
     // ── Failures: Warning, ids only, counted ───────────────────────────────────────────────────────────────────

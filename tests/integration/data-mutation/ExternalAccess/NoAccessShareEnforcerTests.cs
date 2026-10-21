@@ -72,6 +72,24 @@ public class NoAccessShareEnforcerTests
             "the walled user's impersonated root set is cleared under the key that user's own reads write");
     }
 
+    /// <summary>
+    /// r3 task 048 (046 review K1): a licensed user with a stored home link reads under their CUSTOMER tenant's tid when
+    /// they sign in with their company account, so the walled user's set is also cleared under every customer directory.
+    /// </summary>
+    [Fact]
+    public async Task Enforce_ClearsTheWalledUsersCacheKey_AlsoUnderEveryCustomerHomeTenant()
+    {
+        var customer = Guid.Parse("4a8b0c3e-7d21-4f5a-9e6b-0480480480e1");
+        _h.WorkforceIdentity = Sprk.Bff.Api.Tests.AccessControl.IdentityBinding.IdentityBindingTestKit.Tenants(customer);
+        _h.Shares.Seed(Project, SecureProject, User(Walled), CollaborateMask);
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Project, SecureProject), modifiedBy: Author);
+
+        await Enforce(entry);
+
+        _h.Cache.Removed.Should().Contain((Tenant, ImpersonatedRootSetSource.CacheResource, $"{Walled:D}:{Project}"));
+        _h.Cache.Removed.Should().Contain((customer.ToString("D"), ImpersonatedRootSetSource.CacheResource, $"{Walled:D}:{Project}"));
+    }
+
     [Fact]
     public async Task Enforce_WhenTheReadBackStillFindsTheShare_IsAFailureNamingTheUserAndRecord_NeverRemoved()
     {
@@ -470,11 +488,11 @@ public class NoAccessShareEnforcerTests
         NoAccessEnforcementReport? secondReport = null;
         var interleaved = new InterleavingShares(_h.Shares);
         var other = new NoAccessShareEnforcer(_h.Store, _h.Participations, _h.Identities, _h.Shares, _h.Cache.Mock.Object,
-            _h.Lease, _h.ChildShares(), _h.Entities(), Microsoft.Extensions.Logging.Abstractions.NullLogger<NoAccessShareEnforcer>.Instance);
+            _h.Lease, _h.ChildShares(), _h.Entities(), _h.WorkforceIdentity, Microsoft.Extensions.Logging.Abstractions.NullLogger<NoAccessShareEnforcer>.Instance);
         interleaved.BeforeFirstRevoke = async () =>
             secondReport = await other.EnforceEntryAsync(second, new[] { Tenant }, CancellationToken.None);
         var enforcer = new NoAccessShareEnforcer(_h.Store, _h.Participations, _h.Identities, interleaved, _h.Cache.Mock.Object,
-            _h.Lease, _h.ChildShares(interleaved), _h.Entities(), Microsoft.Extensions.Logging.Abstractions.NullLogger<NoAccessShareEnforcer>.Instance);
+            _h.Lease, _h.ChildShares(interleaved), _h.Entities(), _h.WorkforceIdentity, Microsoft.Extensions.Logging.Abstractions.NullLogger<NoAccessShareEnforcer>.Instance);
 
         var firstReport = await enforcer.EnforceEntryAsync(first, new[] { Tenant }, CancellationToken.None);
 
@@ -510,7 +528,7 @@ public class NoAccessShareEnforcerTests
             AfterFirstRead = async () => reportA = await _h.Enforcer.EnforceEntryAsync(entryA, new[] { Tenant }, CancellationToken.None),
         };
         var enforcerB = new NoAccessShareEnforcer(_h.Store, _h.Participations, _h.Identities, staleFirstRead, _h.Cache.Mock.Object,
-            _h.Lease, _h.ChildShares(staleFirstRead), _h.Entities(), Microsoft.Extensions.Logging.Abstractions.NullLogger<NoAccessShareEnforcer>.Instance);
+            _h.Lease, _h.ChildShares(staleFirstRead), _h.Entities(), _h.WorkforceIdentity, Microsoft.Extensions.Logging.Abstractions.NullLogger<NoAccessShareEnforcer>.Instance);
 
         var reportB = await enforcerB.EnforceEntryAsync(entryB, new[] { Tenant }, CancellationToken.None);
 
@@ -815,6 +833,67 @@ public class NoAccessShareEnforcerTests
         report.Removed.Should().Contain(new NoAccessRemovedShare(Walled, WorkAssignment, FiledWorkAssignment, CollaborateMask));
         _h.Shares.MaskOf(WorkAssignment, FiledWorkAssignment, User(Walled)).Should().BeNull("the parent permissions control");
         _h.Shares.MaskOf(WorkAssignment, FiledWorkAssignment, User(Colleague)).Should().Be(CollaborateMask);
+    }
+
+    /// <summary>
+    /// #1620: the filed record was left unsecured (inheritance Refused or Failed), so its creator — the walled user — still OWNS
+    /// it and holds a direct share. Dataverse refuses an app-only revoke of the owner's own share (0x80040223), so it is
+    /// revoked AS the owner; the access ownership still gives is reported user-ownership (re-own the record to wall them),
+    /// and the enforcement COMPLETES rather than failing revoke-not-confirmed on every pass.
+    /// </summary>
+    [Fact]
+    public async Task Enforce_AFiledRecordTheWalledUserOwns_RevokesTheirShareAsTheOwner_AndReportsUserOwnership()
+    {
+        SecureMatterWithAFiledWorkAssignment(filedFlaggedSecure: false);
+        _h.Store.OwningUsers[FiledWorkAssignment] = Walled;
+        _h.Shares.OwningUsers[FiledWorkAssignment] = Walled;
+        _h.Shares.Seed(WorkAssignment, FiledWorkAssignment, User(Walled), CollaborateMask);
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Matter, SecureMatter), modifiedBy: Author);
+
+        var report = await Enforce(entry);
+
+        report.Complete.Should().BeTrue(string.Join("; ", report.Failures.Select(f => f.Message)));
+        report.Removed.Should().Contain(new NoAccessRemovedShare(Walled, WorkAssignment, FiledWorkAssignment, CollaborateMask));
+        _h.Shares.RevokesAsOwner.Should().Equal((FiledWorkAssignment, User(Walled)));
+        report.NotEnforceable.Should().ContainSingle(n => n.RecordId == FiledWorkAssignment).Which.Should().Be(
+            new NoAccessNotEnforceable(Walled, WorkAssignment, FiledWorkAssignment, NoAccessEnforcementReason.UserOwnership, null));
+    }
+
+    /// <summary>#1620: a team-owned record is unchanged — the walled member's share is revoked app-only, team ownership reported.</summary>
+    [Fact]
+    public async Task Enforce_OnATeamOwnedRecord_RevokesAppOnly_AndReportsTeamOwnershipAsBefore()
+    {
+        _h.Store.OwningTeams[SecureProject] = Team;
+        _h.Store.TeamMembers[Walled] = new HashSet<Guid> { Team };
+        _h.Shares.Seed(Project, SecureProject, User(Walled), CollaborateMask);
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Project, SecureProject), modifiedBy: Author);
+
+        var report = await Enforce(entry);
+
+        report.Removed.Should().ContainSingle(r => r.SystemUserId == Walled);
+        _h.Shares.RevokesAsOwner.Should().BeEmpty();
+        report.NotEnforceable.Should().ContainSingle().Which.Mechanism.Should().Be(NoAccessEnforcementReason.TeamOwnership);
+    }
+
+    /// <summary>
+    /// #1620: the walled user owns the record and its owner cannot be read — never reported removed or complete: the app-only
+    /// revoke Dataverse refuses for the owner leaves the share, the pass is incomplete, and the next pass retries.
+    /// </summary>
+    [Fact]
+    public async Task Enforce_WhenTheOwnerCannotBeRead_AndTheWalledUserOwnsIt_IsIncomplete_AndKeepsTheShare()
+    {
+        _h.Shares.OwningUsers[SecureProject] = Walled;
+        _h.Store.FailOwnerRead = true;
+        _h.Shares.Seed(Project, SecureProject, User(Walled), CollaborateMask);
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Project, SecureProject), modifiedBy: Author);
+
+        var report = await Enforce(entry);
+
+        report.Complete.Should().BeFalse();
+        report.Removed.Should().BeEmpty();
+        report.Failures.Should().ContainSingle(f => f.Kind == "revoke-not-confirmed" && f.SystemUserId == Walled);
+        _h.Shares.RevokesAsOwner.Should().BeEmpty("no revoke runs as anyone on an owner that was not read");
+        _h.Shares.MaskOf(Project, SecureProject, User(Walled)).Should().Be(CollaborateMask);
     }
 
     /// <summary>Round 82: a NOT-yet-secure record filed under the matter whose filing type cannot be confirmed is left alone.</summary>

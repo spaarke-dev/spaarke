@@ -628,7 +628,7 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
     {
         var probe = new Mock<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>(
             MockBehavior.Strict, new HttpClient(), new ConfigurationBuilder().Build(),
-            NullLogger<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>.Instance, null!);
+            NullLogger<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>.Instance, null!, null!);
         probe.Setup(p => p.CallerHoldsPrivilegeAsync("caller-token", RecordCreationService.ProjectCreatePrivilege, It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         probe.Setup(p => p.GetCallerRightsAsync("caller-token", It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
@@ -2086,7 +2086,8 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
     private Task RefileThroughTheUpdateHandler(Guid workAssignment, Guid matter) =>
         new DataverseUpdateHandler(
                 FieldMappingWritingToTheWorld().Object, Mock.Of<IGenericEntityService>(), new StampWorld().Restamper,
-                new RecordOwnershipResolverDouble(), _gate, NullLogger<DataverseUpdateHandler>.Instance)
+                new RecordOwnershipResolverDouble(), _gate, NullLogger<DataverseUpdateHandler>.Instance,
+                SecureChildReconcilerFixtures.OverEmptyWorld())
             .UpdateAsync(
                 "sprk_workassignment", workAssignment,
                 new Dictionary<string, object?> { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", matter) },
@@ -2139,7 +2140,8 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
         _fixture.SeedWorkAssignment(workAssignment, isSecure: false);
         var handler = new DataverseUpdateHandler(
             FieldMappingWritingToTheWorld().Object, Mock.Of<IGenericEntityService>(), new StampWorld().Restamper,
-            new RecordOwnershipResolverDouble(), _gate, NullLogger<DataverseUpdateHandler>.Instance);
+            new RecordOwnershipResolverDouble(), _gate, NullLogger<DataverseUpdateHandler>.Instance,
+                SecureChildReconcilerFixtures.OverEmptyWorld());
 
         var act = () => handler.UpdateAsync("sprk_workassignment", workAssignment,
             new Dictionary<string, object?> { ["sprk_regardingmatter"] = 42 }, ConcurrencyMode.None, 1, CancellationToken.None);
@@ -2163,13 +2165,15 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
 
         var handler = new DataverseUpdateHandler(
             FieldMappingWritingToTheWorld().Object, Mock.Of<IGenericEntityService>(), new StampWorld().Restamper,
-            new RecordOwnershipResolverDouble(), SecureRootFilingGateFixtures.Unregistered(), NullLogger<DataverseUpdateHandler>.Instance);
+            new RecordOwnershipResolverDouble(), SecureRootFilingGateFixtures.Unregistered(), NullLogger<DataverseUpdateHandler>.Instance,
+                SecureChildReconcilerFixtures.OverEmptyWorld());
         var viaHandler = () => handler.UpdateAsync("sprk_workassignment", workAssignment, filing, ConcurrencyMode.None, 1, CancellationToken.None);
         await viaHandler.Should().ThrowAsync<RecordOwnerUnresolvedException>();
 
         var noGate = new ServiceCollection()
             .AddSingleton(new StampWorld().Restamper)
             .AddSingleton<IRecordOwnershipResolver>(new RecordOwnershipResolverDouble())
+            .AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.EntitySetNameFixtures.Service())
             .BuildServiceProvider();
         var core = new UpdateRecordActionCore(
             FieldMappingWritingToTheWorld().Object, noGate.GetRequiredService<IServiceScopeFactory>(), NullLogger.Instance);
@@ -2205,6 +2209,7 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
         var services = new ServiceCollection()
             .AddSingleton(new StampWorld().Restamper)
             .AddSingleton<IRecordOwnershipResolver>(new RecordOwnershipResolverDouble())
+            .AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.EntitySetNameFixtures.Service())
             .AddSingleton(_gate)
             .BuildServiceProvider();
         return new UpdateRecordActionCore(
@@ -2313,7 +2318,8 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
         _fixture.SeedWorkAssignment(workAssignment, isSecure: !value);
         var handler = new DataverseUpdateHandler(
             FieldMappingWritingToTheWorld().Object, Mock.Of<IGenericEntityService>(), new StampWorld().Restamper,
-            new RecordOwnershipResolverDouble(), _gate, NullLogger<DataverseUpdateHandler>.Instance);
+            new RecordOwnershipResolverDouble(), _gate, NullLogger<DataverseUpdateHandler>.Instance,
+                SecureChildReconcilerFixtures.OverEmptyWorld());
 
         var act = () => handler.UpdateAsync("sprk_workassignment", workAssignment,
             new Dictionary<string, object?> { ["sprk_issecure"] = value }, ConcurrencyMode.None, 1, CancellationToken.None);
@@ -2332,6 +2338,7 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
         var services = new ServiceCollection()
             .AddSingleton(new StampWorld().Restamper)
             .AddSingleton<IRecordOwnershipResolver>(new RecordOwnershipResolverDouble())
+            .AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.EntitySetNameFixtures.Service())
             .AddSingleton(_gate)
             .BuildServiceProvider();
         var core = new UpdateRecordActionCore(

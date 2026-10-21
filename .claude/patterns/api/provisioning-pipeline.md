@@ -29,5 +29,5 @@ Any multi-step provisioning or setup workflow where:
 
 ## Related
 
-- `DemoExpirationService.cs` — Same per-step try/catch pattern for cleanup operations
+- `DemoExpirationJob.cs` (the `demo-expiration` IScheduledJob) — per-step cleanup; Expired only after every step succeeds, retried on the next run
 - `src/server/api/Sprk.Bff.Api/Api/RegistrationEndpoints.cs` — Catches `DemoProvisioningException` and returns step details in ProblemDetails

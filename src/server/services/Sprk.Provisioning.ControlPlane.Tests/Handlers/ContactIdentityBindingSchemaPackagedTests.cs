@@ -79,12 +79,18 @@ public sealed class ContactIdentityBindingSchemaPackagedTests
         {
             ("contact", BindingColumn, Read: true, Create: false, Update: false),
             ("systemuser", "sprk_primarycontact", Read: true, Create: false, Update: false),
-        }, "every user reads both fields through the reader profile (a secured column is hidden without Read)");
+            ("contact", "sprk_externaltenantid", Read: true, Create: false, Update: false),
+            ("systemuser", "sprk_hometenantid", Read: true, Create: false, Update: false),
+            ("systemuser", "sprk_homeobjectid", Read: true, Create: false, Update: false),
+        }, "every user reads the identity-link fields through the reader profile (a secured column is hidden without Read)");
         Permissions(profiles, WriterProfile).Should().BeEquivalentTo(new[]
         {
             ("contact", BindingColumn, Read: true, Create: true, Update: true),
             ("systemuser", "sprk_primarycontact", Read: true, Create: true, Update: true),
-        }, "the BFF's application users write both fields through the writer profile");
+            ("contact", "sprk_externaltenantid", Read: true, Create: true, Update: true),
+            ("systemuser", "sprk_hometenantid", Read: true, Create: true, Update: true),
+            ("systemuser", "sprk_homeobjectid", Read: true, Create: true, Update: true),
+        }, "the BFF's application users write the identity-link fields through the writer profile");
     }
 
     [Fact]

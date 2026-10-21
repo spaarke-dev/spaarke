@@ -173,6 +173,14 @@ public static class ProvisionProjectEndpoint
     /// <inheritdoc cref="SecureRecordOwnerTeam.DefaultOwnerTeamName"/>
     internal const string DefaultSecureOwnerTeamName = SecureRecordOwnerTeam.DefaultOwnerTeamName;
 
+    /// <summary>
+    /// Bounds Step 7, the write that records the container Step 6 created (#1755). It runs on its own token with this
+    /// timeout, never the request's: a client disconnect there used to leave an empty container no record names, and the
+    /// next call made another. The same bound as <see cref="ContainerOperations.UncancellableStepTimeout"/>, measured on the
+    /// host's <see cref="TimeProvider"/> so a test advances it instead of waiting.
+    /// </summary>
+    internal static readonly TimeSpan ContainerRecordTimeout = TimeSpan.FromSeconds(90);
+
     // ── Reason codes (ProblemDetails extensions["reasonCode"]) ───────────────
     //
     // Same convention as DelegationRuleFilter (task 008) and ProjectClosureEndpoint: a stable machine
@@ -1253,6 +1261,8 @@ public static class ProvisionProjectEndpoint
         }
 
         // ── Step 6: Create the record's own SPE container ────────────────────
+        // Handed the request's token: a client that is gone before the create POST is sent stops it there. Once the POST
+        // is sent, ContainerOperations runs it and the bind on its own bounded token (#1735/#1755).
         // Bound to the Secure Record business unit — the unit that now owns the record (step 5) — so the SPE admin
         // plane's per-container rule (task 165, owner round 20) keeps it out of every customer administrator's reach.
         var containerResult = await CreateSpeContainerAsync(
@@ -1263,33 +1273,80 @@ public static class ProvisionProjectEndpoint
         var speContainerId = containerResult.ContainerId!;
 
         // ── Step 7: Record the container on the record — FAIL if it cannot be written ──
+        // The container exists now, so the write that records it no longer honours the request's token (#1755): a client
+        // disconnect here would leave a container no record names. Its own bound keeps it from hanging; a timeout is a
+        // failure like any other, and the record is then read back before anything is said about the container.
+        var clock = httpContext?.RequestServices.GetService<TimeProvider>() ?? TimeProvider.System;
+        Exception? recordFailure = null;
         try
         {
-            await RecordContainerAsync(dataverseClient, root, recordId, speContainerId, logger, ct);
+            using var record = new CancellationTokenSource(ContainerRecordTimeout, clock);
+            await RecordContainerAsync(dataverseClient, root, recordId, speContainerId, logger, record.Token);
         }
         catch (Exception ex)
         {
-            // ADR-003. This used to be a catch + LogWarning + return 200, and that swallow is the
-            // single reason the broken column names survived five months: provisioning created real
-            // infrastructure, failed to record any of it, and reported success. A container nobody
-            // recorded is invisible — so the error carries its id, which is the only thing that makes
-            // the orphan reconcilable.
-            logger.LogError(ex,
-                "[PROVISION] Container {ContainerId} was created for {RecordType} {RecordId} but could " +
-                "NOT be recorded on the record. The container is orphaned until an operator " +
-                "reconciles it. TraceId={TraceId}",
-                speContainerId, root.WireToken, recordId, traceId);
+            recordFailure = ex;
+        }
 
-            return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
-                $"An SPE container was created for {root.DisplayLabel.ToLowerInvariant()} {recordId} but could " +
-                "not be recorded on the record. The record is owned by the Secure Record owner team and shared " +
-                "to its creator, with no container recorded, so calling provisioning again (the same caller may) " +
-                "resumes and creates and records a new container. The container named here holds nothing — " +
-                "uploads to a secure record with no container of its own are refused — and can be deleted.",
-                traceId,
-                (ReasonKey, ReasonContainerNotRecorded),
-                ("speContainerId", speContainerId),
-                ("ownerTeamId", ownerTeamId));
+        if (recordFailure is not null)
+        {
+            // #1755: a failed answer does not prove the write did not land — Dataverse may have committed it and answered
+            // late. The record is read back (its own bound, the same clock) before the container is called an orphan.
+            var readBack = await ReadRecordedContainerAsync(dataverseClient, root, recordId, logger, clock);
+
+            if (readBack.Read && string.Equals(readBack.ContainerId?.Trim(), speContainerId, StringComparison.Ordinal))
+            {
+                // The record names the container: Step 7 is done. "Can be deleted" here would point at a live container.
+                logger.LogWarning(recordFailure,
+                    "[PROVISION] Recording container {ContainerId} on {RecordType} {RecordId} reported a failure, but the " +
+                    "record reads it back: the write landed. TraceId={TraceId}",
+                    speContainerId, root.WireToken, recordId, traceId);
+            }
+            else if (!readBack.Read)
+            {
+                // Neither the write's answer nor a read settles it. The container may be the record's own: deleting it
+                // is NOT advised.
+                logger.LogError(recordFailure,
+                    "[PROVISION] Container {ContainerId} was created for {RecordType} {RecordId}; recording it on the " +
+                    "record failed and the record could not be read back, so whether the record names it is UNKNOWN. Do " +
+                    "not delete the container before reading the record's sprk_containerid. TraceId={TraceId}",
+                    speContainerId, root.WireToken, recordId, traceId);
+
+                return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
+                    $"An SPE container was created for {root.DisplayLabel.ToLowerInvariant()} {recordId}. Recording it on " +
+                    "the record reported a failure and the record could not be read back, so whether the record names it " +
+                    "is unknown. Do not delete the container named here: it may be the record's own. Read the record's " +
+                    "container, or call provisioning again once Dataverse answers (the same caller may).",
+                    traceId,
+                    (ReasonKey, ReasonContainerNotRecorded),
+                    ("speContainerId", speContainerId),
+                    ("ownerTeamId", ownerTeamId));
+            }
+            else
+            {
+                // ADR-003. This used to be a catch + LogWarning + return 200, and that swallow is the
+                // single reason the broken column names survived five months: provisioning created real
+                // infrastructure, failed to record any of it, and reported success. A container nobody
+                // recorded is invisible — so the error carries its id, which is the only thing that makes
+                // the orphan reconcilable.
+                logger.LogError(recordFailure,
+                    "[PROVISION] Container {ContainerId} was created for {RecordType} {RecordId} but could " +
+                    "NOT be recorded on the record. The container is orphaned until an operator " +
+                    "reconciles it. TraceId={TraceId}",
+                    speContainerId, root.WireToken, recordId, traceId);
+
+                return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
+                    $"An SPE container was created for {root.DisplayLabel.ToLowerInvariant()} {recordId} but could " +
+                    "not be recorded on the record. The record is owned by the Secure Record owner team and shared " +
+                    "to its creator, with no container recorded, so calling provisioning again (the same caller may) " +
+                    "resumes and creates and records a new container. The container named here holds nothing — " +
+                    "uploads to a secure record with no container of its own are refused — and, once the record is " +
+                    "confirmed not to name it, can be deleted.",
+                    traceId,
+                    (ReasonKey, ReasonContainerNotRecorded),
+                    ("speContainerId", speContainerId),
+                    ("ownerTeamId", ownerTeamId));
+            }
         }
 
         logger.LogInformation(
@@ -1489,18 +1546,33 @@ public static class ProvisionProjectEndpoint
             "status={Status} reowned={Reowned} remaining={Remaining} ({PerTable}) detail={Detail}. TraceId={TraceId}",
             root.WireToken, recordId, pass.Status, summary.Reowned, summary.Remaining, perTable, pass.Detail, traceId);
 
-        return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
-            $"The {root.DisplayLabel.ToLowerInvariant()} is secured, shared and has its document container, but its existing " +
-            "related records (documents, events, to-dos, communications, memos) are not all secured yet: " +
-            $"{summary.Reowned} re-owned, {summary.Remaining} remaining" + (perTable.Length > 0 ? $" ({perTable})" : "") +
-            (pass.Detail is null ? "" : $" — {pass.Detail}") +
-            ". No related record is more exposed than before this call. Calling provisioning again (the same caller may) " +
-            "completes them; the secure-child reconciliation completes them regardless.",
-            traceId,
+        // UAC task 099b review round 3 (K2): a grant row the owner team may not own is not completed by a repeat call (nor by
+        // the reconciliation) until an administrator adds the privilege, so the detail does not promise it, and the cause is
+        // named as an extension (the reason code stays children_incomplete: the record IS provisioned).
+        var blockedByOwnerPrivilege = pass.BlockedByGrantOwnerPrivilege;
+        var extensions = new List<(string Key, object? Value)>
+        {
             (ReasonKey, ReasonChildrenIncomplete),
             ("childrenReowned", summary.Reowned),
             ("childrenRemaining", summary.Remaining),
-            ("childTables", summary.Tables));
+            ("childTables", summary.Tables),
+        };
+        extensions.AddRange(SecureChildPassSummary.BlockedByExtensions(pass));
+
+        return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
+            $"The {root.DisplayLabel.ToLowerInvariant()} is secured, shared and has its document container, but its existing " +
+            "related records (documents, events, to-dos, communications, memos, access grants) are not all secured yet: " +
+            $"{summary.Reowned} re-owned, {summary.Remaining} remaining" + (perTable.Length > 0 ? $" ({perTable})" : "") +
+            (pass.Detail is null ? "" : $" — {pass.Detail}") +
+            ". No related record is more exposed than before this call. " +
+            (blockedByOwnerPrivilege
+                ? "Its access grants cannot be secured until an administrator gives the secure owner team's security role " +
+                  "Read on External Record Access; calling provisioning again before that does not complete them, and " +
+                  "calling it again after that does."
+                : "Calling provisioning again (the same caller may) completes them; the secure-child reconciliation " +
+                  "completes them regardless."),
+            traceId,
+            extensions.ToArray());
     }
 
     /// <summary>
@@ -3924,42 +3996,74 @@ public static class ProvisionProjectEndpoint
     {
         logger.LogInformation("[PROVISION] Creating SPE container for {RecordType} {RecordId}", root.WireToken, recordId);
 
-        string? failure;
         try
         {
             var containerDisplayName = root.ContainerDisplayName(recordName);
             var containerDescription = root.ContainerDescription(recordName);
 
+            // Never null (#1755 round 2): a 2xx without a container is an unknown outcome, caught below.
             var container = await speFileStore.CreateContainerAsync(
                 containerTypeId, containerDisplayName, owningBusinessUnitId, containerDescription, ct);
 
-            if (container != null)
-            {
-                logger.LogInformation(
-                    "[PROVISION] Created SPE container {ContainerId} ('{DisplayName}') for {RecordType} {RecordId}",
-                    container.Id, containerDisplayName, root.WireToken, recordId);
+            logger.LogInformation(
+                "[PROVISION] Created SPE container {ContainerId} ('{DisplayName}') for {RecordType} {RecordId}",
+                container.Id, containerDisplayName, root.WireToken, recordId);
 
-                return new SpeContainerCreationResult(container.Id, null);
-            }
+            return new SpeContainerCreationResult(container.Id, null);
+        }
+        catch (ContainerCreateOutcomeUnknownException ex)
+        {
+            // #1755: the POST was sent and its answer never settled it, so a container may exist that nothing names. Not
+            // "nothing needs undoing": the operator is told, and the log carries what finds it. Recovery is #1735 part 2.
+            logger.LogError(ex,
+                "[PROVISION] The SPE container create for {RecordType} {RecordId} was sent but its outcome is unknown: a " +
+                "container named '{DisplayName}' (type {ContainerTypeId}) may exist that no record names. An operator " +
+                "should look for it before it is created again. TraceId={TraceId}",
+                root.WireToken, recordId, ex.DisplayName, containerTypeId, traceId);
 
-            failure = "Graph API returned no container";
-            logger.LogError(
-                "[PROVISION] SpeFileStore.CreateContainerAsync returned null for {RecordType} {RecordId}",
-                root.WireToken, recordId);
+            return new SpeContainerCreationResult(null, Problem(
+                StatusCodes.Status500InternalServerError, "Internal Server Error",
+                $"The {root.DisplayLabel.ToLowerInvariant()} is owned by the Secure Record owner team and shared to its " +
+                "creator, but the request that creates its own SPE container got no answer that names the container, so a " +
+                $"container named '{ex.DisplayName}' may have been created that no record names. The record has no " +
+                "container recorded: calling provisioning again (the same caller may) resumes from here and creates a " +
+                "new one. Report this traceId so an administrator can find and remove the possible orphan.",
+                traceId, (ReasonKey, ReasonContainerCreationFailed), ("ownerTeamId", ownerTeamId)));
+        }
+        catch (ContainerLeftActiveException ex)
+        {
+            // #1755 round 3: the container was created, a step after it (activate, bind or mark) failed, and so did the
+            // delete that undoes it. It is live, its id is known, and no record names it — not "nothing needs undoing".
+            logger.LogError(ex,
+                "[PROVISION] SPE container {ContainerId} was created for {RecordType} {RecordId} but could not be set up, " +
+                "and removing it failed: a container exists that no record names. An operator should remove it. " +
+                "TraceId={TraceId}",
+                ex.ContainerId, root.WireToken, recordId, traceId);
+
+            return new SpeContainerCreationResult(null, Problem(
+                StatusCodes.Status500InternalServerError, "Internal Server Error",
+                $"The {root.DisplayLabel.ToLowerInvariant()} is owned by the Secure Record owner team and shared to its " +
+                $"creator. Its own SPE container '{ex.ContainerId}' was created but could not be set up, and removing it " +
+                "failed, so a container exists that no record names. It holds nothing. The record has no container " +
+                "recorded: calling provisioning again (the same caller may) resumes from here and creates a new one. " +
+                "Report this traceId and the container id so an administrator can remove it.",
+                traceId,
+                (ReasonKey, ReasonContainerCreationFailed),
+                ("speContainerId", ex.ContainerId),
+                ("ownerTeamId", ownerTeamId)));
         }
         catch (Exception ex)
         {
-            failure = "the container request failed";
             logger.LogError(ex,
                 "[PROVISION] Failed to create SPE container for {RecordType} {RecordId}", root.WireToken, recordId);
-        }
 
-        return new SpeContainerCreationResult(null, Problem(
-            StatusCodes.Status500InternalServerError, "Internal Server Error",
-            $"The {root.DisplayLabel.ToLowerInvariant()} is owned by the Secure Record owner team and shared to its " +
-            $"creator, but its own SPE container could not be created ({failure}). Nothing needs undoing: calling " +
-            "provisioning again (the same caller may) resumes from here.",
-            traceId, (ReasonKey, ReasonContainerCreationFailed), ("ownerTeamId", ownerTeamId)));
+            return new SpeContainerCreationResult(null, Problem(
+                StatusCodes.Status500InternalServerError, "Internal Server Error",
+                $"The {root.DisplayLabel.ToLowerInvariant()} is owned by the Secure Record owner team and shared to its " +
+                "creator, but its own SPE container could not be created (the container request failed). Nothing needs " +
+                "undoing: calling provisioning again (the same caller may) resumes from here.",
+                traceId, (ReasonKey, ReasonContainerCreationFailed), ("ownerTeamId", ownerTeamId)));
+        }
     }
 
     /// <summary>
@@ -4089,6 +4193,35 @@ public static class ProvisionProjectEndpoint
         logger.LogInformation(
             "[PROVISION] Recorded container {ContainerId} on {RecordType} {RecordId}",
             speContainerId, root.WireToken, recordId);
+    }
+
+    /// <summary>
+    /// Reads back the container the record names, after a Step 7 write that reported a failure (#1755): the write may
+    /// have landed with its answer lost or late. Runs on its own token bounded by <see cref="ContainerRecordTimeout"/> on
+    /// <paramref name="clock"/>, never the request's. <c>Read</c> is false when the record could not be read — the caller
+    /// then knows nothing about whether the record names the container.
+    /// </summary>
+    private static async Task<(bool Read, string? ContainerId)> ReadRecordedContainerAsync(
+        DataverseWebApiClient dataverseClient,
+        SecureRecordRoot root,
+        Guid recordId,
+        ILogger logger,
+        TimeProvider clock)
+    {
+        try
+        {
+            using var read = new CancellationTokenSource(ContainerRecordTimeout, clock);
+            var row = (await dataverseClient.QueryAsync<RootRow>(
+                root.EntitySet, filter: $"{root.IdColumn} eq {recordId}", select: "sprk_containerid", top: 1,
+                cancellationToken: read.Token)).FirstOrDefault();
+            return row is null ? (false, null) : (true, row.sprk_containerid);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "[PROVISION] {RecordType} {RecordId} could not be read back after recording its container failed.",
+                root.WireToken, recordId);
+            return (false, null);
+        }
     }
 
     /// <summary>Builds a ProblemDetails result with a traceId and any extra extension members.</summary>

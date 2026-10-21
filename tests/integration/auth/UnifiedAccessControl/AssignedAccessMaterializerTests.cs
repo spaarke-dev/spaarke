@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -873,6 +874,65 @@ public class AssignedAccessMaterializerTests
         LedgerRow(contact, Attorney1).Reason.Should().Be(AssignedAccessReason.AccessRemoved);
     }
 
+    /// <summary>
+    /// #1620: the assignee OWNS the record. Dataverse refuses an app-only revoke of the owning user's own share
+    /// (0x80040223), so the auto share's removal runs as the owner — the owner keeps ownership, the share row goes.
+    /// </summary>
+    [Fact]
+    public async Task ClearingTheField_RevokesTheOwningUsersAutoShare_AsTheOwner()
+    {
+        var (contact, user) = _h.LinkedContact();
+        _h.Store.RootOwners[(Matter, _matter)] = DataversePrincipalRef.User(user);
+        _h.Shares.OwningUsers[_matter] = user;
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        await Sync();
+        ShareMask(user).Should().Be(CollaborateMask);
+
+        _h.Store.Assign(Matter, _matter, Attorney1, null);
+        var outcome = await Sync();
+
+        outcome.Failures.Should().BeEmpty();
+        ShareMask(user).Should().BeNull();
+        _h.Shares.RevokesAsOwner.Should().Equal((_matter, DataversePrincipalRef.User(user)));
+        LedgerRow(contact, Attorney1).Reason.Should().Be(AssignedAccessReason.AccessRemoved);
+    }
+
+    [Fact]
+    public async Task ClearingTheField_OnARecordAnotherUserOwns_RevokesAppOnly()
+    {
+        var (contact, user) = _h.LinkedContact();
+        var owner = Guid.NewGuid();
+        _h.Store.RootOwners[(Matter, _matter)] = DataversePrincipalRef.User(owner);
+        _h.Shares.OwningUsers[_matter] = owner;
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        await Sync();
+
+        _h.Store.Assign(Matter, _matter, Attorney1, null);
+        await Sync();
+
+        ShareMask(user).Should().BeNull();
+        _h.Shares.RevokesAsOwner.Should().BeEmpty("only the owner's own share is revoked as the owner");
+    }
+
+    /// <summary>#1620: a root read that carried no owner is a failure for the removal — never a fall-back to app-only.</summary>
+    [Fact]
+    public async Task ClearingTheField_WhenTheRootsOwnerWasNotRead_FailsClosed_AndKeepsTheShare()
+    {
+        var (contact, user) = _h.LinkedContact();
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        await Sync();
+        _h.Store.RootOwners[(Matter, _matter)] = null;
+        var revokesBefore = _h.Shares.Writes.Count(w => w == "RevokeAccess");
+
+        _h.Store.Assign(Matter, _matter, Attorney1, null);
+        var outcome = await Sync();
+
+        outcome.Failures.Should().ContainSingle(f => f.Kind == "owner-unreadable");
+        ShareMask(user).Should().Be(CollaborateMask);
+        _h.Shares.Writes.Count(w => w == "RevokeAccess").Should().Be(revokesBefore, "nothing was sent");
+        LedgerRow(contact, Attorney1).State.Should().Be(AssignedAccessState.Shared, "the next pass tries again");
+    }
+
     [Fact]
     public async Task TheJob_WithItsRevokeSwitchOff_ReportsWouldRevoke_AndRemovesNothing()
     {
@@ -992,6 +1052,31 @@ public class AssignedAccessMaterializerTests
         _h.Cache.Removed.Should().Contain(r => r.Tenant == TestTenant && r.Id == expectedId,
             "the key ImpersonatedRootSetSource.GetAsync reads for that user");
         _h.Cache.Removed.Should().NotContain(r => r.Tenant == "anonymous");
+    }
+
+    /// <summary>r3 task 048 (046 review K1): also every customer home directory a linked user's home sign-in reads under.</summary>
+    [Fact]
+    public async Task AShareWrittenInTheJob_AlsoClearsTheUsersRootSetUnderEveryCustomerHomeTenant()
+    {
+        var customer = Guid.Parse("4a8b0c3e-7d21-4f5a-9e6b-0480480480e2");
+        _h.Configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["AzureAd:TenantId"] = TestTenant,
+                ["WorkforceIdentity:CustomerTenantIds:0"] = customer.ToString("D"),
+            })
+            .Build();
+        var (contact, user) = _h.LinkedContact();
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+
+        await _h.Materializer.MaterializeAsync(
+            new AssignedAccessRequest(Matter, _matter, AssignedAccessTrigger.Job, null, false,
+                _h.Materializer.DeploymentTenants()),
+            CancellationToken.None);
+
+        var expectedId = ImpersonatedRootSetSource.CacheId(user, MatterTable);
+        _h.Cache.Removed.Should().Contain(r => r.Tenant == TestTenant && r.Id == expectedId);
+        _h.Cache.Removed.Should().Contain(r => r.Tenant == customer.ToString("D") && r.Id == expectedId);
     }
 
     // ─────────────────────────────────────────────────────────────────────────────

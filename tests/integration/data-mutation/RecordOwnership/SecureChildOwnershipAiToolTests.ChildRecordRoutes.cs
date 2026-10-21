@@ -1106,6 +1106,94 @@ public sealed partial class SecureChildOwnershipAiToolTests
         TheGateRecordIsTeamOwnedAndUnshared();
     }
 
+    // ── #2091: a filing route's write that moves none of the row's parents (RecordOwnerResolution.ParentsUnchanged — every lookup
+    //    it sets already names that record in that column, every column it clears held no parent) is no re-file ─────────────
+
+    public static TheoryData<string, string> FilingRoutesAndTheLookupOfAToDoUnderTheirRow => new()
+    {
+        { "event-filing", "sprk_regardingevent" },
+        { "communication-filing", "sprk_regardingcommunication" },
+    };
+
+    [Theory(DisplayName = "#2091: a filing route re-binding the matter the row is already filed under writes it and runs no step after a re-file")]
+    [MemberData(nameof(FilingRoutesAndTheLookupOfAToDoUnderTheirRow))]
+    public async Task FilingRoute_ReBindingTheHeldMatter_IsWritten_AndRunsNoStepAfterARefile(string route, string todoLookup)
+    {
+        var (table, id) = route == "event-filing"
+            ? ("sprk_event", Event)
+            : ("sprk_communication", Guid.Parse("a2091000-0000-4000-8000-0000000000a1"));
+        var todo = Guid.Parse("a2091000-0000-4000-8000-0000000000a2");
+        _world.WithRecord(table, id, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam, extra: new()
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", SecureMatter),
+        });
+        _user.OwningTeamOf[id] = Directory.SecureNamedTeam;
+        ShareWorld.SecureChild(table, id, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
+        // An ordinary to-do under the isolated row (drift the two-minute net corrects): the step's pass would isolate it now.
+        ShareWorld.OrdinaryChild("sprk_todo", todo, (todoLookup, table, id));
+        SeedGateRecordOf(id);
+        var threads = new Moq.Mock<Sprk.Bff.Api.Services.Communication.IThreadResolver>();
+
+        var result = await RefileThroughWithThreads(
+            route, id, new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})" }, threads.Object);
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        _user.Patches.Should().ContainSingle("the caller's own update is written");
+        _world.Assignments.Should().BeEmpty("nothing it is filed under moved, so its owner is not re-decided");
+        _shareTable.MaskOf(table, id, DataversePrincipalRef.User(Sharee)).Should().BeNull("the step's mirror did not run");
+        ShareWorld.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.GeneralTeam),
+            "the step's pass over what is filed under the row did not run");
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(Moq.It.IsAny<Guid>(), Moq.It.IsAny<CancellationToken>()), Moq.Times.Never);
+        _gate.Entities.Verify(
+            e => e.RetrieveMultipleAsync(Moq.It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), Moq.It.IsAny<CancellationToken>()),
+            Moq.Times.Never, "the step's gate Decision Record re-own did not run");
+        _gate.RecordSharees(GateRecord).Should().Equal(GateSharee);
+    }
+
+    [Fact(DisplayName = "#2091 (b): the held matter re-bound WITH a different secure ancestor (a secure project) is a re-file — the step runs")]
+    public async Task CommunicationFiling_TheHeldMatterPlusASecureProject_IsARefile_TheStepRuns()
+    {
+        // ParentsUnchanged compares COLUMN BY COLUMN: sprk_regardingmatter re-binds the matter it holds (unchanged), but
+        // sprk_regardingproject now names a secure project it did not hold — a parent change, so the row is re-filed.
+        var communication = Guid.Parse("a2091000-0000-4000-8000-0000000000a3");
+        var secureProject = Guid.Parse("a2091000-0000-4000-8000-0000000000a4");
+        _world.WithSecureRoot("sprk_project", secureProject);
+        _world.WithRecord("sprk_communication", communication, Directory.ChildBu, owningTeam: Directory.ChildTeam, extra: new()
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", OrdinaryMatter),
+        });
+        ShareWorld.SecureRoot("sprk_project", secureProject);
+        _shareTable.Seed("sprk_project", secureProject, DataversePrincipalRef.User(Sharee), CollaborateMask);
+        // What the caller's PATCH leaves: the same matter, and the secure project too.
+        ShareWorld.OrdinaryChild("sprk_communication", communication,
+            ("sprk_regardingmatter", "sprk_matter", OrdinaryMatter), ("sprk_regardingproject", "sprk_project", secureProject));
+        SeedGateRecordOf(communication);
+        var threads = new Moq.Mock<Sprk.Bff.Api.Services.Communication.IThreadResolver>();
+
+        var result = await RefileCommunication(communication, new()
+        {
+            ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
+            ["sprk_RegardingProject@odata.bind"] = $"/sprk_projects({secureProject:D})",
+        }, threads.Object);
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        _world.Assignments.Should().Equal(("sprk_communication", communication, Directory.SecureNamedTeam));
+        _shareTable.MaskOf("sprk_communication", communication, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask,
+            "the step's mirror ran: the secure project's sharee sees the message");
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(communication, Moq.It.IsAny<CancellationToken>()), Moq.Times.Once,
+            "the step ran once (it reconciles a communication's thread)");
+        TheGateRecordIsTeamOwnedAndUnshared();
+    }
+
+    /// <summary><see cref="RefileThrough"/> for the two filing routes, with the step's thread seam.</summary>
+    private Task<IResult> RefileThroughWithThreads(
+        string route, Guid id, Dictionary<string, object?> payload, Sprk.Bff.Api.Services.Communication.IThreadResolver threads) =>
+        route == "event-filing"
+            ? Sprk.Bff.Api.Api.Events.EventEndpoints.RefileEventAsync(
+                id, Payload(payload), _user, _world.Resolver(), Restamper(), Children(threads), HttpContextOfCaller(),
+                NullLogger<Program>.Instance, CancellationToken.None)
+            : RefileCommunication(id, payload, threads);
+
     [Fact]
     public async Task CommunicationFiling_WithTheAssociationStatus_Is400_TheStatusIsTheCallersOwnUpdate()
     {
@@ -1289,6 +1377,41 @@ public sealed partial class SecureChildOwnershipAiToolTests
         result.Success.Should().BeTrue(result.ErrorMessage);
         _world.Assignments.Should().Equal(("sprk_todo", Todo, Directory.ChildTeam));
         _shareTable.MaskOf("sprk_todo", Todo, DataversePrincipalRef.User(Sharee)).Should().BeNull();
+    }
+
+    [Theory(DisplayName = "#2091 r5: the chat update tool shares the writers' isolation read — one fault is retried and the move out releases; a second is a faulted answer that releases nothing")]
+    [InlineData(1, true)]
+    [InlineData(2, false)]
+    public async Task UpdateTool_MovingAToDoOutOfASecureMatter_RetriesTheIsolationReadOnce(int faultsBeforeItHeals, bool released)
+    {
+        _world.WithRecord("sprk_todo", Todo, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam, extra: new()
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", SecureMatter),
+        });
+        ShareWorld.SecureChild("sprk_todo", Todo, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
+        _shareTable.Seed("sprk_todo", Todo, DataversePrincipalRef.User(Sharee), CollaborateMask);
+        _user.FullAccessOn.Add(SecureMatter);
+        ShareWorld.Set("sprk_todo", Todo, "sprk_regardingmatter", new EntityReference("sprk_matter", OrdinaryMatter));
+        var faults = 0;
+        ShareWorld.QueryFault = () =>
+        {
+            if (++faults == faultsBeforeItHeals)
+                ShareWorld.ClearQueryFaults();
+            return new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout of 100 seconds elapsing.");
+        };
+        ShareWorld.FailingQueriesOf("sprk_todo");
+
+        var result = await UpdateRecordWithShares(
+            "sprk_todo", Todo, Lookup("sprk_regardingmatter", "sprk_matter", OrdinaryMatter));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        faults.Should().Be(faultsBeforeItHeals, "the read, and at most one retry");
+        _world.Assignments.Should().Equal(("sprk_todo", Todo, Directory.ChildTeam));
+        if (released)
+            _shareTable.MaskOf("sprk_todo", Todo, DataversePrincipalRef.User(Sharee)).Should().BeNull("the retried read answered");
+        else
+            _shareTable.MaskOf("sprk_todo", Todo, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask,
+                "whether the row WAS isolated is unknown, so nothing is released");
     }
 
     [Fact]

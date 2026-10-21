@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="044" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>A9 schema: contact sprk_externaltenantid + plane WorkforceHome; systemuser home-id link columns + unsecured key mirrors + alternate key</title>
+    <phase>4b A9 workforce home sign-in</phase>
+    <gate>startable (owner approved the schema 2026-10-13, design note §11 item 2); the dev import is a live change shown to the owner first</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Dataverse schema in the solution plus an owner-gated dev import; no C# or TS code</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Schema follows an existing script pattern (Set-ContactIdentityBindingSchema.ps1); the design fixes every name and type</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A9-1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>dataverse, solution, fields, auth</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add the A9 Dataverse schema from notes/a9-bff-design.md §4 and §5 to the SpaarkeMaster solution and a re-runnable schema script, then, with the owner's approval of the exact commands, apply it to dev and verify it read-only.</prompt>
+  <role>SPAARKE platform developer. Dataverse schema author. Follow ADRs strictly.</role>
+  <goal>The solution and dev both have: option WorkforceHome = 100000002 on global option set sprk_identityplane; contact column sprk_externaltenantid (text 36, field-secured like sprk_externalobjectid); systemuser columns sprk_hometenantid and sprk_homeobjectid (text 36, field-secured) and their unsecured mirrors sprk_hometenantidkey and sprk_homeobjectidkey (text 36), with one alternate key on the mirror pair. A verification record in notes/task-044-schema-record.md shows each item read back from dev.</goal>
+
+  <context>
+    <background>Design note §4 (contact identity for home tokens) and §5 (stored link for licensed users). Owner decision 2026-10-13: "schema approved" (one option value, three columns, one alternate key). The existing binding schema was added by scripts/Set-ContactIdentityBindingSchema.ps1 and is in the solution at Entities/Contact/Entity.xml and OptionSets/sprk_identityplane.xml. Dataverse is created/updated app-only by the BFF; no plugins (ADR-002).</background>
+    <relevant-files>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/OptionSets/sprk_identityplane.xml</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Entities/Contact/Entity.xml</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Other/Solution.xml</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Entities/SystemUser/Entity.xml (create the entity folder in the solution if SystemUser is not yet a component; record which)</file>
+      <file role="new">scripts/Set-WorkforceHomeIdentitySchema.ps1</file>
+      <file role="canonical-reference">scripts/Set-ContactIdentityBindingSchema.ps1</file>
+      <file role="new-artifact">projects/spaarke-SPA-external-access-platform-r3/notes/task-044-schema-record.md</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>sprk_externalobjectid / sprk_externalobjectidkey / sprk_identityplane on contact (scripts/Set-ContactIdentityBindingSchema.ps1) key a contact on oid alone; systemuser has azureactivedirectoryobjectid (Spaarke-tenant oid only).</existing>
+    <extension>Extends the existing option set and the existing contact and systemuser tables; no new table. A home oid cannot reuse azureactivedirectoryobjectid (that is the Spaarke-tenant oid) and UAC's condition is a field of its own.</extension>
+    <cost-of-doing-nothing>Without the tenant column a home contact cannot be found by (tid, oid) and A8 guest contacts cannot be told apart from A9 contacts; without the systemuser link columns a licensed user signing in with their company account gets registration_required and becomes a second, contact principal with split access.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="ADR-002">No plugin, workflow or business rule is added for these columns; the BFF is their only writer.</constraint>
+    <constraint source="project">Names, types and the option value are exactly those in design note §4/§5: sprk_identityplane option WorkforceHome = 100000002; contact.sprk_externaltenantid text(36); systemuser.sprk_hometenantid text(36), systemuser.sprk_homeobjectid text(36), both field-secured; systemuser.sprk_hometenantidkey text(36) and systemuser.sprk_homeobjectidkey text(36), both UNSECURED; one alternate key on (sprk_hometenantidkey, sprk_homeobjectidkey). Owner 2026-10-14 option A: Dataverse refuses an alternate key on a field-secured column, so the key sits on mirrors exactly as contact.sprk_externalobjectidkey does (Set-ContactIdentityBindingSchema.ps1, owner round 4 B2). No other column, key or option is added.</constraint>
+    <constraint source="project">contact.sprk_externaltenantid, systemuser.sprk_hometenantid and systemuser.sprk_homeobjectid are field-secured with exactly the profile permissions sprk_externalobjectid has (Spaarke Identity Link Readers: read; Spaarke Identity Link Writers: read, create, update; Other/FieldSecurityProfiles.xml). The two *key mirrors are NOT secured. Keep the reference script's platform-rule preflight and extend it to systemuser, so -Apply stops if a key column is ever field-secured.</constraint>
+    <constraint source="project">The script is idempotent (get-before-create, read back after create) and supports -WhatIf; it never deletes or alters existing columns.</constraint>
+    <constraint source="CLAUDE.md §9 / project security directives">The dev apply is a live change: show the owner the exact command and the rollback (remove the three columns, the key and the option value, unused until 046 ships) and wait for approval. Read-only verification commands are also shown first.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/notes/a9-bff-design.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/patterns/dataverse/plugin-structure.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/data-model/</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Write scripts/Set-WorkforceHomeIdentitySchema.ps1 by copying the structure of Set-ContactIdentityBindingSchema.ps1 (auth, get-before-create, field security, read-back).</step>
+    <step order="2">Add the option value, the three columns and the alternate key to the solution XML files listed; keep XML well-formed and ordered like neighbouring entries.</step>
+    <step order="3">Run the script with -WhatIf against dev and show the owner the output, the apply command and the rollback. Wait for approval.</step>
+    <step order="4">After approval, apply; wait for the alternate key's index to reach Active; read back each item (option value, column type/length/field security, key status).</step>
+    <step order="5">Write notes/task-044-schema-record.md (commands run, masked output, rollback).</step>
+    <step order="6">Update tasks/TASK-INDEX.md: this task's cell to `✅ [done]`, this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If option value 100000002 is already taken on sprk_identityplane, or the field-security profile used by sprk_externalobjectid cannot be found, STOP and escalate (root CLAUDE.md §6); do not pick another value or profile.</trigger>
+    <trigger>If the alternate key fails to activate on dev (existing data conflict), STOP and escalate with the error; do not delete data.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="pwsh">Run the schema script</tool>
+    <tool name="dataverse">Read-only verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/Set-WorkforceHomeIdentitySchema.ps1</output>
+    <output type="code">src/dataverse/solutions/SpaarkeMaster/ (option set, Contact and SystemUser entity XML, Solution.xml)</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r3/notes/task-044-schema-record.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">sprk_identityplane has WorkforceHome = 100000002 in the solution XML and on dev; existing values (Spaarke-tenant workforce, External) are unchanged.</criterion>
+    <criterion testable="true">contact.sprk_externaltenantid exists as text(36), field-secured with the same profile as sprk_externalobjectid, in the solution and on dev.</criterion>
+    <criterion testable="true">systemuser.sprk_hometenantid and sprk_homeobjectid exist as text(36), field-secured; sprk_hometenantidkey and sprk_homeobjectidkey exist as text(36), not secured; one alternate key on (sprk_hometenantidkey, sprk_homeobjectidkey) has status Active on dev.</criterion>
+    <criterion testable="true">Re-running the script on dev changes nothing and reports every item as present.</criterion>
+    <criterion testable="true">No apply command ran before the owner approved it; the record lists the commands and the rollback, with no secret or token value.</criterion>
+  </acceptance-criteria>
+
+  <notes>Design note §4/§5/§8 step 1. Production rollout is provisioning's concern (solution import), not this task.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

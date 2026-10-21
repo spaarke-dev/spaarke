@@ -14,11 +14,22 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// (<c>ExternalDataService.IsCreatedByCaller</c>) stays the authority. It is the caller's own id only, so it
 /// discloses nothing new.
 /// </param>
+/// <param name="WriteAccessPerRecord">
+/// <see langword="true"/> for a caller whose access Dataverse decides (<c>CallerPrincipal.DataverseConfirmsWrites</c>,
+/// unified-access-control-r2 task 036 fix round 1, F4). Their <see cref="Projects"/> levels then say only what they may
+/// SEE (the impersonated set confers Read, so most read as ViewOnly); whether they may create under a record is decided
+/// per record, as Dataverse decides it in MDA. The client then takes its create/upload controls from the record's own
+/// list (<c>canCreate</c>) instead of the level. Omitted when <see langword="false"/>, so every other caller's response
+/// is byte-for-byte what it was.
+/// </param>
 public record ExternalUserContextResponse(
     Guid ContactId,
     string Email,
     IReadOnlyList<ProjectAccessEntry> Projects,
-    Guid? SystemUserId = null);
+    Guid? SystemUserId = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    bool WriteAccessPerRecord = false);
 
 /// <summary>
 /// A single project access entry in the external user context response.

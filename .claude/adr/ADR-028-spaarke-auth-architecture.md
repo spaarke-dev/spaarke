@@ -360,6 +360,30 @@ identity can already do; the effective rights are the overlap of both. The condi
 OBO, user tokens and confidential clients remain forbidden everywhere this extension applies. Evidence:
 `projects/unified-access-control-r2/notes/decisions/function-impersonation-proposal.md`.
 
+### Scope extension (2026-10-18, widened 2026-10-20, owner-accepted): confirming a systemuser's write on /api/v1/external
+
+A licensed core user's SPA/Teams token is never exchanged on `/api/v1/external` (A1–A3), and one resolved through A9's
+stored home link holds a customer-directory token that could not be exchanged anyway. To confirm **every systemuser's**
+write there (ADR-034 A2), the BFF asks Dataverse app-only, impersonating that systemuser: `RetrievePrincipalAccess` with
+`Principal = systemusers(<id>)` on the target record, and `RetrieveUserSetOfPrivilegesByNames` on that systemuser for
+the child table's Create privilege (task 036 decision a, widened by option C). The trust basis is this amendment's: the
+id is the one the validated token was resolved to, never client input, and Dataverse answers from that user's own roles,
+teams and shares. Conditions:
+- the only confirmation on the plane, for every systemuser (`ExternalProjectDataEndpoints.AppOnlyConfirmationPrincipal`),
+  never a fallback after a token exchange;
+- fail closed, and a fault is not a denial: a missing systemuser id adds no rights (both `Spaarke.Dataverse` calls
+  refuse `Guid.Empty`); a fault, a timeout or an unreadable answer adds no rights either, and a write refused only for
+  that reason is a retry-able 503 that writes nothing, never a "no access" 403;
+- a 404 is re-asked on `CallerRecordAccessProbe.NotFoundRetryDelay`'s schedule; a 403 that is not an access answer
+  (e.g. `0x8004A110`, or `0x80040220` whose message names `prvActOnBehalfOfAnotherUser` as a whole token) is UNKNOWN
+  and logged as a Warning — the same reading keeps a JIT container grant in `SpeContainerMembershipSync` for that run
+  rather than removing it (task 171); each question is bounded at 15 s;
+- uncached, and logged with the path that answered (no tokens, no PII);
+- the same deployment prerequisite as the read (E-2, `prvActOnBehalfOfAnotherUser`).
+
+No token exchange is added. Enforced by: `tests/Spaarke.ArchTests/ExternalPlaneNoOboGuardTests.cs`. Evidence:
+`projects/unified-access-control-r2/notes/036-fr20-implementation.md` §12.
+
 ### Deployment prerequisites (register E-2 / E-3)
 
 Both are **blocking** — without them the impersonated read cannot work correctly:
@@ -368,6 +392,10 @@ Both are **blocking** — without them the impersonated read cannot work correct
 2. **The BFF app user stays Organization-scoped.** Impersonation returns *the impersonated user's*
    scope, so the app user's own breadth is not a shortcut — but narrowing it breaks the app-only paths
    that legitimately need org breadth.
+3. **Conditional Access targets the BFF API and the SPA client.** On `/api/v1/external` the BFF never exchanges the
+   user's token (A1–A3, and the write confirmation above), so a Conditional Access or sign-in-risk policy that targets
+   only Dataverse, Graph or SharePoint is never evaluated for SPA/Teams users. Such policies MUST target the BFF API app
+   registration and the SPA client, where those users sign in.
 
 ### Alternatives considered (and rejected)
 
@@ -518,6 +546,7 @@ The Office add-in already runs the working shape: one single-tenant Spaarke clie
   - Its authority is pinned to `https://login.microsoftonline.com/{Spaarke tenant id}`.
   > ⚠️ **Amended by [A9](#amendment-a9-2026-10-13-workforce-contacts-sign-in-with-their-customers-home-directory-browser-spa) (2026-10-13):** this rule now covers **licensed core users**. Workforce contacts on the browser SPA sign in through one **multitenant** Spaarke SPA client at their customer's home directory.
 - **MUST**, in Teams, acquire tokens with **Nested App Authentication first, then the MSAL popup**.
+  > ⚠️ **Amended by [A9](#amendment-a9-2026-10-13-workforce-contacts-sign-in-with-their-customers-home-directory-browser-spa) (2026-10-13):** the Teams host now uses the A9 multitenant client for both populations, still NAA then popup. The Spaarke-tenant authority above remains for the Office add-ins.
 - **MUST** request `api://{app id}/user_impersonation` on **both** planes:
   - **Workforce client:** `{app id}` is the customer BFF app id.
   - **CIAM client:** `{app id}` is the customer's own **CIAM API app**, registered in the CIAM tenant (`spaarkeextid`) by provisioning, keyless, with the CIAM SPA client pre-authorized. A CIAM local account cannot get a token for an API registered in the workforce tenant (AADSTS500207; T240d spike S1, 2026-10-12). The stamp's `Ciam:Audience` is that app id.
@@ -599,13 +628,13 @@ The Office add-in already runs the working shape: one single-tenant Spaarke clie
 
 | Population | Identity | Sign-in | Surfaces |
 |---|---|---|---|
-| Licensed core users | B2B guest in the Spaarke tenant; Dataverse `systemuser` | **Unchanged (A8):** single-tenant Spaarke client, Spaarke-tenant authority, NAA then popup | Model-driven apps, Office add-ins, Teams; the browser SPA through the stored link below |
-| **Workforce contacts** (licence-free customer employees) | **Company account in the customer's home directory; Dataverse `contact`. No B2B guest** | **This amendment** | Browser SPA. Teams is deferred (see Scope) |
+| Licensed core users | B2B guest in the Spaarke tenant; Dataverse `systemuser` | **Unchanged (A8)** for model-driven apps and Office add-ins: single-tenant Spaarke client, Spaarke-tenant authority, NAA then popup | Model-driven apps, Office add-ins; the browser SPA **and Teams** through the stored link below |
+| **Workforce contacts** (licence-free customer employees) | **Company account in the customer's home directory; Dataverse `contact`. No B2B guest** | **This amendment** | Browser SPA and Teams |
 | Partners | CIAM local account (`spaarkeextid`) | **Unchanged (A1/A8)** | Browser SPA |
 
 ### New MUST rules
 
-- **MUST** sign workforce contacts in to the browser SPA through **one multitenant Spaarke SPA client**.
+- **MUST** sign workforce contacts in to the browser SPA **and the Teams host** through **one multitenant Spaarke SPA client**. In Teams it signs in **everyone**, licensed core users included: the host cannot tell the two apart before sign-in. Teams uses NAA with the Teams context's tenant id as the authority, then the MSAL popup. Licensed users there resolve through the stored link (amended 2026-10-13, owner: "yes include teams").
   - The authority is the customer's home directory, `https://login.microsoftonline.com/{home directory id}`. The id comes from Spaarke-owned data (the T240c directory, or dev configuration until it ships), never from a link or other client input.
   - `organizations` is allowed for this client only, and only for discovery before the customer is known. The BFF rules below are the enforcement point either way.
 - **MUST** make each customer's BFF API app multitenant, with `requestedAccessTokenVersion` = 2.
@@ -634,12 +663,13 @@ The Office add-in already runs the working shape: one single-tenant Spaarke clie
 
 - **MUST NOT** create B2B guests for workforce contacts. A8's "Workforce-contact self-registration" rules (guest creation through a shared registration path) are withdrawn.
 - **MUST NOT** accept, on this path, a home-directory token whose `tid` is not in that stamp's list, a home-directory guest (`acct` = 1), or an app token.
-- **MUST NOT** move licensed core users' Office add-in or Teams sign-in to the multitenant client. They stay on A8.
+- **MUST NOT** move licensed core users' **Office add-in** sign-in to the multitenant client. It stays on A8. (Teams moved to the multitenant client for both populations, owner, 2026-10-13.)
 
 ### Scope and preserved invariants
 
+- **Write confirmation for every core user** (2026-10-18, widened 2026-10-20): a licensed core user, Spaarke-tenant or resolved through the stored link, is confirmed for ADR-034 A2 writes app-only, impersonating their systemuser ([A5 scope extension](#scope-extension-2026-10-18-widened-2026-10-20-owner-accepted-confirming-a-systemusers-write-on-apiv1external)); no token of theirs is exchanged.
 - **Unchanged:** no OBO on any collaboration plane; app-only Dataverse and SPE; plane selection from validated `iss`/`tid`; A8's `user_impersonation` scope, default Tier-1 modules and CIAM rules; no invite permission on any stamp identity.
-- **Teams for workforce contacts is deferred** (owner: a soft requirement). When it is added, it uses the documented multitenant NAA pattern under these same rules, after a live sign-in test.
+- **Teams** (owner, 2026-10-13: included). Teams uses the documented multitenant NAA pattern under these same rules, with a live sign-in test on desktop, web and mobile before release. The A8 Teams clause (NAA against the Spaarke tenant) no longer applies to the Teams host.
 - **Licensing** (multiplexing, External Users) is a commercial question outside this ADR.
 - **Model 1 only.** Model 2 keeps A2's text until a further amendment.
 

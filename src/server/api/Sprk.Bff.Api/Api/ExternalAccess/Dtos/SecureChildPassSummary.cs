@@ -31,6 +31,22 @@ public sealed record SecureChildPassSummary(
             .Select(t => new SecureChildPassTable(t.Table, t.Examined, t.AlreadyCorrect, t.Changed, t.Refused, t.Failed, t.NeedsF3))
             .ToList(),
         report.ChildrenNeedingF3);
+
+    /// <summary>
+    /// UAC task 099b review round 3 (K2): the problem-detail extension naming what blocks a <c>children_incomplete</c> that a
+    /// repeat call cannot complete — today only <c>sdap.access.grant.owner_privilege_missing</c>. Absent otherwise.
+    /// </summary>
+    public const string ChildrenBlockedByKey = "childrenBlockedBy";
+
+    /// <summary>
+    /// UAC task 099b review round 4: the <see cref="ChildrenBlockedByKey"/> extension of an incomplete pass, for every endpoint
+    /// that answers one (provisioning and unsecure) — present only when a grant row was left where it is for want of the
+    /// owner privilege (<see cref="SecureChildReconcileReport.BlockedByGrantOwnerPrivilege"/>).
+    /// </summary>
+    internal static IEnumerable<(string Key, object? Value)> BlockedByExtensions(SecureChildReconcileReport report) =>
+        report.BlockedByGrantOwnerPrivilege
+            ? [(ChildrenBlockedByKey, Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalGrantLifecycle.GrantOwnerPrivilegeMissingReasonCode)]
+            : [];
 }
 
 /// <summary>
