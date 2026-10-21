@@ -206,7 +206,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
         var probe = new Mock<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>(
             new HttpClient(), new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
-            NullLogger<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>.Instance, null!) { CallBase = false };
+            NullLogger<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>.Instance, null!)
+        { CallBase = false };
         probe.Setup(p => p.GetCallerSystemUserIdAsync("office-token", It.IsAny<CancellationToken>())).ReturnsAsync(OfficeSaver);
         probe.Setup(p => p.GetCallerRightsAsync("office-token", "sprk_communications", RefiledEmail, It.IsAny<CancellationToken>()))
             .ReturnsAsync(AccessRights.Read | AccessRights.Write);
@@ -238,8 +239,14 @@ public sealed partial class SecureChildOwnershipAiToolTests
                 Direction = "Incoming",
                 Decision = new Sprk.Bff.Api.Services.Communication.Engine.AssociationDecisionTrace
                 {
-                    Status = "Resolved", AutoFiled = false, KillSwitchEnabled = true, AutoFileThreshold = 0.85,
-                    TopDeterministicConfidence = 1, TopConfidence = 1, AiInvolved = false, Reason = "caller-supplied",
+                    Status = "Resolved",
+                    AutoFiled = false,
+                    KillSwitchEnabled = true,
+                    AutoFileThreshold = 0.85,
+                    TopDeterministicConfidence = 1,
+                    TopConfidence = 1,
+                    AiInvolved = false,
+                    Reason = "caller-supplied",
                 },
                 RungsFired = Array.Empty<string>(),
                 Candidates = Array.Empty<Sprk.Bff.Api.Services.Communication.Engine.CandidateTrace>(),
