@@ -3,7 +3,7 @@
   <metadata>
     <title>Tell the Outlook user when a save could not file its email to the record (#2171)</title>
     <phase>8 — UAT findings and cross-project fixes</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF response contract (additive) plus Outlook add-in client change on the save path.</rigor-reason>
     <model-tier>sonnet</model-tier>

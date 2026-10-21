@@ -8,9 +8,9 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **130 ✅** merged 2026-10-21 16:11Z (#2177, `4e36c1929d`). **131 🔄** (FULL, sonnet/high): #2182, now based on master. |
-| **Status** | #2182 retargeted to master. Master merged into `work/spaarkeai-word-add-in-r1-131` (C:\wt131, `0c6f90d97a`, clean; not yet pushed while the guard and email-filing tests run). |
-| **Next Action** | 1. When the C:\wt131 tests pass: push the 131 branch, `gh pr ready 2182`, `gh pr merge 2182 --auto --merge` (131's gates are done; it merges under the owner's 2026-10-21 sign-off).<br>2. After #2182 merges: Step 10 for 131 (POML, TASK-INDEX ✅, drift check), merge master into the work branch, then remove C:\wt131 with `pwsh -NoProfile -Command "& ./scripts/worktree/Remove-WorktreeSafe.ps1 -Path 'C:\wt131'"`.<br>3. Dev deploy of 130+131: only on the owner's go, coordinated with R3; the build must contain 077. |
+| **Task** | No code task active. **130 ✅** (#2177, `4e36c1929d`) and **131 ✅** (#2182, `733c65063c`) merged 2026-10-21; C:\wt131 removed. Open: 042 (UAT), 125 (guest live check), 090 (wrap-up). |
+| **Status** | 130 is live on the dev BFF (`84291ecea8`); 131 is not yet. The owner gave the go (2026-10-21) to deploy in coordination with the other projects. |
+| **Next Action** | 1. When a dev BFF containing `733c65063c` is live (R3's or UAC's next routine deploy; check its ProductVersion), redeploy the Outlook add-in (`/office-addins-deploy`) so 131's notice shows. Before that, merge master into the work branch.<br>2. When R3 sends the owner's two .eml save times or subjects, read the sprk_document rows back and report them to UAC and R3.<br>3. Owner live checks (below), then 090. |
 
 ## Task 130 (#2126 / R3 ISS-015 / UAC D7 T8): what is in #2177
 - Every Office email-derived `sprk_document` (the .eml, each attachment child, a single attachment, the worker fallback) is created linked to its `sprk_communication`, or Restricted. Restricted carries `sprk_accessinheritance` = `AccessInheritance.OwnNarrowing(Restricted)` in the same create (UAC 189); the stager refuses a value without its record.
