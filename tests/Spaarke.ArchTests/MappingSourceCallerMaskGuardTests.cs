@@ -1,4 +1,6 @@
 using System.Reflection;
+using System.Xml;
+using System.Xml.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -22,18 +24,22 @@ namespace Spaarke.ArchTests;
 /// qualified, fully qualified, through a <c>using X = …CreateTimeFieldMapping</c> alias or a <c>using static</c> import, with or
 /// without a verbatim <c>@</c> — the <c>source</c> argument (third positional, or named <c>source:</c>) is either the literal
 /// <c>null</c> / <c>default</c> (nothing read, nothing copied), or a plain local name. For a local name the rule is an
-/// ALLOW-LIST per occurrence, decided on syntax nodes in the SAME member body (method, constructor, accessor or local function):
+/// ALLOW-LIST per occurrence, decided on syntax nodes in the SAME member body (method, constructor or accessor; a local function is
+/// judged as part of the member that contains it, so a variable it captures is traced):
 /// every occurrence of that name there must be (1) a declaration or a statement-level assignment of <c>null</c>, <c>default</c>
 /// or exactly <c>(await )?MappingSourceCallerMask.ApplyAsync(…)</c> (optionally <c>.ConfigureAwait(false)</c>, nothing else);
 /// (2) a null check; or (3) an engine call's source argument — and at least one assignment must be a mask call. Anything else (a
 /// helper argument, an alias, a cast, a parameter, a lambda, pattern or query binding, a deconstruction, a member access, a
 /// <c>ref</c>, a field, property or base-class member declared outside the body) fails, as does an expression source and the
-/// engine's method taken as a method group (assigned, passed, <c>new Func&lt;…&gt;(…)</c>).</para>
+/// engine's method taken as a method group (assigned, passed, <c>new Func&lt;…&gt;(…)</c>). A <c>global using</c> that names the
+/// engine (an alias or <c>static</c>), in any file or in a project file's <c>&lt;Using&gt;</c> item
+/// (<see cref="NoProjectFileImportsTheEngineGlobally"/>), is itself a violation: it would hide calls in every other file.</para>
 /// <para><b>Parsed with Roslyn (a syntax tree); comments and string contents cannot hide or fake a call.</b> The sources are read
 /// by <c>CSharpSyntaxTree.ParseText</c>, so a <c>//</c>, <c>/*</c>, quote or brace inside any kind of string or char literal,
 /// or inside a comment, is never mistaken for code. A tree with syntax errors is still walked, node by node; real sources
 /// compile, and a control that does not parse as a file is parsed as a script (statements and members at the top level).</para>
-/// <para><b>Known limits</b> (accepted): the mask call's arguments are not checked. A call made through REFLECTION
+/// <para><b>Known limits</b> (accepted): the mask call's arguments are not checked. Fail-closed false positive:
+/// <c>nameof(CreateTimeFieldMapping.Apply)</c> is flagged (a method group). A call made through REFLECTION
 /// (<c>GetMethod("Apply").Invoke</c>) is not seen by any syntax scan; <see cref="TheEngine_OffersNoOtherPathThatTakesASourceEntity"/>
 /// keeps the engine's own surface to the two guarded entry points, which is what makes a reflective call the only way round.</para>
 ///
@@ -87,6 +93,75 @@ public class MappingSourceCallerMaskGuardTests
             "source is read app-only, which ignores field-level security; mask it first:\n" +
             "  source = await MappingSourceCallerMask.ApplyAsync(callerClient, table, id, appRead, sourceColumns, logger, ct);\n" +
             "and pass that local (or a literal null). " + string.Join("\n", offenders));
+    }
+
+    /// <summary>
+    /// The project-file twin of a <c>global using</c>: a <c>&lt;Using Include="…CreateTimeFieldMapping" /&gt;</c> item (plain, aliased
+    /// or <c>Static="true"</c>) in any project file, <c>Directory.Build.props</c> or <c>.targets</c> that applies to
+    /// <c>src/server/**</c> imports the engine into every file of the project, which the per-file scan cannot see.
+    /// </summary>
+    [Fact(DisplayName = "#2188: no project file imports the field-mapping engine for every file")]
+    public void NoProjectFileImportsTheEngineGlobally()
+    {
+        var files = Directory.EnumerateFiles(Path.Combine(SourceScan.RepoRoot, "src", "server"), "*", SearchOption.AllDirectories)
+            .Where(f => (f.EndsWith(".csproj", StringComparison.Ordinal) || f.EndsWith(".props", StringComparison.Ordinal)
+                         || f.EndsWith(".targets", StringComparison.Ordinal))
+                        && !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+                        && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .Concat(new[] { "Directory.Build.props", "Directory.Build.targets" }
+                .Select(n => Path.Combine(SourceScan.RepoRoot, n)).Where(File.Exists))
+            .ToList();
+
+        Assert.NotEmpty(files);
+        var offenders = files.SelectMany(f => UsingItemViolations(File.ReadAllText(f)).Select(v => $"{SourceScan.Relative(f)}: {v}")).ToList();
+        Assert.True(offenders.Count == 0,
+            "A project file imports CreateTimeFieldMapping into every file (a <Using> item), which hides its calls from the mask guard: "
+            + string.Join("\n", offenders));
+    }
+
+    public static TheoryData<string, string> UsingItemBypasses() => new()
+    {
+        { "an aliased <Using> item", """<Project><ItemGroup><Using Include="Sprk.Bff.Api.Services.Dataverse.FieldMapping.CreateTimeFieldMapping" Alias="Engine" /></ItemGroup></Project>""" },
+        { "a static <Using> item", """<Project><ItemGroup><Using Include="Sprk.Bff.Api.Services.Dataverse.FieldMapping.CreateTimeFieldMapping" Static="true" /></ItemGroup></Project>""" },
+        { "a <Using> item changed by Update", """<Project><ItemGroup><Using Update="Sprk.Bff.Api.Services.Dataverse.FieldMapping.CreateTimeFieldMapping" Static="true" /></ItemGroup></Project>""" },
+        { "a props file that is not well-formed XML but names the engine", """<Project><Using Include="X.CreateTimeFieldMapping" """ },
+    };
+
+    [Theory(DisplayName = "#2188 guard control: a project-file <Using> of the engine fires")]
+    [MemberData(nameof(UsingItemBypasses))]
+    public void TheProjectFileCheckFires(string shape, string xml)
+        => Assert.True(UsingItemViolations(xml).Count > 0, $"The project-file check did not fire on: {shape}.");
+
+    public static TheoryData<string, string> UsingItemSanctioned() => new()
+    {
+        { "an unrelated <Using> item", """<Project><ItemGroup><Using Include="System.Linq" /></ItemGroup></Project>""" },
+        { "the engine named only in a comment", """<Project><!-- <Using Include="X.CreateTimeFieldMapping" /> --><ItemGroup /></Project>""" },
+        { "the engine named in another element", """<Project><PropertyGroup><Description>CreateTimeFieldMapping</Description></PropertyGroup></Project>""" },
+    };
+
+    [Theory(DisplayName = "#2188 guard control: unrelated project-file content does not fire")]
+    [MemberData(nameof(UsingItemSanctioned))]
+    public void TheProjectFileCheckDoesNotFire(string shape, string xml)
+        => Assert.True(UsingItemViolations(xml).Count == 0, $"The project-file check fired on: {shape}.");
+
+    /// <summary>Each <c>&lt;Using&gt;</c> item in <paramref name="xml"/> that names the engine; a file that does not parse and mentions it counts.</summary>
+    private static List<string> UsingItemViolations(string xml)
+    {
+        try
+        {
+            return XDocument.Parse(xml).Descendants()
+                .Where(e => e.Name.LocalName == "Using")
+                .Where(e => new[] { "Include", "Update" }.Select(a => (string?)e.Attribute(a))
+                    .Any(v => v is not null && v.Split(';').Any(part => part.Trim().Split('.').Last() == EngineType)))
+                .Select(e => $"<Using> item '{e}' imports {EngineType} for every file")
+                .ToList();
+        }
+        catch (XmlException)
+        {
+            return xml.Contains(EngineType, StringComparison.Ordinal)
+                ? [$"a project file that does not parse as XML mentions {EngineType}"]
+                : [];
+        }
     }
 
     /// <summary>
@@ -459,6 +534,67 @@ public class MappingSourceCallerMaskGuardTests
             """
         },
         {
+            "(UAC-r2 re-check, F3-1) a variable captured by a local function, assigned from the mask only under a condition",
+            """
+            class Svc
+            {
+                async Task M()
+                {
+                    var s = appRead;
+                    async Task L()
+                    {
+                        if (flag) s = await MappingSourceCallerMask.ApplyAsync(c, t, i, appRead, cols, _logger, ct);
+                        CreateTimeFieldMapping.Apply(r, t, s, p, w, l);
+                    }
+                }
+            }
+            """
+        },
+        {
+            "(UAC-r2 re-check, F3-1) the same, with the engine called BEFORE the mask assignment in the local function",
+            """
+            class Svc
+            {
+                async Task M()
+                {
+                    var s = appRead;
+                    async Task L()
+                    {
+                        CreateTimeFieldMapping.Apply(r, t, s, p, w, l);
+                        s = await MappingSourceCallerMask.ApplyAsync(c, t, i, appRead, cols, _logger, ct);
+                    }
+                }
+            }
+            """
+        },
+        {
+            "(UAC-r2 re-check, F3-2) the engine named through a :: alias-qualified name",
+            """
+            using FM = Sprk.Bff.Api.Services.Dataverse.FieldMapping;
+            FM::CreateTimeFieldMapping.Apply(r, t, raw, p, w, l);
+            """
+        },
+        {
+            "(UAC-r2 re-check, F3-3) a global using alias of the engine",
+            """
+            global using Engine = Sprk.Bff.Api.Services.Dataverse.FieldMapping.CreateTimeFieldMapping;
+            """
+        },
+        {
+            "(UAC-r2 re-check, F3-3) a global using static of the engine",
+            """
+            global using static Sprk.Bff.Api.Services.Dataverse.FieldMapping.CreateTimeFieldMapping;
+            """
+        },
+        {
+            "(UAC-r2 re-check, F3-4) a masked local reassigned from the app read before the call",
+            """
+            var s = await MappingSourceCallerMask.ApplyAsync(c, t, i, appRead, cols, _logger, ct);
+            s = raw;
+            CreateTimeFieldMapping.Apply(r, t, s, p, w, l);
+            """
+        },
+        {
             "(#2191 review, F b) the engine's method taken as a method group and called through the delegate",
             """
             Action<IEnumerable<FieldMappingRuleEntity>, Entity, Entity?, IReadOnlySet<string>, List<string>, ILogger> f;
@@ -583,10 +719,17 @@ public class MappingSourceCallerMaskGuardTests
         var aliases = imports.Where(u => u.Alias is not null).Select(u => u.Alias!.Name.Identifier.ValueText).ToHashSet(StringComparer.Ordinal);
         var staticImport = imports.Any(u => u.StaticKeyword.IsKind(SyntaxKind.StaticKeyword));
 
+        // A global using of the engine would hide its calls in every OTHER file, which this per-file scan cannot see.
+        foreach (var global in imports.Where(u => u.GlobalKeyword.IsKind(SyntaxKind.GlobalKeyword)))
+        {
+            violations.Add($"{Line(global)}: a global using names CreateTimeFieldMapping, which hides its calls in every other file");
+        }
+
         bool IsEngineType(ExpressionSyntax e) => e switch
         {
             IdentifierNameSyntax id => id.Identifier.ValueText == EngineType || aliases.Contains(id.Identifier.ValueText),
             MemberAccessExpressionSyntax ma => ma.Name.Identifier.ValueText == EngineType,
+            AliasQualifiedNameSyntax aq => aq.Name.Identifier.ValueText == EngineType, // FM::CreateTimeFieldMapping
             _ => false,
         };
 
@@ -669,11 +812,12 @@ public class MappingSourceCallerMaskGuardTests
     }
 
     /// <summary>
-    /// The member body a name is judged in: the nearest local function, accessor or member declaration around the call, else the
-    /// whole unit (a script's top-level statements).
+    /// The member body a name is judged in: the nearest accessor or member declaration around the call, else the whole unit (a
+    /// script's top-level statements). A local function is NOT a scope of its own: the whole enclosing member is judged, so a
+    /// variable the local function captures is traced to where the member declares and assigns it.
     /// </summary>
     private static SyntaxNode ScopeOf(SyntaxNode call)
-        => call.Ancestors().FirstOrDefault(a => a is LocalFunctionStatementSyntax or AccessorDeclarationSyntax
+        => call.Ancestors().FirstOrDefault(a => a is AccessorDeclarationSyntax
                                                 || (a is MemberDeclarationSyntax and not GlobalStatementSyntax))
            ?? call.SyntaxTree.GetRoot();
 
