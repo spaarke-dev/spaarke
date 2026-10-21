@@ -34,6 +34,15 @@ This project reviewed ebilling-r1's `projects/ebilling-r1/notes/procedure-and-fi
 
 **Recommendation: A + B.** A makes the email and invoice agree from the start; B keeps them correct after any later change. B is also the mechanism decision 3 needs.
 
+## v5 re-check (ebilling `70fc2cc616`; gaps recorded in their v5 §15, `cadd4a1a1b`)
+
+v5 §9.1 matches the decisions above. Three add-in gaps were accepted:
+1. **No source document** (a flagged attachment): the caller's Read on the communication; the communication id plus the attachment identity on the Stored File; B follows the communication alone; no document-row guard; the post-commit check runs against the communication's filing and thread.
+2. **An email that can't be identified:** Submit Invoice captures the email first, as `/office/save` does. If capture fails, the copy is created with its own Restricted in the same create. **Owner item, ours to raise when the process is discussed.**
+3. **Keys:** the RFC Message-ID, never the Exchange item id; the endpoint has its own idempotency key that includes the flag.
+
+Separately, uac-r2 found that a source already isolated at submit protects only the Stored File, not the derived invoice rows. The options are in their v5 §15 for the owner; the recommended one carries the isolation onto the invoice.
+
 ## Effect on this project
 
 None until the owner settles the process in decision 1. Tasks 130 and 131 are unaffected.
