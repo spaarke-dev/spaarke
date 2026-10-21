@@ -50,6 +50,10 @@ internal sealed partial class RecordCreationService
     private static readonly IReadOnlySet<string> AppendOnlyTables =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_decisionrecord" };
 
+    /// <summary>Repair's warning for a mapping source it could not read — neutral: no caller is addressed (K4).</summary>
+    internal const string RepairSourceUnreadableWarning =
+        "The related record could not be read, so no fields were copied from it.";
+
     private const string OwnerColumn = "ownerid";
     private const string OwningBusinessUnitColumn = "owningbusinessunit";
     private const string VersionNumberColumn = "versionnumber";
@@ -288,7 +292,8 @@ internal sealed partial class RecordCreationService
             if (!read.Readable || read.Record is null)
             {
                 // Fail closed: a source that cannot be read cannot be told not secure, so nothing is copied from it.
-                warnings.Add(read.Warning ?? MappingSourceReadProbe.SourceUnavailableWarning);
+                // K4: the probe's warning addresses a caller ("not available to you"); Repair runs as the system principal.
+                warnings.Add(RepairSourceUnreadableWarning);
                 report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, null, RecordRepairReason.MappingSourceUnreadable));
                 return;
             }

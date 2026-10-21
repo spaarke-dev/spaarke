@@ -629,6 +629,63 @@ public sealed class RecordRepairModeTests
         _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain(["sprk_clientname", "sprk_practicearea", "sprk_priorityname"]);
         outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.Mapping
             && f.ReasonCode == RecordRepairReason.MappingSourceUnreadable);
+        outcome.Warnings.Should().Contain(RecordCreationService.RepairSourceUnreadableWarning);
+        outcome.Warnings.Should().NotContain(w => w.Contains("you", StringComparison.OrdinalIgnoreCase),
+            "Repair runs as the system principal; no caller is addressed (K4)");
+    }
+
+    [Fact]
+    public async Task DecidingTheSecureTeamFaults_CopiesNothing_FailClosed()
+    {
+        _world.ShareWorld = () => SecureChildShareWorld.Standard().FailingQueriesOf("businessunit");
+        var source = _world.MatterHolding(Directory.ChildBu, Directory.ChildTeam, isSecure: false, "Secret Client");
+        var id = EventOwnedByThePersonUnder(source);
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        NothingSecretWasWritten();
+        outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.Mapping && f.ReasonCode == RecordRepairReason.MappingSourceSecure);
+    }
+
+    // The source gate's own branches, with the owner gate held open (the resolver answers an ordinary owner), so only the
+    // gate itself can stop the copy.
+
+    [Fact]
+    public async Task ASourceWhoseFlagIsEmpty_IsNotCopiedIntoAnOrdinaryTeamsRow_TheGateAlone()
+    {
+        _world.ResolverAnswer = RecordOwnerResolution.Owned(Directory.ChildTeam);
+        var source = _world.MatterHolding(Directory.ChildBu, Directory.ChildTeam, isSecure: false, "Secret Client");
+        _world.Directory.Row("sprk_matter", source).Attributes.Remove("sprk_issecure"); // masked: reads as flagged
+        var id = _world.RowOf("sprk_event", Directory.ChildBu, new Dictionary<string, object>
+        {
+            ["ownerid"] = new EntityReference("team", Directory.ChildTeam),
+            ["owningteam"] = new EntityReference("team", Directory.ChildTeam),
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", source),
+        });
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        NothingSecretWasWritten();
+        outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.Mapping && f.ReasonCode == RecordRepairReason.MappingSourceSecure);
+    }
+
+    [Fact]
+    public async Task ASecureTeamOwnedSource_IsNotCopiedIntoAnOrdinaryTeamsRow_TheGateAlone()
+    {
+        _world.ResolverAnswer = RecordOwnerResolution.Owned(Directory.ChildTeam);
+        var communication = _world.CommunicationOwnedByTheSecureTeam("Secret subject");
+        _world.MapTheCommunicationOntoTheEvent();
+        var id = _world.RowOf("sprk_event", Directory.ChildBu, new Dictionary<string, object>
+        {
+            ["ownerid"] = new EntityReference("team", Directory.ChildTeam),
+            ["owningteam"] = new EntityReference("team", Directory.ChildTeam),
+            ["sprk_regardingcommunication"] = new EntityReference("sprk_communication", communication),
+        });
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain(RepairWorld.CommunicationMappedTarget);
+        outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.Mapping && f.ReasonCode == RecordRepairReason.MappingSourceSecure);
     }
 
     [Fact]
@@ -668,6 +725,7 @@ public sealed class RecordRepairModeTests
 
         outcome.Status.Should().Be(RecordRepairStatus.Skipped);
         outcome.ReasonCode.Should().Be(RecordRepairReason.TableAppendOnly);
+        _world.Directory.RecordQueries.Should().BeEmpty("an append-only row is not even read");
         _world.UpdateCalls.Should().Be(0);
         var row = _world.Directory.Row("sprk_decisionrecord", id);
         row.GetAttributeValue<EntityReference>("ownerid").Should().Be(new EntityReference("systemuser", RepairWorld.PersonInChild));
