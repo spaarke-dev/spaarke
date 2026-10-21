@@ -14,9 +14,11 @@ This project reviewed ebilling-r1's `projects/ebilling-r1/notes/procedure-and-fi
    Who may read an internal-only copy under the invoice is an access question for uac-r2, in ebilling's v5 review.
 4. **Invoice as an add-in save target, versus ebilling O-8:** goes with item 1. Review the process so it isn't overcomplicated. The email must be associated with the matter, project or work assignment, and with the invoice.
 
-**Still open (owner):**
-- Can a Restricted source be used? That is a task-130 document whose email couldn't be identified.
-- Can a source whose thread is not Open be used?
+**Owner decision (2026-10-21): Restricted sources and sources whose thread is not Open are both allowed, on the same terms as internal-only.**
+- A Restricted source is a task-130 document whose email couldn't be identified.
+- "Not Open" means the thread's privacy setting (`sprk_communicationthread`) is Private, so partners can't see it (R3 task 065, `CommunicationOpenThreadGate`).
+- B carries the isolation forward: the invoice file stays Restricted, or hidden from partners, as its source is.
+- The extracted fields don't follow the source. Who may read them stays with uac-r2.
 
 **Owner decision on the race (2026-10-21, later the same day): fix both, A + B.** File the email first, and make the invoice file follow its source.
 
