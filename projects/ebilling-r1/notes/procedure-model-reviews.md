@@ -171,27 +171,45 @@ Three reviews of `procedure-and-file-model.md` v4. Each item is folded into v5 o
 
 ## 4. Owner decisions needed (consolidated)
 
-> **2026-10-21:** the owner answered C, F, G and the override half of D directly in ontology-r1's session (ontology D-175, `notes/decisions.md` in that worktree). Do not ask them again. Later the same day the owner also answered **D2** (ontology D-175 addendum) and **Q** plus the migration question (in SPA-r3's session; relayed by SPA-r3, not found in its notes). Owner answers on I–L given in word-add-in-r1's session were relayed 2026-10-21 (not yet in that project's notes); see the rows. Still open: A, B, E, L (with I), N, P. K, M and O are answered (O leaves a race analysis owed to uac-r2). J is answered (A + B); H's Type is answered.
+> **2026-10-21:** the owner answered C, F, G and the override half of D directly in ontology-r1's session (ontology D-175, `notes/decisions.md` in that worktree). Do not ask them again. Later the same day the owner also answered **D2** (ontology D-175 addendum) and **Q** plus the migration question (in SPA-r3's session; relayed by SPA-r3, not found in its notes). Owner answers on I–L given in word-add-in-r1's session were relayed 2026-10-21 (not yet in that project's notes); see the rows. Still open: B (field name and relation), L (with I). Everything else is answered; O leaves a race analysis owed to uac-r2 (section 7). J is answered (A + B); H's Type is answered.
 
 | # | Question | Recommendation |
 |---|---|---|
-| A | Where matter-specific rule changes live (uac-r2 F1-a) | Option 1: a **record-scoped rule set** in the matter's secure family, not an "exceptions Procedure". Procedures stay reusable documents only. |
-| B | Default firm field for a record's Procedures list | `sprk_assignedlawfirm1/2` (the submission rule). Evaluation always uses the invoice's firm. |
+| A | Where matter-specific rule changes live (uac-r2 F1-a) | **Answered (owner, 2026-10-21): option 1.** Matter-specific rule changes live in a record-scoped `sprk_ruleset` in the record's secure family; the exceptions Procedure and "Exceptions for" are dropped. Procedures stay reusable documents. |
+| B | Default firm field for a record's Procedures list | **Owner proposes a new explicit field** `sprk_billingentity` (organization lookup) on each core record, on the Billing tab and in record setup, as the default firm for its Procedures list. A prompt "Do billing procedures change?" when it changes is not R1: Procedure changes stay a manual user step. **Our reply (open: name and relation to the assigned firms):** see the note after this table. |
 | C | Firm condition on every source, manual assignments included | **Answered (ontology D-175 (1)):** yes. A Procedure naming firm F applies only to F's invoices, from every source. Rank key (Level, −Distance, FirmSpecific). |
 | D | In Review invoices when an override is removed | **Answered (ontology D-175 (2)):** re-check. The general rule re-judges invoices still in review, so none is left unjudged. |
 | D2 | Retiring a whole Procedure: may it close findings on undecided invoices (ontology D-170 reading)? | **Answered (ontology D-175 addendum):** retiring re-checks its pending and In Review invoices; the retired Procedure's findings close on that re-check. Decided invoices keep their snapshot. |
-| E | No version in force for a work date | **Hold** the invoice. |
+| E | No version in force for a work date | **Answered (owner): hold**, with a visible warning on the invoice: "No procedure associated with this invoice". |
 | F | Creator person on the new tables | **Answered (ontology D-175 (4)):** `sprk_createdbyperson` on Procedure, Procedure Version, assignment and Stored File, D-173 shape and protection; replaces "uploaded by". 081 adds the tables to `Set-ChildRecordCreatorPersonSchema.ps1` (`$Tables`, `$SolutionHomes`) and `StampedChildTables`, and asserts zero non-null values before securing. |
 | G | Ontology's matter rules stay separate in R1 | **Answered (ontology D-175 (3)):** yes. Ontology-area Procedures are document-only in R1; a validator refuses `sprk_procedureversion` on Ontology-domain policies. Ontology files a post-R1 convergence issue. |
-| H | Type "Internal guidance"; Area reuses `sprk_policydomain` | **Type answered (owner, ontology D-175):** "Internal Operating Standard" (the owner offered that or "Internal Standard"; ontology took the longer form, so the owner may still pick the short one). Type list: Guideline · Rate card · Billing instructions · Internal Operating Standard · Other. Area reusing `sprk_policydomain` stays our recommendation. |
+| H | Type "Internal guidance"; Area reuses `sprk_policydomain` | **Answered (owner, 2026-10-21): "Internal Standard"** (shorter is better; replaces ontology's relay of "Internal Operating Standard"). Type list: Guideline · Rate card · Billing instructions · Internal Standard · Other. Area reusing `sprk_policydomain` stays our recommendation. |
 | I | The Outlook add-in offers Submit Invoice | **Owner (relayed by word-add-in-r1): yes.** The user flags an attachment to go to the invoice's files instead of becoming a Document. The process is to be discussed separately with the owner; no design is fixed. |
 | J | File an unfiled email to the invoice's matter first | **Answered: A + B.** Earlier the owner leaned to A (file the communication to M through the refile path with the caller's rights, before commit). Options sent to the owner (word-add-in-r1 `notes/ebilling-r1-review-2026-10-21.md`, 277ee0f2c1): **A** file first (gap: a later manual refile to S leaves the copy readable under M); **B** the invoice file follows its source (T7 reads the stored source ids on every access; needs a uac-r2 T7 rule; also the mechanism K needs); **C** row-version check at commit (misses later refiles); **D** block refiling behind a submitted invoice (blocks corrections); **E** reconcile afterwards (leaves a window). **Owner chose A + B ("fix both"; word-add-in-r1 note 0b3810144e).** **Limit of B:** it covers the bytes only. Fields extracted onto the invoice and its lines (amounts, narratives) do not follow the source; that exposure goes to uac-r2 with K. |
 | K | Refuse Restricted, internal-only and not-Open sources | **Owner (relayed): internal-only sources are ALLOWED.** The copy carries the isolation forward: source document and communication ids on the Stored File, Firm-visible = No, and kept out of search, indexes and chat grounding unless it passes T7 (extraction still reads the bytes). Who may read such a copy under the invoice, and the fields extracted from it onto the invoice and lines, needs uac-r2's review. **Restricted and not-Open sources: also ALLOWED, same terms (owner, word-add-in-r1 note bce36d0fc0).** Under J's B the invoice file inherits the source's isolation (stays Restricted, or hidden from partners for a Private thread). The extracted-field readership question for uac-r2 covers all three cases: internal-only, Restricted, Private-thread. |
 | L | Retire the add-in's "save onto invoice" and invoice quick-create | **Tied to I (owner):** review the whole process so it is not overcomplicated. The goal: the email is associated with the matter, project or work assignment, and with the invoice. Our constraint stays: invoices are created only by submission (FR-17, FR-20). |
 | M | Flagged-external internal users on the file route (uac-r2 F1-e) | **Answered (owner, uac-r2 session27 notes, round 113):** Procedure files: always refused (internal-only for download; rule and Decision Record extracts an external user may see are unaffected). Invoice and export files: reachable by "the related external user (i.e., it's their invoice)". uac-r2 then corrected itself: the firm route serves systemusers through the 036 chain (036 read set → I-14 veto → task 187 invoice rule → file gate; R3 d5267adb9), so "their invoice" needs no new relation. **Our design choice (sent to uac-r2):** the internal file route refuses every `sprk_isexternal` caller for every file kind; flagged-external callers get invoice and export files only through the firm route. Must-fire and must-not-fire tests on both routes. Context: the owner reversed #2179 (c); flagged-external systemusers must reach no internal-only record, in Dataverse or the SPA. uac-r2 is designing Dataverse-side enforcement that will cover Procedure and Stored File rows. |
-| N | A reusable Procedure used for a Secure matter (e.g. its rate card) is readable org-wide, name included (O-6) | Confirm O-6. Matter-only rules go in the record-scoped rule set (A). |
+| N | A reusable Procedure used for a Secure matter (e.g. its rate card) is readable org-wide, name included (O-6) | **Answered (owner): confirmed.** A reusable Procedure is readable org-wide even when used on a Secure matter or project (O-6). Record-specific rules go in the record-scoped rule set (A). |
 | O | uac-r2 K1: derived invoice content readable under M if the post-commit check fails | **Answered (owner, uac-r2 round 113): all or nothing**, replacing our "accept". The email and its PDF pass together or not at all; the pre-transaction check stays. A failed post-commit re-run undoes **everything** the submission created (invoice, lines, findings, Signal rows, Stored File row, blob), marks the submission failed and adds an admin note. **We owe uac-r2:** whether the in-transaction document-row guard already catches the re-file race (leaving only root-made-Secure for the post-commit re-run), which races remain, and any Signals already sent outside that cannot be withdrawn. §9.1 step 5 and K1 change in v5. |
-| P | Auditing on the assignment and Stored File tables, plus a download audit event | Yes. |
+| P | Auditing on the assignment and Stored File tables, plus a download audit event | **Answered (owner): yes.** |
+
+
+**B: our reply to the owner's `sprk_billingentity` proposal (2026-10-21).**
+- **Yes, an explicit field is clearer** than inferring the firm from `sprk_assignedlawfirm1/2`. It is set on the core record (Billing tab and record setup) and seeds the record's Procedures list with that firm's Procedures.
+- **Name.** In e-billing, "billing entity" usually means the *client's* entity being billed (the subsidiary or cost entity that pays), not the law firm. If the field means the firm that bills the record, `sprk_billingfirm` avoids that confusion; if it means the client entity, the firm default still needs a field. Owner to choose.
+- **Relation to the assigned firms.** Submission eligibility stays on `sprk_assignedlawfirm1/2` (FR-17). Evaluation always uses the invoice's own firm (C), so a record billed by two firms still applies the right firm's Procedures. The new field only decides the default list and display.
+- **§11 answers.** Existing: `sprk_assignedlawfirm1/2` (two slots, submission rule). Extension: reusing slot 1 would silently change who may submit, so a separate field is cleaner. Cost of doing nothing: the Procedures list must guess between two firms.
+- **Scope:** on every core record type (see the core-record directive below), not only `sprk_matter`.
+
+**"Matter" means any core record (owner directive, 2026-10-21).** e-billing applies to `sprk_matter`, `sprk_project` and `sprk_workassignment`, and will extend to `sprk_agreement`. "Matter" in these notes is shorthand only. v5 states it once and every new table, lookup and rule is built to the core-record set, not to `sprk_matter`:
+- The assignment/override table carries a lookup per core type (or one polymorphic regarding), driven by one list, like `InvoiceFamilyCoreRecordGuard.FilingCores` (`["sprk_matter","sprk_project","sprk_workassignment"]`).
+- The new firm field, the Procedures list control and the record-scoped rule set (A) exist on all three.
+- **Agreement:** today `sprk_agreement` is a child of a matter or project in `CoreAncestorResolver.cs:212`, not a core record. Adding it means a schema step and one list entry; the resolver walk then treats agreement → matter/project as distance 1. v5 records this as the extension path, not R1 work.
+
+**`sprk_family` (owner question, 2026-10-21).** No table named `sprk_family` exists in v4, the repo, the peer worktrees or dev Dataverse (checked 2026-10-21). Two things in our notes could read that way:
+- **v1's "Family" lookup.** v1 proposed one Procedure table whose rows were grouped into a "family" (all versions of one document). That was withdrawn in v3 (O-15) for two descriptively named tables: **Procedure** (`sprk_procedure`, the document) and **Procedure Version** (`sprk_procedureversion`, each issue with its file and effective dates). No family table remains.
+- **"Secure family."** uac-r2's term for the set of child tables that inherit a Secure record's isolation (lineage, role row, census). It is a concept in code (`SecureChildLineage`), not a table, and v5 will say "secure child tables" to avoid the word.
+If the owner saw `sprk_family` somewhere else (a prototype or another project's design), we need the source to answer.
 
 ## 5. SPA-r3: early views on the firm invoice-file route (not final; waits for the owner's go)
 
@@ -237,3 +255,38 @@ uac-r2 withdrew "workforce systemuser → 403 UseInternalRoute" (it pre-dates 03
   - an external-flagged systemuser on a Restricted root gets 404.
 
 Item R is settled (owner informed, no decision needed).
+
+## 7. K1 all-or-nothing: which races the transaction catches (for uac-r2, 2026-10-21)
+
+From a read-only code trace of `work/ebilling-r1` (file:line in the trace; summarised here).
+
+**What the in-transaction guard covers.** One row: the confirmed `sprk_document`, by `versionnumber` with `IfRowVersionMatches` (`InvoiceSubmissionPersister.cs:497-513`). Not the communication, the thread, the root or the owner team. `ExistingDocumentIsolationCheck` reads lineage and owner only, never the Restricted or privacy flags. Live proof that the guard's write moves the version is still outstanding (K1 note in `050a-confirm-redirect.md`).
+
+**Race by race, between the pre-transaction check and commit:**
+
+| Race | Caught by the transaction? |
+|---|---|
+| a. Communication refiled M → S, both ordinary | **No.** The refile writes the communication; no document row changes. |
+| a′. Refiled to a Secure S | **Partly.** `SecureChildReconciler.AfterRefileAsync` runs inline and re-owns the document, but after the communication write. A commit between the two is missed. |
+| b. Communication joins a thread regarding S (K4) | **No** for an ordinary S; partly for a Secure S, as a′. |
+| c. The thread's regarding changes | **No.** Only thread and communication rows are written. |
+| d. M or the root made Secure | **Partly.** Make Secure reconciles children inline after setting the flag; anything missed falls to the 2-minute reconciliation job, after commit. |
+| e. Source made Restricted or internal-only, or thread Open → Private | **No.** No Finance code reads these flags. |
+
+So the post-commit re-run is not only for root-made-Secure: it is the main check for a, b, c and e. Under the new model the re-run must also read the source's Restricted, internal-only and privacy state (owner K answer; J's B).
+
+**Things that cannot be withdrawn by deleting rows**, in today's order after commit:
+- Signals' close/supersede/episode history, and the AutoRejected Decision Record (append-only; no role holds Delete);
+- the Service Bus indexing job and its Azure AI Search entry (only when `DocumentIntelligence:Enabled`);
+- the document's owner change and share mirroring (050a re-file; retired in the new model, since the bytes are copied);
+- notifications, once task 132 replaces today's no-op sink.
+
+**v5 design for all-or-nothing:**
+1. Commit (invoice, lines, approval, Stored File row, submission update) as today.
+2. **Immediately** re-run the full check (D-140 chain plus isolation plus the source's Restricted, internal-only and privacy state) **before any after-step**: no totals, Signals, Decision Record, indexing or notification runs until it passes.
+3. If it fails: delete the invoice, lines, approval and Stored File row; delete the blob; mark the submission Failed with an admin note. Because nothing irreversible has run yet, the undo is complete. Compensation retries until done; the orphan sweep is the backstop.
+4. If it passes: the after-steps run as today.
+
+**Races that remain:**
+- A change that lands after the step-2 re-run passes. The invoice is then legitimately M's; the file follows its source through T7 on every access (J's B), so the bytes stay correct. The **extracted fields** on the invoice and its lines do not follow the source: that is the open readership question for uac-r2.
+- The re-run is a point-in-time read; a change committed during the re-run itself is in the same position as the bullet above.
