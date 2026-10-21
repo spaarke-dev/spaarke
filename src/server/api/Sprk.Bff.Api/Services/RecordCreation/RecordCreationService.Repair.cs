@@ -293,7 +293,7 @@ internal sealed partial class RecordCreationService
             }
 
             // The source's own secure status (review F1-e (ii)) is read in the same one read as its mapped columns.
-            var sourceColumns = CreateTimeFieldMapping.CollectSourceColumns(rules)
+            var sourceColumns = SourceColumnsRepairMayCopy(source.EntityLogicalName, CreateTimeFieldMapping.CollectSourceColumns(rules))
                 .Concat(SourceGateColumns(source.EntityLogicalName))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
@@ -395,6 +395,19 @@ internal sealed partial class RecordCreationService
         InheritedAccessPermission.RefuseAppOnlyWrite(table, [column]) is { } refused
             ? refused.RefusalCode ?? InheritedAccessPermission.AppOnlyDocumentWriteReasonCode
             : null;
+
+    /// <summary>
+    /// The mapped source columns Repair may copy (owner decision 2026-10-21, field security option 1). Today: all of them,
+    /// unchanged.
+    /// </summary>
+    // TODO(task 033): drop every column of sourceTable whose IsSecured is true, read through task 033's app-only metadata
+    // reader. Fail closed: when that metadata is unavailable (a fault, or IsSecured unknown) map nothing for the row, with
+    // reason record_repair.mapping_source_metadata_unavailable. Task 052 stays blocked until this lands.
+    private static IEnumerable<string> SourceColumnsRepairMayCopy(string sourceTable, IEnumerable<string> mappedSourceColumns)
+    {
+        _ = sourceTable;
+        return mappedSourceColumns;
+    }
 
     /// <summary>The source columns Repair reads to tell whether it may copy from it (review F1-e (ii)).</summary>
     private static IEnumerable<string> SourceGateColumns(string sourceTable) =>

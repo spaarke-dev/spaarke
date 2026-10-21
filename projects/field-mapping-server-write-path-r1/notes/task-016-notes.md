@@ -497,3 +497,29 @@ Part B is committed locally and NOT pushed, pending the coordinator's call on `P
    "private; sole caller UpdateAsync, which refuses first".
 
 ArchTests after this: 1341 passed, 1 failed. The failure is #2188 at `Repair.cs:323`, as expected. Part B is pushed.
+
+## Owner decision 2026-10-21: field security, option 1
+
+Repair runs as the system principal and has no caller to mask a source against, so it skips field-secured source
+columns itself. It uses task 033's app-only metadata reader for this. UAC-r2 concurs, on five conditions:
+1. **Fail closed on metadata.** A metadata fault, or an unknown `IsSecured`, maps nothing for the row, with a distinct
+   reason (`record_repair.mapping_source_metadata_unavailable`). Metadata is read per pass, or cached briefly.
+2. **The document access and D7 link columns are skipped.** Done: `RefuseAppOnlyWrite` per rule, and again on the write
+   member.
+3. **A per-occurrence allow-list entry** in the #2188 guard for Repair's single `ApplyFillOnly` call.
+4. **Tests.**
+   - Must-fire: a secured column is not copied; a metadata fault maps nothing; the document columns are skipped.
+   - Must-not-fire: unsecured columns are copied, and the same columns on a to-do or an event are copied.
+5. **052 stays blocked until 033 lands with the skip.** `RecordRepairReachabilityTests` enforces this in the meantime.
+
+**Seam for 033 (done).** `SourceColumnsRepairMayCopy(sourceTable, mappedSourceColumns)` in `Repair.cs` is where the
+`IsSecured` skip goes. It is marked `TODO(task 033)` with the fail-closed rule. Today it returns the columns unchanged,
+so there is no behaviour change.
+
+**Condition 3: STOPPED.** The #2188 guard has no per-occurrence allow-list. Its only exemption mechanism is
+`MappingSourceCallerMaskGuardTests.Allowlist`, keyed by FILE path, and an entry skips the whole file (:83). The "allow-list
+per occurrence" in its remarks (:27, :921) describes how a masked local's uses are judged, not an exemption list.
+- A file entry for `Repair.cs` would let a second `Apply`/`ApplyFillOnly` call there pass, which the decision rules out.
+- A per-occurrence key would be a new mechanism, which the brief rules out.
+- Left for the coordinator. `KnownCallSites` is still 2. The scan already sees 3 call sites (Office, step 3, Repair),
+  because `Repair.cs` is scanned today, so it should go to 3 together with the entry.
