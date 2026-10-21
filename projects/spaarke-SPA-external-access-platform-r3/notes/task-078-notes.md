@@ -294,3 +294,10 @@ Verification after the fix: `dotnet build` 0 warnings, 0 errors. Handler classes
 - **Rollback:** `az webapp config appsettings delete -g rg-spaarke-dev -n spaarke-bff-dev --setting-names ExternalAccess__ImpersonatedRootSets__Enabled`. Never set it to an empty value; that fails startup.
 - **Next:** UAC gates (i)–(v) and the disabled/unlicensed check.
 
+## 036 flag-on live gates (UAC, 2026-10-20 23:55Z–00:13Z)
+
+- Result from uac-r2 (record `projects/unified-access-control-r2/notes/batch7-live-gates-2026-10-17.md`, commit 0a4fbaa38): passed, no STOP, no rollback. (i) negative canary 20/20 ×2; (vii) disabled / unlicensed / team-only users refused or limited exactly by their roles; access source `ImpersonatedRootSet` ×12, 0 `Membership`; 96 requests since the flip, 0 5xx, 0 403.
+- Not run: (iii)–(vi) (dev has no fixture that avoids a write); (ii) passed server-side. UAC's note gives the owner setup + SPA steps.
+- Filed by UAC, non-blocking: #2167 (privilege answer for unlicensed users lists Create; safe because asked after RPA), #2168 (disabled/unlicensed refusal reported as a fault, not 403; fails closed). #1567 closed.
+- Flag stays ON. Rollback unchanged: delete `ExternalAccess__ImpersonatedRootSets__Enabled`.
+

@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-20 21:00Z (85% checkpoint; dev BFF 0b976628e live; 4f5f22694 deploy pending owner approval)
+> **Last Updated**: 2026-10-21 00:20Z (dev BFF 4f5f22694 + 036 flag ON; UAC gates passed; ISS-018 #2166 filed)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -12,7 +12,7 @@
 | **Task** | 070 (dev SPA + Teams package), owner "070-071-072 yes proceed" 2026-10-20. Also open: 074 (A9 live checks, partial), 002 (grid columns, owner question). |
 | **Step** | 070: SPA live (master `28274e04e`); dev Teams package built (run `39489551799`, artifact `teams-app-package`, manifest id `23610794…` v1.2.0). **Next:** owner uploads the package in Teams admin center, then the smoke table in `notes/task-070-deploy-record.md`; then 071. |
 | **Status** | **Dev BFF = `4f5f22694`** (master incl. UAC #2078, flag ImpersonatedRootSets **ON since 23:51Z** (owner ran it; rollback = delete the setting); 23:34Z, owner "deploy approved"; rollback `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261020T233210Z` = 0b976628e; record `notes/task-078-notes.md`). **Dev SPA = `28274e04e`** (run 39468172374; rollback tag `external-spa-dev-rollback-1908696a8`). |
-| **Next Action** | Wait for UAC's post-flip gates (i)–(v) + disabled/unlicensed check on 4f5f22694 with the 036 flag ON. Owner items: 070 package upload, 074 Ralph Dewey link, 002 columns, R4 design revisions. |
+| **Next Action** | UAC 036 flag-on gates PASSED (no STOP; uac-r2 commit 0a4fbaa38; (iii)–(vi) not run, no fixture; follow-ups #2167, #2168 non-blocking). Owner: approve the ISS-018 #2166 fix (CIAM plane must ignore cached company accounts → authority_mismatch); 036 SPA check as Ralph Dewey (also 074 link); upload the Teams package in the **Dewey Cheatham** tenant (Spaarke tenant = "not set up" by design); 002 columns; R4 revisions. |
 
 ### Uncommitted files
 - `.claude/agent-memory/researcher/MEMORY.md` (modified) and three untracked researcher files belong to the OWNER. Never commit or discard them. Commit by pathspec only.
@@ -34,7 +34,8 @@
 
 ## Next actions (in order)
 1. Owner: upload the dev Teams package; smoke (070) → 071 Teams live check.
-2. 074 remaining: licensed-user link (Ralph Dewey), resubmit, existing-record bind, unlisted directory → 401, home token on /api/v1/membership → 401, intake as the new contact.
+2. ISS-018 #2166 fix after owner OK (auth, two top-tier reviews, SPA redeploy).
+3. 074 remaining: licensed-user link (Ralph Dewey), resubmit, existing-record bind, unlisted directory → 401, home token on /api/v1/membership → 401, intake as the new contact.
 3. 002: owner decides whether the six SPA tabs keep their current `sprk_gridconfiguration` columns.
 4. Send UAC the D7 facts; track D7's owner decision.
 5. 072 after 002 + 071; 073 blocked on the ACME gate; 090 last.
