@@ -1032,6 +1032,16 @@ public static class ChatDocumentEndpoints
             return ProblemDetailsHelper.Forbidden(authz.ReasonCode);
         }
 
+        // 3a'. uac-r2 task 188 round 4a: THE external document narrowing, after the Read check. A caller who is not a
+        //      resolved internal systemuser is refused an archive the narrowing hides (an internal-only email's .eml, a
+        //      Restricted document) with the SAME deny shape as no Read; a narrowing fault refuses (fail closed).
+        var visibility = await InternalPlaneDocumentNarrowing.ForCallerAsync(
+            httpContext, new[] { document.Id }, "chat-archive-ingest", logger);
+        if (!visibility.IsShown(document.Id))
+        {
+            return ProblemDetailsHelper.Forbidden(InternalPlaneDocumentNarrowing.HiddenReasonCode);
+        }
+
         // 3b. uac-r2 task 166 r1 (owner round 21 item 1b): the download below follows the row's pointer AS THE
         //     APPLICATION, so the pointer must name a container this document may use — refused before any read.
         if (!await containerResolver.IsDocumentPointerContainerAllowedAsync(

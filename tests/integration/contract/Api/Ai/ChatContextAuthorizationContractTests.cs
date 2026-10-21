@@ -814,6 +814,10 @@ public class ChatContextAuthorizationContractTests
             builder.Services.AddScoped<IAuthorizationRule, OperationAccessRule>();
             builder.Services.AddScoped<AuthorizationService>();
             builder.Services.AddScoped<IAiAuthorizationService, AiAuthorizationService>();
+            // unified-access-control-r2 task 188 round 4a: the caller is a resolved INTERNAL systemuser, so THE external
+            // document narrowing in IAiAuthorizationService makes no call (AiDocumentNarrowingTests states the external caller).
+            Sprk.Bff.Api.Tests.TestInfrastructure.StatedNarrowingCaller.AddStatedNarrowingCaller(builder.Services,
+                () => Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode.Internal, () => new Sprk.Bff.Api.Tests.Services.Ai.Handlers.AppOnlyDocumentWorld());
             builder.Services.AddSingleton<CallerRecordAccessProbe>(Probe);
             builder.Services.AddSingleton(Files.Object);
             builder.Services.AddSingleton(Playbooks.Object);
