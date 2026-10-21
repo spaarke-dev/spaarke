@@ -43,6 +43,26 @@ v5 §9.1 matches the decisions above. Three add-in gaps were accepted:
 
 Separately, uac-r2 found that a source already isolated at submit protects only the Stored File, not the derived invoice rows. The options are in their v5 §15 for the owner; the recommended one carries the isolation onto the invoice.
 
+## Owner input on the add-in invoice flow (2026-10-21; HELD for discussion, not sent to ebilling-r1)
+
+The owner stated two rules:
+- when an email is saved to an invoice, its attachments go to the invoice's files, not Documents;
+- a new invoice must be related to a Matter or Project.
+
+They asked whether an explicit flag is needed for which attachment is the invoice.
+
+Our recommendation:
+- **One attachment is explicitly marked "Invoice"** (pre-selected when there is exactly one PDF); the rest are "Supporting" or "Don't save". The server never guesses.
+- Saving to an existing invoice adds supporting files (eBilling's internal-upload route).
+- "+New invoice" (today a blank quick-create with no core-record link, `OfficeService` QuickCreate Invoice leg) is replaced by Submit Invoice, with the Matter or Project required.
+
+Open questions:
+- Work Assignment in the lookup?
+- Does the .eml stay as a communication filed to the matter?
+- LEDES files?
+
+The owner chose to discuss the process before anything is sent.
+
 ## Effect on this project
 
 None until the owner settles the process in decision 1. Tasks 130 and 131 are unaffected.
