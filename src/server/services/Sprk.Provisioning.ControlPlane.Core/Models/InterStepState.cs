@@ -173,6 +173,17 @@ public sealed class InterStepState
     [ProducedBy(HandlerIds.H2a)]
     public string? ContentSafetyEndpoint { get; set; }
 
+    /// <summary>
+    /// The customer storage account's blob endpoint (H2a output — ARM output <c>storagePrimaryEndpoint</c>,
+    /// <c>https://{account}.blob.core.windows.net/</c>). H4b sets it as the BFF's <c>SessionFileStore__BlobEndpoint</c>
+    /// (the chat session-file store; managed identity only — the container defaults to <c>ai-chunks</c>).
+    /// </summary>
+    /// <remarks>CONTROLLED SCHEMA EXTENSION (T186 follow-up).</remarks>
+    [JsonPropertyName("storageBlobEndpoint")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H2a)]
+    public string? StorageBlobEndpoint { get; set; }
+
     /// <summary>Dataverse `systemuser` GUID for the MI/UAMI Dataverse App User (H10 output; T2 trap subject).</summary>
     [JsonPropertyName("systemUserId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

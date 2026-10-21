@@ -87,6 +87,9 @@ param(
     [string]$SpeContainerId,
 
     [Parameter(Mandatory = $true)]
+    [string]$StorageBlobEndpoint,
+
+    [Parameter(Mandatory = $true)]
     [string]$TenantId,
 
     [Parameter(Mandatory = $true)]
@@ -166,6 +169,7 @@ $settings = @(
     "ScheduledRagIndexing__TenantId=$(Format-KvRef 'TenantId')",
     "ServiceBus__FullyQualifiedNamespace=$ServiceBusFqns",
     "ServiceBus__QueueName=sdap-jobs",
+    "SessionFileStore__BlobEndpoint=$StorageBlobEndpoint",
     "SharePointEmbedded__ContainerTypeId=$ContainerTypeId",
     "SpeAdmin__KeyVaultUri=$KvVaultUri",
     "TENANT_ID=$(Format-KvRef 'TenantId')"

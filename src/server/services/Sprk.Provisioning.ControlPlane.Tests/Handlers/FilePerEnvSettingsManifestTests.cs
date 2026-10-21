@@ -272,6 +272,24 @@ public sealed class FilePerEnvSettingsManifestTests
     }
 
     [Fact]
+    public async Task ReadAsync_RealEmbeddedManifest_SessionFileStoreBlobEndpoint_IsRequiredAndSourcedFromH2a()
+    {
+        // T186 follow-up: without SessionFileStore__BlobEndpoint the stamp BFF's chat session-file store is
+        // StoreDisabled (uploads refused); the value is H2a's storagePrimaryEndpoint output.
+        var entries = ((PerEnvSettingsManifestReadResult.Success)await NewManifest().ReadAsync(CancellationToken.None)).Entries;
+
+        var entry = entries.Single(e => e.Key == "SessionFileStore__BlobEndpoint");
+
+        entry.Required.Should().BeTrue();
+        entry.Indexed.Should().BeFalse();
+        entry.PerEnvSource.Should().Be(PerEnvSettingSource.FromHandlerOutput);
+        entry.ParameterKey.Should().Be("storage_blob_endpoint");
+        PerEnvSourceCatalog.BySourceKey["storage_blob_endpoint"].ProducerHandlerId.Should().Be("H2a");
+        entries.Should().NotContain(e => e.Key == "SessionFileStore__ContainerName",
+            "the container is not written: the BFF default (ai-chunks) is the container every stamp creates");
+    }
+
+    [Fact]
     public async Task ReadAsync_RealEmbeddedManifest_WorkforceTenants_IsARequiredIndexedListFromIntake()
     {
         // T255 (INCOMING-141): H4b writes WorkforceIdentity__CustomerTenantIds__N on both slots from intake

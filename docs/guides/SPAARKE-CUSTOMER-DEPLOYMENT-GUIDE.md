@@ -1157,6 +1157,8 @@ which no stamp sets — so a stamp carries no `Onboarding__*` setting and no HMA
 
 **H4b external-registration owner (R3 073 / ADR-028 A9).** H4b also writes `ExternalAccess__CustomerBusinessUnitId` on both slots: the customer's own business unit, from H10's `InterStepState.CustomerBusinessUnitId` (so H4b follows H10 in the DAG). The BFF refuses to start on a non-GUID value, and without it the external registration route answers 500 `registration_owner_unconfigured`.
 
+**H4b session-file store (T186 follow-up).** H4b also writes `SessionFileStore__BlobEndpoint` on both slots: the stamp storage account's blob endpoint, from H2a's `storagePrimaryEndpoint` output (`InterStepState.StorageBlobEndpoint`). The container is not written — the BFF defaults to `ai-chunks`, which every stamp creates. Without it chat session-file uploads are refused (`StoreDisabled`).
+
 ### 7.4 Phase 4 — Dataverse Environment (H5, H6, H7)
 
 **H5** adopts the Dataverse environment the operator created (PRQ-C-09) — it never creates one (owner D4 / Q1;

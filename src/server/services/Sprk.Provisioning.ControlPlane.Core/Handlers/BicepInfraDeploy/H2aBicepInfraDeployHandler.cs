@@ -679,6 +679,7 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         Check(outputs.ServiceBusFullyQualifiedNamespace, nameof(BicepDeployOutputs.ServiceBusFullyQualifiedNamespace));
         Check(outputs.RedisEndpoint, nameof(BicepDeployOutputs.RedisEndpoint));
         Check(outputs.ContentSafetyEndpoint, nameof(BicepDeployOutputs.ContentSafetyEndpoint));
+        Check(outputs.StorageBlobEndpoint, nameof(BicepDeployOutputs.StorageBlobEndpoint));
         return missing;
     }
 
@@ -789,6 +790,7 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         run.InterStepState.ServiceBusFullyQualifiedNamespace = outputs.ServiceBusFullyQualifiedNamespace;
         run.InterStepState.RedisEndpoint = outputs.RedisEndpoint;
         run.InterStepState.ContentSafetyEndpoint = outputs.ContentSafetyEndpoint;
+        run.InterStepState.StorageBlobEndpoint = outputs.StorageBlobEndpoint;
 
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (replace is ReplaceRunResult.Conflict conflict)

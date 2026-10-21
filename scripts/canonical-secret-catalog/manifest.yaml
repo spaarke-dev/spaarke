@@ -935,6 +935,21 @@ per_env_settings:
       BFF refuses to start without it. customer.bicep sets the same value on
       deploy; H4b keeps it on upgrades.
 
+  - key: 'SessionFileStore__BlobEndpoint'
+    per_env_source: 'from-h2a-output:storage_blob_endpoint'
+    iOptionsModule: 'AiPersistenceModule (SessionFileBlobStore)'
+    required: true
+    notes: >-
+      T186 follow-up. The stamp storage account's blob endpoint (customer.bicep
+      output `storagePrimaryEndpoint`, https://{account}.blob.core.windows.net/)
+      for the chat session-file store. Not a secret: managed identity only (the
+      BFF refuses an endpoint carrying AccountKey/SAS). The container
+      `SessionFileStore:ContainerName` is NOT written, so the BFF uses its
+      default `ai-chunks`, which every stamp creates and on which the stamp
+      UAMI must hold Storage Blob Data Contributor. Without this setting chat
+      uploads are refused (StoreDisabled) and the blob probe reports
+      NotConfigured.
+
   - key: 'DocumentIntelligence__Enabled'
     per_env_source: 'literal'
     literal_value: 'true'

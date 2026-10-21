@@ -51,11 +51,11 @@ public sealed class ArmTemplateInspectorTests
     [Fact]
     public void Inspect_TemplateMissingRequiredOutputs_FailsR4_NamingThem()
     {
-        var declared = ArmDeploymentRunner.RequiredOutputNames.Where(n => n is not ("contentSafetyEndpoint" or "redisEndpoint"))
+        var declared = ArmDeploymentRunner.RequiredOutputNames.Where(n => n is not ("contentSafetyEndpoint" or "redisEndpoint" or "storagePrimaryEndpoint"))
             .Select(n => $"\"{n}\":{{\"type\":\"string\",\"value\":\"x\"}}");
         var json = "{\"resources\":[],\"outputs\":{" + string.Join(",", declared) + "}}";
 
-        Inspect(json).MissingRequiredOutputs.Should().Equal("redisEndpoint", "contentSafetyEndpoint");
+        Inspect(json).MissingRequiredOutputs.Should().Equal("redisEndpoint", "contentSafetyEndpoint", "storagePrimaryEndpoint");
         Inspect("""{"resources":[]}""").MissingRequiredOutputs.Should().Equal(ArmDeploymentRunner.RequiredOutputNames,
             "a template with no outputs object declares none of them");
     }

@@ -71,6 +71,8 @@ public static class PerEnvSourceCatalog
         Output("from-h2a-output:redis_endpoint", HandlerIds.H2a, nameof(InterStepState.RedisEndpoint), r => r.InterStepState.RedisEndpoint),
         // T246: the stamp's Azure AI Content Safety endpoint — a plain setting; the account has local auth disabled.
         Output("from-h2a-output:content_safety_endpoint", HandlerIds.H2a, nameof(InterStepState.ContentSafetyEndpoint), r => r.InterStepState.ContentSafetyEndpoint),
+        // T186 follow-up: SessionFileStore:BlobEndpoint — the stamp's chat session-file store; container defaults to ai-chunks.
+        Output("from-h2a-output:storage_blob_endpoint", HandlerIds.H2a, nameof(InterStepState.StorageBlobEndpoint), r => r.InterStepState.StorageBlobEndpoint),
         // T258 (204e-F6): the stamp BFF's own public URL, PublicConfig__BffUrl — derived from H2a's App Service name
         // with the one derivation H9 records as BffApiUrl (StampBffUrl), so H4b needs nothing from H9 (which runs after it).
         new("from-h2a-output:bff_url", "bff_url", HandlerIds.H2a,

@@ -116,6 +116,7 @@ public sealed class ArmDeploymentRunnerTests
         success.Outputs.RedisEndpoint.Should().Be("sprk-acme-prod-redis.westus2.redis.azure.net:10000");
         // Task 246 — the Content Safety endpoint, verbatim.
         success.Outputs.ContentSafetyEndpoint.Should().Be("https://sprk-acme-prod-contentsafety.cognitiveservices.azure.com/");
+        success.Outputs.StorageBlobEndpoint.Should().Be("https://sprkacmeprod.blob.core.windows.net/");
         // Honest-empty per the file-header "BLOCKING DISCOVERY" note — customer.bicep
         // does not currently produce these; the runner must NOT fabricate values.
         success.Outputs.UserAssignedIdentityObjectId.Should().BeEmpty();
@@ -412,6 +413,7 @@ public sealed class ArmDeploymentRunnerTests
                   "serviceBusEndpoint": { "type": "String", "value": "https://spaarke-acme-prod-sbus.servicebus.windows.net:443/" },
                   "redisEndpoint": { "type": "String", "value": "sprk-acme-prod-redis.westus2.redis.azure.net:10000" },
                   "contentSafetyEndpoint": { "type": "String", "value": "https://sprk-acme-prod-contentsafety.cognitiveservices.azure.com/" },
+                  "storagePrimaryEndpoint": { "type": "String", "value": "https://sprkacmeprod.blob.core.windows.net/" },
                   "signalrEnabled": { "type": "Bool", "value": false }
                 }
                 """));
