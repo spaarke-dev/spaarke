@@ -397,8 +397,10 @@ internal sealed partial class RecordCreationService
             }
             catch (Exception ex)
             {
-                // Mapping fails closed by mapping NOTHING (NFR-01): the caller's own row is still created, and told so.
+                // Mapping fails closed by mapping NOTHING (NFR-01): the caller's own row is still created, and told so —
+                // once: what the faulted step had already said about single rules or values no longer applies.
                 _logger.LogWarning(ex, "[RECORD-CREATE] field mapping for {Table} faulted; nothing was mapped", table);
+                mappingWarnings.Clear();
                 mappingWarnings.Add(new RecordCreationWarning(RecordCreationWarning.MappingUnavailableCode, null, MappingFaulted));
                 mapped = MappingStep.Unmapped(callerItem);
             }
@@ -489,6 +491,18 @@ internal sealed partial class RecordCreationService
                 user is null ? null : CallerMayFileUnder(user, creatorPerson, item, request.ServerSetLookupColumns)).ConfigureAwait(false);
             if (plan.Refusal is { } planRefusal)
                 return Decision.Refuse(PlanRefused(planRefusal, noun));
+
+            // UAC-r2's review of 013 (K-2), task 014 fix round 1: a filing lookup the SERVER set skipped step 5's AppendTo,
+            // and the plan asks it only on a secure record — so it is asked here, as the caller, whatever the record. A
+            // refusal is step 5's own uniform answer (a record the caller may not file under and a missing one alike).
+            if (user is not null
+                && ServerSetRootFilingLookups(table, item, request.ServerSetLookupColumns) is { Length: > 0 } serverSetFiling)
+            {
+                var appendTo = await CallerWriteAuthorization.CheckCallerMayAppendToAsync(user, creatorPerson, serverSetFiling, ct)
+                    .ConfigureAwait(false);
+                if (!appendTo.Succeeded)
+                    return Decision.Refuse(CallerCheckRefused(appendTo, noun));
+            }
 
             if (plan is { Isolated: true, SecureOwnerTeamId: { } secureTeam })
                 isolatedTeam = secureTeam;

@@ -27,8 +27,9 @@ namespace Sprk.Bff.Api.Services.RecordCreation;
 /// <para><b>Step 4 — one merged item.</b> The caller's item and the mapped values are mapped together as the caller
 /// (<see cref="DataverseWriteItemMapper.MapAsync"/>), so every mapped lookup has its entity set (ebilling-r1's review of
 /// 013, item 2) and the body binds it by the table's own navigation property.</para>
-/// <para><b>Step 5 — the merged payload, by origin</b> (owner decision 2026-10-19; FR-08 amendment 2026-10-20). The merged
-/// row is asked whole first. If that fails or faults, the CALLER's values — together with every mapped FILING lookup
+/// <para><b>Step 5 — the merged payload, by origin</b> (owner decision 2026-10-19; FR-08 amendment 2026-10-20). The
+/// caller's own values are asked first, alone, exactly as with no mapping: a failure refuses unchanged, a fault propagates.
+/// Then the merged row is asked whole. If that fails or faults, the CALLER's values — together with every mapped FILING lookup
 /// (<see cref="IsFilingLookup"/>), which files the row as a caller's lookup would — are asked: a failure refuses with the
 /// unchanged uniform outcome, and a fault propagates (refused, NFR-01). Every other mapped value is then asked on its own:
 /// one that fails AppendTo, Append or field security, or whose check faults, is dropped with a warning and never written.
@@ -98,13 +99,31 @@ internal sealed partial class RecordCreationService
         || RecordReparent.FilingParentOf(table, column) is not null;
 
     /// <summary>
-    /// UAC-r2's review of 013 (K-2): a lookup the SERVER set costs no AppendTo (<see cref="RecordCreationRequest.ServerSetLookupColumns"/>),
-    /// so a lineage or ownership-parent lookup must never be one — it would file the row under a record nobody asked about.
-    /// The first such column, or <c>null</c>. (A work assignment's or project's filing column is asked again by the
-    /// secure-root plan's own AppendTo, so it is not refused here.)
+    /// UAC-r2's review of 013 (K-2): a lookup the SERVER set costs no AppendTo at step 5
+    /// (<see cref="RecordCreationRequest.ServerSetLookupColumns"/>), so a lineage or ownership-parent lookup must never be one
+    /// — it would file the row under a record nobody asked about. The first such column, or <c>null</c>. A work assignment's
+    /// or project's own filing column is not refused here: the secure-root plan asks AppendTo on it when the record is
+    /// SECURE (task 013's callback), and <see cref="ServerSetRootFilingLookups"/> has it asked after the plan otherwise.
     /// </summary>
     private static string? ServerSetFilingColumn(string table, IReadOnlySet<string>? serverSetLookupColumns) =>
         serverSetLookupColumns?.FirstOrDefault(c => IsChildFilingLookup(table, c.Trim().ToLowerInvariant()));
+
+    /// <summary>
+    /// UAC-r2's review of 013 (K-2), task 014 fix round 1: the lookups of <paramref name="item"/> that file a work assignment
+    /// or project (<see cref="SecureRootInheritance.FilingColumnsOf"/>) and that the SERVER set. Step 5 skipped their
+    /// AppendTo and the plan asks it on a secure record only, so step 6 asks it, as the caller, whatever the record — none
+    /// is ever filed under unasked. Empty for any other table, and when the server set nothing.
+    /// </summary>
+    private static DataverseWriteItemMapper.MappedLookup[] ServerSetRootFilingLookups(
+        string table, DataverseWriteItemMapper.MappedItem item, IReadOnlySet<string>? serverSetLookupColumns)
+    {
+        if (serverSetLookupColumns is not { Count: > 0 } || !SecureRootInheritance.Inherits(table))
+            return [];
+
+        var serverSet = serverSetLookupColumns.Select(c => c.Trim()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var filing = SecureRootInheritance.FilingColumnsOf(table);
+        return item.Lookups.Where(l => serverSet.Contains(l.Column) && filing.Contains(l.Column)).ToArray();
+    }
 
     private static RecordCreationRefusal ServerSetFilingRefused(string column, string noun) => new(
         RecordCreationRefusalKind.Undecided, RecordCreationRefusal.ServerSetFilingLookupCode,
@@ -232,7 +251,10 @@ internal sealed partial class RecordCreationService
             return unmapped;
 
         // Each mapped value as the create's item value — or not written, with its column named.
-        var dateColumns = written.Where(c => target.Attributes.TryGetValue(c, out var v) && v is DateTime).ToArray();
+        // Only a logical name reaches the metadata filter (a rule's target is admin-written text).
+        var dateColumns = written
+            .Where(c => LogicalNamePattern.IsMatch(c) && target.Attributes.TryGetValue(c, out var v) && v is DateTime)
+            .ToArray();
         var dateBehaviours = dateColumns.Length == 0
             ? null
             : await DateBehavioursAsync(user, table, dateColumns, ct).ConfigureAwait(false);
@@ -326,14 +348,23 @@ internal sealed partial class RecordCreationService
     }
 
     /// <summary>
-    /// Step 5 with mapped values (see the remarks): the merged row whole; on a failure or fault, the caller's values with the
-    /// mapped filing lookups (refuse), then each other mapped value on its own (drop), then the row as written (refuse).
+    /// Step 5 with mapped values (see the remarks): the caller's own values alone, as with no mapping (refuse); the merged
+    /// row whole; on a failure or fault, the caller's values with the mapped filing lookups (refuse), then each other mapped
+    /// value on its own (drop), then the row as written (refuse).
     /// </summary>
     private async Task<MappingStep> CheckMergedPayloadAsync(
         string table, IDataverseUserClient user, Guid me, DataverseWriteItemMapper.MappedItem callerItem,
         DataverseWriteItemMapper.MappedItem merged, IReadOnlyDictionary<string, JsonElement> mappedValues,
         IReadOnlySet<string>? serverSetLookupColumns, string noun, List<RecordCreationWarning> warnings, CancellationToken ct)
     {
+        // The caller's own values first, exactly task 013's one check: a failure refuses unchanged and a fault propagates
+        // (NFR-01). Fix round 1 (review K-3): asked whole first, a mapped lookup could complete a caller's untyped pair that
+        // is refused without mapping — no mapped value may make the caller's own payload pass.
+        var callersOwn = await CallerWriteAuthorization.CheckCallerMayCreateAsync(user, me, table, callerItem, serverSetLookupColumns, ct)
+            .ConfigureAwait(false);
+        if (!callersOwn.Succeeded)
+            return MappingStep.Refused(CallerCheckRefused(callersOwn, noun));
+
         OwnedChildWrite.Outcome? whole;
         try
         {
@@ -355,21 +386,24 @@ internal sealed partial class RecordCreationService
             return new MappingStep(merged, mappedValues, null);
 
         // The caller's values, with every mapped FILING lookup (FR-08 amendment): a failure refuses, as with no mapping; a
-        // fault propagates and is refused (NFR-01).
+        // fault propagates and is refused (NFR-01). With no mapped filing lookup this is the check above, already passed.
         var filing = merged.Lookups
             .Where(l => mappedValues.ContainsKey(l.Column) && IsFilingLookup(table, l.Column))
             .ToArray();
-        var callers = new DataverseWriteItemMapper.MappedItem(
-            callerItem.JsonBody,
-            callerItem.Columns.Concat(filing.Select(l => l.Column)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray())
+        if (filing.Length > 0)
         {
-            Lookups = callerItem.Lookups.Concat(filing).ToArray(),
-            ClearedColumns = callerItem.ClearedColumns,
-        };
-        var callersCheck = await CallerWriteAuthorization.CheckCallerMayCreateAsync(user, me, table, callers, serverSetLookupColumns, ct)
-            .ConfigureAwait(false);
-        if (!callersCheck.Succeeded)
-            return MappingStep.Refused(CallerCheckRefused(callersCheck, noun));
+            var callers = new DataverseWriteItemMapper.MappedItem(
+                callerItem.JsonBody,
+                callerItem.Columns.Concat(filing.Select(l => l.Column)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray())
+            {
+                Lookups = callerItem.Lookups.Concat(filing).ToArray(),
+                ClearedColumns = callerItem.ClearedColumns,
+            };
+            var callersCheck = await CallerWriteAuthorization.CheckCallerMayCreateAsync(user, me, table, callers, serverSetLookupColumns, ct)
+                .ConfigureAwait(false);
+            if (!callersCheck.Succeeded)
+                return MappingStep.Refused(CallerCheckRefused(callersCheck, noun));
+        }
 
         // Every other mapped value on its own: one that fails, or whose check faults, is dropped — never written.
         var filingColumns = filing.Select(l => l.Column).ToHashSet(StringComparer.OrdinalIgnoreCase);

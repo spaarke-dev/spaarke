@@ -85,6 +85,7 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     private readonly Dictionary<(string Table, Guid Id), Entity> _sources = new();
     private readonly List<(string Table, Guid Id, string[] Columns)> _sourceReads = [];
     private readonly HashSet<Guid> _readable = [];
+    private readonly Dictionary<Guid, AccessRights> _rights = [];
     private readonly ReadProbe _probe;
     private readonly StampWorld _stamps = new StampWorld()
         .Row("sprk_matter", OrdinaryMatter).Row("sprk_matter", SecureMatter);
@@ -98,7 +99,11 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     public RecordCreationServiceMappingSeamTests()
     {
         _user = new MappingUserClient(_scripted, _journal);
-        _probe = new ReadProbe(id => _readable.Contains(id) ? AccessRights.Read | AccessRights.Write : AccessRights.None, _journal);
+        _probe = new ReadProbe(
+            id => _rights.TryGetValue(id, out var rights) ? rights
+                : _readable.Contains(id) ? AccessRights.Read | AccessRights.Write
+                : AccessRights.None,
+            _journal);
 
         _appOnly
             .Setup(a => a.UpdateRecordFieldsAsync(
@@ -346,6 +351,58 @@ public sealed partial class RecordCreationServiceMappingSeamTests
                 w.Code == RecordCreationWarning.MappingRuleSkippedCode && w.Detail.Contains("sprk_assignedto"));
     }
 
+    [Fact]
+    public async Task CreateAsync_AMappedWorkAssignmentFilingLookupTheCallerCannotAppendTo_IsRefused_AndNothingIsWritten()
+    {
+        // Fix round 1 (review K-1): a work assignment's own filing column (SecureRootInheritance.FilingColumnsOf), mapped
+        // from the project the caller names, is the caller's to file under: AppendTo it fails refuses, never drops.
+        _user.Columns["sprk_workassignment"] = new() { ["sprk_regardingmatter"] = ("Lookup", true) };
+        Profile("sprk_project", "sprk_workassignment", Rule("sprk_regardingmatter", "sprk_regardingmatter", Lookup));
+        _scripted.NoAppendTo.Add(SecureMatter);
+
+        var outcome = await Service().CreateAsync(
+            Request("sprk_workassignment", new Dictionary<string, object?> { ["sprk_name"] = "Review the lease" },
+                mappingSource: ("sprk_project", SourceProject)),
+            AsCaller(), CancellationToken.None);
+
+        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.NotFoundOrDenied,
+            "a mapped work assignment filing lookup files the row as the caller's would: refused, never dropped");
+        Problem(outcome, "sprk_workassignment").Status.Should().Be(StatusCodes.Status404NotFound);
+        _creates.Should().BeEmpty();
+        _journal.Should().NotContain(["owner", "create"]);
+    }
+
+    [Fact]
+    public async Task CreateAsync_AWorkAssignmentFilingLookupMarkedServerSet_IsStillAskedAppendTo_UnderAnOrdinaryRecord()
+    {
+        // Fix round 1 (review F-1): the plan asks AppendTo on a SECURE record only, so a filing lookup the server set
+        // under an ORDINARY one is asked after the plan — the same uniform answer as the unmarked request's.
+        _scripted.NoAppendTo.Add(OrdinaryMatter);
+
+        var marked = await Service().CreateAsync(
+            WorkAssignmentUnder(OrdinaryMatter, serverSet: "sprk_regardingmatter"), AsCaller(), CancellationToken.None);
+        var unmarked = await Service().CreateAsync(WorkAssignmentUnder(OrdinaryMatter), AsCaller(), CancellationToken.None);
+
+        marked.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.NotFoundOrDenied);
+        Problem(marked, "sprk_workassignment").Status.Should().Be(StatusCodes.Status404NotFound);
+        JsonSerializer.Serialize(Problem(marked, "sprk_workassignment"))
+            .Should().Be(JsonSerializer.Serialize(Problem(unmarked, "sprk_workassignment")),
+                "marked server-set or not, a record the caller may not file under answers alike");
+        _creates.Should().BeEmpty();
+        _journal.Should().NotContain("create");
+    }
+
+    [Fact]
+    public async Task CreateAsync_AWorkAssignmentFilingLookupMarkedServerSet_TheCallerMayAppendTo_IsCreatedThere()
+    {
+        var outcome = await Service().CreateAsync(
+            WorkAssignmentUnder(OrdinaryMatter, serverSet: "sprk_regardingmatter"), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        StringOf(_creates.Should().ContainSingle().Subject.Fields, "sprk_RegardingMatter@odata.bind")
+            .Should().Be($"/sprk_matters({OrdinaryMatter:D})");
+    }
+
     // =====================================================================================
     // #1614 — a Project's pair is the caller's, AppendTo-checked; a rule never writes it
     // =====================================================================================
@@ -370,6 +427,28 @@ public sealed partial class RecordCreationServiceMappingSeamTests
 
         outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.NotFoundOrDenied, "#1614: the pair's record costs AppendTo");
         Problem(outcome, "sprk_project").Status.Should().Be(StatusCodes.Status404NotFound);
+        _creates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CreateAsync_ACallersUntypedPair_IsRefusedAsWithoutMapping_EvenWhenAMappedLookupWouldComplete()
+    {
+        // Fix round 1 (review K-3): the caller's own values are asked alone first, so a mapped sprk_regardingmatter naming
+        // the same record never makes a pair the caller sent without its type pass.
+        ProjectToEventProfile(); // maps the project's sprk_regardingmatter (SecureMatter), which the caller may AppendTo
+        Dictionary<string, object?> Body() => new()
+        {
+            ["sprk_eventname"] = "Hearing",
+            [SecureRootInheritance.PairIdColumn] = SecureMatter.ToString("D"),
+        };
+
+        var mapped = await Service().CreateAsync(
+            Request("sprk_event", Body(), mappingSource: ("sprk_project", SourceProject)), AsCaller(), CancellationToken.None);
+        var unmapped = await Service().CreateAsync(Request("sprk_event", Body(), mapping: false), AsCaller(), CancellationToken.None);
+
+        unmapped.Refusal!.Code.Should().Be(RecordCreationRefusal.InvalidPayloadCode, "task 013's answer to an untyped pair");
+        mapped.Refusal.Should().NotBeNull("mapping never makes the caller's own payload pass");
+        JsonSerializer.Serialize(Problem(mapped, "sprk_event")).Should().Be(JsonSerializer.Serialize(Problem(unmapped, "sprk_event")));
         _creates.Should().BeEmpty();
     }
 
@@ -435,6 +514,10 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     public async Task CreateAsync_AMissingSourceAndOneTheCallerCannotRead_GiveTheSameOutcome_AndReadNothing()
     {
         MatterToEventProfile();
+        // Fix round 1 (review F-2): the denied source EXISTS, with every value the profile copies, and the caller holds
+        // rights on it — only not Read. The missing one is not there at all.
+        _sources[("sprk_matter", DeniedMatter)] = _sources[("sprk_matter", OrdinaryMatter)];
+        _rights[DeniedMatter] = AccessRights.Write | AccessRights.AppendTo | AccessRights.Append;
 
         var missing = await Service().CreateAsync(
             EventUnder(OrdinaryMatter, mappingSource: ("sprk_matter", MissingMatter)), AsCaller(), CancellationToken.None);
@@ -452,6 +535,7 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         _creates[0].Fields.Keys.Order().Should().Equal(_creates[1].Fields.Keys.Order());
         _creates[0].Fields.Should().NotContainKey("sprk_description");
         _sourceReads.Should().BeEmpty("neither source is read: the probe answered first");
+        _probe.Asked.Select(a => a.Id).Should().Equal(MissingMatter, DeniedMatter);
     }
 
     [Fact]
@@ -578,6 +662,30 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         StringOf(fields, "sprk_eventname").Should().Be("Hearing");
     }
 
+    [Fact]
+    public async Task CreateAsync_WhenMappingFaultsAfterARuleWasSkippedAndAValueDropped_OnlyTheFaultIsReported()
+    {
+        // Fix round 1 (review K-8): nothing was mapped, so what the faulted step had said about single rules and values
+        // is not reported beside "none were copied".
+        Profile("sprk_matter", "sprk_event",
+            Rule(null, RecordCreatorPerson.Column, Text, Default, "someone"), // a protected target: skipped
+            Rule("sprk_matterdescription", "sprk_eventcode", Text), // not valid for create: dropped
+            Rule("sprk_matterdescription", "sprk_description", Memo));
+        _user.ThrowOn = path => _sourceReads.Count > 0
+                                && (path.Contains("ManyToOneRelationships", StringComparison.Ordinal)
+                                    || path.Contains("EntitySetName", StringComparison.Ordinal))
+            ? new TimeoutException("metadata read timed out at 10.0.0.9")
+            : null;
+
+        var outcome = await Service().CreateAsync(EventUnder(OrdinaryMatter), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        outcome.MappingWarnings.Should().ContainSingle().Which.Should().Be(new RecordCreationWarning(
+            RecordCreationWarning.MappingUnavailableCode, null, RecordCreationService.MappingFaulted));
+        outcome.Warnings.Should().Equal(RecordCreationService.MappingFaulted);
+        _creates.Should().ContainSingle().Which.Fields.Should().NotContainKey("sprk_description");
+    }
+
     // =====================================================================================
     // A mapped value the column cannot take is dropped, named — never a failed create
     // =====================================================================================
@@ -624,6 +732,26 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         ((JsonElement)fields["sprk_budgetamount"]!).GetDecimal().Should().Be(1250.50m);
         StringOf(fields, "sprk_duedate").Should().Be("2027-03-04");
         outcome.MappingWarnings.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CreateAsync_ADateRuleWhoseTargetIsNoLogicalName_NeverReachesTheMetadataFilter_AndIsDroppedNamed()
+    {
+        // Fix round 1 (review K-9): a rule's target is admin-written text; only a logical name is put in a $filter.
+        _user.DateBehaviours[("sprk_event", "sprk_duedate")] = "DateOnly";
+        Profile("sprk_matter", "sprk_event",
+            Rule("sprk_duedate", "sprk_due'date", CreateTimeFieldMapping.FieldTypeDateTime),
+            Rule("sprk_duedate", "sprk_duedate", CreateTimeFieldMapping.FieldTypeDateTime));
+
+        var outcome = await Service().CreateAsync(EventUnder(OrdinaryMatter), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        StringOf(_creates.Should().ContainSingle().Subject.Fields, "sprk_duedate").Should().Be("2027-03-04");
+        _user.Paths.Where(p => p.Contains("EntityDefinitions", StringComparison.Ordinal))
+            .Should().NotContain(p => p.Contains("due'date", StringComparison.Ordinal));
+        outcome.MappingWarnings.Should().ContainSingle()
+            .Which.Should().Match<RecordCreationWarning>(w =>
+                w.Code == RecordCreationWarning.MappedValueDroppedCode && w.Column == "sprk_due'date");
     }
 
     // =====================================================================================
@@ -809,6 +937,18 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         return Request("sprk_event", body, mapping: true, mappingSource);
     }
 
+    /// <summary>A work assignment filed under <paramref name="matter"/> by the caller's bind, asking for no mapping; the
+    /// matter marked server-set when <paramref name="serverSet"/> names it.</summary>
+    private RecordCreationRequest WorkAssignmentUnder(Guid matter, string? serverSet = null) =>
+        Request("sprk_workassignment", new Dictionary<string, object?>
+        {
+            ["sprk_name"] = "Review the lease",
+            ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({matter:D})",
+        }, mapping: false) with
+        {
+            ServerSetLookupColumns = serverSet is null ? null : new HashSet<string>(StringComparer.OrdinalIgnoreCase) { serverSet },
+        };
+
     private RecordCreationRequest Event(object body, (string Table, Guid Id)? mappingSource) =>
         Request("sprk_event", JsonSerializer.Deserialize<Dictionary<string, object?>>(JsonSerializer.Serialize(body))!, mapping: true,
             mappingSource);
@@ -880,6 +1020,9 @@ public sealed partial class RecordCreationServiceMappingSeamTests
 
         public Func<string, Exception?>? ThrowOn { get; set; }
 
+        /// <summary>Every path read, unescaped, in order.</summary>
+        public List<string> Paths { get; } = [];
+
         [GeneratedRegex(@"^EntityDefinitions\(LogicalName='(?<t>[a-z_]+)'\)")]
         private static partial Regex TableOf();
 
@@ -890,6 +1033,7 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         {
             var path = Uri.UnescapeDataString(relativePath);
             journal.Add(KindOf(path));
+            Paths.Add(path);
             if (ThrowOn?.Invoke(path) is { } fault)
                 throw fault;
 
