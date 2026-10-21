@@ -1594,3 +1594,140 @@ Source SHA restored after every mutant.
 | ArchTests (full) | 1,226 passed, 0 failed; guard class 18/18 after the reason edit |
 | Publish size | 39,351,329 B (branch 91fb23c10e) vs 39,361,684 B (master 1cc7b39ff3): −10,355 B; +840 B vs round 4b. Packages unchanged |
 | `git merge-tree` vs `origin/master` 1cc7b39ff3 | CONFLICT, one line: the I-16 row of `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md` (task 189 #2169 on master vs earlier task-188 rounds). Not caused by 4c; resolve at merge |
+
+## 20. Round 4d — master merge, D7 on the document write routes (#2200), the search count (#2199)
+
+Commits: `b50c89ccac` (merge of `origin/master` `a10e814d02`, with #2169 task 189 and #2150 #2143), `1f2121ba54` (#2200 and
+#2199: fixes, tests, ratchet), and this notes commit. Scenario for every finding: a systemuser flagged `sprk_isexternal` (a
+B2B guest) holding Write / AppendTo / Read on a document through a share. Under D7 (every BFF surface) and owner round 113,
+a document THE narrowing hides refuses writes and counts too, with the answer the route gives for no access. The rule is
+unchanged (§1); every site reuses `InternalPlaneDocumentNarrowing`. Internal systemusers make no narrowing call and no
+app-only read at any site (pinned per site).
+
+### Merge
+
+- **Text conflict, one line:** the I-16 row of `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md`. Kept master's
+  (task 189) text: "a parented Document holds max(own narrowing, inherited) … enforced by
+  `DocumentAccessPermissionWriterGuardTests`", its writer column and its task-189 date. Appended task 188's exception: the
+  external document narrowing reads a document's stored value and its ancestors' on the bounded walk, and may only HIDE it
+  from partners (it never widens). Master's "No access decision reads a To Do, Event or Communication copy" replaces the
+  branch's "a child table's copy, EXCEPT …", because documents are now covered by their own sentences on both sides.
+- **Auto-merged, both sides kept:** `DataverseDocumentsEndpoints.cs` (#2150's `secureExitCaller`, the `AfterRefileAsync`
+  caller argument and the `RecordOwnerUnsettledException` 409, beside task 188's list handlers); `OfficeEndpoints.cs`
+  (#2150's `OfficeRecordCreationService`, beside round 4c's collision narrowing); `FinanceEndpointsAuthorizationContractTests.cs`.
+- **Semantic checks.** `CallerRecordAccessProbe`'s 5th constructor argument (`DataverseWebApiService? appOnlyDataverse`)
+  was already on the branch before this merge (task 036), so no Moq constructor had to change. `RecordOwnershipResolver.ReparentAsync`
+  (#2150): the branch calls it nowhere outside the route master itself edited. After the merge: 0 errors, 0 warnings.
+
+### #2200: document write routes decided on the Record path
+
+| Route | Before | After |
+|---|---|---|
+| `POST /api/ai/rag/index-file` (`RagEndpoints.ResolveIndexFileTargets`) | `sprk_documents` Write on `FinanceCheckPath.Record` | `FinanceCheckPath.Document`: Write, then `AuthorizeDocumentsAsync`'s narrowing. Hidden == the uniform 404 of an unwritable document; the handler never runs. The parent stays on the Record path (the shared map holds no `sprk_document`) |
+| `POST /api/ai/rag/send-to-index` (`RagEndpoints.SendToIndex`) | Write per id (`GetCallerRecordAccessAsync`). A hidden document was read, indexed and stamped, and its governing parent, chunk count and index name were returned | After the Write loop, ONE `ForCallerAsync` over the writable ids. A hidden id is refused in place exactly like an unwritable one (same result, no parent; never read, indexed or stamped). All hidden == the existing 403 `SEND_TO_INDEX_FORBIDDEN`; a fault hides all |
+| `PUT /api/v1/documents/{id}` re-file (`DataverseDocumentsEndpoints.AuthorizeRefileTargetsAsync`) | AppendTo on a parent DOCUMENT through `GetCallerRecordAccessAsync` | A `sprk_document` target goes through `AuthorizeDocumentsAsync` (AppendTo, then the narrowing). Hidden == the 403 `insufficient_rights` of a target without AppendTo; nothing is written. Other targets are unchanged |
+
+**Send-to-index: why `ForCallerAsync`, not `AuthorizeDocumentsAsync`.** The route's contract is a per-document result
+list, and the helper's first-deny answer cannot express it (the `BulkDownloadAuthorizationFilter` precedent, §18). It costs
+one narrowing call per request, not one per id. The Write question is unchanged (`GetCallerRecordAccessAsync`), so an
+internal caller's answer is identical.
+
+**Re-file: the document itself.** The re-filed document is already narrowed by the route's
+`DocumentAuthorizationFilter("write")` (slice B), so a hidden document cannot be moved out of a Restricted ancestor. Only
+the TARGET was on the Record path. Filing under a hidden target would have hidden the document too and returned nothing
+about the target, but D7 refuses it anyway.
+
+**Internal callers.** The Document path is `AuthorizeAsync` over the same `RetrievePrincipalAccess` on `sprk_documents` and
+the same `OperationAccessPolicy` rights (`write` → Write, `entity.associate_document` → AppendTo), so the decision is the
+same. There is no narrowing call and no app-only read (pinned per route).
+
+### #2199: `POST /api/ai/search/count` with `scope=documentIds`
+
+**Fix.** In `SemanticSearchAuthorizationFilter.AuthorizeDocumentIdsScopeAsync`, after the Read loop, ONE `ForCallerAsync`
+over the readable ids. A hidden id is dropped like an unreadable one; all hidden → the existing 403 `NoReadableDocuments`.
+A narrowing fault hides every id, so the answer is that 403, never the untrimmed count. `/count` then counts only
+`AuthorizedDocumentIds` (`NarrowToAuthorized`), so a hidden id never reaches the index.
+
+**Why narrow, not refuse.** Refusing documentIds-scoped counts for every caller who is not internal would also close the
+oracle. But it would take a working count away from an external caller counting documents they may see, and it would
+leave the same unnarrowed set feeding `/search`'s query (trimmed afterwards, but still asked). Narrowing the set gives both
+routes one decision to read, and it is the fix shape #2199 names. Cost: `/search` with documentIds makes 2 narrowing calls
+for an external caller (the filter's and the downstream trim's); internal callers make none.
+
+**Ratchet.** `DocumentDecisionBaseline` loses `SemanticSearchAuthorizationFilter::AuthorizeDocumentIdsScopeAsync` and the
+three #2200 entries (`ResolveIndexFileTargets` no longer uses a shape; the other three now reach the narrowing). One entry
+remains: `FinanceEndpoints::ResolveConfirmTargets`. Non-vacuity now also pins the three fixed sites that still use a shape:
+the search snapshot, and the Record-path calls in send-to-index and the re-file.
+
+### Tests (`tests/integration/auth/UnifiedAccessControl/DocumentWriteRouteNarrowingTests.cs`, 39 cases)
+
+- `IndexFileDocumentNarrowingTests`: the production declaration and filter, the real `AuthorizationService`, and the real
+  narrowing over a stated caller and world.
+  - Must fire × `HiddenDocumentCases` (own Restricted, internal-only communication, Restricted parent, narrowing fault,
+    lookup fault): a 404 identical to an unwritable document, nothing indexed, Document path only.
+  - Must not fire: internal (0 calls, no read); external with a visible document (and the parent on the Record path).
+- `SendToIndexDocumentNarrowingTests`: the real route over `SendToIndexAuthorizationFixture`, which now states a caller
+  (Internal by default).
+  - Only a hidden document × 5: a 403 identical to an unwritable one; never read, indexed or stamped; 1 narrowing call.
+  - Hidden beside a visible and an unwritable document × 5: refused in place with a result identical to the unwritable
+    one and no parent; the unwritable id is never narrowed; a fault gives the 403.
+  - Must not fire: internal; external with a visible document.
+- `DocumentRefileTargetNarrowingTests`: the real PUT over `DocumentRefileTargetNarrowingFixture`, where the re-filed
+  document's narrowing is answered by a separate, always-visible world, so each case reaches the target check.
+  - × 5: a 403 identical to no AppendTo, nothing written, the target narrowed once.
+  - Must not fire: internal under a Restricted document; external under a visible document; external under a matter (no
+    target narrowing call).
+- `SemanticSearchCountNarrowingTests`: the real `MapSemanticSearchEndpoints`, filter and `/count` handler over a counting
+  `ISemanticSearchService`.
+  - Hidden beside visible × 5: count 1, the hidden id is never counted; a fault gives the 403 and nothing is counted.
+  - Only hidden × 5: a 403 identical to an unreadable document.
+  - Must not fire: internal (count 2, no call); external with visible documents (count 2).
+- Hosts. `RagSendToIndexFixture` and `RagSendToIndexReplaceStaleChunksFixture` (full `Program` hosts) take Option A
+  (`AllVisibleDocumentNarrowing`). `Spe.Integration.Tests`' `SemanticSearchAuthorizationTestFixture` takes the same double
+  inline, because that project does not compile the unit-test helpers. `RagEndpointsAuthorizationContractTests` now pins
+  the document on the Document path and the parent on the Record path (it had pinned both on the Record path).
+
+### Before → after
+
+With the three source files back at the merge commit `b50c89ccac` and the new tests kept: 34 of the 39 new cases fail (the
+5 that pass are must-not-fire: internal callers ×3 routes, internal count, the re-file under a matter). After: 39 of 39.
+
+| Item | Before | After |
+|---|---|---|
+| `POST /api/ai/rag/index-file` | A flagged-external caller with Write indexed a hidden document (chunk count; a 409 on a mismatched body) | The uniform 404 of an unwritable document; nothing indexed |
+| `POST /api/ai/rag/send-to-index` | A hidden document was read, indexed, stamped; its governing parent, chunk count and index name returned | Refused in place like an unwritable one (no parent); all hidden → the existing 403 |
+| `PUT /api/v1/documents/{id}` re-file | Filing under a hidden parent document was allowed on AppendTo | The 403 of a target without AppendTo; nothing written |
+| `POST /api/ai/search/count` scope=documentIds | A hidden document counted (content oracle) | Counted only when visible; all hidden or a fault → the existing 403 |
+| ArchTest ratchet | 5 entries | 1 entry (`FinanceEndpoints::ResolveConfirmTargets`) |
+
+### Mutation table (round 4d): 6 of 6 killed
+
+Runner `.uac188/t188r4d_mutate.py` (untracked; deleted at the end). Each: apply, rebuild, run the 4 new classes plus
+`RagEndpointsAuthorizationContractTests` (93 cases) and, where marked, the guard class (18), restore, SHA-1-check.
+
+| Id | Mutation | Unit failed | ArchTest failed |
+|---|---|---|---|
+| MI | index-file document back on the Record path | 7 | 1 |
+| MS1 | send-to-index ignores the narrowing (call kept) | 10 | 0 (per-method reach) |
+| MS2 | send-to-index narrows unwritable ids too | 10 | — |
+| MSG | send-to-index no longer calls the narrowing | 11 | 1 |
+| MR | re-file target document back on the Record path | 6 | 1 |
+| MC | search documentIds ignores the narrowing (call kept) | 10 | 0 (per-method reach) |
+
+### Gates (round 4d)
+
+| Gate | Result |
+|---|---|
+| Build `--no-incremental`: BFF, unit tests, ArchTests, Spe.Integration.Tests | 0 errors, 0 warnings each |
+| Unit, filtered (Office, Permissions, Workspace, Communication, Playbook, Finance, Analysis, Chat, `.Ai.`, Retrieval, Search, Rag, Refile, UnifiedAccessControl, ExternalAccess, Compose, RecordOwnership, AccessPermission; `Category!=Live`) on `1f2121ba54` | 16,776 passed, 2 failed, 11 skipped (16,789). The 2: `ChatMessageStreamingContractTests.SendMessage_ModelThrowsAfterTwoTokens_…` (2 m 10 s, `TaskCanceledException`) and `ProvisionProjectIdempotencyTests.ProvisionProject_WhenRecordingTheContainerTimesOut_…` (1 m 30 s), both under machine load. Rerun alone: 7/7 and 55/55 passed |
+| `Spe.Integration.Tests` `SemanticSearchAuthorizationTests` | 49/49 (6 failed before its fixture took the all-visible double) |
+| ArchTests, full project | 1,235 passed, 0 failed |
+| Publish size (`dotnet publish -c Release`, `Compress-Archive -CompressionLevel Optimal` under pwsh 7, 4 PDBs, fresh detached worktrees) | branch `1f2121ba54` 39,425,118 B vs fresh `origin/master` `9b6963d737` 39,388,315 B: +36,803 B (all of task 188 vs today's master; raw +101,864 B). Total 39.4 MB. Packages unchanged |
+| `git merge-tree --write-tree origin/master HEAD` (master `9b6963d737`) | clean (tree `ba9c8e9df1`) |
+
+Not run, by the brief: the full unfiltered unit suite, any deploy, any Dataverse, Azure or Key Vault access.
+
+### Not examined (noted)
+
+- `UpdateRecordActionCore` (the UpdateRecord playbook node) can write a reparentable child's `sprk_parentdocument` from
+  playbook-configured lookups. Whether that target meets the narrowing was not checked here (not a request-body route).
