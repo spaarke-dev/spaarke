@@ -126,6 +126,13 @@
       - Office Project-under-Matter derives the regarding pair from the filed-under source BEFORE mapping, because ApplyFillOnly never writes it. Mapping never decides isolation. A caller pair cannot lower isolation: for a SECURE matter or project source, only the derived pair is accepted and any other pair is refused uniformly. A non-secure source keeps the caller's pair. This is the same rule as the #2191 hotfix (UAC-r2 2026-10-21); keep its tests green.
       - Verify #2124 (DI-001) on the SDK path: a Default rule into a Money column writes a Money. It is unobservable on the Web API path. Then close #2124.
       - Office default-contact order (named contact, else mapped, else maker's contact) needs a post-mapping default hook (015 or here).</criterion>
+    <criterion testable="true">From task 015 review (2026-10-21): the Office root owner moves to record-first HERE, through the unified service, which has the step-5 AppendTo checks (#1614). 015 reverted its live Office owner change. Required:
+      - Office Project-under-Matter is owned by the Matter's BU team (release note);
+      - a mapped or paired filing parent the caller cannot AppendTo refuses uniformly;
+      - the search index comes from the OWNING BU, so the owner and the index never diverge;
+      - remove the CreateOwnerResolutionGuardTests allow-list entry for Office;
+      - tests for the secure-owner refusal and for the isolated-project ordering (no caller-BU team needed).
+    </criterion>
   </acceptance-criteria>
 
   <notes>Spec FR-13 part 2, FR-12, NFR-07. Office todo and document save are task 030 (not here). Release note: Office Project-under-Matter owner changes (task 015); Office Invoice becomes team-owned.
