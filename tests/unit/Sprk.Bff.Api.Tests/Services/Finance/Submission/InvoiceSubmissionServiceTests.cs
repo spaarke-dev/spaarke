@@ -114,6 +114,12 @@ public sealed class InvoiceSubmissionServiceTests
         /// <summary>D-140: non-null, a communication read throws this.</summary>
         public Exception? CommunicationReadFailure;
 
+        /// <summary>050a round 4 (F1): the communication threads a communication of the chain links (absent: not found).</summary>
+        public readonly Dictionary<Guid, Entity> Threads = new();
+
+        /// <summary>050a round 4 (F1): non-null, a thread read throws this.</summary>
+        public Exception? ThreadReadFailure;
+
         /// <summary>
         /// 050a review round 3 (uac-r2 F1-a): the isolation facts the existing-document check reads, through the REAL
         /// <see cref="Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer"/> walk. By default a world with a Secure Record owner team
@@ -287,6 +293,9 @@ public sealed class InvoiceSubmissionServiceTests
                     "sprk_communication" => CommunicationReadFailure is { } communicationFailure
                         ? throw communicationFailure
                         : Communications.TryGetValue(id, out var communication) ? communication : throw NotFound(),
+                    "sprk_communicationthread" => ThreadReadFailure is { } threadFailure
+                        ? throw threadFailure
+                        : Threads.TryGetValue(id, out var thread) ? thread : throw NotFound(),
                     _ => null!,
                 });
             // The SPA document create stamps the uploaded item on the row (sprk_graphitemid): a committed row is found by it.

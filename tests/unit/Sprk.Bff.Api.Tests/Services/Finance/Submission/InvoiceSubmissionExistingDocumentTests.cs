@@ -486,6 +486,86 @@ public sealed class InvoiceSubmissionExistingDocumentTests
         ShouldHaveWrittenNothing(h);
     }
 
+    // ── 050a review round 4 (uac-r2 F1): the communication's THREAD files it too: the union of both, as SecureChildReconciler.ContextFor ──
+
+    /// <summary>
+    /// An email attachment whose communication sits on a thread. The communication's own regarding matter is
+    /// <paramref name="communicationMatter"/> (null: none, a thread-only reply); the thread's is <paramref name="threadMatter"/>. Not isolated
+    /// (the isolation world holds no row of it), so only the D-140 chain decides.
+    /// </summary>
+    private static (Harness Harness, Guid Thread) ThreadReply(Guid? communicationMatter, Guid threadMatter)
+    {
+        var (h, communication) = EmailAttachment(communicationMatter);
+        var thread = Guid.NewGuid();
+        h.Communications[communication]["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", thread);
+        h.Threads[thread] = new Entity("sprk_communicationthread", thread)
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", threadMatter),
+        };
+        return (h, thread);
+    }
+
+    [Fact(DisplayName = "050a round 4 (uac-r2 F1, must fire): a thread-only reply on ordinary matter S's thread (the communication names no record) confirmed onto M is 409 document_core_record_mismatch")]
+    public async Task ThreadOnlyReply_UnderAnotherMatter_Is409_AndWritesNothing()
+    {
+        var (h, _) = ThreadReply(communicationMatter: null, threadMatter: Guid.NewGuid());
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None);
+
+        outcome.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.DocumentCoreRecordMismatch);
+        ShouldHaveWrittenNothing(h);
+    }
+
+    [Fact(DisplayName = "050a round 4 (uac-r2 F1, must not fire): a thread-only reply on the confirm's own matter's thread is received")]
+    public async Task ThreadOnlyReply_UnderTheConfirmsMatter_IsReceived()
+    {
+        var (h, _) = ThreadReply(communicationMatter: null, threadMatter: MatterId);
+
+        (await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None)).Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
+    }
+
+    [Fact(DisplayName = "050a round 4 (uac-r2 F1, the union): a communication regarding M on S's thread is filed under BOTH, so it is 409 confirmed onto M and 409 confirmed onto S")]
+    public async Task CommunicationRegardingM_OnSsThread_IsRefusedForMAndForS()
+    {
+        var threadMatterS = Guid.NewGuid();
+
+        var (ontoM, _) = ThreadReply(communicationMatter: MatterId, threadMatter: threadMatterS);
+        var refusedForM = await ontoM.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None);
+        refusedForM.StatusCode.Should().Be(StatusCodes.Status409Conflict, "the thread files it under S as well");
+        refusedForM.ErrorCode.Should().Be(InvoiceSubmissionErrors.DocumentCoreRecordMismatch);
+        ShouldHaveWrittenNothing(ontoM);
+
+        var (ontoS, _) = ThreadReply(communicationMatter: MatterId, threadMatter: threadMatterS);
+        var refusedForS = await ontoS.Build().SubmitExistingDocumentAsync(
+            Confirm() with { CoreRecord = new InvoiceCoreRecord(InvoiceCoreRecordKind.Matter, threadMatterS) }, CancellationToken.None);
+        refusedForS.StatusCode.Should().Be(StatusCodes.Status409Conflict, "the communication's own regarding files it under M as well");
+        refusedForS.ErrorCode.Should().Be(InvoiceSubmissionErrors.DocumentCoreRecordMismatch);
+        ShouldHaveWrittenNothing(ontoS);
+    }
+
+    [Fact(DisplayName = "050a round 4 (uac-r2 F1): a communication thread that cannot be read is 503 (fail closed, as a communication read fault), nothing written")]
+    public async Task ThreadUnreadable_Is503_AndWritesNothing()
+    {
+        var (h, _) = ThreadReply(communicationMatter: null, threadMatter: MatterId);
+        h.ThreadReadFailure = new HttpRequestException("dataverse down");
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None);
+
+        outcome.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.CoreRecordUnavailable);
+        ShouldHaveWrittenNothing(h);
+    }
+
+    [Fact(DisplayName = "050a round 4 (uac-r2 F1): a thread that no longer exists files nothing (as a gone communication), so a reply naming no record is received")]
+    public async Task ThreadGone_FilesNothing_IsReceived()
+    {
+        var (h, thread) = ThreadReply(communicationMatter: null, threadMatter: Guid.NewGuid());
+        h.Threads.Remove(thread);
+
+        (await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None)).Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
+    }
+
     // ── 050a review #4: a retry after the submission ended ──
 
     [Theory(DisplayName = "050a review #4 (owner 2026-10-20, D-139): a retry whose submission ended Failed or Rejected is 409 submission_already_ended naming the status; nothing is written or queued")]

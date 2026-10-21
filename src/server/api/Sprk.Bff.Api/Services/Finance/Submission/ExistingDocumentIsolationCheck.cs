@@ -5,8 +5,9 @@
 //   (1) Existing — SecureChildShareSynchronizer.SecureRootsAboveAsync (uac-r2 task 147, public) is the upward walk that places a row under
 //       its secure roots exactly as the ownership resolver would isolate it (through ANY lineage lookup: a thread, an event, an invoice, a
 //       parent document); IsSecureOwnerTeamAsync names the Secure Record owner team. Both are reused, never re-implemented. The D-140 filing
-//       chain (InvoiceSubmissionService.ResolveFilingAsync) reads six core columns, the communication's three regarding columns and the
-//       parent chain: a narrower set than isolation uses, which is the finding.
+//       chain (InvoiceSubmissionService.ResolveFilingAsync) reads six core columns, the communication's three regarding columns together
+//       with its thread's three (round 4, the union SecureChildReconciler.ContextFor takes) and the parent chain: still a narrower set
+//       than isolation uses (no event, invoice, budget or other ownership parent), which is the finding this check answers.
 //   (2) Extension — the walk answers "which secure roots", not "may this confirm name this record"; that decision is the e-billing intake's
 //       and is not added to a uac-r2 file. One type, because the intake (at confirm) and the persister (at commit, and again after a
 //       rolled-back transaction) must decide it identically.
