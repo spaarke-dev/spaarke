@@ -71,7 +71,9 @@ public sealed record BillingEvaluationResult
 /// <para><b>Firm over client default (D-39).</b> For one subject, when a firm rule set's version and a client default's version of
 /// the same rule type both apply, only the firm's is evaluated. Only a firm version that both the gate and its handler accept counts
 /// for this: when the firm version cannot be evaluated, the client default still applies (owner, 2026-10-18; 072 review B2), so a
-/// broken firm rule never silently removes a check.</para>
+/// broken firm rule never silently removes a check. "The same rule type" means the same <see cref="BillingRuleDefinition.PrecedenceKey"/>: the
+/// rule type, and for AddedFee the rule type plus its fee kind (owner, 2026-10-21), so a firm late-fee cap leaves the client default's
+/// administrative-fee cap in force.</para>
 /// <para><b>Refusals (FR-24).</b> A version the gate refuses (logged and metered by the gate) or whose handler refuses it (logged
 /// here as <see cref="OntologyWriterEvents.PolicyVersionInvalid"/> and metered) produces no finding; the other versions still run.
 /// Only <see cref="BillingRuleRefusedException"/> is caught; any other exception is a defect and propagates.</para>
@@ -270,17 +272,20 @@ public sealed class InvoiceComplianceEvaluator
         var subjectsByVersion = new Dictionary<Guid, HashSet<BillingSubject>>();
         foreach (var (subject, versions) in selectedBySubject)
         {
-            var firmTypes = versions
+            // The replacement key is the rule type, and for AddedFee the rule type plus its fee kind (owner, 2026-10-21;
+            // BillingRuleDefinition.PrecedenceKey): a firm late-fee cap displaces the client default's late-fee cap only. For the
+            // kind 'other' the key also carries the fee-code set (ontology-r1 F3): a courier cap never displaces a postage cap.
+            var firmKeys = versions
                 .Where(v => v.Scope == RuleSetScope.Firm
                             && !downgraded.ContainsKey(v.PolicyVersionId)
                             && accepted.TryGetValue(v.PolicyVersionId, out var firmDefinition)
                             && HandlerAccepts(v, firmDefinition))
-                .Select(v => accepted[v.PolicyVersionId].RuleType)
+                .Select(v => accepted[v.PolicyVersionId].PrecedenceKey)
                 .ToHashSet();
             foreach (var version in versions)
             {
                 if (!accepted.TryGetValue(version.PolicyVersionId, out var definition)
-                    || (version.Scope != RuleSetScope.Firm && firmTypes.Contains(definition.RuleType))
+                    || (version.Scope != RuleSetScope.Firm && firmKeys.Contains(definition.PrecedenceKey))
                     || !HandlerAccepts(version, definition))
                 {
                     continue;
