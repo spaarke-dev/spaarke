@@ -8,7 +8,7 @@
 | Field | Value |
 |---|---|
 | **HEAD** | `92e039f5b3` on `work/field-mapping-server-write-path-r1`, pushed. 0 behind master at 77ef24010e. Verified: Spaarke.sln 0/0, ArchTests 1183, suites 1746 |
-| **Running** | The 004→005 implementer agent in an isolated worktree, branch `task/fm-004-005`, base c4a2a7b81 |
+| **Running** | (1) The 004→005 implementer agent, branch `task/fm-004-005`, base c4a2a7b81. (2) The **013** agent (opus/xhigh), branch `task/fm-013`, base bad3195920 (master merged at that point). 013 goes to UAC-r2 and ebilling-r1 for review before any master merge |
 | **Next Action** | When the 004/005 agent reports:<br>• merge `task/fm-004-005` (expect overlap only with master in Spaarke.Dataverse);<br>• verify (sln build, ArchTests, suites);<br>• mark 004 and 005;<br>• push.<br>005's live sprk_syncmode migration needs the owner's OK (dry run only). Then the next candidate is **013** (opus/xhigh; deps 011 ✅ and 012 ✅). |
 
 ## How wave-2 agents are run (lessons)
