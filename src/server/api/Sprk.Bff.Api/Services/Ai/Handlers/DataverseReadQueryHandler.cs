@@ -352,8 +352,12 @@ public sealed class DataverseReadQueryHandler : IToolHandler
             var hiddenRows = 0;
             var hiddenDocuments = new List<Guid>();
             var hiddenDerivedSources = new List<Guid>();
+            // Task 188 round 4a (F1-5): the row cap is measured on the RAW page Dataverse returned, before any row is
+            // hidden — a page that hit TOP stays reported as capped even when the narrowing removed rows from it.
+            var rawPageLength = 0;
             if (response.Body is { } body && body.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.Array)
             {
+                rawPageLength = value.GetArrayLength();
                 foreach (var record in value.EnumerateArray())
                 {
                     if (guardCommunications &&
@@ -471,7 +475,7 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                     "record's GUID. To map GUIDs to display names, query the referenced table " +
                     "(dataverse.describe shows the related table per lookup column).");
             }
-            if (rows.Count >= translation.Top)
+            if (rawPageLength >= translation.Top)
             {
                 warnings.Add($"Result set reached the row cap ({translation.Top}). Narrow the WHERE clause or raise TOP (max {DataverseSqlQueryTranslator.MaxTop}).");
             }

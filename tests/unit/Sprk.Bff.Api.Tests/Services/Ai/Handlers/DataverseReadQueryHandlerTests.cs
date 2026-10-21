@@ -935,6 +935,41 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
         AssertTelemetryRespectsAdr015($"Doc {DocInternal:N}");
     }
 
+    /// <summary>
+    /// Task 188 round 4a (F1-5): the row-cap warning is measured on the RAW page Dataverse returned, not on what is left after
+    /// the narrowing hid rows. A page of <paramref name="returned"/> rows under TOP 50, 3 of them hidden: the model must still be
+    /// told the result hit the cap when the raw page did.
+    /// </summary>
+    [Theory(DisplayName = "Task 188 r4a F1-5: the row-cap warning counts the raw page, before hidden rows are removed")]
+    [InlineData(50, true)]
+    [InlineData(49, false)]
+    public async Task ExecuteChatAsync_ExternalCaller_RowCapWarning_IsMeasuredBeforeTheNarrowing(int returned, bool capped)
+    {
+        AsExternalCaller();
+        SetupDocumentMetadata();
+        var ids = Enumerable.Range(0, returned).Select(_ => Guid.NewGuid()).ToList();
+        foreach (var (id, i) in ids.Select((id, i) => (id, i)))
+        {
+            _appOnly.Document(id, permission: i < 3 ? 100000002 : null);
+        }
+        CaptureDocumentQueries(DocRows(ids.Select(id => DocRow(id)).ToArray()));
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args("SELECT TOP 50 sprk_documentname FROM sprk_document"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        RowIds(result).Should().HaveCount(returned - 3, "the three own-Restricted rows are hidden");
+        if (capped)
+        {
+            result.Warnings.Should().Contain(w => w.Contains("reached the row cap (50)"),
+                "the raw page hit TOP: hiding 3 rows must not make a capped result look complete");
+        }
+        else
+        {
+            result.Warnings.Should().NotContain(w => w.Contains("row cap"), "the raw page was under TOP");
+        }
+    }
+
     [Fact]
     public async Task ExecuteChatAsync_ExternalCallerOnDocument_FieldSecurityMasksTheLinkForTheUser_AppOnlyReadsAnInternalOnlyCommunication_Hidden()
     {
