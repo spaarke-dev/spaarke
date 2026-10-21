@@ -13,8 +13,9 @@
 | **Next Action** | **Do NOT push to `work/spaarkeai-word-add-in-r1` until #2177 merges**: it is the PR head, and a push restarts CI. When it merges:<br>1. Commit and push the local changes (below).<br>2. Retarget #2182 to master (`gh pr edit 2182 --base master`), merge master into `work/spaarkeai-word-add-in-r1-131` in C:\wt131 and push. Mark #2182 ready and run `gh pr merge 2182 --auto --merge` (131's own gates are done; tell the owner it merges under the same sign-off).<br>3. Step 10 for 130 (POML status, TASK-INDEX ✅, drift check), and for 131 after #2182 merges.<br>4. Remove C:\wt131 with `pwsh -NoProfile -Command "& ./scripts/worktree/Remove-WorktreeSafe.ps1 -Path 'C:\wt131'"` after #2182 merges. |
 
 ### Uncommitted (local, held until #2177 merges)
-- `projects/spaarkeai-word-add-in-r1/notes/ebilling-r1-review-2026-10-21.md`: the owner's invoice-flow decisions.
-- `projects/spaarkeai-word-add-in-r1/notes/handoff-history/2026-10.md`: archive append.
+- Commit `ceb8a8ebb8` (checkpoint, local, not pushed).
+- `projects/spaarkeai-word-add-in-r1/notes/defer-issues.md`: ISS-022 (#2209).
+- `projects/spaarkeai-word-add-in-r1/notes/ebilling-r1-review-2026-10-21.md`: ebilling v5.7 and F1-a / F1-c.
 - this file.
 
 ## Task 130 (#2126 / R3 ISS-015 / UAC D7 T8): what is in #2177
@@ -45,8 +46,9 @@
   Not built; it waits on the owner finalizing ebilling's model.
 - **Future work for this project (no task yet):** the Invoice view and ribbon button, removing Invoice from Save and quick-create (the add-in side goes first, or in the same release as ebilling's server-side removal), the email-only .eml save. Create a task when ebilling's contract is final.
 
-## Open owner questions
-- **The `/office/save` re-save gap (found 2026-10-21):** the email save key is type|target|Message-ID only (`OfficeService.cs:1239-1249`), so saving an already-saved email again to the same record (to tick more attachments) is answered "already saved" and creates no new attachment Documents. The pane does say "already saved", so it isn't silent. Ask the owner: file it as an issue, or accept it?
+## Filed 2026-10-21
+- **ISS-022 / #2209:** the `/office/save` re-save gap (the email save key excludes the attachment selection, so re-saving to add attachments is answered "already saved"). Filed on the owner's go; next-round, no task yet.
+- **ebilling v5.7 (`ef9b1a9e9b`)** took our fix for finding the .eml, and the owner chose F1-a(i) and F1-c. Both are recorded in `notes/ebilling-r1-review-2026-10-21.md`: they shape the future Invoice view (show a retry; suggest internal upload). No reply owed.
 
 ## Waiting on the owner (live checks)
 - UAT: 042 (full); 080 (Test User 1 opens a matter-filed document they saved, then Index and document To Do); 121 (email save: Message-ID, link to an existing communication, an unfiled communication gets filed, "Related to" cards); 127 (grids: Matter Documents footer `v1.1.85`, no `[AppInsightsService]` warning, VisualHost, App Insights `customEvents`, Daily Briefing); 078 (one Word-on-the-web run plus the desktop Word build number). Fix what they report.

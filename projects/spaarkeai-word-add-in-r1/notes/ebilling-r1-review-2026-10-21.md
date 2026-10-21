@@ -74,6 +74,18 @@ The owner chose to discuss the process before anything is sent.
 6. **The email is always saved as the .eml file in SPE**, filed to the core record. It is not optional and never an invoice file. That save must not create the attachments as child Documents; ebilling defines the contract.
 7. **LEDES is out of scope.**
 
+**ebilling v5.7 (`ef9b1a9e9b`), relayed 2026-10-21:**
+- **Finding the .eml.** They took our fix for v5.6 point 1. A plain "exactly one Document linked to the communication" breaks after task 130. The .eml is now found in three steps:
+  1. `sprk_isemailarchive = true`;
+  2. then the target core record, with no parent;
+  3. then the SHA-256 of the file marked Invoice.
+
+  If no Document matches, or more than one, the server refuses and the user can retry. ebilling adds a list version of `GetEmailArchiveByCommunicationAsync`.
+- **Owner picks that change what the add-in shows:**
+  - **F1-a (i):** an .eml created by `from-email` is saved Restricted on its own, with a submission marker. The firm still sees its invoice; other outside participants can't open the email.
+  - **F1-c:** if the email can't be identified (no Message-ID, a failed Graph read, or no communication), `from-email` refuses with a retryable "try again" and saves nothing. The Invoice view shows a retry, and suggests the internal upload route if it keeps failing.
+- ebilling lists our re-save gap #2209 (ISS-022) as a known limit.
+
 **Work for this project (not yet a task)**, once ebilling's endpoint contract exists:
 - the Invoice view and ribbon button;
 - removing Invoice from Save and quick-create;
