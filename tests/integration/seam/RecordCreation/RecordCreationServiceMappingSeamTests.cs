@@ -79,6 +79,12 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     private readonly List<string> _journal = [];
     private readonly ScriptedUserClient _scripted = new(Caller);
     private readonly MappingUserClient _user;
+
+    /// <summary>
+    /// #2188: the caller's read of the mapping source (<c>MappingSourceCallerMask</c>) — by default it sees exactly what the
+    /// app-only read returned; a test marks a column field-secured or the read failed.
+    /// </summary>
+    private readonly MappingSourceCallerReadDouble _callerRead;
     private readonly List<(string Table, Guid Id, Dictionary<string, object?> Fields)> _creates = [];
     private readonly Mock<IFieldMappingDataverseService> _appOnly = new(MockBehavior.Strict);
     private readonly Mock<IGenericEntityService> _sourceReader = new(MockBehavior.Strict);
@@ -100,7 +106,8 @@ public sealed partial class RecordCreationServiceMappingSeamTests
 
     public RecordCreationServiceMappingSeamTests()
     {
-        _user = new MappingUserClient(_scripted, _journal);
+        _callerRead = MappingSourceCallerReadDouble.MirroringAppReads(_sourceReader);
+        _user = new MappingUserClient(_callerRead.RoutedOver(_scripted), _journal);
         _probe = new ReadProbe(
             id => _rights.TryGetValue(id, out var rights) ? rights
                 : _readable.Contains(id) ? AccessRights.Read | AccessRights.Write
@@ -689,6 +696,83 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         _probe.Asked.Select(a => a.Id).Should().Equal(MissingMatter, DeniedMatter);
     }
 
+    // =====================================================================================
+    // #2188 / DI-004 — the app-only source read is masked to what the CALLER can read before any rule sees it
+    // =====================================================================================
+
+    [Fact]
+    public async Task CreateAsync_ASourceColumnTheCallerCannotRead_IsNotCopied_ButTheReadableOnesAre()
+    {
+        // Must fire: the app read returns sprk_location ("Courtroom 4"); field security hides it from the caller.
+        MatterToEventProfile();
+        _callerRead.Secured.Add("sprk_location");
+
+        var outcome = await Service().CreateAsync(EventUnder(OrdinaryMatter), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        fields.Should().NotContainKey("sprk_location", "#2188: a column the caller cannot read is never copied");
+        fields.Values.Select(v => v?.ToString()).Should().NotContain(v => v != null && v.Contains("Courtroom 4"));
+        StringOf(fields, "sprk_description").Should().Be("From the matter", "a column the caller can read is copied");
+        StringOf(fields, "sprk_AssignedTo@odata.bind").Should().Be($"/contacts({Assignee:D})", "a readable lookup is copied");
+        outcome.MappingWarnings.Should().BeEmpty("a hidden column looks exactly like an empty one: a Copy skips it silently");
+        _callerRead.Paths.Should().Equal($"sprk_matters({OrdinaryMatter:D})");
+        _journal.Should().ContainInOrder("probe", "source-read", "user:source-read", "user:columns", "owner", "create");
+    }
+
+    [Theory]
+    [InlineData("fault")]
+    [InlineData("timeout")]
+    [InlineData("403")]
+    [InlineData("500")]
+    [InlineData("no-user-context")]
+    public async Task CreateAsync_WhenTheCallerReadOfTheSourceFails_NothingIsMapped_WithTheUniformWarning_AndTheRowIsCreated(
+        string failure)
+    {
+        MatterToEventProfile();
+        _sources[("sprk_matter", DeniedMatter)] = _sources[("sprk_matter", OrdinaryMatter)];
+        _rights[DeniedMatter] = AccessRights.Write | AccessRights.AppendTo | AccessRights.Append;
+        switch (failure)
+        {
+            case "fault": _callerRead.Throw = new HttpRequestException("caller read failed at 10.0.0.9"); break;
+            case "timeout": _callerRead.Throw = new TaskCanceledException("caller read timed out"); break; // not the caller's token
+            case "403": _callerRead.FailWithStatus = 403; break;
+            case "500": _callerRead.FailWithStatus = 500; break;
+            case "no-user-context": _callerRead.FailWithStatus = 0; break; // no caller context (OBO unavailable)
+        }
+
+        var failed = await Service().CreateAsync(EventUnder(OrdinaryMatter), AsCaller(), CancellationToken.None);
+        var denied = await Service().CreateAsync(
+            EventUnder(OrdinaryMatter, mappingSource: ("sprk_matter", DeniedMatter)), AsCaller(), CancellationToken.None);
+
+        failed.Succeeded.Should().BeTrue("a mapping failure never refuses the create: {0}", failed.Refusal?.Detail);
+        _sourceReads.Should().ContainSingle("the app read happened (the probe answered Read) — and was then discarded");
+        _callerRead.Paths.Should().ContainSingle();
+        failed.MappingWarnings.Should().ContainSingle().Which.Should().Be(new RecordCreationWarning(
+            RecordCreationWarning.MappingSourceUnavailableCode, null, MappingSourceReadProbe.SourceUnavailableWarning));
+        failed.MappingWarnings.Should().Equal(denied.MappingWarnings, "FR-04: indistinguishable from a source the caller cannot read");
+        failed.Warnings.Should().Equal(denied.Warnings);
+        _creates.Should().HaveCount(2);
+        _creates[0].Fields.Keys.Order().Should().Equal(_creates[1].Fields.Keys.Order(), "nothing mapped, either way");
+        _creates[0].Fields.Should().NotContainKey("sprk_description").And.NotContainKey("sprk_location")
+            .And.NotContainKey("sprk_AssignedTo@odata.bind");
+        StringOf(_creates[0].Fields, "sprk_eventname").Should().Be("Hearing", "the caller's own values are created");
+    }
+
+    [Fact]
+    public async Task CreateAsync_ADefaultOnlyProfile_ReadsNoSource_SoMakesNoCallerRead_AndStillAppliesItsDefaults()
+    {
+        Profile("sprk_matter", "sprk_event", Rule(null, "sprk_location", Text, Default, "Room 1"));
+
+        var outcome = await Service().CreateAsync(EventUnder(OrdinaryMatter), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        StringOf(_creates.Should().ContainSingle().Subject.Fields, "sprk_location").Should().Be("Room 1");
+        _sourceReads.Should().BeEmpty();
+        _callerRead.Paths.Should().BeEmpty("nothing was read app-only, so there is nothing to mask");
+        outcome.MappingWarnings.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task CreateAsync_AHalfNamedMappingSource_IsUndetermined_NotInferred()
     {
@@ -739,6 +823,7 @@ public sealed partial class RecordCreationServiceMappingSeamTests
 
         (await create.Should().ThrowAsync<ArgumentException>()).Which.Message.Should().Contain("Field mapping");
         _journal.Should().BeEmpty();
+        _callerRead.Paths.Should().BeEmpty("#2188: only a caller reaches step 3, so no system create reaches the mask");
         _creates.Should().BeEmpty();
     }
 
@@ -1232,8 +1317,12 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         public Task<DataverseUserResponse> DeleteAsync(string relativePath, CancellationToken cancellationToken) =>
             inner.DeleteAsync(relativePath, cancellationToken);
 
+        [GeneratedRegex(@"^[a-z_]+\([0-9a-fA-F-]{36}\)$")]
+        private static partial Regex SingleRowRead();
+
         private static string KindOf(string path) =>
             path == "WhoAmI()" ? "user:whoami"
+            : SingleRowRead().IsMatch(path) ? "user:source-read"
             : path.Contains("AttributeType", StringComparison.Ordinal) || path.Contains("DateTimeAttributeMetadata", StringComparison.Ordinal)
                 ? "user:columns"
             : path.Contains("ManyToOneRelationships", StringComparison.Ordinal) || path.Contains("EntitySetName", StringComparison.Ordinal)
