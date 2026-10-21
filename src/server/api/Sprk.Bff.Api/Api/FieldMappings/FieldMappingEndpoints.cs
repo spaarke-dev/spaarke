@@ -1099,6 +1099,7 @@ public static class FieldMappingEndpoints
                         targetEntity, childRecordId, updatePayload, token, impersonateSystemUserId: callerSystemUserId);
                     Func<Task<bool>>? wasIsolated = null;
                     var refiled = false;
+                    Sprk.Bff.Api.Services.Access.SecureRemovalCaller? secureExitCaller = null;
                     if (!mayRefile)
                     {
                         await Write(ct);
@@ -1126,7 +1127,7 @@ public static class FieldMappingEndpoints
                                 ParentChanges = parentChanges,
                                 CallerSystemUserId = callerSystemUserId,
                                 // A move out of a secure root (owner round 10 item 7) is asked of the person this push acts as.
-                                SecureExitCaller = Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForImpersonatedUser(
+                                SecureExitCaller = secureExitCaller = Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForImpersonatedUser(
                                     callerSystemUserId,
                                     refileScope!.ServiceProvider.GetService<Sprk.Bff.Api.Services.Access.IDataverseRecordShareService>()),
                             },
@@ -1164,8 +1165,10 @@ public static class FieldMappingEndpoints
                     // Never throws; the child's update stands.
                     if (refiled && children is not null && wasIsolated is not null)
                     {
+                        // #2143 round 7 (F1): with the person the re-file's F3 check acted for.
                         await children.AfterRefileAsync(
-                            targetEntity.Trim().ToLowerInvariant(), childRecordId, wasIsolated, CancellationToken.None);
+                            targetEntity.Trim().ToLowerInvariant(), childRecordId, wasIsolated,
+                            Sprk.Bff.Api.Services.Access.RefileThreadStep.Reconcile, secureExitCaller, CancellationToken.None);
                     }
 
                     // Task 142 (L1): a push that wrote a ROOT's "Assigned *" column (a project/matter/work assignment

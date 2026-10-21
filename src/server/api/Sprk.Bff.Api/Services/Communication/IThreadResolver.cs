@@ -114,6 +114,20 @@ public interface IThreadResolver
     Task ReconcileThreadForFilingAsync(Guid communicationId, FilingReconcileHost host, CancellationToken ct = default);
 
     /// <summary>
+    /// <see cref="ReconcileThreadForFilingAsync(Guid, FilingReconcileHost, CancellationToken)"/> for a re-file a PERSON made
+    /// (#2143 round 7, F1): <paramref name="secureExitCaller"/> is that re-file's
+    /// <see cref="Sprk.Bff.Api.Services.Dataverse.RecordReparent.SecureExitCaller"/>, carried into the join that moves the email
+    /// to its record's thread, so a move off a secure record's thread is decided on that person's F3 rights — the move the
+    /// re-file was already permitted to make. <c>null</c> (the other overloads) acts for nobody: a move out of a secure
+    /// record's thread is refused and the email keeps the thread's isolation.
+    /// </summary>
+    Task ReconcileThreadForFilingAsync(
+        Guid communicationId,
+        FilingReconcileHost host,
+        Sprk.Bff.Api.Services.Access.SecureRemovalCaller? secureExitCaller,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// spaarkeai-word-add-in-r1 task 129 (backfill sweep): gives an ACTIVE, Open thread that is anchored to a record (a typed
     /// regarding lookup — the one anchor rule, <see cref="ThreadResolver"/>'s <c>ThreadAnchorOf</c>) the owner S6 gives such a
     /// thread: the anchor record's team, resolved by the SAME step the filing reconcile and the thread-create paths use. Fixes

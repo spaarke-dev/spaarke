@@ -558,10 +558,12 @@ public static class ChildRecordEndpoints
             // the caller before the write, rides along on `row`), then task 148's pass over everything filed under it when
             // it moved under, out of or between secure records. One implementation for every re-file writer (it also lets a
             // re-filed communication's thread follow the filing — spaarkeai-word-add-in-r1 task 129).
+            // #2143 round 7 (F1): with the caller the re-file's F3 check acted for, so the thread that follows moves on it.
             await children.AfterRefileAsync(
                 entity, id,
                 async () => GetString(row.Body, "_owningteam_value") is { } before && Guid.TryParse(before, out var beforeTeam)
                             && await children.IsSecureOwnerTeamAsync(beforeTeam, CancellationToken.None).ConfigureAwait(false),
+                RefileThreadStep.Reconcile, outcome.SecureExitCaller,
                 CancellationToken.None).ConfigureAwait(false);
         }
 

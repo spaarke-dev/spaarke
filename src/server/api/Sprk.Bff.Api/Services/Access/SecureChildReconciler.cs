@@ -855,10 +855,24 @@ public sealed class SecureChildReconciler
     /// thread follows the filing (#2091): a writer that placed the message in its thread passes
     /// <see cref="RefileThreadStep.PlacedByWriter"/> and every other step runs.
     /// </summary>
+    public Task<SecureChildReconcileReport?> AfterRefileAsync(
+        string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, RefileThreadStep thread, CancellationToken ct) =>
+        AfterRefileAsync(childLogicalName, childId, wasIsolated, thread, secureExitCaller: null, ct);
+
+    /// <summary>
+    /// <see cref="AfterRefileAsync(string, Guid, Func{Task{bool}}, RefileThreadStep, CancellationToken)"/> for a re-file a PERSON
+    /// made (#2143 round 7, F1): <paramref name="secureExitCaller"/> is that re-file's
+    /// <see cref="Sprk.Bff.Api.Services.Dataverse.RecordReparent.SecureExitCaller"/>, carried into the thread reconcile
+    /// (<see cref="Sprk.Bff.Api.Services.Communication.IThreadResolver.ReconcileThreadForFilingAsync(Guid, Sprk.Bff.Api.Services.Communication.FilingReconcileHost, SecureRemovalCaller?, CancellationToken)"/>),
+    /// so a re-filed communication's move off a secure record's thread is decided on the rights the re-file was checked
+    /// against. Every user-initiated re-file writer calls this overload; <c>null</c> acts for nobody.
+    /// </summary>
     public async Task<SecureChildReconcileReport?> AfterRefileAsync(
-        string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, RefileThreadStep thread, CancellationToken ct)
+        string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, RefileThreadStep thread,
+        SecureRemovalCaller? secureExitCaller, CancellationToken ct)
     {
-        var report = await RefileStepsAsync(childLogicalName, childId, wasIsolated, thread, ct).ConfigureAwait(false);
+        var report = await RefileStepsAsync(childLogicalName, childId, wasIsolated, thread, secureExitCaller, ct)
+            .ConfigureAwait(false);
 
         // Ontology task 042b (D-169, uac-r2 choice A): after UAC's own steps, on EVERY communication re-file, its gate Decision Records
         // still owned by a user are re-owned to the resolver's team (a Secure answer is left to this engine). Never thrown.
@@ -879,7 +893,8 @@ public sealed class SecureChildReconciler
     }
 
     private async Task<SecureChildReconcileReport?> RefileStepsAsync(
-        string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, RefileThreadStep thread, CancellationToken ct)
+        string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, RefileThreadStep thread,
+        SecureRemovalCaller? secureExitCaller, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(childLogicalName);
         ArgumentNullException.ThrowIfNull(wasIsolated);
@@ -922,7 +937,9 @@ public sealed class SecureChildReconciler
             // must not skip them. The resolver is best-effort and does not throw today; a fault leaves the thread for the sweep.
             try
             {
-                await _threads!.ReconcileThreadForFilingAsync(childId, CancellationToken.None).ConfigureAwait(false);
+                await _threads!.ReconcileThreadForFilingAsync(
+                    childId, Sprk.Bff.Api.Services.Communication.FilingReconcileHost.AfterRefileStep, secureExitCaller,
+                    CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
             {

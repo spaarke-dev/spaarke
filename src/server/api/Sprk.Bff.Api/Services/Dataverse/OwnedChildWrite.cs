@@ -1481,6 +1481,13 @@ internal static class OwnedChildWrite
 
         /// <summary>The ADR-024 pair the update leaves disagrees with itself (<see cref="Outcome.Invalid"/>) — nothing written.</summary>
         public string? Invalid { get; init; }
+
+        /// <summary>
+        /// #2143 round 7 (F1): with <see cref="Written"/>, the person the re-file's F3 check acted for — what the writer hands the
+        /// step after the re-file (<see cref="Sprk.Bff.Api.Services.Access.SecureChildReconciler.AfterRefileAsync(string, Guid, Func{Task{bool}}, Sprk.Bff.Api.Services.Access.RefileThreadStep, Sprk.Bff.Api.Services.Access.SecureRemovalCaller?, CancellationToken)"/>),
+        /// so the thread that follows the filing moves on the same rights.
+        /// </summary>
+        public Sprk.Bff.Api.Services.Access.SecureRemovalCaller? SecureExitCaller { get; init; }
     }
 
     /// <summary>The caller's PATCH was refused by Dataverse inside the re-file — carried out so no owner is assigned.</summary>
@@ -1577,6 +1584,17 @@ internal static class OwnedChildWrite
         if (!row.IsSuccess)
             return new RefileOutcome { ClientFailure = row };
 
+        // Owner round 10 item 7 (task 146 c1): a re-file that moves the row OUT of a secure root is an un-secure. F3 is asked AS
+        // THE CALLER — WhoAmI above, RetrievePrincipalAccess under their own token — before anything is written.
+        var secureExitCaller = new Sprk.Bff.Api.Services.Access.SecureRemovalCaller(
+            _ => Task.FromResult<Guid?>(me.SystemUserId),
+            (record, token) => RightsOnAsync(
+                user,
+                me.SystemUserId,
+                Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.EntitySetFor(record.EntityLogicalName),
+                record.RecordId,
+                token));
+
         try
         {
             var resolution = await ownership.ReparentAsync(
@@ -1591,17 +1609,7 @@ internal static class OwnedChildWrite
                     WhenUnfiled = string.Equals(table, "sprk_communication", StringComparison.OrdinalIgnoreCase)
                         ? UnfiledOwnership.KeepCreator
                         : UnfiledOwnership.ActingUserTeam,
-                    // Owner round 10 item 7 (task 146 c1): a re-file that moves the row OUT of a secure root is an
-                    // un-secure. F3 is asked AS THE CALLER — WhoAmI above, RetrievePrincipalAccess under their own token —
-                    // before anything is written.
-                    SecureExitCaller = new Sprk.Bff.Api.Services.Access.SecureRemovalCaller(
-                        _ => Task.FromResult<Guid?>(me.SystemUserId),
-                        (record, token) => RightsOnAsync(
-                            user,
-                            me.SystemUserId,
-                            Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.EntitySetFor(record.EntityLogicalName),
-                            record.RecordId,
-                            token)),
+                    SecureExitCaller = secureExitCaller,
                 },
                 async token =>
                 {
@@ -1617,7 +1625,12 @@ internal static class OwnedChildWrite
             {
                 { IsForbidden: true } => new RefileOutcome { Forbidden = resolution },
                 { IsRefused: true } => new RefileOutcome { OwnerRefusal = resolution },
-                _ => new RefileOutcome { Written = true, ParentsUnchanged = resolution.ParentsUnchanged },
+                _ => new RefileOutcome
+                {
+                    Written = true,
+                    ParentsUnchanged = resolution.ParentsUnchanged,
+                    SecureExitCaller = secureExitCaller,
+                },
             };
         }
         catch (CallerWriteFailedException failed)
