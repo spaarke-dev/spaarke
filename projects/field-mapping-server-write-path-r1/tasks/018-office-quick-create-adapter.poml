@@ -119,6 +119,9 @@
     <criterion testable="true">The task notes contain the itemized behaviour inventory of the deleted core with the landing place of each check, default and error code.</criterion>
     <criterion testable="true">Negative: a service refusal or exception produces the existing Office failure response (existing code), never a 200 and never a created row; an unmapped refusal Kind fails closed to the existing generic Office failure code.</criterion>
     <criterion testable="true">BFF build 0 errors; Office contract tests, OfficeRecordOwnershipTests, SecureChildOwnershipAiToolTests*, RouteAuthorizationGuardTests and RecordOwnerAssignmentCensusTests pass; publish-size delta, CVE result and /conflict-check result recorded in the task notes.</criterion>
+    <criterion testable="true">UAC-r2 review of 013 (2026-10-21).
+      - K-3: Office reference lookups (matter type, practice area, assignee) are verified and dropped with a warning today; through the service they would become 404 AppendTo refusals. Route them through the FR-08 mapped/reference drop-with-warning path, with tests.
+      - Pre-create stamps: OfficeService.cs:2207/2258/2276 stamp into the payload before the create. Do not re-point them until the FR-06 step-10 amendment is decided and implemented (see 017).</criterion>
   </acceptance-criteria>
 
   <notes>Spec FR-13 part 2, FR-12, NFR-07. Office todo and document save are task 030 (not here). Release note: Office Project-under-Matter owner changes (task 015); Office Invoice becomes team-owned.

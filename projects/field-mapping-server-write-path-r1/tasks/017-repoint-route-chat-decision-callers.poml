@@ -127,6 +127,19 @@
       - F4: a test that a supersedes refusal keeps Code and Reason;
       - and it deletes one copy of the verbatim NotAvailableToFileUnder strings.
     Ask ebilling-r1 to review the reconcile commit.</criterion>
+    <criterion testable="true">UAC-r2 review of 013 (2026-10-21).
+      - Pre-create stamps: do not re-point a writer that stamps I-1/I-16 into the payload before the create (TaskActionCore.cs:229, TodoRegardingBuilder.cs:209, CommunicationService.cs:2532, DecisionRecordWriter.cs:1508) until the owner has decided the FR-06 step-10 amendment and the service implements it: pre-create derivation that refuses on failure, plus a post-create re-derivation; documents stay post-create.
+      - K-4:
+        - an upstream 401 now renders 403: decide and document it;
+        - bodies carry correlationId, not traceId: check the clients;
+        - remove the three existing membership publishes when re-pointing;
+        - resolve the chat matter/project number change (OWNER/017).
+      - SystemPrincipal: optionally narrow the 013 refusal. Let the plan run with an always-refuse callback mapped to 403, so ordinary parents proceed and secure parents are refused. An app-only AppendTo check on RequestedBy needs owner approval (ADR-028) and must fail closed on a null or unresolved RequestedBy.
+      - Documents (whichever of this task and UAC-r2 #2169 lands second):
+        - sprk_document.sprk_accessinheritance is refused for every principal (TableServerOwnedColumns on the document entry, plus the system path);
+        - sprk_document.sprk_accesspermission is allowed for callers and refused for system principals, matching RefuseAppOnlyWrite.
+        - Tests for each. UAC-r2 reviews.
+      - Projects/matters caller-refused columns: owner decision before this task (#1608 related).</criterion>
   </acceptance-criteria>
 
   <notes>Spec FR-13 part 1, FR-12, NFR-07, NFR-08. Office quick-create is task 018; widening the route to sprk_matter and sprk_project is task 020. Release note: chat-created children now get the I-1 stamp, I-16 and sharee mirror.</notes>

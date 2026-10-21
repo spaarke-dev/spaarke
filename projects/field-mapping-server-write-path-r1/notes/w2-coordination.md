@@ -156,3 +156,21 @@ touch DecisionCommitService. ebilling sends the shas when the range lands; rebas
   #1911 is on master.
 - **Updates:** do not widen pre-write rules to updates; RefileAsync stays in OwnedChildWrite. Correction (a)
   (EffectiveLookups) is not needed for creates.
+
+## 2026-10-21 — UAC-r2 review of 013
+
+- **Conditions:** (a) PASS, (b) PASS on code, (c) PASS for 013, K2 PASS.
+- **Fix before master (in 013 fix round 2):**
+  - F-1: an I-16 run/order test;
+  - F-2: the (table, id) key test;
+  - F-3: rename Office `RecordCreationService.cs` → `OfficeRecordCreationService.cs` and re-key the census rows (the census can then fire);
+  - F-4: correct the step-10 premise (five writers stamp before the create).
+- **Step 10 (owner):** UAC recommends FR-06 = derive I-1 (and I-16 for To Do/Event/Communication) into the payload before
+  the create, refusing on failure, AND re-derive after the create. Documents stay post-create (#2169). This is
+  required before any pre-create stamp writer is re-pointed (017/018).
+- **Carried:**
+  - K-2 → 014 (no mapped filing lookup via ServerSetLookupColumns);
+  - K-3 → 018;
+  - K-4, SystemPrincipal narrowing, and the document access columns → 017;
+  - K-5: a fault after the create leaves an isolated row unshared, the same as the route today (accepted).
+- **Owner, before 017:** caller-refused columns on projects and matters (#1608).
