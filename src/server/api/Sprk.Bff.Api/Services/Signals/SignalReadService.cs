@@ -164,8 +164,8 @@ public sealed record WorklistItemRow(
 /// catalog query; and, only for returned rows whose evidence carries detail, one caller read per witness table per
 /// <see cref="WitnessIdChunk"/> ids (D-142) and the app-only secure-family placement of those Signals and the witnesses the caller
 /// reads (<see cref="SignalSuppressionService.WitnessDetailShownOnReadAsync"/>: it withholds, never adds); and, only for billing
-/// Duplicate rows (D-176, task 157), at most one billing-event read, one current-invoice read, one submission read per vendor org and
-/// one earlier-invoice read per chunk (<see cref="EarlierInvoiceReadability"/>: it withholds, never adds).
+/// Duplicate rows (D-176, task 157), at most one billing-event read, one current-invoice read, one submission read per chunk of 200
+/// distinct tracking numbers and one earlier-invoice read per chunk of 200 invoice ids (<see cref="EarlierInvoiceReadability"/>: it withholds, never adds).
 /// Nothing is cached across callers.</para>
 /// </remarks>
 public sealed class SignalReadService
@@ -1405,7 +1405,8 @@ public sealed class SignalReadService
     /// when the subject is <c>sprk_invoice</c>, or the subject billing event's invoice (<c>sprk_billingevent</c>, option B after
     /// escalation 1), each read AS THE CALLER; any other subject, an event or invoice the caller cannot read, or one with no invoice or
     /// vendor org: withheld. Reads per request: at most one billing-event read and one current-invoice read (In lists of at most
-    /// <see cref="WitnessIdChunk"/> ids), then <see cref="EarlierInvoiceReadability.ReadableAsync"/>. A fault: none shown.
+    /// <see cref="WitnessIdChunk"/> ids), then <see cref="EarlierInvoiceReadability.ShownAsync{TKey}"/>, which owns the combining
+    /// rule (at least one reference, every one readable; none shown on a fault). A Duplicate with no usable reference is not shown.
     /// </summary>
     private async Task<HashSet<Guid>> DuplicatesShownAsync(
         List<VisibleRow> rows,
@@ -1414,7 +1415,7 @@ public sealed class SignalReadService
         CancellationToken ct)
     {
         var shown = new HashSet<Guid>();
-        var referencesOf = new Dictionary<Guid, List<EarlierInvoiceReadability.Reference>>();
+        var referencesOf = new Dictionary<Guid, IReadOnlyCollection<EarlierInvoiceReadability.Reference>>();
         var currentInvoiceOf = new Dictionary<Guid, Guid>();
         var eventOf = new Dictionary<Guid, Guid>();
         foreach (var row in rows)
@@ -1424,6 +1425,8 @@ public sealed class SignalReadService
                 continue;
             }
 
+            // Every Duplicate gets an entry. One with no reference found below is not shown (EarlierInvoiceReadability.ShownAsync).
+            referencesOf[row.Row.SignalId] = [];
             if (quote.InvoiceIds.Count > 0)
             {
                 referencesOf[row.Row.SignalId] = [.. quote.InvoiceIds.Select(id => new EarlierInvoiceReadability.Reference(id, null, null))];
@@ -1441,7 +1444,7 @@ public sealed class SignalReadService
                 }
             }
 
-            // Otherwise nothing identifies the earlier invoice: withheld.
+            // Otherwise nothing identifies the earlier invoice: no reference, so withheld.
         }
 
         if (eventOf.Count > 0)
@@ -1483,21 +1486,7 @@ public sealed class SignalReadService
             }
         }
 
-        if (referencesOf.Count == 0)
-        {
-            return shown;
-        }
-
-        var readable = await _earlierInvoices.ReadableAsync(_user, referencesOf.Values.SelectMany(r => r), ct).ConfigureAwait(false);
-        foreach (var (signalId, references) in referencesOf)
-        {
-            if (references.Count > 0 && references.All(readable.Contains))
-            {
-                shown.Add(signalId);
-            }
-        }
-
-        return shown;
+        return (await _earlierInvoices.ShownAsync(_user, referencesOf, ct).ConfigureAwait(false)).ToHashSet();
     }
 
     /// <summary>One lookup column of the rows the CALLER's batched read returns (In lists of at most <see cref="WitnessIdChunk"/> ids):

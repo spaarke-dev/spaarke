@@ -76,20 +76,37 @@ public sealed class EarlierInvoiceReadabilityTests
 
     private List<Dictionary<string, object?>> Submissions(string filter)
     {
-        var org = Guid.Parse(Regex.Match(filter, "_sprk_vendororg_value eq ([0-9a-f-]{36})").Groups[1].Value);
-        var values = Regex.Match(filter, @"PropertyValues=\[(.*)\]\)$").Groups[1].Value;
-        var numbers = Regex.Matches(values, "'((?:[^']|'')*)'").Select(m => m.Groups[1].Value.Replace("''", "'", StringComparison.Ordinal))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return _submissions.Where(s => s.Org == org && numbers.Contains(s.Number))
+        // Like Dataverse: the number list is a JSON array (matched without regard to case); the vendor org list, when present, restricts the orgs.
+        var numbers = InList(filter, "sprk_trackingnumber").ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var orgs = filter.Contains("PropertyName='sprk_vendororg'", StringComparison.Ordinal)
+            ? InList(filter, "sprk_vendororg").Select(Guid.Parse).ToHashSet()
+            : null;
+        return _submissions.Where(s => (orgs is null || orgs.Contains(s.Org)) && numbers.Contains(s.Number))
             .Select(s => new Dictionary<string, object?>
             {
-                ["sprk_invoicesubmissionid"] = Guid.NewGuid(),
                 ["sprk_trackingnumber"] = s.Number,
                 ["_sprk_vendororg_value"] = s.Org,
                 ["_sprk_invoice_value"] = s.Invoice,
             })
             .ToList();
     }
+
+    /// <summary>The values of <c>In(PropertyName='{property}',PropertyValues=[...])</c>: single-quoted GUIDs, or JSON strings.</summary>
+    private static List<string> InList(string filter, string property)
+    {
+        var marker = $"In(PropertyName='{property}',PropertyValues=";
+        var array = filter[(filter.IndexOf(marker, StringComparison.Ordinal) + marker.Length)..];
+        if (array.Length > 1 && array[1] == '\'')
+        {
+            return Regex.Matches(array[..array.IndexOf(']', StringComparison.Ordinal)], "'([^']*)'").Select(m => m.Groups[1].Value).ToList();
+        }
+
+        var reader = new Utf8JsonReader(System.Text.Encoding.UTF8.GetBytes(array));
+        using var doc = JsonDocument.ParseValue(ref reader);
+        return doc.RootElement.EnumerateArray().Select(e => e.GetString()!).ToList();
+    }
+
+    private string SubmissionPath() => _paths.Single(p => p.StartsWith("sprk_invoicesubmissions?", StringComparison.Ordinal));
 
     private int Reads(string set) => _paths.Count(p => p.StartsWith(set + "?", StringComparison.Ordinal));
 
@@ -122,14 +139,21 @@ public sealed class EarlierInvoiceReadabilityTests
     }
 
     [Fact]
-    public async Task ATrackingNumberIsSentAsAnEscapedODataLiteral()
+    public async Task ATrackingNumberIsSentAsAJsonStringInTheInList_NotAnODataDoubledQuote()
     {
-        // The number is firm-supplied text: a quote must not end the literal (Justification: the filter is built from stored text).
+        // The number is firm-supplied text. The In list is parsed as a JSON array: a doubled quote (O''Brien) is a 400 on Dataverse, a
+        // JSON string ("O'Brien") matches the row (both proven live on spaarkedev1, task 157 round 2). A quote or backslash is escaped.
         const string number = "O'Brien&Co #1.1";
+        const string awkward = "say \"hi\"\\";
         _submissions.Add((Org, number, Invoice(readable: true)));
+        _submissions.Add((Org, awkward, Invoice(readable: true)));
 
-        (await ReadableAsync(ByNumber(number))).Should().HaveCount(1);
-        _paths.Single(p => p.StartsWith("sprk_invoicesubmissions?", StringComparison.Ordinal)).Should().NotContain("O'Brien").And.NotContain("&Co");
+        (await ReadableAsync(ByNumber(number), ByNumber(awkward))).Should().HaveCount(2);
+
+        var sent = _paths.Single(p => p.StartsWith("sprk_invoicesubmissions?", StringComparison.Ordinal));
+        sent.Should().NotContain("O'Brien").And.NotContain("&Co", "the URL carries the escaped filter");
+        var filter = Uri.UnescapeDataString(sent);
+        filter.Should().Contain("\"O'Brien&Co #1.1\"").And.Contain("\"say \\\"hi\\\"\\\\\"").And.NotContain("''");
     }
 
     [Fact]
@@ -177,18 +201,123 @@ public sealed class EarlierInvoiceReadabilityTests
     }
 
     [Fact]
-    public async Task Reads_AreOneSubmissionReadPerVendorOrg_AndOneInvoiceRead_InListsOfAtMost200()
+    public async Task Reads_AreOneSubmissionReadPerChunkOf200Numbers_AcrossVendorOrgs_AndOneInvoiceRead()
     {
         _submissions.Add((Org, "A", Invoice(readable: true)));
         _submissions.Add((Org, "B", Invoice(readable: true)));
         _submissions.Add((OtherOrg, "C", Invoice(readable: true)));
         (await ReadableAsync(ByNumber("A"), ByNumber("B"), ByNumber("C", OtherOrg), ById(Invoice(readable: true)))).Should().HaveCount(4);
-        Reads("sprk_invoicesubmissions").Should().Be(2);
+        Reads("sprk_invoicesubmissions").Should().Be(1, "two vendor orgs, one read");
         Reads("sprk_invoices").Should().Be(1);
+
+        // The same number in two orgs is ONE value in the list; the exact (org, number) pair is matched after the read.
+        _paths.Clear();
+        _submissions.Add((Org, "S", Invoice(readable: true)));
+        _submissions.Add((OtherOrg, "S", Invoice(readable: false)));
+        (await ReadableAsync(ByNumber("S"), ByNumber("S", OtherOrg))).Should().BeEquivalentTo([ByNumber("S")]);
+        Reads("sprk_invoicesubmissions").Should().Be(1);
 
         _paths.Clear();
         var many = Enumerable.Range(0, 201).Select(_ => ById(Invoice(readable: true))).ToArray();
         (await ReadableAsync(many)).Should().HaveCount(201);
         _paths.Select(p => Regex.Matches(p, "'[0-9a-f-]{36}'").Count).Should().BeEquivalentTo([200, 1]);
+
+        _paths.Clear();
+        var numbers = Enumerable.Range(0, 201).Select(i => $"N-{i}").ToList();
+        foreach (var n in numbers) _submissions.Add((Org, n, Invoice(readable: true)));
+        (await ReadableAsync(numbers.Select(n => ByNumber(n)).ToArray())).Should().HaveCount(201);
+        Reads("sprk_invoicesubmissions").Should().Be(2, "201 numbers: chunks of 200 and 1");
+    }
+
+    [Fact]
+    public async Task TheVendorOrgFilterIsOmittedWhenAChunkNamesMoreThan20Orgs_AndThePairIsStillMatchedExactly()
+    {
+        var orgs = Enumerable.Range(0, EarlierInvoiceReadability.MaxOrgsInFilter + 1).Select(_ => Guid.NewGuid()).ToList();
+        foreach (var org in orgs) _submissions.Add((org, "SAME", Invoice(readable: true)));
+        _submissions.Add((OtherOrg, "SAME", Invoice(readable: true))); // a firm nobody asked about
+
+        var readable = await ReadableAsync(orgs.Select(o => ByNumber("SAME", o)).ToArray());
+
+        readable.Should().HaveCount(orgs.Count);
+        Reads("sprk_invoicesubmissions").Should().Be(1);
+        Uri.UnescapeDataString(SubmissionPath()).Should().NotContain("PropertyName='sprk_vendororg'", "more than 20 orgs: the number list alone bounds the read");
+    }
+
+    [Fact]
+    public async Task TheVendorOrgFilterNamesTheOrgsOfTheChunk_WhenThereAreAtMost20()
+    {
+        _submissions.Add((Org, "A", Invoice(readable: true)));
+
+        (await ReadableAsync(ByNumber("A"))).Should().HaveCount(1);
+        Uri.UnescapeDataString(SubmissionPath()).Should().Contain($"PropertyName='sprk_vendororg',PropertyValues=['{Org:D}']");
+    }
+
+    // ---- ShownAsync: the ONE combining rule (an item is shown only with at least one reference, every one readable) ----
+
+    private Task<IReadOnlySet<string>> ShownAsync(Dictionary<string, IReadOnlyCollection<EarlierInvoiceReadability.Reference>> refsByItem)
+    {
+        var caller = new Mock<IDataverseUserClient>(MockBehavior.Strict);
+        caller.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns((string path, CancellationToken _) => Answer(path));
+        return new EarlierInvoiceReadability(NullLogger<EarlierInvoiceReadability>.Instance)
+            .ShownAsync(caller.Object, refsByItem, CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task ShownAsync_AnItemWithNoReferences_IsNotShown_AndCausesNoRead()
+    {
+        var shown = await ShownAsync(new() { ["empty"] = [] });
+
+        shown.Should().BeEmpty("an item with no references is NOT shown");
+        _paths.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ShownAsync_AnItemWhoseReferencesAreAllReadable_IsShown()
+    {
+        var invoice = Invoice(readable: true);
+        _submissions.Add((Org, "N-1", Invoice(readable: true)));
+
+        var shown = await ShownAsync(new() { ["both"] = [ById(invoice), ByNumber("N-1")], ["one"] = [ById(Invoice(readable: true))] });
+
+        shown.Should().BeEquivalentTo(["both", "one"]);
+    }
+
+    [Fact]
+    public async Task ShownAsync_AnItemWithOneUnreadableReference_IsNotShown_AndOthersAre()
+    {
+        var shown = await ShownAsync(new()
+        {
+            ["mixed"] = [ById(Invoice(readable: true)), ById(Invoice(readable: false))],
+            ["clear"] = [ById(Invoice(readable: true))],
+        });
+
+        shown.Should().BeEquivalentTo(["clear"]);
+    }
+
+    [Fact]
+    public async Task ShownAsync_AnItemWithAnUnusableReference_IsNotShown_AndCausesNoRead()
+    {
+        var shown = await ShownAsync(new() { ["bad"] = [ById(Invoice(readable: true)), new EarlierInvoiceReadability.Reference(null, null, "N-1")] });
+
+        shown.Should().BeEmpty();
+        _paths.Should().BeEmpty("an item that cannot be shown needs no read");
+    }
+
+    [Theory]
+    [InlineData("sprk_invoices", "500")]
+    [InlineData("sprk_invoices", "401")]
+    [InlineData("sprk_invoices", "unparseable")]
+    [InlineData("sprk_invoices", "throw")]
+    [InlineData("sprk_invoicesubmissions", "500")]
+    [InlineData("sprk_invoicesubmissions", "throw")]
+    public async Task ShownAsync_OnAFault_NothingIsShown(string set, string fault)
+    {
+        _submissions.Add((Org, "N-1", Invoice(readable: true)));
+        _faults[set] = fault;
+
+        var shown = await ShownAsync(new() { ["byId"] = [ById(Invoice(readable: true))], ["byNumber"] = [ByNumber("N-1")] });
+
+        shown.Should().BeEmpty();
     }
 }

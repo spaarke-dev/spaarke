@@ -1007,6 +1007,20 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         var reads = many.Requests.Where(r => r.StartsWith("sprk_communications?", StringComparison.Ordinal)).ToList();
         reads.Should().HaveCount(2);
         reads.Select(r => Regex.Matches(r, "'[0-9a-f-]{36}'").Count).Should().BeEquivalentTo([200, 1]);
+
+        // More than 200 distinct tracking numbers (across two vendor orgs): chunks of 200 and 1, never one read per org.
+        var numbers = new World();
+        var m3 = numbers.Matter(readers: [Alice]);
+        for (var i = 0; i < 201; i++)
+        {
+            var org = i % 2 == 0 ? VendorOrg : OtherVendorOrg;
+            var currentInOrg = numbers.Invoice([Alice], org);
+            numbers.Submission([Alice], org, $"C-{i}", numbers.Invoice([Alice], org));
+            BillingSignal(numbers, m3, (NotCoreType, currentInOrg), DuplicateEvidence(null, $"C-{i}"));
+        }
+
+        AllItems(await OkAsync(numbers, Alice)).Should().OnlyContain(i => i.GetProperty("sentence").GetString() == QuotedSentence);
+        numbers.Requests.Count(r => r.StartsWith(SubmissionRead, StringComparison.Ordinal)).Should().Be(2, "201 numbers: chunks of 200 and 1");
     }
 
     // ---------------------------------------------------------------------------------------------------------------
@@ -1301,7 +1315,7 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
     }
 
     [Fact]
-    public async Task D176_ReadsAreBatched_OneOfEachPerRequest_AndOneSubmissionReadPerVendorOrg_InListsOfAtMost200Ids()
+    public async Task D176_ReadsAreBatched_OneOfEachPerRequest_AndOneSubmissionReadPerChunkOf200Numbers_AcrossVendorOrgs()
     {
         var world = new World();
         var m = world.Matter(readers: [Alice]);
@@ -1329,7 +1343,7 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
 
         world.Requests.Count(r => r.StartsWith(BillingEventRead, StringComparison.Ordinal)).Should().Be(1);
         world.Requests.Count(r => r.StartsWith(CurrentInvoiceRead, StringComparison.Ordinal)).Should().Be(1);
-        world.Requests.Count(r => r.StartsWith(SubmissionRead, StringComparison.Ordinal)).Should().Be(2, "one per vendor org");
+        world.Requests.Count(r => r.StartsWith(SubmissionRead, StringComparison.Ordinal)).Should().Be(1, "two vendor orgs, one submission read");
         world.Requests.Count(r => r.StartsWith(EarlierInvoiceRead, StringComparison.Ordinal)).Should().Be(1);
 
         // More than 200 earlier invoices: In lists of at most 200 ids.
@@ -2140,15 +2154,22 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
 
             if (table == "sprk_invoicesubmission")
             {
-                // D-176: like Dataverse, evaluate the vendor org and the tracking-number In list (text compared without regard to case).
+                // D-176: like Dataverse, evaluate the tracking-number In list (a JSON array, text compared without regard to case) and,
+                // when present, the vendor-org In list. A doubled-quote literal would be a 400 on Dataverse, so it is a 400 here.
                 var odata = Uri.UnescapeDataString(path[(path.IndexOf("$filter=", StringComparison.Ordinal) + 8)..]);
-                var org = Guid.Parse(Regex.Match(odata, "_sprk_vendororg_value eq ([0-9a-f-]{36})").Groups[1].Value);
-                var values = Regex.Match(odata, @"PropertyValues=\[(.*)\]\)$").Groups[1].Value;
-                var numbers = Regex.Matches(values, "'((?:[^']|'')*)'").Select(m => m.Groups[1].Value.Replace("''", "'", StringComparison.Ordinal))
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                if (odata.Contains("''", StringComparison.Ordinal))
+                    return DataverseUserResponse.Fail(400, DataverseUserClientErrorCodes.ServiceError, "Invalid JSON. A comma character ',' was expected in scope 'Array'.");
+                var marker = "In(PropertyName='sprk_trackingnumber',PropertyValues=";
+                var reader = new Utf8JsonReader(System.Text.Encoding.UTF8.GetBytes(odata[(odata.IndexOf(marker, StringComparison.Ordinal) + marker.Length)..]));
+                using var numberList = JsonDocument.ParseValue(ref reader);
+                var numbers = numberList.RootElement.EnumerateArray().Select(e => e.GetString()!).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var orgList = Regex.Match(odata, @"In\(PropertyName='sprk_vendororg',PropertyValues=\[([^\]]*)\]\)");
+                var orgs = orgList.Success
+                    ? Regex.Matches(orgList.Groups[1].Value, "'([0-9a-f-]{36})'").Select(m => Guid.Parse(m.Groups[1].Value)).ToHashSet()
+                    : null;
                 var columns = path[(path.IndexOf("$select=", StringComparison.Ordinal) + 8)..path.IndexOf("&$filter", StringComparison.Ordinal)].Split(',');
                 var submissions = Records.Where(r => r.Value.Table == table && r.Value.Readers.Contains(me2))
-                    .Where(r => r.Value.Columns["_sprk_vendororg_value"] is Guid g && g == org)
+                    .Where(r => orgs is null || (r.Value.Columns["_sprk_vendororg_value"] is Guid g && orgs.Contains(g)))
                     .Where(r => r.Value.Columns["sprk_trackingnumber"] is string n && numbers.Contains(n))
                     .Select(r => columns.ToDictionary(c => c, c => c == $"{table}id" ? r.Key : r.Value.Columns.GetValueOrDefault(c)))
                     .ToList();

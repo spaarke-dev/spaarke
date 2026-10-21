@@ -14,8 +14,8 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// <para><b>Fail closed.</b> No submission row, more than one, a row with no invoice, or a reference with neither an id nor a vendor
 /// org and number: not readable. A 403 on a table is a verdict (none of its rows is readable). Any other failure (a 401, a 5xx, an
 /// unparseable body, an exception) is a fault, and a fault makes NOTHING readable: the caller then withholds every Duplicate it judged.</para>
-/// <para><b>Bounded.</b> One submission read per vendor org and one invoice read per call, each in In lists of at most
-/// <see cref="ChunkSize"/> values; never one read per reference.</para>
+/// <para><b>Bounded.</b> One submission read per chunk of <see cref="ChunkSize"/> (200) distinct tracking numbers, across vendor
+/// orgs, and one invoice read per chunk of 200 distinct invoice ids; never one read per reference or per vendor org.</para>
 /// <para><b>Callers.</b> <see cref="SignalReadService"/> (the worklist) and ebilling task 119's invoice-review read apply this one rule.
 /// Each resolves its own CURRENT invoice and vendor org; this class judges only the earlier invoice.</para>
 /// <para>Component justification (CLAUDE.md section 11). Existing: <c>SignalReadService.WitnessesTheCallerReadsAsync</c> (D-142) reads
@@ -38,6 +38,9 @@ public sealed class EarlierInvoiceReadability
     /// <summary>Values per batched read (In lists of at most 200, as the D-142 witness read).</summary>
     internal const int ChunkSize = 200;
 
+    /// <summary>A submission read also filters on the vendor orgs only when its chunk names at most this many (keeps the URL short).</summary>
+    internal const int MaxOrgsInFilter = 20;
+
     internal const string InvoiceEntitySet = "sprk_invoices";
     internal const string InvoiceKey = "sprk_invoiceid";
     internal const string SubmissionEntitySet = "sprk_invoicesubmissions";
@@ -46,6 +49,9 @@ public sealed class EarlierInvoiceReadability
 
     /// <summary><c>sprk_vendororg</c> as a Web API name (on <c>sprk_invoice</c> and <c>sprk_invoicesubmission</c>).</summary>
     internal const string VendorOrgColumn = "_sprk_vendororg_value";
+
+    /// <summary><c>sprk_vendororg</c> as the LOGICAL name a <c>Microsoft.Dynamics.CRM.In</c> filter needs (the <c>_value</c> name is a 400 there; proven live).</summary>
+    internal const string VendorOrgLogicalName = "sprk_vendororg";
 
     /// <summary><c>sprk_invoice</c> as a Web API name (on <c>sprk_invoicesubmission</c> and <c>sprk_billingevent</c>).</summary>
     internal const string InvoiceColumn = "_sprk_invoice_value";
@@ -62,7 +68,49 @@ public sealed class EarlierInvoiceReadability
     /// <param name="TrackingNumber">The earlier submission's tracking number (<c>duplicateOf.trackingNumber</c>).</param>
     public readonly record struct Reference(Guid? EarlierInvoiceId, Guid? VendorOrgId, string? TrackingNumber);
 
-    /// <summary>The <paramref name="references"/> whose earlier invoice the caller's own read returns. On a fault, none.</summary>
+    /// <summary>
+    /// The items whose earlier-invoice detail may be SHOWN to the caller: the ONE rule both callers (the worklist and ebilling task
+    /// 119) apply. An item is shown only when it has AT LEAST ONE reference and EVERY one of its references is readable. An item with
+    /// no references is NOT shown. A reference with neither an id nor (a vendor org plus a tracking number) is not readable, so an
+    /// item holding one is NOT shown. On any fault (a failed or unparseable read, a 401, an exception), nothing is shown.
+    /// </summary>
+    /// <remarks>
+    /// One <see cref="Reference"/> = one prior: its id is used when present, else its tracking number within its vendor org. A caller
+    /// that holds two forms of the same prior passes ONE reference for it. The reads are the batched ones of
+    /// <see cref="ReadableAsync"/>, over the references of the items that could be shown at all.
+    /// </remarks>
+    /// <typeparam name="TKey">The caller's item key (a Signal id, an invoice id, ...).</typeparam>
+    /// <param name="caller">The caller's Dataverse client: every read here is the caller's.</param>
+    /// <param name="refsByItem">Each item and the references (the priors) its detail quotes. An item with an empty list is not shown.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The keys of the items whose detail may be shown.</returns>
+    public async Task<IReadOnlySet<TKey>> ShownAsync<TKey>(
+        IDataverseUserClient caller, IReadOnlyDictionary<TKey, IReadOnlyCollection<Reference>> refsByItem, CancellationToken ct)
+        where TKey : notnull
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+        ArgumentNullException.ThrowIfNull(refsByItem);
+
+        var candidates = refsByItem.Where(item => item.Value is { Count: > 0 } && item.Value.All(IsUsable)).ToList();
+        if (candidates.Count == 0)
+        {
+            return new HashSet<TKey>();
+        }
+
+        var readable = await ReadableAsync(caller, candidates.SelectMany(item => item.Value), ct).ConfigureAwait(false);
+        return candidates.Where(item => item.Value.All(readable.Contains)).Select(item => item.Key).ToHashSet();
+    }
+
+    /// <summary>A reference names its prior by an id, or by a vendor org plus a tracking number.</summary>
+    private static bool IsUsable(Reference reference) =>
+        (reference.EarlierInvoiceId is { } id && id != Guid.Empty)
+        || (reference.VendorOrgId is { } org && org != Guid.Empty && !string.IsNullOrWhiteSpace(reference.TrackingNumber));
+
+    /// <summary>
+    /// The <paramref name="references"/> whose earlier invoice the caller's own read returns, judged one by one. On a fault, none.
+    /// A caller deciding whether to SHOW an item (which may quote several priors, or none) should use
+    /// <see cref="ShownAsync{TKey}"/>, which applies the combining rule: at least one reference and every one readable.
+    /// </summary>
     /// <param name="caller">The caller's Dataverse client: every read here is the caller's.</param>
     /// <param name="references">The references to judge (duplicates are judged once).</param>
     /// <param name="ct">Cancellation.</param>
@@ -189,45 +237,52 @@ public sealed class EarlierInvoiceReadability
 
     /// <summary>
     /// Each number-only reference's earlier invoice: the ONE submission of that vendor org with that tracking number, and its invoice.
-    /// One read per vendor org (In lists of at most <see cref="ChunkSize"/> numbers). Zero rows, more than one, or no invoice: absent
-    /// (not readable). Null on a fault.
+    /// One read per chunk of <see cref="ChunkSize"/> distinct tracking numbers, across vendor orgs: an In list on the number, and an
+    /// In list on the vendor org when the chunk names at most <see cref="MaxOrgsInFilter"/> orgs. The exact (org, number) pair is
+    /// matched after the read. Zero rows, more than one, or no invoice: absent (not readable). Null on a fault.
     /// </summary>
     private async Task<Dictionary<Reference, Guid>?> ResolveByTrackingNumberAsync(
         IDataverseUserClient caller, IReadOnlyList<Reference> references, CancellationToken ct)
     {
         var resolved = new Dictionary<Reference, Guid>();
-        foreach (var byOrg in references.GroupBy(r => r.VendorOrgId!.Value))
+
+        // Dataverse compares text without regard to case, so the numbers are matched back the same way.
+        foreach (var chunk in references.Select(r => r.TrackingNumber!).Distinct(StringComparer.OrdinalIgnoreCase).Chunk(ChunkSize))
         {
-            // Dataverse compares text without regard to case, so the numbers are matched back the same way.
-            foreach (var chunk in byOrg.Select(r => r.TrackingNumber!).Distinct(StringComparer.OrdinalIgnoreCase).Chunk(ChunkSize))
+            var asked = chunk.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var inChunk = references.Where(r => asked.Contains(r.TrackingNumber!)).ToList();
+            var orgs = inChunk.Select(r => r.VendorOrgId!.Value).Distinct().ToList();
+
+            var filter = $"Microsoft.Dynamics.CRM.In(PropertyName='{TrackingNumberColumn}',PropertyValues=[{string.Join(',', chunk.Select(Literal))}])";
+            if (orgs.Count <= MaxOrgsInFilter)
             {
-                var filter = $"{VendorOrgColumn} eq {byOrg.Key:D} and Microsoft.Dynamics.CRM.In(PropertyName='{TrackingNumberColumn}',"
-                    + $"PropertyValues=[{string.Join(',', chunk.Select(Quote))}])";
-                var rows = await ReadAsCallerAsync(
-                    caller,
-                    $"{SubmissionEntitySet}?$select={SubmissionKey},{TrackingNumberColumn},{VendorOrgColumn},{InvoiceColumn}&$filter={Uri.EscapeDataString(filter)}",
-                    "sprk_invoicesubmission",
-                    ct).ConfigureAwait(false);
-                if (rows is null)
-                {
-                    return null;
-                }
+                filter += " and " + SignalReadService.InFilter(VendorOrgLogicalName, orgs);
+            }
 
-                var asked = chunk.ToHashSet(StringComparer.OrdinalIgnoreCase);
-                var submissions = rows
-                    .Where(row => ReadGuid(row, VendorOrgColumn) == byOrg.Key)
-                    .Select(row => (Number: row.TryGetProperty(TrackingNumberColumn, out var n) && n.ValueKind == JsonValueKind.String ? n.GetString() : null,
-                        Invoice: ReadGuid(row, InvoiceColumn)))
-                    .Where(s => s.Number is not null && asked.Contains(s.Number))
-                    .GroupBy(s => s.Number!, StringComparer.OrdinalIgnoreCase)
-                    .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+            var rows = await ReadAsCallerAsync(
+                caller,
+                $"{SubmissionEntitySet}?$select={TrackingNumberColumn},{VendorOrgColumn},{InvoiceColumn}&$filter={Uri.EscapeDataString(filter)}",
+                "sprk_invoicesubmission",
+                ct).ConfigureAwait(false);
+            if (rows is null)
+            {
+                return null;
+            }
 
-                foreach (var reference in byOrg.Where(r => asked.Contains(r.TrackingNumber!)))
+            var submissions = rows
+                .Select(row => (Org: ReadGuid(row, VendorOrgColumn),
+                    Number: row.TryGetProperty(TrackingNumberColumn, out var n) && n.ValueKind == JsonValueKind.String ? n.GetString() : null,
+                    Invoice: ReadGuid(row, InvoiceColumn)))
+                .Where(s => s.Org is not null && s.Number is not null && asked.Contains(s.Number))
+                .GroupBy(s => (s.Org!.Value, s.Number!), PairComparer.Instance)
+                .ToDictionary(g => g.Key, g => g.ToList(), PairComparer.Instance);
+
+            foreach (var reference in inChunk)
+            {
+                if (submissions.TryGetValue((reference.VendorOrgId!.Value, reference.TrackingNumber!), out var found)
+                    && found.Count == 1 && found[0].Invoice is { } invoice)
                 {
-                    if (submissions.TryGetValue(reference.TrackingNumber!, out var found) && found.Count == 1 && found[0].Invoice is { } invoice)
-                    {
-                        resolved[reference] = invoice;
-                    }
+                    resolved[reference] = invoice;
                 }
             }
         }
@@ -235,6 +290,24 @@ public sealed class EarlierInvoiceReadability
         return resolved;
     }
 
-    /// <summary>An OData string literal.</summary>
-    private static string Quote(string value) => "'" + value.Replace("'", "''", StringComparison.Ordinal) + "'";
+    /// <summary>The (vendor org, tracking number) pair, the number compared without regard to case.</summary>
+    private sealed class PairComparer : IEqualityComparer<(Guid Org, string Number)>
+    {
+        public static readonly PairComparer Instance = new();
+
+        public bool Equals((Guid Org, string Number) x, (Guid Org, string Number) y) =>
+            x.Org == y.Org && string.Equals(x.Number, y.Number, StringComparison.OrdinalIgnoreCase);
+
+        public int GetHashCode((Guid Org, string Number) pair) =>
+            HashCode.Combine(pair.Org, StringComparer.OrdinalIgnoreCase.GetHashCode(pair.Number));
+    }
+
+    /// <summary>
+    /// A value of a <c>Microsoft.Dynamics.CRM.In</c> list, as a JSON string. The list is parsed as a JSON array: an OData-style doubled
+    /// quote (<c>O''Brien</c>) is a 400, a JSON string (<c>"O'Brien"</c>) matches the row (both proven live on spaarkedev1). The caller
+    /// then escapes the whole filter for the URL.
+    /// </summary>
+    private static string Literal(string value) => JsonSerializer.Serialize(value, LiteralOptions);
+
+    private static readonly JsonSerializerOptions LiteralOptions = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 }

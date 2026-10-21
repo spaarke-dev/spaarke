@@ -7,7 +7,7 @@
 ## What changed
 
 **Where.**
-- `Services/Signals/EarlierInvoiceReadability.cs` (new): the earlier-invoice check, shared with ebilling task 119. Input: the caller's `IDataverseUserClient` and refs `(EarlierInvoiceId?, VendorOrgId?, TrackingNumber?)`. Output: the refs whose earlier invoice the caller's own `sprk_invoices` read returns. An id ref needs only the invoice read. A number-only ref is resolved through `sprk_invoicesubmissions` (vendor org + tracking number, read as the caller): exactly one row with an invoice, or not readable. Reads: one submission read per vendor org and one invoice read, In lists of at most 200. A 403 is a verdict (none of that table's rows). Anything else (401, 5xx, unparseable body, exception) is a fault: nothing readable. `public const WithheldSentence = "This matches an earlier submission."` mirrors `BillingRuleCatalogue.WithheldDuplicateTemplate` on `work/ebilling-r1`.
+- `Services/Signals/EarlierInvoiceReadability.cs` (new): the earlier-invoice check, shared with ebilling task 119. Input: the caller's `IDataverseUserClient` and refs `(EarlierInvoiceId?, VendorOrgId?, TrackingNumber?)`. Output: the refs whose earlier invoice the caller's own `sprk_invoices` read returns. An id ref needs only the invoice read. A number-only ref is resolved through `sprk_invoicesubmissions` (vendor org + tracking number, read as the caller): exactly one row with an invoice, or not readable. Reads (round 2): one submission read per chunk of 200 distinct tracking numbers, across vendor orgs, and one invoice read per chunk of 200 ids. A 403 is a verdict (none of that table's rows). Anything else (401, 5xx, unparseable body, exception) is a fault: nothing readable. `public const WithheldSentence = "This matches an earlier submission."` mirrors `BillingRuleCatalogue.WithheldDuplicateTemplate` on `work/ebilling-r1`.
 - `SignalReadService.cs`:
   - Step (9a), `DuplicateQuotesOf`, runs **before** the D-142 witness step and reads the stored evidence.
   - Step (9b), `ApplyDuplicateRuleAsync`, runs **after** the witness step.
@@ -76,7 +76,7 @@ None of them takes a token or fact (`BillingFindingSignalMapper.cs:342-351` on `
 - **D-123 stored-evidence sweep:** `SignalReevaluationJob.RedactPoliciesNotInForceAsync` / `RedactSignalsOfDeletedPoliciesAsync` → `SignalSuppressionService.StoredEvidenceToRedactAsync` strips the text of `duplicateOf.*` lines on Signals of an Off, Retired or deleted policy where a Secure team exists. Such a row is then withheld from every reader. Fails closed.
 - **A prior submission with no invoice link** (no `duplicateOf.invoiceId`, and the submission's `_sprk_invoice_value` is null): the Duplicate is withheld for everyone. Fails closed.
 - **Id path vs tracking-number path:** the id path checks only the earlier invoice. The tracking-number path also needs the caller to read the submission, the current invoice and (line-level) the billing event. So an older Signal can be withheld where a newer one about the same prior is shown. Accepted under D-176.
-- **URL length:** about 200 very long tracking numbers in one vendor org could exceed Dataverse's URL limit. The read then faults and the page's Duplicates are withheld (fail closed). Real numbers are about 20 characters.
+- **URL length:** about 200 very long tracking numbers in one chunk could exceed Dataverse's URL limit. The read then faults and the page's Duplicates are withheld (fail closed). Real numbers are about 20 characters.
 - **"Two submissions → withhold"** cannot occur live (the Active alternate key on tracking number + vendor org); it is defensive.
 
 ## Tests
@@ -104,7 +104,7 @@ New tests, all in the task's scope:
 - **`EarlierInvoiceReadabilityTests` (unit, new): 8 methods, 15 cases.**
   - id readable/unreadable;
   - the number resolution cases;
-  - **beyond the criteria:** `ATrackingNumberIsSentAsAnEscapedODataLiteral`, because the number is firm-supplied text in a filter;
+  - **beyond the criteria:** `ATrackingNumberIsSentAsAJsonStringInTheInList_NotAnODataDoubledQuote`, because the number is firm-supplied text in a filter (round 2: the earlier `''` escape was a live 400, see "Round 2");
   - neither id nor number → no read;
   - a fault in either read (500 / 401 / unparseable / throw) → nothing readable;
   - 403 on submissions (numbers unresolved, ids still judged) and on invoices (none);
@@ -114,8 +114,8 @@ New tests, all in the task's scope:
 
 | Suite | Result |
 |---|---|
-| `SignalReadRouteTests` | 83/83 (69 existing + 14 new) |
-| Unit `Sprk.Bff.Api.Tests.Services.Signals` | 382/382 |
+| `SignalReadRouteTests` | 83/83 (69 existing + 14 new; round 2 re-run) |
+| Unit `Sprk.Bff.Api.Tests.Services.Signals` | 394/394 (round 2) |
 | ArchTests | 1093/1093 (full) |
 | BFF build with `-warnaserror` | 0 warnings |
 
@@ -151,3 +151,40 @@ Both were restored and the D176 tests rerun: 12/12.
 - `dotnet format` also reports three `WHITESPACE` findings in pre-existing lines of `SignalReadRouteTests.cs` (2161, 2215-2216; from `147bc993a7f` and `8024c9b922b`).
 
 rework: none task 157
+
+## Round 2 (shared combining rule, batched submission read, live query proof)
+
+**Moved.** The combining rule left `SignalReadService.DuplicatesShownAsync` for the shared class:
+`EarlierInvoiceReadability.ShownAsync<TKey>(caller, IReadOnlyDictionary<TKey, IReadOnlyCollection<Reference>>, ct)` returns the keys that may be shown.
+An item is shown only with at least one reference and every reference readable; no references, or any reference with no usable id or (number plus
+vendor org), is not shown; on any fault nothing is shown. One `Reference` = one prior. `ReadableAsync` stays public (judges one by one) and its doc points
+to `ShownAsync`. `SignalReadService` builds the references (every Duplicate gets an entry, empty when none is found) and calls `ShownAsync`.
+
+**Reads.** One submission read per chunk of 200 distinct tracking numbers, across vendor orgs (was one per org): an In list on `sprk_trackingnumber`,
+plus an In list on `sprk_vendororg` when the chunk names at most 20 orgs. `$select=sprk_trackingnumber,_sprk_vendororg_value,_sprk_invoice_value`. The exact
+(org, number) pair is matched after the read (number without regard to case); zero or several matches, or no invoice: not readable.
+
+**Live proof (spaarkedev1, GET only, 2026-10-21).** The first shape of the new query returned **400** and was fixed:
+- `PropertyValues=['O''Brien']` (the OData doubled quote) is `400 Invalid JSON. A comma character ',' was expected in scope 'Array'`: the In list is parsed as a JSON array.
+  The round 1 code escaped that way, so a number with an apostrophe would have faulted the read (fail closed, but wrong).
+- Fix: values are JSON strings (`"O'Brien #2"`, `"` and `\` JSON-escaped), the whole filter then URL-escaped. Proven semantically on `sprk_documents.sprk_documentname`
+  (same In function; the table has `Examiner's Report 8-24-2026`): the JSON-string form returns that row (200, 1 row, also in lower case); the doubled-quote form is 400.
+  A value holding `"` or a backslash parses (200).
+- The org In list needs the LOGICAL name: `PropertyName='sprk_vendororg'` is 200 (3 rows on `sprk_invoices`); `'_sprk_vendororg_value'` is 400 (entity has no such attribute).
+
+| Query (built by the code, 2 real vendor orgs `b713f0f2-...`, `67577f8c-...`, 3 numbers incl. `O'Brien #2`) | Status | Rows |
+|---|---|---|
+| `sprk_invoicesubmissions` (number In list + org In list) | 200 | 0 |
+| `sprk_invoices` earlier-invoice read (`In sprk_invoiceid`) | 200 | 1 |
+| `sprk_billingevents` (`$select=sprk_billingeventid,_sprk_invoice_value`) | 200 | 1 |
+| `sprk_invoices` current-invoice read (`$select=sprk_invoiceid,_sprk_vendororg_value`) | 200 | 1 |
+
+**Limit of the proof:** `sprk_invoicesubmissions` has **0 rows** on dev (`$count` = 0), so no real tracking number exists and the submission query could only be shown to
+parse (200) and return an empty set, not to return a matching row. The matching semantics are proven on `sprk_documents` as above.
+
+**Tests (round 2).** Unit +5 `ShownAsync` cases (empty list, all readable, one unreadable, unusable reference, fault theory), +2 org-filter cases, the batching test
+rewritten (two orgs one number each: ONE read; 201 numbers: two reads). The route fake now rejects a doubled-quote literal with 400 and evaluates the JSON list;
+the batching route test adds a 201-number page (2 submission reads). ArchTests 1093/1093. `-warnaserror` build 0 warnings.
+
+**Seeding (e).** In `ShownAsync`, `Count: > 0` removed (an item with no references counted as shown): `ShownAsync_AnItemWithNoReferences_IsNotShown_AndCausesNoRead` fails, and two
+D176 route tests (`...TrackingNumberOnly...`, `...LineLevelRepeatOfAnEarlierLine...`) fail. Restored; all pass.
