@@ -369,24 +369,16 @@ internal sealed partial class RecordCreationService
         }
     }
 
-    /// <summary>The D7 link columns of a document (UAC-r2 task 188 r4e): Spaarke's writers set them, never a mapping.</summary>
-    private static readonly IReadOnlySet<string> DocumentLinkColumns =
-        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_parentdocument", CrossPathLink.LinkedCommunicationAttribute };
-
     /// <summary>
     /// Why <paramref name="column"/> of a <paramref name="table"/> row is never written by Repair's mapping, or <c>null</c>:
-    /// a document's Access Permission and own-narrowing record (<see cref="InheritedAccessPermission.RefuseAppOnlyWrite"/>,
-    /// as the field-mapping push asks it) and its D7 links (<see cref="DocumentLinkColumns"/>).
+    /// the app-only refusal every generic writer asks (<see cref="InheritedAccessPermission.RefuseAppOnlyWrite"/>, asked per
+    /// rule as the field-mapping push asks it) — a document's Access Permission and own-narrowing record, and its D7 links
+    /// (#2170). Its code is the reason reported.
     /// </summary>
-    private static string? DocumentServerOwnedRefusal(string table, string column)
-    {
-        if (InheritedAccessPermission.RefuseAppOnlyWrite(table, [column]) is not null)
-            return InheritedAccessPermission.AppOnlyDocumentWriteReasonCode;
-
-        return InheritedAccessPermission.RecordsOwnNarrowing(table) && DocumentLinkColumns.Contains(column)
-            ? RecordRepairReason.DocumentLinkServerOwned
+    private static string? DocumentServerOwnedRefusal(string table, string column) =>
+        InheritedAccessPermission.RefuseAppOnlyWrite(table, [column]) is { } refused
+            ? refused.RefusalCode ?? InheritedAccessPermission.AppOnlyDocumentWriteReasonCode
             : null;
-    }
 
     /// <summary>The source columns Repair reads to tell whether it may copy from it (review F1-e (ii)).</summary>
     private static IEnumerable<string> SourceGateColumns(string sourceTable) =>
@@ -819,9 +811,6 @@ internal static class RecordRepairReason
 
     /// <summary>Review F1-f / UAC-r2: a Decision Record is append-only; Repair neither reads nor writes it.</summary>
     internal const string TableAppendOnly = "record_repair.table_append_only";
-
-    /// <summary>UAC-r2: a document's D7 link (<c>sprk_parentdocument</c>, <c>sprk_relatedcommunication</c>) is Spaarke's.</summary>
-    internal const string DocumentLinkServerOwned = "record_repair.document_link_server_owned";
 
     /// <summary>Review F1-b: the row's filing resolves to the Secure team, which does not own the row yet — nothing is mapped.</summary>
     internal const string MappingSourceSecure = "record_repair.mapping_source_secure";

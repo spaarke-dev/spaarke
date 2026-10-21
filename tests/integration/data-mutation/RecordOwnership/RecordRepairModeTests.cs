@@ -695,9 +695,9 @@ public sealed class RecordRepairModeTests
         Field(outcome, RecordRepairPart.Mapping, "sprk_accessinheritance").ReasonCode
             .Should().Be(InheritedAccessPermission.AppOnlyDocumentWriteReasonCode);
         Field(outcome, RecordRepairPart.Mapping, "sprk_parentdocument").ReasonCode
-            .Should().Be(RecordRepairReason.DocumentLinkServerOwned);
+            .Should().Be(InheritedAccessPermission.AppOnlyDocumentLinkWriteReasonCode);
         Field(outcome, RecordRepairPart.Mapping, "sprk_relatedcommunication").ReasonCode
-            .Should().Be(RecordRepairReason.DocumentLinkServerOwned);
+            .Should().Be(InheritedAccessPermission.AppOnlyDocumentLinkWriteReasonCode);
     }
 
     [Theory]
@@ -717,7 +717,7 @@ public sealed class RecordRepairModeTests
         var outcome = await _world.RepairAsync(table, id);
 
         outcome.Fields.Should().NotContain(f => f.ReasonCode == InheritedAccessPermission.AppOnlyDocumentWriteReasonCode
-            || f.ReasonCode == RecordRepairReason.DocumentLinkServerOwned);
+            || f.ReasonCode == InheritedAccessPermission.AppOnlyDocumentLinkWriteReasonCode);
         var written = _world.Writes.Should().ContainSingle().Subject.Fields;
         written["sprk_accessinheritance"].Should().Be("from-matter");
         written["sprk_accesspermission"].Should().Be("100000001");
