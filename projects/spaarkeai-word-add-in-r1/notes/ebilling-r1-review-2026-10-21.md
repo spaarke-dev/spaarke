@@ -63,6 +63,22 @@ Open questions:
 
 The owner chose to discuss the process before anything is sent.
 
+**Owner decisions after the discussion (2026-10-21; sent to ebilling-r1):**
+1. **An explicit invoice mark.** One attachment is Invoice, the rest Supporting or Don't save; pre-selected when there is exactly one PDF.
+2. **Corrections are resubmissions** (ebilling D-34/D-37/D-43): the old invoice closes as superseded, and a new linked invoice ({invoice}.{n}) keeps the history. No in-place PDF replacement. A correction is refused once the invoice is Approved, Sent to AP or Paid (our recommendation; the owner said ok).
+3. **A separate "Invoice" task-pane view**, opened by a "Submit Invoice" ribbon button, like Add To Do:
+   - new invoice, with the core record required;
+   - existing invoice: add supporting files, or submit a corrected invoice.
+4. **Removed from the normal Save flow:** Invoice as a save target, and the blank "+New invoice" quick-create.
+5. **Core records:** Matter, Project and Work Assignment; Agreement when ebilling R2 adds it. The list comes from ebilling.
+6. **The email is always saved as the .eml file in SPE**, filed to the core record. It is not optional and never an invoice file. That save must not create the attachments as child Documents; ebilling defines the contract.
+7. **LEDES is out of scope.**
+
+**Work for this project (not yet a task)**, once ebilling's endpoint contract exists:
+- the Invoice view and ribbon button;
+- removing Invoice from Save and quick-create;
+- the email-only .eml save.
+
 ## Effect on this project
 
 None until the owner settles the process in decision 1. Tasks 130 and 131 are unaffected.
