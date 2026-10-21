@@ -13,7 +13,8 @@ Owner direction 2026-10-20: "070-071-072 - yes proceed".
 
 - `deploy-teams-app.yml` run `39489551799` (ref master at `c3ec5d6e5`, environment dev): success. It only builds and publishes an artifact; nothing live changes until the owner uploads it.
 - Artifact `teams-app-package` → `appPackage.zip` (2,468 bytes). Manifest: id `23610794-67de-4e6c-be61-ff80cc8cbe7f`, version `1.2.0`, short name "Spaarke", static tab `https://green-dune-0c4f1221e.7.azurestaticapps.net`, no `webApplicationInfo`, validDomains = the SWA host, `spaarke-bff-dev.azurewebsites.net`, `teams.microsoft.com`, `*.cloud.microsoft`.
-- **Owner step:** Teams admin center (Spaarke tenant) → Teams apps → Manage apps → find "Spaarke" (id `23610794…`) → Upload new version, or upload as a new custom app if it is not there yet. Then open it in Teams desktop and web.
+- **Correction 2026-10-20:** the Teams tab serves only tenants listed in VITE_BACKENDS `homeTenantIds` (dev: Dewey Cheatham only; `main.tsx` Teams bootstrap → "This organization is not set up for Spaarke."). So the smoke runs in the **Dewey Cheatham** tenant, as a DC user. Uploaded in the Spaarke tenant, the app opens to "not set up" by design.
+- **Owner step (original text, tenant corrected above):** Teams admin center (Spaarke tenant) → Teams apps → Manage apps → find "Spaarke" (id `23610794…`) → Upload new version, or upload as a new custom app if it is not there yet. Then open it in Teams desktop and web.
 - Rollback: upload the previous package version (or remove the app); the SPA is unaffected.
 
 ## Smoke test (POML step 4): pending, owner-driven

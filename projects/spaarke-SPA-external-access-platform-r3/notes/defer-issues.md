@@ -701,6 +701,26 @@ A customer employee whose Entra user has no Email gets a token with no `email` c
 **Blockers**: none.
 **Related**: task 047, task 074.
 
+### ISS-018 — Partner plane uses a cached company account → `authority_mismatch`
+
+| Field | Value |
+|---|---|
+| **Status** | Open (fix in R3, auth-tagged) |
+| **Urgency** | before 072 |
+| **Filed** | 2026-10-20 |
+| **Source** | Owner live check on dev SPA `28274e04e` (ralph.schroeder@spaarke.com) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2166 |
+
+**Description**
+
+MSAL's account list is shared across clients in the tab. The CIAM plane has no account filter, so `AuthGuard` treats a cached company account as signed in, and `acquireStandaloneBffToken` can pick it. msal-browser then refuses with `authority_mismatch`. One path: company-account sign-in → "not set up" → "choose a different sign-in" → Partner in the same tab (`handleResetRealm` does not clear cached accounts).
+
+**Suggested fix**: filter the CIAM plane to CIAM-tenant accounts (mirror of `isWorkforceHomeAccount`); tests for both planes. Two top-tier reviews (auth).
+
+**Estimated effort**: under 1 day.
+**Blockers**: none. Workaround: new InPrivate window.
+**Related**: task 058, task 074, task 070.
+
 ---
 
 ## Closed
