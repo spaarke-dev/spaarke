@@ -123,15 +123,18 @@ public class OfficeDocumentPersistenceDedupTests
     public async Task CreateDocumentWithSpePointers_EmailSaveWithCapturedCommunication_LinksDocumentToCommunication()
     {
         // FR-C4 (task 025), capture-then-upload: an email save whose message was ALSO captured inbound (a canonical
-        // sprk_communication exists) links the just-created archive DOCUMENT to that communication — so the review
-        // surface shows ONE email, not the communication + this archive as two rows.
+        // sprk_communication exists) links the archive DOCUMENT to that communication — so the review surface shows ONE
+        // email, not the communication + this archive as two rows. Task 130: the link is part of the CREATE (no second
+        // write to sprk_document), so it cannot fail on its own and leave the archive unlinked.
         const string messageId = "<msg-fr-c4-office@x.com>";
         var canonicalCommId = Guid.NewGuid();
         var newDocId = Guid.NewGuid();
         var detector = DetectorReturning(new DedupDecision("h", IsDuplicate: false, CanonicalDocumentId: null));
 
         var docSvc = new Mock<IDocumentDataverseService>();
+        CreateDocumentRequest? created = null;
         docSvc.Setup(d => d.CreateDocumentAsync(It.IsAny<CreateDocumentRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<CreateDocumentRequest, CancellationToken>((r, _) => created = r)
             .ReturnsAsync(newDocId.ToString());
         docSvc.Setup(d => d.UpdateDocumentAsync(It.IsAny<string>(), It.IsAny<UpdateDocumentRequest>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -141,9 +144,7 @@ public class OfficeDocumentPersistenceDedupTests
             .ReturnsAsync(new Entity("sprk_communication", canonicalCommId));
 
         var generic = new Mock<IGenericEntityService>();
-        // canonical-communication reads/writes (FR-C2) are unset → loose defaults; capture the FR-C4 document link.
-        generic.Setup(g => g.RetrieveAsync("sprk_document", newDocId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Entity("sprk_document", newDocId));
+        // canonical-communication reads/writes (FR-C2) are unset → loose defaults; record any write to the document.
         Dictionary<string, object>? docWrite = null;
         generic.Setup(g => g.UpdateAsync("sprk_document", newDocId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
             .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, _, f, _) => docWrite = f)
@@ -162,8 +163,10 @@ public class OfficeDocumentPersistenceDedupTests
         await sut.CreateDocumentWithSpePointersAsync(
             request, "drive1", "item2", "https://spe/web", "email.eml", 100, "user-oid", CancellationToken.None, owningTeamId: RecordOwnershipResolverDouble.DefaultTeamId);
 
-        docWrite.Should().NotBeNull("the new archive document is cross-path-linked to its captured communication (FR-C4)");
-        ((Microsoft.Xrm.Sdk.EntityReference)docWrite![CrossPathLink.LinkedCommunicationAttribute]).Id.Should().Be(canonicalCommId);
+        created!.RelatedCommunicationId.Should().Be(canonicalCommId,
+            "the new archive document is created linked to its captured communication (FR-C4, task 130)");
+        created.AccessPermission.Should().BeNull("a linked document keeps its default Access Permission");
+        docWrite.Should().BeNull("the link is in the create; there is no second write to the document");
     }
 
     [Fact]

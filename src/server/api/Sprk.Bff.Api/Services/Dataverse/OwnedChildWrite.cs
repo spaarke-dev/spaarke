@@ -922,6 +922,12 @@ internal static class OwnedChildWrite
         /// </summary>
         public bool ParentsUnchanged { get; init; }
 
+        /// <summary>
+        /// <see cref="Written"/>: the reparent's answer, which the step after the re-file takes
+        /// (<c>SecureChildReconciler.AfterRefileAsync</c>; #2159 slice 2 — its F3 permission, <see cref="RecordOwnerResolution.SecureExitPermitted"/>).
+        /// </summary>
+        public RecordOwnerResolution? Resolution { get; init; }
+
         /// <summary>The caller's own rights refused it (no AppendTo on a record named) — nothing written.</summary>
         public string? Denied { get; init; }
 
@@ -1096,6 +1102,7 @@ internal static class OwnedChildWrite
                     Written = true,
                     ParentsUnchanged = resolution.ParentsUnchanged,
                     SecureExitCaller = secureExitCaller,
+                    Resolution = resolution,
                 },
             };
         }

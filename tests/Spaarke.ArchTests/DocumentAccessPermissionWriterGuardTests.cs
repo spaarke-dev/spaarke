@@ -57,6 +57,11 @@ public class DocumentAccessPermissionWriterGuardTests
             "column), from DecideDocumentRaiseOnly, which only raises the value and never lowers it."),
         new Writer(Resolver, "RefreshDocumentAccessPermissionAsync",
             "Task 189: the child-records create refresh (L1). Same decision, one update."),
+        new Writer("src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs", "StageDocumentCommunicationFields",
+            "spaarkeai-word-add-in-r1 task 130 (D7 T8): an Office email-derived document's own Restricted, set only by " +
+            "OfficeDocumentPersistence.ApplyEmailCommunicationOutcome together with AccessInheritance.OwnNarrowing(Restricted) " +
+            "(CreateDocumentRequest.AccessInheritanceRecord). The stager writes both in the one create and refuses a value " +
+            "without its record (DocumentCommunicationFieldsStagingTests)."),
     };
 
     private static readonly IReadOnlyList<Writer> NonDocumentWriters = new[]
@@ -93,6 +98,7 @@ public class DocumentAccessPermissionWriterGuardTests
         ("src/server/api/Sprk.Bff.Api/Services/Dataverse/ParentLineage.cs", "Column"), // InheritedAccessPermission.Column
         ("src/server/api/Sprk.Bff.Api/Services/Access/SecureChildShareSynchronizer.cs", "AccessPermissionColumn"),
         ("src/server/api/Sprk.Bff.Api/Services/Access/SecureRootInheritance.cs", "AccessPermissionColumn"),
+        ("src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs", "AccessPermissionColumn"), // task 130
     };
 
     [Fact(DisplayName = "Task 189: only the approved writers write a document's sprk_accesspermission (every writer is listed)")]
@@ -140,6 +146,10 @@ public class DocumentAccessPermissionWriterGuardTests
         Assert.NotEmpty(found);
         var problems = found.Except(KnownAliases).Select(a => $"NEW constant {a.Name} in {a.File}: add it to the scan's key forms")
             .Concat(KnownAliases.Except(found).Select(a => $"STALE alias {a.Name} in {a.File}: remove it"))
+            // #2177 UAC pass 1 F2: a listed alias that Key does not match hides every write through it from the scan.
+            // InheritedAccessPermission's own "Column" is matched qualified (and bare, in its own file: BareColumnWrite).
+            .Concat(KnownAliases.Where(a => !KeyMatches(a.Name == "Column" ? "InheritedAccessPermission.Column" : a.Name))
+                .Select(a => $"UNSEEN alias {a.Name} in {a.File}: Key does not match it, so writes through it are not found"))
             .ToList();
         Assert.True(problems.Count == 0,
             "A constant holding sprk_accesspermission is a key the writer scan must match, or a write through it goes unseen:\n" +
@@ -165,13 +175,26 @@ public class DocumentAccessPermissionWriterGuardTests
         Assert.Equal(new[] { "AccessPermissionKey" }, AliasesIn(ControlSource.Split('\n')).ToArray());
     }
 
+    [Fact(DisplayName = "Task 189 guard control: an alias Key does not match is reported; the listed forms are matched")]
+    public void KeyMatches_MustFireAndMustNotFire()
+    {
+        Assert.False(KeyMatches("AccessPermissionKey"), "a constant Key misses must be reported UNSEEN (must fire)");
+        Assert.False(KeyMatches("AccessPermissionColumnName"), "a longer name is not the column constant");
+        Assert.True(KeyMatches("AccessPermissionColumn"));
+        Assert.True(KeyMatches("DocumentAccessPermissionColumn"), "a prefixed name is matched (must not fire)");
+        Assert.True(KeyMatches("SecureRootInheritance.AccessPermissionColumn"));
+    }
+
+    /// <summary>True when an indexer write through <paramref name="name"/> is one the scan finds.</summary>
+    private static bool KeyMatches(string name) => KeyedWrites[0].IsMatch($"update[{name}] = value;");
+
     // ── detector ─────────────────────────────────────────────────────────────────────────────────────────────────
 
     private sealed record Site(string File, string Member, int Line, string Statement);
 
     /// <summary>The column as a key: its literal, or a constant that holds it (<see cref="KnownAliases"/>).</summary>
     private const string Key =
-        @"(?:""sprk_accesspermission""|(?:\w+\.)*InheritedAccessPermission\.Column|(?:\w+\.)*AccessPermissionColumn)";
+        @"(?:""sprk_accesspermission""|(?:\w+\.)*InheritedAccessPermission\.Column|(?:\w+\.)*\w*AccessPermissionColumn\b)";
 
     private static readonly Regex[] KeyedWrites =
     {

@@ -340,9 +340,10 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
             if (refile.Written && children is not null && wasIsolated is not null)
             {
                 // #2143 round 7 (F1): with the caller the re-file's F3 check acted for, so the thread that follows moves on it.
+                // #2159 slice 2: with the reparent's answer (its F3 permission), so a re-filed document's file release is recorded.
                 await children.AfterRefileAsync(
                     tablename, recordId, wasIsolated, Sprk.Bff.Api.Services.Access.RefileThreadStep.Reconcile,
-                    refile.SecureExitCaller, CancellationToken.None).ConfigureAwait(false);
+                    refile.SecureExitCaller, refile.Resolution, CancellationToken.None).ConfigureAwait(false);
             }
 
             // Ontology D-48 / #1659 (owner decision D-125, every server-side filing path): a communication this tool re-filed
@@ -427,7 +428,8 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
     /// <summary>What the re-file step decided: a finished tool <c>Result</c> (a refusal or the caller's own error), or
     /// <c>Written</c> when the caller's PATCH already ran inside the re-file. Neither = an ordinary update.</summary>
     private readonly record struct RefileStep(
-        ToolResult? Result, bool Written, Sprk.Bff.Api.Services.Access.SecureRemovalCaller? SecureExitCaller = null);
+        ToolResult? Result, bool Written, Sprk.Bff.Api.Services.Access.SecureRemovalCaller? SecureExitCaller = null,
+        RecordOwnerResolution? Resolution = null);
 
     /// <summary>
     /// Task 146 r2 (verifier item 2). The re-file itself is <see cref="OwnedChildWrite.RefileAsync"/> — since task 147 r1
@@ -446,7 +448,7 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         return outcome switch
         {
             { NotARefile: true } => default,
-            { Written: true } => new RefileStep(null, true, outcome.SecureExitCaller),
+            { Written: true } => new RefileStep(null, true, outcome.SecureExitCaller, outcome.Resolution),
             _ => new RefileStep(RefileRefusal(tool, tablename, outcome, startedAt), false),
         };
     }

@@ -345,6 +345,42 @@ public sealed class GraphWireMockFixture : IDisposable
     }
 
     /// <summary>
+    /// Serves a DIFFERENT response to each successive PATCH on <paramref name="pathPrefix"/>, in order; the last one
+    /// repeats. Used where two writes share a path — the business-unit stamp, then the ownership marker (#2032).
+    /// </summary>
+    public GraphWireMockFixture StubPatchSequence(string pathPrefix, params (string Body, int StatusCode)[] responses)
+    {
+        if (responses.Length == 0)
+        {
+            throw new ArgumentException("At least one response is required.", nameof(responses));
+        }
+
+        var scenario = $"patch-seq:{pathPrefix}:{responses.Length}";
+        for (var i = 0; i < responses.Length; i++)
+        {
+            var step = _server
+                .Given(Request.Create().WithPath(new WireMock.Matchers.WildcardMatcher($"{pathPrefix}*")).UsingPatch())
+                .InScenario(scenario);
+            if (i > 0)
+            {
+                step = step.WhenStateIs($"{scenario}#{i}");
+            }
+
+            if (i < responses.Length - 1)
+            {
+                step = step.WillSetStateTo($"{scenario}#{i + 1}");
+            }
+
+            step.RespondWith(Response.Create()
+                .WithStatusCode(responses[i].StatusCode)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody(responses[i].Body));
+        }
+
+        return this;
+    }
+
+    /// <summary>
     /// Serves <paramref name="jsonBody"/> for a PUT — used for create-or-replace resources such as an
     /// <c>applicationPermissionGrant</c>, where the VERB is part of the contract (task 041 measured the
     /// POST alternative failing live).

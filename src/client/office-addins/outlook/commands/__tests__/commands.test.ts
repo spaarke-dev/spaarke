@@ -302,6 +302,57 @@ describe('outlook/commands/index.ts — quickSave (tasks 084, 118)', () => {
     expect(event.completed).toHaveBeenCalledTimes(1);
   });
 
+  describe('task 131 (#2171): the email could not be filed to the record', () => {
+    const FILED_TO_TARGET = 'Saved to Spaarke and filed to Secure Matter.';
+    const NOT_PERMITTED =
+      "The email wasn't added to this record's communications because you don't have permission to change it.";
+    const FAILED = "The email couldn't be added to this record's communications. File it from Spaarke.";
+
+    it.each([
+      ['NotPermitted', NOT_PERMITTED],
+      ['Failed', FAILED],
+    ])(
+      'emailFiling %s: the dialog keeps "Saved to Spaarke and filed to <target>." and appends the explanation (still a success dialog)',
+      async (outcome, sentence) => {
+        mockFetchEnginePreSelection.mockResolvedValue(prediction(true));
+        mockApiPost.mockResolvedValue({ jobId: 'job-1', statusUrl: '/api/office/jobs/job-1', emailFiling: outcome });
+        mockApiGet.mockResolvedValue({ status: 'Completed', result: { artifact: { id: DOCUMENT_ID } } });
+
+        await commands.quickSave(createMockEvent());
+
+        const result = shown()[0]!;
+        expect(result.message).toBe(`${FILED_TO_TARGET} ${sentence}`);
+        expect(result.status).toBe('success'); // informational: the save worked
+        expect(sentence).not.toContain('Secure Matter'); // the explanation itself names no record
+        expect(result.linkUrl).toContain(`id=${DOCUMENT_ID}`);
+      }
+    );
+
+    it.each([['Filed'], ['AlreadyFiled'], [undefined], ['SomethingNewer']])(
+      'emailFiling %s: the dialog is exactly what it was (a newer value is ignored)',
+      async outcome => {
+        mockFetchEnginePreSelection.mockResolvedValue(prediction(true));
+        mockApiPost.mockResolvedValue({
+          jobId: 'job-1',
+          statusUrl: '/api/office/jobs/job-1',
+          ...(outcome !== undefined ? { emailFiling: outcome } : {}),
+        });
+        mockApiGet.mockResolvedValue({ status: 'Completed', result: { artifact: { id: DOCUMENT_ID } } });
+
+        await commands.quickSave(createMockEvent());
+
+        expect(shown().map(r => r.message)).toEqual(['Saved to Spaarke and filed to Secure Matter.']);
+      }
+    );
+
+    it('keeps the skipped-attachments sentence before the explanation', () => {
+      const skipped = { skipped: [{}] } as never;
+      expect(commands.describeEmailSaved({ name: 'M' }, skipped, false, 'NotPermitted')).toBe(
+        `Saved to Spaarke and filed to M. 1 attachment was left out: too large, a cloud link or unreadable. ${NOT_PERMITTED}`
+      );
+    });
+  });
+
   it('names how many attachments were left out of the saved email', () => {
     const skipped = { skipped: [{}, {}] } as never;
     expect(commands.describeEmailSaved(null, skipped, false)).toBe(

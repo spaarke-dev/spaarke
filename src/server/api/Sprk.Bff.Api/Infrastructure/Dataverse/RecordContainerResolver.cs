@@ -147,6 +147,7 @@ public sealed partial class RecordContainerResolver
         _strictDerivedContainer = StrictDerivedContainerFrom(configuration);
         _itemIdBoundBackfillComplete = ItemIdBoundBackfillCompleteFrom(configuration);
         _unfiledDefaultContainerId = configuration?[UnfiledDefaultContainerKey];
+        _declaredUnfiledHomes = DeclaredUnfiledHomesFrom(configuration);
     }
 
     /// <summary>

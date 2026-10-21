@@ -261,7 +261,8 @@ public sealed class SecureRootCreateRouteFixture : ProvisionProjectTestFixture
         {
             // ── Office quick-create: the app-only entity seam, the mapping profile, the caller's systemuser ──
             services.RemoveAll<IGenericEntityService>();
-            services.AddSingleton(OfficeEntities().Object);
+            var officeEntities = OfficeEntities();
+            services.AddSingleton(officeEntities.Object);
             services.RemoveAll<IFieldMappingDataverseService>();
             services.AddSingleton(FieldMappings().Object);
             services.RemoveAll<ICallerSystemUserResolver>();
@@ -274,7 +275,9 @@ public sealed class SecureRootCreateRouteFixture : ProvisionProjectTestFixture
 
             // ── Chat: the caller's own Dataverse (scripted OBO), the session, the gate store, the tool catalog ──
             services.RemoveAll<IDataverseUserClient>();
-            services.AddScoped<IDataverseUserClient>(_ => new SecureChildOwnershipAiToolTests.ScriptedUserClient(CallerSystemUserId));
+            // #2188: the Office mapping-source caller read is answered as the app read was (a caller who reads every column).
+            services.AddScoped<IDataverseUserClient>(_ => MappingSourceCallerReadDouble.MirroringAppReads(officeEntities)
+                .RoutedOver(new SecureChildOwnershipAiToolTests.ScriptedUserClient(CallerSystemUserId)));
             services.RemoveAll<ChatSessionManager>();
             services.AddSingleton<ChatSessionManager>(_sessions);
             services.RemoveAll<PendingPlanManager>();
@@ -311,6 +314,14 @@ public sealed class SecureRootCreateRouteFixture : ProvisionProjectTestFixture
                 ["sprk_matterid"] = id.ToString("D"),
                 ["sprk_recordtype"] = new EntityReference("sprk_recordtype_ref", _mappedType ?? Guid.Empty),
             }));
+
+        // #2191 K2: the record-type catalog row the service derives a project's filed-under pair from (the matter's type).
+        entities
+            .Setup(e => e.RetrieveMultipleAsync(
+                It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => q.EntityName == "sprk_recordtype_ref"), It.IsAny<CancellationToken>()))
+            .Returns(() => Task.FromResult(_mappedType is { } type
+                ? new EntityCollection(new List<Entity> { new("sprk_recordtype_ref", type) })
+                : new EntityCollection()));
         return entities;
     }
 
