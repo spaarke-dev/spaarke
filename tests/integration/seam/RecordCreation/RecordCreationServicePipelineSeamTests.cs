@@ -41,7 +41,7 @@ namespace Sprk.Bff.Api.Tests.Seam.RecordCreation;
 /// write. Refusals are rendered through <see cref="RecordCreationProblemMap"/> — the HTTP body a route will return.</para>
 /// </remarks>
 [Trait("status", "new")]
-public sealed class RecordCreationServicePipelineSeamTests
+public sealed partial class RecordCreationServicePipelineSeamTests
 {
     private static readonly Guid Caller = Guid.Parse("a0130000-0000-4000-8000-0000000000aa");
     private static readonly Guid CallerOid = Guid.Parse("a0130000-0000-4000-8000-0000000000ab");
