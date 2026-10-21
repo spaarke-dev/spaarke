@@ -748,7 +748,7 @@ internal sealed partial class RecordCreationService
     /// </remarks>
     private async Task<OwnerRepair> RepairOwnerAsync(
         string table, RecordTableRule rule, Entity row, Dictionary<string, object> patch, List<RecordRepairField> report,
-        CancellationToken ct)
+        List<RecordOwnershipParent> resolvedOver, CancellationToken ct)
     {
         var rowUnit = row.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn) is { } unit && unit.Id != Guid.Empty
             ? unit.Id
@@ -773,7 +773,20 @@ internal sealed partial class RecordCreationService
                 .ConfigureAwait(false);
             var parents = RecordOwnershipContext.ParentsOf(row).Concat(threadParents).Distinct().ToArray();
             var pairId = row.GetAttributeValue<string>(SecureRootInheritance.PairIdColumn);
+            var pairType = row.GetAttributeValue<EntityReference>(SecureRootInheritance.PairTypeColumn)?.Id;
             filed = parents.Length > 0 || !string.IsNullOrWhiteSpace(pairId);
+
+            // Review F1-e (i): the records the owner is decided over are the only ones the mapping may copy from. The pair
+            // counts only where it files the row on its own (a project, PairParentAsync); read here once, and handed to the
+            // resolution as a parent. A pair that cannot be told is left to ResolveOwnerOverAsync, which refuses it.
+            var pairParent = await PairParentAsync(_entities, table, pairId, pairType, ct).ConfigureAwait(false);
+            if (pairParent.Parent is { } pairNamed)
+            {
+                parents = [.. parents, pairNamed];
+                pairId = null;
+            }
+
+            resolvedOver.AddRange(parents);
             if (keep is null && rule.OwnershipException is not null && parents.Length == 0)
                 keep = (RecordRepairFieldState.Skipped, RecordRepairReason.OwnerKeptByException);
 
@@ -787,8 +800,7 @@ internal sealed partial class RecordCreationService
                     : null;
 
             var resolved = await ResolveOwnerOverAsync(
-                    table, parents, pairInvalidId: false, pairId,
-                    row.GetAttributeValue<EntityReference>(SecureRootInheritance.PairTypeColumn)?.Id, callerObjectId: null,
+                    table, parents, pairInvalidId: false, pairId, pairType, callerObjectId: null,
                     callerSystemUserId: actingUser, requestedBy: null, ct)
                 .ConfigureAwait(false);
             if (resolved.Refusal is { } undetermined)

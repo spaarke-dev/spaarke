@@ -42,6 +42,14 @@ internal sealed partial class RecordCreationService
     private static readonly IReadOnlySet<string> InvoiceFamilyTables =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_invoice", "sprk_billingevent" };
 
+    /// <summary>
+    /// Review F1-f / UAC-r2: tables Repair never touches. Repair's own set, NOT the registry's ownership exception: Create's
+    /// step 7 reads <see cref="RecordTableRule.OwnershipException"/> and refuses an unfiled create with it, so a registry
+    /// entry would change Create.
+    /// </summary>
+    private static readonly IReadOnlySet<string> AppendOnlyTables =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_decisionrecord" };
+
     private const string OwnerColumn = "ownerid";
     private const string OwningBusinessUnitColumn = "owningbusinessunit";
     private const string VersionNumberColumn = "versionnumber";
@@ -60,6 +68,14 @@ internal sealed partial class RecordCreationService
             throw new ArgumentException("A record id is required.", nameof(id));
 
         table = table.Trim().ToLowerInvariant();
+        if (AppendOnlyTables.Contains(table))
+        {
+            // Review F1-f / UAC-r2: a Decision Record is append-only (D-144 as amended: a user-owned one stays its user's,
+            // never its unit's team). Repair neither reads nor writes it: no owner, no mapping, no stamp, no search index.
+            _logger.LogInformation("[RECORD-REPAIR] {Table} {Id}: the table is append-only; not repaired", table, id);
+            return RecordRepairOutcome.Row(table, id, RecordRepairStatus.Skipped, RecordRepairReason.TableAppendOnly);
+        }
+
         var rule = TableRules(table);
         if (rule is null)
         {
@@ -90,7 +106,8 @@ internal sealed partial class RecordCreationService
         var warnings = new List<string>();
 
         // Review F1-b: the owner (and what the row's filing resolves to) is decided BEFORE the mapping, which it may block.
-        var owner = await RepairOwnerAsync(table, rule, row, patch, report, ct).ConfigureAwait(false);
+        var ownerParents = new List<RecordOwnershipParent>();
+        var owner = await RepairOwnerAsync(table, rule, row, patch, report, ownerParents, ct).ConfigureAwait(false);
         if (owner.MappingBlocked is { } blocked)
         {
             _logger.LogInformation("[RECORD-REPAIR] {Table} {Id}: nothing was mapped ({Reason})", table, id, blocked);
@@ -98,7 +115,7 @@ internal sealed partial class RecordCreationService
         }
         else
         {
-            await RepairMappingAsync(table, rule, row, patch, report, warnings, ct).ConfigureAwait(false);
+            await RepairMappingAsync(table, rule, row, ownerParents, patch, report, warnings, ct).ConfigureAwait(false);
         }
 
         await RepairSearchIndexAsync(table, rule, row, owner.BusinessUnit, patch, report, ct).ConfigureAwait(false);
@@ -188,8 +205,8 @@ internal sealed partial class RecordCreationService
     /// or ownership-parent lookup, or an I-1 stamp column) is not written: Repair never re-files a row.
     /// </summary>
     private async Task RepairMappingAsync(
-        string table, RecordTableRule rule, Entity row, Dictionary<string, object> patch, List<RecordRepairField> report,
-        List<string> warnings, CancellationToken ct)
+        string table, RecordTableRule rule, Entity row, IReadOnlyList<RecordOwnershipParent> ownerParents,
+        Dictionary<string, object> patch, List<RecordRepairField> report, List<string> warnings, CancellationToken ct)
     {
         if (!rule.MappingApplies)
         {
@@ -222,6 +239,17 @@ internal sealed partial class RecordCreationService
                 return;
             }
 
+            // Review F1-e (i): the source must be a record the owner step resolved over. The pair can name ANY table and is
+            // free text any writer sets; a source the owner was not decided over was never checked for secure data.
+            if (!ownerParents.Any(p => p.RecordId == source.RecordId
+                    && string.Equals(p.EntityLogicalName, source.EntityLogicalName, StringComparison.OrdinalIgnoreCase)))
+            {
+                _logger.LogWarning("[RECORD-REPAIR] {Table} {Id}: the mapping source {Source} {SourceId} is not what the owner was " +
+                                   "decided over; nothing was mapped", table, row.Id, source.EntityLogicalName, source.RecordId);
+                report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, null, RecordRepairReason.MappingSourceUndetermined));
+                return;
+            }
+
             FieldMappingProfileEntity? profile;
             try
             {
@@ -249,13 +277,25 @@ internal sealed partial class RecordCreationService
                 return;
             }
 
+            // The source's own secure status (review F1-e (ii)) is read in the same one read as its mapped columns.
+            var sourceColumns = CreateTimeFieldMapping.CollectSourceColumns(rules)
+                .Concat(SourceGateColumns(source.EntityLogicalName))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
             var read = await MappingSourceReadProbe.ReadAsync(
-                    MappingSourceReader.System, source, CreateTimeFieldMapping.CollectSourceColumns(rules), _entities, _logger, ct)
+                    MappingSourceReader.System, source, sourceColumns, _entities, _logger, ct)
                 .ConfigureAwait(false);
-            if (!read.Readable)
+            if (!read.Readable || read.Record is null)
             {
+                // Fail closed: a source that cannot be read cannot be told not secure, so nothing is copied from it.
                 warnings.Add(read.Warning ?? MappingSourceReadProbe.SourceUnavailableWarning);
                 report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, null, RecordRepairReason.MappingSourceUnreadable));
+                return;
+            }
+
+            if (!await SourceMayBeCopiedAsync(table, row, source, read.Record, ct).ConfigureAwait(false))
+            {
+                report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, null, RecordRepairReason.MappingSourceSecure));
                 return;
             }
 
@@ -276,6 +316,14 @@ internal sealed partial class RecordCreationService
                 .Order(StringComparer.Ordinal);
             foreach (var column in columns)
             {
+                if (DocumentServerOwnedRefusal(table, column) is { } serverOwned)
+                {
+                    // UAC-r2: a document's access record and its D7 links are Spaarke's. Fill-only does not make a write safe:
+                    // filling an empty link changes who sees the document.
+                    report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, column, serverOwned));
+                    continue;
+                }
+
                 if (written.Contains(column) && target.Attributes.TryGetValue(column, out var value) && value is not null)
                 {
                     if (WouldFileTheRow(table, column, value))
@@ -318,6 +366,79 @@ internal sealed partial class RecordCreationService
             report.RemoveAll(f => f.Part == RecordRepairPart.Mapping);
             warnings.Add(MappingFaulted);
             report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, null, RecordRepairReason.MappingUnavailable));
+        }
+    }
+
+    /// <summary>The D7 link columns of a document (UAC-r2 task 188 r4e): Spaarke's writers set them, never a mapping.</summary>
+    private static readonly IReadOnlySet<string> DocumentLinkColumns =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_parentdocument", CrossPathLink.LinkedCommunicationAttribute };
+
+    /// <summary>
+    /// Why <paramref name="column"/> of a <paramref name="table"/> row is never written by Repair's mapping, or <c>null</c>:
+    /// a document's Access Permission and own-narrowing record (<see cref="InheritedAccessPermission.RefuseAppOnlyWrite"/>,
+    /// as the field-mapping push asks it) and its D7 links (<see cref="DocumentLinkColumns"/>).
+    /// </summary>
+    private static string? DocumentServerOwnedRefusal(string table, string column)
+    {
+        if (InheritedAccessPermission.RefuseAppOnlyWrite(table, [column]) is not null)
+            return InheritedAccessPermission.AppOnlyDocumentWriteReasonCode;
+
+        return InheritedAccessPermission.RecordsOwnNarrowing(table) && DocumentLinkColumns.Contains(column)
+            ? RecordRepairReason.DocumentLinkServerOwned
+            : null;
+    }
+
+    /// <summary>The source columns Repair reads to tell whether it may copy from it (review F1-e (ii)).</summary>
+    private static IEnumerable<string> SourceGateColumns(string sourceTable) =>
+        SecureChildLineage.IsRoot(sourceTable) ? [OwnerColumn, AccessFollowsParent.SecureFlagColumn] : [OwnerColumn];
+
+    /// <summary>
+    /// Review F1-e (ii), belt and braces over the owner gate: whether the source's data may be copied into the row. Not when
+    /// the source is a secure-flagged root whose flag is not an explicit <c>false</c> (empty reads as flagged), or is owned
+    /// by the Secure Record owner team, unless the row is owned by that Secure team. Anything that cannot be told — an
+    /// owner that did not come back, a fault deciding the team — is secure (fail closed).
+    /// </summary>
+    private async Task<bool> SourceMayBeCopiedAsync(string table, Entity row, MappingSource source, Entity read, CancellationToken ct)
+    {
+        try
+        {
+            var flagged = SecureChildLineage.IsRoot(source.EntityLogicalName)
+                && read.GetAttributeValue<bool?>(AccessFollowsParent.SecureFlagColumn) != false;
+            var sourceOwner = read.GetAttributeValue<EntityReference>(OwnerColumn);
+            if (sourceOwner is null || sourceOwner.Id == Guid.Empty)
+            {
+                _logger.LogWarning("[RECORD-REPAIR] {Table} {Id}: the owner of the mapping source {Source} {SourceId} did not come " +
+                                   "back; nothing was mapped", table, row.Id, source.EntityLogicalName, source.RecordId);
+                return false;
+            }
+
+            var sourceSecureTeam = string.Equals(sourceOwner.LogicalName, "team", StringComparison.OrdinalIgnoreCase)
+                && await _shares.IsSecureOwnerTeamAsync(sourceOwner.Id, ct).ConfigureAwait(false);
+            if (!flagged && !sourceSecureTeam)
+                return true;
+
+            var rowOwner = row.GetAttributeValue<EntityReference>(OwnerColumn);
+            var isolated = rowOwner is { LogicalName: "team" } rowTeam
+                && (sourceSecureTeam
+                    ? rowTeam.Id == sourceOwner.Id
+                    : await _shares.IsSecureOwnerTeamAsync(rowTeam.Id, ct).ConfigureAwait(false));
+            if (!isolated)
+            {
+                _logger.LogInformation("[RECORD-REPAIR] {Table} {Id}: the mapping source {Source} {SourceId} is secure and the row " +
+                                       "is not isolated; nothing was mapped", table, row.Id, source.EntityLogicalName, source.RecordId);
+            }
+
+            return isolated;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[RECORD-REPAIR] {Table} {Id}: whether the mapping source {Source} {SourceId} is secure could " +
+                                   "not be told; nothing was mapped", table, row.Id, source.EntityLogicalName, source.RecordId);
+            return false;
         }
     }
 
@@ -678,6 +799,12 @@ internal static class RecordRepairReason
 
     /// <summary>Review F1-a: a secure-flagged root (flag not an explicit false) is provisioned by task 144, never re-owned here.</summary>
     internal const string OwnerRootSecure = "record_repair.owner_root_secure";
+
+    /// <summary>Review F1-f / UAC-r2: a Decision Record is append-only; Repair neither reads nor writes it.</summary>
+    internal const string TableAppendOnly = "record_repair.table_append_only";
+
+    /// <summary>UAC-r2: a document's D7 link (<c>sprk_parentdocument</c>, <c>sprk_relatedcommunication</c>) is Spaarke's.</summary>
+    internal const string DocumentLinkServerOwned = "record_repair.document_link_server_owned";
 
     /// <summary>Review F1-b: the row's filing resolves to the Secure team, which does not own the row yet — nothing is mapped.</summary>
     internal const string MappingSourceSecure = "record_repair.mapping_source_secure";

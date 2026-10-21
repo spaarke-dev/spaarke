@@ -466,6 +466,321 @@ public sealed class RecordRepairModeTests
         _world.Evictions.Should().ContainSingle().Which.Should().Be(("sprk_signal", "sprk_signals", id));
     }
 
+    // =====================================================================================
+    // Review pass 2 — F1-e: the mapping copies only from what the owner was decided over, and never from secure data
+    // =====================================================================================
+
+    [Fact]
+    public async Task APairOnlyEventNamingASecureMatter_CopiesNothingFromIt_ProbeP1()
+    {
+        _world.SecureMatterHolding("Secret Client", "Secret Practice");
+        _world.SeedMatterType();
+        var id = _world.RowOf("sprk_event", Directory.ChildBu, new Dictionary<string, object>
+        {
+            ["ownerid"] = new EntityReference("systemuser", RepairWorld.PersonInChild),
+            ["sprk_regardingrecordid"] = RepairWorld.SecureMatter.ToString("D"),
+            ["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", RepairWorld.MatterType),
+        });
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        NothingSecretWasWritten();
+        outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.Mapping
+            && f.ReasonCode == RecordRepairReason.MappingSourceUndetermined);
+    }
+
+    [Fact]
+    public async Task ATypedOrdinaryMatterPlusAPairNamingASecureMatter_CopiesNothing_ProbeP2()
+    {
+        _world.SecureMatterHolding("Secret Client", "Secret Practice");
+        _world.SeedMatterType();
+        var id = _world.RowOf("sprk_event", Directory.ChildBu, new Dictionary<string, object>
+        {
+            ["ownerid"] = new EntityReference("systemuser", RepairWorld.PersonInChild),
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", RepairWorld.Matter),
+            ["sprk_regardingrecordid"] = RepairWorld.SecureMatter.ToString("D"),
+            ["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", RepairWorld.MatterType),
+        });
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        NothingSecretWasWritten();
+        outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.Mapping
+            && f.ReasonCode == RecordRepairReason.MappingSourceUndetermined);
+    }
+
+    [Fact]
+    public async Task APairNamingAnotherOrdinaryRecord_IsNotCopiedFrom_TheOwnerWasNotDecidedOverIt()
+    {
+        // Not secure, so only F1-e (i) stops it: the pair's record is not what the owner was decided over.
+        _world.SeedMatterType();
+        _world.Directory.Row("sprk_matter", RepairWorld.OtherMatter)["sprk_clientname"] = "Other Client";
+        var id = _world.RowOf("sprk_event", Directory.ChildBu, new Dictionary<string, object>
+        {
+            ["ownerid"] = new EntityReference("systemuser", RepairWorld.PersonInChild),
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", RepairWorld.Matter),
+            ["sprk_regardingrecordid"] = RepairWorld.OtherMatter.ToString("D"),
+            ["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", RepairWorld.MatterType),
+        });
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain(["sprk_clientname", "sprk_practicearea", "sprk_priorityname"]);
+        outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.Mapping
+            && f.ReasonCode == RecordRepairReason.MappingSourceUndetermined);
+    }
+
+    [Fact]
+    public async Task ASourceWhoseOwnerDidNotComeBack_CopiesNothing_FailClosed()
+    {
+        var source = _world.MatterHolding(Directory.ChildBu, Directory.ChildTeam, isSecure: false, "Secret Client");
+        var matter = _world.Directory.Row("sprk_matter", source);
+        matter.Attributes.Remove("ownerid");
+        var id = EventOwnedByThePersonUnder(source);
+
+        await _world.RepairAsync("sprk_event", id);
+
+        NothingSecretWasWritten();
+    }
+
+    [Fact]
+    public async Task ATypedOrdinaryMatterThePairAgreesWith_IsStillTheSource_AndMaps()
+    {
+        _world.SeedMatterType();
+        var id = _world.RowOf("sprk_event", Directory.ChildBu, new Dictionary<string, object>
+        {
+            ["ownerid"] = new EntityReference("systemuser", RepairWorld.PersonInChild),
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", RepairWorld.Matter),
+            ["sprk_regardingrecordid"] = RepairWorld.Matter.ToString("D"),
+            ["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", RepairWorld.MatterType),
+        });
+
+        await _world.RepairAsync("sprk_event", id);
+
+        _world.Writes.Should().ContainSingle().Which.Fields["sprk_clientname"].Should().Be(RepairWorld.MatterClient);
+    }
+
+    [Fact]
+    public async Task ASecureFlaggedMatterNotYetIsolated_IsNotCopiedIntoAUserOwnedEvent()
+    {
+        var source = _world.MatterHolding(Directory.ChildBu, Directory.ChildTeam, isSecure: true, "Secret Client");
+        var id = EventOwnedByThePersonUnder(source);
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        NothingSecretWasWritten();
+        outcome.Fields.Should().NotContain(f => f.Part == RecordRepairPart.Mapping && f.State == RecordRepairFieldState.Repaired);
+    }
+
+    [Fact]
+    public async Task AMatterOwnedByTheSecureTeam_FlaggedFalse_IsNotCopiedIntoAUserOwnedEvent()
+    {
+        var source = _world.MatterHolding(Directory.SecureBu, Directory.SecureNamedTeam, isSecure: false, "Secret Client");
+        var id = EventOwnedByThePersonUnder(source);
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        NothingSecretWasWritten();
+        outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.Mapping && f.ReasonCode == RecordRepairReason.MappingSourceSecure);
+    }
+
+    [Fact]
+    public async Task ASourceReadThatFaults_CopiesNothing_FailClosed()
+    {
+        var id = _world.EventUnderTheMatter(clientName: null, practiceArea: null, priority: null);
+        _world.SourceReadFault = new InvalidOperationException("Test: source read faulted.");
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain(["sprk_clientname", "sprk_practicearea", "sprk_priorityname"]);
+        outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.Mapping
+            && f.ReasonCode == RecordRepairReason.MappingSourceUnreadable);
+    }
+
+    [Fact]
+    public async Task AnOrdinaryMatterFlaggedFalse_OwnedByItsUnitsTeam_StillMaps()
+    {
+        var source = _world.MatterHolding(Directory.ChildBu, Directory.ChildTeam, isSecure: false, "Ordinary Client");
+        var id = EventOwnedByThePersonUnder(source);
+
+        await _world.RepairAsync("sprk_event", id);
+
+        _world.Writes.Should().ContainSingle().Which.Fields["sprk_clientname"].Should().Be("Ordinary Client");
+    }
+
+    // =====================================================================================
+    // Review pass 2 — F1-f / UAC-r2: a Decision Record is append-only; Repair does not touch it
+    // =====================================================================================
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ADecisionRecord_IsNeverRepaired_NoReadNoWrite(bool underTheFiledCommunication)
+    {
+        // P3: a user-owned D-144 gate Decision Record about an unfiled user-owned communication; or one about the filed
+        // communication, its I-1 stamp missing and a profile that would fill a column.
+        var communication = underTheFiledCommunication
+            ? RepairWorld.Communication
+            : _world.UnfiledCommunicationOwnedBy(RepairWorld.PersonInChild);
+        _world.Map("sprk_communication", "sprk_decisionrecord", RepairWorld.DefaultText("sprk_name", "filled", 1));
+        var id = _world.RowOf("sprk_decisionrecord", Directory.ChildBu, new Dictionary<string, object>
+        {
+            ["ownerid"] = new EntityReference("systemuser", RepairWorld.PersonInChild),
+            ["sprk_regardingcommunication"] = new EntityReference("sprk_communication", communication),
+        });
+        var before = _world.Directory.Version("sprk_decisionrecord", id);
+
+        var outcome = await _world.RepairAsync("sprk_decisionrecord", id);
+
+        outcome.Status.Should().Be(RecordRepairStatus.Skipped);
+        outcome.ReasonCode.Should().Be(RecordRepairReason.TableAppendOnly);
+        _world.UpdateCalls.Should().Be(0);
+        var row = _world.Directory.Row("sprk_decisionrecord", id);
+        row.GetAttributeValue<EntityReference>("ownerid").Should().Be(new EntityReference("systemuser", RepairWorld.PersonInChild));
+        row.Attributes.Should().NotContainKey("sprk_name");
+        row.Attributes.Should().NotContainKey("sprk_regardingmatter");
+        _world.Directory.Version("sprk_decisionrecord", id).Should().Be(before);
+    }
+
+    // =====================================================================================
+    // UAC-r2: a document's server-owned columns are never written by Repair's mapping
+    // =====================================================================================
+
+    [Fact]
+    public async Task ADocumentsAccessRecordAndD7Links_AreNeverMapped()
+    {
+        _world.MatterLinksTo();
+        _world.Map("sprk_matter", "sprk_document", ServerOwnedRules());
+        var id = _world.DocumentUnderTheMatter(indexName: "kept-index", index: RepairWorld.ChildIndex);
+
+        var outcome = await _world.RepairAsync("sprk_document", id);
+
+        _world.Writes.Should().BeEmpty();
+        Field(outcome, RecordRepairPart.Mapping, "sprk_accesspermission").ReasonCode
+            .Should().Be(InheritedAccessPermission.AppOnlyDocumentWriteReasonCode);
+        Field(outcome, RecordRepairPart.Mapping, "sprk_accessinheritance").ReasonCode
+            .Should().Be(InheritedAccessPermission.AppOnlyDocumentWriteReasonCode);
+        Field(outcome, RecordRepairPart.Mapping, "sprk_parentdocument").ReasonCode
+            .Should().Be(RecordRepairReason.DocumentLinkServerOwned);
+        Field(outcome, RecordRepairPart.Mapping, "sprk_relatedcommunication").ReasonCode
+            .Should().Be(RecordRepairReason.DocumentLinkServerOwned);
+    }
+
+    [Theory]
+    [InlineData("sprk_event")]
+    [InlineData("sprk_todo")]
+    public async Task TheSameColumnsOnAnotherTable_AreNotRefusedAsADocuments(string table)
+    {
+        _world.MatterLinksTo();
+        _world.Map("sprk_matter", table, ServerOwnedRules());
+        var id = _world.RowOf(table, Directory.ChildBu, new Dictionary<string, object>
+        {
+            ["ownerid"] = new EntityReference("team", Directory.ChildTeam),
+            ["owningteam"] = new EntityReference("team", Directory.ChildTeam),
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", RepairWorld.Matter),
+        });
+
+        var outcome = await _world.RepairAsync(table, id);
+
+        outcome.Fields.Should().NotContain(f => f.ReasonCode == InheritedAccessPermission.AppOnlyDocumentWriteReasonCode
+            || f.ReasonCode == RecordRepairReason.DocumentLinkServerOwned);
+        var written = _world.Writes.Should().ContainSingle().Subject.Fields;
+        written["sprk_accessinheritance"].Should().Be("from-matter");
+        written["sprk_accesspermission"].Should().Be("100000001");
+        // The links are lookups to ownership parents here: not written because Repair never re-files a row — the
+        // document gate is not what stops them.
+        Field(outcome, RecordRepairPart.Mapping, "sprk_parentdocument").ReasonCode.Should().Be(RecordRepairReason.MappedValueWouldRefile);
+        Field(outcome, RecordRepairPart.Mapping, "sprk_relatedcommunication").ReasonCode.Should().Be(RecordRepairReason.MappedValueWouldRefile);
+    }
+
+    // =====================================================================================
+    // Review pass 2 — F3: the mutants that survived pass 1
+    // =====================================================================================
+
+    [Fact]
+    public async Task AnEventOwnedByAnOrdinaryTeam_FiledUnderASecureRecord_GetsNoMapping()
+    {
+        // Filed under a communication of the secure matter that is NOT isolated yet: the source itself is not secure, so
+        // only the owner gate (the resolution is the Secure team, which does not own the event) stops the copy.
+        _world.CommunicationUnderTheSecureMatterNotIsolated("Secret subject");
+        _world.MapTheCommunicationOntoTheEvent();
+        var id = _world.RowOf("sprk_event", Directory.ChildBu, new Dictionary<string, object>
+        {
+            ["ownerid"] = new EntityReference("team", Directory.ChildTeam),
+            ["owningteam"] = new EntityReference("team", Directory.ChildTeam),
+            ["sprk_regardingcommunication"] = new EntityReference("sprk_communication", RepairWorld.SecureCommunication),
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", RepairWorld.SecureMatter),
+        });
+        _world.SecureMatterHolding("Secret Client", "Secret Practice");
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain(RepairWorld.CommunicationMappedTarget);
+        outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.Mapping && f.ReasonCode == RecordRepairReason.MappingSourceSecure);
+    }
+
+    [Fact]
+    public async Task AFiledRowTheResolverCannotOwn_GetsNoMapping()
+    {
+        var id = _world.EventUnderTheMatter(clientName: null, practiceArea: null, priority: null);
+        _world.ResolverAnswer = RecordOwnerResolution.Refused(RecordOwnerRefusal.NoOwnerSource, "Test: no owner.");
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        _world.Writes.Should().BeEmpty();
+        outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.Mapping
+            && f.ReasonCode == RecordRepairReason.MappingFilingUndecided);
+    }
+
+    [Fact]
+    public async Task AConcatThatYieldsOnlyASpace_IsNeverWritten_TwoRepairsWriteNothing()
+    {
+        var id = _world.EventUnderTheMatter(clientName: "Acme", practiceArea: "Tax", priority: "Urgent",
+            owner: new EntityReference("team", Directory.ChildTeam), owningUnit: Directory.ChildBu);
+        _world.Map("sprk_matter", "sprk_event",
+            RepairWorld.Expression(CreateTimeFieldMapping.MappingTypeConcat, "{sprk_nosuch1} {sprk_nosuch2}", "sprk_eventdescription", 1));
+
+        await _world.RepairAsync("sprk_event", id);
+        await _world.RepairAsync("sprk_event", id);
+
+        _world.Writes.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("sprk_project")]
+    [InlineData("sprk_workassignment")]
+    public async Task EverySecureFlaggedRootTable_KeepsAUserOwner(string table)
+    {
+        var id = _world.RootOwnedBy(table, RepairWorld.PersonInChild, isSecure: true);
+
+        var outcome = await _world.RepairAsync(table, id);
+
+        _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain("ownerid");
+        Field(outcome, RecordRepairPart.Owner, "ownerid").ReasonCode.Should().Be(RecordRepairReason.OwnerRootSecure);
+    }
+
+    private static FieldMappingRuleEntity[] ServerOwnedRules() =>
+    [
+        RepairWorld.DefaultText("sprk_accesspermission", "100000001", 1),
+        RepairWorld.DefaultText("sprk_accessinheritance", "from-matter", 2),
+        RepairWorld.CopyLookup("sprk_sourcedocument", "sprk_parentdocument", 3),
+        RepairWorld.CopyLookup("sprk_sourcecommunication", "sprk_relatedcommunication", 4),
+    ];
+
+    private Guid EventOwnedByThePersonUnder(Guid matter) =>
+        _world.RowOf("sprk_event", Directory.ChildBu, new Dictionary<string, object>
+        {
+            ["ownerid"] = new EntityReference("systemuser", RepairWorld.PersonInChild),
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", matter),
+        });
+
+    private void NothingSecretWasWritten()
+    {
+        var values = _world.Writes.SelectMany(w => w.Fields.Values).OfType<string>().ToArray();
+        values.Should().NotContain(["Secret Client", "Secret Practice"]);
+        _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain(["sprk_clientname", "sprk_practicearea"]);
+    }
+
     private static RecordRepairField Field(RecordRepairOutcome outcome, RecordRepairPart part, string column) =>
         outcome.Fields.Should().ContainSingle(f => f.Part == part && f.Column == column).Subject;
 }
@@ -566,6 +881,19 @@ internal sealed class RepairWorld
 
     /// <summary>How the mapping step faults, if at all.</summary>
     public MappingFaultKind MappingFault { get; set; }
+
+    /// <summary>When set, the resolver answers this instead of deciding (an owner decision the test dictates).</summary>
+    public RecordOwnerResolution? ResolverAnswer { get; set; }
+
+    /// <summary>When set, reading a mapping source's columns throws it.</summary>
+    public Exception? SourceReadFault { get; set; }
+
+    /// <summary>Every update call the service made (applied or not).</summary>
+    public int UpdateCalls => Writes.Count;
+
+    public static readonly Guid MatterType = Guid.Parse("a0160000-0000-4000-8000-0000000000c1");
+    public static readonly Guid SecureCommunication = Guid.Parse("a0160000-0000-4000-8000-000000000008");
+    public static readonly Guid SourceDocument = Guid.Parse("a0160000-0000-4000-8000-000000000009");
 
     public Task<RecordRepairOutcome> RepairAsync(string table, Guid id) => Service().RepairAsync(table, id, CancellationToken.None);
 
@@ -692,6 +1020,85 @@ internal sealed class RepairWorld
         return id;
     }
 
+    /// <summary>The record-type catalog row naming the matter table (the ADR-024 pair's type).</summary>
+    public void SeedMatterType() =>
+        Directory.WithRecord("sprk_recordtype_ref", MatterType, null,
+            extra: new Dictionary<string, object> { ["sprk_recordlogicalname"] = "sprk_matter" });
+
+    /// <summary>A row of <paramref name="table"/> in the unit given, with the columns given.</summary>
+    public Guid RowOf(string table, Guid owningUnit, Dictionary<string, object> columns)
+    {
+        var id = Guid.NewGuid();
+        Directory.WithRecord(table, id, owningUnit, extra: columns);
+        return id;
+    }
+
+    /// <summary>A root of <paramref name="table"/> in the child unit owned by a user, with the secure flag given.</summary>
+    public Guid RootOwnedBy(string table, Guid user, bool isSecure)
+    {
+        var id = Guid.NewGuid();
+        Directory.WithRecord(table, id, Directory.ChildBu, isSecure: isSecure,
+            extra: new Dictionary<string, object> { ["ownerid"] = new EntityReference("systemuser", user) });
+        return id;
+    }
+
+    /// <summary>A matter in the unit given, owned by the team given, with the flag given, holding the mapped columns.</summary>
+    public Guid MatterHolding(Guid owningUnit, Guid owningTeam, bool isSecure, string clientName)
+    {
+        var id = Guid.NewGuid();
+        Directory.WithRecord("sprk_matter", id, owningUnit, isSecure: isSecure, owningTeam: owningTeam,
+            extra: new Dictionary<string, object> { ["sprk_clientname"] = clientName, ["sprk_practicearea"] = "Secret Practice" });
+        return id;
+    }
+
+    /// <summary>A communication filed under the secure matter but NOT isolated (owned by the child unit's team).</summary>
+    public void CommunicationUnderTheSecureMatterNotIsolated(string subject)
+    {
+        Directory.WithRecord("sprk_communication", SecureCommunication, Directory.ChildBu, owningTeam: Directory.ChildTeam,
+            extra: new Dictionary<string, object>
+            {
+                ["sprk_regardingmatter"] = new EntityReference("sprk_matter", SecureMatter),
+                ["sprk_subject"] = subject,
+            });
+        _stamps.Row("sprk_communication", SecureCommunication, [("sprk_regardingmatter", "sprk_matter", SecureMatter)]);
+    }
+
+    /// <summary>Replaces (or adds) the <paramref name="source"/> → <paramref name="target"/> profile.</summary>
+    public void Map(string source, string target, params FieldMappingRuleEntity[] rules) =>
+        _profiles[(source, target)] = Profile(source, target, rules);
+
+    /// <summary>A Concat or Template rule into a text column.</summary>
+    public static FieldMappingRuleEntity Expression(int mappingType, string expression, string target, int order) => new()
+    {
+        Id = Guid.NewGuid(), Name = $"expr -> {target}", SourceField = string.Empty, TargetField = target,
+        TargetFieldType = CreateTimeFieldMapping.FieldTypeText, MappingType = mappingType, Expression = expression,
+        ExecutionOrder = order, IsActive = true,
+    };
+
+    /// <summary>A Copy rule of a lookup.</summary>
+    public static FieldMappingRuleEntity CopyLookup(string source, string target, int order) => new()
+    {
+        Id = Guid.NewGuid(), Name = $"{source} -> {target}", SourceField = source, SourceFieldType = 1, TargetField = target,
+        TargetFieldType = CreateTimeFieldMapping.FieldTypeLookup, MappingType = CreateTimeFieldMapping.MappingTypeCopy,
+        ExecutionOrder = order, IsActive = true,
+    };
+
+    /// <summary>A Default rule of a literal into a text column.</summary>
+    public static FieldMappingRuleEntity DefaultText(string target, string value, int order) => new()
+    {
+        Id = Guid.NewGuid(), Name = $"default -> {target}", SourceField = string.Empty, TargetField = target,
+        TargetFieldType = CreateTimeFieldMapping.FieldTypeText, MappingType = CreateTimeFieldMapping.MappingTypeDefault,
+        DefaultValue = value, ExecutionOrder = order, IsActive = true,
+    };
+
+    /// <summary>The matter holds lookups to a document and the communication (sources of the D7-link rules).</summary>
+    public void MatterLinksTo()
+    {
+        var matter = Directory.Row("sprk_matter", Matter);
+        matter["sprk_sourcedocument"] = new EntityReference("sprk_document", SourceDocument);
+        matter["sprk_sourcecommunication"] = new EntityReference("sprk_communication", Communication);
+    }
+
     /// <summary>A communication → event profile copying the communication's subject.</summary>
     public void MapTheCommunicationOntoTheEvent() =>
         _profiles[("sprk_communication", "sprk_event")] = Profile("sprk_communication", "sprk_event",
@@ -749,7 +1156,7 @@ internal sealed class RepairWorld
             .GetRequiredService<IServiceScopeFactory>();
 
         return new RecordCreationService(
-            new CapturingResolver(Directory.Resolver(), OwnerContexts, () => ResolverFault), appOnly.Object, entities,
+            new CapturingResolver(Directory.Resolver(), OwnerContexts, () => ResolverFault, () => ResolverAnswer), appOnly.Object, entities,
             SecureRootFilingGateFixtures.Over(entities),
             new CoreAncestorRestamper(_stamps.Service, _stamps.Resolver, NullLogger<CoreAncestorRestamper>.Instance),
             SecureChildShareWorld.SynchronizerOver(SecureChildShareWorld.Standard, new FakeRecordShareTable()),
@@ -827,6 +1234,8 @@ internal sealed class RepairWorld
             default:
             {
                 // A mapping source's columns (the system principal's app-only read).
+                if (SourceReadFault is { } readFault)
+                    throw readFault;
                 var row = Directory.Row(table, id);
                 var copy = new Entity(table, id);
                 foreach (var column in columns)
@@ -859,7 +1268,8 @@ internal sealed class RepairWorld
 
     /// <summary>The REAL resolver, recording every owner decision asked of it; throwing the fault given, when one is.</summary>
     private sealed class CapturingResolver(
-        IRecordOwnershipResolver inner, List<RecordOwnershipContext> asked, Func<Exception?> fault) : IRecordOwnershipResolver
+        IRecordOwnershipResolver inner, List<RecordOwnershipContext> asked, Func<Exception?> fault,
+        Func<RecordOwnerResolution?> answer) : IRecordOwnershipResolver
     {
         public Task<Guid?> ResolveOwningTeamAsync(RecordOwnershipContext context, CancellationToken ct)
         {
@@ -870,7 +1280,9 @@ internal sealed class RepairWorld
         public Task<RecordOwnerResolution> ResolveOwnerAsync(RecordOwnershipContext context, CancellationToken ct)
         {
             asked.Add(context);
-            return fault() is { } thrown ? Task.FromException<RecordOwnerResolution>(thrown) : inner.ResolveOwnerAsync(context, ct);
+            if (fault() is { } thrown)
+                return Task.FromException<RecordOwnerResolution>(thrown);
+            return answer() is { } dictated ? Task.FromResult(dictated) : inner.ResolveOwnerAsync(context, ct);
         }
 
         public Task<RecordOwnerResolution> ReparentAsync(
