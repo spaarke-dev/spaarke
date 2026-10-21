@@ -634,6 +634,19 @@ Failure mode: a partner on the matter lists and downloads the `.eml` of an inter
 **Blockers**: owner decision.
 **Related**: ISS-010, ISS-014, ISS-016, tasks 065 and 078.
 
+
+**Update 2026-10-20 (owner direction + UAC).** The owner wants this handled with UAC's Manage Access on Documents (#2119), not an R3 column. UAC proposes **#2119 D7**, pending the owner's acceptance (it amends I-14):
+- A child can only narrow partner visibility. A document is hidden from partners when its own Access Permission is Restricted, or when it derives from an internal-only communication.
+- The derivation is computed at read time through `_sprk_relatedcommunication_value` and the 065 rule, and fails closed.
+- One shared predicate in UAC's external read path covers list, download, versions, preview, SPE and the AI tools.
+- Wiring happens after #2078. UAC owns the rule and the predicate; R3 reviews its routes.
+
+**Writer gaps found (R3 code map, master `c3ec5d6e5`).** Three paths save a document from an email without the link, so today's 078 guard and D7's derivation both miss it:
+1. Outlook add-in email-attachment child docs (`UploadFinalizationWorker.cs:1254/1294`: parent-document lookup only).
+2. The add-in single-attachment save (no capture; `OfficeService.cs:506`, `OfficeDocumentPersistence.cs:795`).
+3. The add-in `.eml` when the best-effort canonical link misses (`OfficeDocumentPersistence.cs:790-842`).
+
+Fix owners: Office and Communication. Options: set the link in those writers, and/or have the predicate follow `ParentDocumentLookup`.
 ---
 
 ### ISS-016 — RAG retrieval and chat archive ingest return internal-only email content to callers flagged external
@@ -667,6 +680,48 @@ Failure mode: a licensed user flagged external gets internal-only email content 
 
 ---
 
+
+### ISS-017 — "Could not read your email address" does not tell the customer admin what to fix
+
+| Field | Value |
+|---|---|
+| **Status** | Open (R4 backlog) |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-20 |
+| **Source** | Owner live check on dev (Dewey Cheatham test user Tracy Cheatham, no Email in Entra) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2155 |
+
+**Description**
+
+A customer employee whose Entra user has no Email gets a token with no `email` claim, so registration answers `registration_email_missing`. The SPA says only "Contact your administrator". Owner fix on dev: set the user's Email in Entra; registration then completed and the contact was created.
+
+**Suggested fix**: R4 copy change in `RegistrationPage.tsx` (`emailMissing`): tell the IT admin to set the Email field on the user's Entra account, then sign in again; update the `registration_email_missing` test. Keep the token-only email rule.
+
+**Estimated effort**: under 0.5 day.
+**Blockers**: none.
+**Related**: task 047, task 074.
+
+### ISS-018 — Partner plane uses a cached company account → `authority_mismatch`
+
+| Field | Value |
+|---|---|
+| **Status** | Open (fix in R3, auth-tagged) |
+| **Urgency** | before 072 |
+| **Filed** | 2026-10-20 |
+| **Source** | Owner live check on dev SPA `28274e04e` (ralph.schroeder@spaarke.com) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2166 |
+
+**Description**
+
+MSAL's account list is shared across clients in the tab. The CIAM plane has no account filter, so `AuthGuard` treats a cached company account as signed in, and `acquireStandaloneBffToken` can pick it. msal-browser then refuses with `authority_mismatch`. One path: company-account sign-in → "not set up" → "choose a different sign-in" → Partner in the same tab (`handleResetRealm` does not clear cached accounts).
+
+**Suggested fix**: filter the CIAM plane to CIAM-tenant accounts (mirror of `isWorkforceHomeAccount`); tests for both planes. Two top-tier reviews (auth).
+
+**Estimated effort**: under 1 day.
+**Blockers**: none. Workaround: new InPrivate window.
+**Related**: task 058, task 074, task 070.
+
+---
 
 ## Closed
 

@@ -132,8 +132,8 @@ export function captureTeamsDeepLink(subPageId: string | undefined | null): void
 }
 
 /**
- * Options only the workforce browser plane supplies (standalone-plane.ts). The CIAM plane passes none,
- * so the token REQUEST it sends is unchanged from before task 040 (`{ scopes, account }`, no redirect URI,
+ * Options for a standalone acquisition. The CIAM plane passes `accountFilter` (#2166), which is never sent to MSAL, and
+ * `forceRefresh` / `noInteraction` only when set, so the token REQUEST it sends is unchanged from before task 040 (`{ scopes, account }`, no redirect URI,
  * no cache policy). Its error routing differs in one deliberate way: a `timed_out` silent renewal now
  * falls back to the interactive redirect (see {@link isInteractionNeeded}).
  */
@@ -170,11 +170,23 @@ export interface StandaloneAcquireOptions {
    * redirects, only when set, so the CIAM requests and the Teams requests are unchanged.
    */
   authority?: string;
+  /**
+   * Only the accounts this predicate accepts are considered (applied after `tenantId`). The CIAM paths pass
+   * {@link isCiamAccount}: MSAL's account list is shared by every client in the tab, so without it a company account
+   * cached by the home plane was chosen for the CIAM token and msal-browser refused it with `authority_mismatch` (#2166).
+   * Never sent to MSAL: the token request is unchanged.
+   */
+  accountFilter?: (account: { tenantId?: string }) => boolean;
 }
 
-/** The accounts of one instance, optionally scoped to a tenant (case-insensitive GUID). */
-function accountsFor(instance: IPublicClientApplication, tenantId?: string): AccountInfo[] {
-  return tenantId ? instance.getAllAccounts({ tenantId: tenantId.toLowerCase() }) : instance.getAllAccounts();
+/** The accounts of one instance, optionally scoped to a tenant (case-insensitive GUID) and a predicate. */
+function accountsFor(
+  instance: IPublicClientApplication,
+  tenantId?: string,
+  filter?: (account: { tenantId?: string }) => boolean
+): AccountInfo[] {
+  const accounts = tenantId ? instance.getAllAccounts({ tenantId: tenantId.toLowerCase() }) : instance.getAllAccounts();
+  return filter ? accounts.filter(filter) : accounts;
 }
 
 /**
@@ -362,7 +374,7 @@ function assertRedirectAllowed(instance: IPublicClientApplication): void {
  *
  * @param instance The standalone `PublicClientApplication` (from msal-config.ts) to acquire against.
  * @param bffScope The BFF API OAuth scope for the instance's authority.
- * @param options Workforce-browser-only options (tenant account filter, iframe redirect URI).
+ * @param options Account scoping (CIAM: `accountFilter` only; workforce: tenant, iframe redirect URI, authority).
  * @returns Access token string, ready for `Authorization: Bearer {token}` header.
  * @throws If silent acquisition fails for a non-interaction reason (network error, etc.).
  */
@@ -371,7 +383,7 @@ export async function acquireStandaloneBffToken(
   bffScope: string,
   options: StandaloneAcquireOptions = {}
 ): Promise<string> {
-  const accounts = accountsFor(instance, options.tenantId);
+  const accounts = accountsFor(instance, options.tenantId, options.accountFilter);
   // The home plane's per-request authority (A9), added to a request only when set.
   const authority = options.authority ? { authority: options.authority } : {};
 
@@ -521,14 +533,12 @@ export async function acquireBffToken(): Promise<string> {
 /** The default (CIAM) acquirer: `scope` is the active backend's, passed by bff-client.ts; else the active CIAM scope. */
 function acquireCiamBffToken(scope?: string, options?: BffTokenAcquireOptions): Promise<string> {
   const resolved = scope ?? activeBffScope('ciam');
-  // Options are passed only when set, so the default call shape is `acquireStandaloneBffToken(instance, scope)` as before.
-  if (options?.forceRefresh || options?.noInteraction) {
-    return acquireStandaloneBffToken(msalInstance, resolved, {
-      ...(options.forceRefresh ? { forceRefresh: true } : {}),
-      ...(options.noInteraction ? { noInteraction: true } : {}),
-    });
-  }
-  return acquireStandaloneBffToken(msalInstance, resolved);
+  // Only CIAM accounts are considered (#2166); the flags are added only when set, so the MSAL request is as before.
+  return acquireStandaloneBffToken(msalInstance, resolved, {
+    accountFilter: isCiamAccount,
+    ...(options?.forceRefresh ? { forceRefresh: true } : {}),
+    ...(options?.noInteraction ? { noInteraction: true } : {}),
+  });
 }
 
 /**
@@ -632,8 +642,8 @@ export function getActiveLoginScope(): string {
 }
 
 /**
- * Active account TENANT seam (same shape as the login-scope seam). Null for CIAM (every cached account
- * belongs to the CIAM instance's authority, behaviour unchanged). The workforce browser plane sets
+ * Active account TENANT seam (same shape as the login-scope seam). Null for CIAM, whose accounts are scoped by the
+ * {@link isCiamAccount} predicate instead (#2166: a company account cached in the tab is not a partner sign-in). The workforce browser plane sets
  * Spaarke's tenant id so a CIAM account cached in the same tab's sessionStorage is never treated as a
  * workforce sign-in by `AuthGuard` or the portal-user lookup.
  */
@@ -644,9 +654,10 @@ export function setActiveAccountTenantId(tenantId: string | null): void {
 }
 
 /**
- * Active account PREDICATE seam (ADR-028 A9, task 058). Null for CIAM. The workforce HOME plane sets
- * {@link isWorkforceHomeAccount} so that, BEFORE the signed-in tenant is known, a CIAM account cached in the same tab's
- * sessionStorage is still not counted as a workforce sign-in. Applied after the tenant filter.
+ * Active account PREDICATE seam (ADR-028 A9, task 058). The workforce HOME plane sets {@link isWorkforceHomeAccount} so
+ * that, BEFORE the signed-in tenant is known, a CIAM account cached in the same tab's sessionStorage is still not counted
+ * as a workforce sign-in; the CIAM plane sets {@link isCiamAccount}, the mirror (#2166). Null until a plane is applied.
+ * Applied after the tenant filter.
  */
 let activeAccountFilter: ((account: { tenantId?: string }) => boolean) | null = null;
 
@@ -665,6 +676,17 @@ export function isWorkforceHomeAccount(account: { tenantId?: string }): boolean 
   return isTenantId(tid) && tid.toLowerCase() !== MSAL_TENANT_ID.toLowerCase();
 }
 
+/**
+ * True for an account signed in on the CIAM (partner) plane: its tenant is the CIAM tenant. The CIAM plane's account
+ * filter, the mirror of {@link isWorkforceHomeAccount}: a company account cached in the same tab (the home plane, then
+ * "choose a different sign-in", then Partner) is not a partner sign-in, so it neither counts as signed in nor is used for
+ * the CIAM token (#2166: msal-browser refused it with `authority_mismatch`).
+ */
+export function isCiamAccount(account: { tenantId?: string }): boolean {
+  const tid = account.tenantId;
+  return isTenantId(tid) && tid.toLowerCase() === MSAL_TENANT_ID.toLowerCase();
+}
+
 /** Whether the workforce HOME plane (A9) is the mounted browser plane; read by the registration gate. */
 let workforceHomePlaneActive = false;
 
@@ -676,7 +698,7 @@ export function isWorkforceHomePlaneActive(): boolean {
   return workforceHomePlaneActive;
 }
 
-/** The accounts that belong to the currently-selected browser plane (all of them for CIAM). */
+/** The accounts that belong to the currently-selected browser plane (CIAM: CIAM-tenant accounts only, #2166). */
 export function accountsForActivePlane<T extends { tenantId?: string }>(accounts: readonly T[]): T[] {
   let result = [...accounts];
   if (activeAccountTenantId) {
