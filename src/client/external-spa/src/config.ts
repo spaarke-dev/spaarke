@@ -72,8 +72,9 @@ export const MSAL_CLIENT_ID: string = requireEnvVar('VITE_MSAL_CLIENT_ID', 'CIAM
 export const MSAL_AUTHORITY: string = requireEnvVar('VITE_MSAL_AUTHORITY', 'CIAM MSAL authority URL');
 
 /**
- * CIAM external tenant ID (spaarkeextid). Retained for diagnostics / config parity;
- * the authority above already encodes it.
+ * CIAM external tenant ID (spaarkeextid); must be the tenant in the authority above. The Partner plane counts only accounts
+ * of this tenant (`isCiamAccount`, #2166), so a mismatch would send every partner round the sign-in redirect; the deploy
+ * workflows refuse the pair before building.
  * Injected via .env.development or CI/CD token substitution.
  */
 export const MSAL_TENANT_ID: string = requireEnvVar('VITE_MSAL_TENANT_ID', 'CIAM tenant ID');

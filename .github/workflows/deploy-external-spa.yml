@@ -100,6 +100,14 @@ jobs:
           match VITE_MSAL_BFF_SCOPE "$scope" "api://{app id}/user_impersonation, ADR-028 A8"
           match VITE_TEAMS_MSAL_BFF_SCOPE "$scope" "api://{app id}/user_impersonation, ADR-028 A8"
           match VITE_MSAL_AUTHORITY "$authority" "https://{host}/{tenant GUID}, no query or fragment"
+          # The Partner (CIAM) plane counts only accounts of VITE_MSAL_TENANT_ID (#2166), so it must be the authority's
+          # tenant: on a mismatch every partner would go round the sign-in redirect with no end and no message.
+          if [ -n "$VITE_MSAL_AUTHORITY" ] && [ -n "$VITE_MSAL_TENANT_ID" ]; then
+            authority_tid=$(printf '%s' "${VITE_MSAL_AUTHORITY%/}" | sed 's#.*/##' | tr '[:upper:]' '[:lower:]')
+            if [ "$authority_tid" != "$(printf '%s' "$VITE_MSAL_TENANT_ID" | tr '[:upper:]' '[:lower:]')" ]; then
+              echo "::error::VITE_MSAL_TENANT_ID must be the tenant in VITE_MSAL_AUTHORITY (the Partner plane counts only that tenant's accounts, #2166)"; fail=1
+            fi
+          fi
           if [ -n "$VITE_BFF_API_URL" ]; then match VITE_BFF_API_URL '^https://' "https URL"; fi
           if [ -n "$VITE_BACKENDS" ] && ! printf '%s' "$VITE_BACKENDS" | python3 -c 'import json,sys; assert isinstance(json.load(sys.stdin), list)'; then
             echo "::error::VITE_BACKENDS must be a JSON list"; fail=1

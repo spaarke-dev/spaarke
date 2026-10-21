@@ -15,6 +15,8 @@ import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 const SPAARKE_TENANT = 'a221a95e-6abc-4434-aecc-e48338a1b2f2';
 const CLIENT_ID = '11111111-2222-3333-4444-555555555555';
+/** The CIAM tenant of the test build (vitest.config.ts VITE_MSAL_TENANT_ID): a partner account's tenant (#2166). */
+const CIAM_TID = '00000000-0000-0000-0000-000000000141';
 
 const CONTOSO = {
   customerKey: 'contoso',
@@ -678,7 +680,7 @@ describe('Both planes acquire tokens for the active backend’s scope', () => {
 
   it('CIAM plane uses the same seam: its scope is the selected backend’s api://{CIAM app id}/user_impersonation', async () => {
     stubTwoBackends();
-    h.accounts = [{ homeAccountId: 'c', username: 'c@partner.test', tenantId: '7052feba-bfc4-43e0-b09e-65014b429131' }];
+    h.accounts = [{ homeAccountId: 'c', username: 'c@partner.test', tenantId: CIAM_TID }];
     const { selection, msalAuth, bff } = await load();
     const plane = await import('../src/auth/standalone-plane');
     const msalConfig = await import('../src/auth/msal-config');
@@ -703,7 +705,7 @@ describe('Both planes acquire tokens for the active backend’s scope', () => {
 
   it('the default CIAM acquirer (no plane applied) also follows the active CIAM backend', async () => {
     stubTwoBackends();
-    h.accounts = [{ homeAccountId: 'c', username: 'c@partner.test', tenantId: 'x' }];
+    h.accounts = [{ homeAccountId: 'c', username: 'c@partner.test', tenantId: CIAM_TID }];
     const { selection, bff } = await load();
     selection.activateBackend('ciam', { ...FABRIKAM });
     await bff.bffApiCall('/api/v1/external/me');
@@ -713,7 +715,7 @@ describe('Both planes acquire tokens for the active backend’s scope', () => {
 
   it('acquireBffToken handed to a library as a callback ignores any argument: the scope is always the active backend’s', async () => {
     stubTwoBackends();
-    h.accounts = [{ homeAccountId: 'c', username: 'c@partner.test', tenantId: 'x' }];
+    h.accounts = [{ homeAccountId: 'c', username: 'c@partner.test', tenantId: CIAM_TID }];
     const { selection, msalAuth } = await load();
     selection.activateBackend('ciam', { ...FABRIKAM });
     const asCallback = msalAuth.acquireBffToken as unknown as (arg: string) => Promise<string>;
@@ -735,7 +737,7 @@ describe('Both planes acquire tokens for the active backend’s scope', () => {
     ],
   ])('the token seam refuses %s: nothing reaches acquireTokenSilent / NAA', async (_label, arg) => {
     stubTwoBackends();
-    h.accounts = [{ homeAccountId: 'c', username: 'c@partner.test', tenantId: 'x' }];
+    h.accounts = [{ homeAccountId: 'c', username: 'c@partner.test', tenantId: CIAM_TID }];
     const { selection, msalAuth } = await load();
     selection.activateBackend('ciam', { ...FABRIKAM });
     const seam = msalAuth.acquireActiveBffToken as unknown as (a: unknown) => Promise<string>;
@@ -746,7 +748,7 @@ describe('Both planes acquire tokens for the active backend’s scope', () => {
 
   it('the token seam passes a backend snapshot’s user_impersonation scope through to the acquirer (and only that)', async () => {
     stubTwoBackends();
-    h.accounts = [{ homeAccountId: 'c', username: 'c@partner.test', tenantId: 'x' }];
+    h.accounts = [{ homeAccountId: 'c', username: 'c@partner.test', tenantId: CIAM_TID }];
     const { selection, msalAuth } = await load();
     const active = selection.activateBackend('ciam', { ...FABRIKAM });
     await expect(msalAuth.acquireActiveBffToken(active)).resolves.toBe(`token:${scopeOf(FABRIKAM.bffAppId)}`);
@@ -755,7 +757,7 @@ describe('Both planes acquire tokens for the active backend’s scope', () => {
 
   it('a backend resolved for the workforce plane never yields a CIAM token request (plane mismatch fails closed)', async () => {
     stubTwoBackends();
-    h.accounts = [{ homeAccountId: 'c', username: 'c@partner.test', tenantId: 'x' }];
+    h.accounts = [{ homeAccountId: 'c', username: 'c@partner.test', tenantId: CIAM_TID }];
     const { selection, msalAuth } = await load();
     selection.activateBackend('workforce', { ...FABRIKAM });
     await expect(msalAuth.acquireBffToken()).rejects.toThrow(/workforce plane, not ciam/);
