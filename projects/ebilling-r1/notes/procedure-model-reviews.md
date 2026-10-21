@@ -425,3 +425,7 @@ Answers to our two questions: (1) yes, (a′) changes on the .eml; (2) yes, new 
 
 Checked clean by uac-r2: `[]` means no children; invoice text stays out of email analysis.
 
+**Owner picks (2026-10-21, given in this session and in uac-r2's round 118):** F1-a **option (i)**: the `from-email` .eml is own-Restricted with a submission marker written in the same create, by the submission path only (ArchTest), that (a′) skips. F1-c **refuse**: no communication resolves → retryable refusal; no .eml, no submission. Applied in v5.7.
+
+**word-add-in-r1 on v5.6 point 1:** "exactly one Document with that `sprk_relatedcommunication`" fails after #2177 (attachment children and several .eml Documents link to one communication). v5.7 resolves candidates by `sprk_isemailarchive = true`, then the target core record with no parent, then the marked attachment's SHA-256, refusing retryably on none or several. Code checked: `OfficeDocumentPersistence.cs:327`, `UploadFinalizationWorker.cs:684`, `GetEmailArchiveByCommunicationAsync` (`DataverseServiceClientImpl.cs:1152`, first only).
+
