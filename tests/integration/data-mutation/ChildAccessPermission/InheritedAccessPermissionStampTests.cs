@@ -171,6 +171,59 @@ public class InheritedAccessPermissionStampTests
         level.Should().Be(Restricted);
     }
 
+    [Theory]
+    [InlineData("sprk_todo", true)]
+    [InlineData("sprk_event", true)]
+    [InlineData("sprk_communication", true)]
+    [InlineData("sprk_document", false)]
+    public async Task StampAsync_UnderARestrictedMatter_CarriesTheInheritedValue_ExceptOnADocument(string host, bool carries)
+    {
+        // Task 189 (D7 T7a), the stamp-path fence. Must fire: a document passed through the stamp path gets NO
+        // sprk_accesspermission in its payload (it holds max(own, inherited), written only by DecideDocument's writers).
+        // Must not fire: a To Do, Event or Communication stamp still carries its inherited value, in both payload shapes.
+        var matter = Root("sprk_matter", Restricted);
+        var entity = new Entity(host);
+        var fields = new Dictionary<string, object>();
+
+        var fromEntity = await Resolver().StampAsync(entity, "sprk_matter", matter);
+        var fromFields = await Resolver().StampAsync(fields, host, "sprk_matter", matter);
+
+        fromEntity.Succeeded.Should().BeTrue();
+        fromFields.Succeeded.Should().BeTrue();
+        if (carries)
+        {
+            entity.GetAttributeValue<OptionSetValue>(Column)!.Value.Should().Be(Restricted);
+            ((OptionSetValue)fields[Column]).Value.Should().Be(Restricted);
+            fromEntity.InheritedAccessPermission.Should().Be(Restricted);
+        }
+        else
+        {
+            entity.Contains(Column).Should().BeFalse("a document's value is never written by the stamp path");
+            fields.Should().NotContainKey(Column);
+            fromEntity.InheritedAccessPermission.Should().BeNull();
+            fromFields.InheritedAccessPermission.Should().BeNull();
+        }
+    }
+
+    [Fact]
+    public async Task TheOtherStampPathMembers_GiveADocumentNoValue_AndResolveDoesNotReadIt()
+    {
+        // Task 189's fence, must fire: ApplyInheritedAccessPermissionAsync, DeriveForHostAsync and
+        // ResolveInheritedAccessPermissionAsync give a document under a Restricted matter nothing to write.
+        var matter = Root("sprk_matter", Restricted);
+        var stored = Row("sprk_document", ("sprk_matter", "sprk_matter", matter));
+        var document = new Entity("sprk_document") { ["sprk_matter"] = new EntityReference("sprk_matter", matter) };
+
+        (await Resolver().ApplyInheritedAccessPermissionAsync(document)).Should().BeNull();
+        document.Contains(Column).Should().BeFalse();
+        (await Resolver().DeriveForHostAsync("sprk_document", "sprk_matter", matter)).InheritedAccessPermission.Should().BeNull();
+
+        var readsBefore = _world.QueriedTables.Count(t => t == "sprk_document");
+        (await Resolver().ResolveInheritedAccessPermissionAsync("sprk_document", new Dictionary<string, object>(), stored))
+            .Should().BeNull();
+        _world.QueriedTables.Count(t => t == "sprk_document").Should().Be(readsBefore, "the fence returns before reading the row");
+    }
+
     [Fact]
     public async Task StampAsync_OnARefile_AFilingThatLeadsBackToTheRowItself_NeverBringsBackTheParentItIsLeaving()
     {
@@ -216,6 +269,130 @@ public class InheritedAccessPermissionStampTests
 
         level.Should().BeNull();
         _world.AccessPermissionWrites.Should().BeEmpty("the value its creator chose stands (round 81)");
+    }
+
+    [Fact]
+    public async Task RefreshInheritedAccessPermissionAsync_ADocumentCreatedRestrictedUnderAStandardMatter_StaysRestricted_AndRecordsItsOwn()
+    {
+        // Task 189 (D7 T7a, #2126; must fire): the child-records create of a document its creator narrowed. Before task 189
+        // this refresh reset it to the matter's Standard.
+        var matter = Root("sprk_matter", Standard);
+        var document = Row("sprk_document", Restricted, ("sprk_matter", "sprk_matter", matter));
+
+        var level = await Resolver().RefreshInheritedAccessPermissionAsync("sprk_document", document);
+
+        level.Should().Be(Restricted);
+        _world.AccessPermissionWrites.Should().BeEmpty("the document's own Restricted is never widened");
+        var record = RecordIn(_world.AccessRecordWrites.Should().ContainSingle().Subject.Text);
+        record.OwnPermission.Should().Be(Restricted, "the narrowing is recorded as its own, so the job keeps it too");
+        record.FloorPermission.Should().Be(Standard);
+    }
+
+    [Fact]
+    public async Task RefreshInheritedAccessPermissionAsync_AStandardDocumentUnderAStandardMatter_GetsItsRecord()
+    {
+        // Fix round C, F1 (must fire): every parented document gets a record when it is created, the Standard majority too,
+        // so a narrowing its user makes in the window its matter tightens is told from an inherited value.
+        var matter = Root("sprk_matter", Standard);
+        var document = Row("sprk_document", Standard, ("sprk_matter", "sprk_matter", matter));
+
+        var level = await Resolver().RefreshInheritedAccessPermissionAsync("sprk_document", document);
+
+        level.Should().Be(Standard);
+        _world.AccessPermissionWrites.Should().BeEmpty("its value is already right");
+        var record = RecordIn(_world.AccessRecordWrites.Should().ContainSingle().Subject.Text);
+        record.OwnPermission.Should().BeNull();
+        record.FloorPermission.Should().Be(Standard);
+    }
+
+    [Fact]
+    public async Task RefreshInheritedAccessPermissionAsync_ADocumentUnderARestrictedMatter_TakesItsValue_WithItsRecord_InOneUpdate()
+    {
+        // Task 189 (must not fire): an inherited value is still set from the parents.
+        var matter = Root("sprk_matter", Restricted);
+        var document = Row("sprk_document", Standard, ("sprk_matter", "sprk_matter", matter));
+
+        var level = await Resolver().RefreshInheritedAccessPermissionAsync("sprk_document", document);
+
+        level.Should().Be(Restricted);
+        _world.AccessPermissionWrites.Should().ContainSingle().Which.Should().Be(("sprk_document", document, Restricted));
+        _world.CombinedAccessWrites.Should().ContainSingle().Which.Should().Be(("sprk_document", document));
+        RecordIn(_world.AccessRecordWrites.Single().Text).OwnPermission.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task RefreshInheritedAccessPermissionAsync_AParentlessDocumentsNarrowing_IsRecorded_ItsValueNeverWritten()
+    {
+        // Task 189: round 81 holds (no value write); the narrowing is recorded so a later filing keeps it.
+        var document = Row("sprk_document", Restricted);
+
+        var level = await Resolver().RefreshInheritedAccessPermissionAsync("sprk_document", document);
+
+        level.Should().BeNull();
+        _world.AccessPermissionWrites.Should().BeEmpty();
+        RecordIn(_world.AccessRecordWrites.Should().ContainSingle().Subject.Text).OwnPermission.Should().Be(Restricted);
+    }
+
+    [Theory]
+    [InlineData(Restricted, Standard, Restricted)] // must fire: below its floor, raised (value only)
+    [InlineData(Standard, Restricted, null)] // must not fire: above its floor, never lowered
+    [InlineData(Restricted, Restricted, null)] // at its floor: nothing to write
+    public async Task RefreshInheritedAccessPermissionAsync_WhenDocumentsLackTheRecordColumn_ItsValueIsOnlyRaised(
+        int matterValue, int documentValue, int? written)
+    {
+        // Task 189 fix round C (K2): before the schema script runs, a document's own narrowing cannot be read, so its value
+        // is only raised to what its parents give. The world refuses any read or write naming the missing column.
+        _world.DocumentsLackAccessRecordColumn = true;
+        var matter = Root("sprk_matter", matterValue);
+        var document = Row("sprk_document", documentValue, ("sprk_matter", "sprk_matter", matter));
+        var probe = Probe();
+        var resolver = new CoreAncestorResolver(World(), async (table, ct) =>
+            (await probe(table, ct)).Where(c => c != AccessInheritance.Column).ToHashSet(StringComparer.OrdinalIgnoreCase), _log);
+
+        var level = await resolver.RefreshInheritedAccessPermissionAsync("sprk_document", document);
+
+        level.Should().Be(Math.Max(matterValue, documentValue), "the value the document now holds");
+        if (written is { } value)
+            _world.AccessPermissionWrites.Should().ContainSingle().Which.Should().Be(("sprk_document", document, value));
+        else
+            _world.AccessPermissionWrites.Should().BeEmpty();
+        _world.AccessRecordWrites.Should().BeEmpty();
+        _log.Warnings.Should().Contain(w => w.Contains(AccessInheritance.Column));
+    }
+
+    [Theory]
+    [InlineData(Restricted, Standard, Restricted)] // must fire: below its floor, raised (value only)
+    [InlineData(Standard, Restricted, null)] // must not fire: above its floor, never lowered
+    public async Task RefreshInheritedAccessPermissionAsync_ADocumentWhoseRecordCannotBeRead_IsOnlyRaised_ItsRecordUntouched(
+        int matterValue, int documentValue, int? written)
+    {
+        // Task 189 fix round C (K1): the create refresh makes the reconcile job's decision.
+        var matter = Root("sprk_matter", matterValue);
+        var document = Row("sprk_document", documentValue, ("sprk_matter", "sprk_matter", matter));
+        _world.Set("sprk_document", document, AccessInheritance.Column, "{not json");
+
+        var level = await Resolver().RefreshInheritedAccessPermissionAsync("sprk_document", document);
+
+        if (written is { } value)
+        {
+            level.Should().Be(value);
+            _world.AccessPermissionWrites.Should().ContainSingle().Which.Should().Be(("sprk_document", document, value));
+        }
+        else
+        {
+            level.Should().BeNull("nothing was decided");
+            _world.AccessPermissionWrites.Should().BeEmpty();
+        }
+
+        _world.AccessRecordWrites.Should().BeEmpty();
+        _world.ValueOf<string>("sprk_document", document, AccessInheritance.Column).Should().Be("{not json");
+    }
+
+    private static AccessInheritance RecordIn(string text)
+    {
+        var (record, unreadable) = AccessInheritance.Parse(text);
+        unreadable.Should().BeFalse();
+        return record!;
     }
 
     [Fact]

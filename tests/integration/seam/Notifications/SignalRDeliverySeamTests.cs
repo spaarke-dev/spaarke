@@ -335,6 +335,7 @@ public sealed class SignalRDeliverySeamTests
             => (await CreateAsync(entity, ct), true); // compose-r7 task 013: interface member; fake delegates to create
         public Task<Guid> CreateAsync(Entity entity, CancellationToken ct = default) => Task.FromResult(Guid.NewGuid());
 
+        public Task UpdateIfRowVersionMatchesAsync(string entityLogicalName, Guid id, string rowVersion, Dictionary<string, object> fields, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UpdateAsync(string entityLogicalName, Guid id, Dictionary<string, object> fields, CancellationToken ct = default)
             => throw new NotImplementedException();
         public Task<EntityCollection> RetrieveMultipleAsync(QueryExpression query, CancellationToken ct = default)
