@@ -11,14 +11,18 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | #1911 draft PR. **Active work: the new Procedure and file model** (owner 2026-10-20/21). It replaces the Procedure Library / D-145 / rule-set record-scope design (tasks 079–087). The owner finalized the model 2026-10-21 (EB-D-148); 079–087 are being re-planned. Implementation and schema start from the re-planned POMLs (080 schema still needs ontology-r1's full review and notices). |
+| **Task** | #1911 draft PR. **The Procedure and file model is FINAL (EB-D-148, owner 2026-10-21)** and the tasks are **re-planned** (brief `notes/replan-eb-d-148.md`): 079–086 rewritten, 087 cancelled, 088–099, 113–117, 189 added, 150 amended; 106 POMLs, validator and drift check clean. Start with wave W3-6 (080, 091, 099, 115) once its gates are met (TASK-INDEX Owner gates). |
 | **Design** | `notes/procedure-and-file-model.md`, now **v5.9**: every owner question answered (2026-10-21). v5.5 recorded the owner's Submit Invoice process (I, L) and the `from-email` contract (word-add-in-r1 reviewed it; folded in). v5.6 applies uac-r2's CHANGES-NEEDED review of v5.5 (reviews §14). **uac-r2: ACCEPT on v5.8** (the whole model). **FINAL (EB-D-148).** **Next:** re-plan 079–087 plus the new tasks from model §13 (task-create). All peer reviews are in `notes/procedure-model-reviews.md` §1–§14. |
 | **Peer status** | ontology-r1: **PASS** on v5.1 (reviews §10); ready for the 080 schema review. word-add-in-r1: §9.1 matches; its three flagged-attachment gaps are folded in. uac-r2: accepts with changes each round; v5.3 → v5.4 is text only. |
 | **Background** | **D-140 done:** `task/ebill-d140-parentsof` + uac-r2's arch fix (`task/ebill-d140-archfix`, af038b2bbd; uac-r2 ACCEPT) merged into work/ebilling-r1 as 13b310e1c4 and pushed. Combined tip: build 0 errors, ArchTests 1309/1309, broad filter 14256 passed / 2 failed under load (both pass alone, 77/77; unrelated; filed #2208). Agent worktrees `C:\code_files\spaarke\.claude\worktrees\agent-ac2cb36d489b624e8` and `agent-a63d1a942dbb89891` can be removed with Remove-WorktreeSafe.ps1. |
-| **Next Action** | (1) Handle the v5.4 and D-140 agent completions as above. (2) Owner answers the open items below → patch → the owner finalizes. (3) Decision row **EB-D-148** (project-prefixed ids); re-plan 079–087 plus the new tasks in the model's §13 (task-create). ontology-r1 then does the full 080 schema review; uac-r2 registers the tables in 191. |
+| **Next Action** | (1) Owner answers the five re-plan questions below. (2) W3-6: 099 (code-only, uac-r2 review) can start now; 080 / 115 need ontology-r1's schema review and notices first; 091 needs the owner's OK and the storage-role answer. (3) Peers: ontology-r1 full 080/088 schema review; uac-r2 registers the new tables in 191 and reviews per the gates. |
 
-### Open owner questions (model §15)
-None. All answered 2026-10-21. **The owner finalized 2026-10-21: decision EB-D-148.**
+### Open owner questions (raised by the re-plan POMLs' escalation triggers)
+1. **094:** where does the Submit Invoice button go in the communication UI? No task builds it yet (094 is server-only).
+2. **097:** a correction of an Inactive invoice (Rejected, Returned to Firm, Cancelled, Superseded): proposed 409 refusal.
+3. **099:** step-0 classification of the Finance routes outside the invoice/submission set: recalculate, `/ratecards`, `/code-set-mappings`, `/invoice-review/reject`.
+4. **114:** Override release of a gap hold on SPA-channel submissions, and on holds raised by a 101 correction.
+5. **091:** the stamp identity already holds Storage Blob Data Contributor at account scope (`storage-account.bicep:156-180`), so a container-scoped role restricts nothing; K-3's mitigation does not hold as written. Remove the account-scope grant, or accept it as part of K-3?
 
 ### Owner decisions already given (do not ask again)
 - **Model:** A option 1 (record-scoped `sprk_ruleset`, `sprk_scope` Record 100000002 / Firm record 100000003); B `sprk_billingfirm` + `sprk_billingresponsible` (→ `sprk_organization`, all core types, not access-conferring); C; D/D2 superseded by no-auto-re-check; E hold + warning; F, G; H "Internal Standard"; I yes (process TBD); J A+B; K internal-only/Restricted/Private allowed with isolation carried; M; N; O all-or-nothing; P; Q, Q2 (no migration), R.

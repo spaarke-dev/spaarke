@@ -4,7 +4,7 @@
     <title>Secure business-unit snapshot writer: one write in ProvisionCoreAsync (Step 4.1b), one parent-snapshot rule in SecureRootInheritance's create plan, a caller-supplied value refused on every core writer; membership exclusion (D-141, uac-r2 round 2 items 087.1-087.7)</title>
     <phase>3 Rules (WP3) — rule-set scope (D-141), wave W3-8b</phase>
     <gate>080 done (S8 column on dev); 082 merged (same file, SecureRootInheritance.cs); UAC #2152 merged (the always-applied exclusion set); uac-r2 reviews the diff before merge</gate>
-    <status>not-started</status>
+    <status>cancelled</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes uac-r2's provisioning core (the one writer of the move into Secure), the secure root-create plan used by every create into isolation, and every BFF writer of the three core tables, with a new fail-closed refusal on the Make Secure path; security-sensitive and on another project's hot path.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -134,7 +134,8 @@
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>082 reads the column only while a record is held Secure and treats empty as interim B, so 082 does not wait for this task; this task waits for 082 because both edit SecureRootInheritance.cs. 079 deploys it after checking S8 exists. Two adversarial passes (security, tenant-isolation).</notes>
+  <notes>082 reads the column only while a record is held Secure and treats empty as interim B, so 082 does not wait for this task; this task waits for 082 because both edit SecureRootInheritance.cs. 079 deploys it after checking S8 exists. Two adversarial passes (security, tenant-isolation).
+Cancelled 2026-10-21 by EB-D-148: the BU filter is dropped (model §12, O-12)</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
