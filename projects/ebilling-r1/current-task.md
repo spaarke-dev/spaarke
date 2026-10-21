@@ -40,7 +40,7 @@ O-1 to O-17. Main points:
 - **uac-r2:** reviews v5. #2159 and #2161 still matter for us (strict pointer rule); #2151 is moot; T7 applies only to invoice-thread docs. Updating `core-record-delete-design.md` on their side.
 - **ontology-r1:** scoped re-check of v5, then a full schema review of the 080 rewrite. Records the superseding decision row when D-148 is final. They may have asked the owner their [Owner] items directly; reuse those answers.
 - **word-add-in-r1:** re-checks the revised §9.1.
-- **R3:** dev BFF 4f5f22694; the 015 delete stays blocked; sprk_invoicestatus still exists on dev.
+- **R3:** dev BFF master a10e814d02 (live 2026-10-21 14:35Z); the 015 delete stays blocked; sprk_invoicestatus still exists on dev.
 - **field-mapping:** the 012 recipe is OK with corrections (a)–(c). 013 reviewed 2026-10-21: no objection once F3 (seam-test assertions on Item/Caller, a throwing rule, cancellation) is fixed in 013. F1 (no invoice rule registered → 017 gate), F2 (500 split), F4 (the (c) test) and the arm-order pin go into the reconciliation commit. 014 must keep one `item`, set RelatedEntitySet and protect the family core lookups; 016/040 must call `CheckGenericUpdateAsync`. Round 2 (27bac15a42) re-checked, no objection; 013 + 001–006, 010–012 are in **PR #2184** to master (renames the Office create service; check it when merging #1911). They send the reconcile commit for review before 017. 014 done (706dad05a6; our three items met). Reconcile review checklist: the RegardingTrio tables (invoicesubmission, invoiceapproval, externalidentifier, invoicecorrection) get mapping-protected core lookups when they register; the ratchet copy is replaced by the real `CoreRecordLookups`.
 
 ### Standing rules (unchanged)
