@@ -171,7 +171,7 @@ Three reviews of `procedure-and-file-model.md` v4. Each item is folded into v5 o
 
 ## 4. Owner decisions needed (consolidated)
 
-> **2026-10-21:** the owner answered C, F, G and the override half of D directly in ontology-r1's session (ontology D-175, `notes/decisions.md` in that worktree). Do not ask them again. Later the same day the owner also answered **D2** (ontology D-175 addendum) and **Q** plus the migration question (in SPA-r3's session; relayed by SPA-r3, not found in its notes). Still open: A, B, E, H–P.
+> **2026-10-21:** the owner answered C, F, G and the override half of D directly in ontology-r1's session (ontology D-175, `notes/decisions.md` in that worktree). Do not ask them again. Later the same day the owner also answered **D2** (ontology D-175 addendum) and **Q** plus the migration question (in SPA-r3's session; relayed by SPA-r3, not found in its notes). Owner answers on I–L given in word-add-in-r1's session were relayed 2026-10-21 (not yet in that project's notes); see the rows. Still open: A, B, E, H, J (options), K (Restricted, not-Open), L (with I), M–P.
 
 | # | Question | Recommendation |
 |---|---|---|
@@ -184,10 +184,10 @@ Three reviews of `procedure-and-file-model.md` v4. Each item is folded into v5 o
 | F | Creator person on the new tables | **Answered (ontology D-175 (4)):** `sprk_createdbyperson` on Procedure, Procedure Version, assignment and Stored File, D-173 shape and protection; replaces "uploaded by". 081 adds the tables to `Set-ChildRecordCreatorPersonSchema.ps1` (`$Tables`, `$SolutionHomes`) and `StampedChildTables`, and asserts zero non-null values before securing. |
 | G | Ontology's matter rules stay separate in R1 | **Answered (ontology D-175 (3)):** yes. Ontology-area Procedures are document-only in R1; a validator refuses `sprk_procedureversion` on Ontology-domain policies. Ontology files a post-R1 convergence issue. |
 | H | Type "Internal guidance"; Area reuses `sprk_policydomain` | Yes. |
-| I | The Outlook add-in offers Submit Invoice | Not in R1: offer it in the communication UI. Later, as its own endpoint. |
-| J | File an unfiled email to the invoice's matter first | Yes. |
-| K | Refuse Restricted, internal-only and not-Open sources | Yes. |
-| L | Retire the add-in's "save onto invoice" and invoice quick-create | Yes. Invoices are created only by submission (FR-17, FR-20). |
+| I | The Outlook add-in offers Submit Invoice | **Owner (relayed by word-add-in-r1): yes.** The user flags an attachment to go to the invoice's files instead of becoming a Document. The process is to be discussed separately with the owner; no design is fixed. |
+| J | File an unfiled email to the invoice's matter first | **Owner leans yes** (file the communication to M through the refile path with the caller's rights, before commit). The owner asked for other options; word-add-in-r1 is answering and will forward. |
+| K | Refuse Restricted, internal-only and not-Open sources | **Owner (relayed): internal-only sources are ALLOWED.** The copy carries the isolation forward: source document and communication ids on the Stored File, Firm-visible = No, and kept out of search, indexes and chat grounding unless it passes T7 (extraction still reads the bytes). Who may read an internal-only copy under the invoice needs uac-r2's review. Still open: Restricted sources (task-130 documents whose email cannot be identified) and not-Open sources. |
+| L | Retire the add-in's "save onto invoice" and invoice quick-create | **Tied to I (owner):** review the whole process so it is not overcomplicated. The goal: the email is associated with the matter, project or work assignment, and with the invoice. Our constraint stays: invoices are created only by submission (FR-17, FR-20). |
 | M | Flagged-external internal users on the file route (uac-r2 F1-e) | Refuse for Procedure files always, and for invoice/export files on Restricted roots. |
 | N | A reusable Procedure used for a Secure matter (e.g. its rate card) is readable org-wide, name included (O-6) | Confirm O-6. Matter-only rules go in the record-scoped rule set (A). |
 | O | uac-r2 K1: derived invoice content readable under M if the post-commit check fails | Accept (already accepted in 050a). |
