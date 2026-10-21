@@ -324,3 +324,4 @@ Verification after the fix: `dotnet build` 0 warnings, 0 errors. Handler classes
   - BadImageFormatException: 2 at the 14:35 restart. One problemId was seen at earlier deploys.
   - Graph ODataError "Invalid hostname for this tenancy": existing background noise.
 - **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261021T143151Z` (= `4f5f22694`). The 059 floor still holds; 4f5f22694 contains 077.
+- **Final 30-minute reading** (15:05:38Z): no new exception class; the same three groups (ODataError n=7, noise). Reconciliation runs from 14:58 to 15:04Z succeeded with nothing to do. Sent to UAC; tasks 189 and #2143 close on it. Ontology smoke PASS. SPE admin verified the live version.
