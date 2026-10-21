@@ -1,18 +1,17 @@
 # Current Task — field-mapping-server-write-path-r1
 
-> **Last updated**: 2026-10-21 (checkpoint at 85%: 014 + 015 on master, 016 fix rounds done)
+> **Last updated**: 2026-10-21 (016 merged into the work branch and verified; awaiting UAC-r2 condition (b))
 > **Phase**: Wave 2. Done (12/43): 001–006, 010–015. ALL on master: 001–006, 010–013 (#2184), #2191 (583f90c1d9,
-> live on dev), 014 + 015 (#2214, cf0886360a). #2188 is CLOSED. 016 has finished fix round 2 and is blocked on two
-> ArchTest decisions (below).
+> live on dev), 014 + 015 (#2214, cf0886360a). #2188 is CLOSED. 016 code complete on the work branch.
 
 ## Quick Recovery
 
 | Field | Value |
 |---|---|
-| **HEAD** | work branch `3583ac04cb` = master 446c83d927 + docs. Verified: sln 0/0, ArchTests 1337/1337, related suites 2693 passed / 7 skipped. Pushed. Master is now f1b3dadcf5 (#2186, not in our files) |
-| **016 state** | branch `task/fm-016` head `d80f27ea7e` (worktree `C:\code_files\spaarke\.claude\worktrees\agent-a10e5fe383a4dfcd2`, implementer agent a10e5fe383a4dfcd2), with the work branch 3583ac04cb merged in. Done: F1-a..f, the source gate fail-closed (including a missing Secure team, via the `SecureOwnerTeamAsync` wrapper), Decision Records skipped entirely (`table_append_only`), the four document columns via `RefuseAppOnlyWrite`, `RecordRepairReachabilityTests` (no production caller). RecordRepairModeTests 50/50; filtered 2815 passed / 7 skipped. **ArchTests has exactly 2 failures:** (1) the #2188 guard at `Repair.cs:307` `read.Record`, waiting on the OWNER (field-security option 1 vs 3); (2) #2170 `EveryGenericUpdateWriter_AsksTheAppOnlyRefusal`. It judges per TYPE, so Repair's refusal call makes Create's step-11 exemption look stale. Asked UAC-r2 to choose (a) remove the exemption (weakens their guard), (b) a separate type, or (c, recommended) key by member |
-| **Running** | Scoped Sonnet re-check of 016 fix round 2 (agent ab3d877a1cb7c706b) over the non-merge commits `559b75828b..d80f27ea7e` |
-| **Next Action** | (1) The re-check reports → fix any F. (2) UAC answers on #2170 → implement it on `task/fm-016`. (3) The owner answers field security → option 1: a per-occurrence guard allow-list entry for Repair's `ApplyFillOnly`, with UAC's 5 conditions recorded (the `IsSecured` skip lands in 033; 052 stays blocked) / option 3: Repair maps nothing. (4) ArchTests green → merge `task/fm-016` into the work branch (--no-ff) → full verify (ArchTests AND related suites) → send the 016 diff to UAC-r2 (condition b) → mark 016 → PR to master. (5) Then 017/018 |
+| **HEAD** | work branch `4c5ac9f5ad` = merge of `task/fm-016` (c7ee5bcd0a, --no-ff as c16705d6aa) + master f1b3dadcf5. Verified: sln 0/0, ArchTests 1349/1349, related suites 3156 passed / 7 skipped. Pushed |
+| **016 state** | Code complete. Owner chose field-security option 1. #2188 guard: new per-member `UnmaskedCallExemptions` (`…/RecordCreation/RecordCreationService.Repair.cs\|RecordCreationService.RepairMappingAsync`, Uses = 1), controls + 5 mutants killed, `KnownCallSites` = 3. #2170 guard member-keyed (UAC option c). `SourceColumnsRepairMayCopy` seam is `TODO(task 033)`. Diff for review: `git diff 3583ac04cb...c7ee5bcd0a` |
+| **Running** | Publish-size delta f1b3dadcf5 vs 4c5ac9f5ad (`C:\tmp\f16m`, `C:\tmp\f16a`; remove with Remove-WorktreeSafe.ps1 afterwards) + CVE check. UAC-r2 asked (2026-10-21) for ACCEPT / F items on the 016 diff |
+| **Next Action** | (1) UAC-r2 ACCEPT → mark 016 ✅ (POML, TASK-INDEX, portfolio Tasks Completed = 13) → PR to master with publish delta, CVE, full CI rollup; F items → resume implementer a10e5fe383a4dfcd2. (2) Then 017/018 |
 
 ## Key facts since the last checkpoint
 
@@ -51,10 +50,7 @@
 
 ## Open items for the owner
 
-1. **Repair field security (016; UAC-r2 concurs with option 1):** option 1, Repair skips any field-secured source
-   column using 033's metadata reader, under UAC's five conditions: fail closed on metadata; skip the document
-   access and D7 columns; a per-occurrence guard allow-list entry; tests; 052 blocked until 033. Option 3 (Repair never
-   maps) is the fallback. Option 2 was rejected.
+1. ~~Repair field security~~: DECIDED 2026-10-21, option 1 (notes/decisions.md); implemented in 016, the skip lands in 033.
 2. **016 owner questions:**
    - cross-BU owner moves on ownership-parent tables (recommend keeping the skip and having 052 report the count);
    - whether Repair re-owns roots at all;
