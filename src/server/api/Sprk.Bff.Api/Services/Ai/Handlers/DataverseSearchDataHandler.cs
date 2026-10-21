@@ -32,7 +32,16 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// <para>
 /// <b>User-OBO ONLY (spec MUST rule)</b>: the search executes through
 /// <see cref="IDataverseUserClient"/> — Dataverse Search applies the calling user's security
-/// roles + row-level security to results. No app-only client is reachable (task-012 audit).
+/// roles + row-level security to results. No app-only client is reachable (task-012 audit), except the one below.
+/// </para>
+/// <para>
+/// <b>The "User-OBO ONLY" rule is AMENDED for ONE dependency — unified-access-control-r2 task 188, main-session decision
+/// 2026-10-20 (CLAUDE.md §6.5 path B; owner sign-off pending on the PR)</b>: an EXTERNAL caller's <c>sprk_document</c> rows
+/// are decided by THE external document narrowing through <see cref="AppOnlyDocumentNarrowing"/>, which re-reads those
+/// documents BY ID under the BFF's app-only identity (the external plane's reader) and returns ONLY a hide decision: a
+/// link field security masks for the user can never read as "no link". It can only HIDE a row the user's own read returned;
+/// no app-only data reaches the result, and nothing else of the app-only reader is reachable (a delegate). Every query whose
+/// rows reach the model still runs as the user.
 /// </para>
 /// <para>
 /// <b>ADR-015 / NFR-07</b>: telemetry carries query LENGTH + entity filter + result count +
@@ -62,19 +71,23 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ICallerSystemUserResolver _callerResolver;
     private readonly ISystemUserIdentityResolver _identityResolver;
+    /// <summary>Task 188: THE document narrowing, app-only by id (see the remarks: the one amended dependency).</summary>
+    private readonly AppOnlyDocumentNarrowing _narrowDocuments;
 
     public DataverseSearchDataHandler(
         IDataverseUserClient dataverse,
         ILogger<DataverseSearchDataHandler> logger,
         IHttpContextAccessor httpContextAccessor,
         ICallerSystemUserResolver callerResolver,
-        ISystemUserIdentityResolver identityResolver)
+        ISystemUserIdentityResolver identityResolver,
+        AppOnlyDocumentNarrowing narrowDocuments)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
         _callerResolver = callerResolver ?? throw new ArgumentNullException(nameof(callerResolver));
         _identityResolver = identityResolver ?? throw new ArgumentNullException(nameof(identityResolver));
+        _narrowDocuments = narrowDocuments ?? throw new ArgumentNullException(nameof(narrowDocuments));
     }
 
     /// <inheritdoc />
@@ -291,17 +304,16 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
                 }
 
                 // ISS-010 review round 1 (F1), task 188 (D7, #2126): for an external caller, a sprk_document hit THE external
-                // document predicate hides is dropped silently (same posture as family hits). One batched read of the hit
-                // documents, then the predicate's own batched reads; a document that does not come back is dropped; a fault
-                // throws into the error result below (no data).
+                // document predicate hides is dropped silently (same posture as family hits). The hit documents are read by id
+                // APP-ONLY (main-session decision 2026-10-20), then the predicate's own batched reads; a document that does
+                // not come back is dropped; a fault throws into the error result below (no data).
                 var documentIds = hits
                     .Where(h => ExternalCallerCommunicationGuard.IsDocumentTable(h.EntityName))
                     .Select(h => h.RecordId)
                     .ToList();
                 if (documentIds.Count > 0 && await IsExternalCallerAsync().ConfigureAwait(false))
                 {
-                    narrowing = await ExternalDocumentNarrowing.ReadAndDecideAsync(
-                        documentIds, ExternalCallerCommunicationGuard.QueryOver(_dataverse), cancellationToken).ConfigureAwait(false);
+                    narrowing = await _narrowDocuments(documentIds, cancellationToken).ConfigureAwait(false);
                 }
 
                 foreach (var (hit, entityName, recordId) in hits)

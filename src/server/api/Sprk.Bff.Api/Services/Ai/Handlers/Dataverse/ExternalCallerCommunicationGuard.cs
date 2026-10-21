@@ -24,7 +24,8 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 /// for an external caller. A <c>sprk_document</c> is row-filtered by THE external document predicate
 /// (<see cref="ExternalDocumentNarrowing"/>, unified-access-control-r2 task 188, which replaced this class's own
 /// related-communication check): own or ancestor Restricted, or a communication the caller may not see on the bounded
-/// parent-document walk, hides it.</para>
+/// parent-document walk, hides it. The handlers reach it only through <see cref="AppOnlyDocumentNarrowing"/>, which
+/// re-reads the documents by id app-only, so none of its reads runs over the caller's user client.</para>
 /// <para><b>Who is external.</b> Decided only when the request touches the communication family or <c>sprk_document</c>,
 /// so other requests are byte-identical. The request principal → <see cref="ICallerSystemUserResolver"/> →
 /// <see cref="ISystemUserIdentityResolver.IsExternalAsync"/>. A caller with no principal, no oid or no active systemuser
@@ -158,18 +159,7 @@ internal static class ExternalCallerCommunicationGuard
     /// user client. A failed read THROWS, so a fault becomes the tool's error result with no rows — never "show it".
     /// </summary>
     internal static CommunicationOpenThreadGate.ThreadRowQuery ThreadQueryOver(IDataverseUserClient dataverse) =>
-        (odata, ct) => QueryOver(dataverse)(CommunicationOpenThreadGate.ThreadSet, odata, ct);
-
-    /// <summary>
-    /// The caller's own user client as the reader <see cref="ExternalDocumentNarrowing"/> and the task 065 rule
-    /// (<see cref="CommunicationOpenThreadGate.ReadVisibleCommunicationIdsAsync"/>) read through (task 188). A failed read
-    /// THROWS, so a fault becomes the tool's error result with no rows — never "show it".
-    /// </summary>
-    internal static CommunicationOpenThreadGate.RowQuery QueryOver(IDataverseUserClient dataverse)
-    {
-        ArgumentNullException.ThrowIfNull(dataverse);
-        return (entitySet, odata, ct) => ReadRowsAsync(dataverse, $"{entitySet}?{odata}", $"{entitySet} visibility", ct);
-    }
+        (odata, ct) => ReadRowsAsync(dataverse, $"{CommunicationOpenThreadGate.ThreadSet}?{odata}", "communication thread privacy", ct);
 
     /// <summary>The thread id of one OData communication row (raw <c>_sprk_communicationthread_value</c>), or empty.</summary>
     internal static Guid ThreadIdOf(JsonElement record) =>

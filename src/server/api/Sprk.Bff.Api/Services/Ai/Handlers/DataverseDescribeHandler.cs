@@ -29,7 +29,16 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// <b>User-OBO ONLY (spec MUST rule)</b>: all Dataverse access goes through
 /// <see cref="IDataverseUserClient"/> — the caller's identity, exchanged OBO; metadata and
 /// record visibility are whatever Dataverse grants THAT user. No app-only client is
-/// reachable from this class (task-012 audit).
+/// reachable from this class (task-012 audit), except the one below.
+/// </para>
+/// <para>
+/// <b>The "User-OBO ONLY" rule is AMENDED for ONE dependency — unified-access-control-r2 task 188, main-session decision
+/// 2026-10-20 (CLAUDE.md §6.5 path B; owner sign-off pending on the PR)</b>: an EXTERNAL caller's <c>sprk_document</c> rows
+/// are decided by THE external document narrowing through <see cref="AppOnlyDocumentNarrowing"/>, which re-reads those
+/// documents BY ID under the BFF's app-only identity (the external plane's reader) and returns ONLY a hide decision: a
+/// link field security masks for the user can never read as "no link". It can only HIDE a row the user's own read returned;
+/// no app-only data reaches the result, and nothing else of the app-only reader is reachable (a delegate). Every query whose
+/// rows reach the model still runs as the user.
 /// </para>
 /// <para>
 /// <b>Registration</b>: <c>sprk_analysistool</c> row
@@ -69,19 +78,23 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ICallerSystemUserResolver _callerResolver;
     private readonly ISystemUserIdentityResolver _identityResolver;
+    /// <summary>Task 188: THE document narrowing, app-only by id (see the remarks: the one amended dependency).</summary>
+    private readonly AppOnlyDocumentNarrowing _narrowDocuments;
 
     public DataverseDescribeHandler(
         IDataverseUserClient dataverse,
         ILogger<DataverseDescribeHandler> logger,
         IHttpContextAccessor httpContextAccessor,
         ICallerSystemUserResolver callerResolver,
-        ISystemUserIdentityResolver identityResolver)
+        ISystemUserIdentityResolver identityResolver,
+        AppOnlyDocumentNarrowing narrowDocuments)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
         _callerResolver = callerResolver ?? throw new ArgumentNullException(nameof(callerResolver));
         _identityResolver = identityResolver ?? throw new ArgumentNullException(nameof(identityResolver));
+        _narrowDocuments = narrowDocuments ?? throw new ArgumentNullException(nameof(narrowDocuments));
     }
 
     /// <inheritdoc />
@@ -421,11 +434,9 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
             else
             {
                 // Task 188 (D7, #2126): THE external document predicate (own or ancestor Restricted; the related
-                // communication of the document or, on a bounded parent walk, of its ancestor, under the 065 rule).
-                var document = ExternalDocumentNarrowing.FromWebApi(recordId, record);
-                visible = (await ExternalDocumentNarrowing.DecideAsync(
-                        new[] { document }, ExternalCallerCommunicationGuard.QueryOver(_dataverse), ct).ConfigureAwait(false))
-                    .IsVisible(document);
+                // communication of the document or, on a bounded parent walk, of its ancestor, under the 065 rule), on the
+                // document re-read by id APP-ONLY (main-session decision 2026-10-20), never on the record the user read.
+                visible = (await _narrowDocuments(new[] { recordId }, ct).ConfigureAwait(false)).IsVisible(recordId);
             }
 
             if (!visible)

@@ -781,15 +781,16 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
 
         /// <summary>
         /// Task 188: seeds a document that is NOT under any route parent (an ancestor the narrowing's hop reads reach), with
-        /// its own Access Permission, communication link and parent document link.
+        /// its own Access Permission, communication link and parent document link. <paramref name="rawCommunication"/>, when
+        /// given, is stored as the communication link instead (an unreadable value: not a GUID, or an empty one).
         /// </summary>
-        public void AddAncestorDocument(Guid id, int? accessPermission, Guid? communication, Guid? parent) =>
+        public void AddAncestorDocument(Guid id, int? accessPermission, Guid? communication, Guid? parent, object? rawCommunication = null) =>
             Seed("sprk_documents", new Dictionary<string, object?>
             {
                 ["sprk_documentid"] = id.ToString(),
                 ["sprk_documentname"] = $"ancestor {id}",
                 ["sprk_accesspermission"] = accessPermission,
-                ["_sprk_relatedcommunication_value"] = communication?.ToString(),
+                ["_sprk_relatedcommunication_value"] = rawCommunication ?? communication?.ToString(),
                 ["_sprk_parentdocument_value"] = parent?.ToString(),
             });
 

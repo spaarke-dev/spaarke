@@ -1843,7 +1843,46 @@ public class ExternalDataService
             return DocumentNarrowingResult.NotNarrowed(rows);
         if (await IsInternalSystemUserAsync(caller, ct))
             return DocumentNarrowingResult.NotNarrowed(rows);
-        return await ExternalDocumentNarrowing.DecideOrFailClosedAsync(rows, QueryRowsOrThrowAsync, _logger, ct);
+        var narrowing = await ExternalDocumentNarrowing.DecideOrFailClosedAsync(rows, QueryRowsOrThrowAsync, _logger, ct);
+        LogNarrowingCost("external", rows.Count, rows.Count(row => !narrowing.IsVisible(row)), narrowing);
+        return narrowing;
+    }
+
+    /// <summary>
+    /// Task 188 (main-session decision 2026-10-20): the assistant's <c>dataverse.*</c> tools' document narrowing
+    /// (<see cref="AppOnlyDocumentNarrowing"/>). The documents are re-read BY ID and decided APP-ONLY through the same reader as
+    /// the external plane, so a column field security masks for the user can never read as "no link". The tool has already
+    /// decided the caller is external. A failed read THROWS (the tool call fails with no data); a document that does not come
+    /// back is not visible. Returns the decision only.
+    /// </summary>
+    internal async Task<DocumentNarrowingResult> ReadAndNarrowDocumentsAsync(
+        IReadOnlyCollection<Guid> documentIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(documentIds);
+        var narrowing = await ExternalDocumentNarrowing.ReadAndDecideAsync(documentIds, QueryRowsOrThrowAsync, ct);
+        var distinct = documentIds.Distinct().ToList();
+        LogNarrowingCost("assistant", distinct.Count, distinct.Count(id => !narrowing.IsVisible(id)), narrowing);
+        return narrowing;
+    }
+
+    /// <summary>Reads above which a request's narrowing cost line is logged at Information (Debug otherwise).</summary>
+    internal const int NarrowingCostInformationThreshold = 20;
+
+    /// <summary>
+    /// The ONE narrowing cost line per request (task 188): rows checked, rows hidden, hop levels read and requests per set.
+    /// Counts only (ADR-015). Information when the reads exceed <see cref="NarrowingCostInformationThreshold"/>.
+    /// </summary>
+    private void LogNarrowingCost(string plane, int rows, int hidden, DocumentNarrowingResult narrowing)
+    {
+        var cost = narrowing.Cost;
+        var level = cost.Reads > NarrowingCostInformationThreshold ? LogLevel.Information : LogLevel.Debug;
+        if (!_logger.IsEnabled(level))
+            return;
+        _logger.Log(level,
+            "[EXT-NARROWING] cost plane={Plane} rows={Rows} hidden={Hidden} faulted={Faulted} hopLevels={HopLevels} "
+            + "documentReads={DocumentReads} communicationReads={CommunicationReads} threadReads={ThreadReads}",
+            plane, rows, hidden, narrowing.Faulted, cost.HopLevels,
+            cost.DocumentReads, cost.CommunicationReads, cost.ThreadReads);
     }
 
     /// <summary>

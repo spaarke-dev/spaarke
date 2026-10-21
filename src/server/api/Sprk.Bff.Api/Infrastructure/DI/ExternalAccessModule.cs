@@ -105,6 +105,15 @@ public static class ExternalAccessModule
             client.Timeout = TimeSpan.FromSeconds(15);
         });
 
+        // unified-access-control-r2 task 188 (main-session decision 2026-10-20): the assistant's dataverse.* tools decide a
+        // document with THE external document narrowing APP-ONLY, through the reader above, so a link field security masks
+        // for the user never reads as "no link". A delegate, so the tools reach nothing else of the app-only reader (the
+        // narrow-by-construction shape of owner rounds 7/8). Registered here, unconditionally with the reader it binds
+        // (AddExternalAccess is unconditional in Program.cs); the tool handlers (AddToolFramework's assembly scan) resolve it.
+        // The reader is resolved on the first call, so a tool call that never narrows (an internal caller) builds no client.
+        services.AddScoped<AppOnlyDocumentNarrowing>(sp =>
+            (documentIds, ct) => sp.GetRequiredService<ExternalDataService>().ReadAndNarrowDocumentsAsync(documentIds, ct));
+
         // Per-customer external-access switches (external-access-platform-r3 task 011, spec FR-06 / FR-19, ADR-028
         // A8). PartnerServiceRequestsEnabled (default false) lets CIAM partners use the Service Requests module for
         // their own requests and adds legal-front-door to their default modules. Read by the entitlement resolver

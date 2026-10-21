@@ -25,27 +25,37 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// (<see cref="CommunicationOpenThreadGate.ReadVisibleCommunicationIdsAsync"/>, reused, never copied: flag JSON
 /// <c>false</c>, a thread set, the thread explicitly Open now). Derived at read time, never stamped, so lowering the flag
 /// (<c>CommunicationInternalOnlyFloor.LowerWhenSafeAsync</c>) shows the documents with nothing else written.</item>
-/// <item><b>A Restricted ancestor</b> (main-session scope addition, 2026-10-20). On the SAME walk, an ancestor document whose
-/// own value reads Restricted (or unreadable) hides the descendant: an attachment under a Restricted .eml is hidden. The
-/// walk stops at the first link, so only the ancestors it visits are checked (no extra read).</item>
+/// <item><b>A Restricted ancestor</b> (main-session scope addition and decision, 2026-10-20). On the SAME walk, ANY
+/// ancestor document (parent, grandparent, great-grandparent) whose own value reads Restricted (or unreadable) hides the
+/// descendant: an attachment under a Restricted .eml is hidden, even when the attachment carries its own visible link. The
+/// walk therefore continues past the first communication link to the top of the chain (at most <see cref="MaxHops"/>
+/// hops); only the communication leg stops at the first link.</item>
 /// <item><b>An unknowable chain.</b> A link that is present but not a GUID, a parent that does not come back, a cycle, and
-/// a chain that would need a fourth hop.</item>
+/// a chain that would need a fourth hop, even for a document whose own link is visible (the ancestor leg cannot be
+/// decided past the bound; accepted by the main session, 2026-10-20).</item>
 /// </list>
+/// <para><b>Whose reads.</b> The predicate is a security check, so every read it makes (the documents' own columns, the
+/// parent chain, the communications and the threads) runs under the BFF's app-only identity, the external plane's reader
+/// (<see cref="ExternalDataService"/>), on EVERY surface. The assistant's tools reach it only through
+/// <see cref="AppOnlyDocumentNarrowing"/>, which re-reads the documents by id app-only: a column field security masks for
+/// the user (it reads as null) can never read as "no link" here.</para>
 /// <para><b>Fail closed.</b> <see cref="DecideAsync"/> THROWS on a failed read (the assistant's tools fail the call with no
 /// data); <see cref="DecideOrFailClosedAsync"/> turns a failed read into "nothing visible" and says so
 /// (<see cref="DocumentNarrowingResult.Faulted"/>: a list then reports <c>Truncated</c>). A document id the decision was
 /// not asked about is not visible.</para>
-/// <para><b>Cost</b> (task 188 notes, "Query cost"). No read for a row that decides on its own columns (no link needed, or
-/// own Restricted). Otherwise one batched read per hop level over the DISTINCT parents still undecided (chunks of
-/// <see cref="ChunkSize"/>; a parent already on the page is not read again), then the 065 rule's two batched reads
-/// (communications, threads) over the DISTINCT communications. Never one read per row. No cache: an own Access Permission
-/// change or a flag change applies on the next request.</para>
+/// <para><b>Cost</b> (task 188 notes, "Query cost"). No read for a row that decides on its own columns (own Restricted, or
+/// no link and no parent). Otherwise one batched read per hop level over the DISTINCT parents still undecided (OR-filter
+/// chunks of <see cref="ChunkSize"/> ids, the URL bound, up to <see cref="CommunicationOpenThreadGate.MaxChunksInFlight"/>
+/// in flight at once; a parent already on the page or read at an earlier hop is not read again), then the 065 rule's two
+/// batched reads (communications, threads) over the DISTINCT communications, chunked the same way. Never one read per row.
+/// The counts are returned (<see cref="DocumentNarrowingResult.Cost"/>) and logged once per request by the seam. No cache:
+/// an own Access Permission change or a flag change applies on the next request.</para>
 /// <para><b>Component Justification (CLAUDE.md §11):</b> (1) Existing — <see cref="ExternalMultiRootRule"/> decides by
 /// ROOTS; the 065 rule decides a communication; r3 task 078's <c>ExternalCallerCommunicationGuard</c> applied one leg in the
 /// assistant only. All are reused; 078's document leg is REMOVED in favour of this class. (2) Extension — the multi-root
 /// rule's input is a row's root links and the caller's grants, read through the secure-flag and live-parent seams; this
-/// predicate's input is the document's own columns and its communication chain, read through a different seam (one OData
-/// reader shared with the assistant's user client), so it sits beside the rule rather than inside it. (3) Cost of doing
+/// predicate's input is the document's own columns and its communication chain, read through a different seam (one
+/// app-only OData reader, the external plane's, on every surface), so it sits beside the rule rather than inside it. (3) Cost of doing
 /// nothing — a partner with a grant on a matter downloads the .eml of an internal-only email and its attachments, and a
 /// document a user marked Restricted (ISS-015), which the owner decided must not happen.</para>
 /// </remarks>
@@ -108,19 +118,6 @@ internal static class ExternalDocumentNarrowing
     /// <summary>One OData document row (its <c>$select</c> must carry <see cref="SelectColumns"/>), keyed by column.</summary>
     internal static DocumentNarrowingRow FromWebApi(Guid documentId, IReadOnlyDictionary<string, JsonElement>? row) =>
         FromJson(documentId, column => row is not null && row.TryGetValue(column, out var v) ? v : null);
-
-    /// <summary>One OData document record whose id is <paramref name="documentId"/> (a single-record read).</summary>
-    internal static DocumentNarrowingRow FromWebApi(Guid documentId, JsonElement record) =>
-        FromJson(documentId, column => record.ValueKind == JsonValueKind.Object && record.TryGetProperty(column, out var v) ? v : null);
-
-    /// <summary>One OData document record of a collection read: the id is its <see cref="DocumentPkField"/> (none: hidden).</summary>
-    internal static DocumentNarrowingRow FromWebApi(JsonElement record) =>
-        FromWebApi(
-            record.ValueKind == JsonValueKind.Object && record.TryGetProperty(DocumentPkField, out var id)
-            && id.ValueKind == JsonValueKind.String && Guid.TryParse(id.GetString(), out var parsed)
-                ? parsed
-                : Guid.Empty,
-            record);
 
     /// <summary>
     /// One FetchXML (module) row, keyed by LOGICAL name as the SDK projects it: a lookup is an <see cref="EntityReference"/>,
@@ -188,20 +185,27 @@ internal static class ExternalDocumentNarrowing
     /// <see cref="FetchAttributes"/>). A failed read THROWS (the caller's request fails with no data).
     /// </summary>
     /// <param name="rows">The rows that passed the root rule.</param>
-    /// <param name="query">The reader, under the identity the surface reads with (app-only on the external plane).</param>
+    /// <param name="query">The BFF's app-only reader (the external plane's), on every surface.</param>
     /// <param name="ct">Cancellation token.</param>
-    internal static async Task<DocumentNarrowingResult> DecideAsync(
+    internal static Task<DocumentNarrowingResult> DecideAsync(
         IEnumerable<DocumentNarrowingRow> rows, CommunicationOpenThreadGate.RowQuery query, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(rows);
         ArgumentNullException.ThrowIfNull(query);
+        var counter = new ReadCounter();
+        return DecideCoreAsync(rows, counter.Wrap(query), counter, ct);
+    }
 
+    private static async Task<DocumentNarrowingResult> DecideCoreAsync(
+        IEnumerable<DocumentNarrowingRow> rows, CommunicationOpenThreadGate.RowQuery query, ReadCounter counter,
+        CancellationToken ct)
+    {
         // Keyed by the row AS READ (a value): a row is decided on its own columns and chain, so one that came back without its
         // id is still decided, and two copies of one row decide alike.
         var decided = new Dictionary<DocumentNarrowingRow, DocumentNarrowingReason>();
         var communicationOf = new Dictionary<DocumentNarrowingRow, Guid>();
         var pending = new Dictionary<DocumentNarrowingRow, (Guid Next, HashSet<Guid> Visited)>();
-        // Every row already in hand: a parent that is on the same page is not read again.
+        // Every row already in hand: a parent that is on the same page, or was read at an earlier hop, is not read again.
         var known = new Dictionary<Guid, DocumentNarrowingRow>();
 
         var input = rows.Distinct().ToList();
@@ -224,19 +228,14 @@ internal static class ExternalDocumentNarrowing
             Step(row, row, hop: 0, visited);
         }
 
+        var hopLevels = 0;
         for (var hop = 1; hop <= MaxHops && pending.Count > 0; hop++)
         {
             var unread = pending.Values.Select(p => p.Next).Where(id => !known.ContainsKey(id)).Distinct().ToList();
-            foreach (var chunk in unread.Chunk(ChunkSize))
-            {
-                var asked = chunk.ToHashSet();
-                var found = await query(DocumentSet, HopQuery(chunk), ct).ConfigureAwait(false);
-                foreach (var parent in found.Select(r => FromWebApi(IdOf(r), r)))
-                {
-                    if (asked.Contains(parent.DocumentId))
-                        known.TryAdd(parent.DocumentId, parent); // only what was asked: an answer for another id is ignored
-                }
-            }
+            if (unread.Count > 0)
+                hopLevels++;
+            foreach (var parent in await ReadDocumentsByIdAsync(unread, query, ct).ConfigureAwait(false))
+                known.TryAdd(parent.DocumentId, parent);
 
             var current = pending;
             pending = new Dictionary<DocumentNarrowingRow, (Guid Next, HashSet<Guid> Visited)>();
@@ -256,11 +255,13 @@ internal static class ExternalDocumentNarrowing
         foreach (var subject in pending.Keys)
             decided[subject] = DocumentNarrowingReason.ChainTooLong;
 
-        if (communicationOf.Count > 0)
+        // The communication leg, for the subjects whose whole walk passed (a hidden walk needs no communication read).
+        var linked = communicationOf.Where(kv => !decided.ContainsKey(kv.Key)).ToList();
+        if (linked.Count > 0)
         {
             var visible = await CommunicationOpenThreadGate.ReadVisibleCommunicationIdsAsync(
-                communicationOf.Values, query, ct).ConfigureAwait(false);
-            foreach (var (subject, communicationId) in communicationOf)
+                linked.Select(kv => kv.Value), query, ct).ConfigureAwait(false);
+            foreach (var (subject, communicationId) in linked)
             {
                 decided[subject] = visible.Contains(communicationId)
                     ? DocumentNarrowingReason.Visible
@@ -268,9 +269,10 @@ internal static class ExternalDocumentNarrowing
             }
         }
 
-        return new DocumentNarrowingResult(decided, faulted: false);
+        return new DocumentNarrowingResult(decided, faulted: false, counter.Cost(input.Count, hopLevels));
 
-        // One node of a subject's chain: the subject itself (hop 0) or the ancestor reached at `hop`.
+        // One node of a subject's chain: the subject itself (hop 0) or the ancestor reached at `hop`. The ancestor leg checks
+        // EVERY node to the top of the chain; the communication leg takes the FIRST link found.
         void Step(DocumentNarrowingRow subject, DocumentNarrowingRow node, int hop, HashSet<Guid> visited)
         {
             if (hop > 0 && node.Own != DocumentPermission.NotNarrowed)
@@ -281,21 +283,24 @@ internal static class ExternalDocumentNarrowing
                 return;
             }
 
-            if (node.Communication == UnreadableLink)
+            if (!communicationOf.ContainsKey(subject))
             {
-                decided[subject] = DocumentNarrowingReason.LinkUnreadable;
-                return;
-            }
+                if (node.Communication == UnreadableLink)
+                {
+                    decided[subject] = DocumentNarrowingReason.LinkUnreadable;
+                    return;
+                }
 
-            if (node.Communication != Guid.Empty)
-            {
-                communicationOf[subject] = node.Communication; // the first link found decides
-                return;
+                if (node.Communication != Guid.Empty)
+                    communicationOf[subject] = node.Communication; // the first link found decides the communication leg
             }
 
             if (node.Parent == Guid.Empty)
             {
-                decided[subject] = DocumentNarrowingReason.Visible; // no link anywhere in the chain
+                // The top of the chain, and no Restricted ancestor on the way. With no link anywhere the document is visible;
+                // with one, the communication leg decides it below.
+                if (!communicationOf.ContainsKey(subject))
+                    decided[subject] = DocumentNarrowingReason.Visible;
                 return;
             }
 
@@ -350,32 +355,94 @@ internal static class ExternalDocumentNarrowing
     }
 
     /// <summary>
-    /// For hits that carry no columns (the assistant's <c>dataverse.search_data</c>): reads the documents by id (batched,
-    /// <see cref="SelectColumns"/>), then decides them. A document that does not come back is not visible. A failed read
-    /// THROWS.
+    /// For the assistant's <c>dataverse.*</c> tools (through <see cref="AppOnlyDocumentNarrowing"/>): reads the documents by
+    /// id (batched, <see cref="SelectColumns"/>), then decides them, never on the columns the user's own read returned. A
+    /// document that does not come back is not visible. A failed read THROWS.
     /// </summary>
     internal static async Task<DocumentNarrowingResult> ReadAndDecideAsync(
         IEnumerable<Guid> documentIds, CommunicationOpenThreadGate.RowQuery query, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(documentIds);
         ArgumentNullException.ThrowIfNull(query);
-        var distinct = documentIds.Where(id => id != Guid.Empty).Distinct().ToList();
+        var counter = new ReadCounter();
+        var counted = counter.Wrap(query);
+        var distinct = documentIds.Where(id => id != Guid.Empty && id != UnreadableLink).Distinct().ToList();
+        var rows = await ReadDocumentsByIdAsync(distinct, counted, ct).ConfigureAwait(false);
+        return await DecideCoreAsync(rows, counted, counter, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The documents of <paramref name="ids"/> (distinct, none empty), read by primary key in OR-filter chunks of
+    /// <see cref="ChunkSize"/>, up to <see cref="CommunicationOpenThreadGate.MaxChunksInFlight"/> chunks at once. Only rows
+    /// whose id was asked come back (an answer for another id is ignored). A failed chunk THROWS.
+    /// </summary>
+    private static async Task<IReadOnlyList<DocumentNarrowingRow>> ReadDocumentsByIdAsync(
+        IReadOnlyList<Guid> ids, CommunicationOpenThreadGate.RowQuery query, CancellationToken ct)
+    {
+        var chunks = await CommunicationOpenThreadGate.ReadChunksAsync(
+            ids, (chunk, c) => query(DocumentSet, HopQuery(chunk), c), ct).ConfigureAwait(false);
         var rows = new List<DocumentNarrowingRow>();
-        foreach (var chunk in distinct.Chunk(ChunkSize))
+        foreach (var (chunk, found) in chunks)
         {
             var asked = chunk.ToHashSet();
-            var found = await query(DocumentSet, HopQuery(chunk), ct).ConfigureAwait(false);
             rows.AddRange(found.Select(r => FromWebApi(IdOf(r), r)).Where(r => asked.Contains(r.DocumentId)));
         }
 
-        return await DecideAsync(rows, query, ct).ConfigureAwait(false);
+        return rows;
     }
 
     private static Guid IdOf(IReadOnlyDictionary<string, JsonElement> row) =>
         row.TryGetValue(DocumentPkField, out var v) && v.ValueKind == JsonValueKind.String && Guid.TryParse(v.GetString(), out var id)
             ? id
             : Guid.Empty;
+
+    /// <summary>Counts the reads one decision makes, by entity set (chunks may run concurrently).</summary>
+    private sealed class ReadCounter
+    {
+        private int _documents;
+        private int _communications;
+        private int _threads;
+
+        internal CommunicationOpenThreadGate.RowQuery Wrap(CommunicationOpenThreadGate.RowQuery query) =>
+            (entitySet, odata, ct) =>
+            {
+                switch (entitySet)
+                {
+                    case DocumentSet: Interlocked.Increment(ref _documents); break;
+                    case CommunicationOpenThreadGate.CommunicationSet: Interlocked.Increment(ref _communications); break;
+                    case CommunicationOpenThreadGate.ThreadSet: Interlocked.Increment(ref _threads); break;
+                }
+
+                return query(entitySet, odata, ct);
+            };
+
+        internal DocumentNarrowingCost Cost(int rows, int hopLevels) =>
+            new(rows, hopLevels, Volatile.Read(ref _documents), Volatile.Read(ref _communications), Volatile.Read(ref _threads));
+    }
 }
+
+/// <summary>
+/// What one narrowing decision read (task 188 cost line): the rows decided, the hop levels that needed a read, and the
+/// requests per entity set. Counts only (ADR-015).
+/// </summary>
+internal readonly record struct DocumentNarrowingCost(int Rows, int HopLevels, int DocumentReads, int CommunicationReads, int ThreadReads)
+{
+    /// <summary>Every request the decision made.</summary>
+    internal int Reads => DocumentReads + CommunicationReads + ThreadReads;
+}
+
+/// <summary>
+/// Task 188 (main-session decision 2026-10-20): THE document narrowing for the assistant's <c>dataverse.*</c> tools — the
+/// documents <paramref name="documentIds"/> re-read by id and decided under the BFF's APP-ONLY identity (the external
+/// plane's reader, <see cref="ExternalDataService.ReadAndNarrowDocumentsAsync"/>), so a column field security masks for
+/// the user can never read as "no link". It returns only the decision (no row data reaches the caller), and a failed read
+/// THROWS (the tool call fails with no data). Registered by <c>AddExternalAccess</c>.
+/// </summary>
+/// <remarks>
+/// The one app-only dependency of the read tools, narrow by construction (the shape of owner rounds 7 and 8 for the write
+/// tools): a delegate, so nothing else of the app-only reader can be reached through it.
+/// </remarks>
+public delegate Task<DocumentNarrowingResult> AppOnlyDocumentNarrowing(IReadOnlyCollection<Guid> documentIds, CancellationToken ct);
 
 /// <summary>A document's own Access Permission as the narrowing reads it.</summary>
 internal enum DocumentPermission
@@ -419,15 +486,19 @@ internal enum DocumentNarrowingReason
 /// The narrowing's answer for one request (<see cref="ExternalDocumentNarrowing.DecideAsync"/>). A document it was not
 /// asked about is NOT visible.
 /// </summary>
-internal sealed class DocumentNarrowingResult
+/// <remarks>Public only so the <see cref="AppOnlyDocumentNarrowing"/> delegate the public tool handlers take can name it;
+/// every member is internal.</remarks>
+public sealed class DocumentNarrowingResult
 {
     private readonly IReadOnlyDictionary<DocumentNarrowingRow, DocumentNarrowingReason> _byRow;
     private readonly Dictionary<Guid, DocumentNarrowingReason> _byId = new();
 
-    internal DocumentNarrowingResult(IReadOnlyDictionary<DocumentNarrowingRow, DocumentNarrowingReason> decided, bool faulted)
+    internal DocumentNarrowingResult(
+        IReadOnlyDictionary<DocumentNarrowingRow, DocumentNarrowingReason> decided, bool faulted, DocumentNarrowingCost cost = default)
     {
         _byRow = decided;
         Faulted = faulted;
+        Cost = cost;
         // By id: an id is visible only when every row read for it is (two different reads of one document cannot open it).
         foreach (var (row, reason) in decided)
         {
@@ -451,6 +522,9 @@ internal sealed class DocumentNarrowingResult
 
     /// <summary><c>true</c> when the read failed (as opposed to a document the rule hides).</summary>
     internal bool Faulted { get; }
+
+    /// <summary>What the decision read (zero for a decision that made no read, or one that failed).</summary>
+    internal DocumentNarrowingCost Cost { get; }
 
     /// <summary>Whether <paramref name="row"/> (one of the rows decided) is visible. A row not decided is not.</summary>
     internal bool IsVisible(DocumentNarrowingRow row) => ReasonFor(row) == DocumentNarrowingReason.Visible;

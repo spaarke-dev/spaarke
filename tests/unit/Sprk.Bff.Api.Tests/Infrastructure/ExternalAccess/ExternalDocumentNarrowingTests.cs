@@ -14,7 +14,8 @@ namespace Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess;
 /// <see cref="ExternalDocumentNarrowing"/>, driven over an in-memory Dataverse that answers each by-key read from seeded rows
 /// and projects them through the query's own <c>$select</c> (a column the predicate does not select reads as absent). Each
 /// leg has a must-fire test (hidden) and the legs share must-not-fire tests (visible); the task's mutation table names the
-/// test that fails when a leg is removed.
+/// test that fails when a leg is removed. The ancestor leg checks every ancestor on the bounded walk; the communication leg
+/// takes the first link (main-session decision, 2026-10-20).
 /// </summary>
 [Trait("category", "external-access")]
 [Trait("status", "repaired")]
@@ -341,20 +342,95 @@ public sealed class ExternalDocumentNarrowingTests
         (await Decide(attachment)).IsVisible(attachment).Should().BeTrue();
     }
 
-    /// <summary>
-    /// The walk stops at the FIRST link (design §6.1 rule 3), so ancestors above a linked document are not visited and their
-    /// value is not read (the scope addition rides on that walk with no extra read). No writer sets both
-    /// <c>sprk_relatedcommunication</c> and <c>sprk_parentdocument</c> on one document (task 188 notes); this pins the
-    /// shape so a change to "always walk the ancestors" is a visible, deliberate one.
-    /// </summary>
+    // ── Leg 3 checks EVERY ancestor, the communication leg takes the FIRST link (main-session decision, 2026-10-20) ──
+
     [Fact]
-    public async Task ADocumentWithItsOwnVisibleLink_IsDecidedByThatLink_ItsAncestorsAreNotVisited()
+    public async Task ADocumentWithItsOwnVisibleLink_UnderARestrictedParentEml_IsHidden()
     {
         var eml = _world.Document(permission: Restricted);
         var doc = Row(Guid.NewGuid(), communication: _world.VisibleCommunication(), parent: eml);
 
+        (await Decide(doc)).ReasonFor(doc).Should().Be(DocumentNarrowingReason.AncestorRestricted,
+            "a Restricted ancestor anywhere on the walk hides the document, its own visible link notwithstanding");
+        _world.ReadsOf("sprk_documents").Should().ContainSingle("the walk continues past the document's own link");
+        _world.ReadsOf("sprk_communications").Should().BeEmpty("a walk that hid the document needs no communication read");
+    }
+
+    [Fact]
+    public async Task ADocumentWithItsOwnVisibleLink_UnderARestrictedGrandparent_IsHidden()
+    {
+        var grandparent = _world.Document(permission: Restricted);
+        var parent = _world.Document(communication: _world.VisibleCommunication(), parent: grandparent);
+        var doc = Row(Guid.NewGuid(), communication: _world.VisibleCommunication(), parent: parent);
+
+        (await Decide(doc)).ReasonFor(doc).Should().Be(DocumentNarrowingReason.AncestorRestricted);
+        _world.ReadsOf("sprk_documents").Should().HaveCount(2, "one batched read per hop level, to the top of the chain");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(Standard)]
+    [InlineData(Limited)]
+    public async Task ADocumentWithItsOwnVisibleLink_UnderAStandardParent_IsVisible_TheParentIsRead(int? parentPermission)
+    {
+        var eml = _world.Document(permission: parentPermission);
+        var doc = Row(Guid.NewGuid(), communication: _world.VisibleCommunication(), parent: eml);
+
         (await Decide(doc)).IsVisible(doc).Should().BeTrue();
-        _world.ReadsOf("sprk_documents").Should().BeEmpty();
+        _world.ReadsOf("sprk_documents").Should().ContainSingle();
+    }
+
+    /// <summary>
+    /// The recorded trade-off (main-session decision, 2026-10-20): the ancestor leg cannot be decided past
+    /// <see cref="ExternalDocumentNarrowing.MaxHops"/>, so a chain that needs a fourth hop hides the document even when its
+    /// own link is visible.
+    /// </summary>
+    [Fact]
+    public async Task ADocumentWithItsOwnVisibleLink_AndAChainThatNeedsAFourthHop_IsHidden()
+    {
+        var p4 = _world.Document();
+        var p3 = _world.Document(parent: p4);
+        var p2 = _world.Document(parent: p3);
+        var p1 = _world.Document(parent: p2);
+        var doc = Row(Guid.NewGuid(), communication: _world.VisibleCommunication(), parent: p1);
+
+        (await Decide(doc)).ReasonFor(doc).Should().Be(DocumentNarrowingReason.ChainTooLong);
+        _world.ReadsOf("sprk_documents").Should().HaveCount(3, "the walk never reads a fourth ancestor");
+    }
+
+    [Fact]
+    public async Task ADocumentWithItsOwnVisibleLink_InACycle_IsHidden()
+    {
+        var a = Guid.NewGuid();
+        var b = _world.Document(parent: a);
+        _world.Document(id: a, parent: b);
+        var doc = Row(a, communication: _world.VisibleCommunication(), parent: b);
+
+        (await Decide(doc)).ReasonFor(doc).Should().Be(DocumentNarrowingReason.Cycle);
+    }
+
+    [Fact]
+    public async Task ADocumentWithItsOwnInternalOnlyLink_UnderAParentLinkedToAVisibleCommunication_IsHidden()
+    {
+        var eml = _world.Document(communication: _world.VisibleCommunication());
+        var doc = Row(Guid.NewGuid(), communication: _world.Communication(internalOnly: true, _world.Thread(Open)), parent: eml);
+
+        (await Decide(doc)).ReasonFor(doc).Should().Be(DocumentNarrowingReason.CommunicationHidden,
+            "the document's own link is the first link: it decides the communication leg");
+    }
+
+    [Fact]
+    public async Task ADocumentWithItsOwnVisibleLink_UnderAParentLinkedToAnInternalOnlyCommunication_IsVisible()
+    {
+        var internalOnly = _world.Communication(internalOnly: true, _world.Thread(Open));
+        var own = _world.VisibleCommunication();
+        var eml = _world.Document(communication: internalOnly);
+        var doc = Row(Guid.NewGuid(), communication: own, parent: eml);
+
+        (await Decide(doc)).IsVisible(doc).Should().BeTrue(
+            "the communication leg is unchanged: the FIRST link decides, an ancestor's link is not consulted");
+        _world.ReadsOf("sprk_communications").Should().ContainSingle()
+            .Which.Should().Contain(own.ToString("D")).And.NotContain(internalOnly.ToString("D"));
     }
 
     // ── Batching, reuse, faults ────────────────────────────────────────────────────────────────────────────
@@ -387,6 +463,74 @@ public sealed class ExternalDocumentNarrowingTests
         _world.ReadsOf("sprk_documents").Should().HaveCount(3, "120 distinct parents in chunks of 50");
         _world.ReadsOf("sprk_communications").Should().ContainSingle("one distinct communication");
         _world.ReadsOf("sprk_communicationthreads").Should().ContainSingle();
+        result.Cost.Should().Be(new DocumentNarrowingCost(Rows: 120, HopLevels: 1, DocumentReads: 3, CommunicationReads: 1, ThreadReads: 1),
+            "the cost line reports what was read");
+    }
+
+    [Fact]
+    public async Task ADecisionThatReadsNothing_CostsNothing()
+    {
+        var result = await Decide(Row(Guid.NewGuid()), Row(Guid.NewGuid(), permission: Restricted));
+
+        result.Cost.Should().Be(new DocumentNarrowingCost(Rows: 2, HopLevels: 0, DocumentReads: 0, CommunicationReads: 0, ThreadReads: 0));
+        result.Cost.Reads.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task TheChunksOfOneLevel_AreReadConcurrently_UpToTheCap()
+    {
+        // 5 chunks of parents. Every read is held until the test releases it: the cap's worth must start at once (read one
+        // after another, only one ever would), and while they are held a 5th must not start (with no cap, it would).
+        var cap = CommunicationOpenThreadGate.MaxChunksInFlight;
+        var rows = Enumerable.Range(0, 5 * ExternalDocumentNarrowing.ChunkSize)
+            .Select(_ => Row(Guid.NewGuid(), parent: _world.Document()))
+            .ToArray();
+        var sync = new object();
+        var inFlight = 0;
+        var peak = 0;
+        var capReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        async Task<IReadOnlyList<Dictionary<string, JsonElement>>> Gated(string set, string odata, CancellationToken ct)
+        {
+            lock (sync)
+            {
+                inFlight++;
+                peak = Math.Max(peak, inFlight);
+                if (inFlight >= cap)
+                    capReached.TrySetResult();
+            }
+
+            try
+            {
+                await release.Task.WaitAsync(ct);
+                return await _world.Query(set, odata, ct);
+            }
+            finally
+            {
+                lock (sync) inFlight--;
+            }
+        }
+
+        var decision = ExternalDocumentNarrowing.DecideAsync(rows, Gated, CancellationToken.None);
+        try
+        {
+            var started = await Task.WhenAny(capReached.Task, Task.Delay(TimeSpan.FromSeconds(10)));
+            started.Should().BeSameAs(capReached.Task, "the chunks of one level are read at once, not one after another");
+            await Task.Delay(TimeSpan.FromMilliseconds(300)); // room for a read past the cap to start, were the cap absent or wider
+            lock (sync)
+                peak.Should().Be(cap, $"at most {cap} chunks are in flight at once");
+        }
+        finally
+        {
+            release.TrySetResult();
+        }
+
+        var result = await decision;
+
+        rows.Should().OnlyContain(r => result.IsVisible(r));
+        peak.Should().Be(cap);
+        _world.ReadsOf("sprk_documents").Should().HaveCount(5);
     }
 
     [Fact]
@@ -461,6 +605,9 @@ public sealed class ExternalDocumentNarrowingTests
         result.ReasonFor(restricted).Should().Be(DocumentNarrowingReason.OwnRestricted);
         result.ReasonFor(underInternalOnly).Should().Be(DocumentNarrowingReason.CommunicationHidden);
         result.IsVisible(missing).Should().BeFalse();
+        result.Cost.Should().Be(new DocumentNarrowingCost(Rows: 3, HopLevels: 1, DocumentReads: 2, CommunicationReads: 1, ThreadReads: 0),
+            "the by-id read of the hits is a document read; one hop level read the .eml; an internal-only communication needs no " +
+            "thread read");
     }
 
     // ── Row parsing ────────────────────────────────────────────────────────────────────────────────────────
@@ -549,7 +696,12 @@ public sealed class ExternalDocumentNarrowingTests
             ["sprk_communicationthreads"] = ("sprk_communicationthreadid", new()),
         };
 
-        public List<(string Set, string OData)> Reads { get; } = new();
+        private readonly List<(string Set, string OData)> _reads = new();
+
+        public IReadOnlyList<(string Set, string OData)> Reads
+        {
+            get { lock (_reads) return _reads.ToList(); }
+        }
 
         /// <summary>An entity set whose reads throw.</summary>
         public string? Fault { get; set; }
@@ -558,7 +710,7 @@ public sealed class ExternalDocumentNarrowingTests
 
         public Task<IReadOnlyList<Dictionary<string, JsonElement>>> Query(string set, string odata, CancellationToken ct)
         {
-            Reads.Add((set, odata));
+            lock (_reads) _reads.Add((set, odata));
             if (set == Fault)
                 throw new InvalidOperationException($"read of {set} failed");
 

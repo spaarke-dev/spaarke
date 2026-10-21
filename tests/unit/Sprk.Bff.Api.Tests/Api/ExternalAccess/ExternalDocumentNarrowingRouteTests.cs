@@ -61,6 +61,8 @@ public sealed class ExternalDocumentNarrowingRouteTests : IClassFixture<External
         "grandparent-restricted",
         "four-hop-chain",
         "cycle",
+        "own-visible-link-under-restricted-eml",
+        "own-visible-link-four-hop-chain",
     };
 
     /// <summary>Every case the predicate leaves visible (the task's must-not-fire list).</summary>
@@ -70,6 +72,8 @@ public sealed class ExternalDocumentNarrowingRouteTests : IClassFixture<External
         "no-link-standard",
         "standard-parent-no-link",
         "parent-eml-visible-communication",
+        "own-visible-link-standard-parent",
+        "own-visible-link-parent-eml-internal-only",
     };
 
     public static TheoryData<string, string> HiddenCasesByRoute => Cross(HiddenCases);
@@ -311,6 +315,109 @@ public sealed class ExternalDocumentNarrowingRouteTests : IClassFixture<External
         identity.Verify(i => i.IsExternalAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    // ── The assistant's seam (main-session decision 2026-10-20) ─────────────────────────────────────────────
+
+    /// <summary>
+    /// <c>AddExternalAccess</c> registers the assistant tools' <see cref="AppOnlyDocumentNarrowing"/> over the external
+    /// plane's app-only reader: the documents are re-read BY ID through <see cref="ExternalDataService"/> (whose client is the
+    /// fake here) and decided there.
+    /// </summary>
+    [Fact]
+    public async Task TheAssistantsNarrowing_IsRegistered_OverTheAppOnlyReader()
+    {
+        var appOnly = new ExternalRootEventReadTests.FakeDataverse();
+        var restricted = Guid.NewGuid();
+        var underRestricted = Guid.NewGuid();
+        var plain = Guid.NewGuid();
+        appOnly.AddAncestorDocument(restricted, Restricted, communication: null, parent: null);
+        appOnly.AddAncestorDocument(underRestricted, accessPermission: null, communication: null, parent: restricted);
+        appOnly.AddAncestorDocument(plain, accessPermission: null, communication: null, parent: null);
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://org.test" })
+            .Build());
+        services.AddSingleton<Azure.Core.TokenCredential>(new ExternalRecordDocumentRoutesTests.InMemoryExternalDataService.TestCredential());
+        services.AddExternalAccess();
+        services.AddHttpClient<ExternalDataService>().ConfigurePrimaryHttpMessageHandler(() => appOnly);
+        await using var provider = services.BuildServiceProvider();
+        await using var scope = provider.CreateAsyncScope();
+
+        var narrowing = await scope.ServiceProvider.GetRequiredService<AppOnlyDocumentNarrowing>()(
+            new[] { restricted, underRestricted, plain }, CancellationToken.None);
+
+        narrowing.IsVisible(plain).Should().BeTrue();
+        narrowing.ReasonFor(restricted).Should().Be(DocumentNarrowingReason.OwnRestricted);
+        narrowing.ReasonFor(underRestricted).Should().Be(DocumentNarrowingReason.AncestorRestricted);
+        appOnly.KeyReads("sprk_documents").Should().ContainSingle("the documents by id; the parent came back with them");
+    }
+
+    [Fact]
+    public async Task TheAssistantsNarrowing_LogsOneCostLine_IdsNeverLogged()
+    {
+        var appOnly = new ExternalRootEventReadTests.FakeDataverse();
+        var logger = new CapturingLogger();
+        var eml = Guid.NewGuid();
+        var attachment = Guid.NewGuid();
+        appOnly.AddAncestorDocument(eml, Restricted, communication: null, parent: null);
+        appOnly.AddAncestorDocument(attachment, accessPermission: null, communication: null, parent: eml);
+        var service = new ExternalDataService(
+            new HttpClient(appOnly),
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://org.test" })
+                .Build(),
+            new ExternalRecordDocumentRoutesTests.InMemoryExternalDataService.TestCredential(),
+            logger);
+
+        await service.ReadAndNarrowDocumentsAsync(new[] { attachment }, CancellationToken.None);
+
+        logger.Lines.Should().ContainSingle(l => l.Contains("[EXT-NARROWING] cost")).Which.Should()
+            .Contain("plane=assistant").And.Contain("rows=1").And.Contain("hidden=1").And.Contain("hopLevels=1")
+            .And.Contain("documentReads=2").And.Contain("communicationReads=0").And.Contain("threadReads=0")
+            .And.NotContain(attachment.ToString()).And.NotContain(eml.ToString());
+    }
+
+    [Fact]
+    public async Task TheExternalPlane_LogsOneCostLinePerRequest()
+    {
+        var logger = new CapturingLogger();
+        var eml = Ancestor(permission: Restricted);
+        var service = new ExternalDataService(
+            new HttpClient(_fixture.Data),
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://org.test" })
+                .Build(),
+            new ExternalRecordDocumentRoutesTests.InMemoryExternalDataService.TestCredential(),
+            logger);
+        var rows = new[]
+        {
+            new DocumentNarrowingRow(Guid.NewGuid(), DocumentPermission.NotNarrowed, Guid.Empty, eml),
+            new DocumentNarrowingRow(Guid.NewGuid(), DocumentPermission.NotNarrowed, Guid.Empty, Guid.Empty),
+        };
+
+        await service.NarrowDocumentsAsync(Reader(P), rows);
+
+        logger.Lines.Should().ContainSingle(l => l.Contains("[EXT-NARROWING] cost")).Which.Should()
+            .Contain("plane=external").And.Contain("rows=2").And.Contain("hidden=1").And.Contain("documentReads=1")
+            .And.NotContain(eml.ToString());
+    }
+
+    /// <summary>Records every formatted line at every level (the cost line is Debug below the threshold).</summary>
+    private sealed class CapturingLogger : Microsoft.Extensions.Logging.ILogger<ExternalDataService>
+    {
+        private readonly System.Collections.Concurrent.ConcurrentQueue<string> _lines = new();
+
+        public IReadOnlyList<string> Lines => _lines.ToList();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId,
+            TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            _lines.Enqueue(formatter(state, exception));
+    }
+
     // ── Seeding ──────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>Seeds one case's document (under <see cref="P"/>) and whatever its chain needs; returns its id.</summary>
@@ -352,6 +459,20 @@ public sealed class ExternalDocumentNarrowingRouteTests : IClassFixture<External
                 return Doc(@case, parent: Ancestor(permission: Standard));
             case "parent-eml-visible-communication":
                 return Doc(@case, parent: Ancestor(communication: Communication(internalOnly: false, ThreadPrivacyState.Open)));
+            // Main-session decision 2026-10-20: the ancestor leg checks EVERY ancestor (past the document's own link); the
+            // communication leg takes the FIRST link; a chain past the bound fails closed even under an own visible link.
+            case "own-visible-link-under-restricted-eml":
+                return Doc(@case, communication: Communication(internalOnly: false, ThreadPrivacyState.Open),
+                    parent: Ancestor(permission: Restricted));
+            case "own-visible-link-four-hop-chain":
+                return Doc(@case, communication: Communication(internalOnly: false, ThreadPrivacyState.Open),
+                    parent: Ancestor(parent: Ancestor(parent: Ancestor(parent: Ancestor()))));
+            case "own-visible-link-standard-parent":
+                return Doc(@case, communication: Communication(internalOnly: false, ThreadPrivacyState.Open),
+                    parent: Ancestor(permission: Standard));
+            case "own-visible-link-parent-eml-internal-only":
+                return Doc(@case, communication: Communication(internalOnly: false, ThreadPrivacyState.Open),
+                    parent: Ancestor(communication: Communication(internalOnly: true, ThreadPrivacyState.Open)));
             default:
                 throw new ArgumentOutOfRangeException(nameof(@case), @case, null);
         }

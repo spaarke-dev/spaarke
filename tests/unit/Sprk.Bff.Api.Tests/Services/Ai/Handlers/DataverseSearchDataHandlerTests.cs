@@ -37,6 +37,9 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
     private readonly Mock<ICallerSystemUserResolver> _callerResolver = new();
     private readonly Mock<ISystemUserIdentityResolver> _identityResolver = new();
 
+    /// <summary>Task 188: what the BFF reads APP-ONLY when it decides an external caller's document hits.</summary>
+    private readonly AppOnlyDocumentWorld _appOnly = new();
+
     public DataverseSearchDataHandlerTests()
     {
         // Default caller: a resolved INTERNAL systemuser (sprk_isexternal not true).
@@ -50,7 +53,7 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
 
     private DataverseSearchDataHandler CreateHandler() =>
         new(_dataverse.Object, CreateLogger<DataverseSearchDataHandler>(), _httpContextAccessor,
-            _callerResolver.Object, _identityResolver.Object);
+            _callerResolver.Object, _identityResolver.Object, _appOnly.Narrowing);
 
     private void AsExternalCaller() =>
         _identityResolver
@@ -609,51 +612,39 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
         return captured;
     }
 
-    private void SetupDocumentVisibilityReads(out List<string> documentReads, out List<string> communicationReads)
+    /// <summary>
+    /// Task 188: the app-only truth for the document hits (the narrowing reads them by id APP-ONLY, never through the user's
+    /// client). DocNotReturned is not seeded (fail closed); CommUnreadable is not seeded (unreadable or deleted).
+    /// </summary>
+    private void SeedAppOnlyDocuments()
     {
-        // DocNotReturned is absent from the document read (fail closed); CommUnreadable is absent from the
-        // communication read (unreadable or deleted).
-        documentReads = CaptureGets("sprk_documents?", $$"""
-            {
-              "value": [
-                { "sprk_documentid": "{{DocNoComm:D}}", "_sprk_relatedcommunication_value": null },
-                { "sprk_documentid": "{{DocShared:D}}", "_sprk_relatedcommunication_value": "{{CommShared:D}}" },
-                { "sprk_documentid": "{{DocInternal:D}}", "_sprk_relatedcommunication_value": "{{CommInternal:D}}" },
-                { "sprk_documentid": "{{DocUnreadableComm:D}}", "_sprk_relatedcommunication_value": "{{CommUnreadable:D}}" }
-              ]
-            }
-            """);
-        communicationReads = CaptureGets("sprk_communications?", $$"""
-            {
-              "value": [
-                { "sprk_communicationid": "{{CommShared:D}}", "sprk_isinternalonly": false, "_sprk_communicationthread_value": "{{ThreadOpen:D}}" },
-                { "sprk_communicationid": "{{CommInternal:D}}", "sprk_isinternalonly": true, "_sprk_communicationthread_value": "{{ThreadOpen:D}}" }
-              ]
-            }
-            """);
-        CaptureGets("sprk_communicationthreads?", $$"""
-            { "value": [ { "sprk_communicationthreadid": "{{ThreadOpen:D}}", "sprk_privacystate": 100000000 } ] }
-            """);
+        _appOnly.Document(DocNoComm);
+        _appOnly.Document(DocShared, communication: CommShared);
+        _appOnly.Document(DocInternal, communication: CommInternal);
+        _appOnly.Document(DocUnreadableComm, communication: CommUnreadable);
+        _appOnly.Thread(ThreadOpen, 100000000);
+        _appOnly.Communication(CommShared, internalOnly: false, ThreadOpen);
+        _appOnly.Communication(CommInternal, internalOnly: true, ThreadOpen);
     }
 
     [Fact]
-    public async Task ExecuteChatAsync_ExternalCallerDocumentHits_DropsDocumentsWhoseRelatedCommunicationFailsRule()
+    public async Task ExecuteChatAsync_ExternalCallerDocumentHits_DropsDocumentsWhoseRelatedCommunicationFailsRule_DecidedAppOnly()
     {
         AsExternalCaller();
         CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(DocumentHitsJson)));
-        SetupDocumentVisibilityReads(out var documentReads, out var communicationReads);
+        SeedAppOnlyDocuments();
 
         var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"query":"contoso"}""");
         var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
 
         result.Success.Should().BeTrue(result.ErrorMessage);
-        // Task 188: the hit documents are read with the columns THE external document predicate reads.
-        documentReads.Should().ContainSingle().Which.Should().Be(
+        _appOnly.Reads("sprk_documents").Should().ContainSingle().Which.Should().EndWith(
             "sprk_documents?$select=sprk_documentid,sprk_accesspermission,_sprk_relatedcommunication_value,_sprk_parentdocument_value" +
             $"&$filter=sprk_documentid eq {DocNoComm:D} or sprk_documentid eq {DocShared:D} or sprk_documentid eq {DocInternal:D} or " +
             $"sprk_documentid eq {DocNotReturned:D} or sprk_documentid eq {DocUnreadableComm:D}&$top=5",
-            because: "ONE batched read of the document hits' related communication");
-        communicationReads.Should().ContainSingle();
+            because: "ONE batched by-id read of the document hits, with the predicate's columns, APP-ONLY");
+        _appOnly.Reads("sprk_communications").Should().ContainSingle();
+        DocumentNarrowingReads.VerifyNoNarrowingReadAsTheUser(_dataverse);
         result.Data!.Value.GetProperty("results").EnumerateArray()
             .Select(r => r.GetProperty("recordId").GetString())
             .Should().Equal(new[] { MatterHit.ToString("D"), DocNoComm.ToString("D"), DocShared.ToString("D") },
@@ -668,6 +659,28 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
     }
 
     [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerDocumentHit_TheUsersReadWouldShowNoLink_AppOnlyReadsAnInternalOnlyCommunication_Dropped()
+    {
+        AsExternalCaller();
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson($$"""
+            { "value": [ { "entityname": "sprk_document", "objectid": "{{DocInternal:D}}" } ] }
+            """)));
+        SeedAppOnlyDocuments();
+        // Were the narrowing to read through the user's client, field security would hand it a null link.
+        CaptureGets("sprk_documents?", $$"""
+            { "value": [ { "sprk_documentid": "{{DocInternal:D}}", "_sprk_relatedcommunication_value": null } ] }
+            """);
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"query":"contoso"}""");
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.Data!.Value.GetProperty("results").EnumerateArray().Should().BeEmpty(
+            "the app-only read sees the internal-only communication: the hit is dropped");
+        DocumentNarrowingReads.VerifyNoNarrowingReadAsTheUser(_dataverse);
+    }
+
+    [Fact]
     public async Task ExecuteChatAsync_ExternalCallerDocumentHitWithUnreadableRelatedCommunicationLink_Dropped()
     {
         AsExternalCaller();
@@ -679,14 +692,8 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
               ]
             }
             """)));
-        CaptureGets("sprk_documents?", $$"""
-            {
-              "value": [
-                { "sprk_documentid": "{{DocNoComm:D}}", "_sprk_relatedcommunication_value": null },
-                { "sprk_documentid": "{{DocShared:D}}", "_sprk_relatedcommunication_value": "not-a-guid" }
-              ]
-            }
-            """);
+        _appOnly.Document(DocNoComm);
+        _appOnly.Document(DocShared, rawCommunication: "not-a-guid");
 
         var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"query":"contoso"}""");
         var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
@@ -696,7 +703,7 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
             .Select(r => r.GetProperty("recordId").GetString())
             .Should().Equal(new[] { DocNoComm.ToString("D") },
                 because: "a link that is present but not a usable id hides the hit (fail closed)");
-        _dataverse.Verify(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_communications?")), It.IsAny<CancellationToken>()), Times.Never);
+        _appOnly.Reads("sprk_communications").Should().BeEmpty();
     }
 
     [Fact]
@@ -704,9 +711,8 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
     {
         AsExternalCaller();
         CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(DocumentHitsJson)));
-        _dataverse
-            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_documents?")), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DataverseUserResponse.Fail(500, DataverseUserClientErrorCodes.ServiceError, "Server error."));
+        SeedAppOnlyDocuments();
+        _appOnly.Faults["sprk_documents"] = System.Net.HttpStatusCode.InternalServerError;
 
         var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"query":"contoso"}""");
         var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
@@ -728,6 +734,7 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
         result.Data!.Value.GetProperty("count").GetInt32().Should().Be(6);
         _dataverse.Verify(d => d.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never,
             "an internal caller's search makes no extra Dataverse read");
+        _appOnly.Calls.Should().Be(0, "an internal caller is not narrowed");
     }
 
     // ── Task 188 (D7 T7, #2126): THE external document predicate in search_data ──
@@ -736,12 +743,10 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
     private static readonly Guid DocUnderRestrictedEml = Guid.Parse("d1880000-0000-0000-0000-000000000012");
     private static readonly Guid DocUnderInternalEml = Guid.Parse("d1880000-0000-0000-0000-000000000013");
     private static readonly Guid DocUnderStandardEml = Guid.Parse("d1880000-0000-0000-0000-000000000014");
+    private static readonly Guid DocOwnLinkUnderRestrictedEml = Guid.Parse("d1880000-0000-0000-0000-000000000015");
     private static readonly Guid EmlRestricted = Guid.Parse("e1880000-0000-0000-0000-000000000011");
     private static readonly Guid EmlInternal = Guid.Parse("e1880000-0000-0000-0000-000000000012");
     private static readonly Guid EmlStandard = Guid.Parse("e1880000-0000-0000-0000-000000000013");
-
-    private static string NarrowedDocRow(Guid id, int? permission = null, Guid? parent = null, Guid? communication = null) =>
-        $$"""{ "sprk_documentid": "{{id:D}}", "sprk_accesspermission": {{(permission?.ToString() ?? "null")}}, "_sprk_relatedcommunication_value": {{(communication is { } c ? $"\"{c:D}\"" : "null")}}, "_sprk_parentdocument_value": {{(parent is { } p ? $"\"{p:D}\"" : "null")}} }""";
 
     [Fact]
     public async Task ExecuteChatAsync_ExternalCallerDocumentHits_Task188_OwnOrParentRestrictedOrInternalOnlyParent_Dropped()
@@ -753,24 +758,20 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
                 { "entityname": "sprk_document", "objectid": "{{DocOwnRestricted:D}}" },
                 { "entityname": "sprk_document", "objectid": "{{DocUnderRestrictedEml:D}}" },
                 { "entityname": "sprk_document", "objectid": "{{DocUnderInternalEml:D}}" },
-                { "entityname": "sprk_document", "objectid": "{{DocUnderStandardEml:D}}" }
+                { "entityname": "sprk_document", "objectid": "{{DocUnderStandardEml:D}}" },
+                { "entityname": "sprk_document", "objectid": "{{DocOwnLinkUnderRestrictedEml:D}}" }
               ]
             }
             """)));
-        var documentReads = DocumentNarrowingReads.AnswerByKey(_dataverse, "sprk_documents", "sprk_documentid",
-            NarrowedDocRow(DocOwnRestricted, permission: 100000002),
-            NarrowedDocRow(DocUnderRestrictedEml, parent: EmlRestricted),
-            NarrowedDocRow(DocUnderInternalEml, parent: EmlInternal),
-            NarrowedDocRow(DocUnderStandardEml, parent: EmlStandard),
-            NarrowedDocRow(EmlRestricted, permission: 100000002),
-            NarrowedDocRow(EmlInternal, communication: CommInternal),
-            NarrowedDocRow(EmlStandard, permission: 100000000));
-        CaptureGets("sprk_communications?", $$"""
-            { "value": [ { "sprk_communicationid": "{{CommInternal:D}}", "sprk_isinternalonly": true, "_sprk_communicationthread_value": "{{ThreadOpen:D}}" } ] }
-            """);
-        CaptureGets("sprk_communicationthreads?", $$"""
-            { "value": [ { "sprk_communicationthreadid": "{{ThreadOpen:D}}", "sprk_privacystate": 100000000 } ] }
-            """);
+        SeedAppOnlyDocuments();
+        _appOnly.Document(DocOwnRestricted, permission: 100000002);
+        _appOnly.Document(DocUnderRestrictedEml, parent: EmlRestricted);
+        _appOnly.Document(DocUnderInternalEml, parent: EmlInternal);
+        _appOnly.Document(DocUnderStandardEml, parent: EmlStandard);
+        _appOnly.Document(DocOwnLinkUnderRestrictedEml, communication: CommShared, parent: EmlRestricted);
+        _appOnly.Document(EmlRestricted, permission: 100000002);
+        _appOnly.Document(EmlInternal, communication: CommInternal);
+        _appOnly.Document(EmlStandard, permission: 100000000);
 
         var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"query":"contoso"}""");
         var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
@@ -779,8 +780,10 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
         result.Data!.Value.GetProperty("results").EnumerateArray()
             .Select(r => r.GetProperty("recordId").GetString())
             .Should().Equal(new[] { DocUnderStandardEml.ToString("D") },
-                because: "own Restricted, a Restricted parent .eml and a parent .eml of an internal-only email hide the hit");
-        documentReads.Should().HaveCount(2, "the hits, then one batched read of their parents");
+                because: "own Restricted, a Restricted parent .eml (even under the hit's own visible link) and a parent .eml of " +
+                         "an internal-only email hide the hit");
+        _appOnly.Reads("sprk_documents").Should().HaveCount(2, "the hits, then one batched read of their parents");
+        DocumentNarrowingReads.VerifyNoNarrowingReadAsTheUser(_dataverse);
     }
 
     // ═════════════════════════════════════════════════════════════════════════════
