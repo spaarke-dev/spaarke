@@ -1755,3 +1755,16 @@ Main-session reading (not owner text):
    - **ebilling F1-e:** the internal file route refuses flagged-external callers for Procedure files, always. Rule/decision-record extracts that an external user may see are not affected. Invoice and export files stay reachable by the related external user (their own invoice); the relation that decides "their invoice" is for ebilling and SPA-r3 to define.
 2. **ebilling K1: all-or-nothing.** The email and its invoice PDF are filed together or not at all. A failed isolation re-run after commit undoes everything the submission created (invoice, lines, findings, Signal rows, the file), not just the bytes. A PDF is never accepted under a matter the email is not allowed under. The residual is only the seconds between commit and the re-run, and only where the transaction's document-row guard cannot catch the race.
 3. **Definition of internal-only confirmed (owner, round 113 follow-up):** (a) any record whose Access Permission is Restricted (Limited stays visible, round 111); (b) communications marked internal-only, and the documents attached to or derived from them; (c) all Procedure files. Tracked as task 191 (`tasks/191-d7-flagged-external-dataverse-enforcement.poml`); the owner asked that it stay active in the plan.
+
+## Round 114 (owner, 2026-10-21) — task 191 design questions (partial)
+
+Owner text, verbatim:
+
+> 1. option A means that we will have to explicitely add the law firm to every record they have access, is that correct? OR can the organization access permissions script auto set this? we want their access in model driven app to mirror what they would have in the SPA (and vice versa)-- they can see all records unless secure or restricted (unless for restricted they are added to the access list)
+> 2. if this is the only way - then 'yes'
+> 3. use the same rule so its consitent
+> 4. yes acceptable
+> 5. can use script and alert--but this seems a little risky; if only condition for bff mediated is user admin rights, doesn't the bff already have that?
+
+Decided: **Q3** internal-only passes down to records under or about a hidden record, using the SPA's exact rule. **Q4** the ~2-minute window for out-of-product changes is accepted.
+Open (main session answered with facts; owner to confirm): **Q1/Q2** the target is "MDA = SPA: a flagged-external user sees every record except secure (unless shared), Restricted (unless on the access list) and internal-only". **Q5** the BFF app user is System Administrator (`SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md:76-77`), so a BFF job can move users.
