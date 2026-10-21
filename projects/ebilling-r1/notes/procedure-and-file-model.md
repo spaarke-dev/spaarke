@@ -607,6 +607,11 @@ Unchanged at the core: the immutable policy version (clause and location), reaso
 - **Engineering — the guard's version bump.** Live proof that the source-document guard's write moves `versionnumber` is still outstanding (050a K1 note).
 - **ontology-r1 — extraction for AddedFee.** Whether extraction gives the fee kind and the due date decides whether "not allowed" and "after N days" ship.
 
+- **Owner + uac-r2 — derived rows from an already-isolated source (gap found by uac-r2, 2026-10-21).** v5 carries a Restricted, internal-only or Private-thread source's isolation onto the **Stored File only** (9.1 step 3). The invoice header, lines, approval and findings extracted from that source would still be readable by the core record's ordinary readers, and by flagged-external users, which conflicts with uac-r2 round 113 (no flagged-external user reaches an internal-only record). This differs from the owner-confirmed limit in 9.1, which is about a source that changes *after* submit. Options:
+  - **(a) Carry the isolation onto the invoice itself (recommended).** At commit, in the same transaction, the invoice takes the strictest isolation of its source; lines, approval and findings follow it as secure child rows. **Fact:** `sprk_invoice` has no Access Permission column today; the access-permission reconciler covers four tables (To Do, Event, Communication, Document; `ChildAccessPermissionReconciler.cs`). So (a) needs the column on `sprk_invoice` (and the reconciler's scope), and reviewers and approvers of such an invoice must be granted access explicitly.
+  - **(b) Refuse isolated sources at submit.** Simplest and fully safe, but reverses owner K.
+  - **(c) Accept the disclosure at submit.** Conflicts with round 113 for flagged-external users at least.
+
 ## 16. Review record
 
 **Fable review of v3 (`92fe0be17e`), 2026-10-21, owner-approved.** 13 must-fix items, all folded into v4: the version chain (7.2), "retired by a version" (7.2, 3.1), the Submit Invoice copy guard (9.1), access (5), record-rule drift (6.3), fail-closed reads, gaps and snapshot (7.1, 7.4), re-evaluation on publish (8.2), blob protections (4.2, 4.3), §11 answers (3.3), the rate-card firm (I-P3), the drafting key (7.2), delete ownership (I-P5), overlapping sources (6.5).
