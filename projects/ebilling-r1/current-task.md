@@ -19,7 +19,7 @@
 
 ### Open owner questions (raised by the re-plan POMLs' escalation triggers)
 None. All five answered 2026-10-21 (model §15 tail): Q1 email UI = new task 118 (toolbar Submit Invoice, flagged attachments via profile `sprk_documenttype`, Email Review Invoice tab); Q2 inactive invoices 409 (097); Q3 step 0 on every `/api/finance` route (099); Q4 Override releases any hold (114); Q5 container-scoped storage in customer bicep (091).
-- **Pending peer:** word-add-in-r1 to share its attachment-marking step for 118 (message sent 2026-10-21).
+- **118 marking component:** agreed with word-add-in-r1 2026-10-21. 118 builds `InvoiceAttachmentMarking` in Spaarke.Communication.Components (file subpath export, pure validate/default functions, no submit callback); word-add-in-r1 reviews its PR and the add-in adopts it after 095. Non-invoice attachments default to 'skip'.
 
 ### Owner decisions already given (do not ask again)
 - **Model:** A option 1 (record-scoped `sprk_ruleset`, `sprk_scope` Record 100000002 / Firm record 100000003); B `sprk_billingfirm` + `sprk_billingresponsible` (→ `sprk_organization`, all core types, not access-conferring); C; D/D2 superseded by no-auto-re-check; E hold + warning; F, G; H "Internal Standard"; I yes (process TBD); J A+B; K internal-only/Restricted/Private allowed with isolation carried; M; N; O all-or-nothing; P; Q, Q2 (no migration), R.

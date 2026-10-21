@@ -3,7 +3,7 @@
   <metadata>
     <title>Submit Invoice in the email UI: toolbar button (replaces Link Invoice), flagged attachments, Email Review Invoice tab</title>
     <phase>3 Rules (WP3) — Procedure model (EB-D-148), wave W3-12</phase>
-    <gate>094 merged (the from-document route); word-add-in-r1 has moved its attachment-marking step into a shared component, or agreed that this task builds it there</gate>
+    <gate>094 merged (the from-document route). word-add-in-r1 agreed 2026-10-21 that this task builds the shared marking component; word-add-in-r1 reviews the PR that adds it</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx in two shared client libraries used by several surfaces, and replaces an existing toolbar action.</rigor-reason>
@@ -17,7 +17,7 @@
     <estimated-effort>2 days</estimated-effort>
   </metadata>
 
-  <prompt>Owner 2026-10-21 (re-plan Q1): Submit Invoice gets three entry points in the email UI, all running one shared flow that calls 094's route. (1) The email toolbar's "Link Invoice" button becomes "Submit Invoice". (2) In the Attachments section, an attachment whose document the profile typed as Invoice (sprk_documenttype) shows an "Invoice" badge and a "Submit as invoice" action that opens the flow with that file pre-marked Invoice. (3) The Email Review dialog gets an "Invoice" tab beside Related to / Fields / Tasks, shown only when the email has a PDF attachment, holding the same flow. The marking step (Invoice — exactly one / Supporting / Don't save) is the Outlook add-in's, shared.</prompt>
+  <prompt>Owner 2026-10-21 (re-plan Q1): Submit Invoice gets three entry points in the email UI, all running one shared flow that calls 094's route. (1) The email toolbar's "Link Invoice" button becomes "Submit Invoice". (2) In the Attachments section, an attachment whose document the profile typed as Invoice (sprk_documenttype) shows an "Invoice" badge and a "Submit as invoice" action that opens the flow with that file pre-marked Invoice. (3) The Email Review dialog gets an "Invoice" tab beside Related to / Fields / Tasks, shown only when the email has a PDF attachment, holding the same flow. The marking step (Invoice — exactly one / Supporting / Don't save) is a new shared, host-agnostic component built here and adopted later by the Outlook add-in (word-add-in-r1, 2026-10-21).</prompt>
 
   <role>SPAARKE frontend developer. Expert in Spaarke.Communication.Components, Fluent UI v9 and the shared wizard components.</role>
 
@@ -35,13 +35,18 @@
       <file role="modify">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationWorkspace/ReconciliationWorkspace.tsx (Invoice tab beside the ReconcileTabs)</file>
       <file role="new">src/client/shared/Spaarke.Communication.Components/src/components/ReconcileTabs/InvoiceSubmitTab.tsx</file>
       <file role="new">src/client/shared/Spaarke.Communication.Components/src/components/SubmitInvoice/SubmitInvoiceFromEmail.tsx (the one flow the three entry points open)</file>
-      <file role="reference">the shared attachment-marking component from word-add-in-r1 (location per their notes; today the add-in's taskpane lives in src/client/office-addins/shared/taskpane/)</file>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/components/InvoiceAttachmentMarking/ (InvoiceAttachmentMarking.tsx, invoiceMarking.ts with the two pure functions, index.ts)</file>
+      <file role="modify">src/client/shared/Spaarke.Communication.Components/package.json (exports: the file subpath ./invoice-attachment-marking)</file>
+      <file role="reference">package.json "exports" of src/client/shared/Spaarke.UI.Components (the lookup-field file-subpath precedent)</file>
       <file role="reference">src/client/shared/Spaarke.UI.Components/src/components/InvoiceSubmission/InvoiceSubmissionWizard.tsx (outcome display: InvoiceSubmissionOutcome)</file>
     </relevant-files>
   </context>
 
   <constraints>
     <constraint source="model 9.1, ADR-002">The client never creates sprk_invoice, a submission or a Stored File itself and never decides authorization: every entry point calls 094's route, and a refusal is shown by its error code. "Link Invoice" no longer opens CreateInvoiceWizard from the email UI.</constraint>
+    <constraint source="word-add-in-r1 2026-10-21">InvoiceAttachmentMarking is controlled and does no I/O. Exactly these exports: type InvoiceAttachmentRole = 'invoice' | 'supporting' | 'skip'; interface MarkableAttachment { id: string (opaque: sprk_document id here, Office attachment id in the add-in); fileName: string; contentType?: string; sizeBytes?: number; suggestedInvoice?: boolean; disabledReason?: string }; InvoiceAttachmentMarkingProps { attachments; value: Record&lt;string, InvoiceAttachmentRole&gt;; onChange(next); mode: 'new' | 'correction' | 'supporting-only'; disabled?: boolean }; defaultInvoiceMarking(attachments, mode); validateInvoiceMarking(value, mode) returning { ok: true } or { ok: false; reason: 'no-invoice' | 'more-than-one-invoice' | 'invoice-not-allowed' }. No submit callback: each host owns its button and route.</constraint>
+    <constraint source="word-add-in-r1 2026-10-21">Rules live in the pure functions: new and correction need exactly one 'invoice'; supporting-only allows none and offers no Invoice option. defaultInvoiceMarking pre-selects 'invoice' only when there is exactly one candidate (exactly one suggestedInvoice, else exactly one PDF); every other attachment defaults to 'skip'. A disabledReason attachment cannot be marked and shows the reason.</constraint>
+    <constraint source="word-add-in-r1 2026-10-21 (their task 100 rule)">Exported as a FILE subpath (@spaarke/communication-components/invoice-attachment-marking). The component folder and everything it imports must not import the package barrel, Xrm, Office.js or any fetch/service code; no React-18-only APIs (Fluent useId, not React.useId); peers React 16-19 and Fluent v9 as the package already declares.</constraint>
     <constraint source="model 9.1">Marks per attachment: Invoice (exactly one, required, PDF only), Supporting, Don't save (not attached to the invoice; the existing document is left as it is). Submit is disabled until exactly one Invoice is marked.</constraint>
     <constraint source="owner 2026-10-21">The flag is sprk_documenttype = Invoice on the attachment's document, read in the existing single sprk_document query of CommunicationAttachmentsService (no per-row query, no BFF call, no new AI call). Not yet profiled → no badge (the action is still available from the toolbar and the tab). The badge is a hint; any PDF can be marked Invoice.</constraint>
     <constraint source="owner 2026-10-21">The Invoice tab appears in the Email Review dialog only when the selected email has at least one PDF attachment; its content is the same flow component as the toolbar's.</constraint>
@@ -64,8 +69,8 @@
   </knowledge>
 
   <steps mode="directional">
-    <step order="0">Declare FULL. Read 094's notes for the final route name, request and error codes, and word-add-in-r1's shared marking component.</step>
-    <step order="1">SubmitInvoiceFromEmail: marks step (shared component), submit through an injected callback, outcome display.</step>
+    <step order="0">Declare FULL. Read 094's notes for the final route name, request and error codes, and the file-subpath export precedent (lookup-field).</step>
+    <step order="1">InvoiceAttachmentMarking with its pure functions and the file-subpath export; then SubmitInvoiceFromEmail: the marking component, the host's Submit through an injected callback, outcome display.</step>
     <step order="2">Toolbar: rename to "Submit Invoice", open the flow; remove the 'invoice' create kind from the email UI.</step>
     <step order="3">Attachments: sprk_documenttype in the existing read; badge and "Submit as invoice" action.</step>
     <step order="4">Email Review: InvoiceSubmitTab in ReconciliationWorkspace, shown only with a PDF attachment.</step>
@@ -75,12 +80,11 @@
 
   <escalation>
     <trigger>If 094's route does not accept supporting document ids, STOP and ask the main session whether Supporting is offered here; do not drop the mark silently.</trigger>
-    <trigger>If word-add-in-r1's marking step is not available as a shared component, STOP and ask; do not build a second marking UI.</trigger>
     <trigger>If any other host (not the email UI) uses the 'invoice' create kind of launchCreate.ts, STOP and ask before removing it.</trigger>
   </escalation>
 
   <justification>
-    <existing>EmailToolbar's Link Invoice action (CreateInvoiceWizard), EmailReadingAttachments, ReconciliationWorkspace's tabs, and the add-in's marking step.</existing>
+    <existing>EmailToolbar's Link Invoice action (CreateInvoiceWizard), EmailReadingAttachments, ReconciliationWorkspace's tabs, and the add-in's AttachmentSelector (which gains no marking of its own: the add-in adopts this component).</existing>
     <extension>The toolbar action and attachment list are modified in place; one new flow component and one new tab, because the Email Review dialog's tab host takes one component per tab.</extension>
     <cost-of-doing-nothing>Link Invoice keeps creating invoices outside Submit Invoice (no Stored File, no all-or-nothing steps, no submission record), which the final model forbids, and email users have no way to submit an attached invoice.</cost-of-doing-nothing>
   </justification>
@@ -90,7 +94,7 @@
   </tools>
 
   <outputs>
-    <output type="code">EmailToolbar.tsx, EmailReadingPaneShell.types.ts, EmailWorkspace.tsx, launchCreate.ts, CommunicationAttachmentsService.ts, EmailReadingAttachments.tsx, ReconciliationWorkspace.tsx, InvoiceSubmitTab.tsx, SubmitInvoiceFromEmail.tsx</output>
+    <output type="code">InvoiceAttachmentMarking/ (component, invoiceMarking.ts, index.ts), package.json exports, EmailToolbar.tsx, EmailReadingPaneShell.types.ts, EmailWorkspace.tsx, launchCreate.ts, CommunicationAttachmentsService.ts, EmailReadingAttachments.tsx, ReconciliationWorkspace.tsx, InvoiceSubmitTab.tsx, SubmitInvoiceFromEmail.tsx</output>
     <output type="test">tests beside each modified component</output>
     <output type="docs">projects/ebilling-r1/notes/118-submit-invoice-email-ui.md</output>
   </outputs>
@@ -100,13 +104,15 @@
     <criterion testable="true">An attachment whose document has sprk_documenttype = Invoice shows the badge; one with another type, no type yet, or no document shows none; the type comes from the existing single sprk_document query (query count unchanged).</criterion>
     <criterion testable="true">"Submit as invoice" opens the flow with that attachment marked Invoice.</criterion>
     <criterion testable="true">The Invoice tab is present when the email has a PDF attachment and absent when it has none.</criterion>
+    <criterion testable="true">validateInvoiceMarking: new and correction → no-invoice with zero, more-than-one-invoice with two, ok with one; supporting-only → ok with zero, invoice-not-allowed with one. defaultInvoiceMarking: one suggestedInvoice → that one; none suggested and one PDF → that PDF; two candidates → no invoice preselected; all others 'skip'; supporting-only → no 'invoice'.</criterion>
+    <criterion testable="true">The subpath @spaarke/communication-components/invoice-attachment-marking resolves; a source-scan test fails if any file in InvoiceAttachmentMarking/ imports the package barrel, Xrm, Office, fetch or a service module.</criterion>
     <criterion testable="true">Submit is disabled with zero or two Invoice marks and with a non-PDF marked Invoice; the request carries the communication, the invoice document and the supporting documents only.</criterion>
     <criterion testable="true">A refusal from the route (403, 409, 422) shows its error text and leaves the marks in place; success shows the submission outcome.</criterion>
     <criterion testable="true">Light and dark mode render with tokens only.</criterion>
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Owner 2026-10-21: three entry points (toolbar, flagged attachments, Email Review tab); the flag is the profile's existing document type. The Outlook add-in UI stays word-add-in-r1's.</notes>
+  <notes>Owner 2026-10-21: three entry points (toolbar, flagged attachments, Email Review tab); the flag is the profile's existing document type. The Outlook add-in UI stays word-add-in-r1's. word-add-in-r1 2026-10-21: this task builds the shared marking component; add word-add-in-r1 as reviewer on its PR; their Invoice view adopts it after 095 deploys; no timing link to 096. Default for non-invoice attachments is 'skip' (nothing becomes supporting unless the user says so); 'supporting' was the alternative.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

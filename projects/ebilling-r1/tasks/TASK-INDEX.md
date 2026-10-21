@@ -201,7 +201,7 @@ Phase 3
   W3-11 (parallel, 4): 083, 084 (back end), 085, 094 — prereq 082 / 082 / 082 / 086+092+098 — goal-eligible: NO (094 isolation)
   W3-12 (parallel, 4): 116, 095, 113, 114 — prereq 085 / 094 / 082+100 / 082+105; 116 and 095 p-safe false (no shared files with each other)
                                                                        — goal-eligible: NO
-  W3-12b (single):    118 email UI — prereq 094 + word-add-in-r1 shared marking step — goal-eligible: NO
+  W3-12b (single):    118 email UI + shared marking component — prereq 094 — goal-eligible: NO
   W3-13 (single):     097 — prereq 094, 104; after 095 (shared InvoiceSubmission files) — goal-eligible: NO
   W3-14 (single):     096 — prereq 095 + word-add-in-r1 release gate   — goal-eligible: NO
   W3-5 (single):      079 deploy WP3 — prereq per its row               — goal-eligible: NO (deploy)
@@ -258,5 +258,5 @@ joined at 049 by `029 → 070 → 071 → 072 → 073 → 049`, and WP1 `029` ga
 | 096 | word-add-in-r1 removes the add-in side first; server legs one release later |
 | 084 | UI half waits for the prototype (O-14) |
 | 116 | The `sprk_sourcedocument` column delete runs only after 079, with the owner's OK |
-| 118 | word-add-in-r1 moves its attachment-marking step into a shared component (or agrees this task builds it there) |
+| 118 | Builds the shared InvoiceAttachmentMarking component (file subpath export, agreed with word-add-in-r1 2026-10-21); word-add-in-r1 reviews that PR |
 | 163 | UAT sign-off |
