@@ -92,11 +92,28 @@ public sealed class BillingRuleDefinition
     /// <summary>
     /// The D-39 replacement key: a more specific rule replaces a broader one with the same key. The rule type, and for AddedFee the
     /// rule type plus <see cref="FeeKind"/> (owner, 2026-10-21), so a firm cap on one fee kind replaces only the client default's cap
-    /// on that kind. Every other type keys on the rule type alone. The fee kind is compared as stored (ordinal, no trim or case
-    /// folding): it is a closed vocabulary the schema enforces before a definition exists, and the handler reads it with the same
-    /// exact match (<see cref="BillingRuleCatalogue.FeeKindLabel"/>). A null kind (not reachable through the gate) is a key of its own.
+    /// on that kind. For the kind <c>other</c> (a courier fee and a postage fee are both <c>other</c>) the key also carries the rule's
+    /// fee-code set, so a firm cap replaces only the client default's cap on the same fee (ontology-r1 F3, option a). The set is
+    /// compared exactly: {A} and {A,B} are different keys, so a cap on {A,B} never displaces a cap on {A}. The codes are normalised as
+    /// the handler matches them (<see cref="Handlers.AddedFeeHandler"/>: a case-insensitive set, so order and duplicates do not
+    /// count): upper-cased, de-duplicated, sorted, joined with ',' (a fee code is alphanumeric plus '.', '_' and '-', so ',' cannot
+    /// occur in one). The other kinds (lateFee, administrativeFee, interest) key on the kind alone, with no codes. Every other rule
+    /// type keys on the rule type alone. The fee kind is compared as stored (ordinal, no trim or case folding): it is a closed
+    /// vocabulary the schema enforces before a definition exists, and the handler reads it with the same exact match
+    /// (<see cref="BillingRuleCatalogue.FeeKindLabel"/>). A null kind (not reachable through the gate) is a key of its own. An
+    /// <c>other</c> rule with no codes is not reachable either (the schema requires at least one code on a cap and the gate refuses
+    /// the other allowances; the handler refuses an empty list), but if one existed its empty set would be a key of its own.
     /// </summary>
-    internal (RuleType RuleType, string? FeeKind) PrecedenceKey => (RuleType, RuleType == RuleType.AddedFee ? FeeKind : null);
+    internal (RuleType RuleType, string? FeeKind, string FeeCodeSet) PrecedenceKey =>
+        RuleType != RuleType.AddedFee
+            ? (RuleType, null, string.Empty)
+            : (RuleType, FeeKind, FeeKind == OtherFeeKind ? NormalisedFeeCodeSet() : string.Empty);
+
+    /// <summary>The closed-vocabulary value of <see cref="FeeKind"/> that names no particular fee (schema enum <c>other</c>).</summary>
+    private const string OtherFeeKind = "other";
+
+    private string NormalisedFeeCodeSet() =>
+        string.Join(',', FeeCodes.Select(c => c.ToUpperInvariant()).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal));
 
     /// <summary>AddedFee: <c>cap</c> on a definition (the gate refuses <c>notAllowed</c> and <c>afterDays</c>, task 115).</summary>
     public string? Allowance { get; }

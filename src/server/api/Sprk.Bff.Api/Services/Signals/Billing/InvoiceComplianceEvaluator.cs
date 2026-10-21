@@ -273,7 +273,8 @@ public sealed class InvoiceComplianceEvaluator
         foreach (var (subject, versions) in selectedBySubject)
         {
             // The replacement key is the rule type, and for AddedFee the rule type plus its fee kind (owner, 2026-10-21;
-            // BillingRuleDefinition.PrecedenceKey): a firm late-fee cap displaces the client default's late-fee cap only.
+            // BillingRuleDefinition.PrecedenceKey): a firm late-fee cap displaces the client default's late-fee cap only. For the
+            // kind 'other' the key also carries the fee-code set (ontology-r1 F3): a courier cap never displaces a postage cap.
             var firmKeys = versions
                 .Where(v => v.Scope == RuleSetScope.Firm
                             && !downgraded.ContainsKey(v.PolicyVersionId)

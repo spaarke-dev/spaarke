@@ -12,6 +12,8 @@ namespace Sprk.Bff.Api.Tests.Domain.Signals.Billing;
 /// <summary>
 /// ebilling-r1 task 115 follow-up (owner, 2026-10-21): the D-39 replacement key for AddedFee is the rule type plus its fee kind, so a
 /// firm cap on one fee kind replaces only the client default's cap on that kind. Every other rule type keeps the rule type alone.
+/// ontology-r1 F3 (option a): for the kind <c>other</c> the key also carries the exact fee-code set, so a firm courier cap never
+/// displaces the client default's postage cap.
 /// </summary>
 public class InvoiceComplianceEvaluatorFeeKindTests
 {
@@ -25,6 +27,15 @@ public class InvoiceComplianceEvaluatorFeeKindTests
 
     private static IEnumerable<string> OverCapPolicies(BillingEvaluationResult result) =>
         result.Findings.Where(f => f.ReasonCode == BillingReasonCodes.AddedFeeOverCap).Select(f => f.PolicyCode).Order(StringComparer.Ordinal);
+
+    private static BillingRuleCandidate OtherCap(string policyCode, RuleSetScope scope, params string[] feeCodes) =>
+        Version(policyCode, RuleType.AddedFee,
+            "{\"type\":\"AddedFee\",\"feeKind\":\"other\",\"allowance\":\"cap\",\"feeCodes\":[" + string.Join(',', feeCodes.Select(c => $"\"{c}\"")) + "],\"capAmount\":100}",
+            scope);
+
+    /// <summary>Courier (E107) and postage (E108) lines, each 150, against a cap of 100 wherever a rule caps it.</summary>
+    private static BillingEvaluationRequest CourierAndPostageInvoice() =>
+        Request(Fee(0), Expense(1) with { BilledExpenseCode = "E107", Amount = 150m }, Expense(2) with { BilledExpenseCode = "E108", Amount = 150m });
 
     private static (InvoiceComplianceEvaluator Evaluator, List<string> Ran) RecordingEvaluator()
     {
@@ -92,6 +103,65 @@ public class InvoiceComplianceEvaluatorFeeKindTests
         result.Refusals.Should().ContainSingle().Which.Should().Be(new BillingRuleRefusal(
             firm.PolicyId, "FIRM-FEE", firm.PolicyVersionId, BillingEvaluationReasons.GateRefused));
         OverCapPolicies(result).Should().Equal("CD-LATE");
+    }
+
+    [Fact]
+    public void AFirmOtherCapOnCourier_DoesNotDisplaceTheClientDefaultsOtherCapOnPostage_F3()
+    {
+        var clientPostage = OtherCap("CD-POSTAGE", RuleSetScope.ClientDefault, "E108");
+        var firmCourier = OtherCap("FIRM-COURIER", RuleSetScope.Firm, "E107");
+        var (evaluator, ran) = RecordingEvaluator();
+
+        var result = evaluator.Evaluate(CourierAndPostageInvoice(), Loaded(clientPostage, firmCourier));
+
+        ran.Should().BeEquivalentTo(["CD-POSTAGE", "FIRM-COURIER"]);
+        OverCapPolicies(result).Should().Equal("CD-POSTAGE", "FIRM-COURIER");
+    }
+
+    [Theory]
+    [InlineData("E107", "E107")]
+    [InlineData("E107,E108", "E108,E107")] // order does not count
+    [InlineData("E107,E108", "e108,E107")] // the handler matches codes without regard to case
+    [InlineData("E107", "e107,E107")] // case-only duplicates pass the schema's uniqueItems and collapse to one code
+    public void AFirmOtherCapOnTheSameCodeSet_ReplacesTheClientDefaultsOtherCap_F3(string defaultCodes, string firmCodes)
+    {
+        var clientDefault = OtherCap("CD-OTHER", RuleSetScope.ClientDefault, defaultCodes.Split(','));
+        var firm = OtherCap("FIRM-OTHER", RuleSetScope.Firm, firmCodes.Split(','));
+        var (evaluator, ran) = RecordingEvaluator();
+
+        evaluator.Evaluate(CourierAndPostageInvoice(), Loaded(clientDefault, firm));
+
+        ran.Should().Equal("FIRM-OTHER");
+    }
+
+    [Theory]
+    [InlineData("E107", "E107,E108")]
+    [InlineData("E107,E108", "E107")]
+    public void AnOverlappingButUnequalCodeSet_IsADifferentKey_BothCapsStayEffective_ExactSetNotSubset_F3(string defaultCodes, string firmCodes)
+    {
+        // Intended (owner option a): replacement is exact-set, not subset. A cap on {A,B} is a different fee from a cap on {A}.
+        var clientDefault = OtherCap("CD-OTHER", RuleSetScope.ClientDefault, defaultCodes.Split(','));
+        var firm = OtherCap("FIRM-OTHER", RuleSetScope.Firm, firmCodes.Split(','));
+        var (evaluator, ran) = RecordingEvaluator();
+
+        evaluator.Evaluate(CourierAndPostageInvoice(), Loaded(clientDefault, firm));
+
+        ran.Should().BeEquivalentTo(["CD-OTHER", "FIRM-OTHER"]);
+    }
+
+    [Fact]
+    public void AFirmOtherCapWithNoFeeCodes_IsRefusedByTheGate_AndTheClientDefaultStays_F3()
+    {
+        // The schema requires at least one fee code on a cap, so an empty set never reaches a definition (and never gets a key).
+        var clientPostage = OtherCap("CD-POSTAGE", RuleSetScope.ClientDefault, "E108");
+        var firm = Version("FIRM-NOCODES", RuleType.AddedFee,
+            """{"type":"AddedFee","feeKind":"other","allowance":"cap","feeCodes":[],"capAmount":100}""", RuleSetScope.Firm);
+
+        var result = Evaluator().Evaluate(CourierAndPostageInvoice(), Loaded(clientPostage, firm));
+
+        result.Refusals.Should().ContainSingle().Which.Should().Be(new BillingRuleRefusal(
+            firm.PolicyId, "FIRM-NOCODES", firm.PolicyVersionId, BillingEvaluationReasons.GateRefused));
+        OverCapPolicies(result).Should().Equal("CD-POSTAGE");
     }
 
     [Fact]
