@@ -27,13 +27,15 @@ namespace Spaarke.ArchTests;
 /// argument, an alias, a cast, a parameter, a lambda, pattern or query binding, a deconstruction, a member or field access,
 /// a <c>ref</c>) fails, as do an expression source, a <c>using static</c> or <c>using</c>-alias import of the engine, and the
 /// engine's method taken as a method group (#2191 review).</para>
-/// <para><b>Known limits</b> (accepted, review pass 2): the scan strips a line from the first <c>//</c>, so a <c>//</c> inside
-/// a string hides the rest of that line; the mask call's arguments are not checked; the name inside a string literal is a
-/// fail-closed false positive. A call made through REFLECTION (<c>GetMethod("Apply").Invoke</c>) is not seen by any text scan;
-/// <see cref="TheEngine_OffersNoOtherPathThatTakesASourceEntity"/> keeps the engine's own surface to the two guarded entry
-/// points, which is what makes a reflective call the only way round.</para>
-/// <para><b>Spellings tolerated</b> (UAC-r2 re-check of #2191): a verbatim identifier (<c>CreateTimeFieldMapping.@Apply(</c>) and
-/// a block comment between any two tokens the patterns match (<see cref="StripBlockComments"/>).</para>
+/// <para><b>Known limits</b> (accepted, review pass 2): the mask call's arguments are not checked; the name inside a string
+/// literal is a fail-closed false positive. A call made through REFLECTION (<c>GetMethod("Apply").Invoke</c>) is not seen by any
+/// text scan; <see cref="TheEngine_OffersNoOtherPathThatTakesASourceEntity"/> keeps the engine's own surface to the two guarded
+/// entry points, which is what makes a reflective call the only way round.</para>
+/// <para><b>Comments and strings</b> (UAC-r2 re-check of #2191, F3): ONE pass, <see cref="StripComments"/>, blanks every <c>//</c>
+/// and <c>/* */</c> comment while tracking regular, verbatim, interpolated and raw strings and char literals, so neither a
+/// <c>//</c> nor a <c>/*</c> inside a string can hide code. <see cref="Scan"/> is the single entry point — the file loop and both
+/// control theories use it. <b>Spellings tolerated:</b> a verbatim identifier (<c>CreateTimeFieldMapping.@Apply(</c>) and a block
+/// comment between any two tokens the patterns match.</para>
 ///
 /// <para>Crude by design (<see cref="SourceScan"/>): text, not syntax. Paired with must-fire controls (a bypass in each shape
 /// fails) and must-not-fire controls (the masked Office shape and a literal null pass).</para>
@@ -80,11 +82,9 @@ public class MappingSourceCallerMaskGuardTests
                 continue;
             }
 
-            // Block comments go first, on the raw text: CodeText cuts each line at its first "//", which would leave a block
-            // comment that contains one unclosed.
-            var code = SourceScan.CodeText(StripBlockComments(File.ReadAllText(file)).Split('\n'));
-            callSites += EngineCall.Matches(code).Count;
-            offenders.AddRange(Violations(code).Select(v => $"{relative}:{v}"));
+            var scan = Scan(File.ReadAllText(file));
+            callSites += scan.CallSites;
+            offenders.AddRange(scan.Violations.Select(v => $"{relative}:{v}"));
         }
 
         Assert.True(callSites > 0, "The scan found no call of the field-mapping engine at all — the pattern no longer matches.");
@@ -96,26 +96,48 @@ public class MappingSourceCallerMaskGuardTests
     }
 
     /// <summary>
-    /// The scan guards the two entry points, so they must be the only way in: every non-private method of the engine that takes an
-    /// <see cref="Microsoft.Xrm.Sdk.Entity"/> (a source or a target) is <c>Apply</c> or <c>ApplyFillOnly</c>. A third one — a
-    /// new overload-by-another-name — would take a source the scan never looks at. Reflection, not text, so a rename or a
-    /// formatting trick cannot hide it.
+    /// The scan guards the two entry points, so they must be the only way in: no OTHER non-private method of the engine takes
+    /// anything that could carry a source — a parameter that is, or is assignable to or from, an
+    /// <see cref="Microsoft.Xrm.Sdk.Entity"/>, an <see cref="Microsoft.Xrm.Sdk.AttributeCollection"/>, an <c>IEnumerable</c> of either,
+    /// or an <c>IReadOnlyDictionary&lt;string, object&gt;</c> (which also catches <c>object</c> and an open generic). A third entry
+    /// point would take a source the scan never looks at. Reflection, not text, so a rename or a formatting trick cannot hide it.
+    /// Not covered: properties and fields holding a source, a method's return type, nested types, and calls made by reflection.
     /// </summary>
-    [Fact(DisplayName = "#2188: CreateTimeFieldMapping's only non-private methods that take an Entity are Apply and ApplyFillOnly")]
+    [Fact(DisplayName = "#2188: CreateTimeFieldMapping's only non-private methods that can take a source are Apply and ApplyFillOnly")]
     public void TheEngine_OffersNoOtherPathThatTakesASourceEntity()
     {
         var engine = typeof(Program).Assembly.GetType("Sprk.Bff.Api.Services.Dataverse.FieldMapping.CreateTimeFieldMapping");
         Assert.NotNull(engine);
 
-        var methods = engine!
+        var carriers = new[]
+        {
+            typeof(Microsoft.Xrm.Sdk.Entity),
+            typeof(Microsoft.Xrm.Sdk.AttributeCollection),
+            typeof(IEnumerable<Microsoft.Xrm.Sdk.Entity>),
+            typeof(IEnumerable<Microsoft.Xrm.Sdk.AttributeCollection>),
+            typeof(IReadOnlyDictionary<string, object>),
+        };
+
+        var nonPrivate = engine!
             .GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly)
-            .Where(m => !m.IsPrivate && m.GetParameters().Any(p => p.ParameterType == typeof(Microsoft.Xrm.Sdk.Entity)))
+            .Where(m => !m.IsPrivate)
+            .ToArray();
+
+        Assert.Contains(nonPrivate, m => m.Name == "Apply");
+        Assert.Contains(nonPrivate, m => m.Name == "ApplyFillOnly");
+
+        var others = nonPrivate
+            .Where(m => m.Name is not ("Apply" or "ApplyFillOnly"))
+            .Where(m => m.GetParameters().Any(p =>
+                p.ParameterType.IsGenericParameter
+                || carriers.Any(c => c.IsAssignableFrom(p.ParameterType) || p.ParameterType.IsAssignableFrom(c))))
             .Select(m => m.Name)
             .Distinct()
             .OrderBy(n => n, StringComparer.Ordinal)
             .ToArray();
 
-        Assert.Equal(new[] { "Apply", "ApplyFillOnly" }, methods);
+        Assert.True(others.Length == 0,
+            "CreateTimeFieldMapping offers a way in besides Apply and ApplyFillOnly that can take a source: " + string.Join(", ", others));
     }
 
     // ── controls ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -340,6 +362,36 @@ public class MappingSourceCallerMaskGuardTests
             """
         },
         {
+            "(UAC-r2 re-check, F3 a) a verbatim string holding // then a string holding /* does not hide the call after them",
+            """
+            var re = @"^https?://x";
+            var mime = "image/*";
+            var source = await _entities.RetrieveAsync(table, id, columns, ct);
+            CreateTimeFieldMapping.Apply(rules, target, source, p, w, l);
+            """
+        },
+        {
+            "(UAC-r2 re-check, F3 b) a // inside a regular string before a real call on the same line",
+            """
+            var url = "http://x"; CreateTimeFieldMapping.Apply(rules, target, appRead, p, w, l);
+            """
+        },
+        {
+            "(UAC-r2 re-check, F3 c) a \"*/\" string after a real block comment does not end a later comment early",
+            """
+            /* old */ var close = "*/";
+            var open = "/*";
+            CreateTimeFieldMapping.Apply(rules, target, appRead, p, w, l);
+            """
+        },
+        {
+            "(UAC-r2 re-check, F3 d) // and /* inside an interpolated string with a nested string in its hole",
+            """
+            var label = $"{(x ? "a//b" : "c")} /*";
+            CreateTimeFieldMapping.Apply(rules, target, appRead, p, w, l);
+            """
+        },
+        {
             "(#2191 review, F b) the engine's method taken as a method group and called through the delegate",
             """
             Action<IEnumerable<FieldMappingRuleEntity>, Entity, Entity?, IReadOnlySet<string>, List<string>, ILogger> f;
@@ -352,7 +404,7 @@ public class MappingSourceCallerMaskGuardTests
     [Theory(DisplayName = "#2188 guard control: each bypass shape fires")]
     [MemberData(nameof(Bypasses))]
     public void TheGuardFires_OnEveryBypassShape(string shape, string snippet)
-        => Assert.True(Violations(snippet).Count > 0, $"The guard did not fire on: {shape}.");
+        => Assert.True(Scan(snippet).Violations.Count > 0, $"The guard did not fire on: {shape}.");
 
     public static TheoryData<string, string> SanctionedShapes() => new()
     {
@@ -400,6 +452,15 @@ public class MappingSourceCallerMaskGuardTests
             """
         },
         {
+            "(UAC-r2 re-check, F3) a call inside a block comment, and one after //, stay ignored",
+            """
+            /* CreateTimeFieldMapping.Apply(rules, target, appRead, p, w, l); */
+            // CreateTimeFieldMapping.Apply(rules, target, appRead, p, w, l);
+            var note = "// not a comment, and CreateTimeFieldMapping stays a plain word"; // CreateTimeFieldMapping.Apply(rules, target, x, p, w, l);
+            CreateTimeFieldMapping.ApplyFillOnly(rules, target, null, p, w, l);
+            """
+        },
+        {
             "a named, masked source",
             """
             var masked = await MappingSourceCallerMask.ApplyAsync(caller, table, id, appRead, columns, _logger, ct);
@@ -411,14 +472,25 @@ public class MappingSourceCallerMaskGuardTests
     [Theory(DisplayName = "#2188 guard control: the sanctioned shapes do not fire")]
     [MemberData(nameof(SanctionedShapes))]
     public void TheGuardDoesNotFire_OnTheSanctionedShapes(string shape, string snippet)
-        => Assert.True(Violations(snippet).Count == 0, $"The guard fired on the sanctioned shape: {shape}: {string.Join("; ", Violations(snippet))}");
+        => Assert.True(Scan(snippet).Violations.Count == 0,
+            $"The guard fired on the sanctioned shape: {shape}: {string.Join("; ", Scan(snippet).Violations)}");
 
     // ── the detector ──────────────────────────────────────────────────────────────────────────────────────────────
 
-    /// <summary>Each violation in <paramref name="code"/> as "line: reason".</summary>
-    internal static List<string> Violations(string code)
+    /// <summary>
+    /// The one entry point: comments blanked once (<see cref="StripComments"/>), then the engine's call sites counted and every
+    /// violation found in the SAME text. The file loop and both control theories call this, so the controls exercise the pipeline
+    /// the real tree goes through.
+    /// </summary>
+    internal static (int CallSites, List<string> Violations) Scan(string text)
     {
-        code = StripBlockComments(code);
+        var code = StripComments(text);
+        return (EngineCall.Matches(code).Count, Violations(code));
+    }
+
+    /// <summary>Each violation in <paramref name="code"/> (comments already stripped) as "line: reason".</summary>
+    private static List<string> Violations(string code)
+    {
         var violations = new List<string>();
 
         foreach (Match import in EngineImport.Matches(code))
@@ -660,86 +732,38 @@ public class MappingSourceCallerMaskGuardTests
     }
 
     /// <summary>
-    /// <paramref name="code"/> with every <c>/* ... */</c> block comment blanked to spaces (newlines kept, so offsets and line
-    /// numbers do not move). A small scanner, not a regex: a <c>/*</c> inside a string, char literal or <c>//</c> comment is not a
-    /// comment start, and a <c>//</c> inside a block comment is just text. Idempotent.
+    /// <paramref name="code"/> with every <c>//</c> and <c>/* ... */</c> comment blanked to spaces (newlines kept, so offsets and
+    /// line numbers do not move). ONE string-aware pass: a comment marker inside a regular, verbatim (<c>@"…"</c>, <c>""</c> escape),
+    /// interpolated (<c>$"…{…}…"</c>, the holes included) or raw (<c>"""…"""</c>) string, or a char literal, is text, and a quote
+    /// inside a comment opens nothing. Strings keep their text.
     /// </summary>
-    internal static string StripBlockComments(string code)
+    internal static string StripComments(string code)
     {
         var result = new StringBuilder(code.Length);
-        for (var i = 0; i < code.Length;)
+        var i = 0;
+        while (i < code.Length)
         {
             var c = code[i];
-            if (c == '/' && i + 1 < code.Length && code[i + 1] == '/')
+            var next = i + 1 < code.Length ? code[i + 1] : '\0';
+            if (c == '/' && next == '/')
             {
                 var end = code.IndexOf('\n', i);
-                end = end < 0 ? code.Length : end;
-                result.Append(code, i, end - i);
-                i = end;
+                i = Blank(code, i, end < 0 ? code.Length : end, result);
             }
-            else if (c == '/' && i + 1 < code.Length && code[i + 1] == '*')
+            else if (c == '/' && next == '*')
             {
-                var end = code.IndexOf("*/", i + 2, StringComparison.Ordinal);
-                end = end < 0 ? code.Length : end + 2;
-                for (; i < end; i++)
-                {
-                    result.Append(code[i] is '\n' or '\r' ? code[i] : ' ');
-                }
+                var close = code.IndexOf("*/", i + 2, StringComparison.Ordinal);
+                i = Blank(code, i, close < 0 ? code.Length : close + 2, result);
             }
             else if (c == '"')
             {
-                var start = i;
-                var quotes = 1;
-                while (i + quotes < code.Length && code[i + quotes] == '"')
-                {
-                    quotes++;
-                }
-
-                if (quotes >= 3)
-                {
-                    // A raw string literal: up to the same number of quotes again.
-                    var close = code.IndexOf(new string('"', quotes), i + quotes, StringComparison.Ordinal);
-                    i = close < 0 ? code.Length : close + quotes;
-                }
-                else
-                {
-                    var verbatim = start > 0 && (code[start - 1] == '@' || (start > 1 && code[start - 1] == '$' && code[start - 2] == '@')
-                        || (start > 1 && code[start - 1] == '@' && code[start - 2] == '$'));
-                    i++;
-                    while (i < code.Length)
-                    {
-                        if (!verbatim && code[i] == '\\')
-                        {
-                            i += 2;
-                            continue;
-                        }
-
-                        if (code[i] == '"')
-                        {
-                            if (verbatim && i + 1 < code.Length && code[i + 1] == '"')
-                            {
-                                i += 2;
-                                continue;
-                            }
-
-                            i++;
-                            break;
-                        }
-
-                        if (code[i] == '\n' && !verbatim)
-                        {
-                            break; // an unterminated regular string: stop at the line, never run on
-                        }
-
-                        i++;
-                    }
-                }
-
-                result.Append(code, start, Math.Min(i, code.Length) - start);
+                var end = EndOfString(code, i);
+                result.Append(code, i, end - i);
+                i = end;
             }
             else if (c == '\'' && i + 2 < code.Length)
             {
-                // A char literal: 'x' or '\x' - skipped so '"' does not open a string.
+                // A char literal: 'x' or '\x' - consumed whole so '"' does not open a string.
                 var end = code[i + 1] == '\\' ? i + 3 : i + 2;
                 end = end < code.Length && code[end] == '\'' ? end + 1 : i + 1;
                 result.Append(code, i, end - i);
@@ -753,6 +777,108 @@ public class MappingSourceCallerMaskGuardTests
         }
 
         return result.ToString();
+    }
+
+    /// <summary>Appends spaces for <c>code[from..to]</c>, keeping line breaks; returns <paramref name="to"/>.</summary>
+    private static int Blank(string code, int from, int to, StringBuilder result)
+    {
+        for (var i = from; i < to; i++)
+        {
+            result.Append(code[i] is '\n' or '\r' ? code[i] : ' ');
+        }
+
+        return to;
+    }
+
+    /// <summary>The index just past the string literal whose opening quote is at <paramref name="quote"/>.</summary>
+    private static int EndOfString(string code, int quote)
+    {
+        var prefix = quote;
+        while (prefix > 0 && code[prefix - 1] is '@' or '$')
+        {
+            prefix--;
+        }
+
+        var verbatim = code[prefix..quote].Contains('@');
+        var interpolated = code[prefix..quote].Contains('$');
+
+        var quotes = 1;
+        while (quote + quotes < code.Length && code[quote + quotes] == '"')
+        {
+            quotes++;
+        }
+
+        if (quotes >= 3)
+        {
+            // A raw string literal: up to the same number of quotes again.
+            var close = code.IndexOf(new string('"', quotes), quote + quotes, StringComparison.Ordinal);
+            return close < 0 ? code.Length : close + quotes;
+        }
+
+        var i = quote + 1;
+        while (i < code.Length)
+        {
+            var ch = code[i];
+            var next = i + 1 < code.Length ? code[i + 1] : '\0';
+            if (!verbatim && ch == '\\')
+            {
+                i += 2;
+            }
+            else if (ch == '"')
+            {
+                if (verbatim && next == '"')
+                {
+                    i += 2;
+                    continue;
+                }
+
+                return i + 1;
+            }
+            else if (interpolated && ch == '{')
+            {
+                i = next == '{' ? i + 2 : EndOfHole(code, i + 1);
+            }
+            else if (ch == '\n' && !verbatim)
+            {
+                return i; // an unterminated regular string: stop at the line, never run on
+            }
+            else
+            {
+                i++;
+            }
+        }
+
+        return code.Length;
+    }
+
+    /// <summary>The index just past the interpolation hole whose first character is at <paramref name="start"/>; strings inside it are skipped whole.</summary>
+    private static int EndOfHole(string code, int start)
+    {
+        var depth = 1;
+        var i = start;
+        while (i < code.Length)
+        {
+            var ch = code[i];
+            if (ch == '"')
+            {
+                i = EndOfString(code, i);
+            }
+            else if (ch == '{')
+            {
+                depth++;
+                i++;
+            }
+            else if (ch == '}' && --depth == 0)
+            {
+                return i + 1;
+            }
+            else
+            {
+                i++;
+            }
+        }
+
+        return code.Length;
     }
 
     private static string Shorten(string text)
