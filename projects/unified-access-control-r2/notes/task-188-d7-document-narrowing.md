@@ -563,3 +563,95 @@ passed (of 114 in the trim, #1511 and Insights classes). After: 114 passed.
 - Cost: every trim with a readable document key now makes one externality lookup (both resolvers cache); an external
   caller adds one narrowing call per page (§4: + ⌈N/50⌉ by-id app-only reads, then the hop and communication levels).
 - Not run: the full unfiltered unit suite and the `Category=Live` harnesses (by the brief).
+
+## 15. Round 3 slice B — the internal plane's document routes (security pass 1)
+
+Slices A (§14) and C (`sprk_analysis`, read_query, search_data) are not touched here.
+
+**STATUS: IN PROGRESS, not pushed.** The code, the new tests (44) and the ArchTest rule (2 new facts) pass. About 85
+EXISTING tests in about 9 test hosts now fail: their test principal is not a resolved internal systemuser (non-GUID
+`oid`, or no systemuser modelled), so the narrowing applies, its app-only read faults offline, and the route refuses.
+How those hosts state their caller is open (see the slice B report). Mutants, the full ArchTests, publish size and
+merge-tree are not run yet.
+
+**Also reached (not in the brief's 26).** `ComposeDocumentAuthorizationFilter` (6 compose routes:
+`ComposeAnnotationEndpoints.cs:37/61`, `ComposeDocumentEndpoints.cs:40`, `ComposeSaveEndpoints.cs:33`,
+`ComposeSyncEndpoints.cs:73`, `ComposeTemplateEndpoints.cs:40`) and `OfficeVersionSaveAuthorizationFilter`
+(`Office/OfficeEndpoints.cs:194`, the Office version save) both delegate to `DocumentAuthorizationFilter`, so they are
+narrowed too. `DocumentsModule.cs:90` registers a scoped `DocumentAuthorizationFilter("read")` (no route found using it).
+
+**The defect.** The internal plane's document routes decided a caller only by the root grants (`AuthorizationService`, the
+caller's own Dataverse rights). A systemuser flagged `sprk_isexternal` with a share on matter M could read, download,
+preview, version, edit, check out, delete or list the .eml of an internal-only email filed to M, its attachments, or a
+document a user marked Restricted, through any document-id route, the bulk download and the two container list routes.
+
+**The fix.** One static helper, `Api/Filters/InternalPlaneDocumentNarrowing.ForCallerAsync`, used by all three surfaces:
+1. It runs only AFTER the root grants allowed; each route's own authorization is unchanged (no endpoint loses or changes
+   its auth; no new status code, policy or registration).
+2. A caller who is not a resolved INTERNAL systemuser (`ExternalCallerCommunicationGuard.IsExternalCallerAsync`, reused:
+   flagged external, unresolved, or no principal) is narrowed by ONE `AppOnlyDocumentNarrowing` call over every document
+   id the request names (the injected app-only seam; the rule is not copied).
+3. Internal systemusers: no narrowing call and no app-only read.
+4. Faults (the slice A rule): a failed externality lookup counts as EXTERNAL (the narrowing applies; it never refuses
+   every request and never treats the caller as internal). A failed narrowing hides every document of the request.
+5. Logs: counts and reason codes (`[DOC-NARROWING] {surface}: {hidden} of {count} ...`), never ids. The cost line is
+   `ReadAndNarrowDocumentsAsync`'s own (`plane=assistant`; see K-B3).
+
+| Surface | Behaviour when hidden (or the narrowing faults) |
+|---|---|
+| `DocumentAuthorizationFilter.InvokeAsync` (all 26 routes below) | The filter's existing deny: `ProblemDetailsHelper.Forbidden("sdap.access.deny.insufficient_rights")`, the 403 `OperationAccessRule` gives a caller without the operation's right — indistinguishable from "no right". The handler never runs, so nothing is streamed or written |
+| `BulkDownloadAuthorizationFilter.InvokeAsync` | **Dropped**: the id is removed from the authorized set, exactly as an unauthorized id is. The handler reports it with the same manifest reason as an unauthorized or missing document and never reads its bytes. A fault drops every document (all gone → the handler's existing 404) |
+| `DataverseDocumentsEndpoints.ListDocumentsAsync` (`GET /api/v1/documents?containerId=`) and `ListContainerDocumentsAsync` (`GET /api/v1/containers/{containerId}/documents`) | Row removed from the WHOLE list before paging, so `items`, `totalCount` and `hasNextPage` see visible rows only (no total that includes them, no next page that skips or promises them). A fault removes every row (empty page, `totalCount` 0) |
+
+The two list handlers were lambdas inside `MapDataverseDocumentsEndpoints`; they are extracted verbatim into the named
+methods above so the ArchTest can see each route on its own (one shared lambda key would let one route stop narrowing
+unseen). Their binding, filters and auth are unchanged.
+
+**Route table** (every route carrying `AddDocumentAuthorizationFilter`; 26; filter file:line on this head). R3: each one's
+behaviour changes for a caller who is not an internal systemuser.
+
+| # | Route | Operation | Filter at |
+|---|---|---|---|
+| 1 | `GET /api/v1/documents/{id}` | read | `DataverseDocumentsEndpoints.cs:93` |
+| 2 | `PUT /api/v1/documents/{id}` | write | `DataverseDocumentsEndpoints.cs:280` |
+| 3 | `POST /api/v1/documents/{id}/file` | write | `DataverseDocumentsEndpoints.cs:306` |
+| 4 | `DELETE /api/v1/documents/{id}` | delete | `DataverseDocumentsEndpoints.cs:377` |
+| 5 | `GET /api/v1/documents/{id}/download` | read | `DataverseDocumentsEndpoints.cs:545` |
+| 6 | `POST /api/documents/{documentId}/checkout` | write | `DocumentOperationsEndpoints.cs:43` |
+| 7 | `POST /api/documents/{documentId}/checkin` | write | `DocumentOperationsEndpoints.cs:55` |
+| 8 | `POST /api/documents/{documentId}/discard` | write | `DocumentOperationsEndpoints.cs:71` |
+| 9 | `DELETE /api/documents/{documentId}` | delete | `DocumentOperationsEndpoints.cs:88` |
+| 10 | `GET /api/documents/{documentId}/checkout-status` | read | `DocumentOperationsEndpoints.cs:101` |
+| 11 | `POST /api/documents/{documentId}/analyze` | write | `DocumentOperationsEndpoints.cs:118` |
+| 12 | `GET /api/documents/{documentId}/versions` | read | `DocumentVersionEndpoints.cs:146` |
+| 13 | `GET /api/documents/{documentId}/versions/{versionId}/content` | read | `DocumentVersionEndpoints.cs:211` |
+| 14 | `GET /api/documents/{documentId}/preview-url` | read | `FileAccessEndpoints.cs:66` |
+| 15 | `GET /api/documents/{documentId}/preview` | read | `FileAccessEndpoints.cs:78` |
+| 16 | `GET /api/documents/{documentId}/content` | read | `FileAccessEndpoints.cs:92` |
+| 17 | `GET /api/documents/{documentId}/office` | read | `FileAccessEndpoints.cs:103` |
+| 18 | `GET /api/documents/{documentId}/open-links` | read | `FileAccessEndpoints.cs:112` |
+| 19 | `GET /api/documents/{documentId}/view-url` | read | `FileAccessEndpoints.cs:123` |
+| 20 | `GET /api/documents/{documentId}/download` | read | `FileAccessEndpoints.cs:148` |
+| 21 | `GET /api/documents/{documentId}/eml-render` | read | `FileAccessEndpoints.cs:168` |
+| 22 | `POST /api/documents/resolve-identity` (id from `DocumentUrlIdentityFilter`) | read | `FileAccessEndpoints.cs:197` |
+| 23 | `GET /api/documents/{documentId}/identity` | read | `FileAccessEndpoints.cs:219` |
+| 24 | `POST /api/documents/resolve-email-identity` (id from `DocumentEmailIdentityFilter`) | read | `FileAccessEndpoints.cs:244` |
+| 25 | `POST /api/compose/documents/{documentId}/refresh-profile` | write | `ComposeDocumentEndpoints.cs:66` |
+| 26 | `POST /api/office/documents/{documentId}/generate-profile` | write | `Office/OfficeEndpoints.cs:1603` |
+| — | `POST /api/documents/bulk-download` | read × N | `DocumentsBulkEndpoints.cs:65` (`BulkDownloadAuthorizationFilter`) |
+| — | `GET /api/v1/documents?containerId=` | list | `DataverseDocumentsEndpoints.cs:549` → `ListDocumentsAsync` |
+| — | `GET /api/v1/containers/{containerId}/documents` | list | `DataverseDocumentsEndpoints.cs:576` → `ListContainerDocumentsAsync` |
+
+The two list routes were at `:550` and `:646` on `7bba318b10` (confirmed); they are now the method-group registrations
+above. Routes 22 and 24 resolve the id in an earlier filter and write it into the route values; the narrowing decides on
+that id like the rest.
+
+| | Before | After |
+|---|---|---|
+| External caller (flagged, unresolved or failed lookup) with the right, on a hidden document, any of the 26 routes | Served / written | 403 `insufficient_rights`, handler not run |
+| Same, bulk download | Zipped | Dropped (manifest: same reason as unauthorized) |
+| Same, container lists | Listed and counted | Removed before paging; not counted |
+| External caller, visible document | Served | Served |
+| Internal systemuser | Served | Served; no narrowing call, no app-only read |
+| Narrowing fault, external caller | n/a | Single route 403; bulk and lists drop the documents |
+| No right (root grants) | 403 | 403, before any narrowing |

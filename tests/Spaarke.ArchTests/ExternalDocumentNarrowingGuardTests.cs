@@ -165,6 +165,94 @@ public class ExternalDocumentNarrowingGuardTests
             .Order(StringComparer.Ordinal)
             .ToArray();
 
+    // ── Task 188 round 3 slice B: the internal plane's document routes (self-contained) ──────────────────────────────
+
+    /// <summary>
+    /// The internal-plane document surfaces slice B wired, each of which must REACH the narrowing: the single-document filter
+    /// behind all 26 document-id routes, the bulk-download filter, and the two container list handlers.
+    /// </summary>
+    private static readonly string[] InternalPlaneDocumentSurfaces =
+    {
+        "Sprk.Bff.Api.Api.Filters.DocumentAuthorizationFilter::InvokeAsync",
+        "Sprk.Bff.Api.Api.Filters.BulkDownloadAuthorizationFilter::InvokeAsync",
+        "Sprk.Bff.Api.Api.DataverseDocumentsEndpoints::ListDocumentsAsync",
+        "Sprk.Bff.Api.Api.DataverseDocumentsEndpoints::ListContainerDocumentsAsync",
+    };
+
+    [Fact(DisplayName = "Task 188 r3 B: the internal plane's document filters and container list routes reach THE document narrowing")]
+    public void TheInternalPlaneDocumentRoutes_ReachTheNarrowing()
+    {
+        var types = BffTypes.Value;
+
+        // Non-vacuity: both list handlers are seen calling the app-only container listing.
+        var listers = ContainerListCallers(types);
+        Assert.Contains("Sprk.Bff.Api.Api.DataverseDocumentsEndpoints::ListDocumentsAsync", listers);
+        Assert.Contains("Sprk.Bff.Api.Api.DataverseDocumentsEndpoints::ListContainerDocumentsAsync", listers);
+
+        var problems = InternalPlaneProblems(types, InternalPlaneDocumentSurfaces);
+        Assert.True(problems.Count == 0,
+            "The internal plane's document routes must apply THE external document narrowing for a caller who is not an " +
+            "internal systemuser (task 188 round 3 slice B): call InternalPlaneDocumentNarrowing.ForCallerAsync (or the " +
+            "injected AppOnlyDocumentNarrowing):" + Environment.NewLine + string.Join(Environment.NewLine, problems));
+    }
+
+    [Fact(DisplayName = "Task 188 r3 B: negative control — a filter or container list that does not narrow is found; one that narrows (directly or through a helper) is not")]
+    public void InternalPlaneDetector_MustFireAndMustNotFire()
+    {
+        var fixtures = new[]
+        {
+            typeof(InternalPlaneControlFilterSkipsTheNarrowing), typeof(InternalPlaneControlFilterNarrowsThroughAHelper),
+            typeof(InternalPlaneControlListsWithoutNarrowing), typeof(InternalPlaneControlListsAndNarrows),
+        };
+        var pins = new[]
+        {
+            $"{typeof(InternalPlaneControlFilterSkipsTheNarrowing).FullName}::InvokeAsync",
+            $"{typeof(InternalPlaneControlFilterNarrowsThroughAHelper).FullName}::InvokeAsync",
+        };
+
+        var problems = InternalPlaneProblems(fixtures.SelectMany(IlCallScan.WithNested), pins);
+
+        Assert.Equal(
+            new[]
+            {
+                $"NOT NARROWED: {typeof(InternalPlaneControlFilterSkipsTheNarrowing).FullName}::InvokeAsync",
+                $"NOT NARROWED: {typeof(InternalPlaneControlListsWithoutNarrowing).FullName}::ListAsync",
+            },
+            problems);
+    }
+
+    /// <summary>
+    /// The pinned surfaces that do not reach the narrowing, plus every source method that lists a container's documents
+    /// (<c>IDocumentDataverseService.GetDocumentsByContainerAsync</c>, app-only) without reaching it. A pin that is not
+    /// found at all is reported too, so a rename cannot silently empty the rule.
+    /// </summary>
+    private static List<string> InternalPlaneProblems(IEnumerable<Type> types, IReadOnlyCollection<string> pins)
+    {
+        var list = types.ToList();
+        var scan = Scan(list);
+        var known = IlCallScan.MethodReferences(list).Select(r => SourceKey(r.Caller, r.CallerMethod)).ToHashSet(StringComparer.Ordinal);
+        var problems = new List<string>();
+        foreach (var pin in pins.Concat(ContainerListCallers(list)).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal))
+        {
+            if (!known.Contains(pin))
+                problems.Add($"MISSING: {pin} is no longer found — update the pin");
+            else if (!scan.Reaches.Contains(pin))
+                problems.Add($"NOT NARROWED: {pin}");
+        }
+
+        return problems;
+    }
+
+    /// <summary>Every source method that calls <c>IDocumentDataverseService.GetDocumentsByContainerAsync</c>.</summary>
+    private static IReadOnlyList<string> ContainerListCallers(IEnumerable<Type> types) =>
+        IlCallScan.MethodReferences(types)
+            .Where(r => r.Target.DeclaringType == typeof(Spaarke.Dataverse.IDocumentDataverseService)
+                && r.Target.Name == nameof(Spaarke.Dataverse.IDocumentDataverseService.GetDocumentsByContainerAsync))
+            .Select(r => SourceKey(r.Caller, r.CallerMethod))
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
     // ── detector ─────────────────────────────────────────────────────────────────────────────────────────────────
 
     private sealed record ScanResult(IReadOnlyDictionary<string, HashSet<string>> Surfaces, IReadOnlySet<string> Reaches);
@@ -320,4 +408,39 @@ internal sealed class NarrowingGuardControlDecidesOverItsOwnReader
 internal sealed class NarrowingGuardControlNarrowsThroughTheAppOnlySeam(AppOnlyDocumentNarrowing narrow)
 {
     internal async Task<bool> IsVisibleAsync(Guid id, CancellationToken ct) => (await narrow(new[] { id }, ct)).IsVisible(id);
+}
+
+// Compiled control fixtures for ExternalDocumentNarrowingGuardTests.InternalPlaneDetector_MustFireAndMustNotFire (task 188
+// round 3 slice B). Never run; only their IL is read.
+
+/// <summary>MUST FIRE: a filter that authorizes and passes on without the narrowing.</summary>
+internal sealed class InternalPlaneControlFilterSkipsTheNarrowing
+{
+    internal Task<bool> InvokeAsync(Guid id) => Task.FromResult(id != Guid.Empty);
+}
+
+/// <summary>MUST NOT FIRE: a filter that narrows through a helper of its own.</summary>
+internal sealed class InternalPlaneControlFilterNarrowsThroughAHelper(AppOnlyDocumentNarrowing narrow)
+{
+    internal async Task<bool> InvokeAsync(Guid id, CancellationToken ct) => await IsShownAsync(id, ct);
+
+    private async Task<bool> IsShownAsync(Guid id, CancellationToken ct) => (await narrow(new[] { id }, ct)).IsVisible(id);
+}
+
+/// <summary>MUST FIRE: lists a container's documents app-only and returns them unnarrowed.</summary>
+internal sealed class InternalPlaneControlListsWithoutNarrowing(Spaarke.Dataverse.IDocumentDataverseService documents)
+{
+    internal async Task<int> ListAsync(string containerId) => (await documents.GetDocumentsByContainerAsync(containerId)).Count();
+}
+
+/// <summary>MUST NOT FIRE: lists a container's documents, then narrows them in one call.</summary>
+internal sealed class InternalPlaneControlListsAndNarrows(
+    Spaarke.Dataverse.IDocumentDataverseService documents, AppOnlyDocumentNarrowing narrow)
+{
+    internal async Task<int> ListAsync(string containerId, CancellationToken ct)
+    {
+        var rows = (await documents.GetDocumentsByContainerAsync(containerId, ct)).Select(d => Guid.Parse(d.Id)).ToList();
+        var narrowing = await narrow(rows, ct);
+        return rows.Count(narrowing.IsVisible);
+    }
 }

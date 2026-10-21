@@ -146,7 +146,6 @@ public static class DataverseDocumentsEndpoints
                         });
                 }
 
-
                 // Check if document exists
                 var existingDocument = await dataverseService.GetDocumentAsync(id);
                 if (existingDocument == null)
@@ -547,76 +546,7 @@ public static class DataverseDocumentsEndpoints
         .RequireAuthorization();
 
         // GET /api/v1/documents - List documents (optionally filtered by container)
-        documentsGroup.MapGet("/", async (
-            string? containerId,
-            int? skip,
-            int? take,
-            IDocumentDataverseService dataverseService,
-            ILogger<Program> logger,
-            HttpContext context) =>
-        {
-            var traceId = context.TraceIdentifier;
-
-            try
-            {
-                // Apply defaults
-                var skipValue = skip ?? 0;
-                var takeValue = Math.Min(take ?? 50, 100); // Max 100 items per page
-
-                logger.LogDebug("Listing documents - ContainerId: {ContainerId}, Skip: {Skip}, Take: {Take}",
-                    containerId, skipValue, takeValue);
-
-                IEnumerable<DocumentEntity> documents;
-
-                if (!string.IsNullOrWhiteSpace(containerId))
-                {
-                    if (!Guid.TryParse(containerId, out _))
-                    {
-                        return ProblemDetailsHelper.ValidationError("Container ID must be a valid GUID");
-                    }
-
-                    documents = await dataverseService.GetDocumentsByContainerAsync(containerId);
-                }
-                else
-                {
-                    // See backlog item SDAP-401 for paging implementation (get all documents with pagination)
-                    return ProblemDetailsHelper.ValidationError("ContainerId is required for listing documents");
-                }
-
-                var pagedDocuments = documents.Skip(skipValue).Take(takeValue).ToList();
-                var totalCount = documents.Count();
-
-                logger.LogDebug("Retrieved {Count} of {TotalCount} documents", pagedDocuments.Count, totalCount);
-
-                return TypedResults.Ok(new
-                {
-                    data = new
-                    {
-                        items = pagedDocuments,
-                        totalCount,
-                        skip = skipValue,
-                        take = takeValue,
-                        hasNextPage = (skipValue + takeValue) < totalCount,
-                        hasPreviousPage = skipValue > 0
-                    },
-                    metadata = new
-                    {
-                        requestId = traceId,
-                        timestamp = DateTime.UtcNow,
-                        version = "v1"
-                    }
-                });
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Failed to list documents");
-                return TypedResults.Problem(
-                    statusCode: 500,
-                    title: "Internal Server Error",
-                    detail: "An unexpected error occurred while listing documents",
-                    extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
-            }
-        })
+        documentsGroup.MapGet("/", ListDocumentsAsync)
         // GATED 2026-10-03 by unified-access-control-r2 task 166 (sweep finding S-66). This is the twin of
         // GET /api/v1/containers/{containerId}/documents below — same app-only GetDocumentsByContainerAsync,
         // same SPE pointers in the result — and it was hidden from task 074's guard by a Permanent
@@ -643,68 +573,169 @@ public static class DataverseDocumentsEndpoints
         // Guid.Parse — so a real container id 400s and a GUID-shaped one matches no row. Fixing that type
         // mismatch is one line, and doing it WITHOUT this filter would make the disclosure live. See
         // projects/unified-access-control-r2/notes/task-078-container-document-list-gate.md §4.
-        app.MapGet("/api/v1/containers/{containerId}/documents", async (
-            string containerId,
-            int? skip,
-            int? take,
-            IDocumentDataverseService dataverseService,
-            ILogger<Program> logger,
-            HttpContext context) =>
-        {
-            var traceId = context.TraceIdentifier;
-
-            try
-            {
-                if (string.IsNullOrWhiteSpace(containerId) || !Guid.TryParse(containerId, out _))
-                {
-                    return ProblemDetailsHelper.ValidationError("Container ID must be a valid GUID");
-                }
-
-                var skipValue = skip ?? 0;
-                var takeValue = Math.Min(take ?? 50, 100);
-
-                logger.LogInformation("Listing documents for container {ContainerId}", containerId);
-
-                var documents = await dataverseService.GetDocumentsByContainerAsync(containerId);
-                var pagedDocuments = documents.Skip(skipValue).Take(takeValue).ToList();
-                var totalCount = documents.Count();
-
-                return TypedResults.Ok(new
-                {
-                    data = new
-                    {
-                        containerId,
-                        items = pagedDocuments,
-                        totalCount,
-                        skip = skipValue,
-                        take = takeValue,
-                        hasNextPage = (skipValue + takeValue) < totalCount,
-                        hasPreviousPage = skipValue > 0
-                    },
-                    metadata = new
-                    {
-                        requestId = traceId,
-                        timestamp = DateTime.UtcNow,
-                        version = "v1"
-                    }
-                });
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Failed to list documents for container {ContainerId}", containerId);
-                return TypedResults.Problem(
-                    statusCode: 500,
-                    title: "Internal Server Error",
-                    detail: "An unexpected error occurred while listing documents",
-                    extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
-            }
-        })
+        app.MapGet("/api/v1/containers/{containerId}/documents", ListContainerDocumentsAsync)
         .WithTags("Containers")
         .RequireRateLimiting("dataverse-query")
         .AddContainerDocumentAuthorizationFilter()
         .RequireAuthorization();
 
         return app;
+    }
+
+    /// <summary>
+    /// GET /api/v1/documents?containerId= — list the documents of one container (the handler of the route mapped above;
+    /// extracted from its lambda by unified-access-control-r2 task 188 round 3 slice B, so the narrowing ArchTest sees this
+    /// route on its own). For a caller who is not an internal systemuser the rows THE external document narrowing hides
+    /// are removed BEFORE paging, so <c>totalCount</c> and <c>hasNextPage</c> count only rows the caller may see.
+    /// </summary>
+    internal static async Task<IResult> ListDocumentsAsync(
+        string? containerId,
+        int? skip,
+        int? take,
+        IDocumentDataverseService dataverseService,
+        ILogger<Program> logger,
+        HttpContext context)
+    {
+        var traceId = context.TraceIdentifier;
+
+        try
+        {
+            // Apply defaults
+            var skipValue = skip ?? 0;
+            var takeValue = Math.Min(take ?? 50, 100); // Max 100 items per page
+
+            logger.LogDebug("Listing documents - ContainerId: {ContainerId}, Skip: {Skip}, Take: {Take}",
+                containerId, skipValue, takeValue);
+
+            IEnumerable<DocumentEntity> documents;
+
+            if (!string.IsNullOrWhiteSpace(containerId))
+            {
+                if (!Guid.TryParse(containerId, out _))
+                {
+                    return ProblemDetailsHelper.ValidationError("Container ID must be a valid GUID");
+                }
+
+                documents = await dataverseService.GetDocumentsByContainerAsync(containerId);
+            }
+            else
+            {
+                // See backlog item SDAP-401 for paging implementation (get all documents with pagination)
+                return ProblemDetailsHelper.ValidationError("ContainerId is required for listing documents");
+            }
+
+            // Task 188 round 3 slice B: narrowed before paging, so the page, the total and hasNextPage see visible rows only.
+            var visible = await NarrowContainerListAsync(documents, "document-list", logger, context);
+            var pagedDocuments = visible.Skip(skipValue).Take(takeValue).ToList();
+            var totalCount = visible.Count;
+
+            logger.LogDebug("Retrieved {Count} of {TotalCount} documents", pagedDocuments.Count, totalCount);
+
+            return TypedResults.Ok(new
+            {
+                data = new
+                {
+                    items = pagedDocuments,
+                    totalCount,
+                    skip = skipValue,
+                    take = takeValue,
+                    hasNextPage = (skipValue + takeValue) < totalCount,
+                    hasPreviousPage = skipValue > 0
+                },
+                metadata = new
+                {
+                    requestId = traceId,
+                    timestamp = DateTime.UtcNow,
+                    version = "v1"
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to list documents");
+            return TypedResults.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "An unexpected error occurred while listing documents",
+                extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+        }
+    }
+
+    /// <summary>
+    /// GET /api/v1/containers/{containerId}/documents — the twin of <see cref="ListDocumentsAsync"/> (extracted from its
+    /// lambda by task 188 round 3 slice B). Narrowed the same way, before paging.
+    /// </summary>
+    internal static async Task<IResult> ListContainerDocumentsAsync(
+        string containerId,
+        int? skip,
+        int? take,
+        IDocumentDataverseService dataverseService,
+        ILogger<Program> logger,
+        HttpContext context)
+    {
+        var traceId = context.TraceIdentifier;
+
+        try
+        {
+            if (string.IsNullOrWhiteSpace(containerId) || !Guid.TryParse(containerId, out _))
+            {
+                return ProblemDetailsHelper.ValidationError("Container ID must be a valid GUID");
+            }
+
+            var skipValue = skip ?? 0;
+            var takeValue = Math.Min(take ?? 50, 100);
+
+            logger.LogInformation("Listing documents for container {ContainerId}", containerId);
+
+            var documents = await dataverseService.GetDocumentsByContainerAsync(containerId);
+            // Task 188 round 3 slice B: narrowed before paging, so the page, the total and hasNextPage see visible rows only.
+            var visible = await NarrowContainerListAsync(documents, "container-document-list", logger, context);
+            var pagedDocuments = visible.Skip(skipValue).Take(takeValue).ToList();
+            var totalCount = visible.Count;
+
+            return TypedResults.Ok(new
+            {
+                data = new
+                {
+                    containerId,
+                    items = pagedDocuments,
+                    totalCount,
+                    skip = skipValue,
+                    take = takeValue,
+                    hasNextPage = (skipValue + takeValue) < totalCount,
+                    hasPreviousPage = skipValue > 0
+                },
+                metadata = new
+                {
+                    requestId = traceId,
+                    timestamp = DateTime.UtcNow,
+                    version = "v1"
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to list documents for container {ContainerId}", containerId);
+            return TypedResults.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "An unexpected error occurred while listing documents",
+                extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+        }
+    }
+
+    /// <summary>
+    /// Task 188 round 3 slice B: the container list as the caller may see it. One <see cref="InternalPlaneDocumentNarrowing"/>
+    /// call over the whole list (not one per row, and not only the page, so paging never counts or skips a hidden row). An
+    /// internal systemuser gets the list unchanged; for any other caller a row the narrowing hides is removed, and a
+    /// narrowing that faults removes every row.
+    /// </summary>
+    private static async Task<IReadOnlyList<DocumentEntity>> NarrowContainerListAsync(
+        IEnumerable<DocumentEntity> documents, string surface, ILogger logger, HttpContext context)
+    {
+        var all = documents.ToList();
+        var visibility = await InternalPlaneDocumentNarrowing.ForCallerAsync(context, all.Select(d => d.Id), surface, logger);
+        return visibility.Narrowed ? all.Where(d => visibility.IsShown(d.Id)).ToList() : all;
     }
 
     /// <summary>The right filing a document under a record costs on that record: AppendTo (the key the record-keyed
