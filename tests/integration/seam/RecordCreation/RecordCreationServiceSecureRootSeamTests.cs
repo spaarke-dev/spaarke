@@ -146,12 +146,13 @@ public sealed class RecordCreationServiceSecureRootSeamTests : IClassFixture<Pro
     }
 
     /// <summary>
-    /// UAC-r2 F-2: the plan callback's "already checked" set is keyed by (table, id), never by id alone. A client may pick a
-    /// new row's id, so a row assigned to a CONTACT whose id equals a secure matter's, and filed under that matter by a
-    /// lookup the SERVER set (so step 5 did not ask its AppendTo), must still have the matter's own AppendTo asked by the
-    /// plan callback: the contact's AppendTo, which step 5 did ask, does not stand in for it. Ported from
-    /// <c>SecureRootInheritanceWriterTests.ChatCreate_AssignedToAContactWithASecureMattersId_...</c>; the pair shapes of that
-    /// test are refused earlier here (step 5 asks the pair's record), so this drives the callback itself.
+    /// UAC-r2 F-2: a row assigned to a CONTACT whose id equals a secure matter's, and filed under that matter by a lookup the
+    /// SERVER set (so step 5 did not ask its AppendTo), must still have the matter's own AppendTo asked: the contact's
+    /// AppendTo, which step 5 did ask, does not stand in for it. Ported from
+    /// <c>SecureRootInheritanceWriterTests.ChatCreate_AssignedToAContactWithASecureMattersId_...</c>. Since task 014 a
+    /// server-set work assignment filing lookup is asked AppendTo BEFORE the plan (step 6's pre-plan check), so this no
+    /// longer reaches the plan callback; the callback's (table, id) key is pinned by
+    /// <see cref="CreateAsync_AssignedToAContactWithASecureMattersId_AndFiledUnderAnInvoiceOfThatMatter_IsTheUniformNotFound_AndCreatesNothing"/>.
     /// </summary>
     [Fact]
     public async Task CreateAsync_AssignedToAContactWithASecureMattersId_AndFiledUnderThatMatterByTheServer_IsTheUniformNotFound_AndCreatesNothing()
@@ -165,10 +166,48 @@ public sealed class RecordCreationServiceSecureRootSeamTests : IClassFixture<Pro
         toSecure.Succeeded.Should().BeFalse("a row is never filed under a secure matter the caller may not append to");
         toSecure.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.NotFoundOrDenied);
         toSecure.Refusal.OwnerDecision!.RefusalCode.Should().Be(DataverseUserClientErrorCodes.AccessDenied,
-            "refused by the plan's own AppendTo on the matter, not by step 5 (which asked only about the contact)");
+            "refused by step 6's pre-plan AppendTo on the server-set matter (in the plan's own shape), not by step 5 (which " +
+            "asked only about the contact)");
         var problem = Problem(toSecure);
         problem.Status.Should().Be(StatusCodes.Status404NotFound, "the uniform not-found: never a 403 that says the matter exists and is secure");
         JsonSerializer.Serialize(problem).Should().NotContain(secure.ToString("D"));
+        _writes.Should().BeEmpty("nothing is created");
+    }
+
+    /// <summary>
+    /// Task 014 fix round 3 (UAC-r2 review, F-A): the plan callback's "already checked" set is keyed by (table, id), never by
+    /// id alone. The row is filed under an INVOICE of a secure matter (the plan reaches the matter through it, so no lookup
+    /// names the matter and nothing is server-set) and assigned to a CONTACT whose id equals that matter's. Step 5 asks
+    /// AppendTo on the contact and the invoice only; the matter's own AppendTo is the callback's to ask — an id-only key would
+    /// read the contact's as the matter's and file the row under a secure matter nobody asked about.
+    /// </summary>
+    [Fact]
+    public async Task CreateAsync_AssignedToAContactWithASecureMattersId_AndFiledUnderAnInvoiceOfThatMatter_IsTheUniformNotFound_AndCreatesNothing()
+    {
+        var secure = Guid.NewGuid();
+        SecureMatter(_fixture, secure);
+        var invoice = InvoiceOf(_fixture, secure);
+        _caller.NoAppendToIn.Add(("sprk_matters", secure)); // the caller may append to the CONTACT with that id, not the matter
+
+        var mapped = await DataverseWriteItemMapper.MapAsync(_caller, "sprk_workassignment", JsonSerializer.SerializeToElement(new
+        {
+            sprk_name = "Review the lease",
+            sprk_assignedto = new { relatedTable = "contact", recordId = secure },
+            sprk_regardinginvoice = new { relatedTable = "sprk_invoice", recordId = invoice },
+        }), CancellationToken.None);
+        mapped.Item.Should().NotBeNull(mapped.ValidationError);
+        var request = new RecordCreationRequest("sprk_workassignment", new RecordCreationPayload.Mapped(mapped.Item!))
+        {
+            CorrelationId = FixedCorrelation,
+        };
+
+        var outcome = await Service().CreateAsync(request, AsCaller(), CancellationToken.None);
+
+        outcome.Refusal.Should().NotBeNull("a row is never filed under a secure matter the caller may not append to");
+        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.NotFoundOrDenied);
+        outcome.Refusal.OwnerDecision!.RefusalCode.Should().Be(DataverseUserClientErrorCodes.AccessDenied,
+            "refused by the plan callback's own AppendTo on the matter: the contact with the same id does not stand in for it");
+        Problem(outcome).Status.Should().Be(StatusCodes.Status404NotFound);
         _writes.Should().BeEmpty("nothing is created");
     }
 
