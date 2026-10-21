@@ -30,9 +30,9 @@
   </context>
 
   <justification>
-    <existing>ApplyWitnessRuleAsync already withholds evidence detail by a batched caller-rights read; this adds a second, Duplicate-specific witness inside the same service.</existing>
-    <extension>Extend SignalReadService with one more private step after ApplyWitnessRuleAsync; no new route, service, registration or package.</extension>
-    <cost-of-doing-nothing>A reader who cannot open the earlier invoice sees its tracking number and details in the Duplicate finding (D-176).</cost-of-doing-nothing>
+    <existing>ApplyWitnessRuleAsync already withholds evidence detail by a batched caller-rights read (SignalReadService.cs:1119-1260); nothing resolves or checks an earlier invoice.</existing>
+    <extension>The Signal-side step extends SignalReadService. The readability check itself is one new internal class in Services/Signals (amended 2026-10-21) because a second caller exists: ebilling task 119 (InvoiceReviewReadService, GET /api/finance/invoices/{id}/review, sprk_findingsjson) must apply the identical rule, and the witness read in SignalReadService is private and keyed on SecureChildLineage tables, so it cannot be reused as is.</extension>
+    <cost-of-doing-nothing>A reader who cannot open the earlier invoice sees its tracking number and details in the Duplicate finding (D-176); without the shared check, ebilling 119 would carry a second copy of a data-exposure rule that can drift.</cost-of-doing-nothing>
   </justification>
 
   <constraints>
@@ -41,7 +41,8 @@
     <constraint source="D-176 readability">Readable = the caller's own `_user.GetAsync` read of `sprk_invoices` returns the id. One batched read per request (In lists of at most 200 ids, as WitnessesTheCallerReadsAsync); fallback submission reads also batched (one query per distinct vendor org, In list of tracking numbers ≤ 200). Never one query per Signal.</constraint>
     <constraint source="fail-closed">Any fault, 401, unparseable body, or unresolvable/ambiguous number withholds (for a fault: every Duplicate row on the page). A 403 on the invoice or submission table = none readable. Non-Duplicate rows are unaffected by a fault in this step.</constraint>
     <constraint source="withheld shape (mirror ebilling write time)">For a withheld Duplicate row: (1) remove every evidence line whose ref starts with `duplicateOf.`; (2) on every remaining line remove `text` and `source` and set `withheld: true` (the D-142 line shape); (3) Sentence = "This matches an earlier submission." — a private const in SignalReadService with a comment naming BillingRuleCatalogue.WithheldDuplicateTemplate on work/ebilling-r1 (it is not on this branch); (4) Title (`sprk_name`) cannot carry the earlier invoice (checked 2026-10-21: static headlines only) — leave it unchanged. Note: a withheld `billing.reason` line keeps no text here, while ebilling's write-time shape carries the withheld template; accepted difference, record it in the notes.</constraint>
-    <constraint source="scope">Only `SignalReadService.cs` and its tests change. The existing D-123/D-142 witness rule is unchanged and still runs first; both must keep. Do not change any billing code, SignalWriter, or write-time redaction. Facts (`sprk_factsnapshot`) are not returned by this service: no change there.</constraint>
+    <constraint source="shared check (ebilling 119)">Put the earlier-invoice readability check in one internal sealed class in `Services/Signals/` (name it for what it does, e.g. `EarlierInvoiceReadability`), registered in the existing Signals DI module beside SignalReadService with the same lifetime. Input: the caller's `IDataverseUserClient` (passed in, so it reads as the caller) and a set of refs, each (EarlierInvoiceId?, VendorOrgId?, TrackingNumber?); output: the set of refs whose earlier invoice the caller reads (an id-resolved ref needs only the invoice read; a number-only ref needs VendorOrgId and the submission resolution). It owns the batched submission and invoice reads and the fail-closed rules; on a fault it returns "none readable". Resolving the CURRENT invoice / vendor org from a Signal subject (incl. the billing-event read) stays in SignalReadService. The withheld-sentence const lives on this class (public const) so 119 uses the same text. Unit tests for the class directly, plus the route tests.</constraint>
+    <constraint source="scope">Only `SignalReadService.cs`, the new class, its one DI registration line and their tests change. The existing D-123/D-142 witness rule is unchanged and still runs first; both must keep. Do not change any billing code, SignalWriter, or write-time redaction. Facts (`sprk_factsnapshot`) are not returned by this service: no change there.</constraint>
     <constraint source="BFF hygiene">.claude/constraints/bff-extensions.md: publish-size delta measured against a fresh master build (expect ~0), no new package, ArchTests in full.</constraint>
     <constraint source="tests">Never run the unfiltered Sprk.Bff.Api.Tests; run SignalReadRouteTests and the Signals unit filters. Use `python`, never `python3`.</constraint>
   </constraints>
@@ -68,7 +69,7 @@
 
   <escalation>
     <trigger>(Resolved 2026-10-21: line-level rows use option B above.) If live metadata contradicts the sprk_invoicesubmission key (vendor org + tracking number), STOP and report rather than inventing a resolution path.</trigger>
-    <trigger>If hiding requires changing the billing writer or any file outside SignalReadService.cs and its tests, STOP and report.</trigger>
+    <trigger>If hiding requires changing the billing writer or any file outside SignalReadService.cs, the new class, its DI line and their tests, STOP and report.</trigger>
   </escalation>
 
   <notes>Created 2026-10-21 by the main session (D-176). Known limits to record: native model-driven sprk_signal form/views and ebilling's own invoice-review surfaces are not covered by this BFF read check (ebilling told to apply the same rule on their surfaces); ApprovedRate/Discount rate-card quotes are inside the family (agreed with ebilling 2026-10-21). ebilling reviews the range before merge.</notes>
