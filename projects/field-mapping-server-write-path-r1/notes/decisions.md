@@ -120,3 +120,18 @@ seam tests (re-checked 27bac15a42: no objection, 2026-10-21).
   2. master is merged into the work branch;
   3. 014's step 3 is routed through the mask (the hotfix's bypass guard forces it);
   4. then the PR to master.
+
+## 2026-10-21 — UAC-r2 accepts task 015 on condition (b)
+
+- Range `58d1a3548d..ccd4fff6b9`, no F items, conditions (a)-(d) hold.
+- Confirmed:
+  - no live caller (only the DI registration);
+  - the worker gets the same owner with a null `RequestedBy`;
+  - step 8's index BU is the BU of the team that step 7 or the plan chose, and the autonumber retry reuses it;
+  - a catalog fault gives 503 with nothing written;
+  - the guard has both controls and counts each allow-listed use.
+- Before 017/018 make the unified create live (blocking criteria on both POMLs):
+  - K1: a test for the step-7 catalog fault;
+  - K3: normalise a lowercase `sprk_ai_search_index@odata.bind` explicit null, so no case-duplicate keys reach the payload.
+- #2206 (filed by UAC-r2): a stamped `sprk_ai_search_index` is not re-derived when the owner changes. Pre-existing on master; 015's default inherits it.
+- 017/018, where a project takes its pair-named matter's BU team, go to UAC-r2 for condition (b).

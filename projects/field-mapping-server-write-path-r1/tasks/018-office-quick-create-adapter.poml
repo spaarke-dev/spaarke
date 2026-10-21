@@ -133,6 +133,11 @@
       - remove the CreateOwnerResolutionGuardTests allow-list entry for Office;
       - tests for the secure-owner refusal and for the isolated-project ordering (no caller-BU team needed).
     </criterion>
+    <criterion testable="true">From UAC-r2's task 015 review (2026-10-21), blocking before any route reaches the unified create:
+      - K1: a test where the catalog read in step 7 throws (`RetrieveMultipleAsync` faults) gets 503 `OwnerUnavailableCode` and nothing is written (RecordCreationService step 7, ~:609-630);
+      - K3: a caller payload holding an explicit null under lowercase `sprk_ai_search_index@odata.bind` must not produce two keys that differ only in case after step 8's fill. Normalise the bind key (or drop the null entry before filling); test the duplicate-key case and the canonical-case case.
+      Whichever of 017 or 018 lands first owns this; the other confirms it.
+    </criterion>
   </acceptance-criteria>
 
   <notes>Spec FR-13 part 2, FR-12, NFR-07. Office todo and document save are task 030 (not here). Release note: Office Project-under-Matter owner changes (task 015); Office Invoice becomes team-owned.
