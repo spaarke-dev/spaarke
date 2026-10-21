@@ -260,6 +260,8 @@ public class ExternalDocumentNarrowingGuardTests
     {
         "Sprk.Bff.Api.Services.Ai.Handlers.DataverseReadQueryHandler::ExecuteChatAsync",
         "Sprk.Bff.Api.Services.Ai.Handlers.DataverseSearchDataHandler::ExecuteChatAsync",
+        // F-C1: the one record by id (an analysis or an analysis output).
+        "Sprk.Bff.Api.Services.Ai.Handlers.DataverseDescribeHandler::DescribeRecordAsync",
     };
 
     [Fact(DisplayName = "Task 188 r3 C: every surface that returns rows derived from a document reaches the hide-only overload")]
@@ -681,7 +683,7 @@ internal sealed class DerivedGuardControlNarrowsThroughAHelper(
     internal async Task<int> ReadAsync(IReadOnlyCollection<Guid> rows, CancellationToken ct)
     {
         var sources = await ExternalCallerCommunicationGuard.ReadSourceDocumentIdsAsync(user, "sprk_analysis", rows, ct);
-        return (await HiddenAsync(sources.Values, ct)).Count;
+        return (await HiddenAsync(sources.Values.SelectMany(documents => documents), ct)).Count;
     }
 
     private Task<IReadOnlySet<Guid>> HiddenAsync(IEnumerable<Guid> ids, CancellationToken ct) => narrow.HiddenDocumentIdsAsync(ids, ct);
