@@ -450,7 +450,7 @@ public class OfficeEmailDocumentCommunicationLinkTests
         public Mock<IDataverseService> Dataverse { get; } = new();
 
         public Mock<CallerRecordAccessProbe> Probe { get; } = new(
-            new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!)
+            new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!, null!)
         { CallBase = false };
 
         /// <summary>Communications already filed to a record (task 121 never moves these).</summary>
