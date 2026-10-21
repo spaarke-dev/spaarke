@@ -277,7 +277,7 @@ public static class FinanceEndpoints
 
             // D-134: the intake's answer, rendered as the internal submission route renders it — 202 {submissionId, jobId,
             // trackingNumber, statusUrl}, or its ProblemDetails with errorCode.
-            return InvoiceSubmissionEndpoints.ToResult(outcome, InvoiceSubmissionEndpoints.StatusUrl, correlationId);
+            return InvoiceSubmissionHttp.ToResult(outcome, InvoiceSubmissionEndpoints.StatusUrl, correlationId);
         }
         catch (InvoiceReviewException ex)
         {

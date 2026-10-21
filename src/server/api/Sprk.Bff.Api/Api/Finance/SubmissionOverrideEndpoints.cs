@@ -86,7 +86,7 @@ public static class SubmissionOverrideEndpoints
         }
         catch (SdapProblemException ex)
         {
-            return InvoiceSubmissionEndpoints.ReadFault(ex);
+            return InvoiceSubmissionHttp.ReadFault(ex);
         }
     }
 

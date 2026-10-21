@@ -288,7 +288,7 @@ internal sealed class ExternalInvoiceSubmissionAuthorizationFilter : IEndpointFi
         catch (SdapProblemException ex)
         {
             // A read fault is 503 (retryable), never a 500 and never the not-found 404.
-            return (null, InvoiceSubmissionEndpoints.ReadFault(ex));
+            return (null, InvoiceSubmissionHttp.ReadFault(ex));
         }
 
         if (view is not { FirmId: { } firmId, CoreRecord: { } core }
@@ -406,5 +406,5 @@ internal sealed class ExternalInvoiceSubmissionAuthorizationFilter : IEndpointFi
         Deny(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.FirmUnverifiable,
             "Your firm could not be checked right now. Try again shortly.");
 
-    private static IResult Deny(int status, string code, string detail) => InvoiceSubmissionEndpoints.Refused(status, code, detail);
+    private static IResult Deny(int status, string code, string detail) => InvoiceSubmissionHttp.Refused(status, code, detail);
 }
