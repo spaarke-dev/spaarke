@@ -1786,3 +1786,8 @@ Owner text, verbatim: "1. yes that's fine / 2. yes / 3. invoice file storage wil
 1. **F1-1 (a′) effect accepted.** While its Submit Invoice source is internal-only or Restricted, the invoice and everything derived from it are hidden from external callers, the firm included. The invoice reappears when the source is lowered.
 2. **F1-4 confirmed.** A flagged-external systemuser sees only invoices of the firm their linked contact belongs to. No link means no invoices.
 3. **K-3 (blob network `defaultAction: Allow`):** the owner asked a clarifying question; main session answered (see session). Not yet decided.
+
+## Round 117 (owner, 2026-10-21)
+
+1. **ebilling K-3 (invoice-file blob storage network Allow): accept as a known limit.** Invoice files are reachable only through the invoice record and its gated file route. A network block (private endpoint, or public access denied) is due at prod hardening. Revisit if an invoice-file search is added. Relayed to ebilling.
+2. **Record family: open question, not a decision.** The owner asks whether an explicit "record family" would simplify UAC across related records, and how communications are associated today. Example: an email with invoice content is filed to the invoice rather than the matter. Is it then missing from the matter's messages view? Answer pending a code map of the communication regarding lookups and view queries.
