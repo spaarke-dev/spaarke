@@ -25,7 +25,7 @@ namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 /// one document row on that item that the caller's own read returned is also shown. Parent-record keys are not document
 /// content and are not narrowed. A narrowing that fails withholds every document key (parent-record keys stay).</para>
 /// <para><b>The "User-OBO ONLY" rule is AMENDED for ONE dependency</b> (the round-2 amendment of the <c>dataverse.*</c>
-/// tools, CLAUDE.md §6.5 path B; owner sign-off pending on the PR): the narrowing is reached only through the injected
+/// tools, CLAUDE.md §6.5 path B; approved, owner round 111): the narrowing is reached only through the injected
 /// <see cref="AppOnlyDocumentNarrowing"/>, which re-reads the documents BY ID under the BFF's app-only identity and returns
 /// only a hide decision. It can only remove a key the caller's own read returned; no app-only data reaches the result.</para>
 /// <para><b>Component Justification (CLAUDE.md §11), the three new constructor dependencies.</b> (1) Existing — the

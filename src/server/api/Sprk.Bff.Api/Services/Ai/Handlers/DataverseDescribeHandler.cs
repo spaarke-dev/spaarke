@@ -33,7 +33,7 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// </para>
 /// <para>
 /// <b>The "User-OBO ONLY" rule is AMENDED for ONE dependency — unified-access-control-r2 task 188, main-session decision
-/// 2026-10-20 (CLAUDE.md §6.5 path B; owner sign-off pending on the PR)</b>: an EXTERNAL caller's <c>sprk_document</c> rows
+/// 2026-10-20 (CLAUDE.md §6.5 path B; APPROVED, owner round 111, 2026-10-21)</b>: an EXTERNAL caller's <c>sprk_document</c> rows
 /// are decided by THE external document narrowing through <see cref="AppOnlyDocumentNarrowing"/>, which re-reads those
 /// documents BY ID under the BFF's app-only identity (the external plane's reader) and returns ONLY a hide decision: a
 /// link field security masks for the user can never read as "no link". It can only HIDE a row the user's own read returned;
