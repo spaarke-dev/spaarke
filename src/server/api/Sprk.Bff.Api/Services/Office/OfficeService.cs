@@ -531,19 +531,23 @@ public class OfficeService : IOfficeService
                 // capture an email save runs, over the SAME request shape — the canonical when the email was already
                 // captured (race-proof on the Message-ID alternate key, so a second save reuses the row), else the one
                 // it creates now. A parent without a Message-ID is not captured (it would have no dedup key); the
-                // document create then looks the communication up by the attachment's ParentEmailId, else is Restricted.
-                // ReconciledEmailFiling deliberately does NOT run here: it would file the WHOLE email to the record
-                // picked for one attachment, a filing decision no attachment save asks the user for.
-                var parentCapture = await _emailUploadCapture.CaptureWithOutcomeAsync(
-                    new SaveRequest
-                    {
-                        ContentType = SaveContentType.Email,
-                        Email = parentEmail,
-                        TargetEntity = request.TargetEntity,
-                    },
-                    userId,
-                    cancellationToken);
+                // document create then looks the communication up by the parent's RFC Message-ID (ParentEmailId only
+                // when it has that shape — an Exchange item id is never a lookup key), else is Restricted.
+                // Owner decision 2026-10-20 (task 130): saving one attachment files its parent email to the record
+                // exactly as saving the email itself would — a new capture is filed through rung 0 (TargetEntity), and
+                // an already-captured, unfiled email is filed by ReconciledEmailFiling (task 121's rule), never moved
+                // when already filed.
+                var parentSave = new SaveRequest
+                {
+                    ContentType = SaveContentType.Email,
+                    Email = parentEmail,
+                    TargetEntity = request.TargetEntity,
+                };
+                var parentCapture = await _emailUploadCapture.CaptureWithOutcomeAsync(parentSave, userId, cancellationToken);
                 emailCommunicationId = parentCapture?.CommunicationId;
+
+                await _reconciledEmailFiling.FileIfUnfiledAsync(
+                    parentSave, parentCapture, TokenHelper.ExtractBearerTokenOrNull(httpContext), cancellationToken);
             }
 
             // Step 3: Determine job type based on content type
@@ -1011,7 +1015,12 @@ public class OfficeService : IOfficeService
                     createdByPersonId,
                     // Task 130: the capture's communication — the document is created linked to it (or Restricted).
                     emailCommunicationId: emailCommunicationId,
-                    jobId: jobId);
+                    jobId: jobId,
+                    // Task 130: an attachment's parent RFC Message-ID, as the parent itself reported it — the lookup key
+                    // when the capture produced nothing (ParentEmailId is an Exchange item id whenever Graph read it).
+                    emailMessageIdFallback: attachmentParentEmail is { } parentForLookup
+                        ? OfficeEmailEnricher.ResolveRfcMessageId(parentForLookup)
+                        : null);
 
                 // FR-C3 (email-communication-intelligence-r2, R-3): the content is byte-identical to an existing
                 // canonical document (returned as `documentId`). No second document was created — and there is

@@ -662,7 +662,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         if (createdRestricted)
         {
             OfficeDocumentPersistence.LogCreatedRestricted(
-                _logger, documentId, jobId, !string.IsNullOrWhiteSpace(payload.EmailMetadata?.InternetMessageId));
+                _logger, documentId, jobId, OfficeDocumentPersistence.HasUsableMessageId(payload.EmailMetadata?.InternetMessageId));
         }
 
         _logger.LogInformation(
@@ -748,10 +748,10 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         CancellationToken cancellationToken,
         Guid? createdByPersonId = null)
     {
+        // Task 130: ids only — the subject is email content and stays out of the logs.
         _logger.LogDebug(
-            "Creating EmailArtifact for document {DocumentId}, subject: {Subject}",
-            documentId,
-            metadata.Subject);
+            "Creating EmailArtifact for document {DocumentId}",
+            documentId);
 
         // Map importance (0=Low, 1=Normal, 2=High) to sprk_emailartifact.sprk_priority
         // option values. These MUST match the live option set — Urgent(100000000),
@@ -1286,7 +1286,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         if (createdRestricted)
         {
             OfficeDocumentPersistence.LogCreatedRestricted(
-                _logger, childDocumentId, jobId, !string.IsNullOrWhiteSpace(internetMessageId));
+                _logger, childDocumentId, jobId, OfficeDocumentPersistence.HasUsableMessageId(internetMessageId));
         }
 
         // Update child document with file info and parent relationship

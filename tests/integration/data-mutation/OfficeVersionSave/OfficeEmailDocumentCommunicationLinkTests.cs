@@ -1,24 +1,30 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Graph;
+using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Office;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Engine.Rungs;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Office;
 using Sprk.Bff.Api.Tests.Api.Office;
 using Sprk.Bff.Api.Tests.Auth.SpeAdmin;
@@ -52,6 +58,7 @@ public class OfficeEmailDocumentCommunicationLinkTests
     private const string Sender = "counsel@test.com";
     private const int Restricted = 100000002;
     private const string PersistenceCategory = "Sprk.Bff.Api.Services.Office.OfficeDocumentPersistence";
+    private const string CallerToken = "test-caller-token";
 
     // ── Must fire ──────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -109,10 +116,11 @@ public class OfficeEmailDocumentCommunicationLinkTests
     }
 
     [Fact]
-    public async Task AttachmentSave_WithoutAParentEmail_IsCreatedRestricted()
+    public async Task AttachmentSave_WithoutAParentEmail_IsCreatedRestricted_AndLogsNoMessageId()
     {
         var world = new OfficeVersionSaveWorld();
-        using var factory = Host(world, new CommunicationStore());
+        var logs = new RecordingLoggerProvider();
+        using var factory = Host(world, new CommunicationStore(), logs: logs);
 
         (await factory.CreateClient().PostAsJsonAsync("/api/office/save", AttachmentSave(parentEmailId: null)))
             .StatusCode.Should().Be(HttpStatusCode.Accepted);
@@ -120,6 +128,45 @@ public class OfficeEmailDocumentCommunicationLinkTests
         var created = world.CreatedDocumentRequests.Should().ContainSingle().Subject;
         created.AccessPermission.Should().Be(Restricted);
         created.RelatedCommunicationId.Should().BeNull();
+        logs.Lines.Should().ContainSingle(l => l.Category == PersistenceCategory && l.Level == LogLevel.Error)
+            .Which.Message.Should().Contain("Message-ID present: False", "no Message-ID existed to look up by");
+    }
+
+    [Fact]
+    public async Task AttachmentSave_ByItemIdParent_WhenTheCaptureFails_IsLinkedByTheParentsRfcMessageId_NotRestricted()
+    {
+        // The pane sends the Exchange ITEM id as ParentEmailId; Graph reports the parent's RFC Message-ID. The lookup key
+        // is the RFC id read from the parent — the item id could never match a sprk_communication.
+        var store = new CommunicationStore { FailCapture = true };
+        var existing = store.Seed(RfcId);
+        var graph = new ParentEmailGraph();
+        var world = new OfficeVersionSaveWorld();
+        using var factory = Host(world, store, graph);
+
+        (await factory.CreateClient().PostAsJsonAsync("/api/office/save", AttachmentSave(parentEmailId: ItemId)))
+            .StatusCode.Should().Be(HttpStatusCode.Accepted);
+
+        var created = world.CreatedDocumentRequests.Should().ContainSingle().Subject;
+        created.RelatedCommunicationId.Should().Be(existing);
+        created.AccessPermission.Should().BeNull("the parent's communication was identified, so the document is not Restricted");
+        store.LookedUpIds.Should().NotContain(ItemId, "an Exchange item id is never a Message-ID lookup key");
+    }
+
+    [Fact]
+    public async Task AttachmentSave_ByItemIdParent_NothingToFind_IsRestricted_AndLogsAMessageIdWasPresent()
+    {
+        var store = new CommunicationStore { FailCapture = true };
+        var world = new OfficeVersionSaveWorld();
+        var logs = new RecordingLoggerProvider();
+        using var factory = Host(world, store, new ParentEmailGraph(), logs: logs);
+
+        (await factory.CreateClient().PostAsJsonAsync("/api/office/save", AttachmentSave(parentEmailId: ItemId)))
+            .StatusCode.Should().Be(HttpStatusCode.Accepted);
+
+        world.CreatedDocumentRequests.Should().ContainSingle().Which.AccessPermission.Should().Be(Restricted);
+        logs.Lines.Should().ContainSingle(l => l.Category == PersistenceCategory && l.Level == LogLevel.Error)
+            .Which.Message.Should().Contain("Message-ID present: True", "the parent's RFC Message-ID was the key looked up");
+        store.LookedUpIds.Should().Equal(RfcId);
     }
 
     [Fact]
@@ -175,7 +222,47 @@ public class OfficeEmailDocumentCommunicationLinkTests
             .And.OnlyContain(r => r.RelatedCommunicationId == store.ByMessageId[RfcId] && r.AccessPermission == null);
     }
 
+    [Fact]
+    public async Task AttachmentSave_OfAnUnfiledCapturedEmail_FilesThatEmailToTheRecord_AskingWithTheCallersToken()
+    {
+        // Owner decision 2026-10-20: saving one attachment files its parent email exactly as saving the email would —
+        // task 121's rule for an email captured earlier and filed to nothing.
+        var store = new CommunicationStore();
+        var communicationId = store.Seed(RfcId);
+        var world = new OfficeVersionSaveWorld();
+        using var factory = Host(world, store, new ParentEmailGraph());
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CallerToken);
+        var request = AttachmentSave(parentEmailId: ItemId);
+
+        (await client.PostAsJsonAsync("/api/office/save", request)).StatusCode.Should().Be(HttpStatusCode.Accepted);
+
+        var write = store.CommunicationWrites.Should().ContainSingle().Subject;
+        write.Id.Should().Be(communicationId);
+        ((EntityReference)write.Fields["sprk_regardingmatter"]).Id.Should().Be(request.TargetEntity!.EntityId);
+        store.Probe.Verify(p => p.GetCallerRightsAsync(CallerToken, "sprk_communications", communicationId, It.IsAny<CancellationToken>()), Times.Once);
+        world.CreatedDocumentRequests.Should().ContainSingle().Which.RelatedCommunicationId.Should().Be(communicationId);
+    }
+
     // ── Must not fire ──────────────────────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task AttachmentSave_OfAnAlreadyFiledEmail_NeverMovesIt()
+    {
+        var store = new CommunicationStore();
+        var communicationId = store.Seed(RfcId);
+        store.FiledElsewhere.Add(communicationId);
+        var world = new OfficeVersionSaveWorld();
+        using var factory = Host(world, store, new ParentEmailGraph());
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CallerToken);
+
+        (await client.PostAsJsonAsync("/api/office/save", AttachmentSave(parentEmailId: ItemId)))
+            .StatusCode.Should().Be(HttpStatusCode.Accepted);
+
+        store.CommunicationWrites.Should().BeEmpty("a communication already filed is never moved by a save");
+        world.CreatedDocumentRequests.Should().ContainSingle().Which.RelatedCommunicationId.Should().Be(communicationId);
+    }
 
     [Fact]
     public async Task DocumentSave_GetsNeitherALinkNorRestricted()
@@ -255,6 +342,10 @@ public class OfficeEmailDocumentCommunicationLinkTests
                 NullLogger<EmailUploadCaptureService>.Instance));
             services.RemoveAll<ICommunicationDataverseService>();
             services.AddSingleton<ICommunicationDataverseService>(dataverse.Object);
+            services.RemoveAll<ReconciledEmailFiling>();
+            services.AddScoped(sp => new ReconciledEmailFiling(
+                resolver, dataverse.Object, store.Probe.Object, sp.GetRequiredService<SecureChildReconciler>(),
+                sp.GetRequiredService<CoreAncestorRestamper>(), NullLogger<ReconciledEmailFiling>.Instance));
 
             if (graph is not null)
             {
@@ -283,9 +374,46 @@ public class OfficeEmailDocumentCommunicationLinkTests
             Dataverse
                 .Setup(d => d.GetCommunicationByInternetMessageIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string messageId, CancellationToken _) => Find(messageId));
+
+            // Task 121's filing of a reconciled communication: its filing columns, and the engine's write to it.
+            Dataverse
+                .Setup(d => d.RetrieveAsync("sprk_communication", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string _, Guid id, string[] _, CancellationToken _) =>
+                {
+                    var row = new DataverseEntity("sprk_communication", id);
+                    if (FiledElsewhere.Contains(id))
+                        row["sprk_regardingmatter"] = new EntityReference("sprk_matter", Guid.NewGuid());
+                    return row;
+                });
+            Dataverse
+                .Setup(d => d.UpdateAsync("sprk_communication", It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+                .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, id, fields, _) =>
+                {
+                    lock (_gate)
+                    {
+                        CommunicationWrites.Add((id, fields));
+                    }
+                })
+                .Returns(Task.CompletedTask);
+
+            // The caller may change any communication — but only when asked with the caller's own token.
+            Probe.Setup(p => p.GetCallerRightsAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(AccessRights.None);
+            Probe.Setup(p => p.GetCallerRightsAsync(CallerToken, "sprk_communications", It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(AccessRights.Read | AccessRights.Write);
         }
 
         public Mock<IDataverseService> Dataverse { get; } = new();
+
+        public Mock<CallerRecordAccessProbe> Probe { get; } = new(
+            new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!)
+        { CallBase = false };
+
+        /// <summary>Communications already filed to a record (task 121 never moves these).</summary>
+        public HashSet<Guid> FiledElsewhere { get; } = [];
+
+        /// <summary>Every write to a <c>sprk_communication</c> (the filing engine's), in order.</summary>
+        public List<(Guid Id, Dictionary<string, object> Fields)> CommunicationWrites { get; } = [];
 
         public Dictionary<string, Guid> ByMessageId { get; } = new(StringComparer.Ordinal);
 
@@ -324,10 +452,14 @@ public class OfficeEmailDocumentCommunicationLinkTests
             }
         }
 
+        /// <summary>Every Message-ID the document create's lookup was asked for, in order.</summary>
+        public List<string> LookedUpIds { get; } = [];
+
         private DataverseEntity? Find(string messageId)
         {
             lock (_gate)
             {
+                LookedUpIds.Add(messageId);
                 return !LookupMisses && ByMessageId.TryGetValue(messageId, out var id) ? new DataverseEntity("sprk_communication", id) : null;
             }
         }

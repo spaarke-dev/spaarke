@@ -526,7 +526,7 @@ public class OfficeEmailEnricher
     /// has an <c>@</c> (<c>id-left "@" id-right</c>); an Exchange item id is base64 and never does, and the ids of mail
     /// items begin <c>AAMk</c> (or <c>AQMk</c>) — checked as well, defensively.
     /// </summary>
-    private static bool IsRfcMessageId(string? value) =>
+    public static bool IsRfcMessageId(string? value) =>
         !string.IsNullOrWhiteSpace(value)
         && value.Contains('@')
         && !value.StartsWith("AAMk", StringComparison.Ordinal)

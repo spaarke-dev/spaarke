@@ -172,10 +172,11 @@ public class OfficeDocumentPersistence
         Guid? owningTeamId = null,
         Guid? createdByPersonId = null,
         Guid? emailCommunicationId = null,
-        Guid? jobId = null)
+        Guid? jobId = null,
+        string? emailMessageIdFallback = null)
         => CreateDocumentWithSpePointersAsync(
             request, driveId, itemId, webUrl, fileName, fileName, fileSize, userId, cancellationToken,
-            preAssignedDocumentId, owningTeamId, createdByPersonId, emailCommunicationId, jobId);
+            preAssignedDocumentId, owningTeamId, createdByPersonId, emailCommunicationId, jobId, emailMessageIdFallback);
 
     /// <summary>
     /// Task 046 (b): the same create, with the name the document is SHOWN under (<paramref name="documentName"/>,
@@ -188,6 +189,10 @@ public class OfficeDocumentPersistence
     /// Email save's, or the parent email's for a single Attachment save). Authoritative when present; the Message-ID
     /// lookup runs only when it is absent.</param>
     /// <param name="jobId">Task 130: the save's job, for the Error a Restricted create logs.</param>
+    /// <param name="emailMessageIdFallback">Task 130: the RFC Message-ID of an Attachment save's PARENT email, as read from
+    /// the parent itself (Graph <c>internetMessageId</c>). The Message-ID lookup key for an Attachment save is this value
+    /// when present, else <see cref="AttachmentMetadata.ParentEmailId"/> only when that has the RFC shape; an Exchange
+    /// item id is never used as a lookup key. Ignored for an Email save, which names its own.</param>
     public async Task<(Guid DocumentId, bool WasContentDuplicate, Guid? RelatedCommunicationId)> CreateDocumentWithSpePointersAsync(
         SaveRequest request,
         string driveId,
@@ -202,7 +207,8 @@ public class OfficeDocumentPersistence
         Guid? owningTeamId = null,
         Guid? createdByPersonId = null,
         Guid? emailCommunicationId = null,
-        Guid? jobId = null)
+        Guid? jobId = null,
+        string? emailMessageIdFallback = null)
     {
         // Task 080 (write-path invariant I-6): an Office document create is ALWAYS team-owned. The writers resolve the
         // team (or refuse) before calling; a null here is a writer that skipped that step, and creating the row anyway
@@ -226,8 +232,9 @@ public class OfficeDocumentPersistence
         // document below is CREATED linked to it (sprk_relatedcommunication in the create itself, no second write).
         // Null when this is not an email-derived save, or no communication can be identified — the document is then
         // created Restricted (ApplyEmailCommunicationOutcome).
+        var messageIdLookupKey = EmailMessageIdOf(request, emailMessageIdFallback);
         var canonicalCommunicationId =
-            await MergeUploaderAndResolveCanonicalAsync(request, userId, emailCommunicationId, cancellationToken);
+            await MergeUploaderAndResolveCanonicalAsync(request, userId, emailCommunicationId, messageIdLookupKey, cancellationToken);
 
         // ── FR-C3 content de-dup (gate-after-write, Tier-1 exact quickXorHash) ──────────────
         // The blob is already in SPE (upload happened upstream). Read its content identity and reconcile
@@ -363,8 +370,7 @@ public class OfficeDocumentPersistence
 
         if (createdRestricted)
         {
-            LogCreatedRestricted(
-                _logger, documentId, jobId, !string.IsNullOrWhiteSpace(EmailMessageIdOf(request)));
+            LogCreatedRestricted(_logger, documentId, jobId, HasUsableMessageId(messageIdLookupKey));
         }
 
         // Update with SPE pointers and additional metadata
@@ -860,15 +866,27 @@ public class OfficeDocumentPersistence
     }
 
     /// <summary>
-    /// The Message-ID an email-derived save names its email by (task 130): the <c>.eml</c>'s
-    /// <see cref="EmailMetadata.InternetMessageId"/>, or a single attachment's <see cref="AttachmentMetadata.ParentEmailId"/>.
+    /// The Message-ID an email-derived save is looked up by (task 130): the <c>.eml</c>'s
+    /// <see cref="EmailMetadata.InternetMessageId"/>; for a single attachment, the parent's RFC Message-ID read from the
+    /// parent itself (<paramref name="parentRfcMessageId"/>), else its <see cref="AttachmentMetadata.ParentEmailId"/> — but
+    /// only when that has the RFC shape. An Exchange item id (what Graph addresses a message by) is never a Message-ID, so it
+    /// is never a key: no communication carries it.
     /// </summary>
-    private static string? EmailMessageIdOf(SaveRequest request) => request.ContentType switch
+    internal static string? EmailMessageIdOf(SaveRequest request, string? parentRfcMessageId = null) => request.ContentType switch
     {
         SaveContentType.Email => request.Email?.InternetMessageId,
-        SaveContentType.Attachment => request.Attachment?.ParentEmailId,
+        SaveContentType.Attachment => !string.IsNullOrWhiteSpace(parentRfcMessageId) ? parentRfcMessageId
+            : OfficeEmailEnricher.IsRfcMessageId(request.Attachment?.ParentEmailId) ? request.Attachment!.ParentEmailId
+            : null,
         _ => null,
     };
+
+    /// <summary>
+    /// Task 130: whether a usable Message-ID existed for a save — an RFC Message-ID, never an Exchange item id (which no
+    /// communication carries, so it can identify nothing). What the Restricted Error logs as <c>Message-ID present</c>:
+    /// the key the lookup actually used, not merely a non-empty field.
+    /// </summary>
+    internal static bool HasUsableMessageId(string? messageId) => OfficeEmailEnricher.IsRfcMessageId(messageId);
 
     /// <summary>
     /// FR-C2 (task 022) office-upload half + task 130 resolve: the communication of the email an email-derived save
@@ -880,7 +898,7 @@ public class OfficeDocumentPersistence
     /// Best-effort / non-fatal (NFR-04): never throws out of the save.
     /// </summary>
     private async Task<Guid?> MergeUploaderAndResolveCanonicalAsync(
-        SaveRequest request, string userId, Guid? capturedCommunicationId, CancellationToken ct)
+        SaveRequest request, string userId, Guid? capturedCommunicationId, string? internetMessageId, CancellationToken ct)
     {
         if (!IsEmailDerived(request.ContentType))
             return null;
@@ -898,7 +916,6 @@ public class OfficeDocumentPersistence
                 return null;
             }
 
-            var internetMessageId = EmailMessageIdOf(request);
             if (string.IsNullOrWhiteSpace(internetMessageId))
                 return null;
 

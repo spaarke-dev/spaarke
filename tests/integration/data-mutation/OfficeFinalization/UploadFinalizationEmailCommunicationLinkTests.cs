@@ -90,6 +90,22 @@ public class UploadFinalizationEmailCommunicationLinkTests
         created.AccessPermission.Should().Be(identified ? null : Restricted);
     }
 
+    [Theory]
+    [InlineData(RfcId, "True")]
+    [InlineData("AAMkAGI2TG93-130=", "False")] // an Exchange item id is not a Message-ID: nothing could have identified the email
+    [InlineData(null, "False")]
+    public async Task FallbackCreate_Restricted_LogsMessageIdPresentFromAUsableMessageIdOnly(string? internetMessageId, string expected)
+    {
+        var fixture = new Fixture();
+        var payload = Payload(relatedCommunicationId: null, fallbackCreate: true);
+        payload = payload with { EmailMetadata = payload.EmailMetadata! with { InternetMessageId = internetMessageId } };
+
+        (await fixture.Worker.ProcessAsync(Message(payload), CancellationToken.None)).IsSuccess.Should().BeTrue();
+
+        var error = fixture.Logs.Lines.Should().ContainSingle(l => l.Category == WorkerCategory && l.Level == LogLevel.Error).Subject;
+        error.Message.Should().Contain($"Message-ID present: {expected}");
+    }
+
     [Fact]
     public async Task FallbackCreate_ForADocumentSave_GetsNeitherALinkNorRestricted()
     {
