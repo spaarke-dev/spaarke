@@ -433,6 +433,12 @@ public static class OntologyWriterFailureReason
     /// (logged and metered on <c>billing.rule.invalid</c>).</summary>
     public const string ConsequenceNotAllowed = "consequence_not_allowed";
 
+    /// <summary>ebilling-r1 task 115: a billing body is schema-valid but states a form its type cannot evaluate yet, because the facts it
+    /// needs are not extracted: an AddedFee allowance of <c>notAllowed</c> (no per-line fee kind) or <c>afterDays</c> (no per-line fee
+    /// kind and no due date). Returned at save and by the billing gate (<see cref="Sprk.Bff.Api.Services.Signals.PolicyVersionValidator.TryPrepareBillingRule"/>,
+    /// logged and metered on <c>billing.rule.invalid</c>), so such a rule is never stored as publishable nor evaluated as "holds".</summary>
+    public const string RuleFormNotSupported = "rule_form_not_supported";
+
     /// <summary>The <c>sprk_rulebody</c> exceeds
     /// <see cref="Sprk.Bff.Api.Services.Signals.RuleBodySchemaValidator.MaxRuleBodyLength"/> characters. Refused
     /// by length alone, BEFORE any parse or schema evaluation (task 022 rework round 2, finding F2), so it is its

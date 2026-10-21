@@ -91,4 +91,21 @@ public enum RuleType
     /// <c>scripts/ebilling/Deploy-EbillingSubmissionIntegrityOption.ps1</c> (option value 100000014, the next free one).
     /// </summary>
     SubmissionIntegrity = 100000014,
+
+    // ── Procedure examples (ebilling-r1 task 115, EB-D-148; procedure-and-file-model.md 6.3, O-16) ─────────────────────────────
+    // Catalogue positions 12 and 13 (the system type above has none), so "position = option value - 100000002" holds for 1-11 only.
+
+    /// <summary>
+    /// 12. An added fee (late fee, administrative fee, interest, other; O-16) is within its allowance. The body states one of three
+    /// allowances; only the cap (an amount, or a percent of the invoice's other lines) is evaluated. "Not allowed" and "after N days" are
+    /// refused at save and at the billing gate until extraction returns a per-line fee kind and the due date. Flag only; never
+    /// reject-eligible (FR-26). Added by <c>scripts/ebilling/Deploy-EbillingAddedFeeDiscountOptions.ps1</c>.
+    /// </summary>
+    AddedFee = 100000015,
+
+    /// <summary>
+    /// 13. A fee line's billed rate reflects the agreed discount off the rack rate, plus an optional tolerance. A check only ("rate above the
+    /// agreed discounted rate"; per line, so an invoice-level discount is not seen): Flag, never an adjustment, never reject-eligible (FR-26).
+    /// </summary>
+    Discount = 100000016,
 }

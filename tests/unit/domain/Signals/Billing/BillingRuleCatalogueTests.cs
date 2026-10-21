@@ -44,6 +44,8 @@ public class BillingRuleCatalogueTests
         { RuleType.Duplicate, 100000011, """{"type":"Duplicate","matchFields":["firmInvoiceNumber","timekeeper","lineDate","hours"]}""" },
         { RuleType.RequiredData, 100000012, """{"type":"RequiredData","fields":["billingPeriodStart","taskCode"]}""" },
         { RuleType.AiObservation, 100000013, """{"type":"AiObservation","observation":"blockBilling","minConfidence":0.85}""" },
+        { RuleType.AddedFee, 100000015, """{"type":"AddedFee","feeKind":"lateFee","allowance":"cap","feeCodes":["E120"],"capAmount":100}""" },
+        { RuleType.Discount, 100000016, """{"type":"Discount","discountPercent":10,"tolerancePercent":1}""" },
     };
 
     /// <summary>Missing required parameter (ApprovedTimekeeper has none, so it has no row); the field the error names.</summary>
@@ -59,6 +61,9 @@ public class BillingRuleCatalogueTests
         { RuleType.Duplicate, """{"type":"Duplicate"}""", "matchFields" },
         { RuleType.RequiredData, """{"type":"RequiredData"}""", "fields" },
         { RuleType.AiObservation, """{"type":"AiObservation","observation":"blockBilling"}""", "minConfidence" },
+        { RuleType.AddedFee, """{"type":"AddedFee","feeKind":"lateFee","feeCodes":["E120"],"capAmount":100}""", "allowance" },
+        { RuleType.AddedFee, """{"type":"AddedFee","feeKind":"lateFee","allowance":"cap","capAmount":100}""", "feeCodes" },
+        { RuleType.Discount, """{"type":"Discount","tolerancePercent":1}""", "discountPercent" },
     };
 
     /// <summary>A value outside the parameter's range or closed vocabulary; the field the error names.</summary>
@@ -79,6 +84,14 @@ public class BillingRuleCatalogueTests
         { RuleType.RequiredData, """{"type":"RequiredData","fields":["shoeSize"]}""", "/fields/0" },
         { RuleType.AiObservation, """{"type":"AiObservation","observation":"blockBilling","minConfidence":1.5}""", "/minConfidence" },
         { RuleType.AiObservation, """{"type":"AiObservation","observation":"rudeTone","minConfidence":0.9}""", "/observation" },
+        { RuleType.AddedFee, """{"type":"AddedFee","feeKind":"parkingFee","allowance":"cap","feeCodes":["E120"],"capAmount":100}""", "/feeKind" },
+        { RuleType.AddedFee, """{"type":"AddedFee","feeKind":"lateFee","allowance":"sometimes"}""", "/allowance" },
+        { RuleType.AddedFee, """{"type":"AddedFee","feeKind":"lateFee","allowance":"cap","feeCodes":["E120"],"capAmount":0}""", "/capAmount" },
+        { RuleType.AddedFee, """{"type":"AddedFee","feeKind":"lateFee","allowance":"cap","feeCodes":["E120"],"capPercent":101}""", "/capPercent" },
+        { RuleType.AddedFee, """{"type":"AddedFee","feeKind":"lateFee","allowance":"afterDays","afterDays":0}""", "/afterDays" },
+        { RuleType.Discount, """{"type":"Discount","discountPercent":100}""", "/discountPercent" },
+        { RuleType.Discount, """{"type":"Discount","discountPercent":0}""", "/discountPercent" },
+        { RuleType.Discount, """{"type":"Discount","discountPercent":10,"tolerancePercent":-1}""", "/tolerancePercent" },
     };
 
     private static PolicyVersionValidator Validator(ILogger<PolicyVersionValidator>? logger = null) =>
@@ -94,19 +107,22 @@ public class BillingRuleCatalogueTests
     // ── The closed set: 14 members, values, domain, catalogue position ─────────────────────────────────────────────
 
     [Fact]
-    public void RuleType_HasFifteenMembers_ThreeOntologyThenElevenBillingInFr24OrderThenTheSystemType()
+    public void RuleType_HasSeventeenMembers_ThreeOntologyThenElevenBillingInFr24OrderThenTheSystemTypeThenAddedFeeAndDiscount()
     {
-        Enum.GetValues<RuleType>().Should().HaveCount(15);
+        Enum.GetValues<RuleType>().Should().HaveCount(17);
         Enum.GetValues<RuleType>().Where(RuleDomains.IsOntology)
             .Should().BeEquivalentTo(new[] { RuleType.Threshold, RuleType.Switch, RuleType.Existence });
         // D-125: the system type is a Billing member that is not in the (authorable) catalogue, with the next free option value.
+        // Task 115: AddedFee and Discount take the next two values after it and are positions 12 and 13 of the catalogue.
         Enum.GetValues<RuleType>().Where(RuleDomains.IsBilling)
-            .Should().Equal(BillingRuleCatalogue.Types.Append(RuleType.SubmissionIntegrity));
+            .Should().Equal(BillingRuleCatalogue.Types.Take(11).Append(RuleType.SubmissionIntegrity).Append(RuleType.AddedFee).Append(RuleType.Discount));
         ((int)RuleType.SubmissionIntegrity).Should().Be(100000014);
+        ((int)RuleType.AddedFee).Should().Be(100000015);
+        ((int)RuleType.Discount).Should().Be(100000016);
         BillingRuleCatalogue.Types.Should().NotContain(RuleType.SubmissionIntegrity);
         BillingRuleCatalogue.Types.Select(t => t.ToString()).Should().Equal(
             "ApprovedTimekeeper", "ApprovedRate", "TimeIncrement", "DailyHoursCap", "NonBillableActivity", "ExpenseRule",
-            "InvoiceAge", "CoreRecordWindow", "Duplicate", "RequiredData", "AiObservation");
+            "InvoiceAge", "CoreRecordWindow", "Duplicate", "RequiredData", "AiObservation", "AddedFee", "Discount");
     }
 
     [Theory]
@@ -121,7 +137,10 @@ public class BillingRuleCatalogueTests
             .Should().BeTrue();
         byValue.Should().Be(type);
         RuleDomains.DomainOf(type).Should().Be(RuleDomain.Billing);
-        BillingRuleCatalogue.CataloguePosition(type).Should().Be(optionValue - 100000002, "FR-26 numbering = option value - 100000002");
+        // FR-26 numbering = option value - 100000002 for 1-11; 100000014 is the system type (no position), so AddedFee and Discount
+        // (100000015, 100000016) are positions 12 and 13.
+        BillingRuleCatalogue.CataloguePosition(type).Should().Be(
+            optionValue <= 100000013 ? optionValue - 100000002 : optionValue - 100000003, "catalogue position by option value");
     }
 
     [Fact]
@@ -336,7 +355,7 @@ public class BillingRuleCatalogueTests
         definition!.RuleType.Should().Be(type);
         definition.PolicyVersionId.Should().Be(VersionId);
         definition.PolicyCode.Should().Be(Code);
-        definition.CataloguePosition.Should().Be(optionValue - 100000002);
+        definition.CataloguePosition.Should().Be(optionValue <= 100000013 ? optionValue - 100000002 : optionValue - 100000003);
         definition.TemplateFactFields.Should().BeEquivalentTo(BillingRuleCatalogue.TemplateFactFields(type));
         logger.Entries.Should().BeEmpty();
     }
@@ -369,6 +388,77 @@ public class BillingRuleCatalogueTests
         var timekeeper = Parse("ApprovedTimekeeper", """{"type":"ApprovedTimekeeper"}""");
         timekeeper.TolerancePercent.Should().BeNull();
         timekeeper.Codes.Should().BeEmpty();
+        var fee = Parse("AddedFee", """{"type":"AddedFee","feeKind":"interest","allowance":"cap","feeCodes":["E120","E121"],"capPercent":1.5}""");
+        fee.FeeKind.Should().Be("interest");
+        fee.Allowance.Should().Be("cap");
+        fee.FeeCodes.Should().Equal("E120", "E121");
+        fee.CapPercent.Should().Be(1.5m);
+        fee.CapAmount.Should().BeNull();
+        var discount = Parse("Discount", """{"type":"Discount","discountPercent":12.5}""");
+        discount.DiscountPercent.Should().Be(12.5m);
+        discount.TolerancePercent.Should().BeNull("absent = 0 in the handler");
+    }
+
+    // ── Task 115: AddedFee forms the facts cannot judge yet are refused at save and at the gate ──────────────────
+
+    public static readonly TheoryData<string, string> UnsupportedAddedFeeForms = new()
+    {
+        { """{"type":"AddedFee","feeKind":"lateFee","allowance":"notAllowed"}""", BillingRuleCatalogue.AddedFeeNotAllowedRefusal },
+        { """{"type":"AddedFee","feeKind":"interest","allowance":"afterDays","afterDays":30}""", BillingRuleCatalogue.AddedFeeAfterDaysRefusal },
+    };
+
+    [Theory]
+    [MemberData(nameof(UnsupportedAddedFeeForms))]
+    public void AddedFee_NotAllowedAndAfterDays_AreSchemaValid_ButRefusedAtSave_RuleFormNotSupported(string body, string refusal)
+    {
+        new RuleBodySchemaValidator().Validate(RuleType.AddedFee, body).IsValid.Should().BeTrue("the schema describes all three forms");
+
+        var result = Validator().ValidateForSave("AddedFee", body, null, RuleDomain.Billing, (int)Sprk.Bff.Api.Services.Finance.BillingConsequence.Flag);
+
+        result.IsValid.Should().BeFalse();
+        result.Reason.Should().Be(OntologyWriterFailureReason.RuleFormNotSupported);
+        result.Errors.Should().ContainSingle().Which.Should().Be(refusal);
+    }
+
+    [Fact]
+    public void AddedFee_ACapBody_PassesSaveAndTheGate_AndAWrongCapShapeIsSchemaInvalid()
+    {
+        const string amount = """{"type":"AddedFee","feeKind":"lateFee","allowance":"cap","feeCodes":["E120"],"capAmount":100}""";
+        const string percent = """{"type":"AddedFee","feeKind":"other","allowance":"cap","feeCodes":["E120"],"capPercent":5}""";
+        foreach (var body in new[] { amount, percent })
+        {
+            Validator().ValidateForSave("AddedFee", body, null).IsValid.Should().BeTrue(body);
+            Validator().TryPrepareBillingRule(Row("AddedFee", body), out _).Should().BeTrue(body);
+        }
+
+        // A cap with both limits or neither, a cap with afterDays, and another form carrying a cap's members are refused by the schema.
+        foreach (var body in new[]
+        {
+            """{"type":"AddedFee","feeKind":"lateFee","allowance":"cap","feeCodes":["E120"],"capAmount":100,"capPercent":5}""",
+            """{"type":"AddedFee","feeKind":"lateFee","allowance":"cap","feeCodes":["E120"]}""",
+            """{"type":"AddedFee","feeKind":"lateFee","allowance":"cap","feeCodes":["E120"],"capAmount":100,"afterDays":3}""",
+            """{"type":"AddedFee","feeKind":"lateFee","allowance":"notAllowed","feeCodes":["E120"]}""",
+            """{"type":"AddedFee","feeKind":"lateFee","allowance":"afterDays","afterDays":3,"capAmount":100}""",
+            """{"type":"AddedFee","feeKind":"lateFee","allowance":"afterDays"}""",
+        })
+        {
+            Validator().ValidateForSave("AddedFee", body, null).Reason.Should().Be(OntologyWriterFailureReason.SchemaInvalid, body);
+        }
+    }
+
+    [Theory]
+    [InlineData(RuleType.AddedFee, """{"type":"AddedFee","feeKind":"lateFee","allowance":"cap","feeCodes":["E120"],"capAmount":100}""")]
+    [InlineData(RuleType.Discount, """{"type":"Discount","discountPercent":10}""")]
+    public void AddedFeeAndDiscount_PublishingWithRejectOrSuggestAdjustment_IsRefused_FlagIsAccepted(RuleType type, string body)
+    {
+        var reject = Validator().ValidateForSave(type.ToString(), body, null, RuleDomain.Billing, (int)Sprk.Bff.Api.Services.Finance.BillingConsequence.Reject);
+        reject.IsValid.Should().BeFalse();
+        reject.Reason.Should().Be(OntologyWriterFailureReason.ConsequenceNotAllowed);
+
+        Validator().ValidateForSave(type.ToString(), body, null, RuleDomain.Billing, (int)Sprk.Bff.Api.Services.Finance.BillingConsequence.SuggestAdjustment)
+            .Reason.Should().Be(OntologyWriterFailureReason.ConsequenceNotAllowed);
+        Validator().ValidateForSave(type.ToString(), body, null, RuleDomain.Billing, (int)Sprk.Bff.Api.Services.Finance.BillingConsequence.Flag)
+            .IsValid.Should().BeTrue();
     }
 
     public static readonly TheoryData<string?, string?, string?, string> GateRefusals = new()
@@ -387,6 +477,9 @@ public class BillingRuleCatalogueTests
         { "ApprovedRate", """{"type":"ApprovedRate","tolerancePercent":1e999999}""", null, OntologyWriterFailureReason.SchemaInvalid },
         { "ApprovedRate", """{"type":"ApprovedRate","tolerancePercent":5}""", "{{sprk_totalbudget}}", OntologyWriterFailureReason.TemplateTokenOutsideReadSet },
         { "ApprovedRate", "{\"type\":\"ApprovedRate\"" + new string(' ', RuleBodySchemaValidator.MaxRuleBodyLength) + "}", null, OntologyWriterFailureReason.RuleBodyTooLarge },
+        // Task 115: AddedFee forms the facts cannot judge are refused at the evaluation gate too, never evaluated as "holds".
+        { "AddedFee", """{"type":"AddedFee","feeKind":"lateFee","allowance":"notAllowed"}""", null, OntologyWriterFailureReason.RuleFormNotSupported },
+        { "AddedFee", """{"type":"AddedFee","feeKind":"interest","allowance":"afterDays","afterDays":30}""", null, OntologyWriterFailureReason.RuleFormNotSupported },
     };
 
     [Theory]
@@ -505,6 +598,10 @@ public class BillingRuleCatalogueTests
         { """{"type":"Duplicate","matchFields":["firmInvoiceNumber","hours"]}""", "Duplicate(matchFields=[firmInvoiceNumber, hours])" },
         { """{"type":"RequiredData","fields":["billingPeriodStart","taskCode"]}""", "RequiredData(fields=[billingPeriodStart, taskCode])" },
         { """{"type":"AiObservation","observation":"blockBilling","minConfidence":0.85}""", "AiObservation(observation=blockBilling, minConfidence=0.85)" },
+        { """{"type":"AddedFee","feeKind":"lateFee","allowance":"cap","feeCodes":["E120"],"capAmount":100}""", "AddedFee(feeKind=lateFee, allowance=cap, feeCodes=[E120], capAmount=100)" },
+        { """{"type":"AddedFee","feeKind":"interest","allowance":"cap","feeCodes":["E120","E121"],"capPercent":2}""", "AddedFee(feeKind=interest, allowance=cap, feeCodes=[E120, E121], capPercent=2)" },
+        { """{"type":"Discount","discountPercent":10}""", "Discount(discountPercent=10, tolerancePercent=0)" },
+        { """{"type":"Discount","discountPercent":10,"tolerancePercent":1.5}""", "Discount(discountPercent=10, tolerancePercent=1.5)" },
     };
 
     private static RuleBodyDescriber Describer(Mock<IGenericEntityService>? entities = null) =>

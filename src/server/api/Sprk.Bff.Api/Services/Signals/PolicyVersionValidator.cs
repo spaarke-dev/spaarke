@@ -491,6 +491,13 @@ public sealed class PolicyVersionValidator
             return PolicyVersionValidationResult.Failure(OntologyWriterFailureReason.SchemaInvalid, schemaResult.Errors);
         }
 
+        // Task 115 (procedure model 6.3, v5.1 row 12): a schema-valid AddedFee form whose facts are not extracted yet is refused at save
+        // AND at the billing gate, so it is never published and never evaluated as "holds". Only the cap form passes.
+        if (BillingRuleCatalogue.UnsupportedFormRefusal(ruleType, ruleBodyJson) is { } formRefusal)
+        {
+            return PolicyVersionValidationResult.Failure(OntologyWriterFailureReason.RuleFormNotSupported, formRefusal);
+        }
+
         if (!string.IsNullOrWhiteSpace(messageTemplate))
         {
             if (SignalWriter.HasMalformedPlaceholder(messageTemplate))

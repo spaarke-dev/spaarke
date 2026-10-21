@@ -76,7 +76,8 @@ public static class BillingRuleHandlers
         return handler(new HandlerContext(rule, origin, facts));
     }
 
-    /// <summary>The closed switch. Anything that is not one of the eleven billing members falls to <c>null</c>.</summary>
+    /// <summary>The closed switch. Anything that is not one of the thirteen authorable billing members (the eleven of task 071 plus
+    /// AddedFee and Discount, task 115) falls to <c>null</c>.</summary>
     internal static Handler? HandlerFor(RuleType ruleType) => ruleType switch
     {
         RuleType.ApprovedTimekeeper => ApprovedTimekeeperHandler.Evaluate,
@@ -90,6 +91,8 @@ public static class BillingRuleHandlers
         RuleType.Duplicate => DuplicateHandler.Evaluate,
         RuleType.RequiredData => RequiredDataHandler.Evaluate,
         RuleType.AiObservation => AiObservationHandler.Evaluate,
+        RuleType.AddedFee => AddedFeeHandler.Evaluate,
+        RuleType.Discount => DiscountHandler.Evaluate,
         _ => null,
     };
 

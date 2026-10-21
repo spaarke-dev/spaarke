@@ -187,7 +187,7 @@ public sealed class BillingRuleDraftJobHandlerTests
         request.DocumentId.Should().Be(DocId);
         request.RuleTypes.Select(t => t.RuleType).Should().Equal(BillingRuleCatalogue.Types.Select(t => t.ToString()),
             "the whole closed catalogue and nothing else is offered");
-        request.RuleTypes.Should().HaveCount(11);
+        request.RuleTypes.Should().HaveCount(13);
 
         rig.Stored.Should().ContainSingle();
         var rule = rig.Stored![0];

@@ -29,6 +29,12 @@ public sealed class BillingRuleDefinition
         Fields = Strings(root, "fields");
         Observation = root.TryGetProperty("observation", out var o) ? o.GetString() : null;
         MinConfidence = Decimal(root, "minConfidence");
+        FeeKind = root.TryGetProperty("feeKind", out var k) ? k.GetString() : null;
+        Allowance = root.TryGetProperty("allowance", out var a) ? a.GetString() : null;
+        FeeCodes = Strings(root, "feeCodes");
+        CapAmount = Decimal(root, "capAmount");
+        CapPercent = Decimal(root, "capPercent");
+        DiscountPercent = Decimal(root, "discountPercent");
     }
 
     public Guid PolicyVersionId { get; }
@@ -38,13 +44,13 @@ public sealed class BillingRuleDefinition
     /// <summary>Always a <see cref="RuleDomain.Billing"/> member.</summary>
     public RuleType RuleType { get; }
 
-    /// <summary>FR-24 / FR-26 position (1-11).</summary>
+    /// <summary>FR-24 / FR-26 position (1-13; AddedFee 12 and Discount 13, task 115).</summary>
     public int CataloguePosition => BillingRuleCatalogue.CataloguePosition(RuleType);
 
     /// <summary>The <c>{{field}}</c> tokens the handler must supply for a finding of this type.</summary>
     public IReadOnlySet<string> TemplateFactFields => BillingRuleCatalogue.TemplateFactFields(RuleType);
 
-    /// <summary>ApprovedRate: percent over the approved rate still allowed (0-100).</summary>
+    /// <summary>ApprovedRate: percent over the approved rate still allowed (0-100). Discount: percent over the discounted rate (absent = 0).</summary>
     public decimal? TolerancePercent { get; }
 
     /// <summary>TimeIncrement: the billing increment in hours (e.g. 0.1).</summary>
@@ -79,6 +85,24 @@ public sealed class BillingRuleDefinition
 
     /// <summary>AiObservation: the confidence (0-1] at or above which the observation counts.</summary>
     public decimal? MinConfidence { get; }
+
+    /// <summary>AddedFee: the fee kind (closed vocabulary in the schema). Describes the rule; no fact carries a per-line fee kind.</summary>
+    public string? FeeKind { get; }
+
+    /// <summary>AddedFee: <c>cap</c> on a definition (the gate refuses <c>notAllowed</c> and <c>afterDays</c>, task 115).</summary>
+    public string? Allowance { get; }
+
+    /// <summary>AddedFee (cap): the expense codes of the fee's lines.</summary>
+    public IReadOnlyList<string> FeeCodes { get; }
+
+    /// <summary>AddedFee (cap): the most the fee lines may total, in the invoice currency; null when the cap is a percent.</summary>
+    public decimal? CapAmount { get; }
+
+    /// <summary>AddedFee (cap): the most the fee lines may total as a percent of the other lines; null when the cap is an amount.</summary>
+    public decimal? CapPercent { get; }
+
+    /// <summary>Discount: the agreed discount off the rack rate, in percent (0-100, exclusive). Its tolerance is <see cref="TolerancePercent"/>.</summary>
+    public decimal? DiscountPercent { get; }
 
     /// <summary>Only <see cref="PolicyVersionValidator.TryPrepareBillingRule"/> calls this, after the body passed the type's
     /// schema; it reads the already-validated values and adds no check of its own.</summary>

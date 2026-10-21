@@ -43,7 +43,7 @@ public class BillingFindingSignalMapperTests
             }).ToList(),
         };
         var result = Evaluator().Evaluate(request, loaded);
-        result.Findings.Select(f => f.RuleType).Distinct().Should().HaveCount(11);
+        result.Findings.Select(f => f.RuleType).Distinct().Should().HaveCount(13);
 
         var mappings = MapAll(request, result);
         mappings.SelectMany(m => m.Findings).Should().BeEquivalentTo(result.Findings, "every finding is carried by exactly one request");

@@ -137,7 +137,7 @@ public class BillingSystemPolicyTests
     public void TheDraftingAction_IsNotOfferedTheSystemType_AndCannotNameIt()
     {
         BillingRuleDraftTranslator.RuleTypeOptions().Select(o => o.RuleType).Should().NotContain(nameof(RuleType.SubmissionIntegrity));
-        BillingRuleDraftTranslator.RuleTypeOptions().Should().HaveCount(11);
+        BillingRuleDraftTranslator.RuleTypeOptions().Should().HaveCount(13);
         BillingRuleDraftTranslator.TryParseType("SubmissionIntegrity", out _).Should().BeFalse();
 
         var (rules, refused) = BillingRuleDraftTranslator.Translate(
