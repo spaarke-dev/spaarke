@@ -1778,3 +1778,11 @@ Owner text, verbatim: "yes deploy" / "yes for 191 approach".
    - **Q1:** design A with automatic sharing. Flagged-external users go into one "External Collaborators" business unit and team, with no business-unit depth. The share job shares every record that is not secure, Restricted or internal-only with that one team, and withdraws the share when a record becomes internal-only. Restricted records are shared only with people on their access list. Secure records keep their existing shares. The model-driven app and the SPA match by construction, because the 036 read set asks Dataverse.
    - **Q2:** moot. Flagged-external users lose no ordinary records, so no "would lose" list is needed.
    - **Q5:** a scheduled BFF job moves a newly flagged user into the external unit within about 2 minutes, with an alert only when a move fails. The move is one-way: un-flagging stays an operator step. The job acts only on a flag read as definitely true, never touches application users or administrators, and re-applies the external role after the move.
+
+## Round 116 (owner, 2026-10-21) — ebilling v5 UAC items
+
+Owner text, verbatim: "1. yes that's fine / 2. yes / 3. invoice file storage will be practically limited because can only be accessed through the Invoice record, correct? or when we have an invoice file search"
+
+1. **F1-1 (a′) effect accepted.** While its Submit Invoice source is internal-only or Restricted, the invoice and everything derived from it are hidden from external callers, the firm included. The invoice reappears when the source is lowered.
+2. **F1-4 confirmed.** A flagged-external systemuser sees only invoices of the firm their linked contact belongs to. No link means no invoices.
+3. **K-3 (blob network `defaultAction: Allow`):** the owner asked a clarifying question; main session answered (see session). Not yet decided.
