@@ -618,15 +618,23 @@ public sealed class CommunicationRecordAuthorizationFilter : IEndpointFilter
             if (attachmentIds is { Length: > MaxAttachmentCount })
                 return Denial.Problem(AttachmentLimitExceeded(attachmentIds.Length));
 
-            // (1) Attachments: the decision the document download route makes (operation "read"). A reader can
-            //     already download the bytes, so emailing them adds no capability. An unparseable id is denied with
-            //     the same body.
+            // (1) Attachments: the decision the document download route makes (operation "read", then - task 188
+            //     round 4b - THE external document narrowing, InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync).
+            //     Emailing an attachment adds no capability only because the caller could download the same bytes, and
+            //     the download route refuses a document the narrowing hides (an internal-only email's .eml, a
+            //     Restricted document or one under a Restricted parent) to a caller who is not an internal systemuser;
+            //     so the send refuses it too. An unparseable id, an unreadable or hidden attachment, and a narrowing
+            //     fault all get the same body.
+            var attachmentDocumentIds = new List<Guid>();
             foreach (var raw in (attachmentIds ?? Array.Empty<string>()).Distinct(StringComparer.OrdinalIgnoreCase))
             {
-                if (!Guid.TryParse(raw, out var documentId) || documentId == Guid.Empty
-                    || !await CanReadDocumentAsync(documentId))
+                if (!Guid.TryParse(raw, out var documentId) || documentId == Guid.Empty)
                     return Forbidden(reasonCode);
+                attachmentDocumentIds.Add(documentId);
             }
+
+            if (attachmentDocumentIds.Count > 0 && !await CanReadDocumentsAsync(attachmentDocumentIds.Distinct().ToList()))
+                return Forbidden(reasonCode);
 
             // (2) The thread the message is stamped into (and its participants granted access to).
             if (threadId is { } tid && !await CanSeeThreadAsync(tid))
@@ -775,21 +783,16 @@ public sealed class CommunicationRecordAuthorizationFilter : IEndpointFilter
             Safely($"privilege {privilegeName}", () =>
                 Required<CallerRecordAccessProbe>().CallerHoldsPrivilegeAsync(_token, privilegeName, Ct));
 
-        private Task<bool> CanReadDocumentAsync(Guid documentId) =>
+        private Task<bool> CanReadDocumentsAsync(IReadOnlyCollection<Guid> documentIds) =>
             Safely("document read", async () =>
             {
                 var userId = CallerResolution.ResolveObjectId(User);
                 if (string.IsNullOrEmpty(userId))
                     return false;
 
-                var result = await Required<AuthorizationService>().AuthorizeAsync(new AuthorizationContext
-                {
-                    UserId = userId,
-                    ResourceId = documentId.ToString(),
-                    Operation = "read",
-                    CorrelationId = _http.TraceIdentifier,
-                    UserAccessToken = _token,
-                }, Ct);
+                var result = await InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync(
+                    _http, Required<AuthorizationService>(), userId, documentIds, "read", _token,
+                    "communication-send-attachments", _logger, Ct);
                 return result.IsAllowed;
             });
 

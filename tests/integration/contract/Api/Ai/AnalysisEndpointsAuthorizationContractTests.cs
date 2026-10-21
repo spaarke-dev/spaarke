@@ -1491,6 +1491,10 @@ internal static class AnalysisAuthorizationTestRegistrations
         services.AddSingleton(access.Object);
         services.AddScoped<IAuthorizationRule, OperationAccessRule>();
         services.AddScoped<AuthorizationService>();
+        // Task 188 round 4b: the document grants now apply THE external document narrowing after the root grants; these
+        // hosts are about dispatch and promote, so nothing is hidden (Option A double; the narrowing on the analysis
+        // document path is pinned by FinanceDocumentNarrowingTests and DocumentGrantNarrowingTests).
+        Sprk.Bff.Api.Tests.TestInfrastructure.AllVisibleDocumentNarrowing.UseAllVisibleDocumentNarrowing(services);
 
         var probe = new FinanceAuthz.RecordingPrivilegeProbe();
         probe.Hold(AnalysisAuthorizationFilter.CreateAnalysisPrivilege);

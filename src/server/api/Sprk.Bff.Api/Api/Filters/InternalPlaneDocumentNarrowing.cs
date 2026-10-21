@@ -1,3 +1,4 @@
+using Spaarke.Core.Auth;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Identity;
@@ -67,6 +68,70 @@ internal static class InternalPlaneDocumentNarrowing
         }
 
         return await NarrowForExternalCallerAsync(httpContext, asked, surface, logger).ConfigureAwait(false);
+    }
+
+    /// <summary>The rule name a document the narrowing hides is denied under (logs only; the reason code is
+    /// <see cref="HiddenReasonCode"/>).</summary>
+    internal const string HiddenRuleName = "ExternalDocumentNarrowing";
+
+    /// <summary>
+    /// Task 188 round 4b (F1-2): THE document-resource decision for every site outside
+    /// <see cref="DocumentAuthorizationFilter"/>. The root-grant decision (<see cref="IAuthorizationService.AuthorizeAsync"/>,
+    /// the caller's own rights, one call per id as before) and then ONE <see cref="ForCallerAsync"/> call over every id it
+    /// allowed. The first id the root grants deny is returned as-is (the site's deny shape is unchanged); a document the
+    /// narrowing hides (or a narrowing fault) answers a denial with <see cref="HiddenReasonCode"/> — the reason
+    /// <c>OperationAccessRule</c> gives a caller without the operation's right — so a hidden document cannot be told from an
+    /// unreadable one. Internal systemusers: no narrowing call and no app-only read. An empty list is allowed with no call.
+    /// </summary>
+    /// <remarks>Enforced by the ArchTest <c>EveryDocumentResourceGrant_GoesThroughTheNarrowingHelper</c>: a direct
+    /// document-resource <c>AuthorizeAsync</c> anywhere else in the BFF fails it.</remarks>
+    internal static async Task<AuthorizationResult> AuthorizeDocumentsAsync(
+        HttpContext httpContext,
+        IAuthorizationService authorizationService,
+        string userId,
+        IReadOnlyCollection<Guid> documentIds,
+        string operation,
+        string? userAccessToken,
+        string surface,
+        ILogger? logger,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(httpContext);
+        ArgumentNullException.ThrowIfNull(authorizationService);
+        ArgumentNullException.ThrowIfNull(documentIds);
+
+        AuthorizationResult? allowed = null;
+        foreach (var documentId in documentIds)
+        {
+            var result = await authorizationService.AuthorizeAsync(new AuthorizationContext
+            {
+                UserId = userId,
+                ResourceId = documentId.ToString(),
+                Operation = operation,
+                CorrelationId = httpContext.TraceIdentifier,
+                UserAccessToken = userAccessToken,
+            }, ct).ConfigureAwait(false);
+            if (!result.IsAllowed)
+            {
+                return result;
+            }
+
+            allowed ??= result;
+        }
+
+        if (allowed is null)
+        {
+            return new AuthorizationResult { IsAllowed = true, ReasonCode = "sdap.access.allow.no_documents", RuleName = HiddenRuleName };
+        }
+
+        var visibility = await ForCallerAsync(
+            httpContext, documentIds.Select(id => (string?)id.ToString()), surface, logger).ConfigureAwait(false);
+        if (documentIds.All(id => visibility.IsShown(id.ToString())))
+        {
+            return allowed;
+        }
+
+        return new AuthorizationResult { IsAllowed = false, ReasonCode = HiddenReasonCode, RuleName = HiddenRuleName };
     }
 
     /// <summary>
