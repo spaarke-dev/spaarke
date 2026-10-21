@@ -171,7 +171,7 @@ Three reviews of `procedure-and-file-model.md` v4. Each item is folded into v5 o
 
 ## 4. Owner decisions needed (consolidated)
 
-> **2026-10-21:** the owner answered C, F, G and the override half of D directly in ontology-r1's session (ontology D-175, `notes/decisions.md` in that worktree). Do not ask them again. Still open: A, B, D2, E, H–Q.
+> **2026-10-21:** the owner answered C, F, G and the override half of D directly in ontology-r1's session (ontology D-175, `notes/decisions.md` in that worktree). Do not ask them again. Later the same day the owner also answered **D2** (ontology D-175 addendum) and **Q** plus the migration question (in SPA-r3's session; relayed by SPA-r3, not found in its notes). Still open: A, B, E, H–P.
 
 | # | Question | Recommendation |
 |---|---|---|
@@ -179,7 +179,7 @@ Three reviews of `procedure-and-file-model.md` v4. Each item is folded into v5 o
 | B | Default firm field for a record's Procedures list | `sprk_assignedlawfirm1/2` (the submission rule). Evaluation always uses the invoice's firm. |
 | C | Firm condition on every source, manual assignments included | **Answered (ontology D-175 (1)):** yes. A Procedure naming firm F applies only to F's invoices, from every source. Rank key (Level, −Distance, FirmSpecific). |
 | D | In Review invoices when an override is removed | **Answered (ontology D-175 (2)):** re-check. The general rule re-judges invoices still in review, so none is left unjudged. |
-| D2 | Retiring a whole Procedure: may it close findings on undecided invoices (ontology D-170 reading)? | Re-check the In Review invoices, as for D. Their findings from the retired Procedure close on that re-check; decided invoices keep their snapshot. |
+| D2 | Retiring a whole Procedure: may it close findings on undecided invoices (ontology D-170 reading)? | **Answered (ontology D-175 addendum):** retiring re-checks its pending and In Review invoices; the retired Procedure's findings close on that re-check. Decided invoices keep their snapshot. |
 | E | No version in force for a work date | **Hold** the invoice. |
 | F | Creator person on the new tables | **Answered (ontology D-175 (4)):** `sprk_createdbyperson` on Procedure, Procedure Version, assignment and Stored File, D-173 shape and protection; replaces "uploaded by". 081 adds the tables to `Set-ChildRecordCreatorPersonSchema.ps1` (`$Tables`, `$SolutionHomes`) and `StampedChildTables`, and asserts zero non-null values before securing. |
 | G | Ontology's matter rules stay separate in R1 | **Answered (ontology D-175 (3)):** yes. Ontology-area Procedures are document-only in R1; a validator refuses `sprk_procedureversion` on Ontology-domain policies. Ontology files a post-R1 convergence issue. |
@@ -210,7 +210,8 @@ Three reviews of `procedure-and-file-model.md` v4. Each item is folded into v5 o
 
 | # | Question | Recommendation |
 |---|---|---|
-| Q | Firm sees a pending-scan file as "Checking file…", or the file is hidden until clean | Show it as pending (R3's view): no download until clean. |
+| Q | Firm sees a pending-scan file as "Checking file…", or the file is hidden until clean | **Answered (owner, SPA-r3's session):** show "Checking file…" with no Download. The list row carries the scan status; content on a pending file is 409 `file_scan_pending`; a Malicious file drops out of the list and its content is 404. |
+| Q2 | Migration of invoice PDFs from SPE Documents | **Answered (owner, SPA-r3's session):** no transitional period, all of this is dev. The invoice-PDF-as-Document path and its components are removed. Matches O-13 (no dev migration). |
 | R | Licensed (systemuser) SPA users on the firm file route | Serve them under their own rights, the 036 way, once reconciled with uac-r2. |
 
 ## 6. uac-r2 and SPA-r3: settled rule for the firm file route (item R, 2026-10-21)

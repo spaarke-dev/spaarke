@@ -23,7 +23,8 @@ O-1 to O-17. Main points:
 - **Other:** a late fee is an added fee (AddedFee type); exceptions are retired with their record; no dev migration; the UI is prototyped separately and the back end goes first.
 
 ### Open owner questions
-- A–Q in `notes/procedure-model-reviews.md` §4/§5. **C, F, G and D (override removal) were answered by the owner in ontology-r1's session (ontology D-175, 2026-10-21); do not ask again.** Still open: A, B, D2 (retiring a whole Procedure), E, H–Q.
+- A–Q in `notes/procedure-model-reviews.md` §4/§5. **C, F, G and D (override removal) were answered by the owner in ontology-r1's session (ontology D-175, 2026-10-21); do not ask again.** D2 (ontology D-175 addendum), Q and Q2 (no migration; owner in SPA-r3's session) are answered too. Still open: A, B, E, H–P. H: the owner asked ontology why "guidance"; ontology relays the answer.
+- SPA-r3 asked which BFF routes we retire so the SPA drops the same. Proposed (final with D-148): the four `/external/invoices/{id}/documents…` routes in `ExternalProjectDataEndpoints.cs:378-412` (R3 task 031, uac-r2 187 F1) → replaced by the firm file routes (§6 of the reviews note). Submission routes stay; only their storage target changes.
 - Questions sent to SPA-r3 (2026-10-21): firm invoice-file route shape, the task 188 ArchTest, excluding the snapshot from the firm findings projection, what firms see while a scan is pending. Early views only.
 
 ### 050a (closed)
