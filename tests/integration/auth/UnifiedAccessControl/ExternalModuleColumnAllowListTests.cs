@@ -970,4 +970,68 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         record.Should().ContainKey(primaryId).And.ContainKey(module.PrimaryNameAttribute,
             "the /record default projection survives the shrink");
     }
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // Task 036 (NFR-03): a fetch scoped through an accessible set KNOWN to be incomplete says so
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    private static CallerPrincipal CiamWithTruncatedSets(Guid[] projects, params string[] truncatedRootTypes) => new()
+    {
+        Plane = CallerPrincipalPlane.CiamContact,
+        ContactId = Guid.NewGuid(),
+        Email = "external@lawfirm.test",
+        Oid = Guid.NewGuid().ToString(),
+        ProjectAccess = projects
+            .Select(id => CallerProjectAccess.FromLevel(id, ExternalAccessLevel.Collaborate))
+            .ToList(),
+        TruncatedRootEntityTypes = new HashSet<string>(truncatedRootTypes, StringComparer.OrdinalIgnoreCase),
+    };
+
+    private static string WireJson(FetchResponseDto dto) =>
+        System.Text.Json.JsonSerializer.Serialize(
+            dto, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ExecuteScopedFetch_WhenTheCallersSetIsTruncated_SaysSo_AndOtherwiseTheWireIsUnchanged(bool truncated)
+    {
+        var project = Guid.NewGuid();
+        var principal = truncated
+            ? CiamWithTruncatedSets(new[] { project }, ProjectEntity)
+            : CiamWithTruncatedSets(new[] { project });
+        var dataverse = new FetchDouble(DocumentRow(project));
+
+        var result = await Fetch(Registry(DocumentsModule()), principal, LiveDocumentsGridFetchXml, dataverse);
+
+        var body = result.Should().BeOfType<Ok<FetchResponseDto>>().Subject.Value!;
+        dataverse.Calls.Should().Be(1);
+        body.Entities.Should().ContainSingle("truncation flags the response; it never drops a row");
+        body.Truncated.Should().Be(truncated);
+        var json = WireJson(body);
+        if (truncated)
+        {
+            json.Should().Contain("\"truncated\":true");
+        }
+        else
+        {
+            json.Should().NotContain("truncated", "an uncapped response is byte-for-byte what it was before the field existed");
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteScopedFetch_WhenTheAccessibleSetIsEmptyButTruncated_SaysSo_WithoutQuerying()
+    {
+        // A capped composition can leave a module with no ids at all: "0 rows" is then not the whole truth either.
+        var principal = CiamWithTruncatedSets(Array.Empty<Guid>(), "sprk_matter");
+        var dataverse = new FetchDouble();
+
+        var result = await Fetch(Registry(DocumentsModule()), principal, LiveDocumentsGridFetchXml, dataverse);
+
+        var body = result.Should().BeOfType<Ok<FetchResponseDto>>().Subject.Value!;
+        dataverse.Calls.Should().Be(0);
+        body.Entities.Should().BeEmpty();
+        body.Truncated.Should().BeTrue();
+        WireJson(body).Should().Contain("\"truncated\":true");
+    }
 }

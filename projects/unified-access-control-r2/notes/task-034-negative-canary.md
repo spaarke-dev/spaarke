@@ -185,3 +185,45 @@ deployed BFF's impersonated reads, not by this run.
 
 **Consequence:** task 036 is unblocked. The live layer must be re-run (same procedure) before 036 merges
 if the canary code or the impersonation primitive changes, and before every FR-20 rollout.
+
+## 9. Manual live gate — RE-RUN 2026-10-20 on the PR #2078 merge head (NFR-04 merge gate for 036)
+
+**Result: PASS — 20 of 20 in `ImpersonationNegativeCanaryTests`, including all four live tests, with
+`SPAARKE_CANARY_REQUIRED=true` (no NOT RUN).** Run at 2026-10-20T20:46:31Z and repeated at 20:46:59Z, both
+20/20, from worktree `C:\wt036`, branch `feat/uac-036-fr20-flag-gated-swap`, head `30fb8ce9db` (the merge of
+`origin/master`, including #2122, into 036). Environment: dev (`spaarkedev1`), read-only. No record, role,
+user or flag was written or changed. `ExternalAccess:ImpersonatedRootSets:Enabled` stays off in every
+checked-in config (the tripwire test passed).
+
+| Test | Result |
+|---|---|
+| `ImpersonatedMatterRead_AgainstTheCanaryUser_ReturnsAStrictSubsetAndStrictlyFewerRows` | PASS |
+| `ImpersonatedMatterRead_AgainstTheCanaryUser_ReturnsExactlyTheSeededMatters` | PASS: the impersonated set equals the independently derived **58** |
+| `RetrieveMultipleImpersonatedAsync_OnTheLiveConfiguredService_RefusesAnEmptyCaller` | PASS |
+| `HelperStampedMatterRead_AgainstTheCanaryUser_ReturnsAStrictSubsetAndStrictlyFewerRows` | PASS |
+| 16 tenant-free tests (perturbation, `Require_*`, config tripwire and template scan) | PASS |
+
+**Canary.** The same existing user as §8 (systemuser `d6f8f439-40bf-f111-a05b-3833c5e9614d`), enabled,
+access mode 0, business unit `cb15f587-baa0-f111-aaac-000d3a99d1d7` (no descendant business units).
+Nothing was created, moved or re-roled for this run.
+- Direct roles: 2 (`dc44312f-…`, `f8ce167c-…`), both with `prvReadsprk_matter` at **Deep**.
+- Team: 1 (its business unit's default team), which now holds **1** role (`dc44312f-…`, Deep). §8 recorded 4
+  team roles; three have been removed since. None of the roles holds Organization (Global) depth.
+- Hierarchy security: `ishierarchicalsecuritymodelenabled = false`, `usepositionhierarchy = false`.
+
+**Expected set, derived app-only (README "Provisioning", steps 1-4), never from the impersonated read.**
+These are GET reads with the operator's `az` login: business unit plus descendants (1), the
+`prvReadsprk_matter` depth of each role, every `sprk_matter` with its `owningbusinessunit`, and
+`principalobjectaccess` rows on `sprk_matter` for the user and its team. Deep set **58** plus POA Read rows
+**0** gives **58** of the org's **62** matters, a margin of 4 rows (§8: 59 of 61). The expected ids were passed
+to the run through `SPAARKE_CANARY_SEEDED_MATTER_IDS` and are not reproduced here.
+
+**Credential.** As in §8: `AZURE_TOKEN_CREDENTIALS=AzureCliCredential`, `SPAARKE_TESTS_ALLOW_OUTBOUND=1`, the
+operator's `az` login. No Key Vault read.
+
+**Inversion check.** Not repeated. It is the one-time check from §8 (2026-10-03, INERT as designed). The
+canary code was last changed in `73a4e06aed`, the template-scan test, which is covered by this run.
+
+**Consequence:** the NFR-04 manual gate is satisfied for the 036 merge head `30fb8ce9db`. It must be run
+again before any FR-20 rollout (flag flip), and before merge if the canary code or the impersonation
+primitive changes after this head.

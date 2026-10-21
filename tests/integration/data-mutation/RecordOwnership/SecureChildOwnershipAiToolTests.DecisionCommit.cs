@@ -50,7 +50,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
     private static CallerRecordAccessProbe GrantingProbe()
     {
         var probe = new Mock<CallerRecordAccessProbe>(
-            new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!)
+            new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!, null!)
         { CallBase = false };
         probe.Setup(p => p.GetCallerRightsAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(AccessRights.Read | AccessRights.Write | AccessRights.AppendTo | AccessRights.Append);
