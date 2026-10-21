@@ -47,6 +47,8 @@
     <constraint source="model 4.3, 5.3 (uac-r2 F1-3, F1-e)">The internal file route's and the upload entry's flagged-external refusals are 090's; this task adds both to the guard's list and verifies their tests; it does not reimplement them.</constraint>
     <constraint source="guard rule (root §16)">ExternalInvoiceVisibilityGuardTests: every external-plane method that reads sprk_invoice or a taint-closure table reaches ExternalInvoiceVisibility or is listed with a reason; must-fire and must-not-fire controls; a ratchet baseline only for violations that exist at HEAD and are listed with an owning task.</constraint>
     <constraint source="project">No schema change, no live writes, no deploy; ExternalModuleRegistry gains no table (uac-r2 Q1). Logs carry ids and counts only.</constraint>
+      <constraint source="uac-r2 2026-10-21 (re-plan ack)">Invoice message threads and the notification feed (ExternalMessageEndpoints.cs:82): a message or notice reaches an external caller only if its communication passes the document rule's communication gate (sprk_isinternalonly exactly false AND the thread's sprk_privacystate Open; CommunicationOpenThreadGate) AND the invoice it is about passes (a′). Fail closed on any read fault.</constraint>
+    <constraint source="uac-r2 2026-10-21 (re-plan ack)">GET /invoice-submissions (ExternalInvoiceSubmissionEndpoints.cs:63, :74): return only the caller's own firm's submissions, and drop any whose invoice (a′) hides; any count uses the same filter, computed as the caller.</constraint>
   </constraints>
 
   <knowledge>
