@@ -9,6 +9,7 @@ using Sprk.Bff.Api.Services.Ai.Membership.Events;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 using Sprk.Bff.Api.Services.ExternalAccess;
+using SearchIndexColumns = Sprk.Bff.Api.Services.Ai.SearchIndexNameResolver;
 
 namespace Sprk.Bff.Api.Services.RecordCreation;
 
@@ -25,8 +26,9 @@ namespace Sprk.Bff.Api.Services.RecordCreation;
 /// (<c>CompleteRootCreateAsync</c>, the I-1 re-stamp, I-16, the sharee mirror) and the Office create's (the autonumber
 /// retry and its number read-back, the membership event), in their order. Existing callers still call those cores: tasks
 /// 017 and 018 re-point them. Field mapping (step 3) is task 014's (the partial <c>RecordCreationService.Mapping.cs</c>);
-/// the search-index default (step 8) is a recorded no-op seam that task 015 fills; the owner decision is ONE private
-/// method (<see cref="DecideOwnerAsync"/>) that task 015 swaps.</para>
+/// the owner (step 7, <see cref="DecideOwnerAsync"/>) and the search-index default (step 8,
+/// <see cref="SearchIndexDefaultAsync"/>) are task 015's: record-first for every create, roots and children (FR-09), and
+/// the OWNING business unit's search index, fill-only (FR-10).</para>
 /// <para><b>Step 10 runs after the create.</b> Spec FR-06 places "I-1 stamp + I-16 derived into the payload" before the
 /// create; every existing path (the child-record route, the chat create's G5 core) derives both AFTER the create through
 /// <see cref="CoreAncestorRestamper"/>. Porting kept that order, so step 10 is recorded <see cref="RecordCreationStepState.Deferred"/>
@@ -240,9 +242,9 @@ internal sealed partial class RecordCreationService
             "warnings={MappingWarnings}, correlationId={CorrelationId})",
             table, id, decision.OwningTeamId, decision.IsolatedFor is not null, warnings.Count, decision.MappingWarnings.Count,
             correlationId);
-        // The mapping step's warnings first (step 3 ran before the create), then the post-create ones.
+        // The mapping step's warnings first (step 3 ran before the create), then step 8's, then the post-create ones.
         return trace.Created(id, decision.OwningTeamId, decision.IsolatedFor is not null,
-            [.. decision.MappingWarnings.Select(w => w.Detail), .. warnings], decision.MappingWarnings);
+            [.. decision.MappingWarnings.Select(w => w.Detail), .. decision.DefaultWarnings, .. warnings], decision.MappingWarnings);
     }
 
     /// <summary>What steps 1 to 10 decided: a refusal, or the fields to create and the facts step 12 needs.</summary>
@@ -260,6 +262,9 @@ internal sealed partial class RecordCreationService
 
         /// <summary>Step 3's and step 5's warnings about the mapped values (task 014): what was not mapped, and why.</summary>
         public IReadOnlyList<RecordCreationWarning> MappingWarnings { get; init; } = [];
+
+        /// <summary>Step 8's warning (task 015): the owning business unit's search-index defaults could not be read.</summary>
+        public IReadOnlyList<string> DefaultWarnings { get; init; } = [];
 
         public static Decision Refuse(RecordCreationRefusal refusal) => new() { Refusal = refusal };
     }
@@ -523,7 +528,7 @@ internal sealed partial class RecordCreationService
             trace.Record(RecordCreationStep.SecureRootPlan, RecordCreationStepState.Ran, "ordinary (the table inherits no secure parent)");
         }
 
-        // ── Step 7: the owner (ONE method; task 015 swaps it) ─────────────────────────────────────────────────────────
+        // ── Step 7: the owner — record-first for every create, roots and children (FR-09, task 015) ──────────────────
         trace.Begin(RecordCreationStep.Owner);
         RecordOwnerResolution? owner = null;
         if (isolatedTeam is null)
@@ -542,13 +547,18 @@ internal sealed partial class RecordCreationService
             trace.Record(RecordCreationStep.Owner, RecordCreationStepState.Ran, "the plan's named Secure team (an isolated root)");
         }
 
-        // ── Step 8: the search-index default (ONE method; task 015 fills it) ──────────────────────────────────────────
-        trace.Add(SearchIndexDefault(rule));
+        // ── Step 8: the search-index default — the OWNING business unit's, fill-only (FR-10, I-5; task 015) ────────────
+        trace.Begin(RecordCreationStep.SearchIndexDefault);
+        var owningTeam = isolatedTeam ?? owner!.OwningTeamId!.Value;
+        var searchIndex = await SearchIndexDefaultAsync(table, rule, item, owningTeam, noun, ct).ConfigureAwait(false);
+        trace.Add(searchIndex.Step);
 
         // ── Step 9: the creator person ("for" person and table defaults: the adapters', owner-review item 3) ─────────────
         var fields = owner is not null
             ? OwnedCreateFields(owner, table, item)
             : IsolatedCreateFields(table, item, isolatedTeam!.Value, creatorPerson);
+        foreach (var (column, value) in searchIndex.Fields)
+            fields[column] = value; // only columns the row did not already carry a value for (fill-only)
         trace.Record(RecordCreationStep.CreatorAndDefaults, RecordCreationStepState.Ran,
             RecordCreatorPerson.IsStamped(table)
                 ? "creator person stamped when the requester resolved; \"for\" person and table defaults stay with the adapters"
@@ -562,19 +572,24 @@ internal sealed partial class RecordCreationService
         {
             Fields = fields,
             Item = item,
-            OwningTeamId = isolatedTeam ?? owner!.OwningTeamId,
+            OwningTeamId = owningTeam,
             IsolatedFor = isolatedTeam is null ? null : creatorPerson,
             GrantorOid = grantorOid,
             MappingWarnings = mappingWarnings,
+            DefaultWarnings = searchIndex.Warning is { } searchIndexWarning ? [searchIndexWarning] : [],
         };
     }
 
     /// <summary>
-    /// Step 7, ported from <see cref="OwnedChildWrite.CreateAsync"/>: the resolver's owner over every parent the row is filed
-    /// under (secure-if-any, record-first), with the person who asked as <see cref="RecordOwnershipContext.RequestedBy"/>;
-    /// then the two secure-filing refusals of that core, with its words. A table's ownership exception (an unfiled
-    /// communication keeps its creator, E1) cannot be honoured by an application create, so it refuses. A fault is
-    /// <see cref="RecordCreationRefusal.OwnerUnavailableCode"/> (503), nothing written.
+    /// Step 7 (FR-09, task 015: record-first for every create, roots and children), ported from
+    /// <see cref="OwnedChildWrite.CreateAsync"/>: the resolver's owner over every parent the row is filed under — its
+    /// lookups, and on a table whose ADR-024 pair files it on its own (a project, <see cref="PairParentAsync"/>) the record
+    /// the pair names — secure-if-any, then the filed-under record's business-unit team, then the acting user's, with the
+    /// person who asked as <see cref="RecordOwnershipContext.RequestedBy"/>; then the two secure-filing refusals of that
+    /// core, with its words. A pair whose record cannot be told refuses (<see cref="RecordOwnerRefusal.ParentUndetermined"/>),
+    /// never "filed under nothing". A table's ownership exception (an unfiled communication keeps its creator, E1) cannot be
+    /// honoured by an application create, so it refuses. A fault is <see cref="RecordCreationRefusal.OwnerUnavailableCode"/>
+    /// (503), nothing written.
     /// </summary>
     private async Task<(RecordOwnerResolution? Owner, RecordCreationRefusal? Refusal)> DecideOwnerAsync(
         string table, RecordTableRule rule, DataverseWriteItemMapper.MappedItem item, Guid? callerObjectId,
@@ -592,6 +607,21 @@ internal sealed partial class RecordCreationService
         RecordOwnerResolution owner;
         try
         {
+            var pair = OwnedChildWrite.PairOf(item);
+            var pairParent = pair.InvalidId
+                ? (Parent: null, Undetermined: $"its {SecureRootInheritance.PairIdColumn} is not a record id")
+                : await PairParentAsync(_entities, table, pair.IdText, pair.TypeId, ct).ConfigureAwait(false);
+            if (pairParent.Undetermined is { } undetermined)
+            {
+                var refused = RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUndetermined,
+                    $"what it is filed under could not be told ({undetermined})");
+                return (null, new RecordCreationRefusal(RecordCreationRefusalKind.OwnerUnresolved, RecordOwnerRefusal.ParentUndetermined,
+                    refused.Reason!) { OwnerDecision = refused });
+            }
+
+            if (pairParent.Parent is { } named)
+                parents = [.. parents, named];
+
             owner = await _ownership.ResolveOwnerAsync(
                 RecordOwnershipContext.ForParents(parents, callerObjectId, callerSystemUserId) with { RequestedBy = requestedBy },
                 ct).ConfigureAwait(false);
@@ -647,10 +677,157 @@ internal sealed partial class RecordCreationService
     private static RecordCreationRefusal SecureFilingRefused(RecordOwnerResolution owner, string detail) =>
         new(RecordCreationRefusalKind.OwnerUnresolved, RecordOwnerRefusal.NoOwnerSource, detail) { OwnerDecision = owner };
 
-    /// <summary>Step 8 — the owning business unit's search-index default (FR-10, I-5). A recorded no-op seam until task 015.</summary>
-    private static RecordCreationStepRecord SearchIndexDefault(RecordTableRule rule) => new(
-        RecordCreationStep.SearchIndexDefault, RecordCreationStepState.NoOp,
-        rule.SearchIndexed ? "seam: task 015 fills the owning business unit's search index here" : "the table is not search-indexed");
+    /// <summary>The ADR-024 record-type catalog (the pair's type lookup target).</summary>
+    private const string RecordTypeTable = "sprk_recordtype_ref";
+
+    /// <summary>
+    /// FR-09 (task 015): the record a row's ADR-024 pair files it under ON ITS OWN — only on a table whose pair is
+    /// BFF-managed (<see cref="SecureRootInheritance.PairNamesAParentOnItsOwn"/>: a project, whose only filing is the pair) —
+    /// as an ownership parent. Its record type is read app-only from the catalog, as the secure-root plan reads it before
+    /// this (one row, its <c>sprk_recordlogicalname</c>). The Office create shares it, so a project filed under a matter by
+    /// either path is owned through that matter.
+    /// </summary>
+    /// <returns>No parent: the table's pair files nothing on its own, the pair names nothing, or it names a table that is not
+    /// an ownership parent (<see cref="RecordOwnershipContext.ForParents"/> leaves it out). <c>Undetermined</c>: the pair
+    /// names a record that cannot be told — an id that is not one, no record type, or a type that names no table — which
+    /// the caller refuses (fail closed), never reads as "filed under nothing".</returns>
+    /// <remarks>A Dataverse fault propagates: the caller's owner step refuses it as the owner fault it is.</remarks>
+    internal static async Task<(RecordOwnershipParent? Parent, string? Undetermined)> PairParentAsync(
+        IGenericEntityService entities, string table, string? idText, Guid? typeId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        if (!SecureRootInheritance.PairNamesAParentOnItsOwn(table) || string.IsNullOrWhiteSpace(idText))
+            return (null, null);
+
+        if (!Guid.TryParse(idText.Trim(), out var id) || id == Guid.Empty)
+            return (null, $"its {SecureRootInheritance.PairIdColumn} is not a record id");
+
+        if (typeId is not { } type || type == Guid.Empty)
+            return (null, $"its {SecureRootInheritance.PairIdColumn} names a record without its record type");
+
+        var query = new Microsoft.Xrm.Sdk.Query.QueryExpression(RecordTypeTable)
+        {
+            ColumnSet = new Microsoft.Xrm.Sdk.Query.ColumnSet(OwnedChildWrite.RecordTypeLogicalNameColumn),
+            TopCount = 1,
+        };
+        query.Criteria.AddCondition(RecordTypeTable + "id", Microsoft.Xrm.Sdk.Query.ConditionOperator.Equal, type);
+        var row = (await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+        var named = row?.GetAttributeValue<string>(OwnedChildWrite.RecordTypeLogicalNameColumn)?.Trim().ToLowerInvariant();
+        return string.IsNullOrEmpty(named)
+            ? (null, "its record type names no table")
+            : (new RecordOwnershipParent(named, id), null);
+    }
+
+    /// <summary>The search-index lookup's navigation property on the search-indexed tables (matter, project, document) —
+    /// the bind every browser create already sends (<c>matterService.ts</c>, <c>DocumentRecordService.ts</c>: live).</summary>
+    internal const string SearchIndexNavigationProperty = "sprk_AI_Search_Index";
+
+    /// <summary>The entity set of the AI search index catalog (<c>sprk_aisearchindex</c>).</summary>
+    internal const string SearchIndexEntitySet = "sprk_aisearchindexes";
+
+    /// <summary>What step 8 decided: the step's record, the columns it fills (none, one or both), and its warning.</summary>
+    private sealed record SearchIndexFill(
+        RecordCreationStepRecord Step, IReadOnlyDictionary<string, object?> Fields, string? Warning = null)
+    {
+        public static SearchIndexFill Nothing(RecordCreationStepState state, string note) =>
+            new(new RecordCreationStepRecord(RecordCreationStep.SearchIndexDefault, state, note), new Dictionary<string, object?>());
+    }
+
+    /// <summary>
+    /// Step 8 (FR-10, I-5; task 015): on a table the rules registry marks search-indexed
+    /// (<see cref="RecordTableRule.SearchIndexed"/>), the OWNING business unit's <c>sprk_searchindexname</c> and
+    /// <c>sprk_ai_search_index</c> — each filled only when the row carries no value for it (fill-only: a value the caller,
+    /// a server writer or the field mapping supplied wins). Read once per create, app-only: the owner team's business unit
+    /// (the named Secure Record Owners team's for a root created into isolation), then that unit's two columns — the columns
+    /// <see cref="Sprk.Bff.Api.Services.Ai.SearchIndexNameResolver"/> reads at index time, by its own names.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Non-fatal</b>, as the Office create's business-unit defaults are: these are index ROUTING hints, not a storage
+    /// location or an access boundary, and the resolver walks the record's owning business unit at index time anyway. A read
+    /// that fails fills nothing and tells the caller once (the Office create's words); the create stands.</para>
+    /// <para><b>No precedence chosen</b> between the two columns: each is copied from its own business-unit counterpart, so a
+    /// unit whose two values disagree is passed on as it is and the resolver's lookup-first order decides at index time, as
+    /// it does today.</para>
+    /// </remarks>
+    private async Task<SearchIndexFill> SearchIndexDefaultAsync(
+        string table, RecordTableRule rule, DataverseWriteItemMapper.MappedItem item, Guid owningTeam, string noun,
+        CancellationToken ct)
+    {
+        if (!rule.SearchIndexed)
+            return SearchIndexFill.Nothing(RecordCreationStepState.NoOp, "the table is not search-indexed");
+
+        var fillName = !SuppliesSearchIndexName(item);
+        var fillLookup = !SuppliesSearchIndexLookup(item);
+        if (!fillName && !fillLookup)
+            return SearchIndexFill.Nothing(RecordCreationStepState.Ran, "both values supplied (kept; fill-only)");
+
+        try
+        {
+            var team = await _entities.RetrieveAsync("team", owningTeam, ["businessunitid"], ct).ConfigureAwait(false);
+            if (team?.GetAttributeValue<EntityReference>("businessunitid") is not { } unit || unit.Id == Guid.Empty)
+                throw new InvalidOperationException($"The owner team {owningTeam:D} reported no business unit.");
+
+            var businessUnit = await _entities.RetrieveAsync(SearchIndexColumns.BusinessUnitEntity, unit.Id,
+                    [SearchIndexColumns.LegacyTextColumn, SearchIndexColumns.LookupColumn],
+                    ct)
+                .ConfigureAwait(false);
+
+            var fields = new Dictionary<string, object?>(StringComparer.Ordinal);
+            if (fillName && businessUnit?.GetAttributeValue<string>(SearchIndexColumns.LegacyTextColumn)?.Trim()
+                    is { Length: > 0 } indexName)
+            {
+                fields[SearchIndexColumns.LegacyTextColumn] = indexName;
+            }
+
+            if (fillLookup && businessUnit?.GetAttributeValue<EntityReference>(SearchIndexColumns.LookupColumn)
+                    is { } index && index.Id != Guid.Empty)
+            {
+                fields[$"{SearchIndexNavigationProperty}@odata.bind"] = $"/{SearchIndexEntitySet}({index.Id:D})";
+            }
+
+            return new SearchIndexFill(
+                new RecordCreationStepRecord(RecordCreationStep.SearchIndexDefault, RecordCreationStepState.Ran,
+                    $"{fields.Count} value(s) filled from the owning business unit (fill-only)"),
+                fields);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[RECORD-CREATE] the owning business unit's search-index defaults for a new {Table} could not be read; it is " +
+                "created without them and index routing falls back to its owning business unit", table);
+            return new SearchIndexFill(
+                new RecordCreationStepRecord(RecordCreationStep.SearchIndexDefault, RecordCreationStepState.Failed,
+                    "the owning business unit's defaults could not be read; nothing filled"),
+                new Dictionary<string, object?>(),
+                "Business-unit search defaults could not be read, so they were not applied. Document indexing for this " +
+                $"{noun} falls back to its business unit's settings.");
+        }
+    }
+
+    /// <summary>Whether the row carries a search index NAME already (a non-blank string; a <c>null</c> is no value).</summary>
+    private static bool SuppliesSearchIndexName(DataverseWriteItemMapper.MappedItem item)
+    {
+        using var body = JsonDocument.Parse(item.JsonBody);
+        return body.RootElement.EnumerateObject().Any(p =>
+            string.Equals(p.Name, SearchIndexColumns.LegacyTextColumn, StringComparison.OrdinalIgnoreCase)
+            && p.Value.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(p.Value.GetString()));
+    }
+
+    /// <summary>Whether the row binds the search index LOOKUP already (a bind to a record; a <c>null</c> bind is no value).</summary>
+    private static bool SuppliesSearchIndexLookup(DataverseWriteItemMapper.MappedItem item)
+    {
+        if (item.Lookups.Any(l => string.Equals(l.Column, SearchIndexColumns.LookupColumn, StringComparison.OrdinalIgnoreCase)))
+            return true;
+
+        using var body = JsonDocument.Parse(item.JsonBody);
+        return body.RootElement.EnumerateObject().Any(p =>
+            string.Equals(p.Name, $"{SearchIndexNavigationProperty}@odata.bind", StringComparison.OrdinalIgnoreCase)
+            && p.Value.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(p.Value.GetString()));
+    }
 
     /// <summary>
     /// The create payload of an OWNED row: the item's body, owned by the resolver's team, with the person who asked as its
@@ -1127,7 +1304,7 @@ internal enum RecordCreationStep
     /// <summary>7 — the owner.</summary>
     Owner,
 
-    /// <summary>8 — the search-index default (task 015; a recorded no-op seam here).</summary>
+    /// <summary>8 — the search-index default: the owning business unit's, fill-only, on a search-indexed table (task 015).</summary>
     SearchIndexDefault,
 
     /// <summary>9 — the creator person, the "for" person and the table defaults.</summary>

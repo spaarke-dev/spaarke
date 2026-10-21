@@ -540,9 +540,11 @@ public class RecordOwnerAssignmentCensusTests
             "(If-Match on the guard read's versionnumber; a 412 is Conflict, a 404 NotFound) that shares the pass's evict and " +
             "read-back (WriteOwnerAndReadBackAsync). No identity gains Write on a Decision Record."),
         new OwnerWriteEntry("OfficeRecordCreationService.cs", "CreateMatterAsync", 1, OwnerWriteKind.Root,
-            "Office quick-create of a MATTER (a root) — owned by the resolver's team for the acting user (task 080)."),
+            "Office quick-create of a MATTER (a root) — owned by the resolver's team, record-first over what it is filed under " +
+            "(field-mapping-server-write-path-r1 task 015, FR-09); filed under nothing, the acting user's (task 080)."),
         new OwnerWriteEntry("OfficeRecordCreationService.cs", "CreateProjectAsync", 1, OwnerWriteKind.Root,
-            "Office quick-create of a PROJECT (a root) — owned by the resolver's team for the acting user (task 080)."),
+            "Office quick-create of a PROJECT (a root) — owned by the resolver's team, record-first over what it is filed under " +
+            "(its mapped pair; task 015, FR-09); filed under nothing, the acting user's (task 080)."),
         new OwnerWriteEntry("OfficeRecordCreationService.cs", "IsolateProjectCreate", 1, OwnerWriteKind.Root,
             "Task 158 r1 (owner round 31 item 2): a PROJECT (a root) filed under a secure record is created INTO isolation, " +
             "owned by the named Secure Record Owners team provisioning's topology names (SecureRootInheritance.PlanCreateAsync)."),

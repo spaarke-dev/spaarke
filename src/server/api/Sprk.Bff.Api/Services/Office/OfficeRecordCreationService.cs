@@ -476,21 +476,83 @@ public sealed class OfficeRecordCreationService
     }
 
     /// <summary>
-    /// The owner of a new Matter or Project (task 080, write-path invariant I-6): the caller's business unit's DEFAULT
-    /// OWNER TEAM — owner decision 2026-09-22, "owned by the acting user's BU default owner team … not the user".
+    /// The owner of a new Matter or Project — record-first, as every create's (field-mapping-server-write-path-r1 task 015,
+    /// FR-09, owner decision Q9; write-path invariant I-6): the resolver's owner over the records the row is FILED under —
+    /// its ownership-parent lookups, and a project's ADR-024 pair (its only filing, which field mapping may write;
+    /// <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationService.PairParentAsync"/>, the unified create's own
+    /// reading) — secure-if-any, then the filed-under record's business-unit DEFAULT OWNER TEAM, then the acting user's.
     /// </summary>
     /// <remarks>
-    /// <para>A new core record is filed against nothing, so the acting user's business unit is the answer. The
-    /// optional field-mapping SOURCE is not a parent — it only supplies values — so it does not decide ownership.</para>
-    /// <para>The caller's <c>systemuserid</c> is still load-bearing: an unresolved caller is refused before this runs,
-    /// and the business-unit defaults above are read from the same user, so the team and those defaults always
-    /// come from one business unit.</para>
-    /// <para>Returns <see langword="null"/> when no team resolves; the caller refuses (no row written).</para>
+    /// <para>A row filed under nothing keeps task 080's answer and its refusal unchanged: the caller's business unit's default
+    /// owner team, else <see cref="OwnerTeamUnresolved"/>. The optional field-mapping SOURCE is not a parent — it only
+    /// supplies values — so it decides ownership only through what the mapping wrote onto the row.</para>
+    /// <para>A secure owner is refused here (fail closed): a matter or project filed under a secure record must itself be
+    /// made secure (the secure-root plan, which runs before this for a project, creates such a project into isolation, so a
+    /// secure owner here means the plan and the resolver disagree). A resolver fault propagates, as it did before.</para>
     /// </remarks>
-    private Task<Guid?> ResolveOwnerTeamAsync(Guid callerSystemUserId, CancellationToken ct) =>
-        _ownership.ResolveOwningTeamAsync(
-            new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext { CallerSystemUserId = callerSystemUserId },
-            ct);
+    private async Task<(Guid? Team, RecordCreationResult? Failure)> ResolveOwnerTeamAsync(
+        Entity entity, Guid callerSystemUserId, string entityLabel, CancellationToken ct)
+    {
+        var parents = entity.Attributes
+            .Where(a => a.Value is EntityReference reference
+                        && Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsOwnershipParent(reference.LogicalName)
+                        && !Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsCitation(entity.LogicalName, a.Key))
+            .Select(a => new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(
+                ((EntityReference)a.Value).LogicalName, ((EntityReference)a.Value).Id))
+            .ToList();
+
+        var pairId = entity.Attributes.TryGetValue(Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairIdColumn, out var idValue)
+            ? idValue
+            : null;
+        var pairType = entity.Attributes.TryGetValue(Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairTypeColumn, out var typeValue)
+            ? typeValue as EntityReference
+            : null;
+        var pair = pairId is null or string
+            ? await Sprk.Bff.Api.Services.RecordCreation.RecordCreationService.PairParentAsync(
+                _entities, entity.LogicalName, pairId as string, pairType?.Id, ct).ConfigureAwait(false)
+            : (Parent: null, Undetermined: $"its {Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairIdColumn} is not a record id");
+        if (pair.Undetermined is { } undetermined)
+        {
+            return (null, RecordCreationResult.Failed(new RecordCreationFailure(
+                RecordCreationFailureKind.OwnerUnresolved,
+                Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ParentUndetermined,
+                $"The {entityLabel} was not created: what it is filed under could not be told ({undetermined}).")));
+        }
+
+        if (pair.Parent is { } named)
+            parents.Add(named);
+
+        var owner = await _ownership.ResolveOwnerAsync(
+                Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(parents, callerSystemUserId: callerSystemUserId) with
+                {
+                    RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.Of(callerSystemUserId),
+                },
+                ct)
+            .ConfigureAwait(false);
+
+        if (!owner.IsOwned || owner.OwningTeamId is not { } team)
+        {
+            // Filed under nothing: task 080's refusal, its code and words, unchanged.
+            if (parents.Count == 0)
+                return (null, OwnerTeamUnresolved(entityLabel));
+
+            var code = owner.RefusalCode ?? Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.NoOwnerSource;
+            return (null, RecordCreationResult.Failed(new RecordCreationFailure(
+                KindFor(code), code,
+                $"The {entityLabel} was not created: {owner.Reason ?? "no owner could be resolved for the record it is filed under"}.")));
+        }
+
+        if (owner.IsSecureOwner && parents.Count > 0)
+        {
+            return (null, RecordCreationResult.Failed(new RecordCreationFailure(
+                RecordCreationFailureKind.SecureFilingRefused,
+                Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.NoOwnerSource,
+                $"The {entityLabel} was not created: it is filed under a secure record, and a {entityLabel} created there would "
+                + "itself have to be made secure. Create it from the secure record itself.")));
+        }
+
+        return (team, null);
+    }
 
     private static RecordCreationResult OwnerTeamUnresolved(string entityLabel) =>
         RecordCreationResult.Failed(new RecordCreationFailure(
@@ -693,12 +755,14 @@ public sealed class OfficeRecordCreationService
         await ApplyAssignedInternalAsync(entity, request.AssignedToContactId, ownerId, ct).ConfigureAwait(false);
 
         // Set LAST, after mapping, so nothing can overwrite it — owner attribution is load-bearing (task 030 step 4).
-        // Task 080: the owner is the caller's business-unit default owner TEAM, not the caller.
-        if (await ResolveOwnerTeamAsync(ownerId, ct).ConfigureAwait(false) is not { } ownerTeamId)
+        // Task 080: the owner is a business-unit default owner TEAM, not the caller; task 015: record-first (FR-09).
+        var (resolvedTeam, ownerFailure) = await ResolveOwnerTeamAsync(entity, ownerId, "matter", ct).ConfigureAwait(false);
+        if (ownerFailure is not null)
         {
-            return OwnerTeamUnresolved("matter");
+            return ownerFailure;
         }
 
+        var ownerTeamId = resolvedTeam!.Value;
         entity[OwnerAttribute] = new EntityReference(TeamEntity, ownerTeamId);
 
         // Task 133 (owner round 7 item 2): this create is APP-ONLY, so createdby is the BFF application user. The
@@ -797,15 +861,6 @@ public sealed class OfficeRecordCreationService
         // the request names the assignee (task 100), which wins.
         await ApplyAssignedInternalAsync(entity, request.AssignedToContactId, ownerId, ct).ConfigureAwait(false);
 
-        // Set LAST, after mapping, so nothing can overwrite it — owner attribution is load-bearing.
-        // Task 080: the owner is the caller's business-unit default owner TEAM, not the caller.
-        if (await ResolveOwnerTeamAsync(ownerId, ct).ConfigureAwait(false) is not { } ownerTeamId)
-        {
-            return OwnerTeamUnresolved("project");
-        }
-
-        entity[OwnerAttribute] = new EntityReference(TeamEntity, ownerTeamId);
-
         // Task 133 (owner round 7 item 2): the app-only create's person, as for Matter.
         Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.Stamp(entity, ownerId);
 
@@ -826,8 +881,26 @@ public sealed class OfficeRecordCreationService
                 $"The project was not created: {rootRefusal.Reason}."));
         }
 
+        Guid? ownerTeamId = null;
         if (plan.Isolated)
+        {
             IsolateProjectCreate(entity, plan);
+        }
+        else
+        {
+            // Set LAST, after mapping and the plan, so nothing can overwrite it — owner attribution is load-bearing. Task 080:
+            // a business-unit default owner TEAM, not the caller; task 015 (FR-09): record-first, so a project the mapping
+            // filed under a matter (its pair) is owned through that matter, as every other create path owns it. A project
+            // created into isolation is owned by the plan's named team instead (above), so no owner is resolved for it.
+            var (resolvedTeam, ownerFailure) = await ResolveOwnerTeamAsync(entity, ownerId, "project", ct).ConfigureAwait(false);
+            if (ownerFailure is not null)
+            {
+                return ownerFailure;
+            }
+
+            ownerTeamId = resolvedTeam!.Value;
+            entity[OwnerAttribute] = new EntityReference(TeamEntity, ownerTeamId.Value);
+        }
 
         if (await CreateNumberedAsync(entity, "project", ct).ConfigureAwait(false) is not { } createdId)
         {
