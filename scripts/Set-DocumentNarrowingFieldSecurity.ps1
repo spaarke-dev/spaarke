@@ -21,10 +21,13 @@
     DocumentNarrowingLinks (the same two profiles of task 133, the same preconditions p1-p7, the same
     secure-then-grant-at-once steps and revert).
 
-    TRADE-OFF (read the task 188 notes before -Apply). A secured column reads EMPTY for a user outside the reader
-    profile. The assistant's dataverse.* tools read as the user, so for such a user the predicate would see "no link"
-    and SHOW the document. (p2) therefore must pass (every business unit's default team on the reader profile), and a
-    business unit created later needs Set-RecordCreatorPersonSchema.ps1 -Apply re-run, as for every other locked column.
+    READS (read the task 188 notes before -Apply). A secured column reads EMPTY for a user outside the reader profile.
+    The predicate never depends on that: every read it makes, the assistant's dataverse.* tools included, runs under the
+    BFF's app-only identity (main-session decision 2026-10-20), so a masked link can never read as "no link". (p2)
+    (every business unit's default team on the reader profile) is kept as defence in depth, so users and forms keep
+    seeing the links; a business unit created later needs Set-RecordCreatorPersonSchema.ps1 -Apply re-run, as for every
+    other locked column. BOTH columns stay in the target: an unsecured sprk_parentdocument could be cleared to expose a
+    Restricted .eml's attachments.
 
     LIVE ORDER: deploy the BFF carrying task 188 → THIS SCRIPT (dry run; every precondition OK) → owner approval → -Apply
     → -Verify. Agents run the dry run only.

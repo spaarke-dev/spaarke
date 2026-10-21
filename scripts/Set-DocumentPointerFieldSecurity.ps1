@@ -158,8 +158,8 @@ $Api = "$EnvironmentUrl/api/data/v9.2"
 $Targets = @{
     DocumentPointers = @{ Table = 'sprk_document'; Columns = @('sprk_graphdriveid', 'sprk_graphitemid', 'sprk_graphitemidbound', 'sprk_relocationpending', 'sprk_relocatedversions'); What = 'the document pointers (incl. the item-id copy) and the relocation record (ledger and version record)' }
     ReportCatalog    = @{ Table = 'sprk_report'; Columns = @('sprk_pbi_reportid', 'sprk_workspaceid', 'sprk_datasetid', 'sprk_iscustom'); What = 'the report catalog pointers' }
-    # Task 188 (D7 §6.3): the links ExternalDocumentNarrowing walks. Masked for a reader, the assistant tools (which read as
-    # the user) would see "no link" and show the document, so (p2) matters here as much as for the pointers.
+    # Task 188 (D7 §6.3): the links ExternalDocumentNarrowing walks. The predicate reads them app-only on every surface, so a
+    # mask never opens a document; (p2) still keeps users and forms reading them (defence in depth).
     DocumentNarrowingLinks = @{ Table = 'sprk_document'; Columns = @('sprk_relatedcommunication', 'sprk_parentdocument'); What = 'the document narrowing links (related communication, parent document)' }
 }
 $Table = $Targets[$Target].Table
@@ -395,7 +395,7 @@ function Set-ColumnSecured([string]$Column, [bool]$Value) {
 function Write-MaskedRecovery([string]$Column, [string]$Cause) {
     Write-Host ''
     Write-Host "  !!! RECOVERY REQUIRED NOW — $Table.$Column may be field-secured WITHOUT its reader permission !!!" -ForegroundColor Red
-    $consequence = if ($Target -eq 'DocumentNarrowingLinks') { 'the assistant tools then see no link and SHOW the document' } else { 'files / reports stop opening' }
+    $consequence = if ($Target -eq 'DocumentNarrowingLinks') { 'users and forms then see no link; the narrowing itself reads app-only' } else { 'files / reports stop opening' }
     Write-Host "  Every non-administrator then reads $Column EMPTY ($consequence)." -ForegroundColor Red
     Write-Host "  Cause: $Cause" -ForegroundColor Red
     Write-Host '  Do ONE of these, now: (1) fix the cause and re-run -Apply (it grants only what is missing on an already' -ForegroundColor Red
