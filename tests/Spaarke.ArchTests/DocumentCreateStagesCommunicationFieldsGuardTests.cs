@@ -6,7 +6,8 @@ namespace Spaarke.ArchTests;
 /// <summary>
 /// spaarkeai-word-add-in-r1 task 130 (#2126): <c>DataverseServiceClientImpl.CreateDocumentAsync</c> must call
 /// <c>StageDocumentCommunicationFields(document, request)</c>, the call that puts <c>sprk_relatedcommunication</c> and
-/// <c>sprk_accesspermission</c> on the created <c>sprk_document</c>.
+/// <c>sprk_accesspermission</c> on the created <c>sprk_document</c>; and every Office save-path create applies
+/// <c>OfficeDocumentPersistence.ApplyEmailCommunicationOutcome</c> to its request first (write-path registry I-19).
 /// </summary>
 /// <remarks>
 /// <para><b>Why a source scan.</b> Every Office test mocks <c>IDataverseService.CreateDocumentAsync</c>, and the real
@@ -50,6 +51,75 @@ public class DocumentCreateStagesCommunicationFieldsGuardTests
     /// <summary>True when <paramref name="source"/>'s <c>CreateDocumentAsync</c> body calls the stager.</summary>
     internal static bool StagesCommunicationFields(string source)
         => MethodBody(source, Method) is { } body && StagerCall.IsMatch(body);
+
+    // ── The Office create sites (write-path registry I-19) ────────────────────────────────────────────
+
+    /// <summary>The Office save-path files that create <c>sprk_document</c> rows from an email (I-19's owners' callers).</summary>
+    private static readonly string[] OfficeCreateFiles =
+    [
+        "src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs",
+        "src/server/api/Sprk.Bff.Api/Workers/Office/UploadFinalizationWorker.cs",
+    ];
+
+    /// <summary>Today's create sites across <see cref="OfficeCreateFiles"/>: the save's create, the worker's fallback
+    /// create and its attachment-child create. A drop means the scan lost a site (moved or renamed): update the guard.</summary>
+    private const int ExpectedOfficeCreateSites = 3;
+
+    private static readonly Regex DocumentCreateCall = new(
+        @"\b_documentService\s*\.\s*CreateDocumentAsync\s*\(\s*(?<request>\w+)\b", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// Every <c>_documentService.CreateDocumentAsync(x, …)</c> in <paramref name="source"/> (code text, comments stripped)
+    /// with whether <c>ApplyEmailCommunicationOutcome(x, …)</c> runs between <c>x</c>'s <c>new CreateDocumentRequest</c>
+    /// and the create. A create whose request is not built in view counts as a violation.
+    /// </summary>
+    internal static IReadOnlyList<(string Request, bool AppliesOutcome)> OfficeCreateSites(string source)
+    {
+        var code = SourceScan.CodeText(source.Split('\n'));
+        var sites = new List<(string, bool)>();
+        foreach (Match call in DocumentCreateCall.Matches(code))
+        {
+            var request = call.Groups["request"].Value;
+            var declarations = Regex.Matches(
+                code[..call.Index], @"\b" + Regex.Escape(request) + @"\s*=\s*new\s+(?:[\w.]+\.)?CreateDocumentRequest\b",
+                RegexOptions.CultureInvariant);
+            var applies = declarations.Count > 0
+                && Regex.IsMatch(
+                    code[declarations[^1].Index..call.Index],
+                    @"\bApplyEmailCommunicationOutcome\s*\(\s*" + Regex.Escape(request) + @"\s*,",
+                    RegexOptions.CultureInvariant);
+            sites.Add((request, applies));
+        }
+
+        return sites;
+    }
+
+    [Fact(DisplayName = "Task 130 (I-19): every Office sprk_document create applies the email communication outcome")]
+    public void EveryOfficeDocumentCreate_AppliesTheEmailCommunicationOutcome()
+    {
+        var total = 0;
+        foreach (var file in OfficeCreateFiles)
+        {
+            var path = Path.Combine(SourceScan.RepoRoot, file.Replace('/', Path.DirectorySeparatorChar));
+            Assert.True(System.IO.File.Exists(path), $"{file} not found; update this guard if the file moved.");
+
+            var sites = OfficeCreateSites(System.IO.File.ReadAllText(path));
+            total += sites.Count;
+            foreach (var (request, applies) in sites)
+            {
+                Assert.True(
+                    applies,
+                    $"{file}: CreateDocumentAsync({request}, …) runs without OfficeDocumentPersistence.ApplyEmailCommunicationOutcome"
+                    + $"({request}, …) after the request is built. An email-derived document would be created with neither "
+                    + "sprk_relatedcommunication nor Restricted (write-path registry I-19, task 130, #2126).");
+            }
+        }
+
+        Assert.True(
+            total >= ExpectedOfficeCreateSites,
+            $"Found {total} Office sprk_document create sites, expected at least {ExpectedOfficeCreateSites}: a site moved out of "
+            + "view of this guard. Add its file to OfficeCreateFiles.");
+    }
 
     [Fact(DisplayName = "Task 130: DataverseServiceClientImpl.CreateDocumentAsync stages the communication link and access permission")]
     public void CreateDocumentAsync_CallsStageDocumentCommunicationFields()
@@ -118,5 +188,43 @@ public class DocumentCreateStagesCommunicationFieldsGuardTests
             """;
 
         Assert.True(StagesCommunicationFields(source));
+    }
+
+    [Fact(DisplayName = "Task 130 guard control: an Office create without the outcome call is a violation")]
+    public void Control_OfficeCreateWithoutTheOutcome_IsAViolation()
+    {
+        const string source = """
+            var createRequest = new Spaarke.Dataverse.CreateDocumentRequest { Name = "x" };
+            // OfficeDocumentPersistence.ApplyEmailCommunicationOutcome(createRequest, id);   (commented out: does not count)
+            var id = await _documentService.CreateDocumentAsync(createRequest, ct);
+            """;
+
+        Assert.Equal([("createRequest", false)], OfficeCreateSites(source));
+    }
+
+    [Fact(DisplayName = "Task 130 guard control: an outcome call for an earlier request does not cover a later one")]
+    public void Control_OutcomeForAnEarlierRequest_IsAViolation()
+    {
+        const string source = """
+            var createRequest = new CreateDocumentRequest { Name = "first" };
+            OfficeDocumentPersistence.ApplyEmailCommunicationOutcome(createRequest, id);
+            await _documentService.CreateDocumentAsync(createRequest, ct);
+            createRequest = new CreateDocumentRequest { Name = "second" };
+            await _documentService.CreateDocumentAsync(createRequest, ct);
+            """;
+
+        Assert.Equal([("createRequest", true), ("createRequest", false)], OfficeCreateSites(source));
+    }
+
+    [Fact(DisplayName = "Task 130 guard control: an Office create that applies the outcome passes")]
+    public void Control_OfficeCreateWithTheOutcome_IsNotAViolation()
+    {
+        const string source = """
+            var createRequest = new CreateDocumentRequest { Name = "x" };
+            var restricted = IsEmailDerived(type) && OfficeDocumentPersistence.ApplyEmailCommunicationOutcome(createRequest, id);
+            var documentId = await _documentService.CreateDocumentAsync(createRequest, cancellationToken);
+            """;
+
+        Assert.Equal([("createRequest", true)], OfficeCreateSites(source));
     }
 }

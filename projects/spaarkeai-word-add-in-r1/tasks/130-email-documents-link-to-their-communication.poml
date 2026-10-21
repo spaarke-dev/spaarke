@@ -3,13 +3,16 @@
   <metadata>
     <title>Every document saved from an Outlook email links to that email's communication (#2126 / R3 ISS-015, UAC D7 T8)</title>
     <phase>8 — UAT findings and cross-project fixes</phase>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF code on the Office save path; partner and AI-tool visibility of documents (access control, tenant data exposure).</rigor-reason>
     <model-tier>opus</model-tier>
     <model-tier-reason>Security-sensitive brownfield change across three save paths; UAC reviews under security rules (two passes).</model-tier-reason>
     <effort>xhigh</effort>
     <deps>none</deps>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shares OfficeService and the Office save tests with task 131; run in the main session.</parallel-reason>
     <tags>bff-api, office, communication, access-control, security, unit-test</tags>
   </metadata>
   <prompt>GitHub #2126 (R3 ISS-015). Owner decision 2026-10-20: (a) hide, broadened. Documents saved from an internal-only email (the .eml and its attachments) are not visible to partners. UAC D7 (design: `origin/work/unified-access-control-r2:projects/unified-access-control-r2/notes/2119-manage-access-all-forms-design.md` §6): the read side derives visibility from `sprk_document.sprk_relatedcommunication` (one parent hop through `sprk_parentdocument`, max 3) plus the 065 rule; UAC builds that (T7). This task is T8, the writer side. UAC brief 2026-10-20: one invariant — every document saved from an email carries the link to that email's `sprk_communication`.
@@ -27,8 +30,14 @@ Code map (master c3ec5d6e5):
     <constraint>Null `ICommunicationDataverseService` / `IGenericEntityService` in `OfficeDocumentPersistence` is a wiring defect: production DI must supply them (assert in a DI test); only the bare test constructor may omit them.</constraint>
     <constraint>Do not change what a linked document's own Access Permission is (stays default/Standard); the link alone hides nothing — the 065 rule decides. Do not touch UAC's read side (T7), ExternalCallerCommunicationGuard, or R3's external routes.</constraint>
     <constraint>BFF §10 obligations (publish-size delta vs fresh master, CVE check, tests). Dev BFF deploy only with the owner's go and the standing deploy coordination with R3 (build must contain R3 077, 283466d40).</constraint>
+    <constraint>Owner decisions 2026-10-20 (this session): (1) D7 Restricted confirmed for a document whose email cannot be identified. (2) A single attachment save files its parent email to the save's record exactly as an email save would, through task 121's `ReconciledEmailFiling.FileIfUnfiledAsync`; an email already filed is never moved. (3) #2171 (a refused filing is silent) is task 131, not this task.</constraint>
+    <constraint>Before merge (UAC contract 2026-10-20): write `sprk_accessinheritance` with UAC task 189's own serializer of `AccessInheritance.OwnNarrowing(Restricted)` in the same create payload at every Restricted site (.eml, single attachment, children); list the sites in 189's writer guard if 189 merges first; pass #2150's F3 caller to the attachment-branch `FileIfUnfiledAsync` if #2150 merges first.</constraint>
   </constraints>
-  <acceptance-criteria>
+  <steps mode="directional">
+    <step>Map the create path for each content type; carry the capture's communication id into the create; capture the parent for a single attachment.</step>
+    <step>Apply the link-or-Restricted outcome in every Office create; stage both fields in the Dataverse create; guard it (ArchTest) and test it end to end.</step>
+    <step>Two adversarial security passes, code-review, adr-check; publish-size delta; then the PR and UAC's two passes.</step>
+  </steps>  <acceptance-criteria>
     <criterion testable="true">Must-fire: an email save with attachments — the .eml and every child document are created with sprk_relatedcommunication = the capture's communication.</criterion>
     <criterion testable="true">Must-fire: a single attachment save links the canonical communication when it exists, else the communication the capture creates from the fetched parent message.</criterion>
     <criterion testable="true">Must-fire: an .eml save whose Message-ID lookup misses is linked to the captured communication.</criterion>

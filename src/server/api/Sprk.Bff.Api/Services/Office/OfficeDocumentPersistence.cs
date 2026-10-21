@@ -143,12 +143,14 @@ public class OfficeDocumentPersistence
     /// Task 130: the Error a Restricted email-derived create logs. Ids only — the document, the job, and whether the save
     /// carried a Message-ID at all; never the subject, the sender or the body. The save still succeeds.
     /// </summary>
-    internal static void LogCreatedRestricted(ILogger logger, Guid documentId, Guid? jobId, bool hadMessageId)
+    /// <param name="hadMessageId">Null when the caller cannot know (the worker's fallback for an Attachment payload, which
+    /// carries no Message-ID); logged as "unknown" rather than a false "False".</param>
+    internal static void LogCreatedRestricted(ILogger logger, Guid documentId, Guid? jobId, bool? hadMessageId)
         => logger.LogError(
             "Email-derived sprk_document {DocumentId} (job {JobId}) was created with Access Permission Restricted: no "
             + "sprk_communication could be identified for its email after the capture and the Message-ID lookup "
             + "(Message-ID present: {HadMessageId}). The save succeeded (task 130, #2126).",
-            documentId, jobId, hadMessageId);
+            documentId, jobId, hadMessageId?.ToString() ?? "unknown");
 
     /// <summary>
     /// Creates a Document record in Dataverse with SPE pointers. Returns the document id AND whether the content

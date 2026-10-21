@@ -662,7 +662,10 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         if (createdRestricted)
         {
             OfficeDocumentPersistence.LogCreatedRestricted(
-                _logger, documentId, jobId, OfficeDocumentPersistence.HasUsableMessageId(payload.EmailMetadata?.InternetMessageId));
+                _logger, documentId, jobId,
+                payload.ContentType == SaveContentType.Email
+                    ? OfficeDocumentPersistence.HasUsableMessageId(payload.EmailMetadata?.InternetMessageId)
+                    : null); // an Attachment payload carries no Message-ID: unknown, not "False"
         }
 
         _logger.LogInformation(
