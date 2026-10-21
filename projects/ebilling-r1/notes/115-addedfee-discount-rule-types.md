@@ -7,8 +7,8 @@ Design source: `procedure-and-file-model.md` §6.3 ("Rule types the examples nee
 | Step | State |
 |---|---|
 | 1 Design (this note) | Written 2026-10-21. |
-| 2 ontology-r1 design review | **Pending.** The option values and the three outcomes were agreed at model level (reviews §1 item 6, §8 answer 3). The parameter shapes, the facts read and the decisions in §6 have not been reviewed yet. Code was written in parallel at the main session's direction ("code and scripts only; live steps gated"). If the review changes the design, the code follows it. |
-| 6 Option script | Written, **not run** against any environment. |
+| 2 ontology-r1 design review | **FINDINGS on `9f412274c5`, fixed (§12).** The option values and the three outcomes were agreed at model level (reviews §1 item 6, §8 answer 3). Code was written in parallel at the main session's direction ("code and scripts only; live steps gated"). D-39 precedence (RuleType alone vs RuleType + feeKind) is open with the owner and unchanged here. |
+| 6 Option script | Written. `-WhatIf` run against dev under a GET-only guard (§11); **no write** to any environment. |
 | 8 ontology-r1 PR review | Pending. |
 | 9 Dev option run | Pending the owner's OK, after the ontology-r1 schema review of the script and its -WhatIf output (TASK-INDEX owner gates: 080, 088, 115). |
 | Publish-size delta | Not measured: see §8. |
@@ -39,11 +39,11 @@ A fee the firm adds to an invoice (O-16: a late fee is just an added fee): a lat
 
 | Member | Rule |
 |---|---|
-| `feeKind` | Required. One of `lateFee`, `administrativeFee`, `interest`, `other`. Describes the rule only: no fact carries a fee kind, so the handler does not read it. |
+| `feeKind` | Required. One of `lateFee`, `administrativeFee`, `interest`, `other`. Describes the rule only: no fact carries a fee kind, so the handler does not read it. The finding names it by its label (`FeeKindLabel`: "late fee", "administrative fee", "interest", "added fee"). |
 | `allowance` | Required. One of `notAllowed`, `cap`, `afterDays`. |
 | `feeCodes` | Required for `cap` (1–500 unique codes, the shared code pattern). They identify the fee's lines. Not allowed for the other two forms. |
 | `capAmount` | `cap` only: more than 0, at most 1,000,000,000, in the invoice currency. |
-| `capPercent` | `cap` only: more than 0, at most 100, a percent of the invoice's other lines. |
+| `capPercent` | `cap` only: more than 0, at most 100, a percent of the invoice's other lines. Not a rate on an overdue balance over time ("1.5% per month"): drafting sends that clause to notConverted. |
 | `afterDays` | `afterDays` only: an integer from 1 to 3650. |
 
 - A `cap` body has exactly one of `capAmount` and `capPercent`.
@@ -65,20 +65,21 @@ A fee the firm adds to an invoice (O-16: a late fee is just an added fee): a lat
 | Item | Rule |
 |---|---|
 | Fee lines | **Expense** lines whose code is in `feeCodes` (case ignored): the firm-billed expense code, or the AI expense code when none was billed. This is ExpenseRule's D-117 matching. |
-| Fee total | The sum of the fee lines' amounts, credits included (a credited fee lowers the total). A line with no amount is left out. |
+| Fee total | The sum of the fee lines' amounts, credits included (a credited fee lowers the total). A fee line with no amount is left out. |
 | Limit, amount | `capAmount`, to the cent. |
-| Limit, percent | `ToCent(base × capPercent / 100)`. The base is the sum of the amounts of every other line (fee and expense, credits included); a line with no amount is left out, and a base below 0 counts as 0. |
+| Limit, percent | `ToCent(base × capPercent / 100)`. The base is the sum of the amounts of every other line (fee and expense, credits included). |
+| Percent cap not checked | When the base is 0 or less, or any other line has no amount, the cap is **not compared**: the invoice gets one flag-only `added_fee.not_checked` finding (title "Added-fee limit not checked", its own message, no token; the D-115 pattern), if the fee total is above 0. |
 | Fires | Fee total (to the cent) is **above** the limit. A total equal to the limit holds. No fee line, or a total of 0 or less, gives no finding. |
-| Findings | One per rule per invoice, on the first fee line that carries an amount. The cap is a property of the invoice, as DailyHoursCap's is of the day. |
-| Reads | Every fee line's code (as ExpenseRule names it), amount and date, plus the reference values `feeTotal` and `feeLimit`. For a percent cap the base is the reference value `feeBase`; the other lines' amounts are not listed one by one. That keeps the finding bounded (O2), and AddedFee never rejects, so 073 never needs them. |
+| Findings | One per rule per invoice, **on the invoice** (`sprk_invoice`). The cap is a property of the invoice, so the version in force is the one on the invoice date; a first fee line dated before the version cannot drop the finding. |
+| Reads | Every fee line's code (as ExpenseRule names it), amount and date, plus the reference values `feeTotal` and `feeLimit` (`feeLimit` only when compared). For a percent cap the base is the reference value `feeBase`; the other lines' amounts are not listed one by one. That keeps the finding bounded (O2), and AddedFee never rejects, so 073 never needs them. |
 | Reason code | `added_fee.over_cap` |
-| Tokens | `line.date`, `feeTotal`, `feeLimit`, `rule.feeKind` |
+| Tokens | `feeTotal`, `feeLimit`, `rule.feeKind` (the label). No line token: the finding is on the invoice. Wording: "The {{rule.feeKind}} charges matched by their expense codes total {{feeTotal}}, more than the agreed limit of {{feeLimit}}." |
 | Consequence | Flag only. Not reject-eligible (§7). No suggested adjustment. |
 | Currency (D-20, D-115) | A `capAmount` is money: on an invoice whose currency is missing, unclear or not USD, its findings are dropped and the version is listed as skipped (the "Rates and expense caps were not checked" finding), as for ExpenseRule's cap. A `capPercent` is a ratio of the invoice's own amounts and runs in any currency. |
 
 ## 4. Discount (100000016)
 
-**A check only** ("agreed discount not applied"). It never adjusts an amount.
+**A check only** ("rate above the agreed discounted rate"). It never adjusts an amount. It compares per-line rates only: a firm may give the discount at invoice level (`InvoiceTotalsService` reads the discount total) or give part of it elsewhere, and that is not seen, so neither the wording nor the reason code claims the discount was not applied.
 
 ### Body (`billing-discount.schema.json`)
 
@@ -97,13 +98,14 @@ A fee the firm adds to an invoice (O-16: a late fee is just an added fee): a lat
 | Item | Rule |
 |---|---|
 | Lines | **Fee** lines with a billed rate. Credit lines are skipped (D-105). |
-| Rack rate | `line.ApprovedRate` (046's `RateResolution`) with status Found and a `RackRate`. Any other line ("no resolved rack rate") is **skipped**, with no finding. ApprovedRate already reports a rate it could not establish. |
-| Limit | `ToCent(rack × (1 − discountPercent / 100) × (1 + tolerancePercent / 100))` |
+| Rack rate | `line.ApprovedRate` (046's `RateResolution`) with status Found and a `RackRate`. When any line in scope has none, the invoice gets **one** flag-only `discount.not_checked_no_rack_rate` finding (title "Discount not checked: no rack rate", its own message, no token; the D-115 pattern), reading those lines' rate and date. The other lines are still checked. |
+| Discounted rate | `ToCent(rack × (1 − discountPercent / 100))`, no tolerance. |
+| Limit | `ToCent(rack × (1 − discountPercent / 100) × (1 + tolerancePercent / 100))`, carried as its own value `discountLimit`. |
 | Fires | The billed rate to the cent is **above** the limit. A rate equal to the limit or below it holds. |
-| Findings | One per offending line. |
-| Reads | The line's rate, date and timekeeper as billed (extracted), the credit-test reads (`WithCreditTestReads`), and the reference values `rackRate`, `discountedRate` and the rate card ids. |
-| Reason code | `discount.not_applied` |
-| Tokens | `line.date`, `line.timekeeperName`, `line.rate`, `rackRate`, `discountedRate`, `rule.discountPercent` |
+| Findings | One per offending line, plus at most one "not checked" finding on the invoice. |
+| Reads | The line's rate, date and timekeeper as billed (extracted), the credit-test reads (`WithCreditTestReads`), and the reference values `rackRate`, `discountedRate`, `discountLimit` and the rate card ids. |
+| Reason code | `discount.rate_above_discounted` (renamed from the unreleased `discount.not_applied`) |
+| Tokens | `line.date`, `line.timekeeperName`, `line.rate`, `rackRate`, `discountedRate`, `discountLimit`, `rule.discountPercent`. Headline "Rate above the agreed discounted rate"; wording "{{line.timekeeperName}} billed {{line.rate}} on {{line.date}}, above the limit of {{discountLimit}}: the agreed discount of {{rule.discountPercent}} percent off the standard rate of {{rackRate}} gives {{discountedRate}}." |
 | Consequence | Flag only. No suggested adjustment. Not reject-eligible. |
 | Currency (D-20) | A rate comparison: not run when the currency is missing, unclear or not USD, and the version is listed as skipped (as ApprovedRate). |
 
@@ -115,8 +117,8 @@ Everything the handlers read is already in `BillingFactSet`: line type, amount, 
 
 1. Labels follow the name convention (`AddedFee`), not "Added fee" (§2).
 2. AddedFee fee lines are expense lines matched on `feeCodes` (ExpenseRule's matching). A firm that bills a late fee as a fee line with a task code is not matched. Lines carry no fee kind, so codes are the only key.
-3. The fee total and the percent base are net of credits. A line with no amount is left out.
-4. AddedFee gives one finding per invoice, on the first fee line. The percent base is cited as one reference value, not as every line's amount.
+3. The fee total and the percent base are net of credits. A fee line with no amount is left out of the total; another line with no amount makes a percent cap "not checked" (§12).
+4. AddedFee gives one finding per invoice, on the invoice (§12). The percent base is cited as one reference value, not as every line's amount.
 5. Discount's tolerance is optional (default 0) and multiplies the discounted rate, like ApprovedRate's tolerance multiplies the approved rate.
 6. Money skip (D-20): Discount is not run, and an AddedFee `capAmount` is dropped, on a non-USD or unclear currency; `capPercent` runs. `InvoiceComplianceEvaluator` (ontology-owned) gained these two cases.
 7. New failure reason `rule_form_not_supported` for the two refused AddedFee forms, rather than reusing `schema_invalid`. The body is schema-valid, and the refusal is about missing facts.
@@ -151,6 +153,7 @@ Everything the handlers read is already in `BillingFactSet`: line type, amount, 
   - the D-20 case in `InvoiceComplianceEvaluatorTests`.
 - **Pinned-set updates:** the catalogue, dispatch, translator, job-handler, mapper, rejection-rule and system-policy tests now count 13 types.
 - Every test added falls within the acceptance criteria. The D-20 case is the one addition beyond them: it covers decision 6 (§6).
+- **Review round (§12), 2026-10-21.** BFF build 0 errors. Unit filter as above: 5861 passed, 0 failed, 5 skipped. `Spaarke.ArchTests` (full): 1311 passed, 0 failed. Handler tests: `AddedFeeHandlerTests` and `DiscountHandlerTests` 24 cases; with the two handlers reverted to `9f412274c5` (only the reason rename applied so they compile), 10 of them fail, including the no-rack "not checked", the base 0-or-less and missing-amount cases, the invoice subject and the label; all pass with the fix.
 
 ## 11. Option script
 
@@ -164,4 +167,32 @@ Everything the handlers read is already in `BillingFactSet`: line type, amount, 
   - any of 100000000–100000013 is missing or relabelled;
   - 100000014 is present with a label other than `SubmissionIntegrity`.
 - 100000014 being absent (049's script not yet run on the environment) is reported, not refused.
-- -WhatIf output: not recorded. The script was not run against any environment in this task (no live changes); the -WhatIf run comes with the ontology-r1 schema review.
+- **-WhatIf against dev, 2026-10-21, read-only.** Run through a harness that replaces `Invoke-RestMethod` (and `Invoke-WebRequest`) with a proxy that throws on any method other than GET before a request is sent; functions resolve before cmdlets, so the module's `Invoke-RestMethod @p` lands in the proxy. Must-fire control: a POST through the proxy is refused ("GET-ONLY GUARD: refused POST ... (nothing was sent)"). The run made 1 GET and attempted no other method. Exit 0.
+
+```
+Task 115: sprk_policyversion.sprk_ruletype options 100000015 AddedFee, 100000016 Discount on https://spaarkedev1.crm.dynamics.com (solution SpaarkeMaster) [WhatIf]
+  before: 100000000=Threshold, 100000001=Switch, 100000002=Existence, 100000003=ApprovedTimekeeper, 100000004=ApprovedRate, 100000005=TimeIncrement, 100000006=DailyHoursCap, 100000007=NonBillableActivity, 100000008=ExpenseRule, 100000009=InvoiceAge, 100000010=CoreRecordWindow, 100000011=Duplicate, 100000012=RequiredData, 100000013=AiObservation
+  note: 100000014 SubmissionIntegrity is not present yet (task 049's option script has not run here); not required.
+  WOULD INSERT 100000015 AddedFee
+  WOULD INSERT 100000016 Discount
+  WOULD PUBLISH sprk_policyversion
+Done: created 2, skipped 0.
+GET-ONLY GUARD: 1 GET request(s), no other method attempted.
+```
+
+- The real run stays gated on ontology-r1's review of this output and the owner's OK (§1).
+
+## 12. ontology-r1 review of `9f412274c5` (FINDINGS) and the fixes
+
+| # | Finding | Fix |
+|---|---|---|
+| F2-1 | `discountedRate` included the tolerance. | `discountedRate` = rack × (1 − discount), no tolerance; the tolerance-inclusive limit is its own value and token, `discountLimit`. Wording "above the limit of {{discountLimit}}". |
+| F2-2 | "Agreed discount not applied" over-claims: only per-line rates are compared, and a discount may be given at invoice level or in part. | Headline "Rate above the agreed discounted rate"; reason code renamed `discount.not_applied` → `discount.rate_above_discounted` everywhere (unreleased); catalogue refusal text, drafting description, `RuleType` and body-schema descriptions follow. |
+| F2-3 | A line with no rack rate was skipped silently. | One flag-only invoice-level `discount.not_checked_no_rack_rate` finding when any in-scope fee line has no resolved rack rate (§4). |
+| F2-4 | A percent cap compared against a base of 0 or less, or a base that left out a line with no amount. | Base ≤ 0, or another line with no amount: flag-only `added_fee.not_checked` instead of comparing (§3). Drafting sends "per month on an overdue balance" clauses to notConverted (description and the output schema's `capPercent` description). |
+| F3-5 | `rule.feeKind` was rendered raw, and "on this invoice" over-stated what the total covers. | The fact value is `FeeKindLabel(feeKind)` (now internal); wording "charges matched by their expense codes". |
+| F3-6 | The cap finding sat on the first fee line, so its date chose the version in force and could drop the finding. | The finding's subject is the invoice; `line.date` left AddedFee's token set. D-39 precedence is unchanged (owner decision pending). |
+
+- Both new reasons have their own message and title (`ReasonTemplate`, `ReasonHeadline`) and are flag-only (`IsFlagOnlyReason`), as D-115's "Rates and expense caps were not checked".
+- The output schema's `capPercent` description changed, so the deployed drafting Action picks it up with the 079 mirror redeploy (§6 item 8).
+- Design-model text that still says "agreed discount not applied" (`procedure-and-file-model.md` §6.3, `procedure-model-reviews.md` §1 item 6) is ontology-r1's / the design owner's to update; not changed here.
