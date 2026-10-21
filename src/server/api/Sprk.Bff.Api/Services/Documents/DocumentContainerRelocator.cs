@@ -1334,8 +1334,9 @@ public sealed class DocumentContainerRelocator
     /// <see cref="RelocationReleaseState.LockHeld"/>), and never outside it.</para>
     /// <para>What it names is read HERE, under the lock, never taken from the caller: the row's current file (the source), the
     /// container it derives to now (the target — a secure record's own), and the secure record whose own container holds
-    /// the file, which must be one the re-file left (<see cref="SecureExitPermit.RootsLeft"/>). Anything else records
-    /// nothing. An unreadable ledger is left as it is. Never throws for a read or write fault (<see cref="RelocationReleaseState.Failed"/>).</para>
+    /// the file, which must be one the re-file left (<see cref="SecureExitPermit.RootsLeft"/>); and the target's secure record
+    /// must be one the re-file filed the row under (<see cref="SecureExitPermit.RootsAfter"/>, PR #2161 round 4). Anything
+    /// else records nothing. An unreadable ledger is left as it is. Never throws for a read or write fault (<see cref="RelocationReleaseState.Failed"/>).</para>
     /// </remarks>
     public Task<RelocationReleaseOutcome> RecordReleaseAsync(Guid documentId, SecureExitPermit permit, CancellationToken ct = default)
         => RecordReleaseAsync(documentId, permit, ReleaseLockWait, ct);
@@ -1400,7 +1401,8 @@ public sealed class DocumentContainerRelocator
         RelocationReleaseRetryPayload payload, TimeSpan lockWait, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(payload);
-        var permit = new SecureExitPermit(payload.RootsLeft, SecureRemovalDecision.Permitted(payload.Basis, payload.AuthorizedBy));
+        var permit = new SecureExitPermit(
+            payload.RootsLeft, SecureRemovalDecision.Permitted(payload.Basis, payload.AuthorizedBy), payload.RootsAfter ?? []);
         return RecordReleaseUnderLockAsync(payload.DocumentId, permit, lockWait, ReleaseRetryLockRetryInterval,
             new ReleaseBinding(payload.SourceDrive, payload.TargetContainer, payload.PermittedAt), ct);
     }
@@ -1440,7 +1442,8 @@ public sealed class DocumentContainerRelocator
 
             await jobs.SubmitJobAsync(RelocationReleaseRetryJobHandler.NewJob(new RelocationReleaseRetryPayload(
                 documentId, drive, derivation.PrimaryContainer.Trim(), permit.RootsLeft.ToList(),
-                permit.Decision.CallerSystemUserId, permit.Decision.Basis, permittedAt)), ct).ConfigureAwait(false);
+                permit.Decision.CallerSystemUserId, permit.Decision.Basis, permittedAt, permit.RootsAfter.ToList())), ct)
+                .ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -1561,6 +1564,29 @@ public sealed class DocumentContainerRelocator
             return new RelocationReleaseOutcome(RelocationReleaseState.NotCovered,
                 $"its file is in the own container of {sourceRecord.EntityLogicalName} {sourceRecord.RecordId:D}, which this "
                 + "re-file did not leave with F3; no release was recorded");
+        }
+
+        // PR #2161 round 4 (F1-b): the TARGET must be the filing the F3 decision approved, too — the own container of one of
+        // the secure roots the row was filed under after the re-file (SecureExitPermit.RootsAfter, from the same F3 walk). The
+        // target is read now, so another writer's move between the re-file and this release (the row filed under a third
+        // secure record S3 directly in Dataverse) would otherwise take S1's file to S3's members on an F3 act that never saw
+        // S3. "Belongs" is exact: the record that owns the derived container (ResolveOwningRecordAsync) is one of those roots;
+        // a container no secure record owns, or owned by any other, is NotCovered and the file stays held. A target that is
+        // NO secure record's own container needs no rule here: it was answered NotNeeded above (nothing is recorded, and the
+        // widening guard holds an isolated file bound for an ordinary container whatever the ledger says), so the permit
+        // never releases a file toward an ordinary container. The queued retry carries RootsAfter and runs this same check.
+        var targetRecord = await _resolver.ResolveOwningRecordAsync(derivation.PrimaryContainer!, ct).ConfigureAwait(false);
+        if (targetRecord is null || !permit.RootsAfter.Any(root =>
+                string.Equals(root.EntityLogicalName, targetRecord.EntityLogicalName, StringComparison.OrdinalIgnoreCase)
+                && root.RecordId == targetRecord.RecordId))
+        {
+            _logger.LogWarning(
+                "[DOCUMENT-RELOCATE] Document {DocumentId} derives to container {Target}, whose secure record is not one the F3 "
+                + "re-file filed it under ({Count} root(s)): no release is recorded; the file stays held.", documentId,
+                derivation.PrimaryContainer, permit.RootsAfter.Count);
+            return new RelocationReleaseOutcome(RelocationReleaseState.NotCovered,
+                $"it derives to {derivation.PrimaryContainer!.Trim()}, which is not the own container of a secure record this "
+                + "re-file filed it under with F3; no release was recorded");
         }
 
         var ledger = RelocationLedger.Parse(row!.GetAttributeValue<string>(RelocationLedgerColumn));

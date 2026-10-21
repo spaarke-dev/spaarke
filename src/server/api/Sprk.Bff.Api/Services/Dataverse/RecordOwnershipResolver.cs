@@ -897,7 +897,10 @@ public static class RecordOwnerRefusal
 
 /// <summary>
 /// A re-file's F3 permission to leave secure roots (<see cref="RecordOwnerResolution.SecureExitPermitted"/>): every secure
-/// root the change took the row out from under, and the decision that permitted it (who, and on what basis).
+/// root the change took the row out from under, the decision that permitted it (who, and on what basis), and (PR #2161
+/// round 4) every secure root the row is filed under AFTER the change, from the same F3 walk — the filing that decision
+/// approved. A step that acts on the permission acts only toward one of <see cref="RootsAfter"/>: a filing another writer
+/// made after the walk (a move to a third secure record S3) was never F3-checked, so the permission does not cover it.
 /// </summary>
 /// <remarks>
 /// Component Justification (CLAUDE.md §11): (1) Existing — <see cref="Sprk.Bff.Api.Services.Access.SecureRemovalDecision"/>
@@ -907,7 +910,8 @@ public static class RecordOwnerRefusal
 /// an isolated document's file stays in S1's container for good (#2159 A1) or would move without F3.
 /// </remarks>
 public sealed record SecureExitPermit(
-    IReadOnlyList<RecordOwnershipParent> RootsLeft, Sprk.Bff.Api.Services.Access.SecureRemovalDecision Decision);
+    IReadOnlyList<RecordOwnershipParent> RootsLeft, Sprk.Bff.Api.Services.Access.SecureRemovalDecision Decision,
+    IReadOnlyList<RecordOwnershipParent> RootsAfter);
 
 /// <summary>The answer to an ownership question: a team, a reasoned refusal, or (opted-in only) unchanged.</summary>
 public sealed record RecordOwnerResolution(
@@ -1522,8 +1526,9 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             return exitRefusal;
         }
 
-        // #2159 slice 2: every answer of this written re-file carries the F3 permission it was given (the roots it left) —
-        // the answer resolved before the change and, after #2143, the one the settle re-derived from the row's current parents.
+        // #2159 slice 2: an answer of this written re-file carries the F3 permission it was given (the roots it left) — the
+        // answer resolved before the change, and the one the settle derived from the filing THIS call made (PR #2161 round 4,
+        // F1-a: never one it re-derived from another writer's filing, which this call's F3 check never saw).
         RecordOwnerResolution WithExitPermit(RecordOwnerResolution answer) =>
             exitPermit is null ? answer : answer with { SecureExitPermitted = exitPermit };
 
@@ -1565,7 +1570,25 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         var observed = new AfterChangeObservation();
         try
         {
-            return WithExitPermit(await SettleOwnerAsync(request, parents, before, observed, ct).ConfigureAwait(false));
+            var (settled, filingIsOwn) = await SettleOwnerAsync(request, parents, before, observed, ct).ConfigureAwait(false);
+            if (filingIsOwn)
+            {
+                return WithExitPermit(settled);
+            }
+
+            // PR #2161 round 4 (F1-a): the settle answered from a filing another writer made after this call's change (its
+            // parents or lineage-only lookups are not the ones this call wrote). This call's F3 check approved leaving the
+            // roots for THIS call's filing only, so no step after the re-file may act on it for that one: no permit, and a
+            // file held in the root it left stays held (fail closed).
+            if (exitPermit is not null)
+            {
+                _logger.LogWarning(
+                    "Re-file of {Entity} {RecordId}: its owner was settled from a filing another writer made after this change; "
+                    + "the F3 permission to leave {Count} secure record(s) is not carried to it.",
+                    request.EntityLogicalName, request.RecordId, exitPermit.RootsLeft.Count);
+            }
+
+            return settled;
         }
         catch (Exception assignFailure)
         {
@@ -1783,8 +1806,13 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// may have re-owned the row in between, and a stale "already owned" answer would leave the re-filed row with that
     /// writer's owner. A written owner is read back (task 146).</para>
     /// </remarks>
-    /// <returns>The resolution the row's owner now matches.</returns>
-    private async Task<RecordOwnerResolution> SettleOwnerAsync(
+    /// <returns>
+    /// The resolution the row's owner now matches, and (PR #2161 round 4, F1-a) whether it was derived from the filing THIS
+    /// call made: the row read was still filed exactly as this call resolved it, with the lineage-only lookups this call left
+    /// it (<see cref="RowBeforeChange.LineageLookups"/>) — the same test the Secure-unit guard and the recovery apply. A
+    /// caller carries this call's F3 permission only on such an answer.
+    /// </returns>
+    private async Task<(RecordOwnerResolution Answer, bool FilingIsOwn)> SettleOwnerAsync(
         RecordReparent request, IReadOnlyCollection<RecordOwnershipParent> resolvedFrom, RowBeforeChange before,
         AfterChangeObservation? observed, CancellationToken ct)
     {
@@ -1800,6 +1828,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             lastState = state;
 
             var parentsAsResolved = FiledAsResolved(state, resolvedFrom);
+            var filingIsOwn = parentsAsResolved && SameLineage(state.LineageLookups, before.LineageLookups);
             if (observed is { Read: false })
             {
                 observed.Read = true;
@@ -1830,7 +1859,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
 
             if (!target.IsOwned)
             {
-                return target; // Unchanged — the row keeps its owner.
+                return (target, filingIsOwn); // Unchanged — the row keeps its owner.
             }
 
             lastTarget = target;
@@ -1839,7 +1868,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             var teamId = target.OwningTeamId!.Value;
             if (state.OwningTeam == teamId)
             {
-                return target; // already owned by the team its current parents resolve to
+                return (target, filingIsOwn); // already owned by the team its current parents resolve to
             }
 
             if (!target.IsSecureOwner
@@ -1882,7 +1911,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 continue;
             }
 
-            return await ConfirmOwnerAsync(request, target, ct).ConfigureAwait(false);
+            // Written conditionally at the version read, so the filing it answers is the one read at that version.
+            return (await ConfirmOwnerAsync(request, target, ct).ConfigureAwait(false), filingIsOwn);
         }
 
         if (lastTarget is { IsSecureOwner: true } secure)
@@ -1956,7 +1986,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// before the change with this call's own changes applied (<paramref name="before"/>), so another writer's join is never
     /// answered as this call's settled filing.
     /// </remarks>
-    private async Task<RecordOwnerResolution> ConfirmUnconditionalSecureWriteAsync(
+    private async Task<(RecordOwnerResolution Answer, bool FilingIsOwn)> ConfirmUnconditionalSecureWriteAsync(
         RecordReparent request, IReadOnlyCollection<RecordOwnershipParent> resolvedFrom, RecordOwnerResolution secure,
         RowBeforeChange before, RowOwnership lastRead, CancellationToken ct)
     {
@@ -1967,14 +1997,14 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 + "not be settled (#2143).");
 
         var freshTarget = await ResolveReparentOwnerAsync(request, fresh.Parents.ToArray(), ct).ConfigureAwait(false);
+        var filingIsOwn = FiledAsResolved(fresh, resolvedFrom) && SameLineage(before.LineageLookups, fresh.LineageLookups);
         if (freshTarget.IsSecureOwner)
         {
-            return await ConfirmOwnerAsync(request, secure, ct).ConfigureAwait(false);
+            return (await ConfirmOwnerAsync(request, secure, ct).ConfigureAwait(false), filingIsOwn);
         }
 
         var outcome = await ReleaseOwnSecureWriteAsync(request, secure, freshTarget, fresh, before, lastRead, ct)
             .ConfigureAwait(false);
-        var filingIsOwn = FiledAsResolved(fresh, resolvedFrom) && SameLineage(before.LineageLookups, fresh.LineageLookups);
         if (outcome == SecureWriteRelease.Released && filingIsOwn)
         {
             _logger.LogInformation(
@@ -1982,7 +2012,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 + "secure parent was un-secured); the filing is this re-file's own and its owner is the one those parents now "
                 + "give, team {TeamId} (#2143).",
                 request.EntityLogicalName, request.RecordId, freshTarget.OwningTeamId);
-            return freshTarget;
+            return (freshTarget, true);
         }
 
         if (outcome == SecureWriteRelease.Held)
@@ -2314,11 +2344,30 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             request.EntityLogicalName, request.RecordId, left.Count, decision.Outcome, decision.Basis,
             decision.CallerSystemUserId);
 
+        if (!decision.IsPermitted)
+        {
+            return (RecordOwnerResolution.SecureRemovalRefused(decision, ChildNoun(request.EntityLogicalName)), false, null);
+        }
+
         // #2143 round 2 (F1): a PERMITTED decision is also what the settle's Secure-unit guard keys on — the move out of the
         // Secure Record business unit this check covered, even when another writer's Secure write lands after this read.
-        return decision.IsPermitted
-            ? (null, true, left.Count > 0 ? new SecureExitPermit(left, decision) : null)
-            : (RecordOwnerResolution.SecureRemovalRefused(decision, ChildNoun(request.EntityLogicalName)), false, null);
+        if (left.Count == 0)
+        {
+            return (null, true, null);
+        }
+
+        // PR #2161 round 4 (F1-b): the permit names the filing this decision approved — every secure root above the parents
+        // the row holds AFTER the change (the walk above, when it ran; read here otherwise). A step after the re-file acts on
+        // the permit only toward one of them (DocumentContainerRelocator.RecordReleaseCoreAsync). A filing too deep to walk
+        // names none, so no such step acts on it (held: fail closed); the re-file itself was already decided above.
+        var rootsAfter = after.Roots;
+        if (!removesAParent)
+        {
+            var walked = await SecureRootsAboveAsync(filedUnderAfter, secureBu.Id, ct).ConfigureAwait(false);
+            rootsAfter = walked.TooDeepAt is null ? walked.Roots : Array.Empty<RecordOwnershipParent>();
+        }
+
+        return (null, true, new SecureExitPermit(left, decision, rootsAfter));
     }
 
     /// <summary>The noun a move-out message names the row by ("document", "event", "to-do", …).</summary>
@@ -2512,7 +2561,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
               + "re-file's own";
         try
         {
-            var settled = await SettleOwnerAsync(request, resolvedFrom, before, observed: null, CancellationToken.None)
+            var (settled, _) = await SettleOwnerAsync(request, resolvedFrom, before, observed: null, CancellationToken.None)
                 .ConfigureAwait(false);
             _logger.LogWarning(
                 assignFailure,

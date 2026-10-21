@@ -3550,29 +3550,33 @@ public class RecordOwnershipResolverTests
     // #2159 slice 2: a written re-file carries the F3 permission it was given — the roots it left and the decision — so the
     // step after it can let the document's file follow it (S1 to S2). Generic: the resolver knows nothing of files.
 
+    /// <summary>Out of the secure project, onto the other secure matter (S1 to S2), by a Full Access holder.</summary>
+    private static RecordReparent MoveToOtherSecureMatter(Guid documentId) => new()
+    {
+        EntityLogicalName = "sprk_document",
+        RecordId = documentId,
+        ParentChanges = new Dictionary<string, EntityReference?>
+        {
+            ["sprk_project"] = null,
+            ["sprk_matter"] = new EntityReference("sprk_matter", OtherSecureMatterId),
+        },
+        SecureExitCaller = CallerHolding(FullAccess),
+    };
+
     [Fact]
     public async Task Reparent_FromOneSecureRootToAnother_WithF3_CarriesThePermit_TheRootLeftAndTheDecision()
     {
+        // PR #2161 round 4 (F3): the change is WRITTEN (Applies), so the settle reads this call's own filing.
         var (directory, documentId) = SecureDocumentWorld();
+        var request = MoveToOtherSecureMatter(documentId);
 
-        var resolution = await Build(directory).ReparentAsync(
-            new RecordReparent
-            {
-                EntityLogicalName = "sprk_document",
-                RecordId = documentId,
-                ParentChanges = new Dictionary<string, EntityReference?>
-                {
-                    ["sprk_project"] = null,
-                    ["sprk_matter"] = new EntityReference("sprk_matter", OtherSecureMatterId),
-                },
-                SecureExitCaller = CallerHolding(FullAccess),
-            },
-            _ => Task.CompletedTask,
-            CancellationToken.None);
+        var resolution = await Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
 
         resolution.IsRefused.Should().BeFalse(resolution.Reason);
         resolution.SecureExitPermitted.Should().NotBeNull();
         resolution.SecureExitPermitted!.RootsLeft.Should().Equal(new RecordOwnershipParent("sprk_project", SecureProjectId));
+        resolution.SecureExitPermitted.RootsAfter.Should().Equal(
+            new[] { new RecordOwnershipParent("sprk_matter", OtherSecureMatterId) }, "the filing the F3 decision approved");
         resolution.SecureExitPermitted.Decision.IsPermitted.Should().BeTrue();
         resolution.SecureExitPermitted.Decision.CallerSystemUserId.Should().Be(CallerUserId);
     }
@@ -3581,11 +3585,35 @@ public class RecordOwnershipResolverTests
     public async Task Reparent_OutOfASecureRoot_WithF3_CarriesThePermit()
     {
         var (directory, documentId) = SecureDocumentWorld();
+        var request = MoveToOrdinaryMatter(documentId, CallerHolding(FullAccess));
 
-        var resolution = await Build(directory).ReparentAsync(
-            MoveToOrdinaryMatter(documentId, CallerHolding(FullAccess)), _ => Task.CompletedTask, CancellationToken.None);
+        var resolution = await Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
 
         resolution.SecureExitPermitted!.RootsLeft.Should().Equal(new RecordOwnershipParent("sprk_project", SecureProjectId));
+        resolution.SecureExitPermitted.RootsAfter.Should().BeEmpty("the ordinary matter is no secure root");
+    }
+
+    [Fact]
+    public async Task Reparent_WithF3_WhenAnotherWriterReFilesTheRowBeforeTheSettle_CarriesNoPermit()
+    {
+        // PR #2161 round 4 (F1-a): A re-files S1 to S2 with F3; before A's settle reads the row, B files it under a THIRD
+        // secure matter S3 directly in Dataverse. S3 maps to the same Secure team, so the settle answers "already owned" —
+        // from B's filing, which A's F3 check never saw. That answer must not carry A's permission.
+        var (directory, documentId) = SecureDocumentWorld();
+        var thirdSecureMatter = Guid.Parse("66666666-6666-6666-6666-666666666663");
+        directory.WithRecord("sprk_matter", thirdSecureMatter, SecureBu, isSecure: true, owningTeam: SecureNamedTeam);
+        var request = MoveToOtherSecureMatter(documentId);
+
+        var resolution = await Build(directory).ReparentAsync(
+            request,
+            Applies(directory, request, alsoDone: () => directory.Write("sprk_document", documentId,
+                new Dictionary<string, object?> { ["sprk_matter"] = new EntityReference("sprk_matter", thirdSecureMatter) })),
+            CancellationToken.None);
+
+        resolution.IsRefused.Should().BeFalse(resolution.Reason);
+        resolution.OwningTeamId.Should().Be(SecureNamedTeam, "the settle answered from the row's current filing");
+        resolution.SecureExitPermitted.Should().BeNull("the answer came from another writer's filing, never F3-checked");
+        directory.Assignments.Should().BeEmpty("already owned by the Secure team: nothing written");
     }
 
     [Fact]

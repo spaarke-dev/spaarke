@@ -46,8 +46,11 @@ public class RelocationFixRoundTests
     /// <summary>S1 — the secure matter whose own container holds the file.</summary>
     private static readonly RecordOwnershipParent S1 = new("sprk_matter", T.SecureMatter);
 
+    /// <summary>S2 — the secure matter the re-file filed the document under (the permit's post-change root).</summary>
+    private static readonly RecordOwnershipParent S2 = new("sprk_matter", R.SecondSecureMatter);
+
     private static SecureExitPermit Permit(params RecordOwnershipParent[] left)
-        => new(left, new SecureRemovalDecision(SecureRemovalOutcome.Permitted, SecureRemovalBasis.FullAccess, Caller));
+        => new(left, new SecureRemovalDecision(SecureRemovalOutcome.Permitted, SecureRemovalBasis.FullAccess, Caller), [S2]);
 
     /// <summary>The document filed under <paramref name="matter"/>, its file at <paramref name="drive"/>, owned as told.</summary>
     private static (World World, T.Rig Rig) Placed(Guid matter, string drive, bool isolated, string? bound = Item)
@@ -256,7 +259,7 @@ public class RelocationFixRoundTests
 
     internal static RelocationReleaseRetryPayload APayload(
         string drive = T.SecureContainer, string target = R.SecondSecureContainer, DateTimeOffset? at = null, RecordOwnershipParent? left = null)
-        => new(T.DocumentId, drive, target, [left ?? S1], Caller, SecureRemovalBasis.FullAccess, at ?? DateTimeOffset.UtcNow);
+        => new(T.DocumentId, drive, target, [left ?? S1], Caller, SecureRemovalBasis.FullAccess, at ?? DateTimeOffset.UtcNow, [S2]);
 
     [Fact(DisplayName = "F3 must fire: a lock held past the wait queues a durable retry, bound to the file's container, the target and the time of the re-file")]
     public async Task F3_AHeldLock_QueuesARetry()
@@ -282,6 +285,7 @@ public class RelocationFixRoundTests
             Basis = SecureRemovalBasis.FullAccess,
         });
         payload.RootsLeft.Should().Equal(S1);
+        payload.RootsAfter.Should().Equal(S2);
         payload.PermittedAt.Should().BeOnOrAfter(before).And.BeOnOrBefore(before + DocumentContainerRelocator.ReleaseLockWait + TimeSpan.FromSeconds(1),
             "the time the re-file asked, before the lock wait");
     }
@@ -367,6 +371,8 @@ public class RelocationFixRoundTests
         { "the row no longer derives to the target", () => APayload(target: T.CustomerAContainer) },
         { "the re-file's permission is older than 30 days", () => APayload(at: DateTimeOffset.UtcNow.AddDays(-31)) },
         { "the re-file did not leave the record holding the file", () => APayload(left: new RecordOwnershipParent("sprk_matter", T.PlainMatter)) },
+        // PR #2161 round 4 (F1-b): the target is not the own container of a secure record the re-file filed the row under.
+        { "the target is no root the re-file filed it under", () => APayload() with { RootsAfter = [new RecordOwnershipParent("sprk_matter", T.SecureMatter)] } },
     };
 
     [Theory(DisplayName = "F3 must not fire: the queued retry never records a release the inline path would refuse")]
@@ -418,6 +424,8 @@ public class RelocationFixRoundTests
         { "no source container", () => APayload(drive: " ") },
         { "no target", () => APayload(target: " ") },
         { "no document", () => APayload() with { DocumentId = Guid.Empty } },
+        { "no post-change roots (queued before PR #2161 round 4)", () => APayload() with { RootsAfter = null } },
+        { "an unspecified post-change root", () => APayload() with { RootsAfter = [S2, new RecordOwnershipParent("sprk_matter", Guid.Empty)] } },
     };
 
     [Theory(DisplayName = "F3: a payload that names no complete release is dead-lettered without a read")]

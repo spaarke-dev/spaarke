@@ -50,8 +50,11 @@ public class RelocationReleaseTests
         return (world, new T.Rig(world));
     }
 
+    /// <summary>S2 — the secure matter the re-file filed the document under (the permit's post-change root).</summary>
+    private static readonly RecordOwnershipParent S2 = new("sprk_matter", R.SecondSecureMatter);
+
     private static SecureExitPermit Permit(params RecordOwnershipParent[] left)
-        => new(left, new SecureRemovalDecision(SecureRemovalOutcome.Permitted, SecureRemovalBasis.FullAccess, Caller));
+        => new(left, new SecureRemovalDecision(SecureRemovalOutcome.Permitted, SecureRemovalBasis.FullAccess, Caller), [S2]);
 
     /// <summary>A written re-file's answer that carries <paramref name="permit"/> (null = it left no secure root).</summary>
     private static RecordOwnerResolution Reparent(SecureExitPermit? permit)
@@ -337,6 +340,50 @@ public class RelocationReleaseTests
         outcome.State.Should().Be(RelocationReleaseState.NotCovered, outcome.Detail);
         world.Updates.Should().BeEmpty();
         (await RelocateAsync(rig, RelocationPurpose.Refile)).State.Should().Be(RelocationState.HeldIsolated);
+    }
+
+    [Fact(DisplayName = "PR #2161 round 4 F1-b must not fire: a permit whose post-change roots do not hold the derived target records nothing, and the file stays held")]
+    public async Task APermitWhoseFilingIsNotTheDerivedTarget_RecordsNothing()
+    {
+        // The F3 walk approved S1 to S3; the row derives to S2 now (another writer re-filed it after the walk, directly in
+        // Dataverse). The source check passes (S1 was left), so only the target check stands between S1's file and S2.
+        var (world, rig) = RefiledToS2();
+        var approvedFiling = new RecordOwnershipParent("sprk_matter", Guid.Parse("1c000000-0000-4000-8000-00000000f1a3"));
+        var permit = Permit(S1) with { RootsAfter = [approvedFiling] };
+
+        var outcome = await rig.Relocator.RecordReleaseAsync(T.DocumentId, permit);
+
+        outcome.State.Should().Be(RelocationReleaseState.NotCovered, outcome.Detail);
+        outcome.RetryQueued.Should().BeFalse("a retry would find the same");
+        world.Updates.Should().BeEmpty();
+        LedgerOf(world)!.Release.Should().BeNull();
+        (await RelocateAsync(rig, RelocationPurpose.Refile)).State.Should().Be(RelocationState.HeldIsolated);
+        NoFileStep(rig);
+    }
+
+    [Fact(DisplayName = "PR #2161 round 4 F1-b must not fire: a permit with no post-change root (a filing too deep to walk) records nothing")]
+    public async Task APermitWithNoPostChangeRoot_RecordsNothing()
+    {
+        var (world, rig) = RefiledToS2();
+
+        var outcome = await rig.Relocator.RecordReleaseAsync(T.DocumentId, Permit(S1) with { RootsAfter = [] });
+
+        outcome.State.Should().Be(RelocationReleaseState.NotCovered, outcome.Detail);
+        world.Updates.Should().BeEmpty();
+        (await RelocateAsync(rig, RelocationPurpose.Refile)).State.Should().Be(RelocationState.HeldIsolated);
+    }
+
+    [Fact(DisplayName = "PR #2161 round 4 F1-b must fire: the own filing (source left, target inside the post-change roots) still records the release and the file moves")]
+    public async Task TheOwnFiling_InsideThePostChangeRoots_StillReleases()
+    {
+        var (world, rig) = RefiledToS2();
+
+        var outcome = await rig.Relocator.RecordReleaseAsync(T.DocumentId, Permit(S1));
+
+        outcome.State.Should().Be(RelocationReleaseState.Recorded, outcome.Detail);
+        LedgerOf(world)!.Release!.TargetContainer.Should().Be(R.SecondSecureContainer);
+        (await RelocateAsync(rig, RelocationPurpose.Refile)).State.Should().Be(RelocationState.Relocated);
+        rig.DriveOf(T.DocumentId).Should().Be(R.SecondSecureContainer);
     }
 
     [Theory(DisplayName = "slice 2: no release is needed (and none written) when the file does not leave one secure record's container for another's")]

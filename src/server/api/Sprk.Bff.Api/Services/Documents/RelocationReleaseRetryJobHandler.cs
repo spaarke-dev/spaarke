@@ -145,7 +145,10 @@ public sealed class RelocationReleaseRetryJobHandler : IJobHandler
 /// right after the re-file — and the permission's facts the release records: the secure roots it left, who
 /// (<see cref="AuthorizedBy"/>, a <c>systemuserid</c>), on what basis, and when (<see cref="PermittedAt"/>, which the
 /// release keeps). Not bound to the item (PR #2161 re-check): the relocator re-points the row inside the source container
-/// when it closes an edited source in place, and the release must survive that.
+/// when it closes an edited source in place, and the release must survive that. PR #2161 round 4 (F1-b): it also carries
+/// the secure roots the row was filed under after the change (<see cref="RootsAfter"/>, the filing the F3 decision approved),
+/// and the retry records nothing whose target is no such root's own container — exactly as the inline path. A payload
+/// without them (queued before this round) names no complete release.
 /// </summary>
 public sealed record RelocationReleaseRetryPayload(
     Guid DocumentId,
@@ -154,12 +157,14 @@ public sealed record RelocationReleaseRetryPayload(
     IReadOnlyList<RecordOwnershipParent> RootsLeft,
     Guid AuthorizedBy,
     SecureRemovalBasis Basis,
-    DateTimeOffset PermittedAt)
+    DateTimeOffset PermittedAt,
+    IReadOnlyList<RecordOwnershipParent>? RootsAfter)
 {
     /// <summary>Every fact the release is bound to or records is present, and the basis is one F3 permits on.</summary>
     [JsonIgnore]
     public bool IsWellFormed
         => DocumentId != Guid.Empty && !string.IsNullOrWhiteSpace(SourceDrive) && !string.IsNullOrWhiteSpace(TargetContainer) && RootsLeft is { Count: > 0 } && RootsLeft.All(r => r is { IsSpecified: true })
            && AuthorizedBy != Guid.Empty && Basis is SecureRemovalBasis.Creator or SecureRemovalBasis.FullAccess
-           && PermittedAt != default;
+           && PermittedAt != default
+           && RootsAfter is not null && RootsAfter.All(r => r is { IsSpecified: true });
 }

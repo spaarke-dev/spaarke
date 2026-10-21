@@ -312,7 +312,8 @@ public class RelocationRecheckFixTests
         var key = DocumentContainerRelocator.RelocationLockKey(T.DocumentId);
         rig.Locks.Held.Add(key);
         var permit = new SecureExitPermit([new RecordOwnershipParent("sprk_matter", T.SecureMatter)],
-            new SecureRemovalDecision(SecureRemovalOutcome.Permitted, SecureRemovalBasis.FullAccess, Guid.NewGuid()));
+            new SecureRemovalDecision(SecureRemovalOutcome.Permitted, SecureRemovalBasis.FullAccess, Guid.NewGuid()),
+            [new RecordOwnershipParent("sprk_matter", R.SecondSecureMatter)]);
         (await rig.Relocator.RecordReleaseAsync(T.DocumentId, permit)).RetryQueued.Should().BeTrue();
         rig.Locks.Held.Remove(key);
 

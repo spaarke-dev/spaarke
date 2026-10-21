@@ -250,7 +250,8 @@ public class RelocationTerminalAndHomeRuleTests
 
     private static SecureExitPermit Permit()
         => new([new RecordOwnershipParent("sprk_matter", T.SecureMatter)],
-            new SecureRemovalDecision(SecureRemovalOutcome.Permitted, SecureRemovalBasis.FullAccess, Caller));
+            new SecureRemovalDecision(SecureRemovalOutcome.Permitted, SecureRemovalBasis.FullAccess, Caller),
+            [new RecordOwnershipParent("sprk_matter", R.SecondSecureMatter)]);
 
     private static Guid Id(int n) => Guid.Parse($"00000000-0000-4000-8000-0000000c{n:x4}");
 
