@@ -290,3 +290,12 @@ So the post-commit re-run is not only for root-made-Secure: it is the main check
 **Races that remain:**
 - A change that lands after the step-2 re-run passes. The invoice is then legitimately M's; the file follows its source through T7 on every access (J's B), so the bytes stay correct. The **extracted fields** on the invoice and its lines do not follow the source: that is the open readership question for uac-r2.
 - The re-run is a point-in-time read; a change committed during the re-run itself is in the same position as the bullet above.
+
+**uac-r2's response (2026-10-21): the plan is right, with three conditions (all accepted for v5).**
+1. A fault in the re-run (exception, throttle, timeout or an unreadable flag) is a **failure** and triggers the undo. It is never read as a pass.
+2. The Restricted, internal-only and privacy reads also go into the **pre-transaction** check, so a source that is already isolated is refused up front instead of committed and undone.
+3. **Undo is complete or held:** delete the Stored File row and blob, then the approval, then the lines, then the invoice. If any delete fails, the submission stays Failed and the file stays not-yet-servable until compensation finishes.
+
+**Extracted fields after a later source change: UAC position, a known limit (owner may override).** They do not follow the source. Once the re-run passes, the invoice is its own business record under the core record: its readers are the core record's readers, narrowed by the invoice's own Access Permission. Disclosure happened at submit, as with a download (uac-r2 K2). To hide an invoice later, set its own Access Permission to Restricted; D7 and uac-r2 task 191 then hide it from flagged-external users.
+
+**For uac-r2 task 191:** v5 names each new table and the root column it hangs from, for all core types. uac-r2 updates its delete design §12 to keep record-scoped rule-set rows as secure child rows.
