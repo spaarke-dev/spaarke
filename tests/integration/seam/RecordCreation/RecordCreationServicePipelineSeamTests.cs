@@ -692,7 +692,7 @@ public sealed partial class RecordCreationServicePipelineSeamTests
         restampEntities
             .Setup(e => e.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
             .Returns((FetchExpression q, CancellationToken ct) => Journaled("restamp", () => _stamps.Service.RetrieveMultipleAsync(q, ct)));
-        var restamper = new CoreAncestorRestamper(restampEntities.Object, _stamps.Resolver, NullLogger<CoreAncestorRestamper>.Instance);
+        var restamper = new CoreAncestorRestamper(restampEntities.Object, InheritResolver(), NullLogger<CoreAncestorRestamper>.Instance);
 
         var shares = SecureChildShareWorld.SynchronizerOver(() =>
         {

@@ -1,9 +1,15 @@
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
+using Moq;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.RecordCreation;
+using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Seam.RecordCreation;
@@ -21,6 +27,73 @@ namespace Sprk.Bff.Api.Tests.Seam.RecordCreation;
 /// </remarks>
 public sealed partial class RecordCreationServicePipelineSeamTests
 {
+    // =====================================================================================
+    // Harness additions (task 013 fix round 2, UAC-r2 F-1): the stamp resolver's Access Permission reads, journaled
+    // =====================================================================================
+
+    /// <summary>Whether the stamp resolver's Access Permission reads and writes (I-16) are journaled as "inherit".</summary>
+    private bool _journalInherit;
+
+    /// <summary>
+    /// The REAL <see cref="CoreAncestorResolver"/> (I-1 ancestors and I-16) over the stamp world, with the world's column probe
+    /// (which has <c>sprk_accesspermission</c>, as the host's does). Its calls that concern the Access Permission column are
+    /// journaled as "inherit" when <see cref="_journalInherit"/> is set, so I-16 is observable: before this, the resolver read
+    /// the stamp world directly and a no-op I-16 changed nothing a test could see.
+    /// </summary>
+    private CoreAncestorResolver InheritResolver()
+    {
+        const string Column = "sprk_accesspermission";
+        var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        var world = _stamps.Service;
+        entities
+            .Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns((string t, Guid id, string[] c, CancellationToken ct) =>
+            {
+                if (_journalInherit && c is not null && c.Contains(Column, StringComparer.OrdinalIgnoreCase))
+                    _journal.Add("inherit");
+                return world.RetrieveAsync(t, id, c!, ct);
+            });
+        entities
+            .Setup(e => e.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Returns((string t, Guid id, Dictionary<string, object> f, CancellationToken ct) =>
+            {
+                if (_journalInherit && f.ContainsKey(Column))
+                    _journal.Add("inherit");
+                return world.UpdateAsync(t, id, f, ct);
+            });
+        entities
+            .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Returns((QueryExpression q, CancellationToken ct) =>
+            {
+                if (_journalInherit && q.ColumnSet.Columns.Contains(Column, StringComparer.OrdinalIgnoreCase))
+                    _journal.Add("inherit");
+                return world.RetrieveMultipleAsync(q, ct);
+            });
+        entities
+            .Setup(e => e.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
+            .Returns((FetchExpression q, CancellationToken ct) => world.RetrieveMultipleAsync(q, ct));
+        return new CoreAncestorResolver(entities.Object, SecureChildShareWorld.ColumnProbe(), NullLogger<CoreAncestorResolver>.Instance);
+    }
+
+    // =====================================================================================
+    // UAC-r2 F-1: I-16 runs, and runs between the I-1 re-stamp and the sharee mirror
+    // =====================================================================================
+
+    [Fact]
+    public async Task CreateAsync_AnEventUnderARestrictedMatter_IsStoredRestricted_ByI16_BetweenTheRestampAndTheMirror()
+    {
+        _stamps.Set("sprk_matter", OrdinaryMatter, "sprk_accesspermission", new OptionSetValue(InheritedAccessPermission.Restricted));
+        _journalInherit = true;
+
+        var outcome = await Service().CreateAsync(EventRequest(OrdinaryMatter), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var (_, id, _) = _creates.Should().ContainSingle().Subject;
+        _stamps.RowOf("sprk_event", id).GetAttributeValue<OptionSetValue>("sprk_accesspermission")?.Value
+            .Should().Be(InheritedAccessPermission.Restricted, "I-16 sets the event to what the matter at the top of its filing holds");
+        Journal().Should().ContainInOrder("create", "restamp", "inherit", "mirror");
+    }
+
     private string EventUnder(Guid matter) => $"/sprk_matters({matter:D})";
 
     private RecordCreationRequest EventRequest(Guid matter) =>
