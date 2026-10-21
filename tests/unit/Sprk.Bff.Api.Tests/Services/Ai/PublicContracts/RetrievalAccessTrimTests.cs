@@ -361,6 +361,21 @@ public sealed class RetrievalAccessTrimTests
         world.AppOnly.Calls.Should().Be(0);
     }
 
+    [Fact(DisplayName = "Task 188 r4b pin: a drive-item row with no document id stays withheld on a page that DOES make a narrowing call")]
+    public async Task ADriveItemRowWithoutADocumentId_IsWithheld_EvenWhenThePageNarrowsAVisibleDocument()
+    {
+        var world = new NarrowingWorld(external: true);
+        world.User.Allow("sprk_documents", "01ITEM-NO-ID");
+        var visible = world.VisibleDocument();
+
+        var result = await TrimAsync(world,
+            new Chunk("visible", world.Readable(visible, KeyKind.DocumentId)),
+            new Chunk("item", RetrievalRecordKey.DocumentByDriveItem("01ITEM-NO-ID")!));
+
+        result.Rows.Should().ContainSingle(because: "the item's row names no document, so the narrowing cannot show it");
+        world.AppOnly.Calls.Should().Be(1, "the visible document makes the page's one narrowing call");
+    }
+
     [Theory]
     [InlineData(KeyKind.DocumentId)]
     [InlineData(KeyKind.DriveItem)]

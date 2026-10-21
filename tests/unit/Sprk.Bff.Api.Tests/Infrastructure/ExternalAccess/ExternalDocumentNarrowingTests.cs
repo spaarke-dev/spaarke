@@ -610,6 +610,71 @@ public sealed class ExternalDocumentNarrowingTests
             "thread read");
     }
 
+    // ── Task 188 round 4b: pinned defensive legs ───────────────────────────────────────────────────────────────
+
+    [Theory(DisplayName = "Task 188 r4b pin: an id is visible only when EVERY row decided for it is visible, whatever the order")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void AnIdWithAVisibleAndAHiddenRow_IsHidden_InEitherOrder(bool visibleFirst)
+    {
+        var id = Guid.NewGuid();
+        var visible = new DocumentNarrowingRow(id, DocumentPermission.NotNarrowed, Guid.Empty, Guid.Empty);
+        var hidden = new DocumentNarrowingRow(id, DocumentPermission.Restricted, Guid.Empty, Guid.Empty);
+        var decided = new Dictionary<DocumentNarrowingRow, DocumentNarrowingReason>();
+        foreach (var (row, reason) in visibleFirst
+                     ? new[] { (visible, DocumentNarrowingReason.Visible), (hidden, DocumentNarrowingReason.OwnRestricted) }
+                     : new[] { (hidden, DocumentNarrowingReason.OwnRestricted), (visible, DocumentNarrowingReason.Visible) })
+        {
+            decided[row] = reason;
+        }
+
+        var result = new DocumentNarrowingResult(decided, faulted: false);
+
+        result.IsVisible(id).Should().BeFalse("two reads of one document cannot open it: one hidden row hides the id");
+        result.ReasonFor(id).Should().Be(DocumentNarrowingReason.OwnRestricted);
+    }
+
+    [Fact(DisplayName = "Task 188 r4b pin: a by-id read that also returns a row for an id nobody asked about ignores that row")]
+    public async Task AByIdRead_ARowForAnIdNobodyAskedAbout_IsIgnored()
+    {
+        var asked = _world.Document(permission: Restricted);
+        var notAsked = _world.Document();
+        CommunicationOpenThreadGate.RowQuery query = async (set, odata, ct) =>
+        {
+            var rows = (await _world.Query(set, odata, ct)).ToList();
+            if (set == "sprk_documents" && odata.Contains(asked.ToString("D"), StringComparison.OrdinalIgnoreCase))
+                rows.AddRange(await _world.Query(set, odata.Replace(asked.ToString("D"), notAsked.ToString("D"), StringComparison.OrdinalIgnoreCase), ct));
+            return rows;
+        };
+
+        var result = await ExternalDocumentNarrowing.ReadAndDecideAsync(new[] { asked }, query, CancellationToken.None);
+
+        result.IsVisible(asked).Should().BeFalse();
+        result.IsVisible(notAsked).Should().BeFalse("an answer for another id is ignored: an id not asked is not decided, so not visible");
+        result.ReasonFor(notAsked).Should().Be(DocumentNarrowingReason.ReadFailed);
+    }
+
+    [Fact(DisplayName = "Task 188 r4b pin: a derived row that was not resolved (absent from the source map) is hidden; one with no document is not")]
+    public void ADerivedRowThatWasNotResolved_IsHidden()
+    {
+        var resolved = Guid.NewGuid();
+        var noDocument = Guid.NewGuid();
+        var unresolved = Guid.NewGuid();
+        var sources = new Dictionary<Guid, IReadOnlyList<Guid>>
+        {
+            [resolved] = new[] { Guid.NewGuid() },
+            [noDocument] = Array.Empty<Guid>(),
+        };
+        var hidden = new HashSet<Guid>();
+
+        Sprk.Bff.Api.Services.Ai.Handlers.Dataverse.ExternalCallerCommunicationGuard
+            .IsDerivedRowHidden(unresolved, sources, hidden, out _).Should().BeTrue("an unresolved row is undecidable (fail closed)");
+        Sprk.Bff.Api.Services.Ai.Handlers.Dataverse.ExternalCallerCommunicationGuard
+            .IsDerivedRowHidden(resolved, sources, hidden, out _).Should().BeFalse();
+        Sprk.Bff.Api.Services.Ai.Handlers.Dataverse.ExternalCallerCommunicationGuard
+            .IsDerivedRowHidden(noDocument, sources, hidden, out _).Should().BeFalse();
+    }
+
     // ── Owner round 111: Limited does NOT hide (only Restricted does) ──────────────────────────────────────────
 
     [Fact]
