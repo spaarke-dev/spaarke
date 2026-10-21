@@ -38,7 +38,11 @@
   - the known limits are recorded;
   - our key and removal order are adopted.
   Not built; it waits on the owner finalizing ebilling's model.
-- **Future work for this project (no task yet):** the Invoice view and ribbon button, removing Invoice from Save and quick-create (the add-in side goes first, or in the same release as ebilling's server-side removal), the email-only .eml save. Create a task when ebilling's contract is final.
+- **Future work for this project (no task yet):** the Invoice view and ribbon button, removing Invoice from Save and quick-create, the email-only .eml save. All ship in ONE add-in release; ebilling 096 removes the server legs one release later.
+  - **Owner decision 2026-10-21: create the task only once ebilling 095 (from-email) is built.** Send ebilling the task number then.
+  - Gates: 118's shared `InvoiceAttachmentMarking` merged; 095 deployed. The 095 shapes are frozen at v5.9 FINAL.
+  - Non-invoice attachments default to Supporting (owner decision 2026-10-21).
+  - Production needs a manifest version bump and an M365 Admin Center upload (new ribbon button).
 
 ## Filed 2026-10-21
 - **ISS-022 / #2209:** the `/office/save` re-save gap (the email save key excludes the attachment selection, so re-saving to add attachments is answered "already saved"). Filed on the owner's go; next-round, no task yet.
