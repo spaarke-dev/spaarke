@@ -1842,3 +1842,17 @@ Filed this round: #2213, `CrossPathLink` re-points an archive document already l
 - **Hidden:** matter `b68299c6-bafb-f011-8407-7c1e520aa4df`, partner contacts `8e9918a9…` / `2e419a4f…`. Its 11 own-Restricted documents should disappear from the partner list. A partner download or versions call on `aadbb740-bdfb-f011-8407-7c1e520aa4df` should get the not-under-parent refusal.
 - **Must-not-fire:** matter `86335ce3-4c18-f111-8343-7ced8d1dc988`; documents `0f67ada5…`, `6c112598…` and `73910392…` stay visible.
 - **Writer path:** the first email, Office or upload document create after 21:5xZ must succeed. The BFF app users are Writers.
+
+## Round 121 (2026-10-22): T191a spike writes on dev approved
+
+Asked in-session (the questions, verbatim): "May I run the T191a spike writes on dev (business unit, role, shares, one test-user move, one SPE invite), each with its undo step?" and "Which user should play the flagged-external user for S1/S2?"
+
+Owner answers:
+1. **"Yes, all four"** (S1–S4). The scope is the write list in `notes/2179-flagged-external-dataverse-design.md` "T191a read-only results", taken from the researcher's report:
+   - S1: an "External Collaborators" business unit and a spike role; shares on test matter `fa328db3…` and its children; Write negatives and creates as the test user.
+   - S2: one business-unit move.
+   - S3: about 1,000 timed shares on rows that are neither secure nor Restricted.
+   - S4: one SPE item invite on a document under `fa328db3…`.
+
+   Each write is undone afterwards. Out of bounds: `65a3fab2…`, the Secure Record business unit, the 3 Restricted matters, and Key Vault.
+2. **Test user: the existing flagged guest `e44317a0…`**, the only enabled flagged user. It owns no rows and holds only self-shares. It is moved back to the root business unit, with its direct role restored, afterwards.
