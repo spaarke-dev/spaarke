@@ -252,6 +252,14 @@ public class MembershipResolverPeopleTargetingTests
     }
 
     [Fact]
+    public void CacheVersion_IsBumpedForTheStampedOnlyCreatorTerm()
+    {
+        // #2273 changed what the people query answers under an unchanged options hash — the "bump REQUIRED" case — so a
+        // pre-deploy entry holding forged-creator matches must not be addressable after the deploy.
+        MembershipResolverService.CacheVersion.Should().BeGreaterThanOrEqualTo(7, "#2273 bumped it 6 → 7");
+    }
+
+    [Fact]
     public async Task People_ForAnApplicationUser_NeitherCreatorTermBinds()
     {
         var harness = new Harness(TodoShapesWithCreatorPerson, FullIdentity(), human: false, cache: null, logger: null, entity: Todo, callerId: CallerId);
