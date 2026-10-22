@@ -26,7 +26,10 @@
   **Owner (UAC round 122): "the access should match the 'parent'".** A task-130 own-Restricted .eml that is later linked to exactly one communication (by the 190 sweep or CrossPathLink) follows that communication. A Restricted set by hand still stays (round 87). UAC builds it as a task-190 follow-up and sends us the design before touching CrossPathLink.
 
   **UAC design** (`projects/unified-access-control-r2/notes/task-190-round122-linked-eml-access.md`, `6c980f0da3`): an `OwnProvisional` marker in the AccessInheritance JSON, set only through `AccessInheritance.OwnNarrowingUntilEmailIdentified` in `ApplyEmailCommunicationOutcome`, and released in `OwnPermissionOf` by the D7 walk.
-  - **We reviewed it 2026-10-22: no objection.** UAC builds all of it in one PR (including our one line); we review before merge. **UAC accepted all five points** (no record version bump: an older BFF ignores the field and keeps own = Restricted). Waiting on UAC's draft PR number. Review it against the five points and our I-19 guards.
+  - **We reviewed it 2026-10-22: no objection.** UAC builds all of it in one PR (including our one line); we review before merge. **UAC accepted all five points** (no record version bump: an older BFF ignores the field and keeps own = Restricted). **Draft PR #2234** (head `d5448eddd4`) reviewed 2026-10-22. Our scope is approved: the factory swap at `OfficeDocumentPersistence.cs:144`, our test helpers asserting the marker, and I-19.
+  - **F1 sent:** a released attachment child can end up wider than its person-Restricted .eml, because the release falls back to the TOPS floor (`ParentLineage.cs:525-538`), which ignores an intermediate document's own narrowing. Suggested fix: no release while any document on the walk carries a non-provisional own narrowing, plus a must-not-fire test.
+  - **K sent:** confirming the same value can't make a provisional Restricted the person's; state it in I-19.
+  - Re-check UAC's F1 fix diff when they send it.
   - Our five points:
     1. The release needs the link field security (`Set-DocumentNarrowingFieldSecurity.ps1`) applied first, or a stated window.
     2. Single-attachment saves are never released: a known limit.
