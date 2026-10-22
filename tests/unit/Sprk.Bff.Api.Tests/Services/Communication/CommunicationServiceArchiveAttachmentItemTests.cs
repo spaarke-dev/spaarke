@@ -36,6 +36,9 @@ public class CommunicationServiceArchiveAttachmentItemTests
     private const string ArchiveContainer = "drive-archive";
     private const string AttachmentEntity = "sprk_communicationattachment";
     private const string DocumentEntity = "sprk_document";
+    private const string SecureContainer = "drive-secure-matter";
+
+    private static readonly Guid SecureMatter = Guid.Parse("2246f100-0000-4000-8000-000000002248");
 
     private static readonly string BffApp = TestRecordContainerResolver.PointerWorldBffApplicationId.ToString("D");
 
@@ -46,6 +49,12 @@ public class CommunicationServiceArchiveAttachmentItemTests
         public required List<Entity> Created { get; init; }
         public required List<(string Entity, Guid Id, Dictionary<string, object> Fields)> Updates { get; init; }
         public required List<JobContract> Jobs { get; init; }
+
+        /// <summary>How many "does a document already name this item?" lookups the archive made.</summary>
+        public Func<int> BoundLookups { get; init; } = () => 0;
+
+        /// <summary>How many times the resolver read the communication row (its container derivation).</summary>
+        public Func<int> CommunicationReads { get; init; } = () => 0;
     }
 
     /// <summary>An item the archive wrote for <paramref name="communicationId"/>: its name prefix, uploaded by the BFF.</summary>
@@ -194,16 +203,174 @@ public class CommunicationServiceArchiveAttachmentItemTests
         h.Created.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task AnItemAnotherApplicationWrote_WithThisCommunicationsPrefix_IsNotArchived()
+    {
+        // must-fire: right container, right name, but app-only by an application that is not the BFF.
+        var otherApp = Guid.NewGuid().ToString("D");
+        var h = Build((world, c) => world.Items[(ArchiveContainer, "item-otherapp")] =
+                new SpeItemCreator($"{c:N}_contract.pdf", UserObjectId: null, ApplicationId: otherApp),
+            AttachmentRow("contract.pdf", ArchiveContainer, "item-otherapp"));
+
+        var result = await h.Sut.ArchiveExistingAsync(h.CommunicationId, CancellationToken.None);
+
+        result.AttachmentDocumentsCreated.Should().Be(0);
+        result.AttachmentsRefusedUnverified.Should().Be(1);
+        h.Created.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ACommunicationOfASecureRecord_ArchivesItsItemInTheSecureContainer_AndRefusesOneInTheSharedArchive()
+    {
+        // The derivation is the secure record's own container, not Communication:ArchiveContainerId.
+        var h = Build((world, c) =>
+            {
+                world.SecureClaims[SecureContainer] = ("sprk_matter", SecureMatter);
+                world.Rows[("sprk_matter", SecureMatter)] = new Entity("sprk_matter", SecureMatter)
+                {
+                    ["sprk_issecure"] = true,
+                    ["sprk_containerid"] = SecureContainer,
+                    ["owningbusinessunit"] = new EntityReference("businessunit", TestRecordContainerResolver.PointerWorldRootBusinessUnit),
+                };
+                world.Rows[("sprk_communication", c)]["sprk_regardingmatter"] = new EntityReference("sprk_matter", SecureMatter);
+                world.Items[(SecureContainer, "item-secure")] = ArchiveItem(c, "privileged.pdf");
+                world.Items[(ArchiveContainer, "item-shared")] = ArchiveItem(c, "copy.pdf");
+            },
+            AttachmentRow("privileged.pdf", SecureContainer, "item-secure"),
+            AttachmentRow("copy.pdf", ArchiveContainer, "item-shared"));
+
+        var result = await h.Sut.ArchiveExistingAsync(h.CommunicationId, CancellationToken.None);
+
+        result.AttachmentDocumentsCreated.Should().Be(1);
+        result.AttachmentsRefusedUnverified.Should().Be(1, "the shared archive is not a secure record's communication's container");
+        h.Created.Should().ContainSingle().Which.GetAttributeValue<string>("sprk_graphdriveid").Should().Be(SecureContainer);
+    }
+
+    // ── Fix round 1 (K3): an item a document already names is never bound again ───────────────────────────────────
+
+    [Fact]
+    public async Task AnItemAlreadyBoundToTheCommunicationsEml_IsNotArchived_AndIsCounted()
+    {
+        // must-fire: the row points at C's own .eml item. It passes the item check (C's container, the BFF, C's prefix),
+        // but the .eml document already names it: a second document on it would delete the .eml from under the first.
+        var emlDocument = Guid.NewGuid();
+        var h = Build((world, c) => world.Items[(ArchiveContainer, "item-eml")] = ArchiveItem(c, "Re- Q4 numbers.eml"),
+            boundItems: new Dictionary<string, Guid> { ["item-eml"] = emlDocument },
+            rows: AttachmentRow("Re- Q4 numbers.eml", ArchiveContainer, "item-eml"));
+
+        var result = await h.Sut.ArchiveExistingAsync(h.CommunicationId, CancellationToken.None);
+
+        result.AttachmentDocumentsCreated.Should().Be(0);
+        result.AttachmentsRefusedUnverified.Should().Be(1);
+        h.Created.Should().BeEmpty();
+        h.Updates.Should().BeEmpty();
+        h.Jobs.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task TwoRowsNamingTheSameItem_BindOneDocument_AndTheSiblingIsRefused()
+    {
+        // must-fire: a sibling row re-pointed at an item the first row's new document now names.
+        var h = Build((world, c) => world.Items[(ArchiveContainer, "item-own")] = ArchiveItem(c, "contract.pdf"),
+            AttachmentRow("contract.pdf", ArchiveContainer, "item-own"),
+            AttachmentRow("contract (copy).pdf", ArchiveContainer, "item-own"));
+
+        var result = await h.Sut.ArchiveExistingAsync(h.CommunicationId, CancellationToken.None);
+
+        result.AttachmentDocumentsCreated.Should().Be(1);
+        result.AttachmentsRefusedUnverified.Should().Be(1);
+        h.Created.Should().ContainSingle("one file, one document");
+    }
+
+    [Fact]
+    public async Task WhenTheAlreadyBoundLookupFails_NothingIsCreated()
+    {
+        // fail-closed: Dataverse cannot say whether a document already names the item.
+        var h = Build((world, c) => world.Items[(ArchiveContainer, "item-own")] = ArchiveItem(c, "contract.pdf"),
+            boundLookupFault: new InvalidOperationException("Dataverse unavailable"),
+            rows: AttachmentRow("contract.pdf", ArchiveContainer, "item-own"));
+
+        var result = await h.Sut.ArchiveExistingAsync(h.CommunicationId, CancellationToken.None);
+
+        result.AttachmentDocumentsCreated.Should().Be(0);
+        result.AttachmentsRefusedUnverified.Should().Be(1);
+        h.Created.Should().BeEmpty();
+    }
+
+    // ── Fix round 1 (K4): cost and cancellation ──────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task TheCommunicationsContainer_IsDerivedOnce_ForSeveralAttachments()
+    {
+        var h = Build((world, c) =>
+            {
+                world.Items[(ArchiveContainer, "item-1")] = ArchiveItem(c, "one.pdf");
+                world.Items[(ArchiveContainer, "item-2")] = ArchiveItem(c, "two.pdf");
+                world.Items[(ArchiveContainer, "item-3")] = ArchiveItem(c, "three.pdf");
+            },
+            AttachmentRow("one.pdf", ArchiveContainer, "item-1"),
+            AttachmentRow("two.pdf", ArchiveContainer, "item-2"),
+            AttachmentRow("three.pdf", ArchiveContainer, "item-3"));
+
+        var result = await h.Sut.ArchiveExistingAsync(h.CommunicationId, CancellationToken.None);
+
+        result.AttachmentDocumentsCreated.Should().Be(3);
+        h.CommunicationReads().Should().Be(1, "the container is the communication's, the same for every attachment");
+    }
+
+    [Fact]
+    public async Task WithNothingToArchive_TheContainerIsNotDerived()
+    {
+        var linked = AttachmentRow("done.pdf", ArchiveContainer, "item-done");
+        linked["sprk_document"] = new EntityReference(DocumentEntity, Guid.NewGuid());
+        var h = Build((_, _) => { }, linked);
+
+        var result = await h.Sut.ArchiveExistingAsync(h.CommunicationId, CancellationToken.None);
+
+        result.AttachmentDocumentsCreated.Should().Be(0);
+        result.AttachmentsRefusedUnverified.Should().Be(0);
+        h.CommunicationReads().Should().Be(0);
+    }
+
+    [Fact]
+    public async Task TheCallersCancellation_StopsTheLoop_AndPropagates()
+    {
+        // The caller aborts while the first attachment is being archived; the rest are not attempted.
+        using var cts = new CancellationTokenSource();
+        var h = Build((world, c) =>
+            {
+                world.Items[(ArchiveContainer, "item-1")] = ArchiveItem(c, "one.pdf");
+                world.Items[(ArchiveContainer, "item-2")] = ArchiveItem(c, "two.pdf");
+                world.Items[(ArchiveContainer, "item-3")] = ArchiveItem(c, "three.pdf");
+            },
+            onCreate: cts.Cancel,
+            rows: new[]
+            {
+                AttachmentRow("one.pdf", ArchiveContainer, "item-1"),
+                AttachmentRow("two.pdf", ArchiveContainer, "item-2"),
+                AttachmentRow("three.pdf", ArchiveContainer, "item-3"),
+            });
+
+        var act = () => h.Sut.ArchiveExistingAsync(h.CommunicationId, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        h.Created.Should().ContainSingle("the loop stops at the caller's cancellation");
+        h.BoundLookups().Should().Be(2, "the second attachment's lookup observed the cancellation; the third was never tried");
+    }
+
     // ── harness ─────────────────────────────────────────────────────────────────────────────────────────────────
 
     private static Harness Build(
         Action<TestRecordContainerResolver.DocumentPointerWorld, Guid> arrange, params Entity[] rows)
-        => Build(arrange, itemReadFault: null, noScopeFactory: false, rows);
+        => Build(arrange, itemReadFault: null, noScopeFactory: false, rows: rows);
 
     private static Harness Build(
         Action<TestRecordContainerResolver.DocumentPointerWorld, Guid> arrange,
         Exception? itemReadFault = null,
         bool noScopeFactory = false,
+        IReadOnlyDictionary<string, Guid>? boundItems = null,
+        Exception? boundLookupFault = null,
+        Action? onCreate = null,
         params Entity[] rows)
     {
         var communicationId = Guid.NewGuid();
@@ -216,6 +383,16 @@ public class CommunicationServiceArchiveAttachmentItemTests
         };
         world.Rows[("sprk_communication", communicationId)] = new Entity("sprk_communication", communicationId);
         arrange(world, communicationId);
+        var communicationReads = 0;
+        world.RetrieveFault = (entity, _) =>
+        {
+            if (entity == "sprk_communication")
+            {
+                communicationReads++;
+            }
+
+            return null;
+        };
         var resolver = world.Build();
 
         var created = new List<Entity>();
@@ -229,13 +406,42 @@ public class CommunicationServiceArchiveAttachmentItemTests
             .ReturnsAsync(new EntityCollection(rows.ToList()));
         // Already archived: the .eml step is skipped, so only the attachment step runs.
         entityService
-            .Setup(s => s.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == DocumentEntity), It.IsAny<CancellationToken>()))
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == DocumentEntity && !NamesItem(q)), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EntityCollection(new List<Entity> { new(DocumentEntity, Guid.NewGuid()) }));
+        // Fix round 1 (K3): "does a document already name this item?" — the bound items, plus the documents this call created.
+        var boundLookups = 0;
+        entityService
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == DocumentEntity && NamesItem(q)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((QueryExpression q, CancellationToken token) =>
+            {
+                boundLookups++;
+                token.ThrowIfCancellationRequested();
+                if (boundLookupFault is not null)
+                {
+                    throw boundLookupFault;
+                }
+
+                var item = (string)q.Criteria.Conditions.Single(c => c.AttributeName == "sprk_graphitemid").Values[0];
+                var hits = created
+                    .Where(d => d.GetAttributeValue<string>("sprk_graphitemid") == item)
+                    .Select(_ => new Entity(DocumentEntity, Guid.NewGuid()))
+                    .ToList();
+                if (boundItems is not null && boundItems.TryGetValue(item, out var bound))
+                {
+                    hits.Add(new Entity(DocumentEntity, bound));
+                }
+
+                return new EntityCollection(hits);
+            });
         entityService
             .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Entity e, CancellationToken _) =>
+            .ReturnsAsync((Entity e, CancellationToken token) =>
             {
+                token.ThrowIfCancellationRequested();
                 created.Add(e);
+                onCreate?.Invoke();
                 return Guid.NewGuid();
             });
         entityService
@@ -280,8 +486,13 @@ public class CommunicationServiceArchiveAttachmentItemTests
         return new Harness
         {
             Sut = sut, CommunicationId = communicationId, Created = created, Updates = updates, Jobs = jobs,
+            CommunicationReads = () => communicationReads,
+            BoundLookups = () => boundLookups,
         };
     }
+
+    private static bool NamesItem(QueryExpression query)
+        => query.Criteria.Conditions.Any(c => c.AttributeName == "sprk_graphitemid");
 
     private static IServiceScopeFactory ScopeServing(RecordContainerResolver resolver)
     {

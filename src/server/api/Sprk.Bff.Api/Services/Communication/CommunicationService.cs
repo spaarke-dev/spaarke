@@ -468,6 +468,14 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     public const string AttachmentItemUnverifiedCode = "sdap.communication.attachment_item_unverified";
 
     /// <summary>
+    /// The reason code of an attachment the on-demand archive refused because a <c>sprk_document</c> already names its item
+    /// in <c>sprk_graphitemid</c> (PR #2248 fix round 1, K3): two documents on one file means deleting either one deletes the
+    /// file under the other. Logged per refusal and counted, like <see cref="AttachmentItemUnverifiedCode"/>, in
+    /// <see cref="ArchiveCommunicationResult.AttachmentsRefusedUnverified"/>.
+    /// </summary>
+    public const string AttachmentItemAlreadyBoundCode = "sdap.communication.attachment_item_already_bound";
+
+    /// <summary>
     /// Creates a <c>sprk_document</c> for each attachment of the communication that lacks one (has an SPE
     /// item id but no linked document), using the attachment's OWN drive id (code-review W2), links the
     /// created Document back onto the attachment so a later archive skips it (idempotency, code-review W3),
@@ -481,8 +489,11 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// pointer AND its field-secured bound copy would launder a foreign item through the binding check. Each item is
     /// therefore checked against server-trusted facts (Graph's own record of the item, read app-only, and the
     /// communication's derived container) by <see cref="RecordContainerResolver.CommunicationAttachmentItemRefusalAsync"/>,
-    /// which states the trust argument. A refusal, including a failed verification read, creates nothing, is logged with
-    /// <see cref="AttachmentItemUnverifiedCode"/>, and is counted: never a silent success.
+    /// which states what the check proves. An item a <c>sprk_document</c> already names is refused too
+    /// (<see cref="AttachmentItemAlreadyBoundCode"/>): a second document on the same file would delete it from under the
+    /// first. A refusal, including a failed verification or lookup read, creates nothing, is logged with its code, and is
+    /// counted: never a silent success. The communication's container is derived once per call, on the first candidate.
+    /// The caller's cancellation stops the loop; any other per-attachment fault is non-fatal.
     /// </remarks>
     private async Task<(int Created, int RefusedUnverified)> ArchiveExistingAttachmentsAsync(
         Guid communicationId, CancellationToken ct, Sprk.Bff.Api.Services.Dataverse.RecordRequester? requestedBy = null)
@@ -519,6 +530,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         using var verifyScope = attachments.Entities.Count == 0 ? null : _scopeFactory?.CreateScope();
         var itemVerifier = verifyScope?.ServiceProvider.GetService<RecordContainerResolver>();
 
+        // Fix round 1 (K4): the communication's container is the same for every attachment. It is derived once, on the
+        // first candidate, so a call with nothing to archive reads nothing.
+        DocumentContainerDerivation? communicationContainer = null;
+
         foreach (var att in attachments.Entities)
         {
             // Skip attachments that already have a Document, or that were never uploaded to SPE.
@@ -536,15 +551,32 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             try
             {
                 // #2246: verify the item BEFORE binding a document to it (see remarks). A failed read refuses.
-                var refusal = itemVerifier is null
-                    ? "no item verifier is available"
-                    : await itemVerifier.CommunicationAttachmentItemRefusalAsync(communicationId, driveId, itemId, ct);
+                string? refusal;
+                if (itemVerifier is null)
+                {
+                    refusal = "no item verifier is available";
+                }
+                else
+                {
+                    communicationContainer ??= await itemVerifier.DeriveCommunicationContainersAsync(communicationId, ct);
+                    refusal = await itemVerifier.CommunicationAttachmentItemRefusalAsync(
+                        communicationId, communicationContainer, driveId, itemId, ct);
+                }
+
+                var refusalCode = AttachmentItemUnverifiedCode;
+                if (refusal is null)
+                {
+                    // Fix round 1 (K3): never a second document on a file another document already names.
+                    refusal = await ItemAlreadyBoundRefusalAsync(itemId, ct);
+                    refusalCode = AttachmentItemAlreadyBoundCode;
+                }
+
                 if (refusal is not null)
                 {
                     refusedUnverified++;
                     _logger.LogWarning(
                         "Attachment {AttachmentId} of communication {CommunicationId} NOT archived: {Reason} ({Code}) | Drive: {DriveId}, Item: {ItemId}",
-                        att.Id, communicationId, refusal, AttachmentItemUnverifiedCode, driveId, itemId);
+                        att.Id, communicationId, refusal, refusalCode, driveId, itemId);
                     continue;
                 }
 
@@ -574,8 +606,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 await EnqueueDocumentAnalysisAsync(documentId, correlationId, ct);
                 created++;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
+                // Fix round 1 (K4): the CALLER's cancellation is not a per-attachment failure. It propagates and stops the
+                // loop; anything else (including a timeout the caller did not ask for) stays non-fatal.
                 _logger.LogWarning(
                     ex,
                     "Failed to archive attachment '{FileName}' for communication {CommunicationId} (non-fatal)",
@@ -586,11 +620,45 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         if (refusedUnverified > 0)
         {
             _logger.LogWarning(
-                "On-demand archive of communication {CommunicationId}: {Refused} attachment(s) refused unverified ({Code}); {Created} archived",
-                communicationId, refusedUnverified, AttachmentItemUnverifiedCode, created);
+                "On-demand archive of communication {CommunicationId}: {Refused} attachment(s) refused ({Code} / {AlreadyBoundCode}); {Created} archived",
+                communicationId, refusedUnverified, AttachmentItemUnverifiedCode, AttachmentItemAlreadyBoundCode, created);
         }
 
         return (created, refusedUnverified);
+    }
+
+    /// <summary>
+    /// PR #2248 fix round 1 (K3): does a <c>sprk_document</c> already name <paramref name="itemId"/> in
+    /// <c>sprk_graphitemid</c>? <see langword="null"/> when none does; otherwise why the item may not be bound again. A
+    /// plain column query, not the <c>sprk_graphitemid_uk</c> alternate key, so it still answers when that key is not
+    /// Active or the value is already duplicated (the reason <c>ComposeRecordResolution</c> falls back to a column query).
+    /// Fail closed: a lookup fault refuses; the caller's cancellation propagates.
+    /// </summary>
+    private async Task<string?> ItemAlreadyBoundRefusalAsync(string itemId, CancellationToken ct)
+    {
+        var query = new QueryExpression("sprk_document")
+        {
+            ColumnSet = new ColumnSet("sprk_documentid"),
+            Criteria =
+            {
+                // The RAW item id: sprk_graphitemid is an opaque SPE drive-item id (a string), matched exactly.
+                Conditions = { new ConditionExpression("sprk_graphitemid", ConditionOperator.Equal, itemId) },
+            },
+            TopCount = 1,
+        };
+
+        try
+        {
+            var bound = await _genericEntityService.RetrieveMultipleAsync(query, ct);
+            return bound.Entities.Count == 0
+                ? null
+                : $"the item is already the file of document {bound.Entities[0].Id}; a second document on it would delete it from under the first";
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogInformation(ex, "Whether a document already names attachment item {ItemId} could not be read.", itemId);
+            return $"whether a document already names the item could not be read ({ex.GetType().Name})";
+        }
     }
 
     /// <summary>
