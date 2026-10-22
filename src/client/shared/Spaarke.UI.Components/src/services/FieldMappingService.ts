@@ -61,7 +61,8 @@ function describeError(err: unknown): string {
   }
   if (typeof err === 'string') return err;
   try {
-    return JSON.stringify(err) ?? String(err);
+    // JSON.stringify returns undefined for undefined, a function or a symbol, though its type says string.
+    return (JSON.stringify(err) as string | undefined) ?? String(err);
   } catch {
     return String(err);
   }
