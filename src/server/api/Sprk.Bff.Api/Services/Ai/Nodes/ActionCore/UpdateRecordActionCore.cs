@@ -177,8 +177,9 @@ internal sealed class UpdateRecordActionCore
         // #2257 fix round 1 (main-session decision): a payload built by configuration or a model — the Update Record node's,
         // whoever runs the playbook — is asked the refusal even when the write impersonates the person who started the run:
         // the author of the payload may not be that person. Only a confirmed proposal (ActionSeam's Job B apply, the
-        // confirming user's own edit) written AS that user skips it.
-        if ((input.PayloadSource != UpdateRecordPayloadSource.ConfirmedProposal || input.ImpersonateSystemUserId is null)
+        // confirming user's own edit) written AS that user skips it. Fix round 2 (K4): Guid.Empty is no person.
+        if ((input.PayloadSource != UpdateRecordPayloadSource.ConfirmedProposal
+                || input.ImpersonateSystemUserId is not { } confirmingUser || confirmingUser == Guid.Empty)
             && InheritedAccessPermission.RefuseAppOnlyWrite(input.EntityLogicalName, updatePayload.Keys) is { } documentRefusal)
         {
             throw new RecordOwnerUnresolvedException(input.EntityLogicalName, documentRefusal);

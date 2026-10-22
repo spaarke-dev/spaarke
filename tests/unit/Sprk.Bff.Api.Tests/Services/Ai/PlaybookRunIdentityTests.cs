@@ -294,6 +294,19 @@ public class PlaybookRunIdentityTests
 
     private static readonly Regex ComparisonBefore = new(@"(?:==|!=|\bis(?:\s+not)?|\bcase|\bor|\band)\s*$");
 
+    /// <summary>Fix round 2 (K2): a marker on the LEFT of a comparison, or a switch arm's pattern, is a read.</summary>
+    private static readonly Regex ComparisonAfter = new(@"\G\s*(?:==|!=|=>)");
+
+    /// <summary>
+    /// Fix round 2 (K3): a carrier built from JSON (System.Text.Json, Newtonsoft, HttpClient / HttpRequest JSON helpers, or a
+    /// <c>typeof</c> handed to one of them) can carry a System marker the scan cannot see.
+    /// </summary>
+    private static readonly Regex CarrierFromJson = new(
+        @"\b(?:Deserialize\w*|ReadFromJsonAsync|GetFromJsonAsync|ToObject|PopulateObject)\s*<\s*(?:global::)?(?:\w+\s*\.\s*)*"
+        + @"(?:PlaybookRunRequest|PlaybookRunContext|NodeExecutionContext|PlaybookExecutionContext)\s*\??\s*>"
+        + @"|\b(?:Deserialize\w*|ReadFromJsonAsync|ToObject|PopulateObject)\s*\([^;]*\btypeof\s*\(\s*(?:global::)?(?:\w+\s*\.\s*)*"
+        + @"(?:PlaybookRunRequest|PlaybookRunContext|NodeExecutionContext|PlaybookExecutionContext)\s*\)");
+
     private static readonly Regex IntoTheEnum = new(
         @"\(\s*(?:global::)?(?:\w+\s*\.\s*)*PlaybookRunStartedBy\s*\??\s*\)"   // a cast
         + @"|\bas\s+(?:\w+\.)*PlaybookRunStartedBy\b"                              // an as-conversion
@@ -313,14 +326,14 @@ public class PlaybookRunIdentityTests
     private static List<string> MarkerProblems(string relative, string source)
     {
         var problems = new List<string>();
-        var code = StripStrings(StripComments(source));
+        var code = StripCommentsAndStrings(source);
         if (!MarkerCarrier.IsMatch(code))
         {
             return problems;
         }
 
         var setSites = SystemMarker.Matches(code)
-            .Count(m => !ComparisonBefore.IsMatch(code[..m.Index]));
+            .Count(m => !ComparisonBefore.IsMatch(code[..m.Index]) && !ComparisonAfter.IsMatch(code, m.Index + m.Length));
         if (SystemEntries.ContainsKey(relative))
         {
             if (setSites != 1)
@@ -330,6 +343,9 @@ public class PlaybookRunIdentityTests
         {
             problems.Add($"{relative}: sets PlaybookRunStartedBy.System at {setSites} call site(s) but is not a listed System entry");
         }
+
+        foreach (System.Text.RegularExpressions.Match fromJson in CarrierFromJson.Matches(code))
+            problems.Add($"{relative}: builds a run carrier from JSON ('{fromJson.Value.Trim()}'), which can carry any marker");
 
         foreach (System.Text.RegularExpressions.Match conversion in IntoTheEnum.Matches(code))
             problems.Add($"{relative}: converts a value into PlaybookRunStartedBy ('{conversion.Value.Trim()}')");
@@ -369,7 +385,7 @@ public class PlaybookRunIdentityTests
             var source = File.ReadAllText(file);
             problems.AddRange(MarkerProblems(relative, source));
 
-            var code = StripComments(source);
+            var code = StripCommentsAndStrings(source);
             if (Regex.IsMatch(code, @"\.ExecuteAppOnlyAsync\(") && !code.Contains("StartedBy = PlaybookRunStartedBy."))
             {
                 unmarkedBackgroundCallers.Add(relative);
@@ -406,6 +422,16 @@ public class PlaybookRunIdentityTests
         { "Services/Ai/Foo.cs", "using static Sprk.Bff.Api.Services.Ai.PlaybookRunStartedBy;\nvar r = new PlaybookRunRequest();", true },
         { "Services/Ai/Foo.cs", "using Marker = Sprk.Bff.Api.Services.Ai.PlaybookRunStartedBy;\nvar r = new PlaybookRunRequest();", true },
         { "Services/Ai/PlaybookRunContext.cs", "var c = new NodeExecutionContext { StartedBy = request.StartedBy };", true },
+        // Fix round 2, K1: a "//" inside a string on the same line no longer hides the marker after it.
+        { "Services/Ai/Foo.cs", "var u = \"https://x\"; var r = new PlaybookRunRequest { StartedBy = PlaybookRunStartedBy.System };", true },
+        { "Services/Ai/Foo.cs", "var u = @\"C:\\x\\\"; var r = new PlaybookRunRequest { StartedBy = PlaybookRunStartedBy.System };", true },
+        { "Services/Ai/Foo.cs", "var u = $\"{a}//{b}\"; var r = new PlaybookRunRequest { StartedBy = PlaybookRunStartedBy.System };", true },
+        { "Services/Ai/Foo.cs", "var c = '\"'; var r = new PlaybookRunRequest { StartedBy = PlaybookRunStartedBy.System };", true },
+        // Fix round 2, K3: a carrier built from JSON.
+        { "Services/Ai/Foo.cs", "var r = JsonSerializer.Deserialize<PlaybookRunRequest>(json);", true },
+        { "Services/Ai/Foo.cs", "var r = JsonConvert.DeserializeObject<Sprk.Bff.Api.Services.Ai.NodeExecutionContext>(json);", true },
+        { "Services/Ai/Foo.cs", "var r = await body.ReadFromJsonAsync<PlaybookExecutionContext>(ct);", true },
+        { "Services/Ai/Foo.cs", "var r = (PlaybookRunContext)JsonSerializer.Deserialize(json, typeof(PlaybookRunContext))!;", true },
         // Must not fire.
         { "Services/Ai/PlaybookSchedulerJob.cs", "var a = new PlaybookRunRequest { StartedBy = PlaybookRunStartedBy.System };", false },
         { "Services/Ai/Foo.cs", "if (request.StartedBy == PlaybookRunStartedBy.System) { } var r = new PlaybookRunRequest();", false },
@@ -418,6 +444,14 @@ public class PlaybookRunIdentityTests
         { MarkerDefinitionFile, "public static bool TryResolve(PlaybookRunStartedBy startedBy, Guid? id) => startedBy == PlaybookRunStartedBy.System;", false },
         { "Services/SpeAdmin/BulkOperationService.cs", "var op = new BulkOperation { StartedBy = startedBy };", false },
         { "Services/Ai/Foo.cs", "using (var scope = Open()) { var r = new PlaybookRunRequest { StartedBy = PlaybookRunStartedBy.Person }; }", false },
+        // Fix round 2, K2: reads are not call sites.
+        { "Services/Ai/Foo.cs", "if (PlaybookRunStartedBy.System == request.StartedBy) { } var r = new PlaybookRunRequest();", false },
+        { "Services/Ai/Foo.cs", "if (PlaybookRunStartedBy.System != request.StartedBy) { } var r = new PlaybookRunRequest();", false },
+        { "Services/Ai/Foo.cs", "var label = request.StartedBy switch { PlaybookRunStartedBy.System => \"system\", _ => \"person\" }; var r = new PlaybookRunRequest();", false },
+        // Fix round 2, K1: a marker inside a string, a verbatim string or a raw string is not code.
+        { "Services/Ai/Foo.cs", "var s = @\"StartedBy = PlaybookRunStartedBy.System\"\"\"; var r = new PlaybookRunRequest();", false },
+        { "Services/Ai/Foo.cs", "var s = \"\"\"\n  StartedBy = PlaybookRunStartedBy.System\n  \"\"\"; var r = new PlaybookRunRequest();", false },
+        { "Services/Ai/Foo.cs", "var s = \"a // StartedBy = PlaybookRunStartedBy.System\"; var r = new PlaybookRunRequest();", false },
     };
 
     [Theory]
@@ -425,12 +459,23 @@ public class PlaybookRunIdentityTests
     public void TheSourceGuard_FiresPerCallSite(string relative, string code, bool fires) =>
         MarkerProblems(relative, code).Any().Should().Be(fires, code);
 
-    private static string StripComments(string code) =>
-        Regex.Replace(code, @"/\*.*?\*/|//[^\n]*", string.Empty, RegexOptions.Singleline);
+    /// <summary>
+    /// Fix round 2 (K1): ONE left-to-right pass that drops comments and empties string and char literals, so the <c>//</c>
+    /// inside <c>"https://x"</c> never starts a comment (which ate the rest of its line, and any marker on it), and a quote in
+    /// a comment never starts a string. Raw (<c>"""</c>), verbatim (<c>@""</c>, <c>$@""</c>, <c>@$""</c>, with <c>""</c>
+    /// escapes) and regular or interpolated strings are emptied, so a log template such as "StartedBy={StartedBy}" is not
+    /// read as code. Limit: an interpolation hole holding a quoted string ends the outer string early (as before).
+    /// </summary>
+    private static readonly Regex StringOrComment = new(
+        """"//[^\n]*|/\*[\s\S]*?\*/|"{3}[\s\S]*?"{3}|(?:\$@|@\$|@)"(?:[^"]|"")*"|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)'"""");
 
-    /// <summary>Empties string literals, so a log template such as "StartedBy={StartedBy}" is not read as code.</summary>
-    private static string StripStrings(string code) =>
-        Regex.Replace(code, @"""(?:[^""\\\n]|\\.)*""", "\"\"");
+    private static string StripCommentsAndStrings(string code) =>
+        StringOrComment.Replace(code, m => m.Value[0] switch
+        {
+            '/' => " ",
+            '\'' => "' '",
+            _ => "\"\"",
+        });
 
     private static UpdateRecordNodeExecutor RealExecutor(Mock<IFieldMappingDataverseService> writes) =>
         new(new TemplateEngine(NullLogger<TemplateEngine>.Instance), writes.Object,

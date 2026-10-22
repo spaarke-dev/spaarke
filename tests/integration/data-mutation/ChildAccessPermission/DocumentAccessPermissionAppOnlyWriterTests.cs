@@ -114,6 +114,22 @@ public class DocumentAccessPermissionAppOnlyWriterTests
     }
 
     [Fact]
+    public async Task AConfirmedProposal_ForAnEmptyUser_IsRefused_AsNoPerson()
+    {
+        // #2257 fix round 2 (K4): Guid.Empty names no person, so it never earns the confirmed-proposal skip.
+        var act = () => Core().UpdateAsync(
+            new UpdateRecordActionInput(
+                "sprk_document", Row, FieldMappings: null,
+                LegacyFields: new Dictionary<string, string?> { ["sprk_accesspermission"] = "100000000" }, Lookups: null,
+                ImpersonateSystemUserId: Guid.Empty, PayloadSource: UpdateRecordPayloadSource.ConfirmedProposal),
+            CancellationToken.None);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>())
+            .Which.RefusalCode.Should().Be(InheritedAccessPermission.AppOnlyDocumentWriteReasonCode);
+        _writes.Invocations.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task TheActionSeamsImpersonatedApply_IsUnchanged_AndWritesAsTheConfirmingUser()
     {
         // #2257 fix round 1: every IActionSeam.UpdateRecordAsync caller (the Job B apply services) applies a proposal its user

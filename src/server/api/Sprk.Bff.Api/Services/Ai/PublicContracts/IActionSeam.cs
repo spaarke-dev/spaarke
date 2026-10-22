@@ -50,6 +50,18 @@ public interface IActionSeam
     /// same coercion (Choice/Boolean/Number, metadata-driven fail-loud) as the UpdateRecord node.
     /// Returns a failure result (never a throw) for an unmatchable metadata-confirmed Choice value.
     /// </summary>
+    /// <remarks>
+    /// <b>A person-CONFIRMED proposal only</b> (#2257 fix round 2, K5). A call that sets
+    /// <see cref="UpdateRecordRequest.ImpersonateSystemUserId"/> is treated as the apply of a proposal THAT person confirmed
+    /// (<c>UpdateRecordPayloadSource.ConfirmedProposal</c>): it runs AS them and SKIPS the configuration deny-lists
+    /// (<c>InheritedAccessPermission.RefuseAppOnlyWrite</c>: a document's Access Permission, D7 links and BFF-owned columns,
+    /// every row's owner and creator), leaving the write to their own Dataverse privileges and field security. It must
+    /// therefore NEVER carry a payload built by a model or by configuration that the person did not confirm field by field;
+    /// such a write goes through the Update Record node or the output mapping, which ask the deny-lists whoever they run as.
+    /// The callers are pinned to <c>CommunicationProposalApplyService</c> and <c>CommunicationCreateTaskApplyService</c>
+    /// (ArchTest <c>ActionSeamUpdateRecordCallerGuardTests</c>). A call without a user (or with <see cref="Guid.Empty"/>) is
+    /// asked the deny-lists.
+    /// </remarks>
     Task<UpdateRecordResult> UpdateRecordAsync(
         UpdateRecordRequest request,
         CancellationToken cancellationToken = default);
@@ -213,6 +225,9 @@ public sealed record UpdateRecordRequest
     /// is sent (unified-access-control-r2 task 104, fail closed); it is not turned into a failed
     /// <c>UpdateRecordResult</c>. Supplied only by the Job B apply endpoint (task 031) with the confirming user's id, so
     /// the human-approved field update is attributed to and gated by them at the Dataverse layer.
+    /// <para>#2257 fix round 2 (K5): setting it declares the payload a proposal THIS person confirmed, so the write skips the
+    /// configuration deny-lists (<c>InheritedAccessPermission.RefuseAppOnlyWrite</c>). Never set it for a payload a model or a
+    /// configuration built that the person did not confirm (see <see cref="IActionSeam.UpdateRecordAsync"/>).</para>
     /// </summary>
     public Guid? ImpersonateSystemUserId { get; init; }
 }
