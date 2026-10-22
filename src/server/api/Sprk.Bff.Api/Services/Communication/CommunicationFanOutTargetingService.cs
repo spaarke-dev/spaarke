@@ -69,7 +69,7 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// </summary>
 public sealed class CommunicationFanOutTargetingService
 {
-    private const string ParticipantEntity = "sprk_communicationparticipant";
+    internal const string ParticipantEntity = "sprk_communicationparticipant"; // #2253 fix round 3: refused whole (AccessTables)
     private const string ParticipantCommunicationField = "sprk_communication";
     private const string ParticipantSystemUserField = "sprk_systemuser";
     private const string ParticipantContactField = "sprk_contact";

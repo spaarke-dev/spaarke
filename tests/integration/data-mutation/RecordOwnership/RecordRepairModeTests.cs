@@ -917,7 +917,10 @@ public sealed class RecordRepairModeTests
 
         _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain("sprk_issecure",
             "a blank flag reads as secure; a mapped false would expose the matter's children");
-        Field(outcome, RecordRepairPart.Mapping, "sprk_issecure").ReasonCode.Should().Be(RecordRepairReason.MappedValueConfersAccess);
+        // #2251: a secure root's secure flag is refused to every app-only generic writer, so the per-rule app-only refusal
+        // skips it first and its code is the reason reported (Repair's own MappedValueConfersAccess still holds the rest).
+        Field(outcome, RecordRepairPart.Mapping, "sprk_issecure").ReasonCode
+            .Should().Be(InheritedAccessPermission.AppOnlySecureRootWriteReasonCode);
         _world.Directory.Row("sprk_matter", id).Attributes.Should().NotContainKey("sprk_issecure");
     }
 

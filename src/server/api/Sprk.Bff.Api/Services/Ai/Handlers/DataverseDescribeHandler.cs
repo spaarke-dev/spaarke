@@ -71,7 +71,7 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
     /// <summary>Client-side cap on the number of tables returned for the <c>tables/</c> listing.</summary>
     internal const int MaxTableListEntries = 300;
 
-    [GeneratedRegex(@"^[a-z][a-z0-9_]*$")]
+    [GeneratedRegex(@"^[a-z][a-z0-9_]*\z")]
     private static partial Regex LogicalNameRegex();
 
     private readonly IDataverseUserClient _dataverse;

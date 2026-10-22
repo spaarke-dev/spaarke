@@ -41,7 +41,7 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// </remarks>
 internal static partial class DataverseWriteItemMapper
 {
-    [GeneratedRegex(@"^[a-z][a-z0-9_]*$")]
+    [GeneratedRegex(@"^[a-z][a-z0-9_]*\z")]
     private static partial Regex LogicalNameRegex();
 
     /// <summary>Successful mapping: the OData JSON body + the column logical names it sets (identifiers only — safe to log counts/names per NFR-07).</summary>

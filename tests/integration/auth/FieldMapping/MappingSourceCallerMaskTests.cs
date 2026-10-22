@@ -38,6 +38,14 @@ public class MappingSourceCallerMaskTests
 
     private static MappingSourceCallerReadDouble CallerSeeing(Entity row) => new(id => id == SourceId ? row : null);
 
+    // ── #2253 fix round 3 (K): `$` matched before a final "\n"; `\z` does not ──────────────────────────────────
+
+    [Theory]
+    [InlineData("sprk_clientreference\n", null)]
+    [InlineData("sprk_clientreference", "sprk_clientreference")]
+    public void WebApiPropertyFor_ANameWithATrailingNewline_IsUnreadable(string column, string? expected) =>
+        MappingSourceCallerMask.WebApiPropertyFor(column, "ACME-REF", "sprk_projectid").Should().Be(expected);
+
     // ── must not fire: what the caller can read is kept ───────────────────────────────────────────────────────────
 
     [Fact]

@@ -42,7 +42,7 @@ public interface IMembershipReconciler
 /// </remarks>
 public sealed class MembershipReconciler : IMembershipReconciler
 {
-    private const string ChannelRefEntity = "sprk_communicationchannelref";
+    internal const string ChannelRefEntity = "sprk_communicationchannelref"; // #2253 fix round 3: refused whole (AccessTables)
 
     private readonly IThreadMembershipDerivationService _derivation;
     private readonly IAcsIdentityService _identity;
