@@ -755,21 +755,23 @@ public class SpeContainerMembershipService
     }
 
     /// <summary>
-    /// Whether <paramref name="ex"/>, propagated by <see cref="ReadMarkersAsync"/> or <see cref="ReadAccessAsync"/>, is
-    /// Graph saying the container id does not RESOLVE in this tenancy (<c>400 invalidRequest</c>, e.g. "Invalid hostname for
-    /// this tenancy" when the container's SharePoint site is gone) — an answer that will not change on retry — rather than a
+    /// Whether <paramref name="ex"/>, propagated by the container read of <see cref="ReadMarkersAsync"/>, is Graph saying
+    /// the container id does not RESOLVE in this tenancy (<c>400 invalidRequest</c>, e.g. "Invalid hostname for this
+    /// tenancy" when the container's SharePoint site is gone) — an answer that will not change on retry — rather than a
     /// failure to answer.
     /// </summary>
     /// <remarks>
-    /// <para>The one shared rule, <see cref="SpeAdminGraphService.IsUnresolvableContainerId"/> (measured on dev 2026-10-06):
-    /// only the <c>invalidRequest</c> code counts; a malformed query answers <c>400 BadRequest</c> and stays a fault, as do
-    /// 429, 5xx and anything that is not a Graph <c>ODataError</c>. The ownership guard's own read maps every 400 to "not
-    /// owned" (a refusal the sync also reports without counting a failure), so both paths give the same outcome for an id
-    /// that does not resolve.</para>
+    /// <para>The one shared rule, <see cref="SpeAdminGraphService.IsUnresolvableContainerId"/> (measured on dev 2026-10-06,
+    /// for the single-container GET only): only the <c>invalidRequest</c> code counts; a malformed query answers
+    /// <c>400 BadRequest</c> and stays a fault, as do 429, 5xx and anything that is not a Graph <c>ODataError</c>. It is
+    /// not a verdict on a later read of a container whose id has already resolved (the permission collection and its
+    /// <c>@odata.nextLink</c> pages): a 400 there is a fault. The ownership guard's own read maps every 400 to "not owned"
+    /// (a refusal the JIT sweep also reports without counting a failure), so in the JIT sweep both paths give the same
+    /// outcome for an id that does not resolve.</para>
     /// <para><b>Deliberately NOT mapped to <see langword="null"/> in the reads</b> (#1830, task 192): their other callers treat
     /// null as "the container does not exist, nothing to revoke" (<c>DemoExpirationJob</c>), which would fail OPEN on an id
-    /// Graph merely cannot resolve. Only the just-in-time removal sweep classifies it, and only to report it rather than
-    /// count it failed — it still touches nothing there.</para>
+    /// Graph merely cannot resolve. Only the just-in-time removal sweep classifies it, only for a fault from its FIRST read
+    /// of a container, and only to report it rather than count it failed — it still touches nothing there.</para>
     /// </remarks>
     internal static bool IsUnresolvableContainer(Exception ex)
         => ex is Microsoft.Graph.Models.ODataErrors.ODataError odata && SpeAdminGraphService.IsUnresolvableContainerId(odata);

@@ -14,12 +14,22 @@ namespace Sprk.Bff.Api.Tests.TestInfrastructure;
 /// #1830 (uac-r2 task 192) — one SharePoint Embedded container as the real Graph SDK sees it, behind a recording
 /// <see cref="IRequestAdapter"/> (the SDK's own seam, not a transport mock — the <c>DemoSpeGrantLifecycleTests</c>
 /// convention). The container read either answers <see cref="ContainerReadError"/> or a container with no custom
-/// properties; permission DELETEs and <c>customProperties</c> PATCHes are recorded.
+/// properties; the permission collection answers <see cref="PermissionPages"/> empty pages (each but the last with an
+/// <c>@odata.nextLink</c>) unless <see cref="PermissionPageError"/> names one; permission DELETEs and
+/// <c>customProperties</c> PATCHes are recorded.
 /// </summary>
 internal sealed class SpeContainerGraphStub : IRequestAdapter
 {
+    private int _permissionPagesServed;
+
     /// <summary>Thrown by every container GET when set (as the SDK throws a mapped Graph error).</summary>
     public ODataError? ContainerReadError { get; set; }
+
+    /// <summary>How many pages the permission collection has.</summary>
+    public int PermissionPages { get; set; } = 1;
+
+    /// <summary>Thrown by the permission-collection GET of this 1-based page when set (2 = the first nextLink page).</summary>
+    public (int Page, ODataError Error)? PermissionPageError { get; set; }
 
     /// <summary>Every request sent, as <c>METHOD url</c>.</summary>
     public List<string> Requests { get; } = [];
@@ -46,10 +56,25 @@ internal sealed class SpeContainerGraphStub : IRequestAdapter
         where ModelType : IParsable
     {
         Requests.Add($"{requestInfo.HttpMethod} {requestInfo.URI}");
-        if (ContainerReadError is { } error)
-            throw error;
         if (typeof(ModelType) == typeof(FileStorageContainer))
+        {
+            if (ContainerReadError is { } error)
+                throw error;
             return Task.FromResult((ModelType?)(object)new FileStorageContainer { Id = "stub" });
+        }
+
+        if (typeof(ModelType) == typeof(PermissionCollectionResponse))
+        {
+            var page = ++_permissionPagesServed;
+            if (PermissionPageError is { } failing && failing.Page == page)
+                throw failing.Error;
+            return Task.FromResult((ModelType?)(object)new PermissionCollectionResponse
+            {
+                Value = [],
+                OdataNextLink = page < PermissionPages ? $"{BaseUrl}/storage/fileStorage/containers/stub/permissions?$skiptoken={page}" : null,
+            });
+        }
+
         throw new NotSupportedException($"Unexpected Graph read {requestInfo.URI}.");
     }
 
