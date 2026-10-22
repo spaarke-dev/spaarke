@@ -23,8 +23,10 @@ namespace Sprk.Bff.Api.Services.Finance.Files;
 /// <para><b>Scan tags</b> (researcher, Microsoft Learn 2026-10-22): Defender for Storage writes the index tag
 /// <see cref="ScanResultTagKey"/> with "No threats found" or "Malicious" (other values: "Error", "Not scanned", SAM error strings),
 /// and a scan time tag. The key is matched ignoring case (Learn spells "Malware scanning scan result", the portal lab "Malware
-/// Scanning scan result"). The scan-time key <see cref="ScanTimeTagKey"/> is NOT confirmed on Learn: an absent or unreadable scan
-/// time refuses (Pending), so an unconfirmed key fails closed and is a live verification for the first environment with scanning on
+/// Scanning scan result"). The scan-time key <see cref="ScanTimeTagKey"/> and its value format are NOT stated on Learn ("Scan time
+/// (UTC)" only); the one observed sample (an <c>az storage blob tag list</c> output, nineliveszerotrust.com, April 2026) is
+/// <c>2026-04-17 17:40:38Z</c>, which <see cref="ScanTimeFormats"/> accepts. An absent, unreadable or future scan time refuses
+/// (Pending), so an unconfirmed key or format fails closed and is a live verification for the first environment with scanning on
 /// (notes/090-file-store-service.md). This type never writes tags (091: tag writes are refused by the role anyway).</para>
 /// </remarks>
 public sealed class StoredFileBlobs
@@ -41,6 +43,16 @@ public sealed class StoredFileBlobs
     /// <summary>The malicious verdict value (compared exactly).</summary>
     public const string ScanMaliciousValue = "Malicious";
 
+    /// <summary>
+    /// The closed set of scan-time formats (invariant culture), each ending in an offset designator: the round-trip form, ISO 8601
+    /// with optional fractions, and the space-separated form Defender was observed writing (<c>2026-04-17 17:40:38Z</c>). A value
+    /// without a designator is refused even though <c>K</c> would parse it (see <see cref="TryParseScanTime"/>).
+    /// </summary>
+    internal static readonly string[] ScanTimeFormats = ["O", "yyyy-MM-ddTHH:mm:ss.FFFFFFFK", "yyyy-MM-dd HH:mm:ssK"];
+
+    /// <summary>How far a scan time may lie ahead of this host's clock and still count (clock skew between Defender and the host).</summary>
+    internal static readonly TimeSpan ScanClockSkew = TimeSpan.FromMinutes(5);
+
     /// <summary>Blob metadata keys written at stage (lower case: metadata keys are C# identifiers on the wire).</summary>
     internal const string MetadataSha256 = "sha256", MetadataPurpose = "purpose", MetadataSubmission = "submissionid", MetadataEnvironment = "environment";
 
@@ -51,16 +63,19 @@ public sealed class StoredFileBlobs
 
     private readonly BlobGateway? _gateway;
     private readonly ILogger _logger;
+    private readonly TimeProvider _time;
 
     /// <summary>Production constructor: the bound <c>Finance:FileStore</c> section and the shared managed-identity credential.</summary>
     /// <exception cref="InvalidOperationException">A configured endpoint or tenant is unusable (start-up validation reports it first).</exception>
     public StoredFileBlobs(
-        IOptions<FinanceOptions> options, IOptions<DataverseOptions> dataverse, TokenCredential credential, ILogger<StoredFileBlobs> logger)
+        IOptions<FinanceOptions> options, IOptions<DataverseOptions> dataverse, TokenCredential credential, TimeProvider timeProvider,
+        ILogger<StoredFileBlobs> logger)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(dataverse);
         ArgumentNullException.ThrowIfNull(credential);
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _time = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         Environment = EnvironmentMarkerOf(dataverse.Value.EnvironmentUrl);
 
         var fileStore = options.Value.FileStore ?? new FinanceFileStoreOptions();
@@ -80,10 +95,13 @@ public sealed class StoredFileBlobs
         _gateway = new AzureBlobGateway(endpoint, credential);
     }
 
-    /// <summary>Test constructor: a substitute gateway (<c>null</c> = not configured).</summary>
-    internal StoredFileBlobs(BlobGateway? gateway, Guid tenantId, bool? malwareScanningEnabled, ILogger logger, string? environment = TestEnvironment)
+    /// <summary>Test constructor: a substitute gateway (<c>null</c> = not configured) and clock (<c>null</c> = the system clock).</summary>
+    internal StoredFileBlobs(
+        BlobGateway? gateway, Guid tenantId, bool? malwareScanningEnabled, ILogger logger, string? environment = TestEnvironment,
+        TimeProvider? timeProvider = null)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _time = timeProvider ?? TimeProvider.System;
         if (gateway is not null && tenantId == Guid.Empty)
         {
             throw new ArgumentException("A configured store needs a tenant.", nameof(tenantId));
@@ -275,18 +293,19 @@ public sealed class StoredFileBlobs
         }
 
         var tags = await gateway.GetTagsAsync(container, blobPath, ct).ConfigureAwait(false);
-        return tags is null ? null : (ClassifyScan(tags, properties.LastModified), properties);
+        return tags is null ? null : (ClassifyScan(tags, properties.LastModified, _time.GetUtcNow()), properties);
     }
 
     /// <summary>
     /// The download rule over a blob's index tags (section 4.2; uac-r2 condition 3, 091): <see cref="StoredFileScanState.Malicious"/>
     /// when any scan-result tag says "Malicious"; <see cref="StoredFileScanState.Clean"/> only when every scan-result tag says "No
-    /// threats found" AND exactly one scan-time tag parses (invariant culture, UTC) to a time no earlier than
-    /// <paramref name="lastModified"/>; <see cref="StoredFileScanState.Pending"/> for everything else — no tag, another value
-    /// ("Error", "Not scanned", a SAM code), conflicting tags, a missing or unparseable scan time, or a scan older than the content
-    /// (an overwrite after the scan). Keys are matched ignoring case; values exactly.
+    /// threats found" AND exactly one scan-time tag parses (<see cref="TryParseScanTime"/>) to a time no earlier than
+    /// <paramref name="lastModified"/> and no later than <paramref name="now"/> plus <see cref="ScanClockSkew"/>;
+    /// <see cref="StoredFileScanState.Pending"/> for everything else — no tag, another value ("Error", "Not scanned", a SAM code),
+    /// conflicting tags, a missing or unparseable scan time, a scan older than the content (an overwrite after the scan) or one in
+    /// the future (a time no scan could have finished at). Keys are matched ignoring case; values exactly.
     /// </summary>
-    public static StoredFileScanState ClassifyScan(IReadOnlyDictionary<string, string> tags, DateTimeOffset lastModified)
+    public static StoredFileScanState ClassifyScan(IReadOnlyDictionary<string, string> tags, DateTimeOffset lastModified, DateTimeOffset now)
     {
         ArgumentNullException.ThrowIfNull(tags);
         var results = tags.Where(t => string.Equals(t.Key, ScanResultTagKey, StringComparison.OrdinalIgnoreCase)).Select(t => t.Value).ToList();
@@ -301,14 +320,34 @@ public sealed class StoredFileBlobs
         }
 
         var times = tags.Where(t => string.Equals(t.Key, ScanTimeTagKey, StringComparison.OrdinalIgnoreCase)).Select(t => t.Value).ToList();
-        if (times.Count != 1
-            || !DateTimeOffset.TryParse(times[0], CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var scannedAt))
+        if (times.Count != 1 || !TryParseScanTime(times[0], out var scannedAt))
         {
             return StoredFileScanState.Pending;
         }
 
-        return scannedAt >= lastModified ? StoredFileScanState.Clean : StoredFileScanState.Pending;
+        return scannedAt >= lastModified && scannedAt <= now + ScanClockSkew ? StoredFileScanState.Clean : StoredFileScanState.Pending;
     }
+
+    /// <summary>
+    /// Parses a scan-time tag value: exactly one of <see cref="ScanTimeFormats"/> (invariant culture, no surrounding white space) AND
+    /// an explicit designator at the end (<c>Z</c> or <c>+hh:mm</c> / <c>-hh:mm</c>). The designator is checked separately because no
+    /// <see cref="DateTimeStyles"/> value refuses a missing <c>K</c>: without it a bare time would be read in the host's offset.
+    /// </summary>
+    internal static bool TryParseScanTime(string? value, out DateTimeOffset scannedAt)
+    {
+        scannedAt = default;
+        return value is not null
+            && HasOffsetDesignator(value)
+            && DateTimeOffset.TryParseExact(value, ScanTimeFormats, CultureInfo.InvariantCulture, DateTimeStyles.None, out scannedAt);
+    }
+
+    private static bool HasOffsetDesignator(string value) =>
+        value.EndsWith('Z')
+        || (value.Length >= 6
+            && value[^6] is '+' or '-'
+            && char.IsAsciiDigit(value[^5]) && char.IsAsciiDigit(value[^4])
+            && value[^3] == ':'
+            && char.IsAsciiDigit(value[^2]) && char.IsAsciiDigit(value[^1]));
 
     /// <summary>The blob's properties and metadata, or <c>null</c> when it does not exist (the reconcile job's environment check).</summary>
     /// <exception cref="ArgumentException"><paramref name="blobPath"/> is not a name of this tenant (nothing is called).</exception>

@@ -653,17 +653,20 @@ public sealed class StoredFileServiceTests
 
     private static readonly DateTimeOffset Modified = new(2026, 10, 22, 12, 0, 0, TimeSpan.Zero);
 
+    /// <summary>The store's clock in the verdict tests: an hour after the content was written.</summary>
+    private static readonly DateTimeOffset ScanNow = Modified.AddHours(1);
+
     [Fact(DisplayName = "Scan-time pin (091 condition 3): tagged clean, then Last-Modified later, then refused (Pending)")]
     public void Scan_CleanThenModifiedLater_IsRefused()
     {
         var tags = StoredFileRig.CleanTags(Modified);
-        StoredFileBlobs.ClassifyScan(tags, Modified).Should().Be(StoredFileScanState.Clean, "a scan at the content's own time is clean");
+        StoredFileBlobs.ClassifyScan(tags, Modified, ScanNow).Should().Be(StoredFileScanState.Clean, "a scan at the content's own time is clean");
 
-        StoredFileBlobs.ClassifyScan(tags, Modified.AddSeconds(1)).Should().Be(StoredFileScanState.Pending,
+        StoredFileBlobs.ClassifyScan(tags, Modified.AddSeconds(1), ScanNow).Should().Be(StoredFileScanState.Pending,
             "content written after the scan has no verdict yet, whatever the result tag says");
     }
 
-    [Theory(DisplayName = "Scan verdict: absent, other, conflicting, unparseable or missing scan time → Pending; Malicious anywhere → Malicious")]
+    [Theory(DisplayName = "Scan verdict: absent, other, conflicting, unparseable, offset-less, future or missing scan time → Pending; Malicious anywhere → Malicious")]
     [InlineData(null, null, StoredFileScanState.Pending)]
     [InlineData("Not scanned", "2026-10-22T12:05:00Z", StoredFileScanState.Pending)]
     [InlineData("Error", "2026-10-22T12:05:00Z", StoredFileScanState.Pending)]
@@ -672,6 +675,20 @@ public sealed class StoredFileServiceTests
     [InlineData("No threats found", null, StoredFileScanState.Pending)]
     [InlineData("No threats found", "yesterday", StoredFileScanState.Pending)]
     [InlineData("No threats found", "2026-10-22T11:59:59Z", StoredFileScanState.Pending)]
+    // uac-r2 round 1 F2 must-fire: a lenient parse read each of these as a time (today 12:30, 5 Nov or 11 May, 23 Oct): never Clean.
+    [InlineData("No threats found", "12:30", StoredFileScanState.Pending)]
+    [InlineData("No threats found", "11/05/2026 10:00:00", StoredFileScanState.Pending)]
+    [InlineData("No threats found", "Oct 23", StoredFileScanState.Pending)]
+    [InlineData("No threats found", "2026-10-22 12:05:00", StoredFileScanState.Pending)] // no offset designator
+    [InlineData("No threats found", "2026-10-22T12:05:00", StoredFileScanState.Pending)] // no offset designator
+    [InlineData("No threats found", " 2026-10-22 12:05:00Z", StoredFileScanState.Pending)] // surrounding white space
+    [InlineData("No threats found", "2026-10-22T13:05:01Z", StoredFileScanState.Pending)] // after now + skew: a future scan
+    [InlineData("No threats found", "2026-10-23T12:05:00Z", StoredFileScanState.Pending)] // a day ahead
+    // must-not-fire: the format Defender was observed writing (az storage blob tag list), round-trip, offsets, and inside the skew.
+    [InlineData("No threats found", "2026-10-22 12:05:38Z", StoredFileScanState.Clean)]
+    [InlineData("No threats found", "2026-10-22T12:05:00.1234567+00:00", StoredFileScanState.Clean)]
+    [InlineData("No threats found", "2026-10-22T14:05:00+02:00", StoredFileScanState.Clean)]
+    [InlineData("No threats found", "2026-10-22T13:05:00Z", StoredFileScanState.Clean)] // exactly now + skew
     [InlineData("Malicious", "2026-10-22T12:05:00Z", StoredFileScanState.Malicious)]
     [InlineData("Malicious", null, StoredFileScanState.Malicious)]
     [InlineData("No threats found", "2026-10-22T12:00:00Z", StoredFileScanState.Clean)]
@@ -682,7 +699,37 @@ public sealed class StoredFileServiceTests
         if (result is not null) tags[StoredFileBlobs.ScanResultTagKey] = result;
         if (time is not null) tags[StoredFileBlobs.ScanTimeTagKey] = time;
 
-        StoredFileBlobs.ClassifyScan(tags, Modified).Should().Be(expected);
+        StoredFileBlobs.ClassifyScan(tags, Modified, ScanNow).Should().Be(expected);
+    }
+
+    [Fact(DisplayName = "Scan verdict must-not-fire (uac-r2 round 1 F2): the real Defender sample '2026-04-17 17:40:38Z' is a clean scan time")]
+    public void Scan_RealDefenderSample_IsClean()
+    {
+        // Observed value of "Malware Scanning scan time UTC" (az storage blob tag list, April 2026; Learn states no format).
+        const string sample = "2026-04-17 17:40:38Z";
+        StoredFileBlobs.TryParseScanTime(sample, out var parsed).Should().BeTrue();
+        parsed.Should().Be(new DateTimeOffset(2026, 4, 17, 17, 40, 38, TimeSpan.Zero));
+
+        var written = new DateTimeOffset(2026, 4, 17, 17, 40, 30, TimeSpan.Zero);
+        StoredFileBlobs.ClassifyScan(new Dictionary<string, string>
+        {
+            [StoredFileBlobs.ScanResultTagKey] = StoredFileBlobs.ScanCleanValue,
+            [StoredFileBlobs.ScanTimeTagKey] = sample,
+        }, written, written.AddMinutes(2)).Should().Be(StoredFileScanState.Clean);
+    }
+
+    [Fact(DisplayName = "Scan verdict (uac-r2 round 1 F2): the download path reads the store's clock; a scan time past it plus the skew is Pending")]
+    public async Task Scan_FutureAgainstStoreClock_IsPending()
+    {
+        var rig = new StoredFileRig();
+        var file = Guid.NewGuid();
+        rig.SeedFile(file, Invoice, Pdf, tags: StoredFileRig.CleanTags(rig.Gateway.Now.AddHours(2)));
+        var path = StoredFileBlobName.Build(StoredFileRig.Tenant, Invoice, file);
+
+        (await rig.Blobs.GetScanStateAsync("invoice-files", path, CancellationToken.None))!.Value.State.Should().Be(StoredFileScanState.Pending);
+
+        rig.Gateway.Now = rig.Gateway.Now.AddHours(1); // the store's clock moves past the scan time
+        (await rig.Blobs.GetScanStateAsync("invoice-files", path, CancellationToken.None))!.Value.State.Should().Be(StoredFileScanState.Clean);
     }
 
     [Fact(DisplayName = "Scan verdict: the key is matched ignoring case (Learn and the lab spell it differently); conflicting keys are Pending, Malicious wins")]
@@ -692,20 +739,20 @@ public sealed class StoredFileServiceTests
         {
             ["Malware scanning scan result"] = "No threats found",
             ["malware scanning scan time utc"] = "2026-10-22T12:01:00Z",
-        }, Modified).Should().Be(StoredFileScanState.Clean);
+        }, Modified, ScanNow).Should().Be(StoredFileScanState.Clean);
 
         StoredFileBlobs.ClassifyScan(new Dictionary<string, string>
         {
             ["Malware scanning scan result"] = "No threats found",
             ["Malware Scanning scan result"] = "Error",
             [StoredFileBlobs.ScanTimeTagKey] = "2026-10-22T12:01:00Z",
-        }, Modified).Should().Be(StoredFileScanState.Pending);
+        }, Modified, ScanNow).Should().Be(StoredFileScanState.Pending);
 
         StoredFileBlobs.ClassifyScan(new Dictionary<string, string>
         {
             ["Malware scanning scan result"] = "No threats found",
             ["Malware Scanning scan result"] = "Malicious",
-        }, Modified).Should().Be(StoredFileScanState.Malicious);
+        }, Modified, ScanNow).Should().Be(StoredFileScanState.Malicious);
     }
 
     [Fact(DisplayName = "Scan verdict: only an explicit MalwareScanningEnabled=false yields NotScanned; absent means enabled")]

@@ -458,7 +458,8 @@ internal sealed class StoredFileRig
     {
         Gateway = sharedGateway ?? new InMemoryBlobGateway();
         TenantId = tenant ?? Tenant;
-        Blobs = new StoredFileBlobs(configured ? Gateway : null, configured ? TenantId : Guid.Empty, malwareScanningEnabled, Logger);
+        Blobs = new StoredFileBlobs(configured ? Gateway : null, configured ? TenantId : Guid.Empty, malwareScanningEnabled, Logger,
+            timeProvider: new GatewayClock(Gateway));
         var services = new ServiceCollection();
         StepZero = FinanceStepZeroCaller.Register(services, stepZero);
         Provider = services.BuildServiceProvider();
@@ -526,6 +527,15 @@ internal sealed class StoredFileRig
         [StoredFileBlobs.ScanResultTagKey] = StoredFileBlobs.ScanCleanValue,
         [StoredFileBlobs.ScanTimeTagKey] = scannedAt.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
     };
+}
+
+/// <summary>
+/// The store's clock in the rig: one hour after the fake gateway's write clock, so a scan stamped a minute after a write is in the
+/// past (never a future scan time) wherever a test moves <see cref="InMemoryBlobGateway.Now"/>.
+/// </summary>
+internal sealed class GatewayClock(InMemoryBlobGateway gateway) : TimeProvider
+{
+    public override DateTimeOffset GetUtcNow() => gateway.Now.AddHours(1);
 }
 
 /// <summary>A seekable stream that reports a chosen length and reads zeros (no allocation of that length).</summary>
