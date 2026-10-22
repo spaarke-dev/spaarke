@@ -227,3 +227,12 @@ Conditions, each tested in 018b and checked in UAC-r2's condition (b) review:
    - a non-secure source with a pair rule keeps the non-secure behaviour (skipped with the same warning under fill-only), and the test states it.
 
 There is also the base test: a secure source with a pair rule gives 201, under the derived pair, secure, with the warning. Cite this entry in the 018b PR body.
+
+## 2026-10-22 — G4 condition 1 is satisfied by the contract's shape (no regarding member), and pinned (UAC-r2)
+
+`QuickCreateRequest` has no regarding member, and System.Text.Json drops unknown properties. A client therefore cannot send a regarding pair to Office quick-create, and the adapter only ever writes the derived pair. The condition-1 403 (`secure_source_filing_mismatch` for a differing client pair) is unreachable. UAC-r2 agreed: add no fields just to refuse them, and add no 400 for unknown members.
+
+It is pinned by three tests:
+- a body carrying extra regarding properties under a secure source gets 201, under the derived pair, and is secure;
+- the same body under a non-secure source gets 201, under the derived pair;
+- a reflection test over `QuickCreateRequest`'s public properties and JSON names fails on any member containing "regarding" (case-insensitive), with the message "a regarding member reintroduces G4 condition 1: refuse a differing pair under a secure source with 403 secure_source_filing_mismatch".
