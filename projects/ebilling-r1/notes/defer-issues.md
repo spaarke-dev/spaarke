@@ -1039,3 +1039,20 @@ Each restamps afterwards, but none refuses any of these:
 **Description**: Task 091's §6 hand-off. Wire `modules/ebilling-file-store.bicep` into `customer.bicep` for the stamp UAMI, then recompile `customer.json` (never hand-merge). Also covered: the per-environment scanning setting, task 090's config keys, network Deny at prod hardening, and the per-stamp verification scripts. Never remove the account-scope grant on ACME or any existing stamp from ebilling.
 
 ---
+
+### DEF-035 — D-176: native forms still show Duplicate earlier-invoice detail
+
+| Field | Value |
+|---|---|
+| **Status** | Open (owner decision: fix or accept as known limit) |
+| **Urgency** | medium |
+| **Filed** | 2026-10-21 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2235 |
+
+**Description**: 119's second adversarial pass found two native surfaces that still show the detail to anyone with Read on the row:
+- the `sprk_invoicesubmission` main form, which binds `sprk_findingsjson`;
+- the reject Decision Record, which copies plan sentences into `sprk_factsnapshot` (`InvoiceSubmissionAfterSteps.cs:1429`).
+
+The BFF routes (`/review`, `/blocked`) are covered by 119.
+
+---
