@@ -683,6 +683,14 @@ public static class ContactBindingDecision
     /// </summary>
     public const string DenyOwnerUnconfigured = "sdap.access.registration_owner_unconfigured";
 
+    /// <summary>
+    /// ISS-005 (#1673 UAC round 3, F): the licensed-user link's contact create was refused by Dataverse because the owner team
+    /// cannot own a contact (error 0x80040299, "Privilege Check For Owner": the customer business unit's default owner team
+    /// holds no security role with Read on contact). Its own code so the reconciliation run can tell a role fault from an
+    /// unset <c>ExternalAccess:CustomerBusinessUnitId</c>. Never an API response code: the link route does not surface it.
+    /// </summary>
+    public const string DenyOwnerPrivilegeMissing = "sdap.access.deny.owner_privilege_missing";
+
     /// <summary>The binding column reads as masked (field-level security without Read): no write is safe.</summary>
     public const string DenyBindingColumnMasked = "sdap.access.deny.binding_column_masked";
 

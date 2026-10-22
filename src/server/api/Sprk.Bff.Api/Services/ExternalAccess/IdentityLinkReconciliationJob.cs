@@ -684,6 +684,13 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
         public int OwnerUnconfigured;
 
         /// <summary>
+        /// ISS-005 (#1673 UAC round 3, F): systemusers whose contact create Dataverse refused for the owner team's privilege
+        /// (0x80040299: the default owner team holds no security role with Read on contact). Counted apart from
+        /// <see cref="OwnerUnconfigured"/> because the fix is different (a role on the team, not the setting).
+        /// </summary>
+        public int OwnerPrivilegeMissing;
+
+        /// <summary>
         /// ISS-005 (#1673 UAC re-check K4): systemusers refused with <see cref="ContactBindingDecision.DenyContactLookupFailed"/>
         /// (a contact read, or the owner-team read of a create, could not be answered). Retryable, but the user was not
         /// reconciled, so the run is Partial, never a silent Ok.
@@ -707,6 +714,11 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
             if (result.Outcome == SystemUserLinkOutcome.Denied && result.DenyCode == ContactBindingDecision.DenyOwnerUnconfigured)
             {
                 OwnerUnconfigured++;
+            }
+
+            if (result.Outcome == SystemUserLinkOutcome.Denied && result.DenyCode == ContactBindingDecision.DenyOwnerPrivilegeMissing)
+            {
+                OwnerPrivilegeMissing++;
             }
 
             if (result.Outcome == SystemUserLinkOutcome.Denied && result.DenyCode == ContactBindingDecision.DenyContactLookupFailed)
@@ -769,6 +781,14 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
                 problems.Add(
                     $"{p}{OwnerUnconfigured} contact create(s) refused: ExternalAccess:CustomerBusinessUnitId is not configured "
                     + "(or names no single default owner team). Set it for this environment; the next run retries them.");
+            }
+
+            if (OwnerPrivilegeMissing > 0)
+            {
+                problems.Add(
+                    $"{p}{OwnerPrivilegeMissing} contact create(s) refused by Dataverse (0x80040299, Privilege Check For Owner): "
+                    + "the customer business unit's default owner team holds no security role with Read on contact. "
+                    + "Grant that team a role with Read on contact (see the [ID-BIND] error); the next run retries them.");
             }
 
             if (LookupFailed > 0)

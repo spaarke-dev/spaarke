@@ -419,7 +419,7 @@ public class ContactIdentityBinderOwnerTeamTests
     }
 
     [Fact]
-    public async Task TheLicensedUserLinkCreate_RefusedForItsOwnersPrivilege_IsDeniedOwnerUnconfigured_NotFailed()
+    public async Task TheLicensedUserLinkCreate_RefusedForItsOwnersPrivilege_IsDeniedOwnerPrivilegeMissing_NotFailed()
     {
         GivenOneDefaultTeam();
         GivenDataverseRefusesTheOwner();
@@ -427,8 +427,8 @@ public class ContactIdentityBinderOwnerTeamTests
 
         var result = await OwnedBinder(CustomerBu).EnsureSystemUserLinkAsync(userId, applyWrites: true, CancellationToken.None);
 
-        result.Outcome.Should().Be(SystemUserLinkOutcome.Denied, "a configuration fault, counted with the other owner refusals");
-        result.DenyCode.Should().Be(ContactBindingDecision.DenyOwnerUnconfigured);
+        result.Outcome.Should().Be(SystemUserLinkOutcome.Denied, "a configuration fault, counted apart from the unset setting");
+        result.DenyCode.Should().Be(ContactBindingDecision.DenyOwnerPrivilegeMissing);
         result.IsLinked.Should().BeFalse();
         _store.Contacts.Should().BeEmpty();
         _store.SystemUsers[userId].PrimaryContactId.Should().BeNull();

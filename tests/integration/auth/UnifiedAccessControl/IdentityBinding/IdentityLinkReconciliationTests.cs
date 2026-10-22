@@ -835,6 +835,28 @@ public class IdentityLinkReconciliationTests
         result.ErrorMessage.Should().Contain("ExternalAccess:CustomerBusinessUnitId");
     }
 
+    // ISS-005 (#1673 UAC round 3, F): Dataverse refusing the owner team's privilege (0x80040299) is its OWN counter and message,
+    // not "CustomerBusinessUnitId is not configured": the setting is fine, the default owner team has no role with Read on contact.
+    [Fact]
+    public async Task ARun_WhoseCreatesWereRefusedForTheOwnersPrivilege_IsPartial_AndNamesTheRoleNotTheSetting()
+    {
+        var customerBu = Guid.NewGuid();
+        _store.DefaultTeams[customerBu] = new List<Guid> { Guid.NewGuid() };
+        _store.CreateStatusOverride = StoreWriteStatus.OwnerPrivilegeMissing;
+        var contactsBefore = _store.Contacts.Count;
+
+        var result = await RunAsync(writes: true, ownerAwareBinder: OwnerAwareBinder(_store, customerBu));
+
+        Outcome(result, "Denied").Should().BeGreaterThan(0, "the licensed users with no contact are refused, not created");
+        _store.Contacts.Count.Should().Be(contactsBefore, "nothing was created");
+        using var doc = JsonDocument.Parse(result.ResultJson!);
+        doc.RootElement.GetProperty("status").GetString().Should().Be("partial");
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("0x80040299").And.Contain("Read on contact")
+            .And.NotContain("is not configured", "the setting is configured; this is the team's role")
+            .And.NotContain(customerBu.ToString());
+    }
+
     // ISS-005 (#1673 UAC re-check K4): an owner-team read that cannot be answered refuses the create with
     // DenyContactLookupFailed. The user was not reconciled, so the run is Partial - never an Ok that hid the unreadable lookup.
     [Fact]

@@ -1641,9 +1641,10 @@ public sealed class ContactIdentityBinder
                 if (create.Status == StoreWriteStatus.OwnerPrivilegeMissing)
                 {
                     // K1 (UAC re-check): the owner team may not own a contact. A configuration fault that repeats every run,
-                    // counted with the other owner refusals (the reconciliation job's OwnerUnconfigured), nothing written.
+                    // nothing written. Round 3 F: its own code, so the reconciliation job counts and words it apart from an
+                    // unset CustomerBusinessUnitId (the fix is a security role on the team, not the setting).
                     LogOwnerPrivilegeMissing("Licensed-user link create", $"oid#{HashForLog(request.CallerOid)}");
-                    return Result(suid, SystemUserLinkOutcome.Denied, null, ContactBindingDecision.DenyOwnerUnconfigured,
+                    return Result(suid, SystemUserLinkOutcome.Denied, null, ContactBindingDecision.DenyOwnerPrivilegeMissing,
                         null, none, Array.Empty<IdentityChange>(), false);
                 }
 
