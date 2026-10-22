@@ -11,16 +11,15 @@
 |---|---|
 | **Task** | No lane in flight. **157 ✅** merged to docs via PR #2231 (`2a020e05ff`, 2026-10-22; ebilling PASS through round 3). Rides the next docs→master sync. |
 | **Status** | Waiting on peers (ebilling reviews) and the owner (UAT items). |
-| **Next Action** | Confirm the 2026-10-22 02:30Z nightly heartbeat on dev BFF `a7b956fb55` (background check queued; rerun `scratchpad/live/deploycheck.py` with `since` = 2026-10-22T02:18:52Z if needed), then pick up whichever ebilling review arrives first. |
+| **Next Action** | Pick up whichever ebilling review arrives first (119 is now unblocked); then the next docs→master sync. Nightly heartbeat on `a7b956fb55` confirmed 02:30:29Z. |
 
 ## Next, in order
 
-1. **Nightly heartbeat** on `a7b956fb55`: confirm `[SIGNAL-EVALUATOR] heartbeat outcome=succeeded` and 0 503xx warnings since 02:18:52Z (smoke already PASS).
-2. **Next docs→master sync** (157 + #2174): main session runs the full ArchTests first; notify R3/uac-r2/word-add-in before and after.
-3. **ebilling reviews when sent:** 088 (Stored File schema; sprk_document submission marker; invoice Superseded + resubmission-of link), 097 (per-invoice Superseded close wrapper over `SignalWriter.CloseAsync`), 116 (drafting re-keyed per Procedure Version), 119 (must call `EarlierInvoiceReadability.ShownAsync` and use its `WithheldSentence`; no `DuplicateOfEarlierLine` exemption), 082 (resolver must use `BillingRuleDefinition.PrecedenceKey`, condition in their POML), 081 (creator-person zero-non-null assert). Every schema run: final script + `-WhatIf` to us, before/after notices, no run before our PASS; check all core records, not matter alone.
-4. **105 UAT** with the owner: 102 wizard browser tests + keyboard/screen-reader; 064 §6.1 non-admin checks and UI tests (D-164); the 055 Next step To Do.
-5. Re-run `SignalReadRouteLiveTests` as a non-Console user (DI-83 #1882), then close #1882.
-6. **111 row 4** (owner): `/upload?entityType=sprk_project&entityId=<GUID>` with the GUID from `/project/<GUID>`; then close 111 → 114; then 090 wrap-up.
+1. **Next docs→master sync** (157 + #2174): main session runs the full ArchTests first; notify R3/uac-r2/word-add-in before and after.
+2. **ebilling reviews when sent:** 088 (Stored File schema; sprk_document submission marker; invoice Superseded + resubmission-of link), 097 (per-invoice Superseded close wrapper over `SignalWriter.CloseAsync`), 116 (drafting re-keyed per Procedure Version), 119 (must call `EarlierInvoiceReadability.ShownAsync` and use its `WithheldSentence`; no `DuplicateOfEarlierLine` exemption), 082 (resolver must use `BillingRuleDefinition.PrecedenceKey`, condition in their POML), 081 (creator-person zero-non-null assert). Every schema run: final script + `-WhatIf` to us, before/after notices, no run before our PASS; check all core records, not matter alone.
+3. **105 UAT** with the owner: 102 wizard browser tests + keyboard/screen-reader; 064 §6.1 non-admin checks and UI tests (D-164); the 055 Next step To Do.
+4. Re-run `SignalReadRouteLiveTests` as a non-Console user (DI-83 #1882), then close #1882.
+5. **111 row 4** (owner): `/upload?entityType=sprk_project&entityId=<GUID>` with the GUID from `/project/<GUID>`; then close 111 → 114; then 090 wrap-up.
 
 ## Blocked follow-ups (ours)
 

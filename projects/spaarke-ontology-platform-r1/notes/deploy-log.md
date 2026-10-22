@@ -340,3 +340,9 @@ Criterion 89 (blank the writer client id, expect the writer-failure alert to fir
   - `sprk_ruleset`: the matter, project and work-assignment lookups are RemoveLink; `sprk_procedure` is Restrict.
 - **D-146 / #2132:** holds. No core-record delete reaches a Restrict or a cascade on the new tables.
 
+
+## 2026-10-22 — dev BFF `a7b956fb55` (R3): ontology smoke and nightly heartbeat
+
+- **Deploy:** R3 deployed master `a7b956fb55` at 02:17–02:18:52Z (ProductVersion `1.0.0+a7b956fb55d6…`). Its predecessor `f1b3dadcf5` is an ancestor, and it contains R3 077 `283466d40`. It adds field-mapping #2223/#2228 and UAC #2221. No ontology-owned file changes; the edits to `SecureChildShareSynchronizer`, `CoreAncestorRestamper` and `SecurableEntityRegistry` are additive. We gave OK before the deploy; the owner approved it in R3's session.
+- **Smoke:** PASS. Validate on Secure PAT-908068 (`5d46df87`) returns `valid:false` / `scope_matter_secured`; on Standard REAL-2026-123456.01 (`2444af6d`) it returns `valid:true`.
+- **Nightly sweep:** `[SIGNAL-EVALUATOR] heartbeat outcome=succeeded` at 02:30:29Z with policies=6 hits=142 written=0 closed=0, the same as 2026-10-21. Since 21:45:37Z the only 503xx trace is the heartbeat, with 0 Signals/Ontology/Gate exceptions.
