@@ -45,7 +45,8 @@
                      secures ANY sprk_createdbyperson that is currently unsecured, it counts the rows holding a value. A
                      value written while the column was unsecured could name anyone, and the BFF trusts the column on a
                      stamped table (UAC #2277). A non-zero count FAILs that table: it is NOT secured (no PUT), no field
-                     permission is granted, and the run exits 1 (-Apply and -Verify; the dry run reports it). After
+                     permission is granted, and the run exits 1 (-Apply, -Verify and the dry run alike: the dry run exits 1
+                     on any FAIL or MISSING it finds, though it writes nothing). After
                      -Apply secures a column it counts AGAIN: a value that arrived between the count and the secure FAILs
                      the run (exit 1) -- the column stays secured; review those rows before deploying the BFF. Any OTHER profile (besides the platform's System Administrator profile, and the D-136 narrow
                      profile on its three tables) that can create or update the column is reported FAIL.

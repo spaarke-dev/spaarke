@@ -334,10 +334,15 @@ public static class RuleSetEndpoints
         return Results.Accepted(statusUrl, new RuleDraftAccepted(ruleSetId, jobId, statusUrl));
     }
 
+    /// <summary>The most distinct Procedures the list asks the caller's rights on (the same ceiling as the invoice sibling scan, <see cref="InvoiceContextService.MaxSiblingAccessChecks"/>).</summary>
+    internal const int MaxProcedureRightsChecks = InvoiceContextService.MaxSiblingAccessChecks;
+
     /// <summary>
     /// The list leaves out each Procedure rule set whose Procedure the caller cannot Read (uac-r2 re-check round 2, I-P5): a Procedure's rules are
-    /// no more visible here than on the Procedure's own read. A set whose rights could not be determined is left out too (fail closed). Legacy
-    /// sets (no Procedure) are unchanged. One rights question per distinct Procedure, asked as the caller.
+    /// no more visible here than on the Procedure's own read. Legacy sets (no Procedure) are unchanged. One rights question per distinct Procedure,
+    /// asked as the caller. A known deny leaves the set out; but an answer that is missing for ANY Procedure (a fault, a throttle), or more distinct
+    /// Procedures than <see cref="MaxProcedureRightsChecks"/>, makes the list itself 403 <c>system_failure</c> (round 3, F2 / K2) - the same shape the
+    /// single-set read gives an unknown answer - rather than a list that is silently incomplete.
     /// </summary>
     private static async Task<IResult> ListRuleSets(
         RuleSetService service, AuthorizationService authorization, ILogger<RuleSetService> logger, HttpContext http, CancellationToken ct)
@@ -348,17 +353,24 @@ public static class RuleSetEndpoints
             return Map(outcome, http);
         }
 
+        var procedures = sets.Where(s => s.ProcedureId is not null).Select(s => s.ProcedureId!.Value).Distinct().ToList();
+        if (procedures.Count > MaxProcedureRightsChecks)
+        {
+            logger.LogWarning(
+                "Rule set list: {Procedures} distinct Procedures exceed the {Cap} rights checks the list may ask; the list is refused (fail closed)",
+                procedures.Count, MaxProcedureRightsChecks);
+            return ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
+        }
+
         var caller = new InvoiceContextService.InvoiceCaller(
             CallerResolution.ResolveObjectId(http.User) ?? string.Empty, TokenHelper.ExtractBearerTokenOrNull(http));
-        var readable = new Dictionary<Guid, bool>();
-        var procedures = sets.Where(s => s.ProcedureId is not null).Select(s => s.ProcedureId!.Value).Distinct().ToList();
         using var gate = new SemaphoreSlim(CallerReadCheck.Parallelism);
         var answers = await Task.WhenAll(procedures.Select(async id =>
         {
             await gate.WaitAsync(ct);
             try
             {
-                return (id, await CallerReadCheck.CheckAsync(
+                return (Id: id, Outcome: await CallerReadCheck.CheckAsync(
                     authorization, caller, BillingAdminAuthorization.ProcedureEntitySet, "read", id, logger, "Rule set list: caller read on a Procedure", ct));
             }
             finally
@@ -366,11 +378,17 @@ public static class RuleSetEndpoints
                 gate.Release();
             }
         }));
-        foreach (var (id, result) in answers)
+
+        var unknown = answers.Count(a => a.Outcome == CallerReadOutcome.Failed);
+        if (unknown > 0)
         {
-            readable[id] = result == CallerReadOutcome.Readable; // refused and no answer both leave the set out
+            logger.LogWarning(
+                "Rule set list: the caller's rights could not be determined for {Unknown} of {Procedures} Procedures; the list is refused (fail closed)",
+                unknown, procedures.Count);
+            return ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
         }
 
+        var readable = answers.ToDictionary(a => a.Id, a => a.Outcome == CallerReadOutcome.Readable); // a known deny leaves the set out
         IReadOnlyList<RuleSetSummary> kept = sets.Where(s => s.ProcedureId is not { } id || readable[id]).ToList();
         return Map(RuleSetOutcome<IReadOnlyList<RuleSetSummary>>.Done(kept), http);
     }

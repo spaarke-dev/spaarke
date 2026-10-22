@@ -2,8 +2,9 @@
  * Rule Review page shell (ebilling-r1 task 077, FR-28): the rule set list, "New rule set", and the review of one rule set.
  *
  * No router (ADR-026): the open rule set is state. Access is decided by the server (D-76, admin-only): the page does not guess.
- * A 403 from any call turns the page read-only (write controls hidden, a notice shown); a list that is itself refused shows the
- * notice alone. A 503 `ebilling.disabled` shows the feature-disabled notice.
+ * The billing-admin 403 (reasonCode `sdap.access.deny.insufficient_privilege`) turns the page read-only (write controls hidden, a notice
+ * shown); a list that is itself refused that way shows the notice alone. Any other 403 (a Procedure's `insufficient_rights`, a
+ * `system_failure`) refuses that one call: it shows its own notice and leaves the access as it was. A 503 `ebilling.disabled` shows the feature-disabled notice.
  */
 
 import * as React from 'react';
@@ -15,9 +16,11 @@ import { RuleSetListView } from './components/RuleSetListView';
 import { useFirmNames } from './components/useFirmNames';
 import type { FirmLookup } from './services/firmLookup';
 import {
+  accessAfterFailure,
+  isBillingAdminRefusal,
   isEbillingDisabled,
-  isForbidden,
   type ApiFailure,
+  type PageAccess,
   type RuleSetApi,
   type RuleSetSummary,
 } from './services/ruleSetApi';
@@ -38,11 +41,9 @@ export interface AppProps {
   firmLookup: FirmLookup;
 }
 
-type Access = 'unknown' | 'admin' | 'readOnly';
-
 export const App: React.FC<AppProps> = ({ api, firmLookup }) => {
   const s = useStyles();
-  const [access, setAccess] = React.useState<Access>('unknown');
+  const [access, setAccess] = React.useState<PageAccess>('unknown');
   const [disabled, setDisabled] = React.useState(false);
   const [listRefused, setListRefused] = React.useState(false);
   const [ruleSets, setRuleSets] = React.useState<RuleSetSummary[] | null>(null);
@@ -53,10 +54,10 @@ export const App: React.FC<AppProps> = ({ api, firmLookup }) => {
   const [createNotice, setCreateNotice] = React.useState<Notice | null>(null);
   const firmNames = useFirmNames(firmLookup, (ruleSets ?? []).map(r => r.firmId));
 
-  /** Every failure of every call comes through here: a 403 is read-only, a disabled flag is its own notice. */
+  /** Every failure of every call comes through here: the billing-admin 403 is read-only, a disabled flag is its own notice. */
   const onFailure = React.useCallback((failure: ApiFailure): void => {
     if (isEbillingDisabled(failure)) setDisabled(true);
-    else if (isForbidden(failure)) setAccess('readOnly');
+    else setAccess(prev => accessAfterFailure(prev, failure));
   }, []);
 
   const loadList = React.useCallback(async (): Promise<void> => {
@@ -71,7 +72,7 @@ export const App: React.FC<AppProps> = ({ api, firmLookup }) => {
 
     onFailure(result.failure);
     setRuleSets([]);
-    if (isForbidden(result.failure)) setListRefused(true);
+    if (isBillingAdminRefusal(result.failure)) setListRefused(true);
     else setListNotice(failureNotice(result.failure, 'The rule sets could not be loaded'));
   }, [api, onFailure]);
 
@@ -96,7 +97,7 @@ export const App: React.FC<AppProps> = ({ api, firmLookup }) => {
     } else {
       onFailure(result.failure);
       setCreateNotice(failureNotice(result.failure, 'The rule set was not created'));
-      if (isForbidden(result.failure) || isEbillingDisabled(result.failure)) setNewOpen(false);
+      if (isBillingAdminRefusal(result.failure) || isEbillingDisabled(result.failure)) setNewOpen(false);
     }
   };
 

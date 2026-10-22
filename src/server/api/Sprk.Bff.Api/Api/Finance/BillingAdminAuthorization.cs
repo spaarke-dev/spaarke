@@ -196,9 +196,13 @@ public static class BillingAdminAuthorization
                 return await next(context);
             }
 
-            return ProblemDetailsHelper.Forbidden(
-                outcome == CallerReadOutcome.Refused ? FinanceAuthorizationFilter.InsufficientRightsReasonCode : FinanceAuthorizationFilter.SystemFailureReasonCode,
-                traceId: http.TraceIdentifier);
+            // uac-r2 re-check round 3 (F1): the detail names the right, so the user sees what is missing; a no-answer carries the generic detail.
+            return outcome == CallerReadOutcome.Refused
+                ? ProblemDetailsHelper.Forbidden(
+                    FinanceAuthorizationFilter.InsufficientRightsReasonCode,
+                    detail: $"You need {(operation == "write" ? "Write" : "Read")} on this rule set's Procedure.",
+                    traceId: http.TraceIdentifier)
+                : ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
         };
 
     private const string RuleSetRouteKey = "ruleSetId";

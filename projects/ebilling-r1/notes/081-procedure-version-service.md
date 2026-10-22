@@ -219,6 +219,19 @@ Until then GET is sysadmin-only too. (No `projects/ebilling-r1/tasks/191*.poml` 
 4. **Doc fix, `CallerRecordAccessProbe.GetCallerRightsForRecordsOrUnknownAsync`.** The remark said only the caller's own cancellation is rethrown. That holds per record; a cancellation during the OBO exchange or `WhoAmI` is caught by those steps and becomes "every entry unknown". Corrected. Two tests added: cancellation during `WhoAmI` (the production step) gives all-unknown; a 200 with an unreadable body gives unknown for that record. Not tested: cancellation inside the OBO exchange itself (it needs a real MSAL client; the same catch-all shape as `WhoAmI`).
 5. Race FAIL is not sticky, and values written before the gate existed are never counted: filed as #2280 (DEF-040).
 
+### UAC re-check round 3 (2026-10-22)
+
+1. **F1, the Rule Review page misread the new Procedure 403s.**
+   - Client: `App.tsx` turned the page read-only on ANY 403 and showed "You do not have the billing administrator right", so a Procedure `insufficient_rights` or a `system_failure` locked the whole page. Now only a 403 whose `reasonCode` is `sdap.access.deny.insufficient_privilege` does (`isBillingAdminRefusal`, `accessAfterFailure` in `ruleSetApi.ts`); any other 403 shows its per-action notice and leaves the access as it was. A refused list or create modal follows the same test, so a `system_failure` list shows as a notice with the page still usable.
+   - Server: the Procedure 403 on the rule set routes (`OnTheRuleSetsProcedure`) now has a detail, "You need Write on this rule set's Procedure." or "You need Read on this rule set's Procedure.", matching the filter. A no-answer keeps the generic `system_failure` detail.
+   - Tests: the client must-fire (billing-admin 403 gives readOnly) and must-not-fire (Procedure `insufficient_rights`, `system_failure`, a 403 without a reasonCode, a non-403 carrying the code) in `ruleSetApi.test.ts`; the detail asserted in the Write and Read 403 tests in `RuleSetEndpointsTests`.
+2. **F2, the list hid that it was incomplete.** A `Failed` rights answer (429, 5xx, fault) dropped the set silently. Now ANY unknown answer logs a warning with the count and the list is 403 `system_failure` (the single-set GET's shape; the client shows it as a notice). A known deny still just leaves the set out. Tests: one unknown answer gives `system_failure` and no list (must-fire); a deny-only list is 200 without the denied set (must-not-fire).
+3. **K2, no cap on the rights questions.** One question per distinct Procedure over up to 5,000 sets. `RuleSetEndpoints.MaxProcedureRightsChecks` = `InvoiceContextService.MaxSiblingAccessChecks` (1,000; the other `ScanAsync` caller uses 200 and there is no shared constant). Above it: a warning log, then 403 `system_failure`, before any question is asked. Tests: cap + 1 distinct Procedures gives `system_failure` and asks no more than the cap; exactly the cap is answered in full.
+4. **F3, tests.** `List_LeavesOutProcedureSetsTheCallerCannotRead_...` reworked for F2: two sets share one Procedure and the rights-call count equals the number of distinct Procedures. `List_DoesNotSerializeTheProcedureId` now asserts 200 and exactly one element before checking the property is absent.
+5. **F4, doc.** `Set-ChildRecordCreatorPersonSchema.ps1` help said the dry run only reports the gate's FAIL; it exits 1 on any FAIL or MISSING.
+6. **K1, existence oracle** (403 versus 404 for a Procedure set the caller cannot Read, also through the 409s): filed: #2284.
+7. **K3, Dataverse role reads on `sprk_ruleset` / `sprk_policy` bypass the BFF Procedure Read gate:** tracked: #2285.
+
 ## Live steps left for the main session (none run here)
 
 1. **Run `scripts/Set-ChildRecordCreatorPersonSchema.ps1` on dev: dry run, then `-Apply`, then `-Verify`, BEFORE the BFF carrying 081 is deployed.**
