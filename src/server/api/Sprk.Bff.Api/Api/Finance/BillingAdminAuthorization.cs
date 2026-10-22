@@ -76,4 +76,58 @@ public static class BillingAdminAuthorization
             Check(WriteRuleSetPrivilege, "sprk_rulesets"),
             Check(WritePolicyVersionPrivilege, "sprk_policyversions"),
             Check(WritePolicyPrivilege, "sprk_policies"));
+
+    // ── Procedures (ebilling-r1 task 081, procedure model 3.1 I-P5 and 5.1) ──────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Create on <c>sprk_procedure</c>, as the live privilege table names it (lower case, spaarkedev1 2026-10-22; pinned by
+    /// <c>ProcedureEndpointsTests</c>). No solution role carries it until uac-r2 task 191 (Procedures are internal-only), so today only a
+    /// System Administrator passes.
+    /// </summary>
+    public const string CreateProcedurePrivilege = "prvCreatesprk_procedure";
+
+    /// <summary><c>sprk_procedure</c>'s entity set, the Record-path target of every Procedure route.</summary>
+    public const string ProcedureEntitySet = "sprk_procedures";
+
+    private const string ProcedureRouteKey = "procedureId";
+
+    /// <summary>
+    /// Create a Procedure: Create on <c>sprk_procedure</c>, and the billing-admin marker plus Create on <c>sprk_ruleset</c>, because the same
+    /// transaction creates the Procedure's rule set as the application.
+    /// </summary>
+    public static FinanceAuthorizationTargets CreateProcedure() =>
+        FinanceAuthorizationTargets.Authorize(
+            Check(CreateProcedurePrivilege, ProcedureEntitySet),
+            Check(CreateRuleSetPrivilege, "sprk_rulesets"),
+            Check(WriteRuleSetPrivilege, "sprk_rulesets"));
+
+    /// <summary>Read a Procedure and its versions: the caller's own Read on the Procedure (Record path, as the caller).</summary>
+    public static FinanceAuthorizationTargets ReadProcedure(EndpointFilterInvocationContext context) =>
+        FinanceAuthorizationTargets.FromRoute(context, ProcedureRouteKey, ProcedureEntitySet, "read");
+
+    /// <summary>
+    /// Change a Procedure, a version's dates, retire a version, or preview the Procedure's retire: the caller's own Write on the Procedure AND
+    /// the billing-admin marker (I-P5). An unreadable route id yields no check, which the filter denies.
+    /// </summary>
+    public static FinanceAuthorizationTargets WriteProcedure(EndpointFilterInvocationContext context) => OnProcedure(context);
+
+    /// <summary>Create a version: as <see cref="WriteProcedure"/>, plus Create on <c>sprk_policyversion</c> (the copy-forward creates them).</summary>
+    public static FinanceAuthorizationTargets CreateProcedureVersion(EndpointFilterInvocationContext context) =>
+        OnProcedure(context, Check(CreatePolicyVersionPrivilege, "sprk_policyversions"));
+
+    /// <summary>Publish a version: as <see cref="WriteProcedure"/>, plus Write on both policy tables (it puts policy versions in force).</summary>
+    public static FinanceAuthorizationTargets PublishProcedureVersion(EndpointFilterInvocationContext context) =>
+        OnProcedure(context, Check(WritePolicyVersionPrivilege, "sprk_policyversions"), Check(WritePolicyPrivilege, "sprk_policies"));
+
+    /// <summary>Retire the Procedure: as <see cref="WriteProcedure"/>, plus Write on <c>sprk_policy</c> (it switches every policy Off).</summary>
+    public static FinanceAuthorizationTargets RetireProcedure(EndpointFilterInvocationContext context) =>
+        OnProcedure(context, Check(WritePolicyPrivilege, "sprk_policies"));
+
+    private static FinanceAuthorizationTargets OnProcedure(EndpointFilterInvocationContext context, params FinanceAuthorizationCheck[] extra)
+    {
+        var record = FinanceAuthorizationTargets.FromRoute(context, ProcedureRouteKey, ProcedureEntitySet, "write");
+        return record.Checks.Count == 0
+            ? record // no id, no check: the filter denies
+            : FinanceAuthorizationTargets.Authorize(record.Checks.Append(Check(WriteRuleSetPrivilege, "sprk_rulesets")).Concat(extra).ToArray());
+    }
 }

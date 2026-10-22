@@ -154,7 +154,10 @@ $Column = 'sprk_createdbyperson'
 $ColumnSchemaName = 'sprk_CreatedByPerson'
 $NavigationProperty = 'sprk_CreatedByPerson'
 $TargetEntity = 'systemuser'
-$Tables = @('sprk_document', 'sprk_todo', 'sprk_event', 'sprk_eventlog', 'sprk_communication', 'sprk_communicationthread', 'sprk_communicationattachment', 'sprk_communicationparticipant', 'sprk_emailreviewlog', 'sprk_analysis', 'sprk_analysisoutput', 'sprk_emailartifact', 'sprk_attachmentartifact', 'sprk_fileversion', 'sprk_invoice', 'sprk_spendsignal', 'sprk_spendsnapshot', 'sprk_memo', 'sprk_reportcard', 'sprk_budget', 'sprk_kpiassessment', 'sprk_billingevent', 'sprk_budgetrevision', 'sprk_decisionrecord', 'sprk_signal', 'sprk_invoicesubmission', 'sprk_invoiceapproval', 'sprk_externalidentifier', 'sprk_invoicecorrection')
+$Tables = @('sprk_document', 'sprk_todo', 'sprk_event', 'sprk_eventlog', 'sprk_communication', 'sprk_communicationthread', 'sprk_communicationattachment', 'sprk_communicationparticipant', 'sprk_emailreviewlog', 'sprk_analysis', 'sprk_analysisoutput', 'sprk_emailartifact', 'sprk_attachmentartifact', 'sprk_fileversion', 'sprk_invoice', 'sprk_spendsignal', 'sprk_spendsnapshot', 'sprk_memo', 'sprk_reportcard', 'sprk_budget', 'sprk_kpiassessment', 'sprk_billingevent', 'sprk_budgetrevision', 'sprk_decisionrecord', 'sprk_signal', 'sprk_invoicesubmission', 'sprk_invoiceapproval', 'sprk_externalidentifier', 'sprk_invoicecorrection', 'sprk_procedure', 'sprk_procedureversion')
+# ebilling-r1 task 081 (procedure model 13, O-23): 080 created these two columns UNSECURED. Before this script secures one, it asserts the
+# column holds no value yet (a value written while it was unsecured could name anyone): a non-null count FAILs and the column is left as it is.
+$AssertEmptyBeforeSecuring = @('sprk_procedure', 'sprk_procedureversion')
 $ReaderProfileName = 'Spaarke BFF-Managed Field Readers'
 $WriterProfileName = 'Spaarke BFF-Managed Field Writers'
 # D-136 (owner 2026-10-13): the ontology writer's narrow profile. Fixed id so the live profile and SpaarkeMaster's source
@@ -194,6 +197,10 @@ $SolutionHomes = @{
     sprk_invoiceapproval    = @('SpaarkeMaster')
     sprk_externalidentifier = @('SpaarkeMaster')
     sprk_invoicecorrection  = @('SpaarkeMaster')
+    # ebilling-r1 task 081: the Procedure tables live only in SpaarkeMaster (task 080's Deploy-ProcedureSchema created each one, its
+    # sprk_createdbyperson lookup included); this script secures the column and checks it, never creates it.
+    sprk_procedure          = @('SpaarkeMaster')
+    sprk_procedureversion   = @('SpaarkeMaster')
 }
 
 # ── Auth + helpers ──────────────────────────────────────────────────────────────────────────────────────────
@@ -425,8 +432,18 @@ function Ensure-FieldPermission([string]$ProfileId, [string]$ProfileName, [strin
 foreach ($t in $Tables) {
     if (-not $attrs[$t]) { Report $(if ($Verify) { 'MISSING' } else { 'WOULD' }) "secure $t.$Column and grant both profiles (after the column exists)"; continue }
 
+    $notEmpty = $false
+    if ($attrs[$t].IsSecured -ne $Secured -and $t -in $AssertEmptyBeforeSecuring) {
+        # Task 081: zero non-null values before securing (every mode reads; nothing is written here).
+        $set = (Invoke-DvGet "EntityDefinitions(LogicalName='$t')?`$select=EntitySetName").EntitySetName
+        $valued = Measure-DvRows "$set`?`$select=$($t)id&`$filter=_$($Column)_value ne null"
+        if ($valued -gt 0) { $notEmpty = $true; Report 'FAIL' "$t.$Column already holds $valued value(s) while unsecured; it is NOT secured by this run -- review those rows first" }
+        else { Report 'OK' "$t.$Column holds no value yet (safe to secure)" }
+    }
+
     if ($attrs[$t].IsSecured -eq $Secured) { Report 'OK' "$t.$Column is field-secured" }
     elseif ($Verify) { Report 'MISSING' "$t.$Column is NOT field-secured — any user with Write can name someone else as the record's creator" }
+    elseif ($notEmpty) { }
     elseif ($IsDryRun) { Report 'WOULD' "secure $t.$Column" }
     else { Set-ColumnSecured $t }
 

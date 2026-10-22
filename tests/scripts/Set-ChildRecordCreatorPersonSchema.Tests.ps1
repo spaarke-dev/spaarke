@@ -6,6 +6,8 @@
 # writers rule is unchanged, and a $SolutionHomes table's missing column is never created by -Apply.
 # Task 142 (#1783 / D-135): sprk_decisionrecord joins $Tables and $SolutionHomes exactly as the budget revision did.
 # Task 143 (#1783 / D-135): sprk_signal joins $Tables and $SolutionHomes exactly as the Decision Record did.
+# ebilling-r1 task 081 (model 13, O-23): sprk_procedure and sprk_procedureversion join $Tables with SpaarkeMaster as their only home, and
+# their column (created unsecured by 080) is secured only after the script finds it holds no value.
 #
 # The script talks to a live environment on load, so it is never run here. The relationship-name functions are read out of
 # the script's own AST and exercised against a fake reader: the code under test is the shipped code, not a copy.
@@ -78,11 +80,21 @@ Describe 'the script''s table and solution wiring' {
         $text | Should -Match '(?m)^\$Tables = @\([^)]*''sprk_signal''[^)]*\)'
         $homes = [regex]::Match($text, '(?ms)^\$SolutionHomes = @\{(.*?)^\}').Groups[1].Value
         $homes | Should -Match '(?m)^\s+sprk_signal\s+= @\(''SpaarkeMaster'', ''OntologyPlatformSolution''\)'
-        # exactly the three ontology tables and the four eBilling tables (ebilling-r1 task 013) have solution homes; every
-        # other child's column stays in SpaarkeCore
+        # exactly the three ontology tables, the four eBilling tables (ebilling-r1 task 013) and the two Procedure tables (task 081)
+        # have solution homes; every other child's column stays in SpaarkeCore
         @([regex]::Matches($homes, '(?m)^\s+(sprk_\w+)\s+=') | ForEach-Object { $_.Groups[1].Value } | Sort-Object) |
             Should -Be @('sprk_budgetrevision', 'sprk_decisionrecord', 'sprk_externalidentifier', 'sprk_invoiceapproval',
-                'sprk_invoicecorrection', 'sprk_invoicesubmission', 'sprk_signal')
+                'sprk_invoicecorrection', 'sprk_invoicesubmission', 'sprk_procedure', 'sprk_procedureversion', 'sprk_signal')
+    }
+
+    It 'ebilling-r1 081: lists the two Procedure tables in $Tables with SpaarkeMaster as their only home, and asserts them empty before securing' {
+        $text = Get-Content -Raw $script:ScriptPath
+        $homes = [regex]::Match($text, '(?ms)^\$SolutionHomes = @\{(.*?)^\}').Groups[1].Value
+        foreach ($t in 'sprk_procedure', 'sprk_procedureversion') {
+            $text | Should -Match "(?m)^\`$Tables = @\([^)]*'$t'[^)]*\)"
+            $homes | Should -Match "(?m)^\s+$t\s+= @\('SpaarkeMaster'\)"
+        }
+        $text | Should -Match '(?m)^\$AssertEmptyBeforeSecuring = @\(''sprk_procedure'', ''sprk_procedureversion''\)\s*$'
     }
 
     It 'ebilling-r1 013: lists the four eBilling tables in $Tables with SpaarkeMaster as their only solution home' {
@@ -132,7 +144,8 @@ Describe 'a simulated run' {
         $global:SimCpHomeTables = @('sprk_budgetrevision', 'sprk_decisionrecord', 'sprk_signal')
         # ebilling-r1 task 013: tables whose column travels in SpaarkeMaster only (the eBilling schema scripts create it with
         # the canonical relationship name).
-        $global:SimCpMasterOnlyTables = @('sprk_invoicesubmission', 'sprk_invoiceapproval', 'sprk_externalidentifier', 'sprk_invoicecorrection')
+        $global:SimCpMasterOnlyTables = @('sprk_invoicesubmission', 'sprk_invoiceapproval', 'sprk_externalidentifier', 'sprk_invoicecorrection',
+            'sprk_procedure', 'sprk_procedureversion')
         function global:SimCp-Rel([string]$t) {
             # the maker-made lookups (D-135 Q27) carry the maker's relationship name
             if ($t -in $global:SimCpHomeTables) { "$($t)_CreatedByPerson_systemuser" } else { "sprk_systemuser_$($t)_createdbyperson" }
@@ -155,7 +168,10 @@ Describe 'a simulated run' {
                 if ($global:SimCpScenario -eq 'no-br-column' -and $Matches[1] -eq 'sprk_budgetrevision') { throw '404 not found' }
                 if ($global:SimCpScenario -eq 'no-dr-column' -and $Matches[1] -eq 'sprk_decisionrecord') { throw '404 not found' }
                 if ($global:SimCpScenario -eq 'no-signal-column' -and $Matches[1] -eq 'sprk_signal') { throw '404 not found' }
-                return @{ LogicalName = 'sprk_createdbyperson'; Targets = @('systemuser'); IsSecured = $true; MetadataId = (SimCp-Guid "attr-$($Matches[1])") }
+                # Task 081: 'proc-unsecured-empty' / 'proc-unsecured-valued' leave sprk_procedure's column unsecured, as 080 created it.
+                # (Set-ColumnSecured then reads the untyped attribute, answered below.)
+                $secured = -not ($global:SimCpScenario -like 'proc-unsecured-*' -and $Matches[1] -eq 'sprk_procedure')
+                return @{ LogicalName = 'sprk_createdbyperson'; Targets = @('systemuser'); IsSecured = $secured; MetadataId = (SimCp-Guid "attr-$($Matches[1])") }
             }
             if ($path -match "^RelationshipDefinitions\(SchemaName='([^']+)'\)/Microsoft.Dynamics.CRM.OneToMany") {
                 $name = $Matches[1]
@@ -213,6 +229,15 @@ Describe 'a simulated run' {
                 return @{ value = @(@{ fieldpermissionid = 'p'; canread = 4; cancreate = $(if ($w) { 4 } else { 0 }); canupdate = $(if ($w) { 4 } else { 0 }) }) }
             }
             if ($path -like 'fieldpermissions?*') { return @{ value = @() } }
+            if ($path -match "^EntityDefinitions\(LogicalName='(\w+)'\)/Attributes\(LogicalName='sprk_createdbyperson'\)$") {
+                # Set-ColumnSecured's read of the attribute before it PUTs it back with IsSecured (task 081 scenarios only reach it).
+                return [pscustomobject]@{ LogicalName = 'sprk_createdbyperson'; IsSecured = $false }
+            }
+            if ($path -like 'sprk_procedures?*_sprk_createdbyperson_value ne null*') {
+                # Task 081: the zero-non-null read before securing. One valued row in the 'proc-unsecured-valued' scenario.
+                if ($global:SimCpScenario -eq 'proc-unsecured-valued') { return @{ value = @(@{ sprk_procedureid = 'p1' }) } }
+                return @{ value = @() }
+            }
             if ($path -match '^EntityDefinitions\(LogicalName=''(\w+)''\)\?\$select=MetadataId') { return @{ MetadataId = (SimCp-Guid "table-$($Matches[1])") } }
             if ($path -match '^EntityDefinitions\(LogicalName=''(\w+)''\)\?\$select=EntitySetName') { return @{ EntitySetName = "$($Matches[1])s" } }
             if ($path -like "solutions?*uniquename eq '*'") {
@@ -467,5 +492,31 @@ Describe 'a simulated run' {
         $run.Text | Should -Match 'FAIL\s+sprk_signal\.sprk_createdbyperson is missing and this script never creates it'
         $run.Text | Should -Not -Match 'DONE\s+created sprk_signal'
         $run.ExitCode | Should -Be 1
+    }
+
+    # ── ebilling-r1 task 081: the Procedure tables' column is secured only when it holds no value ──────────────────────
+    It '081: -Apply secures an unsecured, empty sprk_procedure.sprk_createdbyperson after reading that it holds no value' {
+        SimCp-Reset; $global:SimCpScenario = 'proc-unsecured-empty'
+        $run = Invoke-SimulatedRun @{ Apply = $true }
+        $run.Text | Should -Match 'OK\s+sprk_procedure\.sprk_createdbyperson holds no value yet'
+        $run.Text | Should -Match 'DONE\s+secured sprk_procedure\.sprk_createdbyperson'
+        @($run.Writes | Where-Object { $_ -like "PUT EntityDefinitions(LogicalName='sprk_procedure')/Attributes*" }).Count | Should -Be 1
+    }
+
+    It '081 must fire: -Apply does NOT secure sprk_procedure.sprk_createdbyperson when it already holds a value, FAILs, and exits non-zero' {
+        SimCp-Reset; $global:SimCpScenario = 'proc-unsecured-valued'
+        $run = Invoke-SimulatedRun @{ Apply = $true }
+        $run.Text | Should -Match 'FAIL\s+sprk_procedure\.sprk_createdbyperson already holds 1 value\(s\) while unsecured; it is NOT secured'
+        $run.Text | Should -Not -Match 'DONE\s+secured sprk_procedure\.sprk_createdbyperson'
+        @($run.Writes | Where-Object { $_ -like "PUT EntityDefinitions(LogicalName='sprk_procedure')/Attributes*" }).Count | Should -Be 0
+        $run.ExitCode | Should -Be 1
+    }
+
+    It '081 must not fire: an already secured Procedure column is not re-counted (no row read), and the dry run only reports' {
+        SimCp-Reset
+        $run = Invoke-SimulatedRun @{}
+        $run.Text | Should -Match 'OK\s+sprk_procedure\.sprk_createdbyperson is field-secured'
+        $run.Text | Should -Not -Match 'sprk_procedure\.sprk_createdbyperson holds no value'
+        $run.Writes.Count | Should -Be 0
     }
 }
