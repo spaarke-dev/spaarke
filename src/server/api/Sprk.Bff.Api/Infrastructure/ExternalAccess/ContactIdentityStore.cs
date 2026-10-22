@@ -47,13 +47,16 @@ public sealed record NewContactDetails(string? FirstName, string LastName, strin
 
     /// <summary>
     /// ADR-028 A9 (r3 task 047): the home directory (<c>tid</c>), written as <c>sprk_externaltenantid</c>. Required on plane
-    /// WorkforceHome and refused on every other plane (<see cref="DataverseContactIdentityStore.CreatePayload"/>).
+    /// WorkforceHome and refused on every other plane, the Workforce plane included
+    /// (<see cref="DataverseContactIdentityStore.CreatePayload"/>).
     /// </summary>
     public Guid? ExternalTenantId { get; init; }
 
     /// <summary>
     /// ADR-028 A9 (r3 task 047): the owning team (the default team of <c>ExternalAccess:CustomerBusinessUnitId</c>).
-    /// Required on plane WorkforceHome and refused on every other plane (the A8 create sets no owner).
+    /// Required on plane WorkforceHome. ISS-005 (#1673): carried by the Workforce plane's creates (first sign-in and the
+    /// licensed-user link) too, which the binder resolves from the same setting. Refused on every other plane (the CIAM
+    /// create sets no owner).
     /// </summary>
     public Guid? OwningTeamId { get; init; }
 }
@@ -790,30 +793,44 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         if (!string.IsNullOrWhiteSpace(details.FirstName)) payload["firstname"] = details.FirstName;
         if (!string.IsNullOrWhiteSpace(details.Email)) payload["emailaddress1"] = details.Email;
 
-        // ADR-028 A9 (r3 task 047): a WorkforceHome create carries its home directory and its owner; no other plane may.
+        // ADR-028 A9 (r3 task 047): a WorkforceHome create carries its home directory and its owner. ISS-005 (#1673): the
+        // Workforce plane's creates (first sign-in, licensed-user link) carry an owner too - never a home directory. No
+        // other plane may carry either.
         var home = plane == IdentityPlaneMarker.WorkforceHome;
+        var mayCarryOwner = home || plane == IdentityPlaneMarker.Workforce;
         if (home && (details.ExternalTenantId is not { } tenant || tenant == Guid.Empty))
         {
             throw new ArgumentException("A WorkforceHome create needs the home tenant.", nameof(details));
         }
 
-        // The owner-seam refusal (RecordOwnerAssignmentCensusTests.EverySeamRefusesAnOwnerlessCreate): never an app-owned contact.
-        if (home && (details.OwningTeamId is not { } team || team == Guid.Empty))
+        // The owner-seam refusal (RecordOwnerAssignmentCensusTests.EverySeamRefusesAnOwnerlessCreate): never an app-owned
+        // contact. WorkforceHome always needs an owner; a Workforce create has one unless its binder is not bound to this
+        // BFF's own environment (ContactIdentityBinder), and an owner it does carry must not be empty.
+        if ((home && details.OwningTeamId is null) || (mayCarryOwner && details.OwningTeamId == Guid.Empty))
         {
             throw new InvalidOperationException(
-                "No owning team was resolved for the WorkforceHome contact; refusing to create an app-owned contact.");
+                $"No owning team was resolved for the {plane} contact; refusing to create an app-owned contact.");
         }
 
-        if (!home && (details.ExternalTenantId is not null || details.OwningTeamId is not null))
+        if (!home && details.ExternalTenantId is not null)
         {
-            throw new ArgumentException("Only a WorkforceHome create carries a home tenant or an owner.", nameof(details));
+            throw new ArgumentException("Only a WorkforceHome create carries a home tenant.", nameof(details));
+        }
+
+        if (!mayCarryOwner && details.OwningTeamId is not null)
+        {
+            throw new ArgumentException("Only a WorkforceHome or Workforce create carries an owner.", nameof(details));
         }
 
         if (home)
         {
             payload[ContactBindingDecision.ExternalTenantIdColumn] = details.ExternalTenantId!.Value.ToString("D");
-            payload[OwnerBindKey] = $"/teams({details.OwningTeamId!.Value:D})";
             if (!string.IsNullOrWhiteSpace(details.Department)) payload["department"] = details.Department;
+        }
+
+        if (details.OwningTeamId is { } owner)
+        {
+            payload[OwnerBindKey] = $"/teams({owner:D})";
         }
 
         return payload;

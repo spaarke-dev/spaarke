@@ -134,6 +134,12 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
     /// <summary>Every read, by operation name.</summary>
     public List<string> Reads { get; } = new();
 
+    /// <summary>
+    /// ISS-005 (#1673): the production <c>DataverseContactIdentityStore.CreatePayload</c> body of every create request that
+    /// reached the store (the real builder, so a test asserts the <c>ownerid@odata.bind</c> the platform would receive).
+    /// </summary>
+    public List<Dictionary<string, object?>> CreatePayloads { get; } = new();
+
     public bool KeyDefined { get; set; } = true;
     public bool MaskBindingColumn { get; set; }
     public LookupStatus OidLookupStatus { get; set; } = LookupStatus.Read;
@@ -242,6 +248,7 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             SystemUsers.Clear();
             Writes.Clear();
             Reads.Clear();
+            CreatePayloads.Clear();
             KeyDefined = true;
             MaskBindingColumn = false;
             OidLookupStatus = LookupStatus.Read;
@@ -760,11 +767,13 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
 
     public async Task<StoreWriteResult> CreateContactForOidAsync(Guid oid, IdentityPlaneMarker plane, NewContactDetails details, CancellationToken ct)
     {
-        // The production payload's own argument checks (a WorkforceHome create needs tenant + owner; no other plane may).
-        _ = DataverseContactIdentityStore.CreatePayload(oid, plane, details);
+        // The production payload's own argument checks (a WorkforceHome create needs tenant + owner; the Workforce plane may
+        // carry an owner (ISS-005); no other plane may carry either).
+        var payload = DataverseContactIdentityStore.CreatePayload(oid, plane, details);
 
         lock (_gate)
         {
+            CreatePayloads.Add(payload);
             if (FailCreate) return new StoreWriteResult(StoreWriteStatus.Failed, Error: "injected");
             if (CreateStatusOverride is { } overridden) return new StoreWriteResult(overridden, Error: "injected");
             if (!KeyDefined) return new StoreWriteResult(StoreWriteStatus.KeyMissing);

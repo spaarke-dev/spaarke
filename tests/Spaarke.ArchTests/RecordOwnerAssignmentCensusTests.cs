@@ -483,8 +483,10 @@ public class RecordOwnerAssignmentCensusTests
         new OwnerWriteEntry("ContactIdentityStore.cs", "CreatePayload", 1, OwnerWriteKind.Seam,
             "R3 task 047 (ADR-028 A9 registration): a WorkforceHome contact is a person, not a secure record's child; its owner is "
             + "the default team of the configured customer business unit (ExternalAccess:CustomerBusinessUnitId; the Secure Record "
-            + "business unit is refused by id), resolved by the binder before the create. Every other plane writes no owner, and "
-            + "CreatePayload throws on an empty team."),
+            + "business unit is refused by id), resolved by the binder before the create. ISS-005 (#1673): the Workforce plane's "
+            + "creates (first sign-in, licensed-user link) are owned by the same team, resolved by the same binder lookup and "
+            + "refused the same way when it does not resolve; a binder over ANOTHER environment binds none. No other plane writes "
+            + "an owner, and CreatePayload throws on an empty team."),
 
         new OwnerWriteEntry("DocumentCheckoutService.cs", "CreateFileVersionAsync", 1, OwnerWriteKind.Routed,
             "A file version is content of its document (ContentOf)."),

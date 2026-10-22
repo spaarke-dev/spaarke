@@ -247,6 +247,58 @@ public class CallerPrincipalResolverTests
         body.Should().NotContain("new.hire@customer.example");
     }
 
+    [Fact]
+    public async Task WorkforceStrategy_OwnerUnconfigured_Is500_WithRegistrationsReasonCode()
+    {
+        // ISS-005 (#1673): a first sign-in that cannot create the caller's contact because no customer owner team resolves
+        // answers what the registration route answers for the same cause: 500 and sdap.access.registration_owner_unconfigured.
+        var resolver = new Mock<IWorkforcePrincipalResolver>();
+        resolver.Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(WorkforcePrincipalResolution.Denied(
+                WorkforceDenyReason.PrincipalNotResolved, ContactBindingDecision.DenyOwnerUnconfigured));
+        var strategy = new WorkforcePrincipalStrategy(
+            resolver.Object, new Mock<IAccessibleRecordSetService>(MockBehavior.Strict).Object,
+            Mock.Of<ILogger<WorkforcePrincipalStrategy>>());
+        var http = new DefaultHttpContext
+        {
+            User = Principal(("oid", Guid.NewGuid().ToString()), ("acct", "0"), ("email", "new.hire@customer.example")),
+            RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider(),
+        };
+        http.Response.Body = new MemoryStream();
+
+        var body = await DenyBodyAsync(await strategy.ResolveAsync(http, CancellationToken.None), http);
+
+        http.Response.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
+        using var json = System.Text.Json.JsonDocument.Parse(body);
+        json.RootElement.GetProperty("reasonCode").GetString().Should().Be("sdap.access.registration_owner_unconfigured");
+        json.RootElement.GetProperty("errorCode").GetString().Should().Be("sdap.access.registration_owner_unconfigured");
+        body.Should().NotContain("new.hire@customer.example");
+    }
+
+    [Fact]
+    public async Task WorkforceStrategy_ALookupFailure_StaysA403_LikeEveryOtherSignInDeny()
+    {
+        // Must-not-fire: only the owner-unconfigured code is a 500; the lookup-failed code keeps the plane's 403.
+        var resolver = new Mock<IWorkforcePrincipalResolver>();
+        resolver.Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(WorkforcePrincipalResolution.Denied(
+                WorkforceDenyReason.PrincipalNotResolved, ContactBindingDecision.DenyContactLookupFailed));
+        var strategy = new WorkforcePrincipalStrategy(
+            resolver.Object, new Mock<IAccessibleRecordSetService>(MockBehavior.Strict).Object,
+            Mock.Of<ILogger<WorkforcePrincipalStrategy>>());
+        var http = new DefaultHttpContext
+        {
+            User = Principal(("oid", Guid.NewGuid().ToString()), ("acct", "0")),
+            RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider(),
+        };
+        http.Response.Body = new MemoryStream();
+
+        var body = await DenyBodyAsync(await strategy.ResolveAsync(http, CancellationToken.None), http);
+
+        http.Response.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        body.Should().Contain(ContactBindingDecision.DenyContactLookupFailed);
+    }
+
     // ── Workforce strategy: Tier-2 record scope = accessible set (NFR-08) ────────────────────────
 
     [Fact]

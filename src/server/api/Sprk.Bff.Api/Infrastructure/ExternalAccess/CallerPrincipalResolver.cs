@@ -721,6 +721,22 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
                         }));
 
                 case WorkforceDenyReason.PrincipalNotResolved
+                    when resolution.DenyCode == ContactBindingDecision.DenyOwnerUnconfigured:
+                    // ISS-005 (#1673): the first sign-in could not create the caller's contact because no customer owner team
+                    // resolves (ExternalAccess:CustomerBusinessUnitId unset, the Secure Record unit, or not one default team).
+                    // The same answer the registration route gives for the same cause: 500, the same reason code, nothing created.
+                    _logger.LogError("[WF-AUTH] Denying request: {DenyCode}", resolution.DenyCode);
+                    return CallerPrincipalResolution.Denied(Results.Problem(
+                        statusCode: StatusCodes.Status500InternalServerError,
+                        title: "Internal Server Error",
+                        detail: "Sign-in is not configured for this organization. Nothing was created; contact your administrator.",
+                        extensions: new Dictionary<string, object?>
+                        {
+                            ["reasonCode"] = resolution.DenyCode,
+                            ["errorCode"] = resolution.DenyCode,
+                        }));
+
+                case WorkforceDenyReason.PrincipalNotResolved
                     when resolution.DenyCode == WorkforceMembershipTest.DenyGuestUseHomeSignin:
                     // #2128: the customer-tenant guest is told where to sign in instead. Same shape as the CIAM plane's
                     // contact_not_invited (ProblemDetailsHelper.Forbidden with a detail).

@@ -675,6 +675,14 @@ public static class ContactBindingDecision
     /// <summary>The create write failed.</summary>
     public const string DenyContactCreateFailed = "sdap.access.deny.contact_create_failed";
 
+    /// <summary>
+    /// ISS-005 (#1673): no owner team could be resolved from <c>ExternalAccess:CustomerBusinessUnitId</c> (unset, the Secure
+    /// Record business unit, or not exactly one default owner team), so the create is refused and nothing is written. ONE
+    /// code for every contact create: the registration route answers it as 500 (<c>ExternalRegistrationEndpoints.ReasonOwnerUnconfigured</c>
+    /// is this value) and the first-sign-in create answers it the same way (<c>CallerPrincipalResolver</c>).
+    /// </summary>
+    public const string DenyOwnerUnconfigured = "sdap.access.registration_owner_unconfigured";
+
     /// <summary>The binding column reads as masked (field-level security without Read): no write is safe.</summary>
     public const string DenyBindingColumnMasked = "sdap.access.deny.binding_column_masked";
 

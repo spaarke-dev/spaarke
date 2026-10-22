@@ -15,7 +15,9 @@
 // for the same reason: two copies of the rule is how the workforce plane shipped without the CIAM guard.
 
 using System.Security.Claims;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 
 namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
@@ -227,17 +229,44 @@ public sealed class ContactIdentityBinder
     private readonly IOptionsMonitor<WorkforceIdentityOptions> _options;
     private readonly TimeProvider _time;
     private readonly ILogger<ContactIdentityBinder> _logger;
+    private readonly IOptionsMonitor<ExternalAccessOptions>? _externalAccess;
+    private readonly IConfiguration? _configuration;
 
+    /// <summary>
+    /// Creates the binder over <paramref name="store"/>. The last two arguments are the customer-owner inputs of ISS-005; they
+    /// are both given (the DI-registered binder) or both omitted (a binder over another environment).
+    /// </summary>
+    /// <param name="externalAccess">
+    /// ISS-005 (#1673): <c>ExternalAccess:CustomerBusinessUnitId</c>, the unit whose default owner team owns every contact this
+    /// binder creates on the Workforce plane (first sign-in and the licensed-user link). The DI-registered binder - the one
+    /// over THIS BFF's own Dataverse environment - always receives it (and an unset value refuses the create). It is null
+    /// ONLY for a binder over ANOTHER environment (<see cref="ContactIdentityBinderFactory"/>), where the setting names a
+    /// unit of a different environment and does not apply: those creates are unchanged (no owner is bound).
+    /// </param>
+    /// <param name="configuration">
+    /// Read for the Secure Record business unit's name (<c>SecureRecordOwnerTeam.BusinessUnitName</c>); null together with
+    /// <paramref name="externalAccess"/>.
+    /// </param>
     public ContactIdentityBinder(
         IContactIdentityStore store,
         IOptionsMonitor<WorkforceIdentityOptions> options,
         TimeProvider time,
-        ILogger<ContactIdentityBinder> logger)
+        ILogger<ContactIdentityBinder> logger,
+        IOptionsMonitor<ExternalAccessOptions>? externalAccess = null,
+        IConfiguration? configuration = null)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _time = time ?? throw new ArgumentNullException(nameof(time));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        if ((externalAccess is null) != (configuration is null))
+        {
+            throw new ArgumentException(
+                "The customer-owner inputs come together: pass both externalAccess and configuration, or neither.");
+        }
+
+        _externalAccess = externalAccess;
+        _configuration = configuration;
     }
 
     /// <summary>The store this binder writes through (the job reuses it for its scans).</summary>
@@ -844,54 +873,135 @@ public sealed class ContactIdentityBinder
         return new HomeRegistrationResult(HomeRegistrationOutcome.Conflict, Wrote: wrote);
     }
 
-    private async Task<HomeRegistrationResult> CreateHomeContactAsync(HomeRegistrationRequest request, string who, CancellationToken ct)
+    /// <summary>How <see cref="ResolveCustomerOwnerTeamAsync"/> ended (ISS-005, #1673).</summary>
+    private enum OwnerTeamStatus
+    {
+        /// <summary>One owner team found: <see cref="OwnerTeamResolution.TeamId"/> owns the new contact.</summary>
+        Resolved,
+
+        /// <summary>The setting is unset or empty, names the Secure Record business unit, or has no single default owner team: refuse.</summary>
+        Unconfigured,
+
+        /// <summary>A read could not be answered: refuse (retryable).</summary>
+        LookupFailed,
+
+        /// <summary>
+        /// Only from <see cref="ResolveWorkforceCreateOwnerAsync"/>: this binder is not over this BFF's own environment, so the
+        /// setting does not apply and the create binds no owner (as before ISS-005).
+        /// </summary>
+        NotApplicable,
+    }
+
+    private readonly record struct OwnerTeamResolution(OwnerTeamStatus Status, Guid TeamId = default);
+
+    /// <summary>
+    /// The ONE lookup of a contact's owner team (design §6; ISS-005, #1673): the single default owner team of
+    /// <paramref name="customerBusinessUnitId"/> (<c>ExternalAccess:CustomerBusinessUnitId</c>). Registration, the first
+    /// sign-in create and the licensed-user link create all call it, so they refuse alike: nothing is created when the
+    /// setting is unset, when it names the Secure Record business unit, or when the unit's default owner teams are not
+    /// exactly one; an unreadable answer is a <see cref="OwnerTeamStatus.LookupFailed"/>.
+    /// </summary>
+    /// <param name="operation">The create being decided, for the log ("Registration", "First sign-in create", ...).</param>
+    private async Task<OwnerTeamResolution> ResolveCustomerOwnerTeamAsync(
+        Guid? customerBusinessUnitId, string secureBusinessUnitName, string operation, string who, CancellationToken ct)
     {
         // Design §6 create: owned by the default team of ExternalAccess:CustomerBusinessUnitId. Absent → nothing created.
-        if (request.CustomerBusinessUnitId is not { } bu || bu == Guid.Empty)
+        if (customerBusinessUnitId is not { } bu || bu == Guid.Empty)
         {
             _logger.LogError(
-                "[ID-BIND] Registration for {Who} refused: ExternalAccess:CustomerBusinessUnitId is not configured, so the "
-                + "new contact would have no owner. Nothing was created.", who);
-            return new HomeRegistrationResult(HomeRegistrationOutcome.OwnerUnconfigured);
+                "[ID-BIND] {Operation} for {Who} refused: ExternalAccess:CustomerBusinessUnitId is not configured, so the "
+                + "new contact would have no owner. Nothing was created.", operation, who);
+            return new OwnerTeamResolution(OwnerTeamStatus.Unconfigured);
         }
 
         // The customer business unit must never be the Secure Record business unit: a registrant's contact owned by a team
         // there would be a record in the secure unit. Decided by ID (as RecordOwnershipResolver does); an unreadable or
         // ambiguous answer refuses (fail closed); only "no such business unit in this environment" lets the create through.
-        var secure = await _store.FindBusinessUnitsByNameAsync(request.SecureBusinessUnitName, ct).ConfigureAwait(false);
+        var secure = await _store.FindBusinessUnitsByNameAsync(secureBusinessUnitName, ct).ConfigureAwait(false);
         if (secure.Status != LookupStatus.Read)
         {
-            return HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactLookupFailed);
+            return new OwnerTeamResolution(OwnerTeamStatus.LookupFailed);
         }
 
         if (secure.BusinessUnitIds.Count > 1 || secure.BusinessUnitIds.Contains(bu))
         {
             _logger.LogError(
-                "[ID-BIND] Registration for {Who} refused: ExternalAccess:CustomerBusinessUnitId {BusinessUnitId} is the Secure "
+                "[ID-BIND] {Operation} for {Who} refused: ExternalAccess:CustomerBusinessUnitId {BusinessUnitId} is the Secure "
                 + "Record business unit (or that unit is ambiguous: {Count} named '{Name}'). Nothing was created.",
-                who, bu, secure.BusinessUnitIds.Count, request.SecureBusinessUnitName);
-            return new HomeRegistrationResult(HomeRegistrationOutcome.OwnerUnconfigured);
+                operation, who, bu, secure.BusinessUnitIds.Count, secureBusinessUnitName);
+            return new OwnerTeamResolution(OwnerTeamStatus.Unconfigured);
         }
 
         var teams = await _store.FindDefaultOwnerTeamsAsync(bu, ct).ConfigureAwait(false);
         if (teams.Status != LookupStatus.Read)
         {
-            return HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactLookupFailed);
+            return new OwnerTeamResolution(OwnerTeamStatus.LookupFailed);
         }
 
         if (teams.TeamIds.Count != 1)
         {
             _logger.LogError(
-                "[ID-BIND] Registration for {Who} refused: business unit {BusinessUnitId} has {Count} default owner teams "
-                + "(exactly one expected). Nothing was created.", who, bu, teams.TeamIds.Count);
-            return new HomeRegistrationResult(HomeRegistrationOutcome.OwnerUnconfigured);
+                "[ID-BIND] {Operation} for {Who} refused: business unit {BusinessUnitId} has {Count} default owner teams "
+                + "(exactly one expected). Nothing was created.", operation, who, bu, teams.TeamIds.Count);
+            return new OwnerTeamResolution(OwnerTeamStatus.Unconfigured);
+        }
+
+        return new OwnerTeamResolution(OwnerTeamStatus.Resolved, teams.TeamIds[0]);
+    }
+
+    /// <summary>
+    /// ISS-005 (#1673): the owner of a Workforce-plane contact create (first sign-in, licensed-user link), from the setting and
+    /// the Secure Record unit name this binder was given. <see cref="OwnerTeamStatus.NotApplicable"/> for a binder over another
+    /// environment (see the constructor).
+    /// </summary>
+    private Task<OwnerTeamResolution> ResolveWorkforceCreateOwnerAsync(string operation, Guid oid, CancellationToken ct)
+    {
+        if (_externalAccess is null || _configuration is null)
+        {
+            return Task.FromResult(new OwnerTeamResolution(OwnerTeamStatus.NotApplicable));
+        }
+
+        return ResolveCustomerOwnerTeamAsync(
+            _externalAccess.CurrentValue.CustomerBusinessUnitId,
+            SecureRecordOwnerTeam.BusinessUnitName(_configuration),
+            operation,
+            $"oid#{HashForLog(oid)}",
+            ct);
+    }
+
+    /// <summary>
+    /// The create's details with the resolved owner team; unchanged when no owner applies. A positional copy, not a
+    /// <c>with</c> expression: the task 146 b2 census flags every <c>with</c> expression that sets an owning team in
+    /// server code (it cannot tell this team, resolved from the customer unit, from a forged resolver result). A
+    /// property added to <see cref="NewContactDetails"/> must be copied here.
+    /// </summary>
+    private static NewContactDetails WithOwner(NewContactDetails details, OwnerTeamResolution owner)
+        => owner.Status != OwnerTeamStatus.Resolved
+            ? details
+            : new NewContactDetails(details.FirstName, details.LastName, details.Email)
+            {
+                Department = details.Department,
+                ExternalTenantId = details.ExternalTenantId,
+                OwningTeamId = owner.TeamId,
+            };
+
+    private async Task<HomeRegistrationResult> CreateHomeContactAsync(HomeRegistrationRequest request, string who, CancellationToken ct)
+    {
+        var owner = await ResolveCustomerOwnerTeamAsync(
+            request.CustomerBusinessUnitId, request.SecureBusinessUnitName, "Registration", who, ct).ConfigureAwait(false);
+        switch (owner.Status)
+        {
+            case OwnerTeamStatus.Unconfigured:
+                return new HomeRegistrationResult(HomeRegistrationOutcome.OwnerUnconfigured);
+            case OwnerTeamStatus.LookupFailed:
+                return HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactLookupFailed);
         }
 
         var details = new NewContactDetails(request.FirstName, request.LastName, request.Email)
         {
             Department = request.Department,
             ExternalTenantId = request.HomeTenantId,
-            OwningTeamId = teams.TeamIds[0],
+            OwningTeamId = owner.TeamId,
         };
         var create = await _store.CreateContactForOidAsync(request.HomeObjectId, IdentityPlaneMarker.WorkforceHome, details, ct)
             .ConfigureAwait(false);
@@ -1175,7 +1285,19 @@ public sealed class ContactIdentityBinder
                         return ContactBindingResult.Denied(ContactBindingDecision.DenyBindingColumnMasked);
                     }
 
-                    var create = await _store.CreateContactForOidAsync(request.CallerOid, request.CallerPlane, details, ct)
+                    // ISS-005 (#1673): the contact is owned by the customer business unit's default team, or it is not created.
+                    var owner = await ResolveWorkforceCreateOwnerAsync("First sign-in create", request.CallerOid, ct)
+                        .ConfigureAwait(false);
+                    switch (owner.Status)
+                    {
+                        case OwnerTeamStatus.Unconfigured:
+                            return ContactBindingResult.Denied(ContactBindingDecision.DenyOwnerUnconfigured);
+                        case OwnerTeamStatus.LookupFailed:
+                            return ContactBindingResult.Denied(ContactBindingDecision.DenyContactLookupFailed);
+                    }
+
+                    var create = await _store.CreateContactForOidAsync(
+                            request.CallerOid, request.CallerPlane, WithOwner(details, owner), ct)
                         .ConfigureAwait(false);
                     switch (create.Status)
                     {
@@ -1443,7 +1565,21 @@ public sealed class ContactIdentityBinder
                         null, none, Array.Empty<IdentityChange>(), false);
                 }
 
-                var create = await _store.CreateContactForOidAsync(request.CallerOid, IdentityPlaneMarker.Workforce, details, ct)
+                // ISS-005 (#1673): the contact is owned by the customer business unit's default team, or it is not created.
+                var owner = await ResolveWorkforceCreateOwnerAsync("Licensed-user link create", request.CallerOid, ct)
+                    .ConfigureAwait(false);
+                switch (owner.Status)
+                {
+                    case OwnerTeamStatus.Unconfigured:
+                        return Result(suid, SystemUserLinkOutcome.Denied, null, ContactBindingDecision.DenyOwnerUnconfigured,
+                            null, none, Array.Empty<IdentityChange>(), false);
+                    case OwnerTeamStatus.LookupFailed:
+                        return Result(suid, SystemUserLinkOutcome.Denied, null, ContactBindingDecision.DenyContactLookupFailed,
+                            null, none, Array.Empty<IdentityChange>(), false);
+                }
+
+                var create = await _store.CreateContactForOidAsync(
+                        request.CallerOid, IdentityPlaneMarker.Workforce, WithOwner(details, owner), ct)
                     .ConfigureAwait(false);
                 if (create.Status == StoreWriteStatus.KeyMissing)
                 {
