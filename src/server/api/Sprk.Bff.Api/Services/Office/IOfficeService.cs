@@ -153,6 +153,16 @@ public interface IOfficeService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// The contact the pane's "+ New" form prefills in Assigned To (task 100, owner decision B): the caller's own
+    /// linked contact with its display name, or <see langword="null"/> when the caller is unresolved, has no linked
+    /// contact, or the contact could not be read. For a Matter or Project it is exactly the contact the create assigns
+    /// when the request names none; an Invoice has no server default, so there the pane sends it explicitly.
+    /// </summary>
+    /// <param name="callerSystemUserId">The caller's resolved <c>systemuserid</c> (never from the client).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<QuickCreateContactOption?> ResolveDefaultAssigneeAsync(Guid callerSystemUserId, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Creates a first-class <c>sprk_todo</c> from the add-in inline "Create To Do"
     /// (email-communication-intelligence-r2, #3), regarding the record the email was filed to.
     /// </summary>
