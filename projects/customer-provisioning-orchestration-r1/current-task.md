@@ -15,7 +15,7 @@
 ## Active
 
 - **Task 264 ✅ (2026-10-22)** — H3 sets / H13 T7 verifies `removeUnverifiedEmailClaim` (#2001, R3 ISS-013; NOT this project's ISS-013 #1500, which stays open). **Live follow-up, owner OK needed:** ACME BFF app `b4882848` has `authenticationBehaviors: null` — one-off PATCH per guide H3 section (a re-run of H3 is gated with the BFF upgrade), then read back with the guide §12.3 check. Until then ACME's next H13 fails T7.
-- **Task 265 🔲 next** (`tasks/265-t7-customer-business-unit-readback.poml`, #2265) — T7 read-back of `ExternalAccess__CustomerBusinessUnitId` on both slots (write already in `faf36207d`). uac-r2 + R3 told; #2265 commented.
+- **Task 265 ✅ (2026-10-22)** — H13 T7 reads back `ExternalAccess__CustomerBusinessUnitId` on both slots (#2265; write in `faf36207d`). #2265 closes with the branch merge.
 - Merge PR body must also reference #2001 and #2265.
 
 ## Live state

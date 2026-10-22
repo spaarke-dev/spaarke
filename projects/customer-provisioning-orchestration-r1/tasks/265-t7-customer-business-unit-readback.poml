@@ -4,7 +4,7 @@
     <title>H13 T7 reads back ExternalAccess__CustomerBusinessUnitId on both slots (#2265)</title>
     <phase>Model 1 dedicated-stamp remediation — cross-project hand-off (2026-10-22, uac-r2 + SPA-r3)</phase>
     <gate>before any non-dev stamp run</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs (H13 trap T7) and tests; the setting decides the owner of every contact the BFF's external registration creates.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -76,5 +76,20 @@
 
   <notes>
     <note date="2026-10-22">Created from #2265. The write already exists (H4b, faf36207d); this is the read-back only.</note>
+    <note date="2026-10-22">Done (code + tests + guide; no live change). TrapVerificationRequest.CustomerBusinessUnitId, set
+      by H13 from InterStepState (HandlerRunInputs: H13 Output, required:false — T7 owns the verdict); T7 fourth clause
+      CheckCustomerBusinessUnit on both slots (FindSetting rules: case-insensitive name, GUID compare, ambiguous case-variants
+      fail); a run without H10's unit (blank / unparseable / all-zero) fails. The clause is in Evaluate, so a Graph read
+      failure (T264 SettingsVerdictOrDeferral) cannot hide it. Remediation: start a new run (a resume does not re-run a
+      completed H4b) or the one-line `az webapp config appsettings set`, then H13. Guide §9 T7 row, §12.3 checks, H4b note.
+      ControlPlane.Tests 3176 passed, 0 failed, 1 skipped (pre-existing); fail-before proof: 18 of 65 T7 tests fail with the
+      check stubbed. Review: one adversarial pass — nothing F-class (BFF binding checked on master: Guid? via BindConfiguration,
+      Linux App Service `__` form, no false pass); K3 remediation wording and K4 changelog order fixed. Second full pass not
+      run: no F-class finding, fixes are message text + doc order (re-verified by tests). Known limits: K1 T7 does not repeat
+      the BFF's Secure Record / default-owner-team checks (H10 structure; header says so); K2 a KV-reference or case-variant
+      duplicate value fails T7 although the BFF binds it (manual edits only); K3 the setting name is a literal here and in
+      manifest.yaml (a rename fails closed). ACME: its next run's H4b writes the setting before H13 (per-run idempotency), so
+      T7 does not fail there for this clause.
+      rework: fix-round-1 task 265</note>
   </notes>
 </task>

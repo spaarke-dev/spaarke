@@ -102,6 +102,11 @@ public interface IE2ETrapVerifier
 /// <c>AzureAd__TenantId</c> (Spaarke's tenant — it would bind Spaarke's staff into the customer's environment).
 /// OPTIONAL TRAILING FIELD.
 /// </param>
+/// <param name="CustomerBusinessUnitId">
+/// Task 265 (#2265): the customer's own business unit (H10 output, <c>InterStepState.CustomerBusinessUnitId</c>, "D"-format
+/// GUID). T7 passes only when both slots carry it as <c>ExternalAccess__CustomerBusinessUnitId</c> (H4b writes it). OPTIONAL
+/// TRAILING FIELD; blank or unparseable → T7 Failed (the run carries no H10 customer business unit).
+/// </param>
 public sealed record TrapVerificationRequest(
     string CustomerId,
     string RunId,
@@ -118,7 +123,8 @@ public sealed record TrapVerificationRequest(
     string SpeContainerId = "",
     string ExchangeScopeGroupId = "",
     IReadOnlyList<string>? CustomerWorkforceTenantIds = null,
-    string TenancyModel = "");
+    string TenancyModel = "",
+    string CustomerBusinessUnitId = "");
 
 /// <summary>
 /// The 7 §4B silent-fail traps, enumerated (matches design.md §4B; T7 added by task 238).
@@ -151,6 +157,8 @@ public enum TrapKind
     /// first sign-in of a customer employee. Task 264: and the stamp's BFF app registration carries
     /// <c>authenticationBehaviors.removeUnverifiedEmailClaim = true</c> — without it the email-bound contact
     /// registration lets a user with an unverified-domain email register as the contact owning that email.
+    /// Task 265: and <c>ExternalAccess__CustomerBusinessUnitId</c> equal to H10's customer business unit — without it the
+    /// BFF's external registration answers 500 <c>registration_owner_unconfigured</c> and first-sign-in contact creates are refused.
     /// </summary>
     T7CustomerIdentityExplicit = 7,
 }

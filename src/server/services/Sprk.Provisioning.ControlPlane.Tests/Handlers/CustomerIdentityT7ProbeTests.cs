@@ -25,6 +25,11 @@
 // fake HTTP handler (the same ArmSdkTestFakes.NewHandler transport), so the tests prove the one v1.0 read the probe issues
 // (applications(appId='...'), tenant-scoped via the factory). false / null / absent / 404 fail; a read error is an
 // InfraFault, never a Passed. The decision itself is the pure EvaluateUnverifiedEmailClaim.
+//
+// Task 265 (#2265): a fourth clause on the same two slot reads — ExternalAccess__CustomerBusinessUnitId parses as a GUID
+// equal to the run's InterStepState.CustomerBusinessUnitId (H10). Missing on a slot, blank, non-GUID, a different GUID, two
+// case-variant names with different values, and a run that carries no unit all fail; the same GUID in another hex case
+// passes. The decision itself is the pure CheckCustomerBusinessUnit.
 // -----------------------------------------------------------------------------
 
 using System.Net;
@@ -50,6 +55,9 @@ public sealed class CustomerIdentityT7ProbeTests
     private const string BffAppRegId = "33333333-3333-3333-3333-333333333333";
     private const string WorkforceA = "d0e0c0a0-0000-4000-8000-000000000003";
     private const string WorkforceB = "e1e1e1e1-0000-4000-8000-000000000004";
+    private const string CustomerBu = "a1b2c3d4-0000-4000-8000-0000000000aa";   // H10's CustomerBusinessUnitId ("D" format)
+    private const string OtherBu = "b2c3d4e5-0000-4000-8000-0000000000bb";
+    private const string BuSetting = "ExternalAccess__CustomerBusinessUnitId";
 
     [Fact]
     public async Task ProbeAsync_BothSlotsCarryRunCustomerId_ReturnsPassed()
@@ -413,9 +421,178 @@ public sealed class CustomerIdentityT7ProbeTests
             .Should().Contain("= absent");
     }
 
+    // ---------- task 265: the customer business unit ----------
+
+    [Fact]
+    public async Task ProbeAsync_BothSlotsCarryTheRunsCustomerBusinessUnit_ReturnsPassed()
+    {
+        var arm = new FakeSlotSettingsArm(Settings(CustomerId), Settings(CustomerId));
+
+        var outcome = await NewProbe(arm).ProbeAsync(Request(), CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.Passed>();
+        arm.Reads.Should().HaveCount(3, "the unit rides on the same production + staging reads");
+    }
+
+    [Fact]
+    public async Task ProbeAsync_StagingLacksTheCustomerBusinessUnit_ReturnsFailedNamingStaging()
+    {
+        var arm = new FakeSlotSettingsArm(Settings(CustomerId), Settings(CustomerId, businessUnit: null));
+
+        var outcome = await NewProbe(arm).ProbeAsync(Request(), CancellationToken.None);
+
+        var failed = outcome.Should().BeOfType<TrapVerificationOutcome.Failed>().Subject;
+        failed.Diagnostic.Should().Contain($"staging [MISSING — no {BuSetting} setting]")
+            .And.Contain("production [OK]")
+            .And.Contain(CustomerBu, "the expected unit is a public identifier")
+            .And.Contain("registration_owner_unconfigured")
+            .And.Contain("#1673")
+            .And.Contain("start a new run (a resume does not re-run a completed H4b)").And.Contain("az webapp config appsettings set");
+        failed.Diagnostic.Should().NotContain("Customer__Id='", "Customer__Id and the workforce list are fine")
+            .And.NotContain(KeyVaultRef, "no other app setting is ever reported");
+    }
+
+    [Fact]
+    public async Task ProbeAsync_ProductionLacksTheCustomerBusinessUnit_ReturnsFailedNamingProduction()
+    {
+        var arm = new FakeSlotSettingsArm(Settings(CustomerId, businessUnit: null), Settings(CustomerId));
+
+        var outcome = await NewProbe(arm).ProbeAsync(Request(), CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.Failed>()
+            .Which.Diagnostic.Should().Contain("production [MISSING").And.Contain("staging [OK]");
+    }
+
+    [Theory]
+    [InlineData("   ", "[BLANK")]
+    [InlineData("", "[BLANK")]
+    [InlineData("not-a-guid", "[UNPARSEABLE — " + BuSetting + "='not-a-guid'")]
+    [InlineData(OtherBu, "[MISMATCH — " + BuSetting + "='" + OtherBu + "'")]
+    [InlineData("00000000-0000-0000-0000-000000000000", "[MISMATCH")]
+    public async Task ProbeAsync_CustomerBusinessUnitBlankUnparseableOrDifferent_ReturnsFailed(string observed, string expected)
+    {
+        var arm = new FakeSlotSettingsArm(Settings(CustomerId), Settings(CustomerId, businessUnit: observed));
+
+        var outcome = await NewProbe(arm).ProbeAsync(Request(), CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.Failed>()
+            .Which.Diagnostic.Should().Contain($"staging {expected}").And.Contain("production [OK]");
+    }
+
+    [Fact]
+    public async Task ProbeAsync_CustomerBusinessUnitInAnotherHexCase_ReturnsPassed()
+    {
+        var arm = new FakeSlotSettingsArm(
+            Settings(CustomerId, businessUnit: CustomerBu.ToUpperInvariant()),
+            Settings(CustomerId, businessUnit: "{" + CustomerBu + "}"));
+
+        var outcome = await NewProbe(arm).ProbeAsync(Request(), CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.Passed>("the clause compares GUIDs, not strings");
+    }
+
+    [Fact]
+    public async Task ProbeAsync_RunCarriesUppercaseUnitAndSlotsLowercase_ReturnsPassed()
+    {
+        var arm = new FakeSlotSettingsArm(Settings(CustomerId), Settings(CustomerId));
+
+        var outcome = await NewProbe(arm).ProbeAsync(
+            Request() with { CustomerBusinessUnitId = CustomerBu.ToUpperInvariant() }, CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.Passed>();
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("  ")]
+    [InlineData("not-a-guid")]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    public async Task ProbeAsync_RunCarriesNoCustomerBusinessUnit_ReturnsFailedEvenWhenSlotsCarryOne(string runValue)
+    {
+        var arm = new FakeSlotSettingsArm(Settings(CustomerId), Settings(CustomerId));
+
+        var outcome = await NewProbe(arm).ProbeAsync(
+            Request() with { CustomerBusinessUnitId = runValue }, CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.Failed>()
+            .Which.Diagnostic.Should().Contain("no InterStepState.CustomerBusinessUnitId").And.Contain("start a new run");
+    }
+
+    [Fact]
+    public async Task ProbeAsync_CaseVariantUnitNamesWithDifferentValues_ReturnsFailedAmbiguous()
+    {
+        var production = Settings(CustomerId);
+        production["externalaccess__customerbusinessunitid"] = OtherBu;   // the BFF binds one of the two; which cannot be told
+        var arm = new FakeSlotSettingsArm(production, Settings(CustomerId));
+
+        var outcome = await NewProbe(arm).ProbeAsync(Request(), CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.Failed>()
+            .Which.Diagnostic.Should().Contain("production [AMBIGUOUS").And.Contain("staging [OK]");
+    }
+
+    [Fact]
+    public async Task ProbeAsync_UnitSettingNameInAnotherCase_ReturnsPassed()
+    {
+        var staging = Settings(CustomerId, businessUnit: null);
+        staging["EXTERNALACCESS__CUSTOMERBUSINESSUNITID"] = CustomerBu;   // names bind case-insensitively, like Customer__Id
+        var arm = new FakeSlotSettingsArm(Settings(CustomerId), staging);
+
+        var outcome = await NewProbe(arm).ProbeAsync(Request(), CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.Passed>();
+    }
+
+    [Fact]
+    public async Task ProbeAsync_UnitWrongAndGraphReadFails_ReturnsFailedNotInfraFault()
+    {
+        // The unit clause is a settings clause: SettingsVerdictOrDeferral must still report it when the app-registration read fails.
+        var arm = new FakeSlotSettingsArm(Settings(CustomerId), Settings(CustomerId, businessUnit: OtherBu));
+
+        var outcome = await NewProbe(arm, FakeGraph.WithStatus(HttpStatusCode.Forbidden, "Authorization_RequestDenied"))
+            .ProbeAsync(Request(), CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.Failed>()
+            .Which.Diagnostic.Should().Contain("staging [MISMATCH — " + BuSetting).And.Contain("clause was not read");
+    }
+
+    [Fact]
+    public async Task ProbeAsync_UnitWrongAndAppRegistrationWrong_ReportsBothClauses()
+    {
+        var arm = new FakeSlotSettingsArm(Settings(CustomerId, businessUnit: null), Settings(CustomerId));
+
+        var outcome = await NewProbe(arm, FakeGraph.WithFlag(false)).ProbeAsync(Request(), CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.Failed>()
+            .Which.Diagnostic.Should().Contain("production [MISSING — no " + BuSetting).And.Contain("removeUnverifiedEmailClaim = false");
+    }
+
+    [Fact]
+    public void CheckCustomerBusinessUnit_MatchingValue_ReturnsNull()
+    {
+        CustomerIdentityT7Probe.CheckCustomerBusinessUnit(
+            new Dictionary<string, string> { [BuSetting] = " " + CustomerBu.ToUpperInvariant() + " " }, CustomerBu).Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("nope")]
+    public void CheckCustomerBusinessUnit_NoExpectedUnit_ReturnsAProblemWhateverTheSettingHolds(string? expected)
+    {
+        CustomerIdentityT7Probe.CheckCustomerBusinessUnit(
+            new Dictionary<string, string> { [BuSetting] = CustomerBu }, expected).Should().StartWith("[NO EXPECTED UNIT");
+    }
+
+    [Fact]
+    public void CheckCustomerBusinessUnit_NullSettings_ReturnsMissing()
+    {
+        CustomerIdentityT7Probe.CheckCustomerBusinessUnit(null, CustomerBu).Should().StartWith("[MISSING");
+    }
+
     // ---------- helpers ----------
 
-    private static Dictionary<string, string> Settings(string? customerId)
+    private static Dictionary<string, string> Settings(string? customerId, string? businessUnit = CustomerBu)
     {
         var settings = new Dictionary<string, string>
         {
@@ -430,6 +607,11 @@ public sealed class CustomerIdentityT7ProbeTests
         settings["AzureAd__TenantId"] = RunTenantId;
         settings["WorkforceIdentity__CustomerTenantIds__0"] = WorkforceA;
         settings["WorkforceIdentity__CustomerTenantIds__1"] = WorkforceB;
+        // T265: what H4b writes from H10's output (null → the setting is absent on the slot).
+        if (businessUnit is not null)
+        {
+            settings[BuSetting] = businessUnit;
+        }
         return settings;
     }
 
@@ -445,7 +627,8 @@ public sealed class CustomerIdentityT7ProbeTests
         AppServiceName: AppServiceName,
         ResourceGroupName: ResourceGroupName,
         CustomerWorkforceTenantIds: [WorkforceA, WorkforceB],
-        TenancyModel: "Model1");
+        TenancyModel: "Model1",
+        CustomerBusinessUnitId: CustomerBu);
 
     private static CustomerIdentityT7Probe NewProbe(FakeSlotSettingsArm arm, FakeGraph? graph = null) => new(
         ArmSdkTestFakes.NewArmClient(ArmSdkTestFakes.NewHandler(arm.Respond)),

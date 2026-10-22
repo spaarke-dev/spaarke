@@ -6,6 +6,8 @@
 // customer's WORKFORCE TENANT LIST on the same two reads.
 // Task 264 (#2001 from SPA-r3 ISS-013) — extended to the BFF app registration's
 // removeUnverifiedEmailClaim (one tenant-scoped Graph read).
+// Task 265 (#2265 from uac-r2 / SPA-r3; R3 ISS-005 #1673) — extended to the customer business unit on the
+// same two slot reads.
 //
 // THE TRAP (Customer__Id). The BFF answers "which customer am I serving?" from the
 // app setting `Customer__Id`, and only when it is absent derives the id from
@@ -36,27 +38,43 @@
 // H3 creates the registration and L2 owns it (Application.ReadWrite.OwnedBy) — no new Graph
 // permission. The multitenant SPA client's own flag is an operator one-time setting, not read.
 //
+// THE TRAP (customer business unit, T265; #2265). The BFF's external registration
+// (POST /api/v1/external/registration) owns every contact it creates by the app setting
+// ExternalAccess__CustomerBusinessUnitId (config key ExternalAccess:CustomerBusinessUnitId): without it the
+// endpoint answers 500 registration_owner_unconfigured, and R3's first-sign-in contact creates (#1673) are
+// refused; a DIFFERENT unit would own the customer's contacts in the wrong place. Both are silent at boot.
+// H10 creates the customer's unit (a direct child of the environment's root, sibling of the Secure Record
+// unit — refused structurally at H10, so this clause does not look the unit up in Dataverse); H4b writes its
+// id ("D"-format GUID, InterStepState.CustomerBusinessUnitId) to BOTH slots. This clause reads both back and
+// compares them as GUIDs (hex case is irrelevant). Only the GUIDs — public identifiers — are ever echoed.
+//
 // OUTCOMES
 //   Passed     — both slots: Customer__Id == request.CustomerId (ordinal), AND the
 //                settings under WorkforceIdentity__CustomerTenantIds (every child, the
 //                bare key included — .NET binds each child into the list) parse to exactly
 //                the run's tenant ids (same set, no duplicate, no extra, no unparseable
 //                value), none equal to the slot's AzureAd__TenantId on a Model 1 stamp;
-//                AND the BFF app registration's removeUnverifiedEmailClaim is true.
+//                AND the BFF app registration's removeUnverifiedEmailClaim is true;
+//                AND both slots: ExternalAccess__CustomerBusinessUnitId parses as a GUID equal to the
+//                run's InterStepState.CustomerBusinessUnitId (the name is matched case-insensitively,
+//                like Customer__Id).
 //   Failed     — either slot missing / blank / a different Customer__Id (a case-only
 //                difference included: the value is canonical by the customerId standard
 //                and is never normalised — INCOMING §1.1), two Customer__Id names differing
 //                only in case with different values (ambiguous); a workforce list that is
 //                missing or differs; or a run that carries no list (created before T255);
 //                the BFF app registration's removeUnverifiedEmailClaim null / false / absent
-//                (authenticationBehaviors itself null), or the registration not found (404).
+//                (authenticationBehaviors itself null), or the registration not found (404);
+//                either slot's ExternalAccess__CustomerBusinessUnitId missing / blank / not a GUID /
+//                a different GUID, two names differing only in case with different values (ambiguous),
+//                or a run that carries no H10 customer business unit (blank / not a GUID).
 //   InfraFault — a request field (incl. BffAppRegId, TenantId) is missing or unparseable, an
 //                ARM or Graph read fails (ODataError, 401/403/5xx, timeout), or the reads
 //                exceed H13AcceptanceOptions.TrapVerifierTimeout. Never Passed on a read failure.
 //
 // What it is NOT: Customer__Id is defence in depth and an observability handle,
 // not the customer boundary — that is the dedicated per-customer resource
-// (INCOMING §5). Only Customer__Id and the workforce tenant ids (public identifiers)
+// (INCOMING §5). Only Customer__Id, the workforce tenant ids and the customer business unit id (public identifiers)
 // are ever logged or reported (length-capped, control characters escaped); no other
 // app setting is (several are Key Vault references).
 //
@@ -84,7 +102,8 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 /// <summary>
 /// H13 trap T7 — both App Service slots carry <c>Customer__Id</c> equal to the run's customerId and (task 255) exactly
 /// the run's customer workforce tenant list, and (task 264) the stamp's BFF app registration has
-/// <c>authenticationBehaviors.removeUnverifiedEmailClaim = true</c>.
+/// <c>authenticationBehaviors.removeUnverifiedEmailClaim = true</c>, and (task 265) both slots carry
+/// <c>ExternalAccess__CustomerBusinessUnitId</c> equal to H10's customer business unit.
 /// </summary>
 public sealed class CustomerIdentityT7Probe : ITrapProbe
 {
@@ -93,6 +112,9 @@ public sealed class CustomerIdentityT7Probe : ITrapProbe
 
     /// <summary>Task 255: the BFF registration's tenant (Spaarke's on a Model 1 stamp).</summary>
     internal const string AzureAdTenantIdSettingName = "AzureAd__TenantId";
+
+    /// <summary>Task 265: the app setting the BFF binds to <c>ExternalAccess:CustomerBusinessUnitId</c> (H4b writes it from H10's output).</summary>
+    internal const string CustomerBusinessUnitSettingName = "ExternalAccess__CustomerBusinessUnitId";
 
     /// <summary>Staging slot name (parity with app-service.bicep and the T1 / T5 probes).</summary>
     internal const string DefaultStagingSlotName = "staging";
@@ -323,15 +345,19 @@ public sealed class CustomerIdentityT7Probe : ITrapProbe
         var productionWorkforce = CheckWorkforceTenants(productionSettings, expected, isModel1);
         var stagingWorkforce = CheckWorkforceTenants(stagingSettings, expected, isModel1);
 
+        var productionBusinessUnit = CheckCustomerBusinessUnit(productionSettings, request.CustomerBusinessUnitId);
+        var stagingBusinessUnit = CheckCustomerBusinessUnit(stagingSettings, request.CustomerBusinessUnitId);
+
         if (productionShape == SlotShape.Ok && stagingShape == SlotShape.Ok
             && productionWorkforce is null && stagingWorkforce is null
+            && productionBusinessUnit is null && stagingBusinessUnit is null
             && unverifiedEmailProblem is null)
         {
             if (logPass)
             {
                 _logger.LogInformation(
-                    "T7 probe PASSED: both slots carry Customer__Id={CustomerId} and the {Count} workforce tenant(s), and the BFF app registration removes unverified emails. appService={AppService}",
-                    request.CustomerId, expected.Count, request.AppServiceName);
+                    "T7 probe PASSED: both slots carry Customer__Id={CustomerId}, the {Count} workforce tenant(s) and the customer business unit {BusinessUnitId}, and the BFF app registration removes unverified emails. appService={AppService}",
+                    request.CustomerId, expected.Count, request.CustomerBusinessUnitId.Trim(), request.AppServiceName);
             }
             return new TrapVerificationOutcome.Passed(Kind);
         }
@@ -361,6 +387,25 @@ public sealed class CustomerIdentityT7Probe : ITrapProbe
                 "H4b writes the list to both slots and removes stale indices — re-run H4b (a new run if its idempotency key " +
                 "is already recorded), then H13.");
         }
+        if (productionBusinessUnit is not null || stagingBusinessUnit is not null)
+        {
+            var runHasUnit = TryParseBusinessUnit(request.CustomerBusinessUnitId, out var expectedUnit);
+            problems.Add(
+                $"expected both slots to carry {CustomerBusinessUnitSettingName} = " +
+                (runHasUnit
+                    ? $"'{expectedUnit:D}' (H10's customer business unit). "
+                    : "H10's customer business unit — but this run carries no InterStepState.CustomerBusinessUnitId (blank or not a GUID): " +
+                      "H10 did not record it, or the run predates T259. ") +
+                $"Observed: production {productionBusinessUnit ?? "[OK]"}; {DefaultStagingSlotName} {stagingBusinessUnit ?? "[OK]"}. " +
+                "Without it the BFF's external registration answers 500 registration_owner_unconfigured and first-sign-in " +
+                "contact creates are refused (R3 #1673); a different unit would own the customer's contacts in the wrong place. " +
+                "H4b writes it from H10's output to both slots — start a new run (a resume does not re-run a completed H4b)" +
+                (runHasUnit
+                    ? $", or set it on the affected slot(s) with `az webapp config appsettings set -g {request.ResourceGroupName} " +
+                      $"-n {request.AppServiceName} [--slot {DefaultStagingSlotName}] --settings {CustomerBusinessUnitSettingName}={expectedUnit:D}`, " +
+                      "then re-run H13."
+                    : ". H10 never recorded the unit on this run, so only a new run fixes it."));
+        }
         if (unverifiedEmailProblem is not null)
         {
             problems.Add(
@@ -378,6 +423,43 @@ public sealed class CustomerIdentityT7Probe : ITrapProbe
         _logger.LogWarning("T7 probe FAILED: {Diagnostic}", diagnostic);
         return new TrapVerificationOutcome.Failed(Kind, diagnostic);
     }
+
+    /// <summary>
+    /// Task 265: null when the slot carries <see cref="CustomerBusinessUnitSettingName"/> as a GUID equal to
+    /// <paramref name="expected"/> (the run's H10 customer business unit, compared as GUIDs — hex case is irrelevant);
+    /// otherwise a bracketed description of what is wrong. A blank or unparseable <paramref name="expected"/> is itself a
+    /// problem (the run carries no H10 unit). The setting NAME is matched like <c>Customer__Id</c> (case-insensitive; two
+    /// case-variant names with different values are ambiguous). Only this setting's value is echoed.
+    /// </summary>
+    internal static string? CheckCustomerBusinessUnit(IDictionary<string, string>? settings, string? expected)
+    {
+        if (!TryParseBusinessUnit(expected, out var expectedUnit))
+        {
+            return "[NO EXPECTED UNIT — the run carries no H10 customer business unit to compare against]";
+        }
+
+        var lookup = FindSetting(settings, CustomerBusinessUnitSettingName);
+        if (lookup.Ambiguous)
+        {
+            return $"[AMBIGUOUS — several {CustomerBusinessUnitSettingName} names differing only in case, with different values]";
+        }
+        if (lookup.Value is null)
+        {
+            return $"[MISSING — no {CustomerBusinessUnitSettingName} setting]";
+        }
+        if (string.IsNullOrWhiteSpace(lookup.Value))
+        {
+            return $"[BLANK — {CustomerBusinessUnitSettingName} is set but empty]";
+        }
+        if (!Guid.TryParse(lookup.Value.Trim(), out var observed))
+        {
+            return $"[UNPARSEABLE — {CustomerBusinessUnitSettingName}='{Sanitize(lookup.Value)}' is not a GUID]";
+        }
+        return observed == expectedUnit ? null : $"[MISMATCH — {CustomerBusinessUnitSettingName}='{observed:D}']";
+    }
+
+    private static bool TryParseBusinessUnit(string? value, out Guid unit)
+        => Guid.TryParse(value?.Trim(), out unit) && unit != Guid.Empty;
 
     /// <summary>
     /// Task 255: null when the slot's workforce tenant settings are exactly <paramref name="expected"/>; otherwise a

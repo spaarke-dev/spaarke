@@ -286,6 +286,9 @@ public static class HandlerRunInputs
                 // T255: T7 checks both slots carry exactly this list (absent → T7 Failed: the stamp denies every
                 // first sign-in of a customer employee).
                 RunInput.Intake(IntakeParameterCatalog.CustomerWorkforceTenantIds, required: false),
+                // T265 (#2265): T7 checks both slots carry ExternalAccess__CustomerBusinessUnitId == H10's customer unit
+                // (absent → T7 Failed, not an H13 rejection).
+                RunInput.Output(nameof(InterStepState.CustomerBusinessUnitId), required: false),
             ],
             [HandlerIds.H14] =
             [

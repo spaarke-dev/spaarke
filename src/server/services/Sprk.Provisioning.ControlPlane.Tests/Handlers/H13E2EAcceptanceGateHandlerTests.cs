@@ -88,6 +88,7 @@ public sealed class H13E2EAcceptanceGateHandlerTests
     private const string ResourceGroupName = "rg-spaarke-acme-prod";
     private const string AppServiceName = "sprk-bff-acme";
     private const string KeyVaultName = "sprk-acme-prod-kv";
+    private const string CustomerBusinessUnitId = "a1b2c3d4-0000-4000-8000-0000000000aa";   // H10 output (task 265)
     private const string EnvironmentId = "b0000000-0000-0000-0000-000000000001";
 
     // ---------- AC-1 happy path ----------
@@ -268,6 +269,7 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         trapRequest.AppServiceName.Should().Be(AppServiceName);
         trapRequest.KeyVaultName.Should().Be(KeyVaultName, "the trap probes check the CUSTOMER vault (H2a output)");
         trapRequest.ContainerTypeId.Should().Be("ct-from-intake", "T6 selects the SPE owning-app credential by container type (task 245b)");
+        trapRequest.CustomerBusinessUnitId.Should().Be(CustomerBusinessUnitId, "T7 compares both slots' ExternalAccess__CustomerBusinessUnitId with H10's unit (task 265)");
         seams.Invariants.LastRequest!.ContainerTypeId.Should().Be("ct-from-intake", "I4 compares the BFF's container type with the run's (task 227c)");
         seams.Invariants.LastRequest.SpeContainerId.Should().Be(run.InterStepState.SpeContainerId ?? string.Empty,
             "I4 compares the BFF's container settings with H8's container (task 227c)");
@@ -278,6 +280,20 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         columns["sprk_appservicename"].Should().Be(AppServiceName);
         columns["sprk_keyvaultname"].Should().Be(KeyVaultName);
         columns["sprk_containertypeid"].Should().Be("ct-from-intake");
+    }
+
+    [Fact]
+    public async Task AC2j_NoCustomerBusinessUnitInInterStepState_PassesEmptyToT7_NotAnH13Rejection()
+    {
+        var run = BuildRun();
+        run.InterStepState.CustomerBusinessUnitId = null;
+        var repo = new FakeRepository(run, etag: "etag-2j");
+        var handler = BuildHandler(repo, out var seams);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>("T7 owns the verdict on a missing unit, not an H13 pre-check");
+        seams.Traps.LastRequest!.CustomerBusinessUnitId.Should().BeEmpty();
     }
 
     private static void ClearInterStepStateValue(ProvisioningRun run, string property)
@@ -1144,6 +1160,8 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         run.InterStepState.ResourceGroupName = ResourceGroupName;
         run.InterStepState.AppServiceName = AppServiceName;
         run.InterStepState.KeyVaultName = KeyVaultName;
+        // H10 output (task 265) — T7 reads both slots' ExternalAccess__CustomerBusinessUnitId against it.
+        run.InterStepState.CustomerBusinessUnitId = CustomerBusinessUnitId;
         return run;
     }
 
