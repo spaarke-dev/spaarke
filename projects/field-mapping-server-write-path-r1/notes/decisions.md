@@ -151,3 +151,22 @@ seam tests (re-checked 27bac15a42: no objection, 2026-10-21).
 - **Rejected:** option 2 (matching security profiles); it adds a comparison and gains nothing. Option 3 (Repair never
   maps) is the fallback if 033 slips past 052's need date.
 - **Safety until 033:** nothing calls Repair (`RecordRepairReachabilityTests`); 052 is hard-blocked on 033.
+
+## 2026-10-21 — Task 018 split, and the Office fill-only and fixture rulings
+
+The 018 implementer stopped before writing code (the budget, plus live changes beyond the brief). The main session decided:
+
+1. **Office mapping becomes fill-only (option a).** The spec covers this: Q6 (fill-only, caller wins; FR-02), with Q10 putting Office in scope. NFR-07 holds Office's **error codes** fixed, not its mapping semantics.
+   - Four Office contract assertions pin the legacy overwrite and its warnings: `Post_Matter_WhenMappingBlanksTheName_KeepsTheRequestedName`, the Project equivalent, `…WritesANonMatterTypeValue_KeepsTheRequestedType`, and `…AndNoTypeWasRequested_RemovesIt`. They are rewritten to the fill-only outcome. Each change is listed in the 018 notes.
+   - Release note: a mapping rule no longer replaces a value the user entered in Office quick-create.
+   - Option b (a legacy overwrite mode) is rejected: it would mean two mapping semantics, contrary to FR-02.
+2. **The contract fixtures follow the new write.** The service writes one Web API dictionary through `IFieldMappingDataverseService.UpdateRecordFieldsAsync` and retries on 412. The Office contract tests may capture that write and read their assertions from it; a fixture helper may view the dictionary as typed values. What each test asserts (the values written, the codes, the responses) stays the same. Assertions about the mechanism (`CreateAsync` `Times.Once`, `SetupSequence` duplicate-key retries) are re-expressed against the new write, and each is listed in the notes.
+3. **Further live changes go to UAC-r2 for condition (b)** before 018b:
+   - the Assigned To contact named in a request now gets an AppendTo check;
+   - a Matter create with no bearer token now gets 500 `caller_rights_unverifiable`;
+   - the matter/project post-create order gains the I-1 re-stamp and I-16, and the membership event moves from `OfficeEndpoints.cs:1858` into the service.
+4. **018 runs in three phases (three PRs), with one POML:**
+   - **018a:** service prerequisites, no live change (K1, K3, the K-3 reference drop-with-warning path, the K-7 post-mapping default hook).
+   - **018b:** the Matter/Project adapter, after item 3.
+   - **018c:** delete the Office core and re-point or retire the nine test files.
+   - The Invoice leg waits for ebilling-r1; it uses nothing from `OfficeRecordCreationService`.
