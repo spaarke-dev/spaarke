@@ -49,6 +49,25 @@ import { isApiError } from '../utils/thrownFetchError';
  * `bffBaseUrl`) so a Create*Wizard service can call the engine directly with the
  * dependencies it already holds.
  */
+
+/**
+ * The text of a caught error. An Xrm.WebApi rejection is a plain `{ code, message }` object, not an `Error`, so
+ * `String(err)` printed "[object Object]" (#2281).
+ */
+function describeError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === 'object' && typeof (err as { message?: unknown }).message === 'string') {
+    return (err as { message: string }).message;
+  }
+  if (typeof err === 'string') return err;
+  try {
+    // JSON.stringify returns undefined for undefined, a function or a symbol, though its type says string.
+    return (JSON.stringify(err) as string | undefined) ?? String(err);
+  } catch {
+    return String(err);
+  }
+}
+
 export interface IApplyFieldMappingsArgs {
   /** Source entity logical name (e.g. "sprk_matter"). */
   sourceEntity: string;
@@ -169,7 +188,7 @@ export async function applyFieldMappings(args: IApplyFieldMappingsArgs): Promise
     try {
       await applyRule(rule, context);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = describeError(err);
       warnings.push(`Rule "${rule.sourceField}"→"${rule.targetField}" threw and was skipped: ${message}`);
     }
   }
@@ -225,7 +244,7 @@ async function fetchProfile(
       warnings.push(`Field-mapping profile fetch failed (HTTP ${err.status}): ${err.message}`);
       return null;
     }
-    const message = err instanceof Error ? err.message : String(err);
+    const message = describeError(err);
     warnings.push(`Field-mapping profile fetch threw and was treated as no-profile: ${message}`);
     return null;
   }
@@ -380,7 +399,7 @@ async function fetchSourceRecordForRules(
     const options = `?$select=${Array.from(selectFields).join(',')}`;
     return await dataService.retrieveRecord(sourceEntity, sourceId, options);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = describeError(err);
     warnings.push(
       `Failed to fetch source record "${sourceEntity}"(${sourceId}) for Copy/Concat/Template rules; ` +
         `all such rules were skipped: ${message}`

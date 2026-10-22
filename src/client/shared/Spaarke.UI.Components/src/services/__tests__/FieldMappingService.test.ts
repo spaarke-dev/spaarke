@@ -661,6 +661,37 @@ describe('FieldMappingService — Default/Concat/Template engines (task 013)', (
   });
 });
 
+describe('FieldMappingService — error text (#2281)', () => {
+  it('a source fetch rejected with an Xrm.WebApi error object warns with its message, never "[object Object]"', async () => {
+    const rule = makeRule({ targetField: 'sprk_description', sourceFieldType: 'Text', targetFieldType: 'Text' });
+    const dataService: IDataService = {
+      createRecord: jest.fn(async () => 'new-id'),
+      retrieveRecord: jest.fn(async () => {
+        // The shape Xrm.WebApi rejects with: a plain object, not an Error.
+        throw { code: 0x80060888, message: "Could not find a property named 'sprk_assignedattorney1'" };
+      }),
+      retrieveMultipleRecords: jest.fn(async () => ({ entities: [] })),
+      updateRecord: jest.fn(async () => undefined),
+      deleteRecord: jest.fn(async () => undefined),
+    };
+
+    const result = await applyFieldMappings({
+      sourceEntity: 'sprk_matter',
+      sourceId: SOURCE_ID,
+      targetEntity: 'sprk_event',
+      payload: {},
+      dataService,
+      authenticatedFetch: makeAuthenticatedFetch([rule]),
+      bffBaseUrl: 'https://bff.example.com',
+    });
+
+    expect(result.warnings).toHaveLength(1);
+    // The Dataverse message itself, not the serialized error object.
+    expect(result.warnings[0]).toMatch(/rules were skipped: Could not find a property named 'sprk_assignedattorney1'$/);
+    expect(result.warnings[0]).not.toContain('[object Object]');
+  });
+});
+
 describe('FieldMappingService — same-entity support (task 014)', () => {
   it('a same-entity (matter -> matter) self-named Copy rule applies the parent value to the target payload — not a no-op', async () => {
     // sourceEntity === targetEntity === 'sprk_matter', AND sourceField ===
