@@ -17,7 +17,8 @@ namespace Sprk.Bff.Api.Tests.DataMutation.ChildAccessPermission;
 /// applied to every child the push reaches, so one push from a Standard matter would otherwise clear the own narrowing of
 /// each child document (D7: a child narrows, never widens). Such a rule is skipped with its reason
 /// (<see cref="InheritedAccessPermission.RefuseAppOnlyWrite"/>), and the rest of the push applies. Must not fire: the same
-/// column on a to-do or an event, and the document's other columns.
+/// column on a to-do or an event, and the document's other columns. ebilling-r1 task 088: a rule targeting the submission
+/// marker <c>sprk_restrictedbysubmission</c> on a document is skipped the same way.
 /// </summary>
 public class DocumentAccessPermissionPushTargetTests
 {
@@ -30,6 +31,7 @@ public class DocumentAccessPermissionPushTargetTests
     [InlineData("sprk_accesspermission")]
     [InlineData("sprk_accessinheritance")]
     [InlineData(" SPRK_AccessPermission ")]
+    [InlineData("sprk_restrictedbysubmission")] // ebilling-r1 task 088: the submission marker (must fire)
     public async Task APushRule_TargetingADocumentsAccessColumn_IsSkipped_AndTheOtherColumnsArePushed(string target)
     {
         var (updated, failed, skipped, errors, results) = await Push(

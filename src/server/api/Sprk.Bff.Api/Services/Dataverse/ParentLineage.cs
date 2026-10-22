@@ -563,8 +563,18 @@ internal static class InheritedAccessPermission
     internal const string AppOnlyDocumentWriteReasonCode = "sdap.access.document_access_server_only";
 
     /// <summary>
+    /// ebilling-r1 task 088 (procedure-and-file-model.md 9.1): the submission marker on an .eml Document. The Outlook add-in
+    /// invoice submission writes it, in the same create as the .eml's own Restricted narrowing and never in an update
+    /// (task 095); the invoice's (a') predicate skips only a Restricted narrowing that carries it, so the firm still sees its own
+    /// invoice (task 098). A payload that set it would un-hide an isolated invoice from external callers, so
+    /// <see cref="RefuseAppOnlyWrite"/> refuses it on a document like the Access Permission and its record.
+    /// </summary>
+    internal const string SubmissionMarkerColumn = "sprk_restrictedbysubmission";
+
+    /// <summary>
     /// Task 189 fix round C (K5): an APP-ONLY generic writer never writes a document's <see cref="Column"/> or its
-    /// own-narrowing record (<see cref="AccessInheritance.Column"/>). These writers are the Update Record playbook node and
+    /// own-narrowing record (<see cref="AccessInheritance.Column"/>), nor its submission marker
+    /// (<see cref="SubmissionMarkerColumn"/>, ebilling-r1 task 088). These writers are the Update Record playbook node and
     /// the action seam when they act for no person (<c>UpdateRecordActionCore</c>), and an AI output mapping
     /// (<c>DataverseUpdateHandler</c>). A model or a configuration builds their payload, not a person. Only
     /// <see cref="DecideDocument"/>'s writers keep the value at max(own, inherited). A payload that lowered it, or rewrote
@@ -582,11 +592,15 @@ internal static class InheritedAccessPermission
             return null;
 
         var named = keys.Select(SecureRootInheritance.NormalizeColumn)
-            .FirstOrDefault(k => k is Column or AccessInheritance.Column);
-        return named is null
-            ? null
-            : RecordOwnerResolution.Refused(AppOnlyDocumentWriteReasonCode,
-                $"{named} of a document is set by Spaarke (it keeps the document's own narrowing), so it was not written");
+            .FirstOrDefault(k => k is Column or AccessInheritance.Column or SubmissionMarkerColumn);
+        return named switch
+        {
+            null => null,
+            SubmissionMarkerColumn => RecordOwnerResolution.Refused(AppOnlyDocumentWriteReasonCode,
+                $"{named} of a document is set by Spaarke (only the invoice submission writes it, with the narrowing), so it was not written"),
+            _ => RecordOwnerResolution.Refused(AppOnlyDocumentWriteReasonCode,
+                $"{named} of a document is set by Spaarke (it keeps the document's own narrowing), so it was not written"),
+        };
     }
 
     /// <summary>What to hold and what to write on one row of a <see cref="RecordTables"/> table (task 189).</summary>

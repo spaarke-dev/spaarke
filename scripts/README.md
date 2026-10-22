@@ -1960,6 +1960,15 @@ pwsh scripts/ebilling/Deploy-EbillingProcedureSchema.ps1 -WhatIf
 pwsh scripts/ebilling/Deploy-EbillingProcedureSchema.ps1
 ```
 
+### `ebilling/Deploy-EbillingStoredFileSchema.ps1`
+
+Creates the Stored File schema for `ebilling-r1` task 088 (EB-D-148, `projects/ebilling-r1/notes/procedure-and-file-model.md` sections 4.1, 4.2, 5.2, 9.1, 10). F1: the global choice `sprk_storedfilepurpose` (Procedure source, Invoice PDF, Invoice supporting file, Export file; 100000000-100000003). F2: the user-owned, audited table `sprk_storedfile` (primary `sprk_name` = file name, 400) with the parent lookups `sprk_procedureversion`, `sprk_invoice`, `sprk_billingexport` (RemoveLink: the orphan reconcile of task 090 handles a parent deleted outside the BFF), `sprk_purpose`, `sprk_firmvisible` (default No), the local choice `sprk_filestatus` (Not yet servable, Servable, Removed), the source lookups `sprk_sourcedocument` / `sprk_sourcecommunication` (Restrict), `sprk_sourceattachmentidentity` (1000), `sprk_sourceversion` and `sprk_sizebytes` (big integer), `sprk_sourcesha256` / `sprk_sha256` (64), `sprk_contenttype` (255), `sprk_blobpath` (1024) and the unsecured `sprk_createdbyperson` (task 086 secures it); no lookup cascades assign, share, unshare or reparent. F4: the submission marker `sprk_document.sprk_restrictedbysubmission` (two options, default No; written only by task 095's submission path). F5: `sprk_invoice` status reason `Superseded` = 659490005 at statecode 1 (set only by task 097); the pre-flight stops (exit 2, nothing written) when that value or label exists with another meaning or the seven task-012 values differ. F3: field security on every F2 column except `sprk_name` and `sprk_createdbyperson`, and on F4, reusing the "Spaarke BFF-Managed Field Readers / Writers" pair (permission rows only, never a member); `sprk_blobpath` gets the writer row only (server-only). Every column is checked securable before any is secured. The pre-flight stops (exit 2) when `sprk_procedureversion` (task 080) does not exist. Idempotent check-then-create, entity-scoped publish, SpaarkeMaster header, dev only; creates no form, view or role privilege and writes no row. **Needs ontology-r1's full schema-review PASS, the before-notices to ontology-r1 and uac-r2, the owner's OK and task 080's real run before a real run.** `-WhatIf` reads only. The plan and the F5 decision are tested by `tests/scripts/Deploy-EbillingStoredFileSchema.Tests.ps1`.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingStoredFileSchema.ps1 -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingStoredFileSchema.ps1
+```
+
 ### `content-understanding/Deploy-Analyzers.ps1`
 
 Deploys Azure AI Content Understanding analyzers from `infrastructure/content-understanding/*.json` (GA API 2025-11-01, Entra token, no keys). Creates a missing analyzer, does nothing when the deployed one matches, and refuses to overwrite a differing one unless `-Replace` is passed. Analyzer ids allow only letters, digits, `.` and `_` (`sprk_invoice_v1`). Supports `-WhatIf`.
