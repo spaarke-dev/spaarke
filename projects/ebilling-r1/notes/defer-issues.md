@@ -1044,7 +1044,7 @@ Each restamps afterwards, but none refuses any of these:
 
 | Field | Value |
 |---|---|
-| **Status** | Open (owner decision: fix or accept as known limit) |
+| **Status** | Decided 2026-10-22: fix (owner). Field-secure sprk_findingsjson (BFF read/write only, also closes DEF-029) and remove it from the submission form; Decision Records store the generic Duplicate sentence. New task after 090. |
 | **Urgency** | medium |
 | **Filed** | 2026-10-21 |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2235 |
