@@ -1409,7 +1409,7 @@ public static class OfficeEndpoints
         group.MapGet("/quickcreate/defaults", GetQuickCreateDefaultsAsync)
             .WithName("OfficeQuickCreateDefaults")
             .WithSummary("Defaults for the quick-create form")
-            .WithDescription("Returns what the pane's \"+ New\" form prefills: assignedTo = the caller's own linked contact (task 141's user-contact link, never an email match), or null when the caller has none, cannot be resolved, or it could not be read. For a Matter or Project it is the contact the create assigns when the request names none (spaarkeai-word-add-in-r1 task 100).")
+            .WithDescription("Returns what the pane's \"+ New\" form prefills: assignedTo = the caller's own linked contact (task 141's user-contact link, never an email match), or null when the caller has none, cannot be resolved, it could not be read, or the caller holds no AppendTo on it (checked as the caller; a check that cannot complete offers none). For a Matter or Project it is the contact the create assigns when the request names none (spaarkeai-word-add-in-r1 task 100).")
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.Search)
             .AddOfficeAuthFilter()
             .Produces<QuickCreateDefaultsResponse>(StatusCodes.Status200OK)
@@ -1451,6 +1451,8 @@ public static class OfficeEndpoints
     private static async Task<IResult> GetQuickCreateDefaultsAsync(
         OfficeRecordCreationService recordCreation,
         Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver callerResolver,
+        Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient callerDataverse,
+        ILogger<Program> logger,
         HttpContext context,
         CancellationToken cancellationToken)
     {
@@ -1463,7 +1465,60 @@ public static class OfficeEndpoints
         }
 
         var assignedTo = await recordCreation.ResolveDefaultAssigneeAsync(callerSystemUserId, cancellationToken);
+
+        // 018b fix round 2 (K1): the pane sends this contact back as assignedToContactId, and a REQUESTED assignee the caller
+        // cannot AppendTo is refused (403 assignee_inaccessible) — whereas the maker default the create falls back on is
+        // dropped with a warning. A default the caller cannot use is therefore not offered: no prefill, so the create takes
+        // the maker-default path. The check is the service's own (AppendTo, as the caller); one that cannot complete offers none.
+        if (assignedTo is not null
+            && !await CallerMayAppendToAsync(callerDataverse, "contact", assignedTo.Id, logger, cancellationToken))
+        {
+            assignedTo = null;
+        }
+
         return TypedResults.Ok(new QuickCreateDefaultsResponse { AssignedTo = assignedTo });
+    }
+
+    /// <summary>
+    /// AS THE CALLER, whether they hold AppendTo on one record - the check the unified create makes on a named Assigned To
+    /// (<c>CallerWriteAuthorization.CheckCallerMayAppendToRecordAsync</c>). Fail closed: a WhoAmI or rights read that
+    /// cannot complete, or that throws, is "no" (a cancelled request still propagates).
+    /// </summary>
+    private static async Task<bool> CallerMayAppendToAsync(
+        Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient callerDataverse, string table, Guid recordId,
+        ILogger logger, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var me = await Sprk.Bff.Api.Services.Dataverse.CallerWriteAuthorization
+                .WhoAmIAsync(callerDataverse, cancellationToken);
+            if (me.Failure is not null)
+            {
+                logger.LogWarning("[QUICKCREATE-DEFAULTS] The caller could not be identified; no default assignee offered.");
+                return false;
+            }
+
+            var outcome = await Sprk.Bff.Api.Services.Dataverse.CallerWriteAuthorization
+                .CheckCallerMayAppendToRecordAsync(callerDataverse, me.SystemUserId, table, recordId, cancellationToken);
+            if (!outcome.Succeeded)
+            {
+                logger.LogInformation(
+                    "[QUICKCREATE-DEFAULTS] The caller holds no AppendTo on their default assignee {Table} {RecordId}; no default offered.",
+                    table, recordId);
+            }
+
+            return outcome.Succeeded;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "[QUICKCREATE-DEFAULTS] The caller's AppendTo on their default assignee could not be checked; no default offered.");
+            return false;
+        }
     }
 
     /// <summary>

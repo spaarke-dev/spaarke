@@ -392,6 +392,7 @@ public sealed class SecureRootCreateRouteFixture : ProvisionProjectTestFixture
         CallerNoAppendTo.Clear();
         CallerDataverse.Clear();
         OwnerResolver.TeamId = RecordOwnershipResolverDouble.DefaultTeamId;
+        OwnerResolver.RefusalCode = Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.SecureParentNotIsolated;
         OwnerResolver.Requests.Clear();
         OfficeCreateBodies.Clear();
         TeamBusinessUnits.Clear();

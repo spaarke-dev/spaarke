@@ -167,6 +167,53 @@ public partial class SecureRootCreateRouteTests
     }
 
     /// <summary>
+    /// 018b fix round 2 (F1-1): ownership is record-first, so a project filed under an ordinary matter whose owner the
+    /// resolver cannot name for a reason that is NOT the caller's own unit (here the matter has no owning business unit) is
+    /// 403 <c>OFFICE_022</c> with the service's own words — it must not tell the user to check THEIR business unit.
+    /// </summary>
+    [Fact]
+    public async Task OfficeQuickCreate_UnderAnOrdinaryMatterWhoseOwnerCannotBeNamed_IsOffice022_WithoutBlamingTheCallersBusinessUnit()
+    {
+        var matter = Guid.NewGuid();
+        _fixture.SeedMatter(matter, isSecure: false);
+        _fixture.CatalogMattersAs(RecordTypeRef(_fixture, "sprk_matter"));
+        _fixture.OwnerResolver.TeamId = null;
+        _fixture.OwnerResolver.RefusalCode = RecordOwnerRefusal.ParentUnresolved;
+
+        var response = await _fixture.CreateAuthenticatedClient().PostAsJsonAsync(OfficeRoute, Body(matter));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var (code, detail) = await RefusalOf(response);
+        code.Should().Be(OfficeErrorCodes.RecordOwnerUnresolved);
+        detail.Should().NotBeNullOrWhiteSpace().And.NotContainEquivalentOf("your business unit");
+        _fixture.OfficeCreateBodies.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 018b fix round 2 (F1-1, filed-under case): the matter's business unit has no default owner team
+    /// (<c>record_owner_no_default_team</c>, asked with the matter as the parent). The unit at fault is the MATTER's, not the
+    /// caller's, so the 403 <c>OFFICE_022</c> detail is neutral and never tells the caller to check their own unit.
+    /// </summary>
+    [Fact]
+    public async Task OfficeQuickCreate_UnderAnOrdinaryMatterWhoseUnitHasNoOwnerTeam_IsOffice022_WithNeutralWording()
+    {
+        var matter = Guid.NewGuid();
+        _fixture.SeedMatter(matter, isSecure: false);
+        _fixture.CatalogMattersAs(RecordTypeRef(_fixture, "sprk_matter"));
+        _fixture.OwnerResolver.TeamId = null;
+        _fixture.OwnerResolver.RefusalCode = RecordOwnerRefusal.NoDefaultOwnerTeam;
+
+        var response = await _fixture.CreateAuthenticatedClient().PostAsJsonAsync(OfficeRoute, Body(matter));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var (code, detail) = await RefusalOf(response);
+        code.Should().Be(OfficeErrorCodes.RecordOwnerUnresolved);
+        detail.Should().Contain("the business unit of the record it is filed under has no default owner team")
+            .And.NotContainEquivalentOf("your business unit");
+        _fixture.OfficeCreateBodies.Should().BeEmpty();
+    }
+
+    /// <summary>
     /// A SECURE parent the caller cannot AppendTo is refused uniformly — even with no business-unit team scripted (the
     /// AppendTo is asked before any owner): the same 403, the same code and the same words as an ORDINARY parent the
     /// caller cannot AppendTo, so the response never tells a secure matter from an ordinary one. Nothing is written.
