@@ -178,3 +178,14 @@ ebilling-r1 says the owner decided (decision L, model §4/§9) that invoices are
 - Task 018 therefore moves only Matter and Project. It leaves the Invoice leg exactly as it is, apart from a marker comment, and adds no `RecordCreationService` path for `sprk_invoice` from Office.
 - The 018 Invoice criterion is withdrawn.
 - The #1911 reconcile still adds the invoice-family `PreWriteRule` for `sprk_invoice` / `sprk_billingevent`, for the submission path.
+
+## 2026-10-21 — UAC-r2 condition (b) answers for 018b
+
+1. **Assigned To contact: refuse** when the caller lacks AppendTo on it, checked as the caller. Naming the contact grants it an uncapped Collaborate (ADR-034 A4). Dropping it with a warning would silently under-grant (NFR-03). The refusal names `assignedTo` and never reads as "matter not found". It is tested with an unreadable contact and a readable one.
+2. **No bearer token:** accept the 500 `caller_rights_unverifiable` refusal (fail closed).
+3. **Post-create order: OK, on three conditions, each tested:**
+   - (i) the membership event fires exactly once, and the endpoint publish is removed;
+   - (ii) a Project under a secure matter is owned by the Secure Record Owners team and is itself secure, with Access Permission as a floor and the search index following the owner;
+   - (iii) a table-driven refusal map keeps Office's status for every service code; OwnerUnresolved stays 403, and an unmapped new code fails the test.
+
+These are in the 018 POML.

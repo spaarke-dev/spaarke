@@ -138,6 +138,13 @@
       - K3: a caller payload holding an explicit null under lowercase `sprk_ai_search_index@odata.bind` must not produce two keys that differ only in case after step 8's fill. Normalise the bind key (or drop the null entry before filling); test the duplicate-key case and the canonical-case case.
       Whichever of 017 or 018 lands first owns this; the other confirms it.
     </criterion>
+    <criterion testable="true">UAC-r2 condition (b) for 018b (2026-10-21):
+      - Assigned To contact named in the request: REFUSE when the caller lacks AppendTo on the contact, checked as the caller, the same way Create does it (it materialises an uncapped Collaborate grant, ADR-034 A4). The refusal names the field: its ProblemDetails code identifies `assignedTo`, and it never reads as "matter not found". If Office already has a fitting code, reuse it; otherwise this one code is the single allowed addition under NFR-07, recorded in the notes. Test with an unreadable contact (refused) and a readable one (created).
+      - A Matter create with no bearer token is refused with 500 `caller_rights_unverifiable` (fail closed).
+      - (i) The matter membership event fires exactly once per Office create: assert the single publish, and that the endpoint publish (OfficeEndpoints.cs ~:1858) is gone.
+      - (ii) A Project filed under a SECURE matter is owned by the Secure Record Owners team (D-11 / round 6), not the matter's BU default team. It is itself secure (round 6), inherits Access Permission as a floor (round 87), and its search index follows that owner. Test it.
+      - (iii) The adapter map keeps Office's existing status for EVERY refusal code the service can return, including OwnerUnresolved (stays 403) and the Assigned To refusal. A table-driven test lists the full map, enumerated from the service's codes, so an unmapped new code fails the test.
+    </criterion>
     <criterion testable="true">On merge of the Office move onto the unified create: close #1614 and #1617 (their unified-service half merged in #2214, cf0886360a; the Office half closes here). Cite the merge SHA.</criterion>
   </acceptance-criteria>
 
