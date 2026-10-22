@@ -81,4 +81,9 @@ The batch went to dev in one R3 deploy, approved by the owner in R3's session: m
 
 **Not exercised in the window:** partner document reads, wizard uploads and email archives. Owner browser checks stay on the checklist.
 
-**#2248's clients** (CommunicationActions PCF, EmailPage, LegalWorkspace, Console) are being redeployed to dev with the owner's go, 2026-10-22.
+**#2248's clients, redeployed to dev with the owner's go (2026-10-22), built from 1283c41817:**
+- **CommunicationActions PCF:** solution 1.3.20 → **1.3.21**, through `Import-SolutionScoped.ps1`, publishing only its two bundle resources. Master's sources still say 1.3.20, so the next deploy of this control starts at **1.3.22**. The bundle also carries master's "Internal Only" tag work (task 068, 85d1d26f66), which dev did not have.
+- **`sprk_emailpage`:** deployed.
+- **`sprk_spaarkeai` (Console):** deployed. LegalWorkspace has no web resource of its own: its sections, including EmailWorkspace, ship inside `sprk_spaarkeai`.
+- **Read-back:** for all three, the SHA-256 of the Dataverse record and of the served copy equals the build, and both forms of the notice are present.
+- **Ancestry:** the bundles carry no build stamp. Every live bundle's identifiers were a strict subset of the build's, so nothing newer was overwritten.
