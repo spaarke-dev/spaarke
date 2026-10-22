@@ -7,7 +7,7 @@ using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Ai.Context;
-using Sprk.Bff.Api.Services.Office;
+using Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 using Sprk.Bff.Api.Tests.Api.Office;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
@@ -33,7 +33,10 @@ public class OfficeQuickCreateSourceFieldSecurityTests
     private static readonly Guid MatterTypeId = Guid.Parse("b2c4e6a8-1d3f-4a5b-8c7d-9e0f1a2b3c02");
     private static readonly Guid SourceProjectId = Guid.Parse("1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b2188");
     private static readonly Guid AccountId = Guid.Parse("9f8e7d6c-5b4a-4c3d-8e2f-1a0b9c8d7e02");
-    private static readonly Guid CreatedMatterId = Guid.Parse("00000000-0000-0000-0000-00000000c188");
+    private static readonly Guid BusinessUnitId = Guid.Parse("cb15f587-baa0-f111-aaac-000d3a992188");
+
+    /// <summary>The service's step-8 warning when the owning team's business unit cannot be read (the harness scripts it).</summary>
+    private const string BusinessUnitDefaultsWarning = "Business-unit search defaults could not be read";
 
     private const string Secret = "TOP-SECRET-FEE-ARRANGEMENT";
 
@@ -80,7 +83,8 @@ public class OfficeQuickCreateSourceFieldSecurityTests
 
         secured.Warnings.Should().Equal(empty.Warnings,
             "a masked column must be indistinguishable from an empty one: same texts, same count, same order");
-        secured.Warnings.Should().ContainSingle(w => w.Contains("{sprk_feearrangement}") && w.Contains("left blank"));
+        secured.Warnings.Should().ContainSingle(w => w.Contains("{sprk_feearrangement}") && w.Contains("left blank"))
+            .And.NotContain(w => w.Contains(BusinessUnitDefaultsWarning), "the harness answers the owning team's business unit");
         secured.Matter.Attributes.Should().BeEquivalentTo(empty.Matter!.Attributes);
     }
 
@@ -93,6 +97,7 @@ public class OfficeQuickCreateSourceFieldSecurityTests
         secured.Status.Should().Be(HttpStatusCode.Created);
         secured.Matter!.Contains("sprk_client").Should().BeFalse();
         secured.Warnings.Should().Equal(empty.Warnings);
+        secured.Warnings.Should().NotContain(w => w.Contains(BusinessUnitDefaultsWarning), "the harness answers the owning team's business unit");
     }
 
     public static TheoryData<string> CallerReadFailures() => new() { "403", "404", "500", "0", "fault", "timeout" };
@@ -117,7 +122,9 @@ public class OfficeQuickCreateSourceFieldSecurityTests
         result.Matter.Contains("sprk_client").Should().BeFalse();
         result.Matter.Contains("sprk_matterdescription").Should().BeFalse();
         result.Matter.Contains("sprk_matternotes").Should().BeFalse();
-        result.Warnings.Should().ContainSingle(w => w == OfficeRecordCreationService.SourceUnreadableWarning);
+        // FR-04 (G7, signed off 2026-10-22): the service's one "source unavailable" text, and nothing mapped — not even a Default rule.
+        result.Warnings.Should().ContainSingle(w => w == MappingSourceReadProbe.SourceUnavailableWarning)
+            .And.NotContain(w => w.Contains(BusinessUnitDefaultsWarning), "the harness answers the owning team's business unit");
         result.Warnings.Should().Equal(appReadFailed.Warnings,
             "a source the caller read could not use reads exactly like one the app read could not (missing, denied or faulted)");
         result.AppSourceReads.Should().Be(1, "the source is read app-only once; a failed caller read is never retried app-only");
@@ -151,9 +158,18 @@ public class OfficeQuickCreateSourceFieldSecurityTests
         factory.CallerResolver
             .Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CallerSystemUserResolution.Resolved(OwnerId.ToString("D")));
+        factory.CallerDataverse.WithRow("sprk_mattertype_ref", MatterTypeId); // the type, checked as the caller (task 018b)
+        // The owning team -> business unit read (task 015), so step 8's "Business-unit search defaults" warning is not on
+        // every outcome and a warning-list assertion compares only what the mapping said.
         factory.Entities
-            .Setup(e => e.RetrieveAsync("sprk_mattertype_ref", MatterTypeId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Entity("sprk_mattertype_ref", MatterTypeId));
+            .Setup(e => e.RetrieveAsync("team", RecordOwnershipResolverDouble.DefaultTeamId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("team", RecordOwnershipResolverDouble.DefaultTeamId)
+            {
+                ["businessunitid"] = new EntityReference("businessunit", BusinessUnitId),
+            });
+        factory.Entities
+            .Setup(e => e.RetrieveAsync("businessunit", BusinessUnitId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("businessunit", BusinessUnitId));
         factory.AccessProbe
             .Setup(p => p.GetCallerRightsAsync(It.IsAny<string>(), "sprk_projects", SourceProjectId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(AccessRights.Read);
@@ -176,14 +192,12 @@ public class OfficeQuickCreateSourceFieldSecurityTests
             sourceRead.ReturnsAsync(source);
         }
 
-        Entity? created = null;
+        // The creation service's step-11 write (task 018b), and the number read-back of whatever id it picked.
+        var created = factory.CaptureRecordCreationWrite();
         factory.Entities
-            .Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-            .Callback<Entity, CancellationToken>((entity, _) => created = entity)
-            .ReturnsAsync(CreatedMatterId);
-        factory.Entities
-            .Setup(e => e.RetrieveAsync("sprk_matter", CreatedMatterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Entity("sprk_matter", CreatedMatterId) { ["sprk_matternumber"] = "MAT-002188" });
+            .Setup(e => e.RetrieveAsync("sprk_matter", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, Guid id, string[] _, CancellationToken _) =>
+                new Entity("sprk_matter", id) { ["sprk_matternumber"] = "MAT-002188" });
 
         arrangeCaller?.Invoke(factory.CallerRead);
 
@@ -201,7 +215,7 @@ public class OfficeQuickCreateSourceFieldSecurityTests
         var appSourceReads = factory.Entities.Invocations.Count(i =>
             i.Method.Name == nameof(IGenericEntityService.RetrieveAsync) && Equals(i.Arguments[0], "sprk_project"));
 
-        return new Outcome(response.StatusCode, created, body?.Warnings ?? Array.Empty<string>(), appSourceReads,
+        return new Outcome(response.StatusCode, created.Entity, body?.Warnings ?? Array.Empty<string>(), appSourceReads,
             factory.CallerRead.Paths.ToList());
     }
 

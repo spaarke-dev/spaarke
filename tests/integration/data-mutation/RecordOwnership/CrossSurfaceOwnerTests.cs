@@ -407,9 +407,9 @@ internal sealed class CreateWorld
 
     // ── The unified create ────────────────────────────────────────────────────────────────────────────────────────
 
-    public Task<RecordCreationOutcome> CreateAsync(UnifiedCreateRequest request, bool system = false) =>
+    public Task<RecordCreationOutcome> CreateAsync(UnifiedCreateRequest request, bool system = false, RecordRequester? requestedBy = null) =>
         UnifiedService().CreateAsync(request,
-            system ? RecordCreationPrincipal.ForSystem() : RecordCreationPrincipal.ForCaller(_caller, Directory.CallerOid),
+            system ? RecordCreationPrincipal.ForSystem(requestedBy) : RecordCreationPrincipal.ForCaller(_caller, Directory.CallerOid),
             CancellationToken.None);
 
     /// <summary>The app-only reader the services here use, for a test that calls a static step directly.</summary>

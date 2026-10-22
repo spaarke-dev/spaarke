@@ -822,6 +822,23 @@ public sealed class RecordRepairModeTests
             .Should().Be(InheritedAccessPermission.AppOnlyDocumentLinkWriteReasonCode);
     }
 
+    [Fact]
+    public async Task ADocumentsAccessPermission_IsStillRefusedByRepair_TheCreateTimeFillOnlyExemptionDoesNotLeak()
+    {
+        // 018b-K2 (UAC-r2 condition 2): create-time mapping fills a document's Access Permission (D7: no own narrowing to
+        // lower on a create). Repair runs on an EXISTING document, where a fill could lower its narrowing: refused through
+        // DocumentServerOwnedRefusal (must not fire for the create exemption).
+        _world.MatterLinksTo();
+        _world.Map("sprk_matter", "sprk_document", RepairWorld.DefaultText("sprk_accesspermission", "100000001", 1));
+        var id = _world.DocumentUnderTheMatter(indexName: "kept-index", index: RepairWorld.ChildIndex);
+
+        var outcome = await _world.RepairAsync("sprk_document", id);
+
+        _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain("sprk_accesspermission");
+        Field(outcome, RecordRepairPart.Mapping, "sprk_accesspermission").ReasonCode
+            .Should().Be(InheritedAccessPermission.AppOnlyDocumentWriteReasonCode);
+    }
+
     [Theory]
     [InlineData("sprk_event")]
     [InlineData("sprk_todo")]

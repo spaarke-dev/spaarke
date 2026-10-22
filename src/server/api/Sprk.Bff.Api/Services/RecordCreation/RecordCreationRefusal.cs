@@ -115,8 +115,23 @@ internal sealed record RecordCreationRefusal
     /// <summary>What happened, for the caller. Never an upstream exception's or Dataverse's own text.</summary>
     public string Detail { get; }
 
-    /// <summary>The caller's Dataverse failure (<see cref="RecordCreationRefusalKind.Upstream"/>); its text is never rendered.</summary>
+    /// <summary>
+    /// The caller's Dataverse failure; its text is never rendered. Set on an <see cref="RecordCreationRefusalKind.Upstream"/>
+    /// refusal and, since task 018b-1s (G2), on a <see cref="RecordCreationRefusalKind.PrincipalUnresolved"/> refusal, where
+    /// it is the WhoAmI failure (<c>AccessDenied</c>, <c>UserContextRequired</c>, <c>OboExchangeFailed</c> or
+    /// <c>OboNotConfigured</c> as its <see cref="DataverseUserResponse.ErrorCode"/>) so an adapter can tell "no token" from "no
+    /// Dataverse user". The refusal's code and status do not follow from it.
+    /// </summary>
     public DataverseUserResponse? ClientFailure { get; init; }
+
+    /// <summary>
+    /// Task 018b-1s (G5): on a step-5 <see cref="RecordCreationRefusalKind.NotFoundOrDenied"/> refusal, the lookup column of
+    /// the caller's payload whose record was refused — the logical column name without <c>@odata.bind</c>
+    /// (<c>sprk_regardingmatter</c>), or <c>sprk_regardingrecordid</c> for the ADR-024 regarding pair's record. <c>null</c> for
+    /// every other refusal. Never the record's id; the detail, code and status are unchanged by it, and the HTTP map does not
+    /// render it (the uniform not-found stays uniform).
+    /// </summary>
+    public string? RefusedColumn { get; init; }
 
     /// <summary>The pre-write rule's own refusal, by reference (ebilling-r1 correction (c)).</summary>
     public PreWriteRefusal? PreWrite { get; init; }
