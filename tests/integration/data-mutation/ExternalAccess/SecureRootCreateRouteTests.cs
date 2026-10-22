@@ -47,7 +47,7 @@ namespace Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 /// creator shared — with no owner move after the create (no business-unit-visible window).
 /// </summary>
 [Trait("status", "task-158-uac-r2")]
-public class SecureRootCreateRouteTests : IClassFixture<SecureRootCreateRouteFixture>
+public partial class SecureRootCreateRouteTests : IClassFixture<SecureRootCreateRouteFixture>
 {
     private const string OfficeRoute = "/api/office/quickcreate/project";
 
@@ -356,6 +356,24 @@ public sealed class SecureRootCreateRouteFixture : ProvisionProjectTestFixture
     /// <summary>Every question asked of the caller's own Dataverse (OBO), unescaped, in order (field mapping task 018b).</summary>
     public RecordedCallerDataverse CallerDataverse { get; } = new();
 
+    /// <summary>
+    /// The owner resolver the Office create's step 7 asks (record-first): every question gets <see cref="RecordOwnershipResolverDouble.TeamId"/>,
+    /// and is recorded. Field mapping task 018b-2: a root created INTO isolation never asks it.
+    /// </summary>
+    internal RecordOwnershipResolverDouble OwnerResolver { get; } = new();
+
+    /// <summary>The Office create's Web API bodies, exactly as the service sent them (field mapping task 018b-2).</summary>
+    public List<Dictionary<string, object?>> OfficeCreateBodies { get; } = new();
+
+    /// <summary>Each team's business unit for step 8's read (a team not named here is in the default Office unit).</summary>
+    public Dictionary<Guid, Guid> TeamBusinessUnits { get; } = new();
+
+    /// <summary>A business unit's search-index defaults (name, catalog row); a unit not named here has none.</summary>
+    public Dictionary<Guid, (string Name, Guid Index)> BusinessUnitSearchDefaults { get; } = new();
+
+    /// <summary>Every team whose business unit step 8 read, in order.</summary>
+    public List<Guid> TeamReads { get; } = new();
+
     private PendingInvocation? _pending;
     private Guid? _mappedMatter;
     private Guid? _mappedType;
@@ -369,6 +387,12 @@ public sealed class SecureRootCreateRouteFixture : ProvisionProjectTestFixture
         ChatCreates.Clear();
         CallerNoAppendTo.Clear();
         CallerDataverse.Clear();
+        OwnerResolver.TeamId = RecordOwnershipResolverDouble.DefaultTeamId;
+        OwnerResolver.Requests.Clear();
+        OfficeCreateBodies.Clear();
+        TeamBusinessUnits.Clear();
+        BusinessUnitSearchDefaults.Clear();
+        TeamReads.Clear();
         _pending = null;
         _mappedMatter = null;
         _mappedType = null;
@@ -437,7 +461,7 @@ public sealed class SecureRootCreateRouteFixture : ProvisionProjectTestFixture
                 .ReturnsAsync(CallerSystemUserResolution.Resolved(CallerSystemUserId.ToString("D")));
             services.AddScoped(_ => resolver.Object);
             services.RemoveAll<IRecordOwnershipResolver>();
-            services.AddSingleton<IRecordOwnershipResolver>(new RecordOwnershipResolverDouble());
+            services.AddSingleton<IRecordOwnershipResolver>(OwnerResolver);
 
             // ── Chat: the caller's own Dataverse (scripted OBO), the session, the gate store, the tool catalog ──
             services.RemoveAll<IDataverseUserClient>();
@@ -491,16 +515,32 @@ public sealed class SecureRootCreateRouteFixture : ProvisionProjectTestFixture
             }));
 
         // The owning team's business unit and its search defaults (step 8 reads team -> business unit app-only), so a create
-        // that has nothing else to warn about warns nothing (field mapping task 018b, G4 condition 3).
+        // that has nothing else to warn about warns nothing (field mapping task 018b, G4 condition 3). Task 018b-2: per team
+        // and per unit (TeamBusinessUnits, BusinessUnitSearchDefaults), so a test can tell whose unit the defaults came from.
         entities
             .Setup(e => e.RetrieveAsync("team", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .Returns((string _, Guid team, string[] _, CancellationToken _) => Task.FromResult(new Entity("team", team)
+            .Returns((string _, Guid team, string[] _, CancellationToken _) =>
             {
-                ["businessunitid"] = new EntityReference("businessunit", OfficeBusinessUnit),
-            }));
+                TeamReads.Add(team);
+                return Task.FromResult(new Entity("team", team)
+                {
+                    ["businessunitid"] = new EntityReference("businessunit",
+                        TeamBusinessUnits.TryGetValue(team, out var unit) ? unit : OfficeBusinessUnit),
+                });
+            });
         entities
-            .Setup(e => e.RetrieveAsync("businessunit", OfficeBusinessUnit, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Entity("businessunit", OfficeBusinessUnit));
+            .Setup(e => e.RetrieveAsync("businessunit", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns((string _, Guid unit, string[] _, CancellationToken _) =>
+            {
+                var row = new Entity("businessunit", unit);
+                if (BusinessUnitSearchDefaults.TryGetValue(unit, out var defaults))
+                {
+                    row["sprk_searchindexname"] = defaults.Name;
+                    row["sprk_ai_search_index"] = new EntityReference("sprk_aisearchindex", defaults.Index);
+                }
+
+                return Task.FromResult(row);
+            });
 
         // #2191 K2: the record-type catalog row the service derives a project's filed-under pair from (the matter's type).
         // It carries its logical name, as the live row does: the owner step reads it back by id for an ordinary parent
@@ -577,6 +617,7 @@ public sealed class SecureRootCreateRouteFixture : ProvisionProjectTestFixture
     /// </summary>
     private void RecordOfficeProjectCreate(Guid id, IReadOnlyDictionary<string, object?> fields)
     {
+        OfficeCreateBodies.Add(new Dictionary<string, object?>(fields));
         var owner = Bound(fields, "ownerid@odata.bind");
         var isSecure = fields.TryGetValue("sprk_issecure", out var flag)
                        && (flag is true || flag is JsonElement { ValueKind: JsonValueKind.True });
