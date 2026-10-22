@@ -1026,3 +1026,16 @@ Each restamps afterwards, but none refuses any of these:
 **Description**: Found by task 099's fix round. With analysis/document-intelligence off, building the endpoint table throws "Failure to infer one or more parameters ... chatClient | UNKNOWN" because `ChatEndpoints` binds an unregistered `IChatClient`. `GateCombinationConstructibilityTests` does not build the endpoint data source, so it misses this. 099's AI-off registration guard therefore composes `CommunicationModule` + `NotificationsModule` directly instead of booting the host.
 
 ---
+
+### DEF-034 — 091 hand-off: wire the e-billing file store into the customer stamp
+
+| Field | Value |
+|---|---|
+| **Status** | Open (owned by customer-provisioning-orchestration-r1) |
+| **Urgency** | medium |
+| **Filed** | 2026-10-21 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2232 |
+
+**Description**: Task 091's §6 hand-off. Wire `modules/ebilling-file-store.bicep` into `customer.bicep` for the stamp UAMI, then recompile `customer.json` (never hand-merge). Also covered: the per-environment scanning setting, task 090's config keys, network Deny at prod hardening, and the per-stamp verification scripts. Never remove the account-scope grant on ACME or any existing stamp from ebilling.
+
+---

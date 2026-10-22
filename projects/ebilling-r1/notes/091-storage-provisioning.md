@@ -89,7 +89,7 @@ The §3 stop stays: no eBilling container, no `ebilling-file-store.bicep`, no eB
 
 ## 6. Hand-off to customer-provisioning-orchestration-r1 (§3 decided: option A)
 
-Not filed yet (step 7; the owner/coordinator files it after review of §8). Contents:
+Filed 2026-10-21 as #2232 (DEF-034). Contents:
 
 1. Wire `modules/ebilling-file-store.bicep` into `customer.bicep` for the stamp UAMI (`principalId: uami.outputs.principalId`, `storageAccountName: storage.outputs.storageAccountName`, `scope: <stamp RG>`). The module itself creates the custom role definition at the stamp resource group (`assignableScopes` = that RG only; name `guid(resourceGroup().id, 'spaarke-ebilling-file-store-blob-role')`; role name made unique per RG with `uniqueString(resourceGroup().id)`, because custom role names are tenant-unique). The identity that deploys `customer.bicep` therefore needs `Microsoft.Authorization/roleDefinitions/write` and `roleAssignments/write` on the stamp RG (customer-provisioning note (e): the control-plane Worker can). Then recompile `customer.json` from the merged `customer.bicep` (never hand-merge). `CustomerStampKeylessTemplateTests.StampBlobDataRoles_AreContainerScoped` already recognises a custom role with blob data actions, so the wired grants are checked for container scope automatically; the exactness test (`FileStoreRole_IsExactlyContributorPlusTagRead`) reads `modules/ebilling-file-store.json`, which must be recompiled with any module edit.
 2. The per-environment malware-scanning setting: `enableMalwareScanning` has no default (on-upload scanning with `malwareScanningCapGBPerMonth`, or `false` = the explicit "Scanning not enabled" setting, which the BFF must also receive as task 090's `MalwareScanningEnabled=false`).
