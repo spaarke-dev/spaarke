@@ -24,6 +24,7 @@
      - (3) The >2 GiB cap is fail-closed in 090 (checked conversion) and recorded as a known limit.
      - (4) `ForSourceVersion` and the column use one canonical string form.
      - (5) The 088 and 090 POMLs are updated to the new types.
+   - **Scoped check: PASS 2026-10-22** on `44c1ef6a2d..5af7f6c879`. I reproduced Pester (088 74/74, 080 85/85; the suite needs Pester 3.4 under pwsh 7). -WhatIf creates 13 rows, changes 6 and skips 31. ebilling now runs it under the owner's OK, then runs again.
    - **Then the read-back on dev:** `sprk_storedfile` SchemaName `sprk_StoredFile`; primary `sprk_Name`; the new types; 15 secured columns with grants (blobpath Writers only); 6 relationships (4 RemoveLink, 2 Restrict, none parental) with Related menu DoNotDisplay; `statuscode` Superseded `659490005`; a second run skips all. Log it in `notes/deploy-log.md`.
 2. **Next R3 dev BFF from master** carries 157: check ancestry (`aa3dc49897`, R3 077 `283466d40`), run `scratchpad/live/smokeA_v2.py` on both matters, set `since` in `deploycheck.py` to the deploy time and run it; deploy-log entry.
 3. **ebilling reviews when sent:** 097 (BillingFactLoader Superseded → null; our path), 116 (drafting re-keyed per Procedure Version), 082 (resolver uses `BillingRuleDefinition.PrecedenceKey`), 081 (creator-person zero-non-null assert). The 088 F1s are already filed into their POMLs 117, 094/095, 097 (`8d1394a4ed`). Every schema run: final script + `-WhatIf` to us, before/after notices, no run before our PASS; check all core records.
