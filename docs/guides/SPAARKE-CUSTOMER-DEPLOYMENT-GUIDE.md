@@ -1080,19 +1080,21 @@ that stands it up). It is a deployment setting, not a Dataverse column, because 
 
 **Every contact the BFF creates for a customer's people is owned at creation by the default Owner team of one business unit —
 the customer's own.** A contact created with no owner team is owned by the BFF's own application user, in whatever
-business unit that user sits (the root business unit on dev), not by the customer's team. The BFF creates a customer contact in three places, and all three read this one
+business unit that user sits (the root business unit on dev), not by the customer's team. The BFF creates a customer contact in four places, and all four read this one
 setting: **registration** (`POST /api/v1/external/registration`, a WorkforceHome contact), a Type-2 workforce user's **first
 sign-in** (a contact keyed by their `oid`; §6.5.2), and the **licensed-user link** (a contact for a licensed systemuser who has
-none — registration approval, the first resolution of a licensed user, and the identity-link reconciliation job).
+none — registration approval, the first resolution of a licensed user, and the identity-link reconciliation job), and the **invite** (`/invite`, `/invite-and-grant`): an email that matches no contact creates one, owned by the same team; an invite of an
+existing contact never re-owns it.
+The rule is plane-independent: every contact the BFF creates in its own environment gets this team.
 
 | | |
 |---|---|
 | **Setting** | `ExternalAccess__CustomerBusinessUnitId` (configuration key `ExternalAccess:CustomerBusinessUnitId`) — **REQUIRED on every stamp**, on both slots |
 | **Value** | the GUID of the customer's own business unit: a **child of the root** business unit, with **exactly one default Owner team** (Dataverse creates one with the unit), and **never the Secure Record business unit** (the unit named by `SecureRecord__BusinessUnitName`). A value that is not a GUID **fails startup** |
-| **Absent, empty or the all-zero GUID** | **REFUSE, create nothing.** Registration answers `500 sdap.access.registration_owner_unconfigured`; a first sign-in that would create a contact answers `500` with the same code; the licensed-user link is not made (the reconciliation job reports the user `Denied` with the same code, report-only runs included). Binding an **existing** contact (by `oid` or by email) needs no owner and still works |
+| **Absent, empty or the all-zero GUID** | **REFUSE, create nothing.** Registration answers `500 sdap.access.registration_owner_unconfigured`; a first sign-in that would create a contact answers `500` with the same code; an invite that would create a contact answers `500` with the same code and creates no contact, marker, CIAM account or email; the licensed-user link is not made (the reconciliation job reports the user `Denied` with the same code, report-only runs included, and the run is recorded **Partial**, never Ok). The job does **not** switch to a dry run: with the setting unset every create is refused while binds and links still write. Binding an **existing** contact (by `oid` or by email) and inviting an existing contact need no owner and still work. At startup the BFF logs one **Warning** (`[EXT-ACCESS] ExternalAccess:CustomerBusinessUnitId is not set to a non-zero GUID ...`); startup does not fail |
 | **Also refused with the same code** | the unit is the Secure Record business unit (decided by id) or the Secure Record name is ambiguous; the unit has no default Owner team, or more than one. An **unreadable** lookup refuses with `sdap.access.deny.contact_lookup_failed` (retryable; its HTTP status is tracked in #2269) |
 | **Not checked today** | that the unit is a child of the root. The BFF accepts the root unit; refusing it is an open owner decision, so the operator must not set it |
-| **Written by** | provisioning — **H4b** writes it on both slots from the unit H10 creates, and **H13 trap T7** reads it back (T265), once `customer-provisioning-orchestration-r1` merges (#2265). Until then, and for Spaarke's own environments (dev), set it by hand on **both** slots |
+| **Written by** | provisioning — **H4b** writes it on both slots from the unit H10 creates, and **H13 trap T7** reads it back (T265), once `customer-provisioning-orchestration-r1` merges (issue #2265). Until then, and for Spaarke's own environments (dev), set it by hand on **both** slots |
 
 ```bash
 az webapp config appsettings set --resource-group <rg> --name <app-service-name> \
@@ -1103,8 +1105,15 @@ az webapp config appsettings set --resource-group <rg> --name <app-service-name>
 
 ⚠️ **Behaviour change for an existing stamp (ISS-005).** Before ISS-005 a first sign-in on a stamp without this setting created an
 **unowned** contact; it now **refuses** (a Type-2 user with no existing contact cannot sign in until the setting is set), and a
-licensed user with no contact is no longer given one. Set the setting on every existing stamp **before** the BFF build that
-contains ISS-005 reaches it.
+licensed user with no contact is no longer given one, and an invite of an email with no contact (which created an unowned
+contact) now answers `500`. **The setting must be present on every slot (production and staging) BEFORE this build is deployed
+to it**; otherwise the first sign-in, registration or invite that needs a new contact returns `500
+sdap.access.registration_owner_unconfigured`. Check for the startup Warning above after the deploy.
+
+**Contacts created before this build stay app-owned in the root business unit.** Nothing re-owns them; a backfill is out of
+scope here and is tracked as a follow-up issue. **Who can read a new contact changes with it:** a contact owned by the
+customer business unit's team is readable by users with business-unit-scoped Read on contact in that unit, where an
+app-user-owned contact in the root unit was readable only by root-scoped readers.
 
 **Known limit — contacts created in a FOREIGN environment are ownerless (#2270).** The setting names a business unit of **this**
 BFF's Dataverse environment. When registration approval links a new systemuser's contact in a *different* environment (a demo or
