@@ -1088,7 +1088,7 @@ The BFF routes (`/review`, `/blocked`) are covered by 119.
 
 | Field | Value |
 |---|---|
-| **Status** | Decided 2026-10-22: 30 days, all environments incl. dev; module change on task/ebill-2255-softdelete; dev apply pending |
+| **Status** | Decided 2026-10-22: 30 days, all environments incl. dev; module change on task/ebill-2255-softdelete; applied on dev 2026-10-22 (091 §8.8); other environments get it through the stamp wiring (#2232) |
 | **Urgency** | medium |
 | **Filed** | 2026-10-22 |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2255 |

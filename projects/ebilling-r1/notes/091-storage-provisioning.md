@@ -416,7 +416,7 @@ The first paste attempt did not run. Bracketed-paste markers broke the first wor
 
 ### 8.8 Blob soft delete, 30 days, every environment (DEF-038, #2255; owner decision 2026-10-22)
 
-Owner decision 2026-10-22: turn on blob soft delete with 30-day retention for the file store in every environment, including dev. The module change is on `task/ebill-2255-softdelete`. **Nothing here has run against Azure; the dev what-if and apply are pending (main session).**
+Owner decision 2026-10-22: turn on blob soft delete with 30-day retention for the file store in every environment, including dev. The module change is on `task/ebill-2255-softdelete`. **Applied on dev 2026-10-22 by the main session (owner OK: all environments including dev, after a what-if).** The record is at the end of this section.
 
 **Change** (`modules/ebilling-file-store.bicep` and its recompile `.json`):
 - `blobServices/default` was a reference (`existing`); it is now declared, with `properties.deleteRetentionPolicy = { enabled: true, days: blobSoftDeleteRetentionDays }` and nothing else. The containers now depend on it.
@@ -457,3 +457,16 @@ az storage account blob-service-properties show --account-name $account -g $rg -
 **What the what-if should show:** `Modify` on `.../blobServices/default` with `deleteRetentionPolicy.enabled: false -> true` and `days: null -> 30`; the role definition, the three assignments and the three containers unchanged (or `Ignore`/no-change); no Defender resource (`scan=false`). Anything else, stop and tell the owner.
 
 **Side effect:** blobs deleted from now on stay recoverable for 30 days and still count toward storage. The §8.7 tag-write probe's "delete probe a" now leaves a soft-deleted blob in each container for 30 days; harmless.
+
+**Dev run, 2026-10-22** (main session, as ralph.schroeder@spaarke.com; the steps above):
+- **Before read:** saved the whole blob service. `deleteRetentionPolicy` was `{allowPermanentDelete:false, days:null, enabled:false}`.
+- **What-if:** `blobServices/default` showed Modify: `deleteRetentionPolicy.enabled` false -> true and `days` null -> 30. The what-if also listed three items that changed nothing, as the next two reads prove:
+  - `allowPermanentDelete` false -> null. It is still false after the apply.
+  - The role definition `type` "CustomRole" -> "customRole", a case-only difference.
+  - On each container, `defaultEncryptionScope` "$account-encryption-key" -> null and `denyEncryptionScopeOverride` false -> null. An encryption scope can't change after the container is created.
+  The 3 assignments were NoChange. There was no Defender resource.
+- **Apply:** `Succeeded`.
+- **After read, diffed with the before read:** the only difference is `deleteRetentionPolicy` `{allowPermanentDelete:false, days:30, enabled:true}`.
+- **Containers, read before and after:** identical. Each has scope `$account-encryption-key`, deny false, publicAccess None, and no immutability policy or legal hold.
+- **`Test-EbillingFileStoreRole.ps1`:** exit 0, with conditions 1 and 4 still [PASS].
+
