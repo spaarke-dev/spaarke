@@ -1100,6 +1100,12 @@ public class ExternalDocumentNarrowingGuardTests
             "and no existing document is re-pointed or un-linked.",
         ["Sprk.Bff.Api.Services.RecordCreation.RecordCreationService"] =
             "Creates only (step 11, a fresh Guid upserted): the same reason as OwnedChildWrite.",
+        // Task 190 (D7 T7b): EmailArchiveCommunicationLinkSweepJob writes sprk_relatedcommunication through
+        // IGenericEntityService.UpdateIfRowVersionMatchesAsync, which this scan does not match yet, so an entry here would be
+        // STALE. When #2170 option (c) adds that method to the scan, list it as
+        // "Sprk.Bff.Api.Services.Communication.EmailArchiveCommunicationLinkSweepJob::LinkAsync" with the reason: "the BFF's
+        // own typed link writer: sets a NULL sprk_relatedcommunication to the exactly-one communication whose internet message
+        // id equals the document's recorded key; never clears or re-points; conditional on row version (task 190)".
     };
 
     [Fact(DisplayName = "Task 188 r4e: every app-only generic update writer asks InheritedAccessPermission.RefuseAppOnlyWrite (or is listed)")]
