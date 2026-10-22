@@ -1156,7 +1156,8 @@ public class ExternalDocumentNarrowingGuardTests
 
     /// <summary>
     /// #2237: the listed members whose reason is "writes DocumentProfileOutputMapper.BuildFields's output", each with the
-    /// member that calls BuildFields for it (itself, or the private wrapper it calls).
+    /// member that calls BuildFields for it (itself, or the private wrapper it calls — #2239: the writer must be seen
+    /// calling that wrapper; <see cref="DocumentProfileWriterProblems"/>).
     /// </summary>
     private static readonly IReadOnlyDictionary<string, string> DocumentProfileWriters = new Dictionary<string, string>
     {
@@ -1198,22 +1199,11 @@ public class ExternalDocumentNarrowingGuardTests
                     && settle.Writes, "UpdateIfRowVersionMatchesAsync should be seen in RecordOwnershipResolver.SettleOwnerAsync.");
 
         // #2237: the profile mapper asks the refusal, and each writer listed for writing its output still reaches it (the
-        // wizard through its private wrapper, which reaches nothing else that writes).
+        // wizard through its private wrapper, which it must itself call — #2239 — and which reaches nothing else that writes).
         Assert.True(scan.TryGetValue("Sprk.Bff.Api.Services.Ai.DocumentProfileOutputMapper::BuildFields", out var mapper)
                     && mapper.Refuses, "DocumentProfileOutputMapper.BuildFields should be seen calling RefuseAppOnlyWrite.");
-        var buildFieldsCallers = IlCallScan.MethodReferences(BffTypes.Value)
-            .Where(r => r.Target.DeclaringType == typeof(Sprk.Bff.Api.Services.Ai.DocumentProfileOutputMapper)
-                        && r.Target.Name == nameof(Sprk.Bff.Api.Services.Ai.DocumentProfileOutputMapper.BuildFields))
-            .Select(r => SourceKey(r.Caller, r.CallerMethod))
-            .ToHashSet(StringComparer.Ordinal);
-        foreach (var (writer, mapperCaller) in DocumentProfileWriters)
-        {
-            Assert.True(scan.TryGetValue(writer, out var profile) && profile.Writes,
-                $"{writer} should be seen calling UpdateDocumentFieldsAsync — the scan lost its signal (or remove its entry).");
-            Assert.True(buildFieldsCallers.Contains(mapperCaller),
-                $"{writer} is listed for writing DocumentProfileOutputMapper.BuildFields's output, but {mapperCaller} no longer " +
-                "calls BuildFields: the reason no longer holds (#2237).");
-        }
+        var profileWriterProblems = DocumentProfileWriterProblems(BffTypes.Value, scan, DocumentProfileWriters);
+        Assert.True(profileWriterProblems.Count == 0, string.Join("\n", profileWriterProblems));
 
         var problems = GenericWriterProblems(scan, GenericWritersThatUpdateNoDocument);
         Assert.True(problems.Count == 0,
@@ -1283,6 +1273,64 @@ public class ExternalDocumentNarrowingGuardTests
         // #2237 must not fire: a sprk_document field update that asks the refusal first.
         Assert.True(scan[Member(typeof(GenericWriterControlDocumentFieldsAsked), "WriteAsync")] is { Writes: true, Refuses: true });
     }
+
+    [Fact(DisplayName = "#2239: negative control — a listed profile writer that does not call its BuildFields wrapper is found; one that writes its wrapper's output is not")]
+    public void DocumentProfileWriterCheck_MustFireAndMustNotFire()
+    {
+        static string Member(Type type, string member) => $"{type.FullName}::{member}";
+        var orphaned = typeof(DocumentProfileWriterControlOrphanedWrapper);
+        var through = typeof(DocumentProfileWriterControlThroughItsWrapper);
+        var types = new[] { orphaned, through }.SelectMany(IlCallScan.WithNested).ToList();
+        var writers = new Dictionary<string, string>
+        {
+            [Member(orphaned, "WriteAsync")] = Member(orphaned, "BuildPayload"),
+            [Member(through, "WriteAsync")] = Member(through, "BuildPayload"),
+        };
+
+        var problems = DocumentProfileWriterProblems(types, GenericWriterScan(types), writers);
+
+        Assert.Equal(new[] { WrapperNotCalled(Member(orphaned, "WriteAsync"), Member(orphaned, "BuildPayload")) }, problems);
+    }
+
+    /// <summary>
+    /// #2237 / #2239: each <see cref="DocumentProfileWriters"/> entry still holds — the writer calls UpdateDocumentFieldsAsync,
+    /// its mapper caller calls <c>DocumentProfileOutputMapper.BuildFields</c>, and, when that caller is a wrapper, the writer
+    /// calls the wrapper (a writer that built its own dictionary and orphaned the wrapper would otherwise keep the exemption).
+    /// </summary>
+    private static List<string> DocumentProfileWriterProblems(
+        IEnumerable<Type> types, IReadOnlyDictionary<string, GenericWriterUse> scan, IReadOnlyDictionary<string, string> writers)
+    {
+        var references = IlCallScan.MethodReferences(types).ToList();
+        var buildFieldsCallers = references
+            .Where(r => r.Target.DeclaringType == typeof(Sprk.Bff.Api.Services.Ai.DocumentProfileOutputMapper)
+                        && r.Target.Name == nameof(Sprk.Bff.Api.Services.Ai.DocumentProfileOutputMapper.BuildFields))
+            .Select(r => SourceKey(r.Caller, r.CallerMethod))
+            .ToHashSet(StringComparer.Ordinal);
+        // Caller member -> called member, both as "{outermost type}::{member}".
+        var calls = references
+            .Where(r => r.Target.DeclaringType is not null)
+            .Select(r => (From: SourceKey(r.Caller, r.CallerMethod),
+                          To: $"{IlCallScan.Outermost(r.Target.DeclaringType!).FullName}::{r.Target.Name}"))
+            .ToHashSet();
+
+        var problems = new List<string>();
+        foreach (var (writer, mapperCaller) in writers.OrderBy(w => w.Key, StringComparer.Ordinal))
+        {
+            if (!scan.TryGetValue(writer, out var use) || !use.Writes)
+                problems.Add($"{writer} should be seen calling UpdateDocumentFieldsAsync — the scan lost its signal (or remove its entry).");
+            if (!buildFieldsCallers.Contains(mapperCaller))
+                problems.Add($"{writer} is listed for writing DocumentProfileOutputMapper.BuildFields's output, but {mapperCaller} " +
+                             "does not call BuildFields: the reason no longer holds (#2237).");
+            if (writer != mapperCaller && !calls.Contains((writer, mapperCaller)))
+                problems.Add(WrapperNotCalled(writer, mapperCaller));
+        }
+
+        return problems;
+    }
+
+    private static string WrapperNotCalled(string writer, string wrapper) =>
+        $"{writer} is listed for writing DocumentProfileOutputMapper.BuildFields's output through {wrapper}, but it does not " +
+        $"call {wrapper}: what it writes may be a payload it built itself, so the reason no longer holds (#2239).";
 
     private sealed class GenericWriterUse
     {
@@ -1780,4 +1828,32 @@ internal sealed class GenericWriterControlTypedUpdate(Spaarke.Dataverse.IGeneric
 {
     internal Task WriteAsync(Guid id) =>
         entities.UpdateAsync("sprk_document", id, new Dictionary<string, object> { ["sprk_documentdescription"] = "x" }, CancellationToken.None);
+}
+
+// ── #2239: compiled control fixtures for DocumentProfileWriterCheck_MustFireAndMustNotFire (never run; IL only) ──
+
+/// <summary>
+/// MUST FIRE (#2239): listed as writing BuildFields's output through BuildPayload, but WriteAsync builds its own dictionary
+/// and never calls BuildPayload (which still calls BuildFields).
+/// </summary>
+internal sealed class DocumentProfileWriterControlOrphanedWrapper(Spaarke.Dataverse.IDocumentDataverseService documents)
+{
+    internal Task WriteAsync(Guid id, System.Text.Json.JsonElement output) =>
+        documents.UpdateDocumentFieldsAsync(
+            id.ToString(), new Dictionary<string, object?> { ["sprk_filesummary"] = output.GetRawText() }, CancellationToken.None);
+
+    internal static Dictionary<string, object?> BuildPayload(Guid id, System.Text.Json.JsonElement output) =>
+        Sprk.Bff.Api.Services.Ai.DocumentProfileOutputMapper.BuildFields(
+            id, output, "control.pdf", null, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+}
+
+/// <summary>MUST NOT FIRE (#2239): WriteAsync writes what its wrapper BuildPayload returns (BuildPayload calls BuildFields).</summary>
+internal sealed class DocumentProfileWriterControlThroughItsWrapper(Spaarke.Dataverse.IDocumentDataverseService documents)
+{
+    internal Task WriteAsync(Guid id, System.Text.Json.JsonElement output) =>
+        documents.UpdateDocumentFieldsAsync(id.ToString(), BuildPayload(id, output), CancellationToken.None);
+
+    internal static Dictionary<string, object?> BuildPayload(Guid id, System.Text.Json.JsonElement output) =>
+        Sprk.Bff.Api.Services.Ai.DocumentProfileOutputMapper.BuildFields(
+            id, output, "control.pdf", null, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
 }
