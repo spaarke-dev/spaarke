@@ -37,19 +37,23 @@ public class RecordTableRulesTests
         ChildRecordEndpoints.RootServerOwnedColumns.Contains("SPRK_ContainerId").Should().BeTrue("the list was case-insensitive");
     }
 
+    // The pre-registry lists plus #2220: the secure flag and the access columns are the BFF's own on every secure root.
+    private static readonly string[] SecureRootAccessColumns =
+        ["sprk_issecure", "sprk_accesspermission", "sprk_accessinheritance", "sprk_securitybu"];
+
     [Fact]
-    public void MatterProtectedAttributes_View_EqualsThePreRegistryList()
+    public void MatterProtectedAttributes_View_EqualsThePreRegistryList_PlusTheSecureRootAccessColumns()
     {
         OfficeRecordCreationService.MatterProtectedAttributes.Should().BeEquivalentTo(
-            "sprk_matternumber", "ownerid", "sprk_containerid", "sprk_createdbyperson");
+            ["sprk_matternumber", "ownerid", "sprk_containerid", "sprk_createdbyperson", .. SecureRootAccessColumns]);
         OfficeRecordCreationService.MatterProtectedAttributes.Contains("SPRK_MatterNumber").Should().BeTrue("the list was case-insensitive");
     }
 
     [Fact]
-    public void ProjectProtectedAttributes_View_EqualsThePreRegistryList()
+    public void ProjectProtectedAttributes_View_EqualsThePreRegistryList_PlusTheSecureRootAccessColumns()
     {
         OfficeRecordCreationService.ProjectProtectedAttributes.Should().BeEquivalentTo(
-            "sprk_projectnumber", "ownerid", "sprk_containerid", "sprk_createdbyperson", "sprk_issecure");
+            ["sprk_projectnumber", "ownerid", "sprk_containerid", "sprk_createdbyperson", .. SecureRootAccessColumns]);
         OfficeRecordCreationService.ProjectProtectedAttributes.Contains("Sprk_IsSecure").Should().BeTrue("the list was case-insensitive");
     }
 
@@ -57,8 +61,51 @@ public class RecordTableRulesTests
     public void MatterAndProjectProtectedAttributes_StayPerTable_NotMerged()
     {
         // Task 031: a merged set would newly skip a mapping rule targeting sprk_projectnumber on a MATTER create.
-        OfficeRecordCreationService.MatterProtectedAttributes.Should().NotContain("sprk_projectnumber").And.NotContain("sprk_issecure");
+        OfficeRecordCreationService.MatterProtectedAttributes.Should().NotContain("sprk_projectnumber");
         OfficeRecordCreationService.ProjectProtectedAttributes.Should().NotContain("sprk_matternumber");
+    }
+
+    // ── #2220: the secure flag and access columns are never mapped, identically on every secure root ────────────────────
+
+    /// <summary>The secure roots, from the registry that names them (<see cref="RecordCreatorPerson.StampedTables"/>), so a new one is included.</summary>
+    public static TheoryData<string> SecureRoots()
+    {
+        var data = new TheoryData<string>();
+        foreach (var root in RecordCreatorPerson.StampedTables.Order())
+            data.Add(root);
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(SecureRoots))]
+    public void UnifiedCreate_EverySecureRoot_ProtectsExactlyTheSameSecureFlagAndAccessColumnsFromMapping(string table)
+    {
+        // The set the unified service applies to a mapping rule (registry ∪ table-owned ∪ the secure-root additions).
+        var protectedFromMapping = RecordCreationService.ProtectedFromMapping(table, RecordTableRules.Get(table), null);
+
+        protectedFromMapping.Intersect(SecureRootAccessColumns, StringComparer.OrdinalIgnoreCase)
+            .Should().BeEquivalentTo(SecureRootAccessColumns, $"{table}: the four columns are the BFF's own (#2220)");
+    }
+
+    [Theory]
+    [InlineData("sprk_matter")]
+    [InlineData("sprk_project")]
+    public void OfficeCreate_MatterAndProject_ProtectExactlyTheSameSecureFlagAndAccessColumnsFromMapping(string table)
+    {
+        var view = table == "sprk_matter"
+            ? OfficeRecordCreationService.MatterProtectedAttributes
+            : OfficeRecordCreationService.ProjectProtectedAttributes;
+
+        view.Intersect(SecureRootAccessColumns, StringComparer.OrdinalIgnoreCase)
+            .Should().BeEquivalentTo(SecureRootAccessColumns, $"{table}: the Office path protects the same four (#2220)");
+    }
+
+    [Fact]
+    public void SecureRootAccessColumns_AreNotProtectedOnAnOrdinaryChild()
+    {
+        // Must not fire: a child's access columns (a document's sprk_accesspermission) stay fill-only, task 014.
+        RecordCreationService.ProtectedFromMapping("sprk_document", RecordTableRules.Get("sprk_document"), null)
+            .Should().NotContain("sprk_accesspermission").And.NotContain("sprk_issecure").And.NotContain("sprk_securitybu");
     }
 
     [Fact]
