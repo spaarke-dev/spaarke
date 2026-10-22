@@ -18,8 +18,8 @@ namespace Spaarke.ArchTests;
 /// </list>
 /// </summary>
 /// <remarks>
-/// Scans every role in <c>src/dataverse/solutions/SpaarkeMaster/Roles</c>, the only source-controlled role definitions; the BFF application
-/// user's role is not among them. Any depth counts. The live half is task 080's verify (it fails if a role a flagged-external user holds
+/// Scans every role definition in the repo: <c>src/dataverse/solutions/**/Roles/*.xml</c>, recursively, so a role added to any solution
+/// (not only SpaarkeMaster) is covered (uac-r2 review item C, 2026-10-22). The BFF application user's role is not among them. Any depth counts. The live half is task 080's verify (it fails if a role a flagged-external user holds
 /// gains a privilege on the three tables). Matching is exact on <c>prv{Action}{table}</c>, case-insensitive (Dataverse spells the table by
 /// its schema name).
 /// </remarks>
@@ -38,10 +38,11 @@ public class ProcedureRolePrivilegeGuardTests
     [Fact(DisplayName = "081: no Spaarke role grants a privilege on the Procedure tables (Create/Write on versions and assignments never; any, until uac-r2 191)")]
     public void SourceRolesGrantNothingOnTheProcedureTables()
     {
-        var rolesRoot = Path.Combine(SourceScan.RepoRoot, "src", "dataverse", "solutions", "SpaarkeMaster", "Roles");
-        var roles = Directory.EnumerateFiles(rolesRoot, "*.xml", SearchOption.TopDirectoryOnly).ToList();
+        var solutionsRoot = Path.Combine(SourceScan.RepoRoot, "src", "dataverse", "solutions");
+        var roles = RoleFiles(solutionsRoot);
         Assert.True(roles.Count >= 12,
-            $"Scanner found only {roles.Count} role definitions under {rolesRoot} (expected >= 12). Repo root resolved to '{SourceScan.RepoRoot}'.");
+            $"Scanner found only {roles.Count} role definitions under {solutionsRoot}/**/Roles (expected >= 12). Repo root resolved to '{SourceScan.RepoRoot}'.");
+        Assert.Contains(roles, r => r.Contains(Path.Combine("SpaarkeMaster", "Roles"), StringComparison.OrdinalIgnoreCase)); // non-vacuity
         // Non-vacuity: the files parse and carry privileges (a renamed element would otherwise make every role look clean).
         Assert.True(roles.Sum(r => XDocument.Parse(File.ReadAllText(r)).Descendants().Count(e => e.Name.LocalName == "RolePrivilege")) >= 100,
             "The role definitions carry fewer than 100 RolePrivilege elements in all; the scanner is not reading what it should.");
@@ -97,6 +98,36 @@ public class ProcedureRolePrivilegeGuardTests
 
         Assert.Empty(Violations(role));
     }
+
+    [Fact(DisplayName = "081 controls: the role-file selector finds a Roles/*.xml at any depth and nothing outside a Roles folder")]
+    public void RoleFileSelector_FindsNestedRolesOnly()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "sprk-roles-guard-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var nested = Path.Combine(root, "SomeOtherSolution", "src", "Roles");
+            Directory.CreateDirectory(nested);
+            Directory.CreateDirectory(Path.Combine(root, "SpaarkeMaster", "Entities"));
+            File.WriteAllText(Path.Combine(nested, "Role.xml"), "<Role />");                               // must fire
+            File.WriteAllText(Path.Combine(root, "SpaarkeMaster", "Entities", "Entity.xml"), "<Entity />");  // must not
+            File.WriteAllText(Path.Combine(nested, "Role.txt"), "x");                                       // must not
+
+            var found = RoleFiles(root);
+
+            Assert.Single(found);
+            Assert.EndsWith(Path.Combine("Roles", "Role.xml"), found[0], StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    /// <summary>Every <c>*.xml</c> directly in a folder named <c>Roles</c>, at any depth under <paramref name="root"/>.</summary>
+    internal static List<string> RoleFiles(string root) =>
+        Directory.EnumerateFiles(root, "*.xml", SearchOption.AllDirectories)
+            .Where(f => string.Equals(Path.GetFileName(Path.GetDirectoryName(f)), "Roles", StringComparison.OrdinalIgnoreCase))
+            .ToList();
 
     /// <summary>The forbidden grants in one role definition, as "role: name (level) — rule".</summary>
     internal static List<string> Violations(string roleXml)
