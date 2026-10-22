@@ -1,18 +1,18 @@
 # Current Task — field-mapping-server-write-path-r1
 
-> **Last updated**: 2026-10-22 (018b merged to master; 018c running)
-> **Phase**: Wave 2. Done (13/43): 001–006, 010–016 on master; 018a (36403e1f4b) and 018b (**ef8a91a157**, PR #2261) on master.
-> **Live on dev: 1283c41817** (R3; dormant 018a). 018b (LIVE Office change) is a deploy candidate: UAC-r2 and R3 told; owner go needed in R3's session. **Active: task 018, phase 018c.**
+> **Last updated**: 2026-10-22 (task 018 complete; project blocked on 017)
+> **Phase**: Wave 2. Done (14/43): 001–006, 010–016, 018 on master (018a 36403e1f4b, 018b ef8a91a157 #2261, 018c **ab7cf4fc94** #2266).
+> **Live on dev: 1283c41817** (R3; dormant 018a). 018b (LIVE Office change) rides R3's next dev candidate (owner go by SHA in R3's session); R3 sends the SHA, then the owner makes 3 Office quick-creates and this session checks them read-only. **Active: none (blocked).**
 
 ## Quick Recovery
 
 | Field | Value |
 |---|---|
-| **Active task** | 018 (Office quick-create adapter), run as 3 PRs under ONE POML: **018a** service prerequisites → **018b** Matter/Project adapter → **018c** delete the Office core. The Invoice leg is NOT moved (ebilling-r1, owner decision L; task 096 deletes it) |
-| **HEAD** | work branch = master ef8a91a157 + this checkpoint. 018c = branch **`task/fm-018c`** (cut from task/fm-018b1 = 018b code), agent worktree under `C:\code_files\spaarke\.claude\worktrees\`. The 018b worktree `agent-a550606fde68f707f` (task/fm-018b1, merged) can be removed with Remove-WorktreeSafe |
-| **Running** | 018c implementer agent `fm018c` (opus, high, background): delete `OfficeRecordCreationService` + registration; move `ResolveDefaultAssigneeAsync` into `OfficeService` (prefill = server default); remove legacy `CreateTimeFieldMapping.Apply`; #2188 `KnownCallSites` 3 → 2; owner-guard allow-list, census, registry guard; re-point/retire the 9 test files; notes section `## 018c` |
-| **Next Action** | When fm018c reports: verify (build sln, full ArchTests, filtered suites; `git grep OfficeRecordCreationService` empty); one Opus adversarial review of the 018c diff (deletion = test-modifying, so code-review + adr-check); fix rounds; merge task/fm-018c into the work branch (merge origin/master first if it moved); publish delta vs fresh master + CVE; PR; merge on Router + Client lint green; set 018 ✅ in POML + TASK-INDEX; then 019 |
-| **018 progress** | 018a and 018b on master. 018b: Opus review (4 F fixed), Sonnet re-check clean, UAC-r2 condition (b) ACCEPT after fix round 2 (F1-1, K1) and the F4 catch-all wrap (1b4f297d9f). CI: the only red was the Tier 2 ADR cancel (#2224, 5-min timeout). #1614/#1617 were already closed; each has a SHA comment. #2124: commented (create fixed; Repair = 052). #2253 (UAC): whichever merges second adds `WriteIdentity.AppOnly` to `DropAppOnlyRefusedRules` + must-fire test |
+| **Active task** | None. Every pending task goes through 019, which needs 017 (blocked) |
+| **HEAD** | work branch = master ab7cf4fc94 + this checkpoint. No task branches or agent worktrees open |
+| **Running** | Nothing |
+| **Next Action** | Unblock 017: needs ebilling #1911 (still DRAFT) + reconcile, and the owner decisions in "Open items" 2. When R3 reports the 018b dev deploy SHA: ask the owner for the 3 Office quick-creates (Matter; Project under ordinary matter; Project under secure matter), then verify read-only on dev (owner team, sprk_issecure, regarding pair, Assigned To, search index) |
+| **018 progress** | COMPLETE. 018c deleted `OfficeRecordCreationService` + `CreateTimeFieldMapping.Apply`; `ResolveDefaultAssigneeAsync` moved to `IOfficeService`; guards updated (KnownCallSites 2, owner allow-list empty, census). Opus review: F3 fixed, K4 fixed, K2 known limit (cancellation seam test timing). Publish −21,556 B (37.73 MB). #2253 (UAC): whichever merges second adds `WriteIdentity.AppOnly` to `DropAppOnlyRefusedRules` + must-fire test |
 | **CI note** | #2252 raised the Tier 1 arch job timeout to 10 min (merged). The Tier 2 ADR job (#2224) may still be cancelled by its timeout; read the log |
 | **Cleanup left for the owner** | Empty, unregistered folders (Remove-WorktreeSafe partial delete, "Permission denied"): `C:\code_files\spaarke\.claude\worktrees\agent-a10e5fe383a4dfcd2`, `...\agent-a80d401ebbcfb9d3e` |
 
@@ -81,4 +81,4 @@ FR-06 step 10, #1608 columns, the chat number, SystemPrincipal.
 
 ## Next tasks
 
-018c → 019. 017 once unblocked. Then 033 (before 052), 040 (needs 005, 019), 050 (needs 019).
+019 once 017 lands. 017 once unblocked. Then 033 (before 052), 040 (needs 005, 019), 050 (needs 019).
