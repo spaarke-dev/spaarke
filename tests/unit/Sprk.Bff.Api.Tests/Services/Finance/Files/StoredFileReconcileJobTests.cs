@@ -261,6 +261,35 @@ public sealed class StoredFileReconcileJobTests
         h.Counts(result)["blobsDeleted"].GetInt32().Should().Be(0);
     }
 
+    [Fact(DisplayName = "Must-fire (uac-r2 round 2 K1): a parent-gone row's blob rewritten between the marker read and the delete (412) is kept with its row, counted, not a fault")]
+    public async Task ParentGone_BlobChangedAfterJudged_KeptNotFault()
+    {
+        var h = new Harness();
+        var goneParent = new StoredFileParent(StoredFileParentKind.Invoice, Guid.NewGuid());
+        var file = Guid.NewGuid();
+        h.Rig.SeedFile(file, goneParent, Pdf);
+        var path = h.PathOf(goneParent, file);
+        h.Rig.Gateway.BeforeOp = (op, name) =>
+        {
+            if (op == "delete" && name == "invoice-files/" + path)
+            {
+                h.Rig.Gateway.Overwrite("invoice-files", path, [1, 2, 3], h.Rig.Gateway.Now);
+            }
+        };
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue();
+        result.ErrorMessage.Should().BeNull("a changed blob is kept, not a faulted unit");
+        h.Rig.Gateway.Get("invoice-files", path).Should().NotBeNull("only the blob that was judged may be deleted");
+        h.Rig.Dataverse.Rows.Should().ContainKey(file, "the row is the only record of the kept blob");
+        h.Counts(result)["blobsChangedSinceJudged"].GetInt32().Should().Be(1);
+        h.Counts(result)["unitFaults"].GetInt32().Should().Be(0);
+        h.Counts(result)["rowsDeleted"].GetInt32().Should().Be(0);
+        h.Counts(result)["blobsDeleted"].GetInt32().Should().Be(0);
+        h.Log.Entries.Should().Contain(e => e.Message.Contains("412", StringComparison.Ordinal));
+    }
+
     [Fact(DisplayName = "Must-not-fire (uac-r2 round 1 F1): a parent-gone row whose blob is already gone is deleted (no blob delete is attempted)")]
     public async Task ParentGone_BlobAlreadyGone_RowDeleted()
     {
@@ -268,7 +297,7 @@ public sealed class StoredFileReconcileJobTests
         var goneParent = new StoredFileParent(StoredFileParentKind.Invoice, Guid.NewGuid());
         var file = Guid.NewGuid();
         h.Rig.SeedFile(file, goneParent, Pdf);
-        (await h.Rig.Gateway.DeleteIfExistsAsync("invoice-files", h.PathOf(goneParent, file), CancellationToken.None)).Should().BeTrue();
+        (await h.Rig.Gateway.DeleteIfExistsAsync("invoice-files", h.PathOf(goneParent, file), ifMatch: null, CancellationToken.None)).Should().BeTrue();
         h.Rig.Gateway.FailOp["delete"] = new RequestFailedException(503, "a delete must not be attempted");
 
         var result = await h.RunAsync();
@@ -409,6 +438,30 @@ public sealed class StoredFileReconcileJobTests
         h.Rig.Gateway.Get("invoice-files", old).Should().BeNull();
         h.Counts(result)["blobsInGrace"].GetInt32().Should().Be(1);
         h.Counts(result)["blobsDeleted"].GetInt32().Should().Be(1);
+    }
+
+    [Fact(DisplayName = "Must-fire (uac-r2 round 2 K1): a row-less blob rewritten between the listing and the delete (412) is kept, counted, not a fault")]
+    public async Task Orphan_ChangedAfterListed_KeptNotFault()
+    {
+        var h = new Harness();
+        var path = h.SeedOrphan(h.Clock.GetUtcNow().AddDays(-2));
+        h.Rig.Gateway.BeforeOp = (op, name) =>
+        {
+            if (op == "delete" && name == "invoice-files/" + path)
+            {
+                h.Rig.Gateway.Overwrite("invoice-files", path, [1, 2, 3], h.Clock.GetUtcNow());
+            }
+        };
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue();
+        result.ErrorMessage.Should().BeNull("a changed blob is kept, not a faulted unit");
+        h.Rig.Gateway.Get("invoice-files", path).Should().NotBeNull("the listing judged another version of the blob");
+        h.Counts(result)["blobsChangedSinceJudged"].GetInt32().Should().Be(1);
+        h.Counts(result)["unitFaults"].GetInt32().Should().Be(0);
+        h.Counts(result)["blobsDeleted"].GetInt32().Should().Be(0);
+        h.Log.Entries.Should().Contain(e => e.Message.Contains("412", StringComparison.Ordinal));
     }
 
     [Theory(DisplayName = "Row-less blob past the grace naming a submission: kept while the submission is not terminal")]

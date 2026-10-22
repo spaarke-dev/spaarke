@@ -205,7 +205,7 @@ public sealed class StoredFileEndpointsTests
                 break;
             case "blob-missing":
                 host.Rig.SeedFile(file, Invoice, Pdf);
-                await host.Rig.Gateway.DeleteIfExistsAsync("invoice-files", StoredFileBlobName.Build(StoredFileRig.Tenant, Invoice, file), CancellationToken.None);
+                await host.Rig.Gateway.DeleteIfExistsAsync("invoice-files", StoredFileBlobName.Build(StoredFileRig.Tenant, Invoice, file), ifMatch: null, CancellationToken.None);
                 break;
         }
 

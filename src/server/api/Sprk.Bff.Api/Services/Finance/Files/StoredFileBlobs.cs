@@ -471,10 +471,19 @@ public sealed class StoredFileBlobs
         return new BinaryData(buffer.ToArray());
     }
 
-    /// <summary>Deletes one blob of this tenant (with snapshots); <c>false</c> when it was already gone.</summary>
+    /// <summary>
+    /// Deletes one blob of this tenant (with snapshots); <c>false</c> when it was already gone. With <paramref name="ifMatch"/>
+    /// (uac-r2 round 2, K1) the delete applies only to the blob that ETag describes: a blob changed since it was judged throws
+    /// <see cref="RequestFailedException"/> 412 and is left unchanged.
+    /// </summary>
     /// <exception cref="ArgumentException"><paramref name="blobPath"/> is not a name of this tenant (nothing is called).</exception>
-    public async Task<bool> DeleteAsync(string container, string blobPath, CancellationToken ct) =>
-        await (await RequireOwnBlobAsync(container, blobPath, ct).ConfigureAwait(false)).DeleteIfExistsAsync(container, blobPath, ct).ConfigureAwait(false);
+    public async Task<bool> DeleteAsync(string container, string blobPath, ETag? ifMatch, CancellationToken ct) =>
+        await (await RequireOwnBlobAsync(container, blobPath, ct).ConfigureAwait(false))
+            .DeleteIfExistsAsync(container, blobPath, ifMatch, ct).ConfigureAwait(false);
+
+    /// <summary>Deletes one blob of this tenant whatever its ETag (the upload's own clean-up of a blob it just staged).</summary>
+    /// <exception cref="ArgumentException"><paramref name="blobPath"/> is not a name of this tenant (nothing is called).</exception>
+    public Task<bool> DeleteAsync(string container, string blobPath, CancellationToken ct) => DeleteAsync(container, blobPath, ifMatch: null, ct);
 
     /// <summary>
     /// The gateway, after checking that <paramref name="blobPath"/> is a stored-file name of THIS tenant in one of the three
@@ -515,7 +524,7 @@ public sealed class StoredFileBlobs
                     continue;
                 }
 
-                yield return new StoredBlobListing(container, item.Name, parent, fileId, item.CreatedOn, item.LastModified, item.Metadata);
+                yield return new StoredBlobListing(container, item.Name, parent, fileId, item.CreatedOn, item.LastModified, item.Metadata, item.ETag);
             }
 
             if (skipped > 0)
@@ -575,4 +584,5 @@ internal sealed record StoredBlobListing(
     Guid FileId,
     DateTimeOffset? CreatedOn,
     DateTimeOffset? LastModified,
-    IReadOnlyDictionary<string, string> Metadata);
+    IReadOnlyDictionary<string, string> Metadata,
+    ETag? ETag);

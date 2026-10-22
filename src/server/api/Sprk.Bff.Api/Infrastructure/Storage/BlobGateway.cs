@@ -90,12 +90,14 @@ internal sealed record BlobPropertiesInfo(
     IReadOnlyDictionary<string, string> Metadata);
 
 /// <summary>One row of a flat blob listing.</summary>
+/// <param name="ETag">The ETag the listing saw (ebilling-r1 task 090): a later delete can be pinned to the blob this row describes.</param>
 internal sealed record BlobListingItem(
     string Name,
     long? SizeBytes,
     DateTimeOffset? CreatedOn,
     DateTimeOffset? LastModified,
-    IReadOnlyDictionary<string, string> Metadata);
+    IReadOnlyDictionary<string, string> Metadata,
+    ETag? ETag = null);
 
 /// <summary>The answer of a write-once create.</summary>
 internal enum BlobCreateOutcome
@@ -150,8 +152,12 @@ internal abstract class BlobGateway
     /// <summary>Flat listing under <paramref name="prefix"/>; ordering is not guaranteed.</summary>
     public abstract IAsyncEnumerable<BlobListingItem> ListAsync(string container, string prefix, bool includeMetadata, CancellationToken cancellationToken);
 
-    /// <summary>Deletes one blob with its snapshots. <c>false</c> when it did not exist (deletes are idempotent).</summary>
-    public abstract Task<bool> DeleteIfExistsAsync(string container, string blobName, CancellationToken cancellationToken);
+    /// <summary>
+    /// Deletes one blob with its snapshots. <c>false</c> when it did not exist (deletes are idempotent). With
+    /// <paramref name="ifMatch"/>, the delete is refused (<see cref="RequestFailedException"/> 412) when the blob changed since that
+    /// ETag was read, so a caller that judged the blob deletes only what it judged.
+    /// </summary>
+    public abstract Task<bool> DeleteIfExistsAsync(string container, string blobName, ETag? ifMatch, CancellationToken cancellationToken);
 }
 
 /// <summary>The managed-identity Azure Blob implementation of <see cref="BlobGateway"/>.</summary>
@@ -297,16 +303,19 @@ internal sealed class AzureBlobGateway : BlobGateway
                 item.Properties?.LastModified,
                 item.Metadata is null
                     ? new Dictionary<string, string>(StringComparer.Ordinal)
-                    : new Dictionary<string, string>(item.Metadata, StringComparer.Ordinal));
+                    : new Dictionary<string, string>(item.Metadata, StringComparer.Ordinal),
+                item.Properties?.ETag);
         }
     }
 
-    public override async Task<bool> DeleteIfExistsAsync(string container, string blobName, CancellationToken cancellationToken)
+    public override async Task<bool> DeleteIfExistsAsync(string container, string blobName, ETag? ifMatch, CancellationToken cancellationToken)
     {
         // DeleteIfExists returns false for a blob that is already gone AND for a missing container (the SDK maps both
-        // BlobNotFound and ContainerNotFound to false), so "false" means only "nothing was there to delete".
+        // BlobNotFound and ContainerNotFound to false), so "false" means only "nothing was there to delete". A failed If-Match is
+        // not mapped: it throws RequestFailedException 412 (ConditionNotMet).
+        var conditions = ifMatch is { } etag ? new BlobRequestConditions { IfMatch = etag } : null;
         var response = await Blob(container, blobName)
-            .DeleteIfExistsAsync(DeleteSnapshotsOption.IncludeSnapshots, conditions: null, cancellationToken)
+            .DeleteIfExistsAsync(DeleteSnapshotsOption.IncludeSnapshots, conditions, cancellationToken)
             .ConfigureAwait(false);
         return response.Value;
     }

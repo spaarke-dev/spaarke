@@ -789,5 +789,5 @@ internal sealed class AzureBlobSessionFileGateway : SessionFileBlobGateway
     }
 
     public override Task<bool> DeleteAsync(string blobName, CancellationToken cancellationToken)
-        => _blobs.DeleteIfExistsAsync(_container, blobName, cancellationToken);
+        => _blobs.DeleteIfExistsAsync(_container, blobName, ifMatch: null, cancellationToken);
 }

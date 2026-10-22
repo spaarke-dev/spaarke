@@ -564,7 +564,7 @@ public sealed class StoredFileServiceTests
         var rig = new StoredFileRig();
         var file = Guid.NewGuid();
         rig.SeedFile(file, Invoice, Pdf, StoredFileStatus.NotYetServable);
-        await rig.Gateway.DeleteIfExistsAsync("invoice-files", StoredFileBlobName.Build(StoredFileRig.Tenant, Invoice, file), CancellationToken.None);
+        await rig.Gateway.DeleteIfExistsAsync("invoice-files", StoredFileBlobName.Build(StoredFileRig.Tenant, Invoice, file), ifMatch: null, CancellationToken.None);
 
         var result = await rig.Service.FlipToServableAsync(file, CancellationToken.None);
 

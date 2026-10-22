@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Azure;
 using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
@@ -313,9 +314,22 @@ public sealed class StoredFileReconcileJob : IScheduledJob
                         continue;
                     }
 
-                    if (properties is not null && await _blobs.DeleteAsync(container, row.BlobPath!, ct).ConfigureAwait(false))
+                    // uac-r2 round 2 (K1): the delete is pinned to the ETag the marker was judged on. A blob rewritten in between
+                    // (412) is not the blob that was judged: blob and row are kept, counted, and judged again next run.
+                    try
                     {
-                        counts.BlobsDeleted++;
+                        if (properties is not null && await _blobs.DeleteAsync(container, row.BlobPath!, properties.ETag, ct).ConfigureAwait(false))
+                        {
+                            counts.BlobsDeleted++;
+                        }
+                    }
+                    catch (RequestFailedException ex) when (ChangedSinceJudged(ex))
+                    {
+                        counts.BlobsChangedSinceJudged++;
+                        _logger.LogWarning(
+                            "Stored file reconcile: file {FileId} (parent gone): its blob changed after it was judged (412); blob and row kept for the next run",
+                            row.Id);
+                        continue;
                     }
                 }
                 else
@@ -427,11 +441,27 @@ public sealed class StoredFileReconcileJob : IScheduledJob
                     continue;
                 }
 
-                if (await _blobs.DeleteAsync(blob.Container, blob.BlobPath, ct).ConfigureAwait(false))
+                // uac-r2 round 2 (K1): the delete is pinned to the ETag the listing judged (age, marker, submission). A listing
+                // without one gives nothing to pin to, so the blob is kept.
+                if (blob.ETag is not { } judged)
+                {
+                    counts.UnitFaults++;
+                    _logger.LogWarning("Stored file reconcile: blob {Container}/{BlobName} was listed without an ETag; kept for the next run", blob.Container, blob.BlobPath);
+                    continue;
+                }
+
+                if (await _blobs.DeleteAsync(blob.Container, blob.BlobPath, judged, ct).ConfigureAwait(false))
                 {
                     counts.BlobsDeleted++;
                     _logger.LogInformation("Stored file reconcile deleted row-less blob {Container}/{BlobName}", blob.Container, blob.BlobPath);
                 }
+            }
+            catch (RequestFailedException ex) when (ChangedSinceJudged(ex))
+            {
+                counts.BlobsChangedSinceJudged++;
+                _logger.LogWarning(
+                    "Stored file reconcile: row-less blob {Container}/{BlobName} changed after it was listed (412); kept for the next run",
+                    blob.Container, blob.BlobPath);
             }
             catch (Exception ex) when (!ct.IsCancellationRequested)
             {
@@ -440,6 +470,9 @@ public sealed class StoredFileReconcileJob : IScheduledJob
             }
         }
     }
+
+    /// <summary>A delete refused because the blob's ETag is no longer the one judged (If-Match failed): kept, not a fault.</summary>
+    private static bool ChangedSinceJudged(RequestFailedException ex) => ex.Status == 412;
 
     private static async Task<bool> RowExistsAsync(IGenericEntityService entities, Guid fileId, CancellationToken ct)
     {
@@ -495,10 +528,10 @@ public sealed class StoredFileReconcileJob : IScheduledJob
             Heartbeat,
             "Stored file reconcile attempt {Attempt}: failed={Failed} skipped={Skipped} rows={Rows} unreadable={Unreadable} rowsDeleted={RowsDeleted} "
             + "blobs={Blobs} blobsDeleted={BlobsDeleted} inGrace={InGrace} openSubmissions={OpenSubmissions} otherEnvironments={OtherEnvironments} "
-            + "notServable={NotServable} unitFaults={UnitFaults} truncated={Truncated} correlationId={CorrelationId}",
+            + "changedSinceJudged={ChangedSinceJudged} notServable={NotServable} unitFaults={UnitFaults} truncated={Truncated} correlationId={CorrelationId}",
             context.Attempt, counts.Failed, counts.SkippedReason ?? "no", counts.RowsExamined, counts.RowsUnreadable, counts.RowsDeleted,
             counts.BlobsExamined, counts.BlobsDeleted, counts.BlobsInGrace, counts.BlobsOfOpenSubmissions, counts.BlobsOfOtherEnvironments,
-            counts.NotServableDetected, counts.UnitFaults, counts.RowsTruncated, context.CorrelationId);
+            counts.BlobsChangedSinceJudged, counts.NotServableDetected, counts.UnitFaults, counts.RowsTruncated, context.CorrelationId);
 
     private static string Serialize(ReconcileCounts counts) => JsonSerializer.Serialize(counts, ResultJsonOptions);
 
@@ -518,6 +551,9 @@ public sealed class StoredFileReconcileJob : IScheduledJob
         public int BlobsInGrace { get; set; }
         public int BlobsOfOpenSubmissions { get; set; }
         public int BlobsOfOtherEnvironments { get; set; }
+
+        /// <summary>Deletes refused with 412: the blob changed after it was judged (uac-r2 round 2, K1). Kept, not a fault.</summary>
+        public int BlobsChangedSinceJudged { get; set; }
         public int NotServableDetected { get; set; }
         public int UnitFaults { get; set; }
     }

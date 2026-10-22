@@ -205,14 +205,20 @@ internal sealed class InMemoryBlobGateway : BlobGateway
             if (c == container && name.StartsWith(prefix, StringComparison.Ordinal))
             {
                 yield return new BlobListingItem(name, blob.Content.LongLength, blob.CreatedOn, blob.LastModified,
-                    includeMetadata ? new Dictionary<string, string>(blob.Metadata, StringComparer.Ordinal) : new Dictionary<string, string>());
+                    includeMetadata ? new Dictionary<string, string>(blob.Metadata, StringComparer.Ordinal) : new Dictionary<string, string>(),
+                    blob.ETag);
             }
         }
     }
 
-    public override Task<bool> DeleteIfExistsAsync(string container, string blobName, CancellationToken cancellationToken)
+    public override Task<bool> DeleteIfExistsAsync(string container, string blobName, ETag? ifMatch, CancellationToken cancellationToken)
     {
         Record("delete", container, blobName);
+        if (ifMatch is { } etag && Get(container, blobName) is { } blob && etag != blob.ETag)
+        {
+            throw new RequestFailedException(412, "The condition specified using HTTP conditional header(s) is not met.", "ConditionNotMet", null);
+        }
+
         return Task.FromResult(_blobs.TryRemove((container, blobName), out _));
     }
 
