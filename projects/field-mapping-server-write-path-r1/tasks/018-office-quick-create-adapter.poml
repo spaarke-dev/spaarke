@@ -4,7 +4,7 @@
     <title>Office quick-create (Matter, Project, Invoice) becomes a thin adapter over the service; delete the Office RecordCreationService (FR-13 part 2, FR-12)</title>
     <phase>2 W2 Unified RecordCreationService</phase>
     <gate>016 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in Sprk.Bff.Api; tags include bff-api, office; deletes a 1264-line creation core with security behaviour; adds tests at KEEP paths (TEST-MODIFYING and deletion override).</rigor-reason>
     <model-tier>opus</model-tier>
