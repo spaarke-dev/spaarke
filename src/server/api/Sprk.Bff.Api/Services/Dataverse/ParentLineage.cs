@@ -672,7 +672,7 @@ internal static class InheritedAccessPermission
     };
 
     /// <summary>
-    /// #2247: a row's creator. <c>sprk_createdbyperson</c> (<see cref="RecordCreatorPerson.Column"/>, on 28 tables) is read by
+    /// #2247: a row's creator. <c>sprk_createdbyperson</c> (<see cref="RecordCreatorPerson.Column"/>, on 38 tables on dev) is read by
     /// the move-out-of-secure creator check (<c>RecordOwnershipResolver</c>), provisioning resume, event visibility and the
     /// document-pointer creator rule; <c>sprk_createdbycontact</c> (field-secured, the BFF its only writer) by the external
     /// delete-own check; <c>sprk_requestedby</c> (a service request's requester, a contact) by the external Service Requests
