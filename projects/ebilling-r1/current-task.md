@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated**: 2026-10-21 (context-handoff at 86%)
+> **Last Updated**: 2026-10-21 (checkpoint after 080/099 done, 091 dev applied)
 > **Format**: CURRENT state only. Rewrite each checkpoint; target ≤ 10 KB.
 
 ---
@@ -9,46 +9,39 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Wave W3-6 in progress (080, 091, 099, 115), plus D-176 follow-ups. Model FINAL (EB-D-148); 108 POMLs; draft PR #1911. |
-| **Status** | Three owner decisions pending (below); 099 agent still running. |
-| **Next Action** | On the owner's answers: (1) re-run 080 on dev: `pwsh -NoProfile -File scripts/ebilling/Deploy-EbillingProcedureSchema.ps1` from the worktree root (dev default URL), log to scratchpad, then send the after-notice and verify output to ontology-r1 and uac-r2; (2) tell the 115 agent the D-39 precedence key; (3) on option A, resume 091 for ebilling-file-store.bicep + custom role. When ontology-r1 PASSes the 115 re-check, merge task/ebill-115-ruletypes, then run its option script on dev. |
+| **Task** | Wave W3-6 wrapping up (091 live check left), D-176 follow-ups (119 waits on ontology 157). Model FINAL (EB-D-148); 108 POMLs; draft PR #1911. |
+| **Status** | 080 ✅, 099 ✅, 115 + feeKind follow-up merged. 091 merged and applied on dev; only uac-r2 condition (c) is open (tag-write proof as the identity). |
+| **Next Action** | (1) When the owner runs (or authorises) the tag-write proof, send its output to uac-r2 and close 091 (POML status, TASK-INDEX). (2) On ontology's 157 F3 fix range: scoped re-check, PASS. Then ontology merges PR #2231, which unblocks 119 (launch via task-execute, opus/high). (3) Next waves: W3-7 088 (dev schema run, owner OK given), W3-8 081, 090. |
 
 ### Lanes
-| Task | Branch / state | Waiting on |
+| Task | State | Waiting on |
 |---|---|---|
-| 080 Procedure schema | Merged on work/ebilling-r1 (934e41ec53 + K1 6232f7436e). **Dev is PARTIAL**: the five globals, sprk_procedure and sprk_procedureversion are complete; sprk_procedureassignment has only sprk_matter (Delete Cascade). Nothing is secured or published; 0 rows. The fix (core lookups RemoveLink, in-place repair of sprk_matter, order guard) has uac-r2 ACCEPT and ontology-r1 PASS. Pester 3.4: `Import-Module Pester -RequiredVersion 3.4.0` (85 pass). | **Owner OK to re-run** (the change from "Cascade" to "the planner" for assignment rows). |
-| 091 storage | task/ebill-091-storage f8eee9be4b (account-scope grants removed, ai-chunks container grant, template test). Not merged. customer-provisioning OK to merge (customer.json conflict = recompile, never hand-merge). | **Owner: option A** (custom role = Contributor + blobs/tags/read, RG scope, per container). uac-r2 ACCEPT A with 4 conditions (in 091/090 notes). |
-| 099 step 0 | Agent running (task/ebill-099-step0); last seen running the full unit suite. | Agent result, then uac-r2 review. |
-| 115 rule types | task/ebill-115-ruletypes eb0b042e5a (ontology FINDINGS fixed). Option script -WhatIf ok (GET-only). | ontology-r1 re-check; **owner: D-39 precedence for AddedFee** (RuleType alone vs RuleType+feeKind; recommend +feeKind). |
-| D-176 / #2118 | duplicateOf.invoiceId merged (f140542018). Ontology task 157 builds the SignalReadService check. New ebilling task 119 (/review read-time withholding) is gated on 157. | ontology 157 range for our review. |
+| 091 storage | Merged (d084f10a93). Dev: account `sprkspaarkedevebillsa` (rg-spaarke-dev), custom role + 3 container-scope grants to mi-bff-api-dev, scanning NOT enabled on dev (owner). Test-EbillingFileStoreRole.ps1 exit 0. Hand-off #2232 / DEF-034 filed and sent to customer-provisioning. | **uac-r2 (c):** `scripts/ebilling/test-ebilling-file-store-tag-write.sh` run AS mi-bff-api-dev (App Service SSH console, `az webapp ssh -g rg-spaarke-dev -n spaarke-bff-dev`), once per container; expect 201/403/403/200/202. Step 3 = 201 → STOP, tell uac-r2. 090 downloads stay off until it passes. |
+| 119 /review Duplicate withhold | POML updated: mirrors 157 (no exemption, agreed), calls `ShownAsync`, notes (9)-(13). | ontology 157 F3 (nextLink truncation) fix → our re-check → PR #2231 merged. |
+| O-14 prototype | First cut in spaarke-prototype/projects/ebilling.r1 (localhost:5177). P-1/P-2 answered from the model; P-3 owner: not in R1 (applied). | 084/089 to correct its assumed DTOs (src/procedures/types.ts). |
 
-### Owner answers 2026-10-21 (all as recommended) — in progress
-1. 080 dev re-run: running (log: scratchpad 080-rerun.log); before-notices sent; after-notice must include the P9 secured-column list + permission rows (uac-r2 asked).
-2. AddedFee D-39 key = RuleType + feeKind: agent eb-115-feekind on branch task/ebill-115-feekind; ontology-r1 reviews.
-3. 091 option A: agent eb-091-roleA on task/ebill-091-storage (template only; I run the dev deploy after uac-r2 review).
-4. O-14 prototype: spaarke-prototype started it (spaarke-prototype/projects/ebilling.r1); first cut to follow.
-Also running: eb-099-fix (uac-r2 F4 1-4 + registration assertion + multipart-in-handler + namespace guard selector); review of ontology 157 (c7659c6fe1..9d8fc886d4).
+### Done this session (details in git log)
+- 080: dev run exit 0 (created 64, changed 20); the idempotence run wrote nothing; ontology and uac-r2 verified on dev independently. `@odata.type` fix 11ead6c938. Record: notes/080-dev-run-2026-10-21.md.
+- 099: merged 4a1497e252 (uac-r2 ACCEPT 54524dead8). Pre-existing #2218 / DEF-033 (BFF won't start with AI gates off) filed.
+- 115 follow-up: D-39 key = (RuleType, FeeKind, exact fee-code set for `other`), merged f4874f4f8a, ontology PASS.
+- Combined tip tests: unit filtered 6213 pass, ArchTests 1319 pass.
 
-### Filed this session
-#2215 (dead AttachmentClassificationJobHandler), #2216 / DEF-032 (AddedFee forms wait for extraction).
-
-### Owner decisions already given
-- **2026-10-21 owner OKs (W3-6 live steps):** (1) dev schema runs of 080, 115 and 088, each after ontology-r1's review PASS of the final script and -WhatIf, with notices to ontology-r1 and uac-r2 before and after; (2) the dev Azure storage change of 091 (remove the account-scope grant, container-scoped grants), no Key Vault changes. (3) 084 UI: spaarke-prototype says the O-14 prototype is NOT started; it needs the owner to ask it (told the owner 2026-10-21). Its data-shape questions are in notes/084-prototype-questions.md, answered by 084 and 089. 096: word-add-in-r1 confirmed 2026-10-21 that no add-in Invoice task exists yet (their owner is asked to create it ahead of 095). Their release needs 118's component merged and 095 on dev, takes about a week, and production needs a manifest bump and an owner upload. 096 is one release later. 095's §9.1 shapes are frozen; any change goes to them first. (do not ask again)
-- **Model:** A option 1 (record-scoped `sprk_ruleset`, `sprk_scope` Record 100000002 / Firm record 100000003); B `sprk_billingfirm` + `sprk_billingresponsible` (→ `sprk_organization`, all core types, not access-conferring); C; D/D2 superseded by no-auto-re-check; E hold + warning; F, G; H "Internal Standard"; I yes (process TBD); J A+B; K internal-only/Restricted/Private allowed with isolation carried; M; N; O all-or-nothing; P; Q, Q2 (no migration), R.
-- **Access:** uac-r2 round 116 (F1-1 (a′) effect accepted, F1-4 confirmed); round 117 (K-3 a known limit).
-- **Other:** extracted fields stay readable after a later source change. Agreement is a core record, deferred to R2. "Matter" is shorthand for any core record (project CLAUDE.md §3). `sprk_family` does not exist (answered in reviews §4).
+### Owner decisions 2026-10-21 (do not ask again)
+- 080 re-run yes; AddedFee key by fee kind (and exact code set for `other`); 091 option A; O-14 prototype started.
+- Dev file store: new dedicated account; apply after the what-if; scanning "not enabled" on dev.
+- P-3: a child can't re-enable a rule its parent excluded (not in R1).
+- Matter spend/budget stay visible to flagged-external users (no field security).
+- Earlier: dev schema runs of 080/115/088 after ontology PASS + notices; no Key Vault changes; 096 one release after word-add-in-r1's; 095 from-email shapes frozen.
 
 ### Agreed with peers
-- **R3:** we own the BFF change (firm file routes, retire the four `/external/invoices/{id}/documents…` routes, Stored File storage), reviewed by uac-r2 with the 188 guard entry. The SPA side goes to R4. Dev deploy is BFF then SPA through R3. The 051 wizard is on our branch only.
-- **field-mapping:** 013 is cleared (PR #2184, which renames the Office create service; check it at the #1911 merge). Reconcile review checklist: RegardingTrio tables get mapping-protected core lookups; the ratchet copy is replaced by the real `CoreRecordLookups`; 016/040 call `CheckGenericUpdateAsync`.
-- **Dev BFF:** f1b3dadcf5 live 2026-10-21 21:45:37Z (R3 confirmed; = master + uac-r2 188 and #2186); it does NOT contain e0df773395 (our 015 statuscode move, only on work/ebilling-r1), so the 015 delete of sprk_invoicestatus stays blocked until a dev BFF with 015 is live. Includes #2177, so 095's "#2177 merged and deployed" gate is met on dev. The 015 delete stays blocked; `sprk_invoicestatus` still exists on dev.
-
-### 050a (closed)
-Round 4 passed. Under the new model the re-file is retired and Submit Invoice replaces it; the D-140 chain and isolation check are kept.
+- field-mapping 018 moves only Matter and Project quick-create; the Office Invoice leg is left for our 096 to remove. 017 is blocked on #1911.
+- R3: OK'd the dev BFF deploy of master a7b956fb55. Dev BFF lacks e0df773395 (015), so the sprk_invoicestatus delete stays blocked until #1911 lands and a dev deploy carries it.
+- 082 must use `BillingRuleDefinition.PrecedenceKey` for record-level precedence (in its POML).
+- uac-r2 191: scorecard, Insights and Workspace AI keep FinanceAuthorizationFilter without step 0 (NonFinanceFilterUsers list).
 
 ### Standing rules (unchanged)
-- **Worktrees and git:** agents work only in their own worktree; remove worktrees only with Remove-WorktreeSafe.ps1; never bare git stash; never --no-verify.
-- **Verification:** run the broad filter after multi-range picks.
-- **Deploys:** Import-SolutionScoped.ps1 only; dev BFF/SPA deploys only via SPA-r3.
-- **Live changes:** live writes and role changes need the owner's OK. Schema runs need notices to ontology-r1 and uac-r2 before and after.
-- **Gates:** no line upload route before #2047; 100/105 not to dev or master before the Core User check on dev; no dev invoice seeding until REAL-2026-123456.01 is answered.
+- Worktrees: agents work in their own worktree; remove only with Remove-WorktreeSafe.ps1; never bare git stash; never --no-verify.
+- Run the broad filter after multi-range picks.
+- Deploys: Import-SolutionScoped.ps1 only; dev BFF and SPA only via SPA-r3.
+- Live writes and role changes need the owner's OK; schema runs need notices to ontology-r1 and uac-r2 before and after.
+- Gates: no line upload route before #2047; 100 and 105 not to dev or master before the Core User check on dev; no dev invoice seeding until REAL-2026-123456.01 is answered.
