@@ -1400,10 +1400,10 @@ public static class OfficeEndpoints
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
         // GET /office/quickcreate/defaults - What the "+ New" form prefills (task 100, owner decision B)
-        // The caller's OWN linked contact for Assigned To — the same contact RecordCreationService assigns a Matter or
-        // Project when the request names none, so the prefill and the server's default are one answer
-        // (RecordCreationService.ResolveDefaultAssigneeAsync). Takes no id: there is no resource to authorize beyond
-        // the caller themself (waived Permanent in RouteAuthorizationGuardTests).
+        // The caller's OWN linked contact for Assigned To — the same contact the Office quick-create adapter passes the
+        // unified create as its Assigned To default when the request names none, so the prefill and the server's default
+        // are one answer (OfficeService.ResolveDefaultAssigneeAsync, over the adapter's own ResolveMakerContactIdAsync).
+        // Takes no id: there is no resource to authorize beyond the caller themself (waived Permanent in RouteAuthorizationGuardTests).
         // Authorization: OfficeAuthFilter validates user authentication
         // Rate Limit: Search category (30/minute/user) — a read loaded once per pane, not a create
         group.MapGet("/quickcreate/defaults", GetQuickCreateDefaultsAsync)
@@ -1449,7 +1449,7 @@ public static class OfficeEndpoints
     /// form simply has no prefill, and the create itself refuses such a caller with its own message.
     /// </summary>
     private static async Task<IResult> GetQuickCreateDefaultsAsync(
-        OfficeRecordCreationService recordCreation,
+        IOfficeService officeService,
         Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver callerResolver,
         Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient callerDataverse,
         ILogger<Program> logger,
@@ -1464,7 +1464,7 @@ public static class OfficeEndpoints
             return TypedResults.Ok(new QuickCreateDefaultsResponse());
         }
 
-        var assignedTo = await recordCreation.ResolveDefaultAssigneeAsync(callerSystemUserId, cancellationToken);
+        var assignedTo = await officeService.ResolveDefaultAssigneeAsync(callerSystemUserId, cancellationToken);
 
         // 018b fix round 2 (K1): the pane sends this contact back as assignedToContactId, and a REQUESTED assignee the caller
         // cannot AppendTo is refused (403 assignee_inaccessible) — whereas the maker default the create falls back on is

@@ -2267,6 +2267,11 @@ internal class OfficeService : IOfficeService
     internal const string ProjectNameColumn = "sprk_projectname";
     internal const string ProjectDescriptionColumn = "sprk_projectdescription";
 
+    /// <summary>The contact row the quick-create defaults prefill reads (<see cref="ResolveDefaultAssigneeAsync"/>; was the Office core's).</summary>
+    private const string ContactEntity = "contact";
+    private const string ContactNameAttribute = "fullname";
+    private const string ContactEmailAttribute = "emailaddress1";
+
     /// <summary>The ADR-024 record-type catalog: the pair's type names one of its rows.</summary>
     internal const string RecordTypeEntity = "sprk_recordtype_ref";
 
@@ -2307,7 +2312,9 @@ internal class OfficeService : IOfficeService
 
     /// <summary>
     /// The maker's linked contact id (task 141's link), or <see langword="null"/> when there is none or it could not be
-    /// resolved — the identity service the Office core used (<c>ResolveMakerContactIdAsync</c>). Never throws but a cancellation.
+    /// resolved. The ONE place the default assignee is decided: both the create (the <c>PostMappingDefaults</c> Assigned To
+    /// entry in <see cref="QuickCreateViaCreationServiceAsync"/>) and the pane's prefill (<see cref="ResolveDefaultAssigneeAsync"/>)
+    /// read it, so the prefill can never name someone the server would not (task 100). Never throws but a cancellation.
     /// </summary>
     private async Task<Guid?> ResolveMakerContactIdAsync(Guid makerSystemUserId, CancellationToken ct)
     {
@@ -2325,6 +2332,55 @@ internal class OfficeService : IOfficeService
             _logger.LogWarning(ex, "[RECORD-CREATE] The maker's linked contact could not be resolved for {MakerId}", makerSystemUserId);
             return null;
         }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Moved intact from the deleted Office creation core (field mapping task 018c). The contact row is read app-only. That
+    /// discloses nothing: it is the caller's OWN identity link, resolved from their own <c>systemuserid</c>; the route takes no
+    /// id. Never throws for a Dataverse fault — no prefill is the worst case, and the user can still pick someone.
+    /// </remarks>
+    public async Task<QuickCreateContactOption?> ResolveDefaultAssigneeAsync(Guid callerSystemUserId, CancellationToken cancellationToken)
+    {
+        if (callerSystemUserId == Guid.Empty
+            || await ResolveMakerContactIdAsync(callerSystemUserId, cancellationToken).ConfigureAwait(false) is not { } contactId)
+        {
+            return null;
+        }
+
+        Microsoft.Xrm.Sdk.Entity? contact;
+        try
+        {
+            contact = await _genericEntityService
+                .RetrieveAsync(ContactEntity, contactId, [ContactNameAttribute, ContactEmailAttribute], cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[RECORD-CREATE] The default assignee contact {ContactId} could not be read; no prefill.", contactId);
+            return null;
+        }
+
+        var name = contact?.GetAttributeValue<string>(ContactNameAttribute)?.Trim();
+        var email = contact?.GetAttributeValue<string>(ContactEmailAttribute)?.Trim();
+        if (string.IsNullOrEmpty(email))
+        {
+            email = null;
+        }
+
+        // A contact with neither a name nor an email gives the user nothing to recognise — no prefill.
+        var display = string.IsNullOrEmpty(name) ? email : name;
+        if (display is null)
+        {
+            return null;
+        }
+
+        return new QuickCreateContactOption { Id = contactId, Name = display, Email = email };
     }
 
     /// <summary>
