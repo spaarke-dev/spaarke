@@ -2472,6 +2472,14 @@ public class RuleSetService
             : Policy.CurrentVersionId is { } current && current != Working.Id ? Versions.FirstOrDefault(v => v.Id == current) : null;
     }
 
+    /// <summary>
+    /// ebilling-r1 task 081 (uac-r2 review item D, procedure model I-P5): the Procedure a billing rule set belongs to
+    /// (<c>sprk_ruleset.sprk_procedure</c>), or null for a legacy set or no such set. The proposal routes' authorization reads it (app-only)
+    /// to require the caller's Write on that Procedure. A read fault throws (the caller denies).
+    /// </summary>
+    internal virtual async Task<Guid?> ProcedureOfRuleSetAsync(Guid ruleSetId, CancellationToken ct) =>
+        (await LoadRuleSetAsync(ruleSetId, ct))?.GetAttributeValue<EntityReference>(ProcedureColumn)?.Id;
+
     private async Task<Entity?> LoadRuleSetAsync(Guid ruleSetId, CancellationToken ct)
     {
         if (ruleSetId == Guid.Empty)

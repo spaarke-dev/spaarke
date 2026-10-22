@@ -1,4 +1,8 @@
+using Spaarke.Core.Auth;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Finance;
 
 namespace Sprk.Bff.Api.Api.Finance;
 
@@ -122,6 +126,65 @@ public static class BillingAdminAuthorization
     /// <summary>Retire the Procedure: as <see cref="WriteProcedure"/>, plus Write on <c>sprk_policy</c> (it switches every policy Off).</summary>
     public static FinanceAuthorizationTargets RetireProcedure(EndpointFilterInvocationContext context) =>
         OnProcedure(context, Check(WritePolicyPrivilege, "sprk_policies"));
+
+    /// <summary>
+    /// uac-r2 review item D (2026-10-22, I-P5): on a rule set that belongs to a Procedure (<c>sprk_ruleset.sprk_procedure</c> set), a rule
+    /// edit or decision also needs the caller's own Write on THAT Procedure: the same Record-path "write" check on <c>sprk_procedures</c> the
+    /// Procedure routes declare (<see cref="WriteProcedure"/>), run by <see cref="FinanceAuthorizationFilter"/> as the caller; otherwise 403.
+    /// A legacy set (no Procedure) or an unknown set is unchanged (the route's own declaration, then the service's 404). Added AFTER the
+    /// route's <c>AddFinanceAuthorizationFilter</c> (step 0 and the billing-admin privileges run first). Fails closed: a fault reading the
+    /// rule set is a 403 <c>sdap.access.error.system_failure</c>.
+    /// </summary>
+    /// <remarks>§11: <i>Existing</i> — <see cref="FinanceAuthorizationFilter"/> evaluates a Record check; its target declaration is
+    /// synchronous and cannot read the rule set. <i>Extension</i> — this filter reads the set's Procedure, then hands that one check to the
+    /// existing filter, so the evaluation (and its denial shape) is the Procedure routes' own. <i>Cost of doing nothing</i> — a billing
+    /// admin without Write on a Procedure could still change and decide its rules through the rule set routes.</remarks>
+    public static TBuilder RequireWriteOnTheRuleSetsProcedure<TBuilder>(this TBuilder builder) where TBuilder : IEndpointConventionBuilder =>
+        builder.AddEndpointFilter(async (context, next) =>
+        {
+            var http = context.HttpContext;
+            var services = http.RequestServices;
+            if (!http.Request.RouteValues.TryGetValue(RuleSetRouteKey, out var raw) || !Guid.TryParse(raw?.ToString(), out var ruleSetId))
+            {
+                return await next(context); // the route constraint guarantees a guid; the service answers anything else
+            }
+
+            Guid? procedureId;
+            try
+            {
+                procedureId = await services.GetRequiredService<RuleSetService>().ProcedureOfRuleSetAsync(ruleSetId, http.RequestAborted);
+            }
+            catch (Exception ex)
+            {
+                services.GetService<ILogger<FinanceAuthorizationFilter>>()?.LogError(ex,
+                    "Rule set {RuleSetId}: its Procedure could not be read for the Procedure Write check; denying (fail closed)", ruleSetId);
+                return ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
+            }
+
+            if (procedureId is not { } id || id == Guid.Empty)
+            {
+                return await next(context);
+            }
+
+            var filter = new FinanceAuthorizationFilter(
+                services.GetRequiredService<AuthorizationService>(), _ => WriteProcedureRecord(id), FinanceDenial.Forbidden,
+                services.GetService<CallerRecordAccessProbe>());
+            return await filter.InvokeAsync(context, next);
+        });
+
+    private const string RuleSetRouteKey = "ruleSetId";
+
+    /// <summary>The caller's Write on one Procedure: the check <see cref="FinanceAuthorizationTargets.FromRoute"/> builds for the Procedure
+    /// routes, with the id read from the rule set instead of the route.</summary>
+    internal static FinanceAuthorizationTargets WriteProcedureRecord(Guid procedureId) =>
+        FinanceAuthorizationTargets.Authorize(new FinanceAuthorizationCheck
+        {
+            Path = FinanceCheckPath.Record,
+            EntitySetName = ProcedureEntitySet,
+            RecordId = procedureId,
+            Operation = "write",
+            Source = "ruleset.sprk_procedure",
+        });
 
     private static FinanceAuthorizationTargets OnProcedure(EndpointFilterInvocationContext context, params FinanceAuthorizationCheck[] extra)
     {

@@ -122,6 +122,7 @@ public static class RuleSetEndpoints
         group.MapPatch("/{ruleSetId:guid}/proposals/{policyId:guid}", EditProposal)
             .AddFinanceAuthorizationFilter(_ => BillingAdminAuthorization.EditRule())
             .RequireEbillingEnabled()
+            .RequireWriteOnTheRuleSetsProcedure() // uac-r2 D (I-P5): and Write on the set's Procedure, when it has one
             .WithName("EditRuleSetProposal")
             .WithSummary("Edit a rule (a published version is never changed: the edit creates a new Draft version)")
             .Produces<ProposalEdited>(StatusCodes.Status200OK)
@@ -135,6 +136,7 @@ public static class RuleSetEndpoints
         group.MapPost("/{ruleSetId:guid}/proposals/{policyId:guid}/accept", AcceptProposal)
             .AddFinanceAuthorizationFilter(_ => BillingAdminAuthorization.DecideRule())
             .RequireEbillingEnabled()
+            .RequireWriteOnTheRuleSetsProcedure() // uac-r2 D (I-P5): and Write on the set's Procedure, when it has one
             .WithName("AcceptRuleSetProposal")
             .WithSummary("Accept a rule (validated; the body names the rowVersion the admin was shown, 409 when it changed since)")
             .Produces<ProposalView>(StatusCodes.Status200OK)
@@ -148,6 +150,7 @@ public static class RuleSetEndpoints
         group.MapPost("/{ruleSetId:guid}/proposals/{policyId:guid}/reject", RejectProposal)
             .AddFinanceAuthorizationFilter(_ => BillingAdminAuthorization.DecideRule())
             .RequireEbillingEnabled()
+            .RequireWriteOnTheRuleSetsProcedure() // uac-r2 D (I-P5): and Write on the set's Procedure, when it has one
             .WithName("RejectRuleSetProposal")
             .WithSummary("Reject a rule (the body names the rowVersion the admin was shown and a required reason, 1 to 2,000 characters)")
             .Produces<ProposalView>(StatusCodes.Status200OK)
