@@ -188,10 +188,11 @@ public record OutputMappingResult
         new() { Success = true, Updates = updates };
 
     /// <summary>
-    /// Create a failure result with error message.
+    /// Create a failure result with error message, and the per-update results when updates were attempted (#2257 fix round
+    /// 1: each failed update keeps its own message and code, e.g. <c>playbook.write_access_denied</c>).
     /// </summary>
-    public static OutputMappingResult FailureResult(string error) =>
-        new() { Success = false, ErrorMessage = error };
+    public static OutputMappingResult FailureResult(string error, List<EntityUpdateResult>? updates = null) =>
+        new() { Success = false, ErrorMessage = error, Updates = updates ?? new() };
 }
 
 /// <summary>

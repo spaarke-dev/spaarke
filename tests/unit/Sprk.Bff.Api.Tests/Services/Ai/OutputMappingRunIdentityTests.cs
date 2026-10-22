@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
@@ -6,6 +7,7 @@ using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
@@ -15,8 +17,9 @@ namespace Sprk.Bff.Api.Tests.Services.Ai;
 
 /// <summary>
 /// #2257 (owner round 123, "run as the user"): a playbook's output mapping writes AS the person whose run it is, as the Update
-/// Record node does; only a run with no person in it (<see cref="PlaybookRunStartedBy.System"/>) writes app-only, behind
-/// <see cref="InheritedAccessPermission.RefuseAppOnlyWrite"/>. A person's run whose user is unknown writes nothing. Two layers:
+/// Record node does; only a run with no person in it (<see cref="PlaybookRunStartedBy.System"/>) writes app-only. Both are asked
+/// <see cref="InheritedAccessPermission.RefuseAppOnlyWrite"/> (fix round 1: the mapping is configuration, not the person's), and
+/// an Optimistic update reads its row version AS the person. A person's run whose user is unknown writes nothing. Two layers:
 /// <see cref="OutputOrchestratorService"/> decides the identity per update, and <see cref="DataverseUpdateHandler"/> writes as it
 /// (plain and row-version writes, and a re-file's move-out-of-secure check, the way <c>UpdateRecordActionCore</c> does).
 /// </summary>
@@ -118,8 +121,29 @@ public class OutputMappingRunIdentityTests
 
         var result = await orchestrator.ApplyOutputMappingAsync(_playbookId, Run(PlaybookRunStartedBy.Person, Person), CancellationToken.None);
 
+        // Fix round 1 (F3): the failed update carries its own code, so a deleted access-denied catch is seen here (its
+        // message would then be the raw 403, not the code).
         result.Success.Should().BeFalse();
+        var update = result.Updates.Should().ContainSingle("the per-update results are carried on failure").Subject;
+        update.Success.Should().BeFalse();
+        update.EntityType.Should().Be("sprk_invoice");
+        update.ErrorMessage.Should().StartWith(PlaybookRunWriteIdentity.WriteAccessDeniedCode + ":");
         _handler.Invocations.Should().ContainSingle("the refused write is not retried app-only");
+    }
+
+    [Fact]
+    public async Task ASystemUpdate_ThatDataverseRefuses_IsAFailedUpdate_WithoutThePersonsCode()
+    {
+        _handler
+            .Setup(h => h.UpdateAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<ConcurrencyMode>(),
+                It.IsAny<int>(), It.IsAny<CancellationToken>(), null))
+            .ThrowsAsync(new HttpRequestException("403 (Forbidden)", inner: null, HttpStatusCode.Forbidden));
+
+        var result = await Orchestrator().ApplyOutputMappingAsync(_playbookId, Run(PlaybookRunStartedBy.System, null), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.Updates.Should().ContainSingle().Which.ErrorMessage.Should().NotContain(PlaybookRunWriteIdentity.WriteAccessDeniedCode);
     }
 
     // ── DataverseUpdateHandler: writes AS the identity it is given ─────────────────────────────────────────────────────
@@ -127,13 +151,32 @@ public class OutputMappingRunIdentityTests
     private readonly Mock<IFieldMappingDataverseService> _writes = new();
     private readonly RecordOwnershipResolverDouble _ownership = new();
 
-    private DataverseUpdateHandler Handler(IGenericEntityService? rows = null)
+    private DataverseUpdateHandler Handler(IGenericEntityService? rows = null, IImpersonatedCommunicationQuery? readAsPerson = null)
     {
         var world = new StampWorld();
         return new DataverseUpdateHandler(
             _writes.Object, rows ?? world.Service, world.Restamper, _ownership,
             SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance,
-            SecureChildReconcilerFixtures.OverEmptyWorld());
+            SecureChildReconcilerFixtures.OverEmptyWorld(), shares: null, readAsPerson);
+    }
+
+    /// <summary>
+    /// The impersonated read (<see cref="IImpersonatedCommunicationQuery"/>): table metadata for <c>sprk_invoice</c>, and the row
+    /// AS <see cref="Person"/> only when <paramref name="personCanReadTheRow"/> (Dataverse returns no row the person cannot read).
+    /// </summary>
+    private static Mock<IImpersonatedCommunicationQuery> ReadAsPerson(bool personCanReadTheRow, long version = 42L)
+    {
+        static Dictionary<string, JsonElement> Row(string json) =>
+            JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json)!;
+
+        var read = new Mock<IImpersonatedCommunicationQuery>(MockBehavior.Strict);
+        read.Setup(q => q.QueryAsync("EntityDefinitions", It.Is<string>(o => o.Contains("LogicalName eq 'sprk_invoice'")), Person,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync([Row("""{"EntitySetName":"sprk_invoices","PrimaryIdAttribute":"sprk_invoiceid"}""")]);
+        read.Setup(q => q.QueryAsync("sprk_invoices", $"$select=versionnumber&$filter=sprk_invoiceid eq {Invoice:D}", Person,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(personCanReadTheRow ? [Row($$"""{"versionnumber":{{version}}}""")] : []);
+        return read;
     }
 
     [Fact]
@@ -148,19 +191,59 @@ public class OutputMappingRunIdentityTests
     }
 
     [Fact]
-    public async Task TheHandler_RowVersionWrite_IsAlsoMadeAsThePerson()
+    public async Task TheHandler_RowVersionWrite_IsAlsoMadeAsThePerson_WithTheVersionReadAsThePerson()
     {
+        // Fix round 1 (K3): the versionnumber read is made AS the person too, never app-only.
         var rows = new Mock<IGenericEntityService>();
-        rows.Setup(r => r.RetrieveAsync("sprk_invoice", Invoice, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Entity("sprk_invoice", Invoice) { ["versionnumber"] = 42L });
 
-        await Handler(rows.Object).UpdateAsync(
+        await Handler(rows.Object, ReadAsPerson(personCanReadTheRow: true, version: 42L).Object).UpdateAsync(
             "sprk_invoice", Invoice, new Dictionary<string, object?> { ["sprk_aisummary"] = "x" },
             ConcurrencyMode.Optimistic, maxRetries: 1, CancellationToken.None, Person);
 
         _writes.Verify(w => w.UpdateRecordFieldsAsync(
-            "sprk_invoice", Invoice, It.Is<Dictionary<string, object?>>(f => f.ContainsKey("versionnumber")),
+            "sprk_invoice", Invoice, It.Is<Dictionary<string, object?>>(f => Equals(f["versionnumber"], 42L)),
             It.IsAny<CancellationToken>(), Person), Times.Once);
+        rows.Verify(r => r.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Never, "a person's row version is never read app-only");
+    }
+
+    [Fact]
+    public async Task TheHandler_ARowThePersonCannotRead_LooksExactlyLikeAMissingRow_AndNothingIsWritten()
+    {
+        // Fix round 1 (K3): an app-only versionnumber read answered for a row the person could not see, so "not found" and
+        // "may not write" told a missing row from a hidden one. Read AS the person, a hidden row is no row.
+        var rows = new Mock<IGenericEntityService>();
+        rows.Setup(r => r.RetrieveAsync("sprk_invoice", Invoice, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_invoice", Invoice) { ["versionnumber"] = 42L }); // the app-only read would see it
+        var hidden = () => Handler(rows.Object, ReadAsPerson(personCanReadTheRow: false).Object).UpdateAsync(
+            "sprk_invoice", Invoice, new Dictionary<string, object?> { ["sprk_aisummary"] = "x" },
+            ConcurrencyMode.Optimistic, maxRetries: 1, CancellationToken.None, Person);
+
+        var missing = new Mock<IGenericEntityService>();
+        missing.Setup(r => r.RetrieveAsync("sprk_invoice", Invoice, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Entity)null!);
+        var absent = () => Handler(missing.Object).UpdateAsync(
+            "sprk_invoice", Invoice, new Dictionary<string, object?> { ["sprk_aisummary"] = "x" },
+            ConcurrencyMode.Optimistic, maxRetries: 1, CancellationToken.None);
+
+        var hiddenMessage = (await hidden.Should().ThrowAsync<InvalidOperationException>()).Which.Message;
+        var missingMessage = (await absent.Should().ThrowAsync<InvalidOperationException>()).Which.Message;
+        hiddenMessage.Should().Be(missingMessage, "a row the person cannot read reads exactly as a missing one");
+        _writes.Invocations.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task TheHandler_WithoutTheImpersonatedRead_WritesNothingForAPerson_AndNeverReadsAppOnly()
+    {
+        var rows = new Mock<IGenericEntityService>();
+
+        var act = () => Handler(rows.Object).UpdateAsync(
+            "sprk_invoice", Invoice, new Dictionary<string, object?> { ["sprk_aisummary"] = "x" },
+            ConcurrencyMode.Optimistic, maxRetries: 1, CancellationToken.None, Person);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        rows.Invocations.Should().BeEmpty();
+        _writes.Invocations.Should().BeEmpty();
     }
 
     [Fact]
@@ -176,15 +259,29 @@ public class OutputMappingRunIdentityTests
     }
 
     [Fact]
-    public async Task TheHandler_ForAPerson_LeavesTheDecisionToTheirOwnPrivileges_AsTheUpdateRecordCoreDoes()
+    public async Task TheHandler_ForAPerson_StillRefusesTheDenyList_AndWritesNothing()
     {
-        await Handler().UpdateAsync(
+        // Fix round 1 (main-session decision): the mapping is the playbook's configuration, not the person's, so it is asked
+        // RefuseAppOnlyWrite whatever identity the write runs as.
+        var act = () => Handler().UpdateAsync(
             "sprk_invoice", Invoice, new Dictionary<string, object?> { ["ownerid@odata.bind"] = $"/systemusers({Person:D})" },
             ConcurrencyMode.None, maxRetries: 1, CancellationToken.None, Person);
 
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
-            "sprk_invoice", Invoice, It.Is<Dictionary<string, object?>>(f => f.ContainsKey("ownerid@odata.bind")),
-            It.IsAny<CancellationToken>(), Person), Times.Once);
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+            .Should().Be(InheritedAccessPermission.AppOnlyOwnerWriteReasonCode);
+        _writes.Invocations.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task TheHandler_ForAPerson_LoweringADocumentsAccessPermission_IsRefused_AndNothingIsWritten()
+    {
+        var act = () => Handler().UpdateAsync(
+            "sprk_document", Invoice, new Dictionary<string, object?> { ["sprk_accesspermission"] = InheritedAccessPermission.Standard },
+            ConcurrencyMode.None, maxRetries: 1, CancellationToken.None, Person);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+            .Should().Be(InheritedAccessPermission.AppOnlyDocumentWriteReasonCode);
+        _writes.Invocations.Should().BeEmpty();
     }
 
     [Theory]

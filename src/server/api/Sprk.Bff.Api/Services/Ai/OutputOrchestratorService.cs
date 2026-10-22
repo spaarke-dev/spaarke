@@ -75,7 +75,7 @@ public class OutputOrchestratorService : IOutputOrchestratorService
                 var failedCount = results.Count(r => !r.Success);
                 var error = $"{failedCount} of {results.Count} updates failed";
                 _logger.LogError("Output mapping partially failed: {Error}", error);
-                return OutputMappingResult.FailureResult(error);
+                return OutputMappingResult.FailureResult(error, results);
             }
 
             _logger.LogInformation(

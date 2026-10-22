@@ -172,7 +172,7 @@ public sealed class UpdateRecordNodeExecutor : INodeExecutor
     {
         var startedAt = DateTimeOffset.UtcNow;
 
-        // The identity this node's write runs AS (#2257): null is app-only, and is set only for a system run.
+        // The identity this node's write runs AS (#2257): a person's run sets it; it stays null (app-only) only for a system run.
         Guid? impersonateSystemUserId = null;
 
         _logger.LogDebug(
@@ -196,8 +196,9 @@ public sealed class UpdateRecordNodeExecutor : INodeExecutor
 
             // #2257 (owner round 123, "run as the user"): a run a person started writes AS that person, so Dataverse decides
             // the write on their own rights — including a recordId written into this node's config, which no run filter
-            // checks. Only a system run (scheduled, a background job) writes app-only, behind the deny-lists. A person's
-            // run whose user is unknown writes nothing; it never falls back to app-only.
+            // checks. Only a system run (scheduled, a background job) writes app-only. Either way the payload is asked the
+            // deny-lists (fix round 1, below). A person's run whose user is unknown writes nothing; it never falls back to
+            // app-only.
             if (!PlaybookRunWriteIdentity.TryResolve(context.StartedBy, context.UserId, out impersonateSystemUserId))
             {
                 _logger.LogWarning(
@@ -279,7 +280,11 @@ public sealed class UpdateRecordNodeExecutor : INodeExecutor
                     renderedMappings,
                     renderedLegacyFields,
                     renderedLookups,
-                    impersonateSystemUserId),
+                    impersonateSystemUserId,
+                    // #2257 fix round 1 (main-session decision): the payload comes from the playbook's configuration (its
+                    // author, who may not be the person running it) or from a model, never from the runner, so it is asked
+                    // InheritedAccessPermission.RefuseAppOnlyWrite whatever identity the write runs as.
+                    UpdateRecordPayloadSource.Configuration),
                 cancellationToken);
 
             _logger.LogInformation(

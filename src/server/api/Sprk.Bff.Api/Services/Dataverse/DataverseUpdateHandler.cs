@@ -16,6 +16,7 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
     private readonly ILogger<DataverseUpdateHandler> _logger;
     private readonly Sprk.Bff.Api.Services.Access.SecureChildReconciler _children;
     private readonly Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? _shares;
+    private readonly Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery? _readAsPerson;
 
     /// <param name="children">#2091: the ONE step after a re-file (<see cref="Sprk.Bff.Api.Services.Access.SecureChildReconciler.AfterRefileAsync"/>).
     /// REQUIRED: without it a re-file into a Secure record would silently leave the row business-unit readable. Scoped, like
@@ -24,6 +25,10 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
     /// <param name="shares">#2257: the record-access seam a write made AS a person asks for that person's rights when it moves a
     /// row out of a secure root (<see cref="Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForImpersonatedUser"/>), as the
     /// Update Record core does. Optional: without it that question faults, and such a move is refused (fail closed).</param>
+    /// <param name="readAsPerson">#2257 fix round 1 (K3): the existing impersonated OData read (<c>MSCRMCallerID</c>; registered
+    /// unconditionally by CommunicationModule), through which an Optimistic update made AS a person reads the row's
+    /// <c>versionnumber</c> AS that person, so a row they cannot read looks the same as a missing one. Optional: without it
+    /// such an update writes nothing (fail closed); it never reads app-only for a person.</param>
     public DataverseUpdateHandler(
         IFieldMappingDataverseService fieldMappingService,
         IGenericEntityService genericEntityService,
@@ -32,10 +37,12 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         Sprk.Bff.Api.Services.Access.SecureRootFilingGate rootFiling,
         ILogger<DataverseUpdateHandler> logger,
         Sprk.Bff.Api.Services.Access.SecureChildReconciler children,
-        Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? shares = null)
+        Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? shares = null,
+        Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery? readAsPerson = null)
     {
         _children = children ?? throw new ArgumentNullException(nameof(children));
         _shares = shares;
+        _readAsPerson = readAsPerson;
         _fieldMappingService = fieldMappingService ?? throw new ArgumentNullException(nameof(fieldMappingService));
         _genericEntityService = genericEntityService ?? throw new ArgumentNullException(nameof(genericEntityService));
         _restamper = restamper ?? throw new ArgumentNullException(nameof(restamper));
@@ -59,14 +66,13 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         CancellationToken ct,
         Guid? impersonateSystemUserId = null)
     {
-        // #2257 (owner round 123): a write made AS the person whose run this is runs under that person's own Dataverse
-        // privileges, which decide it — as the Update Record core treats its impersonated caller. Only an app-only write (a
-        // run with no person in it) is asked the deny-lists below.
         // unified-access-control-r2 task 189 fix round C (K5): this handler writes a playbook's output mapping app-only (the
         // output orchestrator), so it never writes a document's Access Permission or its own-narrowing record; only the
         // document rule's writers do. Refused before anything is read or written. Task 188 round 4e: nor its D7 link columns
         // (sprk_parentdocument, sprk_relatedcommunication), set, cleared or bound (InheritedAccessPermission.DocumentLinkColumns).
-        if (impersonateSystemUserId is null && InheritedAccessPermission.RefuseAppOnlyWrite(entityLogicalName, fields.Keys) is { } documentRefusal)
+        // #2257 fix round 1 (main-session decision): asked whatever identity the write runs as. A person's run now writes AS
+        // that person, but the mapping is the playbook's configuration (its author, who may not be the runner), never theirs.
+        if (InheritedAccessPermission.RefuseAppOnlyWrite(entityLogicalName, fields.Keys) is { } documentRefusal)
         {
             throw new RecordOwnerUnresolvedException(entityLogicalName, documentRefusal);
         }
@@ -213,17 +219,17 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
                     "Optimistic concurrency update attempt {Attempt}/{MaxRetries} for {EntityType} {RecordId}",
                     attempt, maxRetries, entityLogicalName, recordId);
 
-                // 1. Read current record to get row version
-                var currentRecord = await _genericEntityService.RetrieveAsync(
-                    entityLogicalName, recordId, new[] { "versionnumber" }, ct);
+                // 1. Read current record to get row version, AS the person a person's write runs as (#2257 fix round 1, K3)
+                var readVersion = impersonateSystemUserId is { } person
+                    ? await ReadVersionAsPersonAsync(entityLogicalName, recordId, person, ct)
+                    : (await _genericEntityService.RetrieveAsync(
+                        entityLogicalName, recordId, new[] { "versionnumber" }, ct))?.GetAttributeValue<long>("versionnumber");
 
-                if (currentRecord == null)
+                if (readVersion is not { } currentVersion)
                 {
                     throw new InvalidOperationException(
                         $"Record {entityLogicalName} {recordId} not found for optimistic concurrency update");
                 }
-
-                var currentVersion = currentRecord.GetAttributeValue<long>("versionnumber");
 
                 _logger.LogDebug(
                     "Current version for {EntityType} {RecordId} is {Version}",
@@ -274,6 +280,55 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         throw new InvalidOperationException(
             $"Optimistic concurrency update failed for {entityLogicalName} {recordId}",
             lastException);
+    }
+
+    /// <summary>
+    /// #2257 fix round 1 (K3): the row's <c>versionnumber</c>, read AS <paramref name="person"/> through the same impersonation
+    /// (<c>MSCRMCallerID</c>) the write uses, or <see langword="null"/> when no row comes back. A row the person cannot read
+    /// comes back as none, so it is reported exactly as a missing row: the update is no existence oracle. Never read app-only
+    /// for a person: without the impersonated read nothing is written.
+    /// </summary>
+    private async Task<long?> ReadVersionAsPersonAsync(string entityLogicalName, Guid recordId, Guid person, CancellationToken ct)
+    {
+        if (_readAsPerson is null)
+        {
+            throw new InvalidOperationException(
+                $"The row version of {entityLogicalName} {recordId} cannot be read as the run's user here, so nothing was written");
+        }
+
+        // The name is pasted into OData below: a bare logical name only (fail closed).
+        var table = entityLogicalName.Trim().ToLowerInvariant();
+        if (table.Length is 0 or > 128 || !table.All(c => char.IsAsciiLetterOrDigit(c) || c == '_'))
+        {
+            throw new InvalidOperationException($"'{entityLogicalName}' is not a table name, so nothing was written");
+        }
+
+        // The table's entity set and primary key (table metadata, which every user reads), then the row, both AS the person.
+        var definitions = await _readAsPerson.QueryAsync(
+            "EntityDefinitions", $"$select=EntitySetName,PrimaryIdAttribute&$filter=LogicalName eq '{table}'", person, ct);
+        var definition = definitions.FirstOrDefault();
+        if (definition is null
+            || !definition.TryGetValue("EntitySetName", out var set) || set.ValueKind != System.Text.Json.JsonValueKind.String
+            || !definition.TryGetValue("PrimaryIdAttribute", out var key) || key.ValueKind != System.Text.Json.JsonValueKind.String)
+        {
+            throw new InvalidOperationException($"Table {entityLogicalName} has no entity set or primary key, so nothing was written");
+        }
+
+        var rows = await _readAsPerson.QueryAsync(
+            set.GetString()!, $"$select=versionnumber&$filter={key.GetString()} eq {recordId:D}", person, ct);
+        var row = rows.FirstOrDefault();
+        if (row is null || !row.TryGetValue("versionnumber", out var version))
+        {
+            return null;
+        }
+
+        return version.ValueKind switch
+        {
+            System.Text.Json.JsonValueKind.Number when version.TryGetInt64(out var number) => number,
+            System.Text.Json.JsonValueKind.String when long.TryParse(version.GetString(), out var text) => text,
+            _ => throw new InvalidOperationException(
+                $"The row version of {entityLogicalName} {recordId} is unreadable, so nothing was written"),
+        };
     }
 
     /// <summary>

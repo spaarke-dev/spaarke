@@ -16,8 +16,9 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Nodes;
 /// <summary>
 /// #2257 (owner round 123, "run as the user"): the Update Record node writes AS the person who started the run
 /// (<c>MSCRMCallerID</c>), so Dataverse decides the write on that person's own rights — including a <c>recordId</c> written
-/// into the node's config, which no run filter checks. Only a system run (scheduled, a background job) writes app-only,
-/// behind <see cref="InheritedAccessPermission.RefuseAppOnlyWrite"/>. A person's run whose user is unknown writes nothing and
+/// into the node's config, which no run filter checks. Only a system run (scheduled, a background job) writes app-only. Both
+/// are asked <see cref="InheritedAccessPermission.RefuseAppOnlyWrite"/> (fix round 1): the node's payload is the playbook
+/// author's configuration or a model's, never the runner's. A person's run whose user is unknown writes nothing and
 /// never falls back to app-only. A refusal by Dataverse is a failed node with a stable code, never an unhandled exception.
 /// </summary>
 public class UpdateRecordNodeExecutorRunIdentityTests
@@ -99,17 +100,43 @@ public class UpdateRecordNodeExecutorRunIdentityTests
         _written.Should().ContainSingle().Which.As.Should().Be(Person, "a person's run writes AS that person, never app-only");
     }
 
+    // ── Must fire (fix round 1): a person's run is still asked the deny-lists ──────────────────────────────────────────
+    // The payload is the playbook's configuration (its author, who may not be the runner) or a model's, never the runner's,
+    // so InheritedAccessPermission.RefuseAppOnlyWrite is asked whatever identity the write runs as (main-session decision).
+
     [Fact]
-    public async Task APersonsRun_ANodeAskedToWriteTheOwner_IsSentAsThePerson_WhoseRightsDecideIt()
+    public async Task APersonsRun_ANodeAskedToWriteTheOwner_IsRefused_WithTheOwnerCode_AndNothingIsWritten()
     {
-        // As the Update Record core treats its impersonated caller: Dataverse's privileges decide (no app-only refusal).
         var result = await Executor().ExecuteAsync(
             Context(LegacyConfig("sprk_matter", Matter, "ownerid@odata.bind", $"/systemusers({Person:D})"),
                 PlaybookRunStartedBy.Person, Person),
             CancellationToken.None);
 
-        result.Success.Should().BeTrue(result.ErrorMessage);
-        _written.Should().ContainSingle().Which.As.Should().Be(Person);
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain(InheritedAccessPermission.AppOnlyOwnerWriteReasonCode);
+        _writes.Invocations.Should().BeEmpty("a configured owner write is refused before anything is written, even as the person");
+    }
+
+    [Theory]
+    [InlineData("sprk_accesspermission", "100000000", "sdap.access.document_access_server_only")]
+    [InlineData("sprk_accessinheritance", "{}", "sdap.access.document_access_server_only")]
+    [InlineData("sprk_parentdocument@odata.bind", "/sprk_documents(22570000-0000-4000-8000-00000000f001)", "sdap.access.document_link_server_only")]
+    [InlineData("sprk_graphitemid", "x", "sdap.access.document_bff_column_server_only")]
+    [InlineData("sprk_createdbyperson@odata.bind", "/systemusers(22570000-0000-4000-8000-00000000a001)", "sdap.access.creator_server_only")]
+    public async Task APersonsRun_ANodeThatWritesADocumentsServerOwnedColumn_IsRefused_AndNothingIsWritten(
+        string column, string value, string code)
+    {
+        // The issue's scenario: user A publishes a node that sets sprk_document.sprk_accesspermission = Standard on
+        // {{document.id}}; user B, who holds Write, runs it. B's Restricted document must not be lowered, even as B.
+        var document = Guid.Parse("22570000-0000-4000-8000-00000000f002");
+
+        var result = await Executor().ExecuteAsync(
+            Context(LegacyConfig("sprk_document", document, column, value), PlaybookRunStartedBy.Person, Person),
+            CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain(code);
+        _writes.Invocations.Should().BeEmpty();
     }
 
     // ── The shipped matter-health-single playbook (Update Record on sprk_matter.sprk_performancesummary) ────────────────

@@ -691,13 +691,15 @@ internal static class InheritedAccessPermission
 
     /// <summary>
     /// Task 189 fix round C (K5): an APP-ONLY generic writer never writes a document's <see cref="Column"/> or its
-    /// own-narrowing record (<see cref="AccessInheritance.Column"/>). These writers are the Update Record playbook node and
-    /// the action seam when they act for no person (<c>UpdateRecordActionCore</c>), and an AI output mapping
-    /// (<c>DataverseUpdateHandler</c>). A model or a configuration builds their payload, not a person. Only
+    /// own-narrowing record (<see cref="AccessInheritance.Column"/>). These writers are the Update Record playbook node
+    /// (<c>UpdateRecordActionCore</c>) and an AI output mapping (<c>DataverseUpdateHandler</c>) WHATEVER identity the run
+    /// writes as (#2257 fix round 1: a person's run writes AS that person, and is still asked), and the action seam when it
+    /// acts for no person. A model or a configuration builds their payload, not the person running it. Only
     /// <see cref="DecideDocument"/>'s writers keep the value at max(own, inherited). A payload that lowered it, or rewrote
     /// the record, would show a user's Restricted document to partners (D7, task 188). This is the same refusal
     /// <c>ChildRecordEndpoints.RootServerOwnedColumns</c> makes for a work assignment. A user's own write is not refused: the
-    /// form, the user-OBO chat tools, and an update impersonating its user all run as that user. The field-mapping push also
+    /// form, the user-OBO chat tools, and the action seam's apply of a proposal its impersonated user confirmed
+    /// (<c>UpdateRecordPayloadSource.ConfirmedProposal</c>) all run as that user. The field-mapping push also
     /// runs as its caller, but its rules are a configuration applied to every child it reaches, so it asks this too and
     /// skips such a rule on a document (the rest of the push applies; security pass 2).
     /// <para>Task 188 round 4e: the same writers never write a document's D7 link columns either
