@@ -119,7 +119,7 @@ The census was run with the operator's own token and printed counts only. The sc
   - `communicationAlreadyArchived` total 0, `alreadyArchivedCheckFailed` false; `passComplete` true; batch 200/200, not clamped.
   - **This equals the §1 census exactly.**
 - **Saved ResultJson** (contains document ids, so it is not in the repo): `C:/Users/RALPHS~1/AppData/Local/Temp/uac190gate/*.status.json`.
-- **Exception reading:** R3's 30-minute exception and reconciliation reading of the deploy window.
+- **Exception reading (R3, 02:17:30Z–02:48:36Z): clean.** No new exception class; the only group was the known Graph "Invalid hostname" ×6 (ISS-006). 0 stager refusals, 0 narrowing exceptions, 0 409s. secure-child-reconciliation: 10 of 10 runs Succeeded, accessPermission failed 0.
 - **Closed on merge + deploy + server gate (round 90).**
 - **Apply stays an owner item:** setting `EmailArchiveLinkSweep:Apply=true` restarts the BFF.
   - Before it: the migration report-only to `passComplete`, with its lists saved.
