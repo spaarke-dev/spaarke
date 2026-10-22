@@ -45,7 +45,7 @@
 - **R4 design §9:** 8 questions.
 - **073** is blocked (ACME gate).
 - **C-1:** portal settings in Dewey Cheatham.
-- **Offered, no answer yet:** triage of the unscheduled R3 issues (ISS-001–008, 011–013, DEF-001/002) before 090.
+- **Issue triage proposed** (`notes/issue-triage-2026-10-22.md`, dd33fee617). Waiting on the owner to approve the split and to decide ISS-004 (internal delete policy) and ISS-005 (which BU owns a licensed user's contact). No fixes or hand-offs have started.
 
 ## Peer threads in flight
 - **Ontology:** #2233 (157, earlier-invoice detail hidden) waits on #2252 (ArchTests CI timeout 5→10 min). It will be in the next candidate.
