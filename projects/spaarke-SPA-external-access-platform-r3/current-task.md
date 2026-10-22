@@ -51,6 +51,13 @@
 - **Ontology:** #2233 (157, earlier-invoice detail hidden) waits on #2252 (ArchTests CI timeout 5→10 min). It will be in the next candidate.
 - **ebilling:** 015 (e0df77339) only with the #1911 merge, not close. The `sprk_invoicestatus` delete stays blocked until a live BFF contains it. The 088 dev schema run (sprk_storedfile, sprk_restrictedbysubmission, statuscode Superseded) comes soon; master's BFF ignores it.
 - **UAC round 113:** Dataverse-side enforcement for flagged-external systemusers. R3 listed the paths it carries; still waiting on UAC.
+- **Field-mapping 018b** (ef8a91a157, PR #2261) is on master and rides the next candidate. It is a LIVE change to Office quick-create of Matter and Project:
+  - Creates through RecordCreationService as the caller.
+  - Owner is record-first: a Project gets its matter's BU team, or Secure Record Owners when the matter is secure.
+  - Field mapping is fill-only.
+  - A named assignee needs AppendTo, otherwise 403 OFFICE_009.
+  - The defaults endpoint no longer offers an assignee the caller can't AppendTo.
+  - Post-deploy smoke: one Matter quick-create, plus one Project under an ordinary matter and one under a secure matter. Check the owner team and that the normal maker gets no 403.
 - **Round 122:** shipped in 1283c41817. Known limit: a single-attachment save stays Restricted.
 
 ## Standing dependencies and gates
