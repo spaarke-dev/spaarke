@@ -87,7 +87,7 @@ The census was run with the operator's own token and printed counts only. The sc
 
   Also: run this job's Apply BEFORE task 166's gate-24 migration pass and its `-Verify`. If it runs after, re-run them before the strict flip (gate 25).
 
-## 5. Fix round 2 (head 2af6e97702, PR marked ready)
+## 5. Fix round 2 (head 2af6e97702); merged as c2e172f43f on 2026-10-22
 
 - **Review pass 2 fixes, all in:**
   - **Duplicate archives per communication:** `communicationAlreadyArchived` is an attribute of a matched row, not a new reason. `CountAlreadyArchivedAsync` runs one `In` query before any write. A fault or `MoreRecords` sets `AlreadyArchivedCheckFailed`, and the run reports as partial.

@@ -8,7 +8,7 @@
 > - **D7 / task 191 design:** `notes/2119-manage-access-all-forms-design.md` §6; `notes/2179-flagged-external-dataverse-design.md` (design checkpoint).
 > - **Previous copy:** `notes/handoff-history/current-task-2026-10-20-cp57.md`.
 
-> **Last Updated**: 2026-10-21 (checkpoint #58).
+> **Last Updated**: 2026-10-22 (checkpoint #59).
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -21,18 +21,16 @@
 | **Peers** | Address peers by their ListAgents names: R3 `spaarke-wt-spa-external-access-platform-05`, ebilling `spaarke-wt-ebilling-r1-5b`, word-add-in `spaarke-wt-spaarkeai-word-add-in-r1-a1`, field-mapping `spaarke-wt-field-mapping-server-write-pa-be`, provisioning `spaarke-wt-customer-provisioning-orchest-ff`, ontology `spaarke-wt-spaarke-ontology-platform-r1-79`. |
 
 ## Next actions (mine)
-1. **Task 190 (D7 T7b): start.** Link legacy add-in email documents to their communication using recorded keys only. Report-only first, and list unmatched documents for the owner. FULL rigor, Opus, fresh worktree from `origin/master`.
-2. **Task 191: design checkpoint.** The study is in `notes/2179-flagged-external-dataverse-design.md`. Its §5 questions were answered in rounds 114–115 (see the note's closing section):
-   - design A with automatic sharing to one External Collaborators team;
-   - Q3 taint = yes, using the SPA rule;
-   - Q4 = about 2 minutes;
-   - Q5 = a scheduled BFF move job, one-way.
-
-   **Still open:** the carried-in question (POML goal) on scorecard, Insights and WorkspaceAi exposure for flagged externals. The design must answer it before T191a (spikes) starts. Then T191a–h per §6.
-3. **Housekeeping:**
-   - add #2193–#2217 to `notes/defer-issues.md`;
-   - remove the merged worktrees when idle: C:/wt188, C:/wt188d, C:/wt189, C:/wt2143, C:/wt2159, plus the older C:/wt099b, C:/wt2103, C:/wt2091b, C:/wt2130, C:/wt2128, C:/wt036;
-   - delete `C:/Users/RALPHS~1/AppData/Local/Temp/uac188k4/` and `uac188pub/`.
+1. **Task 190 (D7 T7b): merged, not closed.** PR #2221 merged as **c2e172f43f** (2026-10-22). Record: `notes/task-190-legacy-backfill.md` §1–5.
+   - **Deploy:** one batched dev deploy via R3 (#2223 ef5912c7e8 + field-mapping 016 #2228 + #2221). It waits for 016's merge SHA from field-mapping, then needs the owner's go in R3's session. Never deploy master alone; run the ancestry check (live f1b3dadcf5 must be an ancestor).
+   - **Server gate after deploy:** trigger `email-archive-communication-link-sweep` (dry run) and `document-container-migration` report-only per §4. Save both `ResultJson`s to the note.
+   - **Apply** (`EmailArchiveLinkSweep:Apply`, an app setting that restarts the BFF) needs the owner's go. Follow the §4 gate procedure.
+   - **Then close:** POML status, TASK-INDEX, `scripts/check-task-status-drift.ps1`.
+   - **Guard exemption:** field-mapping merges 016 second and adds the `EmailArchiveCommunicationLinkSweepJob.LinkAsync` exemption (told 2026-10-22).
+2. **#2229 (SPE suite 403s): fixture drift from our own task 188, not a product regression.** PR **#2230** (head 02caa9d307, test-only, closes #2229). A background watcher merges it when Router and Client lint are green. Worktree C:/wt2229f: remove after the merge.
+3. **Task 191:** the carried-in question is answered (design note, last section, 1aa767d6cb): no new gate on scorecard, Insights or Workspace AI. Spend is ebilling's field-security call; the facts went to ebilling. **T191a (spikes) can start.** Fresh worktree C:/wt191, Opus/xhigh, per design §6 and the round 114–115 decisions.
+4. **Housekeeping:** 11 merged worktrees removed (2026-10-22). After the merges, remove C:/wt190 and C:/wt2229f. Delete the temp folder `uac190census`.
+5. **CI:** the Tier 1 `Arch Tests (full suite, blocking)` 5-minute timeout also cancels master runs (evidence on field-mapping's #2224). On a cancel, re-run the job; it passed in 4m06s on the re-run.
 
 ## Peer reviews owed (UAC is the gate)
 - **field-mapping 016 (Repair), full diff for condition (b).** It includes:
@@ -40,9 +38,9 @@
   - Repair's field-security option 1 (owner chose it; 5 conditions on task 033; 052 blocked until it lands);
   - Decision Records skipped entirely; the source-secure gate fails closed.
 
-  **016 status (2026-10-21):** the review found F1-1, F2-1, F3-1, F3-2, F4-1 and F4-2. Field-mapping is fixing them. Re-check the fix scope only.
+  **016 status:** fix round accepted; PR #2228 is with field-mapping to merge.
 
-  **#2220 (Create mapping can write matter `sprk_issecure`, `sprk_accesspermission`, `sprk_accessinheritance` and `sprk_securitybu`):** triaged as fix now, in a separate field-mapping PR that skips and warns. Owed: a condition (b) review of that PR.
+  **#2220:** fixed by #2223 (merged ef5912c7e8, issue closed); it deploys in the batch.
 
   Also owed: 017/018 condition-(b) reviews, and 018 closes #1614/#1617.
 - **ebilling gates:**
@@ -69,7 +67,7 @@
    - 036 gates (ii)–(vi): the owner's SPA steps.
 3. **Sign-off to come:** #2153 (#2152, C:/wt2152, draft), after its passes.
 
-## Done 2026-10-21 (since checkpoint #57)
+## Done 2026-10-21/22 (since checkpoint #57)
 - **189** closed (PR #2169, 1cc7b39ff3; live with #2150 at a10e814d02; gate PASS).
 - **#2161** merged 84291ecea8 (round 119), deployed and gated (items 1–3 clean). #2206 and #2207 filed.
 - **188** closed: #2170 merged 446c83d927 and #2186 merged f1b3dadcf5 (round 120); deployed; Restrict, field security and the web resource applied, all VERIFY PASS; 30-min server gate clean. K4: 11 partner-reachable own-Restricted documents on one matter are now hidden. Partner reads and BFF creates were not exercised in the window; checks are listed in round 120.
@@ -77,3 +75,4 @@
   - field-mapping #2191 (583f90c1d9) and #2214 (cf0886360a) merged and live; #2188 closed.
   - ebilling EB-D-148 dispositions are in delete design §14; 080 is live; 099 accepted; 091 option A agreed (owner).
 - **Filed:** #2213 (CrossPathLink re-points an archive document's link) and #2217 (`Deploy-WebResourceInline.ps1` relative path uploads the wrong file).
+- **2026-10-22:** #2221 merged c2e172f43f; #2229 root-caused (PR #2230); 191's carried-in question answered; defer list gained #2193–#2229; #2222, #2225–#2227 and #2229 filed from task 190.
