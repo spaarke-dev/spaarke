@@ -35,15 +35,24 @@
  *     legitimate email layout relies on inline styles. DOMPurify does NOT
  *     inspect style-attribute CSS, so {@link sanitizeInlineStyle} does
  *     (ISS-003 / #1636): it drops declarations that can paint outside the
- *     message box (`position` other than static/relative, `top`/`left`/…/
- *     `inset`, `z-index`, `transform`/`translate`/`scale`/`zoom`/`offset`,
- *     viewport units, negative margins) or fetch a resource (`url()`,
+ *     message box (`position` other than `static`, `top`/`left`/…/`inset`,
+ *     `z-index`, `transform`/`translate`/`scale`/`zoom`/`offset`, viewport and
+ *     container-query units, negative margins, and the paint-overflow
+ *     properties `box-shadow`, `text-shadow`, `outline*`, `filter`,
+ *     `backdrop-filter`, `-webkit-box-reflect`, `mask*`, `clip-path`, negative
+ *     `letter-spacing` / `word-spacing`) or fetch a resource (`url()`,
  *     `image-set()`, …), plus anything it cannot parse unambiguously. A
  *     fixed-position "sign in again" overlay or a CSS tracking pixel in an
  *     inbound email is therefore inert for EVERY consumer, not only those that
  *     contain the body in a clipped box. This keeps dark-mode rendering of the
  *     surrounding Fluent component chrome intact (ADR-021) since the util
  *     never touches the host component markup, only the body HTML.
+ *   - **`class` and `id` are NOT allowed.** A body that could carry `class` would
+ *     reuse the host's precompiled Fluent/Griffel atomic classes (e.g. a
+ *     `DialogSurface` class is `position: fixed; inset: 0`) and paint a real
+ *     overlay without writing any CSS of its own; `id` would let it collide with
+ *     host ids. Both are on `FORBID_ATTR` as well as off `ALLOWED_ATTR`. The
+ *     email's own look comes from `style` and the presentational attributes.
  *   - **Remote images are NOT loaded by default** (ISS-003 / #1636). An
  *     `<img src="https://…">` tells the sender the reader's IP address and read
  *     time. The `src` of every `<img>` is dropped (the element, `alt`, `width`
@@ -51,6 +60,12 @@
  *     images on an explicit user action passes `{ allowRemoteImages: true }`
  *     for that render; nothing does today. `srcset`, `background=` and
  *     `<link>`/`<style>` are not on the allow-list, so they never load either.
+ *   - **Presentational attributes are kept** (`width`, `height`, `align`,
+ *     `bgcolor`, `colspan`, … — {@link PRESENTATIONAL_ATTR}). With a custom
+ *     `ALLOWED_URI_REGEXP`, DOMPurify requires every attribute that is not on
+ *     its URI-safe list to MATCH that regexp, so `width="600"` would be removed
+ *     as "not a URI". They are therefore listed in `ADD_URI_SAFE_ATTR`; the URL
+ *     attributes (`href`, `src`) and `background` / `target` / `rel` are not.
  *
  * React-agnostic (ADR-022): pure TS, no React import, no React-runtime API, no
  * `as React.ComponentType` cast — Layer-1-safe and reusable by any surface
@@ -151,24 +166,16 @@ const ALLOWED_TAGS: string[] = [
 ];
 
 /**
- * Permitted attributes. NO `on*` event handlers. `href`/`src` values are
- * additionally gated by {@link ALLOWED_URI_REGEXP}. `target`/`rel` are listed
- * so the anchor-hardening hook's values are retained; the hook overwrites them
- * to the safe values regardless of any attacker-supplied value.
+ * Presentational (non-executable, non-URL) attributes that legacy email markup relies on for layout. Used twice, so the
+ * two lists cannot drift: they are on {@link ALLOWED_ATTR} (else DOMPurify drops them as unknown) AND on
+ * `ADD_URI_SAFE_ATTR`. The second is the part that is easy to miss: for an attribute that is not on DOMPurify's built-in
+ * URI-safe list, DOMPurify also requires the VALUE to match `ALLOWED_URI_REGEXP` (it assumes such an attribute might
+ * carry a URL), and a custom regexp like ours (`https?|mailto` only) rejects `width="600"`, `align="center"`,
+ * `colspan="2"`, … as "not a URI". Listing them as URI-safe stops that; none of them can carry a navigable URL. NOT in
+ * here, on purpose: `href` / `src` (checked against the scheme allow-list), `background` (a remote fetch), `target` /
+ * `rel` (the anchor hook owns them), `class` / `id` (see {@link FORBID_ATTR}).
  */
-const ALLOWED_ATTR: string[] = [
-  // links + media (NO `srcset` — comma-separated URL list not scheme-checked by
-  // DOMPurify; inline email images use `src`)
-  'href',
-  'src',
-  'alt',
-  'title',
-  'target',
-  'rel',
-  // presentation (non-executable)
-  'style',
-  'class',
-  'id',
+const PRESENTATIONAL_ATTR: string[] = [
   'dir',
   'lang',
   'width',
@@ -188,6 +195,32 @@ const ALLOWED_ATTR: string[] = [
 ];
 
 /**
+ * Permitted attributes. NO `on*` event handlers, NO `class` / `id`. `href`/`src` values are additionally gated by
+ * {@link ALLOWED_URI_REGEXP}. `target`/`rel` are listed so the anchor-hardening hook's values are retained; the hook
+ * overwrites them to the safe values regardless of any attacker-supplied value.
+ */
+const ALLOWED_ATTR: string[] = [
+  // links + media (NO `srcset` — comma-separated URL list not scheme-checked by
+  // DOMPurify; inline email images use `src`)
+  'href',
+  'src',
+  'alt',
+  'title',
+  'target',
+  'rel',
+  // presentation (non-executable)
+  'style',
+  ...PRESENTATIONAL_ATTR,
+];
+
+/**
+ * Attributes that must never survive even if a future edit adds them to {@link ALLOWED_ATTR}: `class` would let a
+ * hostile body reuse the host's precompiled Fluent/Griffel atomic classes (`position: fixed; inset: 0`, …) and `id`
+ * would collide with host ids. Redundant with the closed allow-list by design (belt and suspenders, ISS-003 / #1636).
+ */
+const FORBID_ATTR: string[] = ['class', 'id'];
+
+/**
  * Explicit forbidden tags — redundant with the closed {@link ALLOWED_TAGS}
  * (anything absent is already dropped) but restated for defense-in-depth and
  * to make the security intent auditable at a glance (NFR-03).
@@ -205,7 +238,11 @@ const SANITIZE_CONFIG: DOMPurify.Config = {
   ALLOWED_TAGS,
   ALLOWED_ATTR,
   FORBID_TAGS,
+  FORBID_ATTR,
   ALLOWED_URI_REGEXP,
+  // Without this DOMPurify drops every attribute in PRESENTATIONAL_ATTR, because its value is not an http(s)/mailto
+  // URL. DOMPurify's other per-attribute checks (the `</style>` / `-->` value scan, `on*` handlers) still run for them.
+  ADD_URI_SAFE_ATTR: PRESENTATIONAL_ATTR,
   // Drop `data-*` attributes — not needed for field-body rendering.
   ALLOW_DATA_ATTR: false,
   // Always return a string for `dangerouslySetInnerHTML`.
@@ -246,8 +283,33 @@ const SAFE_PROPERTY = /^[a-z][a-z0-9-]*$/;
 const PLACEMENT_PROPERTY =
   /^(?:top|right|bottom|left|inset(?:-[a-z-]+)?|z-index|transform(?:-[a-z-]+)?|translate|rotate|scale|perspective|zoom|offset(?:-[a-z-]+)?|position-[a-z-]+)$/;
 
-/** The only `position` values that cannot escape the box. */
-const SAFE_POSITION = /^(?:static|relative)$/;
+/**
+ * The only `position` value that cannot escape the box. `relative` is NOT kept either: it is inert on its own, but it
+ * raises the box into the positioned paint layer, above in-flow siblings and host content, so its overflowing paint (a
+ * shadow, an outline) lands on top of the host UI instead of underneath it.
+ */
+const SAFE_POSITION = /^static$/;
+
+/**
+ * Properties that paint beyond the box's own border edge without moving it, so a hostile body can cover the host UI
+ * from an ordinary in-flow element: `box-shadow` / `text-shadow` (a huge spread or offset), `filter` /
+ * `backdrop-filter` (`drop-shadow()`), `box-reflect` (a mirrored copy, `-webkit-` prefixed), `mask*` and `clip-path`
+ * (re-shape what is painted). Dropped whatever the value; none of them is needed to lay a message out.
+ */
+const PAINT_OVERFLOW_PROPERTY =
+  /^(?:box-shadow|text-shadow|filter|backdrop-filter|box-reflect|clip-path|mask(?:-[a-z-]+)?)$/;
+
+/** Any `outline*` property: it paints outside the border box with no effect on layout. Kept only as "no outline". */
+const OUTLINE_PROPERTY = /^outline(?:-[a-z-]+)?$/;
+
+/** The values under which an `outline*` property paints nothing: `none` or a zero length. */
+const NO_OUTLINE_VALUE = /^(?:none|0(?:\.0+)?(?:px|em|rem|pt)?)$/i;
+
+/** `letter-spacing` / `word-spacing`: a negative value pulls glyphs back over neighbouring content. */
+const SPACING_PROPERTY = /^(?:letter-spacing|word-spacing)$/;
+
+/** A spacing value is kept only if it is `normal` or one plain non-negative length (so no negative number, `calc()`, `var()`). */
+const SAFE_SPACING_VALUE = /^(?:normal|(?:\d+(?:\.\d+)?|\.\d+)(?:px|em|rem|%|pt|ex|ch|cm|mm|in|pc|q)?)$/i;
 
 /** Any `margin*` property (negative margins drag a box over its neighbours) and `text-indent` (a negative indent pushes text out of its box). */
 const MARGIN_PROPERTY = /^(?:margin(?:-[a-z-]+)?|text-indent)$/;
@@ -256,8 +318,11 @@ const MARGIN_PROPERTY = /^(?:margin(?:-[a-z-]+)?|text-indent)$/;
 const SAFE_MARGIN_VALUE =
   /^(?:auto|(?:\d+(?:\.\d+)?|\.\d+)(?:px|em|rem|%|pt|ex|ch|cm|mm|in|pc|q)?)(?:\s+(?:auto|(?:\d+(?:\.\d+)?|\.\d+)(?:px|em|rem|%|pt|ex|ch|cm|mm|in|pc|q)?)){0,3}$/i;
 
-/** A number followed by a viewport unit (`100vw`, `50dvh`, `10vmin`, …): sizes a box to the host window, the shape of an overlay. */
-const VIEWPORT_UNIT = /\d\s*[dsl]?v(?:w|h|i|b|min|max)(?![\w-])/i;
+/**
+ * A number followed by a viewport unit (`100vw`, `50dvh`, `10vmin`, …) or a container-query unit (`100cqw`, `50cqh`,
+ * `10cqmin`, …): sizes a box to the host window / the host's query container, the shape of an overlay.
+ */
+const VIEWPORT_UNIT = /\d\s*(?:[dsl]?v(?:w|h|i|b|min|max)|cq(?:w|h|i|b|min|max))(?![\w-])/i;
 
 /**
  * Values that fetch a resource: `url()` (any scheme, so `https:`, `//host`, `data:`), the string forms `image-set()` /
@@ -278,14 +343,18 @@ const INDIRECT_CSS = /\b(?:var|env)\s*\(/i;
  *   - it has a `property: value` shape with a plain ASCII property name (no CSS escapes, no `*hack`, no `--custom`);
  *   - it contains no backslash (CSS escapes can spell `position` / `url(` in ways a regex cannot see) and no comment
  *     delimiter;
- *   - its property is not a placement property, its `position` (if any) is static/relative, its `margin*` is a plain
- *     non-negative length, and its value has no viewport unit, no resource-fetching function and no `var()`/`env()`.
+ *   - its property is not a placement property, not a paint-overflow property (`box-shadow`, `text-shadow`, `filter`,
+ *     `backdrop-filter`, `box-reflect`, `mask*`, `clip-path`, `outline*` other than "no outline"), its `position` (if
+ *     any) is `static`, its `margin*` is a plain non-negative length, its `letter-spacing` / `word-spacing` is `normal`
+ *     or a plain non-negative length, and its value has no viewport / container-query unit, no resource-fetching
+ *     function and no `var()`/`env()`.
  * Kept pieces are returned verbatim (trimmed) and re-joined with `;`.
  *
- * Not covered, by design (a host that must contain a hostile body still clips it with `contain: paint` /
- * `overflow: hidden`, as the external SPA does): paint that spills out of an in-flow box without moving it, such as a
- * huge `box-shadow` spread, `outline-offset`, or a very large `font-size` / `width` in plain pixels. Also `class` / `id`
- * are allow-listed, so a body can still pick up a host stylesheet rule that happens to share a class name.
+ * Not covered, by design: paint that spills out of an in-flow box without moving it through a property that is also
+ * used for ordinary layout, such as a very large `font-size` / `padding` / `border-width` / `width` in plain pixels or
+ * `border-image-outset`. A host that renders a body therefore still contains it (`contain: paint`, `overflow`), as the
+ * external SPA and the three shared consumers do. `class` / `id` are NOT allowed (see `FORBID_ATTR`), so a body cannot
+ * pick up a host stylesheet rule by name.
  */
 function sanitizeInlineStyle(style: string): string {
   const kept: string[] = [];
@@ -312,6 +381,9 @@ function sanitizeInlineStyle(style: string): string {
     if (!SAFE_PROPERTY.test(property)) continue;
     if (PLACEMENT_PROPERTY.test(property)) continue;
     if (property === 'position' && !SAFE_POSITION.test(value.toLowerCase())) continue;
+    if (PAINT_OVERFLOW_PROPERTY.test(property)) continue;
+    if (OUTLINE_PROPERTY.test(property) && !NO_OUTLINE_VALUE.test(value)) continue;
+    if (SPACING_PROPERTY.test(property) && !SAFE_SPACING_VALUE.test(value)) continue;
     if (MARGIN_PROPERTY.test(property) && !SAFE_MARGIN_VALUE.test(value)) continue;
     if (VIEWPORT_UNIT.test(value) || EXTERNAL_RESOURCE_CSS.test(value) || INDIRECT_CSS.test(value)) continue;
 
@@ -332,8 +404,8 @@ function sanitizeInlineStyle(style: string): string {
  *   3. drops the `src` of every `<img>` / `<source>` unless `allowRemoteImages`
  *      (ISS-003: a remote image is a read receipt; `alt`/`width`/`height` stay);
  *   4. drops a `style` attribute carrying dangerous script tokens, and filters
- *      the rest with {@link sanitizeInlineStyle} (overlay positioning, CSS
- *      resource fetches).
+ *      the rest with {@link sanitizeInlineStyle} (overlay positioning, paint
+ *      overflow, CSS resource fetches).
  *
  * Registered only for the duration of a single {@link sanitizeEmailHtml} call
  * (add before / remove after) so it never leaks onto other DOMPurify consumers
@@ -364,7 +436,7 @@ function hardenNode(node: Element, allowRemoteImages: boolean): void {
   }
 
   // 4. Scrub dangerous CSS from an allowed style attribute: the legacy script tokens drop the whole attribute; the
-  //    rest is filtered declaration by declaration (overlay positioning, CSS resource fetches).
+  //    rest is filtered declaration by declaration (overlay positioning, paint overflow, CSS resource fetches).
   const style = node.getAttribute('style');
   if (style !== null) {
     const safeStyle = DANGEROUS_CSS.test(style) ? '' : sanitizeInlineStyle(style);
@@ -400,10 +472,12 @@ export interface SanitizeEmailHtmlOptions {
  * URL schemes to `http`/`https`/`mailto`, and forces every anchor to
  * `rel="noopener noreferrer" target="_blank"`.
  *
- * It also keeps a body from painting over the host UI (no fixed/absolute/sticky
- * positioning, `z-index`, offsets, transforms, viewport-sized boxes or negative
- * margins in `style`) and from phoning home on open (no remote `<img src>`, no
- * CSS `url()`), see ISS-003 / #1636.
+ * It also keeps a body from painting over the host UI (no `class` / `id`, so no
+ * reuse of host classes; no positioning other than static, `z-index`, offsets,
+ * transforms, viewport-sized boxes, negative margins, shadows, outlines,
+ * filters, masks or reflections in `style`) and from phoning home on open (no
+ * remote `<img src>`, no CSS `url()`), see ISS-003 / #1636. A host should still
+ * render the result inside a clipped box (`contain: paint`) as defence in depth.
  *
  * Pure function: input string in, sanitized string out. No React, no side
  * effects beyond the transient DOMPurify hook it registers and removes within
