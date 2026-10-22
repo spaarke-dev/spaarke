@@ -300,6 +300,27 @@ public class DataverseIdentifierUrlGuardTests
             .Should().Throw<ArgumentException>();
     }
 
+    // ── #2253 fix round 3 (K): a lookup name with a trailing newline (`$` matched before it; `\z` does not) ─────
+
+    [Fact]
+    public async Task TheExternalInvoiceLookupRead_ALookupNameWithATrailingNewline_IsRefused_AndNothingIsSent()
+    {
+        var handler = new RecordingHandler(_ => Json("{\"_sprk_matter_value\":null}"));
+        var sut = new Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDataService(
+            new HttpClient(handler),
+            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
+            }).Build(),
+            new StaticTokenCredential(),
+            NullLogger<Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDataService>.Instance);
+
+        await FluentActions.Awaiting(() => sut.GetInvoiceLookupsAsync(Guid.NewGuid(), ["sprk_matter\n"]))
+            .Should().ThrowAsync<ArgumentException>();
+
+        handler.Requests.Should().BeEmpty();
+    }
+
     private static HttpResponseMessage Json(string body) =>
         new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
 

@@ -66,7 +66,7 @@ internal sealed partial class RecordCreationService
     private static readonly IReadOnlyDictionary<string, TargetAttribute> NoAttributes =
         new Dictionary<string, TargetAttribute>(StringComparer.OrdinalIgnoreCase);
 
-    private static readonly Regex LogicalNamePattern = new("^[a-z][a-z0-9_]*$", RegexOptions.CultureInvariant);
+    private static readonly Regex LogicalNamePattern = new(@"^[a-z][a-z0-9_]*\z", RegexOptions.CultureInvariant);
 
     /// <summary>
     /// What step 3 (or step 5) produced: the item the next steps read, and each mapped column's value as the create's item

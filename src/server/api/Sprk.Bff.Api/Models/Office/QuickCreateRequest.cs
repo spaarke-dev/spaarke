@@ -263,7 +263,7 @@ public static class QuickCreateFieldRequirements
 
     /// <summary>A Dataverse entity logical name: lower-case letter first, then lower-case letters, digits, underscores.</summary>
     private static readonly System.Text.RegularExpressions.Regex EntityLogicalNamePattern =
-        new("^[a-z][a-z0-9_]{0,63}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        new(@"^[a-z][a-z0-9_]{0,63}\z", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     /// <summary>
     /// Tries to parse an entity type string to the enum value.
