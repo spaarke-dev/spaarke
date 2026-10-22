@@ -2,12 +2,14 @@ using System.Globalization;
 using System.Text.Json.Nodes;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
+using FindingGroup = Sprk.Bff.Api.Services.Finance.DuplicateDetailGate.FindingGroup;
 
 namespace Sprk.Bff.Api.Services.Finance;
 
@@ -110,12 +112,14 @@ public sealed record BlockedDecisionRequest(string? Reason);
 /// <summary>Who decided a blocked submission, when, why, and the Decision Record that holds it. Internal reviewers only.</summary>
 public sealed record BlockedDecisionStamp(Guid RecordId, Guid BySystemUserId, DateTimeOffset On, string Reason);
 
-/// <summary>One value a rule read (as stored on the submission, D-112 scrubbing already applied).</summary>
+/// <summary>One value a rule read (as stored on the submission, D-112 scrubbing already applied; none for a group withheld at read time, D-176).</summary>
 public sealed record BlockedValueRead(string? Name, string? Value, int? Line, string? Field, decimal? Confidence, bool BelowReliabilityThreshold);
 
 /// <summary>
 /// One finding of the stored evaluation. <see cref="Blocking"/> is true for a finding that made the rejection rule reject; once the
 /// submission is overridden those are marked <see cref="Overridden"/>, and they stay on the page: an override never deletes or rewrites a finding.
+/// <see cref="DetailWithheld"/> is true, and <see cref="ValuesRead"/> empty, for a duplicate across a secure wall (D-112, at write time) and for
+/// every finding of a (policy, subject, line) group holding a Duplicate whose earlier invoice the caller cannot read (D-176, at read time).
 /// </summary>
 public sealed record BlockedFindingView(
     int Index,
@@ -265,7 +269,7 @@ public sealed class SubmissionOverrideService
         ChannelColumn, InvoiceSubmissionPersister.SubmissionStatus, InvoiceSubmissionPersister.SubmissionReasonCode,
         InvoiceSubmissionPersister.SubmissionInvoice, InvoiceSubmissionPersister.SubmissionFindingsJson,
         TrackingNumberAllocator.TrackingNumberColumn, TrackingNumberAllocator.FirmInvoiceNumberColumn, RowVersionColumn,
-        StoredSignalSetCheck.ProcessingStartColumn,
+        StoredSignalSetCheck.ProcessingStartColumn, TrackingNumberAllocator.FirmColumn,
     ];
 
     private readonly IGenericEntityService _entities;
@@ -273,6 +277,8 @@ public sealed class SubmissionOverrideService
     private readonly IIdempotencyService _idempotency;
     private readonly IEbillingNotificationSink _sink;
     private readonly CallerRecordAccessProbe _probe;
+    private readonly IDataverseUserClient _user;
+    private readonly EarlierInvoiceReadability _earlierInvoices;
     private readonly Func<BillingDecision, CancellationToken, Task<BillingDecisionRecordResult>> _record;
     private readonly Action<BillingDecision> _preflight;
     private readonly HumanDecisionSignalClose.CloseActed _closeActed;
@@ -280,6 +286,7 @@ public sealed class SubmissionOverrideService
     private readonly TimeProvider _time;
     private readonly ILogger<SubmissionOverrideService> _logger;
 
+    /// <param name="user">The CALLER's Dataverse client (OBO): the read's D-176 earlier-invoice check reads with it, never app-only (ADR-028).</param>
     public SubmissionOverrideService(
         IGenericEntityService entities,
         IInvoiceLifecycleService lifecycle,
@@ -287,10 +294,12 @@ public sealed class SubmissionOverrideService
         IIdempotencyService idempotency,
         IEbillingNotificationSink sink,
         CallerRecordAccessProbe probe,
+        IDataverseUserClient user,
+        EarlierInvoiceReadability earlierInvoices,
         SignalWriter signals,
         ILogger<SubmissionOverrideService> logger)
         : this(
-            entities, lifecycle, idempotency, sink, probe, logger,
+            entities, lifecycle, idempotency, sink, probe, user, earlierInvoices, logger,
             (recorder ?? throw new ArgumentNullException(nameof(recorder))).RecordAsync,
             recorder.Preflight,
             (signals ?? throw new ArgumentNullException(nameof(signals))).CloseActedByDecisionAsync,
@@ -307,6 +316,8 @@ public sealed class SubmissionOverrideService
         IIdempotencyService idempotency,
         IEbillingNotificationSink sink,
         CallerRecordAccessProbe probe,
+        IDataverseUserClient user,
+        EarlierInvoiceReadability earlierInvoices,
         ILogger<SubmissionOverrideService> logger,
         Func<BillingDecision, CancellationToken, Task<BillingDecisionRecordResult>> record,
         Action<BillingDecision> preflight,
@@ -321,6 +332,8 @@ public sealed class SubmissionOverrideService
         _idempotency = idempotency ?? throw new ArgumentNullException(nameof(idempotency));
         _sink = sink ?? throw new ArgumentNullException(nameof(sink));
         _probe = probe ?? throw new ArgumentNullException(nameof(probe));
+        _user = user ?? throw new ArgumentNullException(nameof(user));
+        _earlierInvoices = earlierInvoices ?? throw new ArgumentNullException(nameof(earlierInvoices));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _record = record ?? throw new ArgumentNullException(nameof(record));
         _preflight = preflight ?? throw new ArgumentNullException(nameof(preflight));
@@ -390,6 +403,13 @@ public sealed class SubmissionOverrideService
     /// The state of a submission for the review screens, with its stored findings (blocking ones marked, and Overridden once overridden) and
     /// whether THIS caller may override. Read app-only; the route's filter has decided the caller may read the submission. Null when the
     /// submission does not exist; a read fault throws <see cref="InvoiceSubmissionService.ReadUnavailable"/> (503).
+    /// <para><b>D-176 (#2118, task 119 round 2).</b> A stored Duplicate finding quotes an earlier submission (<c>duplicateOf.invoiceId</c>,
+    /// <c>duplicateOf.trackingNumber</c>, <c>duplicateOf.lineIndex</c>) and the duplicated line's values. They are returned only when the
+    /// caller's own read returns that earlier invoice: <see cref="DuplicateDetailGate"/> (the helper the Invoice Review read model uses, over
+    /// <see cref="EarlierInvoiceReadability"/>), one check per response with the caller's <see cref="IDataverseUserClient"/>, a number-only
+    /// prior resolved within the submission's own <c>sprk_vendororg</c> (the firm the Duplicate's priors were read from). Otherwise every
+    /// finding of the (policy, subject, line) group is returned with <c>detailWithheld</c> and no values read. A fault withholds every
+    /// Duplicate group; the view still loads. This view carries no sentence, so there is none to replace.</para>
     /// </summary>
     public async Task<BlockedSubmissionView?> GetAsync(Guid submissionId, string? callerBearerToken, CancellationToken ct)
     {
@@ -455,6 +475,11 @@ public sealed class SubmissionOverrideService
         }
 
         var overridden = overrideStamp is not null;
+        var findings = ReadFindings(root, overridden);
+        var withheld = await DuplicateDetailGate.WithheldGroupsAsync(
+            findings, GroupOf, f => f.ValuesRead.Select(v => (v.Name, v.Value)),
+            row.GetAttributeValue<EntityReference>(TrackingNumberAllocator.FirmColumn)?.Id,
+            _earlierInvoices, _user, _logger, "Blocked submission", ct).ConfigureAwait(false);
         return new BlockedSubmissionView
         {
             SubmissionId = submissionId,
@@ -468,7 +493,7 @@ public sealed class SubmissionOverrideService
             State = state,
             CanOverride = canOverride,
             CanReturn = canReturn,
-            Findings = ReadFindings(root, overridden),
+            Findings = withheld.Count == 0 ? findings : findings.Select(f => Withhold(f, withheld)).ToList(),
             Override = overrideStamp,
             Return = returnStamp,
         };
@@ -1369,6 +1394,12 @@ public sealed class SubmissionOverrideService
 
         return findings;
     }
+
+    private static FindingGroup GroupOf(BlockedFindingView finding) => new(finding.PolicyCode, finding.Subject, finding.Line);
+
+    /// <summary>D-176: a finding of a withheld group in the write-time withheld shape (D-112): <c>detailWithheld</c>, no values read.</summary>
+    private static BlockedFindingView Withhold(BlockedFindingView finding, IReadOnlySet<FindingGroup> withheld) =>
+        withheld.Contains(GroupOf(finding)) ? finding with { DetailWithheld = true, ValuesRead = [] } : finding;
 
     private static string? Text(JsonObject node, string name) =>
         node.TryGetPropertyValue(name, out var value) && value is JsonValue v && v.TryGetValue<string>(out var text) ? text : null;

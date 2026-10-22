@@ -486,8 +486,11 @@ public sealed class InvoiceLineReviewEndpointsAuthorizationContractTests
 
             var settings = new Mock<IEbillingSettingsReader>();
             settings.Setup(s => s.GetAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new EbillingSettings());
+            // No submission row here, so no Duplicate to judge: the caller's client is strict and never asked (task 119's check is unit-tested).
             builder.Services.AddScoped(sp => new InvoiceReviewReadService(
-                host.Entities.Object, sp.GetRequiredService<AuthorizationService>(), settings.Object, NullLogger<InvoiceReviewReadService>.Instance));
+                host.Entities.Object, sp.GetRequiredService<AuthorizationService>(), settings.Object,
+                new Mock<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient>(MockBehavior.Strict).Object,
+                new EarlierInvoiceReadability(NullLogger<EarlierInvoiceReadability>.Instance), NullLogger<InvoiceReviewReadService>.Instance));
 
             var locks = new Mock<IIdempotencyService>();
             locks.Setup(l => l.TryAcquireProcessingLockAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
