@@ -34,6 +34,7 @@
 - Earlier: dev schema runs of 080/115/088 after ontology PASS + notices; no Key Vault changes; 096 one release after word-add-in-r1's; 095 from-email shapes frozen.
 
 ### Agreed with peers
+- customer-provisioning accepted #2232 (wiring the file store into the stamp), sequenced after `ebilling-file-store.bicep` and 97bb759493 reach master. **Tell them when #1911 merges to master.** Their owner picks enableMalwareScanning per environment.
 - field-mapping 018 moves only Matter and Project quick-create; the Office Invoice leg is left for our 096 to remove. 017 is blocked on #1911.
 - R3: OK'd the dev BFF deploy of master a7b956fb55. Dev BFF lacks e0df773395 (015), so the sprk_invoicestatus delete stays blocked until #1911 lands and a dev deploy carries it.
 - 082 must use `BillingRuleDefinition.PrecedenceKey` for record-level precedence (in its POML).
