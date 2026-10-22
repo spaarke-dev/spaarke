@@ -33,6 +33,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Microsoft.Identity.Web;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Protocols;
@@ -42,6 +43,7 @@ using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Authorization;
 using Sprk.Bff.Api.Infrastructure.DI;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Tests.AccessControl;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Infrastructure.DI;
@@ -347,6 +349,27 @@ public sealed class AuthorizationModuleWorkforceHomeTests
     }
 
     [Fact]
+    public async Task ExpiredToken_ReportsExpired_EvenAfterAnotherHostWasDisposed()
+    {
+        // ISS-012 / #1930. A real BFF host (WebApplication.CreateBuilder: Windows EventLog provider included) is built and
+        // disposed first. Without IdentityModelLoggerIsolation, Identity Web binds IdentityModel's process-wide logger
+        // (LogHelper.Logger) to THAT host's logger factory, and the validation below writes through its disposed EventLog:
+        // ObjectDisposedException replaces the SecurityTokenExpiredException this scheme should report.
+        var disposedHost = new ExternalWorkforceLinkEndpointsTests.LinkFixture();
+        _ = disposedHost.Services.GetRequiredService<IOptionsMonitor<JwtBearerOptions>>().Get(JwtBearerDefaults.AuthenticationScheme);
+        await disposedHost.DisposeAsync();
+
+        using var host = await WorkforceHomeHost.StartAsync();
+
+        var status = await host.StatusAsync(ExternalRoute, HomeToken(expires: DateTime.UtcNow.AddMinutes(-30)));
+
+        status.Should().Be(HttpStatusCode.Unauthorized);
+        host.Failures.Should().ContainSingle()
+            .Which.Should().BeOfType<SecurityTokenExpiredException>(
+                "a disposed host's logger must not replace the validation outcome: {0}", string.Join(" | ", host.Failures));
+    }
+
+    [Fact]
     public async Task SignedByKeyWhoseIssuerIsAnotherDirectory_Returns401()
     {
         // Signing-key issuer validation (EnableAadSigningKeyIssuerValidation, design §9) is ON for this scheme: a key the
@@ -502,13 +525,10 @@ public sealed class AuthorizationModuleWorkforceHomeTests
             .Select(p => p.Value?.ToString() ?? string.Empty)
             .ToList();
 
-        /// <summary>
-        /// The token-validation exceptions (<see cref="SecurityTokenException"/>) the WorkforceHome scheme reported
-        /// (OnAuthenticationFailed). Unrelated exceptions that reach the event (e.g. a logger failure) are not auth outcomes.
-        /// </summary>
+        /// <summary>The validation exceptions the WorkforceHome scheme reported (OnAuthenticationFailed).</summary>
         public IReadOnlyList<Exception> Failures
         {
-            get { lock (_failures) return _failures.Where(e => e is SecurityTokenException).ToList(); }
+            get { lock (_failures) return _failures.ToList(); }
         }
 
         public static async Task<WorkforceHomeHost> StartAsync(
@@ -541,10 +561,7 @@ public sealed class AuthorizationModuleWorkforceHomeTests
                     .ConfigureServices(services =>
                     {
                         services.AddSingleton<IConfiguration>(configuration);
-                        // ClearProviders (ISS-012 / #1930): AadIssuerValidator is cached per process and keeps the logger of the host that first built it,
-                        // so a provider this host inherits (Windows EventLog) can be disposed by a later host and throw ObjectDisposedException
-                        // into token validation. Only the capturing provider belongs on this host.
-                        services.AddLogging(logging => logging.ClearProviders().AddProvider(logs).SetMinimumLevel(LogLevel.Trace));
+                        services.AddLogging(logging => logging.AddProvider(logs).SetMinimumLevel(LogLevel.Trace));
                         services.AddRouting();
                         services.AddAuthorizationModule(configuration);
                         foreach (var descriptor in services
