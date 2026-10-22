@@ -574,3 +574,9 @@ Scripts, snapshots and logs: `C:/Users/RALPHS~1/AppData/Local/Temp/uac191b/` (no
 - **F4:** the re-own of rows owned by flagged users stays in T191c. Mailboxes and queues are system rows, outside the registry.
 - **F5:** `WhoAmI` ignores impersonation. Use it only for the operator, never for this check.
 - **Owner browser checklist** (needs the setup re-run first, then the undo): the model-driven app opens as the user; only the shared rows are visible; no Share or Assign buttons; a direct URL to an unshared row is refused; Copilot and `grid_overview` see only the shared rows; Office edit, after S4.
+
+## ebilling 088 input (ontology review, 2026-10-22)
+
+- **Constraint for 191 (and ebilling 086).** The External Collaborator role gets **no** privilege on `sprk_storedfile`.
+- **Why it matters.** One flagged-external user on dev sits in the "Spaarke" BU, which is in 088's reader-profile BU set. That gives column read only, with no table privilege, the same exposure that already exists on the secured `sprk_document` columns.
+- **What 191 checks.** It keeps the table privilege at none, and its role test (T191) asserts that.

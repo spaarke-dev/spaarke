@@ -471,3 +471,35 @@ Additions to §1.3 (proposed by ebilling from model §5.2, accepted here):
 **Task 1 tests**:
 - must-fire: R's assignment rows are deleted by the planner and counted in the preview;
 - must-not-fire: no `Delete` is issued for `sprk_ruleset`, `sprk_policy`, `sprk_policyversion`, `sprk_procedure` or `sprk_procedureversion`, and the plan writes no rule-set status.
+
+---
+
+## 15. Amendment: a row that an outside row references through a Restrict lookup is kept (ontology + ebilling 088 review, 2026-10-22)
+
+**The gap.** ebilling 088 adds `sprk_storedfile` with **Restrict** lookups `sprk_sourcedocument` → `sprk_document` and `sprk_sourcecommunication` → `sprk_communication`. §14's "Covered: `sprk_invoice` blocks first" holds only when the invoice is under R. An invoice's source .eml can be refiled to another record N after submission (D-146/#2132, ebilling model §9.1). N has no invoice, so nothing blocks. The executor deletes N's documents and then its communications, the Restrict refuses, and the run ends `Partial`. #2132 rules that outcome out for a delete the preview approved.
+
+**Rule (metadata-driven, not a table list).** The planner reads every relationship whose referenced table is a table the plan deletes, and whose `CascadeConfiguration.Delete` is `Restrict`. For each row the plan would delete:
+- **Every referencing row is itself deleted earlier in the plan:** the row is deleted, children first. This is §13's ordering for `sprk_parentdocument` and `sprk_relatedcommunication`.
+- **Any referencing row is outside the plan:** the row becomes **Keep**. The preview reports it in `willKeep` with the reason `referenced:{referencing table}`; for a Stored File it reads "kept: source of an invoice file". The row's lookups to R are RemoveLink (inventory §2; ontology confirmed on dev for every document and communication lookup to a matter, project or work assignment), so the platform clears them when R goes. No explicit PATCH is needed.
+- **Keep propagates as §1.4 does.** A kept .eml keeps its attachments (no own claim, parent kept). A kept communication keeps the documents whose only claim is through it. The §13 Restrict links then never point at a deleted parent.
+
+Why this rule rather than a Stored File special case:
+- It covers 088's two lookups and any Restrict added later, with no new list to keep in step.
+- It turns a run-time `Partial` into a preview-time decision, which is what #2132 requires.
+- **A Block was considered and rejected.** It would make the user refile a source document before deleting an unrelated record. Keeping matches D5, which keeps rows something outside R still needs.
+
+**At run time.** The §3.2 re-walk re-reads the Restrict references. A reference that appears after the preview gives `Partial(graph-changed)` with R kept, as for any other row that appears during a run. A Restrict refusal on a row the plan deletes is still a defined `Partial`, never an orphan.
+
+**Known limit (K).** A kept row can lose its last core claim. For example, the .eml refiled to N alone has no core record after N is deleted. Its access stays as stored: an isolated row stays isolated (fail closed, §5), and the secure-child sweep reports it as parentless. Its SPE file stays in its current container. The preview counts these rows separately, as "kept with no remaining record".
+
+**Ownership.** This is the executor and planner (§8 task 3), which uac-r2 owns. ebilling 117 (the O-17 sweep) needs no executor change. It must not delete a Stored File's source rows either, and it doesn't, because it retires rule sets only.
+
+**Tests (task 3):**
+- **Must fire:**
+  - a document or communication on R referenced by a Stored File outside the plan is kept, never `Delete`d, and listed in `willKeep` with `referenced:sprk_storedfile`;
+  - an .eml kept that way keeps its attachments;
+  - a Restrict reference added between the preview and the run gives `Partial(graph-changed)`, R kept.
+- **Must not fire:**
+  - a document whose only referencers are in the plan is deleted;
+  - a Stored File under an invoice on R still blocks the whole delete (§14).
+- **Pure test over the metadata reader:** every Restrict relationship onto a table with disposition Delete is handled by in-plan ordering or by Keep, so none can reach the executor as a surprise.
