@@ -618,3 +618,29 @@ Known limits:
 - sln: 0 warnings, 0 errors.
 - ArchTests: 1353 / 1353.
 - Filtered suites: 4428 passed, 7 skipped, 0 failed.
+
+## UAC-r2 condition (b) review of 018b, and fix round 2 (29d06d80f3, 0a46acad7f)
+
+UAC-r2 tested at 830c2b0f1c. **Every checklist item passed.** The one fix-now item was REJECT F1-1.
+
+**F1-1: the OwnerUnresolved wording.** `OFFICE_022` stays 403. The detail now depends on the code:
+- `acting_user_unresolved`, and `no_default_team` on a create that is not filed under a parent, keep the caller-unit wording.
+- `no_default_team` on a Project filed under a parent gets neutral wording, naming the parent's business unit. The adapter passes in `filedUnderParent`.
+- Every other code passes the service's detail through, for example `NoOwnerSource`'s "Try again".
+
+**K1, taken in 018b.** The pane sends the maker's own contact back as Assigned To. Without this fix, a caller without AppendTo on that contact would be refused on every create. Now the quick-create defaults endpoint offers no assignee the caller cannot AppendTo:
+- the check runs as the caller, through the service's own AppendTo check;
+- it fails closed to no default.
+
+The create then follows the agreed maker-default drop with a warning.
+
+**Notes kept:**
+- K2: the map test checks codes, not kind and code together. `ReasonCreatorUnresolved` as `OwnerUnresolved` maps to `OFFICE_022`, which can't happen for a caller and fails closed.
+- K3: `SecureRootAccessColumnsNeverMappedOfficeTests` and the old-core `SecureRootInheritanceWriterTests` mismatch tests still build the dead core. They are re-pointed or deleted in 018c.
+
+**Mutants:**
+- all-fixed detail: 7 failures;
+- flag ignored: 2;
+- defaults check skipped: 4.
+
+**Verify:** sln 0/0; ArchTests 1361/1361; filtered suites 4515 passed, 7 skipped.
