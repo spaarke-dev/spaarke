@@ -1,3 +1,4 @@
+using System.Reflection;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -532,6 +533,121 @@ public class ContactIdentityBinderOwnerTeamTests
 
         result.IsResolved.Should().BeTrue();
         _store.CreatePayloads.Should().ContainSingle().Which[OwnerBind].Should().Be($"/teams({CustomerTeam:D})");
+    }
+
+    // ── K3: WithOwner copies every property of NewContactDetails ─────────────────────────────────────────
+    //
+    // WithOwner is a positional copy, not a `with` expression (the task 146 b2 census flags every `with` that sets an owning team
+    // in server code). A property added to NewContactDetails and not copied there would be dropped from a Workforce-plane create
+    // without a compile error or a failing behaviour test (those creates set only the three positional values). This test builds
+    // a details object with EVERY public settable/init property set to a non-default value, runs WithOwner, and names any
+    // property whose value did not survive.
+
+    private static MethodInfo WithOwnerMethod()
+        => typeof(ContactIdentityBinder).GetMethod("WithOwner", BindingFlags.NonPublic | BindingFlags.Static)
+           ?? throw new InvalidOperationException(
+               "ContactIdentityBinder.WithOwner was renamed or removed: update the K3 test (and keep a copy-completeness check) with it.");
+
+    /// <summary>The public properties a caller can set (setter or init accessor): what a copy must carry.</summary>
+    private static IReadOnlyList<PropertyInfo> CopiableProperties()
+        => typeof(NewContactDetails).GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(p => p.SetMethod is { IsPublic: true })
+            .ToList();
+
+    /// <summary>A non-default value for a property; a type this does not know fails the test, so the next property is not skipped.</summary>
+    private static object NonDefaultValue(PropertyInfo property)
+    {
+        var type = Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
+        if (type == typeof(string)) return $"sample-{property.Name}";
+        if (type == typeof(Guid)) return Guid.NewGuid();
+        if (type == typeof(bool)) return true;
+        if (type == typeof(int)) return 7;
+        if (type == typeof(DateTimeOffset)) return new DateTimeOffset(2026, 10, 22, 12, 0, 0, TimeSpan.Zero);
+        if (type == typeof(DateTime)) return new DateTime(2026, 10, 22, 12, 0, 0, DateTimeKind.Utc);
+        if (type.IsEnum) return Enum.GetValues(type).Cast<object>().First(v => !Equals(v, Activator.CreateInstance(type)));
+        throw new NotSupportedException(
+            $"NewContactDetails.{property.Name} is a {property.PropertyType}: teach NonDefaultValue() this type so the K3 copy check covers it.");
+    }
+
+    /// <summary>A details object with every copiable property set to a non-default value (the primary constructor, then the init setters).</summary>
+    private static NewContactDetails DetailsWithEveryPropertySet()
+    {
+        var constructor = typeof(NewContactDetails).GetConstructors(BindingFlags.Public | BindingFlags.Instance).Single();
+        var byName = CopiableProperties().ToDictionary(p => p.Name, p => NonDefaultValue(p), StringComparer.OrdinalIgnoreCase);
+        var details = (NewContactDetails)constructor.Invoke(
+            constructor.GetParameters().Select(parameter => byName[parameter.Name!]).ToArray());
+        foreach (var property in CopiableProperties())
+        {
+            property.SetValue(details, byName[property.Name]);
+            if (!Equals(property.GetValue(details), byName[property.Name]))
+            {
+                throw new InvalidOperationException($"NewContactDetails.{property.Name} did not take its sample value.");
+            }
+        }
+
+        return details;
+    }
+
+    /// <summary>The names of the properties whose value in <paramref name="copy"/> is not the original's (the owner's, for OwningTeamId).</summary>
+    private static IReadOnlyList<string> NotCopied(NewContactDetails original, NewContactDetails copy, Guid owningTeam)
+        => CopiableProperties()
+            .Where(p =>
+            {
+                var expected = p.Name == nameof(NewContactDetails.OwningTeamId) ? owningTeam : p.GetValue(original);
+                return !Equals(p.GetValue(copy), expected);
+            })
+            .Select(p => p.Name)
+            .ToList();
+
+    private static NewContactDetails InvokeWithOwner(NewContactDetails details, string status, Guid team)
+    {
+        var method = WithOwnerMethod();
+        var resolutionType = method.GetParameters()[1].ParameterType;
+        var statusType = resolutionType.GetProperty("Status")!.PropertyType;
+        var resolution = Activator.CreateInstance(resolutionType, Enum.Parse(statusType, status), team)!;
+        return (NewContactDetails)method.Invoke(null, new[] { details, resolution })!;
+    }
+
+    [Fact]
+    public void WithOwner_CopiesEveryPropertyOfNewContactDetails_AndSetsTheOwner()
+    {
+        var details = DetailsWithEveryPropertySet();
+        var properties = CopiableProperties().Select(p => p.Name).ToList();
+        properties.Should().Contain(new[] { "FirstName", "LastName", "Email", "Department", "ExternalTenantId", "OwningTeamId" },
+            "the check must see the properties it is about (it would be vacuous over an empty set)");
+        var team = Guid.NewGuid();
+
+        var copy = InvokeWithOwner(details, "Resolved", team);
+
+        NotCopied(details, copy, team).Should().BeEmpty(
+            "WithOwner is a positional copy: a property added to NewContactDetails must be copied there (K3)");
+        copy.OwningTeamId.Should().Be(team, "the resolved owner replaces whatever the details carried");
+    }
+
+    [Theory]
+    [InlineData("NotApplicable")]
+    [InlineData("Unconfigured")]
+    [InlineData("LookupFailed")]
+    public void WithOwner_ReturnsTheDetailsUnchanged_WhenNoOwnerResolved(string status)
+    {
+        var details = DetailsWithEveryPropertySet();
+
+        InvokeWithOwner(details, status, Guid.NewGuid()).Should().Be(details);
+    }
+
+    [Fact]
+    public void TheCopyCheck_FiresOnACopyThatDropsAProperty_AndNotOnACompleteOne()
+    {
+        // Controls for the detector itself: a positional copy that forgets Department and ExternalTenantId is caught, and a
+        // complete copy is not.
+        var details = DetailsWithEveryPropertySet();
+        var team = Guid.NewGuid();
+        var partial = new NewContactDetails(details.FirstName, details.LastName, details.Email) { OwningTeamId = team };
+        var complete = details with { OwningTeamId = team };
+
+        NotCopied(details, partial, team).Should().BeEquivalentTo(
+            new[] { nameof(NewContactDetails.Department), nameof(NewContactDetails.ExternalTenantId) });
+        NotCopied(details, complete, team).Should().BeEmpty();
     }
 
     private sealed class StoreBinderFactory(IContactIdentityStore store, ILogger? binderLog = null) : ContactIdentityBinderFactory(
