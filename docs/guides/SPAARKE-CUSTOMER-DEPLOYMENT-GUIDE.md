@@ -1111,7 +1111,7 @@ to it**; otherwise the first sign-in, registration or invite that needs a new co
 sdap.access.registration_owner_unconfigured`. Check for the startup Warning above after the deploy.
 
 **Contacts created before this build stay app-owned in the root business unit.** Nothing re-owns them; a backfill is out of
-scope here and is tracked as a follow-up issue. **Who can read a new contact changes with it:** a contact owned by the
+scope here and is tracked as #2278. **Who can read a new contact changes with it:** a contact owned by the
 customer business unit's team is readable by users with business-unit-scoped Read on contact in that unit, where an
 app-user-owned contact in the root unit was readable only by root-scoped readers.
 
