@@ -1129,6 +1129,10 @@ public class ExternalDocumentNarrowingGuardTests
             "Writes only ownerid (the ordinary team the fresh parents give), conditioned on the row version.",
         ["Sprk.Bff.Api.Services.RecordCreation.RecordCreationService::CreateAsync"] =
             "Creates only (step 11, a fresh Guid upserted): the same reason as OwnedChildWrite::CreateAsync.",
+        ["Sprk.Bff.Api.Services.Communication.EmailArchiveCommunicationLinkSweepJob::LinkAsync"] =
+            "the BFF's own typed link writer: sets a NULL sprk_relatedcommunication to the exactly-one communication whose " +
+            "internet message id ordinal-equals the document's recorded key; never clears or re-points; conditional on row " +
+            "version (uac-r2 task 190)",
     };
 
     [Fact(DisplayName = "Task 188 r4e: every app-only generic update writer asks InheritedAccessPermission.RefuseAppOnlyWrite (or is listed)")]
