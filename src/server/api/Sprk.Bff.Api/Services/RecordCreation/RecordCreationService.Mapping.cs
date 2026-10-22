@@ -176,8 +176,9 @@ internal sealed partial class RecordCreationService
     /// mapping-protected columns (<see cref="RecordTableRule.MappingProtectedColumns"/>), the access record and secure flag
     /// a work assignment or project create is refused for (<see cref="SecureRootFilingGate.PlanCreateAsync"/>), and the
     /// lookups the server set (K-2: never filled by a mapped value the AppendTo check would then skip).
+    /// <c>internal</c> (was private) so the secure-root parity test (#2220) reads the very set the service applies.
     /// </summary>
-    private static IReadOnlySet<string> ProtectedFromMapping(
+    internal static IReadOnlySet<string> ProtectedFromMapping(
         string table, RecordTableRule rule, IReadOnlySet<string>? serverSetLookupColumns)
     {
         var columns = new HashSet<string>(RecordTableRules.CommonServerOwnedColumns, StringComparer.OrdinalIgnoreCase);
