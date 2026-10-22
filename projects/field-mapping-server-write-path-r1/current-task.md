@@ -1,18 +1,18 @@
 # Current Task — field-mapping-server-write-path-r1
 
-> **Last updated**: 2026-10-22 (86% checkpoint: 018b in UAC-r2 condition (b) fix round 2)
-> **Phase**: Wave 2. Done (13/43): 001–006, 010–016 on master; 018a on master (36403e1f4b).
-> **Live on dev: 1283c41817** (R3, 12:50Z; dormant 018a). **Active: task 018, phase 018b** (live Office Matter/Project swap).
+> **Last updated**: 2026-10-22 (018b merged to master; 018c running)
+> **Phase**: Wave 2. Done (13/43): 001–006, 010–016 on master; 018a (36403e1f4b) and 018b (**ef8a91a157**, PR #2261) on master.
+> **Live on dev: 1283c41817** (R3; dormant 018a). 018b (LIVE Office change) is a deploy candidate: UAC-r2 and R3 told; owner go needed in R3's session. **Active: task 018, phase 018c.**
 
 ## Quick Recovery
 
 | Field | Value |
 |---|---|
 | **Active task** | 018 (Office quick-create adapter), run as 3 PRs under ONE POML: **018a** service prerequisites → **018b** Matter/Project adapter → **018c** delete the Office core. The Invoice leg is NOT moved (ebilling-r1, owner decision L; task 096 deletes it) |
-| **HEAD** | work branch = master 36403e1f4b + checkpoint docs (pushed). 018b = branch **`task/fm-018b1`** (worktree `C:\code_files\spaarke\.claude\worktrees\agent-a550606fde68f707f`), tip **d04ba0b4cd** (= 830c2b0f1c + #2253 decision note), pushed. Fix round 2 = branch **`task/fm-018b-fix2` @ 29d06d80f3** (pushed, NOT yet merged into task/fm-018b1). Uncommitted: none |
-| **Running** | Nothing |
-| **Next Action** | (1) **Close the F1-1 gap in the adapter**: `record_owner_no_default_team` on a Project FILED under a source (the adapter derived the pair) must NOT say "your business unit"; use neutral wording (the team that owns records where it is filed has no default owner team); keep the caller-unit wording for an unfiled Matter and `acting_user_unresolved`. No service change. Map/route test + mutant. (2) Merge task/fm-018b-fix2 into task/fm-018b1; verify (`scratchpad/v018b-m3/verify.sh`, repo= agent-a550606fde68f707f). (3) Send UAC-r2 the fix diff (d04ba0b4cd..new tip) for their own re-check, then ACCEPT. (4) Merge task/fm-018b1 into the work branch; fill `{VERDICT}` in `scratchpad/pr-018b.md` (add fix round 2: F1-1 + K1; publish delta +6,843 B / 37.75 MB at 830c2b0f1c, CVE none; re-measure if src changed materially); `gh pr create`; merge on Router + Client lint green (rollup clean or explained); close #1614/#1617 citing the SHA; tell UAC-r2 the SHA (018b is LIVE: deploy candidate; owner go in the R3 session); then 018c |
-| **018 progress** | 018a done (master). 018b: all passes + Opus review (4 F fixed) + Sonnet re-check (clean; K1 closed). UAC-r2 condition (b): every checklist item PASS; REJECT on F1-1 only (OwnerUnresolved wording). Fix round 2 (29d06d80f3, 4510 passed): F1-1 passes `refusal.Detail` except no_default_team / acting_user_unresolved (gap above); K1 the defaults endpoint offers no assignee the caller cannot AppendTo (fail closed). UAC-r2 notes: K2 (map test checks codes, not kind+code), K3 (SecureRootAccessColumnsNeverMappedOfficeTests + SecureRootInheritanceWriterTests mismatch tests still build the dead core: 018c). #2253 (UAC): whichever merges second adds `WriteIdentity.AppOnly` to `DropAppOnlyRefusedRules` + must-fire test (access-deciding contact column dropped at create). #2124 Repair half = 052 criterion |
+| **HEAD** | work branch = master ef8a91a157 + this checkpoint. 018c = branch **`task/fm-018c`** (cut from task/fm-018b1 = 018b code), agent worktree under `C:\code_files\spaarke\.claude\worktrees\`. The 018b worktree `agent-a550606fde68f707f` (task/fm-018b1, merged) can be removed with Remove-WorktreeSafe |
+| **Running** | 018c implementer agent `fm018c` (opus, high, background): delete `OfficeRecordCreationService` + registration; move `ResolveDefaultAssigneeAsync` into `OfficeService` (prefill = server default); remove legacy `CreateTimeFieldMapping.Apply`; #2188 `KnownCallSites` 3 → 2; owner-guard allow-list, census, registry guard; re-point/retire the 9 test files; notes section `## 018c` |
+| **Next Action** | When fm018c reports: verify (build sln, full ArchTests, filtered suites; `git grep OfficeRecordCreationService` empty); one Opus adversarial review of the 018c diff (deletion = test-modifying, so code-review + adr-check); fix rounds; merge task/fm-018c into the work branch (merge origin/master first if it moved); publish delta vs fresh master + CVE; PR; merge on Router + Client lint green; set 018 ✅ in POML + TASK-INDEX; then 019 |
+| **018 progress** | 018a and 018b on master. 018b: Opus review (4 F fixed), Sonnet re-check clean, UAC-r2 condition (b) ACCEPT after fix round 2 (F1-1, K1) and the F4 catch-all wrap (1b4f297d9f). CI: the only red was the Tier 2 ADR cancel (#2224, 5-min timeout). #1614/#1617 were already closed; each has a SHA comment. #2124: commented (create fixed; Repair = 052). #2253 (UAC): whichever merges second adds `WriteIdentity.AppOnly` to `DropAppOnlyRefusedRules` + must-fire test |
 | **CI note** | #2252 raised the Tier 1 arch job timeout to 10 min (merged). The Tier 2 ADR job (#2224) may still be cancelled by its timeout; read the log |
 | **Cleanup left for the owner** | Empty, unregistered folders (Remove-WorktreeSafe partial delete, "Permission denied"): `C:\code_files\spaarke\.claude\worktrees\agent-a10e5fe383a4dfcd2`, `...\agent-a80d401ebbcfb9d3e` |
 
@@ -81,4 +81,4 @@ FR-06 step 10, #1608 columns, the chat number, SystemPrincipal.
 
 ## Next tasks
 
-018a PR → 018b → 018c → 019. 017 once unblocked. Then 033 (before 052), 040 (needs 005, 019), 050 (needs 019).
+018c → 019. 017 once unblocked. Then 033 (before 052), 040 (needs 005, 019), 050 (needs 019).

@@ -377,6 +377,18 @@ public sealed class SecureRootCreateRouteFixture : ProvisionProjectTestFixture
     /// <summary>Every team whose business unit step 8 read, in order.</summary>
     public List<Guid> TeamReads { get; } = new();
 
+    /// <summary>
+    /// When true, the app-only read of a source matter (the mapping's source read) throws (field mapping task 018c: the deleted
+    /// Office core's "app read of the source fails" tests, re-pointed); cleared by <see cref="ResetRoutes"/>.
+    /// </summary>
+    public bool SourceAppReadFails { get; set; }
+
+    /// <summary>
+    /// When set, the caller's read of the mapping source answers this failure status (field mapping task 018c: the deleted
+    /// Office core's "caller read of the source fails" tests, re-pointed); cleared by <see cref="ResetRoutes"/>.
+    /// </summary>
+    public int? SourceCallerReadFailStatus { get; set; }
+
     private PendingInvocation? _pending;
     private Guid? _mappedMatter;
     private Guid? _mappedType;
@@ -398,6 +410,8 @@ public sealed class SecureRootCreateRouteFixture : ProvisionProjectTestFixture
         TeamBusinessUnits.Clear();
         BusinessUnitSearchDefaults.Clear();
         TeamReads.Clear();
+        SourceAppReadFails = false;
+        SourceCallerReadFailStatus = null;
         _pending = null;
         _mappedMatter = null;
         _mappedType = null;
@@ -480,7 +494,9 @@ public sealed class SecureRootCreateRouteFixture : ProvisionProjectTestFixture
                     RecordTypeOf = id => ChildWorld.ValueOf<string>("sprk_recordtype_ref", id, "sprk_recordlogicalname"),
                 };
                 caller.NoAppendTo.UnionWith(CallerNoAppendTo);
-                return CallerDataverse.Over(MappingSourceCallerReadDouble.MirroringAppReads(officeEntities).RoutedOver(caller));
+                var sourceRead = MappingSourceCallerReadDouble.MirroringAppReads(officeEntities);
+                sourceRead.FailWithStatus = SourceCallerReadFailStatus;
+                return CallerDataverse.Over(sourceRead.RoutedOver(caller));
             });
             services.RemoveAll<ChatSessionManager>();
             services.AddSingleton<ChatSessionManager>(_sessions);
@@ -513,11 +529,13 @@ public sealed class SecureRootCreateRouteFixture : ProvisionProjectTestFixture
             });
         entities
             .Setup(e => e.RetrieveAsync("sprk_matter", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .Returns((string _, Guid id, string[] _, CancellationToken _) => Task.FromResult(new Entity("sprk_matter", id)
-            {
-                ["sprk_matterid"] = id.ToString("D"),
-                ["sprk_recordtype"] = new EntityReference("sprk_recordtype_ref", _mappedType ?? Guid.Empty),
-            }));
+            .Returns((string _, Guid id, string[] _, CancellationToken _) => SourceAppReadFails
+                ? Task.FromException<Entity>(new TimeoutException("app-only read timed out"))
+                : Task.FromResult(new Entity("sprk_matter", id)
+                {
+                    ["sprk_matterid"] = id.ToString("D"),
+                    ["sprk_recordtype"] = new EntityReference("sprk_recordtype_ref", _mappedType ?? Guid.Empty),
+                }));
 
         // The owning team's business unit and its search defaults (step 8 reads team -> business unit app-only), so a create
         // that has nothing else to warn about warns nothing (field mapping task 018b, G4 condition 3). Task 018b-2: per team
