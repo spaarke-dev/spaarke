@@ -189,3 +189,12 @@ ebilling-r1 says the owner decided (decision L, model §4/§9) that invoices are
    - (iii) a table-driven refusal map keeps Office's status for every service code; OwnerUnresolved stays 403, and an unmapped new code fails the test.
 
 These are in the 018 POML.
+
+## 2026-10-22 — 018a: an optional reference whose check cannot complete is dropped, not refused
+
+When a request names an optional reference lookup (`ReferenceLookupColumns`: the registry-listed matter type, practice area and project type) and the caller check for it cannot complete, the value is **dropped with `record_creation.reference_value_dropped`**, and the create proceeds without it. This deviates from NFR-01's wording ("every caller check refuses on error"). It is accepted because:
+- the value is never written, and step 5 re-checks everything that remains;
+- it matches live Office behaviour (`OfficeRecordCreationService.cs:1346-1353`, which creates without the reference and warns);
+- it applies only to caller-owned optional references, never to a filing lookup, the for-person column, a protected column, or an access-conferring column (018a fix round F4-1: these are rejected by the registry allow-list).
+
+Raised by the 018a adversarial review (K-5). Cite this in the 018 PR and in UAC-r2's condition (b) review.
