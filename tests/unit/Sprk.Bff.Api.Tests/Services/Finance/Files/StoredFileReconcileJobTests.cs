@@ -169,6 +169,53 @@ public sealed class StoredFileReconcileJobTests
 
         h.Rig.Dataverse.Rows.Should().NotContainKey(file);
         h.Rig.Gateway.Get("invoice-files", h.PathOf(parent, file)).Should().BeNull();
+        h.Rig.Dataverse.Calls.Should().Contain($"retrieve sprk_invoice {parent.Id}", "the path's parent is confirmed gone by its own read");
+    }
+
+    [Fact(DisplayName = "Must-fire (uac-r2 round 1): a parentless row whose PATH's parent still exists is kept with its blob (the null lookups prove nothing)")]
+    public async Task Parentless_PathParentAlive_Kept()
+    {
+        var h = new Harness();
+        var parent = h.LiveInvoice();
+        var file = Guid.NewGuid();
+        h.Rig.SeedFile(file, parent, Pdf).Attributes.Remove("sprk_invoice");
+
+        var result = await h.RunAsync();
+
+        h.Rig.Dataverse.Rows.Should().ContainKey(file);
+        h.Rig.Gateway.Get("invoice-files", h.PathOf(parent, file)).Should().NotBeNull();
+        h.Counts(result)["rowsParentlessKept"].GetInt32().Should().Be(1);
+        h.Counts(result)["rowsDeleted"].GetInt32().Should().Be(0);
+    }
+
+    [Fact(DisplayName = "Must-fire (uac-r2 round 1): a parentless row whose path's parent read faults is kept and the fault counted")]
+    public async Task Parentless_PathParentReadFaults_Kept()
+    {
+        var h = new Harness();
+        var parent = new StoredFileParent(StoredFileParentKind.Invoice, Guid.NewGuid());
+        var file = Guid.NewGuid();
+        h.Rig.SeedFile(file, parent, Pdf).Attributes.Remove("sprk_invoice");
+        h.Rig.Dataverse.RetrieveFault = new TimeoutException("Dataverse slow");
+
+        var result = await h.RunAsync();
+
+        h.Rig.Dataverse.Rows.Should().ContainKey(file);
+        h.Rig.Gateway.Get("invoice-files", h.PathOf(parent, file)).Should().NotBeNull();
+        h.Counts(result)["unitFaults"].GetInt32().Should().Be(1);
+    }
+
+    [Fact(DisplayName = "Must-fire (uac-r2 round 1): a parentless row whose path names no parent of this tenant is kept (nothing to confirm)")]
+    public async Task Parentless_UnparseablePath_Kept()
+    {
+        var h = new Harness();
+        var parent = new StoredFileParent(StoredFileParentKind.Invoice, Guid.NewGuid());
+        var file = Guid.NewGuid();
+        h.Rig.SeedFile(file, parent, Pdf, blobPathOverride: "not/a/stored/file").Attributes.Remove("sprk_invoice");
+
+        var result = await h.RunAsync();
+
+        h.Rig.Dataverse.Rows.Should().ContainKey(file);
+        h.Counts(result)["rowsParentlessKept"].GetInt32().Should().Be(1);
     }
 
     [Fact(DisplayName = "Must-fire: a parent-gone row whose path names ANOTHER file's blob is deleted, and the other blob is untouched")]

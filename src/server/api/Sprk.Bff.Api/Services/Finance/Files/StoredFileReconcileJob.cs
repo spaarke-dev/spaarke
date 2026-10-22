@@ -26,8 +26,9 @@ public static class StoredFileRetention
 
 /// <summary>
 /// The Finance file store's ONE scheduled job (ebilling-r1 task 090; procedure-and-file-model section 4.2; ADR-036 A1, ADR-052):
-/// (A) a Stored File row whose parent lookups are all null (the parent was deleted: RemoveLink) or whose parent read is a successful
-/// not-found → its blob, then the row, are deleted; (B) a blob with no row (a successful not-found) older than the grace → deleted,
+/// (A) a Stored File row whose parent lookups are all null (the parent was deleted: RemoveLink; confirmed by a not-found read of the
+/// parent its path names) or whose parent read is a successful not-found → its blob (only one carrying this environment's marker),
+/// then the row, are deleted; (B) a blob with no row (a successful not-found) older than the grace → deleted,
 /// unless its metadata names a submission that is not yet terminal; (C) the detector: rows still Not yet servable after
 /// <c>NotServableAlertMinutes</c> → one warning event with the count and ids, no repair.
 /// </summary>
@@ -274,10 +275,23 @@ public sealed class StoredFileReconcileJob : IScheduledJob
 
             try
             {
+                var pathParsed = StoredFileBlobName.TryParseForTenant(row.BlobPath, _blobs.TenantId, out var pathParent, out var pathFile);
+
+                // uac-r2 review round 1: "every lookup null" is RemoveLink's mark, but it is not itself an answer that the parent is
+                // gone. The parent the row's own path names is read first, as the parent-gone pass does: only its not-found deletes.
+                // A path that names no parent of this tenant gives nothing to confirm, so the row is kept (fail safe).
+                if (parentless && (!pathParsed || !await ParentConfirmedGoneAsync(entities, pathParent, ct).ConfigureAwait(false)))
+                {
+                    counts.RowsParentlessKept++;
+                    _logger.LogWarning(
+                        "Stored file reconcile: file {FileId} has no parent lookup but its path's parent is not confirmed gone; kept", row.Id);
+                    continue;
+                }
+
                 // Blob first, then the row: a crash in between leaves a row whose blob is gone, which the next run deletes again
                 // (the blob delete of something already gone succeeds). The reverse order could orphan bytes with no row to find them.
                 // Only the row's OWN blob (its file id in the name): a path naming another file is never followed to a delete.
-                if (StoredFileBlobName.TryParseForTenant(row.BlobPath, _blobs.TenantId, out var pathParent, out var pathFile) && pathFile == row.Id)
+                if (pathParsed && pathFile == row.Id)
                 {
                     // uac-r2 review round 1 F1: the same environment check as the row-less pass. Another environment sharing the
                     // account and the name segment (a copy of this environment's rows) may still serve these bytes: a blob without
@@ -314,6 +328,20 @@ public sealed class StoredFileReconcileJob : IScheduledJob
                 counts.UnitFaults++;
                 _logger.LogWarning(ex, "Stored file reconcile: deleting file {FileId} (parent gone) faulted; kept for the next run", row.Id);
             }
+        }
+    }
+
+    /// <summary>True only on a successful not-found read of <paramref name="parent"/>; it exists → false; a fault throws (unit skipped).</summary>
+    private static async Task<bool> ParentConfirmedGoneAsync(IGenericEntityService entities, StoredFileParent parent, CancellationToken ct)
+    {
+        try
+        {
+            await entities.RetrieveAsync(parent.Table, parent.Id, [parent.Table + "id"], ct).ConfigureAwait(false);
+            return false;
+        }
+        catch (Exception ex) when (StoredFileNotFound.Is(ex))
+        {
+            return true;
         }
     }
 
@@ -480,6 +508,7 @@ public sealed class StoredFileReconcileJob : IScheduledJob
         public bool RowsTruncated { get; set; }
         public int RowsDeleted { get; set; }
         public int RowsWithForeignPath { get; set; }
+        public int RowsParentlessKept { get; set; }
         public int BlobsExamined { get; set; }
         public int BlobsDeleted { get; set; }
         public int BlobsInGrace { get; set; }
