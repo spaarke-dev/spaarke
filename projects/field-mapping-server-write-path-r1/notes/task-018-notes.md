@@ -581,3 +581,40 @@ Mechanism-only re-points keep each test's claim. The full list is in commit 2aa3
 - `RegardingRecordId` added to the request (the reflection test fails with UAC-r2's exact message).
 
 **Counts:** filtered suites plus Issue1079: 3927 passed, 7 skipped, 0 failed. ArchTests: 1352 of 1352.
+
+## 018b-2, K2 and review round 1
+
+**018b-2 (d53d3005b3, b629550198, 8b3e6d7d61).**
+- Tests in `SecureRootCreateRouteTests.OfficeSecureOwner.cs`:
+  - A Project under a secure matter: owned by the Secure Record Owners team (step 7 never asked), secure, and the Restricted floor set by the isolated completion. Only the Secure team's business unit is read for the search index.
+  - Control: under an ordinary matter, the owner is the matter's BU team and the project is not secure.
+  - Isolated ordering: no caller-BU team is needed. The ordinary-matter control gives 403 `OFFICE_022`.
+  - The uniform AppendTo refusal under a secure matter.
+  - An empty or unreadable flag gives 403 `record_owner_parent_undetermined`, and nothing is written.
+- #2238 is fixed: step 9 writes the owner, the creator person, `sprk_issecure` and the search index each under one key (`ServerBindSpellingTests`).
+- #2124: the create path writes a `Money`. The Repair half is a 052 criterion.
+
+**K2 (1392035123, da8ee69e72).**
+- Create-time mapping drops any rule whose target `RefuseAppOnlyWrite` refuses, and gives `mapping_rule_skipped` with the refusal code.
+- `ProtectedFromMapping` unions `InheritedAccessPermission.OwnerColumns` and `CreatorColumns` (#2249).
+- Exemption: `sprk_document` plus `sprk_accesspermission`, create only. UAC-r2 accepted it on two conditions, both met: the exemption stays that narrow, and the Repair must-not-fire test passes. There is no `TODO(#2249)` left.
+
+**Opus adversarial review (one pass), four fix-now findings, all fixed in a94f1929d9:**
+- **F2-1:** a removed isolated row passes its `ProvisionProjectEndpoint` code through at 500 with its detail (it was `OFFICE_INTERNAL`).
+- **F3-2:** the map test enumerates the provisioning codes. The two old-core removal tests are ported to the Office route.
+- **F4-3:** the assignee refusal now has one shape (`OFFICE_009` + `reasonCode assignee_inaccessible`, title Forbidden), built by the filter's own `Deny`. The `WithDescription` text is corrected (assignee, record-first owner).
+- **F2-4:** the field-secured refusal text no longer says "from chat".
+
+Known limits:
+- A no-token request is refused 403 by the endpoint filter, before the service runs.
+- `RefusedColumn` names the first lookup when two name the same record.
+
+**Scoped Sonnet re-check:** no F findings. Its K1 is closed by `TheOnlyProvisioningReasonConstantOutsideTheCodePrefix_IsTheBodyKey`. The rest are recorded:
+- K2: an out-of-class code fails closed;
+- K3: the endpoint's assignee branch is keyed on `OFFICE_009` + `reasonCode`;
+- K4: production reflection over constants, with no trimming.
+
+**Verify at be6628b378:**
+- sln: 0 warnings, 0 errors.
+- ArchTests: 1353 / 1353.
+- Filtered suites: 4428 passed, 7 skipped, 0 failed.

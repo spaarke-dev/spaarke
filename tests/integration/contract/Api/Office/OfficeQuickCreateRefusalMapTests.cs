@@ -233,6 +233,20 @@ public class OfficeQuickCreateRefusalMapTests
             RefusedColumn = column,
         };
 
+    [Fact]
+    public void TheOnlyProvisioningReasonConstantOutsideTheCodePrefix_IsTheBodyKey()
+    {
+        // 018b re-check K1: the map passes provisioning codes through by the sdap.provision. prefix. A new Reason* code
+        // under another prefix would fall silently to OFFICE_INTERNAL, so any constant outside the prefix must be decided here.
+        var outside = typeof(ProvisionProjectEndpoint).GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
+            .Where(f => f is { IsLiteral: true, IsInitOnly: false } && f.FieldType == typeof(string) && f.Name.StartsWith("Reason", StringComparison.Ordinal))
+            .Where(f => !((string)f.GetRawConstantValue()!).StartsWith("sdap.provision.", StringComparison.Ordinal))
+            .Select(f => f.Name);
+
+        outside.Should().BeEquivalentTo(["ReasonKey"],
+            "a Reason* code outside sdap.provision. would not pass through MapQuickCreateRefusal; give it a decided row");
+    }
+
     /// <summary>Every <c>const string</c> a type declares (public or not).</summary>
     private static IEnumerable<string> ConstantsOf(Type type) =>
         type.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
