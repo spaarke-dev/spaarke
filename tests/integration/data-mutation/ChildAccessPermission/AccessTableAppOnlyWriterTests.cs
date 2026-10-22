@@ -53,6 +53,13 @@ public class AccessTableAppOnlyWriterTests
         "fieldpermission",
     ];
 
+    /// <summary>#2253 fix round 2: the platform tables that grant or scope access (<c>PlatformSecurityTables</c>).</summary>
+    private static readonly string[] PlatformTables =
+    [
+        "role", "roleprivileges", "systemuserroles", "teamroles", "fieldsecurityprofile", "systemuserprofiles", "teamprofiles",
+        "principalobjectaccess", "teamtemplate", "hierarchysecurityconfiguration", "position",
+    ];
+
     /// <summary>#2253 fix round 1 (F1-b): each non-root table's access columns, as the readers name them.</summary>
     private static readonly IReadOnlyDictionary<string, string[]> TableAccessColumns = new Dictionary<string, string[]>
     {
@@ -65,9 +72,11 @@ public class AccessTableAppOnlyWriterTests
         ["systemuser"] =
         [
             "sprk_hometenantid", "sprk_homeobjectid", "sprk_hometenantidkey", "sprk_homeobjectidkey", "sprk_primarycontact",
-            "sprk_isexternal",
+            "sprk_isexternal", "businessunitid", "azureactivedirectoryobjectid", "domainname", "internalemailaddress",
+            "isdisabled", "accessmode", "applicationid", "parentsystemuserid", "positionid",
         ],
-        ["businessunit"] = ["sprk_containerid"],
+        ["team"] = ["businessunitid", "name", "teamtype", "isdefault"],
+        ["businessunit"] = ["sprk_containerid", "name"],
     };
 
     /// <summary>
@@ -161,6 +170,11 @@ public class AccessTableAppOnlyWriterTests
         data.Add("sprk_organization", "sprk_accesspermissiongrant", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
         data.Add("systemuser", "sprk_isexternal", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
         data.Add("businessunit", "sprk_containerid", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
+        data.Add("systemuser", "businessunitid", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
+        data.Add("systemuser", "businessunitid@odata.bind", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
+        data.Add("team", "businessunitid", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
+        data.Add("role", "name", InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode);
+        data.Add("principalobjectaccess", "accessrightsmask", InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode);
         data.Add("sprk_externalrecordaccess')?$select=EntitySetName#", "sprk_name",
             InheritedAccessPermission.AppOnlyTableNameInvalidReasonCode);
         data.Add("sprk_matter')?$select=EntitySetName#", "sprk_issecure", InheritedAccessPermission.AppOnlyTableNameInvalidReasonCode);
@@ -245,7 +259,19 @@ public class AccessTableAppOnlyWriterTests
 
     [Fact]
     public void TheAccessTableSet_IsExactlyTheseTables() =>
-        InheritedAccessPermission.AccessTables.Should().BeEquivalentTo(Tables);
+        InheritedAccessPermission.AccessTables.Should().BeEquivalentTo(Tables.Concat(PlatformTables));
+
+    [Fact]
+    public void ThePlatformSecurityTables_AreExactlyThese_AndAllRefusedWhole()
+    {
+        InheritedAccessPermission.PlatformSecurityTables.Should().BeEquivalentTo(PlatformTables);
+        foreach (var table in PlatformTables)
+        {
+            Code(table, "name").Should().Be(InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode, table);
+            Code($" {table.ToUpperInvariant()} ").Should().Be(InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode, table);
+            CallerCode(table, "name").Should().BeNull($"{table}: the caller's own privileges decide");
+        }
+    }
 
     [Fact]
     public void TheSecureRoots_AreExactlyTheseTables_EachWithExactlyTheseColumns()
@@ -404,7 +430,19 @@ public class AccessTableAppOnlyWriterTests
             ("systemuser", DataverseContactIdentityStore.HomeObjectIdKeyColumn),
             ("systemuser", AssignedAccessStore.PrimaryContactColumn),
             ("systemuser", AssignedAccessStore.IsExternalColumn),
+            ("systemuser", RecordContainerResolver.BusinessUnitLookupColumn),
+            ("systemuser", RecordContainerResolver.AzureAdObjectIdColumn),
+            ("systemuser", RecordContainerResolver.DomainNameColumn),
+            ("systemuser", RecordContainerResolver.IsDisabledColumn),
+            ("systemuser", RecordContainerResolver.AccessModeColumn),
+            ("systemuser", RecordContainerResolver.ApplicationIdColumn),
+            ("systemuser", DataverseContactIdentityStore.InternalEmailColumn),
+            (SecureRecordOwnerTeam.TeamEntity, SecureRecordOwnerTeam.BusinessUnitColumn),
+            (SecureRecordOwnerTeam.TeamEntity, SecureRecordOwnerTeam.NameColumn),
+            (SecureRecordOwnerTeam.TeamEntity, SecureRecordOwnerTeam.TeamTypeColumn),
+            (SecureRecordOwnerTeam.TeamEntity, SecureRecordOwnerTeam.IsDefaultColumn),
             ("businessunit", RecordContainerResolver.ContainerColumn),
+            ("businessunit", SecureRecordOwnerTeam.NameColumn),
         ];
         foreach (var (table, column) in readers)
             Code(table, column).Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, $"{column} on {table}");
@@ -422,7 +460,14 @@ public class AccessTableAppOnlyWriterTests
     [InlineData("systemuser", "firstname")]
     [InlineData("systemuser", "sprk_standinggrant")]
     [InlineData("systemuser", "sprk_primarycontactname")]
-    [InlineData("businessunit", "name")]
+    [InlineData("businessunit", "description")]
+    [InlineData("systemuser", "lastname")]
+    [InlineData("systemuser", "title")]
+    [InlineData("systemuser", "mobilephone")]
+    [InlineData("team", "description")]
+    [InlineData("team", "emailaddress")]
+    [InlineData("contact", "domainname")]
+    [InlineData("account", "name")]
     [InlineData("sprk_event", "sprk_externalobjectid")]
     [InlineData("sprk_matter", "sprk_standinggrant")]
     [InlineData("account", "sprk_isexternal")]
@@ -434,7 +479,7 @@ public class AccessTableAppOnlyWriterTests
     [Fact]
     public void AsTheCaller_TheAccessTablesTheSecureRootColumnsAndTheAccessColumns_AreNotAsked()
     {
-        foreach (var table in Tables)
+        foreach (var table in Tables.Concat(PlatformTables))
             CallerCode(table, "sprk_name").Should().BeNull($"{table}: the caller's own privileges decide");
         foreach (var root in Roots)
         {

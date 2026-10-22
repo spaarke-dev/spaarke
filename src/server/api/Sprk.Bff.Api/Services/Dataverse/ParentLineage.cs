@@ -741,6 +741,43 @@ internal static class InheritedAccessPermission
     }
 
     /// <summary>
+    /// #2253 fix round 2: the Dataverse platform tables whose rows grant or scope access, refused whole to an app-only generic
+    /// writer as part of <see cref="AccessTables"/> (defence in depth: the BFF app user is a System Administrator, and no
+    /// Spaarke configuration has a reason to write any of them). No Spaarke reader names them, so the source scan
+    /// (<c>AccessTableReaderScanTests</c>) cannot find them; this list is kept by hand, each with its reason.
+    /// <list type="bullet">
+    /// <item><c>role</c>: a security role (its business unit, its inheritance from a parent role).</item>
+    /// <item><c>roleprivileges</c>: which privileges, at which depth, a role holds.</item>
+    /// <item><c>systemuserroles</c>, <c>teamroles</c>: which roles a user or a team holds.</item>
+    /// <item><c>fieldsecurityprofile</c>: a field security profile (with <c>fieldpermission</c>, already refused, its grants).</item>
+    /// <item><c>systemuserprofiles</c>, <c>teamprofiles</c>: who is in a field security profile.</item>
+    /// <item><c>principalobjectaccess</c>: the record shares (Dataverse writes them through GrantAccess / ModifyAccess /
+    /// RevokeAccess; the BFF's own share writer is <c>DataverseWebApiService.SendShareWriteAsync</c>).</item>
+    /// <item><c>teamtemplate</c>: an access team template's access rights mask.</item>
+    /// <item><c>hierarchysecurityconfiguration</c>: whether, and how deep, the manager or position hierarchy grants access.</item>
+    /// <item><c>position</c>: the position hierarchy (<c>parentpositionid</c>) that hierarchy security walks.</item>
+    /// </list>
+    /// Considered and left out: <c>privilege</c> (platform-defined, read-only); <c>systemuserbusinessunitentitymap</c>
+    /// (platform-maintained); <c>appmoduleroles</c> (which roles open an app, not data access); <c>queuemembership</c>
+    /// (queue item visibility; no Spaarke record is a queue item); <c>businessunit</c> and <c>team</c> (refused per column,
+    /// <see cref="AccessColumns"/>: their other columns are ordinary data).
+    /// </summary>
+    internal static readonly IReadOnlySet<string> PlatformSecurityTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "role",
+        "roleprivileges",
+        "systemuserroles",
+        "teamroles",
+        "fieldsecurityprofile",
+        "systemuserprofiles",
+        "teamprofiles",
+        "principalobjectaccess",
+        "teamtemplate",
+        "hierarchysecurityconfiguration",
+        "position",
+    };
+
+    /// <summary>
     /// #2251: the tables whose rows ARE access: a row grants it, denies it, or records the membership it is derived from.
     /// The BFF app user is a System Administrator, so a generic writer naming one of these, with any column, could point a
     /// grant at another contact or raise its level or reactivate it, move a contact into an organisation (and its grants),
@@ -762,17 +799,21 @@ internal static class InheritedAccessPermission
     /// <item><c>fieldpermission</c> (#2253 fix round 1, found by <c>AccessTableReaderScanTests</c>): a field security
     /// profile's Read / Update grant on a secured column (<c>SecureRootInheritance.PlatformReadableTablesAsync</c> reads it).
     /// A row decides who may read or write the field-secured binding, invite and access columns.</item>
+    /// <item>#2253 fix round 2: every <see cref="PlatformSecurityTables"/> table (roles, privileges, field security profiles,
+    /// shares, access team templates, hierarchy security).</item>
     /// </list>
     /// </summary>
-    internal static readonly IReadOnlySet<string> AccessTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
+    internal static readonly IReadOnlySet<string> AccessTables = new HashSet<string>(
+    [
         Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalGrantLifecycle.EntityLogicalName,
         Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalOrganizationMembership.EntityLogicalName,
         Sprk.Bff.Api.Infrastructure.ExternalAccess.NoAccessListReader.EntityLogicalName,
         Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore.EntityLogicalName,
         "teammembership",
         "fieldpermission",
-    };
+        .. PlatformSecurityTables,
+    ],
+    StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// #2251: per secure root, the columns only the BFF writes on it: the secure flag and access columns #2220 protects on
@@ -817,10 +858,21 @@ internal static class InheritedAccessPermission
     /// sign-in becomes; <c>ContactBindingDecision</c>) and its uniqueness mirrors <c>sprk_hometenantidkey</c> /
     /// <c>sprk_homeobjectidkey</c> (<c>DataverseContactIdentityStore</c>; a held mirror blocks a link); the task-141 link
     /// <c>sprk_primarycontact</c> and <c>sprk_isexternal</c> (<c>AssignedAccessStore</c>'s link candidates, the container
-    /// membership sync, the secure-child share sync, Office edit access).</item>
+    /// membership sync, the secure-child share sync, Office edit access). #2253 fix round 2: its business unit
+    /// <c>businessunitid</c> (BU-depth privileges, the acting user's container: <c>RecordContainerResolver</c>'s
+    /// eligibility read; the standing-writer sync, <c>SpeContainerMembershipSync</c>; the unit's user list,
+    /// <c>SecureRecordOwnerTeam.BusinessUnitUsersFilter</c>); its identity and eligibility <c>azureactivedirectoryobjectid</c>
+    /// (which user a sign-in is, <c>WorkforcePrincipalResolver</c>), <c>domainname</c> (the UPN the container is granted to),
+    /// <c>internalemailaddress</c> (the A9 licensed-user email read), <c>isdisabled</c>, <c>accessmode</c> and
+    /// <c>applicationid</c> (eligibility: the container sync, the Assigned-To link candidates, the No Access enforcement); and
+    /// the platform hierarchy-security inputs <c>parentsystemuserid</c> (manager) and <c>positionid</c>.</item>
+    /// <item><c>team</c> (#2253 fix round 2): <c>businessunitid</c>, <c>name</c>, <c>teamtype</c> and <c>isdefault</c>, the
+    /// four predicates that find the Secure Record owner team (<c>SecureRecordOwnerTeam.NamedOwnerTeamFilter</c>,
+    /// <c>SecureChildShareSynchronizer</c>) and a unit's default team (<c>ContactIdentityStore.BuildDefaultOwnerTeamPath</c>).</item>
     /// <item><c>businessunit</c>: <c>sprk_containerid</c>, the unit's default container
     /// (<see cref="Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.ContainerColumn"/>; its users' standing
-    /// writer grants, <c>SpeContainerMembershipSync</c>).</item>
+    /// writer grants, <c>SpeContainerMembershipSync</c>); and (#2253 fix round 2) <c>name</c>, by which the Secure Record
+    /// business unit is found (<c>SecureRecordOwnerTeam.BusinessUnitFilter</c>).</item>
     /// </list>
     /// Data, not branching: a table with no entry has no such column.
     /// </summary>
@@ -854,11 +906,28 @@ internal static class InheritedAccessPermission
                 Sprk.Bff.Api.Infrastructure.ExternalAccess.DataverseContactIdentityStore.HomeObjectIdKeyColumn,
                 Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore.PrimaryContactColumn,
                 Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore.IsExternalColumn,
+                Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.BusinessUnitLookupColumn,
+                Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.AzureAdObjectIdColumn,
+                Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.DomainNameColumn,
+                Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.IsDisabledColumn,
+                Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.AccessModeColumn,
+                Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.ApplicationIdColumn,
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.DataverseContactIdentityStore.InternalEmailColumn,
+                "parentsystemuserid",
+                "positionid",
+            },
+            [Sprk.Bff.Api.Infrastructure.Dataverse.SecureRecordOwnerTeam.TeamEntity] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                Sprk.Bff.Api.Infrastructure.Dataverse.SecureRecordOwnerTeam.BusinessUnitColumn,
+                Sprk.Bff.Api.Infrastructure.Dataverse.SecureRecordOwnerTeam.NameColumn,
+                Sprk.Bff.Api.Infrastructure.Dataverse.SecureRecordOwnerTeam.TeamTypeColumn,
+                Sprk.Bff.Api.Infrastructure.Dataverse.SecureRecordOwnerTeam.IsDefaultColumn,
             },
             [Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.BusinessUnitEntity] = new HashSet<string>(
                 StringComparer.OrdinalIgnoreCase)
             {
                 Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.ContainerColumn,
+                Sprk.Bff.Api.Infrastructure.Dataverse.SecureRecordOwnerTeam.NameColumn,
             },
         };
 
@@ -897,7 +966,8 @@ internal static class InheritedAccessPermission
     /// (above) as <see cref="WriteIdentity.Caller"/>, which does not ask these two (#2253 fix round 1, K2).</para>
     /// <para>#2253 fix round 1: nor, on a table that is not a secure root, a column an access decision reads
     /// (<see cref="AccessColumns"/>: a contact's identity binding and standing grant, an organisation's standing grant, a
-    /// user's home link, task-141 link and external flag, a business unit's container), refused with
+    /// user's home link, task-141 link, external flag, business unit, identity and eligibility, a team's owner-team
+    /// predicates, a business unit's container and name), refused with
     /// <see cref="AppOnlyAccessColumnWriteReasonCode"/>. Whatever the identity, a table that is not a bare identifier after
     /// trimming is refused first (<see cref="AppOnlyTableNameInvalidReasonCode"/>): the write would paste it into a URL.</para>
     /// <para><b>Identity</b> (<paramref name="identity"/>, K2): <see cref="WriteIdentity.Caller"/> (the field-mapping push,

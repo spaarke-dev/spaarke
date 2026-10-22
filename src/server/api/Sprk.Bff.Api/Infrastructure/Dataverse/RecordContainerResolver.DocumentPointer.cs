@@ -83,8 +83,8 @@ public sealed partial class RecordContainerResolver
     /// </summary>
     internal const string CreatedByPersonColumn = "sprk_createdbyperson";
 
-    /// <summary><c>systemuser.applicationid</c>: set for an application user (an Entra app's Dataverse identity).</summary>
-    private const string ApplicationIdColumn = "applicationid";
+    /// <summary><c>systemuser.applicationid</c>: set for an application user (an Entra app's Dataverse identity). <c>internal</c> (#2253 fix round 2): <c>InheritedAccessPermission.AccessColumns</c> refuses it to app-only generic writers.</summary>
+    internal const string ApplicationIdColumn = "applicationid";
 
     /// <summary><c>businessunit.parentbusinessunitid</c> — null on the root business unit only.</summary>
     private const string ParentBusinessUnitColumn = "parentbusinessunitid";

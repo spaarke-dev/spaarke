@@ -94,10 +94,22 @@ public sealed partial class RecordContainerResolver
     /// <c>CallerIdentityGuardTests.Rule2</c> exists to catch. Nothing here compares an <c>oid</c> to a
     /// <c>systemuserid</c>; the query TRANSLATES one into the other.
     /// </remarks>
-    private const string AzureAdObjectIdColumn = "azureactivedirectoryobjectid";
+    internal const string AzureAdObjectIdColumn = "azureactivedirectoryobjectid";
 
-    /// <summary>The <c>systemuser</c> column carrying the user's business unit.</summary>
-    private const string BusinessUnitLookupColumn = "businessunitid";
+    /// <summary>The <c>systemuser</c> column carrying the user's business unit. <c>internal</c> (#2253 fix round 2): <c>InheritedAccessPermission.AccessColumns</c> refuses it to app-only generic writers.</summary>
+    internal const string BusinessUnitLookupColumn = "businessunitid";
+
+    /// <summary>
+    /// <c>systemuser.domainname</c>, the user's UPN: the eligibility read below, and the container membership sync grants the
+    /// unit's container to it. <c>internal</c> (#2253 fix round 2): <c>InheritedAccessPermission.AccessColumns</c> refuses it to app-only generic writers.
+    /// </summary>
+    internal const string DomainNameColumn = "domainname";
+
+    /// <summary><c>systemuser.isdisabled</c>: a disabled user is not eligible (the read below, the sync, sign-in). <c>internal</c> (#2253 fix round 2): <c>InheritedAccessPermission.AccessColumns</c> refuses it to app-only generic writers.</summary>
+    internal const string IsDisabledColumn = "isdisabled";
+
+    /// <summary><c>systemuser.accessmode</c>: a non-interactive user is not eligible (the read below, the sync). <c>internal</c> (#2253 fix round 2): <c>InheritedAccessPermission.AccessColumns</c> refuses it to app-only generic writers.</summary>
+    internal const string AccessModeColumn = "accessmode";
 
     /// <summary>
     /// How many claimants of one container id to fetch when answering the reverse question. Only needs to be
@@ -2302,7 +2314,7 @@ public sealed partial class RecordContainerResolver
         {
             // Task 171 (adversarial finding 2): the eligibility columns ride on the same read.
             ColumnSet = new ColumnSet(
-                BusinessUnitLookupColumn, "domainname", "isdisabled", "accessmode", "applicationid", "sprk_isexternal"),
+                BusinessUnitLookupColumn, DomainNameColumn, IsDisabledColumn, AccessModeColumn, ApplicationIdColumn, "sprk_isexternal"),
             TopCount = 2,
             Criteria = new FilterExpression
             {
