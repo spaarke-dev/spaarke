@@ -734,7 +734,7 @@ public class AccessTableAppOnlyWriterTests
     {
         // A user's own write runs as that user, so Dataverse's privileges decide it (the refusal is for app-only writers).
         // #2257: only a proposal that user confirmed (ActionSeam's apply) is a user's own write; a playbook payload written
-        // AS its runner is still refused.
+        // AS its runner is still refused (UpdateRecordNodeExecutorRunIdentityTests, OutputMappingRunIdentityTests).
         var user = Guid.Parse("22510000-0000-0000-0000-00000000e4ee");
         await Core().UpdateAsync(
             new UpdateRecordActionInput(

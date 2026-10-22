@@ -284,6 +284,73 @@ public class OutputMappingRunIdentityTests
         _writes.Invocations.Should().BeEmpty();
     }
 
+    // ── Must fire (master merge after #2253): a person's mapping is asked #2251's and #2253's sets too ───────────────────
+    // WriteIdentity.Caller (#2253) skips AccessTables, SecureRootColumns and AccessColumns for a write that runs AS a person;
+    // it is the field-mapping push's only. The output mapping is the playbook's configuration, so the handler asks as
+    // WriteIdentity.AppOnly even when it writes AS the runner. Fails if DataverseUpdateHandler passes WriteIdentity.Caller.
+
+    public static TheoryData<string, string, object?, string> AccessSetWrites => new()
+    {
+        { "sprk_communicationaccount", "sprk_name", "x", InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode },
+        { "sprk_communication", "sprk_isinternalonly", false, InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode },
+        { "sprk_matter", "sprk_containerid", "b!forged", InheritedAccessPermission.AppOnlySecureRootWriteReasonCode },
+    };
+
+    [Theory]
+    [MemberData(nameof(AccessSetWrites))]
+    public async Task TheHandler_ForAPerson_AnAccessTableOrColumn_IsRefused_AndNothingIsWritten(
+        string table, string column, object? value, string code)
+    {
+        var act = () => Handler().UpdateAsync(
+            table, Matter, new Dictionary<string, object?> { [column] = value },
+            ConcurrencyMode.None, maxRetries: 1, CancellationToken.None, Person);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode.Should().Be(code);
+        _writes.Invocations.Should().BeEmpty("the refusal comes before anything is written, even AS the person");
+    }
+
+    [Theory]
+    [MemberData(nameof(AccessSetWrites))]
+    public async Task APersonsRun_ItsOutputMappingOntoAnAccessTableOrColumn_FailsThatUpdate_AndNothingIsWritten(
+        string table, string column, object? value, string code)
+    {
+        // End to end: the orchestrator resolves the run's person and hands the write to the real handler AS that person.
+        var playbookId = Guid.NewGuid();
+        var playbooks = new Mock<IPlaybookService>();
+        playbooks.Setup(p => p.GetPlaybookAsync(playbookId, It.IsAny<CancellationToken>())).ReturnsAsync(new PlaybookResponse
+        {
+            Id = playbookId,
+            Name = "A configured mapping",
+            ConfigJson = JsonSerializer.Serialize(new
+            {
+                outputMapping = new
+                {
+                    updates = new[]
+                    {
+                        new
+                        {
+                            entityType = table,
+                            recordIdSource = "${context.recordId}",
+                            fields = new Dictionary<string, object> { [column] = new { type = "String", value = "${run.value}" } },
+                        },
+                    },
+                },
+            }),
+        });
+        var run = new PlaybookExecutionContext { StartedBy = PlaybookRunStartedBy.Person, RunUserId = Person };
+        run.SetVariable("context.recordId", Matter.ToString());
+        run.SetVariable("run.value", value?.ToString());
+
+        var result = await new OutputOrchestratorService(playbooks.Object, Handler(), NullLogger<OutputOrchestratorService>.Instance)
+            .ApplyOutputMappingAsync(playbookId, run, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        var update = result.Updates.Should().ContainSingle().Subject;
+        update.Success.Should().BeFalse();
+        update.ErrorMessage.Should().Contain($"({code})", "the deny-list refused it as WriteIdentity.AppOnly, not Dataverse");
+        _writes.Invocations.Should().BeEmpty("the refusal comes before anything is written, even AS the person");
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]

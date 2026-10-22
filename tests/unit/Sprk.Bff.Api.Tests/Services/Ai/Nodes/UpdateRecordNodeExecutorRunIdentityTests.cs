@@ -139,6 +139,32 @@ public class UpdateRecordNodeExecutorRunIdentityTests
         _writes.Invocations.Should().BeEmpty();
     }
 
+    // ── Must fire (master merge after #2253): a person's run is asked #2251's and #2253's sets too ───────────────────────
+    // #2253 added WriteIdentity.Caller, which skips AccessTables, SecureRootColumns and AccessColumns for a write that runs AS
+    // a person (the field-mapping push). A playbook run that writes AS its person is not that: the node asks as
+    // WriteIdentity.AppOnly, so every set applies. Fails if UpdateRecordActionCore passes WriteIdentity.Caller.
+
+    [Theory]
+    [InlineData("sprk_communicationaccount", "sprk_name", "x", InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode)]
+    [InlineData("sprk_communication", "sprk_isinternalonly", "false", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode)]
+    [InlineData("sprk_matter", "sprk_containerid", "b!forged", InheritedAccessPermission.AppOnlySecureRootWriteReasonCode)]
+    [InlineData("systemuser", "sprk_primarycontact@odata.bind", "/contacts(22570000-0000-4000-8000-00000000c0c0)",
+        InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode)]
+    public async Task APersonsRun_ANodeThatWritesAnAccessTableOrColumn_IsRefused_AndNothingIsWritten(
+        string table, string column, string value, string code)
+    {
+        // The last row is the issue's own route (a hard-coded systemuser record, its task-141 link to a contact).
+        var record = Guid.Parse("22570000-0000-4000-8000-00000000c002");
+
+        var result = await Executor().ExecuteAsync(
+            Context(LegacyConfig(table, record, column, value), PlaybookRunStartedBy.Person, Person),
+            CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain($"({code})", "a person's run is asked every set, as WriteIdentity.AppOnly");
+        _writes.Invocations.Should().BeEmpty("the refusal comes before anything is written, even AS the person");
+    }
+
     // ── The shipped matter-health-single playbook (Update Record on sprk_matter.sprk_performancesummary) ────────────────
 
     [Fact]
