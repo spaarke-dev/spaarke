@@ -88,7 +88,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 085 | 🔲 [open] | Rate cards keyed to Procedure Version: import, copy-forward, resolver tiers re-keyed to the rank; no scope column | FULL | sonnet / xhigh | P3-E | 080, 082 |
 | 086 | 🔲 [open] | Invoice Stored Files join the secure family as a leaf child of sprk_invoice: lineage, role row, creator person, census | FULL | opus / high | P3-D (p-safe false) | 088, 090, 089 |
 | 087 | ✖ [cancelled] | Secure BU snapshot writer — cancelled 2026-10-21 by EB-D-148 (BU filter dropped, model §12 / O-12) | — | — | — | — |
-| 088 | 🔲 [open] | Stored File schema, the sprk_document submission marker (field-secured, app-only refusal) and invoice status Superseded | FULL | opus / high | P3-A | 080 |
+| 088 | ✅ [done] | Stored File schema, the sprk_document submission marker (field-secured, app-only refusal) and invoice status Superseded | FULL | opus / high | P3-A | 080 |
 | 089 | 🔲 [open] | Assignment and override service (pin, exclude, change rule, removal preview); secure-child registration; K-2 pin test | FULL | opus / high | P3-C (p-safe false) | 080, 081 |
 | 090 | 🔲 [open] | File store service: staged blob, Not yet servable row, verified flip; internal download route; orphan reconcile job | FULL | opus / high | P3-B | 088, 099 |
 | 091 | ✅ [done] | File store provisioning: blob containers, container-scoped role, malware-scan setting, customer-provisioning hand-off | FULL | opus / high | P3-A | none |
