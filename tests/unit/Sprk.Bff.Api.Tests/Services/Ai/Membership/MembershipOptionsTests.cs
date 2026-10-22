@@ -158,13 +158,14 @@ public class MembershipOptionsTests
     }
 
     [Fact]
-    public void AddMembership_WithOperatorBoundIdentityTables_DoesNotSeedDefaults()
+    public void AddMembership_WithOperatorBoundIdentityTables_DoesNotSeedIdentityTableDefaults()
     {
         // The post-configure seeding is GATED on empty — operator-provided
         // configuration MUST replace the defaults cleanly, not append to them.
         // This pins the contract for environments that may want a restricted
-        // identity-table set (e.g., contact-only or team-only) or a different
-        // set of audit-field exclusions.
+        // identity-table set (e.g., contact-only or team-only). Global field
+        // exclusions are ADDED to the ADR-034 mandatory set, never a replacement
+        // for it (GitHub #2152).
         var configValues = new Dictionary<string, string?>
         {
             ["Membership:IncludedIdentityTables:0:Table"] = "systemuser",
@@ -184,6 +185,121 @@ public class MembershipOptionsTests
         // Operator override stands alone — NOT appended to the 6 canonical defaults.
         options.IncludedIdentityTables.Should().HaveCount(1);
         options.IncludedIdentityTables[0].Table.Should().Be("systemuser");
-        options.GlobalFieldExclusions.Should().BeEquivalentTo(new[] { "owninguser" });
+        // GitHub #2152: exclusions are the exception — the ADR-034 mandatory set is always unioned in.
+        options.GlobalFieldExclusions.Should().BeEquivalentTo(new[]
+        {
+            "owninguser", "createdby", "modifiedby", "createdonbehalfby", "modifiedonbehalfby",
+        });
+    }
+
+    // ── GitHub #2152: ADR-034 MUST exclusions always apply ──────────────────
+
+    [Fact]
+    public void AddMembership_WithConfiguredGlobalExclusions_KeepsEveryMandatoryExclusion()
+    {
+        // Must-fire: before #2152 a non-empty configured list replaced the seed, dropping the audit
+        // lookups, which membership discovery then treated as membership links (over-grant).
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Membership:GlobalFieldExclusions:0"] = "sprk_reviewer",
+                ["Membership:GlobalFieldExclusions:1"] = " CreatedBy ",
+            })
+            .Build();
+        var services = new ServiceCollection();
+        services.AddMembership(config);
+        using var sp = services.BuildServiceProvider();
+
+        var options = sp.GetRequiredService<IOptions<MembershipOptions>>().Value;
+
+        var effective = new HashSet<string>(
+            options.GlobalFieldExclusions.Select(s => s.Trim()), StringComparer.OrdinalIgnoreCase);
+        MembershipOptionsDefaults.MandatoryFieldExclusions.Should().OnlyContain(f => effective.Contains(f));
+        effective.Contains("sprk_reviewer").Should().BeTrue(because: "the operator's own exclusion is kept");
+        options.GlobalFieldExclusions.Should().HaveCount(5,
+            because: "a mandatory field the operator already listed (any case/whitespace) is not added twice");
+    }
+
+    [Fact]
+    public void PostConfigure_ForceIncludeOfMandatoryExclusion_IsRemovedAndWarns()
+    {
+        // Must-fire: a per-entity IncludedFields entry must not re-admit an ADR-034 mandatory exclusion,
+        // whatever its casing or surrounding whitespace (" createdby " compares trimmed, as discovery does).
+        var logger = new CapturingLogger();
+        var options = new MembershipOptions
+        {
+            EntityOverrides = new Dictionary<string, EntityOverride>
+            {
+                ["sprk_matter"] = new EntityOverride
+                {
+                    IncludedFields = new List<string> { "ModifiedBy", " createdby ", "sprk_reviewer" },
+                },
+            },
+        };
+
+        new MembershipOptionsDefaults(logger).PostConfigure(null, options);
+
+        options.EntityOverrides["sprk_matter"].IncludedFields.Should().Equal("sprk_reviewer");
+        logger.Warnings.Should().HaveCount(2);
+        logger.Warnings.Should().ContainSingle(w => w.Contains("ModifiedBy"))
+            .Which.Should().Contain("sprk_matter");
+        logger.Warnings.Should().ContainSingle(w => w.Contains("createdby"))
+            .Which.Should().Contain("sprk_matter");
+    }
+
+    [Fact]
+    public void PostConfigure_ForceIncludeOfNonMandatoryExclusion_IsKeptWithoutWarning()
+    {
+        // Must-not-fire: force-include still works for an operator-configured (non-mandatory) exclusion.
+        var logger = new CapturingLogger();
+        var options = new MembershipOptions
+        {
+            GlobalFieldExclusions = new List<string> { "owninguser" },
+            EntityOverrides = new Dictionary<string, EntityOverride>
+            {
+                ["sprk_matter"] = new EntityOverride { IncludedFields = new List<string> { "owninguser" } },
+            },
+        };
+
+        new MembershipOptionsDefaults(logger).PostConfigure(null, options);
+
+        options.EntityOverrides["sprk_matter"].IncludedFields.Should().Equal("owninguser");
+        logger.Warnings.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void PostConfigure_WithEmptyGlobalExclusions_SeedsExactlyTheMandatorySetAsBefore()
+    {
+        // Must-not-fire: an unconfigured environment gets the same 4 entries, in the same order, as before.
+        var logger = new CapturingLogger();
+        var options = new MembershipOptions();
+
+        new MembershipOptionsDefaults(logger).PostConfigure(null, options);
+
+        options.GlobalFieldExclusions.Should().Equal(
+            "createdby", "modifiedby", "createdonbehalfby", "modifiedonbehalfby");
+        logger.Warnings.Should().BeEmpty();
+    }
+
+    private sealed class CapturingLogger : Microsoft.Extensions.Logging.ILogger<MembershipOptionsDefaults>
+    {
+        public List<string> Warnings { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            Microsoft.Extensions.Logging.LogLevel logLevel,
+            Microsoft.Extensions.Logging.EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == Microsoft.Extensions.Logging.LogLevel.Warning)
+            {
+                Warnings.Add(formatter(state, exception));
+            }
+        }
     }
 }

@@ -278,19 +278,21 @@ public class MembershipFieldDiscoveryServiceTests
     [Fact]
     public async Task DiscoverAsync_PerEntityIncludedFields_ForceIncludesGloballyExcludedFieldAsOverride()
     {
-        // Edge case: operator wants the createdby Lookup (normally globally
-        // excluded as touch-history) to count as membership for one specific
-        // entity. The discovery service must override the global exclusion and
-        // mark the descriptor's source as "override".
+        // Edge case: operator globally excludes a NON-mandatory lookup (owninguser) but wants it to
+        // count as membership for one specific entity. The discovery service must override the global
+        // exclusion and mark the descriptor's source as "override". The four ADR-034 audit lookups
+        // (createdby, modifiedby, createdonbehalfby, modifiedonbehalfby) can never be force-included:
+        // MembershipOptionsDefaults strips them from IncludedFields (GitHub #2152).
         var options = BuildOptions();
+        options.GlobalFieldExclusions.Add("owninguser");
         options.EntityOverrides[MatterEntity] = new EntityOverride
         {
-            IncludedFields = { "createdby" }
+            IncludedFields = { "owninguser" }
         };
 
         var lookups = new[]
         {
-            Lookup("createdby", "systemuser"),
+            Lookup("owninguser", "systemuser"),
         };
 
         var sut = new TestableMembershipFieldDiscoveryService(options, lookups);
@@ -299,12 +301,100 @@ public class MembershipFieldDiscoveryServiceTests
 
         result.DiscoveredFields.Should().ContainSingle()
             .Which.Should().BeEquivalentTo(new MembershipDescriptor(
-                Field: "createdby",
-                Role: "createdby", // CamelCase strategy applied, no sprk_ prefix to strip
+                Field: "owninguser",
+                Role: "owninguser", // CamelCase strategy applied, no sprk_ prefix to strip
                 IdentityType: "SystemUser",
                 TargetTable: "systemuser",
                 Source: "override"));
         result.ExcludedFields.Should().BeEmpty();
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // Back-reference discovery (DiscoverLookupsTargetingAsync) — GitHub #2152
+    // ────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task DiscoverLookupsTargetingAsync_AuditLookupsTargetingPrimary_AreNotBackReferences()
+    {
+        // Must-fire: includeRelated expansion (GET /api/users/me/memberships/systemuser?includeRelated=sprk_matter)
+        // reads these back-references. Before #2152 every lookup on the related entity that targeted the primary
+        // entity came back, so createdby/modifiedby/… surfaced as membership roles — touch history as association.
+        // Must-not-fire: a non-audit lookup targeting the primary entity is still a back-reference.
+        var lookups = new[]
+        {
+            Lookup("createdby",               "systemuser"),
+            Lookup("modifiedby",              "systemuser"),
+            Lookup("createdonbehalfby",       "systemuser"),
+            Lookup("modifiedonbehalfby",      "systemuser"),
+            Lookup("ownerid",                 "systemuser", "team"),
+            Lookup("sprk_assignedtointernal", "systemuser"),
+            Lookup("sprk_assignedattorney1",  "contact"),
+        };
+
+        var sut = new TestableMembershipFieldDiscoveryService(BuildOptions(), lookups);
+
+        var backRefs = await sut.DiscoverLookupsTargetingAsync(MatterEntity, "systemuser", CancellationToken.None);
+
+        backRefs.Should().Equal("ownerid", "sprk_assignedtointernal");
+    }
+
+    [Fact]
+    public async Task DiscoverLookupsTargetingAsync_OperatorConfiguredExclusions_StillExcludeEveryMandatoryAuditLookup()
+    {
+        // Must-fire, end to end through the options pipeline: an operator list that names none of the audit
+        // lookups is unioned with them by MembershipOptionsDefaults, and the back-reference path honours it.
+        var options = BuildOptions();
+        options.GlobalFieldExclusions = new List<string> { "sprk_reviewer" };
+        new MembershipOptionsDefaults(NullLogger<MembershipOptionsDefaults>.Instance).PostConfigure(null, options);
+
+        var lookups = new[]
+        {
+            Lookup("createdby",               "systemuser"),
+            Lookup("modifiedby",              "systemuser"),
+            Lookup("createdonbehalfby",       "systemuser"),
+            Lookup("modifiedonbehalfby",      "systemuser"),
+            Lookup("sprk_reviewer",           "systemuser"),
+            Lookup("sprk_assignedtointernal", "systemuser"),
+        };
+
+        var sut = new TestableMembershipFieldDiscoveryService(options, lookups);
+
+        var backRefs = await sut.DiscoverLookupsTargetingAsync(MatterEntity, "systemuser", CancellationToken.None);
+
+        backRefs.Should().Equal("sprk_assignedtointernal");
+    }
+
+    [Fact]
+    public async Task DiscoverLookupsTargetingAsync_SourceEntityOverrides_ApplyAsInDiscoverAsync()
+    {
+        // The related (source) entity's own EntityOverride governs its own lookups, the same rule
+        // DiscoverAsync applies: per-entity ExcludedFields drop a lookup; IncludedFields re-admit a
+        // NON-mandatory global exclusion. An override keyed on the target entity has no effect here.
+        var options = BuildOptions();
+        options.GlobalFieldExclusions.Add("owninguser");
+        options.EntityOverrides[MatterEntity] = new EntityOverride
+        {
+            ExcludedFields = { " SPRK_AssignedToInternal " },
+            IncludedFields = { "owninguser" },
+        };
+        options.EntityOverrides["systemuser"] = new EntityOverride
+        {
+            ExcludedFields = { "sprk_reviewer" },
+        };
+
+        var lookups = new[]
+        {
+            Lookup("owninguser",              "systemuser"),
+            Lookup("sprk_assignedtointernal", "systemuser"),
+            Lookup("sprk_reviewer",           "systemuser"),
+            Lookup("createdby",               "systemuser"),
+        };
+
+        var sut = new TestableMembershipFieldDiscoveryService(options, lookups);
+
+        var backRefs = await sut.DiscoverLookupsTargetingAsync(MatterEntity, "systemuser", CancellationToken.None);
+
+        backRefs.Should().Equal("owninguser", "sprk_reviewer");
     }
 
     // ────────────────────────────────────────────────────────────────────
@@ -464,6 +554,38 @@ public class MembershipFieldDiscoveryServiceTests
         DescriptorFor(result, "sprk_assignedattorney1").IdentityType.Should().Be("Contact");
         DescriptorFor(result, "sprk_assignedlawfirm1").IdentityType.Should().Be("Organization");
         DescriptorFor(result, "ownerid").IdentityType.Should().Be("SystemUser");
+    }
+
+    [Fact]
+    public async Task DiscoverAsync_OperatorExclusionAndForceIncludeOfAuditField_AuditLookupsStayExcluded()
+    {
+        // GitHub #2152 / ADR-034 MUST: an operator-configured GlobalFieldExclusions list used to REPLACE
+        // the audit exclusions, and a per-entity IncludedFields entry could re-admit one — either way an
+        // audit lookup to systemuser (who touched the row) became a membership link (over-grant).
+        var lookups = new[]
+        {
+            Lookup("createdby",              "systemuser"),
+            Lookup("modifiedby",             "systemuser"),
+            Lookup("owninguser",             "systemuser"),
+            Lookup("sprk_assignedattorney1", "contact"),
+        };
+        var options = new MembershipOptions
+        {
+            GlobalFieldExclusions = new List<string> { "owninguser" },
+            EntityOverrides = new Dictionary<string, EntityOverride>
+            {
+                [MatterEntity] = new EntityOverride { IncludedFields = new List<string> { "modifiedby" } },
+            },
+        };
+        new MembershipOptionsDefaults().PostConfigure(name: null, options: options);
+
+        var sut = new TestableMembershipFieldDiscoveryService(options, lookups);
+        var result = await sut.DiscoverAsync(MatterEntity, CancellationToken.None);
+
+        result.DiscoveredFields.Select(d => d.Field).Should().BeEquivalentTo(new[] { "sprk_assignedattorney1" });
+        result.ExcludedFields.Should().Contain(e => e.Field == "createdby" && e.Reason == "global-exclusion");
+        result.ExcludedFields.Should().Contain(e => e.Field == "modifiedby" && e.Reason == "global-exclusion");
+        result.ExcludedFields.Should().Contain(e => e.Field == "owninguser" && e.Reason == "global-exclusion");
     }
 
     // ────────────────────────────────────────────────────────────────────

@@ -63,8 +63,8 @@ Ship ONE canonical "Membership" mechanism with a 6-component design.
 
 `MembershipFieldDiscoveryService` queries Dataverse `EntityDefinitions` metadata for any entity type. Filters to Lookup attributes whose `Targets[]` includes one of 6 configured identity tables (`systemuser`, `contact`, `team`, `businessunit`, `account`, `sprk_organization`). Applies:
 
-- **Global field exclusions** (`createdby`, `modifiedby`, `createdonbehalfby`, `modifiedonbehalfby` — touch-history, not association)
-- **Per-entity overrides** in `appsettings.json`: `ExcludedFields`, `IncludedFields` (force-include even if globally excluded), `FieldRoleOverrides`
+- **Global field exclusions** (`createdby`, `modifiedby`, `createdonbehalfby`, `modifiedonbehalfby` — touch-history, not association). These four always apply in discovery, including the related-records back-reference lookup: an operator `Membership:GlobalFieldExclusions` list adds to them and never replaces them (#2152)
+- **Per-entity overrides** in `appsettings.json`: `ExcludedFields`, `IncludedFields` (force-include even if globally excluded, except the four MUST audit exclusions, which always apply — a force-include naming one is ignored with a Warning, #2152), `FieldRoleOverrides`
 
 Derives **role name** via a CamelCase strategy: strip `sprk_` prefix → strip trailing numeric digits → camelCase. Example: `sprk_AssignedAttorney1` → `assignedAttorney`. Per-entity `FieldRoleOverrides` collapse paired fields: `sprk_assignedlawfirm1` + `sprk_assignedlawfirm2` both map to role `"assignedLawFirm"`.
 

@@ -97,6 +97,11 @@ public sealed class MembershipResolverService : IMembershipResolverService
     /// missing from the <c>owner</c> role.
     /// </para>
     /// <para>
+    /// <b>Bumped 6 → 7 by GitHub #2152</b> — the "bump REQUIRED" case below: the options hash is unchanged, but the
+    /// related-records back-reference set no longer includes the four MUST audit lookups, so a pre-deploy entry would
+    /// be served for up to <see cref="CacheTtl"/> with touch-history rows under <c>createdBy</c>/<c>modifiedBy</c> roles.
+    /// </para>
+    /// <para>
     /// ⚠️ <b>When a bump IS required, and when it is not</b> (stated 2026-09-17, task 043, because the
     /// question came up and the answer was non-obvious). This constant and
     /// <see cref="HashOptions"/> defend against two DIFFERENT failure modes, and only one of them needs
@@ -119,7 +124,7 @@ public sealed class MembershipResolverService : IMembershipResolverService
     /// authorization decision.
     /// </para>
     /// </summary>
-    internal const int CacheVersion = 6;
+    internal const int CacheVersion = 7;
 
     /// <summary>
     /// Per-user cache TTL: 2 minutes (was 5) — task 132, owner rounds 3 R3/R4 (access changes take effect in

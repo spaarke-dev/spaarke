@@ -7,6 +7,9 @@
 // section. Reference: projects/spaarke-platform-foundations-r3/design.md
 // Part 1 § Configuration shape; ADR-034 (forthcoming).
 
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
 namespace Sprk.Bff.Api.Services.Ai.Membership;
 
 /// <summary>
@@ -40,8 +43,11 @@ public sealed class MembershipOptions
     /// Logical names of lookup fields that are always excluded from membership
     /// resolution regardless of entity. Typical entries: <c>createdby</c>,
     /// <c>modifiedby</c>, <c>createdonbehalfby</c>, <c>modifiedonbehalfby</c>.
-    /// Defaults seeded by <see cref="MembershipOptionsDefaults"/> only when the
-    /// bound list is empty (see <see cref="IncludedIdentityTables"/> rationale).
+    /// The ADR-034 mandatory exclusions
+    /// (<see cref="MembershipOptionsDefaults.MandatoryFieldExclusions"/>) are ALWAYS
+    /// unioned into this list by <see cref="MembershipOptionsDefaults"/>, whatever
+    /// the operator binds: configured entries ADD exclusions, they never replace the
+    /// mandatory ones (GitHub #2152).
     /// </summary>
     public List<string> GlobalFieldExclusions { get; set; } = new();
 
@@ -201,7 +207,10 @@ public sealed class EntityOverride
     /// <summary>
     /// Logical names of lookup fields to force-include even if they would
     /// otherwise be globally excluded. Rare; use for entity-specific
-    /// exceptions to global exclusions.
+    /// exceptions to global exclusions. An entry naming one of the ADR-034
+    /// mandatory exclusions (<see cref="MembershipOptionsDefaults.MandatoryFieldExclusions"/>)
+    /// is removed by <see cref="MembershipOptionsDefaults"/> with a Warning — a
+    /// mandatory exclusion cannot be force-included (GitHub #2152).
     /// </summary>
     public List<string> IncludedFields { get; set; } = new();
 
@@ -216,8 +225,9 @@ public sealed class EntityOverride
 
 /// <summary>
 /// Post-configuration seeding for <see cref="MembershipOptions"/>. Populates
-/// the canonical Spaarke identity tables + audit-field exclusions ONLY when the
-/// bound configuration left them empty.
+/// the canonical Spaarke identity tables and access-conferring registry ONLY when
+/// the bound configuration left them empty, and ALWAYS enforces the ADR-034
+/// mandatory field exclusions (<see cref="MandatoryFieldExclusions"/>).
 /// </summary>
 /// <remarks>
 /// <para><b>R7 W12 task 130 (2026-06-30) — root-cause fix for "0 memberships for
@@ -239,13 +249,26 @@ public sealed class EntityOverride
 /// does not replace. Defaulting at the property initializer would cause every
 /// operator-supplied entry to duplicate the canonical defaults. The
 /// post-configure pattern seeds defaults ONLY when the bound list is empty, so
-/// operator config replaces cleanly.</para>
+/// operator config replaces cleanly. The exception is
+/// <see cref="MandatoryFieldExclusions"/>, which ADR-034 requires and which are
+/// therefore unioned in on every configuration (GitHub #2152).</para>
 /// <para>Registered by <c>MembershipModule.AddMembership</c> via
 /// <c>ConfigureOptions&lt;MembershipOptionsDefaults&gt;</c> AFTER
 /// <c>Configure&lt;MembershipOptions&gt;</c>.</para>
 /// </remarks>
 public sealed class MembershipOptionsDefaults : Microsoft.Extensions.Options.IPostConfigureOptions<MembershipOptions>
 {
+    private readonly ILogger<MembershipOptionsDefaults> _logger;
+
+    /// <summary>
+    /// Creates the post-configure step. The logger is optional so tests and fixtures can apply the
+    /// same seeding with <c>new MembershipOptionsDefaults()</c>; DI supplies it in production.
+    /// </summary>
+    public MembershipOptionsDefaults(ILogger<MembershipOptionsDefaults>? logger = null)
+    {
+        _logger = logger ?? NullLogger<MembershipOptionsDefaults>.Instance;
+    }
+
     /// <summary>The canonical Spaarke identity tables (6 entries).</summary>
     public static IReadOnlyList<IdentityTableConfig> CanonicalIdentityTables { get; } = new[]
     {
@@ -258,11 +281,22 @@ public sealed class MembershipOptionsDefaults : Microsoft.Extensions.Options.IPo
     };
 
     /// <summary>
-    /// The standard Dataverse audit lookups (4 entries). These point to
-    /// <c>systemuser</c> but never represent membership in a business sense
-    /// (they record who created/modified a row, not who is assigned to it).
+    /// The field exclusions ADR-034 marks <b>MUST</b> — the ONE place that list lives. Today it is the
+    /// standard Dataverse audit lookups (4 entries): they point to <c>systemuser</c> but record who
+    /// created/modified a row (touch-history), not who is associated with it.
+    /// <para>
+    /// <see cref="PostConfigure"/> ALWAYS unions these into
+    /// <see cref="MembershipOptions.GlobalFieldExclusions"/> (an operator list adds exclusions, it never
+    /// replaces these) and removes any per-entity <see cref="EntityOverride.IncludedFields"/> entry that
+    /// names one, logging a Warning. Before GitHub #2152 they were seeded only when the bound list was
+    /// empty, so any configured exclusion silently re-admitted the audit lookups as membership links.
+    /// </para>
+    /// <para>
+    /// A new mandatory exclusion is ONE entry added here (and the matching ADR-034 MUST line); nothing
+    /// else needs to change.
+    /// </para>
     /// </summary>
-    public static IReadOnlyList<string> CanonicalAuditFieldExclusions { get; } = new[]
+    public static IReadOnlyList<string> MandatoryFieldExclusions { get; } = new[]
     {
         "createdby",
         "modifiedby",
@@ -380,13 +414,10 @@ public sealed class MembershipOptionsDefaults : Microsoft.Extensions.Options.IPo
         {
             options.IncludedIdentityTables.AddRange(CanonicalIdentityTables);
         }
-        if (options.GlobalFieldExclusions.Count == 0)
-        {
-            options.GlobalFieldExclusions.AddRange(CanonicalAuditFieldExclusions);
-        }
+        EnforceMandatoryFieldExclusions(options);
 
         // ADR-034 Amendment A1 / spec FR-24 (unified-access-control-r2 task 041). Same
-        // seed-only-when-empty rule as the two blocks above, for the same reason: IConfiguration.Bind
+        // seed-only-when-empty rule as IncludedIdentityTables above, for the same reason: IConfiguration.Bind
         // APPENDS to List-typed dictionary values, so seeding unconditionally would double up an
         // operator's own registry entries. Gated on the TOP-LEVEL Entities count so a partially
         // operator-configured registry (even a single entity) is never mixed with the canonical seed —
@@ -398,6 +429,50 @@ public sealed class MembershipOptionsDefaults : Microsoft.Extensions.Options.IPo
                 options.AccessConferringRoles.Entities[entityType] = columns
                     .Select(c => new AccessConferringColumn { Field = c.Field, IdentityType = c.IdentityType })
                     .ToList();
+            }
+        }
+    }
+
+    /// <summary>
+    /// ADR-034 MUST (GitHub #2152): the effective global exclusions are always
+    /// <see cref="MandatoryFieldExclusions"/> ∪ the configured list, and no per-entity force-include can
+    /// re-admit a mandatory exclusion. Names compare trimmed and case-insensitively — the same rule
+    /// <c>MembershipFieldDiscoveryService.BuildDiscoveryResult</c> applies when it reads both lists.
+    /// </summary>
+    private void EnforceMandatoryFieldExclusions(MembershipOptions options)
+    {
+        options.GlobalFieldExclusions ??= new List<string>();
+        var configured = new HashSet<string>(
+            options.GlobalFieldExclusions
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Select(s => s.Trim()),
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var field in MandatoryFieldExclusions)
+        {
+            if (configured.Add(field))
+            {
+                options.GlobalFieldExclusions.Add(field);
+            }
+        }
+
+        var mandatory = new HashSet<string>(MandatoryFieldExclusions, StringComparer.OrdinalIgnoreCase);
+        foreach (var (entityType, entityOverride) in options.EntityOverrides ?? new Dictionary<string, EntityOverride>())
+        {
+            if (entityOverride?.IncludedFields is not { Count: > 0 } includedFields)
+            {
+                continue;
+            }
+
+            foreach (var field in includedFields
+                .Where(s => !string.IsNullOrWhiteSpace(s) && mandatory.Contains(s.Trim()))
+                .ToList())
+            {
+                includedFields.Remove(field);
+                _logger.LogWarning(
+                    "Membership: EntityOverrides:{EntityType}:IncludedFields names {Field}, a mandatory " +
+                    "exclusion under ADR-034. The force-include is ignored and the field stays excluded.",
+                    entityType,
+                    field.Trim());
             }
         }
     }
