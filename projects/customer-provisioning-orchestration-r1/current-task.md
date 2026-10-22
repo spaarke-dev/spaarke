@@ -14,7 +14,7 @@
 
 ## Live state
 
-- **ACME BFF upgrade is gated** (project CLAUDE.md §3, R3 2026-10-20): no build with UAC #2128 on `sprk-acme-prod-api` until A9 home sign-in is in place for ACME. R3 tracks the production-SPA gate in `projects/spaarke-SPA-external-access-platform-r3/notes/task-073-gate-acme.md`. In progress: H4b writes `ExternalAccess__CustomerBusinessUnitId` from H10 (implementer agent, uncommitted).
+- **ACME BFF upgrade is gated** (project CLAUDE.md §3, R3 2026-10-20): no build with UAC #2128 on `sprk-acme-prod-api` until A9 home sign-in is in place for ACME. R3 tracks the production-SPA gate in `projects/spaarke-SPA-external-access-platform-r3/notes/task-073-gate-acme.md`. H4b now writes `ExternalAccess__CustomerBusinessUnitId` (H10, `faf36207d`) and `SessionFileStore__BlobEndpoint` (H2a, `d2860c45f`); ACME gets both at its next (gated) run.
 
 - Exchange (Spaarke tenant): `Spaarke Exchange Admin` holds only the two direct `-App` D32 assignments (New-Mailbox entry carries the common parameters since 2026-10-20); no role group; override False.
 - Worker sidecar `exchange-policy-sidecar` = `provisioning-sidecar:2026.10.20-40` (master `05bcdeee6`, L62 fix); dev bicepparam pin matches (`SidecarImagePinTests`). Roll forward: ARM GET/PUT `.../sites/spaarke-provisioning-controlplane-worker-dev/sitecontainers/exchange-policy-sidecar?api-version=2024-04-01`, then `Verify-Sidecar-Live.ps1 -Environment dev [-InTenant]`.
@@ -33,6 +33,7 @@
 ## 📋 Remaining
 
 - **When this branch merges to master**: PR body must say `Closes #2034`, `Closes #2040` and `Closes #2027` (UAC offered a review of the isdisabled check — send them the PR number).
+- **#2232 (from ebilling-r1 091)**: wire `modules/ebilling-file-store.bicep` into `customer.bicep` for the stamp UAMI (custom role at stamp-RG scope + 3 private containers, per-container grants), recompile `customer.json`, add the per-stamp checks (`Test-EbillingFileStoreRole.ps1`, tag-write proof) to H13. **Blocked until ebilling-r1 merges the module and its 091 container-scope grant change (`97bb759493`) to master**; then merge master into this branch first. Owner decides `enableMalwareScanning` per environment (Defender for Storage cost). The Worker holds Owner on DEMO, so the role-definition write is allowed.
 - **T186 close-out**: 6f (above); carry the open lessons into the guide + prereqs; fix L15 and L30; remove the old broad L2 Graph roles; track the S18 columns.
 - **Report to the owner**: S1 plan cost; L49 ComposeIdentityKey DEGRADED on the ACME BFF; task 264 ordering vs task 047; registry table shipping in SpaarkeMaster (does the BFF need it per environment?).
 - **T186 live proofs still open**: ISS-008 (second POST refused); PRQ-C-14. (H14m route-level M4 and the H13 census proved 2026-10-20.)
