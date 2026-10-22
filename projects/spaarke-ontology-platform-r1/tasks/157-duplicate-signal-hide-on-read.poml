@@ -4,7 +4,7 @@
     <title>Hide a billing Duplicate Signal's earlier-invoice detail from a reader who cannot read that invoice (D-176, #2118)</title>
     <phase>3 Worklist</phase>
     <gate>startable (D-176 owner 2026-10-21; ebilling field list 22fe2e6c73 + duplicateOf.invoiceId 6017ebdf20 on work/ebilling-r1)</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Data-exposure rule on the Signal read path (security tag).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -13,6 +13,8 @@
     <deps>151 (pattern, on master)</deps>
     <tags>bff-api,security,testing</tags>
     <estimated-effort>3-5 hours</estimated-effort>
+    <parallel-group>J</parallel-group>
+    <parallel-safe>true</parallel-safe>
   </metadata>
 
   <prompt>A billing Duplicate Signal written while its author could see the earlier invoice quotes that invoice (its tracking number, a sentence naming it, reason texts). A later reader of the Signal who cannot read the earlier invoice still sees that detail (#2118, DI-120). The owner decided (D-176 option b): hide on read. Ontology owns the read check; ebilling supplied the stored-field list.</prompt>
@@ -76,6 +78,13 @@
 
     Implemented 2026-10-21 on task/ontology-157-duplicate-hide (bdc4178cc5): EarlierInvoiceReadability (shared with ebilling 119, public sealed: SignalReadService's public ctor takes it) + SignalReadService steps (9a) detect from STORED evidence before D-142 (which strips every billing line's text) and (9b) withhold after it. Escalation 1 raised and resolved (option B). Tests: 12 route cases + 15 unit cases; seeding proofs (a) and (b) fire. Awaiting the main session's independent review, PR and merge; status → completed and TASK-INDEX at merge. Detail: notes/task-157-duplicate-hide-on-read.md.
     rework: none task 157</notes>
+
+  <completion date="2026-10-22">
+    Merged to docs/ontology-platform-design via PR #2231 (2a020e05ff). Shared check EarlierInvoiceReadability (ShownAsync combining rule, public WithheldSentence) registered in SignalsModule; SignalReadService steps (9a) detect and (9b) withhold. Every read runs as the caller and fails closed.
+    Review: two adversarial passes PASS (security tag); three fix rounds (r1 casing + all-priors rule; r2 shared combining rule, batched submission read, JSON-string In literals after a live 400; r3 ebilling F3: org groups of 20 on every submission read, a paged body is a fault). Scoped re-checks PASS; ebilling PASS on r1, r2 (F3 raised) and r3.
+    Evidence: Signals unit 396/396, SignalReadRouteTests 83/83, ArchTests 1093/1093, -warnaserror build 0 warnings, publish size +0.009 MB; live GETs on spaarkedev1 prove the query shapes parse (0 submissions on dev, so no row match proven).
+    Known limits (K-class, in notes/task-157-duplicate-hide-on-read.md): native sprk_signal form/views not covered; ebilling 119 applies the rule on its surfaces; inactive submissions not filtered; untested structural characters beyond apostrophe, quote and backslash; OrdinalIgnoreCase vs collation (fail closed). Follow-up: equality guard against ebilling's withheld template once both are on master.
+  </completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
