@@ -117,8 +117,171 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     }
 
     // =====================================================================================
+    // Fix round (F1-2): a flag or a choice the caller sent as null is supplied — the default does not overwrite it
+    // =====================================================================================
+
+    [Theory]
+    [InlineData("sprk_priority", "Picklist")]
+    [InlineData("sprk_isreminder", "Boolean")]
+    public async Task PostMappingDefault_ACallersExplicitNull_OnAChoiceOrFlag_IsKept(string column, string type)
+    {
+        _user.Columns["sprk_event"][column] = (type, true);
+        object value = type == "Boolean" ? true : new OptionSetValue(3);
+
+        var outcome = await Service().CreateAsync(
+            EventUnder(OrdinaryMatter, extra: (column, null!)) with
+            {
+                Mapping = null,
+                PostMappingDefaults = new Dictionary<string, object?> { [column] = value },
+            },
+            AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        fields.Should().ContainKey(column);
+        fields[column].Should().Match<object?>(v => v == null || (v is JsonElement && ((JsonElement)v).ValueKind == JsonValueKind.Null),
+            "FR-02: a flag or choice whose key is present is supplied, an explicit null included");
+        outcome.MappingWarnings.Should().BeEmpty();
+    }
+
+    // =====================================================================================
+    // Fix round (F4-3): a default the column cannot take is dropped, never a fault
+    // =====================================================================================
+
+    [Theory]
+    [InlineData("sprk_nosuchcolumn", "a column the table does not have")]
+    [InlineData("sprk_eventcode", "a column that takes no value on create")]
+    [InlineData("sprk_location", "a value of the wrong kind (a number into text)")]
+    public async Task PostMappingDefault_TheColumnCannotTake_IsDroppedWithADefaultWarning_AndTheRowIsCreated(
+        string column, string because)
+    {
+        object value = column == "sprk_location" ? 5 : "x";
+
+        var outcome = await Service().CreateAsync(
+            EventUnder(OrdinaryMatter) with { PostMappingDefaults = new Dictionary<string, object?> { [column] = value } },
+            AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue($"{because}: {outcome.Refusal?.Code} {outcome.Refusal?.Detail}");
+        _creates.Should().ContainSingle().Subject.Fields.Should().NotContainKey(column);
+        var warning = outcome.MappingWarnings.Should().ContainSingle().Subject;
+        warning.Code.Should().Be(RecordCreationWarning.DefaultValueDroppedCode);
+        warning.Column.Should().Be(column);
+    }
+
+    // =====================================================================================
+    // Fix round (K-4): a default that does not map costs only itself
+    // =====================================================================================
+
+    [Fact]
+    public async Task PostMappingDefault_ThatDoesNotMap_IsDropped_AndTheMappedValuesStand()
+    {
+        MatterToEventProfile();
+
+        // A lookup onto a table the column does not reference: it fits "Lookup", but the mapper cannot bind it.
+        var outcome = await Service().CreateAsync(
+            EventUnder(OrdinaryMatter) with
+            {
+                PostMappingDefaults = new Dictionary<string, object?>
+                {
+                    ["sprk_regardingproject"] = new EntityReference("contact", CallersContact),
+                },
+            },
+            AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        StringOf(fields, "sprk_description").Should().Be("From the matter", "the step-3 mapped values stand");
+        StringOf(fields, "sprk_AssignedTo@odata.bind").Should().Be($"/contacts({Assignee:D})");
+        fields.Should().NotContainKey("sprk_RegardingProject@odata.bind");
+        outcome.MappingWarnings.Should().ContainSingle()
+            .Which.Should().Match<RecordCreationWarning>(w =>
+                w.Code == RecordCreationWarning.DefaultValueDroppedCode && w.Column == "sprk_regardingproject");
+    }
+
+    [Fact]
+    public async Task PostMappingDefault_WhenTheDefaultsMergeFaults_OnlyTheDefaultsAreDropped_AndTheMappedRowIsCreated()
+    {
+        MatterToEventProfile();
+
+        // Fault the mapper's metadata reads only once the defaults' own column read has run (step 3½), so the caller's
+        // payload (step 1) and the mapping (step 3) map normally and only the defaults' merge faults.
+        var defaultsRead = false;
+        _user.ThrowOn = path =>
+        {
+            if (path.Contains("AttributeType", StringComparison.Ordinal) && path.Contains("sprk_regardingproject", StringComparison.Ordinal))
+                defaultsRead = true;
+            return defaultsRead
+                   && (path.Contains("ManyToOneRelationships", StringComparison.Ordinal)
+                       || path.Contains("EntitySetName", StringComparison.Ordinal))
+                ? new TimeoutException("metadata read timed out at 10.0.0.9")
+                : null;
+        };
+
+        var outcome = await Service().CreateAsync(
+            EventUnder(OrdinaryMatter) with
+            {
+                PostMappingDefaults = new Dictionary<string, object?>
+                {
+                    ["sprk_regardingproject"] = new EntityReference("sprk_project", OtherProject),
+                },
+            },
+            AsCaller(), CancellationToken.None);
+
+        defaultsRead.Should().BeTrue("the fault was reached at step 3½");
+        outcome.Succeeded.Should().BeTrue($"a default only ever costs itself: {outcome.Refusal?.Code} {outcome.Refusal?.Detail}");
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        StringOf(fields, "sprk_description").Should().Be("From the matter", "the step-3 item and its mapped values stand");
+        StringOf(fields, "sprk_AssignedTo@odata.bind").Should().Be($"/contacts({Assignee:D})");
+        fields.Should().NotContainKey("sprk_RegardingProject@odata.bind");
+        var warning = outcome.MappingWarnings.Should().ContainSingle().Subject;
+        warning.Code.Should().Be(RecordCreationWarning.DefaultValueDroppedCode);
+        warning.Column.Should().Be("sprk_regardingproject");
+        warning.Detail.Should().NotContain("10.0.0.9", "the fault's text stays in the log");
+    }
+
+    // =====================================================================================
     // The adapter's defects are argument errors
     // =====================================================================================
+
+    [Fact]
+    public async Task PostMappingDefault_TwoKeysNamingOneColumn_IsAnArgumentError()
+    {
+        var act = () => Service().CreateAsync(
+            EventUnder(OrdinaryMatter) with
+            {
+                PostMappingDefaults = new Dictionary<string, object?> { ["sprk_location"] = "A", ["SPRK_Location"] = "B" },
+            },
+            AsCaller(), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<ArgumentException>()).Which.Message.Should().Contain("Two post-mapping defaults");
+        _creates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task PostMappingDefault_OnATableFieldMappingDoesNotApplyTo_IsAnArgumentError()
+    {
+        var item = new Sprk.Bff.Api.Services.Dataverse.DataverseWriteItemMapper.MappedItem(
+            "{\"sprk_sentence\":\"A sentence\"}", ["sprk_sentence"]);
+        var request = new RecordCreationRequest("sprk_signal", new RecordCreationPayload.Mapped(item))
+        {
+            PostMappingDefaults = new Dictionary<string, object?> { ["sprk_description"] = "x" },
+        };
+
+        var act = () => Service().CreateAsync(request, AsCaller(), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<ArgumentException>()).Which.Message.Should().Contain("OntologyContentIsNotMapped");
+        _creates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task PostMappingDefault_ANullValue_IsAnArgumentError()
+    {
+        var act = () => Service().CreateAsync(
+            EventUnder(OrdinaryMatter) with { PostMappingDefaults = new Dictionary<string, object?> { ["sprk_location"] = null } },
+            AsCaller(), CancellationToken.None);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
 
     [Theory]
     [InlineData("ownerid")]

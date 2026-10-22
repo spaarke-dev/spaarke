@@ -533,28 +533,94 @@ internal sealed partial class RecordCreationService
 
     private static readonly IReadOnlySet<string> NoDefaultColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-    private static readonly IReadOnlyDictionary<string, JsonElement> NoDefaults = new Dictionary<string, JsonElement>();
+    private static readonly IReadOnlyDictionary<string, PostMappingDefault> NoDefaults = new Dictionary<string, PostMappingDefault>();
 
     /// <summary>
-    /// The request's post-mapping defaults (<see cref="RecordCreationRequest.PostMappingDefaults"/>) as item values, keyed by
-    /// logical name (trimmed, lower-case). A default aimed at a column field mapping may never write
-    /// (<see cref="ProtectedFromMapping"/>, the regarding pair and its resolver columns), or in a form a mapping rule could not
-    /// write either (no Web API form; a date, whose storage behaviour a default cannot state), is the adapter's defect: an
-    /// <see cref="ArgumentException"/>, thrown before anything is read.
+    /// Task 018a fix round (F4-1): the columns that confer access on a row — never an optional reference, whatever a table
+    /// declares (the secure flag, the access record, the security business unit, the SPE container).
     /// </summary>
-    private static IReadOnlyDictionary<string, JsonElement> PostMappingDefaultValues(
+    private static readonly IReadOnlySet<string> AccessConferringColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        AccessFollowsParent.SecureFlagColumn, SecurableEntityRegistry.SecureFlagAttribute, InheritedAccessPermission.Column,
+        AccessInheritance.Column, SecurableEntityRegistry.SecurityBusinessUnitAttribute, "sprk_containerid",
+    };
+
+    /// <summary>A post-mapping default: the SDK value the adapter gave (its type is its FR-02 kind) and its item form.</summary>
+    private sealed record PostMappingDefault(object Value, JsonElement ItemValue);
+
+    /// <summary>
+    /// Task 018a fix round (F4-1): whether <paramref name="column"/> of <paramref name="table"/> may NEVER be an optional
+    /// reference — the "for" person (<see cref="RecordTableRule.ForPerson"/>), a column field mapping never writes
+    /// (<see cref="ProtectedFromMapping"/>), the regarding pair and its resolver columns, a filing lookup
+    /// (<see cref="IsFilingLookup(string, string)"/>), an access-conferring column, or any Assigned* column. Such a lookup is
+    /// the caller's own: one they may not use is refused, never dropped. Asked of every registry entry
+    /// (<see cref="RecordTableRule.OptionalReferenceLookups"/>) by the registry tests and of every request by
+    /// <see cref="ValidateReferenceLookupColumns"/>.
+    /// </summary>
+    internal static bool IsNeverAReference(string table, RecordTableRule rule, string column)
+    {
+        var name = column.Trim();
+        return string.Equals(rule.ForPerson?.Column, name, StringComparison.OrdinalIgnoreCase)
+            || ProtectedFromMapping(table, rule, serverSetLookupColumns: null).Contains(name)
+            || CreateTimeFieldMapping.RegardingPairAndResolverColumns.Contains(name)
+            || IsFilingLookup(table, name.ToLowerInvariant())
+            || AccessConferringColumns.Contains(name)
+            || name.StartsWith("sprk_assigned", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Task 018a fix round (F4-1): a request may mark as references only the lookups its table declares
+    /// (<see cref="RecordTableRule.OptionalReferenceLookups"/>) and never one <see cref="IsNeverAReference"/> names. Any
+    /// other is the adapter's defect: an <see cref="ArgumentException"/>, thrown before anything is read.
+    /// </summary>
+    private static void ValidateReferenceLookupColumns(string table, RecordTableRule rule, RecordCreationRequest request)
+    {
+        if (request.ReferenceLookupColumns is not { Count: > 0 } references)
+            return;
+
+        foreach (var reference in references)
+        {
+            var column = reference?.Trim() ?? string.Empty;
+            if (!rule.OptionalReferenceLookups.Contains(column) || IsNeverAReference(table, rule, column))
+            {
+                throw new ArgumentException(
+                    $"'{reference}' is not an optional reference of a {NounOf(table)}: only " +
+                    (rule.OptionalReferenceLookups.Count == 0 ? "none" : string.Join(", ", rule.OptionalReferenceLookups.Order(StringComparer.Ordinal))) +
+                    " may be dropped with a warning.", nameof(request));
+            }
+        }
+    }
+
+    /// <summary>
+    /// The request's post-mapping defaults (<see cref="RecordCreationRequest.PostMappingDefaults"/>), keyed by logical name
+    /// (trimmed, lower-case). Each is the adapter's defect, an <see cref="ArgumentException"/> thrown before anything is
+    /// read, when: its table maps nothing (<see cref="RecordTableRule.MappingExclusion"/>, as field mapping); two keys name
+    /// the same column; it is aimed at a column field mapping may never write (<see cref="ProtectedFromMapping"/>, the
+    /// regarding pair and its resolver columns); or its value is in a form a mapping rule could not write either (no Web API
+    /// form; a date, whose storage behaviour a default cannot state).
+    /// </summary>
+    private static IReadOnlyDictionary<string, PostMappingDefault> PostMappingDefaultValues(
         string table, RecordTableRule rule, RecordCreationRequest request)
     {
         if (request.PostMappingDefaults is not { Count: > 0 } supplied)
             return NoDefaults;
 
+        if (rule.MappingExclusion is { } exclusion)
+        {
+            throw new ArgumentException(
+                $"A {NounOf(table)} takes no post-mapping default: field mapping does not apply to it ({exclusion.Name}).", nameof(request));
+        }
+
         var protectedColumns = ProtectedFromMapping(table, rule, request.ServerSetLookupColumns);
-        var values = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        var values = new Dictionary<string, PostMappingDefault>(StringComparer.Ordinal);
         foreach (var (key, value) in supplied)
         {
             var column = key?.Trim().ToLowerInvariant();
             if (string.IsNullOrEmpty(column) || !LogicalNamePattern.IsMatch(column))
                 throw new ArgumentException($"A post-mapping default names '{key}', which is not a column's logical name.", nameof(request));
+
+            if (values.ContainsKey(column))
+                throw new ArgumentException($"Two post-mapping defaults name '{column}'.", nameof(request));
 
             if (protectedColumns.Contains(column) || CreateTimeFieldMapping.RegardingPairAndResolverColumns.Contains(column))
             {
@@ -562,41 +628,89 @@ internal sealed partial class RecordCreationService
                     $"A post-mapping default may not set '{column}' of a {NounOf(table)}: field mapping never writes it.", nameof(request));
             }
 
-            if (value is DateTime || ToItemValue(value, dateBehaviour: null) is not { } itemValue)
+            if (value is null or DateTime || ToItemValue(value, dateBehaviour: null) is not { } itemValue)
             {
                 throw new ArgumentException(
                     $"The post-mapping default for '{column}' is not a value a mapping rule writes.", nameof(request));
             }
 
-            values[column] = itemValue;
+            values[column] = new PostMappingDefault(value, itemValue);
         }
 
         return values;
     }
 
     /// <summary>
-    /// The defaults the row still lacks after step 3 — FR-02's "not supplied": a scalar absent, null or blank; a lookup with
-    /// no bind; a flag or choice absent. A caller's value or a mapped one always wins.
+    /// The defaults the row still lacks after step 3 — FR-02's "not supplied", as <see cref="CreateTimeFieldMapping.ApplyFillOnly"/>
+    /// tests it: a flag or a choice (single or multi-select) is supplied whenever its key is present, an explicit null
+    /// included; any other column is supplied unless absent, null, blank text, or a lookup with no id. A caller's value or a
+    /// mapped one always wins.
     /// </summary>
-    private static Dictionary<string, JsonElement> DefaultsToFill(
-        string table, DataverseWriteItemMapper.MappedItem item, IReadOnlyDictionary<string, JsonElement> defaults)
+    private static Dictionary<string, PostMappingDefault> DefaultsToFill(
+        string table, DataverseWriteItemMapper.MappedItem item, IReadOnlyDictionary<string, PostMappingDefault> defaults)
     {
         var row = CallerEntity(table, item);
-        var unfilled = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        var unfilled = new Dictionary<string, PostMappingDefault>(StringComparer.Ordinal);
         foreach (var (column, value) in defaults)
         {
-            var supplied = row.Attributes.TryGetValue(column, out var held) && held switch
-            {
-                null => false,
-                string text => !string.IsNullOrWhiteSpace(text),
-                EntityReference reference => reference.Id != Guid.Empty,
-                _ => true,
-            };
+            var present = row.Attributes.TryGetValue(column, out var held);
+            var supplied = value.Value is bool or OptionSetValue or OptionSetValueCollection
+                ? present
+                : present && held switch
+                {
+                    null => false,
+                    string text => !string.IsNullOrWhiteSpace(text),
+                    EntityReference reference => reference.Id != Guid.Empty,
+                    _ => true,
+                };
             if (!supplied)
                 unfilled[column] = value;
         }
 
         return unfilled;
+    }
+
+    /// <summary>
+    /// Task 018a fix round (F4-3): the unfilled defaults the table can take, judged by field mapping's own checks on the
+    /// target columns read as the caller (<see cref="TargetAttributesAsync"/>, <see cref="Fits"/>): a column that does not
+    /// exist or takes no value on create, or a value of the wrong kind, is dropped with
+    /// <see cref="RecordCreationWarning.DefaultValueDroppedCode"/> — never a fault that fails the create. Metadata that
+    /// cannot be read drops every default ("it could not be checked").
+    /// </summary>
+    private async Task<Dictionary<string, JsonElement>> FittingDefaultsAsync(
+        IDataverseUserClient user, string table, IReadOnlyDictionary<string, PostMappingDefault> unfilled,
+        IReadOnlySet<string> defaultColumns, List<RecordCreationWarning> warnings, CancellationToken ct)
+    {
+        IReadOnlyDictionary<string, TargetAttribute>? attributes;
+        try
+        {
+            attributes = await TargetAttributesAsync(user, table, unfilled.Keys.ToArray(), ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[RECORD-CREATE] the {Table} columns of the post-mapping defaults could not be read; none is written",
+                table);
+            attributes = null;
+        }
+
+        var fitting = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        foreach (var (column, value) in unfilled.OrderBy(kv => kv.Key, StringComparer.Ordinal))
+        {
+            var notWritten = attributes is null ? CouldNotBeChecked
+                : !attributes.TryGetValue(column, out var attribute) || !attribute.ValidForCreate ? NoSuchColumn
+                : !Fits(attribute.Type, value.Value) ? CannotTakeValue
+                : null;
+            if (notWritten is null)
+                fitting[column] = value.ItemValue;
+            else
+                warnings.Add(Dropped(column, notWritten, defaultColumns));
+        }
+
+        return fitting;
     }
 
     /// <summary>

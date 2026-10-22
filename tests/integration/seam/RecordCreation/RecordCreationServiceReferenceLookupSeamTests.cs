@@ -122,7 +122,7 @@ public sealed class RecordCreationServiceReferenceLookupSeamTests
     }
 
     [Fact]
-    public async Task AFilingLookupNamedAsAReference_IsNeverDropped_ItsRefusalStands()
+    public async Task AFilingLookupNamedAsAReference_IsAnArgumentError_NeverDropped()
     {
         _world.Caller.NoAppendTo.Add(CreateWorld.OrdinaryMatter);
         var request = await _world.MappedAsync("sprk_event", new
@@ -134,13 +134,59 @@ public sealed class RecordCreationServiceReferenceLookupSeamTests
             ReferenceLookupColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_regardingmatter" },
         };
 
-        var outcome = await _world.CreateAsync(request);
+        var act = () => _world.CreateAsync(request);
 
-        outcome.Succeeded.Should().BeFalse("a filing lookup is the record the row is filed under, never an optional reference");
-        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.NotFoundOrDenied);
-        outcome.Refusal.Code.Should().Be(RecordCreationRefusal.NotFoundCode, "the uniform AppendTo refusal");
-        outcome.Steps.Last().Step.Should().Be(RecordCreationStep.CallerChecks, "refused by the step-5 checks");
-        outcome.MappingWarnings.Should().BeEmpty();
+        (await act.Should().ThrowAsync<ArgumentException>("a filing lookup is the record the row is filed under, never an optional reference"))
+            .Which.Message.Should().Contain("not an optional reference");
+        _world.Creates.Should().BeEmpty();
+    }
+
+    // =====================================================================================
+    // Fix round (F4-1): only the registry's references may be named
+    // =====================================================================================
+
+    [Fact]
+    public async Task AnEventsAssignedTo_NamedAsAReference_IsAnArgumentError_NeverCreatedWithTheMakersContact()
+    {
+        // The reviewer's probe: an unattachable contact named, marked a reference, with the maker's contact as the default.
+        // Dropping it would let the default fill the column; UAC-r2 condition (b) item 1 requires the refusal instead.
+        _world.Caller.NoAppendToIn.Add(("contacts", AssigneeContact));
+        var request = await _world.MappedAsync("sprk_event", new
+        {
+            sprk_eventname = "Hearing",
+            sprk_regardingmatter = CreateWorld.Lookup("sprk_matter", CreateWorld.OrdinaryMatter),
+            sprk_assignedto = CreateWorld.Lookup("contact", AssigneeContact),
+        }) with
+        {
+            ReferenceLookupColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_assignedto" },
+            PostMappingDefaults = new Dictionary<string, object?>
+            {
+                ["sprk_assignedto"] = new Microsoft.Xrm.Sdk.EntityReference("contact", Guid.NewGuid()),
+            },
+        };
+
+        var act = () => _world.CreateAsync(request);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        _world.Creates.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("sprk_matter", "sprk_assignedtointernal", "the for-person column")]
+    [InlineData("sprk_project", "sprk_assignedtointernal", "the for-person column")]
+    [InlineData("sprk_project", "sprk_regardingrecordtype", "the regarding pair's type")]
+    [InlineData("sprk_matter", "sprk_practicearea_typo", "a column the registry does not declare")]
+    [InlineData("sprk_project", "sprk_mattertype", "another table's reference")]
+    public async Task ALookupTheTableDoesNotDeclareAsAReference_IsAnArgumentError(string table, string column, string because)
+    {
+        var request = CreateWorld.Mapped(table, new Dictionary<string, object?> { ["sprk_name"] = "x" }) with
+        {
+            ReferenceLookupColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { column },
+        };
+
+        var act = () => _world.CreateAsync(request);
+
+        (await act.Should().ThrowAsync<ArgumentException>(because)).Which.Message.Should().Contain(column);
         _world.Creates.Should().BeEmpty();
     }
 

@@ -130,8 +130,74 @@ The whole existing filtered suite also passes unchanged, below.
 ### Known limits (not defects on a real path)
 
 - When the K-3 reference check faults (`CheckCallerMayCreateAsync` throws), the reference is dropped with "it could not
-  be checked". `ScriptedUserClient` has no per-call fault knob, so this branch has no dedicated test. It mirrors
-  `CheckMergedPayloadAsync`'s per-value fault handling.
-- When `MapMergedAsync` faults while it merges defaults, the fault propagates to `CreateAsync` and gives 503
-  `record_creation.check_failed`, the step-5 rule for a fault (NFR-01). It is not treated as a mapping fault, because
-  defaults are not mapping.
+  be checked". `ScriptedUserClient` (the `CreateWorld` caller) has no per-call fault knob, so this branch has no
+  dedicated test. It mirrors `CheckMergedPayloadAsync`'s per-value fault handling. See K-5 below for the accepted
+  deviation.
+- (Superseded by the fix round, K-4: a fault while the defaults merge now drops only the defaults.)
+
+### 018a fix round (Opus adversarial review of `0cae77ab77..2a5f076857`)
+
+#### Fixes
+
+| Finding | Fix |
+|---|---|
+| **F4-1**: the reference exclusion was not enforced. Any named non-filing lookup could be dropped, including the for-person column, `sprk_regardingrecordtype` and the protected lookups. The reviewer's probe: an event whose unattachable contact was marked a reference, plus a maker default, was created with the maker's contact. | The allowed set is now driven by the registry. `RecordTableRule.OptionalReferenceLookups` (`RecordTableRules.cs`) lists exactly what `OfficeRecordCreationService.ApplyReferenceAsync` drops today: `sprk_mattertype` and `sprk_practicearea` on a matter, `sprk_projecttype_ref` on a project. Every other table is empty. `CreateAsync` throws `ArgumentException`, before anything is read, when a requested reference is not in its table's set, or when `RecordCreationService.IsNeverAReference` names it. That check covers: the for person, `ProtectedFromMapping`, the regarding pair and resolver columns, a filing lookup, an access-conferring column (secure flag, access record, security BU, container) and any `sprk_assigned*` column. The registry tests assert that no registry entry is ever one of these. |
+| **F1-2**: a default overwrote a caller's explicit null on a choice or flag. | `DefaultsToFill` now treats a `bool`, `OptionSetValue` or `OptionSetValueCollection` default as supplied whenever its key is present, as `ApplyFillOnly` does. Its comment is corrected. |
+| **F4-3**: a default the column could not take faulted the create (500) instead of being dropped. | Step 3½ reads `TargetAttributesAsync` for the unfilled default columns. It drops any column that does not exist or is not `IsValidForCreate` (`NoSuchColumn`), and any value that fails `Fits` (`CannotTakeValue`), with `record_creation.default_value_dropped`. The wording is mapping's own: `CannotTakeValue` says "the mapped value" even for a default. It is shared with pinned mapping warnings, so it was left unchanged. Those are field mapping's own checks. Metadata that cannot be read drops every default ("it could not be checked"). |
+| **K-4** (fixed; the change was contained) | The defaults now merge over the step-3 item rather than over the caller's item together with the mapped values. A default that does not map costs only itself, and the step-3 item and its mapped values stand. A fault while the defaults merge is caught: every default is dropped ("it could not be checked"), the step-3 row is created, and the fault's text stays in the log. This replaces the 503 `check_failed` recorded above. |
+| **K-7a** | Two default keys that name one column (they differ only in case) are an `ArgumentException`. |
+| **K-7b** | Defaults on a `MappingExclusion` table (the ontology-content tables) are an `ArgumentException`, as field mapping's exclusion is. |
+| (new, found while fixing F1-2) | A `null` default value is an `ArgumentException`: a default fills a value, it never clears one. This is an equivalent mutant: `ToItemValue(null)` has no Web API form, so the null was already refused. The explicit guard stays for nullability. |
+
+#### Recorded, not changed
+
+- **K-5: "the check could not complete" drops the reference.** This is kept as the accepted deviation from NFR-01's
+  wording ("a check that faulted is never a pass"), for a caller-owned **optional** reference only. It matches live
+  Office: `OfficeRecordCreationService.CheckReferenceAsync`'s catch-all at lines 1346-1353 creates the record without
+  the reference ("could not be checked just now"). It stays fail-closed for the value, because the reference is never
+  written past a check that did not complete. The coordinator records it in `decisions.md`.
+- **K-6 (§11): the existing overlap for `PostMappingDefaults`.** `RecordTableRule.ForPerson` (`RecordTableRules.cs`
+  :97 matter, :122 project) names the for-person column and its table. `RecordTableRule.ServerDefaults` (:98-104,
+  :123-129) names, per create path, the column and its precedence rule in words. For Office, that is
+  `sprk_assignedtointernal`: "the contact the request names, else a mapped value, else the maker's linked contact".
+  - **What the registry can drive:** the column, but not the value. `ServerDefault` is descriptive: it has no value,
+    and the value (the maker's linked contact) is resolved per request, which only the adapter can do.
+  - **Decision:** `PostMappingDefaults` stays opt-in and per request. 018b derives the default's column from the
+    registry (the `ServerDefault` whose `Path` is "Office quick-create", which equals `rule.ForPerson.Column`) and
+    supplies only the value.
+  - **Not done:** restricting `PostMappingDefaults` to `ServerDefaults` columns in the service. F4-3 already makes an
+    unknown column harmless. The restriction is cheap if the reviewer wants it.
+- **Open for 018b and the coordinator.** A maker's-contact default the caller cannot AppendTo is **dropped** (the FR-08
+  mapped-value rule, K-7 as briefed). UAC-r2 condition (b) item 1 refuses a **named** Assigned To contact. Whether the
+  maker's-contact fallback should also refuse is not 018a's decision.
+
+#### Tests added (all fail before their fix; mutants below)
+
+| File | Tests |
+|---|---|
+| `tests/unit/domain/Dataverse/RecordCreation/RecordTableRulesTests.cs` | `OptionalReferenceLookups_AreExactlyWhatTheOfficeCreateDropsToday`, using literals so the pin outlives 018c. `OptionalReferenceLookups_NeverHoldAColumnThatIsNeverAReference`. `IsNeverAReference_Fires` has 15 cases (for person, Assigned*, regarding pair, protected, filing, access), each also in upper case. `IsNeverAReference_DoesNotFire_OnTheDeclaredReferences` has 3 cases. |
+| `tests/integration/seam/RecordCreation/RecordCreationServiceReferenceLookupSeamTests.cs` | Must-fire: `AnEventsAssignedTo_NamedAsAReference_IsAnArgumentError_NeverCreatedWithTheMakersContact` (the reviewer's probe), and `ALookupTheTableDoesNotDeclareAsAReference_IsAnArgumentError`, 5 cases including the matter's `sprk_assignedtointernal`. The filing test is now `AFilingLookupNamedAsAReference_IsAnArgumentError_NeverDropped`. Must-not-fire: the existing matter-type drop-with-warning test, unchanged. |
+| `tests/integration/seam/RecordCreation/RecordCreationServiceMappingSeamTests.PostMappingDefaults.cs` | F1-2: `PostMappingDefault_ACallersExplicitNull_OnAChoiceOrFlag_IsKept`, a choice and a flag. F4-3: `PostMappingDefault_TheColumnCannotTake_IsDroppedWithADefaultWarning_AndTheRowIsCreated`, 3 cases (unknown, not creatable, wrong type). K-4: `PostMappingDefault_ThatDoesNotMap_IsDropped_AndTheMappedValuesStand` and `PostMappingDefault_WhenTheDefaultsMergeFaults_OnlyTheDefaultsAreDropped_AndTheMappedRowIsCreated`. K-7a: `PostMappingDefault_TwoKeysNamingOneColumn_IsAnArgumentError`. K-7b: `PostMappingDefault_OnATableFieldMappingDoesNotApplyTo_IsAnArgumentError`. And `PostMappingDefault_ANullValue_IsAnArgumentError`. |
+
+#### Mutants (each run, then reverted)
+
+| Mutant | Result |
+|---|---|
+| D1: `ValidateReferenceLookupColumns` not called (the 2a5f076857 behaviour) | Killed: the reviewer's probe test, all 5 `ALookupTheTableDoesNotDeclare…` cases, and the filing test. |
+| D2: `DefaultsToFill` uses the 2a5f076857 rule (`null` is unsupplied for every kind) | Killed: both explicit-null cases. |
+| D3: no fit check on defaults (every unfilled default reaches the merge) | Killed: all 3 `TheColumnCannotTake…` cases. |
+| D4: `sprk_assignedtointernal` added to the matter's `OptionalReferenceLookups` | Killed: both registry pins. |
+| E1: the 2a5f076857 merge (over the caller's item, mapped and default values together), K-4's base change only | Survived. The scripted mapper has no case in which the two merges differ when nothing faults. The K-4 change is therefore pinned by the fault test, not by `…ThatDoesNotMap…`, which passes under both. |
+| E1′: the 2a5f076857 merge **and** no catch on the defaults merge | Killed: `…WhenTheDefaultsMergeFaults…` (the fault reached `CreateAsync` and gave 503). |
+| E2: no duplicate-key check | Killed: `…TwoKeysNamingOneColumn…`. |
+| E3: no `MappingExclusion` check | Killed: `…OnATableFieldMappingDoesNotApplyTo…`. |
+| E4: a `null` default allowed past the guard | Survived, an equivalent mutant: `ToItemValue(null)` has no form, so the default is refused anyway. Recorded above. |
+
+#### Verification (fix round)
+
+- `dotnet build Spaarke.sln`: 0 warnings, 0 errors.
+- `tests/Spaarke.ArchTests`, built separately and run in full: 1347 passed, 0 failed.
+- The filtered set: 2775 passed, 7 skipped, 0 failed (2782 in total). The set is `RecordCreation`, `FieldMapping`,
+  `Office`, `RecordOwnership`, `SecureRoot`, `SearchIndex`, `CreatorPerson`, `RecordTableRule` and
+  `MappingSourceCallerMask`.
+- Per the coordinator, the unfiltered `Sprk.Bff.Api.Tests` was not run (the test host reached 7.7 GB).

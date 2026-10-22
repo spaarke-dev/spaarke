@@ -170,6 +170,7 @@ internal sealed partial class RecordCreationService
                 RecordCreationRefusal.TableUnsupportedCode, $"'{request.Table}' records are not created here."));
         }
 
+        ValidateReferenceLookupColumns(table, rule, request);
         var defaults = PostMappingDefaultValues(table, rule, request);
 
         Decision decision;
@@ -284,7 +285,7 @@ internal sealed partial class RecordCreationService
     /// <summary>Steps 1 to 10. Any exception propagates to <see cref="CreateAsync"/>, which refuses (fail closed).</summary>
     private async Task<Decision> DecideAsync(
         string table, RecordTableRule rule, RecordCreationRequest request, RecordCreationPrincipal principal,
-        IReadOnlyDictionary<string, JsonElement> defaults, string noun, StepTrace trace, CancellationToken ct)
+        IReadOnlyDictionary<string, PostMappingDefault> defaults, string noun, StepTrace trace, CancellationToken ct)
     {
         // ── Step 1: the principal ─────────────────────────────────────────────────────────────────────────────────────
         trace.Begin(RecordCreationStep.Principal);
@@ -466,15 +467,47 @@ internal sealed partial class RecordCreationService
             var unfilled = DefaultsToFill(table, item, defaults);
             if (unfilled.Count > 0)
             {
-                var combined = new Dictionary<string, JsonElement>(mappedValues, StringComparer.Ordinal);
-                foreach (var (column, value) in unfilled)
-                    combined[column] = value;
-
                 defaultColumns = unfilled.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
-                var withDefaults = await MapMergedAsync(user, table, callerItem, combined, mappingWarnings, ct, defaultColumns)
+
+                // Fix round (F4-3): only what the table can take, by field mapping's own checks; the rest dropped, named.
+                var fitting = await FittingDefaultsAsync(user, table, unfilled, defaultColumns, mappingWarnings, ct)
                     .ConfigureAwait(false);
-                item = withDefaults.Item ?? callerItem;
-                mappedValues = withDefaults.Values;
+
+                // Fix round (K-4): mapped over the step-3 item, so a default that does not map costs only itself — the
+                // step-3 item and its mapped values stand whatever the defaults come to.
+                if (fitting.Count > 0)
+                {
+                    MappingStep withDefaults;
+                    try
+                    {
+                        withDefaults = await MapMergedAsync(user, table, item, fitting, mappingWarnings, ct, defaultColumns)
+                            .ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        // A fault costs the defaults only: none is written, each named; the step-3 row goes on (as a
+                        // mapping fault maps nothing, NFR-01 — a value that could not be checked is never written).
+                        _logger.LogWarning(ex, "[RECORD-CREATE] the post-mapping defaults of a {Table} could not be mapped; none is written",
+                            table);
+                        foreach (var column in fitting.Keys)
+                            mappingWarnings.Add(Dropped(column, CouldNotBeChecked, defaultColumns));
+                        withDefaults = MappingStep.Unmapped(item);
+                    }
+
+                    if (withDefaults is { Item: { } merged, Values.Count: > 0 })
+                    {
+                        var combined = new Dictionary<string, JsonElement>(mappedValues, StringComparer.Ordinal);
+                        foreach (var (column, value) in withDefaults.Values)
+                            combined[column] = value;
+
+                        item = merged;
+                        mappedValues = combined;
+                    }
+                }
             }
         }
 
@@ -1507,9 +1540,10 @@ internal sealed record RecordCreationRequest(string Table, RecordCreationPayload
     /// practice area, a project type), not values the create depends on. Each one bound is asked alone, as the caller, right
     /// after step 2: one the caller may not use (AppendTo, Append, field security), or whose check could not be made, is
     /// dropped with a <see cref="RecordCreationWarning.ReferenceValueDroppedCode"/> warning naming the column, and the create
-    /// proceeds — the FR-08 path for a mapped value, not the refusal a caller's own lookup gets. A FILING lookup and a
-    /// server-set lookup are never references (they keep their own rules). <c>null</c> (the default): every lookup is the
-    /// caller's own, exactly as before. A caller's create only.
+    /// proceeds — the FR-08 path for a mapped value, not the refusal a caller's own lookup gets. Only the lookups the table
+    /// declares (<see cref="RecordTableRule.OptionalReferenceLookups"/>) may be named; any other — the "for" person, an
+    /// Assigned* or access column, a filing lookup, the regarding pair — is an argument error (task 018a fix round, F4-1).
+    /// <c>null</c> (the default): every lookup is the caller's own, exactly as before. A caller's create only.
     /// </summary>
     public IReadOnlySet<string>? ReferenceLookupColumns { get; init; }
 
@@ -1517,12 +1551,15 @@ internal sealed record RecordCreationRequest(string Table, RecordCreationPayload
     /// Task 018a (task 014 review K-7): values an adapter supplies for columns the row may still lack AFTER field mapping —
     /// the last link of an order such as Office's "the contact the request names, else a mapped value, else the maker's
     /// contact". Each is written only when neither the caller nor a mapping rule supplied the column (fill-only, the FR-02
-    /// test), in the form a mapping rule writes (a lookup as an <see cref="Microsoft.Xrm.Sdk.EntityReference"/>, a choice as
-    /// an <see cref="Microsoft.Xrm.Sdk.OptionSetValue"/>, text, a number, a flag), and is then CHECKED at step 5 with the
-    /// mapped values: one the caller may not set is dropped with a <see cref="RecordCreationWarning.DefaultValueDroppedCode"/>
-    /// warning, a filing lookup the caller may not file under refuses. <c>null</c> (the default): nothing is defaulted. A
-    /// caller's create only; a column field mapping may never write (<see cref="RecordCreationService.ProtectedFromMapping"/>,
-    /// the regarding pair) is an argument error.
+    /// test: a flag or choice whose key is present, an explicit null included, is supplied), in the form a mapping rule
+    /// writes (a lookup as an <see cref="Microsoft.Xrm.Sdk.EntityReference"/>, a choice as an
+    /// <see cref="Microsoft.Xrm.Sdk.OptionSetValue"/>, text, a number, a flag). A column the table does not have or that takes
+    /// no value on create, or a value of the wrong kind, is dropped with a
+    /// <see cref="RecordCreationWarning.DefaultValueDroppedCode"/> warning (field mapping's own checks); what is left is
+    /// CHECKED at step 5 with the mapped values: one the caller may not set is dropped with that warning, a filing lookup the
+    /// caller may not file under refuses. <c>null</c> (the default): nothing is defaulted. A caller's create only; a column
+    /// field mapping may never write (<see cref="RecordCreationService.ProtectedFromMapping"/>, the regarding pair), two keys
+    /// naming one column, a null or date value, or a table field mapping does not apply to, is an argument error.
     /// </summary>
     public IReadOnlyDictionary<string, object?>? PostMappingDefaults { get; init; }
 }
