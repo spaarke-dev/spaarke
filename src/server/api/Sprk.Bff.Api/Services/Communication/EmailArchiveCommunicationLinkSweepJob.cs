@@ -8,7 +8,7 @@ using Sprk.Bff.Api.Services.Office;
 namespace Sprk.Bff.Api.Services.Communication;
 
 /// <summary>
-/// unified-access-control-r2 task 190 (D7 T7b, #2126; backfill, and a standing safety net): links each legacy <c>.eml</c>
+/// unified-access-control-r2 task 190 (D7 T7b, #2126; a backfill): links each legacy <c>.eml</c>
 /// archive document (<c>sprk_isemailarchive = true</c>) that has no communication link to THE communication its RECORDED
 /// key names — the one <c>sprk_communication</c> whose <c>sprk_internetmessageid</c> equals the document's
 /// <c>sprk_emailmessageid</c>, exactly — so task 188's document narrowing (<c>ExternalDocumentNarrowing</c>, leg 2) sees the
@@ -64,13 +64,28 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// <c>EmailArchiveLinkSweep__Apply</c>; absent or unparseable = dry run). A dry run reads, classifies and counts
 /// (<c>wouldLink</c>) and calls nothing that writes. The report is the run's <see cref="JobRunResult.ResultJson"/>, ids and
 /// counts only (never a message id): per-reason counts, and per-reason document-id lists capped at
-/// <see cref="MaxListedPerRun"/> (every row is counted). Linked rows are listed with the communication they now point at, so
-/// a link can be reversed from the run history.</para>
+/// <see cref="MaxListedPerRun"/> (every row is counted). Linked rows are listed with the communication they now point at.
+/// Run history lives in memory (<c>InMemoryBackgroundJobStore</c>) and is lost on restart, so save the Apply run's
+/// <c>ResultJson</c> from <c>/status</c> or <c>/history</c> straight away; the per-link Information log line ("Linked document
+/// {id} to communication {id}") is the durable record (the same correction for the reference job is #2226).</para>
+///
+/// <para><b>Communications that already have an archive</b> (<c>communicationAlreadyArchived</c>: a count and the capped
+/// document-id list). An ATTRIBUTE of matched rows, not a reason: such a row still links. D7 needs every archive linked (an
+/// unlinked archive of an internal-only email stays visible to partners), so a second archive on one communication is
+/// linked too. Which archive a consumer picks when a communication has several is #2225; this job does not decide it. Read
+/// once per page (an <c>In</c> over the page's communications) before any write, so a row this run links never counts
+/// itself. Dev, 2026-10-21: 0 of the 29 matchable; 6 communications already have more than one archive.</para>
 ///
 /// <para><b>Use.</b> Registered DISABLED (it never fires on its own); the owner runs it on demand with
 /// <c>POST /api/admin/jobs/email-archive-communication-link-sweep/trigger</c> (SystemAdmin), reads the report, then sets
-/// <c>EmailArchiveLinkSweep__Apply=true</c> and triggers again. <c>POST /api/admin/jobs/{jobId}/enable</c> turns on the daily
-/// schedule as the standing safety net (it heals an archive whose best-effort link failed later). No endpoint was added.</para>
+/// <c>EmailArchiveLinkSweep__Apply=true</c> and triggers again. No endpoint was added. <c>POST /api/admin/jobs/{jobId}/enable</c>
+/// lasts only until the next restart (the enabled flag lives in memory, and every restart re-seeds the job as disabled), so
+/// it is not a standing safety net. The key columns (<c>sprk_emailmessageid</c>, <c>sprk_internetmessageid</c>) are
+/// user-writable (#2227): keep the job registered disabled, and never <c>/enable</c> it with Apply on until #2227 is
+/// fixed.</para>
+///
+/// <para><b>Apply gate.</b> After Apply, a linked communication cannot be deleted while its archive exists: the
+/// relationship is Delete = Restrict (#2186). Name it when asking for Apply.</para>
 ///
 /// <para><b>Batches.</b> A run examines at most <see cref="MaxDocumentsPerRunKey"/> candidates (default
 /// <see cref="DefaultMaxDocumentsPerRun"/>, which is <see cref="MaxListedPerRun"/>). A configured value above
@@ -220,7 +235,8 @@ public sealed class EmailArchiveCommunicationLinkSweepJob : IScheduledJob
             // ADR-003 for a writer: a slice that could not be read is a FAILED run, never "nothing to do".
             if (report.EnumerationFailed)
                 status = StatusError;
-            else if (report.Failed > 0 || report.ChangedSinceRead > 0 || report.ChildCountFailed)
+            else if (report.Failed > 0 || report.ChangedSinceRead > 0 || report.ChildCountFailed
+                     || report.AlreadyArchivedCheckFailed)
                 status = StatusPartial;
         }
 
@@ -236,11 +252,11 @@ public sealed class EmailArchiveCommunicationLinkSweepJob : IScheduledJob
             "{Prefix} heartbeat status={Status} mode={Mode} examined={Examined} matched={Matched} linked={Linked} "
             + "hasParent={HasParent} noKey={NoKey} exchangeItemId={ExchangeItemId} noCommunication={NoCommunication} ambiguous={Ambiguous} "
             + "changedSinceRead={ChangedSinceRead} failed={Failed} childrenCovered={ChildrenCovered} "
-            + "childrenOfUnmatched={ChildrenOfUnmatched} passComplete={PassComplete} attempt={Attempt} durationMs={DurationMs} "
+            + "childrenOfUnmatched={ChildrenOfUnmatched} communicationAlreadyArchived={CommunicationAlreadyArchived} passComplete={PassComplete} attempt={Attempt} durationMs={DurationMs} "
             + "trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
             LogPrefix, status, mode, report.Examined, report.Matched, report.Linked, report.HasParent.Count, report.NoKey.Count, report.ExchangeItemId.Count,
             report.NoCommunication.Count, report.Ambiguous.Count, report.ChangedSinceRead, report.Failed, report.ChildrenCovered,
-            report.ChildrenOfUnmatched, report.PassComplete, context.Attempt, (long)duration.TotalMilliseconds, context.Trigger,
+            report.ChildrenOfUnmatched, report.CommunicationAlreadyArchived.Count, report.PassComplete, context.Attempt, (long)duration.TotalMilliseconds, context.Trigger,
             context.RunId, context.CorrelationId);
 
         return new JobRunResult(
@@ -290,6 +306,7 @@ public sealed class EmailArchiveCommunicationLinkSweepJob : IScheduledJob
 
             var covered = new List<Guid>();
             var unmatched = new List<Guid>();
+            var matched = new List<(Entity Document, Guid CommunicationId)>();
             foreach (var document in documents)
             {
                 ct.ThrowIfCancellationRequested();
@@ -311,6 +328,16 @@ public sealed class EmailArchiveCommunicationLinkSweepJob : IScheduledJob
                 }
 
                 report.Matched++;
+                matched.Add((document, communicationId));
+            }
+
+            // F1: which matched communications ALREADY have a linked archive, read once for the page and before any write
+            // here, so a row this run links never counts against itself. An attribute of matched rows, not a reason: they link.
+            await CountAlreadyArchivedAsync(entityService, matched, report, context, ct).ConfigureAwait(false);
+
+            foreach (var (document, communicationId) in matched)
+            {
+                ct.ThrowIfCancellationRequested();
                 if (!apply)
                 {
                     report.AddLinked(document.Id, communicationId);
@@ -571,6 +598,56 @@ public sealed class EmailArchiveCommunicationLinkSweepJob : IScheduledJob
         }
     }
 
+    /// <summary>
+    /// F1: counts the matched candidates whose communication already has a linked <c>.eml</c> archive, with one read for the
+    /// page (an <c>In</c> over the page's distinct communications). A fault leaves the count short and marks the run partial;
+    /// the rows still link (the count is a report attribute, not a gate).
+    /// </summary>
+    private async Task CountAlreadyArchivedAsync(
+        IGenericEntityService entityService, IReadOnlyList<(Entity Document, Guid CommunicationId)> matched, LinkReport report,
+        JobRunContext context, CancellationToken ct)
+    {
+        if (matched.Count == 0)
+            return;
+
+        HashSet<Guid> archived;
+        try
+        {
+            var page = await entityService.RetrieveMultipleAsync(
+                BuildArchivedCommunicationQuery(matched.Select(m => m.CommunicationId)), ct).ConfigureAwait(false);
+            if (page.MoreRecords)
+                report.AlreadyArchivedCheckFailed = true; // more archives than one page holds: the count is a floor, said so
+            archived = page.Entities
+                .Select(e => e.GetAttributeValue<EntityReference>(CrossPathLink.LinkedCommunicationAttribute)?.Id)
+                .Where(id => id is { } v && v != Guid.Empty)
+                .Select(id => id!.Value)
+                .ToHashSet();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            report.AlreadyArchivedCheckFailed = true;
+            _logger.LogWarning(ex, "{Prefix} Whether this page's communications already have an archive could not be read; the run "
+                + "is partial. correlationId={CorrelationId}", LogPrefix, context.CorrelationId);
+            return;
+        }
+
+        foreach (var (document, communicationId) in matched)
+        {
+            if (archived.Contains(communicationId))
+                report.CommunicationAlreadyArchived.Add(document.Id);
+        }
+    }
+
+    /// <summary>The <c>.eml</c> archives (any state) already linked to one of <paramref name="communications"/>.</summary>
+    internal static QueryExpression BuildArchivedCommunicationQuery(IEnumerable<Guid> communications)
+    {
+        var query = new QueryExpression(DocumentTable) { ColumnSet = new ColumnSet(CrossPathLink.LinkedCommunicationAttribute) };
+        query.Criteria.AddCondition(CrossPathLink.IsEmailArchiveAttribute, ConditionOperator.Equal, true);
+        query.Criteria.AddCondition(
+            CrossPathLink.LinkedCommunicationAttribute, ConditionOperator.In, communications.Distinct().Cast<object>().ToArray());
+        return query;
+    }
+
     /// <summary>The documents (any state) whose <c>sprk_parentdocument</c> is one of <paramref name="parents"/>.</summary>
     internal static QueryExpression BuildChildQuery(IEnumerable<Guid> parents)
     {
@@ -591,6 +668,8 @@ public sealed class EmailArchiveCommunicationLinkSweepJob : IScheduledJob
         public bool PassComplete { get; set; }
         public bool EnumerationFailed { get; set; }
         public bool ChildCountFailed { get; set; }
+        public bool AlreadyArchivedCheckFailed { get; set; }
+        public CountedIds CommunicationAlreadyArchived { get; } = new();
         public int Examined { get; set; }
         public int Matched { get; set; }
         public int Linked { get; set; }
@@ -644,6 +723,8 @@ public sealed class EmailArchiveCommunicationLinkSweepJob : IScheduledJob
             childrenCovered = ChildrenCovered,
             childrenOfUnmatched = ChildrenOfUnmatched,
             childCountFailed = ChildCountFailed,
+            communicationAlreadyArchived = CommunicationAlreadyArchived.ToJson(),
+            alreadyArchivedCheckFailed = AlreadyArchivedCheckFailed,
             linkedListed = LinkedSample.Count,
             linkedDocuments = LinkedSample,
             unmatched = new

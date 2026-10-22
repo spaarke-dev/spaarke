@@ -424,6 +424,67 @@ public class EmailArchiveCommunicationLinkSweepJobTests
         batch.GetProperty("clamped").GetBoolean().Should().BeFalse();
     }
 
+    [Fact]
+    public async Task AMatchedRowWhoseCommunicationAlreadyHasAnArchive_StillLinks_AndIsCounted()
+    {
+        // F1: an attribute of matched rows, not a reason. Archive 9 is already linked to communication 1 (any key).
+        AddArchive(9, null, linkedTo: Id(301));
+        AddArchive(1, Rfc);
+        AddCommunication(1, Rfc);
+        AddArchive(2, "<m2@example.test>");                  // matched, its communication has no archive yet
+        AddCommunication(2, "<m2@example.test>");
+
+        var result = await RunAsync(apply: true);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        var archives = Archives(result);
+        archives.GetProperty("linked").GetInt32().Should().Be(2, "both still link");
+        LinkOf(1).Should().Be(Id(301));
+        LinkOf(2).Should().Be(Id(302));
+        var already = archives.GetProperty("communicationAlreadyArchived");
+        already.GetProperty("total").GetInt32().Should().Be(1);
+        already.GetProperty("documentIds").EnumerateArray().Select(e => e.GetGuid()).Should().Equal(Id(101));
+        archives.GetProperty("alreadyArchivedCheckFailed").GetBoolean().Should().BeFalse();
+        _queries.Count(q => q.EntityName == "sprk_document" && q.Criteria.Conditions.Any(
+            c => c.AttributeName == "sprk_relatedcommunication" && c.Operator == ConditionOperator.In))
+            .Should().Be(1, "one read for the page, not one per row");
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-5")]
+    [InlineData("abc")]
+    public async Task AnUnusableBatchSetting_FallsBackToTheDefault_AndTheRunProgresses(string setting)
+    {
+        AddArchive(1, null);
+        AddArchive(2, null);
+        _settings[EmailArchiveCommunicationLinkSweepJob.MaxDocumentsPerRunKey] = setting;
+
+        var result = await RunAsync(apply: false);
+
+        using var doc = JsonDocument.Parse(result.ResultJson!);
+        doc.RootElement.GetProperty("batch").GetProperty("effective").GetInt32().Should().Be(EmailArchiveCommunicationLinkSweepJob.MaxListedPerRun);
+        Archives(result).GetProperty("examined").GetInt32().Should().Be(2);
+        Archives(result).GetProperty("passComplete").GetBoolean().Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ARowWithNoRowVersion_IsCountedAsFailed_AndNeverWrittenUnconditionally()
+    {
+        var archive = AddArchive(1, Rfc);
+        archive.Attributes.Remove("versionnumber");
+        AddCommunication(1, Rfc);
+
+        var result = await RunAsync(apply: true);
+
+        result.Success.Should().BeFalse();
+        var archives = Archives(result);
+        archives.GetProperty("failed").GetInt32().Should().Be(1);
+        archives.GetProperty("linked").GetInt32().Should().Be(0);
+        LinkOf(1).Should().BeNull();
+        VerifyNoWrite();
+    }
+
     // ── Candidates ────────────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
