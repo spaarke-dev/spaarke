@@ -52,6 +52,15 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         int maxRetries,
         CancellationToken ct)
     {
+        // unified-access-control-r2 task 189 fix round C (K5): this handler writes a playbook's output mapping app-only (the
+        // output orchestrator), so it never writes a document's Access Permission or its own-narrowing record; only the
+        // document rule's writers do. Refused before anything is read or written. Task 188 round 4e: nor its D7 link columns
+        // (sprk_parentdocument, sprk_relatedcommunication), set, cleared or bound (InheritedAccessPermission.DocumentLinkColumns).
+        if (InheritedAccessPermission.RefuseAppOnlyWrite(entityLogicalName, fields.Keys) is { } documentRefusal)
+        {
+            throw new RecordOwnerUnresolvedException(entityLogicalName, documentRefusal);
+        }
+
         // Task 158 (owner round 6): a work assignment or project filed under a secure matter or project is secured. Whether
         // the record this write files it under is secure must be readable, or nothing is written (fail closed).
         if (await _rootFiling.CheckAsync(entityLogicalName, recordId, fields, ct).ConfigureAwait(false) is { } rootRefusal)
@@ -68,7 +77,8 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         // clear (verifier item 8). This handler cannot tell a lookup from a text column; the resolver reads the row and
         // treats a null for a column that holds no parent as no parent change (the write then decides no owner).
         // #2110 (ontology K3): with the lineage lookups it sets that are no ownership parent (a message's thread), so the reparent
-        // can tell whether it moved one (ParentsUnchanged); they never make a write a reparent on their own.
+        // can tell whether it moved one (ParentsUnchanged); but for a message's thread (#2143 round 7c, a re-file on its own)
+        // they never make a write a reparent on their own.
         var parentChanges = RecordOwnershipResolver.IsReparentableChild(entityLogicalName)
             ? RecordReparent.WithLineageLookupsIn(
                 entityLogicalName, RecordReparent.ParentChangesWithClearsIn(entityLogicalName, fields), fields)
@@ -88,6 +98,7 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         // #2091 round 4: the reparent reads the row; a change that moves none of its parents (a rebind onto the parent it
         // holds) is written and is no re-file, so the step does not run.
         var refiled = false;
+        RecordOwnerResolution? refiledBy = null;
         if (parentChanges.Count == 0)
         {
             await WriteAsync(entityLogicalName, recordId, fields, concurrencyMode, maxRetries, ct);
@@ -109,6 +120,7 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
             }
 
             refiled = !reparent.ParentsUnchanged;
+            refiledBy = reparent;
         }
 
         // Task 156 (owner round 4 item 5, option b): this generic update can write what a to-do / event / communication /
@@ -127,7 +139,7 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         // 129). Never throws; the write stands.
         if (refiled && wasIsolated is not null)
         {
-            await _children.AfterRefileAsync(refiledTable, recordId, wasIsolated, CancellationToken.None).ConfigureAwait(false);
+            await _children.AfterRefileAsync(refiledTable, recordId, wasIsolated, refiledBy, CancellationToken.None).ConfigureAwait(false);
         }
     }
 

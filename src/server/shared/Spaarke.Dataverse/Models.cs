@@ -68,6 +68,38 @@ public class CreateDocumentRequest
     /// </summary>
     [JsonIgnore]
     public Guid? CreatedByPersonId { get; set; }
+
+    /// <summary>
+    /// The <c>sprk_communication</c> the new document belongs to, written as <c>sprk_relatedcommunication</c> IN the
+    /// create (spaarkeai-word-add-in-r1 task 130, #2126). The Office save sets it for every document it creates from an
+    /// email — the <c>.eml</c>, each attachment of it, and a single attachment saved on its own — so the document's
+    /// visibility follows its email's communication from its first write. Null for every other caller.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <b>Never bound from a request body</b> (<see cref="JsonIgnoreAttribute"/>), for the same reason as
+    /// <see cref="OwningTeamId"/>: <c>POST /api/v1/documents</c> binds this class directly, and a client-chosen link would let
+    /// a caller attach a document to a communication it cannot see, or detach one from an internal-only email.
+    /// </remarks>
+    [JsonIgnore]
+    public Guid? RelatedCommunicationId { get; set; }
+
+    /// <summary>
+    /// The document's own <c>sprk_accesspermission</c> option value, written IN the create when set (task 130). The Office
+    /// save sets Restricted only for a document saved from an email that cannot be identified (no communication to link);
+    /// null leaves the column at its default (Standard). 🔒 Never bound from a request body, as <see cref="OwningTeamId"/>.
+    /// </summary>
+    [JsonIgnore]
+    public int? AccessPermission { get; set; }
+
+    /// <summary>
+    /// The document's own-narrowing record (<c>sprk_accessinheritance</c>, the task 175 / 189 JSON), written IN the same create
+    /// as <see cref="AccessPermission"/> (unified-access-control-r2 task 189, D7 T7a). Without it, a Restricted that equals the
+    /// parents' value reads as inherited and is widened when they widen. Set together with <see cref="AccessPermission"/>,
+    /// never alone; the create refuses a value without its record. 🔒 Never bound from a request body, as
+    /// <see cref="OwningTeamId"/>.
+    /// </summary>
+    [JsonIgnore]
+    public string? AccessInheritanceRecord { get; set; }
 }
 
 /// <summary>
@@ -1334,6 +1366,12 @@ public class FieldMappingRuleEntity
 
     /// <summary>Is active</summary>
     public bool IsActive { get; set; }
+
+    /// <summary>
+    /// Sync mode of this rule (sprk_syncmode): OneTime (0) or ManualRefresh (1). An empty column reads as OneTime.
+    /// /push re-applies only Copy rules at ManualRefresh (field-mapping-server-write-path-r1 FR-05d).
+    /// </summary>
+    public int SyncMode { get; set; }
 }
 
 /// <summary>

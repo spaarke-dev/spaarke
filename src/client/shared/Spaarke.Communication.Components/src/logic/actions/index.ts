@@ -15,6 +15,9 @@
  *   - `attachmentsSource.ts` — carry-forward attachment enumeration behind an
  *                              injected `IActionsWebApi` host seam
  *                              (`fetchSourceAttachments`).
+ *   - `archiveStatus.ts`     — the "Save to SharePoint" result line, incl. the
+ *                              attachments the archive refused (PR #2248)
+ *                              (`archiveStatus`, `refusedAttachmentsNotice`).
  *
  * Consumed by BOTH the OOB-form PCF (React 16 view) and the future Phase-3
  * reading-pane full-width toolbar (task 032 shell / task 036 compose) — one
@@ -26,3 +29,4 @@
 export * from './composerPrefill';
 export * from './launchCreate';
 export * from './attachmentsSource';
+export * from './archiveStatus';

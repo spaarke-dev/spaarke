@@ -1203,6 +1203,55 @@ import — the script never customises a managed component (ADR-027); it then on
 .\scripts\Set-RecordNumberingSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -Verify   # must exit 0
 ```
 
+**After H6, and BEFORE the BFF: a document's Access Permission (`unified-access-control-r2` task 189, D7 T7a).** A
+document holds max(its own narrowing, the value its parents give it), and under D7 a document's Restricted hides it from
+partners (task 188). The BFF records which part is the document's own in `sprk_document.sprk_accessinheritance`
+(Multiple lines of text, NOT field-secured). `scripts/Set-DocumentAccessPermissionSchema.ps1` creates it and checks
+`sprk_document.sprk_accesspermission` too: dry run, then `-Apply`, then `-Verify` (must exit 0).
+
+```powershell
+.\scripts\Set-DocumentAccessPermissionSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com           # dry run
+.\scripts\Set-DocumentAccessPermissionSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -Apply
+.\scripts\Set-DocumentAccessPermissionSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -Verify   # must exit 0
+```
+
+🔴 **Deploy order: the schema first, then the BFF.** A BFF carrying task 189 cannot tell a document's own narrowing
+from its inherited value until the record column exists, so until then it only RAISES a document's Access Permission
+and never lowers it. The reconcile job reads the column list each run: while documents lack the column, it logs a
+warning and lists `sprk_document` under `tablesWithoutColumn` in its run report. A document below what its parents give
+is raised to it (the value alone, counted in `raisedOnly`); one at or above it is left as it is. The child-records
+create refresh does the same, and neither reads nor writes the missing column. To Do, Event and Communication are
+reconciled as before. A BFF deployed first therefore lowers no document and leaves none below its parents, **but what
+it raises stays.** A document raised while the column is missing, whose parents then widen again, keeps the stricter
+value. On the first run after the script, the job reads that value as the document's own narrowing (it is stricter than
+what its parents give, and the document has no record yet), records it so, and never widens it again.
+
+🔴 **A BFF carrying `spaarkeai-word-add-in-r1` task 130 (D7 T8) REQUIRES the column; it is not raise-only.** When the
+Outlook add-in saves a document from an email it cannot identify, the BFF creates that document Restricted and writes
+`sprk_accessinheritance` in the same create (write-path registry I-19). Without the column, that create fails:
+- a single `.eml` or single-attachment save returns a generic 500;
+- each Restricted attachment child fails inside `UploadFinalizationWorker`. The failure is logged only as a Warning and
+  the job still reports success, so the user sees a saved email whose attachments are missing.
+
+Nothing is exposed (it fails closed), but saves are lost. Run the script and `-Verify` before deploying such a BFF.
+
+**So deploy the schema BEFORE the BFF.** If the BFF went first, find and fix these documents after the script has run:
+
+1. From the window between the BFF deploy and the script, collect the documents the BFF raised: the job's
+   `[CHILD-ACCESS-PERMISSION] set: sprk_document …` log lines that say `own unknown` (each run counts them in
+   `raisedOnly`), and the child-records refresh's `[INHERITED-ACCESS-PERMISSION] sprk_document …` warnings that name
+   the missing `sprk_accessinheritance`.
+2. In the first runs after the script (until `sweep.complete` is `true`), the job counts every document held above its
+   parents by its own narrowing in `ownKept`; its `set:` line says `record written` with an `own` value stricter than
+   `inherited`. Unless a user narrowed it in that window, a document in both lists is stricter only because of the
+   raise.
+3. Widen each one by hand, as a user with Write on it: set its Access Permission to the value its parents give
+   (`inherited` in the line). The next run reads that edit as the own narrowing removed, and the document follows its
+   parents again.
+
+Work assignments and projects keep their own record (the same column name, field-secured there) through
+`scripts/Set-AccessInheritanceSchema.ps1` (task 175). The document script does not touch them.
+
 ### 7.5 Phase 5 — SharePoint Embedded (H8)
 
 **H8** creates (or reuses), activates, verifies, binds and marks the customer's root container inside the pre-existing container type (the
@@ -2419,6 +2468,7 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 | 2026-10-05 | §6.5.4: a declared marker is bound to its registry entry's App Service / resource group (the deploy fails otherwise); the `demo` stand-up also adds `demo` to `Deploy-BffApi.ps1`'s `-Environment` `ValidateSet` | `unified-access-control-r2` task 165, round 62 (batch-4 integration) |
 | 2026-10-05 | §6.5.4: only `dev` carries the marker today — Spaarke's production operator environment (`demo`, declared `false`) adds it in the change that stands it up; the registry declaration must be a JSON boolean and the deploy fails on any other type (`[bool]"false"` is true in PowerShell) | `unified-access-control-r2` task 165, round 57 (`task/uac-r2-165-h`) |
 | 2026-10-08 | §5 handler table: **H4b** row added — the BFF app settings are written through the ARM SDK on both slots (merge, never replace), no longer by running the generated Configure script; **H6** row — the org-settings contract is one Dataverse Web API PATCH and H6 installs no application. The L2 Worker runs no shell tool (G38) | `customer-provisioning-orchestration-r1` T253 |
+| 2026-10-20 | §7.4: the document Access Permission schema — `scripts/Set-DocumentAccessPermissionSchema.ps1` (`sprk_document.sprk_accessinheritance`, not field-secured) runs BEFORE a BFF carrying task 189 is deployed; until it has, that BFF only raises a document's Access Permission to what its parents give and never lowers one (documents listed under `tablesWithoutColumn`, raises counted in `raisedOnly`). A raise kept in that window is recorded as the document's own on the first run after the script and is never widened again: the schema must go first, and §7.4 says how to find such documents and widen them by hand | `unified-access-control-r2` task 189 (D7 T7a, #2126; security pass 2) |
 
 ---
 

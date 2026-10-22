@@ -48,6 +48,7 @@ public class RecordCreatorPersonStampTests
         _entities.Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .Callback<Entity, CancellationToken>((e, _) => _created.Add(e))
             .ReturnsAsync(Guid.NewGuid());
+        _entities.AnswersRecordTypeCatalog(); // #2191 K2: a project created from a matter is filed under it
     }
 
     private static EntityReference PersonOf(Entity row) =>
@@ -57,17 +58,19 @@ public class RecordCreatorPersonStampTests
     // Office quick-create — RecordCreationService (matter, project)
     // =====================================================================================
 
-    private RecordCreationService OfficeCreator()
+    private OfficeRecordCreationService OfficeCreator()
     {
         var ownership = new Mock<IRecordOwnershipResolver>();
         ownership.Setup(o => o.ResolveOwningTeamAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Team);
-        return new RecordCreationService(
+        var caller = OfficeCallerRightsSetup.Granting(); // #2191: the caller may AppendTo the source the project is filed under
+        return new OfficeRecordCreationService(
             _entities.Object, _fieldMappings.Object, ownership.Object,
             IdentityNormalizationFixtures.NoLinkedContact(),
             Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(),
             Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(),
-            NullLogger<RecordCreationService>.Instance);
+            NullLogger<OfficeRecordCreationService>.Instance,
+            caller.Probe, caller.Http);
     }
 
     [Theory]

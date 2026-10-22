@@ -96,6 +96,15 @@ public static class AnalysisChatContextEndpoints
                 detail: "Tenant ID not found in token claims (tid).");
         }
 
+        // Task 188 round 4a (F1-3): an analysis whose source document or output file the external document narrowing
+        // hides answers the route's existing 404 for a caller who is not an internal systemuser — before the resolver (and
+        // its cache) is consulted. The id is decided as the sprk_analysis id the route names.
+        if (Guid.TryParse(analysisId, out var analysisGuid)
+            && await AnalysisAuthorizationFilter.IsAnalysisDocumentHiddenFromCallerAsync(httpContext, analysisGuid, logger))
+        {
+            return TypedResults.NotFound();
+        }
+
         logger.LogDebug(
             "Resolving analysis chat context for {AnalysisId} (tenant={TenantId})",
             analysisId, tenantId);

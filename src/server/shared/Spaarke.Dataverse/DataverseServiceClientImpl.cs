@@ -313,6 +313,9 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         // Task 146 c1-r1 (owner round 13 item 9): the person who asked — createdby is the application user here.
         RecordCreatorPersonColumn.StampIfKnown(document, request.CreatedByPersonId);
 
+        // spaarkeai-word-add-in-r1 task 130 (#2126): the email link and the Restricted fallback, in this one write.
+        StageDocumentCommunicationFields(document, request);
+
         document["statuscode"] = new OptionSetValue(1); // Draft
         document["statecode"] = new OptionSetValue(0);  // Active
 
@@ -320,6 +323,42 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         _logger.LogInformation("Document created with ID: {DocumentId}", documentId);
         return documentId.ToString();
     }
+
+    /// <summary>
+    /// Stages <see cref="CreateDocumentRequest.RelatedCommunicationId"/> (the <c>sprk_relatedcommunication</c> lookup to
+    /// <c>sprk_communication</c>) and <see cref="CreateDocumentRequest.AccessPermission"/> (the <c>sprk_accesspermission</c>
+    /// choice) onto the document <see cref="CreateDocumentAsync"/> creates, so both are part of the ONE create write
+    /// (spaarkeai-word-add-in-r1 task 130). An Access Permission goes with its <see cref="CreateDocumentRequest.AccessInheritanceRecord"/>
+    /// (<c>sprk_accessinheritance</c>) in the same write (UAC-r2 task 189), and a value without one is refused. An unset value
+    /// writes nothing. Pure (no I/O) so the mapping is assertable, as <see cref="StageAnalysisRegardingFields"/> is.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">An Access Permission without its own-narrowing record.</exception>
+    internal static void StageDocumentCommunicationFields(Entity document, CreateDocumentRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.RelatedCommunicationId is { } communicationId && communicationId != Guid.Empty)
+            document[DocumentRelatedCommunicationColumn] = new EntityReference(CommunicationEntityName, communicationId);
+
+        if (request.AccessPermission is { } accessPermission)
+        {
+            // Task 189: a value alone reads as inherited when it equals the parents' value, and is widened when they widen.
+            if (string.IsNullOrWhiteSpace(request.AccessInheritanceRecord))
+                throw new InvalidOperationException(
+                    "A document's own Access Permission is created with its sprk_accessinheritance record in the same write (task 189).");
+
+            document[AccessPermissionColumn] = new OptionSetValue(accessPermission);
+            document[DocumentAccessInheritanceColumn] = request.AccessInheritanceRecord;
+        }
+    }
+
+    // Task 130: sprk_document.sprk_relatedcommunication → sprk_communication (DocumentLinkFields), and the document's own
+    // Access Permission (docs/data-model/child-access-permission.md). The SDK writes by LOGICAL name.
+    private const string DocumentRelatedCommunicationColumn = "sprk_relatedcommunication";
+    private const string CommunicationEntityName = "sprk_communication";
+    private const string AccessPermissionColumn = "sprk_accesspermission";
+    private const string DocumentAccessInheritanceColumn = "sprk_accessinheritance";
 
     public async Task<DocumentEntity?> GetDocumentAsync(string id, CancellationToken ct = default)
     {
@@ -2600,6 +2639,121 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             throw new InvalidOperationException(
                 $"Failed to update {entityLogicalName} record {id}: {ex.Message}", ex);
         }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>The request is built by <see cref="BuildConditionalUpdate"/> and a failure is mapped by
+    /// <see cref="MapConditionalUpdateFailure"/> — pure functions, tested directly (the <c>ServiceClient</c> is built from
+    /// configuration inside this class and cannot be faked; precedent <see cref="BuildBulkUpdateTransaction"/>).</remarks>
+    public async Task UpdateIfRowVersionMatchesAsync(
+        string entityLogicalName, Guid id, string rowVersion, Dictionary<string, object> fields, CancellationToken ct = default)
+    {
+        var request = BuildConditionalUpdate(entityLogicalName, id, rowVersion, fields);
+
+        try
+        {
+            await _serviceClient.ExecuteAsync(request, ct);
+
+            _logger.LogInformation(
+                "[DATAVERSE] Updated {EntityLogicalName} record {EntityId} at version {RowVersion} with {FieldCount} fields",
+                entityLogicalName,
+                id,
+                rowVersion,
+                fields.Count);
+        }
+        catch (Exception ex)
+        {
+            var mapped = MapConditionalUpdateFailure(entityLogicalName, id, rowVersion, ex);
+            if (mapped is System.Data.DBConcurrencyException)
+            {
+                _logger.LogInformation(
+                    "[DATAVERSE] {EntityLogicalName} record {EntityId} changed since version {RowVersion}; the conditional "
+                    + "update was not applied",
+                    entityLogicalName,
+                    id,
+                    rowVersion);
+            }
+            else
+            {
+                _logger.LogError(
+                    exception: ex,
+                    message: "[DATAVERSE] Error updating {EntityLogicalName} record {EntityId} at version {RowVersion}. Fields: {FieldCount}",
+                    entityLogicalName,
+                    id,
+                    rowVersion,
+                    fields.Count);
+            }
+
+            throw mapped;
+        }
+    }
+
+    /// <summary>
+    /// The <see cref="Microsoft.Xrm.Sdk.Messages.UpdateRequest"/> <see cref="UpdateIfRowVersionMatchesAsync"/> sends: the row with
+    /// <see cref="Entity.RowVersion"/> set and <see cref="ConcurrencyBehavior.IfRowVersionMatches"/>, carrying
+    /// <see cref="UpdateAsync"/>'s field rules — a C# <c>null</c> value is SKIPPED, <see cref="DBNull.Value"/> becomes a
+    /// null attribute (the SDK's "clear the column / sever the lookup"), anything else (an <see cref="EntityReference"/>
+    /// lookup included) is written as given. Argument errors throw here, before any I/O.
+    /// </summary>
+    public static Microsoft.Xrm.Sdk.Messages.UpdateRequest BuildConditionalUpdate(
+        string entityLogicalName, Guid id, string rowVersion, Dictionary<string, object> fields)
+    {
+        if (string.IsNullOrEmpty(entityLogicalName))
+            throw new ArgumentNullException(nameof(entityLogicalName));
+
+        if (id == Guid.Empty)
+            throw new ArgumentException("Entity ID cannot be empty", nameof(id));
+
+        if (string.IsNullOrWhiteSpace(rowVersion))
+            throw new ArgumentException("A conditional update needs the row version it was read at", nameof(rowVersion));
+
+        if (fields == null || fields.Count == 0)
+            throw new ArgumentException("Fields dictionary cannot be null or empty", nameof(fields));
+
+        var entity = new Entity(entityLogicalName, id) { RowVersion = rowVersion };
+        foreach (var field in fields)
+        {
+            if (field.Value is null)
+                continue;
+            entity[field.Key] = field.Value is DBNull ? null : field.Value;
+        }
+
+        return new Microsoft.Xrm.Sdk.Messages.UpdateRequest { Target = entity, ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches };
+    }
+
+    /// <summary>Dataverse <c>ConcurrencyVersionMismatch</c> as a signed 32-bit integer
+    /// (<see cref="OrganizationServiceFault.ErrorCode"/>): the row's version is not the one the update was conditioned on.
+    /// The code the Signals writers already type on (<c>SignalWriter.ConcurrencyVersionMismatch</c>).</summary>
+    private const int ConcurrencyVersionMismatchErrorCode = unchecked((int)0x80060882);
+
+    /// <summary><see cref="ConcurrencyVersionMismatchErrorCode"/> as the hex text a fault message carries.</summary>
+    private const string ConcurrencyVersionMismatchErrorText = "0x80060882";
+
+    /// <summary>
+    /// What <see cref="UpdateIfRowVersionMatchesAsync"/> throws for <paramref name="failure"/>: a
+    /// <see cref="System.Data.DBConcurrencyException"/> when Dataverse's <c>ConcurrencyVersionMismatch</c> fault (0x80060882)
+    /// is anywhere in the exception chain — nothing was written, the row changed since <paramref name="rowVersion"/> — and
+    /// otherwise the <see cref="InvalidOperationException"/> <see cref="UpdateAsync"/> throws for any failure. Typed on the
+    /// fault code; K1 (#2143): a link in the chain whose message carries the code's hex text (<c>0x80060882</c>) counts too,
+    /// for a fault the <see cref="ServiceClient"/> surfaces without its typed detail — the precedent
+    /// <c>DecisionCommitService.IsVersionMismatch</c> keeps. The hex code is not localized; the message around it is never
+    /// read.
+    /// </summary>
+    public static Exception MapConditionalUpdateFailure(string entityLogicalName, Guid id, string rowVersion, Exception failure)
+    {
+        for (var current = failure; current is not null; current = current.InnerException)
+        {
+            if ((current is FaultException<OrganizationServiceFault> fault
+                    && fault.Detail?.ErrorCode == ConcurrencyVersionMismatchErrorCode)
+                || current.Message?.Contains(ConcurrencyVersionMismatchErrorText, StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return new System.Data.DBConcurrencyException(
+                    $"{entityLogicalName} {id:D} changed since version {rowVersion} was read; the update was not applied.",
+                    failure);
+            }
+        }
+
+        return new InvalidOperationException($"Failed to update {entityLogicalName} record {id}: {failure.Message}", failure);
     }
 
     public async Task DeleteAsync(string entityLogicalName, Guid id, CancellationToken ct = default)

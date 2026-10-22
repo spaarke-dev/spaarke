@@ -214,6 +214,9 @@ public sealed class VisualizationBudgetWarningContractTests
         {
             User = new ClaimsPrincipal(new ClaimsIdentity(
                 [new Claim("tid", TenantId), new Claim("oid", CallerOid)], "Test")),
+            // unified-access-control-r2 task 188 round 4a: a resolved INTERNAL systemuser, so THE external document narrowing
+            // in IAiAuthorizationService makes no call (AiDocumentNarrowingTests states the external caller).
+            RequestServices = Sprk.Bff.Api.Tests.TestInfrastructure.StatedNarrowingCaller.InternalCallerServices(),
         };
         httpContext.Request.Headers.Authorization = "Bearer test-caller-token";
         httpContext.Items[VisualizationAuthorization.HttpContextItemsKey] = new VisualizationAuthorization

@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Repair pass IScheduledJob (5-minute, forward-only) + on-demand admin trigger (FR-25, NFR-03, NFR-04)</title>
+    <phase>5 W5 Records created outside the product</phase>
+    <gate>016+050 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security-critical: a background job writing Dataverse rows with the system principal plus an admin-triggered endpoint (NFR-01 auth rule); modifies .cs in Sprk.Bff.Api; adds tests at KEEP paths.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive job design (lease, atomic claim, forward-only guarantee, admin authorization) where a mistake writes to the wrong rows.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>W5-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>016, 033, 050</deps>
+    <tags>bff-api, jobs, security, ownership, testing</tags>
+    <estimated-effort>14-20 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add a BFF `IScheduledJob` registered with `AddScheduledJob` that runs every 5 minutes over mapping-target and standard-owned tables. It selects rows with `createdon` &gt;= max(go-live, watermark) whose platform `createdby` is not the BFF application user (marker confirmed by task 050), plus post-go-live user-owned standard-table rows, and runs Repair mode (task 016) on each. Forward-only: never write a row created before go-live. Add an on-demand admin trigger for a table and time window. Each unit is claimed atomically with a completion marker (A1-3); each attempt emits a heartbeat (A1-5). Copy the structure of the canonical reconciliation jobs.</prompt>
+  <role>SPAARKE platform developer, .NET 10 BFF, ADR-036 scheduled-job infrastructure, Dataverse ownership model. Follow ADRs strictly; security fails closed.</role>
+  <goal>Natively created or imported rows get mapping, standard owner, search-index default and stamp within 10 minutes; re-runs are no-ops; a pre-go-live row is never written; the job is leased, atomically claimed per unit, heartbeated and observable (scanned / repaired / no-op / failed); the on-demand trigger is admin-authorized and listed in the route-authorization ledger.</goal>
+
+  <context>
+    <background>spec.md FR-25, NFR-03, NFR-04, NFR-01; design.md §4 (W5); task 050 fixes the repair marker. Repair mode (FR-14, task 016) is the per-row worker and is fill-only and idempotent. Go-live is a configured instant; the watermark is the end of the last fully completed window. Existing admin job endpoints (Api/Admin/JobsEndpoints.cs, group behind RequireAuthorization("SystemAdmin"), POST /{jobId}/trigger) trigger a job by id only; the on-demand pass needs table + window parameters, so extend that surface or add one admin route (decide after reading it; record the choice).</background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorStampReconciliationJob.cs (IScheduledJob with DefaultCronSchedule "*/5 * * * *" ~:74; repair-marker idempotency via MarkEventAsProcessedAsync ~:568; RunCounts ~:839; heartbeat per attempt) - copy the claim/marker/heartbeat/counter structure</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildReconciliationJob.cs (JobIdConstant, DefaultCronSchedule, Success=false for incomplete work, one heartbeat per attempt; registered via AddScheduledJob in ExternalAccessModule) - copy the registration and result shape</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Scheduling/IScheduledJob.cs and IScheduledJobLease.cs (contracts)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Admin/JobsEndpoints.cs (SystemAdmin policy, trigger route) and Infrastructure/DI/AuthorizationModule.cs (policy "SystemAdmin" ~:474)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Dataverse/FieldMapping/RecordRepairPassJob.cs (the scheduled job; select + claim + call Repair mode + counters)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ (the module that registers the RecordCreationService, e.g. the module chosen in task 013; add services.AddScheduledJob&lt;RecordRepairPassJob&gt;(RecordRepairPassJob.DefaultCronSchedule); grep for AddScheduledJob to match an existing call)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Admin/JobsEndpoints.cs (or a new admin route) - on-demand trigger with table + window; declares the SystemAdmin policy</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs (add the on-demand route to the ledger with its admin policy; ProvenByTest entry)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Dataverse/FieldMapping/RecordRepairPassJobTests.cs (selection, forward-only, idempotency, claim, counters)</file>
+      <file role="new">tests/integration/auth/RecordRepairPassTriggerAuthTests.cs (admin-only trigger: non-admin 403, unauthenticated 401, admin success)</file>
+      <file role="canonical-reference">projects/field-mapping-server-write-path-r1/notes/w5-open-questions.md (final marker decision from task 050)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="016" status="pending">Repair mode (fill-only, idempotent per row).</dependency>
+      <dependency task="033" status="pending">HARD BLOCK (task 016 review pass 1 F1-d): the app-only column-metadata reader must be wired into Repair before any scheduled pass calls it; until then one mis-typed mapping rule fails a row's whole repair on every pass.</dependency>
+      <dependency task="050" status="pending">Final repair-marker decision (createdby vs impersonation).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-036 A1-1..A1-7">Scope: the job. Register only through `AddScheduledJob` (A1-1); the in-process scheduler holds the lease so only one instance runs a tick (A1-2); each unit of work (a table + time window slice, or a row) is claimed atomically with a completion marker (A1-3: claim before work, marker after, a re-run finds the marker and no-ops); a run that could not LIST throws, a run with incomplete units returns Success=false (A1-4); exactly one heartbeat per attempt (A1-5); copy the registration shape from CoreAncestorStampReconciliationJob / SecureChildReconciliationJob; read .claude/adr/ADR-036 for A1-6/A1-7 before coding.</constraint>
+    <constraint source="ADR-052">Scope: placement. The workload runs in the BFF as an `IScheduledJob` (BFF identity, one invariant owner shared with the Repair mode). No hand-rolled timer `BackgroundService`, no Azure Function, no new queue or store.</constraint>
+    <constraint source="ADR-002 WP-5/WP-7">Scope: invariants. The server (Repair mode) is the owner of mapping, owner, search index and stamp; no plugin, flow or business rule. The on-demand pass IS the WP-7 import reconciliation; it calls the same Repair mode, never a second implementation.</constraint>
+    <constraint source="project (forward-only)">Scope: selection. Never write a row with `createdon` earlier than the configured go-live instant, including rows reassigned via OOB Assign. Go-live and the watermark are enforced in the query AND re-checked per row before the write (defence in depth). A missing or unparseable go-live config = job does nothing and logs an error (fail closed). No runtime kill switch (out of scope).</constraint>
+    <constraint source="NFR-01 / ADR-028">Scope: security. The job writes with the system principal under the BFF app identity; the on-demand endpoint requires an admin authorization policy declared on the route (not inherited by accident); the table must be in the registry allow-list and the window bounded (max span, no future end); unknown table or oversized window = 400 ProblemDetails; no row ids in non-admin responses. Adversarial review (security, twice per root CLAUDE.md §8.5) is required.</constraint>
+    <constraint source="NFR-03 / NFR-04">Scope: behaviour and telemetry. Two consecutive passes over the same window write nothing the second time. Emit structured per-step logs with a correlation id and counters scanned / repaired / no-op / failed per table; failed rows are retried next tick, not skipped silently, and never block other rows.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: BFF publish. State Placement Justification in the PR; measure publish-size delta against a fresh master build per root CLAUDE.md §10.4; run `dotnet list package --vulnerable --include-transitive`; no new package.</constraint>
+    <constraint source="ADR-038">Scope: tests. Unit tests plus a data-mutation or seam test at KEEP paths; no `Mock&lt;HttpMessageHandler&gt;`; no DI-registration tests; the ledger entry is covered by the existing RouteAuthorizationGuardTests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Scheduled jobs; record ownership repair; admin authorization</topic>
+    <files>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Paged listing and update shapes.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor (security, 2 review passes); read spec FR-25, NFR-01/03/04, `notes/w5-open-questions.md`, ADR-036 A1, and both canonical job files; confirm the repair marker; run /conflict-check on Infrastructure/DI and the ledger file.</step>
+    <step order="1">Write failing tests first: selection (post-go-live + createdby != app user; post-go-live user-owned standard-table rows; pre-go-live excluded; product-created BFF rows excluded), forward-only per-row recheck, idempotent second pass, claim/marker no-op, counters, fail-closed on missing go-live config.</step>
+    <step order="2">Implement `RecordRepairPassJob` copying the canonical claim/marker/heartbeat/counter structure; call Repair mode per row via the system principal; page the listing; bound each run.</step>
+    <step order="3">Register with `AddScheduledJob` in the existing module; add the config keys (go-live instant, per-run cap) following the canonical jobs' config-key pattern.</step>
+    <step order="4">Add the on-demand admin trigger with the admin policy, validation (registry table, bounded window), and the ledger entry plus a ProvenByTest auth test (401, 403 non-admin, 200 admin).</step>
+    <step order="5">Build, run all tests (including RouteAuthorizationGuardTests); measure publish size; run the CVE check.</step>
+    <step order="6">Run the adversarial-reviewer agent over the diff (security); fix every F-class finding; record the pass count.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="8">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the task 050 verdict shows product creates can match the repair selection (impersonation), STOP and escalate per CLAUDE.md §6 before writing the selection query.</trigger>
+    <trigger>If the A1-3 atomic claim cannot be expressed with the available idempotency/lease primitives for a window unit without a new store or column, STOP and escalate (component justification §11).</trigger>
+    <trigger>If the on-demand trigger requires an authorization policy other than the existing admin policy, STOP and escalate as a security-sensitive decision.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Overlaps with CoreAncestorStampReconciliationJob (stamp repair) and SecureChildReconciliationJob (secure-child repair), which repair stamps and isolation only, not mapping, owner and search index; and with JobsEndpoints, which triggers by job id only.</existing>
+    <extension>The canonical jobs cannot be extended: each owns a different invariant and selection, and mixing them would couple unrelated windows and watermarks; the new job reuses their scheduling, claim, marker and heartbeat structure and calls the one Repair mode. The trigger extends the existing admin surface where possible.</extension>
+    <cost-of-doing-nothing>Without the job, natively created and imported rows keep missing mapping, standard owner, search index and stamp (FR-25 acceptance: repaired within 10 minutes), and the WP-7 import reconciliation has no owner.</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="dotnet">Build/test .NET</tool><tool name="adversarial-reviewer">Independent security review of the diff</tool></tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Dataverse/FieldMapping/RecordRepairPassJob.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Admin/JobsEndpoints.cs (on-demand trigger)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Dataverse/FieldMapping/RecordRepairPassJobTests.cs</output>
+    <output type="test">tests/integration/auth/RecordRepairPassTriggerAuthTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The job is registered only via `AddScheduledJob`, implements `IScheduledJob` with a 5-minute schedule, claims each unit atomically with a completion marker, and emits one heartbeat per attempt (tests assert each).</criterion>
+    <criterion testable="true">Selection returns only rows with `createdon` &gt;= max(go-live, watermark) and `createdby` not the BFF application user, plus post-go-live user-owned standard-table rows; product-created rows are not selected.</criterion>
+    <criterion testable="true">Two consecutive passes over the same window: the second performs zero writes (counters show no-op); a present value is never overwritten.</criterion>
+    <criterion testable="true">Negative: a row created before go-live is never written, including one reassigned via OOB Assign (test asserts zero writes); a missing or unparseable go-live config makes the job do nothing and log an error.</criterion>
+    <criterion testable="true">The on-demand trigger declares the admin policy on the route, rejects unauthenticated (401) and non-admin (403) callers, rejects an unregistered table or unbounded window (400), and is present in the RouteAuthorizationGuardTests ledger with a ProvenByTest.</criterion>
+    <criterion testable="true">Counters scanned / repaired / no-op / failed are emitted per table with a correlation id; no hand-rolled timer BackgroundService and no new package is introduced.</criterion>
+    <criterion testable="true">Adversarial security review completed with no open F-class finding; BFF build 0 errors; all tests green; publish-size delta and CVE result recorded in the task notes.</criterion>
+    <criterion testable="true">#2124 (018b-2, 2026-10-22): Repair passes `moneyAttributes` to `ApplyFillOnly` (today `RecordCreationService.Repair.cs` ~:333 passes null, so a Default rule into a Money column writes a decimal Dataverse rejects). Read the table's Money attributes app-only (the app-only metadata reader from 033). Test: a Default rule into a Money column writes `Microsoft.Xrm.Sdk.Money`. The job does not ship without it. Then close #2124.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-25, NFR-01/03/04. Forward-only is binding: no historic backfill (out of scope). Task 053 live-verifies the 10-minute target on dev.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

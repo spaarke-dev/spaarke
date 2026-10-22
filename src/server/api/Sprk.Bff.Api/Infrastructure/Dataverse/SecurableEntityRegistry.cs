@@ -60,6 +60,9 @@ public sealed class SecurableEntityRegistry : ISecurableEntityRegistry
     /// </summary>
     public const string SecureFlagAttribute = "sprk_issecure";
 
+    /// <summary>The secure business unit a secure root is isolated in (<c>sprk_securitybu</c>); written by the BFF only.</summary>
+    public const string SecurityBusinessUnitAttribute = "sprk_securitybu";
+
     /// <summary>
     /// Entities that CARRY <see cref="SecureFlagAttribute"/> but whose value is NOT a security input, so they are
     /// never securable (unified-access-control-r2 task 150; owner round 10 item 11, 2026-10-03: "invoices follow

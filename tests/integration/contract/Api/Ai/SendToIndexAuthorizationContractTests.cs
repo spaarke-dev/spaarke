@@ -398,12 +398,25 @@ public sealed class SendToIndexAuthorizationFixture : WebApplicationFactory<Prog
     /// <summary>Every <see cref="FileIndexRequest"/> that actually reached the indexing pipeline.</summary>
     public List<FileIndexRequest> CapturedIndexRequests { get; } = [];
 
+    /// <summary>
+    /// Task 188 round 4d (#2200): who the caller is for THE external document narrowing. INTERNAL by default (no narrowing
+    /// call, no app-only read), so the tests about tenant and Write are unchanged; <c>SendToIndexDocumentNarrowingTests</c>
+    /// states an external caller.
+    /// </summary>
+    internal Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode Mode { get; set; } =
+        Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode.Internal;
+
+    /// <summary>What the BFF's app-only identity reads for the narrowing (the REAL predicate behind the real seam).</summary>
+    internal Sprk.Bff.Api.Tests.Services.Ai.Handlers.AppOnlyDocumentWorld World { get; private set; } = new();
+
     public void ResetBoundaries()
     {
         DataverseMock.Reset();
         EntityServiceMock.Reset();
         Access.Reset();
         CapturedIndexRequests.Clear();
+        Mode = Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode.Internal;
+        World = new();
 
         // The index-name resolver's Dataverse reads resolve nothing, so the tenant default applies.
         EntityServiceMock
@@ -538,6 +551,9 @@ public sealed class SendToIndexAuthorizationFixture : WebApplicationFactory<Prog
             // sits on top of it unmodified.
             services.RemoveAll<IAccessDataSource>();
             services.AddSingleton<IAccessDataSource>(Access);
+
+            // Task 188 round 4d (#2200): the stated caller and app-only world of THE external document narrowing.
+            Sprk.Bff.Api.Tests.TestInfrastructure.StatedNarrowingCaller.AddStatedNarrowingCaller(services, () => Mode, () => World);
         });
     }
 

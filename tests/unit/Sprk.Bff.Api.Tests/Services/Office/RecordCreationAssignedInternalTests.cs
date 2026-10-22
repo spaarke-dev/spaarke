@@ -34,24 +34,28 @@ public class RecordCreationAssignedInternalTests
         _entities.Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .Callback<Entity, CancellationToken>((e, _) => _created.Add(e))
             .ReturnsAsync(Guid.NewGuid());
+        _entities.AnswersRecordTypeCatalog(); // #2191 K2: a project created from a matter is filed under it
     }
 
-    private RecordCreationService Sut(Mock<IIdentityNormalizationService> identity)
+    private OfficeRecordCreationService Sut(Mock<IIdentityNormalizationService> identity)
     {
         var ownership = new Mock<IRecordOwnershipResolver>();
         ownership.Setup(o => o.ResolveOwningTeamAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Team);
-        return new RecordCreationService(
+        var caller = OfficeCallerRightsSetup.Granting();
+        return new OfficeRecordCreationService(
             _entities.Object,
             _fieldMappings.Object,
             ownership.Object,
             identity.Object,
             Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(),
             Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(),
-            NullLogger<RecordCreationService>.Instance);
+            NullLogger<OfficeRecordCreationService>.Instance,
+            callerAccess: caller.Probe, http: caller.Http, // #2191: the caller may AppendTo the source the project is filed under
+            callerClient: MappingSourceCallerReadDouble.MirroringAppReads(_entities)); // #2188: the caller reads what the app read returned
     }
 
-    private RecordCreationService Sut(Guid? makersContact) => Sut(IdentityNormalizationFixtures.WithContact(makersContact));
+    private OfficeRecordCreationService Sut(Guid? makersContact) => Sut(IdentityNormalizationFixtures.WithContact(makersContact));
 
     [Theory]
     [InlineData(QuickCreateEntityType.Matter)]

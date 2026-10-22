@@ -241,16 +241,61 @@ public static class AccessFollowsParent
 /// "own" marker alone cannot tell, from the stored values, a user's edit from a parent's change (a stored Restricted above a
 /// Standard floor is either "the parent just loosened" or "a user just tightened it"), nor a re-file from a parent loosening
 /// (verifier F1's class). So the record also keeps the floor the stored values were derived from and the parents it came
-/// from: a stored value that differs from max(own, last floor) is a user's edit; a parent set that differs is a re-file (which
+/// from: a stored value that differs from max(own, last floor) is a user's edit (classified against the last AND the live
+/// floor, <see cref="OwnPermissionOf"/>); a parent set that differs is a re-file (which
 /// never loosens); a floor that moved with the same parents is the parent's change (inherited values follow it, both ways).
 /// One versioned JSON column (the relocation ledger's precedent, <c>sprk_relocationpending</c>) instead of five columns.</para>
+/// <para><b>On <c>sprk_document</c> (task 189, D7 T7a).</b> The same record carries a document's own narrowing. The rule is
+/// <see cref="InheritedAccessPermission.DecideDocument"/>, and it differs from the work assignment and project rule in
+/// three ways:</para>
+/// <list type="bullet">
+/// <item>The floor is the task 173 value (the tops of the filing), and the Secure fields are always false.</item>
+/// <item>A re-file follows the new parents.</item>
+/// <item>The column is NOT field-secured there. The stored value is max(own, inherited), and the inherited part is
+/// recomputed from the parents and never read from the record. So an edit of the value or of the record can only remove the
+/// user's own narrowing (any user with Write may, D7) or add one; it can never take the document below its parents' live
+/// value.</item>
+/// </list>
 /// <para><b>No record (existing rows): the backfill rule</b> — a value equal to the current floor is inherited; a value
 /// stricter than it is set on the record. Applied the first time the job (or an inline follow) sees the row, and written.</para>
+/// <para><b>Provisional (owner round 122).</b> <see cref="OwnProvisional"/> marks the one own narrowing that is not a
+/// person's: the Restricted an email-derived document is saved with when its email cannot be identified
+/// (<see cref="OwnNarrowingUntilEmailIdentified"/>). Once the document is linked to a communication, that narrowing counts
+/// as no own value, so the document follows its communication (<see cref="OwnPermissionOf(int, int?, AccessInheritance?, int, bool, out bool)"/>).
+/// The field is not part of the record's version: a record without it is not provisional, and a BFF that predates it
+/// ignores it and keeps the Restricted.</para>
 /// </remarks>
 internal sealed record AccessInheritance(
     IReadOnlyList<string> Parents, bool FloorSecure, int FloorPermission, bool OwnSecure, int? OwnPermission)
 {
-    /// <summary>The column (Multiple lines of text) on <c>sprk_workassignment</c> and <c>sprk_project</c>.</summary>
+    /// <summary>
+    /// Owner round 122: the own narrowing is the save-time Restricted of an email-derived document whose email could not be
+    /// identified. It is released (counts as no own value) once the document is linked to a communication, and dropped by
+    /// any other change of the own value. Set ONLY by <see cref="OwnNarrowingUntilEmailIdentified"/> and read back by
+    /// <see cref="Parse"/>: the setter is private, and <c>AccessInheritanceProvisionalMarkerGuardTests</c> refuses any other
+    /// assignment. A later record keeps it only through <see cref="KeepingProvisionalWith"/>: every <c>with</c> drops it
+    /// (the copy constructor below).
+    /// </summary>
+    internal bool OwnProvisional { get; private init; }
+
+    /// <summary>
+    /// Round 122 fix round 1 (K3): the copy constructor every <c>record with { … }</c> runs. It copies the facts and DROPS
+    /// <see cref="OwnProvisional"/>, so a <c>with</c> can never carry the marker by accident; <see cref="KeepingProvisionalWith"/>
+    /// sets it again, explicitly.
+    /// </summary>
+    private AccessInheritance(AccessInheritance original)
+    {
+        ArgumentNullException.ThrowIfNull(original);
+        Parents = original.Parents;
+        FloorSecure = original.FloorSecure;
+        FloorPermission = original.FloorPermission;
+        OwnSecure = original.OwnSecure;
+        OwnPermission = original.OwnPermission;
+        // OwnProvisional is deliberately not copied.
+    }
+
+    /// <summary>The column (Multiple lines of text) on <c>sprk_workassignment</c> and <c>sprk_project</c> (field-secured), and on
+    /// <c>sprk_document</c> (task 189; not secured, see the remarks).</summary>
     internal const string Column = "sprk_accessinheritance";
 
     /// <summary>
@@ -273,15 +318,27 @@ internal sealed record AccessInheritance(
         DefaultIgnoreCondition = JsonIgnoreCondition.Never,
     };
 
+    /// <summary>
+    /// The stored shape. Owner round 122: <c>ownProvisional</c> is written only when true, so every other record's text is
+    /// unchanged; a record without it reads as not provisional. The version stays 1 (why: <see cref="Parse"/>).
+    /// </summary>
     private sealed record Stored(
-        int V, IReadOnlyList<string>? Parents, bool FloorSecure, int FloorPermission, bool OwnSecure, int? OwnPermission);
+        int V, IReadOnlyList<string>? Parents, bool FloorSecure, int FloorPermission, bool OwnSecure, int? OwnPermission,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool OwnProvisional);
 
     /// <summary>The column's text.</summary>
     internal string Serialize() =>
-        JsonSerializer.Serialize(new Stored(Version, Parents, FloorSecure, FloorPermission, OwnSecure, OwnPermission), Json);
+        JsonSerializer.Serialize(
+            new Stored(Version, Parents, FloorSecure, FloorPermission, OwnSecure, OwnPermission, OwnProvisional), Json);
 
     /// <summary>The record in <paramref name="text"/>: <c>(null, false)</c> when there is none yet, <c>(null, true)</c> when it
     /// cannot be read (never guessed at — the caller loosens nothing).</summary>
+    /// <remarks>
+    /// Owner round 122: the provisional marker does not change the version. A BFF that predates it parses a provisional
+    /// record as an ordinary own Restricted (System.Text.Json skips an unknown property), which keeps the document
+    /// Restricted: it fails closed. A record of any other version, or one whose marker is not a JSON boolean, is unreadable
+    /// here, so its document is only ever raised, never lowered (<see cref="InheritedAccessPermission.DecideDocumentRaiseOnly"/>).
+    /// </remarks>
     internal static (AccessInheritance? Value, bool Unreadable) Parse(string? text)
     {
         if (string.IsNullOrWhiteSpace(text))
@@ -294,7 +351,7 @@ internal sealed record AccessInheritance(
                 || (stored.OwnPermission is { } own && SecureRootInheritance.RankOf(own) < 0))
                 return (null, true);
             return (new AccessInheritance(stored.Parents, stored.FloorSecure, stored.FloorPermission, stored.OwnSecure,
-                stored.OwnPermission), false);
+                stored.OwnPermission) { OwnProvisional = stored.OwnProvisional }, false);
         }
         catch (JsonException)
         {
@@ -302,11 +359,131 @@ internal sealed record AccessInheritance(
         }
     }
 
-    /// <summary>Same facts (the parent list compared as a set).</summary>
+    /// <summary>Same facts (the parent list compared as a set), including the provisional marker (owner round 122).</summary>
     internal bool SameAs(AccessInheritance? other) =>
         other is not null && FloorSecure == other.FloorSecure && FloorPermission == other.FloorPermission
-        && OwnSecure == other.OwnSecure && OwnPermission == other.OwnPermission
+        && OwnSecure == other.OwnSecure && OwnPermission == other.OwnPermission && OwnProvisional == other.OwnProvisional
         && new HashSet<string>(Parents, StringComparer.OrdinalIgnoreCase).SetEquals(other.Parents);
+
+    /// <summary>
+    /// The record's OWN Access Permission, read from a stored value against its access record (owner round 87). This is the
+    /// ONE copy of the rule: <see cref="SecureRootInheritance.Decide"/> (task 175) and the document rule
+    /// <see cref="InheritedAccessPermission.DecideDocument"/> (task 189) both call it.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>With a record.</b> A stored value equal to max(own, last floor) is unchanged since the record was written: the
+    /// own value stands, and the inherited part follows the LIVE floor (<paramref name="floorRank"/>) both ways. Any other
+    /// stored value was set outside the inherited-value writers: a user's edit, or a BFF writer's own narrowing.</para>
+    /// <list type="bullet">
+    /// <item>An edit stricter than the last floor OR the live one is the record's own. Comparing it with the last floor alone
+    /// (the rule before the task 189 fix round) put back a user's Limited set after a Restricted parent widened to Standard,
+    /// and the record went to Standard (the "K1 variant").</item>
+    /// <item>An edit at or below both floors is put back to the live floor. The own value is cleared (a user with Write removes
+    /// an own narrowing, D7 D3), unless it is no looser than the edit. That case is task 175's own write: it stores the
+    /// value first and its record last, so a record write that fails after it followed a lower floor leaves exactly
+    /// max(own, live floor) there.</item>
+    /// </list>
+    /// <para><b>Without one</b> (existing rows), the backfill rule applies: a value stricter than the current floor is own;
+    /// one equal to it is inherited. A re-file is the caller's to handle (task 175's rule; documents follow their new
+    /// parents).</para>
+    /// <para>This overload never releases a provisional narrowing (owner round 122): work assignments and projects never
+    /// carry one.</para>
+    /// </remarks>
+    internal static int? OwnPermissionOf(int storedRank, int? storedPermission, AccessInheritance? record, int floorRank) =>
+        OwnPermissionOf(storedRank, storedPermission, record, floorRank, communicationLinked: false, out _);
+
+    /// <summary>
+    /// <see cref="OwnPermissionOf(int, int?, AccessInheritance?, int)"/> with owner round 122's release: THE one place a
+    /// provisional own narrowing (<see cref="OwnProvisional"/>) is released.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The release.</b> While the stored value is unchanged since the record was written, a provisional own
+    /// narrowing counts as NO own value when <paramref name="communicationLinked"/> is true, so the value follows the live
+    /// floor (which, once the document is linked, is its communication's tops). Otherwise it stands and stays provisional
+    /// (<paramref name="stillProvisional"/>).</para>
+    /// <para><b>Hand edits keep round 87.</b> A stored value that differs is set outside the writers and is classified as
+    /// above: whatever it becomes, it is never provisional again, so a Restricted a user sets stays Restricted after the
+    /// document is linked.</para>
+    /// </remarks>
+    /// <param name="communicationLinked">The communication walk found a link: the document's own
+    /// <c>sprk_relatedcommunication</c>, or the first one up its <c>sprk_parentdocument</c> chain within
+    /// <c>ExternalDocumentNarrowing.MaxHops</c> (<c>ExternalDocumentNarrowing.FindCommunicationLinksAsync</c>). False for a
+    /// cycle, a longer chain, an unreadable step, or when the walk was not made.</param>
+    /// <param name="stillProvisional">True when the returned own value is the record's provisional narrowing, unreleased
+    /// and untouched: the next record keeps the marker (<see cref="KeepingProvisionalWith"/>).</param>
+    internal static int? OwnPermissionOf(
+        int storedRank, int? storedPermission, AccessInheritance? record, int floorRank, bool communicationLinked,
+        out bool stillProvisional)
+    {
+        stillProvisional = false;
+        if (record is null)
+            return storedRank > floorRank ? storedPermission : null;
+
+        var own = record.OwnPermission;
+        var ownRank = SecureRootInheritance.RankOf(own);
+        var lastFloorRank = SecureRootInheritance.RankOf(record.FloorPermission);
+        if (storedRank == Math.Max(ownRank, lastFloorRank))
+        {
+            if (record.OwnProvisional)
+            {
+                if (communicationLinked)
+                    return null; // round 122: linked, so the save-time Restricted gives way to the communication's tops
+                stillProvisional = true;
+            }
+
+            return own;
+        }
+
+        if (storedRank > Math.Min(lastFloorRank, floorRank))
+            return storedPermission;
+        return ownRank <= storedRank ? own : null;
+    }
+
+    /// <summary>
+    /// Task 189 (D7 T7a): the record a BFF writer stores BESIDE an own narrowing it sets on a document, in the same payload.
+    /// Its first user is word-add-in-r1 T8's fallback Restricted for an email it cannot identify. Without this record, a
+    /// narrowing that equals the parents' value reads as inherited and follows them when they widen. The reconciler fills in
+    /// the real parents and floor on its next run, and keeps the own value.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="permission"/> is not Limited or Restricted.</exception>
+    internal static AccessInheritance OwnNarrowing(int permission) =>
+        SecureRootInheritance.RankOf(permission) > 0
+            ? new AccessInheritance(Array.Empty<string>(), false, InheritedAccessPermission.Standard, false, permission)
+            : throw new ArgumentOutOfRangeException(nameof(permission), permission, "An own narrowing is Limited or Restricted.");
+
+    /// <summary>
+    /// Owner round 122: <see cref="OwnNarrowing"/> marked <see cref="OwnProvisional"/>: the Restricted an email-derived
+    /// document is created with when its email cannot be identified. It holds until the document is linked to a
+    /// communication; then the reconciler releases it and the document follows the communication. The ONE setter of the
+    /// marker, called only by <c>OfficeDocumentPersistence.ApplyEmailCommunicationOutcome</c>
+    /// (<c>AccessInheritanceProvisionalMarkerGuardTests</c>).
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="permission"/> is not Restricted.</exception>
+    internal static AccessInheritance OwnNarrowingUntilEmailIdentified(int permission)
+    {
+        if (permission != InheritedAccessPermission.Restricted)
+            throw new ArgumentOutOfRangeException(nameof(permission), permission, "The save-time narrowing is Restricted.");
+        return new AccessInheritance(Array.Empty<string>(), false, InheritedAccessPermission.Standard, false, permission)
+        {
+            OwnProvisional = true,
+        };
+    }
+
+    /// <summary>
+    /// Owner round 122: <paramref name="facts"/> with this record's <see cref="OwnProvisional"/> kept. The one way a later
+    /// record carries the marker: the document rule calls it only while <see cref="OwnPermissionOf(int, int?, AccessInheritance?, int, bool, out bool)"/>
+    /// says the provisional narrowing still stands untouched. It sets the marker explicitly (fix round 1, K3): a <c>with</c>
+    /// would drop it. Fix round 2 (K3): it keeps the marker only when <paramref name="facts"/> carry the SAME own value as
+    /// this record; a different own value is not the provisional narrowing, so the record returned has no marker.
+    /// </summary>
+    internal AccessInheritance KeepingProvisionalWith(AccessInheritance facts)
+    {
+        ArgumentNullException.ThrowIfNull(facts);
+        return new AccessInheritance(facts.Parents, facts.FloorSecure, facts.FloorPermission, facts.OwnSecure, facts.OwnPermission)
+        {
+            OwnProvisional = OwnProvisional && facts.OwnPermission == OwnPermission,
+        };
+    }
 }
 
 /// <summary>
@@ -446,8 +623,8 @@ public sealed partial class SecureRootInheritance
     /// <remarks>
     /// <para><b>Own and inherited.</b> With an access record: a stored value that differs from max(own, last floor) is a
     /// user's edit (a flag set by Make Secure, or cleared by an F3 unsecure; an Access Permission chosen on the form) — it
-    /// becomes the record's own (an Access Permission at or below the last floor is "none set"; one below the floor is put
-    /// back). A flag that turned secure while the floor is secure is the floor's (the securing loop), not an own act. Without
+    /// becomes the record's own when it is stricter than the last or the live floor; otherwise it is put back to the live
+    /// floor (<see cref="AccessInheritance.OwnPermissionOf"/>, the one copy of the Access Permission rule). A flag that turned secure while the floor is secure is the floor's (the securing loop), not an own act. Without
     /// one (existing rows): the backfill rule — a value stricter than the current floor is own, one equal to it inherited.</para>
     /// <para><b>A re-file never loosens</b> (round 87 item 5, verifier F1): when the parents differ from the record's, whatever
     /// the stored values hold beyond the NEW floor becomes the record's own.</para>
@@ -491,19 +668,17 @@ public sealed partial class SecureRootInheritance
             .OrderBy(k => k, StringComparer.Ordinal).ToList();
         var (floorSecure, floorRank) = FloorOf(ancestry);
 
+        // The Access Permission's own part: one copy of the rule, shared with task 189's document rule.
+        var ownPermission = AccessInheritance.OwnPermissionOf(storedRank, storedPermission, marker, floorRank);
         bool ownSecure;
-        int? ownPermission;
         if (marker is null)
         {
             // The backfill rule (existing rows): stricter than the floor = set on the record; equal = inherited.
             ownSecure = storedSecure == true && !floorSecure;
-            ownPermission = storedRank > floorRank ? storedPermission : null;
         }
         else
         {
             ownSecure = marker.OwnSecure;
-            ownPermission = marker.OwnPermission;
-            var lastFloorRank = RankOf(marker.FloorPermission);
 
             // A user's edit since the record was written.
             var expectedSecure = ownSecure || marker.FloorSecure;
@@ -511,15 +686,6 @@ public sealed partial class SecureRootInheritance
                 ownSecure = true; // Make Secure (or another own act)
             else if (storedSecure == false && expectedSecure)
                 ownSecure = false; // an F3 unsecure (or a flag cleared outside the BFF)
-
-            if (storedRank != Math.Max(RankOf(ownPermission), lastFloorRank))
-            {
-                if (storedRank > lastFloorRank)
-                    ownPermission = storedPermission;
-                else if (storedRank == lastFloorRank)
-                    ownPermission = null;
-                // below the last floor: not the record's own; put back below
-            }
 
             // A re-file: what the stored values hold beyond the NEW floor becomes the record's own (round 87 item 5).
             if (!new HashSet<string>(marker.Parents, StringComparer.OrdinalIgnoreCase).SetEquals(parentsNow))
@@ -1336,13 +1502,11 @@ public sealed partial class SecureRootInheritance
         {
             foreach (var table in new[] { WorkAssignment, Project })
             {
-                var rows = await _webApi.QueryAsync<AttributeSecurityRow>(
-                    $"EntityDefinitions(LogicalName='{table}')/Attributes", $"LogicalName eq '{AccessInheritance.Column}'", "IsSecured",
-                    cancellationToken: ct).ConfigureAwait(false);
-                if (rows is not { Count: 1 } || rows[0].IsSecured != true)
+                var (secured, found) = await ColumnFieldSecurityAsync(_webApi, table, AccessInheritance.Column, ct).ConfigureAwait(false);
+                if (!secured)
                 {
                     _logger.LogError("[FOLLOW-PARENT] {Table}.{Column} is not field-secured ({Found} definition(s)).", table,
-                        AccessInheritance.Column, rows?.Count ?? 0);
+                        AccessInheritance.Column, found);
                     return (_accessRecordColumnSecured = false).Value;
                 }
             }
@@ -1355,6 +1519,23 @@ public sealed partial class SecureRootInheritance
                 AccessInheritance.Column);
             return (_accessRecordColumnSecured = false).Value;
         }
+    }
+
+    /// <summary>
+    /// K2's metadata read, shared (owner round 122 fix round 1, K1: <c>ChildAccessPermissionReconciler</c>'s release asks it for
+    /// the document link columns): whether <paramref name="column"/> on <paramref name="table"/> is field-secured, from its
+    /// attribute metadata. Secured only when exactly one definition comes back and it says <c>IsSecured</c>; anything else
+    /// (not secured, missing) is not. A read fault THROWS: each caller fails closed.
+    /// </summary>
+    /// <returns>Whether it is secured, and how many definitions came back.</returns>
+    internal static async Task<(bool Secured, int Definitions)> ColumnFieldSecurityAsync(
+        DataverseWebApiClient webApi, string table, string column, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(webApi);
+        var rows = await webApi.QueryAsync<AttributeSecurityRow>(
+            $"EntityDefinitions(LogicalName='{table}')/Attributes", $"LogicalName eq '{column}'", "IsSecured",
+            cancellationToken: ct).ConfigureAwait(false);
+        return (rows is { Count: 1 } && rows[0].IsSecured == true, rows?.Count ?? 0);
     }
 
     /// <summary>

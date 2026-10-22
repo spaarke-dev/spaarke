@@ -19,6 +19,8 @@
 
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
@@ -260,11 +262,58 @@ public class DocumentContainerRelocatorTests
             Relocator = NewRelocator();
         }
 
-        /// <summary>A relocator over this rig's world, SPE facade and indexing — with another lock store, access source or clock.</summary>
+        /// <summary>A relocator over this rig's world, SPE facade and indexing — with another lock store, access source, clock or logger.</summary>
         public DocumentContainerRelocator NewRelocator(
-            Sprk.Bff.Api.Services.Jobs.IIdempotencyService? locks = null, IAccessDataSource? access = null, TimeProvider? time = null)
+            Sprk.Bff.Api.Services.Jobs.IIdempotencyService? locks = null, IAccessDataSource? access = null, TimeProvider? time = null,
+            ILogger<DocumentContainerRelocator>? logger = null)
             => new(Resolver, World.EntityService!, Spe.Object, Indexing, locks ?? Locks, access ?? Access,
-                NullLogger<DocumentContainerRelocator>.Instance, time, Attribution);
+                logger ?? NullLogger<DocumentContainerRelocator>.Instance, Configuration, time, Attribution, JobServices);
+
+        /// <summary>
+        /// #2159 fix round: the jobs the relocator queued (a release retry), on a <see cref="JobSubmissionService"/> that
+        /// records instead of sending — Service Bus is the boundary. <see cref="SubmitFault"/> makes the send fail.
+        /// </summary>
+        public List<JobContract> Submitted { get; } = new();
+
+        /// <summary>When set, queuing a job FAULTS (Service Bus unavailable).</summary>
+        public Exception? SubmitFault { get; set; }
+
+        private IServiceProvider JobServices => _jobServices ??= BuildJobServices();
+
+        private IServiceProvider? _jobServices;
+
+        private IServiceProvider BuildJobServices()
+        {
+            var submitter = new Mock<JobSubmissionService>(
+                MockBehavior.Loose,
+                Options.Create(new Sprk.Bff.Api.Configuration.ServiceBusOptions
+                {
+                    QueueName = "test-jobs",
+                    ConnectionString = "Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=k;SharedAccessKey=v",
+                }),
+                Mock.Of<ILogger<JobSubmissionService>>(),
+                new Mock<Azure.Messaging.ServiceBus.ServiceBusClient>().Object);
+            submitter
+                .Setup(s => s.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
+                .Returns((JobContract job, CancellationToken _) =>
+                {
+                    if (SubmitFault is { } fault)
+                    {
+                        return Task.FromException(fault);
+                    }
+
+                    lock (Submitted)
+                    {
+                        Submitted.Add(job);
+                    }
+
+                    return Task.CompletedTask;
+                });
+            return new ServiceCollection().AddSingleton(submitter.Object).BuildServiceProvider();
+        }
+
+        /// <summary>The host configuration the relocator reads (#2159: the Secure Record names — the defaults here).</summary>
+        public static IConfiguration Configuration { get; } = new ConfigurationBuilder().Build();
 
         /// <summary>Who an app-only upload was made for (task 171 attach fix) — real, over an in-memory cache.</summary>
         public FaultableAttribution Attribution { get; } = new();
@@ -887,11 +936,14 @@ public class DocumentContainerRelocatorTests
     }
 
     [Fact]
-    public async Task Relocate_WhenTheRepointFails_RemovesTheCopy_AndKeepsTheSource()
+    public async Task Relocate_WhenTheRepointIsRefused_RemovesTheCopy_AndKeepsTheSource()
     {
+        // PR #2161 re-check: only a DEFINITE refusal removes the copy — Dataverse answered with a fault (production shape:
+        // the entity service wraps it). A write whose outcome is unknown keeps it (RelocationRecheckFixTests).
         var world = Environment();
         world.Rows[("sprk_document", DocumentId)] = Doc(drive: CustomerBContainer, item: Item);
-        world.UpdateFault = new HttpRequestException("Dataverse unavailable");
+        world.UpdateFault = new InvalidOperationException("Failed to update sprk_document",
+            new System.ServiceModel.FaultException<OrganizationServiceFault>(new OrganizationServiceFault { ErrorCode = -2147220891 }));
         var rig = new Rig(world);
 
         var outcome = await rig.Relocator.RelocateIfMisplacedAsync(DocumentId, apply: true);
@@ -1073,6 +1125,7 @@ public class DocumentContainerRelocatorTests
         var outcome = await rig.Relocator.RelocateIfMisplacedAsync(DocumentId, apply: true);
 
         outcome.State.Should().Be(RelocationState.Failed);
+        outcome.TerminalCause.Should().Be(DocumentContainerRelocator.TerminalTooLarge, "#2159 B5: no repeat call can move it (#2176)");
         rig.Steps.Should().BeEmpty();
     }
 
@@ -1744,7 +1797,7 @@ public class DocumentContainerRelocatorTests
         faulty.Setup(a => a.GetUserAccessAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new TimeoutException("Dataverse unavailable"));
         var relocator = new DocumentContainerRelocator(rig.Resolver, world.EntityService!, rig.Spe.Object, rig.Indexing, rig.Locks,
-            faulty.Object, NullLogger<DocumentContainerRelocator>.Instance);
+            faulty.Object, NullLogger<DocumentContainerRelocator>.Instance, Rig.Configuration);
 
         var second = await relocator.RelocateDocumentsAsync([DocumentId], SecureContainer, RelocationPurpose.MakeSecure, apply: true);
 
@@ -2698,8 +2751,27 @@ public class DocumentContainerRelocatorTests
 
         outcome.State.Should().Be(RelocationState.Failed);
         outcome.Detail.Should().Contain("larger than a single-request copy");
+        outcome.TerminalCause.Should().Be(DocumentContainerRelocator.TerminalTooLarge, "#2159 B5: a version too large is permanent too");
         rig.Steps.Should().BeEmpty();
         world.Updates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AVersionListThatCannotBeRead_FailsTheMove_AndIsNotTerminal()
+    {
+        // #2159 B5 must not fire: every other history failure is retryable — a later run may read the list.
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(drive: CustomerBContainer, item: Item);
+        var rig = new Rig(world);
+        rig.Spe.Setup(s => s.ListFileVersionsAsync(CustomerBContainer, Item, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("graph is unavailable"));
+
+        var outcome = await rig.Relocator.RelocateIfMisplacedAsync(DocumentId, apply: true);
+
+        outcome.State.Should().Be(RelocationState.Failed, outcome.Detail);
+        outcome.Detail.Should().Contain("could not be listed");
+        outcome.TerminalCause.Should().BeNull();
+        rig.Steps.Should().BeEmpty();
     }
 
     [Fact]

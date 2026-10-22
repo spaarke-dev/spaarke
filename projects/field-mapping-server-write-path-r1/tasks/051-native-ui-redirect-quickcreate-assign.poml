@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Native UI: ribbon New opens the wizard, quick create off, OOB Assign hidden, Memo/KPI via BFF, -Verify script (FR-24)</title>
+    <phase>5 W5 Records created outside the product</phase>
+    <gate>050+029 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes ribbon XML, web resources and Dataverse table metadata; tags include frontend, ribbon, deploy, scripts; deploys to Dataverse.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Follows an existing ribbon override pattern with a prescriptive per-table checklist.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W5-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>050, 029</deps>
+    <tags>ribbon, webresource, dataverse, frontend, deploy, scripts</tags>
+    <estimated-effort>10-14 hours</estimated-effort>
+  </metadata>
+
+  <prompt>On every mapping-target table in the FR-24 list (task 050 decision), make the ribbon "New" button open that table's wizard (extend the `sprk_secure_child_ribbon.js` override pattern), turn quick create off, hide the OOB Assign command on standard-owned tables, and make Event "Add Memo" and "Add KPI" create through the BFF instead of quick-create forms. Add `scripts/Test-NativeCreateSurfaces.ps1 -Verify` that reports quick create off and Assign hidden per table. Dev only unless the owner explicitly approves further.</prompt>
+  <role>SPAARKE platform developer, Dataverse ribbon customization, web resources, PowerShell deployment scripts.</role>
+  <goal>On dev, ribbon New on each listed table opens the wizard; quick create is off; OOB Assign is hidden on standard-owned tables; Memo and KPI creation go through the BFF; `-Verify` exits 0 and names any table that fails.</goal>
+
+  <context>
+    <background>spec.md FR-24; owner Q5 (native UI redirect + repair pass) and Q12 (hide Assign now, remove `prvAssign` only after an audit - out of scope here). Task 050 fixed the live quick-create table list. The existing override pattern is sprk_secure_child_ribbon.js with infrastructure/dataverse/ribbon/SecureChildRibbons/ (Merge-SecureChildRibbon.ps1, secure-child-new.template.xml, README.md). Per-entity ribbon folders exist (MatterRibbons, ProjectRibbons, EventRibbons, InvoiceRibbons, WorkAssignmentRibbons, ...). Event ribbon commands and KPI actions have no dedicated JS file today: grep for "Add Memo"/"Add KPI" ribbon commands before creating one.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/client/webresources/js/sprk_secure_child_ribbon.js (override pattern to extend or copy)</file>
+      <file role="canonical-reference">infrastructure/dataverse/ribbon/SecureChildRibbons/ (Merge-SecureChildRibbon.ps1, secure-child-new.template.xml, README.md)</file>
+      <file role="canonical-reference">infrastructure/dataverse/ribbon/CreatePrivilegeRibbons/ (Set-CreatePrivilegeRibbon.ps1, create-launchers.json - existing create-launcher config)</file>
+      <file role="modify">infrastructure/dataverse/ribbon/MatterRibbons/, ProjectRibbons/, EventRibbons/, InvoiceRibbons/, WorkAssignmentRibbons/ (RibbonDiffXml per table in the FR-24 list)</file>
+      <file role="modify">src/client/webresources/js/sprk_secure_child_ribbon.js (or a sibling webresource for the non-secure New redirect; decide by reading the file)</file>
+      <file role="new">src/client/webresources/js/sprk_native_create_redirect.js (only if extending sprk_secure_child_ribbon.js would mix concerns; Event Memo/KPI BFF commands live here)</file>
+      <file role="new">scripts/Test-NativeCreateSurfaces.ps1 (-Verify per-environment check)</file>
+      <file role="canonical-reference">scripts/Backfill-RecordOwnership.ps1 (script shape: parameters, -WhatIf, logging)</file>
+      <file role="canonical-reference">projects/field-mapping-server-write-path-r1/notes/w5-open-questions.md (final table list from task 050)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="050" status="pending">Final FR-24 table list and live quick-create flags.</dependency>
+      <dependency task="029" status="pending">Every wizard (incl. Document Upload) is migrated so ribbon New lands on a server-mapped wizard.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="skill ribbon-edit">Scope: ribbon changes. Follow .claude/skills/ribbon-edit/SKILL.md (solution export, edit RibbonDiffXml, import); never hand-edit a deployed environment only; commit the ribbon XML under infrastructure/dataverse/ribbon/.</constraint>
+    <constraint source="skill dataverse-deploy">Scope: deployment. Follow .claude/skills/dataverse-deploy/SKILL.md for web resource and solution import. Deploy to dev only; any environment beyond dev requires explicit owner OK recorded in the task notes (root CLAUDE.md §5/§6).</constraint>
+    <constraint source=".claude/constraints/webresource.md">Scope: web resources. Follow the web resource constraints (naming, no inline secrets, Xrm usage); the Memo/KPI commands call the BFF through the existing authenticated client helper, not `Xrm.WebApi.createRecord`.</constraint>
+    <constraint source="ADR-002">Scope: invariants. Redirect and hiding are UX only; they own no invariant. The repair pass (task 052) remains the backstop for rows created natively.</constraint>
+    <constraint source="project">Scope: Assign. Hide the OOB Assign command only; do NOT remove `prvAssign` from roles (out of scope; audit filed in task 063).</constraint>
+    <constraint source="ADR-021">Scope: UI. Any UI shown (confirm or error message) uses Fluent tokens and works in dark mode.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse ribbon override; quick create; web resources</topic>
+    <files>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/constraints/webresource.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Metadata reads and writes for the quick-create flag.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; read spec FR-24, `notes/w5-open-questions.md` and the ribbon-edit and dataverse-deploy skills; confirm the table list; record that deployment is dev only.</step>
+    <step order="1">Read sprk_secure_child_ribbon.js and the SecureChildRibbons README; decide extend vs sibling web resource; record the choice.</step>
+    <step order="2">For each table in the list, edit its RibbonDiffXml: override the New button command to the redirect function (opens the wizard code page for that table, passing the regarding context when present); hide the OOB Assign command on standard-owned tables.</step>
+    <step order="3">Turn quick create off per table (solution metadata change via the ribbon-edit/dataverse-deploy path; if the table is managed, record the supported alternative). Replace Event "Add Memo" and "Add KPI" quick-create actions with BFF-backed commands.</step>
+    <step order="4">Write `scripts/Test-NativeCreateSurfaces.ps1` with `-Verify` (read-only; exit 0 only if every listed table reports quick create off and Assign hidden; print a table; non-zero names failing tables); idempotent; no secrets.</step>
+    <step order="5">Build and deploy web resources and ribbon to dev; run `-Verify`; run the UI tests below.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a table's ribbon or quick-create setting is in a managed solution that cannot be edited, or removing quick create breaks a lookup "+ New" flow used by another surface, STOP and escalate per CLAUDE.md §6 with options.</trigger>
+    <trigger>Any request to deploy beyond dev: stop and obtain explicit owner OK first.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Overlaps with sprk_secure_child_ribbon.js and the SecureChildRibbons / CreatePrivilegeRibbons tooling, which cover secure-child tables only; there is no existing per-environment check of quick-create and Assign state (grep Test-*.ps1 under scripts/ and infrastructure/dataverse/ribbon/ found none for this).</existing>
+    <extension>The ribbon override pattern is extended, not copied; the new web resource exists only if the secure-child file would otherwise mix unrelated concerns. The `-Verify` script has no existing home: Test-RibbonExportCurrent.ps1 checks ribbon export, not quick-create or Assign state.</extension>
+    <cost-of-doing-nothing>Without the redirect and the verify script, native New/quick-create/Assign keep creating rows that bypass the wizard, and FR-24's acceptance ("a scripted per-environment check reports...") cannot be demonstrated.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Ribbon New opens wizard"><steps><step>On dev, open the Matter, Project, Event, Invoice and Work Assignment grids and forms (light mode); click New on each</step></steps><expected>Each opens its wizard instead of a native or quick-create form; with a regarding context present, the wizard is pre-filed under it.</expected></test>
+    <test name="Assign hidden"><steps><step>Open a standard-owned table grid and record form command bar; open the overflow menu</step></steps><expected>The OOB Assign command is absent; Spaarke commands remain.</expected></test>
+    <test name="Event Add Memo and Add KPI via BFF"><steps><step>On an Event form, click Add Memo then Add KPI; check network calls and the created rows</step></steps><expected>Creation goes through the BFF route (no quick-create form, no direct Xrm createRecord); rows carry owner and stamp.</expected></test>
+    <test name="Dark mode (ADR-021)"><steps><step>Switch the app to dark theme; repeat the New redirect and observe any message UI</step></steps><expected>Wizards and any message UI render with Fluent tokens and no contrast or color regressions.</expected></test>
+  </ui-tests>
+
+  <tools><tool name="pac">Solution export/import (ribbon-edit, dataverse-deploy skills)</tool><tool name="pwsh">Run Test-NativeCreateSurfaces.ps1 -Verify</tool></tools>
+
+  <outputs>
+    <output type="code">infrastructure/dataverse/ribbon/ (per-table RibbonDiffXml changes)</output>
+    <output type="code">src/client/webresources/js/ (redirect and Memo/KPI commands)</output>
+    <output type="code">scripts/Test-NativeCreateSurfaces.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">On dev, ribbon New on every table in the FR-24 list opens that table's wizard (UI test evidence per table in the task notes).</criterion>
+    <criterion testable="true">`Test-NativeCreateSurfaces.ps1 -Verify` exits 0 on dev and reports quick create off and Assign hidden for each listed table.</criterion>
+    <criterion testable="true">Event "Add Memo" and "Add KPI" create through the BFF; no quick-create form opens for them.</criterion>
+    <criterion testable="true">Negative: with one table's quick create deliberately left on (or Assign visible) in a scratch check, `-Verify` exits non-zero naming that table; `prvAssign` is not removed from any role.</criterion>
+    <criterion testable="true">No environment beyond dev was changed (owner OK recorded if otherwise); ribbon XML and web resources are committed-ready; web resource build/tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-24, owner Q5/Q12. The repair pass (task 052) catches rows that still arrive natively (imports, API clients).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

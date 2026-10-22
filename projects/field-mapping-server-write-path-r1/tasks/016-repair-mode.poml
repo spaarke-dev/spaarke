@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Repair mode: fill-only, idempotent repair of an existing row (FR-14)</title>
+    <phase>2 W2 Unified RecordCreationService</phase>
+    <gate>015 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in Sprk.Bff.Api; tags include bff-api, ownership; Repair can change ownerid of existing rows (security-adjacent); adds tests at KEEP paths (TEST-MODIFYING override).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Idempotence and "never overwrite a present value" need careful reasoning, and an owner change on an existing row is a security-sensitive write.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits the RecordCreationService core shared with 014 and 015.</parallel-reason>
+    <deps>015</deps>
+    <tags>bff-api, dataverse, ownership, field-mapping, testing</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add a Repair mode to `RecordCreationService`: given an existing row (table + id), it applies, fill-only and idempotently, mapping (FR-02 semantics against the row's CURRENT values), the owner (only when the row is user- or app-owned and not a registry exception), the search-index default, and the I-1 stamp. Two consecutive repairs produce no second write; a present value is never overwritten. The scheduled repair pass (task 052) and the admin trigger call this mode; this task does not build them.</prompt>
+  <role>SPAARKE platform developer, .NET 10 BFF, Dataverse ownership and mapping. Follow ADRs strictly.</role>
+  <goal>`RecordCreationService.RepairAsync` reads the row once, computes the minimal fill-only patch, issues at most one update (zero when nothing is missing), and reports per-field outcomes; it always runs as the system principal (no caller checks) and is safe to re-run.</goal>
+
+  <context>
+    <background>spec.md FR-14, FR-25, NFR-03 (idempotency). Repair reuses steps 3, 7, 8 and 10 of the create pipeline but against the row's current values instead of a request payload. "Present" follows FR-02: scalars present unless absent/null/blank; lookups present when bound; booleans and option sets present unless absent. Owner is only changed when the current owner is a systemuser (user- or app-owned) and the table is not a registry ownership exception. The mapping source is inferred from the row's filed-under parent (task 003 resolver; app-only read for the system principal).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs (add RepairAsync; share step logic, do not copy it)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorStampReconciliationJob.cs (I-1 stamp logic and idempotent update pattern)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs (ResolveOwnerAsync ~:1016)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordTableRules.cs (exceptions, mapping-applies, search-indexed)</file>
+      <file role="new">tests/integration/data-mutation/RecordOwnership/RecordRepairModeTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="015" status="required">Record-first owner and search-index steps exist in the service.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008 (path A, spec ADR Tensions)">Scope: payload-dependent checks. Repair runs as the system principal, which skips the as-caller checks by design (FR-07); it adds no endpoint filter. The on-demand admin trigger's route-level authorization belongs to task 052, not here.</constraint>
+    <constraint source="ADR-019">Scope: results. Repair returns per-field outcomes (repaired / present / skipped with reason code) and a typed refusal for an unresolvable owner; no raw exception text in any returned value; detail goes to logs with the row id.</constraint>
+    <constraint source="ADR-028">Scope: identity. Repair uses the system principal and app-only reads/writes under the managed identity; it never impersonates and never runs with a caller token.</constraint>
+    <constraint source="ADR-010">Scope: DI. A method on the existing scoped service; no new registration.</constraint>
+    <constraint source="NFR-01 (spec)">Scope: owner and mapping repair. Fail closed: if the owner cannot be resolved, change nothing about the owner and report the typed refusal; never assign the BFF app user or an arbitrary team. A present value is never overwritten, including a value that differs from the mapping.</constraint>
+    <constraint source="NFR-03 (spec)">Scope: idempotency. Compute the patch against the freshly read row; if the patch is empty, issue ZERO writes. A second consecutive repair must produce no write. Do not retry blindly after an ambiguous failure.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: BFF publish. Placement Justification in the PR; fresh-master publish-size delta per §10.4; `dotnet list package --vulnerable --include-transitive`; no package.</constraint>
+    <constraint source="ADR-038">Scope: tests added by this task. Data-mutation test under tests/integration/data-mutation/RecordOwnership/ (KEEP path); no Mock&lt;HttpMessageHandler&gt;; no DI-registration tests. Cover the stated contract plus the named edge cases only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Idempotent fill-only repair; invariants I-1, I-3, I-5, I-6</topic>
+    <files>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Update payload shapes.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; read spec FR-14/FR-25/NFR-03; read CoreAncestorStampReconciliationJob for its read-compare-write shape; re-grep the pipeline step methods in RecordCreationService.</step>
+    <step order="1">Write failing data-mutation tests first: unmapped column filled; present column untouched even if it differs from the mapping; blank string scalar treated as not supplied (FR-02); owner repaired only when systemuser-owned and not an exception; team-owned row untouched; search index filled only when unset; I-1 stamp added when missing; two consecutive repairs give zero writes the second time; a registry-exception table keeps its owner.</step>
+    <step order="2">Refactor steps 3, 7, 8 and 10 so Create and Repair share the decision logic (inputs: current values), without changing Create behaviour; rerun task 013-015 tests.</step>
+    <step order="3">Implement `RepairAsync(table, id, ct)`: one retrieve of the row (needed columns only), compute the fill-only patch, issue one update when the patch is non-empty, return the per-field outcome report.</step>
+    <step order="4">Build; run the full RecordOwnership data-mutation folder, SecureChildOwnershipAiToolTests*, RouteAuthorizationGuardTests; publish-size delta; CVE check.</step>
+    <step order="5">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="6">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If an existing row has no filed-under parent, so no mapping source can be inferred, and the table is mapping-applicable, treat it as the silent no-op per FR-03 and record the count; if that appears to hide a real data defect, STOP and escalate per CLAUDE.md §6.</trigger>
+    <trigger>If Repair of the owner would move a row to a different business unit while the row has child records inheriting access, STOP and escalate with the table; do not decide.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Grep `class CoreAncestorStampReconciliationJob` (Services/Dataverse/CoreAncestorStampReconciliationJob.cs, I-1 only) and `SecureChildReconciliationJob` (Services/Access, secure children only): neither repairs mapping, owner or search index.</existing>
+    <extension>Yes for production code: Repair is a method on the service from task 013 sharing the Create step logic, so no new production file. The only new file is a test class; none of the existing RecordOwnership suites exercises an existing-row repair.</extension>
+    <cost-of-doing-nothing>Natively created, imported and agent-written rows never get mapping, search index or the standard owner; the repair pass (task 052) has nothing safe to call (spec section 11 table, FR-25).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs (RepairAsync)</output>
+    <output type="test">tests/integration/data-mutation/RecordOwnership/RecordRepairModeTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Repair of a row with an unmapped column fills it from the mapping (FR-02 semantics against the row's current values); a blank-string scalar counts as not supplied.</criterion>
+    <criterion testable="true">Two consecutive repairs of the same row issue ZERO writes the second time.</criterion>
+    <criterion testable="true">A present value is never overwritten, including a value that differs from what the mapping would produce.</criterion>
+    <criterion testable="true">Owner is repaired only when the row is user- or app-owned and its table is not a registry ownership exception; a team-owned row's owner is untouched.</criterion>
+    <criterion testable="true">Search-index default is filled only when unset; the I-1 stamp is added only when missing.</criterion>
+    <criterion testable="true">Negative: an unresolvable owner leaves ownerid unchanged, reports the typed refusal for that field, and still repairs the other fields; a registry exception table (unfiled communication) keeps its creator owner.</criterion>
+    <criterion testable="true">Negative: Repair never runs caller authorization checks and never impersonates; a test asserts it uses the system principal path (no WhoAmI call).</criterion>
+    <criterion testable="true">BFF build 0 errors; the tests from tasks 013-015, SecureChildOwnershipAiToolTests*, and RouteAuthorizationGuardTests pass unchanged; publish-size delta and CVE result recorded in the task notes.</criterion>
+    <criterion testable="true">ebilling-r1 (2026-10-21): repair writes stored rows with no pre-write step. When the invoice-family guard is on master (ebilling-r1 #1911), a repair write to a sprk_invoice or sprk_billingevent row calls InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync (app-only, D-96) before writing and skips the row with a logged reason on refusal. Test it with a must-fire case and a must-not-fire case. Do not widen pre-write rules to updates.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-14, FR-25, NFR-03. Forward-only selection (go-live watermark) is task 052's job; Repair itself operates on any row it is given.
+Completed 2026-10-21.
+- What landed: RecordCreationService.RepairAsync (new partial RecordCreationService.Repair.cs). One whole-row read; steps 7 (owner; systemuser-owned rows only, record-first via ResolveOwnerOverAsync/OwnerDecided), 3 (fill-only mapping), 8 (search index, only when the owner after repair is a team) and 10 (empty I-1 stamps) build one patch; one UpdateIfRowVersionMatchesAsync; an empty patch is zero writes; RefuseAppOnlyWrite before the write; membership cache invalidated after an owner write. Decision Records skipped (table_append_only); invoice family skipped until #1911 (TODO seam).
+- Never mapped by Repair (every table): secure flag, sprk_accesspermission, sprk_accessinheritance, sprk_securitybu, sprk_containerid (mapped_value_confers_access); the regarding pair (mapped_value_would_refile_pair); Assigned* and AccessConferringRegistry columns (mapped_value_assigns_access). A secure source maps only into an isolated row, fail closed.
+- #2188: owner chose option 1 (2026-10-21). Field-secured source columns are skipped via task 033's app-only metadata reader (seam SourceColumnsRepairMayCopy, TODO task 033); 052 hard-blocked on 033. #2188 guard has a per-member UnmaskedCallExemptions entry (RepairMappingAsync, Uses = 1); KnownCallSites = 3. #2170 guard member-keyed (UAC option c).
+- No production caller: RecordRepairReachabilityTests (IL scan, member-keyed, wrapper/method-group/lambda controls).
+- Reviews: opus adversarial pass + scoped re-checks; UAC-r2 condition (b) review found F1-1, F2-1, F3-1, F3-2, F4-1, F4-2, all fixed; UAC-r2 ACCEPT of the fix round (2026-10-21). K1 (DataverseUpdateHandler exemptions, now IL-asserted) and K2 (no post-create steps; access converges through the jobs, narrower not wider) recorded. The create-side matter-flag gap was filed as #2220 and fixed separately in #2223 (ef5912c7e8).
+- Open owner questions: cross-BU re-own on ownership-parent tables (currently skipped, record_repair.owner_moves_business_unit); whether Repair re-owns roots; SYSTEM/INTEGRATION-owned unfiled rows. Flagged for 052: K-3 (I-16 refresh after a stamp fill), K-1 (Money/unknown-column Default rules fail until 033).
+- Verified on the work branch at ccb732ceb6 (master ef5912c7e8 merged): sln 0/0, ArchTests 1347/1347, related suites 3492 passed / 7 skipped.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

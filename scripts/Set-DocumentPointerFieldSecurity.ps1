@@ -16,8 +16,13 @@
       -Target ReportCatalog              — sprk_report.sprk_pbi_reportid / sprk_workspaceid / sprk_datasetid /
                                            sprk_iscustom, the Power BI pointer the reporting module derives embed
                                            tokens, exports and deletes from (owner round 25 item 6).
-    Dry run by default; -Apply writes; -Verify checks. scripts/Set-ReportCatalogFieldSecurity.ps1 is the named entry
-    point for the second target.
+      -Target DocumentNarrowingLinks     — sprk_document.sprk_relatedcommunication / sprk_parentdocument, the two
+                                           links the external document narrowing walks (unified-access-control-r2
+                                           task 188, D7 §6.3 "remaining hole"): a user who clears either one on a
+                                           document from an internal-only email (or under a Restricted parent) makes
+                                           it visible to partners. Every writer is the BFF, app-only.
+    Dry run by default; -Apply writes; -Verify checks. scripts/Set-ReportCatalogFieldSecurity.ps1 and
+    scripts/Set-DocumentNarrowingFieldSecurity.ps1 are the named entry points for the second and third targets.
 
 .DESCRIPTION
     WHY. The BFF acts AS THE APPLICATION on what these columns name: it downloads a document's bytes from the item the
@@ -52,6 +57,10 @@
            ReportCatalog    — -BffWritesCatalogPointers: the BFF build that registers a catalog row WITHOUT the four
                               columns and stamps them app-only (task 166 f1) is deployed. The Reporting code page never
                               wrote them; until that BFF is live, POST /api/reporting/reports would be refused.
+           DocumentNarrowingLinks — EVIDENCE: no deployed JavaScript / HTML web resource writes either link (a Web API
+                              bind `sprk_RelatedCommunication@odata.bind` / `sprk_ParentDocument@odata.bind`, or a form
+                              getAttribute('<column>').setValue). No client ever wrote them (task 188 scan 2026-10-20:
+                              the only client uses are reads), so there is no cached-bundle confirmation.
       (p5) no sprk_fieldmappingrule, sprk_aitopicregistry or sprk_emailupdatefield row targets a locked column (maker
            configuration that writes outside the BFF; it would fail every write it drives once locked);
       (p6) the table is a ROOT component of -SolutionUniqueName with rootcomponentbehavior 0 (include all
@@ -126,7 +135,7 @@
 param(
     [Parameter(Mandatory)][string]$EnvironmentUrl,
     [Parameter(Mandatory)][string[]]$BffApplicationIds,
-    [ValidateSet('DocumentPointers', 'ReportCatalog')][string]$Target = 'DocumentPointers',
+    [ValidateSet('DocumentPointers', 'ReportCatalog', 'DocumentNarrowingLinks')][string]$Target = 'DocumentPointers',
     [string]$SolutionUniqueName = 'SpaarkeCore',
     [switch]$ClientNoLongerWritesPointers,
     [switch]$BffWritesCatalogPointers,
@@ -139,7 +148,8 @@ $EnvironmentUrl = $EnvironmentUrl.TrimEnd('/')
 if ($Apply -and $Verify) { throw '-Apply and -Verify are separate modes; run -Apply first, then -Verify.' }
 . (Join-Path $PSScriptRoot 'common/DataverseSolutionMembership.ps1')
 if ($Target -eq 'ReportCatalog' -and $ClientNoLongerWritesPointers) { throw '-ClientNoLongerWritesPointers applies to -Target DocumentPointers only.' }
-if ($Target -eq 'DocumentPointers' -and $BffWritesCatalogPointers) { throw '-BffWritesCatalogPointers applies to -Target ReportCatalog only.' }
+if ($Target -ne 'ReportCatalog' -and $BffWritesCatalogPointers) { throw '-BffWritesCatalogPointers applies to -Target ReportCatalog only.' }
+if ($Target -eq 'DocumentNarrowingLinks' -and $ClientNoLongerWritesPointers) { throw '-ClientNoLongerWritesPointers applies to -Target DocumentPointers only.' }
 $BffApplicationIds = @($BffApplicationIds | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 foreach ($id in $BffApplicationIds) { if (-not [Guid]::TryParse($id, [ref][Guid]::Empty)) { throw "-BffApplicationIds: '$id' is not a GUID." } }
 $Api = "$EnvironmentUrl/api/data/v9.2"
@@ -148,6 +158,9 @@ $Api = "$EnvironmentUrl/api/data/v9.2"
 $Targets = @{
     DocumentPointers = @{ Table = 'sprk_document'; Columns = @('sprk_graphdriveid', 'sprk_graphitemid', 'sprk_graphitemidbound', 'sprk_relocationpending', 'sprk_relocatedversions'); What = 'the document pointers (incl. the item-id copy) and the relocation record (ledger and version record)' }
     ReportCatalog    = @{ Table = 'sprk_report'; Columns = @('sprk_pbi_reportid', 'sprk_workspaceid', 'sprk_datasetid', 'sprk_iscustom'); What = 'the report catalog pointers' }
+    # Task 188 (D7 §6.3): the links ExternalDocumentNarrowing walks. The predicate reads them app-only on every surface, so a
+    # mask never opens a document; (p2) still keeps users and forms reading them (defence in depth).
+    DocumentNarrowingLinks = @{ Table = 'sprk_document'; Columns = @('sprk_relatedcommunication', 'sprk_parentdocument'); What = 'the document narrowing links (related communication, parent document)' }
 }
 $Table = $Targets[$Target].Table
 $Columns = $Targets[$Target].Columns
@@ -311,6 +324,34 @@ if ($Target -eq 'DocumentPointers') {
     elseif ($Apply) { Report 'FAIL' '(p4b) -ClientNoLongerWritesPointers not passed: a cached older bundle would still write the pointer, and every such upload would be refused once locked' }
     else { Report 'INFO' '(p4b) -ClientNoLongerWritesPointers is required for -Apply' }
 }
+elseif ($Target -eq 'DocumentNarrowingLinks') {
+    # (p4) EVIDENCE: no deployed JavaScript (3) / HTML (1) web resource writes either link. Reads are fine (a parent map, a
+    # filter); a write is a Web API bind on the navigation property or a form setValue on the column.
+    $writePatterns = @(
+        '(?i)sprk_(RelatedCommunication|ParentDocument)@odata\.bind',
+        '(?i)getAttribute\(\s*[''"`](sprk_relatedcommunication|sprk_parentdocument)[''"`]\s*\)\s*\.setValue'
+    )
+    $scanned = 0; $hits = 0
+    $next = "webresourceset?`$select=name,content,webresourcetype&`$filter=webresourcetype eq 1 or webresourcetype eq 3"
+    while ($next) {
+        $page = Invoke-DvGet $next @{ Prefer = 'odata.maxpagesize=25' }
+        foreach ($wr in @($page.value)) {
+            $scanned++
+            if (-not $wr.content) { continue }
+            $text = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($wr.content))
+            foreach ($pattern in $writePatterns) {
+                if ($text -match $pattern) {
+                    $hits++
+                    Report 'FAIL' "(p4) web resource '$($wr.name)' WRITES a narrowing link ('$($Matches[0])') — once locked that write is refused"
+                    break
+                }
+            }
+        }
+        $next = $page.'@odata.nextLink'
+    }
+    if ($scanned -eq 0) { Report 'FAIL' '(p4) no web resource was read — the scan is wrong, and an empty scan proves nothing' }
+    elseif ($hits -eq 0) { Report 'OK' "(p4) none of the $scanned deployed JavaScript / HTML web resources writes sprk_relatedcommunication or sprk_parentdocument" }
+}
 else {
     if ($BffWritesCatalogPointers) { Report 'OK' '(p4) operator confirms the BFF build that stamps the catalog pointer app-only (task 166 f1) is deployed' }
     elseif ($Apply) { Report 'FAIL' '(p4) -BffWritesCatalogPointers not passed: an older BFF registers catalog rows WITH the pointer as the caller, which the lock refuses' }
@@ -354,7 +395,8 @@ function Set-ColumnSecured([string]$Column, [bool]$Value) {
 function Write-MaskedRecovery([string]$Column, [string]$Cause) {
     Write-Host ''
     Write-Host "  !!! RECOVERY REQUIRED NOW — $Table.$Column may be field-secured WITHOUT its reader permission !!!" -ForegroundColor Red
-    Write-Host "  Every non-administrator then reads $Column EMPTY (files / reports stop opening)." -ForegroundColor Red
+    $consequence = if ($Target -eq 'DocumentNarrowingLinks') { 'users and forms then see no link; the narrowing itself reads app-only' } else { 'files / reports stop opening' }
+    Write-Host "  Every non-administrator then reads $Column EMPTY ($consequence)." -ForegroundColor Red
     Write-Host "  Cause: $Cause" -ForegroundColor Red
     Write-Host '  Do ONE of these, now: (1) fix the cause and re-run -Apply (it grants only what is missing on an already' -ForegroundColor Red
     Write-Host "  secured column), then -Verify; (2) or clear 'Enable column security' on $Table.$Column and publish $Table." -ForegroundColor Red
