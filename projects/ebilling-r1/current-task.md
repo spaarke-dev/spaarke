@@ -9,15 +9,15 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Wave W3-6 wrapping up (091 live check left), D-176 follow-ups (119 waits on ontology 157). Model FINAL (EB-D-148); 108 POMLs; draft PR #1911. |
-| **Status** | 080 ✅, 099 ✅, 115 + feeKind follow-up merged. 091 merged and applied on dev; only uac-r2 condition (c) is open (tag-write proof as the identity). |
-| **Next Action** | (1) When the owner runs (or authorises) the tag-write proof, send its output to uac-r2 and close 091 (POML status, TASK-INDEX). (2) On ontology's 157 F3 fix range: scoped re-check, PASS. Then ontology merges PR #2231, which unblocks 119 (launch via task-execute, opus/high). (3) Next waves: W3-7 088 (dev schema run, owner OK given), W3-8 081, 090. |
+| **Task** | Wave W3-6 wrapping up (091 live check left); 119 running (agent eb-119). Model FINAL (EB-D-148); 108 POMLs; draft PR #1911. |
+| **Status** | 080 ✅, 099 ✅, 115 + feeKind follow-up merged. 091 merged and applied on dev; only uac-r2 condition (c) is open (tag-write proof as the identity, owner asked to run it). ontology 157 merged (PR #2231, 2a020e05ff) and merged into work/ebilling-r1 (e81c833edc); FinanceStepZeroCaller moved out of Shared/ (b26aaece6e; all 5 test projects build). |
+| **Next Action** | (1) eb-119 (opus/high, worktree, branch task/ebill-119-review-withhold) reports: run the SECOND adversarial pass (auth), then send the range to uac-r2 AND to ontology-r1 (owner review), merge on ACCEPT/PASS, then broad tests + build all 5 test projects. (2) When the owner pastes the tag-write proof output, send it to uac-r2 and close 091 (POML status, TASK-INDEX). (3) Next waves: W3-7 088 (dev schema run, owner OK given), W3-8 081, 090. |
 
 ### Lanes
 | Task | State | Waiting on |
 |---|---|---|
 | 091 storage | Merged (d084f10a93). Dev: account `sprkspaarkedevebillsa` (rg-spaarke-dev), custom role + 3 container-scope grants to mi-bff-api-dev, scanning NOT enabled on dev (owner). Test-EbillingFileStoreRole.ps1 exit 0. Hand-off #2232 / DEF-034 filed and sent to customer-provisioning. | **uac-r2 (c):** `scripts/ebilling/test-ebilling-file-store-tag-write.sh` run AS mi-bff-api-dev (App Service SSH console, `az webapp ssh -g rg-spaarke-dev -n spaarke-bff-dev`), once per container; expect 201/403/403/200/202. Step 3 = 201 → STOP, tell uac-r2. 090 downloads stay off until it passes. |
-| 119 /review Duplicate withhold | POML updated: mirrors 157 (no exemption, agreed), calls `ShownAsync`, notes (9)-(13). | ontology 157 F3 (nextLink truncation) fix → our re-check → PR #2231 merged. |
+| 119 /review Duplicate withhold | Running: agent eb-119 (task-execute, FULL). POML: mirrors 157 (no exemption), calls `ShownAsync`, notes (9)-(13). | Agent result; then second adversarial pass, uac-r2 and ontology-r1 review. 157 reaches master with ontology's next docs→master sync; the WithheldSentence equality guard is ontology's, once both are on master. |
 | O-14 prototype | First cut in spaarke-prototype/projects/ebilling.r1 (localhost:5177). P-1/P-2 answered from the model; P-3 owner: not in R1 (applied). | 084/089 to correct its assumed DTOs (src/procedures/types.ts). |
 
 ### Done this session (details in git log)
