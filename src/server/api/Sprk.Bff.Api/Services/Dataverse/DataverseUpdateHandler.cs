@@ -66,8 +66,8 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         CancellationToken ct,
         Guid? impersonateSystemUserId = null)
     {
-        // unified-access-control-r2 task 189 fix round C (K5): this handler writes a playbook's output mapping app-only (the
-        // output orchestrator), so it never writes a document's Access Permission or its own-narrowing record; only the
+        // unified-access-control-r2 task 189 fix round C (K5): this handler writes a playbook's output mapping (the output
+        // orchestrator; app-only for a System run, as the runner for a person's run since #2257), so it never writes a document's Access Permission or its own-narrowing record; only the
         // document rule's writers do. Refused before anything is read or written. Task 188 round 4e: nor its D7 link columns
         // (sprk_parentdocument, sprk_relatedcommunication), set, cleared or bound (InheritedAccessPermission.DocumentLinkColumns).
         // #2251: nor any row of a table whose rows are access (grants, membership, ethical walls; AccessTables), nor a secure
