@@ -213,3 +213,17 @@ The 018b-1 inventory (`notes/task-018-notes.md`, "018b-1") left seven items open
 - **G5:** the service names the refusing lookup on a `NotFoundOrDenied` step-5 refusal (`RefusedColumn`), so Office can map the pair's record to `caller_cannot_file_under_parent` and the Assigned To contact to its own `assignedTo` code (pass 2). This is done with G1 and G2 in pass 018b-1s, before the swap. Never parse `Detail`.
 - **G6, reference-drop wording:** sign off. NFR-07 pins error codes and response shape, not warning text. The assertions take 018a's K-3 text. Release note: Office warning texts follow the service.
 - **G7, an unavailable mapping source:** sign off. FR-04 says a source the caller can't read gives no mapping and a warning, so Default rules no longer apply in that case. This happens only on a read fault, because `QuickCreateSourceAccessFilter` already refuses an unreadable source. Release note.
+
+## 2026-10-22 — G4: UAC-r2 concurs with option (a), on three conditions (condition (b))
+
+UAC-r2 accepts that with a secure source, only the derived pair is written, held by construction. The old 403 existed so a mapped pair could never file a secure-sourced record under a different parent. Fill-only mapping cannot write a pair, so that outcome is impossible. Isolation is unchanged: the Secure team owner and `sprk_issecure` through the step-6 plan, and the empty or unreadable flag is still refused with `record_owner_parent_undetermined`.
+
+Conditions, each tested in 018b and checked in UAC-r2's condition (b) review:
+
+1. **The derived pair also wins over the client.** Under a secure source, a regarding pair in the Office request body that differs from the derived pair is **refused with 403 `secure_source_filing_mismatch`**, and nothing is written. A client pair equal to the derived pair gives 201.
+2. **The skipped rule is visible.** The pair rule's `mapping_rule_skipped` reaches the Office response warnings, naming the rule or its columns.
+3. **Must-not-fire controls:**
+   - a secure source with no pair rule gives 201, secure, and no warning;
+   - a non-secure source with a pair rule keeps the non-secure behaviour (skipped with the same warning under fill-only), and the test states it.
+
+There is also the base test: a secure source with a pair rule gives 201, under the derived pair, secure, with the warning. Cite this entry in the 018b PR body.
