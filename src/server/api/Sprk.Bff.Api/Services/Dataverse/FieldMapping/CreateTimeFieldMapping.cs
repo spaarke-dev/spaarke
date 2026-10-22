@@ -115,7 +115,7 @@ internal static class CreateTimeFieldMapping
         List<string> warnings,
         ILogger logger,
         IReadOnlySet<string>? moneyAttributes = null)
-        => ApplyAll(rules, target, source, protectedAttributes, warnings, logger, moneyAttributes, callerSupplied: null);
+        => ApplyAll(rules, target, source, protectedAttributes, warnings, logger, moneyAttributes, callerSupplied: null, written: null);
 
     /// <summary>
     /// The FR-02 fill-only entry point: like <see cref="Apply"/>, but a mapped value is written only to a column the
@@ -132,6 +132,10 @@ internal static class CreateTimeFieldMapping
     /// rule's <c>TargetFieldType</c>. A rule targeting the regarding pair or a resolver field is refused with one warning
     /// (FR-05(e)); protected targets are refused exactly as in <see cref="Apply"/>.
     /// </summary>
+    /// <param name="mappedColumns">When given, every target column a rule WROTE is added to it (the rule's trimmed target
+    /// field) — the explicit origin set the unified create carries from step 3 to its caller checks (task 014, FR-08): a
+    /// column in it is "mapped", every other column of <paramref name="target"/> is the caller's. A supplied, guarded or
+    /// skipped column is never added.</param>
     internal static void ApplyFillOnly(
         IEnumerable<FieldMappingRuleEntity> rules,
         Entity target,
@@ -139,11 +143,12 @@ internal static class CreateTimeFieldMapping
         IReadOnlySet<string> protectedAttributes,
         List<string> warnings,
         ILogger logger,
-        IReadOnlySet<string>? moneyAttributes = null)
+        IReadOnlySet<string>? moneyAttributes = null,
+        ISet<string>? mappedColumns = null)
     {
         var ordered = rules.ToList();
         var callerSupplied = SnapshotSuppliedColumns(ordered, target, protectedAttributes);
-        ApplyAll(ordered, target, source, protectedAttributes, warnings, logger, moneyAttributes, callerSupplied);
+        ApplyAll(ordered, target, source, protectedAttributes, warnings, logger, moneyAttributes, callerSupplied, mappedColumns);
     }
 
     private static void ApplyAll(
@@ -154,13 +159,14 @@ internal static class CreateTimeFieldMapping
         List<string> warnings,
         ILogger logger,
         IReadOnlySet<string>? moneyAttributes,
-        IReadOnlySet<string>? callerSupplied)
+        IReadOnlySet<string>? callerSupplied,
+        ISet<string>? written)
     {
         foreach (var rule in rules.OrderBy(r => r.ExecutionOrder))
         {
             try
             {
-                ApplyRule(rule, target, source, protectedAttributes, warnings, moneyAttributes, callerSupplied);
+                ApplyRule(rule, target, source, protectedAttributes, warnings, moneyAttributes, callerSupplied, written);
             }
             catch (Exception ex)
             {
@@ -233,7 +239,8 @@ internal static class CreateTimeFieldMapping
         IReadOnlySet<string> protectedAttributes,
         List<string> warnings,
         IReadOnlySet<string>? moneyAttributes,
-        IReadOnlySet<string>? callerSupplied)
+        IReadOnlySet<string>? callerSupplied,
+        ISet<string>? written)
     {
         // Rule fields come off the Dataverse wire through a mapper, so `required` is not a runtime guarantee here.
         var targetField = rule.TargetField?.Trim();
@@ -277,16 +284,16 @@ internal static class CreateTimeFieldMapping
         switch (rule.MappingType)
         {
             case MappingTypeCopy:
-                ApplyCopy(rule, targetField, target, source, warnings);
+                ApplyCopy(rule, targetField, target, source, warnings, written);
                 return;
 
             case MappingTypeDefault:
-                ApplyDefault(rule, targetField, target, warnings, isMoney);
+                ApplyDefault(rule, targetField, target, warnings, isMoney, written);
                 return;
 
             case MappingTypeConcat:
             case MappingTypeTemplate:
-                ApplyExpression(rule, targetField, target, source, warnings, isMoney);
+                ApplyExpression(rule, targetField, target, source, warnings, isMoney, written);
                 return;
 
             default:
@@ -297,7 +304,7 @@ internal static class CreateTimeFieldMapping
     }
 
     private static void ApplyCopy(
-        FieldMappingRuleEntity rule, string targetField, Entity target, Entity? source, List<string> warnings)
+        FieldMappingRuleEntity rule, string targetField, Entity target, Entity? source, List<string> warnings, ISet<string>? written)
     {
         var sourceField = rule.SourceField?.Trim();
         if (source is null || string.IsNullOrEmpty(sourceField))
@@ -317,6 +324,7 @@ internal static class CreateTimeFieldMapping
             if (value is EntityReference reference && reference.Id != Guid.Empty)
             {
                 target[targetField] = new EntityReference(reference.LogicalName, reference.Id);
+                written?.Add(targetField);
                 return;
             }
 
@@ -327,10 +335,11 @@ internal static class CreateTimeFieldMapping
         target[targetField] = rule.TargetFieldType is FieldTypeText or FieldTypeMemo
             ? ToText(value, source, sourceField)
             : value;
+        written?.Add(targetField);
     }
 
     private static void ApplyDefault(
-        FieldMappingRuleEntity rule, string targetField, Entity target, List<string> warnings, bool isMoney)
+        FieldMappingRuleEntity rule, string targetField, Entity target, List<string> warnings, bool isMoney, ISet<string>? written)
     {
         if (string.IsNullOrEmpty(rule.DefaultValue))
         {
@@ -345,10 +354,12 @@ internal static class CreateTimeFieldMapping
         }
 
         target[targetField] = converted;
+        written?.Add(targetField);
     }
 
     private static void ApplyExpression(
-        FieldMappingRuleEntity rule, string targetField, Entity target, Entity? source, List<string> warnings, bool isMoney)
+        FieldMappingRuleEntity rule, string targetField, Entity target, Entity? source, List<string> warnings, bool isMoney,
+        ISet<string>? written)
     {
         var label = rule.MappingType == MappingTypeConcat ? "Concat" : "Template";
 
@@ -391,6 +402,7 @@ internal static class CreateTimeFieldMapping
         if (rule.TargetFieldType is FieldTypeText or FieldTypeMemo)
         {
             target[targetField] = resolved;
+            written?.Add(targetField);
             return;
         }
 
@@ -404,6 +416,7 @@ internal static class CreateTimeFieldMapping
         }
 
         target[targetField] = converted;
+        written?.Add(targetField);
     }
 
     private static IReadOnlyList<string> ExtractPlaceholderFields(string? expression)

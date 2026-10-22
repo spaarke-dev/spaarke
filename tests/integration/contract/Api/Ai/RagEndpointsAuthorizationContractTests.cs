@@ -497,7 +497,10 @@ public sealed class RagEndpointsAuthorizationContractTests : IClassFixture<Route
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         _fixture.IndexedFiles.Should().ContainSingle().Which.ParentEntity.Should().Be(parent);
-        _fixture.Access.RecordChecks.Select(c => c.EntitySetName).Should().BeEquivalentTo("sprk_documents", "sprk_workassignments");
+        // Task 188 round 4d (#2200): the document is decided on the Document path (its rights, then THE external document
+        // narrowing); the parent stays on the Record path.
+        _fixture.Access.RecordChecks.Select(c => c.EntitySetName).Should().BeEquivalentTo("sprk_workassignments");
+        _fixture.Access.DocumentChecks.Select(c => c.ResourceId).Should().BeEquivalentTo(WritableDocument.ToString());
     }
 
     [Theory]

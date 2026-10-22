@@ -57,7 +57,9 @@ public class AiAuthorizationServiceTests
     {
         var context = new Microsoft.AspNetCore.Http.DefaultHttpContext
         {
-            RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider()
+            // unified-access-control-r2 task 188 round 4a: a resolved INTERNAL systemuser, so THE external document narrowing
+            // makes no call here (AiDocumentNarrowingTests states the external caller).
+            RequestServices = Sprk.Bff.Api.Tests.TestInfrastructure.StatedNarrowingCaller.InternalCallerServices()
         };
         context.Request.Headers["Authorization"] = "Bearer mock-token";
         return context;

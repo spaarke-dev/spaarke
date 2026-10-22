@@ -62,9 +62,9 @@ public static class WorkspaceAiEndpoints
     /// <summary>
     /// Authorization declaration for <c>POST /api/workspace/ai/summary</c> (task 163): Read ("read") on the
     /// named record, for exactly the four types <see cref="WorkspaceAiService"/> supports (compared
-    /// case-insensitively). The entity set comes from the shared <c>EntityAccessFilter</c> map, including
-    /// <c>sprk_documents</c> for a document (Record path, the same rights question the document path asks, so
-    /// the evaluated entity set is explicit). An empty type, an empty id and an unsupported type are the
+    /// case-insensitively). A document is decided on the Document path (its rights, then the external document
+    /// narrowing; task 188 round 4c); the other three take the Record path over the shared <c>EntityAccessFilter</c>
+    /// map. An empty type, an empty id and an unsupported type are the
     /// handler's own 400s (same bodies), returned with NO rights query.
     /// </summary>
     internal static FinanceAuthorizationTargets ResolveSummaryTargets(EndpointFilterInvocationContext context)
@@ -114,14 +114,24 @@ public static class WorkspaceAiEndpoints
                 }));
         }
 
-        // sprk_document: the existing document entity-set constant (the shared EntityAccessFilter map holds
-        // the record types a document can be FILED under, not the document itself). The other three: that map.
-        string entitySet;
+        // sprk_document: the DOCUMENT path (task 188 round 4c, F1) — the caller's rights on the document and then THE
+        // external document narrowing (FinanceAuthorizationFilter → InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync),
+        // so a document the narrowing hides is the same uniform 404 as an unreadable one and the playbook never runs over
+        // its name or type. The Record path asked only the root grants. The other three types: the shared
+        // EntityAccessFilter map (the record types a document can be FILED under, not the document itself).
         if (string.Equals(request.EntityType, "sprk_document", StringComparison.OrdinalIgnoreCase))
         {
-            entitySet = FinanceAuthorizationFilter.DocumentEntitySet;
+            return FinanceAuthorizationTargets.Authorize(new FinanceAuthorizationCheck
+            {
+                Path = FinanceCheckPath.Document,
+                EntitySetName = FinanceAuthorizationFilter.DocumentEntitySet,
+                RecordId = request.EntityId,
+                Operation = "read",
+                Source = "body.entityId",
+            });
         }
-        else if (!EntityAccessFilter.TryResolveEntitySet(request.EntityType, out entitySet))
+
+        if (!EntityAccessFilter.TryResolveEntitySet(request.EntityType, out var entitySet))
         {
             // A supported type the shared map cannot resolve declares no check — denied, never passed.
             return FinanceAuthorizationTargets.Authorize();

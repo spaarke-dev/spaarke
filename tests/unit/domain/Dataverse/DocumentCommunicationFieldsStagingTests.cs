@@ -36,22 +36,25 @@ public class DocumentCommunicationFieldsStagingTests
         document.Contains("sprk_accesspermission").Should().BeFalse("a linked document keeps the default (Standard) value");
     }
 
-    private const string OwnRestrictedRecord = """{"v":1,"parents":[],"floorSecure":false,"floorPermission":100000000,"ownSecure":false,"ownPermission":100000002}""";
-
     [Fact]
     public void StageDocumentCommunicationFields_Restricted_WritesTheOptionSetValue_AndItsOwnNarrowingRecord_AndNoLink()
     {
+        // The request as the save-time writer leaves it when no communication could be identified (I-19).
+        var request = new CreateDocumentRequest { Name = "Status.eml", ContainerId = "b!c" };
+        Sprk.Bff.Api.Services.Office.OfficeDocumentPersistence.ApplyEmailCommunicationOutcome(request, relatedCommunicationId: null)
+            .Should().BeTrue();
         var document = new Entity("sprk_document");
 
-        DataverseServiceClientImpl.StageDocumentCommunicationFields(
-            document,
-            new CreateDocumentRequest
-            {
-                Name = "Status.eml", ContainerId = "b!c", AccessPermission = 100000002, AccessInheritanceRecord = OwnRestrictedRecord,
-            });
+        DataverseServiceClientImpl.StageDocumentCommunicationFields(document, request);
 
         document["sprk_accesspermission"].Should().BeOfType<OptionSetValue>().Which.Value.Should().Be(100000002, "Restricted");
-        document["sprk_accessinheritance"].Should().Be(OwnRestrictedRecord, "task 189: the value and its record in one write");
+        var staged = document["sprk_accessinheritance"].Should().BeOfType<string>().Subject;
+        staged.Should().Be(request.AccessInheritanceRecord, "task 189: the value and its record in one write");
+        var (record, unreadable) = Sprk.Bff.Api.Services.Access.AccessInheritance.Parse(staged);
+        unreadable.Should().BeFalse();
+        record!.OwnPermission.Should().Be(100000002);
+        record.OwnProvisional.Should().BeTrue(
+            "owner round 122: the save-time Restricted is provisional, so a later communication link releases it");
         document.Contains("sprk_relatedcommunication").Should().BeFalse();
     }
 

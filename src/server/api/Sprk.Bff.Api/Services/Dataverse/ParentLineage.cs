@@ -194,6 +194,20 @@ internal sealed class ParentLineageWalk
             _rows[(row.LogicalName.ToLowerInvariant(), row.Id)] = row;
     }
 
+    /// <summary>
+    /// Owner round 122: the rows of <paramref name="table"/> with <paramref name="ids"/>, as this walk holds them (its filing
+    /// lookups and value columns). A row it already read or remembered is not read again; the rest are read in one query per
+    /// chunk. A row that does not exist is left out. A read or metadata fault propagates.
+    /// </summary>
+    internal async Task<IReadOnlyList<Entity>> RowsAsync(string table, IReadOnlyCollection<Guid> ids, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(table);
+        ArgumentNullException.ThrowIfNull(ids);
+        var nodes = ids.Where(id => id != Guid.Empty).Distinct().Select(id => (Table: table.ToLowerInvariant(), Id: id)).ToList();
+        await LoadAsync(nodes, ct).ConfigureAwait(false);
+        return nodes.Select(n => _rows[n]).OfType<Entity>().ToList();
+    }
+
     /// <summary>The non-null filing parents of a row read with <see cref="ColumnsForAsync"/>'s columns.</summary>
     internal async Task<IReadOnlyList<(string Table, Guid Id)>> ParentsOfAsync(Entity row, CancellationToken ct)
     {
@@ -563,6 +577,23 @@ internal static class InheritedAccessPermission
     internal const string AppOnlyDocumentWriteReasonCode = "sdap.access.document_access_server_only";
 
     /// <summary>
+    /// Task 188 round 4e: the reason code when an app-only generic writer names one of a document's D7 link columns
+    /// (<see cref="DocumentLinkColumns"/>; <see cref="RefuseAppOnlyWrite"/>).
+    /// </summary>
+    internal const string AppOnlyDocumentLinkWriteReasonCode = "sdap.access.document_link_server_only";
+
+    /// <summary>
+    /// Task 188 round 4e: the document columns THE external document narrowing walks (D7 rules 3 and 4): its parent document
+    /// and the communication it comes from. They are visibility inputs, so re-pointing or clearing either one can show a
+    /// hidden document to partners. The same constants the predicate reads, so the two cannot drift.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> DocumentLinkColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDocumentNarrowing.ParentDocumentAttribute,
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDocumentNarrowing.RelatedCommunicationAttribute,
+    };
+
+    /// <summary>
     /// Task 189 fix round C (K5): an APP-ONLY generic writer never writes a document's <see cref="Column"/> or its
     /// own-narrowing record (<see cref="AccessInheritance.Column"/>). These writers are the Update Record playbook node and
     /// the action seam when they act for no person (<c>UpdateRecordActionCore</c>), and an AI output mapping
@@ -573,20 +604,35 @@ internal static class InheritedAccessPermission
     /// form, the user-OBO chat tools, and an update impersonating its user all run as that user. The field-mapping push also
     /// runs as its caller, but its rules are a configuration applied to every child it reaches, so it asks this too and
     /// skips such a rule on a document (the rest of the push applies; security pass 2).
+    /// <para>Task 188 round 4e: the same writers never write a document's D7 link columns either
+    /// (<see cref="DocumentLinkColumns"/>, refused with <see cref="AppOnlyDocumentLinkWriteReasonCode"/>), in any form: set,
+    /// cleared (a null), <c>{nav}@odata.bind</c> or <c>_{column}_value</c>, any case. Legitimate link changes go through the
+    /// re-file routes (<c>RecordOwnershipResolver.ReparentAsync</c>, caller-checked), the Office create (I-19, the link in the
+    /// create) and the BFF's own typed writers, none of which uses these paths. Every caller of the generic update is held to
+    /// this by <c>ExternalDocumentNarrowingGuardTests</c> (round 4e).</para>
     /// </summary>
     /// <returns>The refusal (nothing is written), or <see langword="null"/> when the write may proceed.</returns>
     internal static RecordOwnerResolution? RefuseAppOnlyWrite(string? table, IEnumerable<string> keys)
     {
         ArgumentNullException.ThrowIfNull(keys);
-        if (!RecordsOwnNarrowing(table?.Trim()))
+        var trimmed = table?.Trim();
+        var narrows = RecordsOwnNarrowing(trimmed);
+        var links = string.Equals(trimmed, Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDocumentNarrowing.DocumentTable, StringComparison.OrdinalIgnoreCase);
+        if (!narrows && !links)
             return null;
 
-        var named = keys.Select(SecureRootInheritance.NormalizeColumn)
-            .FirstOrDefault(k => k is Column or AccessInheritance.Column);
-        return named is null
-            ? null
-            : RecordOwnerResolution.Refused(AppOnlyDocumentWriteReasonCode,
+        var columns = keys.Select(SecureRootInheritance.NormalizeColumn).ToList();
+        if (narrows && columns.FirstOrDefault(k => k is Column or AccessInheritance.Column) is { } named)
+        {
+            return RecordOwnerResolution.Refused(AppOnlyDocumentWriteReasonCode,
                 $"{named} of a document is set by Spaarke (it keeps the document's own narrowing), so it was not written");
+        }
+
+        var link = links ? columns.FirstOrDefault(DocumentLinkColumns.Contains) : null;
+        return link is null
+            ? null
+            : RecordOwnerResolution.Refused(AppOnlyDocumentLinkWriteReasonCode,
+                $"{link} of a document is set by Spaarke (it decides whether partners may see the document), so it was not written");
     }
 
     /// <summary>What to hold and what to write on one row of a <see cref="RecordTables"/> table (task 189).</summary>
@@ -647,13 +693,23 @@ internal static class InheritedAccessPermission
     /// as its parent tightening to the same level reads as inherited, and the document follows the parent's later widening.
     /// With the record (the last inherited value) that edit is stricter than it, so it is the user's own. Each row without a
     /// record is written once (the sweep reaches the legacy rows), then not again while nothing changes.</para>
+    /// <para><b>A provisional narrowing is released by a link</b> (owner round 122). The save-time Restricted of an email that
+    /// could not be identified (<see cref="AccessInheritance.OwnProvisional"/>) counts as no own value once
+    /// <paramref name="communicationLinked"/> is true (<see cref="AccessInheritance.OwnPermissionOf(int, int?, AccessInheritance?, int, bool, out bool)"/>,
+    /// the one place). The decision then writes the inherited value and a record with no own value and no marker, in one
+    /// update; the release is one way. While it stands untouched, every record written keeps the marker; any other change of
+    /// the own value drops it.</para>
     /// </remarks>
     /// <param name="stored">The row's stored <see cref="Column"/>.</param>
     /// <param name="recordText">The row's stored <see cref="AccessInheritance.Column"/>.</param>
     /// <param name="parents">The row's non-null filing parents (<see cref="ParentLineageWalk.ParentsOfAsync"/>).</param>
     /// <param name="inherited">What its parents give it (<see cref="ResolveAsync"/>); ignored when it has none.</param>
+    /// <param name="communicationLinked">Owner round 122: the communication walk found a link for this document
+    /// (<c>ExternalDocumentNarrowing.FindCommunicationLinksAsync</c>). False when it found none, could not decide, or was not
+    /// asked; then nothing is released.</param>
     internal static DocumentDecision DecideDocument(
-        int? stored, string? recordText, IReadOnlyCollection<(string Table, Guid Id)> parents, int? inherited)
+        int? stored, string? recordText, IReadOnlyCollection<(string Table, Guid Id)> parents, int? inherited,
+        bool communicationLinked = false)
     {
         ArgumentNullException.ThrowIfNull(parents);
         var (record, unreadable) = AccessInheritance.Parse(recordText);
@@ -668,6 +724,10 @@ internal static class InheritedAccessPermission
         {
             var ownValue = storedRank > 0 ? stored : null;
             var parentless = new AccessInheritance(Array.Empty<string>(), false, Standard, false, ownValue);
+            // Round 122: a parentless row has no link, so a provisional narrowing is never released here. It stays
+            // provisional while its value is untouched.
+            if (record is { OwnProvisional: true } && record.OwnPermission == ownValue)
+                parentless = record.KeepingProvisionalWith(parentless);
             var writeParentless = record is null ? ownValue is not null : !parentless.SameAs(record);
             return new DocumentDecision
             {
@@ -681,13 +741,16 @@ internal static class InheritedAccessPermission
         if (inherited is null || floorRank < 0)
             return new DocumentDecision { Undetermined = "what its parents give it could not be decided" };
 
-        var own = AccessInheritance.OwnPermissionOf(storedRank, stored, record, floorRank);
+        var own = AccessInheritance.OwnPermissionOf(
+            storedRank, stored, record, floorRank, communicationLinked, out var stillProvisional);
         var targetRank = Math.Max(SecureRootInheritance.RankOf(own), floorRank);
         var target = SecureRootInheritance.PermissionOf(targetRank);
         var next = new AccessInheritance(
             parents.Select(p => $"{p.Table.Trim().ToLowerInvariant()}:{p.Id:D}")
                 .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(k => k, StringComparer.Ordinal).ToList(),
             false, SecureRootInheritance.PermissionOf(floorRank), false, own);
+        if (stillProvisional && record is not null)
+            next = record.KeepingProvisionalWith(next); // round 122: unreleased and untouched, so it stays provisional
         var writeRecord = record is null || !next.SameAs(record);
         return new DocumentDecision
         {

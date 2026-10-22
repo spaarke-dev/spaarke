@@ -52,6 +52,29 @@ internal static class RecordTableRules
         "modifiedby", "modifiedon", "modifiedonbehalfby",
         "overriddencreatedon", "importsequencenumber");
 
+    /// <summary>
+    /// The invoice family's core-record lookups on <c>sprk_invoice</c> and <c>sprk_billingevent</c> — ebilling-r1's
+    /// <c>InvoiceFamilyCoreRecordGuard.CoreRecordLookups</c> (<c>TypedMatterProjectPlusRegardingWorkAssignment</c>, on
+    /// <c>work/ebilling-r1</c>): a row of either names exactly ONE core record, so a field-mapping rule may not fill one
+    /// (ebilling-r1's review of task 013, 2026-10-21, item 3). Declared before <see cref="All"/>: static initialisers run
+    /// in textual order.
+    /// </summary>
+    private static readonly IReadOnlySet<string> InvoiceFamilyCoreLookups =
+        Columns("sprk_matter", "sprk_project", CoreAncestorResolver.StampColumnFor("sprk_workassignment"));
+
+    /// <summary>
+    /// The secure flag and the access columns of a secure root (matter, project): the BFF's own, written only through the
+    /// secure endpoints and the Secure Record setup, never by a field-mapping rule (#2220). Compile-time constants only, so
+    /// declaring them here cannot create a static-initialisation cycle. Declared before <see cref="All"/>.
+    /// </summary>
+    private static readonly string[] SecureRootAccessColumns =
+    [
+        SecurableEntityRegistry.SecureFlagAttribute,
+        InheritedAccessPermission.Column,
+        Sprk.Bff.Api.Services.Access.AccessInheritance.Column,
+        SecurableEntityRegistry.SecurityBusinessUnitAttribute,
+    ];
+
     /// <summary>Every registered table, in declaration order.</summary>
     internal static IReadOnlyList<RecordTableRule> All { get; } =
     [
@@ -64,7 +87,11 @@ internal static class RecordTableRules
             // Was Office RecordCreationService.MatterProtectedAttributes: the number (platform autonumber, task 076),
             // the load-bearing owner, the storage container (unified-access-control-r2 task 076 W1) and the creator
             // person (task 133).
-            MappingProtectedColumns = Columns("sprk_matternumber", "ownerid", "sprk_containerid", RecordCreatorPerson.Column),
+            //
+            // #2220: and the secure flag and access columns (SecureRootAccessColumns): the BFF's own on a matter, as on a
+            // project and a work assignment.
+            MappingProtectedColumns = Columns(
+                ["sprk_matternumber", "ownerid", "sprk_containerid", RecordCreatorPerson.Column, .. SecureRootAccessColumns]),
             // scripts/Set-RecordNumberingSchema.ps1: MAT-{SEQNUM:6}, alternate key sprk_MatterNumber.
             AutonumberColumn = "sprk_matternumber",
             ForPerson = new ForPersonLookup("sprk_assignedtointernal", "contact"),
@@ -85,8 +112,11 @@ internal static class RecordTableRules
             // Was Office RecordCreationService.ProjectProtectedAttributes: the same protections as a matter with the
             // project number, plus the secure flag (task 158 r1: the BFF's own). Per table on purpose: a merged set would
             // newly skip a rule targeting sprk_projectnumber on a MATTER create (task 031).
+            //
+            // #2220: and the access columns (SecureRootAccessColumns), so the Office path and the unified create protect the
+            // same four as a matter and a work assignment.
             MappingProtectedColumns = Columns(
-                "sprk_projectnumber", "ownerid", "sprk_containerid", RecordCreatorPerson.Column, "sprk_issecure"),
+                ["sprk_projectnumber", "ownerid", "sprk_containerid", RecordCreatorPerson.Column, .. SecureRootAccessColumns]),
             // scripts/Set-RecordNumberingSchema.ps1: PRJ-{SEQNUM:6}, alternate key sprk_ProjectNumber.
             AutonumberColumn = "sprk_projectnumber",
             ForPerson = new ForPersonLookup("sprk_assignedtointernal", "contact"),
@@ -107,7 +137,8 @@ internal static class RecordTableRules
             // container, the secure business unit it is isolated in, and its Access Permission. None is field-secured.
             // Enforced today ONLY by POST /api/v1/child-records/{table} for a root; the chat create tool does not refuse
             // them (#1608; task 012 notes, "Pre-existing path difference"). Which paths enforce them is task 013's decision.
-            TableServerOwnedColumns = Columns("sprk_containerid", "sprk_securitybu", "sprk_accesspermission"),
+            TableServerOwnedColumns = Columns(
+                "sprk_containerid", SecurableEntityRegistry.SecurityBusinessUnitAttribute, InheritedAccessPermission.Column),
             ForPerson = new ForPersonLookup("sprk_assignedtointernal", "contact"),
             ServerDefaults = [ChatCallerIsTheForPerson("sprk_assignedtointernal")],
         },
@@ -143,7 +174,14 @@ internal static class RecordTableRules
         new RecordTableRule { Table = "sprk_memo", Kind = RecordTableKind.Child },
         // ebilling-r1 #1911 (not on master): the invoice-family pre-write rule registers on this table, sprk_billingevent
         // and the other four invoice-family tables (task 012 notes, "Invoice-family reconciliation recipe").
-        new RecordTableRule { Table = "sprk_invoice", Kind = RecordTableKind.Child },
+        new RecordTableRule
+        {
+            Table = "sprk_invoice",
+            Kind = RecordTableKind.Child,
+            // Task 014 (ebilling-r1's review of 013, item 3): a fill-only mapping that filled a second core lookup would fail
+            // a valid create with multiple_core_records. The core record is the caller's to name.
+            MappingProtectedColumns = InvoiceFamilyCoreLookups,
+        },
         new RecordTableRule { Table = "sprk_reportcard", Kind = RecordTableKind.Child },
         new RecordTableRule { Table = "sprk_analysis", Kind = RecordTableKind.Child },
         new RecordTableRule
@@ -153,10 +191,20 @@ internal static class RecordTableRules
             // OWNER REVIEW: in no old list. Spec FR-10's acceptance names Document with Matter and Project; no create
             // path fills a document's search index today (grep sprk_searchindexname: only the Office Matter/Project create).
             SearchIndexed = true,
+            // Task 014 (unified-access-control-r2 D7 / #2169, 2026-10-21): the document's access record — the inherited
+            // floor and the document's own narrowing — is written by the BFF only, never by a field-mapping rule (the push
+            // skips it too, task 040). sprk_accesspermission is NOT here: it stays fill-only at create.
+            MappingProtectedColumns = Columns(Sprk.Bff.Api.Services.Access.AccessInheritance.Column),
         },
         new RecordTableRule { Table = "sprk_budget", Kind = RecordTableKind.Child },
         new RecordTableRule { Table = "sprk_kpiassessment", Kind = RecordTableKind.Child },
-        new RecordTableRule { Table = "sprk_billingevent", Kind = RecordTableKind.Child },
+        new RecordTableRule
+        {
+            Table = "sprk_billingevent",
+            Kind = RecordTableKind.Child,
+            // Task 014 (ebilling-r1's review of 013, item 3): as sprk_invoice.
+            MappingProtectedColumns = InvoiceFamilyCoreLookups,
+        },
 
         // ── Other server create tables named by the old lists ────────────────────────────────────────────────────────
 

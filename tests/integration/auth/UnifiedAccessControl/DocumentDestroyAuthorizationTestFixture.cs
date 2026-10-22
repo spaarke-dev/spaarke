@@ -66,6 +66,21 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
     public ConcurrentBag<string> DownloadedItemIds { get; } = new();
 
     /// <summary>
+    /// Task 188 slice D: how many child documents (<c>sprk_parentdocument</c>) a document id has. Both destroy paths read
+    /// it: C2's double answers <see cref="HasChildDocumentsDeleteResult"/> and C3's parent query returns that many rows.
+    /// Absent = none.
+    /// </summary>
+    public ConcurrentDictionary<Guid, int> ChildDocumentCounts { get; } = new();
+
+    /// <summary>
+    /// Task 188 slice D (security pass 2): document ids whose ROW delete Dataverse refuses with this SDK fault code, as if a
+    /// child appeared after the count (<c>0x80040227</c> CannotDeleteDueToAssociation). C3's double throws it from
+    /// <c>DeleteDocumentAsync</c>; C2's double answers <see cref="HasChildDocumentsDeleteResult"/> with the file gone
+    /// for <c>0x80040227</c>. Absent = the delete succeeds.
+    /// </summary>
+    public ConcurrentDictionary<Guid, int> RowDeleteFaultCodes { get; } = new();
+
+    /// <summary>
     /// A document id for which the access check THROWS. ADR-003 requires an errored check to deny;
     /// this is the only way a test can reach that catch block.
     /// </summary>
@@ -83,6 +98,8 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
         DeletedDataverseDocumentIds.Clear();
         UpdatedDataverseDocumentIds.Clear();
         DownloadedItemIds.Clear();
+        ChildDocumentCounts.Clear();
+        RowDeleteFaultCodes.Clear();
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -124,13 +141,16 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
                 sp.GetRequiredService<IConfiguration>(),
                 sp.GetRequiredService<TokenCredential>(),
                 NullLogger<DocumentCheckoutService>.Instance,
-                DeletedDocumentIds));
+                DeletedDocumentIds,
+                ChildDocumentCounts,
+                RowDeleteFaultCodes));
 
             // C3's destroy path.
             services.RemoveAll<IDocumentDataverseService>();
             services.AddSingleton<IDocumentDataverseService>(
                 new RecordingDocumentDataverseService(
-                    DeletedDataverseDocumentIds, UpdatedDataverseDocumentIds, (id, request) => OnDocumentUpdated?.Invoke(id, request)));
+                    DeletedDataverseDocumentIds, UpdatedDataverseDocumentIds, ChildDocumentCounts, RowDeleteFaultCodes,
+                    (id, request) => OnDocumentUpdated?.Invoke(id, request)));
 
             // C1's byte source. Substituted so a bulk-download test can assert WHICH documents' bytes
             // reached the zip — the only assertion that actually distinguishes "excluded by
@@ -328,6 +348,8 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
     private sealed class RecordingCheckoutService : DocumentCheckoutService
     {
         private readonly ConcurrentBag<Guid> _deleted;
+        private readonly ConcurrentDictionary<Guid, int> _childCounts;
+        private readonly ConcurrentDictionary<Guid, int> _rowDeleteFaults;
 
         public RecordingCheckoutService(
             HttpClient httpClient,
@@ -335,17 +357,30 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
             IConfiguration configuration,
             TokenCredential credential,
             ILogger<DocumentCheckoutService> logger,
-            ConcurrentBag<Guid> deleted)
+            ConcurrentBag<Guid> deleted,
+            ConcurrentDictionary<Guid, int> childCounts,
+            ConcurrentDictionary<Guid, int> rowDeleteFaults)
             : base(httpClient, speFileStore, configuration, credential, new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), logger,
                 // Only DeleteAsync is exercised (overridden); no preview/edit URL is minted.
                 TestRecordContainerResolver.ForBusinessUnitContainers())
         {
             _deleted = deleted;
+            _childCounts = childCounts;
+            _rowDeleteFaults = rowDeleteFaults;
         }
 
         public override Task<DeleteResult> DeleteAsync(
             Guid documentId, string correlationId, CancellationToken ct = default)
         {
+            // The real service refuses a parent BEFORE deleting anything (task 188 slice D).
+            if (_childCounts.TryGetValue(documentId, out var children) && children > 0)
+                return Task.FromResult<DeleteResult>(new HasChildDocumentsDeleteResult(children, correlationId));
+
+            // ... and maps Dataverse's Restrict refusal at the row, after the file went, to the same result with no count.
+            if (_rowDeleteFaults.TryGetValue(documentId, out var code)
+                && code == unchecked((int)0x80040227))
+                return Task.FromResult<DeleteResult>(new HasChildDocumentsDeleteResult(null, correlationId, FileGone: true));
+
             _deleted.Add(documentId);
 
             return Task.FromResult(DeleteResult.Success(
@@ -366,18 +401,34 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
     {
         private readonly ConcurrentBag<string> _deleted;
         private readonly ConcurrentBag<string> _updated;
+        private readonly ConcurrentDictionary<Guid, int> _childCounts;
+        private readonly ConcurrentDictionary<Guid, int> _rowDeleteFaults;
         private readonly Action<string, UpdateDocumentRequest> _onUpdated;
 
         public RecordingDocumentDataverseService(
-            ConcurrentBag<string> deleted, ConcurrentBag<string> updated, Action<string, UpdateDocumentRequest> onUpdated)
+            ConcurrentBag<string> deleted, ConcurrentBag<string> updated, ConcurrentDictionary<Guid, int> childCounts,
+            ConcurrentDictionary<Guid, int> rowDeleteFaults, Action<string, UpdateDocumentRequest> onUpdated)
         {
             _deleted = deleted;
             _updated = updated;
+            _childCounts = childCounts;
+            _rowDeleteFaults = rowDeleteFaults;
             _onUpdated = onUpdated;
         }
 
+        // Task 188 slice D: C3 counts a document's children before its delete.
+        public Task<IEnumerable<DocumentEntity>> GetDocumentsByParentAsync(Guid parentDocumentId, CancellationToken ct = default) =>
+            Task.FromResult(Enumerable.Range(0, _childCounts.TryGetValue(parentDocumentId, out var n) ? n : 0)
+                .Select(_ => new DocumentEntity { Id = Guid.NewGuid().ToString(), Name = "attachment" }));
+
         public Task DeleteDocumentAsync(string id, CancellationToken ct = default)
         {
+            // Task 188 slice D: the SDK's refusal, as ServiceClient raises it (a typed fault carrying the error code).
+            if (Guid.TryParse(id, out var guid) && _rowDeleteFaults.TryGetValue(guid, out var code))
+                throw new System.ServiceModel.FaultException<Microsoft.Xrm.Sdk.OrganizationServiceFault>(
+                    new Microsoft.Xrm.Sdk.OrganizationServiceFault { ErrorCode = code, Message = "Dataverse fault (test double)" },
+                    new System.ServiceModel.FaultReason("Dataverse fault (test double)"));
+
             _deleted.Add(id);
             return Task.CompletedTask;
         }
@@ -418,8 +469,6 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
         public Task<DocumentEntity?> GetDocumentByEmailLookupAsync(Guid emailId, CancellationToken ct = default) =>
             throw new NotSupportedException(NotModelled);
         public Task<DocumentEntity?> GetEmailArchiveByCommunicationAsync(Guid communicationId, CancellationToken ct = default) =>
-            throw new NotSupportedException(NotModelled);
-        public Task<IEnumerable<DocumentEntity>> GetDocumentsByParentAsync(Guid parentDocumentId, CancellationToken ct = default) =>
             throw new NotSupportedException(NotModelled);
         public Task<IEnumerable<DocumentEntity>> GetDocumentsByMatterAsync(Guid matterId, Guid? excludeDocumentId = null, CancellationToken ct = default) =>
             throw new NotSupportedException(NotModelled);

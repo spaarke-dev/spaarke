@@ -63,13 +63,17 @@ public class OfficeEmailDocumentCommunicationLinkTests
     // ── Must fire ──────────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>UAC-r2 task 189 (D7 T7a): a Restricted create carries the record that marks it the document's OWN narrowing,
-    /// so the reconciler never widens it to the parents' value.</summary>
+    /// so the reconciler never widens it to the parents' value. Owner round 122: that narrowing is PROVISIONAL, so once the
+    /// document is linked to a communication the reconciler releases it.</summary>
     private static void ShouldBeItsOwnRestriction(CreateDocumentRequest created)
     {
         var (record, unreadable) = AccessInheritance.Parse(created.AccessInheritanceRecord);
         unreadable.Should().BeFalse();
         record.Should().NotBeNull("the Restricted is written with its sprk_accessinheritance record in the same create");
         record!.OwnPermission.Should().Be(Restricted);
+        record.OwnProvisional.Should().BeTrue(
+            "round 122: the save-time Restricted is provisional (AccessInheritance.OwnNarrowingUntilEmailIdentified), " +
+            "so a later link releases it");
     }
 
     [Fact]

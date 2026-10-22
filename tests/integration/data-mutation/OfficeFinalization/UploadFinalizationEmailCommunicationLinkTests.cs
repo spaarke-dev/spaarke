@@ -96,11 +96,12 @@ public class UploadFinalizationEmailCommunicationLinkTests
     }
 
     /// <summary>UAC-r2 task 189 (D7 T7a): the record that marks a Restricted as the document's OWN narrowing. This fixture
-    /// mocks the create, so the stager's refusal never runs here; the record is asserted on the request instead.</summary>
+    /// mocks the create, so the stager's refusal never runs here; the record is asserted on the request instead. Owner round
+    /// 122: the save-time narrowing is PROVISIONAL (released once the document is linked to a communication).</summary>
     private static bool IsItsOwnRestriction(CreateDocumentRequest created)
     {
         var (record, unreadable) = Sprk.Bff.Api.Services.Access.AccessInheritance.Parse(created.AccessInheritanceRecord);
-        return !unreadable && record?.OwnPermission == Restricted;
+        return !unreadable && record?.OwnPermission == Restricted && record.OwnProvisional;
     }
 
     [Theory]

@@ -174,3 +174,17 @@ touch DecisionCommitService. ebilling sends the shas when the range lands; rebas
   - K-4, SystemPrincipal narrowing, and the document access columns → 017;
   - K-5: a fault after the create leaves an isolated row unshared, the same as the route today (accepted).
 - **Owner, before 017:** caller-refused columns on projects and matters (#1608).
+
+## 2026-10-21 — UAC-r2 review of 014 (fad68a797b..13e6919692)
+
+- **Passed:** step 3 and step 5; `server_set_filing_lookup` 500; D7 for mapping; keeping the 403 for a field-secured
+  mapped filing lookup (not an oracle).
+- **Fix now (014 fix round 3):**
+  - F-A: a (table, id) callback-key test; the 013-r2 test's because-text is stale;
+  - F-B: decide "filing" with `ParentsOf`'s predicate. `sprk_workassignment.sprk_regardingcommunication` falls through
+    today. A mapped match refuses, which closes K-5.
+- **#2188:** live on master through the Office quick-create. Office hotfix PR; the service half is in 014 fix round 3.
+  Read as the caller and do not build a per-column check.
+- **Carried:** K-1 (the K-2 guard runs after step 3's reads); K-2 (document access columns on the system path → 017);
+  K-3 → UAC #2190 (`sprk_regardingcommunication` is missing from the root plan's filing columns); K-4 ("from chat" text
+  and the technical 500 detail → owner and 017).

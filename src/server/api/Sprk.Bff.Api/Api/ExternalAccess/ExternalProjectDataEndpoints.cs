@@ -681,10 +681,10 @@ public static class ExternalProjectDataEndpoints
         //     downloaded it through P's route.
         var document = await dataService.GetDocumentParentAndNameAsync(parentKind, documentId, ct);
         var documentName = document.DocumentName;
-        if (!await IsDocumentReadableUnderAsync(document, id, callerContext, dataService, ct))
+        if (!await IsDocumentReadableUnderAsync(document, documentId, id, callerContext, dataService, ct))
         {
             logger.LogWarning(
-                "[EXT-DOWNLOAD] Contact {ContactId} denied — document {DocumentId} not in {ParentKind} {ParentId}, or also filed to a secure record the caller cannot read",
+                "[EXT-DOWNLOAD] Contact {ContactId} denied — document {DocumentId} not in {ParentKind} {ParentId}, also filed to a secure record the caller cannot read, or hidden by the document narrowing",
                 callerContext.ContactId, documentId, parentKind, id);
             return DenyDocumentNotUnderParent(parentKind);
         }
@@ -1481,12 +1481,14 @@ public static class ExternalProjectDataEndpoints
 
     /// <summary>
     /// The single-document check (download, versions): the document is under the route parent AND the caller holds Read on
-    /// every SECURE root it is filed to (<see cref="ExternalMultiRootRule"/>, owner decision 2026-10-12, option B). The
-    /// secure flags of its unreadable linked roots are read app-only, only once the document is known to be under the
-    /// route parent; a document not under it is refused without that read.
+    /// every SECURE root it is filed to (<see cref="ExternalMultiRootRule"/>, owner decision 2026-10-12, option B) AND
+    /// (task 188, D7) the document narrowing does not hide it (<see cref="ExternalDataService.IsDocumentVisibleAsync"/>: own
+    /// or ancestor Restricted, or an internal-only / non-Open communication on the bounded parent walk). The secure flags
+    /// of its unreadable linked roots are read app-only, only once the document is known to be under the route parent; a
+    /// document not under it is refused without that read, and one the root rule refuses without the narrowing read.
     /// </summary>
     private static async Task<bool> IsDocumentReadableUnderAsync(
-        ExternalDataService.DocumentScopeRead document, Guid routeParentId, CallerPrincipal caller,
+        ExternalDataService.DocumentScopeRead document, Guid documentId, Guid routeParentId, CallerPrincipal caller,
         ExternalDataService dataService, CancellationToken ct)
     {
         if (!document.IsUnder(routeParentId))
@@ -1497,13 +1499,17 @@ public static class ExternalProjectDataEndpoints
         var roots = document.Roots.RuleInput(live);
         var flags = await dataService.ReadSecureRootFlagsAsync(
             caller, new[] { (IEnumerable<(ExternalGrantRootType, string?)>)roots }, ct);
-        return document.IsReadableUnder(routeParentId, caller, flags, live);
+        if (!document.IsReadableUnder(routeParentId, caller, flags, live))
+            return false;
+        // Task 188: the same refusal for a document the narrowing hides, so the answer cannot tell why.
+        return await dataService.IsDocumentVisibleAsync(caller, documentId, document, ct);
     }
 
     /// <summary>
-    /// The ONE response for "this document is not (readably) under this record": not filed to the route's parent, absent, or
-    /// (fix round for task 039) also filed to a secure root the caller cannot read. A single body for all three, so the
-    /// refusal cannot be used to probe whether a document exists or where else it is filed.
+    /// The ONE response for "this document is not (readably) under this record": not filed to the route's parent, absent,
+    /// (fix round for task 039) also filed to a secure root the caller cannot read, or (task 188) hidden by the document
+    /// narrowing. A single body for all four, so the refusal cannot be used to probe whether a document exists, where else
+    /// it is filed or why it is hidden.
     /// </summary>
     private static IResult DenyDocumentNotUnderParent(ExternalDataService.DocumentParentKind parentKind) =>
         Results.Problem(statusCode: 403, title: "Forbidden",
@@ -2090,10 +2096,10 @@ public static class ExternalProjectDataEndpoints
         // Fix round for task 039 (ExternalMultiRootRule, owner option B): as the download route, a document also filed to a
         // SECURE root the caller cannot read is the same uniform 403 as one not under this parent.
         var document = await dataService.GetDocumentParentAndNameAsync(parentKind, documentId, ct);
-        if (!await IsDocumentReadableUnderAsync(document, id, callerContext, dataService, ct))
+        if (!await IsDocumentReadableUnderAsync(document, documentId, id, callerContext, dataService, ct))
         {
             logger.LogWarning(
-                "[EXT-VERSIONS] Contact {ContactId} denied — document {DocumentId} not in {ParentKind} {ParentId}, or also filed to a secure record the caller cannot read",
+                "[EXT-VERSIONS] Contact {ContactId} denied — document {DocumentId} not in {ParentKind} {ParentId}, also filed to a secure record the caller cannot read, or hidden by the document narrowing",
                 callerContext.ContactId, documentId, parentKind, id);
             return DenyDocumentNotUnderParent(parentKind);
         }
@@ -2619,7 +2625,8 @@ public static class ExternalProjectDataEndpoints
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            // DeleteAsync throws only from its token and document read, before anything is deleted. An HttpClient timeout
+            // DeleteAsync throws only from its token, document read and child-document read (task 188 slice D), before
+            // anything is deleted. An HttpClient timeout
             // is a TaskCanceledException while ct is NOT cancelled: that is a failed read (503), not the caller leaving.
             logger.LogError(ex, "[EXT-DELETE] Document {DocumentId} could not be read for the delete", id);
             return DeleteOwnUnavailable();
@@ -2637,6 +2644,16 @@ public static class ExternalProjectDataEndpoints
                 return Results.Problem(statusCode: 409, title: "Document checked out",
                     detail: "This document is being edited, so it cannot be deleted now. Nothing was deleted.",
                     extensions: new Dictionary<string, object?> { ["reasonCode"] = "document_locked" });
+
+            case HasChildDocumentsDeleteResult hasChildren:
+                // Task 188 slice D: other documents name this one as their parent. No count on this plane: a child the
+                // caller cannot see (D7) must not be counted to them. FileGone: Dataverse's Restrict refused the row
+                // after the file went (a child created after the pre-check); the row is kept.
+                logger.LogInformation(
+                    "[EXT-DELETE] Document {DocumentId}: refused, it has child documents; file already gone: {FileGone}",
+                    id, hasChildren.FileGone);
+                return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.DocumentHasChildDocuments(
+                    childCount: null, fileGone: hasChildren.FileGone);
 
             case FileNotDeletedDeleteResult notDeleted:
                 return Results.Problem(statusCode: notDeleted.FailureStatusCode, title: "Document not deleted",

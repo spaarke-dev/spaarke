@@ -1,66 +1,97 @@
 # Current Task — field-mapping-server-write-path-r1
 
-> **Last updated**: 2026-10-21
-> **Phase**: Wave 2. Done (10/43): 001–006, 010–013. W1 complete except 005's live -Apply (owner OK). 013 awaiting UAC-r2 and ebilling-r1 review.
+> **Last updated**: 2026-10-21 (016 ✅, UAC-r2 ACCEPT; PR to master next. #2220 fixed on master via #2223)
+> **Phase**: Wave 2. Done (13/43): 001–006, 010–016. On master: 001–006, 010–015, #2191, #2223 (ef5912c7e8, #2220).
+> 016 is on the work branch, with its PR to master in progress.
 
 ## Quick Recovery
 
 | Field | Value |
 |---|---|
-| **HEAD** | work branch with `task/fm-013` (bad3195920..123b632315) and fix round 2 `task/fm-013-r2` (fad68a797b..36d885f72f) merged. Verified: sln 0/0, ArchTests 1214, targeted suites 2208 passed / 7 skipped |
-| **Running** | the 014 agent (opus/xhigh, branch `task/fm-014`, base fad68a797b). It will need to merge with fix round 2: the Office file rename and the pipeline seam harness line |
-| **Next Action** | (1) Wait for the UAC-r2 and ebilling-r1 reviews of 013 (requested 2026-10-21). (2) Owner decisions: the 013 step-10 order, #1608, OWNER/017 and OWNER/017-018 (task-013-notes), and 005's -Apply. (3) Start **014** (deps 002, 003, 013 done; opus/xhigh): check its POML criteria, including the UAC-r2 D7 accessinheritance one, moneyAttributes for #2124, the Office pair, and FR-08 filing refusal |
+| **HEAD** | work branch `ccb732ceb6` = 016 (incl. fix round 73ef4e0845, merged as 33e36aafb9) + master ef5912c7e8. Verified: sln 0/0, ArchTests 1347/1347, related suites 3492 passed / 7 skipped. Pushed |
+| **016 state** | ✅ complete. UAC-r2 condition (b) found F1-1..F4-2; all fixed; UAC-r2 ACCEPT of the fix round. POML notes carry the summary. Draft PR body: scratchpad `pr-016.md` (update counts, master sha, the UAC line, the never-map codes, F2-1) |
+| **Running** | Publish delta ef5912c7e8 vs ccb732ceb6 (`C:\tmp\g16m`, `C:\tmp\g16a`; the script removes them) + CVE |
+| **Next Action** | (1) PR 016 → master; merge on Router + Client lint green and the full rollup explained (Tier 2 ADR job times out: #2224) → send UAC-r2 the merge SHA → portfolio sync (Tasks Completed = 13). (2) If #2221 lands first, add the `EmailArchiveCommunicationLinkSweepJob.LinkAsync` exemption (below). (3) Then 017/018. **Don't ask R3 to deploy**; UAC-r2 batches the candidate (016 + #2221 + #2223), and a BFF deploy needs the owner's go in R3's session |
+
+## Key facts since the last checkpoint
+
+- **#2191 (the #2188 Office hotfix) merged** as 583f90c1d9 after UAC-r2 ACCEPT and green CI; deployed to dev by R3.
+  - The source is read as the caller (design D mask).
+  - K2: the pair is derived from the source; under a secure source only the derived pair is accepted
+    (`secure_source_filing_mismatch` 403).
+  - AppendTo is checked on the derived pair for every source (`caller_cannot_file_under_parent`).
+  - An empty secure flag is not retryable.
+  - The guard is a Roslyn syntax walker (`Microsoft.CodeAnalysis.CSharp` 5.9.0 in ArchTests).
+  - A mask inside a local function, lambda or anonymous method doesn't count outside it.
+  - `global using` and csproj `<Using>` imports of the engine are violations.
+- **#2188 CLOSED** citing 583f90c1d9 and cf0886360a. #1614/#1617 stay OPEN deliberately (no live route uses the
+  unified create yet; the Office mapped-X gap is live until 018); closing them is an 018 criterion.
+- **R3 deploy OKs given:** 84291ecea8, 583f90c1d9 (live), 446c83d927, f1b3dadcf5. The 30-minute reading after #2191
+  was clean, with 0 new refusals logged (no Office quick-create run yet).
+- **014 step 3** (`RecordCreationService.Mapping.cs`) now masks the source through `MappingSourceCallerMask.ApplyAsync`
+  (`KnownCallSites` = 2).
+- **015:** UAC-r2 ACCEPT on condition (b). K1 (a step-7 catalog fault test) and K3 (the search-index bind-key case) are
+  blocking criteria on 017/018. #2206 (the stamped index isn't re-derived on owner change) is pre-existing.
+- **033** owns the APP-ONLY column-metadata reader for system-principal creates AND Repair (criterion added).
+  **052 is hard-blocked on 033** (TASK-INDEX deps 016, 033, 050).
+- **#1617:** confirmed live on Office for a mapped filing lookup naming a DIFFERENT ordinary record X (no AppendTo on
+  X); closed by 018 moving Office onto the unified create.
 
 ## How wave-2 agents are run (lessons)
 
-- `isolation: worktree` creates the worktree from **origin/master**, not this branch. Every brief must start with
-  `git switch -c task/fm-NNN <current tip sha>` and a check that the POML exists.
-- Agents commit on `task/fm-NNN`. The main session merges with `--no-ff`, runs the solution build, ArchTests and the
-  security/field-mapping suites, then marks the POML and TASK-INDEX and pushes.
-- New tests go under `tests/unit/domain/**` or `tests/integration/auth/**` (testing.md:132), never the POML's
-  `tests/unit/Sprk.Bff.Api.Tests/...` path.
-- Publish baseline: rebuild master fresh when origin/master has moved. Last fresh master build:
-  39,290,595 B at 28274e04e.
+- `isolation: worktree` cuts from **origin/master**. Every brief starts with `git switch -c task/fm-NNN <tip>`.
+- **Nested-agent limit:** launch the adversarial-reviewer passes from the main session.
+- When an agent stops, resume it with SendMessage(agentId) for its fix round; it keeps context.
+- Tests go under KEEP paths. The full `Sprk.Bff.Api.Tests` run shows load flakes; rerun failures alone.
+- **After ANY master merge into the work branch, run the full ArchTests AND the related suites, not just the test
+  you expect to fail.** (2026-10-21: a 015 test broke on the #2191 merge and was only caught by the next agent.)
+- A stale ArchTests DLL can show a false census failure after a merge; rebuild before trusting it.
+- `Remove-WorktreeSafe.ps1` from Bash mangles backslash paths; call it through PowerShell.
 
 ## Open items for the owner
 
-1. **HIPC DEV 2 map removal:** the heliosip pac profile token has expired. The owner must re-authenticate
-   (`pac auth create --environment https://hipc-dev-2.crm.dynamics.com`) before the removal can run.
-   model1-prod's copy is managed and goes with the next managed SpaarkeMaster upgrade (verify then). The demo
-   environment no longer exists.
-2. **#2137 timing leak:** the quick-create filter sites and `TodoSourceAccessFilter` need an owner decision on where
-   to fix them. The push site is in task 040.
-3. **005 live migration (dev):** `scripts/Set-FieldMappingRuleSyncMode.ps1 -Apply` needs the owner's OK. Dry run: 25 Copy
-   rules, 21 would change (20 empty, 1 One-time), 4 already Manual Refresh. After the apply: rerun `-Apply` (expect 0
-   changes) and `-Verify` (expect exit 0); record both in task-005-notes. Seeder gap: DI-003 / #2181 (task 040).
-4. **012 OWNER REVIEW items, for 013–015:**
-   - Document is marked search-indexed (FR-10) but no create path fills it today.
-   - Mapping applies by default to memo, budget, KPI assessment, billing event and communication.
-   - The per-path server defaults.
-   - The #1608 work assignment gap: the route refuses its container, securitybu and access permission; the chat
-     create tool allows them. The owner decides in 013.
+1. ~~Repair field security~~: DECIDED 2026-10-21, option 1 (notes/decisions.md); implemented in 016, the skip lands in 033.
+2. **016 owner questions:**
+   - cross-BU owner moves on ownership-parent tables (recommend keeping the skip and having 052 report the count);
+   - whether Repair re-owns roots at all;
+   - whether SYSTEM- and INTEGRATION-owned unfiled rows are refused instead of moved.
+3. **Post-deploy live smoke of #2191 on dev:** Office quick-create of a Project from an ordinary Matter, ideally as a
+   user without a field-security profile.
+   - It should be created and filed under the matter, with mapped values.
+   - A secured column should stay empty.
+   - `sprk_issecure` should come back null, not false.
+4. **005 `-Apply` on dev:** 21 of 25 Copy rules move to Manual Refresh; then `-Apply` again (expect 0) and `-Verify`.
+5. **FR-06 step 10:** UAC-r2's text is recommended. It blocks re-pointing pre-create stamp writers in 017/018.
+6. **Before 017:** #1608 columns; the chat matter/project number (recommend refusing it); SystemPrincipal.
+7. **014:** confirm the 403 for a mapped filing lookup that fails field security (UAC recommends keeping it).
+8. **015:** document index precedence; the Office index until 018; the unfiled-communication refusal; the census gap.
+9. **#2137** (the push half is in 040). **HIPC DEV 2** map removal after `pac auth create`. Verify model1-prod after
+   the next managed upgrade.
+10. **Prod deploy of #2191:** first check prod for matters and projects with a null `sprk_issecure`, and for active
+    `sprk_recordtype_ref` rows for both tables (dev: 0 null, both rows active).
 
 ## Cross-project obligations
 
 - **UAC-r2:**
-  - cleared 011 (decisions.md);
-  - 017 goes to them before merge;
-  - any refusal-code, owner or post-create-order change pings them before merge;
-  - K2 (no shared member names) is an acceptance criterion of 013.
-- **ebilling-r1:**
-  - send the 012 reconciliation recipe (notes/task-012-notes.md) and the registry rule for review;
-  - they review 025 and 032;
-  - the second lander reconciles the invoice-family guard;
-  - they will send the shas of their SignalWriter/DecisionRecordWriter range.
-- **ontology-r1:** 033 needs a design-note review first. Signal, Decision Record and Budget Revision carry the
-  `OntologyContentIsNotMapped` exclusion.
-- **Ongoing:** check with external-access-r3 before any dev BFF deploy (019); they check with us before theirs.
+  - ACCEPTed the 014 mask (merged in #2214); deciding on the #2170 per-type ratchet vs 016;
+  - reviews the 016 diff before merge (Decision Record exception, document column skip, owner outcomes);
+  - reviews 017/018 on condition (b);
+  - holds #2190 and #2169;
+  - pending ArchTest #2170 (`EveryGenericUpdateWriter_AsksTheAppOnlyRefusal`) will cover Repair's write.
+  - **#2221 (UAC task 190, draft) vs 016's member-keyed #2170 guard:** whoever merges second adds the member exemption
+    `EmailArchiveCommunicationLinkSweepJob.LinkAsync` with UAC's reason verbatim: "the BFF's own typed link writer:
+    sets a NULL sprk_relatedcommunication to the exactly-one communication whose internet message id ordinal-equals
+    the document's recorded key; never clears or re-points; conditional on row version (uac-r2 task 190)".
+  - **#2220 (widened to matter + project, UAC 2026-10-21):** separate PR off master, branch
+    `fix/fm-2220-matter-protected`; UAC reviews the diff (condition b: Office matter/project quick-create skip-and-warn;
+    dev 0 rules).
+- **ebilling-r1:** the reconcile commit before 017; 016 and 040 call `CheckGenericUpdateAsync` once #1911 lands. 016
+  has a `TODO(#1911)` seam that skips invoice and billing-event rows.
+- **R3 (external-access-r3):** deploys master to dev. Asks OK/HOLD per deploy; told when #2191 merged.
+- **ontology-r1:** 033 needs a design-note review first.
 
-## Next tasks after the wave
+## Next tasks
 
-- **014 → 015 → 016 → 017/018 → 019** after 013 (W2 sequential core).
-- **Owner item from 013 F4:** if a 017/018 server adapter needs a SystemPrincipal create under a secure root, it
-  needs an app-only access check on `RequestedBy`. 013 fails closed until then.
-- **040:** needs 005 and 019.
-- **050:** needs 019.
-- W1 is otherwise done once 004 and 005 land.
+- 016 → 017/018 → 019. 017/018 blocking criteria include #2188 (now met in the service), the invoice-family rule, FR-06
+  step 10, 015's K1/K3, and R3-1/R3-2.
+- 033 (with the app-only metadata reader) before 052. 040 needs 005 and 019. 050 needs 019.
