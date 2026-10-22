@@ -392,10 +392,18 @@ internal sealed class StoredFileDataverse
     private Task DeleteAsync(string table, Guid id)
     {
         Calls.Enqueue($"delete {table} {id}");
+
+        // Like DataverseServiceClientImpl.DeleteAsync: every fault arrives WRAPPED in InvalidOperationException.
         return table == StoredFileSchema.Entity && Rows.TryRemove(id, out _)
             ? Task.CompletedTask
-            : Task.FromException(NotFound());
+            : Task.FromException(new InvalidOperationException($"Failed to delete {table} record {id}: Does Not Exist", NotFound()));
     }
+
+    /// <summary>Parent ids a set query does not return (no privilege depth) while a read by id still finds them.</summary>
+    public HashSet<Guid> HiddenFromQueries { get; } = [];
+
+    /// <summary>Every page of the stored-file query, as (page number, paging cookie sent).</summary>
+    public ConcurrentQueue<(int Page, string? Cookie)> PagesRequested { get; } = new();
 
     private Task<EntityCollection> RetrieveMultipleAsync(QueryExpression q)
     {
@@ -412,12 +420,28 @@ internal sealed class StoredFileDataverse
 
         if (q.EntityName == StoredFileSchema.Entity)
         {
-            return Task.FromResult(new EntityCollection(Rows.Values.ToList()) { MoreRecords = false });
+            // Paged like Dataverse: PageInfo.Count rows per page, page N, a cookie the caller must send back for page N + 1.
+            var size = q.PageInfo?.Count > 0 ? q.PageInfo.Count : 5000;
+            var page = q.PageInfo?.PageNumber > 0 ? q.PageInfo.PageNumber : 1;
+            PagesRequested.Enqueue((page, q.PageInfo?.PagingCookie));
+            if (page > 1 && q.PageInfo?.PagingCookie != $"cookie-{page - 1}")
+            {
+                return Task.FromException<EntityCollection>(new InvalidOperationException($"page {page} requested without page {page - 1}'s cookie"));
+            }
+
+            var ordered = Rows.Values.OrderBy(r => r.Id).ToList();
+            var slice = ordered.Skip((page - 1) * size).Take(size).ToList();
+            return Task.FromResult(new EntityCollection(slice)
+            {
+                MoreRecords = ordered.Count > page * size,
+                PagingCookie = $"cookie-{page}",
+            });
         }
 
         // Existence query: "<table>id In (...)".
         var ids = q.Criteria.Conditions.SelectMany(c => c.Values).OfType<Guid>().ToHashSet();
-        var found = Others.Where(kv => kv.Key.Table == q.EntityName && ids.Contains(kv.Key.Id)).Select(kv => kv.Value).ToList();
+        var found = Others.Where(kv => kv.Key.Table == q.EntityName && ids.Contains(kv.Key.Id) && !HiddenFromQueries.Contains(kv.Key.Id))
+            .Select(kv => kv.Value).ToList();
         return Task.FromResult(new EntityCollection(found));
     }
 }

@@ -567,6 +567,35 @@ public sealed class StoredFileServiceTests
         rig.Gateway.Names.Should().HaveCount(1);
     }
 
+    [Fact(DisplayName = "Must-fire (review F3): a failed create whose re-read ALSO faults keeps the blob (the row may have committed)")]
+    public async Task CreateFails_RereadFaults_BlobKept()
+    {
+        var rig = new StoredFileRig();
+        rig.Dataverse.CreateFault = new TimeoutException("response lost");
+        rig.Dataverse.RetrieveFault = new TimeoutException("Dataverse slow");
+        var spec = Spec();
+
+        var act = () => rig.Service.CreateForAppAsync(spec, new MemoryStream(Pdf), requestedBy: null, CancellationToken.None);
+
+        await act.Should().ThrowAsync<TimeoutException>();
+        rig.Gateway.Get("invoice-files", StoredFileBlobName.Build(StoredFileRig.Tenant, Invoice, spec.FileId)).Should().NotBeNull();
+        rig.Gateway.Calls.Should().NotContain(c => c.StartsWith("delete", StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "Must-fire (review F3): a failed create over a REUSED blob (another attempt's) never deletes it")]
+    public async Task CreateFails_ReusedBlob_Kept()
+    {
+        var rig = new StoredFileRig();
+        var spec = Spec(StoredFileIds.ForUpload(Submission)) with { SubmissionId = Submission };
+        (await rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None)).IsStaged.Should().BeTrue(); // the other attempt
+        rig.Dataverse.CreateFault = new TimeoutException("transient");
+
+        var act = () => rig.Service.CreateForAppAsync(spec, new MemoryStream(Pdf), requestedBy: null, CancellationToken.None);
+
+        await act.Should().ThrowAsync<TimeoutException>();
+        rig.Gateway.Get("invoice-files", StoredFileBlobName.Build(StoredFileRig.Tenant, Invoice, spec.FileId)).Should().NotBeNull();
+    }
+
     [Fact(DisplayName = "App create: a refused owner writes nothing")]
     public async Task CreateForApp_OwnerRefused_NothingWritten()
     {

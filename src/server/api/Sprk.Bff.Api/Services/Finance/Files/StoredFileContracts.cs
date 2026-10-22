@@ -328,6 +328,27 @@ public static class StoredFileBlobName
 }
 
 /// <summary>Stable refusal codes of the file store (returned, never thrown; logged with ids only).</summary>
+/// <summary>
+/// Dataverse "record does not exist" (0x80040217) at ANY depth of the exception chain: the platform client wraps some faults
+/// (<c>DataverseServiceClientImpl.DeleteAsync</c> throws <see cref="InvalidOperationException"/> around the fault), and
+/// <c>RecordContainerResolver.IsRecordNotFound</c> reads only the exception it is given. Same rule as the submission job handler's.
+/// </summary>
+internal static class StoredFileNotFound
+{
+    internal static bool Is(Exception? ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            if (Infrastructure.Dataverse.RecordContainerResolver.IsRecordNotFound(e))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}
+
 public static class StoredFileRefusal
 {
     /// <summary>No <c>Finance:FileStore:BlobEndpoint</c> is configured.</summary>

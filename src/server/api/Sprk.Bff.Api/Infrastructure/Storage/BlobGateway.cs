@@ -201,11 +201,20 @@ internal sealed class AzureBlobGateway : BlobGateway
             await Blob(container, blobName).UploadAsync(content, options, cancellationToken).ConfigureAwait(false);
             return BlobCreateOutcome.Created;
         }
-        catch (RequestFailedException ex) when (ex.ErrorCode == BlobErrorCode.BlobAlreadyExists)
+        catch (RequestFailedException ex) when (IsAlreadyExists(ex))
         {
             return BlobCreateOutcome.AlreadyExists;
         }
     }
+
+    /// <summary>
+    /// The create's only precondition is <c>If-None-Match: *</c>, so its failure means "a blob of that name exists" whichever way
+    /// the service reports it: 409 <c>BlobAlreadyExists</c> for a single-shot Put Blob, or 412 <c>ConditionNotMet</c> when a large
+    /// upload commits its block list. The caller then compares the existing blob's hash and length (reuse or a content conflict).
+    /// </summary>
+    internal static bool IsAlreadyExists(RequestFailedException ex) =>
+        ex.ErrorCode == BlobErrorCode.BlobAlreadyExists
+        || (ex.Status == 412 && ex.ErrorCode == BlobErrorCode.ConditionNotMet);
 
     public override async Task<(BinaryData Content, string? ContentType)?> DownloadContentAsync(
         string container, string blobName, CancellationToken cancellationToken)

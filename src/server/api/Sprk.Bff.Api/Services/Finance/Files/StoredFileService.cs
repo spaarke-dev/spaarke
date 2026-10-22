@@ -300,7 +300,7 @@ public sealed class StoredFileService
         catch (Exception createFault) when (createFault is not OperationCanceledException)
         {
             // A retry of a deterministic id meets the row the first attempt wrote: that is not a failure.
-            var existing = await TryReadRowAsync(spec.FileId, ct).ConfigureAwait(false);
+            var (known, existing) = await TryReadRowAsync(spec.FileId, ct).ConfigureAwait(false);
             if (existing is not null
                 && string.Equals(existing.BlobPath, blob.BlobPath, StringComparison.Ordinal)
                 && string.Equals(existing.Sha256, blob.Sha256, StringComparison.Ordinal))
@@ -309,7 +309,20 @@ public sealed class StoredFileService
             }
             else
             {
-                await DeleteStagedBlobAsync(blob, spec.FileId).ConfigureAwait(false);
+                // Delete only bytes THIS attempt wrote, and only on a definite "no row": a reused blob may be another attempt's
+                // (whose row is still coming), and a faulted re-read may hide a committed row. Anything kept that really is an
+                // orphan is removed by the reconcile job after the grace.
+                if (!blob.Reused && known && existing is null)
+                {
+                    await DeleteStagedBlobAsync(blob, spec.FileId).ConfigureAwait(false);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Stored file {FileId}: the row write failed; the blob {BlobName} is kept (reused={Reused}, rowKnown={Known}) for the reconcile job",
+                        spec.FileId, blob.BlobPath, blob.Reused, known);
+                }
+
                 throw;
             }
         }
@@ -459,7 +472,7 @@ public sealed class StoredFileService
         {
             entity = await _entities.RetrieveAsync(StoredFileSchema.Entity, fileId, StoredFileSchema.ReadColumns, ct).ConfigureAwait(false);
         }
-        catch (Exception ex) when (RecordContainerResolver.IsRecordNotFound(ex))
+        catch (Exception ex) when (StoredFileNotFound.Is(ex))
         {
             return null;
         }
@@ -467,16 +480,17 @@ public sealed class StoredFileService
         return StoredFileRow.From(entity, _blobs.TenantId);
     }
 
-    private async Task<StoredFileRow?> TryReadRowAsync(Guid fileId, CancellationToken ct)
+    /// <summary>The re-read after a failed create: <c>Known</c> is false when the read itself faulted (the row may exist).</summary>
+    private async Task<(bool Known, StoredFileRow? Row)> TryReadRowAsync(Guid fileId, CancellationToken ct)
     {
         try
         {
-            return await ReadRowAsync(fileId, ct).ConfigureAwait(false);
+            return (true, await ReadRowAsync(fileId, ct).ConfigureAwait(false));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex, "Stored file {FileId}: the row could not be re-read after a failed create", fileId);
-            return null;
+            return (false, null);
         }
     }
 

@@ -53,8 +53,12 @@ public sealed class StoredFileReconcileJob : IScheduledJob
     /// <summary>The per-attempt heartbeat.</summary>
     public static readonly EventId Heartbeat = new(9092, "StoredFileReconcileHeartbeat");
 
-    internal const int PageSize = 5000;
-    internal const int MaxPages = 50;
+    /// <summary>Rows per page of the row read (a test may lower it to exercise paging).</summary>
+    internal int PageSize { get; init; } = 5000;
+
+    /// <summary>Most pages read per run; later rows wait for the next run (a test may lower it).</summary>
+    internal int MaxPages { get; init; } = 50;
+
     internal const int ParentBatchSize = 200;
     internal const int MaxIdsInDetectorEvent = 50;
 
@@ -109,21 +113,31 @@ public sealed class StoredFileReconcileJob : IScheduledJob
         var grace = TimeSpan.FromMinutes(fileStore.OrphanGraceMinutes);
         var alertAfter = TimeSpan.FromMinutes(fileStore.NotServableAlertMinutes);
 
-        using var scope = _scopeFactory.CreateScope();
-        var entities = scope.ServiceProvider.GetRequiredService<IGenericEntityService>();
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var entities = scope.ServiceProvider.GetRequiredService<IGenericEntityService>();
 
-        // Rows first: a fault here means no progress is possible this attempt (ADR-036 A1-4: throw, the host retries).
-        var rows = await ReadAllRowsAsync(entities, counts, cancellationToken).ConfigureAwait(false);
+            // Rows first: a fault here means no progress is possible this attempt (ADR-036 A1-4: throw, the host retries).
+            var rows = await ReadAllRowsAsync(entities, counts, cancellationToken).ConfigureAwait(false);
 
-        // (A) rows whose parent is gone.
-        await ReconcileRowsAsync(entities, rows, counts, cancellationToken).ConfigureAwait(false);
+            // (A) rows whose parent is gone.
+            await ReconcileRowsAsync(entities, rows, counts, cancellationToken).ConfigureAwait(false);
 
-        // (C) the detector, over the rows read (no extra query).
-        DetectNotServable(rows, now, alertAfter, counts, context);
+            // (C) the detector, over the rows read (no extra query).
+            DetectNotServable(rows, now, alertAfter, counts, context);
 
-        // (B) blobs with no row. A listing fault also throws (A1-4).
-        var rowIds = rows.Select(r => r.Id).ToHashSet();
-        await ReconcileBlobsAsync(entities, rowIds, now, grace, counts, cancellationToken).ConfigureAwait(false);
+            // (B) blobs with no row. A listing fault also throws (A1-4).
+            var rowIds = rows.Select(r => r.Id).ToHashSet();
+            await ReconcileBlobsAsync(entities, rowIds, now, grace, counts, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            // A1-5: one heartbeat per attempt, the failed one included, then the host's retry.
+            counts.Failed = true;
+            LogHeartbeat(context, counts);
+            throw;
+        }
 
         LogHeartbeat(context, counts);
         return new JobRunResult(
@@ -143,7 +157,7 @@ public sealed class StoredFileReconcileJob : IScheduledJob
         var query = new QueryExpression(StoredFileSchema.Entity)
         {
             ColumnSet = new ColumnSet(
-                StoredFileSchema.IdColumn, StoredFileSchema.Status, StoredFileSchema.BlobPath, StoredFileSchema.CreatedOn,
+                StoredFileSchema.IdColumn, StoredFileSchema.Purpose, StoredFileSchema.Status, StoredFileSchema.BlobPath, StoredFileSchema.CreatedOn,
                 StoredFileSchema.ProcedureVersionTable, StoredFileSchema.InvoiceTable, StoredFileSchema.BillingExportTable),
             PageInfo = new PagingInfo { Count = PageSize, PageNumber = 1 },
         };
@@ -178,24 +192,35 @@ public sealed class StoredFileReconcileJob : IScheduledJob
 
     private async Task ReconcileRowsAsync(IGenericEntityService entities, List<RowFacts> rows, ReconcileCounts counts, CancellationToken ct)
     {
-        // Which set parents are confirmed gone: one batched query per table; a fault leaves that batch "unknown" (kept).
+        // A row whose always-written columns did not come back was not READABLE to this identity (field security masks a column
+        // the caller may not read as absent, not as an error): its "no parent" proves nothing. Skipped, counted, and reported.
+        var readable = rows.Where(r => r.Readable).ToList();
+        counts.RowsUnreadable = rows.Count - readable.Count;
+        if (counts.RowsUnreadable > 0)
+        {
+            _logger.LogWarning(
+                "Stored file reconcile: {Count} rows came back without their status, purpose or blob path (field security?); they are never treated as parentless",
+                counts.RowsUnreadable);
+        }
+
+        // Which set parents are confirmed gone. A batched query per table finds the candidates (a parent the query did not return),
+        // but a set query also omits rows the app identity cannot SEE, so each candidate is confirmed by a read of its own: only
+        // that read's not-found (0x80040217) means gone. A fault (batch or read) leaves the parent "unknown" (kept).
         var gone = new HashSet<(string Table, Guid Id)>();
         var unknown = new HashSet<(string Table, Guid Id)>();
         foreach (var table in StoredFileSchema.ParentLookups)
         {
-            var ids = rows.SelectMany(r => r.Parents).Where(p => p.Table == table).Select(p => p.Id).Distinct().ToList();
+            var ids = readable.SelectMany(r => r.Parents).Where(p => p.Table == table).Select(p => p.Id).Distinct().ToList();
             foreach (var batch in ids.Chunk(ParentBatchSize))
             {
                 ct.ThrowIfCancellationRequested();
+                List<Guid> candidates;
                 try
                 {
                     var query = new QueryExpression(table) { ColumnSet = new ColumnSet(table + "id") };
                     query.Criteria.AddCondition(table + "id", ConditionOperator.In, batch.Cast<object>().ToArray());
                     var found = (await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.Select(e => e.Id).ToHashSet();
-                    foreach (var id in batch.Where(id => !found.Contains(id)))
-                    {
-                        gone.Add((table, id));
-                    }
+                    candidates = batch.Where(id => !found.Contains(id)).ToList();
                 }
                 catch (Exception ex) when (!ct.IsCancellationRequested)
                 {
@@ -206,11 +231,33 @@ public sealed class StoredFileReconcileJob : IScheduledJob
                     }
 
                     _logger.LogWarning(ex, "Stored file reconcile: the {Table} existence check faulted for {Count} parents; their files are kept this run", table, batch.Length);
+                    continue;
+                }
+
+                foreach (var id in candidates)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    try
+                    {
+                        await entities.RetrieveAsync(table, id, [table + "id"], ct).ConfigureAwait(false);
+
+                        // Readable by id: it exists (the set query did not return it); never "gone".
+                    }
+                    catch (Exception ex) when (StoredFileNotFound.Is(ex))
+                    {
+                        gone.Add((table, id));
+                    }
+                    catch (Exception ex) when (!ct.IsCancellationRequested)
+                    {
+                        counts.UnitFaults++;
+                        unknown.Add((table, id));
+                        _logger.LogWarning(ex, "Stored file reconcile: confirming {Table} {ParentId} is gone faulted; its files are kept this run", table, id);
+                    }
                 }
             }
         }
 
-        foreach (var row in rows)
+        foreach (var row in readable)
         {
             ct.ThrowIfCancellationRequested();
             var parentless = row.Parents.Count == 0;
@@ -260,7 +307,7 @@ public sealed class StoredFileReconcileJob : IScheduledJob
         {
             await entities.DeleteAsync(StoredFileSchema.Entity, id, ct).ConfigureAwait(false);
         }
-        catch (Exception ex) when (RecordContainerResolver.IsRecordNotFound(ex))
+        catch (Exception ex) when (StoredFileNotFound.Is(ex))
         {
             // Already gone: the unit is done.
         }
@@ -345,7 +392,7 @@ public sealed class StoredFileReconcileJob : IScheduledJob
             await entities.RetrieveAsync(StoredFileSchema.Entity, fileId, [StoredFileSchema.IdColumn], ct).ConfigureAwait(false);
             return true;
         }
-        catch (Exception ex) when (RecordContainerResolver.IsRecordNotFound(ex))
+        catch (Exception ex) when (StoredFileNotFound.Is(ex))
         {
             return false;
         }
@@ -374,7 +421,7 @@ public sealed class StoredFileReconcileJob : IScheduledJob
             var status = submission.GetAttributeValue<OptionSetValue>(InvoiceSubmissionPersister.SubmissionStatus)?.Value;
             return status is (int)InvoiceSubmissionStatus.Accepted or (int)InvoiceSubmissionStatus.Rejected or (int)InvoiceSubmissionStatus.Failed;
         }
-        catch (Exception ex) when (RecordContainerResolver.IsRecordNotFound(ex))
+        catch (Exception ex) when (StoredFileNotFound.Is(ex))
         {
             return true;
         }
@@ -390,10 +437,12 @@ public sealed class StoredFileReconcileJob : IScheduledJob
     private void LogHeartbeat(JobRunContext context, ReconcileCounts counts) =>
         _logger.LogInformation(
             Heartbeat,
-            "Stored file reconcile attempt {Attempt}: skipped={Skipped} rows={Rows} rowsDeleted={RowsDeleted} blobs={Blobs} blobsDeleted={BlobsDeleted} "
-            + "inGrace={InGrace} openSubmissions={OpenSubmissions} notServable={NotServable} unitFaults={UnitFaults} truncated={Truncated} correlationId={CorrelationId}",
-            context.Attempt, counts.SkippedReason ?? "no", counts.RowsExamined, counts.RowsDeleted, counts.BlobsExamined, counts.BlobsDeleted,
-            counts.BlobsInGrace, counts.BlobsOfOpenSubmissions, counts.NotServableDetected, counts.UnitFaults, counts.RowsTruncated, context.CorrelationId);
+            "Stored file reconcile attempt {Attempt}: failed={Failed} skipped={Skipped} rows={Rows} unreadable={Unreadable} rowsDeleted={RowsDeleted} "
+            + "blobs={Blobs} blobsDeleted={BlobsDeleted} inGrace={InGrace} openSubmissions={OpenSubmissions} notServable={NotServable} "
+            + "unitFaults={UnitFaults} truncated={Truncated} correlationId={CorrelationId}",
+            context.Attempt, counts.Failed, counts.SkippedReason ?? "no", counts.RowsExamined, counts.RowsUnreadable, counts.RowsDeleted,
+            counts.BlobsExamined, counts.BlobsDeleted, counts.BlobsInGrace, counts.BlobsOfOpenSubmissions, counts.NotServableDetected,
+            counts.UnitFaults, counts.RowsTruncated, context.CorrelationId);
 
     private static string Serialize(ReconcileCounts counts) => JsonSerializer.Serialize(counts, ResultJsonOptions);
 
@@ -401,7 +450,9 @@ public sealed class StoredFileReconcileJob : IScheduledJob
     internal sealed class ReconcileCounts
     {
         public string? SkippedReason { get; set; }
+        public bool Failed { get; set; }
         public int RowsExamined { get; set; }
+        public int RowsUnreadable { get; set; }
         public bool RowsTruncated { get; set; }
         public int RowsDeleted { get; set; }
         public int RowsWithForeignPath { get; set; }
@@ -413,8 +464,15 @@ public sealed class StoredFileReconcileJob : IScheduledJob
         public int UnitFaults { get; set; }
     }
 
-    private sealed record RowFacts(Guid Id, int? Status, string? BlobPath, DateTimeOffset? CreatedOn, IReadOnlyList<(string Table, Guid Id)> Parents)
+    private sealed record RowFacts(
+        Guid Id, int? Status, int? Purpose, string? BlobPath, DateTimeOffset? CreatedOn, IReadOnlyList<(string Table, Guid Id)> Parents)
     {
+        /// <summary>
+        /// The columns every row is created with (BuildRow) came back. A field-secured column the app identity may not read comes back
+        /// ABSENT, so a row missing any of them is not evidence of a cleared parent lookup.
+        /// </summary>
+        public bool Readable => Status is not null && Purpose is not null && !string.IsNullOrEmpty(BlobPath);
+
         public static RowFacts From(Entity entity)
         {
             var parents = StoredFileSchema.ParentLookups
@@ -426,6 +484,7 @@ public sealed class StoredFileReconcileJob : IScheduledJob
             return new RowFacts(
                 entity.Id,
                 entity.GetAttributeValue<OptionSetValue>(StoredFileSchema.Status)?.Value,
+                entity.GetAttributeValue<OptionSetValue>(StoredFileSchema.Purpose)?.Value,
                 entity.GetAttributeValue<string>(StoredFileSchema.BlobPath),
                 created is { } c ? new DateTimeOffset(DateTime.SpecifyKind(c, DateTimeKind.Utc)) : null,
                 parents);

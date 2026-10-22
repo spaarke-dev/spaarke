@@ -30,7 +30,7 @@ public sealed class StoredFileReconcileJobTests
 
     private sealed class Harness
     {
-        public Harness(bool ebilling = true, bool configured = true, int graceMinutes = 1440, int alertMinutes = 60)
+        public Harness(bool ebilling = true, bool configured = true, int graceMinutes = 1440, int alertMinutes = 60, int pageSize = 5000, int maxPages = 50)
         {
             Rig = new StoredFileRig(configured: configured);
             Clock = new FakeTimeProvider(Rig.Gateway.Now.AddHours(25));
@@ -43,7 +43,11 @@ public sealed class StoredFileReconcileJobTests
                 Options.Create(new EbillingOptions { Enabled = ebilling }),
                 Options.Create(new FinanceOptions { FileStore = new FinanceFileStoreOptions { OrphanGraceMinutes = graceMinutes, NotServableAlertMinutes = alertMinutes } }),
                 Clock,
-                Log);
+                Log)
+            {
+                PageSize = pageSize,
+                MaxPages = maxPages,
+            };
         }
 
         public StoredFileRig Rig { get; }
@@ -179,6 +183,119 @@ public sealed class StoredFileReconcileJobTests
         h.Rig.Dataverse.Rows.Should().NotContainKey(rogue);
         h.Rig.Gateway.Get("invoice-files", h.PathOf(live, victim)).Should().NotBeNull("only a row's own blob is deleted");
         h.Counts(result)["rowsWithForeignPath"].GetInt32().Should().Be(1);
+    }
+
+    [Fact(DisplayName = "Must-fire (review F1): a row whose secured columns come back masked (absent) is NOT parentless: row and blob kept, counted unreadable")]
+    public async Task MaskedRow_Kept()
+    {
+        var h = new Harness();
+        var parent = h.LiveInvoice();
+        var file = Guid.NewGuid();
+        var row = h.Rig.SeedFile(file, parent, Pdf);
+        foreach (var column in new[] { "sprk_invoice", "sprk_filestatus", "sprk_purpose", "sprk_blobpath" })
+        {
+            row.Attributes.Remove(column);
+        }
+
+        var result = await h.RunAsync();
+
+        h.Rig.Dataverse.Rows.Should().ContainKey(file);
+        h.Rig.Gateway.Get("invoice-files", h.PathOf(parent, file)).Should().NotBeNull();
+        h.Counts(result)["rowsUnreadable"].GetInt32().Should().Be(1);
+        h.Counts(result)["rowsDeleted"].GetInt32().Should().Be(0);
+    }
+
+    [Fact(DisplayName = "Must-fire (review F2): a parent the set query omits but a read by id finds (privilege depth) is alive: file kept")]
+    public async Task ParentHiddenFromQuery_Kept()
+    {
+        var h = new Harness();
+        var parent = h.LiveInvoice();
+        h.Rig.Dataverse.HiddenFromQueries.Add(parent.Id);
+        var file = Guid.NewGuid();
+        h.Rig.SeedFile(file, parent, Pdf);
+
+        var result = await h.RunAsync();
+
+        h.Rig.Dataverse.Rows.Should().ContainKey(file);
+        h.Counts(result)["rowsDeleted"].GetInt32().Should().Be(0);
+        h.Rig.Dataverse.Calls.Should().Contain($"retrieve sprk_invoice {parent.Id}", "a candidate is confirmed by its own read");
+    }
+
+    [Fact(DisplayName = "Must-fire (review F2): the confirming read faulting keeps the file and counts the fault")]
+    public async Task ConfirmReadFaults_Kept()
+    {
+        var h = new Harness();
+        var goneParent = new StoredFileParent(StoredFileParentKind.Invoice, Guid.NewGuid());
+        var file = Guid.NewGuid();
+        h.Rig.SeedFile(file, goneParent, Pdf);
+        h.Rig.Dataverse.RetrieveFault = new TimeoutException("Dataverse slow");
+
+        var result = await h.RunAsync();
+
+        h.Rig.Dataverse.Rows.Should().ContainKey(file);
+        h.Counts(result)["unitFaults"].GetInt32().Should().Be(1);
+    }
+
+    [Fact(DisplayName = "Review F4: a row already deleted when the job deletes it (the client WRAPS the not-found) is done, not a fault")]
+    public async Task RowAlreadyGone_WrappedNotFound_IsDone()
+    {
+        var h = new Harness();
+        var goneParent = new StoredFileParent(StoredFileParentKind.Invoice, Guid.NewGuid());
+        var file = Guid.NewGuid();
+        h.Rig.SeedFile(file, goneParent, Pdf);
+        h.Rig.Gateway.BeforeOp = (op, name) =>
+        {
+            if (op == "delete")
+            {
+                h.Rig.Dataverse.Rows.TryRemove(file, out _); // another run got there first
+            }
+        };
+
+        var result = await h.RunAsync();
+
+        result.ErrorMessage.Should().BeNull();
+        h.Counts(result)["unitFaults"].GetInt32().Should().Be(0);
+        h.Counts(result)["rowsDeleted"].GetInt32().Should().Be(1);
+    }
+
+    [Fact(DisplayName = "Rows are read page by page with the paging cookie; every page's parent-gone rows are deleted")]
+    public async Task Paging_ReadsEveryPage()
+    {
+        var h = new Harness(pageSize: 2);
+        for (var i = 0; i < 5; i++)
+        {
+            h.Rig.SeedFile(Guid.NewGuid(), new StoredFileParent(StoredFileParentKind.Invoice, Guid.NewGuid()), Pdf);
+        }
+
+        var result = await h.RunAsync();
+
+        h.Rig.Dataverse.PagesRequested.Select(p => p.Page).Should().Equal(1, 2, 3);
+        h.Rig.Dataverse.Rows.Should().BeEmpty();
+        h.Counts(result)["rowsExamined"].GetInt32().Should().Be(5);
+        h.Counts(result)["rowsTruncated"].GetBoolean().Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "Truncated read (MaxPages): a blob whose row was on an unread page is kept (pass B re-reads the row)")]
+    public async Task Truncated_UnreadRowsBlobKept()
+    {
+        var h = new Harness(pageSize: 1, maxPages: 1);
+        var parent = h.LiveInvoice();
+        var files = Enumerable.Range(0, 3).Select(_ => Guid.NewGuid()).ToList();
+        foreach (var file in files)
+        {
+            h.Rig.SeedFile(file, parent, Pdf);
+        }
+
+        var result = await h.RunAsync();
+
+        h.Counts(result)["rowsTruncated"].GetBoolean().Should().BeTrue();
+        h.Counts(result)["rowsExamined"].GetInt32().Should().Be(1);
+        foreach (var file in files)
+        {
+            h.Rig.Gateway.Get("invoice-files", h.PathOf(parent, file)).Should().NotBeNull();
+        }
+
+        h.Counts(result)["blobsDeleted"].GetInt32().Should().Be(0);
     }
 
     // ---------------------------------------------------------------------------------------------------------------------------
@@ -326,6 +443,9 @@ public sealed class StoredFileReconcileJobTests
 
         await act.Should().ThrowAsync<TimeoutException>();
         h.Rig.Gateway.Calls.Should().NotContain(c => c.StartsWith("delete", StringComparison.Ordinal));
+
+        // A1-5 (review F4): the failed attempt still logs its one heartbeat.
+        h.Log.Entries.Where(e => e.EventId.Id == 9092).Should().ContainSingle().Which.Message.Should().Contain("failed=True");
     }
 
     [Fact(DisplayName = "A1-4: the blob listing faulting throws")]
