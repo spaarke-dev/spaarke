@@ -1,11 +1,14 @@
-// #2237 (uac-r2): the document-profile output mapper never maps a column the app-only refusal refuses on a document.
+// #2237 (uac-r2): the document-profile output mapper maps only the named profile columns (fail closed).
 //
-// DocumentProfileOutputMapper.BuildFields turns every property of the AI structured output into a sprk_document column,
-// and every consumer (the upload wizard, the app-only profile, the Compose OBO facade) writes its output through
-// IDocumentDataverseService.UpdateDocumentFieldsAsync. The output is built by a model and a configuration, not a person,
-// so a key naming a document's Access Permission, its own-narrowing record or a D7 link column is dropped
-// (InheritedAccessPermission.RefuseAppOnlyWrite), in any form, with one Warning naming ids and codes only, and the rest of
-// the profile is still mapped.
+// DocumentProfileOutputMapper.BuildFields turns properties of the AI structured output into sprk_document columns, and
+// every consumer (the upload wizard, the app-only profile, the Compose OBO facade) writes its output through
+// IDocumentDataverseService.UpdateDocumentFieldsAsync as the BFF identity. The output keys come from a configuration (the
+// Action's sprk_outputschemajson), not a person, so only DocumentProfileOutputMapper.ProfileColumns, in their plain form,
+// are mapped. A key naming a document's Access Permission, its own-narrowing record or a D7 link column is dropped by the
+// app-only refusal (InheritedAccessPermission.RefuseAppOnlyWrite) with its reason code; every other key that is not a
+// listed profile column (a pointer, relocation or link-source column, the owner, an unknown name, an @odata.bind or
+// _x_value form of a listed column) is dropped by the list. One Warning names the document id, the keys and the codes
+// only, and the rest of the profile is still mapped.
 //
 // No doubles beyond a capturing ILogger: the mapper is a pure function of the JSON output, and the refusal it asks is the
 // real one.
@@ -103,21 +106,116 @@ public sealed class DocumentProfileOutputMapperRefusalTests
         warning.Message.Should().NotContain("5b1e7a4c");
     }
 
+    // Not a listed profile column, or not in its plain form: dropped by the list (fail closed), whatever it names.
+    public static TheoryData<string, string> NotProfileKeys => new()
+    {
+        // key named by the configured schema, JSON value
+        { "sprk_graphitemid", "\"01ABCDEFPOINTERITEM\"" },
+        { "sprk_graphdriveid", "\"b!POINTERDRIVE\"" },
+        { "sprk_graphitemidbound", "\"01ABCDEFPOINTERITEM\"" },
+        { "sprk_relocationpending", "\"{\\\"to\\\":\\\"POINTER\\\"}\"" },
+        { "sprk_filepath", "\"/POINTER/path.pdf\"" },
+        { "sprk_emailmessageid", "\"<POINTER@example.com>\"" },
+        { "sprk_isemailarchive", "true" },
+        { "ownerid", "\"5b1e7a4c-0f6d-4a52-9d1b-3f0c2e8a7d11\"" },
+        { "sprk_containerid", "\"b!POINTERCONTAINER\"" },
+        { "sprk_whatever", "\"POINTER\"" },
+        // neighbouring names of refused columns are not profile columns either
+        { "sprk_accesspermissionnote", "\"POINTER\"" },
+        { "sprk_parentdocumentname", "\"POINTER\"" },
+        // a case variant of a listed column in a non-plain form: the writer would use the raw key
+        { "SPRK_FileSummary@odata.bind", "\"/sprk_POINTER(5b1e7a4c-0f6d-4a52-9d1b-3f0c2e8a7d11)\"" },
+        { "_sprk_filetldr_value", "\"POINTER\"" },
+        // the two columns this mapper computes itself are never taken from the output
+        { "sprk_filetype", "\"POINTER Agreement\"" },
+        { "sprk_searchprofile", "\"POINTER\"" },
+    };
+
+    [Theory]
+    [MemberData(nameof(NotProfileKeys))]
+    public void BuildFields_NotAProfileColumn_IsNotMapped_AndIsLoggedWithoutItsValue(string key, string jsonValue)
+    {
+        var documentId = Guid.NewGuid();
+        var logger = new CapturingLogger();
+
+        var fields = DocumentProfileOutputMapper.BuildFields(
+            documentId, Output($"{{{ProfileProperties},\"{key}\":{jsonValue}}}"), FileName, parentEntity: null, logger);
+
+        // Only the profile and the computed file type (no search profile: one part only), which keeps its computed value.
+        fields.Keys.Should().BeEquivalentTo(
+            "sprk_filesummary", "sprk_filetldr", "sprk_documenttype", "sprk_filekeywords", "sprk_filetype");
+        fields.Values.OfType<string>().Should().NotContain(v => v.Contains("POINTER"));
+        fields["sprk_filetype"].Should().Be("PDF");
+
+        var warning = logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning).Subject;
+        warning.Message.Should()
+            .Contain(documentId.ToString())
+            .And.Contain(key)
+            .And.Contain(DocumentProfileOutputMapper.NotProfileColumnReasonCode);
+        warning.Message.Should().NotContain("POINTER").And.NotContain("5b1e7a4c");
+    }
+
     [Fact]
-    public void BuildFields_NoRefusedKey_MapsEveryPropertyAndLogsNoWarning()
+    public void BuildFields_ModelFileTypeWithNoExtension_IsStillNotWritten()
+    {
+        var fields = DocumentProfileOutputMapper.BuildFields(
+            Guid.NewGuid(), Output($"{{{ProfileProperties},\"sprk_filetype\":\"Legal Agreement\"}}"), "no-extension",
+            parentEntity: null, new CapturingLogger());
+
+        fields.Keys.Should().NotContain("sprk_filetype");
+    }
+
+    [Fact]
+    public void BuildFields_EveryProfileColumn_IsWrittenWithItsValueAndType_AndLogsNoWarning()
     {
         var logger = new CapturingLogger();
 
-        // Must not fire: neighbouring names that are not refused columns stay mapped (sprk_accesspermissionnote is not
-        // sprk_accesspermission; sprk_parentdocumentname is not the link).
         var fields = DocumentProfileOutputMapper.BuildFields(
             Guid.NewGuid(),
-            Output($"{{{ProfileProperties},\"sprk_accesspermissionnote\":\"n\",\"sprk_parentdocumentname\":\"p\"}}"),
+            Output("{\"sprk_filesummary\":\"A summary\",\"sprk_filetldr\":\"tldr\",\"sprk_filekeywords\":\"engagement, fees\"," +
+                   "\"sprk_documenttype\":\"contract\",\"sprk_extractorganization\":\"Alpha Inc., Beta LLC\"," +
+                   "\"sprk_extractpeople\":\"Jane Doe, John Smith\"}"),
             FileName, parentEntity: null, logger);
 
-        fields.Should().ContainKeys("sprk_filesummary", "sprk_filetldr", "sprk_documenttype", "sprk_filekeywords",
-            "sprk_accesspermissionnote", "sprk_parentdocumentname", "sprk_filetype");
+        fields["sprk_filesummary"].Should().BeOfType<string>().Which.Should().Be("A summary");
+        fields["sprk_filetldr"].Should().BeOfType<string>().Which.Should().Be("tldr");
+        fields["sprk_filekeywords"].Should().BeOfType<string>().Which.Should().Be("engagement, fees");
+        fields["sprk_extractorganization"].Should().BeOfType<string>().Which.Should().Be("Alpha Inc., Beta LLC");
+        fields["sprk_extractpeople"].Should().BeOfType<string>().Which.Should().Be("Jane Doe, John Smith");
+        fields["sprk_documenttype"].Should().BeOfType<Microsoft.Xrm.Sdk.OptionSetValue>()
+            .Which.Value.Should().Be(DocumentTypeMapper.ToDataverseValue("contract")!.Value);
+        fields.Keys.Should().BeEquivalentTo(DocumentProfileOutputMapper.ProfileColumns.Append("sprk_filetype"));
         logger.Entries.Should().NotContain(e => e.Level == LogLevel.Warning);
+    }
+
+    [Fact]
+    public void BuildFields_MixedCaseProfileColumn_IsWrittenUnderItsListedName()
+    {
+        var logger = new CapturingLogger();
+
+        var fields = DocumentProfileOutputMapper.BuildFields(
+            Guid.NewGuid(),
+            Output("{\"SPRK_FileSummary\":\"A summary\",\" sprk_FileTldr \":\"tldr\",\"Sprk_DocumentType\":\"contract\"}"),
+            FileName, parentEntity: null, logger);
+
+        // The dictionary ignores case, so the stored key names are what the writer will send.
+        fields.Keys.Should().Contain("sprk_filesummary").And.Contain("sprk_filetldr").And.Contain("sprk_documenttype");
+        fields.Keys.Should().NotContain(k => k != k.ToLowerInvariant() || k != k.Trim());
+        fields["sprk_filesummary"].Should().Be("A summary");
+        fields["sprk_filetldr"].Should().Be("tldr");
+        fields["sprk_documenttype"].Should().BeOfType<Microsoft.Xrm.Sdk.OptionSetValue>();
+        logger.Entries.Should().NotContain(e => e.Level == LogLevel.Warning);
+    }
+
+    [Fact]
+    public void ProfileColumns_IsExactlyTheShippedDocumentProfilerSchema()
+    {
+        // Pinned: widening this list widens what a configuration can make the BFF identity write to a document, so it
+        // is a reviewed diff. Source: the live ACT-011 sprk_outputschemajson and the jps-action-create document-profiler
+        // example, minus sprk_filetype (computed from the file extension).
+        DocumentProfileOutputMapper.ProfileColumns.Should().BeEquivalentTo(
+            "sprk_filesummary", "sprk_filetldr", "sprk_filekeywords", "sprk_documenttype",
+            "sprk_extractorganization", "sprk_extractpeople");
     }
 
     private sealed class CapturingLogger : ILogger
