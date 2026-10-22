@@ -114,23 +114,44 @@ public sealed class StoredFileServiceTests
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
 
+    /// <summary>
+    /// A narrowing cast to int of a size-bearing identifier (one ending in size, length, bytes or total), unless it is the operand of
+    /// <c>checked(</c> (a whole word: <c>unchecked(</c> is NOT exempt). Spacing inside the cast, <c>Int32</c> and a parenthesised
+    /// operand are all seen (uac-r2 round 1 F3).
+    /// </summary>
+    private static readonly Regex UncheckedSizeCast = new(
+        @"(?<!\bchecked\()\(\s*(int|Int32)\s*\)\s*\(?\s*[\w.]*(size|length|bytes|total)\b", RegexOptions.IgnoreCase);
+
     [Fact(DisplayName = "088 retype: no unchecked (int) cast of a size or length exists in the file store's source")]
     public void NoUncheckedIntCastOfASize()
     {
         var dir = Path.Combine(RepoRoot(), "src", "server", "api", "Sprk.Bff.Api", "Services", "Finance", "Files");
         var files = Directory.GetFiles(dir, "*.cs");
         files.Should().NotBeEmpty();
-        var cast = new Regex(@"(?<!checked\()\(int\)\s*[\w.]*(size|length|bytes)", RegexOptions.IgnoreCase);
         foreach (var file in files)
         {
-            var offenders = File.ReadAllLines(file).Where(l => cast.IsMatch(l)).ToList();
+            var offenders = File.ReadAllLines(file).Where(l => UncheckedSizeCast.IsMatch(l)).ToList();
             offenders.Should().BeEmpty($"{Path.GetFileName(file)} must convert sizes only through StoredFileSize.TryToColumnValue");
         }
-
-        // Must-fire control: the pattern sees an unchecked cast and not the checked one.
-        cast.IsMatch("var v = (int)length;").Should().BeTrue();
-        cast.IsMatch("value = checked((int)length);").Should().BeFalse();
     }
+
+    [Theory(DisplayName = "088 retype must-fire (uac-r2 round 1 F3): the size-cast scan sees unchecked(, spacing, Int32, a parenthesised operand and a total")]
+    [InlineData("var v = (int)length;")]
+    [InlineData("var v = unchecked((int)length);")]
+    [InlineData("var v = (int)(length);")]
+    [InlineData("var v = ( int )length;")]
+    [InlineData("var v = (Int32)length;")]
+    [InlineData("var v = (int)total;")]
+    [InlineData("var v = (int)blob.SizeBytes;")]
+    [InlineData("var v = (int) stream.Length;")]
+    public void SizeCastScan_MustFire(string line) => UncheckedSizeCast.IsMatch(line).Should().BeTrue(line);
+
+    [Theory(DisplayName = "088 retype must-not-fire (uac-r2 round 1 F3): checked((int)length) and casts of non-size values pass the scan")]
+    [InlineData("value = checked((int)length);")]
+    [InlineData("var p = ((int)purpose).ToString();")]
+    [InlineData("var m = (int)alertAfter.TotalMinutes;")]
+    [InlineData("var s = (int)StoredFileStatus.NotYetServable;")]
+    public void SizeCastScan_MustNotFire(string line) => UncheckedSizeCast.IsMatch(line).Should().BeFalse(line);
 
     // =============================================================================================================================
     // 088 retype: the ONE canonical source-version string
