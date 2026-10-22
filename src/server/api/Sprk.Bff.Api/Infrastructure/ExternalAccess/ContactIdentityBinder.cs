@@ -18,6 +18,7 @@ using System.Security.Claims;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Registration;
 
 namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
@@ -858,7 +859,7 @@ public sealed class ContactIdentityBinder
     }
 
     /// <summary>How <see cref="ResolveCustomerOwnerTeamAsync"/> ended (ISS-005, #1673).</summary>
-    private enum OwnerTeamStatus
+    internal enum OwnerTeamStatus
     {
         /// <summary>One owner team found: <see cref="OwnerTeamResolution.TeamId"/> owns the new contact.</summary>
         Resolved,
@@ -870,14 +871,14 @@ public sealed class ContactIdentityBinder
         LookupFailed,
 
         /// <summary>
-        /// Only from <see cref="ResolveWorkforceCreateOwnerAsync"/>: this binder was built with
+        /// Only from <see cref="ResolveCreateOwnerAsync"/>: this binder was built with
         /// <see cref="ContactCreateOwner.NoneForForeignEnvironment"/> (it is over another environment, where the setting does
         /// not apply), so the create binds no owner.
         /// </summary>
         NotApplicable,
     }
 
-    private readonly record struct OwnerTeamResolution(OwnerTeamStatus Status, Guid TeamId = default);
+    internal readonly record struct OwnerTeamResolution(OwnerTeamStatus Status, Guid TeamId = default);
 
     /// <summary>
     /// The ONE lookup of a contact's owner team (design §6; ISS-005, #1673): the single default owner team of
@@ -941,27 +942,29 @@ public sealed class ContactIdentityBinder
     /// <see cref="OwnerTeamStatus.NotApplicable"/> with the reason logged at Debug once per create.
     /// </summary>
     private Task<OwnerTeamResolution> ResolveWorkforceCreateOwnerAsync(string operation, Guid oid, CancellationToken ct)
+        => ResolveCreateOwnerAsync(operation, $"oid#{HashForLog(oid)}", ct);
+
+    /// <summary>
+    /// The ONE owner decision of every contact create outside registration, shared with the invite create
+    /// (<c>ExternalInviteService</c>, which has no oid to hash): this binder's <see cref="ContactCreateOwner"/> policy decides,
+    /// through <see cref="ResolveCustomerOwnerTeamAsync"/>. A caller treats everything but
+    /// <see cref="OwnerTeamStatus.Resolved"/> as a refusal when its create is in this BFF's own environment.
+    /// </summary>
+    /// <param name="who">A log label that never identifies the person (a hash, not an email).</param>
+    internal Task<OwnerTeamResolution> ResolveCreateOwnerAsync(string operation, string who, CancellationToken ct)
     {
-        var who = $"oid#{HashForLog(oid)}";
-        switch (_createOwner)
+        if (_createOwner.IsForeignEnvironment)
         {
-            case ContactCreateOwner.CustomerBusinessUnit customer:
-                return ResolveCustomerOwnerTeamAsync(
-                    customer.Options.CurrentValue.CustomerBusinessUnitId,
-                    SecureRecordOwnerTeam.BusinessUnitName(customer.Configuration),
-                    operation,
-                    who,
-                    ct);
-
-            case ContactCreateOwner.ForeignEnvironment foreign:
-                _logger.LogDebug("[ID-BIND] {Operation} for {Who} binds no owner: {Reason}", operation, who, foreign.Reason);
-                return Task.FromResult(new OwnerTeamResolution(OwnerTeamStatus.NotApplicable));
-
-            default:
-                // Unreachable: ContactCreateOwner's constructor is private, so the two variants above are the whole set.
-                throw new InvalidOperationException(
-                    $"Unknown contact create owner policy {_createOwner.GetType().Name}.");
+            _logger.LogDebug("[ID-BIND] {Operation} for {Who} binds no owner: {Reason}", operation, who, _createOwner.ForeignReason);
+            return Task.FromResult(new OwnerTeamResolution(OwnerTeamStatus.NotApplicable));
         }
+
+        return ResolveCustomerOwnerTeamAsync(
+            _createOwner.Options.CurrentValue.CustomerBusinessUnitId,
+            SecureRecordOwnerTeam.BusinessUnitName(_createOwner.Configuration),
+            operation,
+            who,
+            ct);
     }
 
     /// <summary>
@@ -1929,17 +1932,24 @@ public class ContactIdentityBinderFactory
     private readonly ILoggerFactory _loggerFactory;
     private readonly IOptionsMonitor<WorkforceIdentityOptions> _options;
     private readonly TimeProvider _time;
+    private readonly IConfiguration _configuration;
 
+    /// <param name="configuration">
+    /// Read for <c>Dataverse:ServiceUrl</c>, this BFF's own environment, which <see cref="CreateBinder"/> refuses (ISS-005,
+    /// #1673 review K2). Read on each call, so a changed setting applies without a restart.
+    /// </param>
     public ContactIdentityBinderFactory(
         IHttpClientFactory httpClientFactory,
         ILoggerFactory loggerFactory,
         IOptionsMonitor<WorkforceIdentityOptions> options,
-        TimeProvider time)
+        TimeProvider time,
+        IConfiguration configuration)
     {
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
         _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _time = time ?? throw new ArgumentNullException(nameof(time));
+        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
     }
 
     /// <summary>The store for <paramref name="dataverseBaseUrl"/>, authenticated by <paramref name="getToken"/>.</summary>
@@ -1953,14 +1963,28 @@ public class ContactIdentityBinderFactory
     /// the own environment is the DI-registered one, which <c>RegistrationDataverseService.ContactBinderFor</c> returns for it.
     /// The ownerless creates here are a known gap, tracked in #2270.
     /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="dataverseBaseUrl"/> is this BFF's own environment (<c>Dataverse:ServiceUrl</c>, compared by
+    /// <see cref="RegistrationDataverseService.IsSameEnvironment"/>, so the <c>.api.</c> spelling is the same environment):
+    /// an ownerless binder there would create app-owned contacts in root. Use the DI-registered binder.
+    /// </exception>
     public ContactIdentityBinder CreateBinder(string dataverseBaseUrl, Func<CancellationToken, Task<string>> getToken)
-        => new(
+    {
+        if (RegistrationDataverseService.IsSameEnvironment(_configuration["Dataverse:ServiceUrl"], dataverseBaseUrl))
+        {
+            throw new InvalidOperationException(
+                $"A factory binder is ownerless and may only target a foreign Dataverse environment, but {HostOf(dataverseBaseUrl)} "
+                + "is this BFF's own (Dataverse:ServiceUrl). Use the DI-registered ContactIdentityBinder.");
+        }
+
+        return new(
             CreateStore(dataverseBaseUrl, getToken),
             _options,
             _time,
             _loggerFactory.CreateLogger<ContactIdentityBinder>(),
             ContactCreateOwner.NoneForForeignEnvironment(
                 $"foreign Dataverse environment {HostOf(dataverseBaseUrl)}; see #2270"));
+    }
 
     private static string HostOf(string dataverseBaseUrl)
         => Uri.TryCreate(dataverseBaseUrl, UriKind.Absolute, out var uri) ? uri.Host : "(unparseable url)";

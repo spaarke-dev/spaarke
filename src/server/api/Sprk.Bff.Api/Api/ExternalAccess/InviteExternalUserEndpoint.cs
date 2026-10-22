@@ -173,9 +173,12 @@ public static class InviteExternalUserEndpoint
     /// An invite whose contact lookup could not be read (the decision's <c>Fail</c>): not a refusal and not a
     /// collision — nothing was decided, nothing was created or flagged. HTTP 503 with the decision's own reason
     /// code and message, so the client can tell "try again" from a refusal and from an unknown fault (task 141,
-    /// verifier finding 5: this used to be thrown into the generic 500 and the code was dropped).
+    /// verifier finding 5: this used to be thrown into the generic 500 and the code was dropped). ISS-005 (#1673): an
+    /// invite that cannot resolve the owner of the contact it would create is the same shape with
+    /// <paramref name="StatusCode"/> 500 (an operator fix, not a retry).
     /// </summary>
-    internal sealed record InviteLookupFailure(string ReasonCode, string Message, string? Title = null);
+    internal sealed record InviteLookupFailure(
+        string ReasonCode, string Message, string? Title = null, int StatusCode = StatusCodes.Status503ServiceUnavailable);
 
     /// <summary>The <see cref="ProvisionOutcome.Status"/> of a contact whose CIAM account already existed (no onboarding email sent).</summary>
     internal const string AlreadyProvisionedStatus = "AlreadyProvisioned";
@@ -353,7 +356,7 @@ public static class InviteExternalUserEndpoint
     /// </summary>
     internal static IResult LookupFailureResult(InviteLookupFailure failure, HttpContext httpContext)
         => Results.Problem(
-            statusCode: StatusCodes.Status503ServiceUnavailable,
+            statusCode: failure.StatusCode,
             title: failure.Title ?? "Contact lookup unavailable",
             detail: failure.Message,
             extensions: new Dictionary<string, object?>

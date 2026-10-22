@@ -318,14 +318,14 @@ public class RegistrationContactLinkTests
     }
 
     private sealed class ThrowingBinderFactory() : ContactIdentityBinderFactory(
-        Mock.Of<IHttpClientFactory>(), NullLoggerFactory.Instance, Tenants(CustomerTenant), new FakeTimeProvider(Now))
+        Mock.Of<IHttpClientFactory>(), NullLoggerFactory.Instance, Tenants(CustomerTenant), new FakeTimeProvider(Now), FactoryConfiguration())
     {
         public override IContactIdentityStore CreateStore(string dataverseBaseUrl, Func<CancellationToken, Task<string>> getToken)
             => throw new InvalidOperationException("the target environment could not be reached");
     }
 
     private sealed class RecordingBinderFactory(IContactIdentityStore store) : ContactIdentityBinderFactory(
-        Mock.Of<IHttpClientFactory>(), NullLoggerFactory.Instance, Tenants(CustomerTenant), new FakeTimeProvider(Now))
+        Mock.Of<IHttpClientFactory>(), NullLoggerFactory.Instance, Tenants(CustomerTenant), new FakeTimeProvider(Now), FactoryConfiguration())
     {
         public List<string> Environments { get; } = new();
 

@@ -38,6 +38,17 @@ public static class IdentityBindingTestKit
             log ?? new BindingLogCapture<ContactIdentityBinder>(), NoOwnerUnderTest);
 
     /// <summary>
+    /// The configuration a <c>ContactIdentityBinderFactory</c> reads for this BFF's own environment (<c>Dataverse:ServiceUrl</c>),
+    /// which <c>CreateBinder</c> refuses (ISS-005, #1673 review K2). Empty by default: a test that is not about that refusal
+    /// targets whatever environment it names.
+    /// </summary>
+    public static IConfiguration FactoryConfiguration(string? ownServiceUrl = null)
+        => new ConfigurationBuilder().AddInMemoryCollection(
+            ownServiceUrl is null
+                ? new Dictionary<string, string?>()
+                : new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = ownServiceUrl }).Build();
+
+    /// <summary>
     /// The DI-registered (own-environment) binder of a <c>RegistrationDataverseService</c> whose test never links a contact
     /// in the own environment: an empty in-memory store, so any use of it would show.
     /// </summary>

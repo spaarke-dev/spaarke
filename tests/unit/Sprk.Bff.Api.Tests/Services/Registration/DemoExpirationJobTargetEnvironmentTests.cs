@@ -294,7 +294,7 @@ public class DemoExpirationJobTargetEnvironmentTests
             factory.Object,
             NullLogger<RegistrationDataverseService>.Instance,
             new ContactIdentityBinderFactory(
-                Mock.Of<IHttpClientFactory>(), NullLoggerFactory.Instance, Tenants(CustomerTenant), new FakeTimeProvider(Now)),
+                Mock.Of<IHttpClientFactory>(), NullLoggerFactory.Instance, Tenants(CustomerTenant), new FakeTimeProvider(Now), FactoryConfiguration()),
             InertOwnEnvironmentBinder(),
             new NullMembershipCacheInvalidator(NullLogger<NullMembershipCacheInvalidator>.Instance));
 

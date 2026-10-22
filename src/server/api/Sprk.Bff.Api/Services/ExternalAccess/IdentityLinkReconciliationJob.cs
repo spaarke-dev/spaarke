@@ -179,7 +179,8 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
     /// <summary>
     /// The provisioning-target environments to reconcile besides this BFF's own: <paramref name="registrationEnvironment"/>
     /// (<c>DATAVERSE_URL</c>) and every <paramref name="registryEnvironments"/> URL, trailing slash trimmed, blanks
-    /// dropped, de-duplicated case-insensitively, and never <paramref name="ownEnvironment"/> (already reconciled
+    /// dropped, de-duplicated by environment key (<see cref="RegistrationDataverseService.TryEnvironmentKey"/>: the <c>.api.</c> and plain
+    /// spellings of one environment are one target), and never <paramref name="ownEnvironment"/> (already reconciled
     /// through the DI binder). "Never the own environment" is <see cref="RegistrationDataverseService.IsSameEnvironment"/>,
     /// not a string match: the same environment spelled with an <c>.api.</c> host, a different case or a path is still
     /// the own environment (ISS-005, #1673 review F1 - reconciled through a factory binder it would create ownerless
@@ -191,11 +192,19 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
         ArgumentNullException.ThrowIfNull(registryEnvironments);
         static string? Normalise(string? url) => string.IsNullOrWhiteSpace(url) ? null : url.Trim().TrimEnd('/');
 
+        // De-duplicated on the environment key, so the .api. and plain spellings of one environment are one target; a URL
+        // that has no key is compared on its normalised text (and kept, to fail visibly when reconciled).
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var targets = new List<string>();
         foreach (var candidate in new[] { registrationEnvironment }.Concat(registryEnvironments).Select(Normalise))
         {
-            if (candidate is null || RegistrationDataverseService.IsSameEnvironment(candidate, ownEnvironment) || !seen.Add(candidate))
+            if (candidate is null || RegistrationDataverseService.IsSameEnvironment(candidate, ownEnvironment))
+            {
+                continue;
+            }
+
+            var identity = RegistrationDataverseService.TryEnvironmentKey(candidate, out var key) ? key : candidate;
+            if (!seen.Add(identity))
             {
                 continue;
             }
@@ -666,6 +675,13 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
         public int Kept;
         public int ClearFailed;
         public int Changed;
+
+        /// <summary>
+        /// ISS-005 (#1673 review K3): systemusers whose contact create was refused because no owner team could be resolved from
+        /// <c>ExternalAccess:CustomerBusinessUnitId</c>. A configuration fault that repeats every run, so it makes the run
+        /// Partial (never a silent Ok).
+        /// </summary>
+        public int OwnerUnconfigured;
         public readonly HashSet<Guid> ScannedOids = new();
         public readonly HashSet<Guid> DecidedOids = new();
         public readonly HashSet<(Guid ContactId, Guid Oid)> CollisionsThisRun = new();
@@ -681,6 +697,11 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
             }
 
             ids.Add(result.SystemUserId);
+            if (result.Outcome == SystemUserLinkOutcome.Denied && result.DenyCode == ContactBindingDecision.DenyOwnerUnconfigured)
+            {
+                OwnerUnconfigured++;
+            }
+
             if (result.WritesApplied && result.Outcome is not (SystemUserLinkOutcome.Failed or SystemUserLinkOutcome.Denied))
             {
                 Changed++;
@@ -729,6 +750,13 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
             if (UserScanTruncated)
             {
                 problems.Add($"{p}Stopped after {MaxPages} pages of systemusers; later users were not reconciled.");
+            }
+
+            if (OwnerUnconfigured > 0)
+            {
+                problems.Add(
+                    $"{p}{OwnerUnconfigured} contact create(s) refused: ExternalAccess:CustomerBusinessUnitId is not configured "
+                    + "(or names no single default owner team). Set it for this environment; the next run retries them.");
             }
 
             var failed = Count(SystemUserLinkOutcome.Failed) + ClearFailed;

@@ -808,6 +808,45 @@ public class IdentityLinkReconciliationTests
                 new[] { DemoEnvironment.ToUpperInvariant(), null, "  ", OwnEnvironment, OtherDemoEnvironment })
             .Should().Equal(DemoEnvironment, OtherDemoEnvironment);
 
+    // ISS-005 (#1673 review nit): targets are de-duplicated on the environment key, so the .api. and plain spellings of one
+    // environment (and a fully-qualified host) are ONE target, the first spelling kept.
+    [Theory]
+    [InlineData("https://spaarke-demo.crm.dynamics.com", "https://spaarke-demo.api.crm.dynamics.com")]
+    [InlineData("https://spaarke-demo.api.crm.dynamics.com", "https://spaarke-demo.crm.dynamics.com")]
+    [InlineData("https://spaarke-demo.crm.dynamics.com", "https://spaarke-demo.crm.dynamics.com./")]
+    public void ProvisioningTargetUrls_ThePlainAndApiSpellingsOfOneEnvironment_AreOneTarget(string first, string second)
+        => IdentityLinkReconciliationJob.ProvisioningTargetUrls(
+                OwnEnvironment, first, new[] { second, OtherDemoEnvironment })
+            .Should().Equal(first.TrimEnd('/'), OtherDemoEnvironment);
+
+    // ISS-005 (#1673 review K3): an owner-unconfigured Denied result (the own environment's creates refused because
+    // ExternalAccess:CustomerBusinessUnitId is unset) makes the run Partial - a configuration fault that repeats every run is
+    // never reported as an Ok run.
+    [Fact]
+    public async Task ARun_WhoseCreatesWereRefusedForNoOwner_IsPartial_NotOk()
+    {
+        var result = await RunAsync(writes: true, ownerAwareBinder: OwnerAwareBinder(_store, customerBusinessUnitId: null));
+
+        Outcome(result, "Denied").Should().BeGreaterThan(0, "the licensed users with no contact are refused, not created");
+        _store.CreatePayloads.Should().BeEmpty("nothing was created without an owner");
+        using var doc = JsonDocument.Parse(result.ResultJson!);
+        doc.RootElement.GetProperty("status").GetString().Should().Be("partial");
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("ExternalAccess:CustomerBusinessUnitId");
+    }
+
+    [Fact]
+    public async Task ARun_WhoseCreatesAreOwned_IsNotMadePartialByTheOwnerCheck()
+    {
+        var customerBu = Guid.NewGuid();
+        _store.DefaultTeams[customerBu] = new List<Guid> { Guid.NewGuid() };
+
+        var result = await RunAsync(writes: true, ownerAwareBinder: OwnerAwareBinder(_store, customerBu));
+
+        _store.CreatePayloads.Should().NotBeEmpty("the licensed users with no contact are created, owned");
+        (result.ErrorMessage ?? string.Empty).Should().NotContain("ExternalAccess:CustomerBusinessUnitId");
+    }
+
     // ISS-005 (#1673 review F1): the own environment is excluded however it is spelled. Reconciled through a factory binder
     // (owner policy NoneForForeignEnvironment) it would create ownerless contacts in this environment.
     private const string OwnEnvironmentApi = "https://spaarkedev1.api.crm.dynamics.com";
@@ -871,7 +910,8 @@ public class IdentityLinkReconciliationTests
         Dictionary<string, InMemoryContactIdentityStore>? targets = null,
         string[]? registry = null,
         string? registrationEnvironment = null,
-        bool registryFails = false)
+        bool registryFails = false,
+        ContactIdentityBinder? ownerAwareBinder = null)
     {
         var settings = new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = OwnEnvironment };
         if (writes is { } w) settings["IdentityLink:Reconciliation:WritesEnabled"] = w ? "true" : "false";
@@ -880,7 +920,7 @@ public class IdentityLinkReconciliationTests
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
 
         var services = new ServiceCollection();
-        var ownBinder = Binder(_store);
+        var ownBinder = ownerAwareBinder ?? Binder(_store);
         services.AddSingleton(ownBinder);
         if (targets is not null)
         {
@@ -969,7 +1009,7 @@ public class IdentityLinkReconciliationTests
     /// </summary>
     private sealed class PerEnvironmentBinderFactory(Dictionary<string, InMemoryContactIdentityStore> stores)
         : ContactIdentityBinderFactory(Mock.Of<IHttpClientFactory>(), NullLoggerFactory.Instance, Tenants(CustomerTenant),
-            new FakeTimeProvider(Now))
+            new FakeTimeProvider(Now), FactoryConfiguration())
     {
         public override IContactIdentityStore CreateStore(string dataverseBaseUrl, Func<CancellationToken, Task<string>> getToken)
             => stores.TryGetValue(dataverseBaseUrl, out var store)

@@ -653,7 +653,7 @@ public class ContactIdentityBinderOwnerTeamTests
     }
 
     private sealed class StoreBinderFactory(IContactIdentityStore store, ILogger? binderLog = null) : ContactIdentityBinderFactory(
-        Mock.Of<IHttpClientFactory>(), new CaptureLoggerFactory(binderLog), Tenants(CustomerTenant), new FakeTimeProvider(Now))
+        Mock.Of<IHttpClientFactory>(), new CaptureLoggerFactory(binderLog), Tenants(CustomerTenant), new FakeTimeProvider(Now), FactoryConfiguration())
     {
         public override IContactIdentityStore CreateStore(string dataverseBaseUrl, Func<CancellationToken, Task<string>> getToken)
             => store;

@@ -852,15 +852,19 @@ public class DataverseContactIdentityStoreTests
             .Should().Throw<InvalidOperationException>().WithMessage("*refusing to create*");
 
     [Fact]
-    public void TheExternalPlaneCreate_StillRefusesAnOwnerAndAHomeTenant()
+    public void TheOwnerRule_AppliesToEveryPlane_AndTheHomeTenantToWorkforceHomeOnly()
     {
-        // Must-not-fire for the relaxation: only WorkforceHome and Workforce may carry an owner; External (CIAM) may not.
-        var ownerOnExternal = new NewContactDetails("P", "E", "p@x.example") { OwningTeamId = Team };
-        var tenantOnExternal = new NewContactDetails("P", "E", "p@x.example") { ExternalTenantId = HomeTenant };
+        // The owner rule is plane-independent (I-6): an External-plane create carries the owner too (the CIAM plane creates
+        // nothing today; a future create there is owned the same way). Only the home directory is WorkforceHome's alone.
+        var owned = DataverseContactIdentityStore.CreatePayload(Oid, IdentityPlaneMarker.External,
+            new NewContactDetails("P", "E", "p@x.example") { OwningTeamId = Team });
+        owned["ownerid@odata.bind"].Should().Be("/teams(7ea70000-0000-4000-8000-7ea700007ea7)");
 
-        FluentActions.Invoking(() => DataverseContactIdentityStore.CreatePayload(Oid, IdentityPlaneMarker.External, ownerOnExternal))
-            .Should().Throw<ArgumentException>().WithMessage("*carries an owner*");
-        FluentActions.Invoking(() => DataverseContactIdentityStore.CreatePayload(Oid, IdentityPlaneMarker.External, tenantOnExternal))
+        FluentActions.Invoking(() => DataverseContactIdentityStore.CreatePayload(Oid, IdentityPlaneMarker.External,
+                new NewContactDetails("P", "E", "p@x.example") { OwningTeamId = Guid.Empty }))
+            .Should().Throw<InvalidOperationException>().WithMessage("*refusing to create*");
+        FluentActions.Invoking(() => DataverseContactIdentityStore.CreatePayload(Oid, IdentityPlaneMarker.External,
+                new NewContactDetails("P", "E", "p@x.example") { ExternalTenantId = HomeTenant }))
             .Should().Throw<ArgumentException>();
         DataverseContactIdentityStore.CreatePayload(Oid, IdentityPlaneMarker.External, new NewContactDetails("P", "E", "p@x.example"))
             .Keys.Should().NotContain("ownerid@odata.bind");

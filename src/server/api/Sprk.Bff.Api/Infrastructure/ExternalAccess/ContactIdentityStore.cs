@@ -780,6 +780,11 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     /// mirror (the key column) and the plane — the same oid in both columns, in the one create request
     /// (<see cref="BuildCreateRequest"/>).
     /// </summary>
+    /// <remarks>
+    /// The owner rule (ISS-005, #1673; DATAVERSE-WRITE-PATH-ARCHITECTURE I-6): every contact this BFF creates in its own
+    /// environment is owned by the default owner team of <c>ExternalAccess:CustomerBusinessUnitId</c>, whatever the plane; the
+    /// payload carries <c>ownerid@odata.bind</c> on any plane, refuses an empty team, and requires one for WorkforceHome.
+    /// </remarks>
     public static Dictionary<string, object?> CreatePayload(Guid oid, IdentityPlaneMarker plane, NewContactDetails details)
     {
         ArgumentNullException.ThrowIfNull(details);
@@ -793,20 +798,21 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         if (!string.IsNullOrWhiteSpace(details.FirstName)) payload["firstname"] = details.FirstName;
         if (!string.IsNullOrWhiteSpace(details.Email)) payload["emailaddress1"] = details.Email;
 
-        // ADR-028 A9 (r3 task 047): a WorkforceHome create carries its home directory and its owner. ISS-005 (#1673): the
-        // Workforce plane's creates (first sign-in, licensed-user link) carry an owner too - never a home directory. No
-        // other plane may carry either.
+        // THE OWNER RULE (ISS-005, #1673; DATAVERSE-WRITE-PATH-ARCHITECTURE I-6): every contact this BFF creates in its OWN
+        // environment is owned by the default owner team of ExternalAccess:CustomerBusinessUnitId, whatever the plane; the binder
+        // resolves it before the create and refuses the create when it cannot (ContactIdentityBinder). The payload therefore
+        // takes an owner on ANY plane (the CIAM plane is email-bind-only today and creates nothing, but a future create there
+        // is owned the same way). What it refuses: an EMPTY team on any plane, and a WorkforceHome create with no owner at
+        // all. No owner is built only for a binder over ANOTHER environment (ContactCreateOwner.NoneForForeignEnvironment,
+        // ContactIdentityBinderFactory only; tracked in #2270). A home directory belongs to WorkforceHome alone.
         var home = plane == IdentityPlaneMarker.WorkforceHome;
-        var mayCarryOwner = home || plane == IdentityPlaneMarker.Workforce;
         if (home && (details.ExternalTenantId is not { } tenant || tenant == Guid.Empty))
         {
             throw new ArgumentException("A WorkforceHome create needs the home tenant.", nameof(details));
         }
 
-        // The owner-seam refusal (RecordOwnerAssignmentCensusTests.EverySeamRefusesAnOwnerlessCreate): never an app-owned
-        // contact. WorkforceHome always needs an owner; a Workforce create has one unless its binder is not bound to this
-        // BFF's own environment (ContactIdentityBinder), and an owner it does carry must not be empty.
-        if ((home && details.OwningTeamId is null) || (mayCarryOwner && details.OwningTeamId == Guid.Empty))
+        // The owner-seam refusal (RecordOwnerAssignmentCensusTests.EverySeamRefusesAnOwnerlessCreate): never an app-owned contact.
+        if ((home && details.OwningTeamId is null) || details.OwningTeamId == Guid.Empty)
         {
             throw new InvalidOperationException(
                 $"No owning team was resolved for the {plane} contact; refusing to create an app-owned contact.");
@@ -815,11 +821,6 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         if (!home && details.ExternalTenantId is not null)
         {
             throw new ArgumentException("Only a WorkforceHome create carries a home tenant.", nameof(details));
-        }
-
-        if (!mayCarryOwner && details.OwningTeamId is not null)
-        {
-            throw new ArgumentException("Only a WorkforceHome or Workforce create carries an owner.", nameof(details));
         }
 
         if (home)

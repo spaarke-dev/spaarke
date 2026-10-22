@@ -25,6 +25,10 @@ public class RegistrationEnvironmentComparisonTests
     [InlineData("https://SPAARKEDEV1.API.CRM.DYNAMICS.COM/")]           // .api. spelling, shouting, slash
     [InlineData("https://spaarkedev1.api.crm.dynamics.com/api/data/v9.2")] // .api. spelling with a path
     [InlineData("https://spaarkedev1.crm.dynamics.com:443")]            // the default port, spelled out
+    [InlineData("https://spaarkedev1.crm.dynamics.com.")]               // fully-qualified host (trailing dot)
+    [InlineData("https://spaarkedev1.crm.dynamics.com./api/data/v9.2/")] // trailing dot with a path
+    [InlineData("https://spaarkedev1.api.crm.dynamics.com.")]           // trailing dot and .api.
+    [InlineData("HTTPS://SpaarkeDev1.API.CRM.Dynamics.com.:443/")]      // everything at once
     public void TheSameEnvironment_InAnySpelling_IsTheSame(string spelling)
     {
         RegistrationDataverseService.IsSameEnvironment(Own, spelling).Should().BeTrue();
@@ -48,6 +52,7 @@ public class RegistrationEnvironmentComparisonTests
     [InlineData("http://spaarkedev1.crm.dynamics.com")]                 // another scheme
     [InlineData("https://spaarkedev1.crm.dynamics.com:8443")]           // another port
     [InlineData("https://spaarke-demo.api.crm.dynamics.com")]           // .api. spelling of ANOTHER environment
+    [InlineData("https://spaarkedev2.crm.dynamics.com.")]               // trailing dot on ANOTHER environment
     public void ADifferentEnvironment_IsNotTheSame(string other)
     {
         RegistrationDataverseService.IsSameEnvironment(Own, other).Should().BeFalse();

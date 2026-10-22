@@ -8,7 +8,9 @@
 // Now the constructor REQUIRES one of these, and the only way to get "no owner" is a method whose name says why.
 //
 // Enforced by: the required, non-nullable constructor parameter (compiler), and ContactCreateOwnerPolicyGuardTests, which
-// fails the build when NoneForForeignEnvironment is used anywhere in server code except ContactIdentityBinderFactory.
+// fails the build when NoneForForeignEnvironment is used anywhere in server code except ContactIdentityBinderFactory, and
+// by a reflection check that the type has ONLY private constructors and NO nested types (a nested variant with an internal
+// constructor was a way to say "no owner" without calling the method the guard watches; UAC review F3).
 
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
@@ -20,11 +22,19 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// <see cref="FromCustomerBusinessUnit"/> (the binder over THIS BFF's own environment) or
 /// <see cref="NoneForForeignEnvironment"/> (a binder over another one); there is no other way to make one, and no default.
 /// </summary>
-public abstract class ContactCreateOwner
+public sealed class ContactCreateOwner
 {
-    // Private: the two variants below are the whole hierarchy, so the binder's switch over them is complete.
-    private ContactCreateOwner()
+    private readonly IOptionsMonitor<ExternalAccessOptions>? _options;
+    private readonly IConfiguration? _configuration;
+    private readonly string? _foreignReason;
+
+    // Private, and no nested types: the two factory methods below are the only way to make one, so "no owner" can be said
+    // only by NoneForForeignEnvironment, the one name ContactCreateOwnerPolicyGuardTests watches.
+    private ContactCreateOwner(IOptionsMonitor<ExternalAccessOptions>? options, IConfiguration? configuration, string? foreignReason)
     {
+        _options = options;
+        _configuration = configuration;
+        _foreignReason = foreignReason;
     }
 
     /// <summary>
@@ -36,9 +46,10 @@ public abstract class ContactCreateOwner
     /// <param name="configuration">Read for the Secure Record business unit's name (<c>SecureRecordOwnerTeam.BusinessUnitName</c>).</param>
     public static ContactCreateOwner FromCustomerBusinessUnit(
         IOptionsMonitor<ExternalAccessOptions> options, IConfiguration configuration)
-        => new CustomerBusinessUnit(
+        => new(
             options ?? throw new ArgumentNullException(nameof(options)),
-            configuration ?? throw new ArgumentNullException(nameof(configuration)));
+            configuration ?? throw new ArgumentNullException(nameof(configuration)),
+            foreignReason: null);
 
     /// <summary>
     /// The binder creates contacts with NO owner. Only for a binder over a Dataverse environment other than this BFF's own,
@@ -50,28 +61,20 @@ public abstract class ContactCreateOwner
     public static ContactCreateOwner NoneForForeignEnvironment(string reason)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reason);
-        return new ForeignEnvironment(reason);
+        return new(options: null, configuration: null, foreignReason: reason);
     }
 
-    /// <summary>The customer business unit's default owner team owns every create; unresolved refuses it.</summary>
-    internal sealed class CustomerBusinessUnit : ContactCreateOwner
-    {
-        internal CustomerBusinessUnit(IOptionsMonitor<ExternalAccessOptions> options, IConfiguration configuration)
-        {
-            Options = options;
-            Configuration = configuration;
-        }
+    /// <summary>True for <see cref="NoneForForeignEnvironment"/>: the binder is over an environment the setting does not name.</summary>
+    internal bool IsForeignEnvironment => _foreignReason is not null;
 
-        internal IOptionsMonitor<ExternalAccessOptions> Options { get; }
+    /// <summary>Why no owner applies; only meaningful when <see cref="IsForeignEnvironment"/>.</summary>
+    internal string ForeignReason => _foreignReason ?? string.Empty;
 
-        internal IConfiguration Configuration { get; }
-    }
+    /// <summary>The setting, read on every create; only for a <see cref="FromCustomerBusinessUnit"/> policy.</summary>
+    internal IOptionsMonitor<ExternalAccessOptions> Options
+        => _options ?? throw new InvalidOperationException("This policy binds no owner (foreign environment).");
 
-    /// <summary>No owner is bound: the binder is over an environment the setting does not name.</summary>
-    internal sealed class ForeignEnvironment : ContactCreateOwner
-    {
-        internal ForeignEnvironment(string reason) => Reason = reason;
-
-        internal string Reason { get; }
-    }
+    /// <summary>The configuration the Secure Record business unit's name is read from; only for a <see cref="FromCustomerBusinessUnit"/> policy.</summary>
+    internal IConfiguration Configuration
+        => _configuration ?? throw new InvalidOperationException("This policy binds no owner (foreign environment).");
 }

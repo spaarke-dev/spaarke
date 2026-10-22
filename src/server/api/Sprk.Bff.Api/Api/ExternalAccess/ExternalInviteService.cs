@@ -337,8 +337,20 @@ public sealed class ExternalInviteService
                 break;
 
             case InviteContactAction.CreateContact:
-                contactId = await CreateContactAsync(dataverseClient, request, logger, ct);
-                break;
+                {
+                    // ISS-005 (#1673): the new contact is owned by the customer business unit's default owner team, resolved by the
+                    // binder's one owner decision (the same refusal as registration and first sign-in). Decided BEFORE anything is
+                    // written: an unconfigured or unreadable owner creates no contact, marker or CIAM account. Only this create
+                    // sets an owner; a ProvisionExisting contact keeps the owner it has.
+                    var owner = await binder.ResolveCreateOwnerAsync("Invite create", "the invitee", ct);
+                    if (owner.Status != ContactIdentityBinder.OwnerTeamStatus.Resolved)
+                    {
+                        return OwnerNotResolved(owner.Status, request.Email, logger);
+                    }
+
+                    contactId = await CreateContactAsync(dataverseClient, request, owner.TeamId, logger, ct);
+                    break;
+                }
 
             default:
                 // NeedReferenceLookup (or an action this code does not know) cannot reach here: the binder
@@ -497,18 +509,60 @@ public sealed class ExternalInviteService
                 ContactIdentityBinder.InviteMessage(ContactBindingDecision.InviteMarkerNotWritten)!,
                 Title: "Invite could not be recorded"));
 
-    /// <summary>Creates a new, unbound Contact for the invite email. Throws on failure.</summary>
+    /// <summary>
+    /// ISS-005 (#1673): the invite's answer when no owner team could be resolved for the contact it would create: nothing was
+    /// created. An unset or unusable <c>ExternalAccess:CustomerBusinessUnitId</c> is a 500 with
+    /// <see cref="ContactBindingDecision.DenyOwnerUnconfigured"/> (the code registration and first sign-in answer); an owner
+    /// lookup that could not be read is the retryable 503 every invite lookup failure is. No id is in either message.
+    /// </summary>
+    private static ProvisionOutcome OwnerNotResolved(
+        ContactIdentityBinder.OwnerTeamStatus status, string email, ILogger logger)
+    {
+        if (status == ContactIdentityBinder.OwnerTeamStatus.LookupFailed)
+        {
+            logger.LogWarning(
+                "[EXT-INVITE] The owner team for the new contact of {Email} could not be read — nothing created", email);
+            return new ProvisionOutcome(Guid.Empty, "LookupFailed",
+                Failure: new InviteLookupFailure(
+                    ContactBindingDecision.InviteContactLookupFailed,
+                    ContactIdentityBinder.InviteMessage(ContactBindingDecision.InviteContactLookupFailed)
+                        ?? "The invite could not be completed. Nothing was created; try again."));
+        }
+
+        logger.LogError(
+            "[EXT-INVITE] Invite for {Email} refused: no owner team could be resolved for the new contact " +
+            "(ExternalAccess:CustomerBusinessUnitId) — nothing created", email);
+        return new ProvisionOutcome(Guid.Empty, "OwnerUnconfigured",
+            Failure: new InviteLookupFailure(
+                ContactBindingDecision.DenyOwnerUnconfigured,
+                "Invitations are not configured for this organization. Nothing was created; contact your administrator.",
+                Title: "Invitations are not configured",
+                StatusCode: StatusCodes.Status500InternalServerError));
+    }
+
+    /// <summary>
+    /// Creates a new, unbound Contact for the invite email, owned by <paramref name="ownerTeamId"/> (the customer business
+    /// unit's default owner team; ISS-005, #1673). Throws on failure.
+    /// </summary>
     private static async Task<Guid> CreateContactAsync(
         DataverseWebApiClient dataverseClient,
         InviteExternalUserRequest request,
+        Guid ownerTeamId,
         ILogger logger,
         CancellationToken ct)
     {
+        if (ownerTeamId == Guid.Empty)
+        {
+            throw new InvalidOperationException(
+                "Invite create: refusing to create a contact with no owner team (it would be app-owned in the root business unit).");
+        }
+
         var payload = new Dictionary<string, object?>
         {
             ["emailaddress1"] = request.Email,
             ["firstname"] = request.FirstName ?? string.Empty,
-            ["lastname"] = request.LastName ?? request.Email.Split('@')[0]
+            ["lastname"] = request.LastName ?? request.Email.Split('@')[0],
+            ["ownerid@odata.bind"] = $"/teams({ownerTeamId:D})",
         };
 
         var newContactId = await dataverseClient.CreateAsync(ContactEntitySet, payload, ct);

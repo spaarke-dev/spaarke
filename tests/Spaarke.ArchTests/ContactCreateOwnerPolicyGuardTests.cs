@@ -31,8 +31,10 @@ public class ContactCreateOwnerPolicyGuardTests
     private const string FactoryClass = "ContactIdentityBinderFactory";
     private const string DeclaringFile = "src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactCreateOwner.cs";
 
+    // UAC review F3: also the bare variant name. ContactCreateOwner once had a nested ForeignEnvironment class with an internal
+    // constructor, which `new ContactCreateOwner.ForeignEnvironment("x")` could use without naming the factory method.
     private static readonly Regex Mention = new(
-        @"\bNoneForForeignEnvironment\b", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+        @"\b(?:NoneFor)?ForeignEnvironment\b", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     /// <summary>The member's declaration; group 1 is the name, so a mention can be tied to it by position.</summary>
     private static readonly Regex Declaration = new(
@@ -139,14 +141,151 @@ public class ContactCreateOwnerPolicyGuardTests
         Assert.Matches(Declaration, declaringCode);
     }
 
+    // ── No ownerless CreateAsync("contacts") anywhere in the BFF (ISS-005 invite create, #1673 review F1) ──────────────
+
+    private const string BffRoot = "src/server/api/Sprk.Bff.Api/";
+
+    /// <summary>A Dataverse Web API create into the contact entity set: the literal, or a constant named like it.</summary>
+    private static readonly Regex ContactCreate = new(
+        @"\.CreateAsync\s*\(\s*(?:""contacts""|\w*Contacts?EntitySet\b)", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    /// <summary>The start of a member declaration (an access modifier at the head of a line, up to its opening parenthesis).</summary>
+    private static readonly Regex MemberStart = new(
+        @"\n[ \t]*(?:public|private|internal|protected)\b[^\n;=]*\(", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static readonly Regex OwnerBind = new(
+        @"ownerid@odata\.bind|\bOwnerBindKey\b", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// The contact creates in one BFF file's code whose enclosing member (from its declaration to the call) never sets
+    /// <c>ownerid@odata.bind</c>: "line N" for each. A contact created through the Web API without an owner is owned by the
+    /// calling application user in the root business unit (ISS-005). Known limit: a payload built in ANOTHER member and passed
+    /// in is flagged too (build it where it is created), and a create that is not <c>CreateAsync("contacts"</c> or a constant
+    /// named <c>*ContactEntitySet</c> (the identity store's own create, which binds the owner through
+    /// <c>ContactIdentityStore.OwnerBindKey</c>) is not seen.
+    /// </summary>
+    internal static IReadOnlyList<string> OwnerlessContactCreates(string relativePath, string code)
+    {
+        var violations = new List<string>();
+        if (!relativePath.StartsWith(BffRoot, StringComparison.Ordinal))
+        {
+            return violations;
+        }
+
+        var memberStarts = MemberStart.Matches(code).Select(m => m.Index).ToList();
+        foreach (Match create in ContactCreate.Matches(code))
+        {
+            var start = memberStarts.Where(i => i < create.Index).DefaultIfEmpty(0).Max();
+            if (!OwnerBind.IsMatch(code.Substring(start, create.Index - start)))
+            {
+                violations.Add($"line {SourceScan.LineOf(code, create.Index)}");
+            }
+        }
+
+        return violations;
+    }
+
+    [Fact(DisplayName = "ISS-005: no CreateAsync(\"contacts\") in Sprk.Bff.Api is ownerless")]
+    public void EveryContactCreate_InTheBff_SetsAnOwner()
+    {
+        var offenders = new List<string>();
+        var seen = 0;
+        foreach (var file in SourceScan.ServerSourceFiles())
+        {
+            var path = SourceScan.Relative(file).Replace('\\', '/');
+            if (!path.StartsWith(BffRoot, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var code = SourceScan.CodeText(File.ReadAllLines(file));
+            seen += ContactCreate.Matches(code).Count;
+            offenders.AddRange(OwnerlessContactCreates(path, code).Select(v => $"{path}: {v}"));
+        }
+
+        Assert.True(seen > 0, "the scan saw no CreateAsync(\"contacts\") at all (the invite create): the guard is vacuous");
+        Assert.True(
+            offenders.Count == 0,
+            "A contact created through the Web API with no ownerid@odata.bind is owned by the BFF's application user in the root "
+            + "business unit (ISS-005, #1673). Resolve the owner team (ContactIdentityBinder.ResolveCreateOwnerAsync) and bind it. "
+            + "Offending creates:\n" + string.Join("\n", offenders));
+    }
+
+    private const string InviteFile = BffRoot + "Api/ExternalAccess/ExternalInviteService.cs";
+
+    [Fact(DisplayName = "ISS-005 guard, must-fire: an ownerless contact create is caught")]
+    public void Control_AnOwnerlessContactCreate_IsCaught()
+        => Assert.Single(OwnerlessContactCreates(InviteFile, """
+            private static async Task<Guid> CreateContactAsync(DataverseWebApiClient client, string email)
+            {
+                var payload = new Dictionary<string, object?> { ["emailaddress1"] = email };
+                return await client.CreateAsync("contacts", payload, ct);
+            }
+            """));
+
+    [Fact(DisplayName = "ISS-005 guard, must-fire: a constant-named contact set is caught, and a bind in ANOTHER member does not excuse it")]
+    public void Control_AConstantNamedSet_AndABindElsewhere_AreCaught()
+        => Assert.Single(OwnerlessContactCreates(InviteFile, """
+            private static object Other() => new Dictionary<string, object?> { ["ownerid@odata.bind"] = "/teams(x)" };
+
+            private static async Task<Guid> CreateContactAsync(DataverseWebApiClient client, string email)
+            {
+                var payload = new Dictionary<string, object?> { ["emailaddress1"] = email };
+                return await client.CreateAsync(ContactEntitySet, payload, ct);
+            }
+            """));
+
+    [Fact(DisplayName = "ISS-005 guard, must-not-fire: a contact create that binds the owner passes")]
+    public void Control_AnOwnedContactCreate_HasNoViolation()
+        => Assert.Empty(OwnerlessContactCreates(InviteFile, """
+            private static async Task<Guid> CreateContactAsync(DataverseWebApiClient client, string email, Guid team)
+            {
+                var payload = new Dictionary<string, object?>
+                {
+                    ["emailaddress1"] = email,
+                    ["ownerid@odata.bind"] = $"/teams({team:D})",
+                };
+                return await client.CreateAsync(ContactEntitySet, payload, ct);
+            }
+            """));
+
+    [Fact(DisplayName = "ISS-005 guard, must-not-fire: creates in other entity sets, and files outside the BFF, pass")]
+    public void Control_OtherEntitySets_AndOtherProjects_HaveNoViolation()
+    {
+        Assert.Empty(OwnerlessContactCreates(InviteFile, "return await client.CreateAsync(\"accounts\", payload, ct);"));
+        Assert.Empty(OwnerlessContactCreates("src/server/shared/Spaarke.Dataverse/X.cs", "return await client.CreateAsync(\"contacts\", payload, ct);"));
+    }
+
     // ── The type's shape: there is no other way to say "no owner" ────────────────────────────────────
 
-    [Fact(DisplayName = "ISS-005: ContactCreateOwner has no constructor outside itself and exactly the two factory methods")]
+    /// <summary>
+    /// The constructors of <paramref name="type"/> and of every type nested in it, recursively, that are not private: the ways
+    /// to make a policy object other than the two factory methods. Reflection, so it sees a nested class a name scan would not.
+    /// </summary>
+    internal static IReadOnlyList<string> NonPrivateConstructors(Type type)
+    {
+        var offenders = new List<string>();
+        foreach (var constructor in type.GetConstructors(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
+        {
+            if (!constructor.IsPrivate)
+            {
+                offenders.Add($"{type.FullName}: {constructor}");
+            }
+        }
+
+        foreach (var nested in type.GetNestedTypes(BindingFlags.Public | BindingFlags.NonPublic))
+        {
+            offenders.AddRange(NonPrivateConstructors(nested));
+        }
+
+        return offenders;
+    }
+
+    [Fact(DisplayName = "ISS-005: ContactCreateOwner and every type nested in it have only private constructors; exactly the two factory methods")]
     public void ContactCreateOwner_CanOnlyBeMadeByItsTwoFactoryMethods()
     {
-        var constructors = typeof(ContactCreateOwner).GetConstructors(
-            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        Assert.All(constructors, c => Assert.True(c.IsPrivate, $"constructor {c} must be private"));
+        Assert.Empty(NonPrivateConstructors(typeof(ContactCreateOwner)));
+        Assert.True(typeof(ContactCreateOwner).IsSealed, "a subclass would be a third way to make one");
 
         var factories = typeof(ContactCreateOwner)
             .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
@@ -156,6 +295,53 @@ public class ContactCreateOwnerPolicyGuardTests
         Assert.Equal(new[] { nameof(ContactCreateOwner.FromCustomerBusinessUnit), nameof(ContactCreateOwner.NoneForForeignEnvironment) },
             factories);
     }
+
+    // Fixtures for the reflection check's controls.
+    private sealed class FixtureLeaky
+    {
+        private FixtureLeaky()
+        {
+        }
+
+        internal sealed class Variant
+        {
+            internal Variant()
+            {
+            }
+        }
+    }
+
+    private sealed class FixtureSealed
+    {
+        private FixtureSealed()
+        {
+        }
+
+        private sealed class Variant
+        {
+            private Variant()
+            {
+            }
+        }
+    }
+
+    [Fact(DisplayName = "ISS-005 guard, must-fire: a nested type with an internal constructor is caught")]
+    public void Control_ANestedTypeWithAnInternalConstructor_IsCaught()
+        => Assert.Single(NonPrivateConstructors(typeof(FixtureLeaky)));
+
+    [Fact(DisplayName = "ISS-005 guard, must-not-fire: private constructors, nested ones included, pass")]
+    public void Control_PrivateConstructors_AreNotFlagged()
+        => Assert.Empty(NonPrivateConstructors(typeof(FixtureSealed)));
+
+    [Theory(DisplayName = "ISS-005 guard, must-fire: the bare nested-variant name is caught outside the factory")]
+    [InlineData("var owner = new ContactCreateOwner.ForeignEnvironment(\"x\");")]
+    [InlineData("Func<string, object> f = r => new ForeignEnvironment(r);")]
+    public void Control_TheBareVariantName_IsCaught(string statement)
+        => Assert.NotEmpty(Violations(OtherFile, statement));
+
+    [Fact(DisplayName = "ISS-005 guard, must-not-fire: IsForeignEnvironment (a different identifier) passes")]
+    public void Control_AnIdentifierContainingTheName_IsNotFlagged()
+        => Assert.Empty(Violations(OtherFile, "if (owner.IsForeignEnvironment) { }"));
 
     [Fact(DisplayName = "ISS-005: the ContactIdentityBinder constructor requires a non-null ContactCreateOwner")]
     public void TheBinderConstructor_TakesTheOwnerPolicy_AsARequiredNonNullableParameter()
@@ -194,7 +380,7 @@ public class ContactCreateOwnerPolicyGuardTests
         => Assert.Empty(Violations(DeclaringFile, """
             public abstract class ContactCreateOwner
             {
-                public static ContactCreateOwner NoneForForeignEnvironment(string reason) => new ForeignEnvironment(reason);
+                public static ContactCreateOwner NoneForForeignEnvironment(string reason) => new(null, null, reason);
             }
             """));
 
@@ -236,7 +422,7 @@ public class ContactCreateOwnerPolicyGuardTests
         => Assert.Single(Violations(DeclaringFile, """
             public abstract class ContactCreateOwner
             {
-                public static ContactCreateOwner NoneForForeignEnvironment(string reason) => new ForeignEnvironment(reason);
+                public static ContactCreateOwner NoneForForeignEnvironment(string reason) => new(null, null, reason);
                 public static ContactCreateOwner Default() => NoneForForeignEnvironment("default");
             }
             """));

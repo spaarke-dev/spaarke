@@ -559,6 +559,7 @@ public class RegistrationDataverseService : IDisposable
     /// (<see cref="LinkContactForNewSystemUserAsync"/> is non-fatal by design; the reconciliation job fails its run).
     /// Callers that want the opposite default for an unknown URL (eviction treats it as "yes": an unnecessary
     /// eviction costs a re-read) handle blanks themselves, as <see cref="IsThisBffsEnvironment"/> does.</para>
+    /// <para>A trailing dot on the host (<c>org.crm.dynamics.com.</c>, the fully-qualified form) is ignored.</para>
     /// <para>The port is part of the identity: Dataverse listens on the default port, so a URL naming another port is
     /// not the environment this BFF is configured for.</para>
     /// </remarks>
@@ -566,7 +567,8 @@ public class RegistrationDataverseService : IDisposable
         => TryEnvironmentKey(first, out var a) && TryEnvironmentKey(second, out var b)
            && string.Equals(a, b, StringComparison.Ordinal);
 
-    private static bool TryEnvironmentKey(string? url, out string key)
+    /// <summary>The environment key <see cref="IsSameEnvironment"/> compares (scheme, host without an <c>.api.</c> segment, port); false for an unusable URL.</summary>
+    internal static bool TryEnvironmentKey(string? url, out string key)
     {
         key = string.Empty;
         if (string.IsNullOrWhiteSpace(url)
@@ -577,7 +579,8 @@ public class RegistrationDataverseService : IDisposable
             return false;
         }
 
-        var labels = uri.IdnHost.ToLowerInvariant().Split('.').ToList();
+        // A fully-qualified host ("org.crm.dynamics.com.") is the same host: the trailing dot is not part of the name.
+        var labels = uri.IdnHost.ToLowerInvariant().TrimEnd('.').Split('.').ToList();
         if (labels.Count >= 4 && labels[1] == "api" && labels[2].StartsWith("crm", StringComparison.Ordinal))
         {
             labels.RemoveAt(1);

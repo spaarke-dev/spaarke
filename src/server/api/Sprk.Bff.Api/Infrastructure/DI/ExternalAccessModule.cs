@@ -129,6 +129,8 @@ public static class ExternalAccessModule
         services.AddOptions<ExternalAccessOptions>()
             .BindConfiguration(ExternalAccessOptions.SectionName)
             .ValidateOnStart();
+        // ISS-005 (#1673 review K3): warns at startup, once, when CustomerBusinessUnitId is unset (never fails startup).
+        services.AddSingleton<IValidateOptions<ExternalAccessOptions>, ExternalAccessOptionsValidator>();
 
         // Module entitlement resolver (task 072; defaults by principal kind, r3 task 011 / A8) — resolves the
         // Tier-1 module-code set the external-spa widget registry gates tabs on (/api/v1/external/me/entitlements):
