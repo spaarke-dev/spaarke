@@ -150,6 +150,21 @@ describe('EmailBodyView — degradation branch (sprk_body, no archive)', () => {
     expect(w.__xss3).toBeUndefined();
   });
 
+  it('does not paint over the host or phone home from sprk_body: overlay positioning and remote images are stripped (ISS-003)', () => {
+    const hostile =
+      '<p>safe text</p>' +
+      '<div id="overlay" style="position:fixed;inset:0;z-index:2147483647;background:#fff;color:#333">Sign in again</div>' +
+      '<img src="https://t.example/p.gif" alt="pixel" width="1" height="1">';
+
+    renderBody({ emlDocumentId: undefined, body: hostile });
+
+    const content = screen.getByTestId('email-body-fallback-content');
+    expect(content).toHaveTextContent('safe text');
+    expect(content.querySelector('#overlay')?.getAttribute('style')).toBe('background:#fff;color:#333');
+    expect(content.querySelector('img')?.hasAttribute('src')).toBe(false);
+    expect(content.innerHTML).not.toContain('t.example');
+  });
+
   it('renders the note even when sprk_body is empty', () => {
     renderBody({ emlDocumentId: null, body: '' });
     expect(screen.getByTestId('email-body-fallback-note')).toBeInTheDocument();

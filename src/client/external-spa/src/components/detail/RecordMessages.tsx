@@ -185,12 +185,13 @@ const useStyles = makeStyles({
     whiteSpace: 'pre-wrap',
     overflowWrap: 'anywhere',
   },
-  // Inbound HTML mail keeps its `style` attributes (shared sanitizer), so a body could carry
-  // `position:fixed; inset:0; z-index:2147483647` and paint a fake sign-in over the whole app. `contain: paint` makes
-  // this box the containing block for fixed and absolute descendants and clips painting to it; `position: relative`
-  // anchors absolute descendants here. overflowX stays `auto` so a wide table scrolls sideways instead of being cut;
-  // overflowY is `hidden` because normal flow never overflows an auto-height box, so only an absolutely placed
-  // descendant could, and that must be clipped (not given a scrollbar).
+  // Defence in depth (R3 task 051; ISS-003 / #1636). The shared sanitizer now drops `position:fixed|absolute|sticky`,
+  // `inset`, `z-index`, transforms and viewport-sized boxes from an inbound body's `style`, which is what stops a fake
+  // sign-in panel painted over the whole app. This containment stays so one sanitizer regression cannot reopen it:
+  // `contain: paint` makes this box the containing block for fixed and absolute descendants and clips painting to it;
+  // `position: relative` anchors absolute descendants here. overflowX stays `auto` so a wide table scrolls sideways
+  // instead of being cut; overflowY is `hidden` because normal flow never overflows an auto-height box, so only an
+  // absolutely placed descendant could, and that must be clipped (not given a scrollbar).
   bodyHtml: {
     color: tokens.colorNeutralForeground1,
     fontSize: tokens.fontSizeBase300,
