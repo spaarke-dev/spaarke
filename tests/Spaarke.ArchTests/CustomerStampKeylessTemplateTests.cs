@@ -429,6 +429,74 @@ public class CustomerStampKeylessTemplateTests
         Assert.True(hits.Count == 0, "ebilling-file-store.json produces key material: " + string.Join("; ", hits));
     }
 
+    // ---- eBilling file store: blob soft delete (ebilling-r1 DEF-038, owner decision 2026-10-22) -----------------
+
+    [Fact(DisplayName = "DEF-038: the file-store blob service enables blob soft delete with days = the parameter (default 30, range 1..365)")]
+    public void FileStoreBlobService_EnablesSoftDeleteWithParameterDays()
+    {
+        var template = FileStoreTemplate();
+        var blobService = Assert.Single(
+            Resources(template).Select(r => r.Resource).Where(r => IsType(r, "Microsoft.Storage/storageAccounts/blobServices")));
+
+        var violations = BlobServiceViolations(blobService);
+        Assert.True(violations.Count == 0, "ebilling-file-store blob service (DEF-038): " + string.Join("; ", violations));
+
+        var parameter = template["parameters"]?["blobSoftDeleteRetentionDays"];
+        Assert.NotNull(parameter);
+        Assert.Equal(30, parameter!["defaultValue"]?.GetValue<int>());
+        Assert.Equal(1, parameter["minValue"]?.GetValue<int>());
+        Assert.Equal(365, parameter["maxValue"]?.GetValue<int>());
+    }
+
+    [Fact(DisplayName = "DEF-038: the file-store containers deploy after the blob service (soft delete is on before the first blob)")]
+    public void FileStoreContainers_DependOnBlobService()
+    {
+        var containers = Resources(FileStoreTemplate()).Select(r => r.Resource)
+            .Where(r => IsType(r, "Microsoft.Storage/storageAccounts/blobServices/containers")).ToList();
+
+        var container = Assert.Single(containers);
+        var dependsOn = container["dependsOn"] as JsonArray ?? new JsonArray();
+        Assert.Contains(dependsOn, d => d?.GetValue<string>().Contains("'Microsoft.Storage/storageAccounts/blobServices'", StringComparison.Ordinal) == true);
+    }
+
+    [Fact(DisplayName = "DEF-038: must-not-fire — the exact soft-delete-only blob service is accepted")]
+    public void FileStoreBlobService_ExactShape_IsAccepted()
+    {
+        Assert.Empty(BlobServiceViolations(BlobService()));
+    }
+
+    [Theory(DisplayName = "DEF-038: must-fire — a disabled, literal-days, or wider blob service is flagged")]
+    [InlineData("disabled")]
+    [InlineData("literal-days")]
+    [InlineData("missing-policy")]
+    [InlineData("versioning")]
+    [InlineData("change-feed")]
+    [InlineData("container-soft-delete")]
+    [InlineData("cors")]
+    [InlineData("restore-policy")]
+    [InlineData("permanent-delete")]
+    public void FileStoreBlobService_Deviation_IsFlagged(string deviation)
+    {
+        var blobService = BlobService();
+        var properties = blobService["properties"]!.AsObject();
+        var policy = properties["deleteRetentionPolicy"]!.AsObject();
+        switch (deviation)
+        {
+            case "disabled": policy["enabled"] = false; break;
+            case "literal-days": policy["days"] = 30; break;
+            case "missing-policy": properties.Remove("deleteRetentionPolicy"); break;
+            case "versioning": properties["isVersioningEnabled"] = true; break;
+            case "change-feed": properties["changeFeed"] = new JsonObject { ["enabled"] = true }; break;
+            case "container-soft-delete": properties["containerDeleteRetentionPolicy"] = new JsonObject { ["enabled"] = true, ["days"] = 7 }; break;
+            case "cors": properties["cors"] = new JsonObject(); break;
+            case "restore-policy": properties["restorePolicy"] = new JsonObject { ["enabled"] = true, ["days"] = 7 }; break;
+            case "permanent-delete": policy["allowPermanentDelete"] = true; break;
+            default: throw new ArgumentOutOfRangeException(nameof(deviation));
+        }
+
+        Assert.NotEmpty(BlobServiceViolations(blobService));
+    }
+
     // ---- rules ------------------------------------------------------------------------------------------------
 
     private static List<string> LocalAuthViolations(JsonNode template)
@@ -660,6 +728,48 @@ public class CustomerStampKeylessTemplateTests
 
         return violations;
     }
+
+    /// <summary>Every way the file store's blob service differs from "blob soft delete on, days = the retention parameter,
+    /// and nothing else": the PUT must not write versioning, change feed, container soft delete, CORS, restore policy or
+    /// permanent-delete, because an ARM PUT of a property the template does not state may reset it on the live account.</summary>
+    private static List<string> BlobServiceViolations(JsonObject blobService)
+    {
+        var violations = new List<string>();
+        var properties = blobService["properties"] as JsonObject;
+        var policy = properties?["deleteRetentionPolicy"] as JsonObject;
+        if (policy is null)
+        {
+            violations.Add("no properties.deleteRetentionPolicy");
+            return violations;
+        }
+
+        if (policy["enabled"]?.GetValueKind() != System.Text.Json.JsonValueKind.True)
+        {
+            violations.Add("deleteRetentionPolicy.enabled is not true");
+        }
+
+        if (policy["days"]?.ToString() != "[parameters('blobSoftDeleteRetentionDays')]")
+        {
+            violations.Add($"deleteRetentionPolicy.days is '{policy["days"]}', not the blobSoftDeleteRetentionDays parameter");
+        }
+
+        foreach (var extra in policy.Select(p => p.Key).Where(k => k is not ("enabled" or "days")))
+        {
+            violations.Add($"deleteRetentionPolicy sets '{extra}'");
+        }
+
+        foreach (var extra in properties!.Select(p => p.Key).Where(k => k != "deleteRetentionPolicy"))
+        {
+            violations.Add($"blob service sets '{extra}' (only deleteRetentionPolicy is in scope)");
+        }
+
+        return violations;
+    }
+
+    private static JsonObject BlobService() => JsonNode.Parse("""
+        { "type": "Microsoft.Storage/storageAccounts/blobServices", "name": "[format('{0}/{1}', parameters('storageAccountName'), 'default')]",
+          "properties": { "deleteRetentionPolicy": { "enabled": true, "days": "[parameters('blobSoftDeleteRetentionDays')]" } } }
+        """)!.AsObject();
 
     private static JsonObject RoleDefinition(
         IEnumerable<string> actions,

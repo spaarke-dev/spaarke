@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "7803733073939782325"
+      "templateHash": "15638523227508516644"
     }
   },
   "parameters": {
@@ -47,9 +47,29 @@
       "metadata": {
         "description": "Monthly cap, in GB scanned, for on-upload malware scanning. Used only when enableMalwareScanning is true."
       }
+    },
+    "blobSoftDeleteRetentionDays": {
+      "type": "int",
+      "defaultValue": 30,
+      "minValue": 1,
+      "maxValue": 365,
+      "metadata": {
+        "description": "Blob soft delete retention, in days, for the file store account (ebilling-r1 DEF-038). Every environment gets 30 unless it overrides (customer-provisioning passes it per environment)."
+      }
     }
   },
   "resources": [
+    {
+      "type": "Microsoft.Storage/storageAccounts/blobServices",
+      "apiVersion": "2023-01-01",
+      "name": "[format('{0}/{1}', parameters('storageAccountName'), 'default')]",
+      "properties": {
+        "deleteRetentionPolicy": {
+          "enabled": true,
+          "days": "[parameters('blobSoftDeleteRetentionDays')]"
+        }
+      }
+    },
     {
       "copy": {
         "name": "fileStoreContainers",
@@ -60,7 +80,10 @@
       "name": "[format('{0}/{1}/{2}', parameters('storageAccountName'), 'default', parameters('containerNames')[copyIndex()])]",
       "properties": {
         "publicAccess": "None"
-      }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts/blobServices', parameters('storageAccountName'), 'default')]"
+      ]
     },
     {
       "type": "Microsoft.Authorization/roleDefinitions",

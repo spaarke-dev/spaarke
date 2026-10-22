@@ -1088,7 +1088,7 @@ The BFF routes (`/review`, `/blocked`) are covered by 119.
 
 | Field | Value |
 |---|---|
-| **Status** | Open (owner decision: retention period, and whether dev gets it) |
+| **Status** | Decided 2026-10-22: 30 days, all environments incl. dev; module change on task/ebill-2255-softdelete; dev apply pending |
 | **Urgency** | medium |
 | **Filed** | 2026-10-22 |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2255 |
