@@ -51,6 +51,9 @@ export const REGISTRATION_OWNER_UNCONFIGURED = 'sdap.access.registration_owner_u
 export const OWNER_UNCONFIGURED_MESSAGE =
   'Sign-in is not configured for this organization. Contact your administrator.';
 
+/** The title shown above it: the state is an unfinished set-up, not a permission problem ("Access denied" would contradict the sentence). */
+export const OWNER_UNCONFIGURED_TITLE = 'Sign-in is not set up yet';
+
 /** `/me` was refused with `registration_owner_unconfigured` (a 5xx that must NOT fall back to a default workspace). */
 export class OwnerUnconfiguredError extends Error {
   constructor(public readonly statusCode: number) {

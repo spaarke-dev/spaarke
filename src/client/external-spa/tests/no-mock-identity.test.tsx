@@ -376,6 +376,9 @@ describe('/me refusals are not defaulted to a stand-in user', () => {
         'Sign-in is not configured for this organization. Contact your administrator.'
       );
       expect(document.body.textContent).not.toContain('SERVER-DETAIL-MUST-NOT-APPEAR');
+      // The title agrees with the sentence: not "Access denied" above a "not configured" message.
+      expect(denied.textContent).toContain('Sign-in is not set up yet');
+      expect(denied.textContent).not.toContain('Access denied');
       // No workspace: no shell tabs, no Quick Start, and no request beyond /me itself.
       expect(screen.queryAllByRole('tab')).toHaveLength(0);
       expect(screen.queryByText(/quick start/i)).toBeNull();
@@ -414,6 +417,8 @@ describe('/me refusals are not defaulted to a stand-in user', () => {
       const { WorkspaceHomePage } = await import('../src/pages/WorkspaceHomePage');
       render(React.createElement(WorkspaceHomePage, { teamsHost: false }));
       const denied = await screen.findByTestId('bff-access-denied');
+      expect(denied.textContent).toContain('Access denied'); // a real refusal keeps its title
+      expect(denied.textContent).not.toContain('Sign-in is not set up yet');
       expect(denied.textContent?.includes(detail)).toBe(showsDetail);
       expect(denied.textContent?.includes('You do not have access to this workspace')).toBe(!showsDetail);
     },
