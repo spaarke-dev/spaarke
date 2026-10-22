@@ -73,6 +73,38 @@ public sealed class RecordCreationServiceReferenceLookupSeamTests
         outcome.Steps.Single(s => s.Step == RecordCreationStep.TableRules).Note.Should().EndWith("1 reference value(s) dropped");
     }
 
+    [Theory]
+    [InlineData(true, "the AppendTo read throws")]
+    [InlineData(false, "the AppendTo read answers 503")]
+    public async Task AReferenceWhoseCheckCannotComplete_IsDroppedWithAWarning_AndTheMatterIsCreated(bool throws, string because)
+    {
+        // UAC-r2's 018a acceptance (K-a): "the check could not complete" drops the reference (K-5, the accepted deviation
+        // matching live Office), never keeps it.
+        if (throws)
+            _world.Caller.PrivilegesThrowFor = "prvAppendTosprk_mattertype_ref";
+        else
+            _world.Caller.PrivilegesFault = ("prvAppendTosprk_mattertype_ref", 503);
+        var request = await MatterAsync() with { ReferenceLookupColumns = References };
+
+        var outcome = await _world.CreateAsync(request);
+
+        outcome.Succeeded.Should().BeTrue($"{because}: {outcome.Refusal?.Code} {outcome.Refusal?.Detail}");
+        var fields = _world.Creates.Should().ContainSingle().Subject.Fields;
+        fields.Should().NotContainKey(MatterTypeBind, "a reference that could not be checked is never written");
+        fields.Should().ContainKey(PracticeAreaBind, "the other reference's check completed");
+        var warning = outcome.MappingWarnings.Should().ContainSingle().Subject;
+        warning.Code.Should().Be(RecordCreationWarning.ReferenceValueDroppedCode);
+        warning.Column.Should().Be("sprk_mattertype");
+        // A throw is the reference pass's own catch ("it could not be checked"). A 503 on an ORGANIZATION-OWNED table's
+        // AppendTo read is collapsed by CallerWriteAuthorization.CallerMayAppendToOrganizationOwnedAsync to "no AppendTo"
+        // (pre-existing, uniform), so it reads as the not-usable wording — dropped either way.
+        warning.Detail.Should().Be(throws
+            ? "The value you chose for 'sprk_mattertype' was not written: it could not be checked; the matter was created without it."
+            : "The value you chose for 'sprk_mattertype' was not written: it was not found, or you do not have permission to use " +
+              "it; the matter was created without it.");
+        warning.Detail.Should().NotContain("10.0.0.11", "the fault's text stays in the log");
+    }
+
     [Fact]
     public async Task AUsableReference_IsKept_AndNothingIsSaid()
     {
