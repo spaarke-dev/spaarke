@@ -942,15 +942,20 @@ public class DocumentCheckoutService
     /// other value is the result to return with the row KEPT.
     /// </summary>
     /// <remarks>
-    /// <para><b>The pointer is verified first</b> (<see cref="RecordContainerResolver.EnsureDocumentPointerContainerAsync"/>,
-    /// the check every app-only download runs). A destroy that follows the row's pointer as the application is at least
-    /// as consequential as a download: an item id re-pointed outside the BFF must not make this delete another file.</para>
+    /// <para><b>The pointer is verified first</b> (<see cref="RecordContainerResolver.VerifyDocumentPointerForDeleteAsync"/>:
+    /// the rule every app-only download runs, with a fault told apart from a refusal). A destroy that follows the row's
+    /// pointer as the application is at least as consequential as a download: an item id re-pointed outside the BFF must
+    /// not make this delete another file.</para>
     /// <para><b>A row with no pointer has no file</b> to delete; the row may go.</para>
-    /// <para><b>An item already gone</b> (<see cref="SpeFileStore.DeleteFileAsync"/> returns <see langword="false"/>) is
-    /// not a failure: the file is not there, so the row may go.</para>
-    /// <para><b>Anything else keeps the row</b>: a pointer the check refuses or a refused container (409 with the check's
-    /// code), and a Graph or Dataverse fault (503 <see cref="FileNotDeletedCode"/>). Cancellation by the caller is
-    /// rethrown.</para>
+    /// <para><b>An item already gone is not a failure</b>, so the row may go, in two places. (1) The pointer check refuses
+    /// an item Graph no longer has; when the row's bound item id equals the pointer, the drive is this stamp's and Graph
+    /// answers 404, the verdict is <see cref="DocumentPointerDeleteVerdict.FileAlreadyGone"/> and no file is touched (R3
+    /// ISS-004 review F1: without it a row whose file an earlier attempt, or the task-188 race, had deleted could never
+    /// be deleted). (2) <see cref="SpeFileStore.DeleteFileAsync"/> returns <see langword="false"/>.</para>
+    /// <para><b>Anything else keeps the row</b>: a pointer the check refuses (a mismatched or unbound item id, an unowned
+    /// container; 409 <see cref="RecordContainerResolver.DocumentStorageUnverifiedCode"/>), a refused delete (409, its
+    /// code), and a Graph or Dataverse fault, in the pointer check or the delete (503 <see cref="FileNotDeletedCode"/>,
+    /// retryable). Cancellation by the caller is rethrown.</para>
     /// </remarks>
     private async Task<DeleteResult?> DeleteFileOrRefuseAsync(
         Guid documentId, DocumentRecord document, string correlationId, CancellationToken ct)
@@ -965,8 +970,29 @@ public class DocumentCheckoutService
 
         try
         {
-            await _containerResolver.EnsureDocumentPointerContainerAsync(
-                documentId, document.DriveId, document.ItemId, ct);
+            switch (await _containerResolver.VerifyDocumentPointerForDeleteAsync(
+                        documentId, document.DriveId, document.ItemId, ct))
+            {
+                case DocumentPointerDeleteVerdict.Refused:
+                    _logger.LogWarning(
+                        "SPE file of document {DocumentId} not deleted: its pointer is refused; the row is kept [{CorrelationId}]",
+                        documentId, correlationId);
+                    return new FileNotDeletedDeleteResult(
+                        RecordContainerResolver.DocumentStorageUnverifiedCode, StatusCodes.Status409Conflict, correlationId);
+
+                case DocumentPointerDeleteVerdict.Fault:
+                    // The check could not be made (Graph 429/503, a Dataverse fault): retryable, unlike a refusal.
+                    return new FileNotDeletedDeleteResult(
+                        FileNotDeletedCode, StatusCodes.Status503ServiceUnavailable, correlationId);
+
+                case DocumentPointerDeleteVerdict.FileAlreadyGone:
+                    // The bound pointer's item is provably gone from an owned container (an earlier attempt deleted it, or
+                    // the task-188 race did): there is nothing to delete, and NO file is touched here. The row may go.
+                    _logger.LogInformation(
+                        "SPE file of document {DocumentId} is already gone; deleting the row [{CorrelationId}]",
+                        documentId, correlationId);
+                    return null;
+            }
 
             var deleted = await _speFileStore.DeleteFileAsync(document.DriveId, document.ItemId, ct);
             if (!deleted)
@@ -1719,10 +1745,11 @@ public record FileNotDeletedDeleteResult(string Code, int FailureStatusCode, str
 /// <param name="CorrelationId">The request's correlation id.</param>
 /// <param name="FileGone"><see langword="false"/> when NOTHING was deleted (the pre-check). <see langword="true"/> when
 /// the refusal came at the row, after the file step had removed the file (or found it already gone): the row is kept
-/// without its file. Once the children are gone, a later delete treats the missing file as deleted
-/// (<see cref="SpeFileStore.DeleteFileAsync"/> returns <see langword="false"/>) and removes the row, unless the
-/// pointer check (<see cref="DocumentFileDeletePolicy.VerifiedFileFirstKeepRowOnFailure"/>) refuses the missing item
-/// first (the task 032 known limit, now on both routes).</param>
+/// without its file. Once the children are gone, a later delete treats the missing file as deleted and removes the row:
+/// the pointer check reports a bound pointer whose item is gone from an owned container as
+/// <see cref="DocumentPointerDeleteVerdict.FileAlreadyGone"/> (R3 ISS-004 review F1; this closes the task 032 known limit
+/// on both routes). A row whose pointer is unbound or mismatched, or whose container is not this stamp's, is still
+/// refused (409), and a fault in the check is a retryable 503.</param>
 public record HasChildDocumentsDeleteResult(int? ChildCount, string CorrelationId, bool FileGone = false)
     : DeleteResult(false, CorrelationId)
 {

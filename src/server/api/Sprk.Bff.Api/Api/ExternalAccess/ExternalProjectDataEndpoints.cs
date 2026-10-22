@@ -2593,9 +2593,11 @@ public static class ExternalProjectDataEndpoints
     /// <para><b>Order and partial failure</b> (<see cref="DocumentFileDeletePolicy.VerifiedFileFirstKeepRowOnFailure"/>,
     /// ADR-007): the row's pointer is verified, the FILE is deleted first, and only then the row. If the file cannot be
     /// deleted the row is kept and this answers 409 (pointer refused) or 503 (try again). If the file went but the row
-    /// could not be deleted, this answers 500: the row then points at a deleted file. A retry here is refused by the
-    /// pointer check (the item no longer exists), so only a staff delete in the model-driven app clears it; the task 032
-    /// notes record this known limit. A file that was already gone before the delete counts as deleted.</para>
+    /// could not be deleted, this answers 500: the row then points at a deleted file. A retry deletes the row: the
+    /// pointer check (<see cref="Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.VerifyDocumentPointerForDeleteAsync"/>)
+    /// reports an item that is gone from this stamp's container, under the pointer the BFF bound to the row, as already
+    /// deleted (R3 ISS-004 review F1; this closed the task 032 known limit). An unbound, mismatched or unowned pointer is
+    /// still refused (409), and a Graph or Dataverse fault in the check is a retryable 503.</para>
     /// <para><b>One problem key.</b> Every problem body on the delete routes (403, 409, 500, 503, including the
     /// service-request 503 of <see cref="RightsForDocumentParentAsync"/>) carries its code in <c>reasonCode</c>, so the
     /// SPA reads one key. The older <c>code</c> key of the upload and download routes is not used here.</para>

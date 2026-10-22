@@ -82,6 +82,10 @@ public static class DocumentOperationsEndpoints
             .WithDescription("Deletes a document from both Dataverse and SharePoint Embedded")
             .Produces<DeleteDocumentResponse>(200)
             .Produces<DocumentLockedError>(409)
+            // R3 ISS-004 (#1650): the file-first delete keeps the row when the file is not deleted. 409 also carries the
+            // problem bodies (pointer refused, child documents); 503 is the retryable "file could not be deleted right now".
+            .ProducesProblem(409)
+            .ProducesProblem(503)
             .ProducesProblem(403)
             .ProducesProblem(404)
             .ProducesProblem(401)
