@@ -44,16 +44,16 @@ Per-record isolation was already in place: the other 3 secure containers were pr
 | Change | File |
 |---|---|
 | `SpeContainerMembershipService.IsUnresolvableContainer(Exception)` reuses the shared rule `SpeAdminGraphService.IsUnresolvableContainerId`: Graph `ODataError`, 400, code `invalidRequest` (measured on dev 2026-10-06). `SpeAdminGraphService.cs` is not modified. | `Infrastructure/ExternalAccess/SpeContainerMembershipService.cs` |
-| The JIT sweep gets a new catch for that classification. It logs a Warning, adds the problem `"{entity} {id}: container {c} does not resolve in this tenant; skipped"` and does not count it in `failed`. Nothing is read, removed or cleared on that container, and `RemoveMarkedGrantAsync` is never called for it. Genuine faults keep the Error log and `failed++`: 5xx, 429, a 400 with another code, `SpaarkeStorageException`, and anything that is not an `ODataError`. | `Services/Access/SpeContainerMembershipSync.cs` |
+| The JIT sweep gets a new catch for that classification, applied **only to a fault from its first read of a container** (`ReadMarkersAsync`; fix round 1, F2-1). It logs a Warning, adds the problem `"{entity} {id}: container {c} does not resolve in this tenant; skipped"`, counts it in a new `Unresolvable` result field, and does not count it in `failed`. Once that first read answers, the id is proven to resolve, so the same 400 from `ReadAccessAsync` (its container read, the permission collection or a `@odata.nextLink` page) stays an Error and `failed++`. Nothing is read, removed or cleared on that container, and `RemoveMarkedGrantAsync` is never called for it. Genuine faults keep the Error log and `failed++`: 5xx, 429, a 400 with another code, `SpaarkeStorageException`, and anything that is not an `ODataError`. | `Services/Access/SpeContainerMembershipSync.cs` |
 | `RemoveMarkedGrantAsync` moves the ownership check inside the try, so a guard fault fails that one grant closed (`Failed`, marker kept). The task-227d refusal (`spe_container_not_owned`) is excluded by the catch filter and still propagates. | `Infrastructure/ExternalAccess/SpeContainerMembershipService.cs` |
 
 **Not changed, on purpose:**
 
 - **`ReadMarkersCoreAsync` / `ReadAccessAsync` still answer null for 404 only.** `DemoExpirationJob.RevokeSpeContainerAccessAsync` reads null as "the container does not exist; nothing to revoke", which would fail open on an id Graph merely cannot resolve. `OfficeEditAccessService` uses `ReadAccessAsync` too. The classification lives only in the sweep's catch.
-- **The job (`SpeContainerMembershipSyncJob.cs`).** Its success rule (`failed == 0`) is already right once an unresolvable container is not counted as failed. The problem line is carried in `ResultJson`.
+- **The job's success rule (`SpeContainerMembershipSyncJob.cs`).** `failed == 0` is already right once an unresolvable container is not counted as failed. So the skip stays visible on a green run, the heartbeat line and `ResultJson` carry `unresolvable={n}` (fix round 1, K1), and the problem line is in `ResultJson`.
 - **The standing-writer pass.** A business unit stamped with a dead container is still a failure there. It is a config fault on a container that should serve users, the same as its NotOwned branch.
 
-**Why code only, without matching the message text.** The shared rule was measured on dev: both "Invalid hostname for this tenancy" (site part unresolvable) and "The drive ID is incorrectly formatted or was not recognized" (truncated id) are 400 `invalidRequest`, and both mean "this id names no container here". A bug in our own request (a malformed `$select`) answers 400 `BadRequest` and stays a fault. Reusing the one rule keeps the sweep, the SPE-admin binding read and the guard consistent: for an id that does not resolve, all of them report it and none counts it as a failure.
+**Why code only, without matching the message text.** The shared rule was measured on dev: both "Invalid hostname for this tenancy" (site part unresolvable) and "The drive ID is incorrectly formatted or was not recognized" (truncated id) are 400 `invalidRequest`, and both mean "this id names no container here". A bug in our own request (a malformed `$select`) answers 400 `BadRequest` and stays a fault. The rule was measured for the single-container GET only, which is why the sweep applies it only to its first read. Reusing the one rule keeps the JIT sweep, the SPE-admin binding read and the guard consistent: for an id that does not resolve, the JIT sweep reports it and does not count a failure, whether it reaches the sweep as the guard's NotOwned refusal or as Graph's 400. The standing-writer pass is different: it counts NotOwned as `failed++` (see above).
 
 **Fail closed.** An unresolvable item is never treated as revoked-and-done. Its markers (if any could exist) are left alone, it is reported again on every run, and only the operator fix in §6 clears it.
 
@@ -66,7 +66,8 @@ The unit tests are in `tests/unit/Sprk.Bff.Api.Tests/`:
   - Must not fire, as a theory: a 503, a 429, a `SpaarkeStorageException`, and a 400 with code `BadRequest` on A each still give `Failed == 1` and an Error, and B is still removed.
   - Must not fire: an all-healthy run has no problems and no failures.
   - Must fire: a guard fault inside `RemoveMarkedGrantAsync` for one of two grants on a container leaves `Removed == 1` and `Failed == 1`, with one DELETE (real service, CallBase mock).
-  - Job verdict: an unresolvable-only run gives `Success == true` and names the container in `ResultJson`; a genuine 503 gives `Success == false`.
+  - Must fire (round 1, F2-1), a theory over the real `ReadAccessAsync` through the Graph stub: the marker read answers, then the 400 `invalidRequest` comes from `ReadAccessAsync`'s container read, from the permission collection, or from its `@odata.nextLink` page. Each gives `Failed == 1`, `Unresolvable == 0` and an Error, and the other container's revoked grant is still removed.
+  - Job verdict: an unresolvable-only run gives `Success == true`, names the container in `ResultJson`, and reports `unresolvable=1` in the heartbeat and `ResultJson`; a genuine 503 gives `Success == false` with `failed=1, unresolvable=0`.
 - **`Infrastructure/ExternalAccess/SpeContainerMembershipServiceUnresolvableContainerTests.cs`**, over the real Graph SDK through a recording `IRequestAdapter`:
   - The classifier theory: 400 `invalidRequest` (either message, any case) is true; 400 `BadRequest`, a 400 with no body, 403, 404, 429, 503, `SpaarkeStorageException` and `HttpRequestException` are false.
   - `ReadMarkersAsync`: a 404 still gives null; the 400 throws the classified fault from both reads; a 5xx propagates unclassified.
@@ -74,7 +75,7 @@ The unit tests are in `tests/unit/Sprk.Bff.Api.Tests/`:
 - **`Services/Registration/DemoSpeGrantLifecycleTests.cs`** (must not fire): expiry over a real membership service whose container read answers the 400 still **throws**, never "nothing to revoke".
 - **`TestInfrastructure/SpeContainerGraphStub.cs`** holds the shared stub and the scripted guard.
 
-**Perturbation (5 mutants, all killed; files restored and verified):**
+**Perturbation (7 mutants, all killed; files restored and verified):**
 
 | Mutant | Tests that failed |
 |---|---|
@@ -83,12 +84,14 @@ The unit tests are in `tests/unit/Sprk.Bff.Api.Tests/`:
 | M3: the 400 mapped to null in `ReadMarkersCoreAsync` | 2: the reads-throw test and the DemoExpiration must-not-fire test |
 | M4: the classifier widened to any 400 | 4: the BadRequest and no-body classifier rows, and the genuine-fault BadRequest theory ×2 |
 | M5: the refusal swallowed (catch filter without the NotOwned exclusion) | 1: the 227d refusal test |
+| M6 (round 1): the classification catch without `!resolved` (any read's 400 classified) | 3: the F2-1 theory (`ReadAccessAsync`'s container read, the permission collection, a nextLink page) |
+| M7 (round 1): `unresolvable++` removed | 3: the unresolvable theory ×2 and the job test (heartbeat and `ResultJson` count) |
 
-**Runs:**
+**Runs** (round 1, on the branch merged with origin/master `ab7cf4fc94`):
 
 | Suite | Result |
 |---|---|
-| Filtered unit tests (`SpeContainerMembership*`, `DemoExpiration*`, `OfficeEditAccess*`, `SpeContainerOwnershipGuard*`, `DemoSpeGrantLifecycle*`) | 108 / 108 passed |
+| Filtered unit tests (`SpeContainerMembership*`, `DemoExpiration*`, `OfficeEditAccess*`, `SpeContainerOwnershipGuard*`, `DemoSpeGrantLifecycle*`) | 111 / 111 passed (round 1; 108 in round 0) |
 | ArchTests | 1361 / 1361 passed |
 | `Sprk.Bff.Api.IntegrationTests` | 172 passed, 8 skipped, 0 failed |
 | `Spe.Integration.Tests` | 353 passed, 23 skipped, 0 failed |
