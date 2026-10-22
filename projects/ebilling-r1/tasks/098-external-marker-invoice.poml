@@ -108,7 +108,7 @@
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Owner-accepted effect (uac-r2 round 116): while a source is internal-only or Restricted, the invoice and everything derived from it are hidden from external callers, the firm included; it reappears when the source is lowered. 093 applies this predicate at invoice level on the firm file route; 130 and 152 must reach it. (a′) does not follow the resubmission link (097).</notes>
+  <notes>Owner-accepted effect (uac-r2 round 116): while a source is internal-only or Restricted, the invoice and everything derived from it are hidden from external callers, the firm included; it reappears when the source is lowered. 093 applies this predicate at invoice level on the firm file route; 130 and 152 must reach it. (a′) does not follow the resubmission link (097). ontology-r1 2026-10-22 (088 on dev): sprk_storedfile.sprk_sourcedocument and sprk_sourcecommunication are Restrict, so deleting a Document or Communication that a Stored File points at is refused. Any delete or cleanup path this task adds must expect and handle that refusal (uac-r2 delete design section 15 covers core-record deletes).</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
