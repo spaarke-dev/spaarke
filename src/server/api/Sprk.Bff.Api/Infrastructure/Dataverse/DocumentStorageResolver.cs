@@ -137,8 +137,9 @@ public sealed class DocumentStorageResolver : IDocumentStorageResolver
 
     /// <summary>
     /// Whether a document row's pointers name a file, by the SAME checks <see cref="GetSpePointersAsync"/> applies before it
-    /// answers 409 <c>no_file_attached</c> / <c>mapping_missing_*</c>. Used by the external document list to tell the SPA
-    /// whether Download and Versions can succeed (R3 ISS-011, #1886).
+    /// answers 409 <c>no_file_attached</c> / <c>mapping_missing_*</c>. Used by the external document reads to tell the SPA
+    /// whether the pointers pass the resolver's shape checks (R3 ISS-011, #1886). It checks shape only: the container
+    /// check and the stream itself can still refuse a Download (409/404) when this is <see langword="true"/>.
     /// </summary>
     internal static bool HasUsablePointers(string? driveId, string? itemId)
         => IsLikelyDriveId(driveId) && IsLikelyItemId(itemId);

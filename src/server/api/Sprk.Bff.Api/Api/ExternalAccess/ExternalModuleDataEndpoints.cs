@@ -393,7 +393,9 @@ public static class ExternalModuleDataEndpoints
             }
 
             // The response carries the readable columns the CALLER requested: a root column the server projected only for
-            // the rule (serverProjected) is not one of them, even when it is on the module's readable list.
+            // the rule (serverProjected) is not one of them, even when it is on the module's readable list. The documents
+            // module also carries the derived key `hasFile` (R3 ISS-011), added below after the strip; the record route
+            // (GetScopedRecordCoreAsync) does not add it, and the SPA reads a missing value as "has a file".
             var returnable = new HashSet<string>(module.ReadableColumns, StringComparer.OrdinalIgnoreCase);
             returnable.ExceptWith(serverProjected);
             var projected = StripRowsToReadableColumns(scoped, module, returnable, logger);
