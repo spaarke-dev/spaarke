@@ -557,8 +557,9 @@ internal static class InheritedAccessPermission
     internal static bool RecordsOwnNarrowing(string? table) => table is not null && RecordTables.Contains(table);
 
     /// <summary>
-    /// Task 189 fix round C (K5): the reason code when an app-only generic writer names a document's Access Permission or
-    /// its own-narrowing record (<see cref="RefuseAppOnlyWrite"/>).
+    /// Task 189 fix round C (K5): the reason code when an app-only generic writer names a document's Access Permission, its
+    /// own-narrowing record, or (ebilling-r1 task 088) its invoice-submission marker <see cref="SubmissionMarkerColumn"/>
+    /// (<see cref="RefuseAppOnlyWrite"/>).
     /// </summary>
     internal const string AppOnlyDocumentWriteReasonCode = "sdap.access.document_access_server_only";
 

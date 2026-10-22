@@ -48,6 +48,9 @@ public class DocumentAccessPermissionPushTargetTests
         results.Should().ContainSingle(r => r.TargetField == target)
             .Which.Should().Match<FieldMappingResultDto>(r =>
                 r.Status == FieldMappingStatus.Skipped && r.ErrorMessage!.Contains("set by Spaarke"));
+        var isMarker = string.Equals(target.Trim(), "sprk_restrictedbysubmission", StringComparison.OrdinalIgnoreCase);
+        results.Single(r => r.TargetField == target).ErrorMessage.Should().Contain(
+            isMarker ? "only the invoice submission writes it" : "keeps the document's own narrowing");
         results.Should().ContainSingle(r => r.TargetField == "sprk_documentdescription")
             .Which.Status.Should().Be(FieldMappingStatus.Mapped);
     }

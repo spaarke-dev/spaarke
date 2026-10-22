@@ -139,6 +139,7 @@ $script:Created = $State.Created
 $script:Changed = $State.Changed
 $script:Skipped = $State.Skipped
 $script:Expect = $State.Expect
+$script:Planned = $State.Planned
 $SolutionHeader = $State.SolutionHeader
 $Gaps = [System.Collections.Generic.List[string]]::new()
 $script:Wrote = $false
@@ -679,6 +680,44 @@ function Test-OtherProfiles {
     }
 }
 
+# Apply mode: every column of $Specs must read CanBeSecuredForRead / Create / Update true, or the run stops (exit 2) BEFORE any
+# of them is secured. $Then says what the state is at that stop. -WhatIf: nothing to read yet (the columns are not created).
+function Assert-Securable($Specs, [string]$Then) {
+    if ($DryRun) { return }
+    $unsecurable = @()
+    foreach ($spec in @($Specs)) {
+        $sa = $null
+        for ($i = 0; $i -lt 6 -and -not $sa; $i++) {
+            $sa = Get-Attr $spec.Table $spec.Column 'LogicalName,CanBeSecuredForRead,CanBeSecuredForCreate,CanBeSecuredForUpdate'
+            if (-not $sa) { Start-Sleep -Seconds 5 }
+        }
+        if (-not $sa) { throw "$($spec.Table).$($spec.Column) is missing after its create; cannot secure it." }
+        if (-not ($sa.CanBeSecuredForRead -and $sa.CanBeSecuredForCreate -and $sa.CanBeSecuredForUpdate)) { $unsecurable += "$($spec.Table).$($spec.Column) ($($spec.Kind))" }
+    }
+    if ($unsecurable.Count -gt 0) {
+        throw [EscalationException]::new("These columns cannot be secured for read, create and update: $($unsecurable -join ', '). $Then Owner decision needed.")
+    }
+    Write-Report 'OK' "securable: $((@($Specs) | ForEach-Object { "$($_.Table).$($_.Column)" }) -join ', ')"
+}
+
+# Entity-scoped publish of what this run changed (never PublishAllXml). Also called when a run stops after writing, so a re-run
+# (which then skips every item and publishes nothing) never leaves an earlier run's change unpublished (review K2).
+function Publish-Changes {
+    if ($DryRun) { Write-Host "  WhatIf: publish skipped" -ForegroundColor Cyan; return }
+    if ($script:Created.Count -eq 0 -and $script:Changed.Count -eq 0) { Write-Host "  nothing changed - no publish" -ForegroundColor Yellow; return }
+    $xml = "<importexportxml><entities>$((Get-PublishEntities | ForEach-Object { "<entity>$_</entity>" }) -join '')</entities><optionsets><optionset>$($PurposeChoice.Name)</optionset></optionsets></importexportxml>"
+    Invoke-Dv -Path 'PublishXml' -Method POST -Body @{ ParameterXml = $xml } | Out-Null
+    Write-Host "  customizations published ($((Get-PublishEntities) -join ', '), $($PurposeChoice.Name))" -ForegroundColor Green
+}
+
+# After a stop: publish what this run already changed, without masking the stop's own error.
+function Publish-AfterStop {
+    if ($DryRun -or ($script:Created.Count -eq 0 -and $script:Changed.Count -eq 0)) { return }
+    Write-Host "Publishing what this run changed before it stopped..." -ForegroundColor Yellow
+    try { Publish-Changes }
+    catch { Write-Host "  publish after the stop FAILED ($($_.Exception.Message)): publish $((Get-PublishEntities) -join ', ') and $($PurposeChoice.Name) by hand, or the re-run's changes stay unpublished." -ForegroundColor Red }
+}
+
 # ---------------------------------------------------------------------------------------------------------------
 # Run
 # ---------------------------------------------------------------------------------------------------------------
@@ -728,6 +767,20 @@ try {
         if ($a -and $a.AttributeType -ne $col.Type) { $problems.Add("$($col.Table).$($col.Column) exists as $($a.AttributeType), expected $($col.Type)") }
     }
     foreach ($s in $script:Lookups) { Test-LookupSpecPreflight $s $problems }
+    # An existing two-option column must also MEAN the same: default No (an existing marker defaulting to Yes would be secured
+    # before the verify could catch it; review K4).
+    foreach ($bc in @(@($StoredFile, 'sprk_firmvisible'), @($Document, $MarkerColumn))) {
+        if (-not (Get-Attr $bc[0] $bc[1])) { continue }
+        $b = Get-DvOrNull "EntityDefinitions(LogicalName='$($bc[0])')/Attributes(LogicalName='$($bc[1])')/Microsoft.Dynamics.CRM.BooleanAttributeMetadata?`$select=DefaultValue"
+        if (-not $b -or $b.DefaultValue -ne $false) { $problems.Add("$($bc[0]).$($bc[1]) exists with default '$($b.DefaultValue)', expected No") }
+    }
+    # ... and an existing sprk_filestatus must be the local choice with exactly the planned values and labels.
+    if (Get-Attr $StoredFile 'sprk_filestatus') {
+        $pf = Get-DvOrNull "EntityDefinitions(LogicalName='$StoredFile')/Attributes(LogicalName='sprk_filestatus')/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?`$select=LogicalName&`$expand=OptionSet(`$select=Options,IsGlobal)"
+        $have = (@($pf.OptionSet.Options) | Sort-Object Value | ForEach-Object { "$($_.Value)=$($_.Label.UserLocalizedLabel.Label)" }) -join ', '
+        $want = (Get-ChoiceOptions $FileStatusLabels | ForEach-Object { "$($_.Value)=$($_.Label)" }) -join ', '
+        if (-not $pf -or $pf.OptionSet.IsGlobal -or $have -ne $want) { $problems.Add("$StoredFile.sprk_filestatus exists with [$have], expected the local choice [$want]") }
+    }
     if ($problems.Count -gt 0) {
         throw [EscalationException]::new("Existing items conflict with this task (nothing was written, nothing is renamed, renumbered or changed):`n    - " + ($problems -join "`n    - "))
     }
@@ -785,41 +838,32 @@ try {
     Add-Column 'sprk_sizebytes' (New-BigIntDef 'sprk_SizeBytes' 'Size (bytes)' 'Size of the stored file in bytes. Written only by the BFF (field-secured).') 'BigInt'
     Add-Column $BlobPathColumn (New-StringDef 'sprk_BlobPath' 'Blob Path' 'Server-only: {tenantId}/{parent table}/{parent id}/{file id}. The download checks that its parent id equals the row''s parent (model 4.1, 4.2). Readable and writable only by the BFF (field-secured, no reader row).' 1024) 'String'
 
-    # --- 3. F4 the submission marker on sprk_document ----------------------------------------------------------------------
-    Write-Host "3. F4 $Document.$MarkerColumn (two options, default No)" -ForegroundColor Cyan
+    # Every sprk_storedfile column must be securable BEFORE the marker is created and before any column is secured (review F1):
+    # a refusal (for example a big integer column whose CanBeSecuredFor* reads false) then stops with the marker NOT created
+    # and no column secured (exit 2), never with a marker that any user with Write on a document could set.
+    Write-Host "  securable check of the $StoredFile F3 columns (before the marker exists)" -ForegroundColor Cyan
+    Assert-Securable @($script:Secured | Where-Object { $_.Table -eq $StoredFile }) "The marker $Document.$MarkerColumn was NOT created and no column was secured. The $StoredFile columns exist unsecured; nothing writes them before task 090."
+
+    # --- 3. F4 the submission marker on sprk_document: created and secured back to back ---------------------------------------
+    Write-Host "3. F4 $Document.$MarkerColumn (two options, default No), secured right after its create" -ForegroundColor Cyan
     Set-EbEntity $Document
     Add-Column $MarkerColumn (New-TwoOptionDef 'sprk_RestrictedBySubmission' 'Restricted by invoice submission' 'Yes only on an .eml Document that the Outlook add-in invoice submission (from-email, task 095) saved own-Restricted: written in the SAME create as that narrowing, never in an update. The (a'') predicate skips only a Restricted narrowing that carries this marker, so the firm still sees its own invoice (model 9.1). Written only by the BFF (field-secured); app-only generic writers and the field-mapping push refuse it (InheritedAccessPermission.RefuseAppOnlyWrite). Default No.' $false) 'Boolean'
+    $markerSpec = @($script:Secured | Where-Object { $_.Table -eq $Document -and $_.Column -eq $MarkerColumn })
+    Assert-Securable $markerSpec "The marker $Document.$MarkerColumn EXISTS UNSECURED: any user with Write on a document can set it until it is secured. Secure it by hand (writer + reader rows) or remove the column before task 095 / 098 ship."
+    foreach ($spec in $markerSpec) { Invoke-ColumnSecurity $spec }
 
     # --- 4. F5 invoice status reason Superseded ----------------------------------------------------------------------------
     Write-Host "4. F5 $Invoice statuscode Superseded = $($SupersededStatus.Value) at statecode $($SupersededStatus.State) (Inactive)" -ForegroundColor Cyan
     Add-SupersededStatus
 
-    # --- 5. F3 field security ----------------------------------------------------------------------------------------------
+    # --- 5. F3 field security of the Stored File columns (the marker was secured in step 3) ---------------------------------
     Write-Host "5. F3 field security (writer: BFF application user(s) only; reader: every user, except on $BlobPathColumn)" -ForegroundColor Cyan
-    # Every column must be securable BEFORE any is secured, so a refusal (for example a big integer column whose
-    # CanBeSecuredFor* reads false) stops with no column of the set secured (exit 2) instead of half of them.
-    if (-not $DryRun) {
-        $unsecurable = @()
-        foreach ($spec in $script:Secured) {
-            $sa = Get-Attr $spec.Table $spec.Column 'LogicalName,CanBeSecuredForRead,CanBeSecuredForCreate,CanBeSecuredForUpdate'
-            if (-not $sa) { throw "$($spec.Table).$($spec.Column) is missing after its create; cannot secure it." }
-            if (-not ($sa.CanBeSecuredForRead -and $sa.CanBeSecuredForCreate -and $sa.CanBeSecuredForUpdate)) { $unsecurable += "$($spec.Table).$($spec.Column) ($($spec.Kind))" }
-        }
-        if ($unsecurable.Count -gt 0) { throw [EscalationException]::new("These columns cannot be secured for read, create and update, so no F3 column was secured: $($unsecurable -join ', '). Owner decision needed (the columns exist unsecured; nothing writes them before task 090).") }
-    }
-    foreach ($spec in $script:Secured) { Invoke-ColumnSecurity $spec }
+    foreach ($spec in @($script:Secured | Where-Object { $_.Table -eq $StoredFile })) { Invoke-ColumnSecurity $spec }
     Test-OtherProfiles
 
     # --- Publish (only when something changed; entity-scoped, never PublishAllXml) -------------------------------------------
     Write-Host "Publish" -ForegroundColor Cyan
-    $metaChanged = $script:Created.Count -gt 0 -or $script:Changed.Count -gt 0
-    if ($DryRun) { Write-Host "  WhatIf: publish skipped" -ForegroundColor Cyan }
-    elseif (-not $metaChanged) { Write-Host "  nothing changed - no publish" -ForegroundColor Yellow }
-    else {
-        $xml = "<importexportxml><entities>$((Get-PublishEntities | ForEach-Object { "<entity>$_</entity>" }) -join '')</entities><optionsets><optionset>$($PurposeChoice.Name)</optionset></optionsets></importexportxml>"
-        Invoke-Dv -Path 'PublishXml' -Method POST -Body @{ ParameterXml = $xml } | Out-Null
-        Write-Host "  customizations published" -ForegroundColor Green
-    }
+    Publish-Changes
 
     # --- Verification (metadata and row-count reads of everything this script owns) -----------------------------------------
     if (-not $DryRun) {
@@ -868,9 +912,18 @@ try {
             $b = Get-DvOrNull "EntityDefinitions(LogicalName='$($bc[0])')/Attributes(LogicalName='$($bc[1])')/Microsoft.Dynamics.CRM.BooleanAttributeMetadata?`$select=DefaultValue,DisplayName"
             if (-not $b -or $b.DefaultValue -ne $false) { $bad.Add("$($bc[0]).$($bc[1]) default is not No") } else { Write-Host "  $($bc[0]).$($bc[1]): two options '$($b.DisplayName.UserLocalizedLabel.Label)', default No" }
         }
-        $fs = Get-PicklistLabels $StoredFile 'sprk_filestatus'
-        Write-Host "  $StoredFile.sprk_filestatus options: $($fs -join ', ')"
-        if (($fs -join '|') -ne ($FileStatusLabels -join '|')) { $bad.Add("$StoredFile.sprk_filestatus options are not exactly $($FileStatusLabels -join ', ')") }
+        $fsp = Get-DvOrNull "EntityDefinitions(LogicalName='$StoredFile')/Attributes(LogicalName='sprk_filestatus')/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?`$select=LogicalName&`$expand=OptionSet(`$select=Options,IsGlobal)"
+        $fs = (@($fsp.OptionSet.Options) | Sort-Object Value | ForEach-Object { "$($_.Value)=$($_.Label.UserLocalizedLabel.Label)" }) -join ', '
+        $fsWant = (Get-ChoiceOptions $FileStatusLabels | ForEach-Object { "$($_.Value)=$($_.Label)" }) -join ', '
+        Write-Host "  $StoredFile.sprk_filestatus options: $fs (local: $(-not $fsp.OptionSet.IsGlobal))"
+        if ($fs -ne $fsWant -or $fsp.OptionSet.IsGlobal) { $bad.Add("$StoredFile.sprk_filestatus options are [$fs], expected the local choice [$fsWant]") }
+
+        # Forms and views: this script creates none. Creating a table makes the platform add its default system form(s) and
+        # views; they are listed here for the record (task 088 acceptance: "no form, view or subgrid" means none authored here).
+        $forms = @((Invoke-Dv "systemforms?`$select=name,type&`$filter=objecttypecode eq '$StoredFile'").value | ForEach-Object { "$($_.name) (type $($_.type))" })
+        $views = @((Invoke-Dv "savedqueries?`$select=name,querytype,isdefault&`$filter=returnedtypecode eq '$StoredFile'").value | ForEach-Object { "$($_.name) (querytype $($_.querytype))" })
+        Write-Host "  $StoredFile platform-default forms ($($forms.Count)): $($forms -join '; ')"
+        Write-Host "  $StoredFile platform-default views ($($views.Count)): $($views -join '; ')"
 
         # Delete behaviour and cascade of every lookup.
         foreach ($s in $script:Lookups) {
@@ -918,13 +971,15 @@ try {
 }
 catch [EscalationException] {
     Write-Host ""
-    Write-Host "ESCALATION - STOPPED, nothing further was changed: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "ESCALATION - STOPPED, nothing further was changed (what this run already changed is published below): $($_.Exception.Message)" -ForegroundColor Red
+    Publish-AfterStop
     exit 2
 }
 catch {
     Write-Host ""
     Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
     Write-Host "Items already created stay (the script is re-runnable)." -ForegroundColor Red
+    Publish-AfterStop
     exit 1
 }
 

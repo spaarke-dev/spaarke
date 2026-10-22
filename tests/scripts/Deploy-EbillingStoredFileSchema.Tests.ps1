@@ -177,8 +177,28 @@ Describe 'the script text (what it never does)' {
     It 'creates only the sprk_storedfile table' {
         @([regex]::Matches($script:Text, 'Add-Table\s+-Table\s+\$(\w+)') | ForEach-Object { $_.Groups[1].Value }) -join ',' | Should Be 'StoredFile'
     }
-    It 'creates no form, view, chart or sitemap entry' {
-        $script:Text -match '(?i)systemforms|savedqueries|savedqueryvisualizations|sitemaps|FormXml' | Should Be $false
+    It 'creates no form, view, chart or sitemap entry (forms and views are only read, for the verify inventory)' {
+        $script:Text -match '(?i)savedqueryvisualizations|sitemaps|FormXml' | Should Be $false
+        $uses = @([regex]::Matches($script:Text, '(?i)systemforms|savedqueries'))
+        $reads = @([regex]::Matches($script:Text, '(?i)Invoke-Dv\s+"(systemforms|savedqueries)\?`\$select='))
+        $uses.Count | Should Be 2
+        $reads.Count | Should Be 2
+    }
+    It 'checks the Stored File columns are securable BEFORE the marker is created, and secures the marker right after' {
+        $prePass = $script:Text.IndexOf('Assert-Securable @($script:Secured | Where-Object { $_.Table -eq $StoredFile })')
+        $marker = $script:Text.IndexOf('Add-Column $MarkerColumn')
+        $markerCheck = $script:Text.IndexOf('Assert-Securable $markerSpec')
+        $markerSecure = $script:Text.IndexOf('foreach ($spec in $markerSpec) { Invoke-ColumnSecurity $spec }')
+        $prePass | Should BeGreaterThan 0
+        ($prePass -lt $marker -and $marker -lt $markerCheck -and $markerCheck -lt $markerSecure) | Should Be $true
+        # step 5 then secures only the Stored File columns (the plan test above pins Secured = those 15 + the marker)
+        $step5 = $script:Text.IndexOf('foreach ($spec in @($script:Secured | Where-Object { $_.Table -eq $StoredFile })) { Invoke-ColumnSecurity $spec }')
+        $step5 | Should BeGreaterThan $markerSecure
+        $script:Text.Contains('foreach ($spec in $script:Secured) { Invoke-ColumnSecurity $spec }') | Should Be $false
+    }
+    It 'publishes what a stopped run changed, on both the escalation and the error path' {
+        @([regex]::Matches($script:Text, '(?s)catch \[EscalationException\] \{[^}]*Publish-AfterStop[^}]*exit 2')).Count | Should Be 1
+        @([regex]::Matches($script:Text, '(?s)catch \{\s*Write-Host ""[^}]*Publish-AfterStop[^}]*exit 1')).Count | Should Be 1
     }
     It 'adds no role privilege' {
         $script:Text -match '(?i)AddPrivilegesRole|ReplacePrivilegesRole|roleprivileges|RemovePrivilegeRole' | Should Be $false
