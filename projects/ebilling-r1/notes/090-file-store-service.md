@@ -29,13 +29,17 @@
 
 ## 3. Scan rule
 
-Served only when the blob index tag **`Malware Scanning scan result` = `No threats found`** (key matched ignoring case, value exactly) **and** `Malware Scanning scan time UTC` ≥ the blob's Last-Modified. `Malicious`, absent, or any other value refuses. `MalwareScanningEnabled=false` (dev only, until Defender is on) serves untagged blobs; absent means on.
+Served only when the blob index tag **`Malware Scanning scan result` = `No threats found`** (key matched ignoring case, value exactly) **and** `Malware Scanning scan time UTC` ≥ the blob's Last-Modified **and** ≤ now + 5 minutes. `Malicious`, absent, or any other value refuses. `MalwareScanningEnabled=false` (dev only, until Defender is on) serves untagged blobs; absent means on.
 
-**The scan-time key name is unconfirmed** (Microsoft Learn names the result tag; the time tag's exact key was not verified on a live account). A missing or unparsable time **refuses** (fails closed), so if the key is wrong every download on a scanning-on environment returns 409 — visible, not unsafe. Live item L1.
+The scan time parses only by `TryParseExact` over a closed set — `O`, `yyyy-MM-ddTHH:mm:ss.FFFFFFFK`, `yyyy-MM-dd HH:mm:ssK` — invariant culture, no white space, and an explicit `Z` or `±hh:mm` at the end (checked separately: no `DateTimeStyles` flag refuses a missing `K`). Since uac-r2 round 1 F2.
+
+**The scan-time key and format are not stated on Microsoft Learn** ("Scan time (UTC)" only). The one observed value is `2026-04-17 17:40:38Z` (an `az storage blob tag list` output in a third-party write-up, nineliveszerotrust.com, April 2026), which the set accepts and a must-not-fire test pins (`Scan_RealDefenderSample_IsClean`). A missing, unparsable or future time **refuses** (fails closed), so a wrong key or format makes every download on a scanning-on environment return 409 — visible, not unsafe. Live item L1.
 
 ## 4. Environment marker
 
-Blobs are written with metadata `environment` = the lower-case host of `Dataverse:EnvironmentUrl`. Reconcile (B) deletes a row-less blob only when the marker is this deployment's, so two environments sharing one storage account (dev slots, a Model 1 shared stack) never delete each other's in-flight blobs. A blob with no marker is kept and counted (`otherEnvironments=`).
+Blobs are written with metadata `environment` = the lower-case host of `Dataverse:EnvironmentUrl`. Reconcile deletes a blob — row-less (B) or under a parent-gone row (A, since uac-r2 round 1 F1) — only when the marker is this deployment's, so two environments sharing one storage account (dev slots, a Model 1 shared stack, a prod copy in UAT) never delete each other's blobs. A blob with no or another marker is kept and counted (`otherEnvironments=`); under (A) its row is kept too (the row is the blob's only record and cannot be served with its parent gone).
+
+The marker is defence in depth: since uac-r2 round 1 the name segment itself is per environment (§11).
 
 ## 5. Placement and §11
 
@@ -58,7 +62,7 @@ Registry: `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md` §5 row **I-2
 
 - Code is split Contracts / Blobs / Service rather than one file — three reasons to change (schema/ids, storage, lifecycle).
 - Caller checks live in the filter (repo convention, ADR-008), not the handler; the handler re-judges servability.
-- `TenantId` comes from config (`Finance:FileStore:TenantId`), not the token — see open question Q1.
+- `TenantId` comes from config (`Finance:FileStore:TenantId`), not the token, and must be the Dataverse environment's OrganizationId (Q1, answered by uac-r2; §11).
 - A1-3 (job idempotence) is met by idempotent deletes (blob then row; not-found is done), not by a lease.
 - Added beyond the POML on review: CSP sandbox, content-type allow-list, environment marker, communication-only copy → 404.
 
@@ -74,8 +78,9 @@ Pass-2 reviewer independently confirmed that removing the ETag pin or the scan-t
 
 **Pinned tests (uac-r2):**
 - sizebytes: `tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Files/StoredFileServiceTests.cs:49` (`Size_OutOfRange_IsRefused`: int.MaxValue+1, long.MaxValue, -1, long.MinValue), `:59` (`Size_InRange_IsWrittenExactly`: 0, 1, int.MaxValue), `:66` / `:79` (stage refused before any storage call, over-max and negative), `:91` (create: no blob, no row), `:104` (`BuildRow` at int.MaxValue written, +1 throws), `:118` (source scan: no unchecked int cast of a size).
-- row version: `:144` (`SourceVersion_StoredEqualsHashed_UnderAnyCulture`), `:181`.
-- scan time: `:657` (`Scan_CleanThenModifiedLater_IsRefused`); route level `tests/unit/Sprk.Bff.Api.Tests/Api/Finance/StoredFileEndpointsTests.cs:229` (`ScanPending_409`).
+- size scan controls (uac-r2 round 1 F3): `:147` (`SizeCastScan_MustFire`), `:154` (`SizeCastScan_MustNotFire`); the source scan moved to `:126`.
+- row version: `:167` (`SourceVersion_StoredEqualsHashed_PinsTheFormat`; it pins the format, it cannot fail on culture), `:204`.
+- scan time: `:764` (`Scan_CleanThenModifiedLater_IsRefused`), `:800` (`Scan_Verdicts`), `:810` (`Scan_RealDefenderSample_IsClean`), `:826` (`Scan_FutureAgainstStoreClock_IsPending`); route level `tests/unit/Sprk.Bff.Api.Tests/Api/Finance/StoredFileEndpointsTests.cs:229` (`ScanPending_409`).
 
 ## 7a. Verification at the final code tip (f9bfb7942c)
 
@@ -113,11 +118,37 @@ Two adversarial passes (opus), code-review, adr-check.
 
 ## 9. Live steps left for the main session
 
-- **L1** On an environment with Defender malware scanning on: upload a file, read its index tags, confirm the scan-time key is exactly `Malware Scanning scan time UTC` and its format parses. If not, change `StoredFileBlobs.ScanTimeTagKey`.
-- **L2** Dev app settings (task 079, after 091 deploys): `Finance__FileStore__BlobEndpoint`, `Finance__FileStore__TenantId`, `Finance__FileStore__MalwareScanningEnabled=false` until Defender is on.
+- **L1** On an environment with Defender malware scanning on: upload a file, read its index tags, confirm the scan-time key is exactly `Malware Scanning scan time UTC` and its value matches one of `StoredFileBlobs.ScanTimeFormats` (expected `yyyy-MM-dd HH:mm:ssZ`). If not, change `ScanTimeTagKey` / `ScanTimeFormats` and add the live sample to `Scan_Verdicts`.
+- **L2** Dev app settings (task 079, after 091 deploys): `Finance__FileStore__BlobEndpoint`, `Finance__FileStore__TenantId` = **the dev Dataverse environment's OrganizationId** (`organizations` row, or Power Platform admin center → environment → Organization ID; NOT the Entra tenant id), `Finance__FileStore__MalwareScanningEnabled=false` until Defender is on. A wrong value refuses every file-store operation and logs both ids at the first use.
+- **L5** Confirm on the first environment copy (prod → UAT) that the target keeps its own OrganizationId. If a copy carried the source's id over, both would share a segment and only the environment marker would separate them (§4).
 - **L3** Upload a file over 256 MB twice with the same id; confirm the second is treated as already-there (412 path).
 - **L4** As the BFF application user, read a `sprk_storedfile` row and confirm the field-secured columns (`sprk_filestatus`, `sprk_blobpath`, parent lookups) come back; if masked, reconcile keeps everything (safe) and downloads 404.
 
 ## 10. Open questions
 
-- **Q1** On a Model 1 shared stack, is `Finance:FileStore:TenantId` one value per Dataverse environment (current reading: yes — it names the customer's folder in the shared account), or must it come from the caller's token?
+- **Q1** (answered by uac-r2, review round 1) Per-environment config is right; the caller's token is wrong; a customer's prod and UAT must not share a prefix. Resolved in §11.
+
+## 11. uac-r2 review round 1
+
+### Fixed
+
+| Item | Fix | Commit |
+|---|---|---|
+| F1 parent-gone pass deleted a blob without the environment-marker check (prod copied to UAT, shared account: UAT's job deletes prod's bytes) | Reads the blob's properties; deletes only a blob with this deployment's marker; otherwise blob AND row kept, `blobsOfOtherEnvironments++`. The row is kept because it is the blob's only record, cannot be served (parent gone), and deleting it would leave bytes no pass may judge again (B refuses an unmarked blob too); kept, it is counted every run | 7c3a42cebf |
+| Tenant segment per customer, not per environment | `Finance:FileStore:TenantId` must equal the Dataverse environment's OrganizationId; checked once per process at the first operation (see choice below) | b81c3ef9ae |
+| F2 lenient scan-time parse ("12:30", "11/05/2026 10:00:00", "Oct 23" counted Clean) | Exact formats + explicit designator; future time (> now + 5 min) is Pending; `TimeProvider` injected | 3d3ee6e95e |
+| F3 size-cast scan exempted `unchecked(` and missed spacing / `Int32` / `(int)(x)` / totals | New pattern, must-fire and must-not-fire controls | 64e04b7ae0 |
+| Parentless row deleted without a read | A not-found read of the parent its path names first; alive, unparseable path or fault → kept (`rowsParentlessKept`, `unitFaults`) | df55388b1c |
+| Wrong comments (DeleteIfExists on ContainerNotFound; IGenericEntityService lifetime), culture test name | Corrected; test renamed `SourceVersion_StoredEqualsHashed_PinsTheFormat` | af8a64b20a |
+| Dead "probe not registered → 503" branch | Removed; the probe is `GetRequiredService` (the service that needs it resolves first) | 57ee0570a3 |
+
+**The segment choice: validate, not derive.** Deriving the segment from the OrganizationId would make it a value read from Dataverse at run time, so every synchronous name build and parse (`BuildRow`, `StoredFileRow.From`, the job's own-path checks) would wait on an async initialisation. Validating keeps it a fixed configuration value — a row's path is stable for its lifetime, start-up validation (which cannot call Dataverse) still checks only the GUID shape — and adds one app-only read of the `organization` row before the first operation. A match is cached for the process; a mismatch refuses everything for the process with an error naming both ids; a fault is not cached. Nothing is stored on dev yet, so no path migrates. §11 (root CLAUDE.md): no new type or registration — a private check inside `StoredFileBlobs`, which now also takes the existing singleton `IGenericEntityService`; without it, two environments of one customer configured with the same value share a prefix again.
+
+### Known limits (recorded, not fixed)
+
+- **Metadata-only operations move Last-Modified without a rescan.** Setting blob metadata or properties changes Last-Modified but does not retrigger Defender, so the scan time is then older than Last-Modified and the file stays 409 `file_scan_pending` until it is rewritten. The store itself never changes a blob after staging; only an out-of-band change does this. Fails closed.
+- **A same-second overwrite after a scan passes `>=`.** Last-Modified (an HTTP date) and the observed scan-time format both have one-second resolution, so an overwrite in the same second as the scan compares equal and passes. The ETag pin still serves only the version whose verdict was read; the residue is an overwrite inside that second that Defender has not rescanned yet.
+- **The download serves the scan-read version without re-hashing.** The handler streams the blob pinned to the ETag whose verdict the filter read, but does not recompute its SHA-256 against the row (the flip to Servable did). A byte change keeps the ETag only if storage itself is wrong.
+- **`ReadAllAsync` buffers in a `MemoryStream`.** A file near the 2 GiB size limit peaks near 2 GiB (plus the final `ToArray` copy), and a length above `Array.MaxLength` throws. Job reads only; Finance upload limits are far below.
+- **No range support; a 412 mid-stream truncates a started response.** The route serves whole files only (no `Range`). If the blob changes after the first byte, the pinned read fails with 412 and the client gets a truncated 200, not a 409 — headers are already sent.
+- **F4 (the app-only refusal list) is not done here.** It depends on UAC #2253, not yet on master; the main session does it after master is merged in.
