@@ -147,6 +147,54 @@ public class DocumentPointerDeleteVerdictTests
         verdict.Should().Be(DocumentPointerDeleteVerdict.Fault);
     }
 
+    [Fact]
+    public async Task AFaultOnlyInTheStrictDerivationRead_IsAFault_NotARefusal()
+    {
+        // R3 ISS-004 re-check F3-1. The strict rule's one-column binding read succeeds; only the WIDE sprk_document read of
+        // the derivation faults. (ADataverseFault_IsAFault above hits the binding read first, which is the other half.)
+        var world = Environment(strict: true);
+        world.RetrieveFault = (entity, columns) =>
+            entity == "sprk_document" && columns.Length > 1 ? new TimeoutException("Dataverse timed out") : null;
+
+        var verdict = await world.Build().VerifyDocumentPointerForDeleteAsync(DocumentId, Drive, Item);
+
+        verdict.Should().Be(DocumentPointerDeleteVerdict.Fault);
+    }
+
+    [Fact]
+    public async Task TheBooleanCheck_UnderAFaultOnlyInTheStrictDerivationRead_StillReturnsFalse_AndTheDerivationStillFoldsItIntoUndecided()
+    {
+        var world = Environment(strict: true);
+        world.RetrieveFault = (entity, columns) =>
+            entity == "sprk_document" && columns.Length > 1 ? new TimeoutException("Dataverse timed out") : null;
+        var resolver = world.Build();
+
+        (await resolver.IsDocumentPointerContainerAllowedAsync(DocumentId, Drive, Item)).Should().BeFalse();
+        (await resolver.DeriveDocumentContainersAsync(DocumentId)).Decided.Should().BeFalse(
+            "every other caller of the public derivation keeps its Undecided-on-fault contract");
+    }
+
+    [Theory]
+    [MemberData(nameof(BothRules))]
+    public async Task APermanentGraphStatusOnTheItemRead_IsARefusal_AndATransientOneIsAFault(bool strict)
+    {
+        // R3 ISS-004 re-check F3-2: 400 (a malformed item id) and 403 are final for this pointer; 429 and 5xx are not.
+        // 404 is not an exception at all (GetItemCreatorAsync maps it to null: FileAlreadyGone / Refused above).
+        foreach (var (status, expected) in new[]
+                 {
+                     (400, DocumentPointerDeleteVerdict.Refused), (403, DocumentPointerDeleteVerdict.Refused),
+                     (429, DocumentPointerDeleteVerdict.Fault), (500, DocumentPointerDeleteVerdict.Fault),
+                     (503, DocumentPointerDeleteVerdict.Fault),
+                 })
+        {
+            var world = Environment(strict);
+            world.ItemReadFault = new Microsoft.Graph.Models.ODataErrors.ODataError { ResponseStatusCode = status };
+
+            (await world.Build().VerifyDocumentPointerForDeleteAsync(DocumentId, Drive, Item))
+                .Should().Be(expected, $"Graph {status}");
+        }
+    }
+
     [Theory]
     [MemberData(nameof(BothRules))]
     public async Task AFaultAskingWhetherTheFileIsGone_IsAFault(bool strict)

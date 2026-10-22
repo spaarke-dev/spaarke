@@ -505,6 +505,19 @@ public sealed partial class RecordContainerResolver
                 "[DOCUMENT-POINTER] REFUSED (delete): document {DocumentId}'s pointer is refused ({Code}).", documentId, ex.Code);
             return DocumentPointerDeleteVerdict.Refused;
         }
+        catch (Microsoft.Graph.Models.ODataErrors.ODataError ex) when (ex.ResponseStatusCode is 400 or 403)
+        {
+            // R3 ISS-004 re-check F3-2: a Graph answer that is final for THIS pointer (400 a malformed item id, 403 the app
+            // may not read it). Retrying cannot help, so it is a refusal (409), not a 503 "try again" that never succeeds.
+            // 404 never reaches here (GetItemCreatorAsync maps it to null); 429 and 5xx stay faults below. Graph types are
+            // confined to this one catch (ADR-007; the ArchTest checks member signatures only, and SpeContainerMembershipService
+            // already catches ODataError outside Infrastructure.Graph) — changing GetItemCreatorAsync's exception type would
+            // change every other caller.
+            _logger.LogWarning(
+                "[DOCUMENT-POINTER] REFUSED (delete): document {DocumentId}'s item read was refused by Graph ({Status}).",
+                documentId, ex.ResponseStatusCode);
+            return DocumentPointerDeleteVerdict.Refused;
+        }
         catch (Exception ex)
         {
             // Graph throttling or unavailability, a Dataverse fault, a timeout: the check could not be made. Not a refusal.
@@ -594,7 +607,10 @@ public sealed partial class RecordContainerResolver
             return "no SharePoint Embedded reader is available to verify the item";
         }
 
-        var derivation = await DeriveDocumentContainersAsync(documentId, ct).ConfigureAwait(false);
+        // Faults PROPAGATE here (R3 ISS-004 re-check F3-1): a Dataverse fault reading the row or one of its records is
+        // "could not check", not "not derivable" — folding it into Undecided made the delete answer a permanent 409
+        // instead of a retryable 503. The boolean wrappers (IsAllowedUnder*RuleAsync) catch it and refuse, as before.
+        var derivation = await DeriveDocumentContainersCoreAsync(documentId, ct).ConfigureAwait(false);
         if (!derivation.Decided)
         {
             return $"its container cannot be derived ({derivation.Reason})";
@@ -666,7 +682,7 @@ public sealed partial class RecordContainerResolver
 
         try
         {
-            return await DeriveCoreAsync(documentId, depth: 0, ct).ConfigureAwait(false);
+            return await DeriveDocumentContainersCoreAsync(documentId, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -678,6 +694,18 @@ public sealed partial class RecordContainerResolver
             return DocumentContainerDerivation.Undecided($"the document or one of its records could not be read ({ex.GetType().Name})");
         }
     }
+
+    /// <summary>
+    /// <see cref="DeriveDocumentContainersAsync"/> with FAULTS PROPAGATING: an <c>Undecided</c> result is a derivation that
+    /// ran and found nothing derivable; an exception is a derivation that could not be made (a Dataverse fault). The public
+    /// method folds the latter into <c>Undecided</c> (the contract the download, relocator and migration callers rely on);
+    /// the delete's pointer verdict (<see cref="StrictRefusalAsync"/>) tells them apart so a fault is a 503, not a 409
+    /// (R3 ISS-004 re-check F3-1). Cancellation of the caller propagates from both.
+    /// </summary>
+    private Task<DocumentContainerDerivation> DeriveDocumentContainersCoreAsync(Guid documentId, CancellationToken ct)
+        => documentId == Guid.Empty
+            ? Task.FromResult(DocumentContainerDerivation.Undecided("an empty document id names no document"))
+            : DeriveCoreAsync(documentId, depth: 0, ct);
 
     /// <summary>
     /// The container(s) a COMMUNICATION's content belongs in — the communication pipeline's own answer (its secure root's

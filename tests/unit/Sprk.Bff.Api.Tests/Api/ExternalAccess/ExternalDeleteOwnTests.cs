@@ -1042,7 +1042,7 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
     [Trait("category", "external-access")]
     public abstract class PointerCheckOnDeleteContract
     {
-        private readonly Fixture _f;
+        protected readonly Fixture _f;
 
         protected PointerCheckOnDeleteContract(Fixture fixture)
         {
@@ -1050,9 +1050,9 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
             _f.Reset();
         }
 
-        private DocumentCheckoutService Service => _f.Services.GetRequiredService<DocumentCheckoutService>();
+        protected DocumentCheckoutService Service => _f.Services.GetRequiredService<DocumentCheckoutService>();
 
-        private Guid SeedDocument() =>
+        protected Guid SeedDocument() =>
             _f.Seed(DeletableKind.Document, contact: CallerContact, parents: Project(RecordA));
 
         private async Task<HttpResponseMessage> DeleteOverTheExternalRoute(Guid id)
@@ -1233,6 +1233,29 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
             _f.Steps.Should().BeEmpty();
         }
 
+        // ---- a Graph answer on the item read: permanent (409) or transient (503) — R3 ISS-004 re-check F3-2 ----
+
+        [Theory]
+        [InlineData(400, 409)]
+        [InlineData(403, 409)]
+        [InlineData(429, 503)]
+        [InlineData(503, 503)]
+        public async Task GraphStatusOnTheItemRead_IsPermanent409Only_ForA400OrA403(int graphStatus, int expected)
+        {
+            var id = SeedDocument();
+            _f.PointerWorld.ItemReadFault = new Microsoft.Graph.Models.ODataErrors.ODataError { ResponseStatusCode = graphStatus };
+
+            var result = await Service.DeleteAsync(id, "corr-f3-2");
+
+            var kept = result.Should().BeOfType<FileNotDeletedDeleteResult>().Subject;
+            kept.StatusCode.Should().Be(expected, "a 400/403 is final for this pointer; a 429/5xx is worth retrying");
+            kept.Code.Should().Be(expected == 409
+                ? RecordContainerResolver.DocumentStorageUnverifiedCode
+                : DocumentCheckoutService.FileNotDeletedCode);
+            _f.Exists(DeletableKind.Document, id).Should().BeTrue();
+            _f.Steps.Should().BeEmpty("a pointer that is refused or could not be checked never reaches the file");
+        }
+
         // ---- the ordinary outcomes, unchanged ----
 
         [Fact]
@@ -1312,6 +1335,24 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
     {
         public PointerCheckOnDelete_StrictRule(StrictFixture fixture) : base(fixture)
         {
+        }
+
+        [Fact]
+        public async Task AFaultOnlyInTheDerivationRead_IsRetryable503_NotA409_AndTheRowIsKept()
+        {
+            // R3 ISS-004 re-check F3-1: the strict rule's binding read (one column) succeeds; the WIDE sprk_document read of
+            // the derivation (the row's record links) faults. Folded into 'cannot be derived' it was a permanent 409.
+            var id = SeedDocument();
+            _f.PointerWorld.RetrieveFault = (entity, columns) =>
+                entity == "sprk_document" && columns.Length > 1 ? new TimeoutException("Dataverse timed out") : null;
+
+            var result = await Service.DeleteAsync(id, "corr-f3-1");
+
+            var kept = result.Should().BeOfType<FileNotDeletedDeleteResult>().Subject;
+            kept.StatusCode.Should().Be(503);
+            kept.Code.Should().Be(DocumentCheckoutService.FileNotDeletedCode);
+            _f.Exists(DeletableKind.Document, id).Should().BeTrue();
+            _f.Steps.Should().BeEmpty("a check that could not be made never reaches the file");
         }
     }
 
