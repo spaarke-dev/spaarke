@@ -246,3 +246,13 @@ It is pinned by three tests:
   - Create-time mapping passes the table's Money attributes, so a Default rule into a Money column writes a `Money`.
   - Repair (SDK, system principal) passes none and would write a decimal. It is dormant: Repair has no live caller until 052, and 052 is blocked on 033, which carries the app-only metadata reader the fix needs.
   - The 052 POML now has this as an acceptance criterion, and the full analysis is a comment on #2124.
+
+## 2026-10-22 — UAC-r2 #2253: create-time mapping asks the refusal as `WriteIdentity.AppOnly`
+
+UAC-r2 PR #2253 (#2251) adds an explicit write identity to `InheritedAccessPermission.RefuseAppOnlyWrite`, with the values `AppOnly` and `Caller`.
+
+**Create-time mapping takes `WriteIdentity.AppOnly`.** This covers `RecordCreationService.Mapping.cs`, `DropAppOnlyRefusedRules`, and applies even when the create's principal is a caller. UAC-r2 agreed.
+- The mapped values are written by the service's single app-only create (step 11), so no Dataverse privilege or field security stands behind them.
+- Create-time mapping therefore also drops the sets #2253 adds: access tables, secure-root columns, and access-deciding columns on contact, organisation, systemuser and business unit. That matches #2220's create-side refusal.
+- The `sprk_document` + `sprk_accesspermission` create exemption stays.
+- Whichever of #2253 and 018b merges second adds the parameter, plus a must-fire test: an access-deciding contact column is dropped at create.
