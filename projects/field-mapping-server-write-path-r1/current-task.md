@@ -1,17 +1,17 @@
 # Current Task — field-mapping-server-write-path-r1
 
-> **Last updated**: 2026-10-21 (016 merged into the work branch and verified; awaiting UAC-r2 condition (b))
-> **Phase**: Wave 2. Done (12/43): 001–006, 010–015. ALL on master: 001–006, 010–013 (#2184), #2191 (583f90c1d9,
-> live on dev), 014 + 015 (#2214, cf0886360a). #2188 is CLOSED. 016 code complete on the work branch.
+> **Last updated**: 2026-10-21 (016 ✅, UAC-r2 ACCEPT; PR to master next. #2220 fixed on master via #2223)
+> **Phase**: Wave 2. Done (13/43): 001–006, 010–016. On master: 001–006, 010–015, #2191, #2223 (ef5912c7e8, #2220).
+> 016 is on the work branch, with its PR to master in progress.
 
 ## Quick Recovery
 
 | Field | Value |
 |---|---|
-| **HEAD** | work branch `4c5ac9f5ad` = merge of `task/fm-016` (c7ee5bcd0a, --no-ff as c16705d6aa) + master f1b3dadcf5. Verified: sln 0/0, ArchTests 1349/1349, related suites 3156 passed / 7 skipped. Pushed |
-| **016 state** | Code complete. Owner chose field-security option 1. #2188 guard: new per-member `UnmaskedCallExemptions` (`…/RecordCreation/RecordCreationService.Repair.cs\|RecordCreationService.RepairMappingAsync`, Uses = 1), controls + 5 mutants killed, `KnownCallSites` = 3. #2170 guard member-keyed (UAC option c). `SourceColumnsRepairMayCopy` seam is `TODO(task 033)`. Diff for review: `git diff 3583ac04cb...c7ee5bcd0a` |
-| **Running** | Publish-size delta f1b3dadcf5 vs 4c5ac9f5ad (`C:\tmp\f16m`, `C:\tmp\f16a`; remove with Remove-WorktreeSafe.ps1 afterwards) + CVE check. UAC-r2 asked (2026-10-21) for ACCEPT / F items on the 016 diff |
-| **Next Action** | (1) UAC-r2 ACCEPT → mark 016 ✅ (POML, TASK-INDEX, portfolio Tasks Completed = 13) → PR to master with publish delta, CVE, full CI rollup; F items → resume implementer a10e5fe383a4dfcd2. (2) Then 017/018 |
+| **HEAD** | work branch `ccb732ceb6` = 016 (incl. fix round 73ef4e0845, merged as 33e36aafb9) + master ef5912c7e8. Verified: sln 0/0, ArchTests 1347/1347, related suites 3492 passed / 7 skipped. Pushed |
+| **016 state** | ✅ complete. UAC-r2 condition (b) found F1-1..F4-2; all fixed; UAC-r2 ACCEPT of the fix round. POML notes carry the summary. Draft PR body: scratchpad `pr-016.md` (update counts, master sha, the UAC line, the never-map codes, F2-1) |
+| **Running** | Publish delta ef5912c7e8 vs ccb732ceb6 (`C:\tmp\g16m`, `C:\tmp\g16a`; the script removes them) + CVE |
+| **Next Action** | (1) PR 016 → master; merge on Router + Client lint green and the full rollup explained (Tier 2 ADR job times out: #2224) → send UAC-r2 the merge SHA → portfolio sync (Tasks Completed = 13). (2) If #2221 lands first, add the `EmailArchiveCommunicationLinkSweepJob.LinkAsync` exemption (below). (3) Then 017/018. **Don't ask R3 to deploy**; UAC-r2 batches the candidate (016 + #2221 + #2223), and a BFF deploy needs the owner's go in R3's session |
 
 ## Key facts since the last checkpoint
 
