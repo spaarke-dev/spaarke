@@ -1894,3 +1894,20 @@ The owner's answer, verbatim: **"Yes, admin-trusted"**.
 Reading: no ownership check on System runs. The role is treated like a system administrator, and the `RefuseAppOnlyWrite` deny-lists remain the only limit on what a System run writes. This is recorded as a known limit in #2258 and #2262.
 
 **Main-session decision on #2258 (complies with existing rules; not an owner question).** Playbook writes ask `RefuseAppOnlyWrite` WHATEVER the run's identity, because the payload is built by configuration or a model, not by the runner. This is the same reason the field-mapping push asks it although it runs as its caller. Without it, user A's published playbook could lower user B's Restricted document when B runs it.
+
+### Round 125 (2026-10-22): #1830's dead container on secure project 65a3fab2 is removed from the stamp config, then re-provisioned
+
+The question was raised by the task 192 diagnosis (#1830, R3 ISS-006). On dev, the revocation sweep logged an error on every run. The cause is that container `b!MVasATu…`, which belongs to secure project `65a3fab2`, points at a SharePoint site that has been deleted. Graph answers 400 "Invalid hostname for this tenancy". The id is listed in `SharePointEmbedded__OwnedContainerIds`, so the ownership guard never reads it.
+
+- No revoked grant kept access as a result: JIT markers shipped on 2026-10-07, and the container was already dead on 2026-10-06.
+- The other 3 secure containers are processed on every run.
+
+The owner's answer, verbatim: **"Remove id + re-provision (Recommended)"**.
+
+Reading:
+- At the next dev BFF deploy, which goes through R3 and needs the owner's approval of that deploy by SHA in R3's session, remove `b!MVasATu…` from dev's `SharePointEmbedded__OwnedContainerIds`, keeping `b!vzGD…`. To roll back, re-add the id.
+- After that, re-provision project 65a3fab2's container through the existing provision-project endpoint.
+- No container is deleted or purged.
+- This lifts the "don't touch 65a3fab2" rule for this one action only.
+
+The code fix is PR #2268: the sweep reports a container that does not resolve as a warning, not a failure. #2267 (filed) covers checking configured container ids at startup.
