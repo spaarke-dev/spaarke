@@ -247,7 +247,8 @@ public sealed class InvoiceSubmissionServiceTests
                 });
 
             ExternalData = new Mock<ExternalDataService>(
-                new HttpClient(), new ConfigurationBuilder().Build(), Mock.Of<TokenCredential>(), NullLogger<ExternalDataService>.Instance, null!, null!);
+                new HttpClient(), new ConfigurationBuilder().Build(), Mock.Of<TokenCredential>(), NullLogger<ExternalDataService>.Instance, null!, null!,
+                null!); // Moq matches every constructor parameter, the optional ones included (task 188 added the identity resolver)
             ExternalData.Setup(x => x.CreateDocumentAsync(
                     It.IsAny<ExternalDataService.DocumentParentKind>(), It.IsAny<Guid>(), It.IsAny<ExternalUploadedFilePointers>(), It.IsAny<Guid>(),
                     It.IsAny<CallerPrincipal>(), It.IsAny<CancellationToken>()))
