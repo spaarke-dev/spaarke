@@ -478,6 +478,7 @@ internal sealed partial class RecordCreationService
                 if (fitting.Count > 0)
                 {
                     MappingStep withDefaults;
+                    var warningsBeforeMerge = mappingWarnings.Count;
                     try
                     {
                         withDefaults = await MapMergedAsync(user, table, item, fitting, mappingWarnings, ct, defaultColumns)
@@ -493,6 +494,10 @@ internal sealed partial class RecordCreationService
                         // mapping fault maps nothing, NFR-01 — a value that could not be checked is never written).
                         _logger.LogWarning(ex, "[RECORD-CREATE] the post-mapping defaults of a {Table} could not be mapped; none is written",
                             table);
+
+                        // Re-check K-2: what the faulted merge had already said about single defaults no longer applies —
+                        // each default is named once.
+                        mappingWarnings.RemoveRange(warningsBeforeMerge, mappingWarnings.Count - warningsBeforeMerge);
                         foreach (var column in fitting.Keys)
                             mappingWarnings.Add(Dropped(column, CouldNotBeChecked, defaultColumns));
                         withDefaults = MappingStep.Unmapped(item);

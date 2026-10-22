@@ -167,9 +167,12 @@ The whole existing filtered suite also passes unchanged, below.
     supplies only the value.
   - **Not done:** restricting `PostMappingDefaults` to `ServerDefaults` columns in the service. F4-3 already makes an
     unknown column harmless. The restriction is cheap if the reviewer wants it.
-- **Open for 018b and the coordinator.** A maker's-contact default the caller cannot AppendTo is **dropped** (the FR-08
-  mapped-value rule, K-7 as briefed). UAC-r2 condition (b) item 1 refuses a **named** Assigned To contact. Whether the
-  maker's-contact fallback should also refuse is not 018a's decision.
+- **Decided (coordinator, 2026-10-22; put to UAC-r2 for concurrence): DROP the maker's-contact default.** A maker's
+  contact the caller cannot AppendTo is dropped with `record_creation.default_value_dropped` (the FR-08 mapped-value
+  rule). It is not refused. A **named** Assigned To contact still refuses (UAC-r2 condition (b) item 1). Conditions for
+  018b:
+  - the Office adapter surfaces the `default_value_dropped` warning to the caller;
+  - after a drop it **never** writes Assigned To itself, app-only.
 
 #### Tests added (all fail before their fix; mutants below)
 
@@ -187,7 +190,7 @@ The whole existing filtered suite also passes unchanged, below.
 | D2: `DefaultsToFill` uses the 2a5f076857 rule (`null` is unsupplied for every kind) | Killed: both explicit-null cases. |
 | D3: no fit check on defaults (every unfilled default reaches the merge) | Killed: all 3 `TheColumnCannotTake…` cases. |
 | D4: `sprk_assignedtointernal` added to the matter's `OptionalReferenceLookups` | Killed: both registry pins. |
-| E1: the 2a5f076857 merge (over the caller's item, mapped and default values together), K-4's base change only | Survived. The scripted mapper has no case in which the two merges differ when nothing faults. The K-4 change is therefore pinned by the fault test, not by `…ThatDoesNotMap…`, which passes under both. |
+| E1: the 2a5f076857 merge (over the caller's item, mapped and default values together), K-4's base change only | Survived in this round. The tests had no non-throwing failure of the merge, and the catch masked the base in the fault test. **Killed in the re-check** (below) by `…WhenTheDefaultsMergeIsRefused503…`. |
 | E1′: the 2a5f076857 merge **and** no catch on the defaults merge | Killed: `…WhenTheDefaultsMergeFaults…` (the fault reached `CreateAsync` and gave 503). |
 | E2: no duplicate-key check | Killed: `…TwoKeysNamingOneColumn…`. |
 | E3: no `MappingExclusion` check | Killed: `…OnATableFieldMappingDoesNotApplyTo…`. |
@@ -201,3 +204,27 @@ The whole existing filtered suite also passes unchanged, below.
   `Office`, `RecordOwnership`, `SecureRoot`, `SearchIndex`, `CreatorPerson`, `RecordTableRule` and
   `MappingSourceCallerMask`.
 - Per the coordinator, the unfiltered `Sprk.Bff.Api.Tests` was not run (the test host reached 7.7 GB).
+
+### 018a re-check (scoped re-check of `2a5f076857..58e09ce726`: the five items resolved, then these)
+
+| Item | Change | Test |
+|---|---|---|
+| **F3**: K-4 was unpinned (the only K-4 test faulted twice, and the catch masked the base) | Test only. The seam double `MappingUserClient` gains `FailOn` (`Func<string, DataverseUserResponse?>`), beside `ThrowOn`, for a non-throwing 429/503. | `PostMappingDefault_WhenTheDefaultsMergeIsRefused503_TheMappedValuesStand_AndOnlyTheDefaultIsDropped`. After the defaults' own `AttributeType` read for `sprk_regardingproject`, the mapper's `ManyToOneRelationships` and `EntitySetName` reads answer `Fail(503, RateLimited, "busy")`. The mapped `sprk_description` and `sprk_assignedto` are still written, and the only warning is `default_value_dropped` on `sprk_regardingproject`. |
+| **K-2**: duplicate warnings when the defaults merge answers a failure and then a per-column map throws | The step-3½ catch records the warning count before the merge, truncates back to it, then adds one `Dropped` per default. | `PostMappingDefault_WhenTheMergeIsRefusedThenFaults_EachDefaultIsNamedOnce`: the whole merge answers 503, the first default alone answers 503, the second throws. There are exactly two warnings, one per default. |
+| **K-3**: no seam test for unavailable defaults metadata | Test only. The behaviour came with the fix round. | `PostMappingDefault_WhenTheDefaultsColumnMetadataIsUnavailable_EveryDefaultIsDropped_AndTheRowIsCreated`, with `Mapping = null` (so the only column-metadata read is the defaults' own) and two cases: the read throws, and the read answers 503. Both defaults are dropped with `default_value_dropped` ("it could not be checked"), and the row is created. |
+
+Mutants (each run, then reverted):
+
+| Mutant | Result |
+|---|---|
+| F1 (= E1): the 2a5f076857 merge base, catch kept | **Killed** by the F3 test. E1 is now killed. |
+| F2: no truncation in the catch | Killed by the K-2 test (`sprk_assignedto` was named twice). |
+| F3: unreadable defaults metadata treated as "fits" | Killed by both K-3 cases. |
+| F4: no catch on the defaults' column-metadata read | Killed by the K-3 throws case. |
+
+Verification (re-check):
+
+- `dotnet build Spaarke.sln`: 0 warnings, 0 errors.
+- ArchTests, built separately and run in full: 1347 passed, 0 failed.
+- The same filtered set: 2779 passed, 7 skipped, 0 failed (2786 in total).
+- The unfiltered suite was not run.

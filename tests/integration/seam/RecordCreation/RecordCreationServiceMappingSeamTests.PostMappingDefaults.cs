@@ -1,6 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Xrm.Sdk;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.RecordCreation;
 using Xunit;
 
@@ -237,6 +238,128 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         warning.Code.Should().Be(RecordCreationWarning.DefaultValueDroppedCode);
         warning.Column.Should().Be("sprk_regardingproject");
         warning.Detail.Should().NotContain("10.0.0.9", "the fault's text stays in the log");
+    }
+
+    private static readonly DataverseUserResponse Busy =
+        DataverseUserResponse.Fail(503, DataverseUserClientErrorCodes.RateLimited, "busy");
+
+    private static bool IsMapperMetadataRead(string path) =>
+        path.Contains("ManyToOneRelationships", StringComparison.Ordinal) || path.Contains("EntitySetName", StringComparison.Ordinal);
+
+    private static bool IsDefaultsColumnRead(string path, string column) =>
+        path.Contains("AttributeType", StringComparison.Ordinal) && path.Contains(column, StringComparison.Ordinal);
+
+    [Fact]
+    public async Task PostMappingDefault_WhenTheDefaultsMergeIsRefused503_TheMappedValuesStand_AndOnlyTheDefaultIsDropped()
+    {
+        // Re-check F3: the realistic failure — a non-throwing 429/503 on the mapper's relationship and entity-set reads
+        // after the defaults' own column read (step 3½). The step-3 mapped values were mapped before it and must stand.
+        MatterToEventProfile();
+        var defaultsRead = false;
+        _user.FailOn = path =>
+        {
+            if (IsDefaultsColumnRead(path, "sprk_regardingproject"))
+                defaultsRead = true;
+            return defaultsRead && IsMapperMetadataRead(path) ? Busy : null;
+        };
+
+        var outcome = await Service().CreateAsync(
+            EventUnder(OrdinaryMatter) with
+            {
+                PostMappingDefaults = new Dictionary<string, object?>
+                {
+                    ["sprk_regardingproject"] = new EntityReference("sprk_project", OtherProject),
+                },
+            },
+            AsCaller(), CancellationToken.None);
+
+        defaultsRead.Should().BeTrue("the failure was reached at step 3½");
+        outcome.Succeeded.Should().BeTrue($"{outcome.Refusal?.Code} {outcome.Refusal?.Detail}");
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        StringOf(fields, "sprk_description").Should().Be("From the matter", "a mapped value never pays for a default");
+        StringOf(fields, "sprk_AssignedTo@odata.bind").Should().Be($"/contacts({Assignee:D})");
+        fields.Should().NotContainKey("sprk_RegardingProject@odata.bind");
+        outcome.MappingWarnings.Should().ContainSingle()
+            .Which.Should().Match<RecordCreationWarning>(w =>
+                w.Code == RecordCreationWarning.DefaultValueDroppedCode && w.Column == "sprk_regardingproject");
+    }
+
+    [Fact]
+    public async Task PostMappingDefault_WhenTheMergeIsRefusedThenFaults_EachDefaultIsNamedOnce()
+    {
+        // Re-check K-2: the whole merge answers 503, the first default alone answers 503 (named), the second faults — each
+        // default is still named exactly once.
+        var defaultsRead = false;
+        var mapperReads = 0;
+        _user.ThrowOn = path =>
+        {
+            if (IsDefaultsColumnRead(path, "sprk_regardingproject"))
+                defaultsRead = true;
+            if (!defaultsRead || !path.Contains("ManyToOneRelationships", StringComparison.Ordinal))
+                return null;
+            mapperReads++;
+            return mapperReads == 3 ? new TimeoutException("metadata read timed out at 10.0.0.9") : null;
+        };
+        _user.FailOn = path => defaultsRead && mapperReads < 3 && IsMapperMetadataRead(path) ? Busy : null;
+
+        var outcome = await Service().CreateAsync(
+            EventUnder(OrdinaryMatter) with
+            {
+                Mapping = null,
+                PostMappingDefaults = new Dictionary<string, object?>
+                {
+                    ["sprk_assignedto"] = new EntityReference("contact", CallersContact),
+                    ["sprk_regardingproject"] = new EntityReference("sprk_project", OtherProject),
+                },
+            },
+            AsCaller(), CancellationToken.None);
+
+        mapperReads.Should().Be(3, "the whole merge, the first default alone, then the fault");
+        outcome.Succeeded.Should().BeTrue($"{outcome.Refusal?.Code} {outcome.Refusal?.Detail}");
+        outcome.MappingWarnings.Select(w => (w.Code, w.Column)).Should().BeEquivalentTo(
+            [
+                (RecordCreationWarning.DefaultValueDroppedCode, "sprk_assignedto"),
+                (RecordCreationWarning.DefaultValueDroppedCode, "sprk_regardingproject"),
+            ],
+            "one warning per default, never two for the same column");
+    }
+
+    [Theory]
+    [InlineData(true, "the read throws")]
+    [InlineData(false, "the read answers 503")]
+    public async Task PostMappingDefault_WhenTheDefaultsColumnMetadataIsUnavailable_EveryDefaultIsDropped_AndTheRowIsCreated(
+        bool throws, string because)
+    {
+        // Re-check K-3: no field mapping, so the only column-metadata read is the defaults' own.
+        if (throws)
+        {
+            _user.ThrowOn = path => path.Contains("AttributeType", StringComparison.Ordinal)
+                ? new TimeoutException("metadata read timed out at 10.0.0.9")
+                : null;
+        }
+        else
+        {
+            _user.FailOn = path => path.Contains("AttributeType", StringComparison.Ordinal) ? Busy : null;
+        }
+
+        var outcome = await Service().CreateAsync(
+            EventUnder(OrdinaryMatter) with
+            {
+                Mapping = null,
+                PostMappingDefaults = new Dictionary<string, object?>
+                {
+                    ["sprk_location"] = "Courtroom 1",
+                    ["sprk_assignedto"] = new EntityReference("contact", CallersContact),
+                },
+            },
+            AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue($"{because}: {outcome.Refusal?.Code} {outcome.Refusal?.Detail}");
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        fields.Should().NotContainKey("sprk_location").And.NotContainKey("sprk_AssignedTo@odata.bind");
+        outcome.MappingWarnings.Should().HaveCount(2).And.OnlyContain(w =>
+            w.Code == RecordCreationWarning.DefaultValueDroppedCode && w.Detail.EndsWith("it could not be checked."));
+        outcome.MappingWarnings.Select(w => w.Column).Should().BeEquivalentTo("sprk_assignedto", "sprk_location");
     }
 
     // =====================================================================================
