@@ -558,3 +558,19 @@ Raw output: `C:/Users/RALPHS~1/AppData/Local/Temp/uac191a/` (not in the repo); r
 - **The writes that remain** (S1 setup and negatives, S2 move, S3 about 1,000 shares, S4 invite) are listed with undo steps in the researcher's report. They need the owner's in-session approval (POA constraint).
 
 **Spend (ebilling, owner, 2026-10-22):** `sprk_totalspend` and `sprk_totalbudget` stay visible to flagged-external users. There is no field security and no task; it is recorded in ebilling's model note.
+
+## T191a live spike results (dev, 2026-10-22, round 121; all undone)
+
+Scripts, snapshots and logs: `C:/Users/RALPHS~1/AppData/Local/Temp/uac191b/` (not in the repo). Test user `e44317a0…`. Teardown verified against the snapshot: business unit, roles (11f93c04 only), teams (root default only), 3 share rows, owned rows. The spike business unit, team and role are deleted (404).
+
+| Spike | Verdict | Facts |
+|---|---|---|
+| S2: business-unit move under matrix | **Go** | The move (PATCH `businessunitid`) strips the direct role and swaps the root default team for the new business unit's default team. Rows the user owns do **not** move (2 mailboxes, a queue, a notification row) (F4). |
+| S1: role and shares | **Go, with F1** | **Role:** 30 privileges at Basic (Read, Write, Append, AppendTo and Create on matter, project, document, communication, event, to-do), plus `prvReadUser` at Local, plus `prvRead/WriteUserSettings` at Basic. The platform adds 9 Global system-table reads itself.<br>**Reads:** exactly the 8 shared rows. Unshared rows and users outside the business unit get 403. Lookup names render.<br>**Blocked writes:** re-linking or unlinking `sprk_relatedcommunication` / `sprk_parentdocument` (field security from task 188, or AppendTo); re-filing to an unshared matter; writing an unshared row; clearing its own `sprk_isexternal` (no `prvWriteUser`).<br>**Not blocked:** lowering `sprk_accesspermission` on a shared row it can write (**F1**).<br>**Creates:** document, to-do and event under the shared matter: 204. |
+| S3: about 1,000 shares | **Go** | Grant: 987 rows in 78 s (12.7 rows/s, batches of 100, no 429). Revoke: 76.6 s. The user saw exactly the granted set, then nothing. **F2:** `RevokeAccess` leaves the share row at mask 0, so the share-row count rose 1,980 → 2,975 and can't measure the mirror. |
+| S4: SPE item invite | **Blocked** | The az CLI Graph token gets 403 on the container and the item. It needs the BFF managed identity, which only works on Azure-hosted compute (for example the App Service SSH console), or an interactive delegated sign-in through an app registered on the container type. |
+
+- **F3, Dataverse search:** impersonation is honoured, but team-shared rows didn't appear in the user's search within 13.5 minutes, and a deleted row still did. Matters aren't indexed at all. Treat this as a residual window; re-check after 24 hours in the owner checklist.
+- **F4:** the re-own of rows owned by flagged users stays in T191c. Mailboxes and queues are system rows, outside the registry.
+- **F5:** `WhoAmI` ignores impersonation. Use it only for the operator, never for this check.
+- **Owner browser checklist** (needs the setup re-run first, then the undo): the model-driven app opens as the user; only the shared rows are visible; no Share or Assign buttons; a direct URL to an unshared row is refused; Copilot and `grid_overview` see only the shared rows; Office edit, after S4.
