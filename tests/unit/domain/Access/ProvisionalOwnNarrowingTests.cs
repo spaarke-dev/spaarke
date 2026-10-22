@@ -99,6 +99,26 @@ public class ProvisionalOwnNarrowingTests
             "it keeps THIS record's marker, never sets one");
     }
 
+    [Theory]
+    [InlineData(Limited)]
+    [InlineData(null)]
+    public void KeepingProvisionalWith_ADifferentOwnValue_DropsTheMarker(int? ownValue)
+    {
+        // Fix round 2 (K3): the marker belongs to the save-time Restricted. Facts whose own value is anything else are not
+        // that narrowing, so the record they become is never provisional, whoever calls it.
+        var provisional = AccessInheritance.OwnNarrowingUntilEmailIdentified(Restricted);
+        var facts = new AccessInheritance(
+            new[] { "sprk_communication:12212212-0122-4122-8122-000000000c0c" }, false, Standard, false, ownValue);
+
+        var kept = provisional.KeepingProvisionalWith(facts);
+
+        kept.OwnProvisional.Should().BeFalse("its own value is not the provisional Restricted");
+        kept.OwnPermission.Should().Be(ownValue, "every fact is still the new one");
+        kept.Parents.Should().BeSameAs(facts.Parents);
+        provisional.KeepingProvisionalWith(facts with { OwnPermission = Restricted }).OwnProvisional.Should().BeTrue(
+            "the same own value keeps it");
+    }
+
     // ── Versions: an older or unknown record fails closed ───────────────────────────────────────────────────
 
     [Fact]

@@ -473,14 +473,15 @@ internal sealed record AccessInheritance(
     /// Owner round 122: <paramref name="facts"/> with this record's <see cref="OwnProvisional"/> kept. The one way a later
     /// record carries the marker: the document rule calls it only while <see cref="OwnPermissionOf(int, int?, AccessInheritance?, int, bool, out bool)"/>
     /// says the provisional narrowing still stands untouched. It sets the marker explicitly (fix round 1, K3): a <c>with</c>
-    /// would drop it.
+    /// would drop it. Fix round 2 (K3): it keeps the marker only when <paramref name="facts"/> carry the SAME own value as
+    /// this record; a different own value is not the provisional narrowing, so the record returned has no marker.
     /// </summary>
     internal AccessInheritance KeepingProvisionalWith(AccessInheritance facts)
     {
         ArgumentNullException.ThrowIfNull(facts);
         return new AccessInheritance(facts.Parents, facts.FloorSecure, facts.FloorPermission, facts.OwnSecure, facts.OwnPermission)
         {
-            OwnProvisional = OwnProvisional,
+            OwnProvisional = OwnProvisional && facts.OwnPermission == OwnPermission,
         };
     }
 }
