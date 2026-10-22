@@ -97,6 +97,12 @@ public sealed class MembershipResolverService : IMembershipResolverService
     /// missing from the <c>owner</c> role.
     /// </para>
     /// <para>
+    /// <b>Bumped 6 → 7 by #2273</b> — the "bump REQUIRED" case below: the options hash is unchanged, but the
+    /// query's semantics changed (the creator-person term now binds only on a table the BFF stamps, see
+    /// <see cref="Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.IsStamped"/>), so a pre-deploy entry could
+    /// carry rows matched on a forged <c>sprk_createdbyperson</c> and be served for up to <see cref="CacheTtl"/>.
+    /// </para>
+    /// <para>
     /// ⚠️ <b>When a bump IS required, and when it is not</b> (stated 2026-09-17, task 043, because the
     /// question came up and the answer was non-obvious). This constant and
     /// <see cref="HashOptions"/> defend against two DIFFERENT failure modes, and only one of them needs
@@ -119,7 +125,7 @@ public sealed class MembershipResolverService : IMembershipResolverService
     /// authorization decision.
     /// </para>
     /// </summary>
-    internal const int CacheVersion = 6;
+    internal const int CacheVersion = 7;
 
     /// <summary>
     /// Per-user cache TTL: 2 minutes (was 5) — task 132, owner rounds 3 R3/R4 (access changes take effect in
@@ -905,11 +911,13 @@ public sealed class MembershipResolverService : IMembershipResolverService
             }
 
             if (string.Equals(field, CreatorPersonAttribute, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(d.IdentityType, "SystemUser", StringComparison.OrdinalIgnoreCase))
+                && string.Equals(d.IdentityType, "SystemUser", StringComparison.OrdinalIgnoreCase)
+                && Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.IsStamped(entityType))
             {
                 // Task 147 r1: discovered only where the column exists (the schema scripts put it on the roots and the
                 // stamped child tables), so a table without it never names it in the query. Bound under the human rule
-                // below, with Created By.
+                // below, with Created By. #2273: and only on a table the BFF stamps — elsewhere the column may be
+                // unsecured, so any Write holder could name anyone as its creator.
                 creatorPerson = d;
             }
 
