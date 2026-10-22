@@ -1062,10 +1062,10 @@ The BFF routes (`/review`, `/blocked`) are covered by 119.
 
 | Field | Value |
 |---|---|
-| **Status** | Open (fix scope to agree with uac-r2: separate fix or 090) |
+| **Status** | Handed to uac-r2 (their #2237; #2236 closed as duplicate). Whichever of 088 and #2237 merges second makes sure `sprk_restrictedbysubmission` is in the filtered set |
 | **Urgency** | medium |
 | **Filed** | 2026-10-22 |
-| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2236 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2237 (owner uac-r2; #2236 closed as duplicate) |
 
 **Description**: Found by 088's adversarial pass, pre-existing. `DocumentProfileOutputMapper.BuildFields` (`DocumentProfileOutputMapper.cs:50-106`) maps every top-level property of the Document Profiler output to a `sprk_document` column of the same name. Two app-only writers use it, at `AppOnlyAnalysisService.cs:570` and `PublicContracts/DocumentProfileAi.cs:169`. Neither runs the `ParentLineage` app-only refusal that protects the access columns and, after 088, `sprk_restrictedbysubmission`. Fix options: run the refusal on the dictionary, or limit the mapper to an allowlist of profile columns.
 
