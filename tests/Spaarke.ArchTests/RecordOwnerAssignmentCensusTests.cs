@@ -592,22 +592,24 @@ public class RecordOwnerAssignmentCensusTests
             "or the team is in the Secure Record business unit, or the row is user-owned. The write is a conditional Web API PATCH " +
             "(If-Match on the guard read's versionnumber; a 412 is Conflict, a 404 NotFound) that shares the pass's evict and " +
             "read-back (WriteOwnerAndReadBackAsync). No identity gains Write on a Decision Record."),
-        new OwnerWriteEntry("OfficeRecordCreationService.cs", "CreateMatterAsync", 1, OwnerWriteKind.Root,
-            "Office quick-create of a MATTER (a root) — owned by the resolver's team for the acting user (task 080)."),
-        new OwnerWriteEntry("OfficeRecordCreationService.cs", "CreateProjectAsync", 1, OwnerWriteKind.Root,
-            "Office quick-create of a PROJECT (a root) — owned by the resolver's team for the acting user (task 080)."),
-        new OwnerWriteEntry("OfficeRecordCreationService.cs", "IsolateProjectCreate", 1, OwnerWriteKind.Root,
-            "Task 158 r1 (owner round 31 item 2): a PROJECT (a root) filed under a secure record is created INTO isolation, " +
-            "owned by the named Secure Record Owners team provisioning's topology names (SecureRootInheritance.PlanCreateAsync)."),
+        // The Office quick-create of a MATTER or PROJECT (a root) writes its owner through the unified create below
+        // (RecordCreationService.cs: OwnedCreateFields, IsolatedCreateFields) since field mapping task 018; task 018c deleted
+        // the Office creation core and its three owner writes (CreateMatterAsync, CreateProjectAsync, IsolateProjectCreate).
         new OwnerWriteEntry("OwnedChildWrite.cs", "CreateIntoIsolationAsync", 1, OwnerWriteKind.Root,
             "Task 158 r1 (owner round 31 item 2): a chat-created work assignment / project (a root) filed under a secure record " +
             "is created INTO isolation, owned by the named team provisioning's topology names (SecureRootInheritance.PlanCreateAsync)."),
         // field-mapping-server-write-path-r1 task 013: the unified create (Services/RecordCreation/RecordCreationService.cs)
-        // ports OwnedChildWrite's two owner writes unchanged; existing callers still call OwnedChildWrite until tasks 017/018
-        // re-point them. The Office create above is Services/Office/OfficeRecordCreationService.cs (renamed in fix round 2,
-        // UAC-r2 F-3: ServerFiles() keys files by NAME, so the two shared one name and one satisfied the other's checks).
+        // ports OwnedChildWrite's two owner writes unchanged; tasks 017/018 re-pointed the callers. (UAC-r2 F-3: ServerFiles()
+        // keys files by NAME — why the Office core was renamed away from this file's name before 018c deleted it.)
         new OwnerWriteEntry("RecordCreationService.cs", "OwnedCreateFields", 1, OwnerWriteKind.Routed,
             "Task 013: the unified create of an OWNED row — the resolver's team (DecideOwnerAsync), after the as-the-caller checks."),
+        // field-mapping-server-write-path-r1 task 016: Repair mode (FR-14) re-owns an EXISTING systemuser-owned row.
+        new OwnerWriteEntry("RecordCreationService.cs", "RepairOwnerAsync", 1, OwnerWriteKind.Routed,
+            "Task 016: Repair of a user- or application-owned EXISTING row — the resolver's team over the row's own parents " +
+            "(ResolveOwnerOverAsync, the create's step 7), fill-only: a team-owned row, a registry ownership exception, a " +
+            "secure-flagged root (flag not an explicit false; task 144 provisions it), a refusal, or — on an ownership-parent " +
+            "table only — an owner in another business unit leaves it unchanged (a leaf row, which nothing inherits access " +
+            "through, is moved); one conditional update, then the owner-change eviction."),
         new OwnerWriteEntry("RecordCreationService.cs", "IsolatedCreateFields", 1, OwnerWriteKind.Root,
             "Task 013: a work assignment / project (a root) filed under a secure record, created INTO isolation by the unified " +
             "create — owned by the named team SecureRootFilingGate.PlanCreateAsync resolves (OwnedChildWrite.CreateIntoIsolationAsync's)."),

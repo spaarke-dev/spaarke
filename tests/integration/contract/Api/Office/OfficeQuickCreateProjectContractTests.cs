@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Claims;
-using System.ServiceModel;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Xrm.Sdk;
@@ -33,7 +32,8 @@ namespace Sprk.Bff.Api.Tests.Api.Office;
 /// <see cref="OfficeQuickCreateTestWebAppFactory"/> host: the real pipeline runs end to end (routing, OfficeAuthFilter,
 /// the source-access filter, the handler, OfficeService, RecordCreationService, CreateTimeFieldMapping) and only the
 /// Dataverse boundary, the caller → systemuser resolver and the OBO rights probe are substituted. "No row created" is
-/// asserted as "<see cref="IGenericEntityService.CreateAsync"/> was never called".</para>
+/// asserted as "neither <see cref="IGenericEntityService.CreateAsync"/> nor the creation service's write
+/// (<see cref="IFieldMappingDataverseService.UpdateRecordFieldsAsync"/>) was called" (task 018b).</para>
 /// </remarks>
 public class OfficeQuickCreateProjectContractTests
 {
@@ -47,7 +47,6 @@ public class OfficeQuickCreateProjectContractTests
     private static readonly Guid SourceProjectId = Guid.Parse("1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c01");
     private static readonly Guid AccountId = Guid.Parse("9f8e7d6c-5b4a-4c3d-8e2f-1a0b9c8d7e01");
     private static readonly Guid MatterTypeId = Guid.Parse("b2c4e6a8-1d3f-4a5b-8c7d-9e0f1a2b3c01");
-    private static readonly Guid CreatedProjectId = Guid.Parse("00000000-0000-0000-0000-0000000c0de1");
 
     // ── Happy path ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -67,7 +66,7 @@ public class OfficeQuickCreateProjectContractTests
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var json = await ReadJsonAsync(response);
-        json.GetProperty("id").GetString().Should().Be(CreatedProjectId.ToString("D"));
+        json.GetProperty("id").GetString().Should().Be(created.Writes.Single().Id.ToString("D"), "the id of the row the create wrote");
         json.GetProperty("entityType").GetString().Should().Be("Project");
         json.GetProperty("logicalName").GetString().Should().Be("sprk_project");
         json.GetProperty("name").GetString().Should().Be("Acme Migration");
@@ -105,6 +104,8 @@ public class OfficeQuickCreateProjectContractTests
         factory.Entities.Verify(
             e => e.RetrieveAsync("sprk_mattertype_ref", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
             Times.Never, "the Project path has no matter-type concept");
+        factory.CallerDataverse.Requests.Should().NotContain(r => r.Contains("sprk_mattertype_ref"),
+            "the Project path has no matter-type concept, as the caller either");
     }
 
     [Fact]
@@ -113,7 +114,7 @@ public class OfficeQuickCreateProjectContractTests
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
         factory.Entities
-            .Setup(e => e.RetrieveAsync("systemuser", OwnerId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Setup(e => e.RetrieveAsync("team", OwnerTeam.Id, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new TimeoutException("dataverse slow"));
         var created = CaptureCreate(factory);
 
@@ -139,7 +140,7 @@ public class OfficeQuickCreateProjectContractTests
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
         ArrangeBusinessUnit(factory);
-        ArrangeSourceRights(factory, AccessRights.Read);
+        ArrangeSourceRights(factory, AccessRights.Read | AccessRights.AppendTo); // #2191: the project is filed under its source, so AppendTo too
         var created = CaptureCreate(factory);
 
         // Source and target are both sprk_project: same-entity mapping is supported by the framework (no
@@ -167,7 +168,7 @@ public class OfficeQuickCreateProjectContractTests
             ["sprk_projectnumber"] = "PRJ-000123",
         });
 
-        var response = await factory.CreateClient().PostAsJsonAsync(Route, new QuickCreateRequest
+        var response = await BearerClient(factory).PostAsJsonAsync(Route, new QuickCreateRequest
         {
             Name = "Acme Phase 2",
             SourceEntityType = "sprk_project",
@@ -209,14 +210,14 @@ public class OfficeQuickCreateProjectContractTests
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
         ArrangeBusinessUnit(factory);
-        ArrangeSourceRights(factory, AccessRights.Read);
+        ArrangeSourceRights(factory, AccessRights.Read | AccessRights.AppendTo); // #2191: the project is filed under its source, so AppendTo too
         var created = CaptureCreate(factory);
         factory.FieldMappings
             .Setup(m => m.GetFieldMappingProfileWithRulesAsync(
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((FieldMappingProfileEntity?)null);
 
-        var response = await factory.CreateClient().PostAsJsonAsync(Route, new QuickCreateRequest
+        var response = await BearerClient(factory).PostAsJsonAsync(Route, new QuickCreateRequest
         {
             Name = "No Profile Project",
             SourceEntityType = "sprk_project",
@@ -240,13 +241,13 @@ public class OfficeQuickCreateProjectContractTests
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
         ArrangeBusinessUnit(factory);
-        ArrangeSourceRights(factory, AccessRights.Read);
+        ArrangeSourceRights(factory, AccessRights.Read | AccessRights.AppendTo); // #2191: the project is filed under its source, so AppendTo too
         var created = CaptureCreate(factory);
         ArrangeProfile(factory,
             Rule("blank-name", "", 0, "sprk_projectname", 0, mappingType: 3, order: 1, expression: "{sprk_notonsource}"));
         ArrangeSource(factory, new Entity("sprk_project", SourceProjectId));
 
-        var response = await factory.CreateClient().PostAsJsonAsync(Route, new QuickCreateRequest
+        var response = await BearerClient(factory).PostAsJsonAsync(Route, new QuickCreateRequest
         {
             Name = "Requested Name",
             SourceEntityType = "sprk_project",
@@ -257,7 +258,8 @@ public class OfficeQuickCreateProjectContractTests
         var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
         body!.Name.Should().Be("Requested Name");
         created.Entity!.GetAttributeValue<string>("sprk_projectname").Should().Be("Requested Name");
-        body.Warnings.Should().Contain(w => w.Contains("name you entered was kept"));
+        (body.Warnings ?? Array.Empty<string>()).Should().NotContain(w => w.Contains("name you entered was kept"),
+            "fill-only never replaces the caller's name, so there is nothing to restore");
     }
 
     // ── Negative: authentication / authorization ────────────────────────────────────────────────────────
@@ -311,6 +313,63 @@ public class OfficeQuickCreateProjectContractTests
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await ReadProblemAsync(response)).Should().ContainKey("errorCode").WhoseValue.Should().Be("OFFICE_022");
+        AssertNothingCreated(factory);
+    }
+
+    /// <summary>
+    /// UAC-r2 re-check of #2191, must fire: the caller can READ the source (the route's filter passes) but cannot AppendTo it. The
+    /// create is app-only, so Dataverse would file the project under it regardless: refused 403 with the plan's code, nothing created.
+    /// </summary>
+    [Fact]
+    public async Task Post_Project_WhenCallerCanReadButNotAppendToTheSourceRecord_Returns403_AndCreatesNothing()
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(factory);
+        ArrangeBusinessUnit(factory);
+        ArrangeSourceRights(factory, AccessRights.Read);
+        factory.CallerDataverse.NoAppendTo.Add(("sprk_project", SourceProjectId)); // asked as the caller (task 018b)
+        CaptureCreate(factory);
+
+        var response = await BearerClient(factory).PostAsJsonAsync(Route, new QuickCreateRequest
+        {
+            Name = "Not Fileable",
+            SourceEntityType = "sprk_project",
+            SourceRecordId = SourceProjectId,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var problem = await ReadProblemAsync(response);
+        problem.Should().ContainKey("errorCode").WhoseValue.Should().Be("caller_cannot_file_under_parent");
+        AssertNothingCreated(factory);
+    }
+
+    /// <summary>
+    /// UAC-r2 re-check of #2191, must fire: the request carries no bearer token (the host's default client sends none), so the
+    /// caller's own AppendTo on the source cannot be asked — refused at the HTTP level with <c>caller_rights_unverifiable</c> (500),
+    /// never "allowed" because it could not be checked; nothing created, and the rights probe was not asked about the source.
+    /// </summary>
+    [Fact]
+    public async Task Post_Project_WhenTheRequestCarriesNoBearerToken_Returns500CallerRightsUnverifiable_AndCreatesNothing()
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(factory);
+        ArrangeBusinessUnit(factory);
+        ArrangeSourceRights(factory, AccessRights.Read | AccessRights.AppendTo); // would allow, were the caller checked
+        // No token: the caller's own Dataverse cannot be asked — WhoAmI answers as the OBO client does with no user context.
+        factory.CallerDataverse.WhoAmIFailure = Sprk.Bff.Api.Infrastructure.Dataverse.DataverseUserResponse.Fail(
+            0, Sprk.Bff.Api.Infrastructure.Dataverse.DataverseUserClientErrorCodes.UserContextRequired, "No user bearer token.");
+        CaptureCreate(factory);
+
+        var response = await factory.CreateClient().PostAsJsonAsync(Route, new QuickCreateRequest
+        {
+            Name = "Unverifiable Caller",
+            SourceEntityType = "sprk_project",
+            SourceRecordId = SourceProjectId,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        var problem = await ReadProblemAsync(response);
+        problem.Should().ContainKey("errorCode").WhoseValue.Should().Be("caller_rights_unverifiable");
         AssertNothingCreated(factory);
     }
 
@@ -400,25 +459,20 @@ public class OfficeQuickCreateProjectContractTests
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
         ArrangeBusinessUnit(factory);
-        CaptureCreate(factory);
-        factory.Entities
-            .SetupSequence(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException( // production's wrapping (DataverseServiceClientImpl.CreateAsync)
-                "Failed to create sprk_project record: Entity Key Project Number (unique) violated.",
-                new FaultException<OrganizationServiceFault>(
-                    new OrganizationServiceFault
-                    {
-                        ErrorCode = unchecked((int)0x80060892),
-                        Message = "Entity Key Project Number (unique) violated. A record with the same value for Project Number already exists.",
-                    },
-                    new FaultReason("Entity Key Project Number (unique) violated"))))
-            .ReturnsAsync(CreatedProjectId);
+        var created = CaptureCreate(factory);
+        // The Web API create-by-upsert's answer to the number's alternate-key duplicate: 412, on the first attempt only.
+        created.FailAttempt = attempt => attempt == 1
+            ? new HttpRequestException(
+                "Entity Key Project Number (unique) violated. A record with the same value for Project Number already exists.",
+                inner: null, HttpStatusCode.PreconditionFailed)
+            : null;
 
         var response = await factory.CreateClient().PostAsJsonAsync(Route, new QuickCreateRequest { Name = "Collides Once" });
 
         response.StatusCode.Should().Be(HttpStatusCode.Created,
             "sprk_ProjectNumber already existed before task 076, so a project number typed ahead of the sequence costs one retry");
-        factory.Entities.Verify(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+        created.Attempts.Should().HaveCount(2);
+        created.Writes.Should().ContainSingle();
     }
 
     // ── Arrangement + assertion helpers ─────────────────────────────────────────────────────────────────
@@ -435,19 +489,28 @@ public class OfficeQuickCreateProjectContractTests
             .Should().NotContain(key => string.Equals(key.Trim(), "sprk_projectnumber", StringComparison.OrdinalIgnoreCase),
                 "the platform's autonumber fills sprk_projectnumber only when the create leaves it empty (task 076)");
 
+    /// <summary>No row: neither the old app-only create nor the creation service's step-11 write (task 018b).</summary>
     private static void AssertNothingCreated(OfficeQuickCreateTestWebAppFactory factory)
-        => factory.Entities.Verify(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+    {
+        factory.Entities.Verify(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+        factory.FieldMappings.Verify(
+            m => m.UpdateRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(),
+                It.IsAny<Guid?>()),
+            Times.Never);
+    }
 
     private static void ArrangeResolvedCaller(OfficeQuickCreateTestWebAppFactory factory)
         => factory.CallerResolver
             .Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CallerSystemUserResolution.Resolved(OwnerId.ToString("D")));
 
+    /// <summary>The owning team's business unit and its search defaults (the service reads team → business unit, task 015).</summary>
     private static void ArrangeBusinessUnit(OfficeQuickCreateTestWebAppFactory factory)
     {
         factory.Entities
-            .Setup(e => e.RetrieveAsync("systemuser", OwnerId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Entity("systemuser", OwnerId)
+            .Setup(e => e.RetrieveAsync("team", OwnerTeam.Id, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("team", OwnerTeam.Id)
             {
                 ["businessunitid"] = new EntityReference("businessunit", BusinessUnitId),
             });
@@ -459,6 +522,17 @@ public class OfficeQuickCreateProjectContractTests
                 ["sprk_searchindexname"] = "spaarke-files-index",
                 ["sprk_ai_search_index"] = new EntityReference("sprk_aisearchindex", SearchIndexId),
             });
+    }
+
+    /// <summary>
+    /// #2191: the caller's bearer token, which the service hands to the rights probe for AppendTo on the source the project is
+    /// filed under (the host's default client sends none, and a caller that cannot be checked is refused).
+    /// </summary>
+    private static HttpClient BearerClient(OfficeQuickCreateTestWebAppFactory factory)
+    {
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "caller-token-2191");
+        return client;
     }
 
     private static void ArrangeSourceRights(OfficeQuickCreateTestWebAppFactory factory, AccessRights rights)
@@ -491,28 +565,28 @@ public class OfficeQuickCreateProjectContractTests
     }
 
     /// <summary>
-    /// Captures the create payload, and arranges the read-back of the created project's number as the platform's
-    /// autonumber would answer it (task 076).
+    /// Captures the creation service's step-11 write (task 018b), and arranges the read-back of the created project's number
+    /// as the platform's autonumber would answer it (task 076).
     /// </summary>
-    private static CreatedHolder CaptureCreate(OfficeQuickCreateTestWebAppFactory factory)
+    private static RecordCreationWriteCapture CaptureCreate(OfficeQuickCreateTestWebAppFactory factory)
     {
-        var holder = new CreatedHolder();
-        factory.Entities
-            .Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-            .Callback<Entity, CancellationToken>((entity, _) => holder.Entity = entity)
-            .ReturnsAsync(CreatedProjectId);
+        var capture = factory.CaptureRecordCreationWrite();
         ArrangeNumberReadBack(factory, "PRJ-000042");
-        return holder;
+        return capture;
     }
 
-    /// <summary>The created project's number as the read-back sees it; <see langword="null"/> = the column came back blank.</summary>
+    /// <summary>
+    /// The created project's number as the read-back sees it; <see langword="null"/> = the column came back blank. Any id
+    /// but the source's: the service picks the new record's id.
+    /// </summary>
     private static void ArrangeNumberReadBack(OfficeQuickCreateTestWebAppFactory factory, string? number)
         => factory.Entities
             .Setup(e => e.RetrieveAsync(
-                "sprk_project", CreatedProjectId,
+                "sprk_project", It.Is<Guid>(id => id != SourceProjectId),
                 It.Is<string[]>(columns => columns.Length == 1 && columns[0] == "sprk_projectnumber"),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Entity("sprk_project", CreatedProjectId) { ["sprk_projectnumber"] = number });
+            .ReturnsAsync((string _, Guid id, string[] _, CancellationToken _) =>
+                new Entity("sprk_project", id) { ["sprk_projectnumber"] = number });
 
     private static FieldMappingRuleEntity Rule(
         string name, string sourceField, int sourceType, string targetField, int targetType,
@@ -544,10 +618,5 @@ public class OfficeQuickCreateProjectContractTests
         return root.EnumerateObject()
             .Where(property => property.Value.ValueKind == JsonValueKind.String)
             .ToDictionary(property => property.Name, property => property.Value.GetString());
-    }
-
-    private sealed class CreatedHolder
-    {
-        public Entity? Entity { get; set; }
     }
 }

@@ -108,7 +108,9 @@ internal sealed class OwnershipDirectory
         entities
             .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .Returns((QueryExpression query, CancellationToken _) =>
-                fault is null ? Task.FromResult(Answer(query)) : Task.FromException<EntityCollection>(fault));
+                (fault ?? QueryFault) is { } queryFault
+                    ? Task.FromException<EntityCollection>(queryFault)
+                    : Task.FromResult(Answer(query)));
         entities
             .Setup(e => e.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
             .Returns((string entity, Guid id, Dictionary<string, object> fields, CancellationToken _) =>
@@ -352,6 +354,12 @@ internal sealed class OwnershipDirectory
 
     /// <summary>When set, every single-row read (<c>RetrieveAsync</c> — the owner read-backs) throws it.</summary>
     public Exception? OwnerReadFault { get; set; }
+
+    /// <summary>
+    /// When set, every query (<c>RetrieveMultipleAsync</c> — the whole-row and parent reads) throws it. PR #2161 round 5 (K1):
+    /// set mid-call (from <see cref="BeforeWrite"/>) so the owner read-back still answers while the filing read-back faults.
+    /// </summary>
+    public Exception? QueryFault { get; set; }
 
     /// <summary>When set, an update WITHOUT an owner (a filing restore) throws it.</summary>
     public Exception? RestoreFault { get; set; }

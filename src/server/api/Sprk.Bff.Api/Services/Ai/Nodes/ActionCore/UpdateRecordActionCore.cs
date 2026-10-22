@@ -146,7 +146,11 @@ internal sealed class UpdateRecordActionCore
 
         // unified-access-control-r2 task 189 fix round C (K5): a payload that acts for no person (a playbook node, the action
         // seam without an impersonated user) never writes a document's Access Permission or its own-narrowing record; only
-        // the document rule's writers do. Refused before anything is written.
+        // the document rule's writers do. Refused before anything is written. Task 188 round 4e: nor its D7 link columns
+        // (sprk_parentdocument, sprk_relatedcommunication), set, cleared or bound (InheritedAccessPermission.DocumentLinkColumns).
+        // #2251: nor any row of a table whose rows are access (grants, membership, ethical walls; AccessTables), nor a secure
+        // root's secure flag, access columns or container (SecureRootColumns). An update that impersonates its user is not
+        // asked: it runs under that user's own Dataverse privileges, which decide it.
         if (input.ImpersonateSystemUserId is null
             && InheritedAccessPermission.RefuseAppOnlyWrite(input.EntityLogicalName, updatePayload.Keys) is { } documentRefusal)
         {
@@ -250,6 +254,7 @@ internal sealed class UpdateRecordActionCore
         // #2091 round 4: the reparent reads the row; a change that moves none of its parents (a rebind onto the parent it
         // holds) is written and is no re-file, so the step does not run.
         var refiled = false;
+        RecordOwnerResolution? refiledBy = null;
         Sprk.Bff.Api.Services.Access.SecureRemovalCaller? secureExitCaller = null;
         if (parentChanges.Count == 0)
         {
@@ -283,6 +288,7 @@ internal sealed class UpdateRecordActionCore
             }
 
             refiled = !reparent.ParentsUnchanged;
+            refiledBy = reparent;
         }
 
         // After whichever path wrote the record (the plain PATCH or the re-file): task 156's re-stamp, then task 142's
@@ -298,9 +304,10 @@ internal sealed class UpdateRecordActionCore
             if (refiled)
             {
                 // #2143 round 7 (F1): with the person the re-file's F3 check acted for, so the thread that follows moves on it.
+                // #2159 slice 2: with the reparent's answer (its F3 permission), so a re-filed document's file release is recorded.
                 await children.AfterRefileAsync(
                     refiledTable, input.RecordId, wasIsolated, Sprk.Bff.Api.Services.Access.RefileThreadStep.Reconcile,
-                    secureExitCaller, CancellationToken.None).ConfigureAwait(false);
+                    secureExitCaller, refiledBy, CancellationToken.None).ConfigureAwait(false);
             }
         }
         // Spaarkeai-word-add-in-r1 task 129: a re-file that could not run the step above (a host without the reconciler, logged

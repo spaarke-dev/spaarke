@@ -492,6 +492,67 @@ public sealed class CoreAncestorRestamper
     }
 
     /// <summary>
+    /// field-mapping-server-write-path-r1 task 016 (Repair, FR-14): the I-1 stamp columns <paramref name="row"/> is MISSING,
+    /// fill-only — <see cref="RestampChildAsync"/>'s plan for a row filed under an intermediate
+    /// (<see cref="StampSourceKind.Source"/>), keeping only the columns that hold no value and that the source's current root
+    /// SETS. A stamp that holds a different value is never overwritten, and none is cleared: a stale or orphaned copy is
+    /// <see cref="CoreAncestorStampReconciliationJob"/>'s to repair. Nothing is written here, and nothing is cascaded (the
+    /// row's children are the job's too). <c>null</c>: nothing is missing, the table carries no stamp, or the row is not
+    /// filed under an intermediate (a direct link, filed under nothing, ambiguous or inconsistent).
+    /// </summary>
+    /// <param name="row">The row as read with every column (its source lookups, its pair and its stamp columns).</param>
+    /// <exception cref="InvalidOperationException">The source's root could not be derived (its message is for the log).</exception>
+    /// <remarks>Component justification (CLAUDE.md §11): Existing — <see cref="RestampChildAsync"/> plans the same stamp but
+    /// re-reads the row and overwrites and clears; Extension — this reuses its probe, classification, root read and
+    /// <see cref="PlanStamp"/>, and adds only the fill-only filter, on the existing component; Cost of doing nothing — Repair
+    /// either cannot add a missing I-1 stamp in its one fill-only update, or overwrites a present stamp.</remarks>
+    internal async Task<Dictionary<string, object>?> PlanMissingStampAsync(
+        string entityLogicalName, Entity row, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        var entity = (entityLogicalName ?? string.Empty).Trim().ToLowerInvariant();
+        if (!CoreAncestorResolver.StampSourceColumns.ContainsKey(entity))
+        {
+            return null;
+        }
+
+        var decision = CoreAncestorResolver.ClassifyStampSource(
+            entity, row, CoreAncestorResolver.PartyRegardingColumnNames(entity));
+        if (decision.Kind != StampSourceKind.Source)
+        {
+            return null;
+        }
+
+        var host = await _coreAncestors.ProbeColumnsAsync(entity, ct).ConfigureAwait(false);
+        var root = await _coreAncestors
+            .ResolveStampsAsync(decision.Source!.Intermediate, decision.Source.Id, ct)
+            .ConfigureAwait(false);
+        if (!root.Succeeded)
+        {
+            throw new InvalidOperationException(
+                $"the root of its {decision.Source.Intermediate} could not be derived: {root.Error}");
+        }
+
+        var planned = PlanStamp(row, CoreAncestorResolver.CarriableRootTypes(decision.Source.Intermediate), root.Stamps, host);
+        if (planned is null)
+        {
+            return null;
+        }
+
+        var missing = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (column, value) in planned)
+        {
+            var held = row.GetAttributeValue<EntityReference>(column);
+            if (value is EntityReference && (held is null || held.Id == Guid.Empty))
+            {
+                missing[column] = value; // fill-only: a held stamp (stale or not) is the job's, and a clear is never planned
+            }
+        }
+
+        return missing.Count > 0 ? missing : null;
+    }
+
+    /// <summary>
     /// F-051-6: the row is filed under no intermediate, but its pair names one — the typed source column was cleared and
     /// the copy left behind. Clear each copy that still equals that intermediate's current root.
     /// </summary>

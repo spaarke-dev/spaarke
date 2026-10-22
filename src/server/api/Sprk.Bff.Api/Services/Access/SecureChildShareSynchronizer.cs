@@ -332,6 +332,16 @@ public sealed class SecureChildShareSynchronizer
         && (await ResolveSecureOwnerTeamAsync(_dataverse, _configuration, ct).ConfigureAwait(false)).TeamId == teamId;
 
     /// <summary>
+    /// field-mapping-server-write-path-r1 task 016 (review pass 3): this environment's Secure Record owner team as
+    /// <see cref="ResolveSecureOwnerTeamAsync(IGenericEntityService, IConfiguration, CancellationToken)"/> answers it — the
+    /// id, or none (no Secure Record business unit or team) with a refusal when it is ambiguous — for a caller that must
+    /// tell "not the Secure team" from "the Secure team cannot be told" (Repair's mapping-source gate fails closed on the
+    /// latter). <see cref="IsSecureOwnerTeamAsync"/> and its callers are unchanged. A Dataverse fault propagates.
+    /// </summary>
+    internal Task<(Guid? TeamId, string? Refusal)> SecureOwnerTeamAsync(CancellationToken ct) =>
+        ResolveSecureOwnerTeamAsync(_dataverse, _configuration, ct);
+
+    /// <summary>
     /// Task 147 r1c: whether ONE child row is owned by this environment's Secure Record owner team right now — asked by a
     /// re-file route BEFORE it moves the row, so that afterwards it can tell a row that LEFT isolation (its mirrored shares
     /// go, owner round 22) from a row that was never isolated (a share on it is its user's own intent and is kept). A row

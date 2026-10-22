@@ -219,6 +219,23 @@ internal sealed class SecureChildShareWorld
         return this;
     }
 
+    private readonly Dictionary<(string Table, Guid Id), (Func<int, bool> Fails, int Reads, int Fired)> _transientIdListReadFaults = new();
+
+    /// <summary>
+    /// Owner round 122 fix round 1 (B): a TRANSIENT fault on the id-LIST reads (<c>id IN (…)</c>, the parent walk's batched
+    /// read) that name ONE row: those reads, counted from 1 in the order they are asked, for which <paramref name="fails"/>
+    /// answers <c>true</c> throw; every other read answers.
+    /// </summary>
+    public SecureChildShareWorld TransientIdListReadFaultsOf(string table, Guid id, Func<int, bool> fails)
+    {
+        _transientIdListReadFaults[(table, id)] = (fails, 0, 0);
+        return this;
+    }
+
+    /// <summary>How many of <see cref="TransientIdListReadFaultsOf"/>'s faults on that row actually fired.</summary>
+    public int TransientIdListReadFaultsFired(string table, Guid id) =>
+        _transientIdListReadFaults.TryGetValue((table, id), out var fault) ? fault.Fired : 0;
+
     /// <summary>
     /// Makes every PAGED query of one table report more rows to come, however many pages have been read (task 149 r2: a
     /// table larger than the synchronizer's page ceiling, without seeding a hundred thousand rows).
@@ -660,6 +677,7 @@ internal sealed class SecureChildShareWorld
         Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null,
         Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker? ownerPrivileges = null,
         Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing? gateDecisionRecords = null,
+        Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator? relocator = null,
         Microsoft.Extensions.Logging.ILogger<SecureChildReconciler>? logger = null,
         Microsoft.Extensions.Logging.ILogger<SecureChildShareSynchronizer>? sharesLogger = null)
     {
@@ -673,7 +691,7 @@ internal sealed class SecureChildShareWorld
         return new SecureChildReconciler(
             entities, resolver, synchronizer, webApi, configuration, logger ?? NullLogger<SecureChildReconciler>.Instance,
             gateDecisionRecords ?? new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing, // ontology 042b: a gate-record double over an empty world
-            accessCacheInvalidator, threads, ownerPrivileges);
+            accessCacheInvalidator, threads, ownerPrivileges, relocator);
     }
 
     /// <summary>
@@ -793,6 +811,18 @@ internal sealed class SecureChildShareWorld
                 c.AttributeName == query.EntityName + "id" && c.Operator == ConditionOperator.In
                 && c.Values.Any(v => v is Guid id && _failingIdListReads.Contains((query.EntityName, id)))))
             throw new InvalidOperationException($"Test: a {query.EntityName} row in this id list cannot be read.");
+        foreach (var listed in query.Criteria.Conditions
+                     .Where(c => c.AttributeName == query.EntityName + "id" && c.Operator == ConditionOperator.In)
+                     .SelectMany(c => c.Values.OfType<Guid>()).Distinct().ToList())
+        {
+            if (!_transientIdListReadFaults.TryGetValue((query.EntityName, listed), out var fault))
+                continue;
+            var read = fault.Reads + 1;
+            var fires = fault.Fails(read);
+            _transientIdListReadFaults[(query.EntityName, listed)] = (fault.Fails, read, fault.Fired + (fires ? 1 : 0));
+            if (fires)
+                throw new InvalidOperationException($"Test: id-list read {read} naming this {query.EntityName} row faulted (transient).");
+        }
 
         var matched = _rows.Values
             .Where(r => r.LogicalName == query.EntityName && Matches(r, query.Criteria))

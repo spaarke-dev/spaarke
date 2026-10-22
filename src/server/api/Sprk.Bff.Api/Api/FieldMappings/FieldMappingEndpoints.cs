@@ -874,8 +874,10 @@ public static class FieldMappingEndpoints
     /// relationships (task 166 r1, owner round 21 item 3). <paramref name="targetEntity"/> has passed
     /// <see cref="IsLogicalName"/>, so it cannot break out of the quoted key.
     /// </summary>
+    /// <remarks>#2253 fix round 3 (F1): <see cref="IsLogicalName"/> admits a leading digit or underscore, so the bare
+    /// table-name check is asked here too, where the key is built.</remarks>
     internal static string ParentLookupMetadataPath(string targetEntity)
-        => $"EntityDefinitions(LogicalName='{targetEntity}')/ManyToOneRelationships";
+        => $"EntityDefinitions(LogicalName='{DataverseIdentifier.RequireTableName(targetEntity, nameof(targetEntity))}')/ManyToOneRelationships";
 
     /// <summary>
     /// The columns read from each relationship (filtered in memory, so no metadata $filter support is assumed). The
@@ -1050,9 +1052,15 @@ public static class FieldMappingEndpoints
                     // Task 189 (D7 T7a, security pass 2): a document's Access Permission and its own-narrowing record are
                     // set by Spaarke (max(own, inherited)). A rule targeting either on a document is skipped, and the rest
                     // of the push applies: one push from a Standard matter would otherwise clear the own narrowing of every
-                    // child document it reaches.
+                    // child document it reaches. Task 188 round 4e: the same for its D7 link columns (sprk_parentdocument,
+                    // sprk_relatedcommunication; InheritedAccessPermission.DocumentLinkColumns), which decide whether partners see it.
+                    // #2247: on every table, the owner and the creator. #2253 fix round 1 (K2): the push runs AS its caller,
+                    // so it asks as WriteIdentity.Caller: these refusals and the table-name check only. Access tables, a
+                    // secure root's columns and other tables' access columns are left to the caller's own Dataverse
+                    // privileges and field security (sprk_accesspermission on a matter stays editable by a Write holder).
                     if (Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.RefuseAppOnlyWrite(
-                            targetEntity, [rule.TargetField]) is { } setBySpaarke)
+                            targetEntity, [rule.TargetField],
+                            Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.WriteIdentity.Caller) is { } setBySpaarke)
                     {
                         recordFieldResults.Add(new FieldMappingResultDto
                         {
@@ -1154,6 +1162,7 @@ public static class FieldMappingEndpoints
 
                     Func<Task<bool>>? wasIsolated = null;
                     var refiled = false;
+                    Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution? refiledBy = null;
                     Sprk.Bff.Api.Services.Access.SecureRemovalCaller? secureExitCaller = null;
                     try
                     {
@@ -1203,6 +1212,7 @@ public static class FieldMappingEndpoints
 
                             // #2091 round 4: a rule that re-binds the parent the child already holds moves nothing — no step.
                             refiled = !reparent.ParentsUnchanged;
+                            refiledBy = reparent;
                         }
                     }
                     catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException) when (goneCode is not null)
@@ -1237,7 +1247,7 @@ public static class FieldMappingEndpoints
                         // #2143 round 7 (F1): with the person the re-file's F3 check acted for.
                         await children.AfterRefileAsync(
                             targetEntity.Trim().ToLowerInvariant(), childRecordId, wasIsolated,
-                            Sprk.Bff.Api.Services.Access.RefileThreadStep.Reconcile, secureExitCaller, CancellationToken.None);
+                            Sprk.Bff.Api.Services.Access.RefileThreadStep.Reconcile, secureExitCaller, refiledBy, CancellationToken.None);
                     }
 
                     // Task 142 (L1): a push that wrote a ROOT's "Assigned *" column (a project/matter/work assignment

@@ -392,6 +392,55 @@ describe('EmailWorkspace', () => {
   });
 });
 
+describe('Save to SharePoint: attachments the archive refused (PR #2248)', () => {
+  /** An authenticatedFetch whose archive POST answers `archiveResult`; every other call is the rendered-body read. */
+  function fetchAnswering(archiveResult: Record<string, unknown>): jest.Mock {
+    return jest
+      .fn()
+      .mockImplementation(async (url: string) =>
+        String(url).endsWith('/archive')
+          ? ({ ok: true, status: 200, json: async () => archiveResult } as unknown as Response)
+          : ({ ok: true, status: 200, text: async () => '<p>rendered</p>' } as unknown as Response)
+      );
+  }
+
+  async function saveToSharePoint(authenticatedFetch: jest.Mock): Promise<void> {
+    renderWorkspace({ hideList: true, initialSelectedId: COMMUNICATION_ID, authenticatedFetch });
+    fireEvent.click(await screen.findByRole('button', { name: 'Save to SharePoint' }));
+    await waitFor(() =>
+      expect(authenticatedFetch).toHaveBeenCalledWith(`/communications/${COMMUNICATION_ID}/archive`, { method: 'POST' })
+    );
+  }
+
+  it('says how many attachments could not be verified and were not saved', async () => {
+    const authenticatedFetch = fetchAnswering({
+      alreadyArchived: true,
+      attachmentDocumentsCreated: 1,
+      attachmentsRefusedUnverified: 2,
+    });
+
+    await saveToSharePoint(authenticatedFetch);
+
+    expect(await screen.findByTestId('archive-refused-notice')).toHaveTextContent(
+      '2 attachments could not be verified and were not saved.'
+    );
+  });
+
+  it('shows nothing when no attachment was refused', async () => {
+    const authenticatedFetch = fetchAnswering({
+      alreadyArchived: false,
+      attachmentDocumentsCreated: 1,
+      attachmentsRefusedUnverified: 0,
+    });
+
+    await saveToSharePoint(authenticatedFetch);
+
+    // The record re-read after a successful archive is the last thing the handler does.
+    await waitFor(() => expect(screen.getByTestId('email-reading-header')).toBeInTheDocument());
+    expect(screen.queryByTestId('archive-refused-notice')).not.toBeInTheDocument();
+  });
+});
+
 describe('Negative: dual-mount parity + NFR-05 + no self-mounted FluentProvider', () => {
   it('contains no mount-specific branch and mounts no FluentProvider of its own', () => {
     const src = fs.readFileSync(path.join(__dirname, '../EmailWorkspace.tsx'), 'utf8');

@@ -34,6 +34,9 @@ public static class JobProcessingModule
         // ADR-004 IJobHandler). Its dependency, CoreAncestorRestamper, is registered unconditionally beside
         // CoreAncestorResolver (MetadataServiceExtensions.AddCoreAncestorResolver).
         services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestampJobHandler>();
+        // #2159: the durable retry of an F3 release a re-file could not record inline (ADR-052: queue → ADR-004
+        // IJobHandler). Its dependency, DocumentContainerRelocator, is registered unconditionally (DocumentsModule).
+        services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Documents.RelocationReleaseRetryJobHandler>();
         // AI-coupled handlers relocated to Services/Ai/Jobs/ per task 051 (FR-E3); JobType strings unchanged
         services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Ai.Jobs.AppOnlyDocumentAnalysisJobHandler>();
         services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Ai.Jobs.EmailAnalysisJobHandler>();

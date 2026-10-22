@@ -621,6 +621,14 @@ public static class CommunicationModule
         // the resolver it calls, so it exists wherever the resolver does (bff-extensions.md §F.1).
         services.AddScheduledJob<CommunicationThreadFilingSweepJob>(
             CommunicationThreadFilingSweepJob.DefaultCronSchedule, enabled: false);
+
+        // unified-access-control-r2 task 190 (D7 T7b, #2126) — the backfill / safety-net sweep that links each unlinked .eml
+        // archive document to the ONE communication its recorded message id names exactly, so the document narrowing sees it
+        // (ADR-036 IScheduledJob, ADR-052 "BFF, schedule"). Registered DISABLED: it runs only when an admin triggers it
+        // (POST /api/admin/jobs/email-archive-communication-link-sweep/trigger, SystemAdmin) or enables the schedule, and
+        // writes only while EmailArchiveLinkSweep:Apply is true. Beside the capture-side link (CrossPathLink) it backfills.
+        services.AddScheduledJob<EmailArchiveCommunicationLinkSweepJob>(
+            EmailArchiveCommunicationLinkSweepJob.DefaultCronSchedule, enabled: false);
         services.TryAddSingleton(TimeProvider.System);
     }
 
