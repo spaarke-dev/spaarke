@@ -1,26 +1,28 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-22 ~13:40Z (main session). State only — history is in git log, task `<completion>` blocks and
+> **Last Updated**: 2026-10-22 ~17:00Z (main session). State only — history is in git log, task `<completion>` blocks and
 > `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 and §6. Decisions: [`notes/decisions.md`](notes/decisions.md)
-> (D-1..D-177). Deferred work: one self-contained GitHub issue per item, label `ontology-deferred`, plus a DI-nn row in both tables of
-> `notes/defer-issues.md` (next free: **DI-122**). Sub-agents never edit this file.
+> (D-1..D-183). Deferred work: one self-contained GitHub issue per item, label `ontology-deferred`, plus a DI-nn row in both tables of
+> `notes/defer-issues.md` (next free: **DI-123**). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | No lane in flight. 157 ✅ is on master (#2233 `aa3dc49897`). CI ArchTests timeout raised to 10 min (#2252 `2101d3d828`, owner-approved GATE REPAIR). `WithheldSentence` comment lane merged to docs (#2256 `d852945aa6`); worktree removed. |
-| **Status** | Waiting on peers (ebilling 088 run + reviews, R3's next dev BFF deploy) and the owner (UAT items). |
-| **Next Action** | When ebilling sends the 088 after-notice: independent read-back on dev (list below). When R3 deploys the next master build: confirm it contains `aa3dc49897`, smoke, log check. |
+| **Task** | No lane in flight. UAT round 1 triaged: tasks **158–162** written (TASK-INDEX group K, all 🔲), field-mapping half filed as #2281 (DI-122, fix `b1f287c4c3` by field-mapping, PR pending). R2 project started (D-183): worktree `C:\code_files\spaarke-wt-spaarke-ontology-platform-r2`, branch `work/spaarke-ontology-platform-r2`, `design.md` + research note pushed (`16c171b224`). |
+| **Status** | Waiting on the owner (start lanes 158–162? R2 §9 questions) and peers (R3 dev BFF `f5bf481185` after-notice; ebilling reviews). |
+| **Next Action** | Ask the owner which of 158–162 to launch (158, 159, 161, 162 parallel-safe; 160 after 158). When R3 sends the f5bf481185 after-notice: smoke + deploycheck + deploy-log. |
 
 ## Next, in order
 
-1. **ebilling 088 ✅ on dev (2026-10-22):** our read-back PASS, logged in `notes/deploy-log.md`. ebilling merges it into work/ebilling-r1 next. No further action from us unless they send a change.
-2. **Next R3 dev BFF from master** carries 157: check ancestry (`aa3dc49897`, R3 077 `283466d40`), run `scratchpad/live/smokeA_v2.py` on both matters, set `since` in `deploycheck.py` to the deploy time and run it; deploy-log entry.
-3. **ebilling reviews when sent:** 097 (BillingFactLoader Superseded → null; our path), 116 (drafting re-keyed per Procedure Version), 082 (resolver uses `BillingRuleDefinition.PrecedenceKey`), 081 (creator-person zero-non-null assert). The 088 F1s are already filed into their POMLs 117, 094/095, 097 (`8d1394a4ed`). Every schema run: final script + `-WhatIf` to us, before/after notices, no run before our PASS; check all core records.
-4. **105 UAT** with the owner: 102 wizard browser tests + keyboard/screen-reader; 064 §6.1 non-admin checks and UI tests (D-164); the 055 Next step To Do.
+1. **UAT round 1 lanes** (owner go): 158 side-pane lookups + subject link; 159 Assign Task (`sprk_event` type Task; POL-MATTER-NOBUDGET v2 applied to dev only after owner OK on `-WhatIf`); 160 EmailComposer + link by recipient (opus; after 158; R3 reviews the GrantAccessNotifier overload); 161 Create budget (plan substitution); 162 exact document column (closes 114). Each: implementer lane from docs, independent review, fix, re-check.
+2. **R3 dev BFF `f5bf481185`** (our OK given; carries 157): on the after-notice, run `scratchpad/live/smokeA_v2.py` on both matters, set `since` in `deploycheck.py` to the deploy time and run it; deploy-log entry; check tonight's heartbeat.
+2a. **#2281** (field-mapping): dev check after their later BFF candidate: Create Work Assignment on a matter with an attorney copies `sprk_assignedattorney1`, no warning.
+2b. **R2** (D-183): owner answers design.md §9 Q1–Q6, then `/design-to-spec` in the R2 worktree. R2 does not edit R1-owned files while R1 lanes are open.
+3. **ebilling reviews when sent:** 097 (BillingFactLoader Superseded → null; our path), 116 (drafting re-keyed per Procedure Version), 082 (resolver uses `BillingRuleDefinition.PrecedenceKey`; must remove the `sprk_procedure` null filter, and nothing may set `sprk_ruleset.sprk_procedure` before 082). 081 ✅ re-check PASS (`cac386fa6b`, ArchTest `b160493311`). 088 ✅ on dev (read-back PASS). Owner gets ebilling's questions on retroactive correction and the D-11 clean slate. The 088 F1s are already filed into their POMLs 117, 094/095, 097 (`8d1394a4ed`). Every schema run: final script + `-WhatIf` to us, before/after notices, no run before our PASS; check all core records.
+4. **105 UAT** with the owner, per `notes/uat-v4-log.md` (R1–R24 + C1–C4; R19, C1, C3 pass). Open: keyboard/screen-reader (C2), the 055 Next step To Do (C4), the rest of R1–R24.
 5. Re-run `SignalReadRouteLiveTests` as a non-Console user (DI-83 #1882), then close #1882.
-6. **111 row 4** (owner): `/upload?entityType=sprk_project&entityId=<GUID>` with the GUID from `/project/<GUID>`; then close 111 → 114; then 090 wrap-up.
+6. **111 row 4** (owner): https://green-dune-0c4f1221e.7.azurestaticapps.net/upload?entityType=sprk_project&entityId=e42aa40d-361b-f111-88b3-7ced8d1dc988 ; then close 111. **114** closes after 162 (and #2281 on dev); then 090 wrap-up.
 
 ## Blocked follow-ups (ours)
 
@@ -41,14 +43,14 @@
 
 ## Dev state (spaarkedev1 / spaarke-bff-dev)
 
-- Dev BFF `1283c41817` live (R3, 2026-10-22; contains R3 077, no ontology file changes, not yet 157); ontology smoke PASS ~13:35Z; no 503xx warnings or ontology exceptions since 12:50:18Z. Last nightly heartbeat 02:30:29Z succeeded. Every dev BFF candidate must contain R3 077 (`283466d40`). R3 owns the dev BFF line; we never deploy it.
+- Dev BFF `1283c41817` live (R3, 2026-10-22; contains R3 077, not yet 157); R3's next candidate `f5bf481185` (carries 157) OK'd by us; ontology smoke PASS ~13:35Z; no 503xx warnings or ontology exceptions since 12:50:18Z. Last nightly heartbeat 02:30:29Z succeeded. Every dev BFF candidate must contain R3 077 (`283466d40`). R3 owns the dev BFF line; we never deploy it.
 - Console auto-deploys from master; landing tab = Worklist (D-164; revert `Set-DefaultWorkspaceLayout.ps1 -To 'Daily Briefing'`).
 - ebilling on dev: 080 Procedure schema (read back), 115 rule-type options 100000015/100000016 (100000014 SubmissionIntegrity not yet on dev); 119 merged on their branch (`4a43d9a223`; `WithheldDuplicateTemplate = EarlierInvoiceReadability.WithheldSentence`).
 - Policies: six on, including POL-MATTER-NOBUDGET; none has a matter. Roles: Ontology Service 58; Ontology Administrator 38; Console User 21; Secure Record Owner 40.
-- Worktrees: none of ours (`C:\wts-c34` removed with Remove-WorktreeSafe). Non-worktree folders left alone: `C:\wb126-pub`, `C:\wts-126-pub`, `C:\wts-103-seed`, `C:\wts-132-out`, `C:\wts-132m-out`, `C:\wts-r1609`, `C:\wts-r1609c`, `C:\wts-rc046b`, `C:\wts-rc1653`.
+- Worktrees: R2 `C:\code_files\spaarke-wt-spaarke-ontology-platform-r2` (docs only); no lane worktrees (`C:\wts-c34` removed with Remove-WorktreeSafe). Non-worktree folders left alone: `C:\wb126-pub`, `C:\wts-126-pub`, `C:\wts-103-seed`, `C:\wts-132-out`, `C:\wts-132m-out`, `C:\wts-r1609`, `C:\wts-r1609c`, `C:\wts-rc046b`, `C:\wts-rc1653`.
 
 ## Peers (current session names)
 
 ebilling `spaarke-wt-ebilling-r1-5b` · R3 `spaarke-wt-spa-external-access-platform-05` · uac-r2 `spaarke-wt-unified-access-control-r2-ac` ·
-word-add-in `spaarke-wt-spaarkeai-word-add-in-r1-c4` · field-mapping `spaarke-wt-field-mapping-server-write-pa-b5`. Before/after notices to
+word-add-in `spaarke-wt-spaarkeai-word-add-in-r1-c4` · field-mapping `spaarke-wt-field-mapping-server-write-pa-be`. Before/after notices to
 word-add-in, R3 and uac-r2 for any dev BFF, Console or landing change.
