@@ -126,9 +126,8 @@ public sealed class DocumentProfileOutputMapperRefusalTests
         // a case variant of a listed column in a non-plain form: the writer would use the raw key
         { "SPRK_FileSummary@odata.bind", "\"/sprk_POINTER(5b1e7a4c-0f6d-4a52-9d1b-3f0c2e8a7d11)\"" },
         { "_sprk_filetldr_value", "\"POINTER\"" },
-        // the two columns this mapper computes itself are never taken from the output
-        { "sprk_filetype", "\"POINTER Agreement\"" },
-        { "sprk_searchprofile", "\"POINTER\"" },
+        // a non-plain form of a computed column is not the quiet skip (#2239): it is dropped and reported
+        { "sprk_filetype@odata.bind", "\"/sprk_POINTER(5b1e7a4c-0f6d-4a52-9d1b-3f0c2e8a7d11)\"" },
     };
 
     [Theory]
@@ -207,12 +206,113 @@ public sealed class DocumentProfileOutputMapperRefusalTests
         logger.Entries.Should().NotContain(e => e.Level == LogLevel.Warning);
     }
 
+    // ── #2239 round 2 ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("sprk_filetype", "\"Legal Agreement\"")]
+    [InlineData("SPRK_FileType", "\"Legal Agreement\"")]
+    [InlineData("sprk_searchprofile", "\"POINTER profile\"")]
+    public void BuildFields_ModelNamesAComputedColumn_IsSkippedWithoutAWarning_AndTheComputedValueWins(
+        string key, string jsonValue)
+    {
+        var logger = new CapturingLogger();
+
+        var fields = DocumentProfileOutputMapper.BuildFields(
+            Guid.NewGuid(), Output($"{{{ProfileProperties},\"{key}\":{jsonValue}}}"), FileName, parentEntity: null, logger);
+
+        fields["sprk_filetype"].Should().Be("PDF");
+        fields.Values.OfType<string>().Should().NotContain(v => v.Contains("Legal Agreement") || v.Contains("POINTER"));
+        logger.Entries.Should().NotContain(e => e.Level == LogLevel.Warning);
+    }
+
+    [Fact]
+    public void BuildFields_TwoKeysNameTheSameColumn_TheFirstIsWritten_AndTheLaterOneIsReportedAsADuplicate()
+    {
+        var documentId = Guid.NewGuid();
+        var logger = new CapturingLogger();
+
+        // The later case variant would replace the coerced Choice with a raw string Dataverse rejects (the whole update).
+        var fields = DocumentProfileOutputMapper.BuildFields(
+            documentId,
+            Output("{\"sprk_documenttype\":\"contract\",\"SPRK_DOCUMENTTYPE\":\"RAWVALUE\"," +
+                   "\"sprk_filesummary\":\"first summary\",\"Sprk_FileSummary\":\"RAWVALUE\"}"),
+            FileName, parentEntity: null, logger);
+
+        fields["sprk_documenttype"].Should().BeOfType<Microsoft.Xrm.Sdk.OptionSetValue>()
+            .Which.Value.Should().Be(DocumentTypeMapper.ToDataverseValue("contract")!.Value);
+        fields["sprk_filesummary"].Should().Be("first summary");
+        fields.Keys.Should().BeEquivalentTo("sprk_documenttype", "sprk_filesummary", "sprk_filetype");
+
+        var warning = logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning).Subject;
+        warning.Message.Should()
+            .Contain(documentId.ToString())
+            .And.Contain("SPRK_DOCUMENTTYPE").And.Contain("Sprk_FileSummary")
+            .And.Contain(DocumentProfileOutputMapper.DuplicateColumnReasonCode)
+            .And.NotContain(DocumentProfileOutputMapper.NotProfileColumnReasonCode)
+            .And.NotContain("RAWVALUE");
+    }
+
+    [Theory]
+    [InlineData("{\"summary\":\"A summary\",\"tldr\":\"tldr\",\"documentType\":\"contract\"}")] // a misconfigured schema
+    [InlineData("{}")]
+    [InlineData("{\"sprk_filetype\":\"PDF\",\"sprk_searchprofile\":\"x\"}")] // only the computed columns
+    [InlineData("{\"sprk_filesummary\":null,\"sprk_filetldr\":\"  \"}")] // listed, but nothing to map
+    public void BuildFields_NoProfileColumnMapped_ReturnsAnEmptyDictionary_WithNoComputedColumn(string json)
+    {
+        var fields = DocumentProfileOutputMapper.BuildFields(
+            Guid.NewGuid(), Output(json), FileName, parentEntity: null, new CapturingLogger());
+
+        fields.Should().BeEmpty("an empty result is what every consumer's fields.Count == 0 check treats as a failure");
+    }
+
+    [Fact]
+    public void BuildFields_OneProfileColumn_GivesThatColumnAndTheComputedFileType()
+    {
+        var fields = DocumentProfileOutputMapper.BuildFields(
+            Guid.NewGuid(), Output("{\"sprk_filetldr\":\"tldr\"}"), FileName, parentEntity: null, new CapturingLogger());
+
+        fields.Keys.Should().BeEquivalentTo("sprk_filetldr", "sprk_filetype");
+        fields["sprk_filetldr"].Should().Be("tldr");
+        fields["sprk_filetype"].Should().Be("PDF");
+    }
+
+    [Fact]
+    public void BuildFields_DroppedKeyText_HasControlCharactersReplaced_IsCappedPerKey_AndAtMostTwentyKeysAreListed()
+    {
+        var documentId = Guid.NewGuid();
+        var logger = new CapturingLogger();
+
+        // A key that would forge a second log line, a long key, and 25 more unknown keys (27 dropped in all).
+        var forged = "sprk_x\\r\\n[ERR] forged line\\tend\\u0007";
+        var longKey = "sprk_" + new string('L', 150);
+        var many = string.Concat(Enumerable.Range(0, 25).Select(i => $",\"zz_unknown_{i:00}\":\"v\""));
+
+        DocumentProfileOutputMapper.BuildFields(
+            documentId, Output($"{{{ProfileProperties},\"{forged}\":\"v\",\"{longKey}\":\"v\"{many}}}"),
+            FileName, parentEntity: null, logger);
+
+        var warning = logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning).Subject.Message;
+        warning.Should().NotContain("\r").And.NotContain("\n").And.NotContain("\t").And.NotContain("\u0007");
+        warning.Should().Contain("sprk_x??[ERR] forged line?end?");
+        warning.Should().Contain("sprk_" + new string('L', 95)).And.NotContain("sprk_" + new string('L', 96));
+        warning.Should().Contain(" 27 key(s)").And.Contain(",+7 more");
+        // Sorted ordinally: the two sprk_ keys sort before every zz_ key, so the listed twenty end at zz_unknown_17.
+        warning.Should().Contain("zz_unknown_17").And.NotContain("zz_unknown_18");
+    }
+
+    [Fact]
+    public void WarningKey_ReplacesEveryControlCharacter_AndCapsAtOneHundred()
+    {
+        DocumentProfileOutputMapper.WarningKey("  a\rb\nc\td\u0000e\u001bf\u007fg\u0085h  ").Should().Be("a?b?c?d?e?f?g?h");
+        DocumentProfileOutputMapper.WarningKey(new string('k', 101)).Should().HaveLength(DocumentProfileOutputMapper.WarningKeyMaxLength);
+    }
+
     [Fact]
     public void ProfileColumns_IsExactlyTheShippedDocumentProfilerSchema()
     {
         // Pinned: widening this list widens what a configuration can make the BFF identity write to a document, so it
-        // is a reviewed diff. Source: the live ACT-011 sprk_outputschemajson and the jps-action-create document-profiler
-        // example, minus sprk_filetype (computed from the file extension).
+        // is a reviewed diff. Source: the six top-level properties of dev's live ACT-011 sprk_outputschemajson. The
+        // jps-action-create document-profiler example also names sprk_filetype, which the mapper computes.
         DocumentProfileOutputMapper.ProfileColumns.Should().BeEquivalentTo(
             "sprk_filesummary", "sprk_filetldr", "sprk_filekeywords", "sprk_documenttype",
             "sprk_extractorganization", "sprk_extractpeople");
