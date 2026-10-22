@@ -812,3 +812,8 @@ Agreement is a core record that can stand alone or sit under a matter or project
 7. **Approvers:** `sprk_billingapproverrole` on agreements (D-33 / D-40 / D-54).
 
 **R1 groundwork:** every list of core types is one shared list; new tables use one typed lookup per core type, so adding a column is additive; a ratchet test fails when new e-billing code names the core types outside that list.
+
+
+## Owner decision 2026-10-21: matter spend stays readable by flagged-external users (uac-r2 191 question)
+
+uac-r2 (191, `notes/2179-flagged-external-dataverse-design.md`) found that `sprk_totalspend` and `sprk_totalbudget` on a core record are not field-secured. Under owner round 114, a flagged-external user who can open the record therefore sees them on the form and in POST /api/workspace/ai/summary. The owner chose to **leave them visible for now**: no field security and no new task. If this is revisited, the fix is field security on the spend columns, not a route gate, because a gate would leave the same values visible in the MDA.

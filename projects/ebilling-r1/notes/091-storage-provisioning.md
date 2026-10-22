@@ -242,3 +242,156 @@ az webapp ssh -g rg-spaarke-dev -n spaarke-bff-dev --subscription $sub
 ```
 
 No Key Vault command and no account key, SAS or connection string anywhere above.
+
+### 8.6 Dev run (2026-10-21)
+
+Owner decisions 2026-10-21:
+- Create a dedicated account in rg-spaarke-dev (option (a), `sprkspaarkedevebillsa`).
+- Apply after the what-if.
+- Dev scanning: **"Scanning not enabled"** (`enableMalwareScanning=false`; files are served as "Not scanned" on dev).
+
+Steps 0–5 were run by the main session as ralph.schroeder@spaarke.com. Step 6, the data-plane proof as the identity, is **not yet run**.
+
+```
+== 0. create account
+{
+  "name": "sprkspaarkedevebillsa",
+  "publicBlob": false,
+  "sharedKey": false,
+  "state": "Succeeded",
+  "tls": "TLS1_2"
+}
+== 1. before reads
+{
+  "network": "Allow",
+  "publicBlob": false,
+  "sharedKey": false
+}
+{
+  "blobSoftDelete": {
+    "allowPermanentDelete": false,
+    "days": null,
+    "enabled": false
+  },
+  "containerSoftDelete": null
+}
+{
+  "isEnabled": false,
+  "malwareScanning": {
+    "onUpload": {
+      "capGBPerMonth": -1,
+      "isEnabled": false
+    }
+  },
+  "overrideSubscriptionLevelSettings": false,
+  "sensitiveDataDiscovery": {
+    "isEnabled": false
+  }
+}
+Role                                             Scope
+-----------------------------------------------  --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Cognitive Services OpenAI User                   /subscriptions/484bc857-3802-427f-9ea5-ca47b43db0f0/resourceGroups/spe-infrastructure-westus2/providers/Microsoft.CognitiveServices/accounts/spaarke-openai-dev
+Cognitive Services User                          /subscriptions/484bc857-3802-427f-9ea5-ca47b43db0f0/resourceGroups/spe-infrastructure-westus2/providers/Microsoft.CognitiveServices/accounts/spaarke-openai-dev
+Key Vault Secrets User                           /subscriptions/484bc857-3802-427f-9ea5-ca47b43db0f0/resourceGroups/SharePointEmbedded/providers/Microsoft.KeyVault/vaults/spaarke-spekvcert
+Azure Service Bus Data Sender                    /subscriptions/484bc857-3802-427f-9ea5-ca47b43db0f0/resourcegroups/SharePointEmbedded/providers/Microsoft.ServiceBus/namespaces/spaarke-servicebus-dev/topics/sprk-membership-changes
+Azure Service Bus Data Receiver                  /subscriptions/484bc857-3802-427f-9ea5-ca47b43db0f0/resourcegroups/SharePointEmbedded/providers/Microsoft.ServiceBus/namespaces/spaarke-servicebus-dev/topics/sprk-membership-changes/subscriptions/recon-junction-updater
+Search Index Data Contributor                    /subscriptions/484bc857-3802-427f-9ea5-ca47b43db0f0/resourceGroups/spe-infrastructure-westus2/providers/Microsoft.Search/searchServices/spaarke-search-dev
+Communication and Email Service Owner            /subscriptions/484bc857-3802-427f-9ea5-ca47b43db0f0/resourceGroups/rg-spaarke-dev/providers/Microsoft.Communication/CommunicationServices/spaarke-acs-dev
+Azure Service Bus Data Sender                    /subscriptions/484bc857-3802-427f-9ea5-ca47b43db0f0/resourceGroups/SharePointEmbedded/providers/Microsoft.ServiceBus/namespaces/spaarke-servicebus-dev
+Azure Service Bus Data Receiver                  /subscriptions/484bc857-3802-427f-9ea5-ca47b43db0f0/resourceGroups/SharePointEmbedded/providers/Microsoft.ServiceBus/namespaces/spaarke-servicebus-dev
+Cognitive Services Content Understanding Reader  /subscriptions/484bc857-3802-427f-9ea5-ca47b43db0f0/resourceGroups/rg-spaarke-dev/providers/Microsoft.CognitiveServices/accounts/spaarke-docintel-invoices-dev
+== 2. what-if (scan=false)
+Change
+--------
+Create
+Ignore
+Ignore
+Ignore
+Ignore
+Ignore
+Ignore
+Ignore
+Ignore
+Ignore
+Create
+Create
+Create
+Create
+Create
+Create
+Ignore
+Ignore
+Ignore
+Create   Microsoft.Authorization/roleDefinitions/fa22633d-1c13-50ff-b07d-e23d4d9eb6e5
+Create   Microsoft.Storage/storageAccounts/sprkspaarkedevebillsa/blobServices/default/containers/billing-exports
+Create   Microsoft.Storage/storageAccounts/sprkspaarkedevebillsa/blobServices/default/containers/billing-exports/providers/Microsoft.Authorization/roleAssignments/4853f12b-9ff0-5d19-9d13-ad46b9840096
+Create   Microsoft.Storage/storageAccounts/sprkspaarkedevebillsa/blobServices/default/containers/invoice-files
+Create   Microsoft.Storage/storageAccounts/sprkspaarkedevebillsa/blobServices/default/containers/invoice-files/providers/Microsoft.Authorization/roleAssignments/1c3eb40b-f168-59f5-8337-26dd79562761
+Create   Microsoft.Storage/storageAccounts/sprkspaarkedevebillsa/blobServices/default/containers/procedures
+Create   Microsoft.Storage/storageAccounts/sprkspaarkedevebillsa/blobServices/default/containers/procedures/providers/Microsoft.Authorization/roleAssignments/1784d197-94c2-5eec-9dd5-a9269d66d27f
+ignored: 12 existing resources in the RG not in the template
+== 3. apply (owner OK 2026-10-21; scan=false)
+{
+  "outputs": {
+    "blobEndpoint": {
+      "type": "String",
+      "value": "https://sprkspaarkedevebillsa.blob.core.windows.net/"
+    },
+    "containerNames": {
+      "type": "Array",
+      "value": [
+        "procedures",
+        "invoice-files",
+        "billing-exports"
+      ]
+    }
+  },
+  "state": "Succeeded"
+}
+== 4. Test-EbillingFileStoreRole
+
+>> 1. Role definition is exact (uac-r2 condition 1)
+   [INFO] role 'Spaarke eBilling File Store Blob Data (2bit77dli45c2)' id fa22633d-1c13-50ff-b07d-e23d4d9eb6e5
+   [PASS] exactly Storage Blob Data Contributor (live) + blobs/tags/read; no wildcard, no tags/write
+
+>> 2. Assigned per container only (uac-r2 condition 4)
+   [INFO] 3 assignment(s) of the role in the subscription
+   [PASS] one assignment per container (procedures, invoice-files, billing-exports), none above container scope
+
+>> 3. Other blob data roles the principal holds on the account (context)
+   [PASS] no built-in Storage Blob Data role on the account or above
+
+>> 4. Data-plane 403 proof (uac-r2 condition 2)
+   [INFO] not run here: run scripts/ebilling/test-ebilling-file-store-tag-write.sh in the App Service SSH console (as the identity)
+exit=0
+== 5. after reads
+{
+  "network": "Allow",
+  "publicBlob": false,
+  "sharedKey": false
+}
+{
+  "blobSoftDelete": false,
+  "containerSoftDelete": null
+}
+{
+  "enabled": false,
+  "onUpload": false
+}
+Name             PublicAccess
+---------------  --------------
+billing-exports  None
+invoice-files    None
+procedures       None
+C:\code_files\spaarke-wt-ebilling-r1>  "C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\\..\python.exe" -IBm azure.cli role assignment list --assignee 9fd47efb-7962-492b-ac44-e5ccd0268ebb --all --query [?contains(scope,'Storage')].{role:roleDefinitionName,scope:scope} -o table
+].{role:roleDefinitionName was unexpected at this time.
+Spaarke eBilling File Store Blob Data (2bit77dli45c2) | sprkspaarkedevebillsa/blobServices/default/containers/billing-exports
+Spaarke eBilling File Store Blob Data (2bit77dli45c2) | sprkspaarkedevebillsa/blobServices/default/containers/invoice-files
+Spaarke eBilling File Store Blob Data (2bit77dli45c2) | sprkspaarkedevebillsa/blobServices/default/containers/procedures
+```
+
+**State:**
+- uac-r2 conditions 1 and 4 are met live (Test-EbillingFileStoreRole.ps1 exit 0).
+- The account is unchanged apart from the module's resources: network Allow (as created), shared key off, public blob off, no soft delete, Defender off.
+- The identity's only storage roles are the three container-scope grants.
+- Condition 2 (step 6) is still open. 090 downloads stay off on every environment until it passes.
