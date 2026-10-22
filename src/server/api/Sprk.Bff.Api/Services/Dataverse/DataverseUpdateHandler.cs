@@ -70,9 +70,14 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         // output orchestrator), so it never writes a document's Access Permission or its own-narrowing record; only the
         // document rule's writers do. Refused before anything is read or written. Task 188 round 4e: nor its D7 link columns
         // (sprk_parentdocument, sprk_relatedcommunication), set, cleared or bound (InheritedAccessPermission.DocumentLinkColumns).
+        // #2251: nor any row of a table whose rows are access (grants, membership, ethical walls; AccessTables), nor a secure
+        // root's secure flag, access columns or container (SecureRootColumns). Asked before the secure-root filing gate.
         // #2257 fix round 1 (main-session decision): asked whatever identity the write runs as. A person's run now writes AS
         // that person, but the mapping is the playbook's configuration (its author, who may not be the runner), never theirs.
-        if (InheritedAccessPermission.RefuseAppOnlyWrite(entityLogicalName, fields.Keys) is { } documentRefusal)
+        // Master merge after #2253: so it is asked as WriteIdentity.AppOnly (every set, AccessColumns included) even when the
+        // write impersonates the runner; WriteIdentity.Caller is the field-mapping push's only.
+        if (InheritedAccessPermission.RefuseAppOnlyWrite(
+                entityLogicalName, fields.Keys, InheritedAccessPermission.WriteIdentity.AppOnly) is { } documentRefusal)
         {
             throw new RecordOwnerUnresolvedException(entityLogicalName, documentRefusal);
         }

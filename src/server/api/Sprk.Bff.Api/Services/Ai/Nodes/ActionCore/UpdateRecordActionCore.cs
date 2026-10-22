@@ -174,13 +174,22 @@ internal sealed class UpdateRecordActionCore
         // impersonated user) never writes a document's Access Permission or its own-narrowing record; only the document
         // rule's writers do. Refused before anything is written. Task 188 round 4e: nor its D7 link columns
         // (sprk_parentdocument, sprk_relatedcommunication), set, cleared or bound (InheritedAccessPermission.DocumentLinkColumns).
+        // #2251: nor any row of a table whose rows are access (grants, membership, ethical walls; AccessTables), nor a secure
+        // root's secure flag, access columns or container (SecureRootColumns); #2253: nor a non-root table's access columns
+        // (AccessColumns), nor a table name that is not a bare identifier.
         // #2257 fix round 1 (main-session decision): a payload built by configuration or a model — the Update Record node's,
         // whoever runs the playbook — is asked the refusal even when the write impersonates the person who started the run:
         // the author of the payload may not be that person. Only a confirmed proposal (ActionSeam's Job B apply, the
-        // confirming user's own edit) written AS that user skips it. Fix round 2 (K4): Guid.Empty is no person.
+        // confirming user's own edit) written AS that user skips it, and runs under that user's own Dataverse privileges,
+        // which decide it. Fix round 2 (K4): Guid.Empty is no person.
+        // Master merge after #2253: the refusal is asked as WriteIdentity.AppOnly (every set) even when the run writes AS a
+        // person. WriteIdentity.Caller (the pre-#2251 sets only) is the field-mapping push's, which #2253 leaves to its
+        // caller's own privileges; a playbook payload is built by configuration or a model, not by the runner, so the
+        // runner's own rights are not the only lock on it (PlaybookRunIdentityTests).
         if ((input.PayloadSource != UpdateRecordPayloadSource.ConfirmedProposal
                 || input.ImpersonateSystemUserId is not { } confirmingUser || confirmingUser == Guid.Empty)
-            && InheritedAccessPermission.RefuseAppOnlyWrite(input.EntityLogicalName, updatePayload.Keys) is { } documentRefusal)
+            && InheritedAccessPermission.RefuseAppOnlyWrite(
+                input.EntityLogicalName, updatePayload.Keys, InheritedAccessPermission.WriteIdentity.AppOnly) is { } documentRefusal)
         {
             throw new RecordOwnerUnresolvedException(input.EntityLogicalName, documentRefusal);
         }

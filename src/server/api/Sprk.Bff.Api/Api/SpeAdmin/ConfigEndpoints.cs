@@ -38,7 +38,7 @@ public static class ConfigEndpoints
     //   • 1–127 characters
     //   • See: https://learn.microsoft.com/azure/key-vault/general/about-keys-secrets-certificates
     private static readonly Regex KeyVaultSecretNameRegex =
-        new(@"^[a-zA-Z0-9-]{1,127}$", RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
+        new(@"^[a-zA-Z0-9-]{1,127}\z", RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
 
     // OData $select for list queries — summary fields only (performance)
     private const string ListSelect =

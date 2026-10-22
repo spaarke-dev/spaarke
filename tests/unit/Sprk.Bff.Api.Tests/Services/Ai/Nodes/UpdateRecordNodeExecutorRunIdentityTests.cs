@@ -174,12 +174,15 @@ public class UpdateRecordNodeExecutorRunIdentityTests
     [Fact]
     public async Task AHardCodedRecordId_ThePersonCannotWrite_IsRefused_AndNothingIsWrittenAppOnly()
     {
-        // The issue's route: the node's config names a record the run filter never checked (systemuser.sprk_primarycontact).
+        // The issue's route: the node's config names a record the run filter never checked. Master merge after #2253: the
+        // issue's own column (systemuser.sprk_primarycontact) is now an access column, refused before Dataverse is asked
+        // (pinned with the other #2251/#2253 sets in the person's-run must-fire tests); an ordinary column on the same
+        // hard-coded record still reaches Dataverse AS the person, which refuses it.
         var self = Guid.Parse("22570000-0000-4000-8000-00000000c001");
         DataverseRefuses(Person);
 
         var result = await Executor().ExecuteAsync(
-            Context(LegacyConfig("systemuser", self, "sprk_primarycontact@odata.bind", "/contacts(22570000-0000-4000-8000-00000000c0c0)"),
+            Context(LegacyConfig("systemuser", self, "jobtitle", "Partner"),
                 PlaybookRunStartedBy.Person, Person),
             CancellationToken.None);
 

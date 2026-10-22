@@ -1,19 +1,19 @@
 # Current Task — field-mapping-server-write-path-r1
 
-> **Last updated**: 2026-10-22 (checkpoint at 85%: 018a ready for its PR)
-> **Phase**: Wave 2. Done (13/43): 001–006, 010–016, ALL on master (016 = #2228 a7b956fb55; #2220 = #2223 ef5912c7e8).
-> **Live on dev: a7b956fb55** (R3, 2026-10-22 02:18Z). **Active: task 018, phase 018a** (service prerequisites,
-> no live change). UAC-r2 ACCEPT. PR next.
+> **Last updated**: 2026-10-22 (018b merged to master; 018c running)
+> **Phase**: Wave 2. Done (13/43): 001–006, 010–016 on master; 018a (36403e1f4b) and 018b (**ef8a91a157**, PR #2261) on master.
+> **Live on dev: 1283c41817** (R3; dormant 018a). 018b (LIVE Office change) is a deploy candidate: UAC-r2 and R3 told; owner go needed in R3's session. **Active: task 018, phase 018c.**
 
 ## Quick Recovery
 
 | Field | Value |
 |---|---|
 | **Active task** | 018 (Office quick-create adapter), run as 3 PRs under ONE POML: **018a** service prerequisites → **018b** Matter/Project adapter → **018c** delete the Office core. The Invoice leg is NOT moved (ebilling-r1, owner decision L; task 096 deletes it) |
-| **HEAD** | work branch `738b526a2d` = 018a (2a5f076857 + fix rounds 58e09ce726, 4530e597f0, K-a a4d77aa539) + master 230302c307 (#2234). Pushed. Uncommitted: none |
-| **Running** | (1) Full verify after the #2234 merge (filter includes the #2234 suites): output `scratchpad/v018a2/`. (2) Publish delta 230302c307 vs 738b526a2d (`C:\tmp\h18m`, `C:\tmp\h18a`; the script removes them) + CVE |
-| **Next Action** | Both green → write the 018a PR body (from the notes' "018a" section, the condition (b) statement, UAC-r2 ACCEPT, decisions.md 2026-10-22 K-5 deviation, publish delta, CVE) → `gh pr create` from the work branch → merge only on Router + Client lint green and the rollup clean or explained (#2224 = known ADR-job timeout) → tell UAC-r2 the SHA (don't ask R3 to deploy: 018a is dormant; UAC-r2 batches) → resume the implementer (agent a80d401ebbcfb9d3e) for **018b**, whose criteria are all in the 018 POML |
-| **018 progress** | 018a = PR #2243 (CI running; merge on Router + Client lint green, rollup clean/explained, then tell UAC-r2 the SHA). 018b split into 3 passes on ONE PR: **018b-1 running** (fresh opus implementer, branch `task/fm-018b1`: NFR-01 inventory FIRST, then the leg swap, refusal map + table test, single membership publish, drop the old-core ctor dependency, fixtures + the four fill-only rewrites); 018b-2 (Assigned To refusal code, dropped default surfaced, secure-matter Project, no-token/empty-flag tests); 018b-3 (`ResolveDefaultAssigneeAsync` move, owner-guard and census cleanup, isolated ordering, #2124, optional #2238, notes). Then an Opus review + UAC-r2 (b) on the whole of 018b |
+| **HEAD** | work branch = master ef8a91a157 + this checkpoint. 018c = branch **`task/fm-018c`** (cut from task/fm-018b1 = 018b code), agent worktree under `C:\code_files\spaarke\.claude\worktrees\`. The 018b worktree `agent-a550606fde68f707f` (task/fm-018b1, merged) can be removed with Remove-WorktreeSafe |
+| **Running** | 018c implementer agent `fm018c` (opus, high, background): delete `OfficeRecordCreationService` + registration; move `ResolveDefaultAssigneeAsync` into `OfficeService` (prefill = server default); remove legacy `CreateTimeFieldMapping.Apply`; #2188 `KnownCallSites` 3 → 2; owner-guard allow-list, census, registry guard; re-point/retire the 9 test files; notes section `## 018c` |
+| **Next Action** | When fm018c reports: verify (build sln, full ArchTests, filtered suites; `git grep OfficeRecordCreationService` empty); one Opus adversarial review of the 018c diff (deletion = test-modifying, so code-review + adr-check); fix rounds; merge task/fm-018c into the work branch (merge origin/master first if it moved); publish delta vs fresh master + CVE; PR; merge on Router + Client lint green; set 018 ✅ in POML + TASK-INDEX; then 019 |
+| **018 progress** | 018a and 018b on master. 018b: Opus review (4 F fixed), Sonnet re-check clean, UAC-r2 condition (b) ACCEPT after fix round 2 (F1-1, K1) and the F4 catch-all wrap (1b4f297d9f). CI: the only red was the Tier 2 ADR cancel (#2224, 5-min timeout). #1614/#1617 were already closed; each has a SHA comment. #2124: commented (create fixed; Repair = 052). #2253 (UAC): whichever merges second adds `WriteIdentity.AppOnly` to `DropAppOnlyRefusedRules` + must-fire test |
+| **CI note** | #2252 raised the Tier 1 arch job timeout to 10 min (merged). The Tier 2 ADR job (#2224) may still be cancelled by its timeout; read the log |
 | **Cleanup left for the owner** | Empty, unregistered folders (Remove-WorktreeSafe partial delete, "Permission denied"): `C:\code_files\spaarke\.claude\worktrees\agent-a10e5fe383a4dfcd2`, `...\agent-a80d401ebbcfb9d3e` |
 
 ## 018 — what is decided (all in the 018 POML and notes/decisions.md)
@@ -81,4 +81,4 @@ FR-06 step 10, #1608 columns, the chat number, SystemPrincipal.
 
 ## Next tasks
 
-018a PR → 018b → 018c → 019. 017 once unblocked. Then 033 (before 052), 040 (needs 005, 019), 050 (needs 019).
+018c → 019. 017 once unblocked. Then 033 (before 052), 040 (needs 005, 019), 050 (needs 019).

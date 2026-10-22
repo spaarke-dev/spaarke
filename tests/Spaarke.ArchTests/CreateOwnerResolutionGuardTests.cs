@@ -26,8 +26,7 @@ public class CreateOwnerResolutionGuardTests
     public static readonly IReadOnlyDictionary<string, (int Uses, string Reason)> Allowlist =
         new Dictionary<string, (int Uses, string Reason)>
         {
-            ["src/server/api/Sprk.Bff.Api/Services/Office/OfficeRecordCreationService.cs"] = (1,
-                "Office root owner moves to ResolveOwnerAsync in task 018 via the unified service; #1614. Expires at 018."),
+            // Empty: the last entry (the Office creation core, #1614) expired at task 018 and went with that core (018c).
         };
 
     /// <summary>The file that declares the member (the interface and its implementation).</summary>

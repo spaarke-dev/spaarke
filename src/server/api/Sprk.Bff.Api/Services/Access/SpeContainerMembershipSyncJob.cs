@@ -97,10 +97,10 @@ public sealed class SpeContainerMembershipSyncJob : IScheduledJob
         _logger.LogInformation(
             "[SPE-MEMBERSHIP-SYNC] heartbeat attempt={Attempt} standing={{containers={Containers}, granted={Granted}, alreadyHeld={AlreadyHeld}, "
             + "removed={StandingRemoved}, unknown={StandingUnknown}, failed={StandingFailed}, capped={Capped}}} jit={{secureContainers={SecureContainers}, "
-            + "grants={JitSeen}, removed={JitRemoved}, kept={JitKept}, unknown={JitUnknown}, failed={JitFailed}, truncated={Truncated}}} durationMs={DurationMs}",
+            + "grants={JitSeen}, removed={JitRemoved}, kept={JitKept}, unknown={JitUnknown}, failed={JitFailed}, unresolvable={JitUnresolvable}, truncated={Truncated}}} durationMs={DurationMs}",
             context.Attempt,
             standing?.Containers, standing?.Granted, standing?.AlreadyHeld, standing?.Removed, standing?.Unknown, standing?.Failed, standing?.Capped,
-            jit?.SecureContainers, jit?.GrantsSeen, jit?.Removed, jit?.Kept, jit?.Unknown, jit?.Failed, jit?.Truncated,
+            jit?.SecureContainers, jit?.GrantsSeen, jit?.Removed, jit?.Kept, jit?.Unknown, jit?.Failed, jit?.Unresolvable, jit?.Truncated,
             (long)duration.TotalMilliseconds);
 
         if (standing is null && jit is null)

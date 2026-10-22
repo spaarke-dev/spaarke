@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse.FieldMapping;
@@ -66,7 +67,7 @@ internal sealed partial class RecordCreationService
     private static readonly IReadOnlyDictionary<string, TargetAttribute> NoAttributes =
         new Dictionary<string, TargetAttribute>(StringComparer.OrdinalIgnoreCase);
 
-    private static readonly Regex LogicalNamePattern = new("^[a-z][a-z0-9_]*$", RegexOptions.CultureInvariant);
+    private static readonly Regex LogicalNamePattern = new(@"^[a-z][a-z0-9_]*\z", RegexOptions.CultureInvariant);
 
     /// <summary>
     /// What step 3 (or step 5) produced: the item the next steps read, and each mapped column's value as the create's item
@@ -176,7 +177,9 @@ internal sealed partial class RecordCreationService
     /// (step 2: the common server-owned columns, the table's own, its autonumber and the creator person), the registry's
     /// mapping-protected columns (<see cref="RecordTableRule.MappingProtectedColumns"/>), the access record and secure flag
     /// a work assignment or project create is refused for (<see cref="SecureRootFilingGate.PlanCreateAsync"/>), and the
-    /// lookups the server set (K-2: never filled by a mapped value the AppendTo check would then skip).
+    /// lookups the server set (K-2: never filled by a mapped value the AppendTo check would then skip), and the contact-plane
+    /// creator and requester (<c>sprk_createdbycontact</c>, <c>sprk_requestedby</c>, task 018b-K2). What an app-only write is
+    /// refused is dropped separately, by <see cref="DropAppOnlyRefusedRules"/>.
     /// <c>internal</c> (was private) so the secure-root parity test (#2220) reads the very set the service applies.
     /// </summary>
     internal static IReadOnlySet<string> ProtectedFromMapping(
@@ -188,6 +191,11 @@ internal sealed partial class RecordCreationService
         if (rule.AutonumberColumn is { } number)
             columns.Add(number);
         columns.Add(RecordCreatorPerson.Column);
+        // Task 018b-K2 (UAC-r2 condition (b)): the owner and the creator columns (#2247: the creator person, the contact-plane
+        // creator and the requester) are the server's alone. A rule that filled the contact ones app-only would give that
+        // contact creator or requester rights on the external plane. The sets are the app-only refusal's own, so they never drift.
+        columns.UnionWith(InheritedAccessPermission.OwnerColumns);
+        columns.UnionWith(InheritedAccessPermission.CreatorColumns);
         if (SecureRootInheritance.Inherits(table))
         {
             columns.Add(AccessInheritance.Column);
@@ -197,6 +205,48 @@ internal sealed partial class RecordCreationService
         if (serverSetLookupColumns is not null)
             columns.UnionWith(serverSetLookupColumns.Select(c => c.Trim()));
         return columns;
+    }
+
+    /// <summary>
+    /// Task 018b-K2: the one target <see cref="InheritedAccessPermission.RefuseAppOnlyWrite"/> refuses that create-time mapping
+    /// still fills: a document's Access Permission (<see cref="InheritedAccessPermission.Column"/>). UAC-r2 D7 decided it stays
+    /// fill-only at create (<c>RecordTableRules.cs</c>, the <c>sprk_document</c> entry, lines 195-201): on a CREATE a document has
+    /// no own narrowing for a mapped value to lower, so a fill is safe. The refusal guards UPDATE writers, which could lower an
+    /// existing narrowing.
+    /// </summary>
+    private static bool IsFillOnlyAtCreateExemption(string table, string target) =>
+        string.Equals(table.Trim(), ExternalDocumentNarrowing.DocumentTable, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(target.Trim(), InheritedAccessPermission.Column, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Task 018b-K2: drops each rule whose target <see cref="InheritedAccessPermission.RefuseAppOnlyWrite"/> refuses for
+    /// <paramref name="table"/> (mapping writes app-only, as the create's origin set, so it may write nothing that refusal
+    /// guards), with a <see cref="RecordCreationWarning.MappingRuleSkippedCode"/> warning that names the column and the
+    /// refusal code and no value. Keeps the refusal and this list from drifting apart. Never refuses the create (FR-08).
+    /// </summary>
+    private static List<FieldMappingRuleEntity> DropAppOnlyRefusedRules(
+        string table, List<FieldMappingRuleEntity> rules, List<RecordCreationWarning> warnings)
+    {
+        var kept = new List<FieldMappingRuleEntity>(rules.Count);
+        foreach (var rule in rules)
+        {
+            var target = rule.TargetField;
+            if (!string.IsNullOrWhiteSpace(target)
+                && !IsFillOnlyAtCreateExemption(table, target)
+                && InheritedAccessPermission.RefuseAppOnlyWrite(
+                    table, [target], InheritedAccessPermission.WriteIdentity.AppOnly) is { } refused)
+            {
+                var code = refused.RefusalCode ?? InheritedAccessPermission.AppOnlyDocumentWriteReasonCode;
+                warnings.Add(new RecordCreationWarning(RecordCreationWarning.MappingRuleSkippedCode, target,
+                    $"Field-mapping rule targeting \"{target}\" was skipped: that field is managed by the server and cannot be " +
+                    $"set by a field-mapping rule ({code})."));
+                continue;
+            }
+
+            kept.Add(rule);
+        }
+
+        return kept;
     }
 
     /// <summary>
@@ -253,6 +303,12 @@ internal sealed partial class RecordCreationService
                 $"Field-mapping profile \"{profile.Name}\" has no rules; nothing was applied."));
             return unmapped;
         }
+
+        // Task 018b-K2: a rule aimed at a column an app-only write is refused (InheritedAccessPermission.RefuseAppOnlyWrite) is
+        // dropped with a warning that names the column and the refusal code. Mapping never refuses (FR-08).
+        rules = DropAppOnlyRefusedRules(table, rules, warnings);
+        if (rules.Count == 0)
+            return unmapped;
 
         // FR-04: Read as the caller FIRST. Missing, denied, unmapped type, a failed probe or read: ONE outcome — nothing
         // mapped (not even a Default rule), one warning that names nothing.

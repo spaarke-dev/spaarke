@@ -2,7 +2,6 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Claims;
-using System.ServiceModel;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
@@ -38,14 +37,12 @@ namespace Sprk.Bff.Api.Tests.Api.Office;
 /// (<see cref="IGenericEntityService"/>, <see cref="IFieldMappingDataverseService"/>), the caller → systemuser resolver,
 /// and the OBO rights probe (its designated virtual seam) are substituted — configured LOCALLY in
 /// <see cref="OfficeQuickCreateTestWebAppFactory"/>, so the shared <see cref="OfficeTestWebAppFactory"/> is untouched.
-/// "No row created" is asserted as "<see cref="IGenericEntityService.CreateAsync"/> was never called".
+/// "No row created" is asserted as "neither <see cref="IGenericEntityService.CreateAsync"/> nor the creation service's write
+/// (<see cref="IFieldMappingDataverseService.UpdateRecordFieldsAsync"/>) was called" (task 018b).
 /// </remarks>
 public class OfficeQuickCreateContractTests
 {
     private const string Route = "/api/office/quickcreate/matter";
-
-    /// <summary>Dataverse <c>0x80040217 ObjectDoesNotExist</c> as a signed int — what a retrieve of a missing row faults with.</summary>
-    private const int ObjectDoesNotExist = -2147220969;
 
     private static readonly Guid OwnerId = Guid.Parse("7d0e8a41-3b5c-4f2e-9a10-5c2b7e4f1a01");
     /// <summary>Task 080: every quick-created record is owned by the caller's business-unit DEFAULT OWNER TEAM (the factory's <see cref="RecordOwnershipResolverDouble"/>), never by the caller.</summary>
@@ -55,7 +52,6 @@ public class OfficeQuickCreateContractTests
     private static readonly Guid SearchIndexId = Guid.Parse("fdcc183b-8b71-f111-ab0d-7ced8ddc4cc6");
     private static readonly Guid SourceProjectId = Guid.Parse("1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c01");
     private static readonly Guid AccountId = Guid.Parse("9f8e7d6c-5b4a-4c3d-8e2f-1a0b9c8d7e01");
-    private static readonly Guid CreatedMatterId = Guid.Parse("00000000-0000-0000-0000-00000000c0de");
 
     /// <summary>The number the platform's autonumber gives the created matter (task 076).</summary>
     private const string PlatformNumber = "MAT-000042";
@@ -82,7 +78,7 @@ public class OfficeQuickCreateContractTests
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var json = await ReadJsonAsync(response);
-        json.GetProperty("id").GetString().Should().Be(CreatedMatterId.ToString("D"));
+        json.GetProperty("id").GetString().Should().Be(created.Writes.Single().Id.ToString("D"), "the id of the row the create wrote");
         json.GetProperty("entityType").GetString().Should().Be("Matter");
         json.GetProperty("logicalName").GetString().Should().Be("sprk_matter");
         json.GetProperty("name").GetString().Should().Be("Acme v. Globex");
@@ -138,6 +134,8 @@ public class OfficeQuickCreateContractTests
         factory.Entities.Verify(
             e => e.RetrieveAsync("sprk_mattertype_ref", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
             Times.Never, "there is no type to look up");
+        factory.CallerDataverse.Requests.Should().NotContain(r => r.Contains("sprk_mattertype_ref"),
+            "there is no type to look up, as the caller either");
     }
 
     [Fact]
@@ -146,11 +144,7 @@ public class OfficeQuickCreateContractTests
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
         ArrangeBusinessUnit(factory);
-        factory.Entities
-            .Setup(e => e.RetrieveAsync("sprk_mattertype_ref", MatterTypeId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new FaultException<OrganizationServiceFault>(
-                new OrganizationServiceFault { ErrorCode = ObjectDoesNotExist, Message = "sprk_mattertype_ref Does Not Exist" },
-                new FaultReason("Does Not Exist")));
+        factory.CallerDataverse.Missing.Add(("sprk_mattertype_ref", MatterTypeId)); // the caller's read of the type: 404
         var created = CaptureCreate(factory);
 
         var response = await factory.CreateClient().PostAsJsonAsync(
@@ -158,10 +152,11 @@ public class OfficeQuickCreateContractTests
 
         response.StatusCode.Should().Be(HttpStatusCode.Created, "an unknown type is treated like a missing one — never a 400 or 500");
         var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
-        body!.Warnings.Should().ContainSingle(w => w.Contains("matter type was not found"));
+        // 018a K-3: the service's one reference-drop text (the same words for "not found" and "not permitted").
+        body!.Warnings.Should().ContainSingle(w => w == UnusableMatterTypeWarning);
         created.Entity!.Contains("sprk_mattertype").Should().BeFalse("a dangling lookup would fail the whole create");
         created.Entity.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(OwnerTeam);
-        factory.Entities.Verify(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once);
+        created.Writes.Should().ContainSingle();
     }
 
     [Fact]
@@ -170,9 +165,9 @@ public class OfficeQuickCreateContractTests
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
         ArrangeBusinessUnit(factory);
-        factory.Entities
-            .Setup(e => e.RetrieveAsync("sprk_mattertype_ref", MatterTypeId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new TimeoutException("dataverse slow"));
+        factory.CallerDataverse.Fault = path => path.StartsWith($"sprk_mattertype_refs({MatterTypeId:D})", StringComparison.Ordinal)
+            ? new TimeoutException("dataverse slow")
+            : null;
         var created = CaptureCreate(factory);
 
         var response = await factory.CreateClient().PostAsJsonAsync(
@@ -305,10 +300,11 @@ public class OfficeQuickCreateContractTests
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
-        body!.Warnings.Should().Contain(w => w.Contains("not a matter type"));
+        // Fill-only (ruling 1, 2026-10-21): the requested type wins, so the mapped value is never written or reverted.
+        (body!.Warnings ?? Array.Empty<string>()).Should().NotContain(w => w.Contains("not a matter type"));
         created.Entity!.GetAttributeValue<EntityReference>("sprk_mattertype")
             .Should().BeEquivalentTo(new EntityReference("sprk_mattertype_ref", MatterTypeId),
-                "a non-matter-type value would fail the whole create, so the requested type is restored");
+                "a non-matter-type value would fail the whole create, so the requested type is kept");
     }
 
     [Fact]
@@ -334,7 +330,9 @@ public class OfficeQuickCreateContractTests
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
-        body!.Warnings.Should().Contain(w => w.Contains("not a matter type"))
+        body!.Warnings.Should().Contain(
+                w => w.StartsWith("The mapped value for 'sprk_mattertype' was not written", StringComparison.Ordinal),
+                "the mapped reference to another table is dropped (mapped_value_dropped)")
             .And.Contain(w => w.Contains("No matter type was supplied"));
         created.Entity!.Contains("sprk_mattertype").Should().BeFalse("a non-matter-type value would fail the whole create");
     }
@@ -363,7 +361,8 @@ public class OfficeQuickCreateContractTests
         var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
         body!.Name.Should().Be("Requested Name");
         created.Entity!.GetAttributeValue<string>("sprk_mattername").Should().Be("Requested Name");
-        body.Warnings.Should().Contain(w => w.Contains("name you entered was kept"));
+        (body.Warnings ?? Array.Empty<string>()).Should().NotContain(w => w.Contains("name you entered was kept"),
+            "fill-only never replaces the caller's name, so there is nothing to restore");
     }
 
     [Fact]
@@ -704,22 +703,16 @@ public class OfficeQuickCreateContractTests
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
         ArrangeBusinessUnit(factory);
-        ArrangeNumberReadBack(factory, PlatformNumber);
-        var attempts = new List<Entity>();
-        factory.Entities
-            .Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-            .Callback<Entity, CancellationToken>((entity, _) => attempts.Add(entity))
-            .Returns(() => attempts.Count == 1
-                ? Task.FromException<Guid>(NumberKeyViolation())
-                : Task.FromResult(CreatedMatterId));
+        var created = CaptureCreate(factory);
+        created.FailAttempt = attempt => attempt == 1 ? NumberKeyViolation() : null;
 
         var response = await factory.CreateClient().PostAsJsonAsync(Route, new QuickCreateRequest { Name = "Collides Once", MatterTypeId = Guid.Empty });
 
         response.StatusCode.Should().Be(HttpStatusCode.Created, "a number typed in ahead of the sequence costs one retry, not the create");
-        attempts.Should().HaveCount(2);
-        attempts.ForEach(AssertNumberLeftToThePlatform); // the retry leaves the number to the platform too
+        created.Attempts.Should().HaveCount(2);
+        created.Attempts.ForEach(a => AssertNumberLeftToThePlatform(created.ToEntity(a.Table, a.Id, a.Fields))); // the retry too
         var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
-        body!.Id.Should().Be(CreatedMatterId);
+        body!.Id.Should().Be(created.Writes.Single().Id);
         body.Warnings.Should().NotContain(w => w.Contains("number"), "the retry got a number; nothing is missing");
     }
 
@@ -729,16 +722,16 @@ public class OfficeQuickCreateContractTests
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
         ArrangeBusinessUnit(factory);
-        factory.Entities
-            .Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(NumberKeyViolation());
+        var created = CaptureCreate(factory);
+        created.FailAttempt = _ => NumberKeyViolation();
 
         var response = await factory.CreateClient().PostAsJsonAsync(Route, new QuickCreateRequest { Name = "Always Collides" });
 
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
-        (await ReadProblemAsync(response)).Should().ContainKey("errorCode").WhoseValue.Should().Be(OfficeRecordCreationService.NumberUnavailableCode);
-        factory.Entities.Verify(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Exactly(3),
+        (await ReadProblemAsync(response)).Should().ContainKey("errorCode").WhoseValue.Should().Be("record_number_unavailable");
+        created.Attempts.Should().HaveCount(3,
             "the attempts are bounded; a run of typed-ahead numbers is the operator's re-seed, not an endless loop");
+        created.Writes.Should().BeEmpty();
     }
 
     [Fact]
@@ -747,15 +740,13 @@ public class OfficeQuickCreateContractTests
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
         ArrangeBusinessUnit(factory);
-        factory.Entities
-            .Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new TimeoutException("dataverse slow"));
+        var created = CaptureCreate(factory);
+        created.FailAttempt = _ => new TimeoutException("dataverse slow");
 
         var response = await factory.CreateClient().PostAsJsonAsync(Route, new QuickCreateRequest { Name = "Timed Out" });
 
         response.StatusCode.Should().Be(HttpStatusCode.InternalServerError, "unchanged: any other create fault propagates");
-        factory.Entities.Verify(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once,
-            "a timeout may have created the row; retrying it could create a second");
+        created.Attempts.Should().ContainSingle("a timeout may have created the row; retrying it could create a second");
     }
 
     [Fact]
@@ -784,7 +775,7 @@ public class OfficeQuickCreateContractTests
         ArrangeBusinessUnit(factory);
         CaptureCreate(factory);
         factory.Entities
-            .Setup(e => e.RetrieveAsync("sprk_matter", CreatedMatterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Setup(e => e.RetrieveAsync("sprk_matter", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new TimeoutException("dataverse slow"));
 
         var response = await factory.CreateClient().PostAsJsonAsync(Route, new QuickCreateRequest { Name = "Read Fails", MatterTypeId = MatterTypeId });
@@ -833,24 +824,32 @@ public class OfficeQuickCreateContractTests
             Times.Never);
     }
 
+    /// <summary>No row: neither the old app-only create nor the creation service's step-11 write (task 018b).</summary>
     private static void AssertNothingCreated(OfficeQuickCreateTestWebAppFactory factory)
-        => factory.Entities.Verify(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+    {
+        factory.Entities.Verify(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+        factory.FieldMappings.Verify(
+            m => m.UpdateRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(),
+                It.IsAny<Guid?>()),
+            Times.Never);
+    }
 
     private static void ArrangeResolvedCaller(OfficeQuickCreateTestWebAppFactory factory)
         => factory.CallerResolver
             .Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CallerSystemUserResolution.Resolved(OwnerId.ToString("D")));
 
+    /// <summary>The type row the caller reads (task 018b: the reference is checked as the caller).</summary>
     private static void ArrangeMatterTypeExists(OfficeQuickCreateTestWebAppFactory factory)
-        => factory.Entities
-            .Setup(e => e.RetrieveAsync("sprk_mattertype_ref", MatterTypeId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Entity("sprk_mattertype_ref", MatterTypeId));
+        => factory.CallerDataverse.WithRow("sprk_mattertype_ref", MatterTypeId);
 
+    /// <summary>The owning team's business unit and its search defaults (the service reads team → business unit, task 015).</summary>
     private static void ArrangeBusinessUnit(OfficeQuickCreateTestWebAppFactory factory)
     {
         factory.Entities
-            .Setup(e => e.RetrieveAsync("systemuser", OwnerId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Entity("systemuser", OwnerId) { ["businessunitid"] = new EntityReference("businessunit", BusinessUnitId) });
+            .Setup(e => e.RetrieveAsync("team", OwnerTeam.Id, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("team", OwnerTeam.Id) { ["businessunitid"] = new EntityReference("businessunit", BusinessUnitId) });
 
         factory.Entities
             .Setup(e => e.RetrieveAsync("businessunit", BusinessUnitId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
@@ -891,43 +890,41 @@ public class OfficeQuickCreateContractTests
     }
 
     /// <summary>
-    /// Captures the create payload, and arranges the read-back of the created matter's number as the platform's
-    /// autonumber would answer it (task 076), so every happy path exercises the "number assigned" branch.
+    /// Captures the creation service's step-11 write (task 018b), and arranges the read-back of the created matter's number as
+    /// the platform's autonumber would answer it (task 076), so every happy path exercises the "number assigned" branch.
     /// </summary>
-    private static CreatedHolder CaptureCreate(OfficeQuickCreateTestWebAppFactory factory)
+    private static RecordCreationWriteCapture CaptureCreate(OfficeQuickCreateTestWebAppFactory factory)
     {
-        var holder = new CreatedHolder();
-        factory.Entities
-            .Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-            .Callback<Entity, CancellationToken>((entity, _) => holder.Entity = entity)
-            .ReturnsAsync(CreatedMatterId);
+        var capture = factory.CaptureRecordCreationWrite();
         ArrangeNumberReadBack(factory, PlatformNumber);
-        return holder;
+        return capture;
     }
 
-    /// <summary>The created matter's number as the read-back sees it; <see langword="null"/> = the column came back blank.</summary>
+    /// <summary>
+    /// The created matter's number as the read-back sees it; <see langword="null"/> = the column came back blank. Any id: the
+    /// service picks the new record's id.
+    /// </summary>
     private static void ArrangeNumberReadBack(OfficeQuickCreateTestWebAppFactory factory, string? number)
         => factory.Entities
             .Setup(e => e.RetrieveAsync(
-                "sprk_matter", CreatedMatterId,
+                "sprk_matter", It.IsAny<Guid>(),
                 It.Is<string[]>(columns => columns.Length == 1 && columns[0] == "sprk_matternumber"),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Entity("sprk_matter", CreatedMatterId) { ["sprk_matternumber"] = number });
+            .ReturnsAsync((string _, Guid id, string[] _, CancellationToken _) =>
+                new Entity("sprk_matter", id) { ["sprk_matternumber"] = number });
 
     /// <summary>
-    /// The alternate-key duplicate Dataverse raises when the platform's number is already held (live, 2026-10-02), in the
-    /// shape production delivers it: <c>DataverseServiceClientImpl.CreateAsync</c> wraps every fault in an
-    /// <see cref="InvalidOperationException"/>, and the classifier walks to the inner fault.
+    /// The alternate-key duplicate Dataverse raises when the platform's number is already held (live, 2026-10-02), as the
+    /// creation service's Web API create-by-upsert receives it: a 412 Precondition Failed (task 018b).
     /// </summary>
-    private static InvalidOperationException NumberKeyViolation() => new(
-        "Failed to create sprk_matter record: Entity Key Matter Number (unique) violated.",
-        new FaultException<OrganizationServiceFault>(
-            new OrganizationServiceFault
-            {
-                ErrorCode = unchecked((int)0x80060892),
-                Message = "Entity Key Matter Number (unique) violated. A record with the same value for Matter Number already exists.",
-            },
-            new FaultReason("Entity Key Matter Number (unique) violated")));
+    private static HttpRequestException NumberKeyViolation() => new(
+        "Entity Key Matter Number (unique) violated. A record with the same value for Matter Number already exists.",
+        inner: null, HttpStatusCode.PreconditionFailed);
+
+    /// <summary>018a K-3: the service's words for an optional reference it did not write (not found, or not permitted).</summary>
+    private const string UnusableMatterTypeWarning =
+        "The value you chose for 'sprk_mattertype' was not written: it was not found, or you do not have permission to use it; "
+        + "the matter was created without it.";
 
     private static FieldMappingRuleEntity Rule(
         string name, string sourceField, int sourceType, string targetField, int targetType,
@@ -959,11 +956,6 @@ public class OfficeQuickCreateContractTests
         return root.EnumerateObject()
             .Where(property => property.Value.ValueKind == JsonValueKind.String)
             .ToDictionary(property => property.Name, property => property.Value.GetString());
-    }
-
-    private sealed class CreatedHolder
-    {
-        public Entity? Entity { get; set; }
     }
 }
 
@@ -1010,9 +1002,24 @@ public sealed class OfficeQuickCreateTestWebAppFactory : OfficeTestWebAppFactory
     /// </summary>
     public MappingSourceCallerReadDouble CallerRead { get; }
 
+    /// <summary>
+    /// Field mapping task 018b-1b: the caller's Dataverse as the host registers it. The #2188 mask read is answered by
+    /// <see cref="CallerRead"/>, unchanged; the questions <c>RecordCreationService</c> asks as the caller are scripted from the
+    /// suites' fixture world, with <c>WhoAmI()</c> naming the systemuser <see cref="CallerResolver"/> resolved. Anything else
+    /// throws, naming the request.
+    /// </summary>
+    public OfficeCallerDataverseDouble CallerDataverse { get; }
+
+    /// <summary>
+    /// Field mapping task 018b-1b: captures <c>RecordCreationService</c>'s step-11 write and views it as the SDK entity the old
+    /// <c>IGenericEntityService.CreateAsync</c> capture held (<see cref="RecordCreationWriteCapture.Entity"/>).
+    /// </summary>
+    public RecordCreationWriteCapture CaptureRecordCreationWrite() => RecordCreationWriteCapture.Attach(FieldMappings, CallerDataverse);
+
     public OfficeQuickCreateTestWebAppFactory()
     {
         CallerRead = MappingSourceCallerReadDouble.MirroringAppReads(Entities);
+        CallerDataverse = new OfficeCallerDataverseDouble(CallerRead, ResolvedCaller);
         // #2191 K2: a project created from a matter or project is filed under it — the pair's type comes from the record-type
         // catalog, and the secure-root plan then reads that parent's flag. This host holds no matter or project rows, so the
         // parent read finds none and confers nothing (an ordinary create, as every pre-existing test here expects).
@@ -1040,6 +1047,20 @@ public sealed class OfficeQuickCreateTestWebAppFactory : OfficeTestWebAppFactory
             });
     }
 
+    /// <summary>
+    /// The systemuser the endpoint's resolver last resolved, read from the mock's recorded invocations (so it adds no call to
+    /// it); <see langword="null"/> when none resolved.
+    /// </summary>
+    private Guid? ResolvedCaller()
+    {
+        var resolved = CallerResolver.Invocations.LastOrDefault(i => i.Method.Name == nameof(ICallerSystemUserResolver.ResolveAsync));
+        return resolved?.ReturnValue is Task<CallerSystemUserResolution> { IsCompletedSuccessfully: true } task
+               && task.Result is { IsResolved: true, SystemUserId: { } id }
+               && Guid.TryParse(id, out var systemUserId)
+            ? systemUserId
+            : null;
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         base.ConfigureWebHost(builder);
@@ -1059,7 +1080,7 @@ public sealed class OfficeQuickCreateTestWebAppFactory : OfficeTestWebAppFactory
             services.AddSingleton(AccessProbe.Object);
 
             services.RemoveAll<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient>();
-            services.AddSingleton<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient>(CallerRead);
+            services.AddSingleton<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient>(CallerDataverse);
         });
     }
 }

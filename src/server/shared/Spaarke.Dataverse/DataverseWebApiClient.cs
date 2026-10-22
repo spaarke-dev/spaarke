@@ -170,7 +170,7 @@ public class DataverseWebApiClient : IDisposable
     public virtual async Task<T?> RetrieveAsync<T>(string entitySetName, Guid id, string? select = null, CancellationToken cancellationToken = default)
     {
         var query = select != null ? $"?$select={select}" : "";
-        var url = $"{entitySetName}({id}){query}";
+        var url = $"{DataverseIdentifier.RequireTableName(entitySetName, nameof(entitySetName))}({id}){query}";
 
         _logger.LogDebug("GET {Url}", url);
 
@@ -185,7 +185,8 @@ public class DataverseWebApiClient : IDisposable
     {
         _logger.LogDebug("POST {EntitySetName}", entitySetName);
 
-        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Post, entitySetName, cancellationToken);
+        using var request = await CreateAuthenticatedRequestAsync(
+            HttpMethod.Post, DataverseIdentifier.RequireTableName(entitySetName, nameof(entitySetName)), cancellationToken);
         request.Content = JsonContent.Create(entity);
         var response = await _httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
@@ -203,7 +204,7 @@ public class DataverseWebApiClient : IDisposable
 
     public virtual async Task UpdateAsync(string entitySetName, Guid id, object entity, CancellationToken cancellationToken = default)
     {
-        var url = $"{entitySetName}({id})";
+        var url = $"{DataverseIdentifier.RequireTableName(entitySetName, nameof(entitySetName))}({id})";
 
         _logger.LogDebug("PATCH {Url}", url);
 
@@ -236,7 +237,7 @@ public class DataverseWebApiClient : IDisposable
         if (string.IsNullOrWhiteSpace(etag))
             throw new ArgumentException("A conditional update needs the row's ETag as it was read; nothing was sent.", nameof(etag));
 
-        var url = $"{entitySetName}({id})";
+        var url = $"{DataverseIdentifier.RequireTableName(entitySetName, nameof(entitySetName))}({id})";
 
         _logger.LogDebug("PATCH {Url} (If-Match {ETag})", url, etag);
 
@@ -266,7 +267,7 @@ public class DataverseWebApiClient : IDisposable
     // RetrieveAsync / CreateAsync / UpdateAsync / QueryAsync already carry. No behaviour change.
     public virtual async Task DeleteAsync(string entitySetName, Guid id, CancellationToken cancellationToken = default)
     {
-        var url = $"{entitySetName}({id})";
+        var url = $"{DataverseIdentifier.RequireTableName(entitySetName, nameof(entitySetName))}({id})";
 
         _logger.LogDebug("DELETE {Url}", url);
 
@@ -310,7 +311,7 @@ public class DataverseWebApiClient : IDisposable
         // Use relative URL form — Dataverse accepts both absolute and entity-set-relative
         var refBody = new Dictionary<string, string>
         {
-            ["@odata.id"] = $"{relatedEntitySet}({relatedEntityId})"
+            ["@odata.id"] = $"{DataverseIdentifier.RequireTableName(relatedEntitySet, nameof(relatedEntitySet))}({relatedEntityId})"
         };
 
         request.Content = JsonContent.Create(refBody);
