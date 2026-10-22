@@ -77,6 +77,9 @@ None of them takes a token or fact (`BillingFindingSignalMapper.cs:342-351` on `
 - **A prior submission with no invoice link** (no `duplicateOf.invoiceId`, and the submission's `_sprk_invoice_value` is null): the Duplicate is withheld for everyone. Fails closed.
 - **Id path vs tracking-number path:** the id path checks only the earlier invoice. The tracking-number path also needs the caller to read the submission, the current invoice and (line-level) the billing event. So an older Signal can be withheld where a newer one about the same prior is shown. Accepted under D-176.
 - **URL length:** about 200 very long tracking numbers in one chunk could exceed Dataverse's URL limit. The read then faults and the page's Duplicates are withheld (fail closed). Real numbers are about 20 characters.
+- **No paging on the submission read (round 2):** the read follows no `@odata.nextLink`. A chunk is at most 200 numbers and each (org, number) pair is unique under the alternate key, so a page holds at most 200 matching rows (under Dataverse's 5,000-row page) unless the org In-filter is dropped (more than 20 orgs in the chunk) and the same number recurs across many orgs. A missing row then reads as "no match", which withholds (fail closed).
+- **Structural characters (round 2):** apostrophe, `"` and backslash are proven live; other characters JSON-encode under `UnsafeRelaxedJsonEscaping` and are then URL-escaped once, but have no live test.
+- **Case (round 2):** the (org, number) pair is matched `OrdinalIgnoreCase` after the read; Dataverse's In match follows the org collation (case-insensitive on dev). A culture-specific fold that differs from ordinal case-folding could leave a returned row unmatched, which withholds (fail closed).
 - **"Two submissions → withhold"** cannot occur live (the Active alternate key on tracking number + vendor org); it is defensive.
 
 ## Tests
