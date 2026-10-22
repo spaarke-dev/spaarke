@@ -1867,3 +1867,20 @@ Reading: once such an archive is linked to exactly one communication (by the 190
 - A Restricted set on the archive by hand still stays (round 87). The implementation must tell the two apart.
 - Dev today: 0 unlinked archives are own-Restricted (190 census: 119 blank, 1 Standard), so the 190 Apply on dev is unaffected.
 - The design check is running; the implementation follows as a task-190 follow-up.
+
+## Round 123 (2026-10-22): user-started playbook runs write as the user (#2257)
+
+Raised by UAC's security pass 2 on PR #2253. Any signed-in internal user can create a playbook through the still-open authoring API (`POST /api/ai/playbooks`, then nodes), add an Update Record step, and run it. The step writes app-only, as System Administrator, to any record and any column the deny-lists don't name.
+
+The owner first asked what a playbook is, since the product moved away from playbooks as its design model. The explanation given:
+- the old engine still runs underneath: matter health's Update Record step, document summaries, the document email wizard, and the Console's playbook list;
+- its authoring API is still open to any signed-in user, though no screen uses it.
+
+The owner's choice, verbatim: **"Run as the user (Recommended)"**.
+
+Reading:
+- When a person starts a run (`RunUserId` set), the Update Record step and the output mapping write AS THAT PERSON: `ImpersonateSystemUserId` = `RunUserId`.
+- Runs with no person (scheduled or system) stay app-only, behind the `RefuseAppOnlyWrite` deny-lists.
+- `matter-health-single` keeps working, because the run filter already requires Write on the matter.
+- The authoring API is not locked in this change (the "Run as user + lock authoring" option was not chosen).
+- Implementation: #2257, after #2253.
