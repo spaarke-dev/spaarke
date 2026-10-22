@@ -1010,9 +1010,24 @@ public sealed class OfficeQuickCreateTestWebAppFactory : OfficeTestWebAppFactory
     /// </summary>
     public MappingSourceCallerReadDouble CallerRead { get; }
 
+    /// <summary>
+    /// Field mapping task 018b-1b: the caller's Dataverse as the host registers it. The #2188 mask read is answered by
+    /// <see cref="CallerRead"/>, unchanged; the questions <c>RecordCreationService</c> asks as the caller are scripted from the
+    /// suites' fixture world, with <c>WhoAmI()</c> naming the systemuser <see cref="CallerResolver"/> resolved. Anything else
+    /// throws, naming the request.
+    /// </summary>
+    public OfficeCallerDataverseDouble CallerDataverse { get; }
+
+    /// <summary>
+    /// Field mapping task 018b-1b: captures <c>RecordCreationService</c>'s step-11 write and views it as the SDK entity the old
+    /// <c>IGenericEntityService.CreateAsync</c> capture held (<see cref="RecordCreationWriteCapture.Entity"/>).
+    /// </summary>
+    public RecordCreationWriteCapture CaptureRecordCreationWrite() => RecordCreationWriteCapture.Attach(FieldMappings, CallerDataverse);
+
     public OfficeQuickCreateTestWebAppFactory()
     {
         CallerRead = MappingSourceCallerReadDouble.MirroringAppReads(Entities);
+        CallerDataverse = new OfficeCallerDataverseDouble(CallerRead, ResolvedCaller);
         // #2191 K2: a project created from a matter or project is filed under it — the pair's type comes from the record-type
         // catalog, and the secure-root plan then reads that parent's flag. This host holds no matter or project rows, so the
         // parent read finds none and confers nothing (an ordinary create, as every pre-existing test here expects).
@@ -1040,6 +1055,20 @@ public sealed class OfficeQuickCreateTestWebAppFactory : OfficeTestWebAppFactory
             });
     }
 
+    /// <summary>
+    /// The systemuser the endpoint's resolver last resolved, read from the mock's recorded invocations (so it adds no call to
+    /// it); <see langword="null"/> when none resolved.
+    /// </summary>
+    private Guid? ResolvedCaller()
+    {
+        var resolved = CallerResolver.Invocations.LastOrDefault(i => i.Method.Name == nameof(ICallerSystemUserResolver.ResolveAsync));
+        return resolved?.ReturnValue is Task<CallerSystemUserResolution> { IsCompletedSuccessfully: true } task
+               && task.Result is { IsResolved: true, SystemUserId: { } id }
+               && Guid.TryParse(id, out var systemUserId)
+            ? systemUserId
+            : null;
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         base.ConfigureWebHost(builder);
@@ -1059,7 +1088,7 @@ public sealed class OfficeQuickCreateTestWebAppFactory : OfficeTestWebAppFactory
             services.AddSingleton(AccessProbe.Object);
 
             services.RemoveAll<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient>();
-            services.AddSingleton<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient>(CallerRead);
+            services.AddSingleton<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient>(CallerDataverse);
         });
     }
 }
