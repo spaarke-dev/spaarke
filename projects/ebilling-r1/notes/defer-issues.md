@@ -1084,3 +1084,16 @@ The BFF routes (`/review`, `/blocked`) are covered by 119.
 
 ---
 
+### DEF-038 — File store has no blob soft delete or versioning
+
+| Field | Value |
+|---|---|
+| **Status** | Open (owner decision: retention period, and whether dev gets it) |
+| **Urgency** | medium |
+| **Filed** | 2026-10-22 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2255 |
+
+**Description**: Raised by uac-r2 in the 091 review. `ebilling-file-store.bicep` leaves blob soft delete and versioning off, and the BFF identity can delete blobs (the 091 probe returned 202). A wrong delete of an invoice file cannot be recovered. Options: soft delete or versioning with retention in the module, at least for non-dev environments, with each environment's value coming in through the stamp wiring (#2232).
+
+---
+
