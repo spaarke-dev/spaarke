@@ -39,7 +39,9 @@ namespace Sprk.Bff.Api.Tests.DataMutation.ChildAccessPermission;
 /// root the registry and the grant model name is covered; the tables the access code names are scanned from source by
 /// <c>Spaarke.ArchTests.AccessTableReaderScanTests</c>. #2253 fix round 1 adds: a table that is not a bare identifier is
 /// refused first (<see cref="InheritedAccessPermission.AppOnlyTableNameInvalidReasonCode"/>, F1-a), and a non-root table's
-/// access columns (<see cref="InheritedAccessPermission.AccessColumns"/>, F1-b).
+/// access columns (<see cref="InheritedAccessPermission.AccessColumns"/>, F1-b). #2253 fix round 4 adds the mailbox
+/// configuration, the AI search index allow-list, the membership junction and the SPE admin audit trail (refused whole), and
+/// a proposal's message (<c>sprk_emailreviewlog.sprk_communication</c>, refused per column).
 /// </summary>
 public class AccessTableAppOnlyWriterTests
 {
@@ -55,6 +57,9 @@ public class AccessTableAppOnlyWriterTests
         // #2253 fix round 3: F3 (the record-type catalogue) and the wider reader scan (K).
         "sprk_recordtype_ref", "sprk_communicationparticipant", "sprk_communicationchannelref", "sprk_specontainertypeconfig",
         "sprk_speenvironment",
+
+        // #2253 fix round 4: F-2 (mailbox configuration), K-4 (index allow-list, membership junction), K-2 (SPE audit).
+        "sprk_communicationaccount", "sprk_aisearchindex", "sprk_userentityassociation", "sprk_speauditlog",
     ];
 
     /// <summary>#2253 fix round 2: the platform tables that grant or scope access (<c>PlatformSecurityTables</c>).</summary>
@@ -92,6 +97,9 @@ public class AccessTableAppOnlyWriterTests
             "sprk_regardingservicerequest",
         ],
         ["sprk_communicationattachment"] = ["sprk_graphdriveid", "sprk_graphitemid", "sprk_communication", "sprk_document"],
+
+        // #2253 fix round 4 (F-1): the message a proposal belongs to decides who sees and applies it.
+        ["sprk_emailreviewlog"] = ["sprk_communication"],
     };
 
     /// <summary>
@@ -196,6 +204,12 @@ public class AccessTableAppOnlyWriterTests
         data.Add("sprk_analysis", "sprk_regardingmatter@odata.bind", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
         data.Add("sprk_communicationattachment", "sprk_graphitemid", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
         data.Add("principalobjectaccess", "accessrightsmask", InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode);
+        // #2253 fix round 4: F-1 in each form, and F-2's mailbox columns.
+        data.Add("sprk_emailreviewlog", "sprk_communication", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
+        data.Add("sprk_emailreviewlog", "sprk_Communication@odata.bind", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
+        data.Add("sprk_emailreviewlog", "_sprk_communication_value", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
+        data.Add("sprk_communicationaccount", "sprk_receiveenabled", InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode);
+        data.Add("sprk_aisearchindex", "sprk_searchindexname", InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode);
         data.Add("sprk_externalrecordaccess')?$select=EntitySetName#", "sprk_name",
             InheritedAccessPermission.AppOnlyTableNameInvalidReasonCode);
         data.Add("sprk_matter')?$select=EntitySetName#", "sprk_issecure", InheritedAccessPermission.AppOnlyTableNameInvalidReasonCode);
@@ -277,11 +291,13 @@ public class AccessTableAppOnlyWriterTests
     [InlineData("sprk_eventtype_ref")]
     [InlineData("sprk_communication")]
     [InlineData("sprk_communicationthread")]
-    [InlineData("sprk_communicationaccount")]
     [InlineData("sprk_communicationattachment")]
     [InlineData("sprk_analysis")]
-    [InlineData("sprk_userentityassociation")]
     [InlineData("sprk_emailupdatefield")]
+    // #2253 fix round 4: refused per column, not whole; and the communication tables beside the mailbox configuration.
+    [InlineData("sprk_emailreviewlog")]
+    [InlineData("sprk_communicationrule")]
+    [InlineData("sprk_triagecategory")]
     public void ANeighbouringTable_IsNotRefusedWhole(string? table)
     {
         Code(table, "sprk_name").Should().BeNull($"'{table}' is not an access table");
@@ -408,6 +424,9 @@ public class AccessTableAppOnlyWriterTests
             SecureRootInheritance.RecordTypeRefEntity,
             Sprk.Bff.Api.Services.Communication.CommunicationFanOutTargetingService.ParticipantEntity,
             Sprk.Bff.Api.Services.Communication.Membership.MembershipReconciler.ChannelRefEntity,
+            // #2253 fix round 4 (K-4).
+            DataverseAllowedIndexesProvider.CatalogEntity,
+            Sprk.Bff.Api.Services.Ai.Membership.MembershipJunctionUpdater.JunctionEntityLogicalName,
         ];
         foreach (var table in readers)
         {
@@ -428,6 +447,20 @@ public class AccessTableAppOnlyWriterTests
         Code(" SPRK_RecordType_Ref ", key).Should().Be(InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode);
     }
 
+    [Theory]
+    [InlineData("sprk_emailaddress")]
+    [InlineData("sprk_receiveenabled")]
+    [InlineData("sprk_autocreaterecords")]
+    [InlineData("sprk_sendstoday")]
+    [InlineData("sprk_SubscriptionId")]
+    public void TheMailboxConfiguration_IsRefusedWhole_ToAnAppOnlyWriter_NotToTheCaller(string key)
+    {
+        // #2253 fix round 4 (F-2): which mailbox the BFF subscribes to and ingests is decided by these rows, read app-only.
+        Code("sprk_communicationaccount", key).Should().Be(InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode);
+        Code(" SPRK_CommunicationAccount ", key).Should().Be(InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode);
+        CallerCode("sprk_communicationaccount", key).Should().BeNull("the caller's own privileges decide");
+    }
+
     // ── #2253 fix round 1 (F1-b): a non-root table's access columns ──────────────────────────────────────────────
 
     /// <summary>Each access column on its table, in each form a payload key can take.</summary>
@@ -445,8 +478,9 @@ public class AccessTableAppOnlyWriterTests
             }
         }
 
-        // The navigation-property spelling a configuration writes for the task-141 link.
+        // The navigation-property spelling a configuration writes for the task-141 link, and for a proposal's message.
         data.Add("systemuser", "sprk_PrimaryContact@odata.bind", "sprk_primarycontact");
+        data.Add("sprk_emailreviewlog", "sprk_Communication@odata.bind", "sprk_communication");
         return data;
     }
 
@@ -518,6 +552,8 @@ public class AccessTableAppOnlyWriterTests
                 Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator.AttachmentCommunicationColumn),
             (Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator.AttachmentEntity,
                 Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator.AttachmentDocumentColumn),
+            (Sprk.Bff.Api.Api.Filters.CommunicationRecordAuthorizationFilter.EmailReviewLogEntity,
+                Sprk.Bff.Api.Api.Filters.CommunicationRecordAuthorizationFilter.ProposalCommunicationColumn),
         ];
         foreach (var (table, column) in readers)
             Code(table, column).Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, $"{column} on {table}");
@@ -557,7 +593,14 @@ public class AccessTableAppOnlyWriterTests
     [InlineData("sprk_event", "sprk_isinternalonly")]
     [InlineData("sprk_event", "sprk_regardingmatter")]
     [InlineData("sprk_document", "sprk_privacystate")]
-    [InlineData("sprk_communicationaccount", "sprk_sendstoday")]
+    // #2253 fix round 4 (F-1): a proposal's other columns, and its message's column on other tables.
+    [InlineData("sprk_emailreviewlog", "sprk_action")]
+    [InlineData("sprk_emailreviewlog", "sprk_aisuggestion")]
+    [InlineData("sprk_emailreviewlog", "sprk_targetentity")]
+    [InlineData("sprk_emailreviewlog", "sprk_targetrecordid")]
+    [InlineData("sprk_emailreviewlog", "sprk_communicationname")]
+    [InlineData("sprk_event", "sprk_communication")]
+    [InlineData("sprk_emailupdatefield", "sprk_communication")]
     public void AnOrdinaryColumn_OrAnAccessColumnOnAnotherTable_IsNotRefused(string table, string key) =>
         Code(table, key).Should().BeNull($"'{key}' on {table} decides no access");
 

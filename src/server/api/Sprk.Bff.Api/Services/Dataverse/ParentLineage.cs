@@ -816,6 +816,21 @@ internal static class InheritedAccessPermission
     /// unit a type serves (<c>SpeAdminGraphService</c>, <c>ConfigEndpoints</c>). Each is written only by its typed writer
     /// (the participant indexer, the thread key strategy, the SPE admin endpoints); no playbook, output mapping or
     /// field-mapping rule writes them (live dev, read-only, 2026-10-22).</item>
+    /// <item>#2253 fix round 4. <c>sprk_communicationaccount</c> (F-2): mailbox configuration. Receive-enabled accounts are
+    /// read app-only (<c>IncomingCommunicationProcessor</c>, <c>GraphSubscriptionManager</c>,
+    /// <c>InboundPollingBackupService</c>), and <c>sprk_emailaddress</c>, <c>sprk_receiveenabled</c> and
+    /// <c>sprk_autocreaterecords</c> decide which mailbox the BFF subscribes to and ingests into Spaarke records.
+    /// <c>sprk_aisearchindex</c> (K-4): the active rows' <c>sprk_searchindexname</c> is the allow-list a caller-supplied
+    /// <c>searchIndexName</c> is checked against before the BFF binds a search client to it
+    /// (<c>DataverseAllowedIndexesProvider</c>, <c>KnowledgeDeploymentService.ValidateAllowedIndexAsync</c>), so a written
+    /// row widens which indexes every caller may query. <c>sprk_userentityassociation</c> (K-4): the membership junction;
+    /// <c>ParticipantCorrelationRung</c> reads it to file an inbound email under the matters its participants belong to, and
+    /// with <c>AutoFileOptions.Rung2And3AutoFileEnabled</c> on that filing is automatic, so a forged row puts a message in
+    /// front of another matter's audience. <c>sprk_speauditlog</c> (K-2, the SPE admin scan): the append-only SPE admin
+    /// audit trail; its <c>sprk_containertypeconfig</c> lookup decides which admins read a row (<c>AuditLogEndpoints</c>,
+    /// behind <c>SpeAdminTenantScope</c>). Each is written only by its typed writer (the account and subscription services,
+    /// the catalogue's admin, <c>MembershipJunctionUpdater</c> and the reconciliation job, <c>SpeAuditService</c>); no
+    /// playbook node, output mapping or field-mapping rule writes them (live dev, read-only, 2026-10-22).</item>
     /// </list>
     /// </summary>
     internal static readonly IReadOnlySet<string> AccessTables = new HashSet<string>(
@@ -829,6 +844,10 @@ internal static class InheritedAccessPermission
         Sprk.Bff.Api.Services.Communication.Membership.MembershipReconciler.ChannelRefEntity,
         "sprk_specontainertypeconfig",
         "sprk_speenvironment",
+        "sprk_communicationaccount",
+        Sprk.Bff.Api.Services.Ai.DataverseAllowedIndexesProvider.CatalogEntity,
+        Sprk.Bff.Api.Services.Ai.Membership.MembershipJunctionUpdater.JunctionEntityLogicalName,
+        "sprk_speauditlog",
         "teammembership",
         "fieldpermission",
         .. PlatformSecurityTables,
@@ -903,6 +922,13 @@ internal static class InheritedAccessPermission
     /// <c>sprk_graphdriveid</c> / <c>sprk_graphitemid</c> and the links <c>sprk_communication</c> / <c>sprk_document</c>,
     /// which decide which bytes the row names and which container it belongs with (<c>DocumentContainerRelocator</c>,
     /// <c>RecordContainerResolver.CommunicationAttachmentItemRefusalAsync</c>).</item>
+    /// <item>#2253 fix round 4 (F-1). <c>sprk_emailreviewlog</c>: <c>sprk_communication</c>, the message a proposal belongs
+    /// to. A caller sees a proposal, and may apply it, only when they can see that message
+    /// (<c>CommunicationRecordAuthorizationFilter.AuthorizeVisibleProposalAsync</c> and
+    /// <c>AuthorizeProposalCreateTaskApplyAsync</c>), and the queue feed scopes the proposals it returns, with their quoted
+    /// text, by it (<c>CommunicationQueueFeedService.LoadOpenProposalItemsAsync</c>). Re-pointed at a message the caller can
+    /// see, a privileged message's proposal would be shown and applied. Its target columns are not listed: the apply checks
+    /// the caller's own rights on the target.</item>
     /// </list>
     /// Data, not branching: a table with no entry has no such column.
     /// </summary>
@@ -978,6 +1004,11 @@ internal static class InheritedAccessPermission
                 Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator.ItemColumn,
                 Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator.AttachmentCommunicationColumn,
                 Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator.AttachmentDocumentColumn,
+            },
+            [Sprk.Bff.Api.Api.Filters.CommunicationRecordAuthorizationFilter.EmailReviewLogEntity] = new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase)
+            {
+                Sprk.Bff.Api.Api.Filters.CommunicationRecordAuthorizationFilter.ProposalCommunicationColumn,
             },
         };
 

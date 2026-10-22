@@ -50,20 +50,18 @@ public class AccessTableReaderScanTests
             ["sprk_communicationthread"] = "A thread: its privacy state and thread type are refused per column (AccessColumns); its owner is refused.",
             ["sprk_analysis"] = "An analysis: every anchor lookup the read rule requires Read on is refused per column (AccessColumns).",
             ["sprk_communicationattachment"] = "An attachment row: its file pointer and its communication / document links are refused per column (AccessColumns).",
+            // #2253 fix round 4 (F-1): the proposal's message decides who sees and applies it.
+            ["sprk_emailreviewlog"] = "The proposal and decision log: its communication, which decides who sees and applies a proposal, is refused per column (AccessColumns); its target is re-checked against the caller's own rights.",
 
             // Not access, each read in the code:
-            ["sprk_communicationaccount"] = "A mailbox configuration row; a caller's use is gated by the caller's own Read/Write on it (CommunicationRecordAuthorizationFilter), no column decides record access.",
             ["sprk_analysisskill"] = "A scope row /create associates; the check is the caller's own rights on the analysis, no column of it is read (AnalysisAuthorizationFilter).",
             ["sprk_analysisknowledge"] = "A scope row /create associates; the check is the caller's own rights on the analysis, no column of it is read (AnalysisAuthorizationFilter).",
             ["sprk_analysistool"] = "A scope row /create associates; the check is the caller's own rights on the analysis, no column of it is read (AnalysisAuthorizationFilter).",
             ["sprk_emailupdatefield"] = "The fields an email proposal may set; the apply runs impersonated (CommunicationProposalApplyService), so Dataverse still enforces the caller's rights.",
-            ["sprk_emailreviewlog"] = "The proposal and decision log; read app-only and never returned, it decides no access.",
             ["sprk_triagecategory"] = "The classifier's category taxonomy (CommunicationEnrichmentService).",
             ["sprk_communicationrule"] = "AI confidence thresholds and task due days (CommunicationRuleGate); sprk_flagprivilege is legal privilege, not access.",
             ["sprk_gridconfiguration"] = "UI grid configuration (GridConfigurationService).",
             ["savedquery"] = "View definitions (SavedQueryService).",
-            ["sprk_aisearchindex"] = "The AI search index catalogue: which index a record is indexed into, not who reads it; search results are authorized per row.",
-            ["sprk_userentityassociation"] = "The user-record membership cache behind the 'my memberships' list and the email-correlation rung; the nightly reconciliation rebuilds it from the source lookups, and no access decision reads it.",
             ["privilege"] = "Platform-defined and read-only (Dataverse refuses a write); UserPrivilegeChecker reads its names.",
             ["template"] = "Email templates; the filter checks the caller's own Read on the row (CommunicationRecordAuthorizationFilter).",
         };
@@ -95,6 +93,9 @@ public class AccessTableReaderScanTests
         Path.Combine("Services", "Documents"),
         Path.Combine("Services", "RecordCreation"),
         Path.Combine("Api", "Filters"),
+        // #2253 fix round 4 (K-2): the SPE admin endpoints and services, which read the container-type configuration.
+        Path.Combine("Api", "SpeAdmin"),
+        Path.Combine("Services", "SpeAdmin"),
     ];
 
     private static readonly Regex TableConstant = new(
@@ -205,6 +206,9 @@ public class AccessTableReaderScanTests
         foreach (var table in InheritedAccessPermission.AccessColumns.Keys)
         {
             Assert.False(InheritedAccessPermission.AccessTables.Contains(table), table + " is refused whole and per column");
+
+            // #2253 fix round 4 (K-3): and listed, so its reason says it is refused per column.
+            Assert.True(NotAccessTables.ContainsKey(table), table + " has access columns but is not listed in NotAccessTables");
         }
 
         Assert.DoesNotContain("sprk_recordtype_ref", NotAccessTables.Keys);
