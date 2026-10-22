@@ -161,7 +161,9 @@ public static class FinanceModule
 
         // Override / Return of a blocked internal submission (ebilling-r1 task 105, FR-19, FR-37, D-24, D-73, D-76). Concrete (ADR-010: no
         // interface, one implementation). Scoped like its scoped dependencies (IGenericEntityService, IInvoiceLifecycleService). The privilege
-        // check is a static class over the existing CallerRecordAccessProbe, so it adds no registration. Unconditional (flag rule above).
+        // check is a static class over the existing CallerRecordAccessProbe, so it adds no registration. Unconditional (flag rule above). The
+        // blocked view also takes the caller's IDataverseUserClient and EarlierInvoiceReadability (SignalsModule) for the D-176 Duplicate check
+        // (task 119 round 2, DuplicateDetailGate, shared with InvoiceReviewReadService).
         services.AddScoped<SubmissionOverrideService>();
 
         // Invoice submission processing (ebilling-r1 task 049 parts B-E, FR-20 / FR-21, D-101; Processing Pipeline steps 1-9). The pipeline is

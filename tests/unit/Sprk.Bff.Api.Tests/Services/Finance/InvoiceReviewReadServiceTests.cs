@@ -613,6 +613,14 @@ public sealed class InvoiceReviewReadServiceTests
         finding.SuggestedAdjustment.Should().BeNull();
     }
 
+    /// <summary>The whole response, as serialized, names neither the earlier tracking number nor the earlier invoice id (119 round 2, K3).</summary>
+    private static void ShouldNotLeak(InvoiceReviewDto review, string number, Guid invoice)
+    {
+        var json = JsonSerializer.Serialize(review);
+        json.Should().NotContain(number);
+        json.Should().NotContain(invoice.ToString("D"));
+    }
+
     /// <summary>The non-Duplicate groups of <see cref="DuplicateWorld"/> come back exactly as stored.</summary>
     private static void OthersUntouched(InvoiceReviewDto review)
     {
@@ -660,6 +668,7 @@ public sealed class InvoiceReviewReadServiceTests
         ShouldBeWithheld(duplicate);
         duplicate.Message.Should().Be(BillingRuleCatalogue.WithheldDuplicateTemplate, "a read-time withheld finding reads like a write-time one (K2)");
         OthersUntouched(review);
+        ShouldNotLeak(review, EarlierNumber, EarlierInvoice);
     }
 
     [Fact(DisplayName = "119: the whole (policy, subject) group is scrubbed and its sentence replaced even when the Duplicate is not the primary reason")]
@@ -671,10 +680,12 @@ public sealed class InvoiceReviewReadServiceTests
             [Finding(0, "BILL-DUP", "other.reason", 0, ruleType: "Duplicate"), Finding(1, "BILL-DUP", "DuplicateOfPriorSubmissionLine", 0, EarlierNumber, EarlierInvoice)],
             [Plan("BILL-DUP", LineId(1), DuplicateSentence, "other.reason", "DuplicateOfPriorSubmissionLine")]));
 
-        var findings = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!.Lines.Single().Findings;
+        var review = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!;
+        var findings = review.Lines.Single().Findings;
 
         ShouldBeWithheld(findings.Single(f => f.ReasonCode == "other.reason"), primary: true);
         ShouldBeWithheld(findings.Single(f => f.ReasonCode == "DuplicateOfPriorSubmissionLine"), primary: false);
+        ShouldNotLeak(review, EarlierNumber, EarlierInvoice);
     }
 
     [Theory(DisplayName = "119: the fallback not found, more than one submission, or a fault in the caller's read withholds; the page still loads")]
@@ -706,6 +717,7 @@ public sealed class InvoiceReviewReadServiceTests
         review.Should().NotBeNull("the check never fails the page");
         ShouldBeWithheld(review!.Lines.Single().Findings.Single(f => f.PolicyCode == "BILL-DUP"));
         OthersUntouched(review);
+        ShouldNotLeak(review, EarlierNumber, EarlierInvoice);
     }
 
     [Fact(DisplayName = "119: a finding withheld at write time (no duplicateOf.*) is returned as stored and asks the caller nothing")]
@@ -748,6 +760,34 @@ public sealed class InvoiceReviewReadServiceTests
         }
 
         OthersUntouched(review);
+    }
+
+    [Fact(DisplayName = "119 r2: two Duplicate groups, one readable and one not: only the unreadable one is withheld")]
+    public async Task MixedReadability_WithholdsOnlyTheUnreadableGroup()
+    {
+        const string otherNumber = "F-080.1";
+        const string otherSentence = "Invoice F-100, the line dated 2026-09-01 for J. Smith, duplicates F-080.1.";
+        var w = new World();
+        w.AddLine(1, InvoiceLineStatus.Flagged);
+        w.AddLine(2, InvoiceLineStatus.Flagged);
+        w.Submission = SubmissionRow(Stored(
+            [
+                Finding(0, "BILL-DUP", "DuplicateOfPriorSubmissionLine", 0, EarlierNumber, EarlierInvoice),
+                Finding(1, "BILL-DUP", "DuplicateOfPriorSubmissionLine", 1, otherNumber, OtherEarlierInvoice),
+            ],
+            [
+                Plan("BILL-DUP", LineId(1), DuplicateSentence, "DuplicateOfPriorSubmissionLine"),
+                Plan("BILL-DUP", LineId(2), otherSentence, "DuplicateOfPriorSubmissionLine"),
+            ]));
+        w.ReadableInvoices.Add(EarlierInvoice);
+
+        var review = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!;
+
+        ShouldBeShown(review.Lines.Single(l => l.Sequence == 1).Findings.Single(), DuplicateSentence);
+        ShouldBeWithheld(review.Lines.Single(l => l.Sequence == 2).Findings.Single());
+        JsonSerializer.Serialize(review).Should().Contain(EarlierNumber, "the readable group is returned whole");
+        ShouldNotLeak(review, otherNumber, OtherEarlierInvoice);
+        w.CallerReads("sprk_invoices").Should().Be(1, "one check for both groups");
     }
 
     [Fact(DisplayName = "119: one check per response: one caller invoice read and one submission read whatever the number of Duplicates")]
@@ -798,6 +838,7 @@ public sealed class InvoiceReviewReadServiceTests
         review.Should().NotBeNull();
         ShouldBeWithheld(review!.Lines.Single().Findings.Single(f => f.PolicyCode == "BILL-DUP"));
         OthersUntouched(review);
+        ShouldNotLeak(review, EarlierNumber, EarlierInvoice);
         // The read model's own wrap caught it (not a fault 157 handled itself): its Warning names the check.
         w.Logger.Verify(l => l.Log(
             LogLevel.Warning, It.IsAny<EventId>(),

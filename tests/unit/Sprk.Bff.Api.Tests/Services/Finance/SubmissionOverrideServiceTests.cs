@@ -1,5 +1,7 @@
 using System.ServiceModel;
+using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -8,6 +10,7 @@ using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Finance;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
@@ -102,6 +105,16 @@ public class SubmissionOverrideServiceTests
         public FakeTimeProvider Clock { get; } = new(new DateTimeOffset(2026, 10, 20, 9, 0, 0, TimeSpan.Zero));
         public CapturedLogger Log { get; } = new();
         public SubmissionOverrideService Service { get; }
+
+        // D-176 (task 119 round 2): the CALLER's Dataverse, the evaluating double of InvoiceReviewReadServiceTests (and ontology 157). The
+        // invoice read returns the In-listed ids the caller reads; the submission read evaluates the vendor org and tracking-number In lists.
+        public HashSet<Guid> ReadableInvoices { get; } = [];
+        public List<(Guid Org, string Number, Guid? Invoice)> CallerSubmissions { get; } = [];
+        public List<string> CallerPaths { get; } = [];
+        public Func<string, Task<DataverseUserResponse>>? CallerFault { get; set; }
+        public Mock<IDataverseUserClient> CallerClient { get; } = new(MockBehavior.Strict);
+
+        public int CallerReads(string set) => CallerPaths.Count(p => p.StartsWith(set + "?", StringComparison.Ordinal));
 
         private readonly string _initialJson;
 
@@ -254,8 +267,12 @@ public class SubmissionOverrideServiceTests
             Probe.CallerSystemUserId = Caller;
             Probe.Hold(EbillingOverridePrivilege.PrivilegeName);
 
+            CallerClient.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Returns((string path, CancellationToken _) => AnswerCaller(path));
+
             Service = new SubmissionOverrideService(
-                Entities.Object, Lifecycle.Object, Idempotency.Object, Sink.Object, Probe, Log,
+                Entities.Object, Lifecycle.Object, Idempotency.Object, Sink.Object, Probe, CallerClient.Object,
+                new EarlierInvoiceReadability(NullLogger<EarlierInvoiceReadability>.Instance), Log,
                 (decision, ct) =>
                 {
                     Order.Add("record");
@@ -302,6 +319,57 @@ public class SubmissionOverrideServiceTests
                 });
             Entities.Setup(e => e.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string table, CancellationToken _) => table + "s");
+        }
+
+        private Task<DataverseUserResponse> AnswerCaller(string path)
+        {
+            CallerPaths.Add(path);
+            if (CallerFault is not null)
+            {
+                return CallerFault(path);
+            }
+
+            var set = path[..path.IndexOf('?')];
+            var filter = Uri.UnescapeDataString(path[(path.IndexOf("$filter=", StringComparison.Ordinal) + 8)..]);
+            object rows = set switch
+            {
+                "sprk_invoices" => Regex.Matches(filter, "'([0-9a-f-]{36})'").Select(m => Guid.Parse(m.Groups[1].Value))
+                    .Where(ReadableInvoices.Contains)
+                    .Select(id => new Dictionary<string, object?> { ["sprk_invoiceid"] = id })
+                    .ToList(),
+                "sprk_invoicesubmissions" => SubmissionsAsCaller(filter),
+                _ => throw new InvalidOperationException($"unexpected caller read {path}"),
+            };
+            return Task.FromResult(DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new { value = rows })));
+        }
+
+        private List<Dictionary<string, object?>> SubmissionsAsCaller(string filter)
+        {
+            var numbers = InList(filter, "sprk_trackingnumber").ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var orgs = InList(filter, "sprk_vendororg").Select(Guid.Parse).ToHashSet();
+            return CallerSubmissions.Where(s => orgs.Contains(s.Org) && numbers.Contains(s.Number))
+                .Select(s => new Dictionary<string, object?>
+                {
+                    ["sprk_trackingnumber"] = s.Number,
+                    ["_sprk_vendororg_value"] = s.Org,
+                    ["_sprk_invoice_value"] = s.Invoice,
+                })
+                .ToList();
+        }
+
+        /// <summary>The values of <c>In(PropertyName='{property}',PropertyValues=[...])</c>: single-quoted GUIDs, or JSON strings.</summary>
+        private static List<string> InList(string filter, string property)
+        {
+            var marker = $"In(PropertyName='{property}',PropertyValues=";
+            var array = filter[(filter.IndexOf(marker, StringComparison.Ordinal) + marker.Length)..];
+            if (array.Length > 1 && array[1] == '\'')
+            {
+                return Regex.Matches(array[..array.IndexOf(']', StringComparison.Ordinal)], "'([^']*)'").Select(m => m.Groups[1].Value).ToList();
+            }
+
+            var reader = new Utf8JsonReader(System.Text.Encoding.UTF8.GetBytes(array));
+            using var doc = JsonDocument.ParseValue(ref reader);
+            return doc.RootElement.EnumerateArray().Select(e => e.GetString()!).ToList();
         }
 
         /// <summary>The app-identity close as the Signal writer behaves: Open/Acknowledged → Resolved Acted by the record; a repeat by the
@@ -1470,6 +1538,282 @@ public class SubmissionOverrideServiceTests
         var act = () => w.Service.GetAsync(World.SubmissionId, World.Token, CancellationToken.None);
 
         (await act.Should().ThrowAsync<SdapProblemException>()).Which.StatusCode.Should().Be(503);
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+    // Read: D-176 (task 119 round 2), a Duplicate's earlier invoice judged as the caller (DuplicateDetailGate, shared with /review)
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+
+    private static readonly Guid FirmId = Guid.Parse("10500000-0000-4000-8000-0000000000f1");
+    private static readonly Guid EarlierInvoice = Guid.Parse("10500000-0000-4000-8000-0000000000e1");
+    private static readonly Guid OtherEarlierInvoice = Guid.Parse("10500000-0000-4000-8000-0000000000e2");
+    private const string EarlierNumber = "F-090.1";
+    private const string OtherEarlierNumber = "F-080.1";
+
+    private static JsonObject ValueRead(string name, string? value, int? line, string? field = null) => new()
+    {
+        ["name"] = name, ["value"] = value, ["line"] = line, ["field"] = field, ["confidence"] = field is null ? null : 0.97,
+        ["belowReliabilityThreshold"] = false,
+    };
+
+    /// <summary>A stored finding as 049 writes DuplicateHandler's: the line's values, the current invoice number, then (when visible at
+    /// write time) <c>duplicateOf.trackingNumber</c>, <c>duplicateOf.lineIndex</c> and <c>duplicateOf.invoiceId</c>; a group scrubbed at
+    /// write time (D-112) has no values at all, as the persister writes it.</summary>
+    private static JsonObject StoredFinding(
+        string policy, string reason, int? line, string? number = null, Guid? earlierInvoice = null, bool withheld = false, string ruleType = "Duplicate")
+    {
+        var finding = new JsonObject
+        {
+            ["ruleType"] = ruleType, ["policyCode"] = policy, ["policyVersionId"] = Guid.NewGuid().ToString("D"), ["clause"] = "Guideline 9",
+            ["clauseLocation"] = null, ["subject"] = line is null ? "Invoice" : "Line", ["line"] = line, ["reasonCode"] = reason,
+            ["detailWithheld"] = withheld, ["consequence"] = "Flag", ["rejects"] = false, ["heldBecause"] = null,
+        };
+        if (withheld)
+        {
+            return finding;
+        }
+
+        var values = new JsonArray(
+            ValueRead("line.timekeeperName", "J. Smith", line, "Timekeeper"), ValueRead("line.date", "2026-09-01", line, "Date"),
+            ValueRead("invoice.firmInvoiceNumber", "INV-100", null));
+        if (number is not null)
+        {
+            values.Add(ValueRead("duplicateOf.trackingNumber", number, null));
+            values.Add(ValueRead("duplicateOf.lineIndex", "3", null));
+        }
+
+        if (earlierInvoice is { } id)
+        {
+            values.Add(ValueRead("duplicateOf.invoiceId", id.ToString("D"), null));
+        }
+
+        finding["valuesRead"] = values;
+        return finding;
+    }
+
+    /// <summary>The blocked fixture (its real InvoiceAge finding kept) plus a RateCard finding on line 0 and the given findings; the
+    /// submission names its firm (<c>sprk_vendororg</c>), the org a number-only prior is resolved in.</summary>
+    private static async Task<World> DuplicateWorldAsync(params JsonObject[] added)
+    {
+        var w = await World.CreateAsync(json =>
+        {
+            var findings = (JsonArray)json["findings"]!;
+            foreach (var finding in added.Prepend(StoredFinding("BILL-RATE", "rate.above_card", 0, ruleType: "RateCard")))
+            {
+                finding["index"] = findings.Count;
+                findings.Add(finding);
+            }
+
+            return json;
+        });
+        w.Submission[TrackingNumberAllocator.FirmColumn] = new EntityReference("sprk_organization", FirmId);
+        return w;
+    }
+
+    private static Task<BlockedSubmissionView?> GetBlockedAsync(World w) => w.Service.GetAsync(World.SubmissionId, World.Token, CancellationToken.None);
+
+    private static BlockedFindingView Of(BlockedSubmissionView view, string policy, int? line = 0) =>
+        view.Findings.Single(f => f.PolicyCode == policy && f.Line == line);
+
+    private static void ShouldBeShown(BlockedFindingView finding)
+    {
+        finding.DetailWithheld.Should().BeFalse();
+        finding.ValuesRead.Should().Contain(v => v.Name == "line.timekeeperName");
+    }
+
+    private static void ShouldBeWithheld(BlockedFindingView finding)
+    {
+        finding.DetailWithheld.Should().BeTrue();
+        finding.ValuesRead.Should().BeEmpty("no duplicateOf.* entry and no line values (the write-time withheld shape)");
+    }
+
+    /// <summary>The whole response, as serialized, names neither the earlier tracking number nor the earlier invoice id (K3).</summary>
+    private static void ShouldNotLeak(BlockedSubmissionView view, string number, Guid invoice)
+    {
+        var json = JsonSerializer.Serialize(view);
+        json.Should().NotContain(number);
+        json.Should().NotContain(invoice.ToString("D"));
+    }
+
+    /// <summary>The non-Duplicate findings come back as stored: the RateCard one with its values, the fixture's own blocking finding.</summary>
+    private static void OthersUntouched(BlockedSubmissionView view)
+    {
+        var rate = Of(view, "BILL-RATE");
+        rate.DetailWithheld.Should().BeFalse();
+        rate.ValuesRead.Should().HaveCount(3);
+        view.Findings.Where(f => f.PolicyCode is not ("BILL-DUP" or "BILL-DUPINV")).Should().OnlyContain(f => !f.DetailWithheld);
+        view.Findings.Should().Contain(f => f.Blocking, "the fixture's blocking finding is untouched");
+    }
+
+    [Theory(DisplayName = "119 r2: blocked view, a Duplicate whose earlier invoice the caller reads (by id, or by number) is returned unchanged, read as the caller")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Get_D176_ReadableEarlierInvoice_IsUnchanged(bool byId)
+    {
+        var w = await DuplicateWorldAsync(StoredFinding("BILL-DUP", "DuplicateOfPriorSubmissionLine", 0, EarlierNumber, byId ? EarlierInvoice : null));
+        w.ReadableInvoices.Add(EarlierInvoice);
+        w.CallerSubmissions.Add((FirmId, EarlierNumber, EarlierInvoice));
+
+        var view = (await GetBlockedAsync(w))!;
+
+        var duplicate = Of(view, "BILL-DUP");
+        ShouldBeShown(duplicate);
+        duplicate.ValuesRead.Should().Contain(v => v.Name == "duplicateOf.trackingNumber" && v.Value == EarlierNumber);
+        OthersUntouched(view);
+        w.CallerReads("sprk_invoices").Should().Be(1, "the earlier invoice is read as the caller");
+        w.CallerReads("sprk_invoicesubmissions").Should().Be(byId ? 0 : 1, "an id needs no submission read; a number is resolved through it");
+        if (!byId)
+        {
+            Uri.UnescapeDataString(w.CallerPaths.Single(p => p.StartsWith("sprk_invoicesubmissions?", StringComparison.Ordinal)))
+                .Should().Contain(FirmId.ToString("D"), "the number is resolved within the submission's own firm");
+        }
+    }
+
+    [Theory(DisplayName = "119 r2: blocked view, an earlier invoice the caller cannot read withholds the Duplicate group; nothing in the response names it")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Get_D176_UnreadableEarlierInvoice_IsWithheld(bool byId)
+    {
+        var w = await DuplicateWorldAsync(StoredFinding("BILL-DUP", "DuplicateOfPriorSubmissionLine", 0, EarlierNumber, byId ? EarlierInvoice : null));
+        w.CallerSubmissions.Add((FirmId, EarlierNumber, EarlierInvoice));
+
+        var view = (await GetBlockedAsync(w))!;
+
+        ShouldBeWithheld(Of(view, "BILL-DUP"));
+        OthersUntouched(view);
+        ShouldNotLeak(view, EarlierNumber, EarlierInvoice);
+    }
+
+    [Theory(DisplayName = "119 r2: blocked view, the fallback not found, more than one submission, a 500 or a throw withholds; the view still loads")]
+    [InlineData("not-found")]
+    [InlineData("more-than-one")]
+    [InlineData("500")]
+    [InlineData("throw")]
+    public async Task Get_D176_FallbackFailures_Withhold(string failure)
+    {
+        var w = await DuplicateWorldAsync(StoredFinding("BILL-DUP", "DuplicateOfPriorSubmissionLine", 0, EarlierNumber));
+        w.ReadableInvoices.UnionWith([EarlierInvoice, OtherEarlierInvoice]);
+        switch (failure)
+        {
+            case "more-than-one":
+                w.CallerSubmissions.Add((FirmId, EarlierNumber, EarlierInvoice));
+                w.CallerSubmissions.Add((FirmId, EarlierNumber.ToLowerInvariant(), OtherEarlierInvoice));
+                break;
+            case "500":
+                w.CallerFault = _ => Task.FromResult(DataverseUserResponse.Fail(500, DataverseUserClientErrorCodes.ServiceError, "boom"));
+                break;
+            case "throw":
+                w.CallerFault = _ => Task.FromException<DataverseUserResponse>(new TimeoutException("read timed out"));
+                break;
+        }
+
+        var view = await GetBlockedAsync(w);
+
+        view.Should().NotBeNull("the check never fails the view (200)");
+        ShouldBeWithheld(Of(view!, "BILL-DUP"));
+        OthersUntouched(view!);
+        ShouldNotLeak(view!, EarlierNumber, EarlierInvoice);
+    }
+
+    [Fact(DisplayName = "119 r2: blocked view, a finding withheld at write time (no duplicateOf.*) stays withheld and asks the caller nothing")]
+    public async Task Get_D176_WriteTimeWithheld_StaysWithheld()
+    {
+        var w = await DuplicateWorldAsync(StoredFinding("BILL-DUP", "DuplicateOfPriorSubmissionLine", 0, withheld: true));
+
+        var view = (await GetBlockedAsync(w))!;
+
+        ShouldBeWithheld(Of(view, "BILL-DUP"));
+        OthersUntouched(view);
+        w.CallerPaths.Should().BeEmpty("no Duplicate quoting an earlier invoice: nothing to judge");
+    }
+
+    [Fact(DisplayName = "119 r2: blocked view, with no Duplicate every finding is returned as stored and the caller is asked nothing")]
+    public async Task Get_D176_NonDuplicateFindings_AreUntouched()
+    {
+        var w = await DuplicateWorldAsync(StoredFinding("BILL-STAFF", "staffing.too_many", null, ruleType: "Staffing"));
+
+        var view = (await GetBlockedAsync(w))!;
+
+        OthersUntouched(view);
+        Of(view, "BILL-STAFF", null).ValuesRead.Should().HaveCount(3);
+        w.CallerPaths.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "119 r2: blocked view, two Duplicate groups, one readable and one not: only the unreadable one is withheld")]
+    public async Task Get_D176_MixedReadability_WithholdsOnlyTheUnreadableGroup()
+    {
+        var w = await DuplicateWorldAsync(
+            StoredFinding("BILL-DUP", "DuplicateOfPriorSubmissionLine", 0, EarlierNumber, EarlierInvoice),
+            StoredFinding("BILL-DUP", "DuplicateOfPriorSubmissionLine", 1, OtherEarlierNumber, OtherEarlierInvoice));
+        w.ReadableInvoices.Add(EarlierInvoice);
+
+        var view = (await GetBlockedAsync(w))!;
+
+        ShouldBeShown(Of(view, "BILL-DUP", 0));
+        ShouldBeWithheld(Of(view, "BILL-DUP", 1));
+        OthersUntouched(view);
+        JsonSerializer.Serialize(view).Should().Contain(EarlierNumber, "the readable group is returned whole");
+        ShouldNotLeak(view, OtherEarlierNumber, OtherEarlierInvoice);
+    }
+
+    [Fact(DisplayName = "119 r2: blocked view, one check per response: one caller invoice read and one submission read whatever the number of Duplicates")]
+    public async Task Get_D176_OneCheckPerResponse()
+    {
+        var w = await DuplicateWorldAsync(
+            StoredFinding("BILL-DUP", "DuplicateOfPriorSubmissionLine", 0, EarlierNumber, EarlierInvoice),
+            StoredFinding("BILL-DUP", "DuplicateOfPriorSubmissionLine", 1, EarlierNumber),
+            StoredFinding("BILL-DUP", "DuplicateOfPriorSubmissionLine", 2, OtherEarlierNumber),
+            StoredFinding("BILL-DUPINV", "DuplicateInvoiceNumber", null, OtherEarlierNumber, OtherEarlierInvoice));
+        w.ReadableInvoices.UnionWith([EarlierInvoice, OtherEarlierInvoice]);
+        w.CallerSubmissions.Add((FirmId, EarlierNumber, EarlierInvoice));
+        w.CallerSubmissions.Add((FirmId, OtherEarlierNumber, OtherEarlierInvoice));
+
+        var view = (await GetBlockedAsync(w))!;
+
+        view.Findings.Where(f => f.PolicyCode is "BILL-DUP" or "BILL-DUPINV").Should().HaveCount(4).And.OnlyContain(f => !f.DetailWithheld);
+        w.CallerReads("sprk_invoices").Should().Be(1);
+        w.CallerReads("sprk_invoicesubmissions").Should().Be(1);
+        w.CallerPaths.Should().HaveCount(2);
+    }
+
+    [Fact(DisplayName = "119 r2: blocked view, an exception escaping the check withholds every Duplicate group, warns without detail, and the view still loads")]
+    public async Task Get_D176_CheckThatThrows_WithholdsEveryDuplicate()
+    {
+        var w = await DuplicateWorldAsync(
+            StoredFinding("BILL-DUP", "DuplicateOfPriorSubmissionLine", 0, EarlierNumber, EarlierInvoice),
+            StoredFinding("BILL-DUPINV", "DuplicateInvoiceNumber", null, EarlierNumber, EarlierInvoice));
+        w.ReadableInvoices.Add(EarlierInvoice);
+        // A null response makes EarlierInvoiceReadability throw past its own guard (a NullReferenceException after the read): only the
+        // gate's wrap stands between it and the route.
+        w.CallerFault = _ => Task.FromResult<DataverseUserResponse>(null!);
+
+        var view = await GetBlockedAsync(w);
+
+        view.Should().NotBeNull();
+        ShouldBeWithheld(Of(view!, "BILL-DUP"));
+        ShouldBeWithheld(Of(view!, "BILL-DUPINV", null));
+        OthersUntouched(view!);
+        ShouldNotLeak(view!, EarlierNumber, EarlierInvoice);
+        w.Log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning
+            && e.Message.Contains("Blocked submission: the earlier-invoice check faulted (NullReferenceException)", StringComparison.Ordinal));
+        w.Log.Entries.Should().NotContain(e => e.Message.Contains(EarlierNumber, StringComparison.Ordinal)
+            || e.Message.Contains(EarlierInvoice.ToString("D"), StringComparison.Ordinal), "no earlier-invoice detail in the log");
+    }
+
+    [Fact(DisplayName = "119 r2: blocked view, the request's cancellation during the check propagates")]
+    public async Task Get_D176_Cancellation_Propagates()
+    {
+        using var cts = new CancellationTokenSource();
+        var w = await DuplicateWorldAsync(StoredFinding("BILL-DUP", "DuplicateOfPriorSubmissionLine", 0, EarlierNumber, EarlierInvoice));
+        w.CallerFault = _ =>
+        {
+            cts.Cancel();
+            throw new OperationCanceledException(cts.Token);
+        };
+
+        var act = () => w.Service.GetAsync(World.SubmissionId, World.Token, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════
