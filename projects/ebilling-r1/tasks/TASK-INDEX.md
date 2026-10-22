@@ -106,7 +106,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 116 | 🔲 [open] | Procedure Version documents: drafting and readers keyed per version on its Stored File; sprk_sourcedocument retired | FULL | opus / high | P3-F (p-safe false) | 081, 085, 090 |
 | 117 | 🔲 [open] | Core-record delete and Procedures: retire sweep for unlinked record-scoped rule sets; delete lists agreed with uac-r2 | FULL | opus / high | P3-D (p-safe false) | 089 |
 | 118 | 🔲 [open] | Submit Invoice in the email UI: toolbar button (replaces Link Invoice), flagged attachments, Email Review Invoice tab | FULL | sonnet / high | P3-F | 094 |
-| 119 | 🔲 [open] | Read-time Duplicate withholding on /review: hide an earlier invoice the reader cannot read (D-176, #2118) | FULL | opus / high | P4-A | 100 |
+| 119 | ✅ [done] | Read-time Duplicate withholding on /review: hide an earlier invoice the reader cannot read (D-176, #2118) | FULL | opus / high | P4-A | 100 |
 
 ### Phase 4 — Review and approval (WP4)
 
