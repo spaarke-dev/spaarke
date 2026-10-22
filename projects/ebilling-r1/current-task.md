@@ -17,7 +17,7 @@
 | Task | State | Waiting on |
 |---|---|---|
 | 081 Procedure service | Agent running. Merges first; it shares uac's creator-person files with 090 | Agent report |
-| 090 File store service | Agent running. Its POML carries: the checked sizebytes conversion (refuse > int.MaxValue), one canonical source-version string, and downloads only on a clean scan time no earlier than Last-Modified (091 condition 3) | Agent report; rebase after 081 |
+| 090 File store service | Built (bedf2580e9). uac-r2 review: 4 F findings. A fix agent is working on F1–F3 and the cheap Ks in the 090 worktree; send that diff to uac-r2 for a diff-only re-check. F4 waits for UAC #2253 to reach master (uac-r2 will message when it does). Then merge master into work/ebilling-r1 (252+ commits behind) and rebase 090. F4 itself: add StoredFileSchema.Entity (the constant, not a literal) to ParentLineage AccessTables, refused whole, with a reason comment naming the typed writer StoredFileService and "no playbook node, output mapping or field-mapping rule writes it"; add Services/Finance/Files to ScannedFolders; put sprk_procedureversion and sprk_billingexport in NotAccessTables with true reasons; add a must-fire row in TheAccessTableSet_IsExactlyTheseTables. Earlier note: Its POML carries: the checked sizebytes conversion (refuse > int.MaxValue), one canonical source-version string, and downloads only on a clean scan time no earlier than Last-Modified (091 condition 3) | Agent report; rebase after 081 |
 | O-14 prototype | First cut in spaarke-prototype/projects/ebilling.r1 | 084/089 correct its assumed DTOs |
 
 ### Owner decisions 2026-10-22 (later; do not ask again)
