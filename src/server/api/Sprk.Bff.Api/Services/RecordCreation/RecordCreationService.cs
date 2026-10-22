@@ -199,6 +199,8 @@ internal sealed partial class RecordCreationService
         // ── Step 11: ONE app-only create (alternate-key retry on an autonumber table only) ─────────────────────────────
         trace.Begin(RecordCreationStep.Create);
         var id = Guid.NewGuid();
+        // Task 018b-1s (G1): the keys of the body this create sends, exactly as sent (a copy: the create may keep the instance).
+        var writtenColumns = decision.Fields!.Keys.ToArray();
         // Only the platform's own number is retried: a row that names its number (a server writer's mapped item; a caller's
         // is refused at step 2) collides on THAT number, which no retry changes.
         var retriesTheNumber = rule.AutonumberColumn is not null && !decision.Item!.Columns.Any(c => IsNumberColumn(rule, c));
@@ -257,7 +259,8 @@ internal sealed partial class RecordCreationService
             correlationId);
         // The mapping step's warnings first (step 3 ran before the create), then step 8's, then the post-create ones.
         return trace.Created(id, decision.OwningTeamId, decision.IsolatedFor is not null,
-            [.. decision.MappingWarnings.Select(w => w.Detail), .. decision.DefaultWarnings, .. warnings], decision.MappingWarnings);
+            [.. decision.MappingWarnings.Select(w => w.Detail), .. decision.DefaultWarnings, .. warnings], decision.MappingWarnings,
+            writtenColumns);
     }
 
     /// <summary>What steps 1 to 10 decided: a refusal, or the fields to create and the facts step 12 needs.</summary>
@@ -309,7 +312,11 @@ internal sealed partial class RecordCreationService
                             table, whoFailure.ErrorCode);
                         return Decision.Refuse(new RecordCreationRefusal(RecordCreationRefusalKind.PrincipalUnresolved,
                             Sprk.Bff.Api.Api.ChildRecordEndpoints.CallerUnresolvedReasonCode,
-                            $"You could not be identified in Dataverse, so the {noun} was not created."));
+                            $"You could not be identified in Dataverse, so the {noun} was not created.")
+                        {
+                            // Task 018b-1s (G2): which of the four WhoAmI failures it was (no token vs no Dataverse user).
+                            ClientFailure = whoFailure,
+                        });
                     }
 
                     return Decision.Refuse(Upstream(whoFailure, noun));
@@ -1243,7 +1250,7 @@ internal sealed partial class RecordCreationService
         { ClientFailure: { } failure } => Upstream(failure, noun),
         { Invalid: { } invalid } => new(RecordCreationRefusalKind.Invalid, RecordCreationRefusal.InvalidPayloadCode, invalid),
         { ParentUnavailable: true } => new(RecordCreationRefusalKind.NotFoundOrDenied, RecordCreationRefusal.NotFoundCode,
-            check.Denied ?? NotAvailableToFileUnder),
+            check.Denied ?? NotAvailableToFileUnder) { RefusedColumn = check.RefusedColumn },
         { Denied: { } denied } => new(RecordCreationRefusalKind.Forbidden, RecordCreationRefusal.DeniedCode, denied),
         _ => new(RecordCreationRefusalKind.Undecided, RecordCreationRefusal.NoDecisionCode, $"The {noun} was not created."),
     };
@@ -1512,9 +1519,10 @@ internal sealed partial class RecordCreationService
 
         public RecordCreationOutcome Created(
             Guid id, Guid? owningTeamId, bool isolated, IReadOnlyList<string> warnings,
-            IReadOnlyList<RecordCreationWarning> mappingWarnings) => new()
+            IReadOnlyList<RecordCreationWarning> mappingWarnings, IReadOnlyCollection<string> writtenColumns) => new()
         {
             CreatedId = id,
+            WrittenColumns = writtenColumns,
             OwningTeamId = owningTeamId,
             Isolated = isolated,
             Warnings = warnings,
@@ -1754,6 +1762,16 @@ internal sealed record RecordCreationOutcome
     public IReadOnlyList<RecordCreationWarning> MappingWarnings { get; init; } = [];
 
     public IReadOnlyList<RecordCreationStepRecord> Steps { get; init; } = [];
+
+    /// <summary>
+    /// Task 018b-1s (G1): the keys of the one app-only create's body (step 11), exactly as sent — a plain column by its
+    /// logical name (<c>sprk_mattername</c>) and a lookup by its bind key (<c>sprk_MatterType@odata.bind</c>, the metadata's
+    /// own navigation-property spelling; never expanded or rewritten). It is the final row, so it holds what the server added
+    /// (the owner bind, the creator person, a search-index default) and leaves out a mapped value that was dropped. An
+    /// adapter asks whether a column was written by comparing case-insensitively with and without the bind suffix. Empty
+    /// for every refusal, including one after the create (an isolated root removed again) — the row no longer exists.
+    /// </summary>
+    public IReadOnlyCollection<string> WrittenColumns { get; init; } = [];
 
     /// <summary>The team the create bound as owner.</summary>
     public Guid? OwningTeamId { get; init; }
