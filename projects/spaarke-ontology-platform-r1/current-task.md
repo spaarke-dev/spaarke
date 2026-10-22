@@ -15,17 +15,7 @@
 
 ## Next, in order
 
-1. **ebilling 088:** run 1 on dev stopped with exit 1 on 2026-10-22. The field-permission service refused the BigInt `sprk_sourceversion` (0x8004f508), even though CanBeSecuredFor* read true in both pre-checks.
-   - **Partial state on dev:** the table, all columns, the marker and Superseded exist; 8 of 14 Stored File columns are secured.
-   - **Retype (owner-approved in ebilling's session):** `sprk_sourceversion` becomes String 20 and `sprk_sizebytes` becomes Integer. ebilling deletes the two empty BigInt columns and re-creates them with the new types.
-   - **Our scoped check (asked of ebilling 2026-10-22):**
-     - (1) The re-run skips the partial state and secures only the 6 remaining columns. Our read-back on 2026-10-22 shows 9 columns secured, not 8: filestatus is secured too. Each has Readers R / Writers RCU rows plus the platform's own System Administrator row. The two BigInt columns are deleted, and there are 0 rows. The end state is 15 secured columns; blobpath gets Writers only.
-     - (2) The delete is guarded by a dependency check and gives a clear exit if a name still resolves.
-     - (3) The >2 GiB cap is fail-closed in 090 (checked conversion) and recorded as a known limit.
-     - (4) `ForSourceVersion` and the column use one canonical string form.
-     - (5) The 088 and 090 POMLs are updated to the new types.
-   - **Scoped check: PASS 2026-10-22** on `44c1ef6a2d..5af7f6c879`. I reproduced Pester (088 74/74, 080 85/85; the suite needs Pester 3.4 under pwsh 7). -WhatIf creates 13 rows, changes 6 and skips 31. ebilling now runs it under the owner's OK, then runs again.
-   - **Then the read-back on dev:** `sprk_storedfile` SchemaName `sprk_StoredFile`; primary `sprk_Name`; the new types; 15 secured columns with grants (blobpath Writers only); 6 relationships (4 RemoveLink, 2 Restrict, none parental) with Related menu DoNotDisplay; `statuscode` Superseded `659490005`; a second run skips all. Log it in `notes/deploy-log.md`.
+1. **ebilling 088 ✅ on dev (2026-10-22):** our read-back PASS, logged in `notes/deploy-log.md`. ebilling merges it into work/ebilling-r1 next. No further action from us unless they send a change.
 2. **Next R3 dev BFF from master** carries 157: check ancestry (`aa3dc49897`, R3 077 `283466d40`), run `scratchpad/live/smokeA_v2.py` on both matters, set `since` in `deploycheck.py` to the deploy time and run it; deploy-log entry.
 3. **ebilling reviews when sent:** 097 (BillingFactLoader Superseded → null; our path), 116 (drafting re-keyed per Procedure Version), 082 (resolver uses `BillingRuleDefinition.PrecedenceKey`), 081 (creator-person zero-non-null assert). The 088 F1s are already filed into their POMLs 117, 094/095, 097 (`8d1394a4ed`). Every schema run: final script + `-WhatIf` to us, before/after notices, no run before our PASS; check all core records.
 4. **105 UAT** with the owner: 102 wizard browser tests + keyboard/screen-reader; 064 §6.1 non-admin checks and UI tests (D-164); the 055 Next step To Do.
