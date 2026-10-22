@@ -41,7 +41,9 @@ namespace Sprk.Bff.Api.Tests.DataMutation.ChildAccessPermission;
 /// refused first (<see cref="InheritedAccessPermission.AppOnlyTableNameInvalidReasonCode"/>, F1-a), and a non-root table's
 /// access columns (<see cref="InheritedAccessPermission.AccessColumns"/>, F1-b). #2253 fix round 4 adds the mailbox
 /// configuration, the AI search index allow-list, the membership junction and the SPE admin audit trail (refused whole), and
-/// a proposal's message (<c>sprk_emailreviewlog.sprk_communication</c>, refused per column).
+/// a proposal's message (<c>sprk_emailreviewlog.sprk_communication</c>, refused per column). #2253 fix round 5 adds a
+/// business unit's parent (<c>businessunit.parentbusinessunitid</c>, refused per column, F4) and the triage taxonomy
+/// (<c>sprk_triagecategory</c>, refused whole, K1).
 /// </summary>
 public class AccessTableAppOnlyWriterTests
 {
@@ -60,6 +62,9 @@ public class AccessTableAppOnlyWriterTests
 
         // #2253 fix round 4: F-2 (mailbox configuration), K-4 (index allow-list, membership junction), K-2 (SPE audit).
         "sprk_communicationaccount", "sprk_aisearchindex", "sprk_userentityassociation", "sprk_speauditlog",
+
+        // #2253 fix round 5 (K1): the classifier taxonomy whose category routes an unfiled communication's owner.
+        "sprk_triagecategory",
     ];
 
     /// <summary>#2253 fix round 2: the platform tables that grant or scope access (<c>PlatformSecurityTables</c>).</summary>
@@ -85,7 +90,7 @@ public class AccessTableAppOnlyWriterTests
             "isdisabled", "accessmode", "applicationid", "parentsystemuserid", "positionid",
         ],
         ["team"] = ["businessunitid", "name", "teamtype", "isdefault"],
-        ["businessunit"] = ["sprk_containerid", "name"],
+        ["businessunit"] = ["sprk_containerid", "name", "parentbusinessunitid"], // #2253 fix round 5 (F4): the parent
 
         // #2253 fix round 3 (K): found by the wider reader scan.
         ["sprk_communication"] = ["sprk_isinternalonly"],
@@ -210,6 +215,11 @@ public class AccessTableAppOnlyWriterTests
         data.Add("sprk_emailreviewlog", "_sprk_communication_value", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
         data.Add("sprk_communicationaccount", "sprk_receiveenabled", InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode);
         data.Add("sprk_aisearchindex", "sprk_searchindexname", InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode);
+        // #2253 fix round 5: F4 (re-parenting a business unit) in each form, and K1's classifier guidance.
+        data.Add("businessunit", "parentbusinessunitid", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
+        data.Add("businessunit", "parentbusinessunitid@odata.bind", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
+        data.Add("businessunit", "_parentbusinessunitid_value", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
+        data.Add("sprk_triagecategory", "sprk_classifierguidance", InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode);
         data.Add("sprk_externalrecordaccess')?$select=EntitySetName#", "sprk_name",
             InheritedAccessPermission.AppOnlyTableNameInvalidReasonCode);
         data.Add("sprk_matter')?$select=EntitySetName#", "sprk_issecure", InheritedAccessPermission.AppOnlyTableNameInvalidReasonCode);
@@ -297,7 +307,9 @@ public class AccessTableAppOnlyWriterTests
     // #2253 fix round 4: refused per column, not whole; and the communication tables beside the mailbox configuration.
     [InlineData("sprk_emailreviewlog")]
     [InlineData("sprk_communicationrule")]
-    [InlineData("sprk_triagecategory")]
+    // #2253 fix round 5 (K1): the taxonomy's neighbours (sprk_triagecategory itself is refused whole).
+    [InlineData("sprk_triagecategoryx")]
+    [InlineData("sprk_triagepriority")]
     public void ANeighbouringTable_IsNotRefusedWhole(string? table)
     {
         Code(table, "sprk_name").Should().BeNull($"'{table}' is not an access table");
@@ -417,9 +429,11 @@ public class AccessTableAppOnlyWriterTests
     // ── #2253 fix round 3: F3 (sprk_recordtype_ref) and the wider reader scan's whole tables ─────────────────────
 
     [Fact]
-    public void TheNewWholeTables_AreTheirReadersOwnConstants_AndRefusedOnlyToAnAppOnlyWriter()
+    public void TheNewWholeTables_AreTheBffsOwnConstants_AndRefusedOnlyToAnAppOnlyWriter()
     {
-        string[] readers =
+        // The constant the BFF names each table by: a reader's where one exists; for the membership junction it is its
+        // writer's (MembershipJunctionUpdater), the only constant naming that table (#2253 fix round 5, K3).
+        string[] constants =
         [
             SecureRootInheritance.RecordTypeRefEntity,
             Sprk.Bff.Api.Services.Communication.CommunicationFanOutTargetingService.ParticipantEntity,
@@ -428,7 +442,7 @@ public class AccessTableAppOnlyWriterTests
             DataverseAllowedIndexesProvider.CatalogEntity,
             Sprk.Bff.Api.Services.Ai.Membership.MembershipJunctionUpdater.JunctionEntityLogicalName,
         ];
-        foreach (var table in readers)
+        foreach (var table in constants)
         {
             Code(table, "sprk_name").Should().Be(InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode, table);
             CallerCode(table, "sprk_name").Should().BeNull($"{table}: the caller's own privileges decide");
@@ -461,6 +475,20 @@ public class AccessTableAppOnlyWriterTests
         CallerCode("sprk_communicationaccount", key).Should().BeNull("the caller's own privileges decide");
     }
 
+    [Theory]
+    [InlineData("sprk_name")]
+    [InlineData("sprk_classifierguidance")]
+    [InlineData("sprk_enabled")]
+    [InlineData("statecode")]
+    public void TheTriageTaxonomy_IsRefusedWhole_ToAnAppOnlyWriter_NotToTheCaller(string key)
+    {
+        // #2253 fix round 5 (K1): the offered rows are the classifier's choices and guidance, and the category it picks
+        // routes an unfiled communication's owner (CategoryRoutingGate), so no app-only writer may touch a row.
+        Code("sprk_triagecategory", key).Should().Be(InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode);
+        Code(" SPRK_TriageCategory ", key).Should().Be(InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode);
+        CallerCode("sprk_triagecategory", key).Should().BeNull("the caller's own privileges decide");
+    }
+
     // ── #2253 fix round 1 (F1-b): a non-root table's access columns ──────────────────────────────────────────────
 
     /// <summary>Each access column on its table, in each form a payload key can take.</summary>
@@ -481,6 +509,7 @@ public class AccessTableAppOnlyWriterTests
         // The navigation-property spelling a configuration writes for the task-141 link, and for a proposal's message.
         data.Add("systemuser", "sprk_PrimaryContact@odata.bind", "sprk_primarycontact");
         data.Add("sprk_emailreviewlog", "sprk_Communication@odata.bind", "sprk_communication");
+        data.Add("businessunit", "ParentBusinessUnitId@odata.bind", "parentbusinessunitid");
         return data;
     }
 
@@ -538,6 +567,7 @@ public class AccessTableAppOnlyWriterTests
             (SecureRecordOwnerTeam.TeamEntity, SecureRecordOwnerTeam.IsDefaultColumn),
             ("businessunit", RecordContainerResolver.ContainerColumn),
             ("businessunit", SecureRecordOwnerTeam.NameColumn),
+            (RecordContainerResolver.BusinessUnitEntity, RecordContainerResolver.ParentBusinessUnitColumn),
             (RecordThreadFiling.CommunicationTable, Sprk.Bff.Api.Services.Communication.CommunicationInternalOnlyFloor.InternalOnlyField),
             (Sprk.Bff.Api.Services.Communication.CommunicationInternalOnlyFloor.ThreadEntity,
                 Sprk.Bff.Api.Services.Communication.CommunicationInternalOnlyFloor.ThreadPrivacyField),
@@ -601,6 +631,14 @@ public class AccessTableAppOnlyWriterTests
     [InlineData("sprk_emailreviewlog", "sprk_communicationname")]
     [InlineData("sprk_event", "sprk_communication")]
     [InlineData("sprk_emailupdatefield", "sprk_communication")]
+    // #2253 fix round 5 (F4): a business unit's other columns, and the parent's name on other tables.
+    [InlineData("businessunit", "parentbusinessunitidname")]
+    [InlineData("businessunit", "costcenter")]
+    [InlineData("businessunit", "divisionname")]
+    [InlineData("team", "parentbusinessunitid")]
+    // #2253 fix round 5 (K1): the communication's category lookup is a column, not the taxonomy table.
+    [InlineData("sprk_communication", "sprk_triagecategory")]
+    [InlineData("sprk_communication", "sprk_TriageCategory@odata.bind")]
     public void AnOrdinaryColumn_OrAnAccessColumnOnAnotherTable_IsNotRefused(string table, string key) =>
         Code(table, key).Should().BeNull($"'{key}' on {table} decides no access");
 

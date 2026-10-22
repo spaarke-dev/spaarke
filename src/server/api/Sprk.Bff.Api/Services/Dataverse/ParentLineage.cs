@@ -828,9 +828,18 @@ internal static class InheritedAccessPermission
     /// with <c>AutoFileOptions.Rung2And3AutoFileEnabled</c> on that filing is automatic, so a forged row puts a message in
     /// front of another matter's audience. <c>sprk_speauditlog</c> (K-2, the SPE admin scan): the append-only SPE admin
     /// audit trail; its <c>sprk_containertypeconfig</c> lookup decides which admins read a row (<c>AuditLogEndpoints</c>,
-    /// behind <c>SpeAdminTenantScope</c>). Each is written only by its typed writer (the account and subscription services,
-    /// the catalogue's admin, <c>MembershipJunctionUpdater</c> and the reconciliation job, <c>SpeAuditService</c>); no
-    /// playbook node, output mapping or field-mapping rule writes them (live dev, read-only, 2026-10-22).</item>
+    /// behind <c>SpeAdminTenantScope</c>). The account and subscription services, <c>MembershipJunctionUpdater</c> and the
+    /// reconciliation job, and <c>SpeAuditService</c> are their typed writers; the BFF has no writer of
+    /// <c>sprk_aisearchindex</c>: its rows are reference data written outside the BFF (the operator's
+    /// <c>scripts/phase-g-lookup-migration</c>, or a person in the app). No playbook node, output mapping or
+    /// field-mapping rule writes them (live dev, read-only, 2026-10-22).</item>
+    /// <item>#2253 fix round 5 (K1). <c>sprk_triagecategory</c>: the classifier's category taxonomy. The offered rows'
+    /// <c>sprk_name</c> and <c>sprk_classifierguidance</c> are the choices and guidance the classifier is given
+    /// (<c>LookupChoicesResolver</c>), and the category it picks drives <c>CategoryRoutingGate</c>, which assigns an
+    /// unfiled communication's <c>ownerid</c> to the mapped team (<c>CommunicationEnrichmentService.AssignOwningTeamAsync</c>),
+    /// so a re-worded row moves mail into another team's ownership: the <c>sprk_userentityassociation</c> rationale. The
+    /// BFF only reads it; no playbook node, output mapping or field-mapping rule writes it (live dev, read-only,
+    /// 2026-10-22).</item>
     /// </list>
     /// </summary>
     internal static readonly IReadOnlySet<string> AccessTables = new HashSet<string>(
@@ -848,6 +857,7 @@ internal static class InheritedAccessPermission
         Sprk.Bff.Api.Services.Ai.DataverseAllowedIndexesProvider.CatalogEntity,
         Sprk.Bff.Api.Services.Ai.Membership.MembershipJunctionUpdater.JunctionEntityLogicalName,
         "sprk_speauditlog",
+        "sprk_triagecategory",
         "teammembership",
         "fieldpermission",
         .. PlatformSecurityTables,
@@ -910,8 +920,13 @@ internal static class InheritedAccessPermission
     /// <c>SecureChildShareSynchronizer</c>) and a unit's default team (<c>ContactIdentityStore.BuildDefaultOwnerTeamPath</c>).</item>
     /// <item><c>businessunit</c>: <c>sprk_containerid</c>, the unit's default container
     /// (<see cref="Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.ContainerColumn"/>; its users' standing
-    /// writer grants, <c>SpeContainerMembershipSync</c>); and (#2253 fix round 2) <c>name</c>, by which the Secure Record
-    /// business unit is found (<c>SecureRecordOwnerTeam.BusinessUnitFilter</c>).</item>
+    /// writer grants, <c>SpeContainerMembershipSync</c>); (#2253 fix round 2) <c>name</c>, by which the Secure Record
+    /// business unit is found (<c>SecureRecordOwnerTeam.BusinessUnitFilter</c>); and (#2253 fix round 5, F4) its parent
+    /// <c>parentbusinessunitid</c>, which a plain Update can change: an SPE admin's scope is their unit and its descendants
+    /// (<c>SpeAdminTenantScope</c>), the business-unit walk picks a document's container
+    /// (<c>RecordContainerResolver</c>'s hierarchy read), the isolation census reads it (<c>SecureRecordIsolationCensus</c>),
+    /// and Dataverse's Parent:Child privilege depth follows it. Re-parented, the Secure Record unit would come under
+    /// another unit's users and admins.</item>
     /// <item>#2253 fix round 3 (K, the wider reader scan). <c>sprk_communication</c>: <c>sprk_isinternalonly</c>, which hides
     /// a message from partners (<c>CommunicationAccessFilter.EvaluateMessage</c>, <c>CommunicationInternalOnlyFloor</c>).
     /// <c>sprk_communicationthread</c>: <c>sprk_privacystate</c> (the Open / Private gate on fan-out and the partner read,
@@ -984,6 +999,7 @@ internal static class InheritedAccessPermission
             {
                 Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.ContainerColumn,
                 Sprk.Bff.Api.Infrastructure.Dataverse.SecureRecordOwnerTeam.NameColumn,
+                Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.ParentBusinessUnitColumn,
             },
             [RecordThreadFiling.CommunicationTable] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
@@ -1048,7 +1064,7 @@ internal static class InheritedAccessPermission
     /// <para>#2253 fix round 1: nor, on a table that is not a secure root, a column an access decision reads
     /// (<see cref="AccessColumns"/>: a contact's identity binding and standing grant, an organisation's standing grant, a
     /// user's home link, task-141 link, external flag, business unit, identity and eligibility, a team's owner-team
-    /// predicates, a business unit's container and name), refused with
+    /// predicates, a business unit's container, name and parent), refused with
     /// <see cref="AppOnlyAccessColumnWriteReasonCode"/>. Whatever the identity, a table that is not a bare identifier after
     /// trimming is refused first (<see cref="AppOnlyTableNameInvalidReasonCode"/>): the write would paste it into a URL.</para>
     /// <para><b>Identity</b> (<paramref name="identity"/>, K2): <see cref="WriteIdentity.Caller"/> (the field-mapping push,

@@ -86,8 +86,8 @@ public sealed partial class RecordContainerResolver
     /// <summary><c>systemuser.applicationid</c>: set for an application user (an Entra app's Dataverse identity). <c>internal</c> (#2253 fix round 2): <c>InheritedAccessPermission.AccessColumns</c> refuses it to app-only generic writers.</summary>
     internal const string ApplicationIdColumn = "applicationid";
 
-    /// <summary><c>businessunit.parentbusinessunitid</c> — null on the root business unit only.</summary>
-    private const string ParentBusinessUnitColumn = "parentbusinessunitid";
+    /// <summary><c>businessunit.parentbusinessunitid</c> — null on the root business unit only. <c>internal</c> (#2253 fix round 5): <c>InheritedAccessPermission.AccessColumns</c> refuses it to app-only generic writers.</summary>
+    internal const string ParentBusinessUnitColumn = "parentbusinessunitid";
 
     /// <summary>The communication a document belongs to (the archive path's link; every archive writer stamps it).</summary>
     private const string CommunicationEntity = "sprk_communication";
