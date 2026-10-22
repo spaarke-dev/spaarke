@@ -83,9 +83,9 @@ public sealed class SubmissionOverrideEndpointsAuthorizationContractTests
 
     private static readonly object[][] AllRoutes = [["GET", "blocked", true], ["POST", "override", false], ["POST", "return", false]];
 
-    public static IEnumerable<object[]> RoutesRefused => FinanceStepZeroCaller.Cross(AllRoutes, FinanceStepZeroCaller.RefusedKinds);
+    public static IEnumerable<object[]> RoutesRefused => StatedCaller.Cross(AllRoutes, StatedCaller.RefusedKinds);
 
-    public static IEnumerable<object[]> RoutesInternal => FinanceStepZeroCaller.Cross(AllRoutes, FinanceStepZeroCaller.InternalKinds);
+    public static IEnumerable<object[]> RoutesInternal => StatedCaller.Cross(AllRoutes, StatedCaller.InternalKinds);
 
     [Theory(DisplayName = "Task 099 must-fire: /blocked, /override and /return refuse a flagged-external, row-less or unreadable caller with their own denial, before any rights call, privilege question or read")]
     [MemberData(nameof(RoutesRefused))]
@@ -460,8 +460,8 @@ public sealed class SubmissionOverrideEndpointsAuthorizationContractTests
 
     private sealed class Host : IAsyncDisposable
     {
-        /// <summary>The step-0 caller (task 099); internal unless a test changes <see cref="FinanceStepZeroCaller.Kind"/>.</summary>
-        public FinanceStepZeroCaller StepZero { get; private set; } = null!;
+        /// <summary>The step-0 caller (task 099); internal unless a test changes <see cref="StatedCaller.Kind"/>.</summary>
+        public StatedCaller StepZero { get; private set; } = null!;
 
         private WebApplication _app = null!;
         private HttpClient _client = null!;
@@ -482,7 +482,7 @@ public sealed class SubmissionOverrideEndpointsAuthorizationContractTests
                 })
                 .AddScheme<AuthenticationSchemeOptions, FinanceAuthzTestAuthHandler>(FinanceAuthzTestAuthHandler.SchemeName, _ => { });
             builder.Services.AddAuthorization();
-            host.StepZero = FinanceStepZeroCaller.Register(builder.Services); // task 099: every /api/finance route runs step 0
+            host.StepZero = StatedCaller.Register(builder.Services); // task 099: every /api/finance route runs step 0
             builder.Services.AddOptions<EbillingOptions>().Configure(o => o.Enabled = ebillingEnabled);
 
             // The REAL authorization stack, substituted only at the access-data boundary.

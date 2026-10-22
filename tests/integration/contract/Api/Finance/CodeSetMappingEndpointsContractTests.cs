@@ -47,8 +47,8 @@ public sealed class CodeSetMappingEndpointsContractTests
 
     private sealed class Host : IAsyncDisposable
     {
-        /// <summary>The step-0 caller (task 099); internal unless a test changes <see cref="FinanceStepZeroCaller.Kind"/>.</summary>
-        public FinanceStepZeroCaller StepZero { get; private set; } = null!;
+        /// <summary>The step-0 caller (task 099); internal unless a test changes <see cref="StatedCaller.Kind"/>.</summary>
+        public StatedCaller StepZero { get; private set; } = null!;
 
         public readonly FakeCodingReferenceData Data = new();
         public readonly Mock<IInvoiceAi> Ai = new();
@@ -76,7 +76,7 @@ public sealed class CodeSetMappingEndpointsContractTests
                 })
                 .AddScheme<AuthenticationSchemeOptions, FinanceAuthzTestAuthHandler>(FinanceAuthzTestAuthHandler.SchemeName, _ => { });
             builder.Services.AddAuthorization();
-            host.StepZero = FinanceStepZeroCaller.Register(builder.Services); // task 099: every /api/finance route runs step 0
+            host.StepZero = StatedCaller.Register(builder.Services); // task 099: every /api/finance route runs step 0
             builder.Services.AddOptions<EbillingOptions>().Configure(o => o.Enabled = ebillingEnabled);
             builder.Services.AddSingleton<IAccessDataSource>(host.Access);
             builder.Services.AddScoped<IAuthorizationRule, OperationAccessRule>();
@@ -202,9 +202,9 @@ public sealed class CodeSetMappingEndpointsContractTests
         host.Data.Updates.Should().BeEmpty();
     }
 
-    public static IEnumerable<object[]> AllRoutesRefused => FinanceStepZeroCaller.Cross(AllRoutes, FinanceStepZeroCaller.RefusedKinds);
+    public static IEnumerable<object[]> AllRoutesRefused => StatedCaller.Cross(AllRoutes, StatedCaller.RefusedKinds);
 
-    public static IEnumerable<object[]> AllRoutesInternal => FinanceStepZeroCaller.Cross(AllRoutes, FinanceStepZeroCaller.InternalKinds);
+    public static IEnumerable<object[]> AllRoutesInternal => StatedCaller.Cross(AllRoutes, StatedCaller.InternalKinds);
 
     [Theory(DisplayName = "Task 099 must-fire: every code-set route refuses a flagged-external, row-less or unreadable caller before any privilege question or read")]
     [MemberData(nameof(AllRoutesRefused))]
