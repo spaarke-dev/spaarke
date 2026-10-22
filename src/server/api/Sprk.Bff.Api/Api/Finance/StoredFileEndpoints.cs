@@ -252,13 +252,10 @@ public sealed class StoredFileAccessFilter : IEndpointFilter
             return StoredFileDownloadDecision.NotFound;
         }
 
-        // (3) and (4): the CALLER's own Read, never the application's. No probe registered is a configuration fault: refused.
-        var probe = services.GetService<CallerRecordAccessProbe>();
-        if (probe is null)
-        {
-            logger?.LogError("Stored file {FileId}: CallerRecordAccessProbe is not registered; refusing (503)", fileId);
-            return StoredFileDownloadDecision.Unavailable;
-        }
+        // (3) and (4): the CALLER's own Read, never the application's. Resolved as required: StoredFileService (resolved above and
+        // as the handler's parameter, which binds before this filter runs) cannot exist without it, so no "not registered" branch
+        // could be reached here; a missing registration fails the request before anything is served.
+        var probe = services.GetRequiredService<CallerRecordAccessProbe>();
 
         var token = TokenHelper.ExtractBearerTokenOrNull(httpContext);
         var parentRights = await probe.GetCallerRightsForAuthorizationGateAsync(token, parent.EntitySet, parent.Id, ct);
