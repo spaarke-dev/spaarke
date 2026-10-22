@@ -5,8 +5,9 @@
 // IDocumentDataverseService.UpdateDocumentFieldsAsync as the BFF identity. The output keys come from a configuration (the
 // Action's sprk_outputschemajson), not a person, so only DocumentProfileOutputMapper.ProfileColumns, in their plain form,
 // are mapped. A key naming a document's Access Permission, its own-narrowing record or a D7 link column is dropped by the
-// app-only refusal (InheritedAccessPermission.RefuseAppOnlyWrite) with its reason code; every other key that is not a
-// listed profile column (a pointer, relocation or link-source column, the owner, an unknown name, an @odata.bind or
+// app-only refusal (InheritedAccessPermission.RefuseAppOnlyWrite) with its reason code, and so is (#2240) one naming a
+// BFF-owned column (the pointer and its binding, the relocation record, the file path, the email-archive key); every
+// other key that is not a listed profile column (the owner, an unknown name, an @odata.bind or
 // _x_value form of a listed column) is dropped by the list. One Warning names the document id, the keys and the codes
 // only, and the rest of the profile is still mapped.
 //
@@ -50,6 +51,19 @@ public sealed class DocumentProfileOutputMapperRefusalTests
         { "_sprk_parentdocument_value", "\"5b1e7a4c-0f6d-4a52-9d1b-3f0c2e8a7d11\"", "sprk_parentdocument", InheritedAccessPermission.AppOnlyDocumentLinkWriteReasonCode },
         // an object value (mapped as a JSON blob when not refused)
         { "sprk_accessinheritance", "{\"own\":0}", "sprk_accessinheritance", InheritedAccessPermission.AppOnlyDocumentWriteReasonCode },
+        // #2240: a document's BFF-owned columns (the pointer, its binding, the legacy item id, the relocation record, the
+        // file path and the email-archive key) are refused too, so they are dropped with the refusal's code, not the list's
+        { "sprk_graphitemid", "\"01ABCDEFPOINTERITEM\"", "sprk_graphitemid", InheritedAccessPermission.AppOnlyDocumentBffColumnWriteReasonCode },
+        { "sprk_graphdriveid", "\"b!POINTERDRIVE\"", "sprk_graphdriveid", InheritedAccessPermission.AppOnlyDocumentBffColumnWriteReasonCode },
+        { "sprk_graphitemidbound", "\"01ABCDEFPOINTERITEM\"", "sprk_graphitemidbound", InheritedAccessPermission.AppOnlyDocumentBffColumnWriteReasonCode },
+        { "sprk_driveitemid", "\"01ABCDEFPOINTERITEM\"", "sprk_driveitemid", InheritedAccessPermission.AppOnlyDocumentBffColumnWriteReasonCode },
+        { "sprk_relocationpending", "\"{\\\"to\\\":\\\"POINTER\\\"}\"", "sprk_relocationpending", InheritedAccessPermission.AppOnlyDocumentBffColumnWriteReasonCode },
+        { "sprk_relocatedversions", "\"[]\"", "sprk_relocatedversions", InheritedAccessPermission.AppOnlyDocumentBffColumnWriteReasonCode },
+        { "sprk_filepath", "\"/POINTER/path.pdf\"", "sprk_filepath", InheritedAccessPermission.AppOnlyDocumentBffColumnWriteReasonCode },
+        { "sprk_emailmessageid", "\"<POINTER@example.com>\"", "sprk_emailmessageid", InheritedAccessPermission.AppOnlyDocumentBffColumnWriteReasonCode },
+        { "sprk_isemailarchive", "true", "sprk_isemailarchive", InheritedAccessPermission.AppOnlyDocumentBffColumnWriteReasonCode },
+        { "SPRK_GraphItemIdBound@odata.bind", "\"/sprk_POINTER(01)\"", "sprk_graphitemidbound", InheritedAccessPermission.AppOnlyDocumentBffColumnWriteReasonCode },
+        { "_sprk_filepath_value", "\"POINTER\"", "sprk_filepath", InheritedAccessPermission.AppOnlyDocumentBffColumnWriteReasonCode },
     };
 
     [Theory]
@@ -110,13 +124,6 @@ public sealed class DocumentProfileOutputMapperRefusalTests
     public static TheoryData<string, string> NotProfileKeys => new()
     {
         // key named by the configured schema, JSON value
-        { "sprk_graphitemid", "\"01ABCDEFPOINTERITEM\"" },
-        { "sprk_graphdriveid", "\"b!POINTERDRIVE\"" },
-        { "sprk_graphitemidbound", "\"01ABCDEFPOINTERITEM\"" },
-        { "sprk_relocationpending", "\"{\\\"to\\\":\\\"POINTER\\\"}\"" },
-        { "sprk_filepath", "\"/POINTER/path.pdf\"" },
-        { "sprk_emailmessageid", "\"<POINTER@example.com>\"" },
-        { "sprk_isemailarchive", "true" },
         { "ownerid", "\"5b1e7a4c-0f6d-4a52-9d1b-3f0c2e8a7d11\"" },
         { "sprk_containerid", "\"b!POINTERCONTAINER\"" },
         { "sprk_whatever", "\"POINTER\"" },

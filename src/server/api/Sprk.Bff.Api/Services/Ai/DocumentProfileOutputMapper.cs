@@ -36,7 +36,8 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// the listed name); an <c>@odata.bind</c> or <c>_{column}_value</c> form is dropped even when it names a listed column.
 /// Each key is first asked the app-only refusal the generic writers ask
 /// (<see cref="InheritedAccessPermission.RefuseAppOnlyWrite"/>: a document's Access Permission and own-narrowing record,
-/// task 189, and its D7 link columns, task 188). No listed column is one it refuses, so today it drops nothing the list
+/// task 189, its D7 link columns, task 188, and its BFF-owned pointer, relocation, file-path and email-archive columns,
+/// #2240). No listed column is one it refuses, so today it drops nothing the list
 /// would not; it is kept for its reason codes in the log and so the refusal still holds if the list is ever widened by
 /// mistake. The dropped keys are logged with one Warning (the document id, the key names and the reason codes; no values)
 /// and the rest of the profile is mapped. Every consumer writes this method's output, so the filter is here, where none
