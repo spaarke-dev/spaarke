@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
@@ -68,6 +69,7 @@ public sealed class InvoiceReviewReadServiceTests
         public readonly List<(Guid Org, string Number, Guid? Invoice)> CallerSubmissions = [];
         public readonly List<string> CallerPaths = [];
         public Func<string, Task<DataverseUserResponse>>? CallerFault;
+        public readonly Mock<ILogger<InvoiceReviewReadService>> Logger = new();
 
         public World(int status = InvoiceStatusCodes.InReview)
         {
@@ -124,7 +126,7 @@ public sealed class InvoiceReviewReadServiceTests
                 .Returns((string path, CancellationToken _) => AnswerCaller(path));
             return new InvoiceReviewReadService(
                 Entities.Object, authorization, settings.Object, caller.Object,
-                new EarlierInvoiceReadability(NullLogger<EarlierInvoiceReadability>.Instance), NullLogger<InvoiceReviewReadService>.Instance);
+                new EarlierInvoiceReadability(NullLogger<EarlierInvoiceReadability>.Instance), Logger.Object);
         }
 
         public int CallerReads(string set) => CallerPaths.Count(p => p.StartsWith(set + "?", StringComparison.Ordinal));
@@ -796,6 +798,11 @@ public sealed class InvoiceReviewReadServiceTests
         review.Should().NotBeNull();
         ShouldBeWithheld(review!.Lines.Single().Findings.Single(f => f.PolicyCode == "BILL-DUP"));
         OthersUntouched(review);
+        // The read model's own wrap caught it (not a fault 157 handled itself): its Warning names the check.
+        w.Logger.Verify(l => l.Log(
+            LogLevel.Warning, It.IsAny<EventId>(),
+            It.Is<It.IsAnyType>((state, _) => state.ToString()!.Contains("earlier-invoice check faulted (NullReferenceException)")),
+            It.IsAny<Exception?>(), It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
     }
 
     // Beyond the closed set, justified in the task notes: the contract says cancellation propagates through the wrap.

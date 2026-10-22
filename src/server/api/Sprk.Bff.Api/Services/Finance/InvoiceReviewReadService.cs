@@ -815,7 +815,7 @@ public sealed class InvoiceReviewReadService
                 if (string.Equals(value.Name, DuplicateOfInvoiceIdValue, StringComparison.OrdinalIgnoreCase))
                 {
                     duplicate = true;
-                    if (System.Guid.TryParse(value.Value, CultureInfo.InvariantCulture, out var id) && id != System.Guid.Empty)
+                    if (Guid.TryParse(value.Value, CultureInfo.InvariantCulture, out var id) && id != Guid.Empty)
                     {
                         ids.Add(id);
                     }
