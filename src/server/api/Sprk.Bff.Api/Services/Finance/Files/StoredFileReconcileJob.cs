@@ -229,7 +229,8 @@ public sealed class StoredFileReconcileJob : IScheduledJob
             {
                 // Blob first, then the row: a crash in between leaves a row whose blob is gone, which the next run deletes again
                 // (the blob delete of something already gone succeeds). The reverse order could orphan bytes with no row to find them.
-                if (StoredFileBlobName.TryParseForTenant(row.BlobPath, _blobs.TenantId, out var pathParent, out _))
+                // Only the row's OWN blob (its file id in the name): a path naming another file is never followed to a delete.
+                if (StoredFileBlobName.TryParseForTenant(row.BlobPath, _blobs.TenantId, out var pathParent, out var pathFile) && pathFile == row.Id)
                 {
                     if (await _blobs.DeleteAsync(ContainerOfTable(pathParent.Kind), row.BlobPath!, ct).ConfigureAwait(false))
                     {

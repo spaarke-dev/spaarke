@@ -211,7 +211,7 @@ public sealed class StoredFileBlobs
     /// <exception cref="RequestFailedException">A storage fault.</exception>
     internal async Task<Verification> VerifyAsync(string container, string blobPath, string? expectedSha256, CancellationToken ct)
     {
-        var gateway = RequireGateway();
+        var gateway = RequireOwnBlob(container, blobPath);
         await using var stream = await gateway.OpenReadAsync(container, blobPath, ifMatch: null, ct).ConfigureAwait(false);
         if (stream is null)
         {
@@ -231,7 +231,7 @@ public sealed class StoredFileBlobs
     internal async Task<(StoredFileScanState State, BlobPropertiesInfo Properties)?> GetScanStateAsync(
         string container, string blobPath, CancellationToken ct)
     {
-        var gateway = RequireGateway();
+        var gateway = RequireOwnBlob(container, blobPath);
         var properties = await gateway.GetPropertiesAsync(container, blobPath, ct).ConfigureAwait(false);
         if (properties is null)
         {
@@ -284,7 +284,7 @@ public sealed class StoredFileBlobs
     /// gone. A blob changed since then fails with <see cref="RequestFailedException"/> status 412.
     /// </summary>
     internal Task<Stream?> OpenReadAsync(string container, string blobPath, ETag etag, CancellationToken ct) =>
-        RequireGateway().OpenReadAsync(container, blobPath, etag, ct);
+        RequireOwnBlob(container, blobPath).OpenReadAsync(container, blobPath, etag, ct);
 
     /// <summary>The whole blob pinned to <paramref name="etag"/>, or <c>null</c> when it is gone (jobs only: at most 2 GiB by the size rule).</summary>
     internal async Task<BinaryData?> ReadAllAsync(string container, string blobPath, ETag etag, CancellationToken ct)
@@ -302,7 +302,16 @@ public sealed class StoredFileBlobs
 
     /// <summary>Deletes one blob of this tenant (with snapshots); <c>false</c> when it was already gone.</summary>
     /// <exception cref="ArgumentException"><paramref name="blobPath"/> is not a name of this tenant (nothing is called).</exception>
-    public Task<bool> DeleteAsync(string container, string blobPath, CancellationToken ct)
+    public Task<bool> DeleteAsync(string container, string blobPath, CancellationToken ct) =>
+        RequireOwnBlob(container, blobPath).DeleteIfExistsAsync(container, blobPath, ct);
+
+    /// <summary>
+    /// The gateway, after checking that <paramref name="blobPath"/> is a stored-file name of THIS tenant in one of the three
+    /// containers. Every blob-level read and delete goes through it, so no caller of this class can reach another tenant's bytes
+    /// even when it skips the service's own-path check.
+    /// </summary>
+    /// <exception cref="ArgumentException">Not a stored-file blob of this tenant (nothing is called).</exception>
+    private BlobGateway RequireOwnBlob(string container, string? blobPath)
     {
         var gateway = RequireGateway();
         if (!StoredFileSchema.Containers.Contains(container) || !StoredFileBlobName.TryParseForTenant(blobPath, TenantId, out _, out _))
@@ -310,7 +319,7 @@ public sealed class StoredFileBlobs
             throw new ArgumentException("Not a stored-file blob of this tenant.", nameof(blobPath));
         }
 
-        return gateway.DeleteIfExistsAsync(container, blobPath, ct);
+        return gateway;
     }
 
     /// <summary>

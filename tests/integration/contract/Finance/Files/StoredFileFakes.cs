@@ -50,6 +50,12 @@ internal sealed class InMemoryBlobGateway : BlobGateway
     /// <summary>When set, only calls of this op ("create", "props", "tags", "open", "list", "delete") throw <see cref="FailEverything"/>-like faults.</summary>
     public Dictionary<string, Exception> FailOp { get; } = new(StringComparer.Ordinal);
 
+    /// <summary>Runs before every call ("op", "container/name"): lets a test change state between two calls (a concurrent writer).</summary>
+    public Action<string, string>? BeforeOp { get; set; }
+
+    /// <summary>Runs once, on the first read of a stream <see cref="OpenReadAsync"/> returned (the first byte served).</summary>
+    public Action? OnFirstRead { get; set; }
+
     public int StorageCalls => Calls.Count;
 
     public IReadOnlyCollection<(string Container, string Name)> Names => _blobs.Keys.ToList();
@@ -125,7 +131,51 @@ internal sealed class InMemoryBlobGateway : BlobGateway
             throw new RequestFailedException(412, "The condition specified using HTTP conditional header(s) is not met.", "ConditionNotMet", null);
         }
 
-        return Task.FromResult<Stream?>(new MemoryStream(blob.Content, writable: false));
+        return Task.FromResult<Stream?>(OnFirstRead is { } onRead ? new FirstReadStream(blob.Content, onRead) : new MemoryStream(blob.Content, writable: false));
+    }
+
+    private sealed class FirstReadStream(byte[] content, Action onFirstRead) : MemoryStream(content, writable: false)
+    {
+        private bool _read;
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            Notify();
+            return base.Read(buffer, offset, count);
+        }
+
+        public override int Read(Span<byte> buffer)
+        {
+            Notify();
+            return base.Read(buffer);
+        }
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            Notify();
+            return base.ReadAsync(buffer, offset, count, cancellationToken);
+        }
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            Notify();
+            return base.ReadAsync(buffer, cancellationToken);
+        }
+
+        public override Task CopyToAsync(Stream destination, int bufferSize, CancellationToken cancellationToken)
+        {
+            Notify();
+            return base.CopyToAsync(destination, bufferSize, cancellationToken);
+        }
+
+        private void Notify()
+        {
+            if (!_read)
+            {
+                _read = true;
+                onFirstRead();
+            }
+        }
     }
 
     public override Task<BlobPropertiesInfo?> GetPropertiesAsync(string container, string blobName, CancellationToken cancellationToken)
@@ -169,6 +219,7 @@ internal sealed class InMemoryBlobGateway : BlobGateway
     private void Record(string op, string container, string name)
     {
         Calls.Enqueue($"{op} {container}/{name}");
+        BeforeOp?.Invoke(op, $"{container}/{name}");
         if (FailEverything is { } fault)
         {
             throw fault;
@@ -377,9 +428,13 @@ internal sealed class StoredFileRig
     public static readonly Guid Tenant = Guid.Parse("7a1e0000-0000-4000-8000-000000000090");
     public static readonly Guid TeamId = Guid.Parse("7ea70000-0000-4000-8000-000000000090");
 
-    public StoredFileRig(bool? malwareScanningEnabled = true, bool configured = true, StepZeroCallerKind stepZero = StepZeroCallerKind.FlagFalse)
+    public StoredFileRig(
+        bool? malwareScanningEnabled = true, bool configured = true, StepZeroCallerKind stepZero = StepZeroCallerKind.FlagFalse,
+        InMemoryBlobGateway? sharedGateway = null, Guid? tenant = null)
     {
-        Blobs = new StoredFileBlobs(configured ? Gateway : null, configured ? Tenant : Guid.Empty, malwareScanningEnabled, Logger);
+        Gateway = sharedGateway ?? new InMemoryBlobGateway();
+        TenantId = tenant ?? Tenant;
+        Blobs = new StoredFileBlobs(configured ? Gateway : null, configured ? TenantId : Guid.Empty, malwareScanningEnabled, Logger);
         var services = new ServiceCollection();
         StepZero = FinanceStepZeroCaller.Register(services, stepZero);
         Provider = services.BuildServiceProvider();
@@ -388,7 +443,10 @@ internal sealed class StoredFileRig
         Service = new StoredFileService(Dataverse.Service, Blobs, Probe, Owners.Object, Provider, NullLogger<StoredFileService>.Instance);
     }
 
-    public InMemoryBlobGateway Gateway { get; } = new();
+    public InMemoryBlobGateway Gateway { get; }
+
+    /// <summary>This rig's tenant (<see cref="Tenant"/> unless another was given).</summary>
+    public Guid TenantId { get; }
     public StoredFileDataverse Dataverse { get; } = new();
     public RecordingRightsProbe Probe { get; } = new();
     public Mock<IRecordOwnershipResolver> Owners { get; } = new(MockBehavior.Strict);
@@ -410,9 +468,9 @@ internal sealed class StoredFileRig
         StoredFilePurpose purpose = StoredFilePurpose.InvoicePdf, Guid? sourceDocument = null, IDictionary<string, string>? tags = null,
         string? blobPathOverride = null, string contentType = "application/pdf")
     {
-        var path = blobPathOverride ?? StoredFileBlobName.Build(Tenant, parent, fileId);
+        var path = blobPathOverride ?? StoredFileBlobName.Build(TenantId, parent, fileId);
         var sha = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes));
-        Gateway.Seed(StoredFileSchema.ContainerOf(purpose), StoredFileBlobName.Build(Tenant, parent, fileId), bytes,
+        Gateway.Seed(StoredFileSchema.ContainerOf(purpose), StoredFileBlobName.Build(TenantId, parent, fileId), bytes,
             new Dictionary<string, string> { ["sha256"] = sha }, tags ?? CleanTags(Gateway.Now.AddMinutes(1)));
         var row = new Entity(StoredFileSchema.Entity, fileId)
         {

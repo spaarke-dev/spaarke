@@ -348,14 +348,20 @@ public sealed class StoredFileService
     internal async Task<StoredFileDownloadDecision> JudgeServableAsync(StoredFileRow row, Guid callerSystemUserId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(row);
-        if (row.Parent is not { } parent || row.Status != StoredFileStatus.Servable || !PathIsOwn(row))
+        if (row.Parent is not { } parent || row.Status != StoredFileStatus.Servable)
         {
             return StoredFileDownloadDecision.NotFound;
         }
 
+        // Before the path check: an unconfigured store has no tenant, so no path could prove its own (an operator fault, not a 404).
         if (!_blobs.IsConfigured)
         {
             return StoredFileDownloadDecision.Unavailable;
+        }
+
+        if (!PathIsOwn(row))
+        {
+            return StoredFileDownloadDecision.NotFound;
         }
 
         var fileId = row.FileId;
