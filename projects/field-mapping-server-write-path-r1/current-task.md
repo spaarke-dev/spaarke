@@ -9,7 +9,7 @@
 | Field | Value |
 |---|---|
 | **HEAD** | work branch `35c395b693` = master a7b956fb55's second parent; 0 commits not on master. Verified at 35c395b693: sln 0/0, ArchTests 1347/1347, related suites 3492 passed / 7 skipped, EmailArchive job tests 37/37. #2228 rollup CLEAN |
-| **Running** | nothing |
+| **Running** | Task 018 implementer (opus, worktree, branch `task/fm-018` from the work branch). Scope: Matter/Project legs only; the Invoice leg is HELD pending ebilling-r1's answer (asked 2026-10-21: (a) move now / (b) hold until #1911 + reconcile); `CreateTodoAsync` untouched (030, FR-06 step 10). 017 is BLOCKED: #1911 is a draft, plus FR-06 step 10, #1608, the chat number and SystemPrincipal (owner) |
 | **Next Action** | Start 017 and 018 (both depend on 016; FULL, opus/high). First re-read their POML blocking criteria: #2188 (met), the invoice-family reconcile with ebilling-r1, FR-06 step 10 (owner item 5), 015's K1 (step-7 catalog fault test) / K3 (search-index bind key), R3-1/R3-2, and the #1614/#1617 closure (018). 017 and 018 share `RecordCreationService` files only via callers; run `/conflict-check` before parallelising. **Don't ask R3 to deploy**: UAC-r2 is batching #2223 + #2221 + 016 for R3, and a BFF deploy needs the owner's go in R3's session |
 | **Cleanup left for the owner** | Empty, unregistered folder `C:\code_files\spaarke\.claude\worktrees\agent-a10e5fe383a4dfcd2` (Remove-WorktreeSafe refused after a partial delete; nothing in it) |
 
