@@ -32,6 +32,11 @@
     LIVE ORDER: deploy the BFF carrying task 188 → THIS SCRIPT (dry run; every precondition OK) → owner approval → -Apply
     → -Verify. Agents run the dry run only.
 
+    REVERT AND THE BFF (owner round 122, write-path registry I-19). The BFF's access-permission pass releases an email
+    document's save-time Restricted only while BOTH columns are field-secured. It reads that once per process and CACHES a
+    "secured" answer (a "not secured" answer is asked again every run, so -Apply takes effect without a restart). After a
+    revert (unsecuring either column) RESTART the BFF: until then the cached "secured" stands and releases go ahead.
+
 .PARAMETER EnvironmentUrl
     e.g. https://spaarkedev1.crm.dynamics.com
 

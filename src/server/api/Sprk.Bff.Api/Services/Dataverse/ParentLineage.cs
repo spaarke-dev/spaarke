@@ -194,6 +194,20 @@ internal sealed class ParentLineageWalk
             _rows[(row.LogicalName.ToLowerInvariant(), row.Id)] = row;
     }
 
+    /// <summary>
+    /// Owner round 122: the rows of <paramref name="table"/> with <paramref name="ids"/>, as this walk holds them (its filing
+    /// lookups and value columns). A row it already read or remembered is not read again; the rest are read in one query per
+    /// chunk. A row that does not exist is left out. A read or metadata fault propagates.
+    /// </summary>
+    internal async Task<IReadOnlyList<Entity>> RowsAsync(string table, IReadOnlyCollection<Guid> ids, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(table);
+        ArgumentNullException.ThrowIfNull(ids);
+        var nodes = ids.Where(id => id != Guid.Empty).Distinct().Select(id => (Table: table.ToLowerInvariant(), Id: id)).ToList();
+        await LoadAsync(nodes, ct).ConfigureAwait(false);
+        return nodes.Select(n => _rows[n]).OfType<Entity>().ToList();
+    }
+
     /// <summary>The non-null filing parents of a row read with <see cref="ColumnsForAsync"/>'s columns.</summary>
     internal async Task<IReadOnlyList<(string Table, Guid Id)>> ParentsOfAsync(Entity row, CancellationToken ct)
     {
@@ -580,6 +594,102 @@ internal static class InheritedAccessPermission
     };
 
     /// <summary>
+    /// #2240: the reason code when an app-only generic writer names one of a document's BFF-owned columns
+    /// (<see cref="BffOwnedDocumentColumns"/>; <see cref="RefuseAppOnlyWrite"/>).
+    /// </summary>
+    internal const string AppOnlyDocumentBffColumnWriteReasonCode = "sdap.access.document_bff_column_server_only";
+
+    /// <summary>
+    /// #2240: the document columns only the BFF's own typed writers write. The generic writers run AS the BFF, so field
+    /// security does not stop them; this refusal does. None is a lookup, and the refusal's normalization covers every form
+    /// anyway. <c>scripts/Set-DocumentPointerFieldSecurity.ps1</c> (target DocumentPointers) lists five of them and
+    /// field-secures four: <c>sprk_graphdriveid</c>, <c>sprk_graphitemidbound</c>, <c>sprk_relocationpending</c> and
+    /// <c>sprk_relocatedversions</c>. It lists <c>sprk_graphitemid</c> but skips it (an alternate key cannot be secured), and
+    /// it does not list <c>sprk_driveitemid</c>, <c>sprk_filepath</c>, <c>sprk_emailmessageid</c> or
+    /// <c>sprk_isemailarchive</c>; for those five this refusal is the only lock on these paths. Every column the script
+    /// lists must be in this set (<c>DocumentBffOwnedColumnAppOnlyWriterTests</c> reads the script).
+    /// <list type="bullet">
+    /// <item><c>sprk_graphdriveid</c>, <c>sprk_graphitemid</c>: the SharePoint Embedded pointer the BFF follows as the
+    /// application (task 166, owner round 21). <c>sprk_graphitemid</c> cannot be field-secured (alternate key).</item>
+    /// <item><c>sprk_graphitemidbound</c>: the BFF-only copy of the item id the pointer check compares with
+    /// (<see cref="DocumentPointerBinding"/>, task 171). Setting it alone makes every app-only read refuse the document;
+    /// setting it with the item id forges a pointer that passes the check.</item>
+    /// <item><c>sprk_driveitemid</c>: the legacy copy of the item id, and an access key. A caller passes the retrieval trim
+    /// (<c>RetrievalRecordKey.DocumentByDriveItem</c>) and the AI filter's item check
+    /// (<c>AiAuthorizationFilter.IsSpeItemShownToCallerAsync</c>) when they can read ANY document whose
+    /// <c>sprk_driveitemid</c> equals the item, so setting it on a document a partner can read shows them another
+    /// document's content. Its only writer is the relocator's re-key (<c>DocumentContainerRelocator.ReKeyedOwnColumns</c>,
+    /// a typed app-only update that does not ask this refusal).</item>
+    /// <item><c>sprk_relocationpending</c>: the relocator's ledger; it names a source the BFF may later delete (task 166
+    /// f1-v1). <c>sprk_relocatedversions</c>: the relocation's version record (task 166 f1-v2).</item>
+    /// <item><c>sprk_filepath</c>: the item's web URL, written with the pointer (a resource-naming field the document
+    /// update endpoint refuses from a caller, <c>DataverseDocumentsEndpoints.ResourceNamingFieldsIn</c>).</item>
+    /// <item><c>sprk_emailmessageid</c>, <c>sprk_isemailarchive</c>: the archive document's recorded key and its archive
+    /// marker. The task 190 sweep (<c>EmailArchiveCommunicationLinkSweepJob</c>) turns them into a D7 link
+    /// (<c>sprk_relatedcommunication</c>), so writing them can link a document to a communication of the writer's
+    /// choosing.</item>
+    /// </list>
+    /// The owners' constants where they are public, so the set cannot drift from them.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> BffOwnedDocumentColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "sprk_graphdriveid",
+        DocumentPointerBinding.ItemIdColumn,
+        DocumentPointerBinding.BoundItemIdColumn,
+        "sprk_driveitemid",
+        Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator.RelocationLedgerColumn,
+        Sprk.Bff.Api.Services.Documents.RelocatedVersionHistory.Column,
+        "sprk_filepath",
+        Sprk.Bff.Api.Services.Communication.CrossPathLink.EmailMessageIdAttribute,
+        Sprk.Bff.Api.Services.Communication.CrossPathLink.IsEmailArchiveAttribute,
+    };
+
+    /// <summary>
+    /// #2247: the reason code when an app-only generic writer names a row's owner (<see cref="OwnerColumns"/>;
+    /// <see cref="RefuseAppOnlyWrite"/>), on any table.
+    /// </summary>
+    internal const string AppOnlyOwnerWriteReasonCode = "sdap.access.owner_server_only";
+
+    /// <summary>
+    /// #2247: the reason code when an app-only generic writer names a row's creator (<see cref="CreatorColumns"/>;
+    /// <see cref="RefuseAppOnlyWrite"/>), on any table.
+    /// </summary>
+    internal const string AppOnlyCreatorWriteReasonCode = "sdap.access.creator_server_only";
+
+    /// <summary>
+    /// #2247: a row's owner, in every column Dataverse names it by. The owner decides who may read the row, and the BFF app
+    /// user is a System Administrator, so an app-only write of <c>ownerid</c> re-owns any row (permanently on a standard
+    /// record; under a secure root the reconciler puts it back within minutes). Its writers are the BFF's typed ones (the
+    /// create's owner step, the reparent, the reconciler, Repair's owner step), none of which asks this refusal over it. The
+    /// other three are read-only in Dataverse; they are listed so a configuration naming them is refused, not sent.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> OwnerColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "ownerid",
+        "owninguser",
+        "owningteam",
+        "owningbusinessunit",
+    };
+
+    /// <summary>
+    /// #2247: a row's creator. <c>sprk_createdbyperson</c> (<see cref="RecordCreatorPerson.Column"/>, on 38 tables on dev) is read by
+    /// the move-out-of-secure creator check (<c>RecordOwnershipResolver</c>), provisioning resume, event visibility and the
+    /// document-pointer creator rule; <c>sprk_createdbycontact</c> (field-secured, the BFF its only writer) by the external
+    /// delete-own check; <c>sprk_requestedby</c> (a service request's requester, a contact) by the external Service Requests
+    /// module's scope, message and document access on a service request, and the requester-only hard delete
+    /// (<c>ExternalProjectDataEndpoints</c>). Their writers are the create paths' typed stamps (for the requester, the
+    /// intake create, <c>ExternalDataService.BuildServiceRequestCreatePayload</c>), none of which uses these paths. Every
+    /// column of <c>ExternalDataService.CreatorColumns</c> is refused here or is a platform audit column
+    /// (<c>OwnerCreatorColumnAppOnlyWriterTests</c>).
+    /// </summary>
+    internal static readonly IReadOnlySet<string> CreatorColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        RecordCreatorPerson.Column,
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDataService.CreatedByContactColumn,
+        "sprk_requestedby",
+    };
+
+    /// <summary>
     /// Task 189 fix round C (K5): an APP-ONLY generic writer never writes a document's <see cref="Column"/> or its
     /// own-narrowing record (<see cref="AccessInheritance.Column"/>). These writers are the Update Record playbook node and
     /// the action seam when they act for no person (<c>UpdateRecordActionCore</c>), and an AI output mapping
@@ -596,6 +706,16 @@ internal static class InheritedAccessPermission
     /// re-file routes (<c>RecordOwnershipResolver.ReparentAsync</c>, caller-checked), the Office create (I-19, the link in the
     /// create) and the BFF's own typed writers, none of which uses these paths. Every caller of the generic update is held to
     /// this by <c>ExternalDocumentNarrowingGuardTests</c> (round 4e).</para>
+    /// <para>#2240: nor a document's BFF-owned columns (<see cref="BffOwnedDocumentColumns"/>: its file pointer, binding and
+    /// legacy item id, relocation record, file path and email-archive key), refused with
+    /// <see cref="AppOnlyDocumentBffColumnWriteReasonCode"/> in the same forms. Their writers are the BFF's typed ones (the upload and Office persistence, the pointer binder, the
+    /// relocator, the email archive), none of which uses these paths.</para>
+    /// <para>#2247: on EVERY table, nor a row's owner (<see cref="OwnerColumns"/>, refused with
+    /// <see cref="AppOnlyOwnerWriteReasonCode"/>) or its creator (<see cref="CreatorColumns"/>, refused with
+    /// <see cref="AppOnlyCreatorWriteReasonCode"/>), in the same forms. A writer that decides one of these itself (Repair's owner
+    /// step) asks this refusal only over the columns a configuration gave it, never over the one it decided.</para>
+    /// <para><b>Precedence</b> (the first match decides the code): on a document, its Access Permission or own-narrowing
+    /// record, then its D7 links, then its BFF-owned columns; then, on every table, the owner, then the creator.</para>
     /// </summary>
     /// <returns>The refusal (nothing is written), or <see langword="null"/> when the write may proceed.</returns>
     internal static RecordOwnerResolution? RefuseAppOnlyWrite(string? table, IEnumerable<string> keys)
@@ -604,8 +724,6 @@ internal static class InheritedAccessPermission
         var trimmed = table?.Trim();
         var narrows = RecordsOwnNarrowing(trimmed);
         var links = string.Equals(trimmed, Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDocumentNarrowing.DocumentTable, StringComparison.OrdinalIgnoreCase);
-        if (!narrows && !links)
-            return null;
 
         var columns = keys.Select(SecureRootInheritance.NormalizeColumn).ToList();
         if (narrows && columns.FirstOrDefault(k => k is Column or AccessInheritance.Column) is { } named)
@@ -615,10 +733,32 @@ internal static class InheritedAccessPermission
         }
 
         var link = links ? columns.FirstOrDefault(DocumentLinkColumns.Contains) : null;
-        return link is null
-            ? null
-            : RecordOwnerResolution.Refused(AppOnlyDocumentLinkWriteReasonCode,
+        if (link is not null)
+        {
+            return RecordOwnerResolution.Refused(AppOnlyDocumentLinkWriteReasonCode,
                 $"{link} of a document is set by Spaarke (it decides whether partners may see the document), so it was not written");
+        }
+
+        // #2240: the document's pointer, relocation and email-archive columns are the BFF's own (BffOwnedDocumentColumns).
+        var owned = links ? columns.FirstOrDefault(BffOwnedDocumentColumns.Contains) : null;
+        if (owned is not null)
+        {
+            return RecordOwnerResolution.Refused(AppOnlyDocumentBffColumnWriteReasonCode,
+                $"{owned} of a document is set by Spaarke (it names the document's file or its email), so it was not written");
+        }
+
+        // #2247: on every table, the row's owner and its creator are the BFF's typed writers' (OwnerColumns, CreatorColumns).
+        if (columns.FirstOrDefault(OwnerColumns.Contains) is { } owner)
+        {
+            return RecordOwnerResolution.Refused(AppOnlyOwnerWriteReasonCode,
+                $"{owner} of a record is set by Spaarke (it decides who may see the record), so it was not written");
+        }
+
+        var creator = columns.FirstOrDefault(CreatorColumns.Contains);
+        return creator is null
+            ? null
+            : RecordOwnerResolution.Refused(AppOnlyCreatorWriteReasonCode,
+                $"{creator} of a record is set by Spaarke (it records who created the record), so it was not written");
     }
 
     /// <summary>What to hold and what to write on one row of a <see cref="RecordTables"/> table (task 189).</summary>
@@ -679,13 +819,23 @@ internal static class InheritedAccessPermission
     /// as its parent tightening to the same level reads as inherited, and the document follows the parent's later widening.
     /// With the record (the last inherited value) that edit is stricter than it, so it is the user's own. Each row without a
     /// record is written once (the sweep reaches the legacy rows), then not again while nothing changes.</para>
+    /// <para><b>A provisional narrowing is released by a link</b> (owner round 122). The save-time Restricted of an email that
+    /// could not be identified (<see cref="AccessInheritance.OwnProvisional"/>) counts as no own value once
+    /// <paramref name="communicationLinked"/> is true (<see cref="AccessInheritance.OwnPermissionOf(int, int?, AccessInheritance?, int, bool, out bool)"/>,
+    /// the one place). The decision then writes the inherited value and a record with no own value and no marker, in one
+    /// update; the release is one way. While it stands untouched, every record written keeps the marker; any other change of
+    /// the own value drops it.</para>
     /// </remarks>
     /// <param name="stored">The row's stored <see cref="Column"/>.</param>
     /// <param name="recordText">The row's stored <see cref="AccessInheritance.Column"/>.</param>
     /// <param name="parents">The row's non-null filing parents (<see cref="ParentLineageWalk.ParentsOfAsync"/>).</param>
     /// <param name="inherited">What its parents give it (<see cref="ResolveAsync"/>); ignored when it has none.</param>
+    /// <param name="communicationLinked">Owner round 122: the communication walk found a link for this document
+    /// (<c>ExternalDocumentNarrowing.FindCommunicationLinksAsync</c>). False when it found none, could not decide, or was not
+    /// asked; then nothing is released.</param>
     internal static DocumentDecision DecideDocument(
-        int? stored, string? recordText, IReadOnlyCollection<(string Table, Guid Id)> parents, int? inherited)
+        int? stored, string? recordText, IReadOnlyCollection<(string Table, Guid Id)> parents, int? inherited,
+        bool communicationLinked = false)
     {
         ArgumentNullException.ThrowIfNull(parents);
         var (record, unreadable) = AccessInheritance.Parse(recordText);
@@ -700,6 +850,10 @@ internal static class InheritedAccessPermission
         {
             var ownValue = storedRank > 0 ? stored : null;
             var parentless = new AccessInheritance(Array.Empty<string>(), false, Standard, false, ownValue);
+            // Round 122: a parentless row has no link, so a provisional narrowing is never released here. It stays
+            // provisional while its value is untouched.
+            if (record is { OwnProvisional: true } && record.OwnPermission == ownValue)
+                parentless = record.KeepingProvisionalWith(parentless);
             var writeParentless = record is null ? ownValue is not null : !parentless.SameAs(record);
             return new DocumentDecision
             {
@@ -713,13 +867,16 @@ internal static class InheritedAccessPermission
         if (inherited is null || floorRank < 0)
             return new DocumentDecision { Undetermined = "what its parents give it could not be decided" };
 
-        var own = AccessInheritance.OwnPermissionOf(storedRank, stored, record, floorRank);
+        var own = AccessInheritance.OwnPermissionOf(
+            storedRank, stored, record, floorRank, communicationLinked, out var stillProvisional);
         var targetRank = Math.Max(SecureRootInheritance.RankOf(own), floorRank);
         var target = SecureRootInheritance.PermissionOf(targetRank);
         var next = new AccessInheritance(
             parents.Select(p => $"{p.Table.Trim().ToLowerInvariant()}:{p.Id:D}")
                 .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(k => k, StringComparer.Ordinal).ToList(),
             false, SecureRootInheritance.PermissionOf(floorRank), false, own);
+        if (stillProvisional && record is not null)
+            next = record.KeepingProvisionalWith(next); // round 122: unreleased and untouched, so it stays provisional
         var writeRecord = record is null || !next.SameAs(record);
         return new DocumentDecision
         {

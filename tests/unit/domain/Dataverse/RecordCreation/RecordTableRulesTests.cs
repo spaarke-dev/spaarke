@@ -273,4 +273,59 @@ public class RecordTableRulesTests
 
         act.Should().Throw<ArgumentException>();
     }
+
+    // ── Task 018a fix round (F4-1): the optional references ──────────────────────────────────────────────────────────
+
+    [Fact]
+    public void OptionalReferenceLookups_AreExactlyWhatTheOfficeCreateDropsToday()
+    {
+        // OfficeRecordCreationService.ApplyReferenceAsync (MatterTypeAttribute, MatterPracticeAreaAttribute,
+        // ProjectTypeAttribute at 2a5f076857): literals, so the pin outlives task 018c's deletion of that service.
+        RecordTableRules.Get("sprk_matter").OptionalReferenceLookups.Should().BeEquivalentTo("sprk_mattertype", "sprk_practicearea");
+        RecordTableRules.Get("sprk_project").OptionalReferenceLookups.Should().BeEquivalentTo("sprk_projecttype_ref");
+        RecordTableRules.All.Where(r => r.Table is not ("sprk_matter" or "sprk_project"))
+            .Should().OnlyContain(r => r.OptionalReferenceLookups.Count == 0, "no other table declares a reference");
+    }
+
+    [Fact]
+    public void OptionalReferenceLookups_NeverHoldAColumnThatIsNeverAReference()
+    {
+        var offending = RecordTableRules.All
+            .SelectMany(r => r.OptionalReferenceLookups.Select(c => (r.Table, Column: c, Rule: r)))
+            .Where(x => RecordCreationService.IsNeverAReference(x.Table, x.Rule, x.Column))
+            .Select(x => $"{x.Table}.{x.Column}");
+
+        offending.Should().BeEmpty(
+            "a reference is dropped with a warning, so it may never be the for person, a column mapping never writes, the " +
+            "regarding pair, a filing lookup, or an access-conferring or Assigned* column");
+    }
+
+    [Theory]
+    [InlineData("sprk_event", "sprk_assignedto")] // the for person (and Assigned*)
+    [InlineData("sprk_todo", "sprk_assignedto")]
+    [InlineData("sprk_matter", "sprk_assignedtointernal")]
+    [InlineData("sprk_project", "sprk_assignedtointernal")]
+    [InlineData("sprk_workassignment", "sprk_assignedattorney1")] // Assigned*, not the for person
+    [InlineData("sprk_project", "sprk_regardingrecordtype")] // the regarding pair
+    [InlineData("sprk_project", "sprk_regardingrecordid")]
+    [InlineData("sprk_matter", "ownerid")] // ProtectedFromMapping
+    [InlineData("sprk_matter", "sprk_matternumber")]
+    [InlineData("sprk_event", "sprk_regardingmatter")] // filing lookups
+    [InlineData("sprk_workassignment", "sprk_regardingmatter")]
+    [InlineData("sprk_document", "sprk_matter")]
+    [InlineData("sprk_document", "sprk_accesspermission")] // access-conferring
+    [InlineData("sprk_matter", "sprk_issecure")]
+    [InlineData("sprk_event", "sprk_containerid")]
+    public void IsNeverAReference_Fires(string table, string column)
+    {
+        RecordCreationService.IsNeverAReference(table, RecordTableRules.Get(table), column).Should().BeTrue();
+        RecordCreationService.IsNeverAReference(table, RecordTableRules.Get(table), column.ToUpperInvariant()).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("sprk_matter", "sprk_mattertype")]
+    [InlineData("sprk_matter", "sprk_practicearea")]
+    [InlineData("sprk_project", "sprk_projecttype_ref")]
+    public void IsNeverAReference_DoesNotFire_OnTheDeclaredReferences(string table, string column) =>
+        RecordCreationService.IsNeverAReference(table, RecordTableRules.Get(table), column).Should().BeFalse();
 }

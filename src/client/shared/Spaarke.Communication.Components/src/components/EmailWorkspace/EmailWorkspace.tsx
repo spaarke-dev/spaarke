@@ -40,7 +40,7 @@
  * standard hooks only, no `as React.ComponentType` cast.
  */
 import * as React from 'react';
-import { makeStyles, tokens, Text } from '@fluentui/react-components';
+import { makeStyles, tokens, Text, MessageBar, MessageBarBody } from '@fluentui/react-components';
 import type { ICommunicationAssociation } from '@spaarke/ui-components';
 import { EmailViewSelector, useEmailViews } from '../EmailViewSelector';
 import { EmailReadingPaneShell } from '../EmailReadingPaneShell';
@@ -50,7 +50,7 @@ import { EmailRecipients } from '../EmailRecipients';
 import { EmailConnectionsReview, ConfirmedChip, useConnectionsReviewStyles } from '../EmailAssociationsAndTracking';
 import { useEmailComposeActions } from '../EmailComposeActions';
 import { derivePrimaryReview, summarizePrimaryReview, clearPrimaryRegarding, bffRefile } from '../../logic/connections';
-import { launchCreate, type CreateKind } from '../../logic/actions';
+import { launchCreate, refusedAttachmentsNotice, type CreateKind, type IArchiveResult } from '../../logic/actions';
 import { CollapsibleSection } from './CollapsibleSection';
 import {
   COMMUNICATION_ENTITY,
@@ -104,6 +104,10 @@ const useStyles = makeStyles({
   },
   recipientsWrap: {
     paddingBlock: tokens.spacingVerticalM,
+    paddingInline: tokens.spacingHorizontalXL,
+  },
+  archiveNotice: {
+    paddingTop: tokens.spacingVerticalM,
     paddingInline: tokens.spacingHorizontalXL,
   },
   // Subject line shown directly ABOVE the message body (owner UAT #4) — mirrors
@@ -254,16 +258,24 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
     onSent: record.reload,
   });
 
+  // PR #2248: the attachments the last archive of an email refused ("N attachment(s) could not be verified and
+  // were not saved."), shown on THAT email only — never a silent success.
+  const [archiveNotice, setArchiveNotice] = React.useState<{ communicationId: string; message: string } | null>(null);
+
   // "Save to SharePoint" (archive) — mirrors the `CommunicationActions` PCF's
   // handleArchive: POST the existing archive endpoint, then re-read the record so
   // the `.eml` body + attachments reflect the archived copy. Best-effort.
   const handleSaveToSharePoint = React.useCallback(
     (communicationId: string): void => {
       void (async () => {
+        setArchiveNotice(null);
         try {
           const resp = await authenticatedFetch(`/communications/${communicationId}/archive`, { method: 'POST' });
-          if (resp.ok) record.reload();
-          else console.warn(`[EmailWorkspace] Save to SharePoint failed (${resp.status}).`);
+          if (resp.ok) {
+            const refused = refusedAttachmentsNotice((await resp.json()) as IArchiveResult);
+            if (refused) setArchiveNotice({ communicationId, message: refused });
+            record.reload();
+          } else console.warn(`[EmailWorkspace] Save to SharePoint failed (${resp.status}).`);
         } catch (err) {
           console.warn('[EmailWorkspace] Save to SharePoint failed:', err);
         }
@@ -376,6 +388,13 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
           renderHeader={() => <EmailReadingHeader subject={record.recordState?.subject ?? null} />}
           renderBody={id => (
             <div className={s.bodyRegion}>
+              {archiveNotice?.communicationId === id && (
+                <div className={s.archiveNotice}>
+                  <MessageBar intent="warning" data-testid="archive-refused-notice">
+                    <MessageBarBody>{archiveNotice.message}</MessageBarBody>
+                  </MessageBar>
+                </div>
+              )}
               <div className={s.recipientsWrap}>
                 <EmailRecipients
                   from={record.recordState?.from ?? null}

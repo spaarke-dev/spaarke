@@ -108,6 +108,7 @@ internal sealed partial class RecordCreationService
             return RecordRepairOutcome.Row(table, id, RecordRepairStatus.Skipped, RecordRepairReason.RowNotFound);
 
         var patch = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        var mapped = new HashSet<string>(StringComparer.OrdinalIgnoreCase); // #2247: the patch columns a mapping rule gave
         var report = new List<RecordRepairField>();
         var warnings = new List<string>();
 
@@ -121,7 +122,7 @@ internal sealed partial class RecordCreationService
         }
         else
         {
-            await RepairMappingAsync(table, rule, row, ownerParents, patch, report, warnings, ct).ConfigureAwait(false);
+            await RepairMappingAsync(table, rule, row, ownerParents, patch, mapped, report, warnings, ct).ConfigureAwait(false);
         }
 
         await RepairSearchIndexAsync(table, rule, row, owner.BusinessUnit, patch, report, ct).ConfigureAwait(false);
@@ -153,10 +154,14 @@ internal sealed partial class RecordCreationService
         if (await InvoiceFamilyUpdateRefusalAsync(table, id, patch, ct).ConfigureAwait(false) is { } refusedBy)
             return Outcome(RecordRepairStatus.Skipped, refusedBy);
 
-        // #2170: the write itself asks the app-only refusal over every column it sends (the per-member guard,
-        // EveryGenericUpdateWriter_AsksTheAppOnlyRefusal). The mapping already reports each document column it refuses
-        // (DocumentServerOwnedRefusal), so this only fires if a later step ever puts one in the patch: nothing is written.
-        if (InheritedAccessPermission.RefuseAppOnlyWrite(table, patch.Keys) is { } refusedWrite)
+        // #2170: the write itself asks the app-only refusal (the per-member guard, EveryGenericUpdateWriter_AsksTheAppOnlyRefusal).
+        // #2247: it asks over the MAPPED columns only (`mapped`: what a field-mapping rule, a configuration, gave), never over
+        // the columns Repair decides itself: the owner (step 7, its ownership logic writes `ownerid`, which the refusal
+        // refuses from every configuration), the search-index default (step 8) and the I-1 stamp (step 10). A rule that
+        // targets the owner or the creator is never mapped: the per-rule ask (DocumentServerOwnedRefusal) skips it first, and
+        // ProtectedFromMapping also holds the plain owner and creator-person names. So this only fires if the mapping ever
+        // lets one through: nothing is written.
+        if (InheritedAccessPermission.RefuseAppOnlyWrite(table, patch.Keys.Where(mapped.Contains)) is { } refusedWrite)
         {
             _logger.LogError("[RECORD-REPAIR] {Table} {Id}: the repair write names a column Spaarke sets ({Reason}); nothing " +
                              "was written", table, id, refusedWrite.Reason);
@@ -223,7 +228,8 @@ internal sealed partial class RecordCreationService
     /// </summary>
     private async Task RepairMappingAsync(
         string table, RecordTableRule rule, Entity row, IReadOnlyList<RecordOwnershipParent> ownerParents,
-        Dictionary<string, object> patch, List<RecordRepairField> report, List<string> warnings, CancellationToken ct)
+        Dictionary<string, object> patch, HashSet<string> mappedColumns, List<RecordRepairField> report, List<string> warnings,
+        CancellationToken ct)
     {
         if (!rule.MappingApplies)
         {
@@ -386,6 +392,9 @@ internal sealed partial class RecordCreationService
                     report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, column, RecordRepairReason.MappingNoValue));
                 }
             }
+
+            // #2247: what the write asks the app-only refusal over (a fault above maps nothing, so adds nothing).
+            mappedColumns.UnionWith(mappedHere);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -406,7 +415,7 @@ internal sealed partial class RecordCreationService
     /// Why <paramref name="column"/> of a <paramref name="table"/> row is never written by Repair's mapping, or <c>null</c>:
     /// the app-only refusal every generic writer asks (<see cref="InheritedAccessPermission.RefuseAppOnlyWrite"/>, asked per
     /// rule as the field-mapping push asks it) — a document's Access Permission and own-narrowing record, and its D7 links
-    /// (#2170). Its code is the reason reported.
+    /// (#2170), and on every table the owner and the creator (#2247). Its code is the reason reported.
     /// </summary>
     private static string? DocumentServerOwnedRefusal(string table, string column) =>
         InheritedAccessPermission.RefuseAppOnlyWrite(table, [column]) is { } refused

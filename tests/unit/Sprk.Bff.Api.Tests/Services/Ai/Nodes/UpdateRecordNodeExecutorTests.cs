@@ -413,15 +413,16 @@ public class UpdateRecordNodeExecutorTests
     {
         // Arrange
         var recordId = Guid.NewGuid();
-        var ownerId = Guid.NewGuid();
+        var reviewerId = Guid.NewGuid();
+        // #2247: a user lookup that is not the owner or the creator (an app-only node may not write those).
         var config = $@"{{
             ""entityLogicalName"":""sprk_document"",
             ""recordId"":""{recordId}"",
             ""fields"":{{""sprk_status"":""Assigned""}},
             ""lookups"":{{
-                ""ownerid"":{{
+                ""sprk_ReviewedBy"":{{
                     ""targetEntity"":""systemuser"",
-                    ""targetId"":""{ownerId}""
+                    ""targetId"":""{reviewerId}""
                 }}
             }}
         }}";
@@ -435,7 +436,34 @@ public class UpdateRecordNodeExecutorTests
 
         // Assert
         result.Success.Should().BeTrue();
-        written.Should().ContainSingle().Which["ownerid@odata.bind"].Should().Be($"/systemusers({ownerId})");
+        written.Should().ContainSingle().Which["sprk_ReviewedBy@odata.bind"].Should().Be($"/systemusers({reviewerId})");
+    }
+
+    [Theory(DisplayName = "#2247: an app-only node's lookup onto the owner or the creator is refused, and nothing is written")]
+    [InlineData("sprk_document", "ownerid", "systemuser")]
+    [InlineData("sprk_matter", "ownerid", "team")]
+    [InlineData("sprk_event", "sprk_CreatedByPerson", "systemuser")]
+    public async Task ExecuteAsync_ALookupOntoTheOwnerOrTheCreator_FailsTheNode_AndWritesNothing(
+        string table, string field, string target)
+    {
+        var config = $@"{{
+            ""entityLogicalName"":""{table}"",
+            ""recordId"":""{Guid.NewGuid()}"",
+            ""fields"":{{""sprk_name"":""x""}},
+            ""lookups"":{{
+                ""{field}"":{{
+                    ""targetEntity"":""{target}"",
+                    ""targetId"":""{Guid.NewGuid()}""
+                }}
+            }}
+        }}";
+        SetupMockPassThrough();
+        var written = UseEntitySetsFromMetadata();
+
+        var result = await _executor.ExecuteAsync(CreateValidContext(config), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        written.Should().BeEmpty("the refusal comes before the write");
     }
 
     [Fact(DisplayName = "#2091 r4: a lookup's bind names the target's entity set as metadata answers it (sprk_analysis → sprk_analysises), never a guessed plural")]

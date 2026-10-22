@@ -567,7 +567,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         JsonElement aiOutput = await _actionRunner!.RunAsync(action, documentText, runContext, cancellationToken);
 
         // Shared mapper — identical to the wizard + Compose paths (one source of truth, no drift).
-        var fields = DocumentProfileOutputMapper.BuildFields(aiOutput, fileName, parentEntity: null, _logger);
+        var fields = DocumentProfileOutputMapper.BuildFields(documentId, aiOutput, fileName, parentEntity: null, _logger);
         if (fields.Count == 0)
         {
             _logger.LogWarning(

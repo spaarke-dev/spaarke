@@ -136,11 +136,13 @@ public class OfficeDocumentPersistence
         }
 
         // UAC-r2 task 189 (D7 T7a): the Restricted is recorded as the document's OWN narrowing in the same create, so the
-        // reconciler keeps it when the document's parents are wider.
+        // reconciler keeps it when the document's parents are wider. Owner round 122: it is marked provisional, so once the
+        // document is linked to a communication the reconciler releases it and the document follows that communication.
         const int restricted = Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.Restricted;
         create.RelatedCommunicationId = null;
         create.AccessPermission = restricted;
-        create.AccessInheritanceRecord = Sprk.Bff.Api.Services.Access.AccessInheritance.OwnNarrowing(restricted).Serialize();
+        create.AccessInheritanceRecord =
+            Sprk.Bff.Api.Services.Access.AccessInheritance.OwnNarrowingUntilEmailIdentified(restricted).Serialize();
         return true;
     }
 
