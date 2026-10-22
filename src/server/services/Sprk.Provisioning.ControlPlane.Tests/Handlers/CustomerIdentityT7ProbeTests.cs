@@ -19,6 +19,12 @@
 // list — missing on a slot, a stale extra index, an unparseable value, Spaarke's
 // tenant on a Model 1 stamp, and a run without the list all fail; order does not
 // matter; a case-variant or ':' name counts (the BFF binds it).
+//
+// Task 264 (#2001 from SPA-r3 ISS-013): a third clause — the BFF app registration has
+// authenticationBehaviors.removeUnverifiedEmailClaim == true. The real Microsoft.Graph client runs against a hand-rolled
+// fake HTTP handler (the same ArmSdkTestFakes.NewHandler transport), so the tests prove the one v1.0 read the probe issues
+// (applications(appId='...'), tenant-scoped via the factory). false / null / absent / 404 fail; a read error is an
+// InfraFault, never a Passed. The decision itself is the pure EvaluateUnverifiedEmailClaim.
 // -----------------------------------------------------------------------------
 
 using System.Net;
@@ -26,6 +32,8 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.Graph;
+using Microsoft.Graph.Models;
 using Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 using Xunit;
 
@@ -39,6 +47,7 @@ public sealed class CustomerIdentityT7ProbeTests
     private const string CustomerId = "acme";
     private const string KeyVaultRef = "@Microsoft.KeyVault(SecretUri=https://sprk-acme-prod-kv.vault.azure.net/secrets/Redis-ConnectionString/)";
     private const string RunTenantId = "11111111-1111-1111-1111-111111111111";   // Model 1: Spaarke's tenant = AzureAd__TenantId
+    private const string BffAppRegId = "33333333-3333-3333-3333-333333333333";
     private const string WorkforceA = "d0e0c0a0-0000-4000-8000-000000000003";
     private const string WorkforceB = "e1e1e1e1-0000-4000-8000-000000000004";
 
@@ -249,6 +258,161 @@ public sealed class CustomerIdentityT7ProbeTests
             new CustomerIdentityT7Probe.SettingLookup(null, Ambiguous: true));
     }
 
+    // ---------- task 264: the BFF app registration strips unverified emails ----------
+
+    [Fact]
+    public async Task ProbeAsync_BffAppFlagTrue_ReadsTheRunsAppInTheRunsTenant_ReturnsPassed()
+    {
+        var arm = new FakeSlotSettingsArm(Settings(CustomerId), Settings(CustomerId));
+        var graph = FakeGraph.WithFlag(true);
+
+        var outcome = await NewProbe(arm, graph).ProbeAsync(Request(), CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.Passed>();
+        graph.Tenants.Should().Equal(new[] { RunTenantId }, "I5: the Graph client is built for the run's tenant, never an ambient one");
+        var read = graph.Requests.Should().ContainSingle().Subject;
+        read.AbsoluteUri.Should().StartWith("https://graph.microsoft.com/v1.0/applications(appId='" + BffAppRegId + "')");
+        read.Query.Should().Contain("authenticationBehaviors");
+        read.AbsoluteUri.Should().NotContain("/beta/");
+    }
+
+    [Theory]
+    [InlineData(false, "removeUnverifiedEmailClaim = false")]
+    [InlineData(null, "no authenticationBehaviors")]
+    public async Task ProbeAsync_BffAppFlagNotTrue_ReturnsFailedNamingTheApp(bool? flag, string expected)
+    {
+        // flag == null: Graph returns authenticationBehaviors without the flag only when other values are set, so the
+        // "absent" body is covered by EvaluateUnverifiedEmailClaim_FlagNull; here a missing object is the ACME shape.
+        var arm = new FakeSlotSettingsArm(Settings(CustomerId), Settings(CustomerId));
+        var graph = flag is null
+            ? FakeGraph.WithBody($$"""{ "id": "obj", "appId": "{{BffAppRegId}}", "authenticationBehaviors": null }""")
+            : FakeGraph.WithFlag(flag);
+
+        var outcome = await NewProbe(arm, graph).ProbeAsync(Request(), CancellationToken.None);
+
+        var failed = outcome.Should().BeOfType<TrapVerificationOutcome.Failed>().Subject;
+        failed.Diagnostic.Should().Contain(BffAppRegId).And.Contain(expected).And.Contain("Set it by hand").And.Contain("a resume does not re-run H3");
+        failed.Diagnostic.Should().NotContain("Customer__Id=", "the settings clauses are fine");
+    }
+
+    [Fact]
+    public async Task ProbeAsync_BffAppAuthenticationBehaviorsWithoutTheFlag_ReturnsFailed()
+    {
+        var arm = new FakeSlotSettingsArm(Settings(CustomerId), Settings(CustomerId));
+
+        var outcome = await NewProbe(arm, FakeGraph.WithFlag(null)).ProbeAsync(Request(), CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.Failed>()
+            .Which.Diagnostic.Should().Contain("removeUnverifiedEmailClaim = absent");
+    }
+
+    [Fact]
+    public async Task ProbeAsync_BffAppNotFound_ReturnsFailed_H3sAppIsMissing()
+    {
+        var arm = new FakeSlotSettingsArm(Settings(CustomerId), Settings(CustomerId));
+
+        var outcome = await NewProbe(arm, FakeGraph.WithStatus(HttpStatusCode.NotFound, "Request_ResourceNotFound"))
+            .ProbeAsync(Request(), CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.Failed>()
+            .Which.Diagnostic.Should().Contain("was not found").And.Contain("Start a new run");
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Forbidden, "Authorization_RequestDenied", "HTTP 403")]
+    [InlineData(HttpStatusCode.InternalServerError, "generalException", "HTTP 500")]
+    public async Task ProbeAsync_GraphReadFails_ReturnsInfraFault_NeverPassed(HttpStatusCode status, string code, string expected)
+    {
+        var arm = new FakeSlotSettingsArm(Settings(CustomerId), Settings(CustomerId));
+
+        var outcome = await NewProbe(arm, FakeGraph.WithStatus(status, code)).ProbeAsync(Request(), CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.InfraFault>().Which.Diagnostic.Should().Contain(expected);
+    }
+
+    [Fact]
+    public async Task ProbeAsync_GraphReadFailsButSettingsWrong_ReturnsFailedNotingTheUnreadClause()
+    {
+        var arm = new FakeSlotSettingsArm(Settings(CustomerId), Settings(customerId: null));
+
+        var outcome = await NewProbe(arm, FakeGraph.WithStatus(HttpStatusCode.Forbidden, "Authorization_RequestDenied"))
+            .ProbeAsync(Request(), CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.Failed>()
+            .Which.Diagnostic.Should().Contain("staging [MISSING").And.Contain("clause was not read").And.Contain("HTTP 403");
+    }
+
+    [Fact]
+    public async Task ProbeAsync_GraphClientFactoryThrows_ReturnsInfraFault()
+    {
+        var arm = new FakeSlotSettingsArm(Settings(CustomerId), Settings(CustomerId));
+        var probe = new CustomerIdentityT7Probe(
+            ArmSdkTestFakes.NewArmClient(ArmSdkTestFakes.NewHandler(arm.Respond)),
+            Options.Create(new H13AcceptanceOptions()),
+            NullLogger<CustomerIdentityT7Probe>.Instance,
+            _ => throw new InvalidOperationException("no credential"));
+
+        var outcome = await probe.ProbeAsync(Request(), CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.InfraFault>().Which.Diagnostic.Should().Contain("InvalidOperationException");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("  ")]
+    [InlineData("not-a-guid")]
+    public async Task ProbeAsync_BffAppRegIdBlankOrUnparseable_ReturnsInfraFaultWithoutAnyRead(string appRegId)
+    {
+        var arm = new FakeSlotSettingsArm(Settings(CustomerId), Settings(CustomerId));
+        var graph = FakeGraph.WithFlag(true);
+
+        var outcome = await NewProbe(arm, graph).ProbeAsync(Request() with { BffAppRegId = appRegId }, CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.InfraFault>()
+            .Which.Diagnostic.Should().Contain(nameof(TrapVerificationRequest.BffAppRegId));
+        arm.Reads.Should().BeEmpty();
+        graph.Tenants.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ProbeAsync_SettingsAndAppRegistrationBothWrong_ReportsBothClauses()
+    {
+        var arm = new FakeSlotSettingsArm(Settings(CustomerId), Settings(customerId: null));
+
+        var outcome = await NewProbe(arm, FakeGraph.WithFlag(false)).ProbeAsync(Request(), CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.Failed>()
+            .Which.Diagnostic.Should().Contain("staging [MISSING").And.Contain("removeUnverifiedEmailClaim = false");
+    }
+
+    [Fact]
+    public void EvaluateUnverifiedEmailClaim_FlagTrue_ReturnsNoProblem()
+    {
+        CustomerIdentityT7Probe.EvaluateUnverifiedEmailClaim(
+            new AuthenticationBehaviors { RemoveUnverifiedEmailClaim = true }).Should().BeNull();
+    }
+
+    [Fact]
+    public void EvaluateUnverifiedEmailClaim_FlagFalse_ReturnsAProblem()
+    {
+        CustomerIdentityT7Probe.EvaluateUnverifiedEmailClaim(
+            new AuthenticationBehaviors { RemoveUnverifiedEmailClaim = false }).Should().Contain("= false");
+    }
+
+    [Fact]
+    public void EvaluateUnverifiedEmailClaim_NullBehaviors_ReturnsAProblem()
+    {
+        CustomerIdentityT7Probe.EvaluateUnverifiedEmailClaim(null).Should().Contain("no authenticationBehaviors");
+    }
+
+    [Fact]
+    public void EvaluateUnverifiedEmailClaim_FlagNull_ReturnsAProblem()
+    {
+        CustomerIdentityT7Probe.EvaluateUnverifiedEmailClaim(
+            new AuthenticationBehaviors { RemoveUnverifiedEmailClaim = null, BlockAzureADGraphAccess = true })
+            .Should().Contain("= absent");
+    }
+
     // ---------- helpers ----------
 
     private static Dictionary<string, string> Settings(string? customerId)
@@ -275,7 +439,7 @@ public sealed class CustomerIdentityT7ProbeTests
         TenantId: "11111111-1111-1111-1111-111111111111",
         SubscriptionId: SubscriptionId,
         DataverseUrl: "https://org.crm.dynamics.com",
-        BffAppRegId: "33333333-3333-3333-3333-333333333333",
+        BffAppRegId: BffAppRegId,
         UamiClientId: "44444444-4444-4444-4444-444444444444",
         KeyVaultName: "sprk-acme-prod-kv",
         AppServiceName: AppServiceName,
@@ -283,10 +447,42 @@ public sealed class CustomerIdentityT7ProbeTests
         CustomerWorkforceTenantIds: [WorkforceA, WorkforceB],
         TenancyModel: "Model1");
 
-    private static CustomerIdentityT7Probe NewProbe(FakeSlotSettingsArm arm) => new(
+    private static CustomerIdentityT7Probe NewProbe(FakeSlotSettingsArm arm, FakeGraph? graph = null) => new(
         ArmSdkTestFakes.NewArmClient(ArmSdkTestFakes.NewHandler(arm.Respond)),
         Options.Create(new H13AcceptanceOptions()),
-        NullLogger<CustomerIdentityT7Probe>.Instance);
+        NullLogger<CustomerIdentityT7Probe>.Instance,
+        (graph ?? FakeGraph.WithFlag(true)).Factory);
+
+    /// <summary>Canned Microsoft Graph for the one application read; the real SDK client runs over a fake HTTP handler.</summary>
+    private sealed class FakeGraph
+    {
+        private readonly Func<HttpRequestMessage, HttpResponseMessage> _respond;
+
+        private FakeGraph(Func<HttpRequestMessage, HttpResponseMessage> respond) => _respond = respond;
+
+        public List<string> Tenants { get; } = new();
+        public List<Uri> Requests { get; } = new();
+
+        public static FakeGraph WithFlag(bool? flag) => WithBody(flag is null
+            ? $$"""{ "id": "obj", "appId": "{{BffAppRegId}}", "authenticationBehaviors": { "blockAzureADGraphAccess": true } }"""
+            : $$"""{ "id": "obj", "appId": "{{BffAppRegId}}", "authenticationBehaviors": { "removeUnverifiedEmailClaim": {{(flag.Value ? "true" : "false")}} } }""");
+
+        public static FakeGraph WithBody(string json) => new(_ => ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK, json));
+
+        public static FakeGraph WithStatus(HttpStatusCode status, string code) => new(_ => ArmSdkTestFakes.JsonResponse(
+            status, $$"""{ "error": { "code": "{{code}}", "message": "canned" } }"""));
+
+        public GraphServiceClient Factory(string tenantId)
+        {
+            Tenants.Add(tenantId);
+            var handler = ArmSdkTestFakes.NewHandler(request =>
+            {
+                Requests.Add(request.RequestUri!);
+                return _respond(request);
+            });
+            return new GraphServiceClient(new HttpClient(handler));
+        }
+    }
 
     /// <summary>Canned ARM for one site + its staging slot; anything else is a 404 so a stray call fails.</summary>
     private sealed class FakeSlotSettingsArm

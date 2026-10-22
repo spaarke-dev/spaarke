@@ -99,6 +99,17 @@
 // created with it; an existing one gets it added (every other optional claim preserved — the retired script's
 // -AcctClaimOnly mode, Get-SpaarkeAccessTokenOptionalClaimsWithAcct). Read fresh, PATCH only when missing, read back.
 //
+// UNVERIFIED EMAIL CLAIM (task 264, #2001 from SPA-r3 ISS-013): every per-customer BFF registration carries
+// authenticationBehaviors.removeUnverifiedEmailClaim = true. R3's email-bound contact registration
+// (ExternalRegistrationEndpoints.cs / ContactIdentityBinder.cs) binds a workforce sign-in to a contact by the token `email`
+// claim, which is safe only when Entra strips that claim for an unverified domain; otherwise a user in an allowed customer
+// directory with an unverified-domain email equal to a contact's could register as that contact. New and existing
+// registrations alike: read fresh (get-before-set), PATCH only when it is not already true, read back. The setting is a
+// complex type that Graph replaces whole, so the other authenticationBehaviors values (blockAzureADGraphAccess,
+// requireClientServicePrincipal) are carried over unchanged. Graph v1.0 (SDK 6.5.0) returns and accepts it; no beta call.
+// The multitenant SPA client (Spaarke Workforce SPA) carries the same flag as an operator one-time setting that H3 never
+// touches. H13 trap T7 verifies the result independently.
+//
 // KEYLESS-PROOF APP ROLE (task 230b, owner D13): the app-reg exposes the application role
 // KeylessProofContract.AppRoleValue (fixed id, allowedMemberTypes ["Application"]) and H3 assigns it to
 // the L2 Worker identity (ControlPlaneIdentityOptions.PrincipalObjectId) — the only caller of the
@@ -260,6 +271,13 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
             if (acctFailure is not null)
             {
                 return acctFailure;
+            }
+
+            // (2d) T264: authenticationBehaviors.removeUnverifiedEmailClaim = true (new and existing registrations alike).
+            var unverifiedEmailFailure = await EnsureRemoveUnverifiedEmailClaimAsync(graph, app.Id!, request, cancellationToken).ConfigureAwait(false);
+            if (unverifiedEmailFailure is not null)
+            {
+                return unverifiedEmailFailure;
             }
 
             // (3) Ensure service principal.
@@ -854,6 +872,104 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
                 $"Adding the acct optional claim to application {appObjectId} failed: Graph ODataError " +
                 $"{ex.ResponseStatusCode}: {ex.Error?.Code} {ex.Error?.Message ?? ex.Message}. " +
                 $"[{EntraAppRegRejectionCodes.AcctClaimFailed}]");
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // `removeUnverifiedEmailClaim` (task 264) — see file header
+    // ---------------------------------------------------------------------
+
+    /// <summary>
+    /// The <c>authenticationBehaviors</c> to PATCH so the registration strips unverified-domain emails from its tokens, or
+    /// null when it already does. Graph replaces the whole complex type, so the plan carries the other two values over
+    /// unchanged. They are COPIED into a new object: a model read from Graph is not re-serialised whole when reused in a
+    /// PATCH body (the SDK's backing store sends only changed values) — the same reason <see cref="PlanAcctOptionalClaim"/> copies.
+    /// An unset value is not assigned, so the body carries no explicit null for it (as <see cref="PlanClientAccess"/>).
+    /// </summary>
+    internal static AuthenticationBehaviors? PlanRemoveUnverifiedEmailClaim(AuthenticationBehaviors? current)
+    {
+        if (current?.RemoveUnverifiedEmailClaim == true)
+        {
+            return null;
+        }
+
+        var plan = new AuthenticationBehaviors { RemoveUnverifiedEmailClaim = true };
+        if (current?.BlockAzureADGraphAccess is { } blockAzureAdGraphAccess)
+        {
+            plan.BlockAzureADGraphAccess = blockAzureAdGraphAccess;
+        }
+        if (current?.RequireClientServicePrincipal is { } requireClientServicePrincipal)
+        {
+            plan.RequireClientServicePrincipal = requireClientServicePrincipal;
+        }
+        return plan;
+    }
+
+    /// <summary>
+    /// Reads the app's <c>authenticationBehaviors</c> fresh, sets <c>removeUnverifiedEmailClaim</c> when it is not already
+    /// true (<see cref="PlanRemoveUnverifiedEmailClaim"/>), and reads it back. Idempotent: a registration that has it is
+    /// not written. Returns null on success or a Failure.
+    /// </summary>
+    private async Task<EntraAppRegOutcome?> EnsureRemoveUnverifiedEmailClaimAsync(
+        GraphServiceClient graph, string appObjectId, EntraAppRegRequest request, CancellationToken ct)
+    {
+        try
+        {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(_options.GraphRequestTimeout);
+
+            var current = await RetryWhileReplicatingAsync(
+                attemptCt => graph.Applications[appObjectId]
+                    .GetAsync(rc => rc.QueryParameters.Select = ["id", "appId", "authenticationBehaviors"], attemptCt),
+                IsNotYetReplicated, "authenticationBehaviors read", ct).ConfigureAwait(false);
+            if (current is null)
+            {
+                return new EntraAppRegOutcome.Failure(
+                    $"Graph GET /applications/{appObjectId} returned nothing. [{EntraAppRegRejectionCodes.UnverifiedEmailClaimFailed}]");
+            }
+
+            var plan = PlanRemoveUnverifiedEmailClaim(current.AuthenticationBehaviors);
+            if (plan is null)
+            {
+                return null;
+            }
+
+            await graph.Applications[appObjectId].PatchAsync(new Application { AuthenticationBehaviors = plan }, cancellationToken: timeoutCts.Token)
+                .ConfigureAwait(false);
+
+            // A write we did not observe is not a write we can report. Entra replicates writes, so a read straight after
+            // the PATCH may be stale: retry before calling it a failure.
+            for (var attempt = 1; ; attempt++)
+            {
+                using var readCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                readCts.CancelAfter(_options.GraphRequestTimeout);
+                var after = await graph.Applications[appObjectId]
+                    .GetAsync(rc => rc.QueryParameters.Select = ["id", "authenticationBehaviors"], readCts.Token)
+                    .ConfigureAwait(false);
+                if (PlanRemoveUnverifiedEmailClaim(after?.AuthenticationBehaviors) is null)
+                {
+                    break;
+                }
+                if (attempt >= _options.RoleAssignmentRetryCount)
+                {
+                    return new EntraAppRegOutcome.Failure(
+                        $"authenticationBehaviors.removeUnverifiedEmailClaim was written to application {current.AppId} but is " +
+                        $"not true when read back ({attempt} reads). Resume H3. [{EntraAppRegRejectionCodes.UnverifiedEmailClaimFailed}]");
+                }
+                await Task.Delay(_options.RoleAssignmentRetryDelay, ct).ConfigureAwait(false);
+            }
+
+            _logger.LogInformation(
+                "H3 set removeUnverifiedEmailClaim: customerId={CustomerId} appId={AppId}",
+                request.CustomerId, current.AppId);
+            return null;
+        }
+        catch (ODataError ex)
+        {
+            return new EntraAppRegOutcome.Failure(
+                $"Setting authenticationBehaviors.removeUnverifiedEmailClaim on application {appObjectId} failed: Graph " +
+                $"ODataError {ex.ResponseStatusCode}: {ex.Error?.Code} {ex.Error?.Message ?? ex.Message}. " +
+                $"[{EntraAppRegRejectionCodes.UnverifiedEmailClaimFailed}]");
         }
     }
 

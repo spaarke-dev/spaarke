@@ -148,7 +148,9 @@ public enum TrapKind
     /// INCOMING-CUSTOMER-RUNTIME-IDENTITY §1.2). Without it the BFF derives its identity from the resource
     /// group with a warning — a stamp that "was never finished". Task 255: and exactly the run's customer
     /// workforce tenant list (<c>WorkforceIdentity__CustomerTenantIds__N</c>) — without it the BFF denies every
-    /// first sign-in of a customer employee.
+    /// first sign-in of a customer employee. Task 264: and the stamp's BFF app registration carries
+    /// <c>authenticationBehaviors.removeUnverifiedEmailClaim = true</c> — without it the email-bound contact
+    /// registration lets a user with an unverified-domain email register as the contact owning that email.
     /// </summary>
     T7CustomerIdentityExplicit = 7,
 }
