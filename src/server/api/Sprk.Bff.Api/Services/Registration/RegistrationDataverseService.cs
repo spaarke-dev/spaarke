@@ -606,8 +606,9 @@ public class RegistrationDataverseService : IDisposable
     /// ISS-005 (#1673 review F1): when <paramref name="dataverseBaseUrl"/> is THIS BFF's own environment
     /// (<see cref="IsSameEnvironment"/> against <c>Dataverse:ServiceUrl</c>, however the URL is spelled - e.g. the
     /// registration default <c>DATAVERSE_URL</c> naming the same environment with an <c>.api.</c> host), the result is the
-    /// DI-registered binder, which carries the customer-owner inputs. A factory binder has none and creates ownerless
-    /// contacts, which is right only for a genuinely different environment.
+    /// DI-registered binder, whose owner policy is <c>ContactCreateOwner.FromCustomerBusinessUnit</c>. A factory binder's is
+    /// <c>NoneForForeignEnvironment</c>: it creates ownerless contacts, which is right only for a genuinely different
+    /// environment (tracked in #2270).
     /// </remarks>
     public ContactIdentityBinder ContactBinderFor(string dataverseBaseUrl)
     {

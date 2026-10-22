@@ -393,7 +393,9 @@ public class ContactIdentityBinderOwnerTeamTests
         _store.Reads.Should().NotContain(new[] { "owner-team", "business-unit" });
     }
 
-    // ── The binder over ANOTHER environment is unchanged (the setting names a unit of THIS environment) ────
+    // ── A binder over ANOTHER environment binds no owner, by design (#2270): the setting names a unit of THIS environment ──
+    // These tests do not lock a gap in: the own environment is owned (the DI tests below; RegistrationContactLinkTests asserts the
+    // registration approval's own-environment contact carries ownerid), and this is the factory's explicit, named policy.
 
     [Fact]
     public async Task TheReportOnlyLinkPass_OfABinderOverAnotherEnvironment_PlansTheCreate_SaysOwnerNone_AndReadsNoOwnerTeam()

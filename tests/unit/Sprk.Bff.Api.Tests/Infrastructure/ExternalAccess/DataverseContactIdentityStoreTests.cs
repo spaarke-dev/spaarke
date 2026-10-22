@@ -835,7 +835,10 @@ public class DataverseContactIdentityStoreTests
     [Fact]
     public void TheWorkforceCreate_WithNoOwner_IsStillBuilt_ForABinderOverAnotherEnvironment()
     {
-        // The binder over ANOTHER environment binds no owner (ContactIdentityBinderFactory): unchanged by ISS-005.
+        // The payload builder serves BOTH kinds of binder. This is the one built for a binder over ANOTHER environment
+        // (ContactCreateOwner.NoneForForeignEnvironment, ContactIdentityBinderFactory only; ownerless by design, tracked in #2270).
+        // A binder over this BFF's own environment always carries an owner: TheWorkforceCreate_CarriesTheOwnerBind_AndNoHomeTenant
+        // above, and ContactIdentityBinderOwnerTeamTests / RegistrationContactLinkTests through the binder.
         var payload = DataverseContactIdentityStore.CreatePayload(Oid, IdentityPlaneMarker.Workforce,
             new NewContactDetails("Pat", "Example", "pat@customer.example"));
 

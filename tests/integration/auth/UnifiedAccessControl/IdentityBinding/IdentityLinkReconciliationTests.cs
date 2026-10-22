@@ -809,7 +809,7 @@ public class IdentityLinkReconciliationTests
             .Should().Equal(DemoEnvironment, OtherDemoEnvironment);
 
     // ISS-005 (#1673 review F1): the own environment is excluded however it is spelled. Reconciled through a factory binder
-    // (no owner inputs) it would create ownerless contacts in this environment.
+    // (owner policy NoneForForeignEnvironment) it would create ownerless contacts in this environment.
     private const string OwnEnvironmentApi = "https://spaarkedev1.api.crm.dynamics.com";
 
     [Theory]

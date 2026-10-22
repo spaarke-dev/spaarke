@@ -44,9 +44,9 @@ public static class IdentityBindingTestKit
     public static ContactIdentityBinder InertOwnEnvironmentBinder() => Binder(new InMemoryContactIdentityStore());
 
     /// <summary>
-    /// A binder over THIS BFF's own environment as DI builds it (ISS-005, #1673): the customer-owner inputs are given, so a
-    /// Workforce-plane create is owned by the default owner team of <paramref name="customerBusinessUnitId"/>, or refused
-    /// when that is unset.
+    /// A binder over THIS BFF's own environment as DI builds it (ISS-005, #1673): its owner policy is
+    /// <c>ContactCreateOwner.FromCustomerBusinessUnit</c>, so a Workforce-plane create is owned by the default owner team of
+    /// <paramref name="customerBusinessUnitId"/>, or refused when that is unset.
     /// </summary>
     public static ContactIdentityBinder OwnerAwareBinder(
         InMemoryContactIdentityStore store, Guid? customerBusinessUnitId, IDictionary<string, string?>? configuration = null)
