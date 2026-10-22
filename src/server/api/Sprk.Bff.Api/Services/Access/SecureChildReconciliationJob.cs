@@ -795,6 +795,9 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                         // Task 189 fix round C (K1+K2): documents whose own narrowing could not be known, raised to what their
                         // parents give (value only; never lowered).
                         raisedOnly = apRun.RaisedOnly,
+                        // Owner round 122 fix round 2 (K2): save-time Restricted documents not released because the
+                        // document link columns are not field-secured. Not carried, so they never hold the window.
+                        releaseRefusedLinkColumnsNotSecured = apRun.ReleaseRefusedLinkColumnsNotSecured,
                         failure = apRun.Failure,
                         sweep = new
                         {
@@ -849,7 +852,8 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         }
 
         var reconciler = new ChildAccessPermissionReconciler(
-            dataverse, (table, token) => coreAncestors.ProbeColumnsAsync(table, token), _logger);
+            dataverse, (table, token) => coreAncestors.ProbeColumnsAsync(table, token), _logger,
+            token => DocumentLinkColumnsSecuredAsync(services, token));
         ChildAccessPermissionRun run;
         try
         {
@@ -898,10 +902,12 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             "alreadyCorrect={AlreadyCorrect} changed={Changed} wouldChange={WouldChange} parentless={Parentless} " +
             "undetermined={Undetermined} failed={Failed} deferred={Deferred} writeCapReached={WriteCapReached} carried={Carried} " +
             "sweepRows={SweepRows} sweepComplete={SweepComplete} recordsWritten={RecordsWritten} ownKept={OwnKept} " +
-            "changedConcurrently={ChangedConcurrently} raisedOnly={RaisedOnly} failure={Failure}",
+            "changedConcurrently={ChangedConcurrently} raisedOnly={RaisedOnly} " +
+            "releaseRefusedLinkColumnsNotSecured={ReleaseRefusedLinkColumnsNotSecured} failure={Failure}",
             runId, mode, since, run.RowsChanged, run.Examined, run.AlreadyCorrect, run.Changed, run.WouldChange, run.Parentless,
             run.Undetermined, run.Failed, run.Deferred, run.WriteCapReached, carriedRows, run.SweepRows, sweepComplete,
-            run.RecordsWritten, run.OwnKept, run.ChangedConcurrently, run.RaisedOnly, run.Failure);
+            run.RecordsWritten, run.OwnKept, run.ChangedConcurrently, run.RaisedOnly, run.ReleaseRefusedLinkColumnsNotSecured,
+            run.Failure);
 
         return new AccessPermissionRunReport(mode, run, since, carriedRows, sweepAfter is not null, sweepComplete);
     }
@@ -1863,6 +1869,35 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     private readonly HashSet<(string Table, Guid Id)> _accessPermissionPending = new();
     private bool _accessPermissionSweepComplete;
     private (string Table, Guid Id)? _accessPermissionSweepCursor;
+
+    // Owner round 122 fix round 1 (K1): both document link columns were found field-secured. Cached for the process once
+    // true (this job is a singleton); a "not secured" answer or a failed read is asked again on the next run that needs it,
+    // so applying Set-DocumentNarrowingFieldSecurity.ps1 takes effect without a restart. REVERTING it does not: the cached
+    // "secured" stands until the BFF restarts (fix round 2; I-19).
+    private volatile bool _documentLinkColumnsSecured;
+
+    /// <summary>
+    /// Owner round 122 fix round 1 (K1): whether <c>sprk_document</c>'s two link columns
+    /// (<see cref="ChildAccessPermissionReconciler.ReleaseLinkColumns"/>) are field-secured, read from attribute metadata by
+    /// the same reader as the access record's check (<see cref="SecureRootInheritance.ColumnFieldSecurityAsync"/>). The
+    /// reconciler asks only when a release is due. A read fault THROWS (the reconciler then releases nothing this run).
+    /// </summary>
+    private async Task<bool> DocumentLinkColumnsSecuredAsync(IServiceProvider services, CancellationToken ct)
+    {
+        if (_documentLinkColumnsSecured)
+            return true;
+
+        var webApi = services.GetRequiredService<DataverseWebApiClient>();
+        foreach (var column in ChildAccessPermissionReconciler.ReleaseLinkColumns)
+        {
+            var (secured, _) = await SecureRootInheritance.ColumnFieldSecurityAsync(webApi, "sprk_document", column, ct)
+                .ConfigureAwait(false);
+            if (!secured)
+                return false;
+        }
+
+        return _documentLinkColumnsSecured = true;
+    }
 
     /// <summary>Which part of a run a record is reconciled in (task 147 r1c).</summary>
     private enum WorkGroup
