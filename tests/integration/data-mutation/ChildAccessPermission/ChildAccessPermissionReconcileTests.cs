@@ -610,6 +610,8 @@ public partial class ChildAccessPermissionReconcileTests
             services.AddScoped(_ => SecureChildShareWorld.ReconcilerOver(() => World, Shares, null!));
             services.AddScoped(_ => SecureChildShareWorld.SynchronizerOver(() => World, Shares));
             services.AddSingleton(_ => SecureChildShareWorld.CoreAncestorsOver(() => World));
+            // Round 122 fix round 1 (K1): the attribute metadata the release reads for the two document link columns.
+            services.AddSingleton<DataverseWebApiClient>(_ => LinkColumns);
             _provider = services.BuildServiceProvider();
 
             var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -623,6 +625,9 @@ public partial class ChildAccessPermissionReconcileTests
         }
 
         public SecureChildShareWorld World { get; } = SecureChildShareWorld.Standard();
+
+        /// <summary>Round 122 fix round 1 (K1): the link columns' field security (both secured unless a test says otherwise).</summary>
+        public LinkColumnSecurity LinkColumns { get; } = new();
 
         public FakeRecordShareTable Shares { get; } = new();
 

@@ -1,4 +1,9 @@
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using Azure.Core;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Access;
@@ -225,5 +230,273 @@ public partial class ChildAccessPermissionReconcileTests
 
         ValueOf(job, eml).Should().Be(Restricted, "the person's Restricted is theirs");
         RecordOf(job, eml).OwnPermission.Should().Be(Restricted);
+    }
+
+    // ── Fix round 1 ─────────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>A person sets a document's value by hand (the form, a grid, the Web API).</summary>
+    private static void HandSet(Harness job, Guid document, int value)
+    {
+        job.World.Set("sprk_document", document, Column, new OptionSetValue(value));
+        job.World.Modified("sprk_document", document, job.Now.UtcDateTime);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task Round122Fix1_APersonRestrictedEml_KeepsItsProvisionalChildrenRestricted_AfterItIsLinked(int hops)
+    {
+        // F1 (word-add-in), must not fire: the children find the .eml's link 1 to 3 hops up, but a person made the .eml's
+        // Restricted their own (lowered it, then raised it again: round 87), so no child is released wider than it.
+        var job = new Harness();
+        var (_, communication) = CommunicationUnder(job, Standard);
+        var eml = SavedUnidentified(job);
+        var chain = new List<Guid> { eml };
+        for (var i = 0; i < hops; i++)
+            chain.Add(SavedUnidentified(job, ("sprk_parentdocument", "sprk_document", chain[^1])));
+        await job.RunAsync();
+        HandSet(job, eml, Standard);
+        await job.RunAsync();
+        HandSet(job, eml, Restricted);
+        await job.RunAsync();
+        RecordOf(job, eml).OwnProvisional.Should().BeFalse("the person's change made it theirs");
+        RecordOf(job, eml).OwnPermission.Should().Be(Restricted);
+
+        Link(job, eml, communication);
+        var linked = await job.RunAsync();
+        await job.RunAsync();
+
+        ValueOf(job, eml).Should().Be(Restricted, "a person's Restricted stays (round 87)");
+        foreach (var child in chain.Skip(1))
+        {
+            ValueOf(job, child).Should().Be(Restricted, $"{chain.IndexOf(child)} hop(s) below a person's Restricted");
+            RecordOf(job, child).OwnProvisional.Should().BeTrue("unreleased, so it keeps the marker");
+            RecordOf(job, child).FloorPermission.Should().Be(Standard, "its floor is the communication's tops: only the rule keeps it");
+        }
+
+        linked.GetProperty("accessPermission").GetProperty("undetermined").GetInt32().Should().Be(
+            0, "a person's narrowing on the way is decided, not carried");
+    }
+
+    [Fact]
+    public async Task Round122Fix1_APersonRestrictedDocumentBetweenAChildAndTheLink_KeepsTheChildRestricted()
+    {
+        // F1, must not fire: the document a person narrowed is in the middle; the provisional .eml above it is released. The
+        // middle document's Restricted is its own: set while it had no parent, then it was filed under the .eml (its own
+        // narrowing is kept; a Restricted set while under the Restricted .eml would read as inherited, round 87).
+        var job = new Harness();
+        var (_, communication) = CommunicationUnder(job, Standard);
+        var eml = SavedUnidentified(job);
+        var middle = job.Child("sprk_document", Restricted);
+        await job.RunAsync();
+        job.World.Set("sprk_document", middle, "sprk_parentdocument", new EntityReference("sprk_document", eml));
+        job.World.Modified("sprk_document", middle, job.Now.UtcDateTime);
+        var child = SavedUnidentified(job, ("sprk_parentdocument", "sprk_document", middle));
+        await job.RunAsync();
+        RecordOf(job, middle).OwnPermission.Should().Be(Restricted);
+        RecordOf(job, middle).OwnProvisional.Should().BeFalse();
+
+        Link(job, eml, communication);
+        await job.RunAsync();
+        await job.RunAsync();
+
+        ValueOf(job, eml).Should().Be(Standard, "the provisional .eml is released");
+        ValueOf(job, middle).Should().Be(Restricted, "its own");
+        ValueOf(job, child).Should().Be(Restricted, "never wider than the person's Restricted above it");
+        RecordOf(job, child).OwnProvisional.Should().BeTrue();
+        RecordOf(job, child).FloorPermission.Should().Be(Standard, "the floor is the tops only: the rule keeps it");
+    }
+
+    [Fact]
+    public async Task Round122Fix1_AnUnreadableRecordOnTheWayToTheLink_KeepsTheChildRestricted_AndCarriesIt()
+    {
+        // F1 + B: whether the .eml above holds a person's narrowing cannot be read, so the child stays Restricted and is
+        // decided again next run; once the record reads again the child is released.
+        var job = new Harness();
+        var (_, communication) = CommunicationUnder(job, Standard);
+        var eml = SavedUnidentified(job);
+        var child = SavedUnidentified(job, ("sprk_parentdocument", "sprk_document", eml));
+        await job.RunAsync();
+        var emlRecord = job.World.ValueOf<string>("sprk_document", eml, Record);
+        job.World.Set("sprk_document", eml, Record, """{"v":99}""");
+
+        Link(job, eml, communication);
+        var report = await job.RunAsync();
+
+        ValueOf(job, child).Should().Be(Restricted);
+        RecordOf(job, child).OwnProvisional.Should().BeTrue();
+        var accessPermission = report.GetProperty("accessPermission");
+        accessPermission.GetProperty("undetermined").GetInt32().Should().BeGreaterThanOrEqualTo(1);
+        accessPermission.GetProperty("problems").EnumerateArray().Select(p => p.GetString())
+            .Should().Contain(p => p!.Contains(child.ToString("D")) && p.Contains("chain_record_unreadable"));
+
+        job.World.Set("sprk_document", eml, Record, emlRecord); // the record reads again; nothing lists the child but its carry
+        await job.RunAsync();
+
+        ValueOf(job, child).Should().Be(Standard, "carried, so it is decided again and released");
+    }
+
+    [Fact]
+    public async Task Round122Fix1_AHopReadThatFaultsOnce_IsCarried_AndTheReleaseHappensOnTheNextRun()
+    {
+        // B: a failed link walk is never read as "not linked". The .eml's link lands without this pass listing the .eml (its
+        // write fell outside the window, e.g. after a restart), and the child is touched, so the child is decided while the
+        // walk must read the .eml: that read faults once. The child stays Restricted that run, is carried, and is released
+        // on the next run; nothing else lists it (a write does not move modifiedon in this world).
+        var job = new Harness();
+        var (_, communication) = CommunicationUnder(job, Standard);
+        var eml = SavedUnidentified(job);
+        var child = SavedUnidentified(job, ("sprk_parentdocument", "sprk_document", eml));
+        await job.RunAsync();
+        ValueOf(job, child).Should().Be(Restricted);
+
+        job.World.Set("sprk_document", eml, "sprk_relatedcommunication", new EntityReference("sprk_communication", communication));
+        job.World.Modified("sprk_document", child, job.Now.UtcDateTime);
+        job.World.TransientIdListReadFaultsOf("sprk_document", eml, read => read == 1);
+        var faulted = await job.RunAsync();
+
+        job.World.TransientIdListReadFaultsFired("sprk_document", eml).Should().Be(1, "the walk's hop read faulted");
+        ValueOf(job, child).Should().Be(Restricted, "fail closed this run");
+        var accessPermission = faulted.GetProperty("accessPermission");
+        accessPermission.GetProperty("undetermined").GetInt32().Should().Be(1);
+        accessPermission.GetProperty("carriedRows").GetInt32().Should().Be(1);
+        accessPermission.GetProperty("problems").EnumerateArray().Select(p => p.GetString())
+            .Should().ContainSingle(p => p!.Contains(child.ToString("D")) && p.Contains("link_read_failed"));
+
+        await job.RunAsync();
+
+        ValueOf(job, child).Should().Be(Standard, "carried, and released on the next run");
+        RecordOf(job, child).OwnProvisional.Should().BeFalse();
+        RecordOf(job, child).OwnPermission.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Round122Fix1_ALinkColumnThatIsNotFieldSecured_ReleasesNothing_UntilItIs()
+    {
+        // K1: a user who can write a document (or an .eml but not its children) could set a link and release a Restricted.
+        // Without both link columns field-secured, nothing is released; the row is carried, and once they are, released.
+        var job = new Harness();
+        job.LinkColumns.Secured[ChildAccessPermissionReconciler.ReleaseLinkColumns[1]] = false;
+        var (_, communication) = CommunicationUnder(job, Standard);
+        var eml = SavedUnidentified(job);
+        await job.RunAsync();
+
+        Link(job, eml, communication);
+        var unsecured = await job.RunAsync();
+
+        ValueOf(job, eml).Should().Be(Restricted);
+        RecordOf(job, eml).OwnProvisional.Should().BeTrue("unreleased");
+        var accessPermission = unsecured.GetProperty("accessPermission");
+        accessPermission.GetProperty("undetermined").GetInt32().Should().Be(1);
+        accessPermission.GetProperty("problems").EnumerateArray().Select(p => p.GetString())
+            .Should().ContainSingle(p => p!.Contains(eml.ToString("D")) && p.Contains("link_columns_not_secured"));
+
+        job.LinkColumns.Secured[ChildAccessPermissionReconciler.ReleaseLinkColumns[1]] = true; // the script is applied
+        await job.RunAsync();
+
+        ValueOf(job, eml).Should().Be(Standard, "a 'not secured' answer is asked again, so no restart is needed");
+    }
+
+    [Fact]
+    public async Task Round122Fix1_AFailedFieldSecurityRead_ReleasesNothing_AndTheNextRunReleases()
+    {
+        var job = new Harness();
+        job.LinkColumns.Fails = read => read == 1;
+        var (_, communication) = CommunicationUnder(job, Standard);
+        var eml = SavedUnidentified(job);
+        await job.RunAsync();
+
+        Link(job, eml, communication);
+        var failed = await job.RunAsync();
+
+        ValueOf(job, eml).Should().Be(Restricted);
+        failed.GetProperty("accessPermission").GetProperty("problems").EnumerateArray().Select(p => p.GetString())
+            .Should().ContainSingle(p => p!.Contains(eml.ToString("D")) && p.Contains("link_columns_security_unreadable"));
+
+        await job.RunAsync();
+
+        ValueOf(job, eml).Should().Be(Standard);
+    }
+
+    [Fact]
+    public async Task Round122Fix1_SecuredLinkColumns_AreAskedOnce_AndRemembered()
+    {
+        // K1, must fire: both columns secured, so every release goes ahead; the answer is read once and kept for the process.
+        var job = new Harness();
+        var (_, communication) = CommunicationUnder(job, Standard);
+        var first = SavedUnidentified(job);
+        var second = SavedUnidentified(job);
+        await job.RunAsync();
+        job.LinkColumns.Asked.Should().BeEmpty("nothing was due for release, so nothing was asked");
+
+        Link(job, first, communication);
+        await job.RunAsync();
+        Link(job, second, communication);
+        await job.RunAsync();
+
+        ValueOf(job, first).Should().Be(Standard);
+        ValueOf(job, second).Should().Be(Standard);
+        job.LinkColumns.Asked.Should().Equal(
+            "sprk_document.sprk_relatedcommunication", "sprk_document.sprk_parentdocument");
+    }
+
+    /// <summary>
+    /// Round 122 fix round 1 (K1): the attribute metadata (<c>EntityDefinitions(…)/Attributes</c>, <c>IsSecured</c>) the job
+    /// reads for the two document link columns, through the access record's reader. No HTTP.
+    /// </summary>
+    private sealed class LinkColumnSecurity : DataverseWebApiClient
+    {
+        private static readonly Regex AttributesOf = new(@"^EntityDefinitions\(LogicalName='([^']+)'\)/Attributes$");
+        private static readonly Regex LogicalNameIs = new(@"^LogicalName eq '([^']+)'$");
+
+        public LinkColumnSecurity()
+            : base(new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
+            }).Build(), NullLogger<DataverseWebApiClient>.Instance, new NoCredential())
+        {
+        }
+
+        /// <summary>IsSecured per <c>sprk_document</c> column; a column not listed has no definition.</summary>
+        public Dictionary<string, bool> Secured { get; } = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sprk_relatedcommunication"] = true,
+            ["sprk_parentdocument"] = true,
+        };
+
+        /// <summary>Which reads (counted from 1) throw.</summary>
+        public Func<int, bool>? Fails { get; set; }
+
+        /// <summary>Every "table.column" asked about, in order.</summary>
+        public List<string> Asked { get; } = new();
+
+        public override Task<List<T>> QueryAsync<T>(
+            string entitySetName, string? filter = null, string? select = null, int? top = null, int? skip = null,
+            CancellationToken cancellationToken = default)
+        {
+            var table = AttributesOf.Match(entitySetName);
+            var column = LogicalNameIs.Match(filter ?? string.Empty);
+            if (!table.Success || !column.Success || select != "IsSecured")
+                throw new InvalidOperationException($"Test: unexpected Web API query {entitySetName} {filter} {select}.");
+
+            Asked.Add($"{table.Groups[1].Value}.{column.Groups[1].Value}");
+            if (Fails?.Invoke(Asked.Count) == true)
+                throw new HttpRequestException("Test: the attribute metadata could not be read.");
+
+            var rows = table.Groups[1].Value == "sprk_document" && Secured.TryGetValue(column.Groups[1].Value, out var secured)
+                ? new[] { new Dictionary<string, object?> { ["IsSecured"] = secured } }
+                : Array.Empty<Dictionary<string, object?>>();
+            return Task.FromResult(JsonSerializer.Deserialize<List<T>>(JsonSerializer.Serialize(rows))!);
+        }
+
+        private sealed class NoCredential : TokenCredential
+        {
+            public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken) =>
+                throw new InvalidOperationException("Test: this double never authenticates.");
+
+            public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken) =>
+                throw new InvalidOperationException("Test: this double never authenticates.");
+        }
     }
 }

@@ -806,6 +806,7 @@ public sealed class ExternalDocumentNarrowingTests
 
         link.IsLinked.Should().BeTrue("the walk ignores the own leg: a provisional .eml is Restricted until it is released");
         link.Communication.Should().Be(communication);
+        link.Path.Should().Equal(doc);
         _world.Reads.Should().BeEmpty("the first link found ends the walk");
     }
 
@@ -817,14 +818,22 @@ public sealed class ExternalDocumentNarrowingTests
     {
         var communication = Guid.NewGuid();
         var above = _world.Document(permission: Restricted, communication: communication);
+        var ancestors = new List<Guid> { above };
         for (var i = 1; i < hops; i++)
+        {
             above = _world.Document(permission: Restricted, parent: above);
+            ancestors.Insert(0, above);
+        }
+
         var doc = Row(Guid.NewGuid(), permission: Restricted, parent: above);
 
         var link = await FindLink(doc);
 
         link.IsLinked.Should().BeTrue();
         link.Communication.Should().Be(communication);
+        link.Path.Select(r => r.DocumentId).Should().Equal(
+            new[] { doc.DocumentId }.Concat(ancestors),
+            "fix round 1 (F1): the rows it passed through, from the document itself up to the one carrying the link");
         _world.ReadsOf("sprk_documents").Should().HaveCount(hops, "one batched read per hop level");
         _world.ReadsOf("sprk_communications").Should().BeEmpty("the walk decides nothing about visibility");
     }
@@ -854,8 +863,10 @@ public sealed class ExternalDocumentNarrowingTests
 
         var link = await FindLink(doc);
 
-        link.Should().Be(new DocumentCommunicationLink(Guid.Empty, null));
+        link.Communication.Should().Be(Guid.Empty);
+        link.Unknowable.Should().BeNull();
         link.IsLinked.Should().BeFalse();
+        link.Path.Select(r => r.DocumentId).Should().Equal(doc.DocumentId, p1, p2);
     }
 
     [Fact]

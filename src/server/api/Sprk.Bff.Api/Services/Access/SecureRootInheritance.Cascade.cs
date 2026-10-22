@@ -1501,13 +1501,11 @@ public sealed partial class SecureRootInheritance
         {
             foreach (var table in new[] { WorkAssignment, Project })
             {
-                var rows = await _webApi.QueryAsync<AttributeSecurityRow>(
-                    $"EntityDefinitions(LogicalName='{table}')/Attributes", $"LogicalName eq '{AccessInheritance.Column}'", "IsSecured",
-                    cancellationToken: ct).ConfigureAwait(false);
-                if (rows is not { Count: 1 } || rows[0].IsSecured != true)
+                var (secured, found) = await ColumnFieldSecurityAsync(_webApi, table, AccessInheritance.Column, ct).ConfigureAwait(false);
+                if (!secured)
                 {
                     _logger.LogError("[FOLLOW-PARENT] {Table}.{Column} is not field-secured ({Found} definition(s)).", table,
-                        AccessInheritance.Column, rows?.Count ?? 0);
+                        AccessInheritance.Column, found);
                     return (_accessRecordColumnSecured = false).Value;
                 }
             }
@@ -1520,6 +1518,23 @@ public sealed partial class SecureRootInheritance
                 AccessInheritance.Column);
             return (_accessRecordColumnSecured = false).Value;
         }
+    }
+
+    /// <summary>
+    /// K2's metadata read, shared (owner round 122 fix round 1, K1: <c>ChildAccessPermissionReconciler</c>'s release asks it for
+    /// the document link columns): whether <paramref name="column"/> on <paramref name="table"/> is field-secured, from its
+    /// attribute metadata. Secured only when exactly one definition comes back and it says <c>IsSecured</c>; anything else
+    /// (not secured, missing) is not. A read fault THROWS: each caller fails closed.
+    /// </summary>
+    /// <returns>Whether it is secured, and how many definitions came back.</returns>
+    internal static async Task<(bool Secured, int Definitions)> ColumnFieldSecurityAsync(
+        DataverseWebApiClient webApi, string table, string column, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(webApi);
+        var rows = await webApi.QueryAsync<AttributeSecurityRow>(
+            $"EntityDefinitions(LogicalName='{table}')/Attributes", $"LogicalName eq '{column}'", "IsSecured",
+            cancellationToken: ct).ConfigureAwait(false);
+        return (rows is { Count: 1 } && rows[0].IsSecured == true, rows?.Count ?? 0);
     }
 
     /// <summary>

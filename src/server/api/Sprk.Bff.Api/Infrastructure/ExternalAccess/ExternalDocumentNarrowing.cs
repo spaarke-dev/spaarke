@@ -393,7 +393,9 @@ internal static class ExternalDocumentNarrowing
     /// It decides nothing about visibility: no communication is read, and the own and ancestor legs are not applied (a
     /// provisional <c>.eml</c> is itself Restricted until it is released). Fail closed for its caller: a link that is not a
     /// GUID, an unreadable parent link, a parent that does not come back, a cycle and a chain that needs a fourth hop all
-    /// answer <see cref="DocumentCommunicationLink.Unknowable"/>, never a link. A failed read THROWS.
+    /// answer <see cref="DocumentCommunicationLink.Unknowable"/>, never a link. A failed read THROWS. Round 122 fix round 1
+    /// (F1): each answer carries the rows the walk passed through (<see cref="DocumentCommunicationLink.Path"/>), so the
+    /// caller can refuse a release past a document that a person narrowed. Collecting them changes nothing in the walk.
     /// </remarks>
     internal static async Task<IReadOnlyDictionary<DocumentNarrowingRow, DocumentCommunicationLink>> FindCommunicationLinksAsync(
         IEnumerable<DocumentNarrowingRow> rows, DocumentRowReader read, CancellationToken ct)
@@ -401,25 +403,36 @@ internal static class ExternalDocumentNarrowing
         ArgumentNullException.ThrowIfNull(rows);
         ArgumentNullException.ThrowIfNull(read);
         var found = new Dictionary<DocumentNarrowingRow, DocumentCommunicationLink>();
+        var paths = new Dictionary<DocumentNarrowingRow, List<DocumentNarrowingRow>>();
         await WalkChainsAsync(
             rows.Distinct().ToList(), read,
             (subject, node, _) =>
             {
+                var path = PathOf(subject);
+                path.Add(node); // the subject itself at hop 0, then each ancestor in order
                 if (node.Communication == UnreadableLink)
                 {
-                    found[subject] = new DocumentCommunicationLink(Guid.Empty, DocumentNarrowingReason.LinkUnreadable);
+                    found[subject] = new DocumentCommunicationLink(Guid.Empty, DocumentNarrowingReason.LinkUnreadable) { Path = path };
                     return false;
                 }
 
                 if (node.Communication == Guid.Empty)
                     return true; // no link here: go on up
 
-                found[subject] = new DocumentCommunicationLink(node.Communication, null); // the first link found
+                // The first link found; the path ends at the document that carries it.
+                found[subject] = new DocumentCommunicationLink(node.Communication, null) { Path = path };
                 return false;
             },
-            (subject, unknowable) => found[subject] = new DocumentCommunicationLink(Guid.Empty, unknowable),
+            (subject, unknowable) => found[subject] = new DocumentCommunicationLink(Guid.Empty, unknowable) { Path = PathOf(subject) },
             ct).ConfigureAwait(false);
         return found;
+
+        List<DocumentNarrowingRow> PathOf(DocumentNarrowingRow subject)
+        {
+            if (!paths.TryGetValue(subject, out var path))
+                paths[subject] = path = new List<DocumentNarrowingRow>();
+            return path;
+        }
     }
 
     /// <summary>
@@ -594,6 +607,12 @@ internal delegate Task<IReadOnlyList<DocumentNarrowingRow>> DocumentRowReader(IR
 /// </summary>
 internal readonly record struct DocumentCommunicationLink(Guid Communication, DocumentNarrowingReason? Unknowable)
 {
+    /// <summary>
+    /// Round 122 fix round 1 (F1): the rows the walk passed through, in order: the document itself (hop 0), then each
+    /// ancestor up to and INCLUDING the one that carries the link (or, with no link, the last one it reached).
+    /// </summary>
+    internal IReadOnlyList<DocumentNarrowingRow> Path { get; init; } = [];
+
     /// <summary>A link was found within the walk's bound. Only this releases a provisional own narrowing.</summary>
     internal bool IsLinked => Communication != Guid.Empty && Unknowable is null;
 }

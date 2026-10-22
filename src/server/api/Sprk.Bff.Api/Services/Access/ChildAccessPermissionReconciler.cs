@@ -161,14 +161,40 @@ internal sealed class ChildAccessPermissionReconciler
     /// </summary>
     private readonly HashSet<string> _raiseOnlyTables = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Owner round 122 fix round 1 (K1): whether both document link columns are field-secured. A fault throws.</summary>
+    private readonly Func<CancellationToken, Task<bool>> _linkColumnsSecured;
+
+    /// <summary>
+    /// Round 122 fix round 1 (K1): this run's answer to <see cref="_linkColumnsSecured"/>, asked at most once per run and only
+    /// when a release is due: null = not asked yet; otherwise the reason code that refuses a release, or "" when secured.
+    /// </summary>
+    private string? _linkColumnsRefusal;
+
+    /// <param name="dataverse">Reads and writes (app-only).</param>
+    /// <param name="probe">Which columns a table has.</param>
+    /// <param name="logger">The job's logger.</param>
+    /// <param name="linkColumnsSecured">Owner round 122 fix round 1 (K1): whether <c>sprk_document.sprk_relatedcommunication</c>
+    /// and <c>sprk_document.sprk_parentdocument</c> are both field-secured (attribute metadata). A provisional own narrowing
+    /// is released only when they are: otherwise a user who can write a document could set a link and release it, and a
+    /// user who can write an <c>.eml</c> but not its children could release the children. A fault throws.</param>
     internal ChildAccessPermissionReconciler(
-        IGenericEntityService dataverse, CoreAncestorResolver.EntityColumnProbe probe, ILogger logger)
+        IGenericEntityService dataverse, CoreAncestorResolver.EntityColumnProbe probe, ILogger logger,
+        Func<CancellationToken, Task<bool>> linkColumnsSecured)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _probe = probe ?? throw new ArgumentNullException(nameof(probe));
-        _walk = new ParentLineageWalk(dataverse, probe, [InheritedAccessPermission.Column]);
+        _linkColumnsSecured = linkColumnsSecured ?? throw new ArgumentNullException(nameof(linkColumnsSecured));
+        // Round 122 fix round 1 (F1): the walk also reads each document's own-narrowing record (where the table has it), so the
+        // release can tell a person's narrowing on the documents between a row and its link.
+        _walk = new ParentLineageWalk(dataverse, probe, [InheritedAccessPermission.Column, AccessInheritance.Column]);
     }
+
+    /// <summary>
+    /// Owner round 122 fix round 1 (K1): the two link columns a release relies on. Both must be field-secured.
+    /// </summary>
+    internal static readonly IReadOnlyList<string> ReleaseLinkColumns =
+        [ExternalDocumentNarrowing.RelatedCommunicationAttribute, ExternalDocumentNarrowing.ParentDocumentAttribute];
 
     /// <param name="since">The window start (rows modified at or after it are listed).</param>
     /// <param name="carried">Rows an earlier run could not decide.</param>
@@ -195,6 +221,7 @@ internal sealed class ChildAccessPermissionReconciler
         var sweepEnd = false;
         _recordTables.Clear();
         _raiseOnlyTables.Clear();
+        _linkColumnsRefusal = null;
         try
         {
             foreach (var table in InheritedAccessPermission.Tables.OrderBy(t => t, StringComparer.Ordinal))
@@ -385,6 +412,16 @@ internal sealed class ChildAccessPermissionReconciler
             var recordText = raiseOnly ? null : row.GetAttributeValue<string>(AccessInheritance.Column);
             var parents = await _walk.ParentsOfAsync(row, ct).ConfigureAwait(false);
 
+            // Owner round 122: a provisional own narrowing (the save-time Restricted of an email that could not be identified)
+            // is released once the communication walk finds a link. The walk is made only for such a row, before the floor
+            // (the floor's walk then reuses its reads); the rule is AccessInheritance.OwnPermissionOf's. Fix round 1 (B): a
+            // walk that cannot decide is carried, never read as "not linked".
+            var (link, linkReason) = !raiseOnly && parents.Count > 0
+                && AccessInheritance.Parse(recordText).Value is { OwnProvisional: true }
+                ? await CommunicationLinkAsync(table, id, row, ct).ConfigureAwait(false)
+                : (CommunicationLinkState.NotLinked, null);
+            var communicationLinked = link == CommunicationLinkState.Linked;
+
             InheritedAccessPermission.Answer? answer = null;
             if (parents.Count > 0)
             {
@@ -402,12 +439,6 @@ internal sealed class ChildAccessPermissionReconciler
                 }
             }
 
-            // Owner round 122: a provisional own narrowing (the save-time Restricted of an email that could not be identified)
-            // is released once the communication walk finds a link. The walk is made only for such a row; the rule is
-            // AccessInheritance.OwnPermissionOf's.
-            var communicationLinked = !raiseOnly && parents.Count > 0
-                && AccessInheritance.Parse(recordText).Value is { OwnProvisional: true }
-                && await CommunicationLinkedAsync(table, id, row, ct).ConfigureAwait(false);
             var decision = raiseOnly
                 ? InheritedAccessPermission.DecideDocumentRaiseOnly(stored, parents, answer?.Value, undecided: null)
                 : InheritedAccessPermission.DecideDocument(stored, recordText, parents, answer?.Value, communicationLinked);
@@ -428,6 +459,15 @@ internal sealed class ChildAccessPermissionReconciler
                     "[CHILD-ACCESS-PERMISSION] {Table} {Id}: {Reason}; its record is left as it is, and its value is only " +
                     "raised to what its parents give.", table, id, why);
             }
+            else if (link == CommunicationLinkState.Undecidable)
+            {
+                // Fix round 1 (B): whether it may be released could not be decided. It was decided as not linked (fail closed:
+                // it stays Restricted), and it is carried, so the next run decides it again.
+                undetermined++;
+                carry.Add((table, id));
+                if (problems.Count < MaxProblems)
+                    problems.Add($"{table} {id:D}: its save-time Restricted could not be released ({linkReason})");
+            }
 
             if (parents.Count == 0)
                 parentless++; // round 81: its value is the user's, never written; a narrowing is RECORDED as its own
@@ -435,7 +475,7 @@ internal sealed class ChildAccessPermissionReconciler
                 ownKept++;
             if (!decision.WriteValue && decision.Record is null)
             {
-                if (parents.Count > 0)
+                if (parents.Count > 0 && link != CommunicationLinkState.Undecidable)
                     correct++;
                 return;
             }
@@ -536,15 +576,46 @@ internal sealed class ChildAccessPermissionReconciler
         };
     }
 
-    /// <summary>
-    /// Owner round 122: whether the document <paramref name="row"/> is linked to a communication, by THE communication walk of
-    /// the external document narrowing (<see cref="ExternalDocumentNarrowing.FindCommunicationLinksAsync"/>):
-    /// its own <c>sprk_relatedcommunication</c>, or the first one up its <c>sprk_parentdocument</c> chain within 3 hops. Its
-    /// parents come from this run's walk, which has usually read them already for the floor. Fail closed: a chain that
-    /// cannot be known, or a read that faults, answers false (the narrowing stays), with a warning.
-    /// </summary>
-    private async Task<bool> CommunicationLinkedAsync(string table, Guid id, Entity row, CancellationToken ct)
+    /// <summary>Owner round 122 fix round 1 (B): what the release walk decided for one provisional document.</summary>
+    private enum CommunicationLinkState
     {
+        /// <summary>No release: no link within the bound, or a person's own narrowing on the way to it. Not carried.</summary>
+        NotLinked,
+
+        /// <summary>Linked, every document on the way to the link holds no narrowing of a person's, and the link columns
+        /// are field-secured: the provisional narrowing is released.</summary>
+        Linked,
+
+        /// <summary>It cannot be decided now (a read fault, an unreadable step or record, a parent that does not come back,
+        /// or the link columns' field security not proven): no release, and the row is carried and counted undetermined.</summary>
+        Undecidable,
+    }
+
+    /// <summary>
+    /// Owner round 122: whether the provisional document <paramref name="row"/> may be released, by THE communication walk of
+    /// the external document narrowing (<see cref="ExternalDocumentNarrowing.FindCommunicationLinksAsync"/>): its own
+    /// <c>sprk_relatedcommunication</c>, or the first one up its <c>sprk_parentdocument</c> chain within 3 hops, read through
+    /// this run's walk.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Fix round 1 (F1).</b> Linked only when EVERY document the walk passed through, from the row itself up to and
+    /// including the one that carries the link, holds no own narrowing of a person's: its own value is none, or it is a
+    /// provisional one still untouched (<see cref="AccessInheritance.OwnPermissionOf(int, int?, AccessInheritance?, int, bool, out bool)"/>,
+    /// read against the lowest floor, Standard, so a stored value counts as own whenever it could be). Otherwise a child would
+    /// be released wider than the <c>.eml</c> a person narrowed above it.</para>
+    /// <para><b>Fix round 1 (B).</b> Three answers, never a silent "not linked": a read fault, an unreadable link or parent
+    /// link, a parent that does not come back, an unreadable record or stored value on the way, and field security that is
+    /// not proven are <see cref="CommunicationLinkState.Undecidable"/> (carried). No link within the bound (none at all, a
+    /// cycle, a fourth hop) and a person's narrowing on the way are <see cref="CommunicationLinkState.NotLinked"/>.</para>
+    /// <para><b>Fix round 1 (K1).</b> A release also needs both link columns field-secured (asked once per run, only when a
+    /// release is due).</para>
+    /// <para>Each refusal is logged with its reason code (ids and codes only).</para>
+    /// </remarks>
+    private async Task<(CommunicationLinkState State, string? Reason)> CommunicationLinkAsync(
+        string table, Guid id, Entity row, CancellationToken ct)
+    {
+        DocumentCommunicationLink link;
+        Dictionary<Guid, Entity> onTheWay;
         try
         {
             var subject = ExternalDocumentNarrowing.FromEntity(row);
@@ -553,23 +624,94 @@ internal sealed class ChildAccessPermissionReconciler
                 async (ids, c) => (await _walk.RowsAsync(table, ids, c).ConfigureAwait(false))
                     .Select(ExternalDocumentNarrowing.FromEntity).ToList(),
                 ct).ConfigureAwait(false);
-            if (found.TryGetValue(subject, out var link) && link.Unknowable is { } why)
+            if (!found.TryGetValue(subject, out link))
+                return Refused(CommunicationLinkState.Undecidable, "link_walk_no_answer");
+
+            if (link.Unknowable is { } why)
             {
-                _logger.LogWarning(
-                    "[CHILD-ACCESS-PERMISSION] {Table} {Id}: whether it is linked to a communication cannot be known ({Reason}); " +
-                    "its save-time Restricted stays.", table, id,
+                // A cycle or a fourth hop is no link within the bound (the row is listed again when its chain changes); every
+                // other unknowable step may read differently next run.
+                return Refused(
+                    why is DocumentNarrowingReason.Cycle or DocumentNarrowingReason.ChainTooLong
+                        ? CommunicationLinkState.NotLinked
+                        : CommunicationLinkState.Undecidable,
                     DocumentNarrowingResult.CodeOf(why));
             }
 
-            return found.TryGetValue(subject, out var result) && result.IsLinked;
+            if (!link.IsLinked)
+                return (CommunicationLinkState.NotLinked, null); // no link anywhere on the chain
+
+            // The documents above it on the way to the link, as this run's walk read them (no further read).
+            onTheWay = (await _walk.RowsAsync(table, link.Path.Skip(1).Select(n => n.DocumentId).ToList(), ct)
+                    .ConfigureAwait(false))
+                .ToDictionary(e => e.Id);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             _logger.LogWarning(ex,
-                "[CHILD-ACCESS-PERMISSION] {Table} {Id}: its communication link could not be read; its save-time Restricted " +
-                "stays.", table, id);
-            return false;
+                "[CHILD-ACCESS-PERMISSION] {Table} {Id}: its communication link could not be read (link_read_failed); its " +
+                "save-time Restricted stays, and it is decided again next run.", table, id);
+            return (CommunicationLinkState.Undecidable, "link_read_failed");
         }
+
+        // F1: every document from the row itself up to and including the one that carries the link.
+        foreach (var node in link.Path)
+        {
+            var document = node.DocumentId == id ? row : onTheWay.GetValueOrDefault(node.DocumentId);
+            if (document is null)
+                return Refused(CommunicationLinkState.Undecidable, "chain_row_not_read");
+
+            var storedValue = document.GetAttributeValue<OptionSetValue>(InheritedAccessPermission.Column)?.Value;
+            var storedRank = SecureRootInheritance.RankOf(storedValue);
+            var (record, unreadable) = AccessInheritance.Parse(document.GetAttributeValue<string>(AccessInheritance.Column));
+            if (storedRank < 0 || unreadable)
+                return Refused(CommunicationLinkState.Undecidable, "chain_record_unreadable");
+
+            var own = AccessInheritance.OwnPermissionOf(
+                storedRank, storedValue, record, SecureRootInheritance.RankOf(InheritedAccessPermission.Standard),
+                communicationLinked: false, out var stillProvisional);
+            if (own is not null && !stillProvisional)
+                return Refused(CommunicationLinkState.NotLinked, "chain_own_narrowing");
+        }
+
+        // K1: the release relies on both link columns being field-secured.
+        if (await LinkColumnsRefusalAsync(ct).ConfigureAwait(false) is { Length: > 0 } refusal)
+            return Refused(CommunicationLinkState.Undecidable, refusal);
+
+        return (CommunicationLinkState.Linked, null);
+
+        (CommunicationLinkState, string?) Refused(CommunicationLinkState state, string reason)
+        {
+            _logger.LogWarning(
+                "[CHILD-ACCESS-PERMISSION] {Table} {Id}: its save-time Restricted is not released ({Reason}); it stays " +
+                "Restricted{Again}.", table, id, reason,
+                state == CommunicationLinkState.Undecidable ? ", and it is decided again next run" : string.Empty);
+            return (state, reason);
+        }
+    }
+
+    /// <summary>
+    /// Round 122 fix round 1 (K1): why a release is refused for field security this run (<c>link_columns_not_secured</c>,
+    /// <c>link_columns_security_unreadable</c>), or "" when both link columns are secured. Asked once per run.
+    /// </summary>
+    private async Task<string> LinkColumnsRefusalAsync(CancellationToken ct)
+    {
+        if (_linkColumnsRefusal is { } known)
+            return known;
+        try
+        {
+            _linkColumnsRefusal = await _linkColumnsSecured(ct).ConfigureAwait(false) ? string.Empty : "link_columns_not_secured";
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex,
+                "[CHILD-ACCESS-PERMISSION] Whether {Columns} on sprk_document are field-secured could not be read " +
+                "(link_columns_security_unreadable); no save-time Restricted is released this run.",
+                string.Join(", ", ReleaseLinkColumns));
+            _linkColumnsRefusal = "link_columns_security_unreadable";
+        }
+
+        return _linkColumnsRefusal;
     }
 
     /// <summary>The position a sweep starts from: before the first row of the first table.</summary>
@@ -664,7 +806,7 @@ internal sealed class ChildAccessPermissionReconciler
     private async Task<ColumnSet> ColumnSetAsync(string table, CancellationToken ct)
     {
         var columns = await _walk.ColumnsForAsync(table, ct).ConfigureAwait(false);
-        if (_recordTables.Contains(table))
+        if (_recordTables.Contains(table) && !columns.Contains(AccessInheritance.Column, StringComparer.OrdinalIgnoreCase))
             columns = [.. columns, AccessInheritance.Column]; // task 189: the document's own-narrowing record, read with the row
         return columns.Count > 0 ? new ColumnSet(columns.ToArray()) : new ColumnSet(table.ToLowerInvariant() + "id");
     }
