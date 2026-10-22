@@ -172,10 +172,6 @@ internal sealed partial class RecordCreationService
         $"The {noun} was not created: the server set '{column}', which files it under a record, without asking whether you " +
         "may file under that record. Nothing was written.");
 
-    // TODO(#2249): use InheritedAccessPermission.CreatorColumns once UAC-r2 #2249 merges
-    /// <summary>The <c>sprk_requestedby</c> (→ contact) column: who requested the row. The server alone writes it (FR-11, FR-25).</summary>
-    private const string RequestedByColumn = "sprk_requestedby";
-
     /// <summary>
     /// The columns a mapping rule may not write on <paramref name="table"/>: every column a caller's payload may not name
     /// (step 2: the common server-owned columns, the table's own, its autonumber and the creator person), the registry's
@@ -195,10 +191,11 @@ internal sealed partial class RecordCreationService
         if (rule.AutonumberColumn is { } number)
             columns.Add(number);
         columns.Add(RecordCreatorPerson.Column);
-        // Task 018b-K2 (UAC-r2 condition (b)): the contact-plane creator and requester are stamped by the server only. A rule
-        // that filled them app-only would give that contact creator or requester rights on the external plane.
-        columns.Add(ExternalDataService.CreatedByContactColumn);
-        columns.Add(RequestedByColumn);
+        // Task 018b-K2 (UAC-r2 condition (b)): the owner and the creator columns (#2247: the creator person, the contact-plane
+        // creator and the requester) are the server's alone. A rule that filled the contact ones app-only would give that
+        // contact creator or requester rights on the external plane. The sets are the app-only refusal's own, so they never drift.
+        columns.UnionWith(InheritedAccessPermission.OwnerColumns);
+        columns.UnionWith(InheritedAccessPermission.CreatorColumns);
         if (SecureRootInheritance.Inherits(table))
         {
             columns.Add(AccessInheritance.Column);
