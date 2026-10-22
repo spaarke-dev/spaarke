@@ -347,6 +347,9 @@ public sealed class SecureRootCreateRouteFixture : ProvisionProjectTestFixture
     /// <summary>The Office app-only creates (the entity as the service sent it).</summary>
     public List<Entity> OfficeCreates { get; } = new();
 
+    /// <summary>Runs right after the Office project's create lands (a test's "walled off after the plan" moment); cleared by <see cref="ResetRoutes"/>.</summary>
+    public Action<Guid>? AfterOfficeCreate { get; set; }
+
     /// <summary>The chat tool's app-only creates (table, id).</summary>
     public List<(string Table, Guid Id)> ChatCreates { get; } = new();
 
@@ -383,6 +386,7 @@ public sealed class SecureRootCreateRouteFixture : ProvisionProjectTestFixture
     /// <summary>Clears the route-side state (the provisioning state is <see cref="ProvisionProjectTestFixture.Reset"/>'s).</summary>
     public void ResetRoutes()
     {
+        AfterOfficeCreate = null;
         OfficeCreates.Clear();
         ChatCreates.Clear();
         CallerNoAppendTo.Clear();
@@ -643,6 +647,7 @@ public sealed class SecureRootCreateRouteFixture : ProvisionProjectTestFixture
             ChildWorld.Set("sprk_project", id, "sprk_regardingrecordid", pairId);
         if (pairType is { } pairTypeId)
             ChildWorld.Set("sprk_project", id, "sprk_regardingrecordtype", new EntityReference("sprk_recordtype_ref", pairTypeId));
+        AfterOfficeCreate?.Invoke(id);
     }
 
     private static Guid? Bound(IReadOnlyDictionary<string, object?> fields, string key) =>

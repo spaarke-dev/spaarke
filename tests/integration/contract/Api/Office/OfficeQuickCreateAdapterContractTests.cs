@@ -63,7 +63,7 @@ public class OfficeQuickCreateAdapterContractTests
 
     [Theory]
     [MemberData(nameof(MatterAndProject))]
-    public async Task Post_WithANamedContactTheCallerCannotAppendTo_Returns403AssigneeInaccessible_WritesNothing_NeverNotFound(string type)
+    public async Task Post_WithANamedContactTheCallerCannotAppendTo_Returns403AssigneeInaccessible_InTheFiltersShape_WritesNothing_NeverNotFound(string type)
     {
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
@@ -75,15 +75,39 @@ public class OfficeQuickCreateAdapterContractTests
             $"/api/office/quickcreate/{type}", new QuickCreateRequest { Name = "Not Mine To Assign", AssignedToContactId = ChosenContact });
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
         var problem = await ReadProblemAsync(response);
-        problem.Should().ContainKey("errorCode").WhoseValue.Should().Be(QuickCreateSourceAccessFilter.AssigneeDeniedReasonCode,
+        problem.Should().ContainKey("errorCode").WhoseValue.Should().Be("OFFICE_009", "the filter's code, not a second shape");
+        problem.Should().ContainKey("reasonCode").WhoseValue.Should().Be(QuickCreateSourceAccessFilter.AssigneeDeniedReasonCode,
             "the refusal names the Assigned To field (G5: the service names the refused column)");
+        problem.Should().ContainKey("title").WhoseValue.Should().Be("Forbidden");
         problem.Should().ContainKey("detail").WhoseValue.Should().Be(QuickCreateSourceAccessFilter.AssigneeDeniedDetail)
             .And.NotContainEquivalentOf("not found", "it never reads as 'matter not found'");
         created.Attempts.Should().BeEmpty("a refused assignee writes nothing");
         factory.CallerDataverse.Requests.Should().Contain(r =>
                 r.Contains("RetrievePrincipalAccess", StringComparison.Ordinal) && r.Contains($"contacts({ChosenContact:D})", StringComparison.Ordinal),
             "AppendTo on the contact is asked AS THE CALLER");
+
+        // The same refusal, the other way in: a contact the caller cannot READ is the route filter's. The two bodies are identical
+        // but for the per-request ids — one shape for the pane to key on.
+        using var gated = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(gated);
+        gated.AccessProbe
+            .Setup(p => p.GetCallerRightsAsync(It.IsAny<string>(), "contacts", ChosenContact, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AccessRights.AppendTo); // rights, but not Read
+        CaptureCreate(gated, type);
+        var filtered = await gated.CreateClient().PostAsJsonAsync(
+            $"/api/office/quickcreate/{type}", new QuickCreateRequest { Name = "Not Mine To Read", AssignedToContactId = ChosenContact });
+
+        filtered.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var filterProblem = await ReadProblemAsync(filtered);
+        foreach (var perRequest in new[] { "correlationId", "traceId" })
+        {
+            problem.Remove(perRequest);
+            filterProblem.Remove(perRequest);
+        }
+
+        problem.Should().BeEquivalentTo(filterProblem, "the service's Assigned To refusal and the filter's are one shape");
     }
 
     [Theory]

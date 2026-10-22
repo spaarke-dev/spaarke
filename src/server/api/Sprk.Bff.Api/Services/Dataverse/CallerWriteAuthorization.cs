@@ -108,7 +108,7 @@ internal static class CallerWriteAuthorization
             {
                 return new Outcome
                 {
-                    Denied = $"Column '{secured}' is field-secured and cannot be set from chat on a record the application creates for you.",
+                    Denied = $"Column '{secured}' is field-secured and cannot be set on a record the application creates for you.",
                 };
             }
         }

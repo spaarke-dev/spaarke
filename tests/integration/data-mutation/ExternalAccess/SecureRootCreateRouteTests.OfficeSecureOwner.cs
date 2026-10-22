@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Xrm.Sdk;
+using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Api.Office.Errors;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
@@ -245,6 +246,59 @@ public partial class SecureRootCreateRouteTests
             .And.NotContain("has no secure flag value");
         _fixture.OfficeCreateBodies.Should().BeEmpty();
         _fixture.OfficeCreates.Should().BeEmpty();
+    }
+
+    // ── The isolated project removed again (the old core's two Office removal tests, ported to the new route) ─────────
+
+    /// <summary>
+    /// Owner round 31 item 2, Office: the maker cannot be shared — the project is removed again. The route answers 500 with the
+    /// provisioning code that failed (NFR-07, 018b F2-1: the old core passed it through), the detail saying the project was
+    /// "removed again" and that a retry can succeed, and nothing is left behind.
+    /// </summary>
+    [Fact]
+    public async Task OfficeQuickCreate_WhenTheMakerCannotBeShared_TheProjectIsRemovedAgain_Is500WithTheShareFailedCode_AndNothingIsLeftBehind()
+    {
+        var matter = Guid.NewGuid();
+        SecureMatter(_fixture, matter);
+        _fixture.CatalogMattersAs(RecordTypeRef(_fixture, "sprk_matter"));
+        _fixture.FailShareForPrincipal = Creator;
+
+        var response = await _fixture.CreateAuthenticatedClient().PostAsJsonAsync(OfficeRoute, Body(matter));
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError, await response.Content.ReadAsStringAsync());
+        var (code, detail) = await RefusalOf(response);
+        code.Should().Be(ProvisionProjectEndpoint.ReasonCreatorShareFailed);
+        detail.Should().Contain("removed again").And.Contain("Try again in a few minutes", "a fault: a retry can succeed")
+            .And.Contain("Nothing was created");
+        var created = _fixture.OfficeCreates.Should().ContainSingle("the create reached Dataverse before it was removed").Subject;
+        _fixture.ChildWorld.Deletes.Should().ContainSingle().Which.Id.Should().Be(created.Id, "the project that could not be shared is the one removed");
+        _fixture.IsSecureOf(created.Id).Should().BeNull("read back gone");
+    }
+
+    /// <summary>
+    /// Verifier item 7, Office, the removed case: a maker walled off after the plan — the project is removed again, the route
+    /// answers 500 <c>sdap.provision.resume_creator_no_access</c> naming the refusal instead of "try again in a few minutes" (a
+    /// retry is refused the same way), and nothing is left behind.
+    /// </summary>
+    [Fact]
+    public async Task OfficeQuickCreate_WhenTheMakerIsWalledOffAfterThePlan_TheProjectIsRemovedAgain_Is500WithTheResumeNoAccessCode_AndNoRetryIsSuggested()
+    {
+        var matter = Guid.NewGuid();
+        SecureMatter(_fixture, matter);
+        _fixture.CatalogMattersAs(RecordTypeRef(_fixture, "sprk_matter"));
+        _fixture.AfterOfficeCreate = _ => _fixture.NoAccessList.DenySystemUserOnRecord(Creator, matter);
+
+        var response = await _fixture.CreateAuthenticatedClient().PostAsJsonAsync(OfficeRoute, Body(matter));
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError, await response.Content.ReadAsStringAsync());
+        var (code, detail) = await RefusalOf(response);
+        code.Should().Be(ProvisionProjectEndpoint.ReasonResumeCreatorNoAccess, "the completion's own refusal, passed through");
+        detail.Should().Contain("removed again").And.NotContain("Try again");
+        detail.Should().NotContain("..").And.NotContain("Nothing was changed")
+            .And.EndWith("an administrator needs to review your access to the secure record it would be filed under.");
+        var created = _fixture.OfficeCreates.Should().ContainSingle().Subject;
+        _fixture.ChildWorld.Deletes.Should().ContainSingle().Which.Id.Should().Be(created.Id);
+        _fixture.IsSecureOf(created.Id).Should().BeNull("read back gone");
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────────────────────────────────────────────
