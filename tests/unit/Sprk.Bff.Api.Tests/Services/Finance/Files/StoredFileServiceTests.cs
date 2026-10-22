@@ -396,6 +396,42 @@ public sealed class StoredFileServiceTests
         await empty.Should().ThrowAsync<InvalidOperationException>();
     }
 
+    [Fact(DisplayName = "OrganizationId must-fire (uac-r2 round 2): the PRODUCTION constructor wires the organization check; another environment's id refuses before any storage call")]
+    public async Task Organization_ProductionConstructor_WiresTheCheck()
+    {
+        var configured = Guid.Parse("0e900000-0000-4000-8000-0000000000c1");
+        var otherEnvironment = Guid.Parse("0e900000-0000-4000-8000-0000000000c2");
+        var entities = new Mock<Spaarke.Dataverse.IGenericEntityService>(MockBehavior.Strict);
+        entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection([new Entity("organization", otherEnvironment) { ["organizationid"] = otherEnvironment }]));
+
+        // A Strict credential: any token request (the first step of any storage call) would throw, so no network call is made.
+        var credential = new Mock<Azure.Core.TokenCredential>(MockBehavior.Strict);
+        var blobs = new StoredFileBlobs(
+            Microsoft.Extensions.Options.Options.Create(new Sprk.Bff.Api.Configuration.FinanceOptions
+            {
+                FileStore = new Sprk.Bff.Api.Configuration.FinanceFileStoreOptions
+                {
+                    BlobEndpoint = "https://stfilestoretest.blob.core.windows.net",
+                    TenantId = configured.ToString(),
+                },
+            }),
+            Microsoft.Extensions.Options.Options.Create(new Sprk.Bff.Api.Configuration.DataverseOptions { EnvironmentUrl = "https://spaarke-test.crm.dynamics.com" }),
+            credential.Object,
+            entities.Object,
+            TimeProvider.System,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<StoredFileBlobs>.Instance);
+
+        blobs.IsConfigured.Should().BeTrue();
+        var staged = await blobs.StageAsync(StoredFilePurpose.InvoicePdf, Invoice, Guid.NewGuid(), new MemoryStream(Pdf), "application/pdf", null, CancellationToken.None);
+        staged.RefusalCode.Should().Be(StoredFileRefusal.NotConfigured);
+        await blobs.Invoking(b => b.EnsureEnvironmentAsync(CancellationToken.None)).Should().ThrowAsync<InvalidOperationException>().WithMessage("*OrganizationId*");
+
+        entities.Verify(e => e.RetrieveMultipleAsync(
+            It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => q.EntityName == "organization"), It.IsAny<CancellationToken>()), Times.Once);
+        credential.VerifyNoOtherCalls();
+    }
+
     [Fact(DisplayName = "Stage: a purpose under the wrong parent is refused before any storage call")]
     public async Task Stage_WrongParent_Refused()
     {
