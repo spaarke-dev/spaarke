@@ -153,6 +153,29 @@ public sealed class CrossSurfaceOwnerTests
     }
 
     [Fact]
+    public async Task AStep7CatalogReadFault_IsTheOwnerUnavailableRefusal_503_AndNothingIsWritten()
+    {
+        // UAC-r2's review of 015 (K1), task 018a: step 7 reads the pair's record type to file a project under the matter it
+        // names (PairParentAsync). That read faulting is an owner that could not be decided — never "filed under nothing",
+        // never the generic check fault.
+        _world.ServiceCatalogReadFault = new InvalidOperationException("catalog read faulted");
+
+        var outcome = await _world.CreateAsync(_world.BrowserRouteProject(CreateWorld.OrdinaryMatter));
+
+        _world.ServiceCatalogReadsFaulted.Should().BeGreaterThan(0, "the fault was reached");
+        outcome.Succeeded.Should().BeFalse();
+        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.Unavailable);
+        outcome.Refusal.Code.Should().Be(RecordCreationRefusal.OwnerUnavailableCode,
+            "a step-7 fault is the owner's, refused by step 7 itself (NFR-01)");
+        outcome.Steps.Should().Contain(s => s.Step == RecordCreationStep.SecureRootPlan && s.State == RecordCreationStepState.Ran,
+            "the plan's own catalog read still answered: the fault is step 7's");
+        outcome.Steps.Last().Step.Should().Be(RecordCreationStep.Owner, "refused at step 7");
+        RecordCreationProblemMap.ToProblemDetails(outcome.Refusal, "sprk_project", outcome.CorrelationId).Status
+            .Should().Be(StatusCodes.Status503ServiceUnavailable);
+        _world.Creates.Should().BeEmpty("nothing is written when the owner could not be decided");
+    }
+
+    [Fact]
     public async Task APairWhoseRecordTypeNamesNoTable_IsUndetermined_NeverFiledUnderNothing()
     {
         var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
@@ -251,6 +274,9 @@ internal sealed class CreateWorld
         _caller.RecordTypes[DocumentType] = "sprk_document";
     }
 
+    /// <summary>The caller's scripted Dataverse (its privileges, its AppendTo denials).</summary>
+    public SecureChildOwnershipAiToolTests.ScriptedUserClient Caller => _caller;
+
     /// <summary>Every app-only create the unified service asked for.</summary>
     public List<(string Table, Guid Id, Dictionary<string, object?> Fields)> Creates { get; } = [];
 
@@ -268,6 +294,16 @@ internal sealed class CreateWorld
 
     /// <summary>Every business-unit row read (step 8).</summary>
     public List<Guid> BusinessUnitReads { get; } = [];
+
+    /// <summary>
+    /// When set, every record-type catalog query the unified create's OWN reader sends (step 7's pair read,
+    /// <see cref="RecordCreationService.PairParentAsync"/>) faults with it; the secure-root gate's reader (step 6's plan)
+    /// still answers.
+    /// </summary>
+    public Exception? ServiceCatalogReadFault { get; set; }
+
+    /// <summary>Catalog queries the unified create's own reader faulted on.</summary>
+    public int ServiceCatalogReadsFaulted { get; private set; }
 
     private static Directory NewDirectory(bool withCaller)
     {
@@ -400,7 +436,7 @@ internal sealed class CreateWorld
 
         var stamps = new StampWorld();
         return new RecordCreationService(
-            new CountingResolver(_directory.Resolver(), () => _ownerQuestions++), appOnly.Object, Entities(),
+            new CountingResolver(_directory.Resolver(), () => _ownerQuestions++), appOnly.Object, Entities(serviceReader: true),
             SecureRootFilingGateFixtures.Over(Entities()),
             new CoreAncestorRestamper(stamps.Service, stamps.Resolver, NullLogger<CoreAncestorRestamper>.Instance),
             SecureChildShareWorld.SynchronizerOver(SecureChildShareWorld.Standard, new FakeRecordShareTable()),
@@ -474,7 +510,7 @@ internal sealed class CreateWorld
     /// reads); a team's business unit; a business unit's search-index defaults; the Office create's source matter and the
     /// caller's business unit; and the SDK create, recorded.
     /// </summary>
-    private IGenericEntityService Entities()
+    private IGenericEntityService Entities(bool serviceReader = false)
     {
         var entities = new Mock<IGenericEntityService>(MockBehavior.Loose);
         entities
@@ -486,7 +522,15 @@ internal sealed class CreateWorld
             .Setup(e => e.RetrieveMultipleAsync(
                 It.Is<QueryExpression>(q => RecordTypeCatalogSetup.IsCatalogQuery(q)), It.IsAny<CancellationToken>()))
             .Returns((QueryExpression query, CancellationToken _) =>
-                Task.FromResult(RecordTypeCatalogSetup.Answer(query) is { Entities.Count: > 0 } row ? row : _directory.Answer(query)));
+            {
+                if (serviceReader && ServiceCatalogReadFault is { } fault)
+                {
+                    ServiceCatalogReadsFaulted++;
+                    return Task.FromException<EntityCollection>(fault);
+                }
+
+                return Task.FromResult(RecordTypeCatalogSetup.Answer(query) is { Entities.Count: > 0 } row ? row : _directory.Answer(query));
+            });
         entities
             .Setup(e => e.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EntityCollection());

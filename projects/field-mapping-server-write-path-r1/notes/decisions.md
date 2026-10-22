@@ -151,3 +151,50 @@ seam tests (re-checked 27bac15a42: no objection, 2026-10-21).
 - **Rejected:** option 2 (matching security profiles); it adds a comparison and gains nothing. Option 3 (Repair never
   maps) is the fallback if 033 slips past 052's need date.
 - **Safety until 033:** nothing calls Repair (`RecordRepairReachabilityTests`); 052 is hard-blocked on 033.
+
+## 2026-10-21 — Task 018 split, and the Office fill-only and fixture rulings
+
+The 018 implementer stopped before writing code (the budget, plus live changes beyond the brief). The main session decided:
+
+1. **Office mapping becomes fill-only (option a).** The spec covers this: Q6 (fill-only, caller wins; FR-02), with Q10 putting Office in scope. NFR-07 holds Office's **error codes** fixed, not its mapping semantics.
+   - Four Office contract assertions pin the legacy overwrite and its warnings: `Post_Matter_WhenMappingBlanksTheName_KeepsTheRequestedName`, the Project equivalent, `…WritesANonMatterTypeValue_KeepsTheRequestedType`, and `…AndNoTypeWasRequested_RemovesIt`. They are rewritten to the fill-only outcome. Each change is listed in the 018 notes.
+   - Release note: a mapping rule no longer replaces a value the user entered in Office quick-create.
+   - Option b (a legacy overwrite mode) is rejected: it would mean two mapping semantics, contrary to FR-02.
+2. **The contract fixtures follow the new write.** The service writes one Web API dictionary through `IFieldMappingDataverseService.UpdateRecordFieldsAsync` and retries on 412. The Office contract tests may capture that write and read their assertions from it; a fixture helper may view the dictionary as typed values. What each test asserts (the values written, the codes, the responses) stays the same. Assertions about the mechanism (`CreateAsync` `Times.Once`, `SetupSequence` duplicate-key retries) are re-expressed against the new write, and each is listed in the notes.
+3. **Further live changes go to UAC-r2 for condition (b)** before 018b:
+   - the Assigned To contact named in a request now gets an AppendTo check;
+   - a Matter create with no bearer token now gets 500 `caller_rights_unverifiable`;
+   - the matter/project post-create order gains the I-1 re-stamp and I-16, and the membership event moves from `OfficeEndpoints.cs:1858` into the service.
+4. **018 runs in three phases (three PRs), with one POML:**
+   - **018a:** service prerequisites, no live change (K1, K3, the K-3 reference drop-with-warning path, the K-7 post-mapping default hook).
+   - **018b:** the Matter/Project adapter, after item 3.
+   - **018c:** delete the Office core and re-point or retire the nine test files.
+   - The Invoice leg waits for ebilling-r1; it uses nothing from `OfficeRecordCreationService`.
+
+## 2026-10-21 — The Office Invoice quick-create leg is not moved (ebilling-r1, owner decision L)
+
+ebilling-r1 says the owner decided (decision L, model §4/§9) that invoices are created only by submission (FR-17, FR-20).
+- ebilling task 096 deletes the Office Invoice quick-create leg (`QuickCreateRequest.cs:180`) and the Invoice save target (`OfficeDocumentPersistence.cs:47`). It ships one release after word-add-in-r1's add-in release, because cached add-in clients can still call those legs.
+- Task 018 therefore moves only Matter and Project. It leaves the Invoice leg exactly as it is, apart from a marker comment, and adds no `RecordCreationService` path for `sprk_invoice` from Office.
+- The 018 Invoice criterion is withdrawn.
+- The #1911 reconcile still adds the invoice-family `PreWriteRule` for `sprk_invoice` / `sprk_billingevent`, for the submission path.
+
+## 2026-10-21 — UAC-r2 condition (b) answers for 018b
+
+1. **Assigned To contact: refuse** when the caller lacks AppendTo on it, checked as the caller. Naming the contact grants it an uncapped Collaborate (ADR-034 A4). Dropping it with a warning would silently under-grant (NFR-03). The refusal names `assignedTo` and never reads as "matter not found". It is tested with an unreadable contact and a readable one.
+2. **No bearer token:** accept the 500 `caller_rights_unverifiable` refusal (fail closed).
+3. **Post-create order: OK, on three conditions, each tested:**
+   - (i) the membership event fires exactly once, and the endpoint publish is removed;
+   - (ii) a Project under a secure matter is owned by the Secure Record Owners team and is itself secure, with Access Permission as a floor and the search index following the owner;
+   - (iii) a table-driven refusal map keeps Office's status for every service code; OwnerUnresolved stays 403, and an unmapped new code fails the test.
+
+These are in the 018 POML.
+
+## 2026-10-22 — 018a: an optional reference whose check cannot complete is dropped, not refused
+
+When a request names an optional reference lookup (`ReferenceLookupColumns`: the registry-listed matter type, practice area and project type) and the caller check for it cannot complete, the value is **dropped with `record_creation.reference_value_dropped`**, and the create proceeds without it. This deviates from NFR-01's wording ("every caller check refuses on error"). It is accepted because:
+- the value is never written, and step 5 re-checks everything that remains;
+- it matches live Office behaviour (`OfficeRecordCreationService.cs:1346-1353`, which creates without the reference and warns);
+- it applies only to caller-owned optional references, never to a filing lookup, the for-person column, a protected column, or an access-conferring column (018a fix round F4-1: these are rejected by the registry allow-list).
+
+Raised by the 018a adversarial review (K-5). Cite this in the 018 PR and in UAC-r2's condition (b) review.
