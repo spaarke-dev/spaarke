@@ -2032,7 +2032,8 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
     }
 
     /// <summary>
-    /// #2253 fix round 1 (K4): an update that impersonates its user skips the app-only refusal, so the filing gate's K3
+    /// #2253 fix round 1 (K4): an update that impersonates its user for a proposal that user confirmed (#2257: only
+    /// <c>UpdateRecordPayloadSource.ConfirmedProposal</c>) skips the app-only refusal, so the filing gate's K3
     /// refusal still answers a <c>sprk_issecure</c> write on a project or a work assignment there, and nothing is written. The
     /// gate's refusal stays pinned at the writer level, not only behind the app-only one.
     /// </summary>
@@ -2055,7 +2056,8 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
         var act = () => core.UpdateAsync(
             new UpdateRecordActionInput(table, record, FieldMappings: null,
                 LegacyFields: new Dictionary<string, string?> { ["sprk_issecure"] = "false" }, Lookups: null,
-                ImpersonateSystemUserId: Guid.Parse("0000c158-0000-0000-0000-0000000e2253")),
+                ImpersonateSystemUserId: Guid.Parse("0000c158-0000-0000-0000-0000000e2253"),
+                PayloadSource: UpdateRecordPayloadSource.ConfirmedProposal),
             CancellationToken.None);
 
         (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>())

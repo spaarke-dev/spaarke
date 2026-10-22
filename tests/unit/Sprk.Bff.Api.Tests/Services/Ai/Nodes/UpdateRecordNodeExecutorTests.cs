@@ -811,7 +811,9 @@ public class UpdateRecordNodeExecutorTests
             },
             ExecutorType = ExecutorType.UpdateRecord,
             Scopes = new ResolvedScopes([], [], []),
-            TenantId = "test-tenant"
+            TenantId = "test-tenant",
+            // #2257: these pin the app-only node write (a system run); the run-identity rule has its own tests.
+            StartedBy = PlaybookRunStartedBy.System
         };
     }
 

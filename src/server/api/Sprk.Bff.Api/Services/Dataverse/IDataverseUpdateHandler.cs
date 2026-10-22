@@ -24,6 +24,11 @@ public interface IDataverseUpdateHandler
     /// <param name="concurrencyMode">Concurrency mode (None or Optimistic)</param>
     /// <param name="maxRetries">Max retries for optimistic concurrency conflicts (default: 3)</param>
     /// <param name="ct">Cancellation token</param>
+    /// <param name="impersonateSystemUserId">#2257 (owner round 123): the Dataverse <c>systemuserid</c> of the person whose run
+    /// this is; the write runs AS them (<c>MSCRMCallerID</c>), as the Update Record node's does, and so does an Optimistic
+    /// update's <c>versionnumber</c> read. <c>null</c> = app-only, for a run with no person in it. Either way the fields are
+    /// asked <c>InheritedAccessPermission.RefuseAppOnlyWrite</c> first: the mapping is configuration, not the person's
+    /// (#2257 fix round 1).</param>
     /// <exception cref="InvalidOperationException">Thrown if optimistic concurrency fails after max retries</exception>
     Task UpdateAsync(
         string entityLogicalName,
@@ -31,5 +36,6 @@ public interface IDataverseUpdateHandler
         Dictionary<string, object?> fields,
         ConcurrencyMode concurrencyMode,
         int maxRetries,
-        CancellationToken ct);
+        CancellationToken ct,
+        Guid? impersonateSystemUserId = null);
 }

@@ -88,6 +88,8 @@ Registry: [`NodeExecutorRegistry.cs`](../../src/server/api/Sprk.Bff.Api/Services
 
 > **Important**: `UpdateRecordNodeExecutor`, `CreateTaskNodeExecutor`, `CreateNotificationNodeExecutor`, and `SendEmailNodeExecutor` **all accept the same Playbook-Builder wrapper config format** and therefore share the Part 4 exposure whenever an upstream **multi-line or quote-bearing** value is templated into their config. Update Record is simply the one profiling hits first.
 
+> **Who the write runs as** (#2257, owner round 123, "run as the user"): `UpdateRecordNodeExecutor` writes AS the person who started the run (`NodeExecutionContext.StartedBy = Person`, the user in `NodeExecutionContext.UserId`): a node playbook run from any HTTP entry (the playbook run routes, `/api/ai/analysis/execute` for a non-profile playbook, Insights ask, workspace pre-fill, the Console's re-analysis tool) writes with the caller's own rights. Paths A and B do not run this node (Direct Action). The app-only analysis job (Path C, for a playbook other than Document Profile, which it profiles on the Direct Action spine) is a system run (`StartedBy = System`) and writes app-only. Either way the node's payload is asked `InheritedAccessPermission.RefuseAppOnlyWrite` (fix round 1: it is the playbook author's configuration or a model's, never the runner's). A person's run whose user cannot be resolved fails the node with `playbook.run_user_unresolved` and writes nothing; a write Dataverse refuses for that person fails it with `playbook.write_access_denied`. The rule: `PlaybookRunWriteIdentity` (`Services/Ai/IPlaybookOrchestrationService.cs`); the full statement is in `DATAVERSE-WRITE-PATH-ARCHITECTURE.md`, I-16.
+
 ---
 
 ## Part 2 — The document-profile capability (ACT-011) and its entry points

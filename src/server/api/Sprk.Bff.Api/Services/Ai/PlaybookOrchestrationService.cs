@@ -93,6 +93,26 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             "Starting playbook execution - RunId: {RunId}, PlaybookId: {PlaybookId}, Documents: {DocumentCount}",
             runId, request.PlaybookId, request.DocumentIds.Length);
 
+        // #2257 (owner round 123, "run as the user"): an HTTP run is always a person's, and its record writes run AS that
+        // person. The run routes' filter already resolved them (request.RunUserId); every other HTTP entry (analysis
+        // execute, Insights ask, workspace pre-fill and summary, the Console's re-analysis tool) is resolved here, the same
+        // way — WhoAmI over the request's own OBO token — never from a caller value. Unresolved stays null, and a writing
+        // node then refuses to write (it never falls back to app-only). A System marker is not honoured on this path.
+        if (request.StartedBy != PlaybookRunStartedBy.Person)
+        {
+            _logger.LogWarning(
+                "Playbook {PlaybookId} was started over HTTP with StartedBy={StartedBy}; an HTTP run is always a person's run",
+                request.PlaybookId, request.StartedBy);
+        }
+
+        var runUserId = request.RunUserId;
+        if (runUserId is null && httpContext.RequestServices is not null)
+        {
+            runUserId = await Sprk.Bff.Api.Api.Filters.PlaybookAuthorizationFilter
+                .ResolveCallerSystemUserIdAsync(httpContext, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         // Create run context. StartedByOid (task 164, sweep #78): the HTTP caller's Entra oid, recorded so the
         // agent status route can answer only the caller who started the run. NOT UserId, which is a Dataverse
         // systemuserid for the eq-userid substitution: on the HTTP path it is the authenticated caller's systemuserid,
@@ -106,7 +126,8 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             request.Parameters)
         {
             StartedByOid = Sprk.Bff.Api.Infrastructure.Authentication.CallerResolution.ResolveObjectId(httpContext.User),
-            UserId = request.RunUserId
+            UserId = runUserId is { } resolved && resolved != Guid.Empty ? resolved : null,
+            StartedBy = PlaybookRunStartedBy.Person
         };
 
         // If the caller pre-loaded the document context, attach it so all nodes share it.
@@ -153,8 +174,16 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         // FetchXml 'eq-userid' substitution is skipped — Dataverse then evaluates as the
         // BFF service principal (MI), returning 0 records. R3's PlaybookSchedulerJob passes
         // userId via Parameters["userId"] but did not wire it into context.UserId here.
+        //
+        // #2257 (owner round 123): that per-user target applies only to a System run, which writes app-only whatever user it
+        // targets. A Person run on this path acts for request.RunUserId alone — a parameter never becomes the identity a
+        // write runs as — and with no RunUserId it refuses to write.
         Guid? userId = null;
-        if (request.Parameters is not null
+        if (request.StartedBy == PlaybookRunStartedBy.Person)
+        {
+            userId = request.RunUserId is { } person && person != Guid.Empty ? person : null;
+        }
+        else if (request.Parameters is not null
             && request.Parameters.TryGetValue("userId", out var userIdStr)
             && Guid.TryParse(userIdStr, out var parsedUserId))
         {
@@ -171,7 +200,8 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             request.UserContext,
             request.Parameters)
         {
-            UserId = userId
+            UserId = userId,
+            StartedBy = request.StartedBy
         };
 
         if (request.Document != null)

@@ -15,11 +15,11 @@ namespace Sprk.Bff.Api.Tests.DataMutation.ChildAccessPermission;
 /// <summary>
 /// unified-access-control-r2 task 189 fix round C (K5): an APP-ONLY generic writer never writes a document's
 /// <c>sprk_accesspermission</c> or its own-narrowing record <c>sprk_accessinheritance</c>
-/// (<see cref="InheritedAccessPermission.RefuseAppOnlyWrite"/>). These writers are the Update Record playbook node and the
-/// action seam acting for no person (<see cref="UpdateRecordActionCore"/>), and a playbook's output mapping
-/// (<see cref="DataverseUpdateHandler"/>). Their payload is built by a model or a configuration; a value or record it wrote
+/// (<see cref="InheritedAccessPermission.RefuseAppOnlyWrite"/>). These writers are the Update Record playbook node and a
+/// playbook's output mapping (<see cref="DataverseUpdateHandler"/>) whatever identity the run writes as (#2257 fix round 1),
+/// and the action seam acting for no person (<see cref="UpdateRecordActionCore"/>). Their payload is built by a model or a configuration; a value or record it wrote
 /// could lower a user's Restricted document and show it to partners (D7). Must not fire: the same columns on a to-do or
-/// an event (allowed today), and an update acting for its user (a user's own edit).
+/// an event (allowed today), and the action seam's apply of a proposal its impersonated user confirmed (a user's own edit).
 /// </summary>
 public class DocumentAccessPermissionAppOnlyWriterTests
 {
@@ -72,13 +72,110 @@ public class DocumentAccessPermissionAppOnlyWriterTests
             new UpdateRecordActionInput(
                 "sprk_document", Row, FieldMappings: null,
                 LegacyFields: new Dictionary<string, string?> { ["sprk_accesspermission"] = "100000002" }, Lookups: null,
-                ImpersonateSystemUserId: User),
+                ImpersonateSystemUserId: User, PayloadSource: UpdateRecordPayloadSource.ConfirmedProposal),
             CancellationToken.None);
 
         _writes.Verify(w => w.UpdateRecordFieldsAsync(
             "sprk_document", Row, It.Is<Dictionary<string, object?>>(f => f.ContainsKey("sprk_accesspermission")),
             It.IsAny<CancellationToken>(), User), Times.Once);
     }
+
+    [Fact]
+    public async Task AConfiguredPayload_WrittenAsItsRunsUser_IsStillRefused_AndNothingIsWritten()
+    {
+        // #2257 fix round 1 (main-session decision): a payload built by configuration (the Update Record node's: a playbook
+        // author's, who may not be the person running it) is asked the refusal even when the write impersonates that person.
+        // The input's default is Configuration, so a new caller is refused unless it says it applies a confirmed proposal.
+        var act = () => Core().UpdateAsync(
+            new UpdateRecordActionInput(
+                "sprk_document", Row, FieldMappings: null,
+                LegacyFields: new Dictionary<string, string?> { ["sprk_accesspermission"] = "100000000" }, Lookups: null,
+                ImpersonateSystemUserId: User),
+            CancellationToken.None);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>())
+            .Which.RefusalCode.Should().Be(InheritedAccessPermission.AppOnlyDocumentWriteReasonCode);
+        _writes.Invocations.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AConfirmedProposal_ActingForNoUser_IsStillRefused()
+    {
+        var act = () => Core().UpdateAsync(
+            new UpdateRecordActionInput(
+                "sprk_document", Row, FieldMappings: null,
+                LegacyFields: new Dictionary<string, string?> { ["sprk_accesspermission"] = "100000000" }, Lookups: null,
+                PayloadSource: UpdateRecordPayloadSource.ConfirmedProposal),
+            CancellationToken.None);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>())
+            .Which.RefusalCode.Should().Be(InheritedAccessPermission.AppOnlyDocumentWriteReasonCode);
+        _writes.Invocations.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AConfirmedProposal_ForAnEmptyUser_IsRefused_AsNoPerson()
+    {
+        // #2257 fix round 2 (K4): Guid.Empty names no person, so it never earns the confirmed-proposal skip.
+        var act = () => Core().UpdateAsync(
+            new UpdateRecordActionInput(
+                "sprk_document", Row, FieldMappings: null,
+                LegacyFields: new Dictionary<string, string?> { ["sprk_accesspermission"] = "100000000" }, Lookups: null,
+                ImpersonateSystemUserId: Guid.Empty, PayloadSource: UpdateRecordPayloadSource.ConfirmedProposal),
+            CancellationToken.None);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>())
+            .Which.RefusalCode.Should().Be(InheritedAccessPermission.AppOnlyDocumentWriteReasonCode);
+        _writes.Invocations.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task TheActionSeamsImpersonatedApply_IsUnchanged_AndWritesAsTheConfirmingUser()
+    {
+        // #2257 fix round 1: every IActionSeam.UpdateRecordAsync caller (the Job B apply services) applies a proposal its user
+        // confirmed, so the seam passes ConfirmedProposal and keeps its behaviour.
+        var result = await Seam().UpdateRecordAsync(
+            new Sprk.Bff.Api.Services.Ai.PublicContracts.UpdateRecordRequest
+            {
+                EntityLogicalName = "sprk_document",
+                RecordId = Row,
+                LegacyFields = new Dictionary<string, string?> { ["sprk_accesspermission"] = "100000002" },
+                ImpersonateSystemUserId = User,
+            },
+            CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.Error);
+        _writes.Verify(w => w.UpdateRecordFieldsAsync(
+            "sprk_document", Row, It.Is<Dictionary<string, object?>>(f => f.ContainsKey("sprk_accesspermission")),
+            It.IsAny<CancellationToken>(), User), Times.Once);
+    }
+
+    [Fact]
+    public async Task TheActionSeam_ActingForNoUser_IsStillRefused()
+    {
+        var result = await Seam().UpdateRecordAsync(
+            new Sprk.Bff.Api.Services.Ai.PublicContracts.UpdateRecordRequest
+            {
+                EntityLogicalName = "sprk_document",
+                RecordId = Row,
+                LegacyFields = new Dictionary<string, string?> { ["sprk_accesspermission"] = "100000000" },
+            },
+            CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().StartWith(InheritedAccessPermission.AppOnlyDocumentWriteReasonCode);
+        _writes.Invocations.Should().BeEmpty();
+    }
+
+    private Sprk.Bff.Api.Services.Ai.PublicContracts.ActionSeam Seam() => new(
+        Mock.Of<IGenericEntityService>(),
+        _writes.Object,
+        new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+        CoreAncestorResolverFixtures.Inert(),
+        new RecordOwnershipResolverDouble(),
+        IdentityNormalizationFixtures.NoLinkedContact(),
+        Mock.Of<ICommunicationDataverseService>(),
+        NullLogger<Sprk.Bff.Api.Services.Ai.PublicContracts.ActionSeam>.Instance);
 
     [Theory]
     [InlineData("sprk_accesspermission")]
