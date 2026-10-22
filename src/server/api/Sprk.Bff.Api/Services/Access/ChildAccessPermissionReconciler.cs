@@ -95,6 +95,14 @@ internal sealed record ChildAccessPermissionRun
     /// record left as it is. Also counted in <see cref="Changed"/>. Report-only: 0 (they are in <see cref="WouldChange"/>).
     /// </summary>
     public int RaisedOnly { get; init; }
+
+    /// <summary>
+    /// Owner round 122 fix round 2 (K2): documents whose save-time Restricted would have been released but was refused
+    /// because <c>sprk_document</c>'s link columns are not field-secured (a definite "not secured" answer,
+    /// <c>link_columns_not_secured</c>). They keep Restricted (fail closed), are NOT carried, and are reconsidered when they
+    /// are next listed (the per-instance sweep, or their own change). Logged once per run as a warning, with the count only.
+    /// </summary>
+    public int ReleaseRefusedLinkColumnsNotSecured { get; init; }
 }
 
 /// <summary>
@@ -317,7 +325,7 @@ internal sealed class ChildAccessPermissionReconciler
 
         // Decide each row of the four tables.
         int examined = 0, correct = 0, changed = 0, would = 0, parentless = 0, undetermined = 0, failed = 0, deferred = 0;
-        int recordsWritten = 0, ownKept = 0, changedConcurrently = 0, raisedOnly = 0;
+        int recordsWritten = 0, ownKept = 0, changedConcurrently = 0, raisedOnly = 0, refusedNotSecured = 0;
         var attempted = 0;
         var problems = new List<string>();
         var changes = new List<(string, Guid, int?, int)>();
@@ -469,13 +477,19 @@ internal sealed class ChildAccessPermissionReconciler
                     problems.Add($"{table} {id:D}: its save-time Restricted could not be released ({linkReason})");
             }
 
+            // Fix round 2 (K2): the link columns are definitely not field-secured. A refusal, not an undecidable row: it stays
+            // Restricted (decided as not linked, above) and is NOT carried, so a deployment without the field security never
+            // fills the carried set and holds the window. Counted apart; reconsidered when it is next listed.
+            if (link == CommunicationLinkState.NotSecured)
+                refusedNotSecured++;
+
             if (parents.Count == 0)
                 parentless++; // round 81: its value is the user's, never written; a narrowing is RECORDED as its own
             if (decision.OwnKept)
                 ownKept++;
             if (!decision.WriteValue && decision.Record is null)
             {
-                if (parents.Count > 0 && link != CommunicationLinkState.Undecidable)
+                if (parents.Count > 0 && link is not (CommunicationLinkState.Undecidable or CommunicationLinkState.NotSecured))
                     correct++;
                 return;
             }
@@ -550,6 +564,16 @@ internal sealed class ChildAccessPermissionReconciler
             }
         }
 
+        if (refusedNotSecured > 0)
+        {
+            // Fix round 2 (K2): once per run, the count only.
+            _logger.LogWarning(
+                "[CHILD-ACCESS-PERMISSION] {Count} save-time Restricted document(s) linked to a communication were not released " +
+                "(link_columns_not_secured): {Columns} on sprk_document are not field-secured " +
+                "(scripts/Set-DocumentNarrowingFieldSecurity.ps1). They stay Restricted and are reconsidered when next listed.",
+                refusedNotSecured, string.Join(", ", ReleaseLinkColumns));
+        }
+
         return new ChildAccessPermissionRun
         {
             RowsChanged = rowsChanged,
@@ -573,6 +597,7 @@ internal sealed class ChildAccessPermissionReconciler
             OwnKept = ownKept,
             ChangedConcurrently = changedConcurrently,
             RaisedOnly = raisedOnly,
+            ReleaseRefusedLinkColumnsNotSecured = refusedNotSecured,
         };
     }
 
@@ -587,8 +612,14 @@ internal sealed class ChildAccessPermissionReconciler
         Linked,
 
         /// <summary>It cannot be decided now (a read fault, an unreadable step or record, a parent that does not come back,
-        /// or the link columns' field security not proven): no release, and the row is carried and counted undetermined.</summary>
+        /// or the link columns' field security could not be read): no release, and the row is carried and counted
+        /// undetermined.</summary>
         Undecidable,
+
+        /// <summary>Fix round 2 (K2): it would be released, but the link columns are definitely not field-secured. A refusal:
+        /// no release (it stays Restricted), not carried, counted in
+        /// <see cref="ChildAccessPermissionRun.ReleaseRefusedLinkColumnsNotSecured"/>.</summary>
+        NotSecured,
     }
 
     /// <summary>
@@ -604,12 +635,14 @@ internal sealed class ChildAccessPermissionReconciler
     /// read against the lowest floor, Standard, so a stored value counts as own whenever it could be). Otherwise a child would
     /// be released wider than the <c>.eml</c> a person narrowed above it.</para>
     /// <para><b>Fix round 1 (B).</b> Three answers, never a silent "not linked": a read fault, an unreadable link or parent
-    /// link, a parent that does not come back, an unreadable record or stored value on the way, and field security that is
-    /// not proven are <see cref="CommunicationLinkState.Undecidable"/> (carried). No link within the bound (none at all, a
-    /// cycle, a fourth hop) and a person's narrowing on the way are <see cref="CommunicationLinkState.NotLinked"/>.</para>
+    /// link, a parent that does not come back, an unreadable record or stored value on the way, and field security whose
+    /// metadata could not be read are <see cref="CommunicationLinkState.Undecidable"/> (carried). No link within the bound
+    /// (none at all, a cycle, a fourth hop) and a person's narrowing on the way are <see cref="CommunicationLinkState.NotLinked"/>.</para>
     /// <para><b>Fix round 1 (K1).</b> A release also needs both link columns field-secured (asked once per run, only when a
-    /// release is due).</para>
-    /// <para>Each refusal is logged with its reason code (ids and codes only).</para>
+    /// release is due). Fix round 2 (K2): a definite "not secured" is <see cref="CommunicationLinkState.NotSecured"/>, a
+    /// refusal that is not carried.</para>
+    /// <para>Each refusal is logged with its reason code (ids and codes only), except <see cref="CommunicationLinkState.NotSecured"/>:
+    /// that one is counted and logged once per run.</para>
     /// </remarks>
     private async Task<(CommunicationLinkState State, string? Reason)> CommunicationLinkAsync(
         string table, Guid id, Entity row, CancellationToken ct)
@@ -674,9 +707,14 @@ internal sealed class ChildAccessPermissionReconciler
                 return Refused(CommunicationLinkState.NotLinked, "chain_own_narrowing");
         }
 
-        // K1: the release relies on both link columns being field-secured.
+        // K1: the release relies on both link columns being field-secured. Fix round 2 (K2): "not secured" is a definite
+        // answer, so a refusal (not carried; counted and logged once per run by the caller); only a failed read is undecidable.
         if (await LinkColumnsRefusalAsync(ct).ConfigureAwait(false) is { Length: > 0 } refusal)
-            return Refused(CommunicationLinkState.Undecidable, refusal);
+        {
+            return refusal == LinkColumnsNotSecured
+                ? (CommunicationLinkState.NotSecured, refusal)
+                : Refused(CommunicationLinkState.Undecidable, refusal);
+        }
 
         return (CommunicationLinkState.Linked, null);
 
@@ -690,6 +728,9 @@ internal sealed class ChildAccessPermissionReconciler
         }
     }
 
+    /// <summary>Fix round 2 (K2): the refusal code for a definite "not secured" answer (a refusal, not carried).</summary>
+    private const string LinkColumnsNotSecured = "link_columns_not_secured";
+
     /// <summary>
     /// Round 122 fix round 1 (K1): why a release is refused for field security this run (<c>link_columns_not_secured</c>,
     /// <c>link_columns_security_unreadable</c>), or "" when both link columns are secured. Asked once per run.
@@ -700,7 +741,7 @@ internal sealed class ChildAccessPermissionReconciler
             return known;
         try
         {
-            _linkColumnsRefusal = await _linkColumnsSecured(ct).ConfigureAwait(false) ? string.Empty : "link_columns_not_secured";
+            _linkColumnsRefusal = await _linkColumnsSecured(ct).ConfigureAwait(false) ? string.Empty : LinkColumnsNotSecured;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {

@@ -375,7 +375,8 @@ public partial class ChildAccessPermissionReconcileTests
     public async Task Round122Fix1_ALinkColumnThatIsNotFieldSecured_ReleasesNothing_UntilItIs()
     {
         // K1: a user who can write a document (or an .eml but not its children) could set a link and release a Restricted.
-        // Without both link columns field-secured, nothing is released; the row is carried, and once they are, released.
+        // Without both link columns field-secured, nothing is released. Fix round 2 (K2): that is a refusal, not an undecidable
+        // row: it is counted apart and NOT carried; once the columns are secured, it is released when it is next listed.
         var job = new Harness();
         job.LinkColumns.Secured[ChildAccessPermissionReconciler.ReleaseLinkColumns[1]] = false;
         var (_, communication) = CommunicationUnder(job, Standard);
@@ -388,14 +389,42 @@ public partial class ChildAccessPermissionReconcileTests
         ValueOf(job, eml).Should().Be(Restricted);
         RecordOf(job, eml).OwnProvisional.Should().BeTrue("unreleased");
         var accessPermission = unsecured.GetProperty("accessPermission");
-        accessPermission.GetProperty("undetermined").GetInt32().Should().Be(1);
-        accessPermission.GetProperty("problems").EnumerateArray().Select(p => p.GetString())
-            .Should().ContainSingle(p => p!.Contains(eml.ToString("D")) && p.Contains("link_columns_not_secured"));
+        accessPermission.GetProperty("releaseRefusedLinkColumnsNotSecured").GetInt32().Should().Be(1);
+        accessPermission.GetProperty("undetermined").GetInt32().Should().Be(0, "a definite 'not secured' is a refusal");
+        accessPermission.GetProperty("carriedRows").GetInt32().Should().Be(0, "a refusal is not carried");
+        accessPermission.GetProperty("problems").EnumerateArray().Should().BeEmpty();
 
         job.LinkColumns.Secured[ChildAccessPermissionReconciler.ReleaseLinkColumns[1]] = true; // the script is applied
+        job.World.Modified("sprk_document", eml, job.Now.UtcDateTime); // its own change lists it again
         await job.RunAsync();
 
         ValueOf(job, eml).Should().Be(Standard, "a 'not secured' answer is asked again, so no restart is needed");
+    }
+
+    [Fact]
+    public async Task Round122Fix2_LinkColumnsNotSecured_OverMoreRowsThanTheJobCarries_DoNotHoldTheWindow()
+    {
+        // K2, must fire: before fix round 2 every linked provisional row was carried as undecidable on every run, and more than
+        // MaxCarriedRows of them overflowed the carried set and froze the access-permission watermark.
+        var job = new Harness(maxWritesPerRun: 5000);
+        job.LinkColumns.Secured[ChildAccessPermissionReconciler.ReleaseLinkColumns[0]] = false;
+        var (_, communication) = CommunicationUnder(job, Standard);
+        var count = SecureChildReconciliationJob.MaxCarriedRows + 1;
+        var emls = Enumerable.Range(0, count)
+            .Select(_ => SavedUnidentified(job, ("sprk_relatedcommunication", "sprk_communication", communication)))
+            .ToList();
+
+        var first = (await job.RunAsync()).GetProperty("accessPermission");
+        var second = (await job.RunAsync()).GetProperty("accessPermission");
+
+        first.GetProperty("releaseRefusedLinkColumnsNotSecured").GetInt32().Should().Be(count);
+        first.GetProperty("undetermined").GetInt32().Should().Be(0);
+        first.GetProperty("carriedRows").GetInt32().Should().Be(0, "no overflow: nothing is carried");
+        first.GetProperty("writeCapReached").GetBoolean().Should().BeFalse();
+        second.GetProperty("since").GetDateTime().Should().BeAfter(first.GetProperty("since").GetDateTime(),
+            "the watermark advances");
+        emls.Should().OnlyContain(d => ValueOf(job, d) == Restricted, "nothing is released");
+        emls.Should().OnlyContain(d => RecordOf(job, d).OwnProvisional, "each stays provisional");
     }
 
     [Fact]
@@ -411,8 +440,13 @@ public partial class ChildAccessPermissionReconcileTests
         var failed = await job.RunAsync();
 
         ValueOf(job, eml).Should().Be(Restricted);
-        failed.GetProperty("accessPermission").GetProperty("problems").EnumerateArray().Select(p => p.GetString())
+        var accessPermission = failed.GetProperty("accessPermission");
+        accessPermission.GetProperty("problems").EnumerateArray().Select(p => p.GetString())
             .Should().ContainSingle(p => p!.Contains(eml.ToString("D")) && p.Contains("link_columns_security_unreadable"));
+        // Fix round 2 (K2): a READ FAULT stays undecidable and carried (only a definite "not secured" is a refusal).
+        accessPermission.GetProperty("undetermined").GetInt32().Should().Be(1);
+        accessPermission.GetProperty("carriedRows").GetInt32().Should().Be(1, "a failed read is carried");
+        accessPermission.GetProperty("releaseRefusedLinkColumnsNotSecured").GetInt32().Should().Be(0);
 
         await job.RunAsync();
 
