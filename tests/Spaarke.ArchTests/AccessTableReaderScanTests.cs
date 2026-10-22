@@ -68,6 +68,11 @@ public class AccessTableReaderScanTests
             // ebilling-r1 (master merge): the invoice family's FR-05 guard reads these tables' filing lookups.
             ["sprk_billingevent"] = "An invoice line, a child record: its access follows its parents (SecureChildLineage); the FR-05 guard reads its core-record lookups and its invoice to keep it filed with its invoice (InvoiceFamilyCoreRecordGuard, OwnedChildWrite), and no access decision reads its columns.",
             ["sprk_externalidentifier"] = "A party's identifier for an invoice or core record (D-68), a child record: its access follows its parents (SecureChildLineage); the FR-05 guard reads its core-record and invoice lookups (InvoiceFamilyCoreRecordGuard), and nothing in the BFF reads its value to match or show anything.",
+            // ebilling-r1 task 090 (uac-r2 F4): a Stored File's parents. The file store names them only to ask the caller's OWN rights on
+            // the row and to confirm a parent still exists; the Stored File row itself is refused whole (AccessTables).
+            ["sprk_procedureversion"] = "A Procedure Version, a Stored File parent: the file store asks the caller's own Write (upload) and Read (download) on the row through RetrievePrincipalAccess over OBO (CallerRecordAccessProbe.GetCallerRightsForAuthorizationGateAsync in StoredFileService and StoredFileAccessFilter), so Dataverse decides; the reconcile job reads only its id, to confirm it still exists (StoredFileReconcileJob), and a file's owner follows the row's owner, refused on every table (OwnerColumns). No access decision reads its other columns.",
+            ["sprk_billingexport"] = "A billing export batch, a Stored File parent (not a codified secure child, SecureChildLineage): the file store asks the caller's own Write / Read on the row as the caller (CallerRecordAccessProbe.GetCallerRightsForAuthorizationGateAsync), the reconcile job reads only its id to confirm it still exists, and a file's owner follows the row's owner (OwnerColumns). No access decision reads its other columns; the BFF has no writer of it yet (task 150).",
+            ["organization"] = "The environment's one platform organization row: StoredFileBlobs.ReadOrganizationIdAsync reads only its organizationid, which Dataverse assigns and no write can change, to check that Finance:FileStore:TenantId (the blob names' tenant segment) is this environment. No access decision reads its other columns.",
         };
 
     /// <summary>
@@ -101,6 +106,8 @@ public class AccessTableReaderScanTests
         // #2253 fix round 4 (K-2): the SPE admin endpoints and services, which read the container-type configuration.
         Path.Combine("Api", "SpeAdmin"),
         Path.Combine("Services", "SpeAdmin"),
+        // ebilling-r1 task 090 (uac-r2 F4): the Stored File store, whose rows decide which bytes are served to whom.
+        Path.Combine("Services", "Finance", "Files"),
     ];
 
     private static readonly Regex TableConstant = new(
