@@ -221,6 +221,7 @@ internal static class CallerWriteAuthorization
                 {
                     Denied = "You do not have permission to file this record under the record type it names.",
                     ParentUnavailable = true,
+                    RefusedColumn = SecureRootInheritance.PairIdColumn,
                 })
                 : new PairTarget(null, new Outcome { ClientFailure = typeRow });
         }
@@ -346,6 +347,7 @@ internal static class CallerWriteAuthorization
                 {
                     Denied = $"You do not have permission to file this record under the {lookup.RelatedTable} it names.",
                     ParentUnavailable = true,
+                    RefusedColumn = lookup.Column,
                 };
             }
         }
