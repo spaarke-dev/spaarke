@@ -1448,6 +1448,8 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
                          + "&$select=sprk_documentid,sprk_documentname,sprk_documenttype,sprk_filesummary,_sprk_project_value"
                          + ",_sprk_relatedproject_value,_sprk_matter_value,_sprk_relatedmatter_value"
                          + ",_sprk_workassignment_value,_sprk_relatedworkassignment_value,createdon"
+                         // R3 ISS-011 (#1886): the SPE pointers, read only to derive hasFile (never put on the wire).
+                         + ",sprk_graphdriveid,sprk_graphitemid"
                          + ",_sprk_createdbyperson_value,_sprk_createdbycontact_value"
                          // Task 187: the document's other parents, whose LIVE roots the rule takes in.
                          + ",_sprk_canonicaldocument_value,_sprk_invoice_value,_sprk_parentdocument_value,_sprk_relatedagreement_value"

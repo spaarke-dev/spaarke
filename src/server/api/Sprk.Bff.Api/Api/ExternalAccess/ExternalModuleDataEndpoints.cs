@@ -344,6 +344,7 @@ public static class ExternalModuleDataEndpoints
             IReadOnlyList<string> serverProjected = Array.Empty<string>();
             var ruleAttributes = (module.RequireReadOnSecureRoots ? module.RootRuleAttributes : Enumerable.Empty<string>())
                 .Concat(module.NarrowingAttributes)
+                .Concat(module.FileStateAttributes) // R3 ISS-011: read to derive hasFile, never returned (not readable columns)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
             if (ruleAttributes.Count > 0)
@@ -396,6 +397,20 @@ public static class ExternalModuleDataEndpoints
             var returnable = new HashSet<string>(module.ReadableColumns, StringComparer.OrdinalIgnoreCase);
             returnable.ExceptWith(serverProjected);
             var projected = StripRowsToReadableColumns(scoped, module, returnable, logger);
+
+            // R3 ISS-011 (#1886): a documents module row says whether it has a file. Derived from the pointers read above and
+            // already stripped from `projected`; only the boolean is added (the strip keeps the rows' order and count).
+            if (module.NarrowsDocuments)
+            {
+                projected = projected
+                    .Select((row, i) =>
+                    {
+                        var withFlag = row.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
+                        withFlag[ExternalModuleDescriptor.HasFileKey] = ExternalModuleDescriptor.HasFileOf(scoped[i]);
+                        return (IReadOnlyDictionary<string, object?>)withFlag;
+                    })
+                    .ToList();
+            }
 
             logger.LogInformation(
                 "[EXT-MODULE] Fetch module={Module} entity={Entity}: {Returned}/{Total} rows after Tier-2 scope (server-side filtered).",
