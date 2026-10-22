@@ -303,8 +303,8 @@ internal sealed class AzureBlobGateway : BlobGateway
 
     public override async Task<bool> DeleteIfExistsAsync(string container, string blobName, CancellationToken cancellationToken)
     {
-        // DeleteIfExists returns false for a blob that is already gone. A missing CONTAINER still throws: that is a deployment
-        // fault, not "nothing to delete".
+        // DeleteIfExists returns false for a blob that is already gone AND for a missing container (the SDK maps both
+        // BlobNotFound and ContainerNotFound to false), so "false" means only "nothing was there to delete".
         var response = await Blob(container, blobName)
             .DeleteIfExistsAsync(DeleteSnapshotsOption.IncludeSnapshots, conditions: null, cancellationToken)
             .ConfigureAwait(false);

@@ -157,12 +157,14 @@ public sealed class StoredFileServiceTests
     // 088 retype: the ONE canonical source-version string
     // =============================================================================================================================
 
-    [Theory(DisplayName = "088 retype: sprk_sourceversion and the string ForSourceVersion hashes are the same string, under invariant, de-DE and ar-SA")]
+    // Pins the FORMAT: plain digits, no separator or padding, the same string stored and hashed. It cannot fail on culture, since
+    // long.ToString() gives the same ASCII digits under every culture; the cultures stay only as a cheap tripwire (uac-r2 round 1).
+    [Theory(DisplayName = "088 retype: pins the source-version format - sprk_sourceversion and the string ForSourceVersion hashes are the same plain digits")]
     [InlineData("")]
     [InlineData("de-DE")]
     [InlineData("ar-SA")]
     [InlineData("fa-IR")]
-    public void SourceVersion_StoredEqualsHashed_UnderAnyCulture(string culture)
+    public void SourceVersion_StoredEqualsHashed_PinsTheFormat(string culture)
     {
         var previous = CultureInfo.CurrentCulture;
         try

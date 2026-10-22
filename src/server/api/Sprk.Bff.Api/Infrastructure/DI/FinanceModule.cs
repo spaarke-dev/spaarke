@@ -380,7 +380,8 @@ public static class FinanceModule
         //   * StoredFileBlobs - singleton: one managed-identity BlobGateway (Infrastructure/Storage, shared with SessionFileBlobStore)
         //     over the shared TokenCredential. An empty Finance:FileStore:BlobEndpoint is a runtime state ("not configured"), not
         //     a DI state, so the registration is unconditional (ADR-032 P1; the flag rule above).
-        //   * StoredFileService - scoped like its scoped IGenericEntityService. Concrete (ADR-010: one implementation).
+        //   * StoredFileService - scoped: per request, like its CallerRecordAccessProbe (a transient typed HttpClient) and request
+        //     IServiceProvider; IGenericEntityService is a singleton (GraphModule). Concrete (ADR-010: one implementation).
         //   * StoredFileReconcileJob - the ONE scheduled job of the store (ADR-036 A1 rule 6: AddScheduledJob, no BackgroundService);
         //     it reads Ebilling:Enabled itself (ADR-018).
         services.AddSingleton<StoredFileBlobs>();

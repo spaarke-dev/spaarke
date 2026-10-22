@@ -26,7 +26,8 @@ namespace Sprk.Bff.Api.Services.Finance.Files;
 /// needed because nothing writes business files keyed by a Dataverse parent with a servable status. Cost of doing nothing: invoice
 /// PDFs, Procedure sources and export files have nowhere to live once the SPE path retires (092, 150).</para>
 /// <para><b>Placement (ADR-052 B2, B3).</b> In the BFF: request-scoped authorization over the caller's token and short app-only
-/// writes; no new process. Scoped: it takes the scoped <see cref="IGenericEntityService"/>.</para>
+/// writes; no new process. Scoped: per request, like the typed-HttpClient <see cref="CallerRecordAccessProbe"/> (transient) and the
+/// request <see cref="IServiceProvider"/> it takes; <see cref="IGenericEntityService"/> is a singleton (GraphModule).</para>
 /// <para><b>ADR-013.</b> No Services.Ai type is referenced: step 0 comes through <see cref="FinanceAuthorizationFilter.EvaluateStepZeroAsync"/>.</para>
 /// <para><b>Authorization.</b> The download's caller checks (step 0, the caller's own Read on the parent and the source document) are
 /// made in the route's endpoint filter (ADR-008), which then asks <see cref="JudgeServableAsync"/>. The caller upload makes its own:
