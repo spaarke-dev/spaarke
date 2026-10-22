@@ -1884,3 +1884,13 @@ Reading:
 - `matter-health-single` keeps working, because the run filter already requires Write on the matter.
 - The authoring API is not locked in this change (the "Run as user + lock authoring" option was not chosen).
 - Implementation: #2257, after #2253.
+
+### Round 124 (2026-10-22): the "Spaarke AI Analysis Admin" role is admin-trusted
+
+Raised by PR #2258's security pass 1 (K2). A holder of "Spaarke AI Analysis Admin" (Global Write and Assign on `sprk_analysisplaybook`) can make a playbook scheduled (`sprk_playbooktype = 2`), or edit a routed playbook's nodes. The scheduler then runs it app-only, as System (`PlaybookSchedulerJob.cs:391`). Ordinary users have no such path.
+
+The owner's answer, verbatim: **"Yes, admin-trusted"**.
+
+Reading: no ownership check on System runs. The role is treated like a system administrator, and the `RefuseAppOnlyWrite` deny-lists remain the only limit on what a System run writes. This is recorded as a known limit in #2258 and #2262.
+
+**Main-session decision on #2258 (complies with existing rules; not an owner question).** Playbook writes ask `RefuseAppOnlyWrite` WHATEVER the run's identity, because the payload is built by configuration or a model, not by the runner. This is the same reason the field-mapping push asks it although it runs as its caller. Without it, user A's published playbook could lower user B's Restricted document when B runs it.
