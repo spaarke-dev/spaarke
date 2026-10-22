@@ -610,8 +610,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                             att.Id, communicationId, repairId);
 
                         // The earlier archive stopped before its enqueue, so the document was never profiled. The job's
-                        // idempotency key (DocAnalysis:{documentId}) makes a second enqueue a no-op if one did run.
-                        await EnqueueDocumentAnalysisAsync(repairId, correlationId, ct);
+                        // idempotency key (DocAnalysis:{documentId}) makes a second enqueue a no-op if one did run. Not
+                        // cancellable by the caller: the row is linked now, so no later archive would repair a lost enqueue.
+                        await EnqueueDocumentAnalysisAsync(repairId, correlationId, CancellationToken.None);
                         continue;
                     }
                 }
@@ -650,8 +651,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     CancellationToken.None);
                 linkedDocuments.Add(documentId);
 
-                // Enqueue AI analysis (parity with the send-side attachment archival).
-                await EnqueueDocumentAnalysisAsync(documentId, correlationId, ct);
+                // Enqueue AI analysis (parity with the send-side attachment archival). Not cancellable by the caller, for
+                // the reason the link-back is not: the row is linked, so no later archive would enqueue it.
+                await EnqueueDocumentAnalysisAsync(documentId, correlationId, CancellationToken.None);
                 created++;
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -683,7 +685,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// <c>ComposeRecordResolution</c> falls back to a column query).
     /// <para>
     /// Fix round 2 (F1): a partial archive is repaired, not refused. When exactly one document matches and it is this
-    /// row's own unlinked attachment document (related to <paramref name="communicationId"/>, source type Email Attachment,
+    /// row's own unlinked attachment document (related to <paramref name="communicationId"/>, Active, source type Email Attachment,
     /// pointer and bound copy both equal to the item, and no attachment row of the communication links to it), its id is
     /// returned for the row to be linked to. The source-type condition keeps a row pointed at the <c>.eml</c> from being
     /// linked to the <c>.eml</c> document. Any other match refuses.
@@ -700,7 +702,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 "sprk_graphitemid",
                 Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn,
                 "sprk_relatedcommunication",
-                "sprk_sourcetype"),
+                "sprk_sourcetype",
+                "statecode"),
             // The normalised (trimmed) item id: sprk_graphitemid is an opaque SPE drive-item id (a string), matched
             // exactly. Fix round 2 (K): the bound copy too, so a document whose pointer was re-pointed but whose bound
             // copy still names the item is caught.
@@ -730,6 +733,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 var existing = bound.Entities[0];
                 var isThisRowsUnlinkedAttachmentDocument =
                     existing.GetAttributeValue<EntityReference>("sprk_relatedcommunication")?.Id == communicationId
+                    && existing.GetAttributeValue<OptionSetValue>("statecode")?.Value == 0 // Active: never re-link a deactivated document
                     && existing.GetAttributeValue<OptionSetValue>("sprk_sourcetype")?.Value == 659490004 // Email Attachment
                     && string.Equals(existing.GetAttributeValue<string>("sprk_graphitemid"), itemId, StringComparison.Ordinal)
                     && string.Equals(

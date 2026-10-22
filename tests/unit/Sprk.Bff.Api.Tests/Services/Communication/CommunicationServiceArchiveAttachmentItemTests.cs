@@ -284,6 +284,67 @@ public class CommunicationServiceArchiveAttachmentItemTests
     }
 
     [Fact]
+    public async Task ASiblingRowAlreadyLinkedBeforeTheArchive_KeepsItsDocument_AndARowRepointedAtItIsRefused()
+    {
+        // must-fire (re-check F1): row A1 was linked to D1 (item-own) by an EARLIER archive; sibling A2 is re-pointed at
+        // item-own. D1 otherwise passes every repair condition, so only the rows linked at load time keep A2 off it.
+        var d1Id = Guid.NewGuid();
+        var linkedRow = AttachmentRow("contract.pdf", ArchiveContainer, "item-own");
+        linkedRow["sprk_document"] = new EntityReference(DocumentEntity, d1Id);
+        var h = Build((world, c) => world.Items[(ArchiveContainer, "item-own")] = ArchiveItem(c, "contract.pdf"),
+            existingDocuments: c =>
+            {
+                var d1 = Document(c, "item-own", "item-own", EmailAttachmentSourceType);
+                d1.Id = d1Id;
+                return new[] { d1 };
+            },
+            rows: new[] { linkedRow, AttachmentRow("contract (copy).pdf", ArchiveContainer, "item-own") });
+
+        var result = await h.Sut.ArchiveExistingAsync(h.CommunicationId, CancellationToken.None);
+
+        result.AttachmentDocumentsCreated.Should().Be(0);
+        result.AttachmentsRefusedUnverified.Should().Be(1);
+        h.Created.Should().BeEmpty();
+        h.Updates.Should().BeEmpty("A2 is not linked to the document A1 already owns");
+    }
+
+    [Fact]
+    public async Task TwoDocumentsNamingTheItem_AreNotARepair_AndTheRowIsRefused()
+    {
+        // must-fire (re-check F2): C's own clean attachment document AND a second document whose bound copy names the item.
+        // Only exactly one match is a repair.
+        var h = Build((world, c) => world.Items[(ArchiveContainer, "item-own")] = ArchiveItem(c, "contract.pdf"),
+            existingDocuments: c => new[]
+            {
+                Document(c, "item-own", "item-own", EmailAttachmentSourceType),
+                Document(Guid.NewGuid(), "item-elsewhere", "item-own", EmailAttachmentSourceType),
+            },
+            rows: AttachmentRow("contract.pdf", ArchiveContainer, "item-own"));
+
+        var result = await h.Sut.ArchiveExistingAsync(h.CommunicationId, CancellationToken.None);
+
+        result.AttachmentDocumentsCreated.Should().Be(0);
+        result.AttachmentsRefusedUnverified.Should().Be(1);
+        h.Created.Should().BeEmpty();
+        h.Updates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ADeactivatedDocumentOnTheItem_IsNotARepair_AndTheRowIsRefused()
+    {
+        // must-fire: C's own attachment document on the item, but Inactive. A row is never re-linked to it.
+        var h = Build((world, c) => world.Items[(ArchiveContainer, "item-own")] = ArchiveItem(c, "contract.pdf"),
+            existingDocuments: c => new[] { Document(c, "item-own", "item-own", EmailAttachmentSourceType, state: 1) },
+            rows: AttachmentRow("contract.pdf", ArchiveContainer, "item-own"));
+
+        var result = await h.Sut.ArchiveExistingAsync(h.CommunicationId, CancellationToken.None);
+
+        result.AttachmentDocumentsCreated.Should().Be(0);
+        result.AttachmentsRefusedUnverified.Should().Be(1);
+        h.Updates.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task WhenTheAlreadyBoundLookupFails_NothingIsCreated()
     {
         // fail-closed: Dataverse cannot say whether a document already names the item.
@@ -558,6 +619,7 @@ public class CommunicationServiceArchiveAttachmentItemTests
             {
                 token.ThrowIfCancellationRequested();
                 e.Id = Guid.NewGuid();
+                e["statecode"] = new OptionSetValue(0); // Dataverse creates a row Active
                 created.Add(e);
                 onCreate?.Invoke();
                 return e.Id;
@@ -635,9 +697,10 @@ public class CommunicationServiceArchiveAttachmentItemTests
     private const int EmailAttachmentSourceType = 659490004;
 
     /// <summary>An existing <c>sprk_document</c>: its communication, pointer, field-secured bound copy and source type.</summary>
-    private static Entity Document(Guid communicationId, string pointer, string boundCopy, int sourceType)
+    private static Entity Document(Guid communicationId, string pointer, string boundCopy, int sourceType, int state = 0)
         => new(DocumentEntity, Guid.NewGuid())
         {
+            ["statecode"] = new OptionSetValue(state),
             ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", communicationId),
             ["sprk_graphitemid"] = pointer,
             [DocumentPointerBinding.BoundItemIdColumn] = boundCopy,
