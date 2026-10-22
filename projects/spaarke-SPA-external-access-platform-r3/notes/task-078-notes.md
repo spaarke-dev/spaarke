@@ -400,3 +400,25 @@ Verification after the fix: `dotnet build` 0 warnings, 0 errors. Handler classes
 - **30 minutes** (to 02:48Z): no new exception class (Graph noise ×6); all zero counts; reconciliation runs Succeeded.
 - **Owner decision (UAC round 122), "the access should match the 'parent'":** a linked own-Restricted email archive follows its communication. UAC builds it (a provisional own-narrowing marker); word-add-in reviews. Known limit: a single attachment save stays Restricted.
 - **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261022T021635Z` (= `f1b3dadcf5`).
+
+## Dev BFF deploy of master 1283c41817 (2026-10-22 12:49Z; owner: "yes, deploy 1283c41817")
+
+- **Contents since a7b956fb55:**
+  - UAC #2234 (round 122): a provisional own-Restricted email document is released to its communication by the reconciler.
+  - UAC #2239: the AI profile writer is limited to the 6 ACT-011 columns.
+  - Field-mapping 018a: dormant.
+  - UAC #2244 and #2249: the app-only refusal covers BFF-owned document, owner and creator columns.
+  - UAC #2248: archive verifies the attachment item before binding.
+  - The candidate moved 6b3f35c79f → fa1de47276 → 1283c41817; each move was re-confirmed by the peers.
+- **ExternalDocumentNarrowing.cs refactor (#2234):** UAC confirmed D7's decision is unchanged.
+  - The test file is additions only (+172/−0).
+  - R3 ran the narrowing and reconcile tests at 6b3f35c79f: 150 passed, 0 failed.
+  - Later commits don't touch the narrowing.
+- **Peer OKs:** UAC, ebilling, word-add-in, field-mapping (dev has no rules on the refused document, owner or creator columns), SPE admin and ontology.
+- **Pre-checks:** live `a7b956fb55`, an ancestor. No e0df77339. No settings or schema change.
+- **Rollback snapshot:** `deploy/rollback/wwwroot-20261022T124709Z` (222 files, DLL `a7b956fb55`).
+- **Deploy:** detached `C:/wtbffe-128`. Package 37.73 MB; 4 critical files SHA-256 verified; CORS OK.
+- **Read-back** (12:50:18Z): `1.0.0+1283c41817cefab38063486105d59ddd199b08b9`. healthz and healthz/dataverse 200; `/api/me` anonymous 401.
+- **Ontology smoke:** PASS.
+- **Still due:** the 30-minute reading (about 13:20Z). UAC's server gate and client redeploys are in UAC's session.
+- **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261022T124709Z` (= `a7b956fb55`).

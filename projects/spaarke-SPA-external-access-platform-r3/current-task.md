@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-22 02:55Z. Dev BFF a7b956fb55 (deployed 02:17Z: #2223, fm-016, UAC 190 sweep disabled) on top of f1b3dadcf5 (D7 + slice D) + 036 flag ON; dev SPA 3531ed65e; R4 design.md drafted.
+> **Last Updated**: 2026-10-22 13:00Z (86% checkpoint). Dev BFF 1283c41817 live (12:50Z); 30-min gate due 13:20Z. Dev SPA 3531ed65e. R4 design.md drafted.
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -9,61 +9,53 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | No task mid-implementation. Open, owner-driven: 070/071 (Teams), 074 (A9 probes), 002 (grid columns). R4 `design.md` drafted, waiting for owner review. |
-| **Status** | **Dev BFF = `a7b956fb55`**, deployed 2026-10-22 02:17Z; owner-approved here. It adds #2223, fm-016 (dormant) and the UAC 190 sweep (disabled, Apply off) to f1b3dadcf5, which added D7 T7 (#2170, the ISS-015 fix with T8 #2177), slice D (#2186) and #2214 to 583f90c1d9. UAC then applied Restrict, field security and sprk_DocumentOperations.js 1.28.2 on dev. Record: `notes/task-078-notes.md`, last section. Flag `ExternalAccess__ImpersonatedRootSets__Enabled` has been **ON since 2026-10-20 23:51Z**; rollback is to delete the setting. BFF rollback is `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261022T021635Z`, which returns to f1b3dadcf5. **Dev SPA = `3531ed65e`**: run 39536100531, 2026-10-21 03:02Z, with the #2166 fix and the UAC #2078/#2122 SPA changes. Rollback tag: `external-spa-dev-rollback-28274e04e`. UAC's 036 flag-on gates passed (uac-r2 0a4fbaa38). |
-| **Next Action** | Wait for the owner: (1) smoke of SPA 3531ed65e (list in `notes/task-070-deploy-record.md`, last section), then close #2166; (2) answers to R4 design §9; (3) Teams package upload in the **Dewey Cheatham** tenant (the Spaarke tenant gets "not set up" by design), then 071; (4) 002 columns. |
+| **Task** | No task mid-implementation. R3 is acting as the dev BFF deploy coordinator for peer sessions. Open, owner-driven: 070/071 (Teams), 074 (A9 probes), 002 (grid columns). R4 `design.md` is drafted and waiting for owner review. |
+| **Status** | **Dev BFF = `1283c41817`**, deployed 2026-10-22 12:49–12:50:18Z; owner: "yes, deploy 1283c41817". All six peers said OK. It adds to a7b956fb55: UAC #2234 (round 122 provisional own-Restricted release), #2239 (AI profile writer limited to 6 ACT-011 columns), field-mapping 018a (dormant), #2244 and #2249 (app-only refusal covers BFF-owned document, owner and creator columns) and #2248 (archive verifies attachment item). **BFF rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261022T124709Z` (= a7b956fb55). Flag `ExternalAccess__ImpersonatedRootSets__Enabled` has been ON since 2026-10-20 23:51Z. **Dev SPA = `3531ed65e`** (rollback tag `external-spa-dev-rollback-28274e04e`). Deploy records: `notes/task-078-notes.md` (one section per deploy). |
+| **Next Action** | (1) When background task b7resdzof finishes (about 13:20Z), send UAC the 30-minute reading: exceptions, reconciliation runs, DOC-PROFILE "not profile columns"/"no mappable profile fields", document_bff_column_server_only, releaseRefusedLinkColumnsNotSecured; expect all 0 apart from the Graph noise. Then append a "1283c41817" section to task-078-notes, update this file, and commit by pathspec. (2) UAC redeploys the CommunicationActions PCF and the EmailPage/LegalWorkspace/Console code pages in its own session with the owner's go. |
 
 ### Uncommitted files
-- `.claude/agent-memory/researcher/MEMORY.md` (modified) and three untracked researcher files belong to the OWNER. Never commit or discard them. Commit by pathspec only. Everything else is committed and pushed (R3 `7db91a09c`, R4 `0239edf9a`).
+- `.claude/agent-memory/researcher/MEMORY.md` (modified) and three untracked researcher files belong to the OWNER. Never commit or discard them. Commit by pathspec only.
 
 ### Critical Context
-- **Deploy rule** (memory `shared-dev-bff-deploy-coordination`): read the live DLL via Kudu VFS, run the ancestor check, get every reachable session's OK and fresh DIRECT owner approval, snapshot via Kudu `api/zip/site/wwwroot/`. SPA deploy: `gh workflow run deploy-external-spa.yml --ref master -f environment=dev`, after pushing a rollback tag of the live build.
+- **Deploy rule** (memory `shared-dev-bff-deploy-coordination`):
+  - Fresh DIRECT owner approval naming the exact SHA; relayed approval doesn't count.
+  - The peers (UAC, field-mapping, word-add-in -c4, ontology, ebilling, SPE admin) each say OK.
+  - Then `phaseA.ps1` (live DLL read, Kudu zip snapshot), a detached worktree `C:\wtbffe-<sha3>`, `Deploy-BffApi.ps1 -Environment dev`, and `readback.ps1`.
+  - Then the 30-minute reading with `exc<N>.ps1` and `recon2.ps1`.
+  - Scratchpad scripts are in this session's scratchpad (`phaseA.ps1`, `readback.ps1`, `recon2.ps1`, `exc6.ps1`). App Insights is `spe-insights-dev-67e2xz` in rg `spe-infrastructure-westus2`. The admin token resource is `api://1e40baad-e065-4aea-a8d4-4b7ab273458c`.
+  - KQL via az on Windows rejects some compound queries (nested iff, mixed-type coalesce): keep queries simple, one count each.
+  - ebilling's OK carries over automatically when the candidate moves only with UAC/R3 changes that don't touch finance or invoice data.
 - **Review policy:** auth, security and tenant-isolation changes get two top-tier passes; anything else gets one.
-- **Test runs:** filtered, with absolute csproj paths. Run SPA vitest files one at a time: a full parallel run flakes in App.signOut, App.teamsHost and DocumentUploadPage.externalUpload, which all pass when run alone.
-- The Teams package is at scratchpad `teams-dev-39489551799\appPackage.zip` (run 39489551799, manifest 23610794…, v1.2.0). The SPA only serves tenants listed in VITE_BACKENDS homeTenantIds, which is Dewey Cheatham only.
-- Leftovers for a human: `C:\code_files\spaarke\.claude\worktrees\agent-a4775c0edc08ac138` and `agent-aad40bdfd9712fba4` (Permission denied).
+- **Test runs:** filtered, with absolute csproj paths. Run SPA vitest files one at a time.
+- **Teams package:** scratchpad `teams-dev-39489551799\appPackage.zip`. The SPA serves only the Dewey Cheatham home tenant.
+- **Temporary build worktrees to remove** (`scripts/worktree/Remove-WorktreeSafe.ps1` only, with the owner's OK): `C:\wtbffe-a10`, `-842`, `-583`, `-f1b`, `-a7b`, `-6b3`, `-128`.
 
-## Done this session (2026-10-21)
-- **#2166 / ISS-018:** the Partner (CIAM) plane now counts only CIAM-tenant accounts (`isCiamAccount`, accountFilter). This fixed `authority_mismatch`. PR #2175 had two opus reviews; follow-ups were applied, including a deploy-workflow guard that VITE_MSAL_TENANT_ID equals the authority's tenant. Deployed. The issue is commented and stays open until the owner smoke.
-- **074:** Ralph Dewey's licensed-user link works on dev; it took 2 popup tries. The first failure was an Entra page ("not in Spaarke tenant"), cause not captured. The owner can check the Entra sign-in logs for 2026-10-21 02:10–02:20Z. Filed as ISS-019 #2192 (R4).
-- **ebilling firm invoice-file route:** owner decisions, plus the rule agreed with UAC and ebilling, are in `notes/decisions.md` (2026-10-21). ebilling owns the BFF change: it adds `/invoices/{id}/files`, retires the four invoice-document routes and changes submission storage. R4 owns the SPA side. Deploy BFF then SPA, back to back, through R3. The 051 wizard is on work/ebilling-r1 (#1911), so R4 doesn't plan its own.
-- **R4 design.md drafted:** R4 branch `0239edf9a`. It is a template for six types, per-record actions, two new event routes (matters, WAs), a field/allow-list table checked against the schema (several prototype fields don't exist; task 157 dropped others), an icon map, and backlog items DEF-003 preview, #2155, #2192 and invoice files. §9 has 8 owner questions.
-- ISS-015's status was updated to "D7 accepted; fix = UAC task 188 + word-add-in task 130".
+## Deploys 2026-10-21/22 (all owner-approved here; records in task-078-notes)
+`a10e814d02` (UAC #2169, #2150) → `84291ecea8` (#2161, #2177, #2205) → `583f90c1d9` (#2191 leak fix, #2182) → `f1b3dadcf5` (D7 T7 #2170, slice D #2186; UAC then applied Restrict, field security, DocumentOperations.js 1.28.2) → `a7b956fb55` (#2223, fm-016, UAC 190 sweep disabled) → `1283c41817`. Every 30-minute gate so far has been clean; the only exceptions are the Graph "Invalid hostname" noise (ISS-006).
 
-## Open owner questions
-- **R4 design §9:**
-  1. Prototype decisions.
-  2. The owner's prototype change list (not received).
-  3. Fields, including whether internal people's names show to partners.
-  4. Doc and SR on the template.
-  5. Toolbar shared or local.
-  6. Icon map.
-  7. "Submit invoice" in the toolbar.
-  8. Decide 002 together with the fields.
-- **002:** the six tabs keep their current columns or change (notes/task-002-notes.md "Live capture 2026-10-20").
-- **073:** routing (VITE_BACKENDS vs the T240c directory), DNS, prod environment + TEAMS_APP_ID, consent design.
-- **C-1:** the owner applies the portal settings in Dewey Cheatham.
+## Open owner items
+- **D7 not exercised live:** there have been no partner document reads. Optional owner check: sign in as contact 8e9918a9 or 2e419a4f. Matter b68299c6 should list empty, matter 86335ce3 should list its 3 documents, and a download of aadbb740 should be refused (not-under-parent). ISS-015 closes once D7 is seen working.
+- **#2177 .eml saves** (UAC is asking the owner): one identified, one unidentifiable; word-add-in reads the rows back.
+- **#2191** Office quick-create live smoke (field-mapping).
+- **UAC 190 sweep Apply** (29 links pending): owner decision.
+- **SPA 3531ed65e smoke**, then close #2166.
+- **Teams package upload** in Dewey Cheatham → 070 → 071.
+- **002:** column and label list per tab.
+- **074 remaining probes.**
+- **R4 design §9:** 8 questions.
+- **073** is blocked (ACME gate).
+- **C-1:** portal settings in Dewey Cheatham.
+- **Offered, no answer yet:** triage of the unscheduled R3 issues (ISS-001–008, 011–013, DEF-001/002) before 090.
 
 ## Peer threads in flight
-- **uac-r2 round 113** reverses #2179(c): a flagged-external systemuser must not reach internal-only records, in Dataverse or through SPA/BFF. UAC is designing the Dataverse-side enforcement. R3 replied:
-  - The firm invoice route does NOT 403 systemusers; they are served the 036 way, as agreed.
-  - It listed the SPA/BFF paths that carry systemusers: root sets, documents (task 188), messages, the notification feed, events and to-dos (no internal-only filter known; asked UAC to check), ISS-014 #2125 and ISS-016 #2127.
-  - Awaiting UAC's answer.
-- **UAC D7 T7 (task 188)** and word-add-in task 130 (T8) will need an R3-coordinated dev BFF deploy later.
-- **ebilling:** will send its PR when ready (after D-148). Deploy it paired with the R4/R3 SPA change.
-- **84291ecea8 follow-up:** UAC gate item 4: the owner does two .eml saves, or it relies on real saves. word-add-in reads the rows back. Ontology re-checks its logs at the 02:30Z nightly run. D7 is live but not exercised: no partner document reads yet. The optional owner partner check is in task-078-notes (f1b3dadcf5 section). ISS-015 can close once D7 is proven live. On master, not deployed: ontology #2233 (earlier-invoice detail hidden on read). Next deploys: UAC round-122 PR when merged; ebilling 015 (e0df77339) when ebilling asks.
-
-## Next actions (in order)
-1. Owner smoke of SPA 3531ed65e, then close #2166.
-2. Owner: upload the Teams package in Dewey Cheatham → 070 smoke → 071.
-3. 074 remaining: resubmit, existing-record bind, unlisted directory → 401, home token on /api/v1/membership → 401, intake as the new contact.
-4. 002 decision → 072 (both-plane E2E) → 090. 073 stays blocked on the ACME gate.
-5. After the owner answers R4 §9: update the R4 design.md, then a new R4 session runs `/design-to-spec`.
+- **Ontology:** #2233 (157, earlier-invoice detail hidden) waits on #2252 (ArchTests CI timeout 5→10 min). It will be in the next candidate.
+- **ebilling:** 015 (e0df77339) only with the #1911 merge, not close. The `sprk_invoicestatus` delete stays blocked until a live BFF contains it. The 088 dev schema run (sprk_storedfile, sprk_restrictedbysubmission, statuscode Superseded) comes soon; master's BFF ignores it.
+- **UAC round 113:** Dataverse-side enforcement for flagged-external systemusers. R3 listed the paths it carries; still waiting on UAC.
+- **Round 122:** shipped in 1283c41817. Known limit: a single-attachment save stays Restricted.
 
 ## Standing dependencies and gates
 - **059 rollback order:** F (SPA) → E (`gh variable delete` ×2) → D → C → B → A. Never roll the BFF back below 077 while 1e40baad is on v2.
-- **ebilling 015:** deleting `sprk_invoicestatus` is blocked until a live dev BFF contains e0df77339. Every candidate gets the content check.
 - **ebilling-r1 merge (later):** schema scripts (D-104, D-113, D-121, D-124, D-125, D-127) must run on dev before a BFF built from that master.
-- **UAC:** tell UAC before any BFF change to external write routes, ExternalAccessModule.cs or AccessibleRecordSetService.cs. #2103 reason-code changes come to R3 first.
-- **Ontology:** 042c reaches master via their docs→master sync. Do NOT merge their docs branch into R3.
-- **Session names change on restart:** re-run ListAgents.
+- **UAC:** tell UAC before any BFF change to external write routes, ExternalAccessModule.cs or AccessibleRecordSetService.cs.
+- **Ontology:** do NOT merge their docs branch into R3.
+- **Session names change on restart:** re-run ListAgents (word-add-in is now `-c4`).
