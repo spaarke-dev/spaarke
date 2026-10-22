@@ -1189,7 +1189,8 @@ internal sealed partial class RecordCreationService
         RecordOwnerResolution owner, string table, DataverseWriteItemMapper.MappedItem item)
     {
         var fields = OwnedChildWrite.BodyFields(item.JsonBody);
-        PutServerValue(fields, "ownerid@odata.bind", $"/teams({owner.OwningTeamId!.Value})");
+        RemoveOtherSpellings(fields, "ownerid@odata.bind");
+        fields["ownerid@odata.bind"] = $"/teams({owner.OwningTeamId!.Value})";
         var creator = new Dictionary<string, object?>(StringComparer.Ordinal);
         owner.StampCreatorOn(creator, table);
         foreach (var (key, value) in creator)
@@ -1206,7 +1207,8 @@ internal sealed partial class RecordCreationService
         string table, DataverseWriteItemMapper.MappedItem item, Guid secureTeam, Guid creatorPerson)
     {
         var fields = OwnedChildWrite.BodyFields(item.JsonBody);
-        PutServerValue(fields, "ownerid@odata.bind", $"/teams({secureTeam})");
+        RemoveOtherSpellings(fields, "ownerid@odata.bind");
+        fields["ownerid@odata.bind"] = $"/teams({secureTeam})";
         PutServerValue(fields, "sprk_issecure", true);
         if (RecordCreatorPerson.IsStamped(table))
         {
@@ -1227,14 +1229,23 @@ internal sealed partial class RecordCreationService
     /// </summary>
     private static void PutServerValue(Dictionary<string, object?> fields, string key, object? value)
     {
+        RemoveOtherSpellings(fields, key);
+        fields[key] = value;
+    }
+
+    /// <summary>
+    /// <see cref="PutServerValue"/>'s first half, for the owner bind: its assignment stays a literal
+    /// <c>fields["ownerid@odata.bind"] = …</c> where the owner is decided, which the owner-write census
+    /// (<c>RecordOwnerAssignmentCensusTests</c>) reads.
+    /// </summary>
+    private static void RemoveOtherSpellings(Dictionary<string, object?> fields, string key)
+    {
         foreach (var spelled in fields.Keys
                      .Where(k => string.Equals(k, key, StringComparison.OrdinalIgnoreCase) && !string.Equals(k, key, StringComparison.Ordinal))
                      .ToArray())
         {
             fields.Remove(spelled);
         }
-
-        fields[key] = value;
     }
 
     /// <summary>
