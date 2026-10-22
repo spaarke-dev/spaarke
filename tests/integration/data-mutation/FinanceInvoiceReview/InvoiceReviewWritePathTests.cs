@@ -691,6 +691,62 @@ public class InvoiceReviewWritePathTests
             "the step after the re-file mirrors the secure matter's sharee onto the document now, not at the next two-minute pass");
     }
 
+    [Fact(DisplayName = "#2159 slice 2: the re-file hands the reparent's answer to AfterRefileAsync, so a release the answer permits reaches the reconciler")]
+    public async Task Refile_PassesTheReparentsAnswer_ToTheStepAfterTheRefile()
+    {
+        Matters();
+        var document = Guid.NewGuid();
+        _world.OrdinaryChild("sprk_document", document);
+        var left = new RecordOwnershipParent("sprk_matter", SecureMatter);
+        var permit = new SecureExitPermit(
+            [left],
+            new Sprk.Bff.Api.Services.Access.SecureRemovalDecision(
+                Sprk.Bff.Api.Services.Access.SecureRemovalOutcome.Permitted, Sprk.Bff.Api.Services.Access.SecureRemovalBasis.FullAccess, Sharee),
+            [new RecordOwnershipParent("sprk_matter", OrdinaryMatter)]);
+        var logger = new ReconcilerLog();
+
+        // The job acts for nobody, so the real resolver never permits a secure exit here; the answer is stamped with one so the
+        // test can see whether the answer, not a bare call, reached the step (no relocator: the reconciler logs the permit).
+        var result = await new InvoiceDocumentRefile(new PermitStamping(RealResolver(), permit),
+                SecureChildShareWorld.ReconcilerOver(() => _world, new TokenHonouringShares(_shares), null!, logger: logger),
+                WorldDocuments().Object, NullLogger<InvoiceDocumentRefile>.Instance)
+            .RefileAsync(InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(document), document, OrdinaryInvoice, CancellationToken.None);
+
+        result.Status.Should().Be(InvoiceDocumentRefileStatus.Refiled);
+        logger.Warnings.Should().Contain(m => m.Contains(document.ToString()) && m.Contains("left 1 secure record(s) with F3"),
+            "the reconciler acts on the permit only when the re-file passes it the reparent's RecordOwnerResolution");
+    }
+
+    /// <summary>The real resolver, its answer stamped with <paramref name="permit"/> (a re-file that left a secure root with F3).</summary>
+    private sealed class PermitStamping(IRecordOwnershipResolver inner, SecureExitPermit permit) : IRecordOwnershipResolver
+    {
+        public Task<Guid?> ResolveOwningTeamAsync(RecordOwnershipContext context, CancellationToken ct) => inner.ResolveOwningTeamAsync(context, ct);
+
+        public Task<RecordOwnerResolution> ResolveOwnerAsync(RecordOwnershipContext context, CancellationToken ct) => inner.ResolveOwnerAsync(context, ct);
+
+        public async Task<RecordOwnerResolution> ReparentAsync(RecordReparent request, Func<CancellationToken, Task> applyChange, CancellationToken ct) =>
+            await inner.ReparentAsync(request, applyChange, ct) with { SecureExitPermitted = permit };
+    }
+
+    /// <summary>The reconciler's warnings, formatted.</summary>
+    private sealed class ReconcilerLog : Microsoft.Extensions.Logging.ILogger<Sprk.Bff.Api.Services.Access.SecureChildReconciler>
+    {
+        public List<string> Warnings { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state,
+            Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == Microsoft.Extensions.Logging.LogLevel.Warning)
+            {
+                Warnings.Add(formatter(state, exception));
+            }
+        }
+    }
+
     [Fact(DisplayName = "050a review #1: a redelivery that finds the link ALREADY written writes no link and still re-derives the owner through the real resolver")]
     public async Task Refile_LinkAlreadyWritten_WritesNoLink_AndStillReDerivesTheOwner()
     {
