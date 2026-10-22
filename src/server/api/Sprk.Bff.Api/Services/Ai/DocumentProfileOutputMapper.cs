@@ -1,6 +1,9 @@
 using System.Text.Json;
 using Microsoft.Xrm.Sdk;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Services.Access;
+using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -24,15 +27,26 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// <see cref="DocumentProfileFieldMapper.BuildSearchProfile"/>; <c>sprk_filetype</c> derived from the
 /// file extension (deterministic — not asked of the LLM).
 /// </para>
+/// <para>
+/// #2237 (uac-r2): a property naming a column Spaarke sets itself is never mapped. The output is built by a model and a
+/// configuration, not by a person, so every key is asked the app-only refusal the generic writers ask
+/// (<see cref="InheritedAccessPermission.RefuseAppOnlyWrite"/>): a document's Access Permission and own-narrowing record
+/// (task 189) and its D7 link columns (<see cref="InheritedAccessPermission.DocumentLinkColumns"/>, task 188), in any
+/// form (<c>@odata.bind</c>, <c>_{column}_value</c>, any case). The refused keys are dropped with one Warning (the document
+/// id, the columns and the reason codes; no values) and the rest of the profile is mapped. Every consumer writes this
+/// method's output, so the filter is here, where none can skip it.
+/// </para>
 /// </remarks>
 public static class DocumentProfileOutputMapper
 {
     /// <summary>
     /// Maps the AI structured output into a Dataverse field dictionary and appends the deterministic
     /// <c>sprk_filetype</c> (from the file extension). The returned dictionary is ready for
-    /// <c>IDocumentDataverseService.UpdateDocumentFieldsAsync</c>.
+    /// <c>IDocumentDataverseService.UpdateDocumentFieldsAsync</c>. It never holds a column the app-only refusal refuses
+    /// on a document (#2237); <paramref name="documentId"/> is logged when one is dropped.
     /// </summary>
     public static Dictionary<string, object?> BuildFields(
+        Guid documentId,
         JsonElement root,
         string fileName,
         ParentEntityContext? parentEntity,
@@ -47,10 +61,23 @@ public static class DocumentProfileOutputMapper
         // Sibling dict of stringified outputs used for BuildSearchProfile below.
         var stringOutputs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
+        // #2237: the columns the app-only refusal refuses (normalized names) and its reason codes, logged once below.
+        var refusedColumns = new SortedSet<string>(StringComparer.Ordinal);
+        var refusalCodes = new SortedSet<string>(StringComparer.Ordinal);
+
         foreach (var prop in root.EnumerateObject())
         {
             var name = prop.Name;
             var kind = prop.Value.ValueKind;
+
+            // Asked per key, as Repair's mapping asks it, so every refused key is dropped and the rest is still mapped.
+            if (InheritedAccessPermission.RefuseAppOnlyWrite(ExternalDocumentNarrowing.DocumentTable, [name]) is { } refusal)
+            {
+                // The normalized name is one of the refusal's own constants, never model text.
+                refusedColumns.Add(SecureRootInheritance.NormalizeColumn(name));
+                refusalCodes.Add(refusal.RefusalCode ?? InheritedAccessPermission.AppOnlyDocumentWriteReasonCode);
+                continue;
+            }
 
             switch (kind)
             {
@@ -105,6 +132,14 @@ public static class DocumentProfileOutputMapper
                         break;
                     }
             }
+        }
+
+        if (refusedColumns.Count > 0)
+        {
+            logger.LogWarning(
+                "[DOC-PROFILE] sprk_document {DocumentId}: the AI output named {RefusedCount} column(s) Spaarke sets itself; " +
+                "not written: {RefusedColumns} ({ReasonCodes}). The rest of the profile is written.",
+                documentId, refusedColumns.Count, string.Join(",", refusedColumns), string.Join(",", refusalCodes));
         }
 
         var searchProfile = DocumentProfileFieldMapper.BuildSearchProfile(
