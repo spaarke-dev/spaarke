@@ -42,27 +42,28 @@ public class RecordTableRulesTests
         ["sprk_issecure", "sprk_accesspermission", "sprk_accessinheritance", "sprk_securitybu"];
 
     [Fact]
-    public void MatterProtectedAttributes_View_EqualsThePreRegistryList_PlusTheSecureRootAccessColumns()
+    public void MatterMappingProtectedColumns_EqualThePreRegistryList_PlusTheSecureRootAccessColumns()
     {
-        OfficeRecordCreationService.MatterProtectedAttributes.Should().BeEquivalentTo(
+        // Task 018c: the Office core's view over this set is deleted; the pin stays on the registry, its one source.
+        RecordTableRules.Get("sprk_matter").MappingProtectedColumns.Should().BeEquivalentTo(
             ["sprk_matternumber", "ownerid", "sprk_containerid", "sprk_createdbyperson", .. SecureRootAccessColumns]);
-        OfficeRecordCreationService.MatterProtectedAttributes.Contains("SPRK_MatterNumber").Should().BeTrue("the list was case-insensitive");
+        RecordTableRules.Get("sprk_matter").MappingProtectedColumns.Contains("SPRK_MatterNumber").Should().BeTrue("the list was case-insensitive");
     }
 
     [Fact]
-    public void ProjectProtectedAttributes_View_EqualsThePreRegistryList_PlusTheSecureRootAccessColumns()
+    public void ProjectMappingProtectedColumns_EqualThePreRegistryList_PlusTheSecureRootAccessColumns()
     {
-        OfficeRecordCreationService.ProjectProtectedAttributes.Should().BeEquivalentTo(
+        RecordTableRules.Get("sprk_project").MappingProtectedColumns.Should().BeEquivalentTo(
             ["sprk_projectnumber", "ownerid", "sprk_containerid", "sprk_createdbyperson", .. SecureRootAccessColumns]);
-        OfficeRecordCreationService.ProjectProtectedAttributes.Contains("Sprk_IsSecure").Should().BeTrue("the list was case-insensitive");
+        RecordTableRules.Get("sprk_project").MappingProtectedColumns.Contains("Sprk_IsSecure").Should().BeTrue("the list was case-insensitive");
     }
 
     [Fact]
-    public void MatterAndProjectProtectedAttributes_StayPerTable_NotMerged()
+    public void MatterAndProjectMappingProtectedColumns_StayPerTable_NotMerged()
     {
         // Task 031: a merged set would newly skip a mapping rule targeting sprk_projectnumber on a MATTER create.
-        OfficeRecordCreationService.MatterProtectedAttributes.Should().NotContain("sprk_projectnumber");
-        OfficeRecordCreationService.ProjectProtectedAttributes.Should().NotContain("sprk_matternumber");
+        RecordTableRules.Get("sprk_matter").MappingProtectedColumns.Should().NotContain("sprk_projectnumber");
+        RecordTableRules.Get("sprk_project").MappingProtectedColumns.Should().NotContain("sprk_matternumber");
     }
 
     // ── #2220: the secure flag and access columns are never mapped, identically on every secure root ────────────────────
@@ -85,19 +86,6 @@ public class RecordTableRulesTests
 
         protectedFromMapping.Intersect(SecureRootAccessColumns, StringComparer.OrdinalIgnoreCase)
             .Should().BeEquivalentTo(SecureRootAccessColumns, $"{table}: the four columns are the BFF's own (#2220)");
-    }
-
-    [Theory]
-    [InlineData("sprk_matter")]
-    [InlineData("sprk_project")]
-    public void OfficeCreate_MatterAndProject_ProtectExactlyTheSameSecureFlagAndAccessColumnsFromMapping(string table)
-    {
-        var view = table == "sprk_matter"
-            ? OfficeRecordCreationService.MatterProtectedAttributes
-            : OfficeRecordCreationService.ProjectProtectedAttributes;
-
-        view.Intersect(SecureRootAccessColumns, StringComparer.OrdinalIgnoreCase)
-            .Should().BeEquivalentTo(SecureRootAccessColumns, $"{table}: the Office path protects the same four (#2220)");
     }
 
     [Fact]
@@ -279,7 +267,7 @@ public class RecordTableRulesTests
     [Fact]
     public void OptionalReferenceLookups_AreExactlyWhatTheOfficeCreateDropsToday()
     {
-        // OfficeRecordCreationService.ApplyReferenceAsync (MatterTypeAttribute, MatterPracticeAreaAttribute,
+        // The deleted Office core's ApplyReferenceAsync (MatterTypeAttribute, MatterPracticeAreaAttribute,
         // ProjectTypeAttribute at 2a5f076857): literals, so the pin outlives task 018c's deletion of that service.
         RecordTableRules.Get("sprk_matter").OptionalReferenceLookups.Should().BeEquivalentTo("sprk_mattertype", "sprk_practicearea");
         RecordTableRules.Get("sprk_project").OptionalReferenceLookups.Should().BeEquivalentTo("sprk_projecttype_ref");
