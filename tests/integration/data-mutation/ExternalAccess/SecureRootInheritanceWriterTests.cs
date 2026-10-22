@@ -2802,8 +2802,9 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
         var act = () => handler.UpdateAsync("sprk_workassignment", workAssignment,
             new Dictionary<string, object?> { ["sprk_issecure"] = value }, ConcurrencyMode.None, 1, CancellationToken.None);
 
+        // #2251: the app-only refusal (a secure root's secure flag) answers before the filing gate's K3 refusal.
         (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>())
-            .Which.RefusalCode.Should().Be(AccessFollowsParent.SecureFlagReasonCode);
+            .Which.RefusalCode.Should().Be(InheritedAccessPermission.AppOnlySecureRootWriteReasonCode);
         _writes.Should().BeEmpty();
     }
 
@@ -2827,19 +2828,23 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
                 LegacyFields: new Dictionary<string, string?> { ["sprk_issecure"] = "false" }, Lookups: null),
             CancellationToken.None);
 
+        // #2251: the app-only refusal (a secure root's secure flag) answers before the filing gate's K3 refusal.
         (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>())
-            .Which.RefusalCode.Should().Be(AccessFollowsParent.SecureFlagReasonCode);
+            .Which.RefusalCode.Should().Be(InheritedAccessPermission.AppOnlySecureRootWriteReasonCode);
         _writes.Should().BeEmpty();
     }
 
-    /// <summary>K3, the field-mapping push: a rule onto <c>sprk_issecure</c> fails that record, nothing written.</summary>
+    /// <summary>
+    /// K3, the field-mapping push: a rule onto <c>sprk_issecure</c> writes nothing. #2251: the push asks the app-only refusal
+    /// per rule, so the rule is skipped (a secure root's secure flag) before the filing gate sees the record.
+    /// </summary>
     [Fact]
-    public async Task FieldMappingPush_OntoTheSecureFlag_FailsThatRecord_AndWritesNothing()
+    public async Task FieldMappingPush_OntoTheSecureFlag_SkipsThatRule_AndWritesNothing()
     {
         var workAssignment = Guid.NewGuid();
         _fixture.SeedWorkAssignment(workAssignment, isSecure: false);
 
-        var (updated, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+        var (updated, failed, skipped, errors, results) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
             FieldMappingWritingToTheWorld().Object,
             new StampWorld().Restamper,
             [
@@ -2857,8 +2862,10 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
             CancellationToken.None,
             rootFiling: _gate);
 
-        (updated, failed).Should().Be((0, 1));
-        errors.Should().ContainSingle(e => e.RecordId == workAssignment && e.Error.Contains(AccessFollowsParent.SecureFlagReasonCode));
+        (updated, failed, skipped).Should().Be((0, 0, 1));
+        errors.Should().BeEmpty();
+        results.Should().ContainSingle().Which.Should().Match<FieldMappingResultDto>(r =>
+            r.Status == FieldMappingStatus.Skipped && r.TargetField == "sprk_issecure");
         _writes.Should().BeEmpty();
     }
 }

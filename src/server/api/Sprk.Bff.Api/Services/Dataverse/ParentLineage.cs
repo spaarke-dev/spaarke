@@ -690,6 +690,74 @@ internal static class InheritedAccessPermission
     };
 
     /// <summary>
+    /// #2251: the reason code when an app-only generic writer names a table whose rows are access
+    /// (<see cref="AccessTables"/>; <see cref="RefuseAppOnlyWrite"/>), whatever its columns.
+    /// </summary>
+    internal const string AppOnlyAccessTableWriteReasonCode = "sdap.access.access_table_server_only";
+
+    /// <summary>
+    /// #2251: the reason code when an app-only generic writer names a secure root's secure flag, access columns or
+    /// container (<see cref="SecureRootColumns"/>; <see cref="RefuseAppOnlyWrite"/>).
+    /// </summary>
+    internal const string AppOnlySecureRootWriteReasonCode = "sdap.access.secure_root_server_only";
+
+    /// <summary>
+    /// #2251: the tables whose rows ARE access: a row grants it, denies it, or records the membership it is derived from.
+    /// The BFF app user is a System Administrator, so a generic writer naming one of these, with any column, could point a
+    /// grant at another contact or raise its level or reactivate it, move a contact into an organisation (and its grants),
+    /// repoint an ethical wall, or rewrite the provenance the Assigned-To rule acts on. Each is written only by the BFF's own
+    /// typed writers, none of which uses these paths: the grant endpoints and <c>ExternalGrantLifecycle</c> (revoke, expiry,
+    /// closure), the No Access enforcement endpoint and store, <c>AssignedAccessStore</c> (the Assigned-To materializer),
+    /// and the membership's own writers. The readers' constants, so the set cannot drift from them
+    /// (<c>AccessTableAppOnlyWriterTests</c>).
+    /// <list type="bullet">
+    /// <item><c>sprk_externalrecordaccess</c>: the grants (<c>ExternalParticipationService</c>'s grant filters,
+    /// <c>ExternalGrantLifecycle</c>).</item>
+    /// <item><c>sprk_contactorganization</c>: organisation membership (<c>ExternalOrganizationMembership</c>; a member is
+    /// covered by the organisation's grants and walls).</item>
+    /// <item><c>sprk_noaccessentry</c>: the ethical walls (<c>NoAccessListReader</c>, <c>NoAccessEnforcementStore</c>).</item>
+    /// <item><c>sprk_assignedaccess</c>: the Assigned-To provenance ledger (<c>AssignedAccessStore</c>): its state decides
+    /// whether the materializer grants, keeps (Adopted, Declined) or revokes access.</item>
+    /// <item><c>teammembership</c>: team membership (<c>NoAccessEnforcementStore</c>, the isolation census). Dataverse
+    /// refuses an update of this intersect table anyway; listing it gives the same answer before any call.</item>
+    /// </list>
+    /// </summary>
+    internal static readonly IReadOnlySet<string> AccessTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalGrantLifecycle.EntityLogicalName,
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalOrganizationMembership.EntityLogicalName,
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.NoAccessListReader.EntityLogicalName,
+        Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore.EntityLogicalName,
+        "teammembership",
+    };
+
+    /// <summary>
+    /// #2251: per secure root, the columns only the BFF writes on it: the secure flag and access columns #2220 protects on
+    /// a create (<see cref="Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.SecureRootAccessColumns"/>:
+    /// <c>sprk_issecure</c>, <c>sprk_accesspermission</c>, <c>sprk_accessinheritance</c>, <c>sprk_securitybu</c>), and its
+    /// SharePoint Embedded container
+    /// (<see cref="Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.ContainerColumn"/>). The roots are the
+    /// registry's (<see cref="Sprk.Bff.Api.Services.RecordCreation.RecordTableKind.Root"/>: matter, project, work
+    /// assignment). An app-only write could un-secure a matter (<c>SecureRootFilingGate.CheckAsync</c> checks only a work
+    /// assignment or a project), lower its Access Permission below what a person set, move it out of its secure business
+    /// unit, or point it at another root's container. Their writers are the BFF's typed ones (Make Secure / Remove Secure,
+    /// Secure Record setup and provisioning, the inheritance cascade, container provisioning), none of which uses these
+    /// paths. Data, not branching: a table with no entry has no such column.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, IReadOnlySet<string>> SecureRootColumns =
+        Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.All
+            .Where(rule => rule.Kind == Sprk.Bff.Api.Services.RecordCreation.RecordTableKind.Root)
+            .ToDictionary(
+                rule => rule.Table,
+                IReadOnlySet<string> (_) => new HashSet<string>(
+                    [
+                        .. Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.SecureRootAccessColumns,
+                        Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.ContainerColumn,
+                    ],
+                    StringComparer.OrdinalIgnoreCase),
+                StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Task 189 fix round C (K5): an APP-ONLY generic writer never writes a document's <see cref="Column"/> or its
     /// own-narrowing record (<see cref="AccessInheritance.Column"/>). These writers are the Update Record playbook node and
     /// the action seam when they act for no person (<c>UpdateRecordActionCore</c>), and an AI output mapping
@@ -714,8 +782,17 @@ internal static class InheritedAccessPermission
     /// <see cref="AppOnlyOwnerWriteReasonCode"/>) or its creator (<see cref="CreatorColumns"/>, refused with
     /// <see cref="AppOnlyCreatorWriteReasonCode"/>), in the same forms. A writer that decides one of these itself (Repair's owner
     /// step) asks this refusal only over the columns a configuration gave it, never over the one it decided.</para>
-    /// <para><b>Precedence</b> (the first match decides the code): on a document, its Access Permission or own-narrowing
-    /// record, then its D7 links, then its BFF-owned columns; then, on every table, the owner, then the creator.</para>
+    /// <para>#2251: nor a table whose rows are access (<see cref="AccessTables"/>: grants, organisation membership, ethical
+    /// walls, the Assigned-To ledger, team membership), refused whole with <see cref="AppOnlyAccessTableWriteReasonCode"/>
+    /// whatever the payload names; nor a secure root's secure flag, access columns or container
+    /// (<see cref="SecureRootColumns"/>), refused with <see cref="AppOnlySecureRootWriteReasonCode"/> in the same forms. The
+    /// table is matched trimmed and in any case. Out of scope, as for every code above: a write that impersonates its user
+    /// (the action seam's apply, which skips this refusal) runs under that user's own privileges, and the chat create tool
+    /// checks the caller's own privileges before it writes. The field-mapping push also runs as its caller, but it asks this
+    /// per rule (above), so a rule naming one of these is skipped there too.</para>
+    /// <para><b>Precedence</b> (the first match decides the code): an access table; then, on a document, its Access
+    /// Permission or own-narrowing record, then its D7 links, then its BFF-owned columns; then a secure root's columns; then,
+    /// on every table, the owner, then the creator.</para>
     /// </summary>
     /// <returns>The refusal (nothing is written), or <see langword="null"/> when the write may proceed.</returns>
     internal static RecordOwnerResolution? RefuseAppOnlyWrite(string? table, IEnumerable<string> keys)
@@ -724,6 +801,13 @@ internal static class InheritedAccessPermission
         var trimmed = table?.Trim();
         var narrows = RecordsOwnNarrowing(trimmed);
         var links = string.Equals(trimmed, Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDocumentNarrowing.DocumentTable, StringComparison.OrdinalIgnoreCase);
+
+        // #2251: a table whose rows are access (AccessTables) is refused whole, whatever the payload names.
+        if (trimmed is not null && AccessTables.Contains(trimmed))
+        {
+            return RecordOwnerResolution.Refused(AppOnlyAccessTableWriteReasonCode,
+                $"{trimmed.ToLowerInvariant()} records are set by Spaarke (they decide who may see what), so nothing was written");
+        }
 
         var columns = keys.Select(SecureRootInheritance.NormalizeColumn).ToList();
         if (narrows && columns.FirstOrDefault(k => k is Column or AccessInheritance.Column) is { } named)
@@ -745,6 +829,15 @@ internal static class InheritedAccessPermission
         {
             return RecordOwnerResolution.Refused(AppOnlyDocumentBffColumnWriteReasonCode,
                 $"{owned} of a document is set by Spaarke (it names the document's file or its email), so it was not written");
+        }
+
+        // #2251: a secure root's secure flag, access columns and container are the BFF's typed writers' (SecureRootColumns).
+        if (trimmed is not null && SecureRootColumns.TryGetValue(trimmed, out var rootColumns)
+            && columns.FirstOrDefault(rootColumns.Contains) is { } rootColumn)
+        {
+            return RecordOwnerResolution.Refused(AppOnlySecureRootWriteReasonCode,
+                $"{rootColumn} of a secure root is set by Spaarke (it decides whether the record is secure, who may see it and " +
+                "where its files are), so it was not written");
         }
 
         // #2247: on every table, the row's owner and its creator are the BFF's typed writers' (OwnerColumns, CreatorColumns).

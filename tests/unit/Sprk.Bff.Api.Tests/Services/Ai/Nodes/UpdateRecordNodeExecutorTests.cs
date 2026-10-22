@@ -466,6 +466,48 @@ public class UpdateRecordNodeExecutorTests
         written.Should().BeEmpty("the refusal comes before the write");
     }
 
+    [Theory(DisplayName = "#2251: an app-only node onto an access table or a secure root's secure columns fails, and nothing is written")]
+    [InlineData("sprk_externalrecordaccess", "sprk_accesslevel")]
+    [InlineData(" SPRK_ContactOrganization ", "statecode")]
+    [InlineData("sprk_noaccessentry", "sprk_name")]
+    [InlineData("sprk_assignedaccess", "sprk_state")]
+    [InlineData("sprk_matter", "sprk_issecure")]
+    [InlineData("sprk_matter", "sprk_containerid")]
+    [InlineData("sprk_project", "SPRK_SecurityBU")]
+    [InlineData("sprk_workassignment", "sprk_accesspermission")]
+    public async Task ExecuteAsync_AnAccessTableOrASecureRootColumn_FailsTheNode_AndWritesNothing(string table, string field)
+    {
+        var config = $@"{{
+            ""entityLogicalName"":""{table}"",
+            ""recordId"":""{Guid.NewGuid()}"",
+            ""fields"":{{""{field}"":""1""}}
+        }}";
+        SetupMockPassThrough();
+        var written = UseEntitySetsFromMetadata();
+
+        var result = await _executor.ExecuteAsync(CreateValidContext(config), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        written.Should().BeEmpty("the refusal comes before the write");
+    }
+
+    [Fact(DisplayName = "#2251 must not fire: the live matter node's update of an ordinary column (sprk_performancesummary) is written")]
+    public async Task ExecuteAsync_AnOrdinaryColumnOnAMatter_IsWritten()
+    {
+        var config = $@"{{
+            ""entityLogicalName"":""sprk_matter"",
+            ""recordId"":""{Guid.NewGuid()}"",
+            ""fieldMappings"":[{{""field"":""sprk_performancesummary"",""type"":""string"",""value"":""a health summary""}}]
+        }}";
+        SetupMockPassThrough();
+        var written = UseEntitySetsFromMetadata();
+
+        var result = await _executor.ExecuteAsync(CreateValidContext(config), CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        written.Should().ContainSingle().Which.Should().ContainKey("sprk_performancesummary");
+    }
+
     [Fact(DisplayName = "#2091 r4: a lookup's bind names the target's entity set as metadata answers it (sprk_analysis → sprk_analysises), never a guessed plural")]
     public async Task ExecuteAsync_WithALookupToSprkAnalysis_BindsTheMetadataEntitySet()
     {

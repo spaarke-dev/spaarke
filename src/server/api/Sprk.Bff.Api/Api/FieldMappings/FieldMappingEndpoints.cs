@@ -1050,6 +1050,9 @@ public static class FieldMappingEndpoints
                     // of the push applies: one push from a Standard matter would otherwise clear the own narrowing of every
                     // child document it reaches. Task 188 round 4e: the same for its D7 link columns (sprk_parentdocument,
                     // sprk_relatedcommunication; InheritedAccessPermission.DocumentLinkColumns), which decide whether partners see it.
+                    // #2251: the push runs as its caller, so it is not one of the app-only writers that issue names; it asks
+                    // the same refusal per rule all the same (its rules are configuration applied to every child), so a rule
+                    // onto an access table or a secure root's secure flag, access columns or container is skipped too.
                     if (Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.RefuseAppOnlyWrite(
                             targetEntity, [rule.TargetField]) is { } setBySpaarke)
                     {

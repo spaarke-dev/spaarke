@@ -60,8 +60,11 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 /// </summary>
 public sealed partial class RecordContainerResolver
 {
-    /// <summary>The stamped container column, on both the securable records and the business unit.</summary>
-    private const string ContainerColumn = "sprk_containerid";
+    /// <summary>
+    /// The stamped container column, on both the securable records and the business unit. <c>internal</c> (#2251): the
+    /// app-only generic writers refuse it on a secure root (<c>InheritedAccessPermission.SecureRootColumns</c>).
+    /// </summary>
+    internal const string ContainerColumn = "sprk_containerid";
 
     /// <summary>
     /// The record's owning business unit. Dataverse populates this system column on every user- or
