@@ -19,11 +19,20 @@
 //   Resource-group scoped: deploy into the storage account's resource group. The role definition is
 //   created here (assignableScopes = this resource group) and assigned once per container at that
 //   container's scope -- never on the account or the resource group (K-3 mitigation, re-plan Q5).
-//   The account itself is only referenced: no network-rule, soft-delete or key change.
+//   The account itself is only referenced: no network-rule or key change. The one account-level setting
+//   this module owns is the blob service's blob soft delete (deleteRetentionPolicy, default 30 days;
+//   ebilling-r1 DEF-038, owner decision 2026-10-22: every environment including dev). Versioning, change
+//   feed and container soft delete are deliberately NOT set here.
 //
 // KEYLESS (root CLAUDE.md section 9, ADR-028, task 244)
 //   No key, connection string or SAS anywhere; the only output is the blob endpoint. The BFF's
 //   managed identity is the only data-plane principal granted. No Key Vault resource.
+//
+// SOFT DELETE (ebilling-r1 DEF-038)
+//   blobServices/default is declared (not just referenced) so the module can set deleteRetentionPolicy.
+//   That PUT carries ONLY deleteRetentionPolicy: no CORS, versioning, change feed, restore policy,
+//   container soft delete or default service version is written. Read the full blob-service properties
+//   before the first apply (notes/091-storage-provisioning.md section 8.8).
 //
 // NOT HERE (hand-off to customer-provisioning-orchestration-r1, notes/091-storage-provisioning.md section 6)
 //   Wiring into customer.bicep for the stamp UAMI; the per-environment scanning choice.
@@ -50,6 +59,11 @@ param enableMalwareScanning bool
 @minValue(1)
 param malwareScanningCapGBPerMonth int = 5000
 
+@description('Blob soft delete retention, in days, for the file store account (ebilling-r1 DEF-038). Every environment gets 30 unless it overrides (customer-provisioning passes it per environment).')
+@minValue(1)
+@maxValue(365)
+param blobSoftDeleteRetentionDays int = 30
+
 // ============================================================================
 // EXISTING ACCOUNT (referenced only)
 // ============================================================================
@@ -58,9 +72,19 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' existing 
   name: storageAccountName
 }
 
-resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2023-01-01' existing = {
+// ============================================================================
+// BLOB SERVICE -- blob soft delete only (ebilling-r1 DEF-038); nothing else on the service is written
+// ============================================================================
+
+resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2023-01-01' = {
   parent: storageAccount
   name: 'default'
+  properties: {
+    deleteRetentionPolicy: {
+      enabled: true
+      days: blobSoftDeleteRetentionDays
+    }
+  }
 }
 
 // ============================================================================
