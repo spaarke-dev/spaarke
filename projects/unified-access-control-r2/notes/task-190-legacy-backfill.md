@@ -86,3 +86,22 @@ The census was run with the operator's own token and printed counts only. The sc
   4. Any linked id that newly appears among the interim-refused documents is relocated by that job's own write mode (an owner go), or reported.
 
   Also: run this job's Apply BEFORE task 166's gate-24 migration pass and its `-Verify`. If it runs after, re-run them before the strict flip (gate 25).
+
+## 5. Fix round 2 (head 2af6e97702, PR marked ready)
+
+- **Review pass 2 fixes, all in:**
+  - **Duplicate archives per communication:** `communicationAlreadyArchived` is an attribute of a matched row, not a new reason. `CountAlreadyArchivedAsync` runs one `In` query before any write. A fault or `MoreRecords` sets `AlreadyArchivedCheckFailed`, and the run reports as partial.
+  - **Remarks:** the false claims about durable run history and a standing `/enable` are removed (the scheduler store is in memory).
+  - **Configuration:** tests pin the Apply key and the batch clamp (`batch.configured`, `effective`, `clamped` in the report).
+- **Dev facts (read-only, 2026-10-21):**
+  - none of the 29 matched communications already has an archive;
+  - 6 communications have more than one archive, which is the #2225 condition.
+- **Restrict:** `sprk_document_RelatedCommunication_sprk_communication` is Restrict on delete (#2186). A linked communication therefore cannot be deleted while the archive exists. That is intended: deleting it would silently drop the D7 leg.
+- **Filed from this task:** #2222, #2225, #2226, #2227. The integration run also surfaced #2229 (pre-existing on master).
+- **Checks at 2af6e97702:**
+  - job suite 37/37; targeted 78/78; ArchTests 1337/1337; BFF build 0 errors, 0 warnings;
+  - publish +9,940 B;
+  - `Sprk.Bff.Api.IntegrationTests` 158 passed, 8 skipped, 0 failed;
+  - `Spe.Integration.Tests`: 9 failed (the same 9 fail on master, #2229), 344 passed, 23 skipped.
+- **CI:** Tier 1 `Arch Tests (full suite, blocking)` was cancelled by its 5-minute job timeout, not by a test failure. The same timeout cancelled master's runs at 18:59Z and 00:07Z. Evidence is on #2224; the job is re-run.
+- **Apply run (owner go):** follow the §4 gate procedure. Save the run's `ResultJson` to this note straight after Apply, because the in-memory store loses it on the next restart.
