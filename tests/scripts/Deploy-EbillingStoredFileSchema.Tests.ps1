@@ -13,7 +13,12 @@
 #   4a. (task 088 pre-run fixes) the SchemaNames (table sprk_StoredFile, primary sprk_Name, every other column PascalCase after the
 #      prefix; logical names unchanged), AssociatedMenuConfiguration DoNotDisplay on all six relationship bodies (the module's
 #      Add-Lookup / Add-Table bodies are captured with Invoke-Dv mocked), the publish entity list (seven entities + the choice, no
-#      PublishAllXml) and the order (the big integer columns and their securable check come before any lookup or other column);
+#      PublishAllXml) and the securability pre-pass (over every sprk_storedfile column, before the marker);
+#   4b. (task 088 retype, run 1 on dev 2026-10-22) no BigInt column: sprk_sourceversion is a text 20 and sprk_sizebytes a whole number
+#      0 to 2147483647; and a RE-RUN against the partial state dev was left in (fake Dataverse, tests/scripts/fixtures/
+#      Invoke-StoredFileSchemaAgainstFake.ps1, a child process, no network): everything present is skipped, the two retyped columns
+#      are created, exactly six columns are secured and granted (blobpath the writer row only); and a BigInt that still resolves is
+#      an exit 2 with no write;
 #   5. the profile pre-flight (Test-ProfilePreconditions, Dataverse reads stubbed): the reader profile is checked against the NAMED
 #      business units only (-ReaderBusinessUnits), never every default team (UAC 191's External Collaborators BU must never hold it).
 # The script's constants are taken from the script itself (its top-level assignments), not retyped here.
@@ -34,7 +39,7 @@ $errs = $null; $tokens = $null
 $script:Ast = [System.Management.Automation.Language.Parser]::ParseFile($script:ScriptPath, [ref]$tokens, [ref]$errs)
 
 # The script's own constants (top-level assignments), so a change there is what the tests see.
-$constants = 'StoredFile', 'Document', 'Invoice', 'Version', 'Export', 'Communication', 'CreatorColumn', 'MarkerColumn', 'BlobPathColumn', 'PurposeChoice', 'FileStatusLabels', 'KnownStatus', 'SupersededStatus', 'StoredFileSchema', 'StoredFileNameSchema', 'RelatedMenuBehavior', 'BigIntColumns'
+$constants = 'StoredFile', 'Document', 'Invoice', 'Version', 'Export', 'Communication', 'CreatorColumn', 'MarkerColumn', 'BlobPathColumn', 'PurposeChoice', 'FileStatusLabels', 'KnownStatus', 'SupersededStatus', 'StoredFileSchema', 'StoredFileNameSchema', 'RelatedMenuBehavior'
 foreach ($st in $script:Ast.EndBlock.Statements) {
     if ($st -is [System.Management.Automation.Language.AssignmentStatementAst] -and $st.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and $st.Left.VariablePath.UserPath -in $constants) {
         Invoke-Expression $st.Extent.Text
@@ -95,7 +100,7 @@ Describe 'Get-StoredFilePlan (F2, F4 and the F3 secured set)' {
     }
     It 'lists every other F2 column and F4 with its type and length' {
         $cols = (@($plan.Columns) | ForEach-Object { "$($_.Table).$($_.Column):$($_.Type)$(if ($_.MaxLength) { "/$($_.MaxLength)" })" } | Sort-Object) -join ','
-        $cols | Should Be 'sprk_document.sprk_restrictedbysubmission:Boolean,sprk_storedfile.sprk_blobpath:String/1024,sprk_storedfile.sprk_contenttype:String/255,sprk_storedfile.sprk_filestatus:Picklist,sprk_storedfile.sprk_firmvisible:Boolean,sprk_storedfile.sprk_name:String/400,sprk_storedfile.sprk_purpose:Picklist,sprk_storedfile.sprk_sha256:String/64,sprk_storedfile.sprk_sizebytes:BigInt,sprk_storedfile.sprk_sourceattachmentidentity:String/1000,sprk_storedfile.sprk_sourcesha256:String/64,sprk_storedfile.sprk_sourceversion:BigInt'
+        $cols | Should Be 'sprk_document.sprk_restrictedbysubmission:Boolean,sprk_storedfile.sprk_blobpath:String/1024,sprk_storedfile.sprk_contenttype:String/255,sprk_storedfile.sprk_filestatus:Picklist,sprk_storedfile.sprk_firmvisible:Boolean,sprk_storedfile.sprk_name:String/400,sprk_storedfile.sprk_purpose:Picklist,sprk_storedfile.sprk_sha256:String/64,sprk_storedfile.sprk_sizebytes:Integer,sprk_storedfile.sprk_sourceattachmentidentity:String/1000,sprk_storedfile.sprk_sourcesha256:String/64,sprk_storedfile.sprk_sourceversion:String/20'
     }
     It 'secures every F2 column except sprk_name and sprk_createdbyperson, plus the marker (16 columns)' {
         $sec = @($plan.Secured)
@@ -335,6 +340,20 @@ Describe 'the create bodies the module sends (Invoke-Dv mocked inside the module
         $b.SchemaName | Should BeExactly 'sprk_other'
         $b.Attributes[0].SchemaName | Should BeExactly 'sprk_name'
     }
+    It 'builds the retyped columns: a text 20 and a whole number 0 to 2147483647, no BigInt (run 1 retype)' {
+        $fn = $script:Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'New-WholeNumberDef' }, $true) | Select-Object -First 1
+        $fn | Should Not BeNullOrEmpty
+        Invoke-Expression $fn.Extent.Text
+        $z = New-WholeNumberDef 'sprk_SizeBytes' 'Size (bytes)' 'd' 0 2147483647
+        $z['@odata.type'] | Should Be 'Microsoft.Dynamics.CRM.IntegerAttributeMetadata'
+        $z.MinValue | Should Be 0
+        $z.MaxValue | Should Be 2147483647
+        $z.SchemaName | Should BeExactly 'sprk_SizeBytes'
+        $v = New-StringDef 'sprk_SourceVersion' 'Source Version' 'd' 20
+        $v['@odata.type'] | Should Be 'Microsoft.Dynamics.CRM.StringAttributeMetadata'
+        $v.MaxLength | Should Be 20
+        $v.FormatName.Value | Should Be 'Text'
+    }
     It 'refuses a SchemaName that does not lowercase to the logical name (must-fire)' {
         { Add-Table -Table 'sprk_storedfile' -Display 'x' -Plural 'x' -Description 'd' -PrimaryColumn 'sprk_name' -PrimaryDisplay 'N' -PrimaryDescription 'p' -PrimaryLength 100 -SchemaName 'sprk_StoredFiles' } | Should Throw 'does not lowercase'
     }
@@ -355,30 +374,130 @@ Describe 'the publish list (K-c)' {
     }
 }
 
-Describe 'the order (item 4): the big integer columns and their securable check come first' {
-    It 'creates the two big integer columns once each, right after the audit and before any lookup or other column' {
-        foreach ($c in $BigIntColumns) { @([regex]::Matches($script:Text, "Add-Column '$c'")).Count | Should Be 1 }
-        ($BigIntColumns -join ',') | Should Be 'sprk_sourceversion,sprk_sizebytes'
-        $audit = $script:Text.IndexOf('Set-TableAudit $StoredFile')
-        $b1 = $script:Text.IndexOf("Add-Column 'sprk_sourceversion'")
-        $b2 = $script:Text.IndexOf("Add-Column 'sprk_sizebytes'")
-        $bigCheck = $script:Text.IndexOf('Assert-Securable @($script:Secured | Where-Object { $_.Table -eq $StoredFile -and $_.Column -in $BigIntColumns })')
-        $lookup = $script:Text.IndexOf('Add-Lookup -Column')
-        $purpose = $script:Text.IndexOf("Add-GlobalChoiceColumn 'sprk_purpose'")
-        $string1 = $script:Text.IndexOf("Add-Column 'sprk_sourcesha256'")
-        $fullCheck = $script:Text.IndexOf('Assert-Securable @($script:Secured | Where-Object { $_.Table -eq $StoredFile })')
-        $marker = $script:Text.IndexOf('Add-Column $MarkerColumn')
-        $audit | Should BeGreaterThan 0
-        ($audit -lt $b1 -and $b1 -lt $b2 -and $b2 -lt $bigCheck) | Should Be $true
-        ($bigCheck -lt $lookup -and $bigCheck -lt $purpose -and $bigCheck -lt $string1) | Should Be $true
-        # the full pass and the marker rules are unchanged: full check, then the marker, and nothing is secured before either
-        ($string1 -lt $fullCheck -and $fullCheck -lt $marker) | Should Be $true
-        $firstSecure = $script:Text.IndexOf('Invoke-ColumnSecurity $spec')
-        ($bigCheck -lt $firstSecure -and $marker -lt $firstSecure) | Should Be $true
+Describe 'the column types (run 1 retype): no BigInt, a text 20 and a whole number' {
+    $cols = @((Get-StoredFilePlan).Columns)
+    It 'plans sprk_sourceversion as String, max length 20' {
+        $c = $cols | Where-Object { $_.Column -eq 'sprk_sourceversion' }
+        $c.Type | Should Be 'String'
+        $c.MaxLength | Should Be 20
     }
-    It 'lists exactly the BigInt-typed columns of the plan as the early ones (must-fire if a BigInt column is added without being listed)' {
-        $big = @((Get-StoredFilePlan).Columns | Where-Object { $_.Type -eq 'BigInt' } | ForEach-Object { $_.Column } | Sort-Object)
-        ($big -join ',') | Should Be (($BigIntColumns | Sort-Object) -join ',')
+    It 'plans sprk_sizebytes as Integer, 0 to 2147483647' {
+        $c = $cols | Where-Object { $_.Column -eq 'sprk_sizebytes' }
+        $c.Type | Should Be 'Integer'
+        $c.MinValue | Should Be 0
+        $c.MaxValue | Should Be 2147483647
+    }
+    It 'plans no BigInt column and the script builds none (must-fire if one comes back)' {
+        @($cols | Where-Object { $_.Type -eq 'BigInt' }).Count | Should Be 0
+        $script:Text -match 'BigIntAttributeMetadata|New-BigIntDef|BigIntColumns' | Should Be $false
+    }
+    It 'creates each retyped column once, with the planned builder, SchemaName in PascalCase after the prefix, and the matching expected type' {
+        @([regex]::Matches($script:Text, "Add-Column 'sprk_sourceversion' \(New-StringDef 'sprk_SourceVersion' [^\r\n]* 20\) 'String'")).Count | Should Be 1
+        @([regex]::Matches($script:Text, "Add-Column 'sprk_sizebytes' \(New-WholeNumberDef 'sprk_SizeBytes' [^\r\n]* 0 2147483647\) 'Integer'")).Count | Should Be 1
+    }
+    It 'keeps the pre-flight existing-column type check (a planned column of another type stops the run before any write)' {
+        $script:Text.Contains('exists as $($a.AttributeType), expected $($col.Type)') | Should Be $true
+    }
+    It 'creates the two columns after the audit and before the securable pre-pass, which still runs before the marker' {
+        $audit = $script:Text.IndexOf('Set-TableAudit $StoredFile')
+        $v = $script:Text.IndexOf("Add-Column 'sprk_sourceversion'")
+        $z = $script:Text.IndexOf("Add-Column 'sprk_sizebytes'")
+        $pre = $script:Text.IndexOf('Assert-Securable @($script:Secured | Where-Object { $_.Table -eq $StoredFile })')
+        $marker = $script:Text.IndexOf('Add-Column $MarkerColumn')
+        $firstSecure = $script:Text.IndexOf('Invoke-ColumnSecurity $spec')
+        ($audit -lt $v -and $v -lt $pre -and $z -lt $pre -and $pre -lt $marker -and $marker -lt $firstSecure) | Should Be $true
+        # the early big-integer pre-pass is gone: the only Assert-Securable over storedfile columns is the full one
+        @([regex]::Matches($script:Text, 'Assert-Securable @\(\$script:Secured')).Count | Should Be 1
+    }
+}
+
+# The script itself, in a child process against the fake Dataverse. WhatIf (and, for the must-fire, Apply: the fake records every
+# non-GET so "no write" is a count, not a hope).
+function Invoke-AgainstFake([string[]]$ExistingBigInt = @(), [switch]$Apply) {
+    $fixture = Join-Path $PSScriptRoot 'fixtures/Invoke-StoredFileSchemaAgainstFake.ps1'
+    $argv = @('-NoProfile', '-File', $fixture, '-ScriptPath', $script:ScriptPath)
+    if ($ExistingBigInt.Count -gt 0) { $argv += @('-ExistingBigInt', ($ExistingBigInt -join ',')) }
+    if ($Apply) { $argv += '-Apply' }
+    $raw = (& pwsh @argv 2>&1 | Out-String)
+    $text = [regex]::Replace($raw, "\x1b\[[0-9;]*m", '')
+    $exit = [regex]::Match($text, 'RUNNER-EXIT: (-?\d+)').Groups[1].Value
+    $writes = [regex]::Match($text, 'RUNNER-NONGET: (\d+)').Groups[1].Value
+    return [pscustomobject]@{ Text = $text; Exit = $exit; Writes = $writes }
+}
+
+Describe 'a re-run against the partial state dev was left in (fake Dataverse, -WhatIf)' {
+    $r = Invoke-AgainstFake
+    $text = $r.Text
+    $lines = @($text -split "\r?\n")
+    $six = 'sprk_blobpath', 'sprk_contenttype', 'sprk_sha256', 'sprk_sizebytes', 'sprk_sourcesha256', 'sprk_sourceversion'
+    $nine = 'sprk_billingexport', 'sprk_filestatus', 'sprk_firmvisible', 'sprk_invoice', 'sprk_procedureversion', 'sprk_purpose', 'sprk_sourceattachmentidentity', 'sprk_sourcecommunication', 'sprk_sourcedocument'
+
+    It 'ran to the end: exit 0, nothing written, no escalation' {
+        $r.Exit | Should Be '0'
+        $r.Writes | Should Be '0'
+        $text -match 'ESCALATION|ERROR:|FINDINGS' | Should Be $false
+        $text | Should Match 'WhatIf run: nothing was written'
+    }
+    It 'creates exactly the two retyped columns, with their new types, and nothing else (no table, option set, lookup, marker or status)' {
+        $would = @($lines | Where-Object { $_ -match '^\s*WOULD (CREATE|INSERT)' })
+        $would.Count | Should Be 2
+        (($would | ForEach-Object { $_.Trim() }) -join '|') | Should Be 'WOULD CREATE sprk_sourceversion (String)|WOULD CREATE sprk_sizebytes (Integer)'
+        $created = @($lines | Where-Object { $_ -match '^\s+\+ (sprk_\w+\.\w+)$' } | ForEach-Object { $_.Trim() })
+        ($created -join '|') | Should Be '+ sprk_storedfile.sprk_sourceversion|+ sprk_storedfile.sprk_sizebytes'
+    }
+    It 'skips the option set, table, lookups, other columns, marker and Superseded, with no exit 2' {
+        foreach ($s in 'optionset sprk_storedfilepurpose', 'table sprk_storedfile', 'sprk_storedfile.sprk_createdbyperson', 'sprk_storedfile.sprk_blobpath', 'sprk_document.sprk_restrictedbysubmission', 'sprk_invoice.statuscode=659490005') {
+            @($lines | Where-Object { $_.Trim() -eq "= $s" }).Count | Should Be 1
+        }
+        foreach ($c in $nine) { @($lines | Where-Object { $_.Trim() -eq "= secure sprk_storedfile.$c" }).Count | Should Be 1 }
+        @($lines | Where-Object { $_.Trim() -eq '= secure sprk_document.sprk_restrictedbysubmission' }).Count | Should Be 1
+    }
+    It 'secures exactly the six remaining columns (the nine already secured are not touched)' {
+        $secured = @($lines | Where-Object { $_ -match '^\s+WOULD SECURE sprk_storedfile\.\w+' } | ForEach-Object { [regex]::Match($_, 'WOULD SECURE sprk_storedfile\.(\w+)').Groups[1].Value } | Sort-Object)
+        ($secured -join ',') | Should Be ($six -join ',')
+        @($lines | Where-Object { $_ -match '^\s+~ secure ' }).Count | Should Be 6
+        # the nine and the six are the 15 columns of the end state
+        ($nine + $six).Count | Should Be 15
+    }
+    It 'grants the writer row on all six and the reader row on five, NOT on sprk_blobpath (11 rows)' {
+        $rows = @($lines | Where-Object { $_ -match '^\s+\+ field permission (.+) on sprk_storedfile\.(\w+)$' } | ForEach-Object { $m = [regex]::Match($_, 'field permission (.+) on sprk_storedfile\.(\w+)$'); "$($m.Groups[2].Value):$(if ($m.Groups[1].Value -like '*Writers') { 'W' } else { 'R' })" } | Sort-Object)
+        $rows.Count | Should Be 11
+        (($rows | Where-Object { $_ -like '*:W' }) -join ',') | Should Be 'sprk_blobpath:W,sprk_contenttype:W,sprk_sha256:W,sprk_sizebytes:W,sprk_sourcesha256:W,sprk_sourceversion:W'
+        (($rows | Where-Object { $_ -like '*:R' }) -join ',') | Should Be 'sprk_contenttype:R,sprk_sha256:R,sprk_sizebytes:R,sprk_sourcesha256:R,sprk_sourceversion:R'
+        @($rows | Where-Object { $_ -eq 'sprk_blobpath:R' }).Count | Should Be 0
+        @($lines | Where-Object { $_ -match 'WOULD GRANT .*Readers.* on sprk_storedfile\.sprk_blobpath' }).Count | Should Be 0
+    }
+    It 'adds nothing for the nine columns already secured and granted (their System Administrator row is expected, not a finding)' {
+        foreach ($c in $nine) {
+            @($lines | Where-Object { $_ -match "WOULD (SECURE|GRANT).* sprk_storedfile\.$c(\s|$)" }).Count | Should Be 0
+            @($lines | Where-Object { $_ -match "OK\s+no profile besides .* can write sprk_storedfile\.$c$" }).Count | Should Be 1
+        }
+    }
+}
+
+Describe 'a BigInt that still resolves stops the run before any write (exit 2) (must-fire)' {
+    It 'exits 2 with no write when sprk_sizebytes still exists as BigInt (apply mode)' {
+        $r = Invoke-AgainstFake -ExistingBigInt 'sprk_sizebytes' -Apply
+        $r.Exit | Should Be '2'
+        $r.Writes | Should Be '0'
+        $r.Text | Should Match 'sprk_storedfile\.sprk_sizebytes exists as BigInt, expected Integer'
+        $r.Text -cmatch '  (CREATED|INSERTED|DONE)  ' | Should Be $false
+        $r.Text | Should Not Match 'Publishing what this run changed'
+    }
+    It 'exits 2 with no write when sprk_sourceversion still exists as BigInt (apply mode), naming String' {
+        $r = Invoke-AgainstFake -ExistingBigInt 'sprk_sourceversion' -Apply
+        $r.Exit | Should Be '2'
+        $r.Writes | Should Be '0'
+        $r.Text | Should Match 'sprk_storedfile\.sprk_sourceversion exists as BigInt, expected String'
+    }
+    It 'names both when both resolve, and stops in -WhatIf too' {
+        $r = Invoke-AgainstFake -ExistingBigInt 'sprk_sourceversion', 'sprk_sizebytes'
+        $r.Exit | Should Be '2'
+        $r.Text | Should Match 'sprk_sourceversion exists as BigInt'
+        $r.Text | Should Match 'sprk_sizebytes exists as BigInt'
+    }
+    It 'does not fire on the partial state itself (must-not-fire)' {
+        (Invoke-AgainstFake).Exit | Should Be '0'
     }
 }
 

@@ -20,8 +20,8 @@
             sprk_purpose (global choice F1); sprk_firmvisible (two options, default No);
             sprk_filestatus (LOCAL choice: Not yet servable 100000000, Servable 100000001, Removed 100000002);
             sprk_sourcedocument (-> sprk_document, Restrict); sprk_sourcecommunication (-> sprk_communication, Restrict);
-            sprk_sourceattachmentidentity (text 1000); sprk_sourceversion (big integer);
-            sprk_sourcesha256 and sprk_sha256 (text 64); sprk_contenttype (text 255); sprk_sizebytes (big integer);
+            sprk_sourceattachmentidentity (text 1000); sprk_sourceversion (text 20: ONE canonical string form of the row version);
+            sprk_sourcesha256 and sprk_sha256 (text 64); sprk_contenttype (text 255); sprk_sizebytes (whole number 0 to 2147483647);
             sprk_blobpath (text 1024); sprk_createdbyperson (-> systemuser, RemoveLink; the Deploy-EbillingSubmissionSchema.ps1
             shape; created UNSECURED - task 086 secures it).
       F3  Field security, reusing unified-access-control-r2's profile pair as task 080 does (permission rows only, never a member):
@@ -57,9 +57,12 @@
     "Stored Files" entry to the Related menu of its target form (procedure version, invoice, billing export, document,
     communication, user); the verify reads each back.
 
-    ORDER. The two big integer columns (sprk_sourceversion, sprk_sizebytes) are created right after the table, and their
-    CanBeSecuredFor* flags are checked at once, before any lookup or other column exists: if the platform refuses to secure that
-    type, the run stops (exit 2) with only the table and those two columns to remove by hand.
+    COLUMN TYPES (run 1 on dev, 2026-10-22). A BigInt column reads CanBeSecuredFor* true but the field-permission service refuses its
+    permission rows (0x8004f508 "NOT secured for entity fieldpermission"), so both were retyped: sprk_sourceversion is a text 20 and
+    sprk_sizebytes a whole number 0 to 2147483647 (a file over 2 GiB cannot be stored). No BigInt column is planned. An existing
+    column of a planned logical name with another type (a BigInt still resolving after its delete) stops the pre-flight (exit 2,
+    before any write). A re-run against a partly built table skips everything present and creates / secures the rest.
+    The securability pre-pass over every sprk_storedfile column runs before the marker is created and before any column is secured.
 
     PUBLISH. Only what this script and its relationships touched: sprk_storedfile, sprk_document, sprk_invoice, sprk_communication,
     sprk_procedureversion, sprk_billingexport, systemuser and the sprk_storedfilepurpose choice. Never PublishAllXml.
@@ -139,8 +142,6 @@ $StoredFileSchema = 'sprk_StoredFile'
 $StoredFileNameSchema = 'sprk_Name'
 # AssociatedMenuConfiguration.Behavior of every lookup: no entry on the target's Related menu.
 $RelatedMenuBehavior = 'DoNotDisplay'
-# The two big integer columns, created and checked for securability first (see ORDER).
-$BigIntColumns = @('sprk_sourceversion', 'sprk_sizebytes')
 
 # F1: values are assigned 100000000, 100000001, ... in label order.
 $PurposeChoice = @{ Name = 'sprk_storedfilepurpose'; Display = 'Stored File Purpose'; Description = 'What a Stored File is for: a Procedure Version''s source document, an invoice PDF, an invoice supporting file or an export file (ebilling-r1 task 088, model 4.1).'; Labels = @('Procedure source', 'Invoice PDF', 'Invoice supporting file', 'Export file') }
@@ -195,14 +196,17 @@ function New-TwoOptionDef([string]$Schema, [string]$Display, [string]$Descriptio
     }
 }
 
-# A big integer column (BigIntAttributeMetadata; its range is fixed by the platform).
-function New-BigIntDef([string]$Schema, [string]$Display, [string]$Description) {
+# A whole number column (IntegerAttributeMetadata; copied from Deploy-EbillingProcedureSchema.ps1).
+function New-WholeNumberDef([string]$Schema, [string]$Display, [string]$Description, [int]$Min, [int]$Max) {
     return @{
-        '@odata.type' = 'Microsoft.Dynamics.CRM.BigIntAttributeMetadata'
+        '@odata.type' = 'Microsoft.Dynamics.CRM.IntegerAttributeMetadata'
         SchemaName    = $Schema
         DisplayName   = New-Label $Display
         Description   = New-Label $Description
         RequiredLevel = @{ Value = 'None' }
+        Format        = 'None'
+        MinValue      = $Min
+        MaxValue      = $Max
     }
 }
 
@@ -383,11 +387,11 @@ function Get-StoredFilePlan {
         @{ Table = $sf; Column = 'sprk_firmvisible'; Type = 'Boolean' }
         @{ Table = $sf; Column = 'sprk_filestatus'; Type = 'Picklist' }
         @{ Table = $sf; Column = 'sprk_sourceattachmentidentity'; Type = 'String'; MaxLength = 1000 }
-        @{ Table = $sf; Column = 'sprk_sourceversion'; Type = 'BigInt' }
+        @{ Table = $sf; Column = 'sprk_sourceversion'; Type = 'String'; MaxLength = 20 }
         @{ Table = $sf; Column = 'sprk_sourcesha256'; Type = 'String'; MaxLength = 64 }
         @{ Table = $sf; Column = 'sprk_sha256'; Type = 'String'; MaxLength = 64 }
         @{ Table = $sf; Column = 'sprk_contenttype'; Type = 'String'; MaxLength = 255 }
-        @{ Table = $sf; Column = 'sprk_sizebytes'; Type = 'BigInt' }
+        @{ Table = $sf; Column = 'sprk_sizebytes'; Type = 'Integer'; MinValue = 0; MaxValue = 2147483647 }
         @{ Table = $sf; Column = $BlobPathColumn; Type = 'String'; MaxLength = 1024 }
         @{ Table = $Document; Column = $MarkerColumn; Type = 'Boolean' }
     )
@@ -875,11 +879,6 @@ try {
     Set-PrimaryNameLength $StoredFile 'sprk_name' 400
     Set-PrimaryNameRequired $StoredFile 'sprk_name'
     Set-TableAudit $StoredFile
-    # The big integer columns first, with their securable check, so a refusal leaves only the table and these two columns (ORDER).
-    Add-Column 'sprk_sourceversion' (New-BigIntDef 'sprk_SourceVersion' 'Source Version' 'The source document''s version number at staging; the commit''s IfRowVersionMatches guard pins it (uac-r2 F2-c). Written only by the BFF (field-secured).') 'BigInt'
-    Add-Column 'sprk_sizebytes' (New-BigIntDef 'sprk_SizeBytes' 'Size (bytes)' 'Size of the stored file in bytes. Written only by the BFF (field-secured).') 'BigInt'
-    Write-Host "  securable check of the big integer columns ($($BigIntColumns -join ', ')) before any other column exists" -ForegroundColor Cyan
-    Assert-Securable @($script:Secured | Where-Object { $_.Table -eq $StoredFile -and $_.Column -in $BigIntColumns }) "Only $StoredFile and its two big integer columns were created: no lookup, no other column, no marker; nothing was secured. If the type has to change, delete $StoredFile (it holds no rows) and re-run."
     foreach ($s in $script:Lookups) {
         Set-EbEntity $s.Table
         Add-Lookup -Column $s.Column -SchemaName $s.Schema -RelSchema $s.Rel -Target $s.Target -Display $s.Display -Description $s.Desc -DeleteBehavior $s.Delete -MenuBehavior $s.Menu
@@ -889,13 +888,15 @@ try {
     Add-Column 'sprk_firmvisible' (New-TwoOptionDef 'sprk_FirmVisible' 'Firm-visible' 'Yes only for an invoice PDF the firm uploaded through the SPA; a Submit Invoice copy, a supporting file, a Procedure file and an export file are always No (uac-r2 F1-d). The firm file route serves only Invoice PDF + Firm-visible + Servable. Written only by the BFF (field-secured). Default No.' $false) 'Boolean'
     Add-LocalChoice -Column 'sprk_filestatus' -Schema 'sprk_FileStatus' -Display 'File Status' -Description 'Not yet servable (staged, or committed but not yet re-checked), Servable, or Removed. Every reader refuses a row that is not Servable (model 4.1, 9.1 steps 4-6). Written only by the BFF (field-secured).' -Labels $FileStatusLabels
     Add-Column 'sprk_sourceattachmentidentity' (New-StringDef 'sprk_SourceAttachmentIdentity' 'Source Attachment Identity' 'For a Submit Invoice copy: the marked attachment''s identity inside the source (the .eml''s MIME part: ordinal, name; model 9.1 step 3). Never an Exchange item id. Written only by the BFF (field-secured).' 1000) 'String'
+    Add-Column 'sprk_sourceversion' (New-StringDef 'sprk_SourceVersion' 'Source Version' 'The source document''s version number at staging, as ONE canonical string (invariant culture, no padding, no separators; task 090); the commit''s IfRowVersionMatches guard pins it (uac-r2 F2-c). Written only by the BFF (field-secured).' 20) 'String'
     Add-Column 'sprk_sourcesha256' (New-StringDef 'sprk_SourceSha256' 'Source SHA-256' 'SHA-256 of the source bytes at staging (hex), checked again by the flip to Servable (uac-r2 F2-1). Written only by the BFF (field-secured).' 64) 'String'
     Add-Column 'sprk_sha256' (New-StringDef 'sprk_Sha256' 'SHA-256' 'SHA-256 of the stored blob (hex). Written only by the BFF (field-secured).' 64) 'String'
     Add-Column 'sprk_contenttype' (New-StringDef 'sprk_ContentType' 'Content Type' 'MIME content type of the stored file. Written only by the BFF (field-secured).' 255) 'String'
+    Add-Column 'sprk_sizebytes' (New-WholeNumberDef 'sprk_SizeBytes' 'Size (bytes)' 'Size of the stored file in bytes, 0 to 2147483647 (a larger file cannot be stored; the BFF refuses it, task 090). Written only by the BFF (field-secured).' 0 2147483647) 'Integer'
     Add-Column $BlobPathColumn (New-StringDef 'sprk_BlobPath' 'Blob Path' 'Server-only: {tenantId}/{parent table}/{parent id}/{file id}. The download checks that its parent id equals the row''s parent (model 4.1, 4.2). Readable and writable only by the BFF (field-secured, no reader row).' 1024) 'String'
 
     # Every sprk_storedfile column must be securable BEFORE the marker is created and before any column is secured (review F1):
-    # a refusal (for example a big integer column whose CanBeSecuredFor* reads false) then stops with the marker NOT created
+    # a refusal (for example a column whose CanBeSecuredFor* reads false) then stops with the marker NOT created
     # and no column secured (exit 2), never with a marker that any user with Write on a document could set.
     Write-Host "  securable check of the $StoredFile F3 columns (before the marker exists)" -ForegroundColor Cyan
     Assert-Securable @($script:Secured | Where-Object { $_.Table -eq $StoredFile }) "The marker $Document.$MarkerColumn was NOT created and no column was secured. The $StoredFile columns exist unsecured; nothing writes them before task 090."
@@ -963,6 +964,10 @@ try {
         foreach ($col in $script:Columns | Where-Object { $_.MaxLength }) {
             $sa = Get-DvOrNull "EntityDefinitions(LogicalName='$($col.Table)')/Attributes(LogicalName='$($col.Column)')/Microsoft.Dynamics.CRM.StringAttributeMetadata?`$select=MaxLength"
             if (-not $sa -or [int]$sa.MaxLength -ne $col.MaxLength) { $bad.Add("$($col.Table).$($col.Column) max length is $($sa.MaxLength), expected $($col.MaxLength)") } else { Write-Host "  $($col.Table).$($col.Column): text $($col.MaxLength)" }
+        }
+        foreach ($col in $script:Columns | Where-Object { $_.Type -eq 'Integer' }) {
+            $ia = Get-DvOrNull "EntityDefinitions(LogicalName='$($col.Table)')/Attributes(LogicalName='$($col.Column)')/Microsoft.Dynamics.CRM.IntegerAttributeMetadata?`$select=MinValue,MaxValue"
+            if (-not $ia -or [int64]$ia.MinValue -ne $col.MinValue -or [int64]$ia.MaxValue -ne $col.MaxValue) { $bad.Add("$($col.Table).$($col.Column) range is $($ia.MinValue) to $($ia.MaxValue), expected $($col.MinValue) to $($col.MaxValue)") } else { Write-Host "  $($col.Table).$($col.Column): whole number $($col.MinValue) to $($col.MaxValue)" }
         }
         foreach ($bc in @(@($StoredFile, 'sprk_firmvisible'), @($Document, $MarkerColumn))) {
             $b = Get-DvOrNull "EntityDefinitions(LogicalName='$($bc[0])')/Attributes(LogicalName='$($bc[1])')/Microsoft.Dynamics.CRM.BooleanAttributeMetadata?`$select=DefaultValue,DisplayName"
