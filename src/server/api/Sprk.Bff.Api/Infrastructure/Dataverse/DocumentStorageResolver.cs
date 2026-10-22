@@ -120,7 +120,7 @@ public sealed class DocumentStorageResolver : IDocumentStorageResolver
     /// Valid: starts with "b!" and is 20+ characters
     /// Example: b!OWdlYTJh...
     /// </summary>
-    private static bool IsLikelyDriveId(string? value)
+    internal static bool IsLikelyDriveId(string? value)
         => !string.IsNullOrWhiteSpace(value)
            && value.StartsWith("b!", StringComparison.Ordinal)
            && value.Length > 20;
@@ -130,8 +130,16 @@ public sealed class DocumentStorageResolver : IDocumentStorageResolver
     /// Valid: alphanumeric start, 20+ characters
     /// Example: 01LBYCMX76QPLGITR47BB355T4G2CVDL2B
     /// </summary>
-    private static bool IsLikelyItemId(string? value)
+    internal static bool IsLikelyItemId(string? value)
         => !string.IsNullOrWhiteSpace(value)
            && char.IsLetterOrDigit(value[0])
            && value.Length > 20;
+
+    /// <summary>
+    /// Whether a document row's pointers name a file, by the SAME checks <see cref="GetSpePointersAsync"/> applies before it
+    /// answers 409 <c>no_file_attached</c> / <c>mapping_missing_*</c>. Used by the external document list to tell the SPA
+    /// whether Download and Versions can succeed (R3 ISS-011, #1886).
+    /// </summary>
+    internal static bool HasUsablePointers(string? driveId, string? itemId)
+        => IsLikelyDriveId(driveId) && IsLikelyItemId(itemId);
 }
