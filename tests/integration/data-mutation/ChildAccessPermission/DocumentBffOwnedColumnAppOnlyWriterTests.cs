@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -112,11 +113,54 @@ public class DocumentBffOwnedColumnAppOnlyWriterTests
     }
 
     [Fact]
-    public void TheOwnedSet_HoldsEveryColumnTheFieldSecurityScriptLocksForTheBff()
+    public void TheOwnedSet_HoldsEveryColumnTheFieldSecurityScriptListsForTheBff()
     {
-        // The DocumentPointers target of scripts/Set-DocumentPointerFieldSecurity.ps1 (the BFF-only writers' profile).
-        InheritedAccessPermission.BffOwnedDocumentColumns.Should().Contain(
-            ["sprk_graphdriveid", "sprk_graphitemid", "sprk_graphitemidbound", "sprk_relocationpending", "sprk_relocatedversions"]);
+        // The DocumentPointers target of scripts/Set-DocumentPointerFieldSecurity.ps1 (the BFF-only writers' profile), read
+        // from the script itself: a column added there and not here fails this test.
+        var script = File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "Set-DocumentPointerFieldSecurity.ps1"));
+        var listed = DocumentPointerColumns(script);
+
+        listed.Should().HaveCountGreaterThanOrEqualTo(5, "the DocumentPointers target's column list is parsed, not missed");
+        listed.Where(c => !InheritedAccessPermission.BffOwnedDocumentColumns.Contains(c))
+            .Should().BeEmpty("every column the script locks for the BFF is one the app-only refusal refuses");
+    }
+
+    [Fact]
+    public void TheScriptCheck_FiresOnAColumnTheOwnedSetLacks()
+    {
+        // Must-fire control for the test above: the script's list with one column the set does not hold.
+        var script = File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "Set-DocumentPointerFieldSecurity.ps1"));
+        var widened = Regex.Replace(
+            script, @"(DocumentPointers\s*=\s*@\{[^\r\n]*?Columns\s*=\s*@\()", "$1'sprk_notbffowned', ", RegexOptions.Multiline);
+
+        DocumentPointerColumns(widened).Where(c => !InheritedAccessPermission.BffOwnedDocumentColumns.Contains(c))
+            .Should().Equal("sprk_notbffowned");
+    }
+
+    /// <summary>The columns of the script's DocumentPointers target (<c>DocumentPointers = @{ Table = ...; Columns = @(...) }</c>).</summary>
+    private static IReadOnlyList<string> DocumentPointerColumns(string script)
+    {
+        var target = Regex.Match(
+            script, @"^\s*DocumentPointers\s*=\s*@\{\s*Table\s*=\s*'([^']+)'\s*;\s*Columns\s*=\s*@\(([^)]*)\)", RegexOptions.Multiline);
+        if (!target.Success)
+            return [];
+
+        target.Groups[1].Value.Should().Be("sprk_document");
+        return Regex.Matches(target.Groups[2].Value, @"'([^']+)'").Select(m => m.Groups[1].Value).ToArray();
+    }
+
+    private static string RepoRoot()
+    {
+        var dir = AppContext.BaseDirectory;
+        while (dir is not null)
+        {
+            var git = Path.Combine(dir, ".git");
+            if (Directory.Exists(git) || File.Exists(git))
+                return dir;
+            dir = Directory.GetParent(dir)?.FullName;
+        }
+
+        throw new InvalidOperationException("Repository root not found above " + AppContext.BaseDirectory);
     }
 
     [Fact]
