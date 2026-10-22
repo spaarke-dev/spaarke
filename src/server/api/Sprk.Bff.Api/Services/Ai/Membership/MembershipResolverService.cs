@@ -905,11 +905,13 @@ public sealed class MembershipResolverService : IMembershipResolverService
             }
 
             if (string.Equals(field, CreatorPersonAttribute, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(d.IdentityType, "SystemUser", StringComparison.OrdinalIgnoreCase))
+                && string.Equals(d.IdentityType, "SystemUser", StringComparison.OrdinalIgnoreCase)
+                && Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.IsStamped(entityType))
             {
                 // Task 147 r1: discovered only where the column exists (the schema scripts put it on the roots and the
                 // stamped child tables), so a table without it never names it in the query. Bound under the human rule
-                // below, with Created By.
+                // below, with Created By. #2273: and only on a table the BFF stamps — elsewhere the column may be
+                // unsecured, so any Write holder could name anyone as its creator.
                 creatorPerson = d;
             }
 
