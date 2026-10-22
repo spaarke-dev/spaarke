@@ -1,25 +1,26 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-22 ~02:35Z (main session; 157 merged). State only — history is in git log, task `<completion>` blocks and
-> `notes/handoff-history/2026-10.md` (the previous 25 KB checkpoint is archived there verbatim). Standing rules: [`CLAUDE.md`](CLAUDE.md)
-> §3 and §6. Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-177). Deferred work: one self-contained GitHub issue per item,
-> label `ontology-deferred`, plus a DI-nn row in both tables of `notes/defer-issues.md` (next free: **DI-122**). Sub-agents never edit this file.
+> **Last Updated**: 2026-10-22 ~13:40Z (main session). State only — history is in git log, task `<completion>` blocks and
+> `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 and §6. Decisions: [`notes/decisions.md`](notes/decisions.md)
+> (D-1..D-177). Deferred work: one self-contained GitHub issue per item, label `ontology-deferred`, plus a DI-nn row in both tables of
+> `notes/defer-issues.md` (next free: **DI-122**). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | No lane in flight. **157 ✅** merged to docs via PR #2231 (`2a020e05ff`, 2026-10-22; ebilling PASS through round 3). Rides the next docs→master sync. |
-| **Status** | Waiting on peers (ebilling reviews) and the owner (UAT items). |
-| **Next Action** | Pick up whichever ebilling review arrives first (119 is now unblocked); then the next docs→master sync. Nightly heartbeat on `a7b956fb55` confirmed 02:30:29Z. |
+| **Task** | No lane in flight. 157 ✅ is on master (#2233 `aa3dc49897`). CI ArchTests timeout raised to 10 min (#2252 `2101d3d828`, owner-approved GATE REPAIR). `WithheldSentence` comment lane merged to docs (#2256 `d852945aa6`); worktree removed. |
+| **Status** | Waiting on peers (ebilling 088 run + reviews, R3's next dev BFF deploy) and the owner (UAT items). |
+| **Next Action** | When ebilling sends the 088 after-notice: independent read-back on dev (list below). When R3 deploys the next master build: confirm it contains `aa3dc49897`, smoke, log check. |
 
 ## Next, in order
 
-1. **Next docs→master sync** (157 + #2174): main session runs the full ArchTests first; notify R3/uac-r2/word-add-in before and after.
-2. **ebilling reviews when sent:** 088 (Stored File schema; sprk_document submission marker; invoice Superseded + resubmission-of link), 097 (per-invoice Superseded close wrapper over `SignalWriter.CloseAsync`), 116 (drafting re-keyed per Procedure Version), 119 (must call `EarlierInvoiceReadability.ShownAsync` and use its `WithheldSentence`; no `DuplicateOfEarlierLine` exemption), 082 (resolver must use `BillingRuleDefinition.PrecedenceKey`, condition in their POML), 081 (creator-person zero-non-null assert). Every schema run: final script + `-WhatIf` to us, before/after notices, no run before our PASS; check all core records, not matter alone.
-3. **105 UAT** with the owner: 102 wizard browser tests + keyboard/screen-reader; 064 §6.1 non-admin checks and UI tests (D-164); the 055 Next step To Do.
-4. Re-run `SignalReadRouteLiveTests` as a non-Console user (DI-83 #1882), then close #1882.
-5. **111 row 4** (owner): `/upload?entityType=sprk_project&entityId=<GUID>` with the GUID from `/project/<GUID>`; then close 111 → 114; then 090 wrap-up.
+1. **ebilling 088 run** (schema gate PASS + K-fix scoped check PASS; OK to run, keep `sprk_Name`). After their after-notice and verify output, read back on dev: `sprk_storedfile` SchemaName `sprk_StoredFile`; primary `sprk_Name`; 6 relationships (4 RemoveLink, 2 Restrict, none parental) with Related menu DoNotDisplay; field security; `statuscode` Superseded `659490005`; second run skips all. Log it in `notes/deploy-log.md`.
+2. **Next R3 dev BFF from master** carries 157: check ancestry (`aa3dc49897`, R3 077 `283466d40`), run `scratchpad/live/smokeA_v2.py` on both matters, set `since` in `deploycheck.py` to the deploy time and run it; deploy-log entry.
+3. **ebilling reviews when sent:** 097 (BillingFactLoader Superseded → null; our path), 116 (drafting re-keyed per Procedure Version), 082 (resolver uses `BillingRuleDefinition.PrecedenceKey`), 081 (creator-person zero-non-null assert). The 088 F1s are already filed into their POMLs 117, 094/095, 097 (`8d1394a4ed`). Every schema run: final script + `-WhatIf` to us, before/after notices, no run before our PASS; check all core records.
+4. **105 UAT** with the owner: 102 wizard browser tests + keyboard/screen-reader; 064 §6.1 non-admin checks and UI tests (D-164); the 055 Next step To Do.
+5. Re-run `SignalReadRouteLiveTests` as a non-Console user (DI-83 #1882), then close #1882.
+6. **111 row 4** (owner): `/upload?entityType=sprk_project&entityId=<GUID>` with the GUID from `/project/<GUID>`; then close 111 → 114; then 090 wrap-up.
 
 ## Blocked follow-ups (ours)
 
@@ -27,7 +28,7 @@
 - 5 stale `DecisionRecordWriter.cs` comments (:556 :1547 :1660 :2164 :2326) + `DecisionRecordContextImmutabilityTests.CreateEntryPoints` check — after ebilling 074 reaches master.
 - Close **#2212** when ebilling's fix (`f0884a175f`) reaches master.
 - When ebilling 015 reaches master: update `notes/102a-authoring-contract.md` residual row and D-161 to name `statuscode`.
-- After 157 and ebilling's billing code are both on master: equality guard that `EarlierInvoiceReadability.WithheldSentence` equals ebilling's withheld template (ontology owns the const).
+- The advisory ADR Compliance CI job also hits its 5-minute timeout; left to the ci-cd owners (noted on #2009).
 
 ## Open owner / peer items
 
@@ -35,16 +36,16 @@
 2. **Dev spend figure:** seeded 25,000 on REAL-2026-123456.01 becomes 0 at the next rollup (all dev invoices In Review; D-166). Offer an Approved invoice seed only if the owner asks.
 3. **CORS** on `/api/v1/external/notifications` (R3 owns): if it recurs, get the UTC time and the OPTIONS status. Never dispatch `deploy-external-spa.yml` from master while R3's SPA work is off master.
 4. **uac-r2 #2091 follow-up** (`SecureChildReconciler`/`RefileStepsAsync`): review when sent — gate-DR step still runs on thread join/reply re-file; same-parent skip hides no real parent change; gate-DR failure logs 50317 and never fails the re-file.
-5. **field-mapping 033** (SignalWriter + DecisionRecordWriter onto RecordCreationService): our owner review + uac-r2 review of their design note when sent (invariants already sent 2026-10-20).
-6. Next docs→master sync: re-check master's `GateDecisionRecordSharing.IsFiled` keeps `ParentsOf(communication.Attributes, CommunicationTable)`; #2174 (docs-only ArchTest/comment lane) rides it.
+5. **field-mapping 033** (SignalWriter + DecisionRecordWriter onto RecordCreationService): our owner review + uac-r2 review of their design note when sent.
+6. Next docs→master sync: re-check master's `GateDecisionRecordSharing.IsFiled` keeps `ParentsOf(communication.Attributes, CommunicationTable)`; carries #2256 (comment only).
 
 ## Dev state (spaarkedev1 / spaarke-bff-dev)
 
-- Dev BFF `a7b956fb55` live (R3, 2026-10-22 02:18:52Z; adds field-mapping #2223/#2228 and UAC #2221, no ontology files); ontology smoke PASS (Secure 5d46df87 → `scope_matter_secured`; Standard REAL-2026-123456.01 → valid). Every dev BFF candidate must contain R3 077 (`283466d40`). R3 owns the dev BFF line; we never deploy it.
+- Dev BFF `1283c41817` live (R3, 2026-10-22; contains R3 077, no ontology file changes, not yet 157); ontology smoke PASS ~13:35Z; no 503xx warnings or ontology exceptions since 12:50:18Z. Last nightly heartbeat 02:30:29Z succeeded. Every dev BFF candidate must contain R3 077 (`283466d40`). R3 owns the dev BFF line; we never deploy it.
 - Console auto-deploys from master; landing tab = Worklist (D-164; revert `Set-DefaultWorkspaceLayout.ps1 -To 'Daily Briefing'`).
-- ebilling on dev: 080 Procedure schema run + idempotent second run (our independent read-back matches, see `notes/deploy-log.md`); 115 rule-type options 100000015 AddedFee / 100000016 Discount (100000014 SubmissionIntegrity not yet on dev).
+- ebilling on dev: 080 Procedure schema (read back), 115 rule-type options 100000015/100000016 (100000014 SubmissionIntegrity not yet on dev); 119 merged on their branch (`4a43d9a223`; `WithheldDuplicateTemplate = EarlierInvoiceReadability.WithheldSentence`).
 - Policies: six on, including POL-MATTER-NOBUDGET; none has a matter. Roles: Ontology Service 58; Ontology Administrator 38; Console User 21; Secure Record Owner 40.
-- Worktrees: none (all removed 2026-10-21/22 with Remove-WorktreeSafe, `C:\wts-157` last). Non-worktree folders left alone: `C:\wb126-pub`, `C:\wts-126-pub`, `C:\wts-103-seed`, `C:\wts-132-out`, `C:\wts-132m-out`, `C:\wts-r1609`, `C:\wts-r1609c`, `C:\wts-rc046b`, `C:\wts-rc1653`.
+- Worktrees: none of ours (`C:\wts-c34` removed with Remove-WorktreeSafe). Non-worktree folders left alone: `C:\wb126-pub`, `C:\wts-126-pub`, `C:\wts-103-seed`, `C:\wts-132-out`, `C:\wts-132m-out`, `C:\wts-r1609`, `C:\wts-r1609c`, `C:\wts-rc046b`, `C:\wts-rc1653`.
 
 ## Peers (current session names)
 
