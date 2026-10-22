@@ -236,3 +236,13 @@ It is pinned by three tests:
 - a body carrying extra regarding properties under a secure source gets 201, under the derived pair, and is secure;
 - the same body under a non-secure source gets 201, under the derived pair;
 - a reflection test over `QuickCreateRequest`'s public properties and JSON names fails on any member containing "regarding" (case-insensitive), with the message "a regarding member reintroduces G4 condition 1: refuse a differing pair under a secure source with 403 secure_source_filing_mismatch".
+
+## 2026-10-22 — 018b-2: undetermined-flag wording; #2124 on the Repair path
+
+- **The undetermined secure flag keeps its code, and the guidance changes.** An Office Project from a matter whose `sprk_issecure` is empty, or cannot be read, is refused with 403 `record_owner_parent_undetermined`, and nothing is written. The refusal's detail is now the step-6 plan's: it names the cause (no flag value, or the read failed). It no longer adds the old core's "Try again" or "Ask an administrator" guidance.
+  - Accepted under NFR-07, which pins codes, not text, and consistent with G6.
+  - Release note: Office refusal texts follow the service.
+- **#2124 is fixed on the create path and still open on Repair.**
+  - Create-time mapping passes the table's Money attributes, so a Default rule into a Money column writes a `Money`.
+  - Repair (SDK, system principal) passes none and would write a decimal. It is dormant: Repair has no live caller until 052, and 052 is blocked on 033, which carries the app-only metadata reader the fix needs.
+  - The 052 POML now has this as an acceptance criterion, and the full analysis is a comment on #2124.
