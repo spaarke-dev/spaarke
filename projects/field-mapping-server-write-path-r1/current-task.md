@@ -1,6 +1,6 @@
 # Current Task — field-mapping-server-write-path-r1
 
-> **Last updated**: 2026-10-22 (checkpoint at 85%: 018a ready for its PR)
+> **Last updated**: 2026-10-22 (018a merged as 36403e1f4b; 018b passes 1a, 1s and 1b done)
 > **Phase**: Wave 2. Done (13/43): 001–006, 010–016, ALL on master (016 = #2228 a7b956fb55; #2220 = #2223 ef5912c7e8).
 > **Live on dev: a7b956fb55** (R3, 2026-10-22 02:18Z). **Active: task 018, phase 018a** (service prerequisites,
 > no live change). UAC-r2 ACCEPT. PR next.
@@ -10,10 +10,11 @@
 | Field | Value |
 |---|---|
 | **Active task** | 018 (Office quick-create adapter), run as 3 PRs under ONE POML: **018a** service prerequisites → **018b** Matter/Project adapter → **018c** delete the Office core. The Invoice leg is NOT moved (ebilling-r1, owner decision L; task 096 deletes it) |
-| **HEAD** | work branch `738b526a2d` = 018a (2a5f076857 + fix rounds 58e09ce726, 4530e597f0, K-a a4d77aa539) + master 230302c307 (#2234). Pushed. Uncommitted: none |
-| **Running** | (1) Full verify after the #2234 merge (filter includes the #2234 suites): output `scratchpad/v018a2/`. (2) Publish delta 230302c307 vs 738b526a2d (`C:\tmp\h18m`, `C:\tmp\h18a`; the script removes them) + CVE |
-| **Next Action** | Both green → write the 018a PR body (from the notes' "018a" section, the condition (b) statement, UAC-r2 ACCEPT, decisions.md 2026-10-22 K-5 deviation, publish delta, CVE) → `gh pr create` from the work branch → merge only on Router + Client lint green and the rollup clean or explained (#2224 = known ADR-job timeout) → tell UAC-r2 the SHA (don't ask R3 to deploy: 018a is dormant; UAC-r2 batches) → resume the implementer (agent a80d401ebbcfb9d3e) for **018b**, whose criteria are all in the 018 POML |
-| **018 progress** | 018a = PR #2243 (CI running; merge on Router + Client lint green, rollup clean/explained, then tell UAC-r2 the SHA). 018b split into 3 passes on ONE PR: **018b-1 running** (fresh opus implementer, branch `task/fm-018b1`: NFR-01 inventory FIRST, then the leg swap, refusal map + table test, single membership publish, drop the old-core ctor dependency, fixtures + the four fill-only rewrites); 018b-2 (Assigned To refusal code, dropped default surfaced, secure-matter Project, no-token/empty-flag tests); 018b-3 (`ResolveDefaultAssigneeAsync` move, owner-guard and census cleanup, isolated ordering, #2124, optional #2238, notes). Then an Opus review + UAC-r2 (b) on the whole of 018b |
+| **HEAD** | work branch = master **36403e1f4b** (018a merged, #2243; UAC-r2 told the SHA). 018b lives on branch **`task/fm-018b1`** (worktree `C:\code_files\spaarke\.claude\worktrees\agent-a550606fde68f707f`), tip cf49b648e2: inventory a931124bb6 + G1–G7 answers + G4 UAC-r2 conditions + 018b-1s (3a97cce150) + 018b-1b (84d2add15b) + master |
+| **Running** | Combined verify of `task/fm-018b1` (`scratchpad/v018b1m/`) |
+| **Next Action** | Verify green → push → launch **018b-1c, the swap** (fresh opus implementer, branch from the `task/fm-018b1` tip): adapter, refusal map + table test (G2 and G5 mappings), single membership publish, ctor removal, re-pointed fixtures, G1 warning via `WrittenColumns`, G4 UAC-r2 conditions 1–3, G6/G7 rewrites, mutants. Then 018b-2, 018b-3 → one Opus review → UAC-r2 condition (b) → merge into the work branch → PR |
+| **018 progress** | 018a ✅ master 36403e1f4b. 018b: 1a inventory ✅; G1–G7 decided (`decisions.md` 2026-10-22); G4 option (a) accepted by UAC-r2 with 3 conditions; 1s service members ✅; 1b fixture ✅; **1c swap next**; then 018b-2 (Assigned To refusal code via `RefusedColumn`, dropped default surfaced, secure-matter Project, no-token/empty-flag tests) and 018b-3 (`ResolveDefaultAssigneeAsync` move, owner-guard and census cleanup, isolated ordering, #2124, optional #2238, notes) |
+| **CI note** | The Tier 1 `Arch Tests (full suite)` job also hits its 5-min timeout (#2009; master 5 of the last 8 runs). Re-run the failed jobs; it is not a test failure. Owner decision on raising it, as with #2224 |
 | **Cleanup left for the owner** | Empty, unregistered folders (Remove-WorktreeSafe partial delete, "Permission denied"): `C:\code_files\spaarke\.claude\worktrees\agent-a10e5fe383a4dfcd2`, `...\agent-a80d401ebbcfb9d3e` |
 
 ## 018 — what is decided (all in the 018 POML and notes/decisions.md)
