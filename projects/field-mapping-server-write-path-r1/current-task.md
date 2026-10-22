@@ -1,19 +1,19 @@
 # Current Task — field-mapping-server-write-path-r1
 
-> **Last updated**: 2026-10-22 (018a merged as 36403e1f4b; 018b passes 1a, 1s and 1b done)
-> **Phase**: Wave 2. Done (13/43): 001–006, 010–016, ALL on master (016 = #2228 a7b956fb55; #2220 = #2223 ef5912c7e8).
-> **Live on dev: a7b956fb55** (R3, 2026-10-22 02:18Z). **Active: task 018, phase 018a** (service prerequisites,
-> no live change). UAC-r2 ACCEPT. PR next.
+> **Last updated**: 2026-10-22 (018b complete on `task/fm-018b1`; review fix round 1 merged; re-check + verify running)
+> **Phase**: Wave 2. Done (13/43): 001–006, 010–016 on master; 018a on master (36403e1f4b).
+> **Live on dev: 1283c41817** (R3, 2026-10-22 12:50Z; includes dormant 018a, UAC #2244/#2249/#2248). **Active: task 018,
+> phase 018b** (the live Office Matter/Project swap).
 
 ## Quick Recovery
 
 | Field | Value |
 |---|---|
 | **Active task** | 018 (Office quick-create adapter), run as 3 PRs under ONE POML: **018a** service prerequisites → **018b** Matter/Project adapter → **018c** delete the Office core. The Invoice leg is NOT moved (ebilling-r1, owner decision L; task 096 deletes it) |
-| **HEAD** | work branch = master **36403e1f4b** (018a merged, #2243; UAC-r2 told the SHA). 018b lives on branch **`task/fm-018b1`** (worktree `C:\code_files\spaarke\.claude\worktrees\agent-a550606fde68f707f`), tip cf49b648e2: inventory a931124bb6 + G1–G7 answers + G4 UAC-r2 conditions + 018b-1s (3a97cce150) + 018b-1b (84d2add15b) + master |
-| **Running** | Combined verify of `task/fm-018b1` (`scratchpad/v018b1m/`) |
-| **Next Action** | Verify green → push → launch **018b-1c, the swap** (fresh opus implementer, branch from the `task/fm-018b1` tip): adapter, refusal map + table test (G2 and G5 mappings), single membership publish, ctor removal, re-pointed fixtures, G1 warning via `WrittenColumns`, G4 UAC-r2 conditions 1–3, G6/G7 rewrites, mutants. Then 018b-2, 018b-3 → one Opus review → UAC-r2 condition (b) → merge into the work branch → PR |
-| **018 progress** | 018a ✅ master 36403e1f4b. 018b: 1a inventory ✅; G1–G7 decided (`decisions.md` 2026-10-22); G4 option (a) accepted by UAC-r2 with 3 conditions; 1s service members ✅; 1b fixture ✅; **1c swap next**; then 018b-2 (Assigned To refusal code via `RefusedColumn`, dropped default surfaced, secure-matter Project, no-token/empty-flag tests) and 018b-3 (`ResolveDefaultAssigneeAsync` move, owner-guard and census cleanup, isolated ordering, #2124, optional #2238, notes) |
+| **HEAD** | work branch = master 36403e1f4b + checkpoint docs. 018b lives on **`task/fm-018b1`** (worktree `C:\code_files\spaarke\.claude\worktrees\agent-a550606fde68f707f`), tip **be6628b378**: inventory, G1–G7 + G4 decisions, 1s service members, 1b fixture double, 1c swap + re-pointed suites + new tests, 018b-2 (secure-matter project, flag, #2238), K2 (mapping drops app-only-refused targets; owner/creator sets from #2249), review fix round 1, master 1283c41817 |
+| **Running** | (1) Full verify of be6628b378 (`scratchpad/v018b-fix1/`). (2) Scoped Sonnet re-check of fix round 1 (ebb6688ee0..a94f1929d9 + da8ee69e72) |
+| **Next Action** | Both clean → notes for fix round 1 + K2 + 018b-2 → ping UAC-r2 for the condition (b) review (G4 conditions, K2, the `sprk_accesspermission` create exemption + its Repair test, no `TODO(#2249)`) → on ACCEPT: merge `task/fm-018b1` into the work branch, publish delta + CVE, PR body (cite decisions.md 2026-10-22 entries, ADR-008 path A, release notes) → merge on Router + Client lint green → close #1614/#1617 citing the merge SHA (POML: on merge of the Office move) → tell UAC-r2 the SHA (018b is LIVE: R3 deploy candidate) → 018c |
+| **018 progress** | 018a ✅ master. 018b: all passes done; Opus review → 4 findings (F2-1 provisioning pass-through, F3-2 map coverage, F4-3 assignee shape, F2-4 "from chat") fixed in a94f1929d9. #2124: create path fixed; Repair half is a 052 criterion (comment on #2124). Release notes: Office warning/refusal texts follow the service; Project-under-Matter owner = the matter BU team (Secure team under a secure matter); fill-only mapping; Default rules not applied when the source read faults |
 | **CI note** | The Tier 1 `Arch Tests (full suite)` job also hits its 5-min timeout (#2009; master 5 of the last 8 runs). Re-run the failed jobs; it is not a test failure. Owner decision on raising it, as with #2224 |
 | **Cleanup left for the owner** | Empty, unregistered folders (Remove-WorktreeSafe partial delete, "Permission denied"): `C:\code_files\spaarke\.claude\worktrees\agent-a10e5fe383a4dfcd2`, `...\agent-a80d401ebbcfb9d3e` |
 
