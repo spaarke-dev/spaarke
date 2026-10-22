@@ -26,7 +26,7 @@
   **Owner (UAC round 122): "the access should match the 'parent'".** A task-130 own-Restricted .eml that is later linked to exactly one communication (by the 190 sweep or CrossPathLink) follows that communication. A Restricted set by hand still stays (round 87). UAC builds it as a task-190 follow-up and sends us the design before touching CrossPathLink.
 
   **UAC design** (`projects/unified-access-control-r2/notes/task-190-round122-linked-eml-access.md`, `6c980f0da3`): an `OwnProvisional` marker in the AccessInheritance JSON, set only through `AccessInheritance.OwnNarrowingUntilEmailIdentified` in `ApplyEmailCommunicationOutcome`, and released in `OwnPermissionOf` by the D7 walk.
-  - **We reviewed it 2026-10-22: no objection.** UAC builds all of it in one PR (including our one line); we review before merge.
+  - **We reviewed it 2026-10-22: no objection.** UAC builds all of it in one PR (including our one line); we review before merge. **UAC accepted all five points** (no record version bump: an older BFF ignores the field and keeps own = Restricted). Waiting on UAC's draft PR number. Review it against the five points and our I-19 guards.
   - Our five points:
     1. The release needs the link field security (`Set-DocumentNarrowingFieldSecurity.ps1`) applied first, or a stated window.
     2. Single-attachment saves are never released: a known limit.
