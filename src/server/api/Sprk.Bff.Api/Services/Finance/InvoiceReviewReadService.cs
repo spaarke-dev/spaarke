@@ -355,7 +355,7 @@ public sealed class InvoiceReviewReadService
     private static readonly string[] SubmissionColumns =
     [
         InvoiceSubmissionPersister.SubmissionStatus, InvoiceSubmissionPersister.SubmissionReasonCode,
-        InvoiceSubmissionPersister.SubmissionFindingsJson, "sprk_trackingnumber", "createdon",
+        InvoiceSubmissionPersister.SubmissionFindingsJson, "sprk_trackingnumber", "createdon", TrackingNumberAllocator.FirmColumn,
     ];
 
     private static readonly string[] DecisionRecordColumns =
@@ -424,7 +424,7 @@ public sealed class InvoiceReviewReadService
 
         var parsed = submission?.Findings;
         var withheld = await DuplicateGroupsWithheldAsync(
-            parsed, invoice.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.InvoiceVendorOrg)?.Id, ct).ConfigureAwait(false);
+            parsed, submission?.VendorOrg, ct).ConfigureAwait(false);
         var bySequence = lineRows.ToDictionary(l => l.Id, l => l.GetAttributeValue<int?>(InvoiceSubmissionPersister.LineSequence) ?? 0);
         var lines = new List<ReviewLineDto>(lineRows.Count);
         foreach (var row in lineRows.OrderBy(l => bySequence[l.Id]).ThenBy(l => l.Id))
@@ -483,7 +483,7 @@ public sealed class InvoiceReviewReadService
         return query;
     }
 
-    private sealed record SubmissionRead(ReviewSubmissionDto Dto, bool Held, ParsedFindings? Findings);
+    private sealed record SubmissionRead(ReviewSubmissionDto Dto, bool Held, ParsedFindings? Findings, Guid? VendorOrg);
 
     private async Task<SubmissionRead?> ReadSubmissionAsync(Guid invoiceId, CancellationToken ct)
     {
@@ -509,7 +509,8 @@ public sealed class InvoiceReviewReadService
         return new SubmissionRead(
             new ReviewSubmissionDto(row.Id, row.GetAttributeValue<string>("sprk_trackingnumber"), parsed?.Kind, parsed?.ReasonCode ?? reason, parsed?.Decision, parsed?.Pipeline ?? []),
             held,
-            parsed);
+            parsed,
+            row.GetAttributeValue<EntityReference>(TrackingNumberAllocator.FirmColumn)?.Id);
     }
 
     private async Task<IReadOnlyList<ReviewDecisionRecordDto>> ReadHistoryAsync(Guid invoiceId, IReadOnlyList<Guid> lineIds, CancellationToken ct)
@@ -747,7 +748,7 @@ public sealed class InvoiceReviewReadService
     /// <summary>
     /// D-176: the groups holding a Duplicate whose earlier invoice the caller may not see. The rule, the references, the group key and the
     /// fail-closed wrap are <see cref="DuplicateDetailGate"/>'s, shared with the blocked-submission view so the two routes cannot diverge;
-    /// a number-only prior is resolved within the CURRENT invoice's vendor org.
+    /// a number-only prior is resolved within the SUBMISSION's <c>sprk_vendororg</c> (the firm the priors were read from, as the blocked view does), not the invoice's, which a writer can change.
     /// </summary>
     private Task<IReadOnlySet<FindingGroup>> DuplicateGroupsWithheldAsync(ParsedFindings? parsed, Guid? vendorOrg, CancellationToken ct) =>
         DuplicateDetailGate.WithheldGroupsAsync(

@@ -102,12 +102,24 @@ public sealed class InvoiceReviewReadServiceTests
                     {
                         "sprk_invoice" => new EntityCollection(Invoice is null ? [] : [Invoice]),
                         "sprk_billingevent" => new EntityCollection(Lines.ToList()),
-                        "sprk_invoicesubmission" => new EntityCollection(Submission is null ? [] : [Submission]),
+                        "sprk_invoicesubmission" => new EntityCollection(Submission is null ? [] : [Requested(Submission, query.ColumnSet)]),
                         "sprk_decisionrecord" => new EntityCollection(History.ToList()),
                         "sprk_timekeeper" => new EntityCollection(Roster.ToList()),
                         _ => throw new InvalidOperationException($"Unexpected read of {query.EntityName}"),
                     };
                 });
+        }
+
+        /// <summary>The row as Dataverse returns it: only the requested columns, so a column the service forgot to ask for is absent (119 round 4).</summary>
+        private static Entity Requested(Entity row, ColumnSet columns)
+        {
+            var projected = new Entity(row.LogicalName, row.Id);
+            foreach (var column in columns.Columns.Where(row.Contains))
+            {
+                projected[column] = row[column];
+            }
+
+            return projected;
         }
 
         public int Reads(string entity) => Queries.Count(q => q.EntityName == entity);
@@ -277,6 +289,8 @@ public sealed class InvoiceReviewReadServiceTests
         ["sprk_outcomereasoncode"] = blocked ? SubmissionReasonCodes.Blocked : null,
         ["sprk_findingsjson"] = findings,
         ["sprk_trackingnumber"] = "TRK-1",
+        // The firm the submission's priors were read from; the same org as the invoice's unless a test changes the invoice's (119 round 4).
+        ["sprk_vendororg"] = new EntityReference("sprk_organization", FirmId),
         ["createdon"] = DateTime.UtcNow,
     };
 
@@ -649,7 +663,7 @@ public sealed class InvoiceReviewReadServiceTests
         if (!byId)
         {
             Uri.UnescapeDataString(w.CallerPaths.Single(p => p.StartsWith("sprk_invoicesubmissions?", StringComparison.Ordinal)))
-                .Should().Contain(FirmId.ToString("D"), "the number is resolved within the current invoice's vendor org");
+                .Should().Contain(FirmId.ToString("D"), "the number is resolved within the submission's vendor org");
         }
 
         w.Reads("sprk_invoice").Should().Be(1, "no app-only read of the earlier invoice: only the current invoice is read app-only");
@@ -670,6 +684,38 @@ public sealed class InvoiceReviewReadServiceTests
         duplicate.Message.Should().Be(BillingRuleCatalogue.WithheldDuplicateTemplate, "a read-time withheld finding reads like a write-time one (K2)");
         OthersUntouched(review);
         ShouldNotLeak(review, EarlierNumber, EarlierInvoice);
+    }
+
+    // ── 119 round 4 (uac-r2): a number-only prior resolves within the SUBMISSION's vendor org, as /blocked does ──
+
+    private static readonly Guid ChangedOrg = Guid.Parse("10000000-0000-4000-8000-0000000000f2");
+
+    [Theory(DisplayName = "119 r4: a legacy number-only Duplicate resolves in the submission's vendor org, not the invoice's (a writer can change the invoice's)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NumberOnlyPrior_ResolvesInTheSubmissionsOrg(bool readableInSubmissionsOrg)
+    {
+        var w = DuplicateWorld(EarlierNumber, null);
+        // The invoice was moved to another firm after the submission was read; the earlier invoice with that number is readable only there.
+        w.Invoice!["sprk_vendororg"] = new EntityReference("sprk_organization", ChangedOrg) { Name = "Other LLP" };
+        w.ReadableInvoices.Add(EarlierInvoice);
+        w.CallerSubmissions.Add((readableInSubmissionsOrg ? FirmId : ChangedOrg, EarlierNumber, EarlierInvoice));
+
+        var review = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!;
+
+        var duplicate = review.Lines.Single().Findings.Single(f => f.PolicyCode == "BILL-DUP");
+        if (readableInSubmissionsOrg)
+        {
+            ShouldBeShown(duplicate, DuplicateSentence);
+        }
+        else
+        {
+            ShouldBeWithheld(duplicate);
+            ShouldNotLeak(review, EarlierNumber, EarlierInvoice);
+        }
+
+        var lookup = Uri.UnescapeDataString(w.CallerPaths.Single(p => p.StartsWith("sprk_invoicesubmissions?", StringComparison.Ordinal)));
+        lookup.Should().Contain(FirmId.ToString("D")).And.NotContain(ChangedOrg.ToString("D"));
     }
 
     [Fact(DisplayName = "119: the whole (policy, subject) group is scrubbed and its sentence replaced even when the Duplicate is not the primary reason")]
