@@ -18,6 +18,7 @@
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Access;
@@ -401,9 +402,15 @@ internal sealed class ChildAccessPermissionReconciler
                 }
             }
 
+            // Owner round 122: a provisional own narrowing (the save-time Restricted of an email that could not be identified)
+            // is released once the communication walk finds a link. The walk is made only for such a row; the rule is
+            // AccessInheritance.OwnPermissionOf's.
+            var communicationLinked = !raiseOnly && parents.Count > 0
+                && AccessInheritance.Parse(recordText).Value is { OwnProvisional: true }
+                && await CommunicationLinkedAsync(table, id, row, ct).ConfigureAwait(false);
             var decision = raiseOnly
                 ? InheritedAccessPermission.DecideDocumentRaiseOnly(stored, parents, answer?.Value, undecided: null)
-                : InheritedAccessPermission.DecideDocument(stored, recordText, parents, answer?.Value);
+                : InheritedAccessPermission.DecideDocument(stored, recordText, parents, answer?.Value, communicationLinked);
             if (decision.Undetermined is { } why)
             {
                 undetermined++;
@@ -482,6 +489,12 @@ internal sealed class ChildAccessPermissionReconciler
                     recordsWritten++;
                 if (decision.RaiseOnly)
                     raisedOnly++;
+                if (communicationLinked && decision.Own is null)
+                {
+                    _logger.LogInformation(
+                        "[CHILD-ACCESS-PERMISSION] {Table} {Id}: its save-time Restricted (its email could not be identified) " +
+                        "was released: it is linked to a communication, so it follows it (owner round 122).", table, id);
+                }
                 _logger.LogInformation(
                     "[CHILD-ACCESS-PERMISSION] set: {Table} {Id} {From} -> {To} (inherited {Inherited} from {Tops}; own {Own}; " +
                     "record {Record}).", table, id, from, decision.Target, inheritedText, tops, own, recordAction);
@@ -521,6 +534,42 @@ internal sealed class ChildAccessPermissionReconciler
             ChangedConcurrently = changedConcurrently,
             RaisedOnly = raisedOnly,
         };
+    }
+
+    /// <summary>
+    /// Owner round 122: whether the document <paramref name="row"/> is linked to a communication, by THE communication walk of
+    /// the external document narrowing (<see cref="ExternalDocumentNarrowing.FindCommunicationLinksAsync"/>):
+    /// its own <c>sprk_relatedcommunication</c>, or the first one up its <c>sprk_parentdocument</c> chain within 3 hops. Its
+    /// parents come from this run's walk, which has usually read them already for the floor. Fail closed: a chain that
+    /// cannot be known, or a read that faults, answers false (the narrowing stays), with a warning.
+    /// </summary>
+    private async Task<bool> CommunicationLinkedAsync(string table, Guid id, Entity row, CancellationToken ct)
+    {
+        try
+        {
+            var subject = ExternalDocumentNarrowing.FromEntity(row);
+            var found = await ExternalDocumentNarrowing.FindCommunicationLinksAsync(
+                [subject],
+                async (ids, c) => (await _walk.RowsAsync(table, ids, c).ConfigureAwait(false))
+                    .Select(ExternalDocumentNarrowing.FromEntity).ToList(),
+                ct).ConfigureAwait(false);
+            if (found.TryGetValue(subject, out var link) && link.Unknowable is { } why)
+            {
+                _logger.LogWarning(
+                    "[CHILD-ACCESS-PERMISSION] {Table} {Id}: whether it is linked to a communication cannot be known ({Reason}); " +
+                    "its save-time Restricted stays.", table, id,
+                    DocumentNarrowingResult.CodeOf(why));
+            }
+
+            return found.TryGetValue(subject, out var result) && result.IsLinked;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex,
+                "[CHILD-ACCESS-PERMISSION] {Table} {Id}: its communication link could not be read; its save-time Restricted " +
+                "stays.", table, id);
+            return false;
+        }
     }
 
     /// <summary>The position a sweep starts from: before the first row of the first table.</summary>

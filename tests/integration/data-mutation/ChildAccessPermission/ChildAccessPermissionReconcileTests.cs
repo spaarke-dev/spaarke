@@ -31,7 +31,7 @@ namespace Sprk.Bff.Api.Tests.DataMutation.ChildAccessPermission;
 /// nothing (AC 3); a concurrent narrowing is never overwritten. The To Do, Event and Communication tests above are
 /// unchanged (AC 4).</para>
 /// </remarks>
-public class ChildAccessPermissionReconcileTests
+public partial class ChildAccessPermissionReconcileTests
 {
     private const int Standard = InheritedAccessPermission.Standard;
     private const int Limited = InheritedAccessPermission.Limited;

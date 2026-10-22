@@ -258,10 +258,25 @@ public static class AccessFollowsParent
 /// </list>
 /// <para><b>No record (existing rows): the backfill rule</b> — a value equal to the current floor is inherited; a value
 /// stricter than it is set on the record. Applied the first time the job (or an inline follow) sees the row, and written.</para>
+/// <para><b>Provisional (owner round 122).</b> <see cref="OwnProvisional"/> marks the one own narrowing that is not a
+/// person's: the Restricted an email-derived document is saved with when its email cannot be identified
+/// (<see cref="OwnNarrowingUntilEmailIdentified"/>). Once the document is linked to a communication, that narrowing counts
+/// as no own value, so the document follows its communication (<see cref="OwnPermissionOf(int, int?, AccessInheritance?, int, bool, out bool)"/>).
+/// The field is not part of the record's version: a record without it is not provisional, and a BFF that predates it
+/// ignores it and keeps the Restricted.</para>
 /// </remarks>
 internal sealed record AccessInheritance(
     IReadOnlyList<string> Parents, bool FloorSecure, int FloorPermission, bool OwnSecure, int? OwnPermission)
 {
+    /// <summary>
+    /// Owner round 122: the own narrowing is the save-time Restricted of an email-derived document whose email could not be
+    /// identified. It is released (counts as no own value) once the document is linked to a communication, and dropped by
+    /// any other change of the own value. Set ONLY by <see cref="OwnNarrowingUntilEmailIdentified"/> and read back by
+    /// <see cref="Parse"/>: the setter is private, and <c>AccessInheritanceProvisionalMarkerGuardTests</c> refuses any other
+    /// assignment. A later record keeps it only through <see cref="KeepingProvisionalWith"/>.
+    /// </summary>
+    internal bool OwnProvisional { get; private init; }
+
     /// <summary>The column (Multiple lines of text) on <c>sprk_workassignment</c> and <c>sprk_project</c> (field-secured), and on
     /// <c>sprk_document</c> (task 189; not secured, see the remarks).</summary>
     internal const string Column = "sprk_accessinheritance";
@@ -286,15 +301,27 @@ internal sealed record AccessInheritance(
         DefaultIgnoreCondition = JsonIgnoreCondition.Never,
     };
 
+    /// <summary>
+    /// The stored shape. Owner round 122: <c>ownProvisional</c> is written only when true, so every other record's text is
+    /// unchanged; a record without it reads as not provisional. The version stays 1 (why: <see cref="Parse"/>).
+    /// </summary>
     private sealed record Stored(
-        int V, IReadOnlyList<string>? Parents, bool FloorSecure, int FloorPermission, bool OwnSecure, int? OwnPermission);
+        int V, IReadOnlyList<string>? Parents, bool FloorSecure, int FloorPermission, bool OwnSecure, int? OwnPermission,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool OwnProvisional);
 
     /// <summary>The column's text.</summary>
     internal string Serialize() =>
-        JsonSerializer.Serialize(new Stored(Version, Parents, FloorSecure, FloorPermission, OwnSecure, OwnPermission), Json);
+        JsonSerializer.Serialize(
+            new Stored(Version, Parents, FloorSecure, FloorPermission, OwnSecure, OwnPermission, OwnProvisional), Json);
 
     /// <summary>The record in <paramref name="text"/>: <c>(null, false)</c> when there is none yet, <c>(null, true)</c> when it
     /// cannot be read (never guessed at — the caller loosens nothing).</summary>
+    /// <remarks>
+    /// Owner round 122: the provisional marker does not change the version. A BFF that predates it parses a provisional
+    /// record as an ordinary own Restricted (System.Text.Json skips an unknown property), which keeps the document
+    /// Restricted: it fails closed. A record of any other version, or one whose marker is not a JSON boolean, is unreadable
+    /// here, so its document is only ever raised, never lowered (<see cref="InheritedAccessPermission.DecideDocumentRaiseOnly"/>).
+    /// </remarks>
     internal static (AccessInheritance? Value, bool Unreadable) Parse(string? text)
     {
         if (string.IsNullOrWhiteSpace(text))
@@ -307,7 +334,7 @@ internal sealed record AccessInheritance(
                 || (stored.OwnPermission is { } own && SecureRootInheritance.RankOf(own) < 0))
                 return (null, true);
             return (new AccessInheritance(stored.Parents, stored.FloorSecure, stored.FloorPermission, stored.OwnSecure,
-                stored.OwnPermission), false);
+                stored.OwnPermission) { OwnProvisional = stored.OwnProvisional }, false);
         }
         catch (JsonException)
         {
@@ -315,10 +342,10 @@ internal sealed record AccessInheritance(
         }
     }
 
-    /// <summary>Same facts (the parent list compared as a set).</summary>
+    /// <summary>Same facts (the parent list compared as a set), including the provisional marker (owner round 122).</summary>
     internal bool SameAs(AccessInheritance? other) =>
         other is not null && FloorSecure == other.FloorSecure && FloorPermission == other.FloorPermission
-        && OwnSecure == other.OwnSecure && OwnPermission == other.OwnPermission
+        && OwnSecure == other.OwnSecure && OwnPermission == other.OwnPermission && OwnProvisional == other.OwnProvisional
         && new HashSet<string>(Parents, StringComparer.OrdinalIgnoreCase).SetEquals(other.Parents);
 
     /// <summary>
@@ -342,9 +369,36 @@ internal sealed record AccessInheritance(
     /// <para><b>Without one</b> (existing rows), the backfill rule applies: a value stricter than the current floor is own;
     /// one equal to it is inherited. A re-file is the caller's to handle (task 175's rule; documents follow their new
     /// parents).</para>
+    /// <para>This overload never releases a provisional narrowing (owner round 122): work assignments and projects never
+    /// carry one.</para>
     /// </remarks>
-    internal static int? OwnPermissionOf(int storedRank, int? storedPermission, AccessInheritance? record, int floorRank)
+    internal static int? OwnPermissionOf(int storedRank, int? storedPermission, AccessInheritance? record, int floorRank) =>
+        OwnPermissionOf(storedRank, storedPermission, record, floorRank, communicationLinked: false, out _);
+
+    /// <summary>
+    /// <see cref="OwnPermissionOf(int, int?, AccessInheritance?, int)"/> with owner round 122's release: THE one place a
+    /// provisional own narrowing (<see cref="OwnProvisional"/>) is released.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The release.</b> While the stored value is unchanged since the record was written, a provisional own
+    /// narrowing counts as NO own value when <paramref name="communicationLinked"/> is true, so the value follows the live
+    /// floor (which, once the document is linked, is its communication's tops). Otherwise it stands and stays provisional
+    /// (<paramref name="stillProvisional"/>).</para>
+    /// <para><b>Hand edits keep round 87.</b> A stored value that differs is set outside the writers and is classified as
+    /// above: whatever it becomes, it is never provisional again, so a Restricted a user sets stays Restricted after the
+    /// document is linked.</para>
+    /// </remarks>
+    /// <param name="communicationLinked">The communication walk found a link: the document's own
+    /// <c>sprk_relatedcommunication</c>, or the first one up its <c>sprk_parentdocument</c> chain within
+    /// <c>ExternalDocumentNarrowing.MaxHops</c> (<c>ExternalDocumentNarrowing.FindCommunicationLinksAsync</c>). False for a
+    /// cycle, a longer chain, an unreadable step, or when the walk was not made.</param>
+    /// <param name="stillProvisional">True when the returned own value is the record's provisional narrowing, unreleased
+    /// and untouched: the next record keeps the marker (<see cref="KeepingProvisionalWith"/>).</param>
+    internal static int? OwnPermissionOf(
+        int storedRank, int? storedPermission, AccessInheritance? record, int floorRank, bool communicationLinked,
+        out bool stillProvisional)
     {
+        stillProvisional = false;
         if (record is null)
             return storedRank > floorRank ? storedPermission : null;
 
@@ -352,7 +406,17 @@ internal sealed record AccessInheritance(
         var ownRank = SecureRootInheritance.RankOf(own);
         var lastFloorRank = SecureRootInheritance.RankOf(record.FloorPermission);
         if (storedRank == Math.Max(ownRank, lastFloorRank))
+        {
+            if (record.OwnProvisional)
+            {
+                if (communicationLinked)
+                    return null; // round 122: linked, so the save-time Restricted gives way to the communication's tops
+                stillProvisional = true;
+            }
+
             return own;
+        }
+
         if (storedRank > Math.Min(lastFloorRank, floorRank))
             return storedPermission;
         return ownRank <= storedRank ? own : null;
@@ -369,6 +433,39 @@ internal sealed record AccessInheritance(
         SecureRootInheritance.RankOf(permission) > 0
             ? new AccessInheritance(Array.Empty<string>(), false, InheritedAccessPermission.Standard, false, permission)
             : throw new ArgumentOutOfRangeException(nameof(permission), permission, "An own narrowing is Limited or Restricted.");
+
+    /// <summary>
+    /// Owner round 122: <see cref="OwnNarrowing"/> marked <see cref="OwnProvisional"/>: the Restricted an email-derived
+    /// document is created with when its email cannot be identified. It holds until the document is linked to a
+    /// communication; then the reconciler releases it and the document follows the communication. The ONE setter of the
+    /// marker, called only by <c>OfficeDocumentPersistence.ApplyEmailCommunicationOutcome</c>
+    /// (<c>AccessInheritanceProvisionalMarkerGuardTests</c>).
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="permission"/> is not Restricted.</exception>
+    internal static AccessInheritance OwnNarrowingUntilEmailIdentified(int permission)
+    {
+        if (permission != InheritedAccessPermission.Restricted)
+            throw new ArgumentOutOfRangeException(nameof(permission), permission, "The save-time narrowing is Restricted.");
+        return new AccessInheritance(Array.Empty<string>(), false, InheritedAccessPermission.Standard, false, permission)
+        {
+            OwnProvisional = true,
+        };
+    }
+
+    /// <summary>
+    /// Owner round 122: <paramref name="facts"/> with this record's <see cref="OwnProvisional"/> kept. The one way a later
+    /// record carries the marker: the document rule calls it only while <see cref="OwnPermissionOf(int, int?, AccessInheritance?, int, bool, out bool)"/>
+    /// says the provisional narrowing still stands untouched.
+    /// </summary>
+    internal AccessInheritance KeepingProvisionalWith(AccessInheritance facts)
+    {
+        ArgumentNullException.ThrowIfNull(facts);
+        return this with
+        {
+            Parents = facts.Parents, FloorSecure = facts.FloorSecure, FloorPermission = facts.FloorPermission,
+            OwnSecure = facts.OwnSecure, OwnPermission = facts.OwnPermission,
+        };
+    }
 }
 
 /// <summary>

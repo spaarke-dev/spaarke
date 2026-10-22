@@ -794,10 +794,170 @@ public sealed class ExternalDocumentNarrowingTests
         odd.Parent.Should().Be(Guid.Empty, "an attribute the SDK omitted is not set");
     }
 
+    // ── Owner round 122: the communication walk alone (it releases a provisional own narrowing) ─────────────
+
+    [Fact]
+    public async Task Round122Walk_TheDocumentsOwnLink_IsFound_WithoutARead()
+    {
+        var communication = Guid.NewGuid();
+        var doc = Row(Guid.NewGuid(), permission: Restricted, communication: communication, parent: Guid.NewGuid());
+
+        var link = await FindLink(doc);
+
+        link.IsLinked.Should().BeTrue("the walk ignores the own leg: a provisional .eml is Restricted until it is released");
+        link.Communication.Should().Be(communication);
+        _world.Reads.Should().BeEmpty("the first link found ends the walk");
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task Round122Walk_TheFirstLinkUpTheParentChain_IsFound_WithinThreeHops_PastRestrictedAncestors(int hops)
+    {
+        var communication = Guid.NewGuid();
+        var above = _world.Document(permission: Restricted, communication: communication);
+        for (var i = 1; i < hops; i++)
+            above = _world.Document(permission: Restricted, parent: above);
+        var doc = Row(Guid.NewGuid(), permission: Restricted, parent: above);
+
+        var link = await FindLink(doc);
+
+        link.IsLinked.Should().BeTrue();
+        link.Communication.Should().Be(communication);
+        _world.ReadsOf("sprk_documents").Should().HaveCount(hops, "one batched read per hop level");
+        _world.ReadsOf("sprk_communications").Should().BeEmpty("the walk decides nothing about visibility");
+    }
+
+    [Fact]
+    public async Task Round122Walk_ALinkFourHopsUp_IsNotFound_ChainTooLong()
+    {
+        var p4 = _world.Document(communication: Guid.NewGuid());
+        var p3 = _world.Document(parent: p4);
+        var p2 = _world.Document(parent: p3);
+        var p1 = _world.Document(parent: p2);
+        var doc = Row(Guid.NewGuid(), parent: p1);
+
+        var link = await FindLink(doc);
+
+        link.IsLinked.Should().BeFalse();
+        link.Unknowable.Should().Be(DocumentNarrowingReason.ChainTooLong);
+        _world.ReadsOf("sprk_documents").Should().HaveCount(3, "a fourth ancestor is never read");
+    }
+
+    [Fact]
+    public async Task Round122Walk_NoLinkAnywhere_IsNotLinked_AndKnown()
+    {
+        var p2 = _world.Document();
+        var p1 = _world.Document(parent: p2);
+        var doc = Row(Guid.NewGuid(), parent: p1);
+
+        var link = await FindLink(doc);
+
+        link.Should().Be(new DocumentCommunicationLink(Guid.Empty, null));
+        link.IsLinked.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Round122Walk_ACycleBeforeAnyLink_IsUnknowable()
+    {
+        var a = Guid.NewGuid();
+        var b = _world.Document(parent: a);
+        _world.Document(id: a, parent: b);
+        var doc = Row(a, parent: b);
+
+        var link = await FindLink(doc);
+
+        link.IsLinked.Should().BeFalse();
+        link.Unknowable.Should().Be(DocumentNarrowingReason.Cycle);
+    }
+
+    [Fact]
+    public async Task Round122Walk_AParentThatDoesNotComeBack_IsUnknowable()
+    {
+        var link = await FindLink(Row(Guid.NewGuid(), parent: Guid.NewGuid()));
+
+        link.IsLinked.Should().BeFalse();
+        link.Unknowable.Should().Be(DocumentNarrowingReason.ParentNotFound);
+    }
+
+    [Fact]
+    public async Task Round122Walk_UnreadableLinks_AreUnknowable_NeverALink()
+    {
+        var badParent = ExternalDocumentNarrowing.FromWebApi(Guid.NewGuid(), new Dictionary<string, JsonElement>
+        {
+            ["_sprk_parentdocument_value"] = JsonSerializer.SerializeToElement(42),
+        });
+        var badLink = ExternalDocumentNarrowing.FromWebApi(Guid.NewGuid(), new Dictionary<string, JsonElement>
+        {
+            ["_sprk_relatedcommunication_value"] = JsonSerializer.SerializeToElement("not-a-guid"),
+        });
+        (await FindLink(badParent)).Unknowable.Should().Be(DocumentNarrowingReason.ParentUnreadable);
+        (await FindLink(badLink)).Unknowable.Should().Be(DocumentNarrowingReason.LinkUnreadable);
+    }
+
+    [Fact]
+    public async Task Round122Walk_AFailedRead_Throws()
+    {
+        _world.Fault = "sprk_documents";
+        var doc = Row(Guid.NewGuid(), parent: _world.Document(communication: Guid.NewGuid()));
+
+        var act = () => FindLink(doc);
+
+        await act.Should().ThrowAsync<InvalidOperationException>("the caller turns a failed read into 'not linked'");
+    }
+
+    [Fact]
+    public async Task Round122_D7IsUnchanged_AReleasedEmlAndItsReleasedChild_UnderAnInternalOnlyCommunication_StayHidden()
+    {
+        // After the release both hold the communication's value (here Standard): leg 1 and leg 3 no longer fire, and the
+        // communication leg still hides them from partners.
+        var internalOnly = _world.Communication(internalOnly: true, _world.Thread(Open));
+        var eml = _world.Document(permission: Standard, communication: internalOnly);
+        var releasedEml = Row(eml, permission: Standard, communication: internalOnly);
+        var releasedChild = Row(Guid.NewGuid(), permission: Standard, parent: eml);
+
+        (await FindLink(releasedChild)).Communication.Should().Be(internalOnly, "the walk that released it found this link");
+        var result = await Decide(releasedEml, releasedChild);
+
+        result.ReasonFor(releasedEml).Should().Be(DocumentNarrowingReason.CommunicationHidden);
+        result.ReasonFor(releasedChild).Should().Be(DocumentNarrowingReason.CommunicationHidden);
+    }
+
+    [Fact]
+    public void Round122_FromEntity_ReadsAnSdkRowAsFromFetchDoes_WithItsId()
+    {
+        var id = Guid.NewGuid();
+        var communication = Guid.NewGuid();
+        var row = new Entity("sprk_document", id)
+        {
+            ["sprk_accesspermission"] = new OptionSetValue(Restricted),
+            ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", communication),
+        };
+
+        ExternalDocumentNarrowing.FromEntity(row)
+            .Should().Be(new DocumentNarrowingRow(id, DocumentPermission.Restricted, communication, Guid.Empty));
+    }
+
     // ── helpers ─────────────────────────────────────────────────────────────────────────────────────────────
 
     private Task<DocumentNarrowingResult> Decide(params DocumentNarrowingRow[] rows) =>
         ExternalDocumentNarrowing.DecideAsync(rows, _world.Query, CancellationToken.None);
+
+    /// <summary>Round 122: the communication walk over this world, reading the documents by key as the narrowing does.</summary>
+    private async Task<DocumentCommunicationLink> FindLink(DocumentNarrowingRow row)
+    {
+        var found = await ExternalDocumentNarrowing.FindCommunicationLinksAsync([row], ReadDocuments, CancellationToken.None);
+        return found[row];
+    }
+
+    private async Task<IReadOnlyList<DocumentNarrowingRow>> ReadDocuments(IReadOnlyList<Guid> ids, CancellationToken ct)
+    {
+        var odata = $"$select=sprk_documentid,{string.Join(",", ExternalDocumentNarrowing.SelectColumns)}" +
+                    $"&$filter={string.Join(" or ", ids.Select(id => $"sprk_documentid eq {id:D}"))}";
+        var rows = await _world.Query("sprk_documents", odata, ct);
+        return rows.Select(r => ExternalDocumentNarrowing.FromWebApi(Guid.Parse(r["sprk_documentid"].GetString()!), r)).ToList();
+    }
 
     /// <summary>A document row as a surface reads it (with the predicate's columns).</summary>
     private static DocumentNarrowingRow Row(Guid id, int? permission = null, Guid? communication = null, Guid? parent = null) =>
