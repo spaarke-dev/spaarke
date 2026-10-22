@@ -47,7 +47,7 @@ Exit codes: 0 = done; 2 = escalation (nothing further changed; owner decision); 
 | `sprk_sourcecommunication` | `sprk_communication` | `sprk_storedfile_sourcecommunication_communication` | Restrict | NoCascade |
 | `sprk_createdbyperson` | `systemuser` | `sprk_systemuser_sprk_storedfile_createdbyperson` | RemoveLink | NoCascade |
 
-No relationship is parental. Other columns: `sprk_purpose` (F1 choice), `sprk_firmvisible` (two options, default No), `sprk_filestatus` (local choice 100000000 Not yet servable, 100000001 Servable, 100000002 Removed), `sprk_sourceattachmentidentity` (1000), `sprk_sourceversion` (BigInt), `sprk_sourcesha256` (64), `sprk_sha256` (64), `sprk_contenttype` (255), `sprk_sizebytes` (BigInt), `sprk_blobpath` (1024).
+No relationship is parental. Other columns: `sprk_purpose` (F1 choice), `sprk_firmvisible` (two options, default No), `sprk_filestatus` (local choice 100000000 Not yet servable, 100000001 Servable, 100000002 Removed), `sprk_sourceattachmentidentity` (1000), `sprk_sourceversion` (text 20; ONE canonical string form of the source row version), `sprk_sourcesha256` (64), `sprk_sha256` (64), `sprk_contenttype` (255), `sprk_sizebytes` (whole number 0 to 2147483647), `sprk_blobpath` (1024).
 
 **F3** field security, 16 columns, reusing uac-r2's profile pair (permission rows only; members are never added or removed):
 - writer "Spaarke BFF-Managed Field Writers": read 4, create 4, update 4;
@@ -142,7 +142,7 @@ Tests:
 1. **Forms and views.** The script authors no form, view or subgrid. Creating the table still makes Dataverse add its default system forms and views. The verify step lists them as the platform defaults, and their names are recorded after the live run. Owner question: whether the negative criterion "no form, view or subgrid" is met by "none authored", or whether 079 should remove the defaults.
 2. **Profiles.** uac-r2's existing profile pair is reused. The considered `-CreateProfiles` option was dropped: the script never creates a profile or changes its members, and it stops (exit 2) when the preconditions do not hold. uac-r2 still has to agree to this reuse and review the ParentLineage.cs diff (step 6).
 3. **Copied helpers.** The global-choice, audit and field-security helpers are copied from 080's script, as the POML prescribes (step 2), rather than moved into `EbillingSchema.psm1`. Recommended follow-up: consolidate them into the module once 080 and 088 have both run.
-4. **Securability pre-pass.** Before the marker is created, the script reads `CanBeSecuredForRead/Create/Update` on the 15 `sprk_storedfile` columns. If any is false, it stops (exit 2) with the marker not created and nothing secured. The marker gets its own check, then is secured at once. Reason: on dev, 50 of 53 BigInt columns are unsecurable (platform image timestamps). The 3 securable ones (for example `flowlog.duration`) show that a BigInt can be secured, but a new custom BigInt (`sprk_sourceversion`, `sprk_sizebytes`) has not been tried live.
+4. **Securability pre-pass.** Before the marker is created, the script reads `CanBeSecuredForRead/Create/Update` on the 15 `sprk_storedfile` columns. If any is false, it stops (exit 2) with the marker not created and nothing secured. The marker gets its own check, then is secured at once. Reason: on dev, 50 of 53 BigInt columns are unsecurable (platform image timestamps). The 3 securable ones (for example `flowlog.duration`) show that a BigInt can be secured, but a new custom BigInt had not been tried live. Run 1 then showed the pre-pass is not enough for a BigInt (section 8); both BigInt columns were retyped and the early "BigInt first" step was removed. The pre-pass over all 15 columns stays.
 
 ## 6. Review (task-execute step 9.5 and the adversarial pass)
 
@@ -158,7 +158,7 @@ Adversarial reviewer (opus, one pass over `9985d9f07e..620fbb412f`, 2026-10-22).
 | 6 | K2 | A failed first run never publishes, and the re-run skips everything (inherited from 080) | **Fixed**: `Publish-AfterStop` in both catch blocks (publish failure prints a manual-publish hint without masking the stop). 080 has the same pattern: reported, not changed here |
 | 7 | K4 | Pre-flight checked only the type of an existing item | **Fixed**: existing `sprk_firmvisible` / marker must default No; existing `sprk_filestatus` must be the local choice with the planned values |
 | 8 | K4 | Verify compared `sprk_filestatus` labels, not values | **Fixed**: verify compares Value=Label pairs and the local binding |
-| 9 | K4 | Securing a BigInt has not run live | Known limit; mitigated by the pre-pass (deviation 5.4). Watch the live run |
+| 9 | K4 | Securing a BigInt has not run live | Known limit; mitigated by the pre-pass (deviation 5.4). **Occurred in run 1; resolved by the retype, section 8** |
 | 10 | K1 | Pre-existing: `DocumentProfileOutputMapper.cs:50-106` writes AI output to `sprk_document` app-only without `RefuseAppOnlyWrite` | Not caused by 088. Same exposure as `sprk_accesspermission`, already accepted in the ArchTest remarks. Needs the output schema to name the column, and a raw string fails the Boolean type check. **Reported to the operator** for a decision |
 | 11 | K3 | Pester covers the plan, the F5 decision and text scans; not the pre-flight, grants, skip paths or publish | Known limit; the live second run (step 8) proves idempotency |
 
@@ -184,6 +184,36 @@ The pre-flight used to require the reader field-security profile on ALL default 
 
 1. Forms and views: is "none authored, platform defaults only" acceptable (5.1)?
 2. uac-r2: agreement on reusing its profile pair, and its review of the ParentLineage.cs diff (step 6).
-3. Live run: watch the BigInt securability check. If it stops with exit 2, the Stored File columns exist unsecured and nothing writes them before task 090; the owner decides (for example a Whole-number or String column instead).
+3. ~~Live run: watch the BigInt securability check.~~ Answered by run 1 (section 8): the owner chose a String and a whole number.
 4. `DocumentProfileOutputMapper` app-only writer (K10): whether to add `RefuseAppOnlyWrite` there (affects the access columns too).
 5. Consolidating the helpers copied from 080 into `EbillingSchema.psm1`.
+
+## 8. Run 1 and the retype (2026-10-22)
+
+**The failure.** Run 1 of `scripts/ebilling/Deploy-EbillingStoredFileSchema.ps1` on dev stopped with exit 1 on the first BigInt column. Field security on `sprk_storedfile.sprk_sourceversion` (BigInt) was accepted (`IsSecured` PUT succeeded), but the field-permission service refused the permission row: `POST fieldpermissions` returned HTTP 400 `0x8004f508` "FieldPermissionService ValidatePermission failed on Create for attribute sprk_sourceversion ... because sprk_sourceversion is NOT secured for entity fieldpermission", on all 12 retries, even though `CanBeSecuredForRead/Create/Update` read true on the column. The script's revert path took the column back to not secured, so no reader was left masked.
+
+**Lesson.** `CanBeSecuredFor*` is not enough for a BigInt column: the flags read true, and the securability pre-pass (deviation 5.4) passed, yet the field-permission service would not accept a row for it. Only the permission-row POST proves a column type can carry field security. For a new column type on a secured table, try the type live on a throwaway column (secure it and grant) before it goes in a plan, or use a type already secured in this project (String, Integer, Boolean, Picklist, Lookup).
+
+**Owner decision, 2026-10-22.** Retype both BigInt columns: `sprk_sourceversion` becomes a String, max length 20 (Text format); `sprk_sizebytes` becomes a whole number (Integer), 0 to 2147483647. SchemaNames stay `sprk_SourceVersion` and `sprk_SizeBytes`. The same type is already used for `sprk_invoicecorrection.sprk_sourceversion` (text 20).
+
+**The delete (the main session's record, verbatim).** Before the delete: 0 rows, 0 fieldpermission rows on the two columns, both IsSecured=false. DELETE of both attributes succeeded (the platform refuses a delete that has dependencies). Published `sprk_storedfile`. 0 remaining. `RetrieveDependenciesForDelete` was not run separately before the delete.
+
+**State of dev after the delete and before run 2.**
+- Created: the option set `sprk_storedfilepurpose`; the table `sprk_storedfile` with every column except the two, and all 6 lookups; the marker `sprk_document.sprk_restrictedbysubmission` (secured, writer and reader rows); invoice statuscode Superseded 659490005.
+- Secured and granted (9 `sprk_storedfile` columns, each with Readers read-only, Writers read/create/update and the platform's own System Administrator row): `sprk_procedureversion`, `sprk_invoice`, `sprk_billingexport`, `sprk_purpose`, `sprk_firmvisible`, `sprk_filestatus`, `sprk_sourcedocument`, `sprk_sourcecommunication`, `sprk_sourceattachmentidentity`.
+- Not secured: `sprk_sourcesha256`, `sprk_sha256`, `sprk_contenttype`, `sprk_blobpath`. `sprk_sourceversion` and `sprk_sizebytes` do not exist.
+
+**Script changes.**
+- `sprk_sourceversion` is `New-StringDef ... 20`; `sprk_sizebytes` is `New-WholeNumberDef ... 0 2147483647` (copied from `Deploy-EbillingProcedureSchema.ps1`). `New-BigIntDef`, `$BigIntColumns` and the "BigInt first" creation and securable step are gone; both columns are created in the normal column order.
+- Unchanged: the securability pre-pass over all 15 `sprk_storedfile` columns before the marker is created; the pre-flight existing-column type check. A planned column that already exists with another type (for example a BigInt still resolving because the delete is still processing) stops the run with exit 2 before any write: "sprk_storedfile.sprk_sizebytes exists as BigInt, expected Integer".
+- The verify now also reads each Integer column back (range 0 to 2147483647); String length 20 is read by the existing length check.
+
+**Run 2 plan (the re-run is idempotent against the partial state).** Everything present is skipped (option set, table, name length / required / audit, 6 lookups, other columns, marker with its rows, Superseded, the 9 secured columns with their rows). Created: `sprk_sourceversion` (String) and `sprk_sizebytes` (Integer). Secured and granted: exactly 6 columns, `sprk_sourceversion`, `sprk_sourcesha256`, `sprk_sha256`, `sprk_contenttype`, `sprk_sizebytes`, `sprk_blobpath` (11 permission rows: writer on all six, reader on five; `sprk_blobpath` has the writer row only). End state: 15 secured `sprk_storedfile` columns (every F2 column except `sprk_name` and `sprk_createdbyperson`) plus the marker. The System Administrator row the platform adds to a secured column is expected; `Test-OtherProfiles` already exempts it.
+
+`-WhatIf` against dev (read-only GETs, exit 0): created 13 (the 2 columns and 11 permission rows), changed 6 (the 6 `secure` items), skipped 31. Output: `C:/Users/RALPHS~1/AppData/Local/Temp/claude/c--code-files-spaarke-wt-ebilling-r1/e7feb8db-bd91-431a-995c-acf68e28cb28/scratchpad/088-whatif2.txt`.
+
+**Tests.** `tests/scripts/Deploy-EbillingStoredFileSchema.Tests.ps1` (74 pass). The partial state is proved by running the script in a child process against a fake Dataverse (`tests/scripts/fixtures/Invoke-StoredFileSchemaAgainstFake.ps1`) that answers GETs from the state above (including `sprk_filestatus` secured and the System Administrator rows) and records any non-GET: the planned actions are asserted line by line. Must-fire: an existing BigInt `sprk_sizebytes` (or `sprk_sourceversion`) gives exit 2 with no write.
+
+**Known limits.**
+- **A file larger than 2,147,483,647 bytes (2 GiB) cannot be stored.** `sprk_sizebytes` is capped there; task 090 refuses such a file (fail closed, see its constraints).
+- `RetrieveDependenciesForDelete` was not run before the delete; the platform's own refusal of a delete with dependencies was the guard.
