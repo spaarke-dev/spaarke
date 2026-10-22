@@ -30,11 +30,11 @@ public class OfficeQuickCreateRefusalMapTests
     /// <summary>One row: the service's refusal (kind, code, the WhoAmI failure, the refused column) → the Office code and status.</summary>
     /// <remarks>The kind is carried by name: the enum is internal, and a public theory row cannot expose it.</remarks>
     public sealed record Row(
-        string KindName, string Code, string? WhoAmIFailure, string? RefusedColumn, string OfficeCode, int Status)
+        string KindName, string Code, string? WhoAmIFailure, string? RefusedColumn, string OfficeCode, int Status, string? ReasonCode = null)
     {
         internal RecordCreationRefusalKind Kind => Enum.Parse<RecordCreationRefusalKind>(KindName);
 
-        public override string ToString() => $"{Kind} {Code} [{WhoAmIFailure ?? "-"}|{RefusedColumn ?? "-"}] → {OfficeCode} {Status}";
+        public override string ToString() => $"{Kind} {Code} [{WhoAmIFailure ?? "-"}|{RefusedColumn ?? "-"}] → {OfficeCode} {Status}{(ReasonCode is null ? "" : " / " + ReasonCode)}";
     }
 
     /// <summary>THE expected map. The Office codes are the old core's (NFR-07); "same" passes the service's code through.</summary>
@@ -43,8 +43,9 @@ public class OfficeQuickCreateRefusalMapTests
     private static List<Row> BuildMap()
     {
         var rows = new List<Row>();
-        void Add(RecordCreationRefusalKind kind, string code, string officeCode, int status, string? who = null, string? column = null)
-            => rows.Add(new Row(kind.ToString(), code, who, column, officeCode, status));
+        void Add(RecordCreationRefusalKind kind, string code, string officeCode, int status, string? who = null, string? column = null,
+            string? reason = null)
+            => rows.Add(new Row(kind.ToString(), code, who, column, officeCode, status, reason));
 
         // PrincipalUnresolved (G2): no Dataverse user → 403 owner_unresolved; no usable token, none or another → 500.
         var unresolved = ChildRecordEndpoints.CallerUnresolvedReasonCode;
@@ -65,10 +66,13 @@ public class OfficeQuickCreateRefusalMapTests
         Add(RecordCreationRefusalKind.Forbidden, AccessInheritance.ServerOnlyReasonCode, AccessInheritance.ServerOnlyReasonCode, Forbidden);
         Add(RecordCreationRefusalKind.Forbidden, RecordCreationRefusal.SystemPrincipalUnsupportedCode, InternalError, ServerError);
 
-        // NotFoundOrDenied (G5): the Assigned To column → the Office assignee refusal; any other column, or none → filing.
+        // NotFoundOrDenied (G5): the Assigned To column → the Office assignee refusal, in the route filter's own shape (errorCode
+        // OFFICE_009 with reasonCode assignee_inaccessible); any other column, or none → filing.
         var notFound = RecordCreationRefusal.NotFoundCode;
-        Add(RecordCreationRefusalKind.NotFoundOrDenied, notFound, QuickCreateSourceAccessFilter.AssigneeDeniedReasonCode, Forbidden, column: AssignedTo);
-        Add(RecordCreationRefusalKind.NotFoundOrDenied, notFound, QuickCreateSourceAccessFilter.AssigneeDeniedReasonCode, Forbidden, column: "SPRK_AssignedToInternal");
+        Add(RecordCreationRefusalKind.NotFoundOrDenied, notFound, OfficeErrorCodes.AccessDenied, Forbidden, column: AssignedTo,
+            reason: QuickCreateSourceAccessFilter.AssigneeDeniedReasonCode);
+        Add(RecordCreationRefusalKind.NotFoundOrDenied, notFound, OfficeErrorCodes.AccessDenied, Forbidden, column: "SPRK_AssignedToInternal",
+            reason: QuickCreateSourceAccessFilter.AssigneeDeniedReasonCode);
         Add(RecordCreationRefusalKind.NotFoundOrDenied, notFound, "caller_cannot_file_under_parent", Forbidden, column: SecureRootInheritance.PairIdColumn);
         Add(RecordCreationRefusalKind.NotFoundOrDenied, notFound, "caller_cannot_file_under_parent", Forbidden, column: "sprk_client");
         Add(RecordCreationRefusalKind.NotFoundOrDenied, notFound, "caller_cannot_file_under_parent", Forbidden, column: null);
@@ -87,7 +91,11 @@ public class OfficeQuickCreateRefusalMapTests
         Add(RecordCreationRefusalKind.Conflict, RecordCreationRefusal.NumberUnavailableCode, RecordCreationRefusal.NumberUnavailableCode, StatusCodes.Status409Conflict);
 
         // Undecided: the plan's and the isolated create's own codes pass through (500); the service's own are the generic 500.
-        Add(RecordCreationRefusalKind.Undecided, ProvisionProjectEndpoint.ReasonCreatorNoAccessUnverifiable, ProvisionProjectEndpoint.ReasonCreatorNoAccessUnverifiable, ServerError);
+        // Every code provisioning declares (ProvisionProjectEndpoint.Reason*) is passed through at 500 with its detail — the isolated
+        // row's removal carries the one that failed (F2-1, NFR-07: creator_share_failed "Try again", creator_no_access "an
+        // administrator needs to review your access"). Read by reflection here, so a new constant is a row, not a silent 500.
+        foreach (var provisioning in ProvisioningReasonCodes())
+            Add(RecordCreationRefusalKind.Undecided, provisioning, provisioning, ServerError);
         Add(RecordCreationRefusalKind.Undecided, RecordOwnerRefusal.SecureOwnerTeamUnresolved, RecordOwnerRefusal.SecureOwnerTeamUnresolved, ServerError);
         foreach (var inherit in InheritReasonCodes())
             Add(RecordCreationRefusalKind.Undecided, inherit, inherit, ServerError);
@@ -122,6 +130,7 @@ public class OfficeQuickCreateRefusalMapTests
 
         mapped.Code.Should().Be(row.OfficeCode);
         mapped.Status.Should().Be(row.Status);
+        mapped.ReasonCode.Should().Be(row.ReasonCode, "only the Assigned To refusal carries the filter's reasonCode");
         mapped.Status.Should().BeGreaterThanOrEqualTo(400, "a refusal is never a success");
         mapped.Detail.Should().NotBeNullOrWhiteSpace();
     }
@@ -141,10 +150,9 @@ public class OfficeQuickCreateRefusalMapTests
         var declared = ConstantsOf(typeof(RecordCreationRefusal))
             .Concat(ConstantsOf(typeof(RecordOwnerRefusal)))
             .Concat(InheritReasonCodes())
+            .Concat(ProvisioningReasonCodes())
             .Concat([
                 ChildRecordEndpoints.CallerUnresolvedReasonCode,
-                ProvisionProjectEndpoint.ReasonCreatorNoAccess,
-                ProvisionProjectEndpoint.ReasonCreatorNoAccessUnverifiable,
                 AccessFollowsParent.SecureFlagReasonCode,
                 AccessInheritance.ServerOnlyReasonCode,
             ])
@@ -192,6 +200,24 @@ public class OfficeQuickCreateRefusalMapTests
         mapped.Detail.Should().Contain("Assigned To").And.NotContainEquivalentOf("not found");
     }
 
+    [Fact]
+    public void EveryProvisioningCode_WhenUndecided_PassesThroughAt500WithItsOwnDetail()
+    {
+        var codes = ProvisioningReasonCodes().ToList();
+        codes.Should().NotBeEmpty("the reflection found provisioning's Reason* constants");
+        codes.Should().OnlyContain(c => c.StartsWith("sdap.provision.", StringComparison.Ordinal),
+            "ReasonKey (the body key) is not a code");
+
+        foreach (var code in codes)
+        {
+            var mapped = OfficeService.MapQuickCreateRefusal(
+                new RecordCreationRefusal(RecordCreationRefusalKind.Undecided, code, "the isolated create's detail"), "project", AssignedTo);
+
+            (mapped.Code, mapped.Status, mapped.Detail).Should().Be((code, ServerError, "the isolated create's detail"), code);
+            mapped.ReasonCode.Should().BeNull();
+        }
+    }
+
     public static TheoryData<string> Kinds()
     {
         var data = new TheoryData<string>();
@@ -212,6 +238,13 @@ public class OfficeQuickCreateRefusalMapTests
         type.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
             .Where(f => f is { IsLiteral: true, IsInitOnly: false } && f.FieldType == typeof(string))
             .Select(f => (string)f.GetRawConstantValue()!);
+
+    /// <summary>Every code <see cref="ProvisionProjectEndpoint"/> declares (<c>Reason*</c> constants under <c>sdap.provision.</c>).</summary>
+    private static IEnumerable<string> ProvisioningReasonCodes() =>
+        typeof(ProvisionProjectEndpoint).GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
+            .Where(f => f is { IsLiteral: true, IsInitOnly: false } && f.FieldType == typeof(string) && f.Name.StartsWith("Reason", StringComparison.Ordinal))
+            .Select(f => (string)f.GetRawConstantValue()!)
+            .Where(c => c.StartsWith("sdap.provision.", StringComparison.Ordinal));
 
     /// <summary>The isolated create's completion codes (<c>SecureRootInheritance.Reason*</c>).</summary>
     private static IEnumerable<string> InheritReasonCodes() =>

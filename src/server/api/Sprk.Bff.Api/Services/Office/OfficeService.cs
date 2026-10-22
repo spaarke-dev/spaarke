@@ -2203,6 +2203,14 @@ internal class OfficeService : IOfficeService
             _logger.LogWarning(
                 "[RECORD-CREATE] {Entity} quick-create refused: {Kind} {ServiceCode} → {OfficeCode} ({Status}), correlationId={CorrelationId}",
                 table, refusal.Kind, refusal.Code, mapped.Code, mapped.Status, outcome.CorrelationId);
+            // The Assigned To refusal is the route filter's shape (OFFICE_009 + reasonCode, title "Forbidden"): carry its reasonCode
+            // so the endpoint renders ONE body whether the contact was unreadable (the filter) or readable but not appendable (here).
+            if (mapped.ReasonCode is { } reasonCode)
+            {
+                throw new SdapProblemException(mapped.Code, "Forbidden", mapped.Detail, mapped.Status,
+                    new Dictionary<string, object> { [AssigneeReasonCodeExtension] = reasonCode });
+            }
+
             throw new SdapProblemException(mapped.Code, title, mapped.Detail, mapped.Status);
         }
 
@@ -2386,8 +2394,19 @@ internal class OfficeService : IOfficeService
     /// <summary><c>sprk_invoice</c> "Assigned To 1" contact lookup — the invoice's Assigned To (live metadata 2026-10-05, task 100).</summary>
     internal const string InvoiceAssignedToAttribute = "sprk_assignedto1";
 
+    /// <summary>The <see cref="SdapProblemException.Extensions"/> key that carries the Assigned To refusal's <c>reasonCode</c>.</summary>
+    internal const string AssigneeReasonCodeExtension = "reasonCode";
+
     /// <summary>An Office quick-create refusal: the ProblemDetails <c>errorCode</c>, its status and its detail.</summary>
-    internal sealed record QuickCreateRefusal(string Code, int Status, string Detail);
+    internal sealed record QuickCreateRefusal(string Code, int Status, string Detail)
+    {
+        /// <summary>
+        /// Set only for the Assigned To refusal, which is rendered in the route filter's own shape (<c>errorCode</c>
+        /// <c>OFFICE_009</c>, this <c>reasonCode</c>, title "Forbidden"): see
+        /// <see cref="Sprk.Bff.Api.Api.Filters.QuickCreateSourceAccessFilter"/>.
+        /// </summary>
+        public string? ReasonCode { get; init; }
+    }
 
     /// <summary>
     /// THE refusal map of the quick-create Matter/Project leg (field mapping task 018b, ADR-019, NFR-07; UAC-r2 condition (b)
@@ -2425,8 +2444,11 @@ internal class OfficeService : IOfficeService
             // ── NotFoundOrDenied (G5) ──
             (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.NotFoundOrDenied, _)
                 when string.Equals(refusal.RefusedColumn, assignedToColumn, StringComparison.OrdinalIgnoreCase)
-                => new(Sprk.Bff.Api.Api.Filters.QuickCreateSourceAccessFilter.AssigneeDeniedReasonCode, Forbidden,
-                    Sprk.Bff.Api.Api.Filters.QuickCreateSourceAccessFilter.AssigneeDeniedDetail),
+                => new(OfficeErrorCodes.AccessDenied, Forbidden,
+                    Sprk.Bff.Api.Api.Filters.QuickCreateSourceAccessFilter.AssigneeDeniedDetail)
+                {
+                    ReasonCode = Sprk.Bff.Api.Api.Filters.QuickCreateSourceAccessFilter.AssigneeDeniedReasonCode,
+                },
             (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.NotFoundOrDenied, _)
                 => new(CallerCannotFileUnderParentCode, Forbidden,
                     $"The {noun} was not created: you do not have permission to file a {noun} under the record it names."),
@@ -2457,8 +2479,16 @@ internal class OfficeService : IOfficeService
 
             // ── Undecided: the secure-create plan's and provisioning's own codes pass through (500) ──
             (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Undecided,
-                Sprk.Bff.Api.Api.ExternalAccess.ProvisionProjectEndpoint.ReasonCreatorNoAccessUnverifiable
-                or Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.SecureOwnerTeamUnresolved)
+                Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.SecureOwnerTeamUnresolved)
+                => new(refusal.Code, ServerError, refusal.Detail),
+            // The isolated row's removal carries the provisioning code that failed (RecordCreationService.AfterCreateAsync passes
+            // secured.ReasonCode): creator_share_failed ("Try again in a few minutes"), creator_no_access ("an administrator needs
+            // to review your access"), and so on. The old core passed each through at 500 with its detail (NFR-07), so every
+            // ProvisionProjectEndpoint.Reason* constant does. The set is read from those constants (ProvisioningReasonCodes), not
+            // matched by a "sdap.provision." prefix: a code passes through because someone declared it, and the refusal-map test
+            // reflects over the same type, so a new constant is a decided row rather than a silent one.
+            (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Undecided, var provisioningCode)
+                when ProvisioningReasonCodes.Contains(provisioningCode)
                 => new(refusal.Code, ServerError, refusal.Detail),
             (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Undecided, var code)
                 when code.StartsWith(SecureInheritReasonPrefix, StringComparison.Ordinal)
@@ -2470,6 +2500,19 @@ internal class OfficeService : IOfficeService
             _ => internalError,
         };
     }
+
+    /// <summary>
+    /// Every <c>Reason*</c> code <see cref="Sprk.Bff.Api.Api.ExternalAccess.ProvisionProjectEndpoint"/> declares, read from its
+    /// constants (its private <c>ReasonKey</c> is the body key, not a code: only values under <c>sdap.provision.</c> count).
+    /// </summary>
+    internal static readonly IReadOnlySet<string> ProvisioningReasonCodes =
+        typeof(Sprk.Bff.Api.Api.ExternalAccess.ProvisionProjectEndpoint)
+            .GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+            .Where(f => f is { IsLiteral: true, IsInitOnly: false } && f.FieldType == typeof(string)
+                && f.Name.StartsWith("Reason", StringComparison.Ordinal))
+            .Select(f => (string)f.GetRawConstantValue()!)
+            .Where(code => code.StartsWith("sdap.provision.", StringComparison.Ordinal))
+            .ToHashSet(StringComparer.Ordinal);
 
     /// <summary>The prefix of the isolated create's completion codes (<c>SecureRootInheritance.Reason*</c>), passed through.</summary>
     internal const string SecureInheritReasonPrefix = "sdap.inherit.";
