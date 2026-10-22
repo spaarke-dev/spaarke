@@ -1047,7 +1047,12 @@ public class FinanceEndpointsAuthorizationContractTests
 
         public Exception? ThrowOnEveryCall { get; set; }
 
+        private readonly HashSet<(string Set, Guid Id)> _faulted = new();
+
         public void Grant(string set, Guid id, AccessRights rights) => _rights[(set, id)] = rights;
+
+        /// <summary>Dataverse gave no answer for this record: rights None with <see cref="AccessSnapshot.Faulted"/> true (an unknown, not a denial).</summary>
+        public void Fault(string set, Guid id) => _faulted.Add((set, id));
 
         public Task<AccessSnapshot> GetUserAccessAsync(
             string userId, string resourceId, string? userAccessToken = null, CancellationToken ct = default)
@@ -1076,6 +1081,7 @@ public class FinanceEndpointsAuthorizationContractTests
                 UserId = userId,
                 ResourceId = id.ToString(),
                 AccessRights = _rights.TryGetValue((set, id), out var rights) ? rights : AccessRights.None,
+                Faulted = _faulted.Contains((set, id)),
             });
         }
     }

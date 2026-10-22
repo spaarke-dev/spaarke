@@ -366,6 +366,206 @@ public sealed class RuleSetEndpointsTests
         host.Service.Verify(s => s.DecideAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<long>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()), Times.Never);
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // uac-r2 re-check round 2 (2026-10-22, I-P5): /draft needs Write on the set's Procedure; the reads need Read on it
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private static void SetBelongsToProcedure(Host host, Guid procedureId) =>
+        host.Service.Setup(s => s.ProcedureOfRuleSetAsync(SetId, It.IsAny<CancellationToken>())).ReturnsAsync(procedureId);
+
+    [Fact(DisplayName = "081 uac r2 I-P5 must-fire: /draft on a Procedure's rule set without Write on that Procedure is 403 and queues nothing")]
+    public async Task Draft_OnAProceduresSet_WithoutWriteOnTheProcedure_Is403_AndNothingIsQueued()
+    {
+        await using var host = await Host.StartAsync();
+        var procedureId = Guid.NewGuid();
+        SetBelongsToProcedure(host, procedureId);
+        host.Access.Grant("sprk_procedures", procedureId, AccessRights.Read); // Read only
+
+        var response = await host.Client.SendAsync(Req("POST", $"{Base}/{SetId}/draft", content: JsonContent.Create(new { })));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.InsufficientRightsReasonCode);
+        host.Service.Verify(s => s.GetDraftSourceAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        host.Jobs.VerifyNoOtherCalls();
+    }
+
+    [Fact(DisplayName = "081 uac r2 I-P5 must-not-fire: /draft on a rule set with no Procedure is unchanged (no Procedure check is asked)")]
+    public async Task Draft_OnALegacySet_AsksNoProcedureCheck_AndReachesTheService()
+    {
+        await using var host = await Host.StartAsync();
+        host.Service.Setup(s => s.GetDraftSourceAsync(SetId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<DraftSource>.Refused(404, RuleSetService.CodeNotFound, "no such rule set"));
+
+        var response = await host.Client.SendAsync(Req("POST", $"{Base}/{SetId}/draft", content: JsonContent.Create(new { })));
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound, "the request reached the service, as before");
+        host.Access.Calls.Should().NotContain(c => c.Set == "sprk_procedures");
+    }
+
+    [Fact(DisplayName = "081 uac r2 I-P5: /draft on a Procedure's rule set with Write on that Procedure reaches the service")]
+    public async Task Draft_OnAProceduresSet_WithWriteOnTheProcedure_ReachesTheService()
+    {
+        await using var host = await Host.StartAsync();
+        var procedureId = Guid.NewGuid();
+        SetBelongsToProcedure(host, procedureId);
+        host.Access.Grant("sprk_procedures", procedureId, AccessRights.Read | AccessRights.Write);
+        host.Service.Setup(s => s.GetDraftSourceAsync(SetId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<DraftSource>.Refused(422, RuleSetService.CodeSourceMissing, "no source"));
+
+        var response = await host.Client.SendAsync(Req("POST", $"{Base}/{SetId}/draft", content: JsonContent.Create(new { })));
+
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity, "the request reached the service, which answered");
+    }
+
+    [Theory(DisplayName = "081 uac r2 I-P5: an UNKNOWN rights answer on the Procedure is system_failure, not insufficient_rights, on the write-gated routes too")]
+    [MemberData(nameof(ProposalRoutes))]
+    public async Task ProposalRoute_WhenTheProceduresRightsAreUnknown_IsSystemFailure(string method, string url)
+    {
+        await using var host = await Host.StartAsync();
+        var procedureId = Guid.NewGuid();
+        SetBelongsToProcedure(host, procedureId);
+        host.Access.Fault("sprk_procedures", procedureId);
+
+        var response = await host.Client.SendAsync(Req(method, url, content: ProposalBody(url)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.SystemFailureReasonCode);
+        host.Service.Verify(s => s.EditAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<ProposalEdit>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    private static void ServiceReadsTheSet(Host host) =>
+        host.Service.Setup(s => s.GetAsync(SetId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<RuleSetDetail>.Done(new RuleSetDetail(Summary(), Guid.NewGuid(), null, new[] { Proposal() })));
+
+    [Fact(DisplayName = "081 uac r2 I-P5 must-fire: GET of a Procedure's rule set without Read on that Procedure is 403 insufficient_rights and never reads the set")]
+    public async Task Get_OnAProceduresSet_WithoutReadOnTheProcedure_Is403_AndNeverReadsTheSet()
+    {
+        await using var host = await Host.StartAsync();
+        var procedureId = Guid.NewGuid();
+        SetBelongsToProcedure(host, procedureId);
+        host.Access.Grant("sprk_procedures", procedureId, AccessRights.None); // Dataverse answered: no Read
+        ServiceReadsTheSet(host);
+
+        var response = await host.Client.SendAsync(Req("GET", $"{Base}/{SetId}"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.InsufficientRightsReasonCode);
+        host.Access.Calls.Should().Contain(c => c.Path == FinAuth.AccessPath.Record && c.Set == "sprk_procedures" && c.Id == procedureId && c.HasToken);
+        host.Service.Verify(s => s.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact(DisplayName = "081 uac r2 I-P5 must-fire: GET of a Procedure's rule set whose Procedure rights are UNKNOWN is 403 system_failure")]
+    public async Task Get_OnAProceduresSet_WhenTheProceduresRightsAreUnknown_IsSystemFailure()
+    {
+        await using var host = await Host.StartAsync();
+        var procedureId = Guid.NewGuid();
+        SetBelongsToProcedure(host, procedureId);
+        host.Access.Fault("sprk_procedures", procedureId);
+        ServiceReadsTheSet(host);
+
+        var response = await host.Client.SendAsync(Req("GET", $"{Base}/{SetId}"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.SystemFailureReasonCode);
+        host.Service.Verify(s => s.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact(DisplayName = "081 uac r2 I-P5 must-fire: GET whose rule set cannot be read for its Procedure is 403 system_failure")]
+    public async Task Get_WhenTheSetsProcedureCannotBeRead_IsSystemFailure()
+    {
+        await using var host = await Host.StartAsync();
+        host.Service.Setup(s => s.ProcedureOfRuleSetAsync(SetId, It.IsAny<CancellationToken>())).ThrowsAsync(new TimeoutException("simulated read fault"));
+        ServiceReadsTheSet(host);
+
+        var response = await host.Client.SendAsync(Req("GET", $"{Base}/{SetId}"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.SystemFailureReasonCode);
+        host.Service.Verify(s => s.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact(DisplayName = "081 uac r2 I-P5: GET of a Procedure's rule set with Read on that Procedure returns it")]
+    public async Task Get_OnAProceduresSet_WithReadOnTheProcedure_Returns200()
+    {
+        await using var host = await Host.StartAsync();
+        var procedureId = Guid.NewGuid();
+        SetBelongsToProcedure(host, procedureId);
+        host.Access.Grant("sprk_procedures", procedureId, AccessRights.Read);
+        ServiceReadsTheSet(host);
+
+        var response = await host.Client.SendAsync(Req("GET", $"{Base}/{SetId}"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact(DisplayName = "081 uac r2 I-P5 must-not-fire: GET of a rule set with no Procedure is unchanged (no Procedure check is asked)")]
+    public async Task Get_OnALegacySet_AsksNoProcedureCheck()
+    {
+        await using var host = await Host.StartAsync();
+        ServiceReadsTheSet(host);
+
+        var response = await host.Client.SendAsync(Req("GET", $"{Base}/{SetId}"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.Access.Calls.Should().NotContain(c => c.Set == "sprk_procedures");
+    }
+
+    private static RuleSetSummary SummaryOf(Guid id, Guid? procedureId) =>
+        new RuleSetSummary(id, "Set " + id.ToString()[..4], "Draft", "ClientDefault", null, true, null, null, 1) { ProcedureId = procedureId };
+
+    [Fact(DisplayName = "081 uac r2 I-P5 must-fire: the list leaves out a Procedure's set the caller cannot Read, and one whose rights are unknown; legacy sets stay")]
+    public async Task List_LeavesOutProcedureSetsTheCallerCannotRead_OrWhoseRightsAreUnknown()
+    {
+        await using var host = await Host.StartAsync();
+        var legacy = SummaryOf(Guid.NewGuid(), null);
+        var readableProcedure = Guid.NewGuid();
+        var deniedProcedure = Guid.NewGuid();
+        var unknownProcedure = Guid.NewGuid();
+        var readable = SummaryOf(Guid.NewGuid(), readableProcedure);
+        var denied = SummaryOf(Guid.NewGuid(), deniedProcedure);
+        var unknown = SummaryOf(Guid.NewGuid(), unknownProcedure);
+        host.Access.Grant("sprk_procedures", readableProcedure, AccessRights.Read);
+        host.Access.Grant("sprk_procedures", deniedProcedure, AccessRights.None);
+        host.Access.Fault("sprk_procedures", unknownProcedure);
+        host.Service.Setup(s => s.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<IReadOnlyList<RuleSetSummary>>.Done(new[] { legacy, readable, denied, unknown }));
+
+        var response = await host.Client.SendAsync(Req("GET", Base));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var ids = (await response.Content.ReadFromJsonAsync<JsonArray>())!.Select(n => n!["id"]!.GetValue<Guid>()).ToList();
+        ids.Should().BeEquivalentTo(new[] { legacy.Id, readable.Id });
+        host.Access.Calls.Count(c => c.Set == "sprk_procedures").Should().Be(3, "one rights question per distinct Procedure");
+    }
+
+    [Fact(DisplayName = "081 uac r2 I-P5 must-not-fire: a list of only legacy sets is returned whole and asks no Procedure question")]
+    public async Task List_OfLegacySetsOnly_IsUnchanged_AndAsksNoProcedureCheck()
+    {
+        await using var host = await Host.StartAsync();
+        host.Service.Setup(s => s.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<IReadOnlyList<RuleSetSummary>>.Done(new[] { SummaryOf(Guid.NewGuid(), null), SummaryOf(Guid.NewGuid(), null) }));
+
+        var response = await host.Client.SendAsync(Req("GET", Base));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await response.Content.ReadFromJsonAsync<JsonArray>())!.Should().HaveCount(2);
+        host.Access.Calls.Should().NotContain(c => c.Set == "sprk_procedures");
+    }
+
+    [Fact(DisplayName = "081 uac r2 I-P5: the Procedure id is internal; the list response never carries it")]
+    public async Task List_DoesNotSerializeTheProcedureId()
+    {
+        await using var host = await Host.StartAsync();
+        var procedureId = Guid.NewGuid();
+        host.Access.Grant("sprk_procedures", procedureId, AccessRights.Read);
+        host.Service.Setup(s => s.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<IReadOnlyList<RuleSetSummary>>.Done(new[] { SummaryOf(Guid.NewGuid(), procedureId) }));
+
+        var response = await host.Client.SendAsync(Req("GET", Base));
+
+        (await response.Content.ReadAsStringAsync()).Should().NotContainEquivalentOf("procedureId");
+    }
+
     [Theory]
     [InlineData("POST", $"{Base}?name=OCG&sourceKind=Guideline", BillingAdminAuthorization.CreateRuleSetPrivilege)]
     [InlineData("POST", $"{Base}?name=OCG&sourceKind=Guideline", BillingAdminAuthorization.WriteRuleSetPrivilege)]

@@ -1,5 +1,7 @@
 using Spaarke.Core.Auth;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Infrastructure.Auth;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Finance;
@@ -130,17 +132,32 @@ public static class BillingAdminAuthorization
     /// <summary>
     /// uac-r2 review item D (2026-10-22, I-P5): on a rule set that belongs to a Procedure (<c>sprk_ruleset.sprk_procedure</c> set), a rule
     /// edit or decision also needs the caller's own Write on THAT Procedure: the same Record-path "write" check on <c>sprk_procedures</c> the
-    /// Procedure routes declare (<see cref="WriteProcedure"/>), run by <see cref="FinanceAuthorizationFilter"/> as the caller; otherwise 403.
+    /// Procedure routes declare (<see cref="WriteProcedure"/>), asked of Dataverse as the caller; otherwise 403 (<c>insufficient_rights</c> when Dataverse
+    /// answered that the right is not held, <c>system_failure</c> when it gave no answer).
     /// A legacy set (no Procedure) or an unknown set is unchanged (the route's own declaration, then the service's 404). Added AFTER the
     /// route's <c>AddFinanceAuthorizationFilter</c> (step 0 and the billing-admin privileges run first). Fails closed: a fault reading the
     /// rule set is a 403 <c>sdap.access.error.system_failure</c>.
     /// </summary>
     /// <remarks>§11: <i>Existing</i> — <see cref="FinanceAuthorizationFilter"/> evaluates a Record check; its target declaration is
-    /// synchronous and cannot read the rule set. <i>Extension</i> — this filter reads the set's Procedure, then hands that one check to the
-    /// existing filter, so the evaluation (and its denial shape) is the Procedure routes' own. <i>Cost of doing nothing</i> — a billing
+    /// synchronous and cannot read the rule set. <i>Extension</i> — this filter reads the set's Procedure, then asks the same rights question
+    /// through <see cref="CallerReadCheck"/> (the finance read APIs' caller-rights check, which keeps "denied" apart from "no answer"). <i>Cost of doing nothing</i> — a billing
     /// admin without Write on a Procedure could still change and decide its rules through the rule set routes.</remarks>
     public static TBuilder RequireWriteOnTheRuleSetsProcedure<TBuilder>(this TBuilder builder) where TBuilder : IEndpointConventionBuilder =>
-        builder.AddEndpointFilter(async (context, next) =>
+        builder.AddEndpointFilter(OnTheRuleSetsProcedure("write"));
+
+    /// <summary>
+    /// uac-r2 re-check round 2 (2026-10-22, I-P5): the sibling of <see cref="RequireWriteOnTheRuleSetsProcedure"/> for the READ of a rule set.
+    /// On a set that belongs to a Procedure, reading its rules also needs the caller's own Read on THAT Procedure (the Record-path "read" check
+    /// on <c>sprk_procedures</c> the Procedure read route declares); otherwise 403. A legacy set or an unknown set is unchanged. Same
+    /// resolution of the Procedure (server-side, from the stored set), same ordering (step 0, billing admin, then the Procedure), same fail closed.
+    /// </summary>
+    /// <remarks>§11: <i>Existing</i> — the Write filter above. <i>Extension</i> — one shared body, parameterised by the operation. <i>Cost of
+    /// doing nothing</i> — a billing admin without Read on a Procedure could read its rules (clause text, rule bodies) through the rule set read.</remarks>
+    public static TBuilder RequireReadOnTheRuleSetsProcedure<TBuilder>(this TBuilder builder) where TBuilder : IEndpointConventionBuilder =>
+        builder.AddEndpointFilter(OnTheRuleSetsProcedure("read"));
+
+    private static Func<EndpointFilterInvocationContext, EndpointFilterDelegate, ValueTask<object?>> OnTheRuleSetsProcedure(string operation) =>
+        async (context, next) =>
         {
             var http = context.HttpContext;
             var services = http.RequestServices;
@@ -157,7 +174,7 @@ public static class BillingAdminAuthorization
             catch (Exception ex)
             {
                 services.GetService<ILogger<FinanceAuthorizationFilter>>()?.LogError(ex,
-                    "Rule set {RuleSetId}: its Procedure could not be read for the Procedure Write check; denying (fail closed)", ruleSetId);
+                    "Rule set {RuleSetId}: its Procedure could not be read for the Procedure {Operation} check; denying (fail closed)", ruleSetId, operation);
                 return ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
             }
 
@@ -166,25 +183,25 @@ public static class BillingAdminAuthorization
                 return await next(context);
             }
 
-            var filter = new FinanceAuthorizationFilter(
-                services.GetRequiredService<AuthorizationService>(), _ => WriteProcedureRecord(id), FinanceDenial.Forbidden,
-                services.GetService<CallerRecordAccessProbe>());
-            return await filter.InvokeAsync(context, next);
-        });
+            // The caller's own rights on the Procedure, asked of Dataverse as the caller (the Procedure routes' check). Denied only when Dataverse
+            // answered and the right is not held; no answer (a fault, a throttle, no identity) is system_failure, never insufficient_rights.
+            var caller = new InvoiceContextService.InvoiceCaller(
+                CallerResolution.ResolveObjectId(http.User) ?? string.Empty, TokenHelper.ExtractBearerTokenOrNull(http));
+            var logger = services.GetService<ILogger<FinanceAuthorizationFilter>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<FinanceAuthorizationFilter>.Instance;
+            var outcome = await CallerReadCheck.CheckAsync(
+                services.GetRequiredService<AuthorizationService>(), caller, ProcedureEntitySet, operation, id, logger,
+                $"Rule set {ruleSetId}: caller {operation} on its Procedure", http.RequestAborted);
+            if (outcome == CallerReadOutcome.Readable)
+            {
+                return await next(context);
+            }
+
+            return ProblemDetailsHelper.Forbidden(
+                outcome == CallerReadOutcome.Refused ? FinanceAuthorizationFilter.InsufficientRightsReasonCode : FinanceAuthorizationFilter.SystemFailureReasonCode,
+                traceId: http.TraceIdentifier);
+        };
 
     private const string RuleSetRouteKey = "ruleSetId";
-
-    /// <summary>The caller's Write on one Procedure: the check <see cref="FinanceAuthorizationTargets.FromRoute"/> builds for the Procedure
-    /// routes, with the id read from the rule set instead of the route.</summary>
-    internal static FinanceAuthorizationTargets WriteProcedureRecord(Guid procedureId) =>
-        FinanceAuthorizationTargets.Authorize(new FinanceAuthorizationCheck
-        {
-            Path = FinanceCheckPath.Record,
-            EntitySetName = ProcedureEntitySet,
-            RecordId = procedureId,
-            Operation = "write",
-            Source = "ruleset.sprk_procedure",
-        });
 
     private static FinanceAuthorizationTargets OnProcedure(EndpointFilterInvocationContext context, params FinanceAuthorizationCheck[] extra)
     {

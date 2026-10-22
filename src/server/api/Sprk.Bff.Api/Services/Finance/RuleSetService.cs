@@ -62,7 +62,12 @@ public sealed record RuleSetCreateRequest(
 /// <summary>A rule set row as the admin sees it.</summary>
 public sealed record RuleSetSummary(
     Guid Id, string Name, string Status, string Scope, Guid? FirmId, bool VisibleToFirms,
-    DateOnly? EffectiveFrom, DateOnly? EffectiveTo, int RuleCount);
+    DateOnly? EffectiveFrom, DateOnly? EffectiveTo, int RuleCount)
+{
+    /// <summary>The Procedure whose rules the set holds (<c>sprk_ruleset.sprk_procedure</c>), or null for a legacy set. Internal and never
+    /// serialized: the list route reads it to leave out the Procedure sets the caller cannot Read (uac-r2 re-check round 2, I-P5).</summary>
+    internal Guid? ProcedureId { get; init; }
+}
 
 /// <summary>A created rule set: Draft, with its source document stored in the Procedure Library.</summary>
 public sealed record RuleSetCreated(
@@ -2660,7 +2665,10 @@ public class RuleSetService
             set.GetAttributeValue<bool>("sprk_visibletofirms"),
             set.GetAttributeValue<DateTime?>("sprk_effectivefrom") is { } from ? DateOnly.FromDateTime(from) : null,
             set.GetAttributeValue<DateTime?>("sprk_effectiveto") is { } to ? DateOnly.FromDateTime(to) : null,
-            ruleCount);
+            ruleCount)
+        {
+            ProcedureId = set.GetAttributeValue<EntityReference>(ProcedureColumn)?.Id,
+        };
     }
 
     /// <param name="carryRowVersion">

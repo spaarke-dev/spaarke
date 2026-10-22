@@ -1,7 +1,9 @@
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using Spaarke.Core.Auth;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.Finance;
@@ -82,6 +84,7 @@ public static class RuleSetEndpoints
         group.MapPost("/{ruleSetId:guid}/draft", DraftRules)
             .AddFinanceAuthorizationFilter(_ => BillingAdminAuthorization.DraftRules())
             .RequireEbillingEnabled()
+            .RequireWriteOnTheRuleSetsProcedure() // uac-r2 round 2 (I-P5): and Write on the set's Procedure, when it has one
             .WithName("DraftRuleSetRules")
             .WithSummary("Start drafting the rule set's rules from its source document (a background job)")
             .WithDescription(
@@ -110,6 +113,7 @@ public static class RuleSetEndpoints
         group.MapGet("/{ruleSetId:guid}", GetRuleSet)
             .AddFinanceAuthorizationFilter(_ => BillingAdminAuthorization.Admin())
             .RequireEbillingEnabled()
+            .RequireReadOnTheRuleSetsProcedure() // uac-r2 round 2 (I-P5): and Read on the set's Procedure, when it has one
             .WithName("GetRuleSet")
             .WithSummary("A rule set with its rules beside their clause quotes")
             .Produces<RuleSetDetail>(StatusCodes.Status200OK)
@@ -330,8 +334,46 @@ public static class RuleSetEndpoints
         return Results.Accepted(statusUrl, new RuleDraftAccepted(ruleSetId, jobId, statusUrl));
     }
 
-    private static async Task<IResult> ListRuleSets(RuleSetService service, HttpContext http, CancellationToken ct) =>
-        Map(await service.ListAsync(ct), http);
+    /// <summary>
+    /// The list leaves out each Procedure rule set whose Procedure the caller cannot Read (uac-r2 re-check round 2, I-P5): a Procedure's rules are
+    /// no more visible here than on the Procedure's own read. A set whose rights could not be determined is left out too (fail closed). Legacy
+    /// sets (no Procedure) are unchanged. One rights question per distinct Procedure, asked as the caller.
+    /// </summary>
+    private static async Task<IResult> ListRuleSets(
+        RuleSetService service, AuthorizationService authorization, ILogger<RuleSetService> logger, HttpContext http, CancellationToken ct)
+    {
+        var outcome = await service.ListAsync(ct);
+        if (outcome.Kind != RuleSetOutcomeKind.Done || outcome.Value is not { } sets || !sets.Any(s => s.ProcedureId is not null))
+        {
+            return Map(outcome, http);
+        }
+
+        var caller = new InvoiceContextService.InvoiceCaller(
+            CallerResolution.ResolveObjectId(http.User) ?? string.Empty, TokenHelper.ExtractBearerTokenOrNull(http));
+        var readable = new Dictionary<Guid, bool>();
+        var procedures = sets.Where(s => s.ProcedureId is not null).Select(s => s.ProcedureId!.Value).Distinct().ToList();
+        using var gate = new SemaphoreSlim(CallerReadCheck.Parallelism);
+        var answers = await Task.WhenAll(procedures.Select(async id =>
+        {
+            await gate.WaitAsync(ct);
+            try
+            {
+                return (id, await CallerReadCheck.CheckAsync(
+                    authorization, caller, BillingAdminAuthorization.ProcedureEntitySet, "read", id, logger, "Rule set list: caller read on a Procedure", ct));
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }));
+        foreach (var (id, result) in answers)
+        {
+            readable[id] = result == CallerReadOutcome.Readable; // refused and no answer both leave the set out
+        }
+
+        IReadOnlyList<RuleSetSummary> kept = sets.Where(s => s.ProcedureId is not { } id || readable[id]).ToList();
+        return Map(RuleSetOutcome<IReadOnlyList<RuleSetSummary>>.Done(kept), http);
+    }
 
     private static async Task<IResult> GetRuleSet(Guid ruleSetId, RuleSetService service, HttpContext http, CancellationToken ct) =>
         Map(await service.GetAsync(ruleSetId, ct), http);

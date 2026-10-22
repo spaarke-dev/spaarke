@@ -1055,8 +1055,13 @@ public partial class RouteAuthorizationGuardTests
             "Each route declares the id it authorizes; the filter evaluates it as the caller via GetCallerRecordAccessAsync + "
             + "OperationAccessPolicy.HasRequiredRights (FinanceAuthorizationFilter.cs:409-412), uniform 404 on deny (task 130)."),
         new CreditedForm("RequireWriteOnTheRuleSetsProcedure", "Api/Finance/BillingAdminAuthorization.cs",
-            "Reads the route rule set's Procedure (BillingAdminAuthorization.cs:155) and, when set, runs FinanceAuthorizationFilter's "
-            + "Record-path write check on sprk_procedures as the caller (:172); a read fault is 403 (:161) (ebilling-r1 081, uac D)."),
+            "Reads the route rule set's Procedure (BillingAdminAuthorization.cs:172) and, when set, asks the caller's own Write on "
+            + "sprk_procedures via CallerReadCheck.CheckAsync (:191); a read fault or an unanswered question is 403 system_failure (:178, :200) "
+            + "(ebilling-r1 081, uac D; /draft added in re-check round 2)."),
+        new CreditedForm("RequireReadOnTheRuleSetsProcedure", "Api/Finance/BillingAdminAuthorization.cs",
+            "The sibling for the rule set READ: the same Procedure resolution (BillingAdminAuthorization.cs:172) and CallerReadCheck.CheckAsync "
+            + "(:191) asking Read; denied is 403 insufficient_rights, an unanswered question or a read fault 403 system_failure (:178, :200) "
+            + "(ebilling-r1 081, uac r2 I-P5)."),
         new CreditedForm("AddRecordRouteAccessAuthorizationFilter", "Api/Filters/RecordRouteAccessAuthorizationFilter.cs",
             "RetrievePrincipalAccess on the route record over OBO via CallerRecordAccessProbe "
             + "(RecordRouteAccessAuthorizationFilter.cs:110), 403 on deny (:155); the probe throwing is a denial (task 076)."),
