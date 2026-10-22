@@ -350,6 +350,15 @@ public partial class RouteAuthorizationGuardTests
             + "caller must hold (BillingAdminAuthorization via AddFinanceAuthorizationFilter, D-76, fail closed; Write on sprk_ruleset is the marker "
             + "because the Ontology Administrator holds every privilege on the shared policy tables); reads of the proposals are admin-only too. "
             + "The eBilling kill switch runs after it."),
+        new GovernedFile("Api/Finance/ProcedureEndpoints.cs", Scope.RouteLevelGate,
+            "/api/finance/procedures/* (ebilling-r1 task 081, EB-D-148) -- Procedures and their versions. Step 0 on the group "
+            + "(RequireInternalFinanceCaller, reads included: Procedures are internal-only). Each route then declares its basis through "
+            + "AddFinanceAuthorizationFilter, as the caller, fail closed (BillingAdminAuthorization): POST / -- Create on sprk_procedure "
+            + "(prvCreatesprk_procedure) plus Create and Write on sprk_ruleset (it creates the rule set too); GET /{procedureId} -- Read on the "
+            + "Procedure (Record path, sprk_procedures); PATCH /{procedureId}, PATCH .../versions/{versionId}, POST .../versions/{versionId}/retire "
+            + "and GET .../retire-preview -- Write on the Procedure AND the billing-admin marker (Write on sprk_ruleset); POST .../versions -- the "
+            + "same plus Create on sprk_policyversion; POST .../versions/{versionId}/publish -- the same plus Write on sprk_policyversion and "
+            + "sprk_policy; POST .../retire -- the same plus Write on sprk_policy. The eBilling kill switch runs after it."),
         new GovernedFile("Api/Finance/InvoiceContextEndpoints.cs", Scope.RouteLevelGate,
             "GET /api/finance/invoices/{invoiceId}/context (ebilling-r1 task 106, FR-33) -- the Invoice Review context panel. The route carries "
             + "AddFinanceAuthorizationFilter(\"finance.read\", sprk_invoices, invoiceId): Read on the invoice as the caller, fail closed; the eBilling "
@@ -995,7 +1004,12 @@ public partial class RouteAuthorizationGuardTests
     // /api/finance/submissions/{submissionId}/blocked, POST .../override and POST .../return. Classified by GovernedFiles (RouteLevelGate:
     // AddFinanceAuthorizationFilter as the caller on the submission; the override's privilege is asked inside the service on every call);
     // the kill-switch filter .RequireEbillingEnabled is already classified in NotAuthorizationForms.
-    private const int ExpectedEndpointFileCount = 141;
+    // 141 -> 142 (2026-10-22, ebilling-r1 task 081, EB-D-148). Net +1: Api/Finance/ProcedureEndpoints.cs ADDED -- POST/GET/PATCH
+    // /api/finance/procedures[/{procedureId}], POST .../versions, PATCH .../versions/{versionId}, POST .../versions/{versionId}/publish|retire,
+    // GET .../retire-preview and POST .../retire. Classified by GovernedFiles (RouteLevelGate: step 0 on the group, then
+    // AddFinanceAuthorizationFilter per route as the caller); the kill-switch filter is already classified in NotAuthorizationForms.
+    // Task 090 runs in parallel and may add a file too: reconcile the sum at integration.
+    private const int ExpectedEndpointFileCount = 142;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -1040,6 +1054,14 @@ public partial class RouteAuthorizationGuardTests
         new CreditedForm("AddFinanceAuthorizationFilter", "Api/Filters/FinanceAuthorizationFilter.cs",
             "Each route declares the id it authorizes; the filter evaluates it as the caller via GetCallerRecordAccessAsync + "
             + "OperationAccessPolicy.HasRequiredRights (FinanceAuthorizationFilter.cs:409-412), uniform 404 on deny (task 130)."),
+        new CreditedForm("RequireWriteOnTheRuleSetsProcedure", "Api/Finance/BillingAdminAuthorization.cs",
+            "Reads the route rule set's Procedure (BillingAdminAuthorization.cs:172) and, when set, asks the caller's own Write on "
+            + "sprk_procedures via CallerReadCheck.CheckAsync (:191); a read fault or an unanswered question is 403 system_failure (:178, :200) "
+            + "(ebilling-r1 081, uac D; /draft added in re-check round 2)."),
+        new CreditedForm("RequireReadOnTheRuleSetsProcedure", "Api/Finance/BillingAdminAuthorization.cs",
+            "The sibling for the rule set READ: the same Procedure resolution (BillingAdminAuthorization.cs:172) and CallerReadCheck.CheckAsync "
+            + "(:191) asking Read; denied is 403 insufficient_rights, an unanswered question or a read fault 403 system_failure (:178, :200) "
+            + "(ebilling-r1 081, uac r2 I-P5)."),
         new CreditedForm("AddRecordRouteAccessAuthorizationFilter", "Api/Filters/RecordRouteAccessAuthorizationFilter.cs",
             "RetrievePrincipalAccess on the route record over OBO via CallerRecordAccessProbe "
             + "(RecordRouteAccessAuthorizationFilter.cs:110), 403 on deny (:155); the probe throwing is a denial (task 076)."),

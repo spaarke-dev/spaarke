@@ -280,6 +280,151 @@ public sealed class RuleSetServiceTests
                     Rows.GetValueOrDefault(entity)?.RemoveAll(r => r.Id == id);
                     return Task.CompletedTask;
                 });
+
+            // Task 081: ONE transaction across tables, as Dataverse's ExecuteTransaction runs it — requests applied in order, a conditional
+            // update checked at ITS turn (so a row updated earlier in the same transaction has moved), and any fault rolls every earlier
+            // request back. The exception is the real seam's: DataverseTransactionException over the Dataverse fault.
+            Entities.Setup(e => e.ExecuteTransactionAsync(It.IsAny<IReadOnlyList<OrganizationRequest>>(), It.IsAny<CancellationToken>()))
+                .Returns((IReadOnlyList<OrganizationRequest> requests, CancellationToken _) =>
+                {
+                    Transactions.Add(requests.ToList());
+                    if (TransactionOutcomeUnknown)
+                    {
+                        throw new DataverseTransactionException("simulated timeout: no fault came back", null, true, new TimeoutException());
+                    }
+
+                    if (TransactionThrows is { } thrown)
+                    {
+                        throw thrown;
+                    }
+
+                    var snapshot = TakeSnapshot();
+                    for (var i = 0; i < requests.Count; i++)
+                    {
+                        var fault = FailTransactionRequest?.Invoke(requests[i]) == true
+                            ? (unchecked((int)0x80040265), "simulated request failure")
+                            : ApplyInTransaction(requests[i]);
+                        if (fault is { } f)
+                        {
+                            RestoreSnapshot(snapshot);
+                            TransactionFaults.Add((i, f.Item1));
+                            throw new DataverseTransactionException(
+                                $"simulated: request {i} failed; nothing was applied", i, false,
+                                new System.ServiceModel.FaultException<OrganizationServiceFault>(
+                                    new OrganizationServiceFault { ErrorCode = f.Item1, Message = f.Item2 },
+                                    new System.ServiceModel.FaultReason(f.Item2)));
+                        }
+                    }
+
+                    return Task.CompletedTask;
+                });
+        }
+
+        /// <summary>Every transaction as sent (task 081), whether or not it committed.</summary>
+        public readonly List<IReadOnlyList<OrganizationRequest>> Transactions = new();
+
+        /// <summary>Faulted transactions: the index of the request that faulted and its Dataverse error code.</summary>
+        public readonly List<(int Index, int ErrorCode)> TransactionFaults = new();
+
+        /// <summary>Faults the first request it answers true for (nothing in the transaction is applied).</summary>
+        public Func<OrganizationRequest, bool>? FailTransactionRequest;
+
+        /// <summary>The transaction returns no fault at all (a timeout): <see cref="DataverseTransactionException.OutcomeUnknown"/>, nothing applied.</summary>
+        public bool TransactionOutcomeUnknown;
+
+        /// <summary>The transaction throws this exception as is, nothing applied (e.g. an HttpClient timeout's TaskCanceledException).</summary>
+        public Exception? TransactionThrows;
+
+        private (int Code, string Message)? ApplyInTransaction(OrganizationRequest request)
+        {
+            switch (request)
+            {
+                case Microsoft.Xrm.Sdk.Messages.CreateRequest create:
+                {
+                    var target = create.Target;
+                    if (target.Id != Guid.Empty && Rows.GetValueOrDefault(target.LogicalName)?.Any(r => r.Id == target.Id) == true)
+                    {
+                        return (unchecked((int)0x80040237), "Cannot insert duplicate key.");
+                    }
+
+                    // The (Procedure, version number) alternate key of sprk_procedureversion (task 080).
+                    if (target.LogicalName == "sprk_procedureversion"
+                        && Rows.GetValueOrDefault("sprk_procedureversion")?.Any(r =>
+                            r.GetAttributeValue<EntityReference>("sprk_procedure")?.Id == target.GetAttributeValue<EntityReference>("sprk_procedure")?.Id
+                            && r.GetAttributeValue<int?>("sprk_versionnumber") == target.GetAttributeValue<int?>("sprk_versionnumber")) == true)
+                    {
+                        return (unchecked((int)0x80060892), "A record with matching key values already exists.");
+                    }
+
+                    var row = new Entity(target.LogicalName, target.Id == Guid.Empty ? Guid.NewGuid() : target.Id);
+                    foreach (var a in target.Attributes) row[a.Key] = a.Value;
+                    Writes.Add((Write.Create, row.LogicalName, row.Id, row.Attributes.ToDictionary(a => a.Key, a => a.Value)));
+                    Order.Add("txn-create:" + row.LogicalName);
+                    Seed(row);
+                    _createdBy[row.Id] = Identity;
+                    return null;
+                }
+
+                case Microsoft.Xrm.Sdk.Messages.UpdateRequest update:
+                {
+                    var target = update.Target;
+                    if (Rows.GetValueOrDefault(target.LogicalName)?.Any(r => r.Id == target.Id) != true)
+                    {
+                        return (unchecked((int)0x80040217), $"{target.LogicalName} With Id = {target.Id} Does Not Exist");
+                    }
+
+                    if (update.ConcurrencyBehavior == ConcurrencyBehavior.IfRowVersionMatches
+                        && RowVersions.GetValueOrDefault(target.Id).ToString(System.Globalization.CultureInfo.InvariantCulture) != target.RowVersion)
+                    {
+                        Refusals.Add((target.LogicalName, new[] { target.Id }));
+                        return (unchecked((int)0x80060882), "The version of the existing record doesn't match the RowVersion property provided.");
+                    }
+
+                    var fields = target.Attributes.ToDictionary(a => a.Key, a => a.Value ?? DBNull.Value);
+                    Writes.Add((Write.Update, target.LogicalName, target.Id, fields));
+                    Order.Add("txn-update:" + target.LogicalName);
+                    Apply(target.LogicalName, target.Id, fields);
+                    return null;
+                }
+
+                default:
+                    throw new NotSupportedException(request.GetType().Name);
+            }
+        }
+
+        private sealed record Snapshot(
+            Dictionary<string, List<(Entity Row, Dictionary<string, object> Attributes)>> Rows, Dictionary<Guid, long> RowVersions,
+            int Writes, int Order, Dictionary<Guid, Guid> CreatedBy);
+
+        private Snapshot TakeSnapshot() => new(
+            Rows.ToDictionary(t => t.Key, t => t.Value.Select(r => (r, r.Attributes.ToDictionary(a => a.Key, a => a.Value))).ToList()),
+            new Dictionary<Guid, long>(RowVersions), Writes.Count, Order.Count, new Dictionary<Guid, Guid>(_createdBy));
+
+        private void RestoreSnapshot(Snapshot s)
+        {
+            foreach (var table in Rows.Keys.ToList())
+            {
+                if (!s.Rows.TryGetValue(table, out var rows))
+                {
+                    Rows.Remove(table);
+                    continue;
+                }
+
+                Rows[table].Clear();
+                foreach (var (row, attributes) in rows)
+                {
+                    row.Attributes.Clear();
+                    foreach (var (key, value) in attributes) row[key] = value;
+                    Rows[table].Add(row);
+                }
+            }
+
+            RowVersions.Clear();
+            foreach (var (id, version) in s.RowVersions) RowVersions[id] = version;
+            Writes.RemoveRange(s.Writes, Writes.Count - s.Writes);
+            Order.RemoveRange(s.Order, Order.Count - s.Order);
+            _createdBy.Clear();
+            foreach (var (id, user) in s.CreatedBy) _createdBy[id] = user;
         }
 
         public RuleSetService Service()

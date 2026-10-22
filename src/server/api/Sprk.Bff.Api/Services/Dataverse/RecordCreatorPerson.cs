@@ -108,6 +108,15 @@ public static class RecordCreatorPerson
         // SignalWriteRequest.RequestedBy; every Signal raised today is job-raised and names nobody). The owner created the column
         // on dev (field-secured, D-136); the same script lists it, with SpaarkeMaster / OntologyPlatformSolution as its homes.
         "sprk_signal",
+        // ebilling-r1 task 081 (procedure model 13, O-23): ProcedureService creates Procedures and their versions app-only for the
+        // calling admin, so they record that person. 080 created the column; the script secures and verifies it (SpaarkeMaster).
+        // Not in the Secure Record Owner role set (Procedures are not secure-record children):
+        // RecordOwnerAssignmentCensusTests.StampedOutsideCodifiedChildren lists them as stamped outside it.
+        "sprk_procedure", "sprk_procedureversion",
+        // ebilling-r1 task 081 (080 hand-off; ontology F4-1, D-173): 080 created the column on the policy tables too. RuleSetService and
+        // the Procedure copy-forward create them app-only for the calling admin, so they record that person; the script empty-checks,
+        // secures and publishes both (SpaarkeMaster).
+        "sprk_policy", "sprk_policyversion",
     };
 
     /// <summary>Whether <paramref name="entityLogicalName"/> carries the column: a secure root or a stamped child table.</summary>

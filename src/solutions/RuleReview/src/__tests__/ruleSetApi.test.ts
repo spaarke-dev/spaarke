@@ -1,6 +1,8 @@
 import {
   createRuleSetApi,
   describeFailure,
+  accessAfterFailure,
+  isBillingAdminRefusal,
   isEbillingDisabled,
   isForbidden,
   isStale,
@@ -45,6 +47,36 @@ describe('toFailure', () => {
     const f = toFailure(problem(503, 'ebilling.disabled'));
     expect(isEbillingDisabled(f)).toBe(true);
     expect(isForbidden(f)).toBe(false);
+  });
+
+  describe('access after a failed call (uac-r2 round 3 F1)', () => {
+    const admin403 = () => toFailure(problem(403, null, { reasonCode: 'sdap.access.deny.insufficient_privilege' }));
+    const procedure403 = () => toFailure(problem(403, null, { reasonCode: 'sdap.access.deny.insufficient_rights', detail: "You need Write on this rule set's Procedure." }));
+    const systemFailure403 = () => toFailure(problem(403, null, { reasonCode: 'sdap.access.error.system_failure' }));
+
+    it('must-fire: the billing-admin 403 turns the page read-only', () => {
+      expect(isBillingAdminRefusal(admin403())).toBe(true);
+      expect(accessAfterFailure('admin', admin403())).toBe('readOnly');
+      expect(accessAfterFailure('unknown', admin403())).toBe('readOnly');
+    });
+
+    it('must-not-fire: a Procedure insufficient_rights 403 leaves the access as it was', () => {
+      expect(isForbidden(procedure403())).toBe(true);
+      expect(isBillingAdminRefusal(procedure403())).toBe(false);
+      expect(accessAfterFailure('admin', procedure403())).toBe('admin');
+      expect(accessAfterFailure('unknown', procedure403())).toBe('unknown');
+      expect(accessAfterFailure('readOnly', procedure403())).toBe('readOnly');
+    });
+
+    it('must-not-fire: a system_failure 403 leaves the access as it was', () => {
+      expect(isBillingAdminRefusal(systemFailure403())).toBe(false);
+      expect(accessAfterFailure('admin', systemFailure403())).toBe('admin');
+    });
+
+    it('must-not-fire: a 403 with no reasonCode, and a non-403 carrying the code, leave the access as it was', () => {
+      expect(accessAfterFailure('admin', toFailure(problem(403, null)))).toBe('admin');
+      expect(accessAfterFailure('admin', toFailure(problem(500, null, { reasonCode: 'sdap.access.deny.insufficient_privilege' })))).toBe('admin');
+    });
   });
 
   it('an auth error is a sign-in failure; a network error is neither', () => {
