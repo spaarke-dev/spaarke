@@ -47,3 +47,11 @@ Owner (round 122, 2026-10-22): "the access should match the 'parent'". The case:
   - Existing: the `AccessInheritance` record and the round 87 rule.
   - Extension: a field on that record, so no new column or service.
   - Cost of doing nothing: owner round 122 is unmet, and a linked email stays Restricted forever.
+
+## 5. Built (PR #2234, merged 230302c307, 2026-10-22)
+
+- **Reviews:** word-add-in approved its scope, and its F1 is fixed. Two UAC adversarial passes ACCEPT. Fix round 1 covered word-add-in F1, a failed walk that was never retried, the field-security check now enforced in code, the copy constructor dropping the marker, and the docs. Fix round 2 covered "not secured" as a refusal that is not carried, the marker kept only for the same own value, and the doc notes.
+- **Checks:** BFF and sln builds 0/0. ArchTests 1352/1352. Both integration suites have 0 failures. Publish +10,412 B. All mutants killed.
+- **Known limits:** recorded in I-19 and the PR body (K2, K4, K5, K6, the single-attachment case, and `chain_own_narrowing`). A BFF restart is needed after reverting the field-security script.
+- **Deploy:** batched with the #2237 fix through R3, with the owner's go. Dev has the precondition (`Set-DocumentNarrowingFieldSecurity.ps1` applied) and 0 affected rows.
+- **Server gate after deploy:** the `secure-child-reconciliation` run report shows `releaseRefusedLinkColumnsNotSecured = 0` and no new exception class.
