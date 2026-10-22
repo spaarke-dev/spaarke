@@ -139,6 +139,20 @@ internal static class ExternalDocumentNarrowing
         return new DocumentNarrowingRow(id, own, FetchLink(row, RelatedCommunicationAttribute), FetchLink(row, ParentDocumentAttribute));
     }
 
+    /// <summary>
+    /// Owner round 122: one SDK row (a <c>QueryExpression</c> answer, as the reconciler reads documents): <see cref="FromFetch"/>
+    /// over its attributes, keyed by logical name, with its id. A column the read did not select reads as "not set".
+    /// </summary>
+    internal static DocumentNarrowingRow FromEntity(Entity row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        var attributes = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var attribute in row.Attributes)
+            attributes[attribute.Key] = attribute.Value;
+        attributes[DocumentPkField] = row.Id;
+        return FromFetch(attributes);
+    }
+
     private static Guid FetchLink(IReadOnlyDictionary<string, object?> row, string attribute)
     {
         if (!row.TryGetValue(attribute, out var raw) || raw is null)
@@ -204,56 +218,10 @@ internal static class ExternalDocumentNarrowing
         // id is still decided, and two copies of one row decide alike.
         var decided = new Dictionary<DocumentNarrowingRow, DocumentNarrowingReason>();
         var communicationOf = new Dictionary<DocumentNarrowingRow, Guid>();
-        var pending = new Dictionary<DocumentNarrowingRow, (Guid Next, HashSet<Guid> Visited)>();
-        // Every row already in hand: a parent that is on the same page, or was read at an earlier hop, is not read again.
-        var known = new Dictionary<Guid, DocumentNarrowingRow>();
 
         var input = rows.Distinct().ToList();
-        foreach (var row in input.Where(r => r.DocumentId != Guid.Empty && r.DocumentId != UnreadableLink))
-            known.TryAdd(row.DocumentId, row);
-
-        foreach (var row in input)
-        {
-            if (row.Own != DocumentPermission.NotNarrowed)
-            {
-                decided[row] = row.Own == DocumentPermission.Restricted
-                    ? DocumentNarrowingReason.OwnRestricted
-                    : DocumentNarrowingReason.OwnUnreadable;
-                continue;
-            }
-
-            var visited = new HashSet<Guid>();
-            if (row.DocumentId != Guid.Empty)
-                visited.Add(row.DocumentId);
-            Step(row, row, hop: 0, visited);
-        }
-
-        var hopLevels = 0;
-        for (var hop = 1; hop <= MaxHops && pending.Count > 0; hop++)
-        {
-            var unread = pending.Values.Select(p => p.Next).Where(id => !known.ContainsKey(id)).Distinct().ToList();
-            if (unread.Count > 0)
-                hopLevels++;
-            foreach (var parent in await ReadDocumentsByIdAsync(unread, query, ct).ConfigureAwait(false))
-                known.TryAdd(parent.DocumentId, parent);
-
-            var current = pending;
-            pending = new Dictionary<DocumentNarrowingRow, (Guid Next, HashSet<Guid> Visited)>();
-            foreach (var (subject, walk) in current)
-            {
-                if (!known.TryGetValue(walk.Next, out var ancestor))
-                {
-                    decided[subject] = DocumentNarrowingReason.ParentNotFound;
-                    continue;
-                }
-
-                Step(subject, ancestor, hop, walk.Visited);
-            }
-        }
-
-        // Defensive: the loop above decides every walk by MaxHops (Step refuses a hop past it).
-        foreach (var subject in pending.Keys)
-            decided[subject] = DocumentNarrowingReason.ChainTooLong;
+        var hopLevels = await WalkChainsAsync(
+            input, (ids, c) => ReadDocumentsByIdAsync(ids, query, c), Visit, End, ct).ConfigureAwait(false);
 
         // The communication leg, for the subjects whose whole walk passed (a hidden walk needs no communication read).
         var linked = communicationOf.Where(kv => !decided.ContainsKey(kv.Key)).ToList();
@@ -271,16 +239,20 @@ internal static class ExternalDocumentNarrowing
 
         return new DocumentNarrowingResult(decided, faulted: false, counter.Cost(input.Count, hopLevels));
 
-        // One node of a subject's chain: the subject itself (hop 0) or the ancestor reached at `hop`. The ancestor leg checks
-        // EVERY node to the top of the chain; the communication leg takes the FIRST link found.
-        void Step(DocumentNarrowingRow subject, DocumentNarrowingRow node, int hop, HashSet<Guid> visited)
+        // One node of a subject's chain: the subject itself (hop 0) or the ancestor reached at `hop`. The own leg (hop 0) and
+        // the ancestor leg check EVERY node to the top of the chain; the communication leg takes the FIRST link found.
+        bool Visit(DocumentNarrowingRow subject, DocumentNarrowingRow node, int hop)
         {
-            if (hop > 0 && node.Own != DocumentPermission.NotNarrowed)
+            if (node.Own != DocumentPermission.NotNarrowed)
             {
-                decided[subject] = node.Own == DocumentPermission.Restricted
-                    ? DocumentNarrowingReason.AncestorRestricted
-                    : DocumentNarrowingReason.AncestorUnreadable;
-                return;
+                decided[subject] = (hop, node.Own) switch
+                {
+                    (0, DocumentPermission.Restricted) => DocumentNarrowingReason.OwnRestricted,
+                    (0, _) => DocumentNarrowingReason.OwnUnreadable,
+                    (_, DocumentPermission.Restricted) => DocumentNarrowingReason.AncestorRestricted,
+                    _ => DocumentNarrowingReason.AncestorUnreadable,
+                };
+                return false;
             }
 
             if (!communicationOf.ContainsKey(subject))
@@ -288,42 +260,178 @@ internal static class ExternalDocumentNarrowing
                 if (node.Communication == UnreadableLink)
                 {
                     decided[subject] = DocumentNarrowingReason.LinkUnreadable;
-                    return;
+                    return false;
                 }
 
                 if (node.Communication != Guid.Empty)
                     communicationOf[subject] = node.Communication; // the first link found decides the communication leg
             }
 
+            return true;
+        }
+
+        // The walk ended without a node deciding the subject.
+        void End(DocumentNarrowingRow subject, DocumentNarrowingReason? unknowable)
+        {
+            if (unknowable is { } why)
+                decided[subject] = why;
+            else if (!communicationOf.ContainsKey(subject))
+                decided[subject] = DocumentNarrowingReason.Visible; // the top, no Restricted ancestor and no link anywhere
+            // otherwise: the top with a link — the communication leg decides it above
+        }
+    }
+
+    /// <summary>
+    /// THE walk up a document's parent chain (task 188), shared by the narrowing (<see cref="DecideAsync"/>) and the
+    /// communication-link walk (owner round 122, <see cref="FindCommunicationLinksAsync"/>): each subject itself (hop 0),
+    /// then its <c>sprk_parentdocument</c>, grandparent and great-grandparent, at most <see cref="MaxHops"/> hops.
+    /// </summary>
+    /// <remarks>
+    /// Each hop level is ONE batched read (<paramref name="read"/>) over the DISTINCT parents still pending that are not in
+    /// hand: a subject, or a parent read at an earlier hop, is not read again. A chain cannot be known when a parent link is
+    /// unreadable, a parent does not come back, the chain loops back to a node already on it, or it needs a hop past
+    /// <see cref="MaxHops"/>.
+    /// </remarks>
+    /// <param name="subjects">The documents to walk (distinct).</param>
+    /// <param name="read">Reads the parents of one hop level. A failed read THROWS, and so does this walk.</param>
+    /// <param name="visit">Called for each node of a subject's chain in order (the subject itself at hop 0): false when it has
+    /// decided the subject (its walk stops there), true to go on up.</param>
+    /// <param name="end">Called once for each subject the visitor did not stop: <see langword="null"/> when its chain reached
+    /// a node with no parent; otherwise why the chain cannot be known (<see cref="DocumentNarrowingReason.ParentUnreadable"/>,
+    /// <see cref="DocumentNarrowingReason.ParentNotFound"/>, <see cref="DocumentNarrowingReason.Cycle"/>,
+    /// <see cref="DocumentNarrowingReason.ChainTooLong"/>).</param>
+    /// <returns>The hop levels that needed a read.</returns>
+    private static async Task<int> WalkChainsAsync(
+        IReadOnlyList<DocumentNarrowingRow> subjects, DocumentRowReader read,
+        Func<DocumentNarrowingRow, DocumentNarrowingRow, int, bool> visit,
+        Action<DocumentNarrowingRow, DocumentNarrowingReason?> end, CancellationToken ct)
+    {
+        var pending = new Dictionary<DocumentNarrowingRow, (Guid Next, HashSet<Guid> Visited)>();
+        // Every row already in hand: a parent that is on the same page, or was read at an earlier hop, is not read again.
+        var known = new Dictionary<Guid, DocumentNarrowingRow>();
+        foreach (var row in subjects.Where(r => r.DocumentId != Guid.Empty && r.DocumentId != UnreadableLink))
+            known.TryAdd(row.DocumentId, row);
+
+        foreach (var row in subjects)
+        {
+            var visited = new HashSet<Guid>();
+            if (row.DocumentId != Guid.Empty)
+                visited.Add(row.DocumentId);
+            Step(row, row, hop: 0, visited);
+        }
+
+        var hopLevels = 0;
+        for (var hop = 1; hop <= MaxHops && pending.Count > 0; hop++)
+        {
+            var unread = pending.Values.Select(p => p.Next).Where(id => !known.ContainsKey(id)).Distinct().ToList();
+            if (unread.Count > 0)
+                hopLevels++;
+            foreach (var parent in await read(unread, ct).ConfigureAwait(false))
+                known.TryAdd(parent.DocumentId, parent);
+
+            var current = pending;
+            pending = new Dictionary<DocumentNarrowingRow, (Guid Next, HashSet<Guid> Visited)>();
+            foreach (var (subject, walk) in current)
+            {
+                if (!known.TryGetValue(walk.Next, out var ancestor))
+                {
+                    end(subject, DocumentNarrowingReason.ParentNotFound);
+                    continue;
+                }
+
+                Step(subject, ancestor, hop, walk.Visited);
+            }
+        }
+
+        // Defensive: the loop above ends every walk by MaxHops (Step refuses a hop past it).
+        foreach (var subject in pending.Keys)
+            end(subject, DocumentNarrowingReason.ChainTooLong);
+
+        return hopLevels;
+
+        void Step(DocumentNarrowingRow subject, DocumentNarrowingRow node, int hop, HashSet<Guid> visited)
+        {
+            if (!visit(subject, node, hop))
+                return;
+
             if (node.Parent == Guid.Empty)
             {
-                // The top of the chain, and no Restricted ancestor on the way. With no link anywhere the document is visible;
-                // with one, the communication leg decides it below.
-                if (!communicationOf.ContainsKey(subject))
-                    decided[subject] = DocumentNarrowingReason.Visible;
+                end(subject, null); // the top of the chain
                 return;
             }
 
             if (node.Parent == UnreadableLink)
             {
-                decided[subject] = DocumentNarrowingReason.ParentUnreadable;
+                end(subject, DocumentNarrowingReason.ParentUnreadable);
                 return;
             }
 
             if (visited.Contains(node.Parent))
             {
-                decided[subject] = DocumentNarrowingReason.Cycle;
+                end(subject, DocumentNarrowingReason.Cycle);
                 return;
             }
 
             if (hop >= MaxHops)
             {
-                decided[subject] = DocumentNarrowingReason.ChainTooLong;
+                end(subject, DocumentNarrowingReason.ChainTooLong);
                 return;
             }
 
             visited.Add(node.Parent);
             pending[subject] = (node.Parent, visited);
+        }
+    }
+
+    /// <summary>
+    /// Owner round 122: the communication walk of leg 2 ALONE, for the reconciler that releases a provisional own narrowing
+    /// (<c>AccessInheritance.OwnPermissionOf</c>). For each row: the FIRST communication link on it, or up its
+    /// <c>sprk_parentdocument</c> chain within <see cref="MaxHops"/> hops, on <see cref="WalkChainsAsync"/>, the same walk
+    /// the narrowing takes.
+    /// </summary>
+    /// <remarks>
+    /// It decides nothing about visibility: no communication is read, and the own and ancestor legs are not applied (a
+    /// provisional <c>.eml</c> is itself Restricted until it is released). Fail closed for its caller: a link that is not a
+    /// GUID, an unreadable parent link, a parent that does not come back, a cycle and a chain that needs a fourth hop all
+    /// answer <see cref="DocumentCommunicationLink.Unknowable"/>, never a link. A failed read THROWS. Round 122 fix round 1
+    /// (F1): each answer carries the rows the walk passed through (<see cref="DocumentCommunicationLink.Path"/>), so the
+    /// caller can refuse a release past a document that a person narrowed. Collecting them changes nothing in the walk.
+    /// </remarks>
+    internal static async Task<IReadOnlyDictionary<DocumentNarrowingRow, DocumentCommunicationLink>> FindCommunicationLinksAsync(
+        IEnumerable<DocumentNarrowingRow> rows, DocumentRowReader read, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        ArgumentNullException.ThrowIfNull(read);
+        var found = new Dictionary<DocumentNarrowingRow, DocumentCommunicationLink>();
+        var paths = new Dictionary<DocumentNarrowingRow, List<DocumentNarrowingRow>>();
+        await WalkChainsAsync(
+            rows.Distinct().ToList(), read,
+            (subject, node, _) =>
+            {
+                var path = PathOf(subject);
+                path.Add(node); // the subject itself at hop 0, then each ancestor in order
+                if (node.Communication == UnreadableLink)
+                {
+                    found[subject] = new DocumentCommunicationLink(Guid.Empty, DocumentNarrowingReason.LinkUnreadable) { Path = path };
+                    return false;
+                }
+
+                if (node.Communication == Guid.Empty)
+                    return true; // no link here: go on up
+
+                // The first link found; the path ends at the document that carries it.
+                found[subject] = new DocumentCommunicationLink(node.Communication, null) { Path = path };
+                return false;
+            },
+            (subject, unknowable) => found[subject] = new DocumentCommunicationLink(Guid.Empty, unknowable) { Path = PathOf(subject) },
+            ct).ConfigureAwait(false);
+        return found;
+
+        List<DocumentNarrowingRow> PathOf(DocumentNarrowingRow subject)
+        {
+            if (!paths.TryGetValue(subject, out var path))
+                paths[subject] = path = new List<DocumentNarrowingRow>();
+            return path;
         }
     }
 
@@ -484,6 +592,30 @@ internal static class AppOnlyDocumentNarrowingExtensions
 /// narrowing without touching the assistant's. A failed read THROWS. Registered by <c>AddExternalAccess</c>.
 /// </summary>
 internal delegate Task<DocumentNarrowingResult> InternalRouteDocumentNarrowing(IReadOnlyCollection<Guid> documentIds, CancellationToken ct);
+
+/// <summary>
+/// Reads the documents of <paramref name="ids"/> (distinct, none empty) for one hop level of the parent-chain walk
+/// (<see cref="ExternalDocumentNarrowing.FindCommunicationLinksAsync"/>): the rows that come back, each with its own Access
+/// Permission and both links. A document that does not come back is left out. A failed read THROWS.
+/// </summary>
+internal delegate Task<IReadOnlyList<DocumentNarrowingRow>> DocumentRowReader(IReadOnlyList<Guid> ids, CancellationToken ct);
+
+/// <summary>
+/// Owner round 122: what the communication walk found for one document
+/// (<see cref="ExternalDocumentNarrowing.FindCommunicationLinksAsync"/>): the first communication link
+/// (<see cref="Communication"/>), none (both empty), or why the chain cannot be known (<see cref="Unknowable"/>).
+/// </summary>
+internal readonly record struct DocumentCommunicationLink(Guid Communication, DocumentNarrowingReason? Unknowable)
+{
+    /// <summary>
+    /// Round 122 fix round 1 (F1): the rows the walk passed through, in order: the document itself (hop 0), then each
+    /// ancestor up to and INCLUDING the one that carries the link (or, with no link, the last one it reached).
+    /// </summary>
+    internal IReadOnlyList<DocumentNarrowingRow> Path { get; init; } = [];
+
+    /// <summary>A link was found within the walk's bound. Only this releases a provisional own narrowing.</summary>
+    internal bool IsLinked => Communication != Guid.Empty && Unknowable is null;
+}
 
 /// <summary>A document's own Access Permission as the narrowing reads it.</summary>
 internal enum DocumentPermission

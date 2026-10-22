@@ -59,7 +59,8 @@ public class DocumentAccessPermissionWriterGuardTests
             "Task 189: the child-records create refresh (L1). Same decision, one update."),
         new Writer("src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs", "StageDocumentCommunicationFields",
             "spaarkeai-word-add-in-r1 task 130 (D7 T8): an Office email-derived document's own Restricted, set only by " +
-            "OfficeDocumentPersistence.ApplyEmailCommunicationOutcome together with AccessInheritance.OwnNarrowing(Restricted) " +
+            "OfficeDocumentPersistence.ApplyEmailCommunicationOutcome together with " +
+            "AccessInheritance.OwnNarrowingUntilEmailIdentified(Restricted) (provisional, owner round 122) " +
             "(CreateDocumentRequest.AccessInheritanceRecord). The stager writes both in the one create and refuses a value " +
             "without its record (DocumentCommunicationFieldsStagingTests)."),
     };
