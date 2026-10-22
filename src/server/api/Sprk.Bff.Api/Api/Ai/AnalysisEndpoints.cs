@@ -892,6 +892,15 @@ public static class AnalysisEndpoints
         // schema uses sprk_* property names natively — typed Choice coercion for
         // sprk_documenttype + a computed search profile).
         var fields = BuildDocumentProfileFields(documentId, aiOutput, docText.FileName, parentEntity, logger);
+        if (fields.Count == 0)
+        {
+            // #2239: no profile column mapped (e.g. a misconfigured output schema) is a failed profile, not a success —
+            // the same rule the app-only and Compose consumers apply. Nothing is written and nothing is indexed.
+            logger.LogWarning(
+                "Document {DocumentId} profile — the action produced no mappable profile fields; nothing written", documentId);
+            yield return AnalysisStreamChunk.FromError("AI analysis produced no profile fields.");
+            yield break;
+        }
 
         logger.LogInformation(
             "Document {DocumentId} profile — mapped {FieldCount} fields for update: {Fields}",
