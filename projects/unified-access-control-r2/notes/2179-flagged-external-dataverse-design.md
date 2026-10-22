@@ -526,3 +526,19 @@ Overall: roughly L/XL (about 8–12 agent-days including review loops). BFF-touc
 - **Q3:** internal-only passes to records under or about a hidden record, using the SPA's exact rule.
 - **Q4:** about 2 minutes is accepted for changes made outside the product.
 - **Q5:** a scheduled BFF job moves a newly flagged user automatically, under the round 115 safeguards: one-way only, and it acts only on a flag read as definitely true. It alerts only when a move fails. This replaces the operator script for moving in.
+
+## Carried-in question answered (main session, 2026-10-21): scorecard, Insights and Workspace AI
+
+The POML's open question: do scorecard grades, `InsightsSearchEndpoint` and `WorkspaceAiEndpoints` count as internal-only for a flagged-external systemuser? **Answer: no new BFF gate on any of them.** None returns a class of data on round 113's internal-only list that 191's Dataverse enforcement or the existing trims don't already withhold. Facts are from `origin/master`, read-only, 2026-10-21.
+
+| Surface | What it returns | Why no new gate |
+|---|---|---|
+| Scorecard: `POST /api/matters/{id}/recalculate-grades`, `POST /api/projects/{id}/recalculate-grades` (`ScorecardCalculatorEndpoints.cs:39`, `:60`) | Grades only. | **Record:** the gate is `FinanceAuthorizationFilter`'s Read check, made with the caller's own token (`FinanceAuthorizationFilter.cs:330`, no app-only branch). A Restricted or secure matter therefore follows 191's Dataverse enforcement automatically.<br>**Data:** the grades are columns on the same matter or project row, which the user reads directly anyway.<br>**Callers:** MDA web resources only. |
+| Insights: `POST /api/insights/search`, `/ask` and `/assistant/query` | Document names, snippets, a summary. | **Subject:** gated by the caller's Read (task 163).<br>**Documents:** every one passes `RetrievalAccessTrim.SearchReadableAsync` (`InsightsOrchestrator.cs:969`): one read as the caller (task 176), then the D7 narrowing for a caller who is not an internal systemuser (task 188 round 3, `RetrievalAccessTrim.cs:20-26`). Restricted documents and documents derived from internal-only communications are withheld.<br>**Index:** `IndexRetrieveNode` rows are trimmed the same way (176 fix round 1). |
+| Workspace AI: `POST /api/workspace/ai/summary` (`WorkspaceAiEndpoints.cs:30`) | An AI summary built from the record's columns; for a matter, that includes spend and budget. | **Documents:** narrowed (`InternalPlaneDocumentNarrowing`).<br>**Records:** the caller's Read decides, so 191 enforcement carries over.<br>**Spend:** spend and budget are not internal-only under round 113. Under the round-114 visibility target, a flagged-external user who sees a matter sees its row, and these columns are plain (not field-secured) columns on that row. |
+
+- **Procedure files.** They live in the ebilling file store, not in the RAG index or the `sprk_document` table. None of the three surfaces reads them. T191 still checks that no Procedure file is indexed, and if one ever is, the trim must hide it (§3.8).
+- **Spend for flagged-external users is ebilling's call, not a route gate.** Ebilling's step 0 refuses flagged-external callers on `/api/finance` (on `origin/work/ebilling-r1` only, `FinanceAuthorizationFilter.cs:378-390`). If ebilling also wants matter spend hidden from them, the mechanism has to be field security on the spend columns. A route gate would leave the same values visible in the model-driven app and in this summary. Ebilling has the facts; the decision stays theirs.
+- **Correction to the inventory agent.** It reported Insights search as having "no per-document check". That is wrong: the code above shows the trim. The inventory is not cited further.
+
+T191a (spikes) is unblocked.
