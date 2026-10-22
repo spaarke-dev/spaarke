@@ -738,7 +738,8 @@ internal static class InheritedAccessPermission
         /// on every table, the owner and the creator) and the table-name check. Not <see cref="AccessTables"/>,
         /// <see cref="SecureRootColumns"/> or <see cref="AccessColumns"/>: what the person may write there is Dataverse's
         /// call (<c>sprk_accesspermission</c> on a matter stays editable by a Write holder;
-        /// <c>scripts/Set-SecureFlagFieldSecurity.ps1</c>).
+        /// <c>scripts/Set-SecureFlagFieldSecurity.ps1</c>). Only the field-mapping push may pass it (#2257 fix round 3;
+        /// enforced by ArchTest <c>RefuseAppOnlyWriteCallerIdentityGuardTests</c>).
         /// </summary>
         Caller,
     }
