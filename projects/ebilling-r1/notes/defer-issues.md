@@ -1051,7 +1051,8 @@ Each restamps afterwards, but none refuses any of these:
 
 **Description**: 119's second adversarial pass found two native surfaces that still show the detail to anyone with Read on the row:
 - the `sprk_invoicesubmission` main form, which binds `sprk_findingsjson`;
-- the reject Decision Record, which copies plan sentences into `sprk_factsnapshot` (`InvoiceSubmissionAfterSteps.cs:1429`).
+- the reject Decision Record, which copies plan sentences into `sprk_factsnapshot` (`InvoiceSubmissionAfterSteps.cs:1429`);
+- the override and return Decision Records, which copy `reasons[].sentence` the same way (`SubmissionOverrideService.cs:1056`; found in 119 round 2, added 2026-10-21).
 
 The BFF routes (`/review`, `/blocked`) are covered by 119.
 
