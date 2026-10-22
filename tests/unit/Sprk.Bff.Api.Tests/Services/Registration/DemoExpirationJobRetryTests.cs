@@ -362,6 +362,7 @@ public class DemoExpirationJobRetryTests
                 NullLogger<RegistrationDataverseService>.Instance,
                 new ContactIdentityBinderFactory(
                     Mock.Of<IHttpClientFactory>(), NullLoggerFactory.Instance, Tenants(CustomerTenant), new FakeTimeProvider(Now)),
+                InertOwnEnvironmentBinder(),
                 new NullMembershipCacheInvalidator(NullLogger<NullMembershipCacheInvalidator>.Instance)),
             _email.Object,
             TestSpeOwnership.AllowAll(graphFactory.Object),

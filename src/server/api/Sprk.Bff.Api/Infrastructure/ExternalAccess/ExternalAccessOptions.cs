@@ -42,8 +42,11 @@ public sealed class ExternalAccessOptions
     /// <summary>
     /// ADR-028 A9 (r3 task 047): the business unit whose DEFAULT team owns every contact the registration route
     /// (<c>POST /api/v1/external/registration</c>) creates. Absent means no registration create: the route answers 500
-    /// <c>registration_owner_unconfigured</c> and creates nothing (binding an existing contact needs no owner). App Service
-    /// form: <c>ExternalAccess__CustomerBusinessUnitId</c>. A value that is not a GUID fails startup.
+    /// <c>registration_owner_unconfigured</c> and creates nothing (binding an existing contact needs no owner). ISS-005
+    /// (#1673): the same unit's default team owns the contact a workforce user's first sign-in creates and the contact a
+    /// licensed user's link creates, and absent refuses those creates the same way (the sign-in answers 500 with the same
+    /// reason code; the link is not made). App Service form: <c>ExternalAccess__CustomerBusinessUnitId</c>. A value that is
+    /// not a GUID fails startup.
     /// </summary>
     public Guid? CustomerBusinessUnitId { get; set; }
 

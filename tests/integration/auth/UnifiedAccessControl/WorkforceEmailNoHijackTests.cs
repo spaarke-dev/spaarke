@@ -368,7 +368,8 @@ public class WorkforceEmailNoHijackTests
     public async Task AnEmptyCustomerTenantSetting_BindsAndCreatesForNobody()
     {
         _store.AddContact(ContactA, email: Email);
-        var binder = new ContactIdentityBinder(_store, Tenants(), new Microsoft.Extensions.Time.Testing.FakeTimeProvider(Now), _log);
+        var binder = new ContactIdentityBinder(_store, Tenants(), new Microsoft.Extensions.Time.Testing.FakeTimeProvider(Now), _log,
+            IdentityBinding.IdentityBindingTestKit.NoOwnerUnderTest);
 
         var result = await Resolver(binder).ResolveAsync(WorkforceUser(Caller, CustomerTenant, email: Email), CancellationToken.None);
 

@@ -624,6 +624,7 @@ public sealed partial class AccessCacheInvalidationTests : IClassFixture<Provisi
                     factory, NullLoggerFactory.Instance,
                     IdentityBinding.IdentityBindingTestKit.Tenants(IdentityBinding.IdentityBindingTestKit.CustomerTenant),
                     TimeProvider.System),
+                IdentityBinding.IdentityBindingTestKit.InertOwnEnvironmentBinder(),
                 invalidator);
         }
 

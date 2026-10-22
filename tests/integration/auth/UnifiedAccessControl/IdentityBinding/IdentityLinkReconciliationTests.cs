@@ -808,6 +808,33 @@ public class IdentityLinkReconciliationTests
                 new[] { DemoEnvironment.ToUpperInvariant(), null, "  ", OwnEnvironment, OtherDemoEnvironment })
             .Should().Equal(DemoEnvironment, OtherDemoEnvironment);
 
+    // ISS-005 (#1673 review F1): the own environment is excluded however it is spelled. Reconciled through a factory binder
+    // (owner policy NoneForForeignEnvironment) it would create ownerless contacts in this environment.
+    private const string OwnEnvironmentApi = "https://spaarkedev1.api.crm.dynamics.com";
+
+    [Theory]
+    [InlineData(OwnEnvironment, OwnEnvironmentApi)]
+    [InlineData(OwnEnvironment, OwnEnvironmentApi + "/")]
+    [InlineData(OwnEnvironmentApi, OwnEnvironment)]
+    [InlineData(OwnEnvironment, "HTTPS://SPAARKEDEV1.API.CRM.DYNAMICS.COM/api/data/v9.2/")]
+    public void ProvisioningTargetUrls_ExcludeTheOwnEnvironment_InEitherSpelling_AndKeepTheOthers(string own, string ownSpelledOtherwise)
+        => IdentityLinkReconciliationJob.ProvisioningTargetUrls(
+                own,
+                ownSpelledOtherwise,
+                new[] { DemoEnvironment, ownSpelledOtherwise, OtherDemoEnvironment, own })
+            .Should().Equal(DemoEnvironment, OtherDemoEnvironment);
+
+    [Fact]
+    public async Task TheRegistrationDefault_NamingTheOwnEnvironmentWithAnApiHost_IsNotAProvisioningTarget()
+    {
+        // DATAVERSE_URL = the .api. spelling of Dataverse:ServiceUrl. Before the fix it was a target: its binder came from the
+        // factory (no store here -> "could not be reached"), and in production would create ownerless contacts.
+        var result = await RunAsync(writes: true, targets: new(), registrationEnvironment: OwnEnvironmentApi);
+
+        TargetEnvironments(result).Should().BeEmpty("the own environment is reconciled through the DI binder only");
+        result.Success.Should().BeTrue(result.ErrorMessage);
+    }
+
     // ── Shipping state ───────────────────────────────────────────────────────────────────────────────
 
     /// <remarks>
@@ -853,7 +880,8 @@ public class IdentityLinkReconciliationTests
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
 
         var services = new ServiceCollection();
-        services.AddSingleton(Binder(_store));
+        var ownBinder = Binder(_store);
+        services.AddSingleton(ownBinder);
         if (targets is not null)
         {
             services.AddSingleton(new RegistrationDataverseService(
@@ -863,6 +891,7 @@ public class IdentityLinkReconciliationTests
                 Mock.Of<IHttpClientFactory>(f => f.CreateClient(It.IsAny<string>()) == new HttpClient()),
                 NullLogger<RegistrationDataverseService>.Instance,
                 new PerEnvironmentBinderFactory(targets),
+                ownBinder,
                 // Task 132: the team/BU write-path eviction hook; this suite writes no team or BU.
                 new Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator(
                     NullLogger<Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator>.Instance)));

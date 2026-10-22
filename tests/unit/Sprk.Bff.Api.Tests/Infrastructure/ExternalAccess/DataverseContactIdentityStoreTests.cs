@@ -819,6 +819,53 @@ public class DataverseContactIdentityStoreTests
             .Should().Throw<ArgumentException>();
     }
 
+    // ── ISS-005 (#1673): the Workforce plane's creates carry the owner; no other non-home plane does ──────────────
+
+    [Fact]
+    public void TheWorkforceCreate_CarriesTheOwnerBind_AndNoHomeTenant()
+    {
+        var payload = DataverseContactIdentityStore.CreatePayload(Oid, IdentityPlaneMarker.Workforce,
+            new NewContactDetails("Pat", "Example", "pat@customer.example") { OwningTeamId = Team });
+
+        payload["ownerid@odata.bind"].Should().Be("/teams(7ea70000-0000-4000-8000-7ea700007ea7)");
+        payload["sprk_identityplane"].Should().Be((int)IdentityPlaneMarker.Workforce);
+        payload.Keys.Should().NotContain("sprk_externaltenantid").And.NotContain("department");
+    }
+
+    [Fact]
+    public void TheWorkforceCreate_WithNoOwner_IsStillBuilt_ForABinderOverAnotherEnvironment()
+    {
+        // The payload builder serves BOTH kinds of binder. This is the one built for a binder over ANOTHER environment
+        // (ContactCreateOwner.NoneForForeignEnvironment, ContactIdentityBinderFactory only; ownerless by design, tracked in #2270).
+        // A binder over this BFF's own environment always carries an owner: TheWorkforceCreate_CarriesTheOwnerBind_AndNoHomeTenant
+        // above, and ContactIdentityBinderOwnerTeamTests / RegistrationContactLinkTests through the binder.
+        var payload = DataverseContactIdentityStore.CreatePayload(Oid, IdentityPlaneMarker.Workforce,
+            new NewContactDetails("Pat", "Example", "pat@customer.example"));
+
+        payload.Keys.Should().NotContain("ownerid@odata.bind");
+    }
+
+    [Fact]
+    public void TheWorkforceCreate_RefusesAnEmptyOwnerTeam()
+        => FluentActions.Invoking(() => DataverseContactIdentityStore.CreatePayload(Oid, IdentityPlaneMarker.Workforce,
+                new NewContactDetails("Pat", "Example", "pat@customer.example") { OwningTeamId = Guid.Empty }))
+            .Should().Throw<InvalidOperationException>().WithMessage("*refusing to create*");
+
+    [Fact]
+    public void TheExternalPlaneCreate_StillRefusesAnOwnerAndAHomeTenant()
+    {
+        // Must-not-fire for the relaxation: only WorkforceHome and Workforce may carry an owner; External (CIAM) may not.
+        var ownerOnExternal = new NewContactDetails("P", "E", "p@x.example") { OwningTeamId = Team };
+        var tenantOnExternal = new NewContactDetails("P", "E", "p@x.example") { ExternalTenantId = HomeTenant };
+
+        FluentActions.Invoking(() => DataverseContactIdentityStore.CreatePayload(Oid, IdentityPlaneMarker.External, ownerOnExternal))
+            .Should().Throw<ArgumentException>().WithMessage("*carries an owner*");
+        FluentActions.Invoking(() => DataverseContactIdentityStore.CreatePayload(Oid, IdentityPlaneMarker.External, tenantOnExternal))
+            .Should().Throw<ArgumentException>();
+        DataverseContactIdentityStore.CreatePayload(Oid, IdentityPlaneMarker.External, new NewContactDetails("P", "E", "p@x.example"))
+            .Keys.Should().NotContain("ownerid@odata.bind");
+    }
+
     [Fact]
     public void TheHomeBind_WritesBindingMirrorPlaneAndTenant_InOneRequest()
         => DataverseContactIdentityStore.HomeBindPayload(HomeTenant, Oid).Should().BeEquivalentTo(

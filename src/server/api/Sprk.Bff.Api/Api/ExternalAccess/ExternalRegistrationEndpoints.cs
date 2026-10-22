@@ -45,7 +45,7 @@ public static class ExternalRegistrationEndpoints
     public const string ReasonEmailMissing = "sdap.access.registration_email_missing";
 
     /// <summary><c>ExternalAccess:CustomerBusinessUnitId</c> is absent (or has no single default team): nothing created.</summary>
-    public const string ReasonOwnerUnconfigured = "sdap.access.registration_owner_unconfigured";
+    public const string ReasonOwnerUnconfigured = ContactBindingDecision.DenyOwnerUnconfigured;
 
     /// <summary>The caller is not a WorkforceHome identity (a Spaarke-tenant workforce token or a CIAM token).</summary>
     public const string ReasonHomeIdentityRequired = "sdap.access.registration_home_identity_required";

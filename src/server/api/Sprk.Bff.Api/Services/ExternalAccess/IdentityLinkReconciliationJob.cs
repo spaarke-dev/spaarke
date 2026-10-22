@@ -180,7 +180,10 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
     /// The provisioning-target environments to reconcile besides this BFF's own: <paramref name="registrationEnvironment"/>
     /// (<c>DATAVERSE_URL</c>) and every <paramref name="registryEnvironments"/> URL, trailing slash trimmed, blanks
     /// dropped, de-duplicated case-insensitively, and never <paramref name="ownEnvironment"/> (already reconciled
-    /// through the DI binder). Pure.
+    /// through the DI binder). "Never the own environment" is <see cref="RegistrationDataverseService.IsSameEnvironment"/>,
+    /// not a string match: the same environment spelled with an <c>.api.</c> host, a different case or a path is still
+    /// the own environment (ISS-005, #1673 review F1 - reconciled through a factory binder it would create ownerless
+    /// contacts). A URL that cannot be read is kept as a target and fails visibly when it is reconciled. Pure.
     /// </summary>
     public static IReadOnlyList<string> ProvisioningTargetUrls(
         string? ownEnvironment, string? registrationEnvironment, IEnumerable<string?> registryEnvironments)
@@ -188,12 +191,11 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
         ArgumentNullException.ThrowIfNull(registryEnvironments);
         static string? Normalise(string? url) => string.IsNullOrWhiteSpace(url) ? null : url.Trim().TrimEnd('/');
 
-        var own = Normalise(ownEnvironment);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var targets = new List<string>();
         foreach (var candidate in new[] { registrationEnvironment }.Concat(registryEnvironments).Select(Normalise))
         {
-            if (candidate is null || string.Equals(candidate, own, StringComparison.OrdinalIgnoreCase) || !seen.Add(candidate))
+            if (candidate is null || RegistrationDataverseService.IsSameEnvironment(candidate, ownEnvironment) || !seen.Add(candidate))
             {
                 continue;
             }

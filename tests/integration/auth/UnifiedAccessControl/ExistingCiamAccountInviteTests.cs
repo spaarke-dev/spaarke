@@ -449,7 +449,7 @@ public class ExistingCiamAccountInviteTests
         _ciam.Failure = ObjectConflictOnProxyAddresses();
         var clock = new FakeTimeProvider(IdentityBindingTestKit.Now);
         var binder = new ContactIdentityBinder(_h.Identities, IdentityBindingTestKit.Tenants(IdentityBindingTestKit.CustomerTenant),
-            clock, NullLogger<ContactIdentityBinder>.Instance);
+            clock, NullLogger<ContactIdentityBinder>.Instance, IdentityBindingTestKit.NoOwnerUnderTest);
 
         await Invite(binder);
         var firstHash = _h.Identities.Contacts[contact].InviteCodeHash;
