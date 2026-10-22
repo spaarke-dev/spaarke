@@ -589,7 +589,7 @@ public sealed class RuleSetEndpointsTests
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.SystemFailureReasonCode);
-        host.Access.Calls.Count(c => c.Set == "sprk_procedures").Should().BeLessOrEqualTo(RuleSetEndpoints.MaxProcedureRightsChecks);
+        host.Access.Calls.Count(c => c.Set == "sprk_procedures").Should().Be(0, "the cap is checked before any rights question");
     }
 
     [Fact(DisplayName = "081 uac r2 round 3 K2 must-not-fire: exactly the cap of distinct Procedures is answered in full")]
