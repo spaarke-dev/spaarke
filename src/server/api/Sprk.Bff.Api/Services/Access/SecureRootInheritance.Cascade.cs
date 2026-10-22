@@ -273,9 +273,26 @@ internal sealed record AccessInheritance(
     /// identified. It is released (counts as no own value) once the document is linked to a communication, and dropped by
     /// any other change of the own value. Set ONLY by <see cref="OwnNarrowingUntilEmailIdentified"/> and read back by
     /// <see cref="Parse"/>: the setter is private, and <c>AccessInheritanceProvisionalMarkerGuardTests</c> refuses any other
-    /// assignment. A later record keeps it only through <see cref="KeepingProvisionalWith"/>.
+    /// assignment. A later record keeps it only through <see cref="KeepingProvisionalWith"/>: every <c>with</c> drops it
+    /// (the copy constructor below).
     /// </summary>
     internal bool OwnProvisional { get; private init; }
+
+    /// <summary>
+    /// Round 122 fix round 1 (K3): the copy constructor every <c>record with { … }</c> runs. It copies the facts and DROPS
+    /// <see cref="OwnProvisional"/>, so a <c>with</c> can never carry the marker by accident; <see cref="KeepingProvisionalWith"/>
+    /// sets it again, explicitly.
+    /// </summary>
+    private AccessInheritance(AccessInheritance original)
+    {
+        ArgumentNullException.ThrowIfNull(original);
+        Parents = original.Parents;
+        FloorSecure = original.FloorSecure;
+        FloorPermission = original.FloorPermission;
+        OwnSecure = original.OwnSecure;
+        OwnPermission = original.OwnPermission;
+        // OwnProvisional is deliberately not copied.
+    }
 
     /// <summary>The column (Multiple lines of text) on <c>sprk_workassignment</c> and <c>sprk_project</c> (field-secured), and on
     /// <c>sprk_document</c> (task 189; not secured, see the remarks).</summary>
@@ -455,15 +472,15 @@ internal sealed record AccessInheritance(
     /// <summary>
     /// Owner round 122: <paramref name="facts"/> with this record's <see cref="OwnProvisional"/> kept. The one way a later
     /// record carries the marker: the document rule calls it only while <see cref="OwnPermissionOf(int, int?, AccessInheritance?, int, bool, out bool)"/>
-    /// says the provisional narrowing still stands untouched.
+    /// says the provisional narrowing still stands untouched. It sets the marker explicitly (fix round 1, K3): a <c>with</c>
+    /// would drop it.
     /// </summary>
     internal AccessInheritance KeepingProvisionalWith(AccessInheritance facts)
     {
         ArgumentNullException.ThrowIfNull(facts);
-        return this with
+        return new AccessInheritance(facts.Parents, facts.FloorSecure, facts.FloorPermission, facts.OwnSecure, facts.OwnPermission)
         {
-            Parents = facts.Parents, FloorSecure = facts.FloorSecure, FloorPermission = facts.FloorPermission,
-            OwnSecure = facts.OwnSecure, OwnPermission = facts.OwnPermission,
+            OwnProvisional = OwnProvisional,
         };
     }
 }

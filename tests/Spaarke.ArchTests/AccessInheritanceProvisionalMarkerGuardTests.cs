@@ -15,7 +15,9 @@ namespace Spaarke.ArchTests;
 /// file:</para>
 /// <list type="bullet">
 /// <item>the marker is set to <c>true</c> only in <c>OwnNarrowingUntilEmailIdentified</c> (the factory);</item>
-/// <item>the only other assignment is <c>Parse</c> reading the stored value back (<c>= stored.OwnProvisional</c>);</item>
+/// <item>the only other assignments are <c>Parse</c> reading the stored value back (<c>= stored.OwnProvisional</c>) and
+/// <c>KeepingProvisionalWith</c> keeping the record's own marker (<c>= OwnProvisional</c>; fix round 1, K3: every
+/// <c>with</c> drops the marker, because the record's copy constructor does not copy it);</item>
 /// <item>no <c>with { … OwnProvisional … }</c> anywhere, the factory included;</item>
 /// <item>the factory is called only by <c>OfficeDocumentPersistence.ApplyEmailCommunicationOutcome</c> (write-path registry
 /// I-19, the one save-time writer).</item>
@@ -31,6 +33,7 @@ public class AccessInheritanceProvisionalMarkerGuardTests
     private const string RecordFile = "src/server/api/Sprk.Bff.Api/Services/Access/SecureRootInheritance.Cascade.cs";
     private const string Factory = "OwnNarrowingUntilEmailIdentified";
     private const string ParseMethod = "Parse";
+    private const string KeepMethod = "KeepingProvisionalWith";
     private const string OutcomeFile = "src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs";
     private const string OutcomeMethod = "ApplyEmailCommunicationOutcome";
 
@@ -43,6 +46,9 @@ public class AccessInheritanceProvisionalMarkerGuardTests
     private static readonly Regex ReadBack = new(
         @"\bOwnProvisional\s*=\s*stored\.OwnProvisional\b", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
+    private static readonly Regex KeepOwn = new(
+        @"\bOwnProvisional\s*=\s*OwnProvisional\b", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
     private static readonly Regex WithMarker = new(
         @"\bwith\s*\{[^}]*\bOwnProvisional\b", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
@@ -54,8 +60,8 @@ public class AccessInheritanceProvisionalMarkerGuardTests
 
     /// <summary>
     /// The marker writes in <paramref name="source"/> that are not sanctioned: every assignment, except (in the record file)
-    /// one <c>= true</c> in the factory and one <c>= stored.OwnProvisional</c> in <c>Parse</c>; and every <c>with</c> that
-    /// names the marker.
+    /// one <c>= true</c> in the factory, one <c>= stored.OwnProvisional</c> in <c>Parse</c> and one <c>= OwnProvisional</c> in
+    /// <c>KeepingProvisionalWith</c>; and every <c>with</c> that names the marker.
     /// </summary>
     internal static int ForgedMarkerWrites(string source, bool isRecordFile)
     {
@@ -66,8 +72,10 @@ public class AccessInheritanceProvisionalMarkerGuardTests
 
         var factory = DocumentCreateStagesCommunicationFieldsGuardTests.MethodBody(source, Factory);
         var parse = DocumentCreateStagesCommunicationFieldsGuardTests.MethodBody(source, ParseMethod);
+        var keep = DocumentCreateStagesCommunicationFieldsGuardTests.MethodBody(source, KeepMethod);
         var sanctioned = Math.Min(factory is null ? 0 : SetTrue.Matches(factory).Count, 1)
-                         + Math.Min(parse is null ? 0 : ReadBack.Matches(parse).Count, 1);
+                         + Math.Min(parse is null ? 0 : ReadBack.Matches(parse).Count, 1)
+                         + Math.Min(keep is null ? 0 : KeepOwn.Matches(keep).Count, 1);
         return forged - sanctioned;
     }
 
@@ -142,6 +150,12 @@ public class AccessInheritanceProvisionalMarkerGuardTests
                 return (new AccessInheritance(p, false, f, false, o) { OwnProvisional = stored.OwnProvisional }, false);
             }
 
+            private AccessInheritance(AccessInheritance original)
+            {
+                Parents = original.Parents;
+                OwnProvisional = original.OwnProvisional;
+            }
+
             internal AccessInheritance Forge() => this with { OwnProvisional = true };
             internal AccessInheritance Forge2() => this with { Parents = [], OwnProvisional = stored.OwnProvisional };
             internal AccessInheritance Forge3() => new(p, false, f, false, o) { OwnProvisional = true };
@@ -153,8 +167,9 @@ public class AccessInheritanceProvisionalMarkerGuardTests
             flag.OwnProvisional |= true;
             """;
 
-        // Forge: a with (assignment + with). Forge2: a with that copies the stored value (assignment + with). Forge3, Forge4: one each.
-        Assert.Equal(6, ForgedMarkerWrites(record, isRecordFile: true));
+        // The copy constructor copying the marker (K3): one. Forge: a with (assignment + with). Forge2: a with that copies the
+        // stored value (assignment + with). Forge3, Forge4: one each.
+        Assert.Equal(7, ForgedMarkerWrites(record, isRecordFile: true));
         Assert.Equal(4, ForgedMarkerWrites(elsewhere, isRecordFile: false));
     }
 
@@ -176,7 +191,17 @@ public class AccessInheritanceProvisionalMarkerGuardTests
                 return (new AccessInheritance(p, false, f, false, o) { OwnProvisional = stored.OwnProvisional }, false);
             }
 
-            internal AccessInheritance KeepingProvisionalWith(AccessInheritance facts) => this with { Parents = facts.Parents };
+            private AccessInheritance(AccessInheritance original)
+            {
+                Parents = original.Parents;
+            }
+
+            internal AccessInheritance KeepingProvisionalWith(AccessInheritance facts)
+            {
+                return new AccessInheritance(facts.Parents, false, f, false, o) { OwnProvisional = OwnProvisional };
+            }
+
+            internal AccessInheritance Copy() => this with { Parents = facts.Parents };
             internal bool SameAs(AccessInheritance other) => OwnProvisional == other.OwnProvisional;
             """;
         const string elsewhere = """

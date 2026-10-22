@@ -79,6 +79,26 @@ public class ProvisionalOwnNarrowingTests
         provisional.SameAs(AccessInheritance.Parse(provisional.Serialize()).Value).Should().BeTrue();
     }
 
+    [Fact]
+    public void AWithOnAProvisionalRecord_DropsTheMarker_OnlyKeepingProvisionalWithKeepsIt()
+    {
+        // Fix round 1 (K3): the record's copy constructor does not copy the marker, so no `with` can carry it by accident.
+        var provisional = AccessInheritance.OwnNarrowingUntilEmailIdentified(Restricted);
+
+        var copied = provisional with { FloorPermission = Limited };
+        var unchanged = provisional with { };
+
+        copied.OwnProvisional.Should().BeFalse("a with drops the marker");
+        copied.FloorPermission.Should().Be(Limited);
+        copied.OwnPermission.Should().Be(Restricted, "every other fact is copied");
+        unchanged.OwnProvisional.Should().BeFalse();
+        unchanged.Parents.Should().BeSameAs(provisional.Parents);
+        provisional.KeepingProvisionalWith(copied).OwnProvisional.Should().BeTrue("the one explicit way to keep it");
+        provisional.KeepingProvisionalWith(copied).FloorPermission.Should().Be(Limited);
+        AccessInheritance.OwnNarrowing(Restricted).KeepingProvisionalWith(copied).OwnProvisional.Should().BeFalse(
+            "it keeps THIS record's marker, never sets one");
+    }
+
     // ── Versions: an older or unknown record fails closed ───────────────────────────────────────────────────
 
     [Fact]
