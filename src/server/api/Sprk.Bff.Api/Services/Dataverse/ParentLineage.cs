@@ -801,6 +801,21 @@ internal static class InheritedAccessPermission
     /// A row decides who may read or write the field-secured binding, invite and access columns.</item>
     /// <item>#2253 fix round 2: every <see cref="PlatformSecurityTables"/> table (roles, privileges, field security profiles,
     /// shares, access team templates, hierarchy security).</item>
+    /// <item><c>sprk_recordtype_ref</c> (#2253 fix round 3, F3): the record-type catalogue. Its
+    /// <c>sprk_recordlogicalname</c> names the table a polymorphic regarding pair points at, and access decisions read it:
+    /// which root a record is filed under (<c>SecureRootInheritance.ReadRecordTypeAsync</c>), container resolution
+    /// (<c>RecordContainerResolver</c>), the No Access walls (<c>NoAccessEnforcementStore.ReadRecordTypeLogicalNameAsync</c>)
+    /// and which tables a field-mapping profile pushes between. It is reference data: no Spaarke writer and no playbook,
+    /// output mapping or field-mapping rule writes it (live dev, read-only, 2026-10-22), so the whole table is refused.</item>
+    /// <item>#2253 fix round 3 (K, the wider reader scan). <c>sprk_communicationparticipant</c>: the message-grain audience
+    /// index (ADR-048). Its rows are the candidate set a message fans out to (<c>CommunicationFanOutTargetingService</c>) and
+    /// the thread's participant roll-up (<c>ThreadResolver</c>). <c>sprk_communicationchannelref</c>: the binding of a thread
+    /// to its ACS chat thread (<c>sprk_externalref</c>); <c>MembershipReconciler</c> projects the thread's authorized set onto
+    /// the chat it names, so a re-pointed row would add one thread's audience to another chat. <c>sprk_specontainertypeconfig</c>
+    /// and <c>sprk_speenvironment</c>: which app registration, Key Vault secret and tenant act on a container type, and the
+    /// unit a type serves (<c>SpeAdminGraphService</c>, <c>ConfigEndpoints</c>). Each is written only by its typed writer
+    /// (the participant indexer, the thread key strategy, the SPE admin endpoints); no playbook, output mapping or
+    /// field-mapping rule writes them (live dev, read-only, 2026-10-22).</item>
     /// </list>
     /// </summary>
     internal static readonly IReadOnlySet<string> AccessTables = new HashSet<string>(
@@ -809,6 +824,11 @@ internal static class InheritedAccessPermission
         Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalOrganizationMembership.EntityLogicalName,
         Sprk.Bff.Api.Infrastructure.ExternalAccess.NoAccessListReader.EntityLogicalName,
         Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore.EntityLogicalName,
+        Sprk.Bff.Api.Services.Access.SecureRootInheritance.RecordTypeRefEntity,
+        Sprk.Bff.Api.Services.Communication.CommunicationFanOutTargetingService.ParticipantEntity,
+        Sprk.Bff.Api.Services.Communication.Membership.MembershipReconciler.ChannelRefEntity,
+        "sprk_specontainertypeconfig",
+        "sprk_speenvironment",
         "teammembership",
         "fieldpermission",
         .. PlatformSecurityTables,
@@ -873,6 +893,16 @@ internal static class InheritedAccessPermission
     /// (<see cref="Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.ContainerColumn"/>; its users' standing
     /// writer grants, <c>SpeContainerMembershipSync</c>); and (#2253 fix round 2) <c>name</c>, by which the Secure Record
     /// business unit is found (<c>SecureRecordOwnerTeam.BusinessUnitFilter</c>).</item>
+    /// <item>#2253 fix round 3 (K, the wider reader scan). <c>sprk_communication</c>: <c>sprk_isinternalonly</c>, which hides
+    /// a message from partners (<c>CommunicationAccessFilter.EvaluateMessage</c>, <c>CommunicationInternalOnlyFloor</c>).
+    /// <c>sprk_communicationthread</c>: <c>sprk_privacystate</c> (the Open / Private gate on fan-out and the partner read,
+    /// <c>CommunicationOpenThreadGate</c>) and <c>sprk_threadtype</c> (who reaches a Direct thread,
+    /// <c>DirectThreadAccessService</c>; its filing, <c>RecordThreadFiling</c>). <c>sprk_analysis</c>: every anchor lookup
+    /// (<c>AnalysisAuthorizationFilter.AnchorColumns</c>): the read rule requires Read on each populated anchor, and with none
+    /// the analysis becomes its creator's personal one. <c>sprk_communicationattachment</c>: the file pointer
+    /// <c>sprk_graphdriveid</c> / <c>sprk_graphitemid</c> and the links <c>sprk_communication</c> / <c>sprk_document</c>,
+    /// which decide which bytes the row names and which container it belongs with (<c>DocumentContainerRelocator</c>,
+    /// <c>RecordContainerResolver.CommunicationAttachmentItemRefusalAsync</c>).</item>
     /// </list>
     /// Data, not branching: a table with no entry has no such column.
     /// </summary>
@@ -928,6 +958,26 @@ internal static class InheritedAccessPermission
             {
                 Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.ContainerColumn,
                 Sprk.Bff.Api.Infrastructure.Dataverse.SecureRecordOwnerTeam.NameColumn,
+            },
+            [RecordThreadFiling.CommunicationTable] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                Sprk.Bff.Api.Services.Communication.CommunicationInternalOnlyFloor.InternalOnlyField,
+            },
+            [Sprk.Bff.Api.Services.Communication.CommunicationInternalOnlyFloor.ThreadEntity] = new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase)
+            {
+                Sprk.Bff.Api.Services.Communication.CommunicationInternalOnlyFloor.ThreadPrivacyField,
+                RecordThreadFiling.ThreadTypeColumn,
+            },
+            [Sprk.Bff.Api.Api.Filters.AnalysisAuthorizationFilter.AnalysisEntityLogicalName] = new HashSet<string>(
+                Sprk.Bff.Api.Api.Filters.AnalysisAuthorizationFilter.AnchorColumns, StringComparer.OrdinalIgnoreCase),
+            [Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator.AttachmentEntity] = new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase)
+            {
+                Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator.DriveColumn,
+                Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator.ItemColumn,
+                Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator.AttachmentCommunicationColumn,
+                Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator.AttachmentDocumentColumn,
             },
         };
 

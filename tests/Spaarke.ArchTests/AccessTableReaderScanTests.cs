@@ -12,7 +12,9 @@ namespace Spaarke.ArchTests;
 /// </summary>
 /// <remarks>
 /// <para><b>What is scanned.</b> The <c>.cs</c> files under the BFF's <c>Infrastructure/ExternalAccess</c>,
-/// <c>Services/Access</c>, <c>Services/ExternalAccess</c> and <c>Api/ExternalAccess</c>, line comments stripped. A table is
+/// <c>Services/Access</c>, <c>Services/ExternalAccess</c> and <c>Api/ExternalAccess</c>, and (#2253 fix round 3) every
+/// other folder that reads grant, membership, wall, container or secure-root data (<c>ScannedFolders</c>), line
+/// comments stripped. A table is
 /// named by: a string constant whose name ends in <c>EntityLogicalName</c>, <c>EntitySet</c>, <c>EntitySetName</c>,
 /// <c>LogicalName</c>, <c>Entity</c> or <c>Table</c>; a literal passed to <c>QueryExpression</c>, <c>LinkEntity</c>,
 /// <c>AddLink</c>, <c>RetrieveAsync</c>, <c>QueryAsync</c>, <c>CreateAsync</c>, <c>UpdateAsync</c> or <c>DeleteAsync</c>;
@@ -37,13 +39,44 @@ public class AccessTableReaderScanTests
             ["businessunit"] = "A business unit: its container and name are refused per column (AccessColumns); its parent is set only by SetParentBusinessUnit.",
             ["team"] = "A team: its owner-team predicates are refused per column (AccessColumns); membership is teammembership (refused).",
             ["sprk_document"] = "A child record: its Access Permission, own narrowing, D7 links and BFF-owned columns are refused per column.",
-            ["sprk_communication"] = "A child record; its access follows its parents (the reconcilers), its owner is refused (OwnerColumns).",
+            ["sprk_communication"] = "A child record: its internal-only flag is refused per column (AccessColumns), its owner is refused (OwnerColumns); the rest follows its parents.",
             ["sprk_event"] = "A child record; its access follows its parents, its owner and creator are refused (OwnerColumns, CreatorColumns).",
             ["sprk_todo"] = "A child record; its access follows its parents, its owner and creator are refused.",
             ["sprk_invoice"] = "A child record; its access follows its parents, its owner and creator are refused.",
             ["sprk_servicerequest"] = "A child record; its requester is refused (CreatorColumns), its access follows its parents.",
             ["account"] = "A customer account; no access decision reads its columns.",
-            ["sprk_recordtype_ref"] = "The record-type catalogue (logical names and display names); it decides no access.",
+
+            // #2253 fix round 3 (K): found by the wider scan. Refused per column (AccessColumns):
+            ["sprk_communicationthread"] = "A thread: its privacy state and thread type are refused per column (AccessColumns); its owner is refused.",
+            ["sprk_analysis"] = "An analysis: every anchor lookup the read rule requires Read on is refused per column (AccessColumns).",
+            ["sprk_communicationattachment"] = "An attachment row: its file pointer and its communication / document links are refused per column (AccessColumns).",
+
+            // Not access, each read in the code:
+            ["sprk_communicationaccount"] = "A mailbox configuration row; a caller's use is gated by the caller's own Read/Write on it (CommunicationRecordAuthorizationFilter), no column decides record access.",
+            ["sprk_analysisskill"] = "A scope row /create associates; the check is the caller's own rights on the analysis, no column of it is read (AnalysisAuthorizationFilter).",
+            ["sprk_analysisknowledge"] = "A scope row /create associates; the check is the caller's own rights on the analysis, no column of it is read (AnalysisAuthorizationFilter).",
+            ["sprk_analysistool"] = "A scope row /create associates; the check is the caller's own rights on the analysis, no column of it is read (AnalysisAuthorizationFilter).",
+            ["sprk_emailupdatefield"] = "The fields an email proposal may set; the apply runs impersonated (CommunicationProposalApplyService), so Dataverse still enforces the caller's rights.",
+            ["sprk_emailreviewlog"] = "The proposal and decision log; read app-only and never returned, it decides no access.",
+            ["sprk_triagecategory"] = "The classifier's category taxonomy (CommunicationEnrichmentService).",
+            ["sprk_communicationrule"] = "AI confidence thresholds and task due days (CommunicationRuleGate); sprk_flagprivilege is legal privilege, not access.",
+            ["sprk_gridconfiguration"] = "UI grid configuration (GridConfigurationService).",
+            ["savedquery"] = "View definitions (SavedQueryService).",
+            ["sprk_aisearchindex"] = "The AI search index catalogue: which index a record is indexed into, not who reads it; search results are authorized per row.",
+            ["sprk_userentityassociation"] = "The user-record membership cache behind the 'my memberships' list and the email-correlation rung; the nightly reconciliation rebuilds it from the source lookups, and no access decision reads it.",
+            ["privilege"] = "Platform-defined and read-only (Dataverse refuses a write); UserPrivilegeChecker reads its names.",
+            ["template"] = "Email templates; the filter checks the caller's own Read on the row (CommunicationRecordAuthorizationFilter).",
+        };
+
+    /// <summary>
+    /// #2253 fix round 3 (K): names the detector matches that are not tables, each with why. Kept apart from
+    /// <see cref="NotAccessTables"/> so that list holds only tables.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> NotTables =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["contains"] = "The OData function in a thread-name search filter (CommunicationThreadReadService).",
+            ["sprk_entitylogicalname"] = "A column (on sprk_userentityassociation) whose constant's name ends in LogicalName.",
         };
 
     private static readonly string[] ScannedFolders =
@@ -52,6 +85,16 @@ public class AccessTableReaderScanTests
         Path.Combine("Services", "Access"),
         Path.Combine("Services", "ExternalAccess"),
         Path.Combine("Api", "ExternalAccess"),
+        // #2253 fix round 3 (K): every other folder that reads grant, membership, wall, container or secure-root data.
+        Path.Combine("Infrastructure", "Dataverse"),
+        Path.Combine("Infrastructure", "Authentication"),
+        Path.Combine("Infrastructure", "Graph"),
+        Path.Combine("Services", "Dataverse"),
+        Path.Combine("Services", "Communication"),
+        Path.Combine("Services", "Ai", "Membership"),
+        Path.Combine("Services", "Documents"),
+        Path.Combine("Services", "RecordCreation"),
+        Path.Combine("Api", "Filters"),
     ];
 
     private static readonly Regex TableConstant = new(
@@ -141,12 +184,32 @@ public class AccessTableReaderScanTests
     private static bool IsCovered(string table)
     {
         var known = InheritedAccessPermission.AccessTables.Concat(NotAccessTables.Keys);
-        return known.Any(t => SameTable(table, t));
+        return known.Any(t => SameTable(table, t)) || NotTables.ContainsKey(table);
     }
 
     /// <summary>The listed or refused logical name <paramref name="table"/> names, or itself.</summary>
     private static string Logical(string table) =>
         InheritedAccessPermission.AccessTables.Concat(NotAccessTables.Keys).FirstOrDefault(t => SameTable(table, t)) ?? table;
+
+    [Fact(DisplayName = "#2253 fix round 3: every name listed as not a table is still matched by the detector")]
+    public void EveryListedNonTable_IsStillMatched()
+    {
+        var named = ScanServer().Select(hit => hit.Table).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var stale = NotTables.Keys.Where(t => !named.Contains(t)).ToList();
+        Assert.True(stale.Count == 0, "Listed but no longer matched (remove them): " + string.Join(", ", stale));
+    }
+
+    [Fact(DisplayName = "#2253 fix round 3: the access columns' tables are listed, never also refused whole")]
+    public void EveryAccessColumnTable_IsListed_AndNotRefusedWhole()
+    {
+        foreach (var table in InheritedAccessPermission.AccessColumns.Keys)
+        {
+            Assert.False(InheritedAccessPermission.AccessTables.Contains(table), table + " is refused whole and per column");
+        }
+
+        Assert.DoesNotContain("sprk_recordtype_ref", NotAccessTables.Keys);
+        Assert.Contains("sprk_recordtype_ref", InheritedAccessPermission.AccessTables);
+    }
 
     private static bool SameTable(string named, string logical) =>
         string.Equals(named, logical, StringComparison.OrdinalIgnoreCase)
