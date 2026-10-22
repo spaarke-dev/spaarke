@@ -381,3 +381,22 @@ Verification after the fix: `dotnet build` 0 warnings, 0 errors. Handler classes
   - Ontology smoke PASS.
 - **Not exercised:** no partner document reads and no document creates in the window. D7 narrowing and the BFF-writer path under the new field security are unproven live until real traffic, or the owner's optional partner check (a contact 8e9918a9/2e419a4f sign-in: b68299c6 lists empty, 86335ce3 lists its 3, aadbb740 download refused as not-under-parent).
 - **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261021T214302Z` (= `583f90c1d9`). Rolling back the BFF does NOT undo UAC's Restrict, field-security or web-resource changes; those are UAC's to reverse.
+
+## Dev BFF deploy of master a7b956fb55 (2026-10-22 02:17Z; owner: "yes go ahead", in reply to the a7b956fb55 request)
+
+- **Contents:**
+  - #2223: field-mapping never writes the secure flag or access columns on matter/project; Office quick-create skips them with a warning. A no-op on dev, which has 0 such rules.
+  - #2228 / fm-016: Repair mode, dormant.
+  - #2221 / UAC task 190: `email-archive-communication-link-sweep`, registered disabled, a dry run unless `EmailArchiveLinkSweep:Apply` (not set).
+- **Peer OKs:** UAC (requested it), ebilling, SPE admin, field-mapping, word-add-in and ontology.
+- **Pre-checks:** live DLL `f1b3dadcf5`, an ancestor. No e0df77339. No external-access files changed.
+- **Rollback snapshot:** `deploy/rollback/wwwroot-20261022T021635Z` (222 files, DLL `f1b3dadcf5`).
+- **Deploy:** `Deploy-BffApi.ps1 -Environment dev` from detached `C:/wtbffe-a7b`. Package 37.71 MB; 4 critical files SHA-256 verified; CORS OK. No settings changed.
+- **Read-back** (02:18:52Z):
+  - `1.0.0+a7b956fb55d682e679cda007bea258a53bb76aa5`.
+  - healthz and healthz/dataverse 200; `/api/me` anonymous 401.
+  - Sweep job enabled=False, cron `45 3 * * *`, 0 runs.
+- **UAC task 190 gate:** PASS. The sweep dry run at 02:21Z found 120 examined, 29 would link, 0 written, 0 failed. The container-migration report found 0 newly refused. Apply stays an owner item. Ontology smoke PASS.
+- **30 minutes** (to 02:48Z): no new exception class (Graph noise ×6); all zero counts; reconciliation runs Succeeded.
+- **Owner decision (UAC round 122), "the access should match the 'parent'":** a linked own-Restricted email archive follows its communication. UAC builds it (a provisional own-narrowing marker); word-add-in reviews. Known limit: a single attachment save stays Restricted.
+- **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261022T021635Z` (= `f1b3dadcf5`).
