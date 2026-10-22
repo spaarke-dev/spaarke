@@ -126,7 +126,7 @@ public class OfficeQuickCreateRefusalMapTests
     [MemberData(nameof(Rows))]
     public void EachServiceRefusal_MapsToItsOfficeCodeAndStatus(Row row)
     {
-        var mapped = OfficeService.MapQuickCreateRefusal(Refusal(row.Kind, row.Code, row.WhoAmIFailure, row.RefusedColumn), "matter", AssignedTo);
+        var mapped = OfficeService.MapQuickCreateRefusal(Refusal(row.Kind, row.Code, row.WhoAmIFailure, row.RefusedColumn), "matter", AssignedTo, filedUnderParent: false);
 
         mapped.Code.Should().Be(row.OfficeCode);
         mapped.Status.Should().Be(row.Status);
@@ -168,7 +168,7 @@ public class OfficeQuickCreateRefusalMapTests
     public void AnUnknownCode_FailsClosed_NeverA2xx_AndNeverPassesThrough(string kindName)
     {
         var kind = Enum.Parse<RecordCreationRefusalKind>(kindName);
-        var mapped = OfficeService.MapQuickCreateRefusal(Refusal(kind, "record_creation.a_code_no_one_mapped", null, null), "project", AssignedTo);
+        var mapped = OfficeService.MapQuickCreateRefusal(Refusal(kind, "record_creation.a_code_no_one_mapped", null, null), "project", AssignedTo, filedUnderParent: false);
 
         mapped.Code.Should().NotBe("record_creation.a_code_no_one_mapped", "an unmapped code is never passed through");
         mapped.Status.Should().BeGreaterThanOrEqualTo(400);
@@ -186,7 +186,7 @@ public class OfficeQuickCreateRefusalMapTests
     public void AnUnknownKind_FailsClosedToTheGenericOffice500()
     {
         var mapped = OfficeService.MapQuickCreateRefusal(
-            Refusal((RecordCreationRefusalKind)999, RecordCreationRefusal.NotFoundCode, null, AssignedTo), "matter", AssignedTo);
+            Refusal((RecordCreationRefusalKind)999, RecordCreationRefusal.NotFoundCode, null, AssignedTo), "matter", AssignedTo, filedUnderParent: false);
 
         (mapped.Code, mapped.Status).Should().Be((InternalError, ServerError));
     }
@@ -195,7 +195,7 @@ public class OfficeQuickCreateRefusalMapTests
     public void TheAssignedToRefusal_NeverReadsAsMatterNotFound()
     {
         var mapped = OfficeService.MapQuickCreateRefusal(
-            Refusal(RecordCreationRefusalKind.NotFoundOrDenied, RecordCreationRefusal.NotFoundCode, null, AssignedTo), "matter", AssignedTo);
+            Refusal(RecordCreationRefusalKind.NotFoundOrDenied, RecordCreationRefusal.NotFoundCode, null, AssignedTo), "matter", AssignedTo, filedUnderParent: false);
 
         mapped.Detail.Should().Contain("Assigned To").And.NotContainEquivalentOf("not found");
     }
@@ -211,7 +211,7 @@ public class OfficeQuickCreateRefusalMapTests
         foreach (var code in codes)
         {
             var mapped = OfficeService.MapQuickCreateRefusal(
-                new RecordCreationRefusal(RecordCreationRefusalKind.Undecided, code, "the isolated create's detail"), "project", AssignedTo);
+                new RecordCreationRefusal(RecordCreationRefusalKind.Undecided, code, "the isolated create's detail"), "project", AssignedTo, filedUnderParent: false);
 
             (mapped.Code, mapped.Status, mapped.Detail).Should().Be((code, ServerError, "the isolated create's detail"), code);
             mapped.ReasonCode.Should().BeNull();
@@ -225,10 +225,50 @@ public class OfficeQuickCreateRefusalMapTests
     public void OwnerUnresolved_WhereTheCallersOwnUnitIsTheCause_NamesTheCallersBusinessUnit(string code)
     {
         var mapped = OfficeService.MapQuickCreateRefusal(
-            new RecordCreationRefusal(RecordCreationRefusalKind.OwnerUnresolved, code, "the service's own detail"), "project", AssignedTo);
+            new RecordCreationRefusal(RecordCreationRefusalKind.OwnerUnresolved, code, "the service's own detail"), "project", AssignedTo, filedUnderParent: false);
 
         (mapped.Code, mapped.Status).Should().Be((OfficeErrorCodes.RecordOwnerUnresolved, Forbidden));
         mapped.Detail.Should().Contain("your business unit's team").And.Contain("default team").And.NotContain("the service's own detail");
+    }
+
+    /// <summary>
+    /// A project filed under a record is owned by that record's unit (record-first): its missing default team is not the
+    /// caller's, so the wording is neutral. Without a parent the caller's unit decides. The acting-user refusal is the
+    /// caller's in both cases.
+    /// </summary>
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public void NoDefaultTeam_NamesTheCallersUnit_OnlyWhenTheCreateIsNotFiledUnderAParent(bool filedUnderParent, bool namesCallersUnit)
+    {
+        var mapped = OfficeService.MapQuickCreateRefusal(
+            new RecordCreationRefusal(RecordCreationRefusalKind.OwnerUnresolved, RecordOwnerRefusal.NoDefaultOwnerTeam, "the service's own detail"),
+            "project", AssignedTo, filedUnderParent);
+
+        (mapped.Code, mapped.Status).Should().Be((OfficeErrorCodes.RecordOwnerUnresolved, Forbidden));
+        if (namesCallersUnit)
+        {
+            mapped.Detail.Should().Contain("your business unit's team");
+        }
+        else
+        {
+            mapped.Detail.Should().NotContainEquivalentOf("your business unit")
+                .And.Contain("the business unit of the record it is filed under has no default owner team")
+                .And.Contain("Nothing was created.");
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ActingUserUnresolved_KeepsTheCallerWording_WhetherOrNotFiledUnderAParent(bool filedUnderParent)
+    {
+        var mapped = OfficeService.MapQuickCreateRefusal(
+            new RecordCreationRefusal(RecordCreationRefusalKind.OwnerUnresolved, RecordOwnerRefusal.ActingUserUnresolved, "the service's own detail"),
+            "project", AssignedTo, filedUnderParent);
+
+        (mapped.Code, mapped.Status).Should().Be((OfficeErrorCodes.RecordOwnerUnresolved, Forbidden));
+        mapped.Detail.Should().Contain("your business unit's team");
     }
 
     /// <summary>
@@ -244,7 +284,7 @@ public class OfficeQuickCreateRefusalMapTests
     public void OwnerUnresolved_WhereTheCallersOwnUnitIsNotTheCause_PassesTheServicesDetailThrough(string code, string detail)
     {
         var mapped = OfficeService.MapQuickCreateRefusal(
-            new RecordCreationRefusal(RecordCreationRefusalKind.OwnerUnresolved, code, detail), "project", AssignedTo);
+            new RecordCreationRefusal(RecordCreationRefusalKind.OwnerUnresolved, code, detail), "project", AssignedTo, filedUnderParent: false);
 
         (mapped.Code, mapped.Status).Should().Be((OfficeErrorCodes.RecordOwnerUnresolved, Forbidden));
         mapped.Detail.Should().Be(detail);
@@ -257,7 +297,7 @@ public class OfficeQuickCreateRefusalMapTests
         var mapped = OfficeService.MapQuickCreateRefusal(
             new RecordCreationRefusal(RecordCreationRefusalKind.OwnerUnresolved, RecordOwnerRefusal.NoOwnerSource,
                 "Whether this 'sprk_project' is filed under a secure record could not be decided consistently. It was NOT created. Try again."),
-            "project", AssignedTo);
+            "project", AssignedTo, filedUnderParent: false);
 
         mapped.Detail.Should().Contain("Try again");
     }

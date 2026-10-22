@@ -2158,8 +2158,11 @@ internal class OfficeService : IOfficeService
 
         // A Project created FROM a matter or project is filed under it (#2191 K2): the pair is derived here, before the
         // create, from the request's own source — never left to field mapping, which never writes a pair (fill-only).
-        if (entityType == QuickCreateEntityType.Project
-            && IsFiledUnderItsSource(request, out var parentTable, out var parentId))
+        var parentTable = string.Empty;
+        var parentId = Guid.Empty;
+        var filedUnderParent = entityType == QuickCreateEntityType.Project
+            && IsFiledUnderItsSource(request, out parentTable, out parentId);
+        if (filedUnderParent)
         {
             var (typeId, retryable) = await DeriveFiledUnderTypeAsync(parentTable, cancellationToken).ConfigureAwait(false);
             if (typeId is not { } recordType)
@@ -2199,7 +2202,7 @@ internal class OfficeService : IOfficeService
 
         if (outcome.Refusal is { } refusal)
         {
-            var mapped = MapQuickCreateRefusal(refusal, noun, forPerson.Column);
+            var mapped = MapQuickCreateRefusal(refusal, noun, forPerson.Column, filedUnderParent);
             _logger.LogWarning(
                 "[RECORD-CREATE] {Entity} quick-create refused: {Kind} {ServiceCode} → {OfficeCode} ({Status}), correlationId={CorrelationId}",
                 table, refusal.Kind, refusal.Code, mapped.Code, mapped.Status, outcome.CorrelationId);
@@ -2424,7 +2427,8 @@ internal class OfficeService : IOfficeService
     /// "not found"); any other column, or none, is <c>caller_cannot_file_under_parent</c>. The detail is never parsed.</para>
     /// </remarks>
     internal static QuickCreateRefusal MapQuickCreateRefusal(
-        Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusal refusal, string noun, string assignedToColumn)
+        Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusal refusal, string noun, string assignedToColumn,
+        bool filedUnderParent)
     {
         ArgumentNullException.ThrowIfNull(refusal);
         const int Forbidden = StatusCodes.Status403Forbidden;
@@ -2471,6 +2475,14 @@ internal class OfficeService : IOfficeService
             // default team for the caller's unit, or the acting user could not be resolved). Any other code (a parent in
             // another unit with no owner team, a plan/resolver race's "Try again", the ownership exception) keeps the
             // service's own text — never Dataverse's — so the user is not told to check a unit that is not the cause.
+            // A project filed under a record is owned by THAT record's unit (record-first), so its missing default team is the
+            // record's unit's, not the caller's: neutral wording. Without a parent the caller's own unit decides.
+            (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.OwnerUnresolved,
+                Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.NoDefaultOwnerTeam)
+                when filedUnderParent
+                => new(OfficeErrorCodes.RecordOwnerUnresolved, Forbidden,
+                    $"The {noun} could not be created: the business unit of the record it is filed under has no default owner "
+                    + "team. Ask an administrator to check that unit's default team. Nothing was created."),
             (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.OwnerUnresolved,
                 Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.NoDefaultOwnerTeam
                 or Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ActingUserUnresolved)
