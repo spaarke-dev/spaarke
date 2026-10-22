@@ -253,9 +253,10 @@ public class CommunicationServiceArchiveAttachmentItemTests
     {
         // must-fire: the row points at C's own .eml item. It passes the item check (C's container, the BFF, C's prefix),
         // but the .eml document already names it: a second document on it would delete the .eml from under the first.
-        var emlDocument = Guid.NewGuid();
+        // Fix round 2: the .eml document is C's own, unlinked, pointer and bound copy both naming the item; only its source
+        // type (Email Archive) keeps the repair path from linking the row to it.
         var h = Build((world, c) => world.Items[(ArchiveContainer, "item-eml")] = ArchiveItem(c, "Re- Q4 numbers.eml"),
-            boundItems: new Dictionary<string, Guid> { ["item-eml"] = emlDocument },
+            existingDocuments: c => new[] { Document(c, "item-eml", "item-eml", EmailArchiveSourceType) },
             rows: AttachmentRow("Re- Q4 numbers.eml", ArchiveContainer, "item-eml"));
 
         var result = await h.Sut.ArchiveExistingAsync(h.CommunicationId, CancellationToken.None);
@@ -356,6 +357,122 @@ public class CommunicationServiceArchiveAttachmentItemTests
         await act.Should().ThrowAsync<OperationCanceledException>();
         h.Created.Should().ContainSingle("the loop stops at the caller's cancellation");
         h.BoundLookups().Should().Be(2, "the second attachment's lookup observed the cancellation; the third was never tried");
+
+        // Fix round 2 (F1, F3): the link-back after the create is not the caller's to cancel (the Update double honours
+        // its token, as Dataverse does), so the created document is linked, not orphaned.
+        h.Updates.Should().ContainSingle().Which.Fields["sprk_document"].Should().BeOfType<EntityReference>()
+            .Which.Id.Should().Be(h.Created.Single().Id);
+    }
+
+    // ── Fix round 2 (F1): the row's ids are normalised once, trimmed ────────────────────────────────────────────
+
+    [Theory]
+    [InlineData(" item-own")]
+    [InlineData("item-own\t")]
+    public async Task APaddedItemId_OfAnItemADocumentAlreadyNames_IsRefused(string paddedItem)
+    {
+        // must-fire: the verifier trims, so a padded id verifies on item-own; the lookup must look for item-own too.
+        var h = Build((world, c) => world.Items[(ArchiveContainer, "item-own")] = ArchiveItem(c, "contract.pdf"),
+            existingDocuments: _ => new[] { Document(Guid.NewGuid(), "item-own", "item-own", EmailAttachmentSourceType) },
+            rows: AttachmentRow("contract.pdf", ArchiveContainer, paddedItem));
+
+        var result = await h.Sut.ArchiveExistingAsync(h.CommunicationId, CancellationToken.None);
+
+        result.AttachmentDocumentsCreated.Should().Be(0);
+        result.AttachmentsRefusedUnverified.Should().Be(1);
+        h.Created.Should().BeEmpty("a second document on item-own would delete it from under the first");
+        h.Updates.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(" item-own", " " + ArchiveContainer)]
+    [InlineData("item-own\t", ArchiveContainer + "\t")]
+    public async Task APaddedItemId_OfAGenuineUnboundItem_IsArchived_WithTheTrimmedPointer(string paddedItem, string paddedDrive)
+    {
+        // must-not-fire: a genuine item is still archived, and the stored pointer, bound copy and drive are trimmed.
+        var h = Build((world, c) => world.Items[(ArchiveContainer, "item-own")] = ArchiveItem(c, "contract.pdf"),
+            AttachmentRow("contract.pdf", paddedDrive, paddedItem));
+
+        var result = await h.Sut.ArchiveExistingAsync(h.CommunicationId, CancellationToken.None);
+
+        result.AttachmentDocumentsCreated.Should().Be(1);
+        result.AttachmentsRefusedUnverified.Should().Be(0);
+        var doc = h.Created.Should().ContainSingle().Subject;
+        doc.GetAttributeValue<string>("sprk_graphitemid").Should().Be("item-own");
+        doc.GetAttributeValue<string>(DocumentPointerBinding.BoundItemIdColumn).Should().Be("item-own");
+        doc.GetAttributeValue<string>("sprk_graphdriveid").Should().Be(ArchiveContainer);
+    }
+
+    [Fact]
+    public async Task AnItemIdOfOnlyWhitespace_IsRefused_AndCounted()
+    {
+        var h = Build((_, _) => { }, AttachmentRow("blank.pdf", ArchiveContainer, " \t "));
+
+        var result = await h.Sut.ArchiveExistingAsync(h.CommunicationId, CancellationToken.None);
+
+        result.AttachmentDocumentsCreated.Should().Be(0);
+        result.AttachmentsRefusedUnverified.Should().Be(1);
+        h.Created.Should().BeEmpty();
+    }
+
+    // ── Fix round 2 (F1): a partial archive is repaired, not refused ─────────────────────────────────────────────
+
+    [Fact]
+    public async Task ARetryAfterAFailedLinkBack_LinksTheExistingDocument_AndIsNotRefused()
+    {
+        // The first archive creates the document; its link-back to the row fails (a transient fault, non-fatal).
+        var updateCalls = 0;
+        var h = Build((world, c) => world.Items[(ArchiveContainer, "item-own")] = ArchiveItem(c, "contract.pdf"),
+            updateFault: () => ++updateCalls == 1 ? new InvalidOperationException("Dataverse transient fault") : null,
+            rows: AttachmentRow("contract.pdf", ArchiveContainer, "item-own"));
+
+        var first = await h.Sut.ArchiveExistingAsync(h.CommunicationId, CancellationToken.None);
+        first.AttachmentDocumentsCreated.Should().Be(0, "the link-back failed");
+        h.Created.Should().ContainSingle();
+        h.Updates.Should().BeEmpty();
+
+        var retry = await h.Sut.ArchiveExistingAsync(h.CommunicationId, CancellationToken.None);
+
+        retry.AttachmentDocumentsCreated.Should().Be(1, "the row is linked to the document the first archive created");
+        retry.AttachmentsRefusedUnverified.Should().Be(0);
+        h.Created.Should().ContainSingle("nothing new is created");
+        h.Updates.Should().ContainSingle().Which.Fields["sprk_document"].Should().BeOfType<EntityReference>()
+            .Which.Id.Should().Be(h.Created.Single().Id);
+    }
+
+    [Fact]
+    public async Task AMatchOnAnotherCommunicationsAttachmentDocument_IsStillRefused()
+    {
+        // must-fire: same item, attachment source type, pointer and bound copy intact, but another communication's.
+        var h = Build((world, c) => world.Items[(ArchiveContainer, "item-own")] = ArchiveItem(c, "contract.pdf"),
+            existingDocuments: _ => new[] { Document(Guid.NewGuid(), "item-own", "item-own", EmailAttachmentSourceType) },
+            rows: AttachmentRow("contract.pdf", ArchiveContainer, "item-own"));
+
+        var result = await h.Sut.ArchiveExistingAsync(h.CommunicationId, CancellationToken.None);
+
+        result.AttachmentDocumentsCreated.Should().Be(0);
+        result.AttachmentsRefusedUnverified.Should().Be(1);
+        h.Created.Should().BeEmpty();
+        h.Updates.Should().BeEmpty("the row is not linked to another communication's document");
+    }
+
+    // ── Fix round 2 (K): the lookup also matches the bound copy ──────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ADocumentWhosePointerWasMovedButWhoseBoundCopyNamesTheItem_IsCaught_AndRefused()
+    {
+        // must-fire: C's own attachment document, its pointer re-pointed elsewhere, its field-secured bound copy still
+        // naming item-own. It names the item, so the item is not bound again; and it is not a clean partial archive.
+        var h = Build((world, c) => world.Items[(ArchiveContainer, "item-own")] = ArchiveItem(c, "contract.pdf"),
+            existingDocuments: c => new[] { Document(c, "item-elsewhere", "item-own", EmailAttachmentSourceType) },
+            rows: AttachmentRow("contract.pdf", ArchiveContainer, "item-own"));
+
+        var result = await h.Sut.ArchiveExistingAsync(h.CommunicationId, CancellationToken.None);
+
+        result.AttachmentDocumentsCreated.Should().Be(0);
+        result.AttachmentsRefusedUnverified.Should().Be(1);
+        h.Created.Should().BeEmpty();
+        h.Updates.Should().BeEmpty();
     }
 
     // ── harness ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -368,9 +485,10 @@ public class CommunicationServiceArchiveAttachmentItemTests
         Action<TestRecordContainerResolver.DocumentPointerWorld, Guid> arrange,
         Exception? itemReadFault = null,
         bool noScopeFactory = false,
-        IReadOnlyDictionary<string, Guid>? boundItems = null,
+        Func<Guid, Entity[]>? existingDocuments = null,
         Exception? boundLookupFault = null,
         Action? onCreate = null,
+        Func<Exception?>? updateFault = null,
         params Entity[] rows)
     {
         var communicationId = Guid.NewGuid();
@@ -409,7 +527,9 @@ public class CommunicationServiceArchiveAttachmentItemTests
             .Setup(s => s.RetrieveMultipleAsync(
                 It.Is<QueryExpression>(q => q.EntityName == DocumentEntity && !NamesItem(q)), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EntityCollection(new List<Entity> { new(DocumentEntity, Guid.NewGuid()) }));
-        // Fix round 1 (K3): "does a document already name this item?" — the bound items, plus the documents this call created.
+        // Fix round 1 (K3): "does a document already name this item?" — the seeded documents plus the documents created,
+        // evaluated as Dataverse would: the query's conditions under its filter operator, projected to its column set.
+        var seeded = existingDocuments?.Invoke(communicationId) ?? Array.Empty<Entity>();
         var boundLookups = 0;
         entityService
             .Setup(s => s.RetrieveMultipleAsync(
@@ -423,16 +543,11 @@ public class CommunicationServiceArchiveAttachmentItemTests
                     throw boundLookupFault;
                 }
 
-                var item = (string)q.Criteria.Conditions.Single(c => c.AttributeName == "sprk_graphitemid").Values[0];
-                var hits = created
-                    .Where(d => d.GetAttributeValue<string>("sprk_graphitemid") == item)
-                    .Select(_ => new Entity(DocumentEntity, Guid.NewGuid()))
+                var hits = seeded.Concat(created)
+                    .Where(d => Satisfies(q.Criteria, d))
+                    .Take(q.TopCount ?? int.MaxValue)
+                    .Select(d => Project(q.ColumnSet, d))
                     .ToList();
-                if (boundItems is not null && boundItems.TryGetValue(item, out var bound))
-                {
-                    hits.Add(new Entity(DocumentEntity, bound));
-                }
-
                 return new EntityCollection(hits);
             });
         entityService
@@ -440,14 +555,34 @@ public class CommunicationServiceArchiveAttachmentItemTests
             .ReturnsAsync((Entity e, CancellationToken token) =>
             {
                 token.ThrowIfCancellationRequested();
+                e.Id = Guid.NewGuid();
                 created.Add(e);
                 onCreate?.Invoke();
-                return Guid.NewGuid();
+                return e.Id;
             });
+        // Fix round 2 (F3): the Update double honours its token, as Dataverse does, and a written link is kept on the row
+        // so a later archive skips it.
         entityService
             .Setup(s => s.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
-            .Callback((string entity, Guid id, Dictionary<string, object> fields, CancellationToken _) => updates.Add((entity, id, fields)))
-            .Returns(Task.CompletedTask);
+            .Returns((string entity, Guid id, Dictionary<string, object> fields, CancellationToken token) =>
+            {
+                token.ThrowIfCancellationRequested();
+                if (updateFault?.Invoke() is { } fault)
+                {
+                    throw fault;
+                }
+
+                updates.Add((entity, id, fields));
+                if (entity == AttachmentEntity && rows.FirstOrDefault(r => r.Id == id) is { } row)
+                {
+                    foreach (var (column, value) in fields)
+                    {
+                        row[column] = value;
+                    }
+                }
+
+                return Task.CompletedTask;
+            });
 
         var options = new CommunicationOptions
         {
@@ -493,6 +628,43 @@ public class CommunicationServiceArchiveAttachmentItemTests
 
     private static bool NamesItem(QueryExpression query)
         => query.Criteria.Conditions.Any(c => c.AttributeName == "sprk_graphitemid");
+
+    private const int EmailArchiveSourceType = 659490003;
+    private const int EmailAttachmentSourceType = 659490004;
+
+    /// <summary>An existing <c>sprk_document</c>: its communication, pointer, field-secured bound copy and source type.</summary>
+    private static Entity Document(Guid communicationId, string pointer, string boundCopy, int sourceType)
+        => new(DocumentEntity, Guid.NewGuid())
+        {
+            ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", communicationId),
+            ["sprk_graphitemid"] = pointer,
+            [DocumentPointerBinding.BoundItemIdColumn] = boundCopy,
+            ["sprk_sourcetype"] = new OptionSetValue(sourceType),
+        };
+
+    /// <summary>A flat filter of string Equal conditions, evaluated under its own operator (And / Or).</summary>
+    private static bool Satisfies(FilterExpression filter, Entity document)
+    {
+        filter.Filters.Should().BeEmpty("the lookup is one flat filter");
+        var matches = filter.Conditions.Select(c =>
+        {
+            c.Operator.Should().Be(ConditionOperator.Equal);
+            return string.Equals(document.GetAttributeValue<string>(c.AttributeName), (string)c.Values[0], StringComparison.Ordinal);
+        }).ToList();
+        return filter.FilterOperator == LogicalOperator.Or ? matches.Any(m => m) : matches.All(m => m);
+    }
+
+    /// <summary>Only the columns the query asked for, as Dataverse returns them.</summary>
+    private static Entity Project(ColumnSet columns, Entity document)
+    {
+        var projected = new Entity(DocumentEntity, document.Id);
+        foreach (var attribute in document.Attributes.Where(a => columns.AllColumns || columns.Columns.Contains(a.Key)))
+        {
+            projected[attribute.Key] = attribute.Value;
+        }
+
+        return projected;
+    }
 
     private static IServiceScopeFactory ScopeServing(RecordContainerResolver resolver)
     {
