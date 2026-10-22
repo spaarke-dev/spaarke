@@ -1,7 +1,9 @@
 using Azure;
 using Microsoft.Net.Http.Headers;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Auth;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.Finance.Files;
 
@@ -13,7 +15,7 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// </summary>
 /// <remarks>
 /// <para><b>Order (uac-r2 Q5, F1-3, F1-e, F4-2).</b> <c>RequireAuthorization</c> (group) → <see cref="StoredFileAccessFilterExtensions.AddStoredFileAccessFilter{TBuilder}"/>,
-/// which runs every check of <see cref="StoredFileService.AuthorizeDownloadAsync"/> before the handler: (1) step 0 → 403 before any
+/// which runs every check of the download rule before the handler: (1) step 0 → 403 before any
 /// record read; (2) app-only row read → unknown 404, fault 503; (3) the caller's own Read on the parent (gate variant) → else 404;
 /// (4) the copy rule → else 404; (5) Servable, own path, scan verdict → 404 / 409 <c>file_scan_pending</c> / 503
 /// <c>file_store_unavailable</c> → then the eBilling kill switch (<c>RequireEbillingEnabled</c>, ADR-018), chained AFTER the
@@ -137,8 +139,8 @@ public sealed class StoredFileAccessFilterAttached : IFinanceStepZeroFilter
 }
 
 /// <summary>
-/// The download's endpoint filter (ADR-008): the whole of <see cref="StoredFileService.AuthorizeDownloadAsync"/> before the handler,
-/// rendered as ProblemDetails (ADR-019). Fails closed: an unexpected fault answers 503 and nothing is served.
+/// The download's endpoint filter (ADR-008): the whole download rule before the handler (<see cref="DecideAsync"/>), rendered as
+/// ProblemDetails (ADR-019). Fails closed: an unexpected fault answers 503 and nothing is served.
 /// </summary>
 public sealed class StoredFileAccessFilter : IEndpointFilter
 {
@@ -158,9 +160,7 @@ public sealed class StoredFileAccessFilter : IEndpointFilter
         StoredFileDownloadDecision decision;
         try
         {
-            var service = httpContext.RequestServices.GetRequiredService<StoredFileService>();
-            decision = await service.AuthorizeDownloadAsync(
-                httpContext.User, TokenHelper.ExtractBearerTokenOrNull(httpContext), fileId, httpContext.RequestAborted);
+            decision = await DecideAsync(httpContext, fileId, logger);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !httpContext.RequestAborted.IsCancellationRequested)
         {
@@ -183,6 +183,61 @@ public sealed class StoredFileAccessFilter : IEndpointFilter
             default:
                 return ProblemDetailsHelper.UniformRecordNotFound(httpContext);
         }
+    }
+
+    /// <summary>
+    /// The download rule, in order, before the handler (section 4.3, 5.3; uac-r2 Q5, F1-3, F1-e, F4-2): (1) step 0 → 403 before any
+    /// record read; (2) the app-only row read, unknown id → 404, fault → 503; (3) the caller's own Read on the parent, gate variant
+    /// (<see cref="CallerRecordAccessProbe.GetCallerRightsForAuthorizationGateAsync"/>: no access, unknown and a fault all answer
+    /// <see cref="AccessRights.None"/> on one schedule) → else 404; (4) when the row has a source document, the caller's own Read on it
+    /// (the copy rule) → else 404; (5) <see cref="StoredFileService.JudgeServableAsync"/>: Servable, own path, scan verdict.
+    /// </summary>
+    private static async Task<StoredFileDownloadDecision> DecideAsync(HttpContext httpContext, Guid fileId, ILogger? logger)
+    {
+        var services = httpContext.RequestServices;
+        var ct = httpContext.RequestAborted;
+
+        // (1) step 0, before any record read.
+        var stepZero = await FinanceAuthorizationFilter.EvaluateStepZeroAsync(httpContext.User, services, logger, ct);
+        if (!stepZero.IsInternal || stepZero.SystemUserId is not { } callerSystemUserId)
+        {
+            return StoredFileDownloadDecision.Forbidden(stepZero.RefusalReasonCode ?? FinanceAuthorizationFilter.SystemFailureReasonCode);
+        }
+
+        // (2) the app-only row read (a fault throws: 503 above).
+        var service = services.GetRequiredService<StoredFileService>();
+        var row = await service.ReadRowAsync(fileId, ct);
+        if (row?.Parent is not { } parent)
+        {
+            return StoredFileDownloadDecision.NotFound;
+        }
+
+        // (3) and (4): the CALLER's own Read, never the application's. No probe registered is a configuration fault: refused.
+        var probe = services.GetService<CallerRecordAccessProbe>();
+        if (probe is null)
+        {
+            logger?.LogError("Stored file {FileId}: CallerRecordAccessProbe is not registered; refusing (503)", fileId);
+            return StoredFileDownloadDecision.Unavailable;
+        }
+
+        var token = TokenHelper.ExtractBearerTokenOrNull(httpContext);
+        var parentRights = await probe.GetCallerRightsForAuthorizationGateAsync(token, parent.EntitySet, parent.Id, ct);
+        if (!parentRights.HasFlag(AccessRights.Read))
+        {
+            return StoredFileDownloadDecision.NotFound;
+        }
+
+        if (row.SourceDocumentId is { } sourceDocument)
+        {
+            var sourceRights = await probe.GetCallerRightsForAuthorizationGateAsync(token, StoredFileSchema.DocumentEntitySet, sourceDocument, ct);
+            if (!sourceRights.HasFlag(AccessRights.Read))
+            {
+                return StoredFileDownloadDecision.NotFound;
+            }
+        }
+
+        // (5) Servable, own path, scan verdict.
+        return await service.JudgeServableAsync(row, callerSystemUserId, ct);
     }
 
     /// <summary>409 <c>file_scan_pending</c>.</summary>

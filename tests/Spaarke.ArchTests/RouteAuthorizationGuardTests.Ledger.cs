@@ -387,6 +387,12 @@ public partial class RouteAuthorizationGuardTests
             + "Dataverse as the caller on EVERY call inside SubmissionOverrideService (EbillingOverridePrivilege, fail closed: 403 "
             + "ebilling.override.not_permitted); Return needs no privilege (D-73). The decider, the invoice, the findings and the decision id are "
             + "derived server-side, never taken from the request."),
+        new GovernedFile("Api/Finance/StoredFileEndpoints.cs", Scope.RouteLevelGate,
+            "GET /api/finance/files/{fileId}/content (ebilling-r1 task 090, EB-D-148, procedure-and-file-model 4.3) -- an internal caller downloads "
+            + "a Stored File's bytes. AddStoredFileAccessFilter runs the download rule before the handler: step 0 (403 before any record read), "
+            + "the app-only row read, the CALLER's own Read on the parent and, for a copy, on its source document (gate variant, uniform 404), "
+            + "then StoredFileService.JudgeServableAsync: Servable / own path / scan verdict (404, 409 file_scan_pending, 503). The eBilling kill "
+            + "switch runs after it."),
         new GovernedFile("Api/ScorecardCalculatorEndpoints.cs", Scope.RouteLevelGate,
             "matter/project grade recalculation, Read on the parent as the caller (task 130)."),
         new GovernedFile("Api/NavMapEndpoints.cs", Scope.RouteLevelGate,
@@ -995,7 +1001,11 @@ public partial class RouteAuthorizationGuardTests
     // /api/finance/submissions/{submissionId}/blocked, POST .../override and POST .../return. Classified by GovernedFiles (RouteLevelGate:
     // AddFinanceAuthorizationFilter as the caller on the submission; the override's privilege is asked inside the service on every call);
     // the kill-switch filter .RequireEbillingEnabled is already classified in NotAuthorizationForms.
-    private const int ExpectedEndpointFileCount = 141;
+    // 141 -> 142 (2026-10-22, ebilling-r1 task 090, EB-D-148). Net +1: Api/Finance/StoredFileEndpoints.cs ADDED -- GET
+    // /api/finance/files/{fileId}/content. Classified by GovernedFiles (RouteLevelGate: AddStoredFileAccessFilter, credited in CreditedForms:
+    // step 0, then the caller's own Read on the parent and the source document via the gate variant); .RequireEbillingEnabled is already in
+    // NotAuthorizationForms. Task 081 runs in parallel and may add a file too: reconcile the sum at integration.
+    private const int ExpectedEndpointFileCount = 142;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -1040,6 +1050,11 @@ public partial class RouteAuthorizationGuardTests
         new CreditedForm("AddFinanceAuthorizationFilter", "Api/Filters/FinanceAuthorizationFilter.cs",
             "Each route declares the id it authorizes; the filter evaluates it as the caller via GetCallerRecordAccessAsync + "
             + "OperationAccessPolicy.HasRequiredRights (FinanceAuthorizationFilter.cs:409-412), uniform 404 on deny (task 130)."),
+        new CreditedForm("AddStoredFileAccessFilter", "Api/Finance/StoredFileEndpoints.cs",
+            "StoredFileAccessFilter decides before the handler: step 0 via FinanceAuthorizationFilter.EvaluateStepZeroAsync "
+            + "(StoredFileEndpoints.cs:201, 403), then RetrievePrincipalAccess as the caller over OBO via "
+            + "CallerRecordAccessProbe.GetCallerRightsForAuthorizationGateAsync on the row's parent (:224) and, for a copy, its source "
+            + "document (:232), uniform 404 on deny (:184); any unexpected fault refuses with 503 (:168) (ebilling-r1 task 090)."),
         new CreditedForm("AddRecordRouteAccessAuthorizationFilter", "Api/Filters/RecordRouteAccessAuthorizationFilter.cs",
             "RetrievePrincipalAccess on the route record over OBO via CallerRecordAccessProbe "
             + "(RecordRouteAccessAuthorizationFilter.cs:110), 403 on deny (:155); the probe throwing is a denial (task 076)."),

@@ -128,6 +128,44 @@ public sealed class FinanceStepZeroCoverageGuardTests
         Assert.Empty(Violations(endpoints));
     }
 
+    [Fact(DisplayName = "Task 090 must-not-fire: a flagged /api/finance route that runs the Stored File access filter (a step-0 filter) is not reported")]
+    public void TheGuardDoesNotFire_OnAFlaggedRouteRunningTheStoredFileAccessFilter()
+    {
+        var endpoints = new[]
+        {
+            Endpoint("/api/finance/files/{fileId}/content", FinanceInternalCallersOnly.Instance, Sprk.Bff.Api.Api.Finance.StoredFileAccessFilterAttached.Instance),
+        };
+
+        Assert.Empty(Violations(endpoints));
+    }
+
+    [Fact(DisplayName = "Task 090 must-fire: the Stored File access filter without the flag, and the flag with a marker that is not a step-0 filter, are each reported")]
+    public void TheGuardFires_OnTheStoredFileRouteWithoutTheFlag_OrWithANonStepZeroMarker()
+    {
+        var endpoints = new[]
+        {
+            Endpoint("/api/finance/files/{fileId}/content", Sprk.Bff.Api.Api.Finance.StoredFileAccessFilterAttached.Instance),
+            Endpoint("/api/finance/files/{fileId}/other", FinanceInternalCallersOnly.Instance, new object()),
+        };
+
+        var violations = Violations(endpoints);
+
+        Assert.Equal(2, violations.Count);
+        Assert.Contains(violations, v => v.Contains("/content", StringComparison.Ordinal) && v.Contains("no step-0 flag", StringComparison.Ordinal));
+        Assert.Contains(violations, v => v.Contains("/other", StringComparison.Ordinal) && v.Contains("inert", StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "Task 090: the real table maps the Stored File download with the step-0 flag and the Stored File access filter, in both boots")]
+    public void TheStoredFileDownloadIsMappedWithStepZero()
+    {
+        foreach (var app in new[] { _booted.Development, _booted.Production })
+        {
+            var download = Assert.Single(app.Endpoints, e => PathOf(e).Equals("api/finance/files/{}/content", StringComparison.OrdinalIgnoreCase));
+            Assert.NotNull(download.Metadata.GetMetadata<FinanceInternalCallersOnly>());
+            Assert.NotNull(download.Metadata.GetMetadata<Sprk.Bff.Api.Api.Finance.StoredFileAccessFilterAttached>());
+        }
+    }
+
     [Fact(DisplayName = "Task 099: the NonFinanceFilterUsers list is current - the real table holds exactly those non-finance users of the Finance filter, no more, no fewer")]
     public void TheNonFinanceFilterUsersListIsCurrent()
     {
@@ -279,9 +317,11 @@ public sealed class FinanceStepZeroCoverageGuardTests
             {
                 violations.Add(display + "has no step-0 flag (RequireInternalFinanceCaller)");
             }
-            else if (endpoint.Metadata.GetMetadata<FinanceAuthorizationFilterAttached>() is null)
+            else if (endpoint.Metadata.GetMetadata<IFinanceStepZeroFilter>() is null)
             {
-                violations.Add(display + "is flagged but does not run FinanceAuthorizationFilter, so the flag is inert");
+                // ebilling-r1 task 090: any filter whose marker implements IFinanceStepZeroFilter runs step 0 first (FinanceAuthorizationFilter,
+                // StoredFileAccessFilter); a marker may implement it only when its own tests prove that.
+                violations.Add(display + "is flagged but does not run FinanceAuthorizationFilter (or another step-0 filter), so the flag is inert");
             }
         }
 

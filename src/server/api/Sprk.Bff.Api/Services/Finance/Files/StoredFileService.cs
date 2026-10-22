@@ -15,9 +15,9 @@ namespace Sprk.Bff.Api.Services.Finance.Files;
 /// <summary>
 /// The Finance file store (ebilling-r1 task 090; procedure-and-file-model sections 4.1-4.3, 9.1 steps 2 and 4-6; EB-D-148): the ONE
 /// owner of <c>sprk_storedfile</c> rows and their blobs. Bytes are staged to Azure Blob under a deterministic id, the row is created
-/// Not yet servable, and it is flipped to Servable only after the blob is proven present with the row's SHA-256. The download rule
-/// (<see cref="AuthorizeDownloadAsync"/>) and the job read (<see cref="OpenForProcessingAsync"/>) serve only a Servable row whose path
-/// is its own and whose scan verdict is clean.
+/// Not yet servable, and it is flipped to Servable only after the blob is proven present with the row's SHA-256. The download
+/// (<c>StoredFileAccessFilter</c>, then <see cref="JudgeServableAsync"/>) and the job read (<see cref="OpenForProcessingAsync"/>) serve
+/// only a Servable row whose path is its own and whose scan verdict is clean.
 /// </summary>
 /// <remarks>
 /// <para><b>Component justification (root CLAUDE.md §11).</b> Existing: <c>SessionFileBlobStore</c> stores AI chat bytes keyed by
@@ -28,6 +28,9 @@ namespace Sprk.Bff.Api.Services.Finance.Files;
 /// <para><b>Placement (ADR-052 B2, B3).</b> In the BFF: request-scoped authorization over the caller's token and short app-only
 /// writes; no new process. Scoped: it takes the scoped <see cref="IGenericEntityService"/>.</para>
 /// <para><b>ADR-013.</b> No Services.Ai type is referenced: step 0 comes through <see cref="FinanceAuthorizationFilter.EvaluateStepZeroAsync"/>.</para>
+/// <para><b>Authorization.</b> The download's caller checks (step 0, the caller's own Read on the parent and the source document) are
+/// made in the route's endpoint filter (ADR-008), which then asks <see cref="JudgeServableAsync"/>. The caller upload makes its own:
+/// step 0 and Write on the parent, before any write.</para>
 /// <para><b>Logs carry ids only</b>: file, parent and submission ids, blob names (tenant/table/ids) and codes; never file names.</para>
 /// </remarks>
 public sealed class StoredFileService
@@ -337,56 +340,15 @@ public sealed class StoredFileService
     // =============================================================================================================================
 
     /// <summary>
-    /// The download rule (section 4.3, 5.3; uac-r2 Q5, F1-3, F1-e, F4-2), in this order, before any byte: (1) step 0 → 403 before any
-    /// record read; (2) app-only row read, unknown id → 404, fault → 503; (3) the caller's own Read on the parent, gate variant →
-    /// else 404; (4) when <c>sprk_sourcedocument</c> is set, the caller's own Read on it (the copy rule) → else 404; (5) Servable, path
-    /// parent equals row parent, scan Clean (or NotScanned) → serve; Malicious, not Servable, Removed or a mismatch → 404; Pending → 409;
-    /// a storage fault → 503.
+    /// Step (5) of the download rule (section 4.3; uac-r2 Q5), for a row whose caller checks (step 0, Read on the parent, the copy
+    /// rule) <c>StoredFileAccessFilter</c> has already passed: Servable, path parent equals row parent, scan Clean (or NotScanned when
+    /// scanning is off) → serve; Malicious, not Servable, Removed, a path mismatch or a missing blob → 404; Pending → 409; the store
+    /// not configured or a storage fault → 503.
     /// </summary>
-    public async Task<StoredFileDownloadDecision> AuthorizeDownloadAsync(
-        ClaimsPrincipal user, string? callerBearerToken, Guid fileId, CancellationToken ct)
+    internal async Task<StoredFileDownloadDecision> JudgeServableAsync(StoredFileRow row, Guid callerSystemUserId, CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(user);
-
-        // (1) step 0, before any record read.
-        var stepZero = await FinanceAuthorizationFilter.EvaluateStepZeroAsync(user, _services, _logger, ct).ConfigureAwait(false);
-        if (!stepZero.IsInternal)
-        {
-            return StoredFileDownloadDecision.Forbidden(stepZero.RefusalReasonCode!);
-        }
-
-        // (2) app-only row read.
-        StoredFileRow? row;
-        try
-        {
-            row = await ReadRowAsync(fileId, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            _logger.LogError(ex, "Stored file {FileId} download: the row read faulted (503)", fileId);
-            return StoredFileDownloadDecision.Unavailable;
-        }
-
-        if (row?.Parent is not { } parent)
-        {
-            return StoredFileDownloadDecision.NotFound;
-        }
-
-        // (3) the caller's own Read on the parent, gate variant (no access and unknown take the same time and answer).
-        if (!await CallerCanReadAsync(callerBearerToken, parent.EntitySet, parent.Id, ct).ConfigureAwait(false))
-        {
-            return StoredFileDownloadDecision.NotFound;
-        }
-
-        // (4) the copy rule: the caller's own Read on the source document.
-        if (row.SourceDocumentId is { } sourceDocument
-            && !await CallerCanReadAsync(callerBearerToken, StoredFileSchema.DocumentEntitySet, sourceDocument, ct).ConfigureAwait(false))
-        {
-            return StoredFileDownloadDecision.NotFound;
-        }
-
-        // (5) Servable, own path, scan verdict.
-        if (row.Status != StoredFileStatus.Servable || !PathIsOwn(row))
+        ArgumentNullException.ThrowIfNull(row);
+        if (row.Parent is not { } parent || row.Status != StoredFileStatus.Servable || !PathIsOwn(row))
         {
             return StoredFileDownloadDecision.NotFound;
         }
@@ -395,6 +357,8 @@ public sealed class StoredFileService
         {
             return StoredFileDownloadDecision.Unavailable;
         }
+
+        var fileId = row.FileId;
 
         (StoredFileScanState State, Infrastructure.Storage.BlobPropertiesInfo Properties)? scan;
         try
@@ -413,7 +377,7 @@ public sealed class StoredFileService
             { State: StoredFileScanState.Malicious } => LogMalicious(fileId),
             { State: StoredFileScanState.Pending } => StoredFileDownloadDecision.ScanPending,
             { } verdict => StoredFileDownloadDecision.Serve(new StoredFileServable(
-                fileId, parent, row.Container!, row.BlobPath!, verdict.Properties.ETag, row.ContentType, stepZero.SystemUserId!.Value)),
+                fileId, parent, row.Container!, row.BlobPath!, verdict.Properties.ETag, row.ContentType, callerSystemUserId)),
         };
     }
 
@@ -468,7 +432,7 @@ public sealed class StoredFileService
         return new StoredFileProcessingRead(StoredFileProcessingOutcome.Ok, bytes, row.ContentType);
     }
 
-    /// <summary>Opens the stream of a file <see cref="AuthorizeDownloadAsync"/> decided to serve, pinned to the version it judged.</summary>
+    /// <summary>Opens the stream of a file <see cref="JudgeServableAsync"/> decided to serve, pinned to the version it judged.</summary>
     internal Task<Stream?> OpenServableAsync(StoredFileServable file, CancellationToken ct) =>
         _blobs.OpenReadAsync(file.Container, file.BlobPath, file.ETag, ct);
 
@@ -508,13 +472,6 @@ public sealed class StoredFileService
             _logger.LogWarning(ex, "Stored file {FileId}: the row could not be re-read after a failed create", fileId);
             return null;
         }
-    }
-
-    private async Task<bool> CallerCanReadAsync(string? callerBearerToken, string entitySet, Guid id, CancellationToken ct)
-    {
-        // The gate variant answers None for no access, unknown and any fault, on the same schedule (task 064).
-        var rights = await _probe.GetCallerRightsForAuthorizationGateAsync(callerBearerToken, entitySet, id, ct).ConfigureAwait(false);
-        return rights.HasFlag(AccessRights.Read);
     }
 
     /// <summary>The row's path parses for this tenant, names the row's own parent and file id, and the row has a container.</summary>

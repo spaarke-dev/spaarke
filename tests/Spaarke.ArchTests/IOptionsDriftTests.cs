@@ -137,7 +137,16 @@ public class IOptionsDriftTests
         },
         ["WorkforceIdentityOptions"] = Array.Empty<Guard>(), // WorkforceIdentityOptionsValidator checks the SHAPE of CustomerTenantIds elements only; an empty list is valid, so no key is demanded.
         ["ContentUnderstandingOptions"] = Array.Empty<Guard>(), // ContentUnderstandingOptionsValidator (ebilling-r1 task 043): an empty Endpoint is valid (reader not configured -> FeatureDisabledException at call time); the other keys have valid defaults. It checks the SHAPE of values that are set, so no key is demanded.
-        ["FinanceOptions"] = Array.Empty<Guard>(), // FinanceOptionsValidator (ebilling-r1 task 028): checks only that the two eBilling container ids, when set, differ from each other and from EmailProcessing:DefaultContainerId / Communication:ArchiveContainerId. Empty is valid, so no key is demanded.
+        // FinanceOptionsValidator (ebilling-r1 task 028): the two eBilling container ids, when set, differ from each other and from
+        // EmailProcessing:DefaultContainerId / Communication:ArchiveContainerId; empty is valid. Task 090 adds Finance:FileStore: an empty
+        // BlobEndpoint is valid (store not configured), and its other keys have valid defaults; only TenantId is demanded, and only once
+        // BlobEndpoint is set.
+        ["FinanceOptions"] = new[]
+        {
+            new Guard("Finance:FileStore:TenantId", Disposition.Exempt,
+                "FinanceOptionsValidator (ebilling-r1 task 090): a GUID is required only when Finance:FileStore:BlobEndpoint is set, which no stamp channel writes yet (task 079 sets dev after 091). Whoever writes the endpoint for a stamp writes the tenant with it; the validator names the key at boot.",
+                Gate: "Finance:FileStore:BlobEndpoint"),
+        },
     };
 
     // ───────────────────────────────────── channels ─────────────────────────────────────
