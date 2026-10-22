@@ -19,7 +19,13 @@
 - **Deploy dependency:** a BFF with T8 REQUIRES `sprk_document.sprk_accessinheritance` (`Set-DocumentAccessPermissionSchema.ps1`, guide §7.4). It is applied in dev; prod needs it before any BFF with 189 or T8. A deploy needs the owner's go, coordinated with R3, and the build must contain 077.
 
 ## Live in dev
-- **BFF `spaarke-bff-dev`: master `1.0.0+f1b3dadcf5`** since 2026-10-21 21:45:37Z (deployed by R3 on our OK; adds UAC 188 / D7 T7, field-mapping #2214 and UAC #2186 to `583f90c1d9`, which had tasks 130 and 131 and 077; healthz 200). UAC is applying, live, the document-link Delete = Restrict (`Set-DocumentLinkDeleteRestrict.ps1`), field security and web resources. After that, deleting a saved .eml that has attachment children is refused (409) until the children are deleted. No Office save path deletes. R3's 30-minute App Insights reading (16:41:30Z–17:12:38Z): **0** stager refusals and no new exception class; the only group is the known Graph "Invalid hostname" noise. UAC's gate (one identified and one unidentifiable .eml save) waits on the owner; when R3 sends times or subjects, read the sprk_document rows back (relatedcommunication, accesspermission, accessinheritance).
+- **BFF `spaarke-bff-dev`: master `1.0.0+a7b956fb55`** since 2026-10-22 02:18:52Z (deployed by R3 on our OK; healthz 200). It adds to `f1b3dadcf5`:
+  - field-mapping #2223 and #2228;
+  - UAC #2221 / task 190, the .eml-to-communication link sweep, registered disabled with Apply off.
+
+  Open question with UAC (relayed by R3): should a task-130 own-Restricted .eml that the sweep later links lose its own Restricted? Today it stays Restricted, which fails closed.
+
+  `f1b3dadcf5` (21:45:37Z) added UAC 188 / D7 T7, field-mapping #2214 and UAC #2186 to `583f90c1d9` (tasks 130 and 131, and 077). UAC is applying, live, the document-link Delete = Restrict (`Set-DocumentLinkDeleteRestrict.ps1`), field security and web resources. After that, deleting a saved .eml that has attachment children is refused (409) until the children are deleted. No Office save path deletes. R3's 30-minute App Insights reading (16:41:30Z–17:12:38Z): **0** stager refusals and no new exception class; the only group is the known Graph "Invalid hostname" noise. UAC's gate (one identified and one unidentifiable .eml save) waits on the owner; when R3 sends times or subjects, read the sprk_document rows back (relatedcommunication, accesspermission, accessinheritance).
 - **Console `sprk_spaarkeai`:** `deploy-spaarke-ai.yml` auto-publishes on every master push touching SpaarkeAi or the shared UI packages; read `modifiedon` to know which build is live. Default landing tab is Worklist (ontology data change 2026-10-17; Daily Briefing is in the Workspaces dropdown).
 - The add-ins are current (`733c65063c`; `deploy-office-addins.yml` runs on every master push).
 
