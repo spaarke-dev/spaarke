@@ -2,7 +2,7 @@
 
 > **Last Updated**: 2026-10-22 ~17:00Z (main session). State only — history is in git log, task `<completion>` blocks and
 > `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 and §6. Decisions: [`notes/decisions.md`](notes/decisions.md)
-> (D-1..D-183). Deferred work: one self-contained GitHub issue per item, label `ontology-deferred`, plus a DI-nn row in both tables of
+> (D-1..D-184). Deferred work: one self-contained GitHub issue per item, label `ontology-deferred`, plus a DI-nn row in both tables of
 > `notes/defer-issues.md` (next free: **DI-123**). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
@@ -19,7 +19,7 @@
 2. **R3 dev BFF `f5bf481185`** (our OK given; carries 157): on the after-notice, run `scratchpad/live/smokeA_v2.py` on both matters, set `since` in `deploycheck.py` to the deploy time and run it; deploy-log entry; check tonight's heartbeat.
 2a. **#2281** fixed on master `1fa0cf5cb8` (#2282, reviewed; #2281 closed). Seeder defect it uncovered: #2283 (customer-provisioning). #2285 (ebilling: internal Read on sprk_policy/ruleset): our Basic User policy Read is intended (§12), commented; owner decides on hiding Billing policy rows. Dev check after the BFF candidate after `f5bf481185`: Create Work Assignment on a matter with an attorney copies `sprk_assignedattorney1`, no warning.
 2b. **R2** (D-183): owner answers design.md §9 Q1–Q6, then `/design-to-spec` in the R2 worktree. R2 does not edit R1-owned files while R1 lanes are open.
-3. **ebilling reviews when sent:** 097 (BillingFactLoader Superseded → null; our path), 116 (drafting re-keyed per Procedure Version), 082 (resolver uses `BillingRuleDefinition.PrecedenceKey`; must remove the `sprk_procedure` null filter, and nothing may set `sprk_ruleset.sprk_procedure` before 082). 081 ✅ re-check PASS (`cac386fa6b`, ArchTest `b160493311`). 088 ✅ on dev (read-back PASS). Owner gets ebilling's questions on retroactive correction and the D-11 clean slate. The 088 F1s are already filed into their POMLs 117, 094/095, 097 (`8d1394a4ed`). Every schema run: final script + `-WhatIf` to us, before/after notices, no run before our PASS; check all core records.
+3. **ebilling reviews when sent:** the D-184 `SignalReadService` change (vendor org from the submission; security review, 2 passes; must merge with or before Duplicate-raising code); 097 (BillingFactLoader Superseded → null; our path), 116 (drafting re-keyed per Procedure Version), 082 (resolver uses `BillingRuleDefinition.PrecedenceKey`; must remove the `sprk_procedure` null filter, and nothing may set `sprk_ruleset.sprk_procedure` before 082). 081 ✅ re-check PASS (`cac386fa6b`, ArchTest `b160493311`). 088 ✅ on dev (read-back PASS). Owner gets ebilling's questions on retroactive correction and the D-11 clean slate. The 088 F1s are already filed into their POMLs 117, 094/095, 097 (`8d1394a4ed`). Every schema run: final script + `-WhatIf` to us, before/after notices, no run before our PASS; check all core records.
 4. **105 UAT** with the owner, per `notes/uat-v4-log.md` (R1–R24 + C1–C4; R19, C1, C3 pass). Open: keyboard/screen-reader (C2), the 055 Next step To Do (C4), the rest of R1–R24.
 5. Re-run `SignalReadRouteLiveTests` as a non-Console user (DI-83 #1882), then close #1882.
 6. **111 row 4** (owner): https://green-dune-0c4f1221e.7.azurestaticapps.net/upload?entityType=sprk_project&entityId=e42aa40d-361b-f111-88b3-7ced8d1dc988 ; then close 111. **114** closes after 162 (and #2281 on dev); then 090 wrap-up.
