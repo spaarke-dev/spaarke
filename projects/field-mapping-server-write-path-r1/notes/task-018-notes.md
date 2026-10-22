@@ -479,3 +479,44 @@ Proposed split, each part on the same PR:
    - the agreed assertion rewrites;
    - mutants.
    - About 70 steps, once G1 to G7 are answered.
+
+## 018b-1s: service outcome members (G1, G2, G5): commit 3a97cce150
+
+No live behaviour change; the service still has no live caller.
+
+- **`RecordCreationOutcome.WrittenColumns` (G1):** the keys of the step-11 create body, exactly as sent.
+  - A lookup appears as its bind key in the metadata's navigation casing (`sprk_MatterType@odata.bind`). Compare case-insensitively, with and without the bind suffix.
+  - It includes the server-added keys (owner, creator person, search-index default) and leaves out dropped values.
+  - It is empty on every refusal.
+- **`ClientFailure` on `PrincipalUnresolved` (G2):** the WhoAmI failure (`AccessDenied`, `UserContextRequired`, `OboExchangeFailed`, `OboNotConfigured`). The code and the 403 are unchanged.
+- **`RecordCreationRefusal.RefusedColumn` (G5):** the logical lookup column, or `sprk_regardingrecordid` for the pair's record, including the unreadable record-type row.
+  - It is set only on a step-5 `NotFoundOrDenied` refusal and is carried from a new `OwnedChildWrite.Outcome.RefusedColumn`.
+  - It is null elsewhere, including on the step-6 `PlanRefused` and pre-write not-found refusals.
+  - It is never rendered by the HTTP map.
+  - The live child-records route sets it but never serializes it.
+  - It holds the column name only, never the value (UAC-r2).
+- **Known limit:** when a typed filing lookup and the pair name the same record, the existing `DistinctBy` names the typed lookup.
+- **Tests:** 17 new, in `tests/integration/seam/RecordCreation/RecordCreationServiceOutcomeSeamTests.cs` and `RecordCreationServicePipelineSeamTests.PrincipalFailure.cs`. Five mutants, all killed.
+- **§11:** see `decisions.md`, 2026-10-22 G1–G7.
+  - `WrittenColumns`: no outcome member names written columns, and a read-back adds an app-only read and a race.
+  - `ClientFailure`: an existing member, set on a second kind.
+  - `RefusedColumn`: without it, an adapter would have to parse `Detail`.
+
+## 018b-1b: Office contract-host caller-Dataverse double: commit 84d2add15b
+
+Fixture only; no `src/` change.
+
+**Files**, all in `tests/integration/contract/Api/Office/`:
+- `OfficeCallerDataverseDouble.cs`: a closed-world double. Unknown requests throw `UnscriptedCallerRequestException`. Mask reads are passed through untouched to the existing `MappingSourceCallerReadDouble`.
+- `RecordCreationWriteCapture.cs`: `factory.CaptureRecordCreationWrite()` exposes `.Entity` / `.Entities` as an SDK view, and `FailAttempt` drives the 412 retry.
+- `OfficeCallerDataverseDoubleTests.cs`: 58 self-tests; three deliberate breakages made 11 of them fail.
+
+**Counts:** every Office suite is unchanged. The filtered total went from 3753 to 3811 passed, 7 skipped.
+
+**Notes for the swap:**
+- The service picks the new record's id, so number read-back setups must match any id.
+- New row ids need `CallerDataverse.WithRow(...)`.
+- Turn old app-only "not found" or fault setups into `Missing`, `Respond` or `Fault` overrides.
+- `HeldPrivileges` (endpoint filter) and `CallerDataverse.Held` are separate.
+- `sprk_client` is a fixture-only lookup.
+- A caller PATCH from step 12 would throw and must be scripted.
