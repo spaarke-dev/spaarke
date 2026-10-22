@@ -1050,11 +1050,13 @@ public static class FieldMappingEndpoints
                     // of the push applies: one push from a Standard matter would otherwise clear the own narrowing of every
                     // child document it reaches. Task 188 round 4e: the same for its D7 link columns (sprk_parentdocument,
                     // sprk_relatedcommunication; InheritedAccessPermission.DocumentLinkColumns), which decide whether partners see it.
-                    // #2251: the push runs as its caller, so it is not one of the app-only writers that issue names; it asks
-                    // the same refusal per rule all the same (its rules are configuration applied to every child), so a rule
-                    // onto an access table or a secure root's secure flag, access columns or container is skipped too.
+                    // #2247: on every table, the owner and the creator. #2253 fix round 1 (K2): the push runs AS its caller,
+                    // so it asks as WriteIdentity.Caller: these refusals and the table-name check only. Access tables, a
+                    // secure root's columns and other tables' access columns are left to the caller's own Dataverse
+                    // privileges and field security (sprk_accesspermission on a matter stays editable by a Write holder).
                     if (Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.RefuseAppOnlyWrite(
-                            targetEntity, [rule.TargetField]) is { } setBySpaarke)
+                            targetEntity, [rule.TargetField],
+                            Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.WriteIdentity.Caller) is { } setBySpaarke)
                     {
                         recordFieldResults.Add(new FieldMappingResultDto
                         {

@@ -467,15 +467,18 @@ public class UpdateRecordNodeExecutorTests
     }
 
     [Theory(DisplayName = "#2251: an app-only node onto an access table or a secure root's secure columns fails, and nothing is written")]
-    [InlineData("sprk_externalrecordaccess", "sprk_accesslevel")]
-    [InlineData(" SPRK_ContactOrganization ", "statecode")]
-    [InlineData("sprk_noaccessentry", "sprk_name")]
-    [InlineData("sprk_assignedaccess", "sprk_state")]
-    [InlineData("sprk_matter", "sprk_issecure")]
-    [InlineData("sprk_matter", "sprk_containerid")]
-    [InlineData("sprk_project", "SPRK_SecurityBU")]
-    [InlineData("sprk_workassignment", "sprk_accesspermission")]
-    public async Task ExecuteAsync_AnAccessTableOrASecureRootColumn_FailsTheNode_AndWritesNothing(string table, string field)
+    [InlineData("sprk_externalrecordaccess", "sprk_accesslevel", InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode)]
+    [InlineData(" SPRK_ContactOrganization ", "statecode", InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode)]
+    [InlineData("sprk_noaccessentry", "sprk_name", InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode)]
+    [InlineData("sprk_assignedaccess", "sprk_state", InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode)]
+    [InlineData("sprk_matter", "sprk_issecure", InheritedAccessPermission.AppOnlySecureRootWriteReasonCode)]
+    [InlineData("sprk_matter", "sprk_containerid", InheritedAccessPermission.AppOnlySecureRootWriteReasonCode)]
+    [InlineData("sprk_project", "SPRK_SecurityBU", InheritedAccessPermission.AppOnlySecureRootWriteReasonCode)]
+    [InlineData("sprk_workassignment", "sprk_accesspermission", InheritedAccessPermission.AppOnlySecureRootWriteReasonCode)]
+    [InlineData("contact", "sprk_externalobjectid", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode)]
+    [InlineData("systemuser", "sprk_isexternal", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode)]
+    [InlineData("sprk_externalrecordaccess')?$select=EntitySetName#", "sprk_name", InheritedAccessPermission.AppOnlyTableNameInvalidReasonCode)]
+    public async Task ExecuteAsync_AnAccessTableOrASecureRootColumn_FailsTheNode_AndWritesNothing(string table, string field, string code)
     {
         var config = $@"{{
             ""entityLogicalName"":""{table}"",
@@ -488,6 +491,7 @@ public class UpdateRecordNodeExecutorTests
         var result = await _executor.ExecuteAsync(CreateValidContext(config), CancellationToken.None);
 
         result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain($"({code})", "the node fails with the refusal's own code (#2253 K5)");
         written.Should().BeEmpty("the refusal comes before the write");
     }
 

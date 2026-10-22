@@ -100,7 +100,8 @@ public class DocumentBffOwnedColumnAppOnlyWriterTests
     [InlineData("sprk_communication")]
     [InlineData("sprk_communicationattachment")]
     [InlineData("sprk_matter")]
-    [InlineData(null)]
+    // #2253 fix round 1 (F1-a): a null table is no longer "another table"; it is refused as no table name at all
+    // (AccessTableAppOnlyWriterTests.ATableThatIsNotAnIdentifier_IsRefusedFirst_ForEveryIdentity).
     public void EveryOwnedColumn_IsNotRefusedOnAnotherTable(string? table)
     {
         InheritedAccessPermission.RefuseAppOnlyWrite(table, Owned).Should().BeNull();

@@ -28,14 +28,18 @@ namespace Sprk.Bff.Api.Tests.DataMutation.ChildAccessPermission;
 /// writers. An app-only generic writer never writes them (<see cref="InheritedAccessPermission.RefuseAppOnlyWrite"/>, reasons
 /// <see cref="InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode"/> and
 /// <see cref="InheritedAccessPermission.AppOnlySecureRootWriteReasonCode"/>): the Update Record playbook node and the action
-/// seam acting for no person (<see cref="UpdateRecordActionCore"/>), a playbook's output mapping
-/// (<see cref="DataverseUpdateHandler"/>), and the field-mapping push (a rule naming one is skipped). The BFF app user is a
+/// seam acting for no person (<see cref="UpdateRecordActionCore"/>) and a playbook's output mapping
+/// (<see cref="DataverseUpdateHandler"/>). The field-mapping push runs as its caller and asks only the table-name check and
+/// the refusals it asked before #2251 (#2253 fix round 1, K2). The BFF app user is a
 /// System Administrator, so before this a playbook could point a grant at another contact, move a contact into an
 /// organisation, repoint an ethical wall, un-secure a matter or point it at another root's container. Must fire: every
 /// access table, in any case and with whitespace, with any column; every secure-root column on every root, in its plain,
 /// case-variant, <c>@odata.bind</c> and <c>_{column}_value</c> forms. Must not fire: ordinary columns on a root (the live
 /// <c>sprk_matter.sprk_performancesummary</c> node), the same columns on other tables, neighbouring table names. Drift: every
-/// table constant the access readers query is refused, and every root the registry and the grant model name is covered.
+/// root the registry and the grant model name is covered; the tables the access code names are scanned from source by
+/// <c>Spaarke.ArchTests.AccessTableReaderScanTests</c>. #2253 fix round 1 adds: a table that is not a bare identifier is
+/// refused first (<see cref="InheritedAccessPermission.AppOnlyTableNameInvalidReasonCode"/>, F1-a), and a non-root table's
+/// access columns (<see cref="InheritedAccessPermission.AccessColumns"/>, F1-b).
 /// </summary>
 public class AccessTableAppOnlyWriterTests
 {
@@ -44,7 +48,51 @@ public class AccessTableAppOnlyWriterTests
     private static readonly Guid Forged = Guid.Parse("22510000-0000-0000-0000-00000000e4ff");
 
     private static readonly string[] Tables =
-        ["sprk_externalrecordaccess", "sprk_contactorganization", "sprk_noaccessentry", "sprk_assignedaccess", "teammembership"];
+    [
+        "sprk_externalrecordaccess", "sprk_contactorganization", "sprk_noaccessentry", "sprk_assignedaccess", "teammembership",
+        "fieldpermission",
+    ];
+
+    /// <summary>#2253 fix round 1 (F1-b): each non-root table's access columns, as the readers name them.</summary>
+    private static readonly IReadOnlyDictionary<string, string[]> TableAccessColumns = new Dictionary<string, string[]>
+    {
+        ["contact"] =
+        [
+            "sprk_externalobjectid", "sprk_externalobjectidkey", "sprk_identityplane", "sprk_externaltenantid",
+            "sprk_externalinvitedon", "sprk_externalinvitecodehash", "sprk_standinggrant", "sprk_accesspermissiongrant",
+        ],
+        ["sprk_organization"] = ["sprk_standinggrant", "sprk_accesspermissiongrant"],
+        ["systemuser"] =
+        [
+            "sprk_hometenantid", "sprk_homeobjectid", "sprk_hometenantidkey", "sprk_homeobjectidkey", "sprk_primarycontact",
+            "sprk_isexternal",
+        ],
+        ["businessunit"] = ["sprk_containerid"],
+    };
+
+    /// <summary>
+    /// #2253 fix round 1 (F1-a): names that are not a bare identifier after trimming. The first is the reviewed attack: the
+    /// metadata URL would answer for <c>sprk_externalrecordaccess</c> while every set saw an unknown string.
+    /// </summary>
+    public static TheoryData<string?> CraftedTableNames() => new()
+    {
+        "sprk_externalrecordaccess')?$select=EntitySetName#",
+        "sprk_matter')?$select=EntitySetName#",
+        "sprk_externalrecordaccess#",
+        "sprk_externalrecordaccess'",
+        "sprk_externalrecordaccess/../sprk_matter",
+        "sprk_external recordaccess",
+        "sprk_external\nrecordaccess",
+        "sprk_matter?x=1",
+        "sprk_matter(00000000-0000-0000-0000-000000000001)",
+        "_sprk_matter",
+        "1sprk_matter",
+        "sprk_m\u00e4tter",
+        "sprk_matter%27",
+        "",
+        "   ",
+        null,
+    };
 
     private static readonly string[] Roots = ["sprk_matter", "sprk_project", "sprk_workassignment"];
 
@@ -106,6 +154,16 @@ public class AccessTableAppOnlyWriterTests
             data.Add(root, "sprk_SecurityBU@odata.bind", InheritedAccessPermission.AppOnlySecureRootWriteReasonCode);
             data.Add(root, "SPRK_AccessPermission", InheritedAccessPermission.AppOnlySecureRootWriteReasonCode);
         }
+
+        // #2253 fix round 1: a non-root table's access columns, and the crafted table name of F1-a.
+        data.Add("contact", "sprk_externalobjectid", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
+        data.Add("contact", "sprk_standinggrant", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
+        data.Add("sprk_organization", "sprk_accesspermissiongrant", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
+        data.Add("systemuser", "sprk_isexternal", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
+        data.Add("businessunit", "sprk_containerid", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
+        data.Add("sprk_externalrecordaccess')?$select=EntitySetName#", "sprk_name",
+            InheritedAccessPermission.AppOnlyTableNameInvalidReasonCode);
+        data.Add("sprk_matter')?$select=EntitySetName#", "sprk_issecure", InheritedAccessPermission.AppOnlyTableNameInvalidReasonCode);
 
         return data;
     }
@@ -179,7 +237,6 @@ public class AccessTableAppOnlyWriterTests
     [InlineData("contact")]
     [InlineData("sprk_organization")]
     [InlineData("sprk_matterx")]
-    [InlineData(null)]
     public void ANeighbouringTable_IsNotRefusedWhole(string? table)
     {
         Code(table, "sprk_name").Should().BeNull($"'{table}' is not an access table");
@@ -218,43 +275,8 @@ public class AccessTableAppOnlyWriterTests
     }
 
     // ── Drift ────────────────────────────────────────────────────────────────────────────────────────────────────
-
-    /// <summary>The table constants the access readers and the grant writers name: every one must be refused whole.</summary>
-    private static readonly string[] ReaderTables =
-    [
-        ExternalGrantLifecycle.EntityLogicalName,
-        GrantExternalAccessEndpoint.EntityLogicalName,
-        WorkforceRoleCeilingGate.GrantTable,
-        SecureChildReconciler.GrantTable,
-        ExternalOrganizationMembership.EntityLogicalName,
-        NoAccessListReader.EntityLogicalName,
-        AssignedAccessStore.EntityLogicalName,
-    ];
-
-    [Fact]
-    public void EveryTableTheAccessReadersQuery_IsRefusedWhole() =>
-        NotRefused(ReaderTables).Should().BeEmpty("every table the access readers decide access from is the BFF's alone");
-
-    [Fact]
-    public void TheDriftCheck_FiresOnAReaderTableTheRefusalDoesNotList() =>
-        NotRefused([.. ReaderTables, "sprk_accessgrantx"]).Should().Equal("sprk_accessgrantx");
-
-    [Fact]
-    public void EachReadersCollection_IsItsRefusedTablesCollection()
-    {
-        // The readers query by collection; each collection is the refused logical name's, so a renamed reader drifts here.
-        foreach (var (set, logical) in new[]
-                 {
-                     (ExternalGrantLifecycle.EntitySet, ExternalGrantLifecycle.EntityLogicalName),
-                     (ExternalOrganizationMembership.EntitySet, ExternalOrganizationMembership.EntityLogicalName),
-                     (NoAccessListReader.EntitySet, NoAccessListReader.EntityLogicalName),
-                     (AssignedAccessStore.EntitySet, AssignedAccessStore.EntityLogicalName),
-                 })
-        {
-            set.Should().BeOneOf(logical + "s", logical + "es", logical[..^1] + "ies");
-            InheritedAccessPermission.AccessTables.Should().Contain(logical);
-        }
-    }
+    // #2253 fix round 1 (K3): which tables the access code names is scanned from source by
+    // Spaarke.ArchTests.AccessTableReaderScanTests (refused whole here, or listed there with a reason).
 
     [Fact]
     public void EveryRootTheRegistryAndTheGrantModelName_IsASecureRoot()
@@ -286,12 +308,157 @@ public class AccessTableAppOnlyWriterTests
         }
     }
 
-    /// <summary>The tables of <paramref name="tables"/> the refusal does not refuse whole.</summary>
-    private static IEnumerable<string> NotRefused(IEnumerable<string> tables) =>
-        tables.Where(t => Code(t, "sprk_name") != InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode).ToList();
-
     private static string? Code(string? table, params string[] keys) =>
         InheritedAccessPermission.RefuseAppOnlyWrite(table, keys)?.RefusalCode;
+
+    private static string? CallerCode(string? table, params string[] keys) =>
+        InheritedAccessPermission.RefuseAppOnlyWrite(table, keys, InheritedAccessPermission.WriteIdentity.Caller)?.RefusalCode;
+
+    // ── #2253 fix round 1 (F1-a): a table that is not a bare identifier ─────────────────────────────────────────
+
+    [Theory]
+    [MemberData(nameof(CraftedTableNames))]
+    public void ATableThatIsNotAnIdentifier_IsRefusedFirst_ForEveryIdentity(string? table)
+    {
+        // Named with the columns of every other refusal: the name check answers before any of them.
+        string[] keys = ["sprk_name", "sprk_issecure", "ownerid", "sprk_externalobjectid"];
+
+        Code(table, keys).Should().Be(InheritedAccessPermission.AppOnlyTableNameInvalidReasonCode);
+        CallerCode(table, keys).Should().Be(InheritedAccessPermission.AppOnlyTableNameInvalidReasonCode);
+        Code(table).Should().Be(InheritedAccessPermission.AppOnlyTableNameInvalidReasonCode, "an empty payload too");
+    }
+
+    [Theory]
+    [InlineData("sprk_matter")]
+    [InlineData("  sprk_Matter\t")]
+    [InlineData("SPRK_EVENT")]
+    [InlineData("sprk_recordtype_ref")]
+    [InlineData("account")]
+    [InlineData("sprk_x2")]
+    public void AnIdentifierTable_PassesTheNameCheck(string table)
+    {
+        Code(table, "sprk_description").Should().BeNull();
+        CallerCode(table, "sprk_description").Should().BeNull();
+    }
+
+    // ── #2253 fix round 1 (F1-b): a non-root table's access columns ──────────────────────────────────────────────
+
+    /// <summary>Each access column on its table, in each form a payload key can take.</summary>
+    public static TheoryData<string, string, string> EveryAccessColumnForm()
+    {
+        var data = new TheoryData<string, string, string>();
+        foreach (var (table, columns) in TableAccessColumns)
+        {
+            foreach (var column in columns)
+            {
+                data.Add(table, column, column);
+                data.Add($" {table.ToUpperInvariant()} ", $" {column.ToUpperInvariant()} ", column);
+                data.Add(table, $"{column}@odata.bind", column);
+                data.Add(table, $"_{column}_value", column);
+            }
+        }
+
+        // The navigation-property spelling a configuration writes for the task-141 link.
+        data.Add("systemuser", "sprk_PrimaryContact@odata.bind", "sprk_primarycontact");
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryAccessColumnForm))]
+    public void AnAccessColumn_InAnyForm_IsRefusedOnItsTable(string table, string key, string column)
+    {
+        var refusal = InheritedAccessPermission.RefuseAppOnlyWrite(table, ["sprk_description", key]);
+
+        refusal.Should().NotBeNull();
+        refusal!.RefusalCode.Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
+        refusal.Reason.Should().StartWith($"{column} of a {table.Trim().ToLowerInvariant()} ");
+    }
+
+    [Fact]
+    public void TheAccessColumnMap_IsExactlyTheseColumns()
+    {
+        InheritedAccessPermission.AccessColumns.Keys.Should().BeEquivalentTo(TableAccessColumns.Keys);
+        foreach (var (table, columns) in TableAccessColumns)
+            InheritedAccessPermission.AccessColumns[table].Should().BeEquivalentTo(columns, table);
+    }
+
+    [Fact]
+    public void TheAccessColumnMap_IsBuiltFromTheReadersOwnConstants()
+    {
+        // One source of truth with each reader: a renamed reader constant drifts here.
+        (string Table, string Column)[] readers =
+        [
+            (SubjectStandingGrantReader.ContactEntity, ContactBindingDecision.ExternalObjectIdColumn),
+            (SubjectStandingGrantReader.ContactEntity, ContactBindingDecision.KeyMirrorColumn),
+            (SubjectStandingGrantReader.ContactEntity, ContactBindingDecision.IdentityPlaneColumn),
+            (SubjectStandingGrantReader.ContactEntity, ContactBindingDecision.ExternalTenantIdColumn),
+            (SubjectStandingGrantReader.ContactEntity, ContactBindingDecision.ExternalInvitedOnColumn),
+            (SubjectStandingGrantReader.ContactEntity, ContactBindingDecision.ExternalInviteCodeHashColumn),
+            (SubjectStandingGrantReader.ContactEntity, SubjectStandingGrantReader.StandingGrantAttribute),
+            (SubjectStandingGrantReader.ContactEntity, SubjectStandingGrantReader.BaselineAttribute),
+            (SubjectStandingGrantReader.OrganizationEntity, SubjectStandingGrantReader.StandingGrantAttribute),
+            (SubjectStandingGrantReader.OrganizationEntity, SubjectStandingGrantReader.BaselineAttribute),
+            ("systemuser", ContactBindingDecision.HomeTenantIdColumn),
+            ("systemuser", ContactBindingDecision.HomeObjectIdColumn),
+            ("systemuser", DataverseContactIdentityStore.HomeTenantIdKeyColumn),
+            ("systemuser", DataverseContactIdentityStore.HomeObjectIdKeyColumn),
+            ("systemuser", AssignedAccessStore.PrimaryContactColumn),
+            ("systemuser", AssignedAccessStore.IsExternalColumn),
+            ("businessunit", RecordContainerResolver.ContainerColumn),
+        ];
+        foreach (var (table, column) in readers)
+            Code(table, column).Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, $"{column} on {table}");
+    }
+
+    [Theory]
+    [InlineData("contact", "firstname")]
+    [InlineData("contact", "emailaddress1")]
+    [InlineData("contact", "sprk_containerid")]
+    [InlineData("contact", "sprk_isexternal")]
+    [InlineData("contact", "sprk_identitycollisionon")]
+    [InlineData("contact", "sprk_externalobjectidx")]
+    [InlineData("sprk_organization", "sprk_name")]
+    [InlineData("sprk_organization", "sprk_externalobjectid")]
+    [InlineData("systemuser", "firstname")]
+    [InlineData("systemuser", "sprk_standinggrant")]
+    [InlineData("systemuser", "sprk_primarycontactname")]
+    [InlineData("businessunit", "name")]
+    [InlineData("sprk_event", "sprk_externalobjectid")]
+    [InlineData("sprk_matter", "sprk_standinggrant")]
+    [InlineData("account", "sprk_isexternal")]
+    public void AnOrdinaryColumn_OrAnAccessColumnOnAnotherTable_IsNotRefused(string table, string key) =>
+        Code(table, key).Should().BeNull($"'{key}' on {table} decides no access");
+
+    // ── #2253 fix round 1 (K2): the push asks as its caller ──────────────────────────────────────────────────────
+
+    [Fact]
+    public void AsTheCaller_TheAccessTablesTheSecureRootColumnsAndTheAccessColumns_AreNotAsked()
+    {
+        foreach (var table in Tables)
+            CallerCode(table, "sprk_name").Should().BeNull($"{table}: the caller's own privileges decide");
+        foreach (var root in Roots)
+        {
+            foreach (var column in RootColumns)
+                CallerCode(root, column).Should().BeNull($"{column} on {root}: the caller's own privileges decide");
+        }
+
+        foreach (var (table, columns) in TableAccessColumns)
+        {
+            foreach (var column in columns)
+                CallerCode(table, column).Should().BeNull($"{column} on {table}: the caller's own privileges decide");
+        }
+    }
+
+    [Fact]
+    public void AsTheCaller_TheRefusalsThePushAskedBefore2251_StillHold()
+    {
+        CallerCode("sprk_document", "sprk_accesspermission").Should().Be(InheritedAccessPermission.AppOnlyDocumentWriteReasonCode);
+        CallerCode("sprk_document", "sprk_parentdocument").Should().Be(InheritedAccessPermission.AppOnlyDocumentLinkWriteReasonCode);
+        CallerCode("sprk_document", "sprk_graphitemidbound").Should().Be(InheritedAccessPermission.AppOnlyDocumentBffColumnWriteReasonCode);
+        CallerCode("sprk_matter", "ownerid").Should().Be(InheritedAccessPermission.AppOnlyOwnerWriteReasonCode);
+        CallerCode("sprk_externalrecordaccess", "ownerid").Should().Be(InheritedAccessPermission.AppOnlyOwnerWriteReasonCode);
+        CallerCode("contact", "sprk_createdbyperson").Should().Be(InheritedAccessPermission.AppOnlyCreatorWriteReasonCode);
+    }
 
     // ── Update Record node / action seam (app-only) ──────────────────────────────────────────────────────────────
 
@@ -312,12 +479,14 @@ public class AccessTableAppOnlyWriterTests
     }
 
     [Theory]
-    [InlineData("sprk_externalrecordaccess", "sprk_Contact", "contact")]
-    [InlineData("sprk_contactorganization", "sprk_Organization", "sprk_organization")]
-    [InlineData("sprk_noaccessentry", "sprk_SubjectContact", "contact")]
-    [InlineData("sprk_matter", "sprk_SecurityBU", "team")] // the refusal reads the bind key; the target only needs a pinned set
+    [InlineData("sprk_externalrecordaccess", "sprk_Contact", "contact", InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode)]
+    [InlineData("sprk_contactorganization", "sprk_Organization", "sprk_organization", InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode)]
+    [InlineData("sprk_noaccessentry", "sprk_SubjectContact", "contact", InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode)]
+    // the refusal reads the bind key; the target only needs a pinned set
+    [InlineData("sprk_matter", "sprk_SecurityBU", "team", InheritedAccessPermission.AppOnlySecureRootWriteReasonCode)]
+    [InlineData("systemuser", "sprk_PrimaryContact", "contact", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode)]
     public async Task APlaybookLookup_IntoAnAccessTableOrOntoASecureRootColumn_IsRefused_AndNothingIsWritten(
-        string table, string field, string target)
+        string table, string field, string target, string code)
     {
         var act = () => Core().UpdateAsync(
             new UpdateRecordActionInput(
@@ -325,9 +494,7 @@ public class AccessTableAppOnlyWriterTests
                 Lookups: [new RenderedLookup(field, target, Forged.ToString("D"))]),
             CancellationToken.None);
 
-        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
-            .Should().BeOneOf(InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode,
-                InheritedAccessPermission.AppOnlySecureRootWriteReasonCode);
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode.Should().Be(code);
         _writes.Invocations.Should().BeEmpty("the refusal comes before anything is written");
     }
 
@@ -398,11 +565,18 @@ public class AccessTableAppOnlyWriterTests
 
     // ── Field-mapping push (a rule naming one is skipped; the rest of the push applies) ──────────────────────────
 
+    /// <summary>
+    /// #2253 fix round 1 (K2): the push runs as its caller, so a rule onto a matter's Access Permission (editable by a Write
+    /// holder; <c>scripts/Set-SecureFlagFieldSecurity.ps1</c>), a root's container or business unit, or an access table is
+    /// not refused here: it is sent as the caller, whose own Dataverse privileges and field security decide it.
+    /// </summary>
     [Theory]
-    [InlineData("sprk_matter", "sprk_issecure")]
+    [InlineData("sprk_matter", "sprk_accesspermission")]
+    [InlineData("sprk_matter", "sprk_securitybu")]
     [InlineData("sprk_project", "sprk_containerid")]
-    [InlineData("sprk_workassignment", "sprk_securitybu")]
-    public async Task APushRule_OntoASecureRootColumn_IsSkipped_AndTheOtherColumnsArePushed(string table, string target)
+    [InlineData("sprk_externalrecordaccess", "sprk_accesslevel")]
+    [InlineData("contact", "sprk_standinggrant")]
+    public async Task APushRule_OntoAColumnTheCallersPrivilegesDecide_IsSentAsTheCaller(string table, string target)
     {
         var (updated, failed, skipped, errors, results) = await Push(
             table, Rule("sprk_name", "sprk_description"), Rule("sprk_name", target));
@@ -410,17 +584,17 @@ public class AccessTableAppOnlyWriterTests
         (updated, failed, skipped).Should().Be((1, 0, 0));
         errors.Should().BeEmpty();
         _writes.Verify(w => w.UpdateRecordFieldsAsync(
-            table, Row, It.Is<Dictionary<string, object?>>(f => f.Count == 1 && f.ContainsKey("sprk_description")),
+            table, Row, It.Is<Dictionary<string, object?>>(f => f.Count == 2 && f.ContainsKey("sprk_description") && f.ContainsKey(target)),
             It.IsAny<CancellationToken>(), Caller), Times.Once);
-        results.Should().ContainSingle(r => r.TargetField == target)
-            .Which.Status.Should().Be(FieldMappingStatus.Skipped);
+        results.Should().NotContain(r => r.Status == FieldMappingStatus.Skipped);
     }
 
     [Fact]
-    public async Task APushIntoAnAccessTable_SkipsEveryRule_AndWritesNothing()
+    public async Task APushIntoACraftedTableName_SkipsEveryRule_AndWritesNothing()
     {
         var (updated, failed, skipped, errors, results) = await Push(
-            "sprk_externalrecordaccess", Rule("sprk_name", "sprk_description"), Rule("sprk_name", "sprk_accesslevel"));
+            "sprk_externalrecordaccess')?$select=EntitySetName#", Rule("sprk_name", "sprk_description"),
+            Rule("sprk_name", "sprk_accesslevel"));
 
         (updated, failed, skipped).Should().Be((0, 0, 1));
         errors.Should().BeEmpty();

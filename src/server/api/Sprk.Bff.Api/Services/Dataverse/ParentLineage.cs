@@ -702,6 +702,45 @@ internal static class InheritedAccessPermission
     internal const string AppOnlySecureRootWriteReasonCode = "sdap.access.secure_root_server_only";
 
     /// <summary>
+    /// #2253 fix round 1 (F1-a): the reason code when a generic writer names a table that is not a bare Dataverse identifier
+    /// (<see cref="Spaarke.Dataverse.DataverseIdentifier.IsTableName"/>), after trimming: null, blank, or anything with a
+    /// quote, a parenthesis, a <c>?</c>, a <c>#</c>, a slash or whitespace inside it. Such a name is pasted into the
+    /// metadata URL (<c>EntityDefinitions(LogicalName='{name}')</c>), where
+    /// <c>sprk_externalrecordaccess')?$select=EntitySetName#</c> resolves to <c>sprk_externalrecordaccess</c> while every set
+    /// here sees an unknown string. Refused first, for every writer identity (fail closed).
+    /// </summary>
+    internal const string AppOnlyTableNameInvalidReasonCode = "sdap.access.table_name_invalid";
+
+    /// <summary>
+    /// #2253 fix round 1 (F1-b): the reason code when an app-only generic writer names a column that decides access on a
+    /// table that is not a secure root (<see cref="AccessColumns"/>; <see cref="RefuseAppOnlyWrite"/>).
+    /// </summary>
+    internal const string AppOnlyAccessColumnWriteReasonCode = "sdap.access.access_column_server_only";
+
+    /// <summary>
+    /// #2253 fix round 1 (K2): who a generic write runs as, which decides which refusals <see cref="RefuseAppOnlyWrite"/>
+    /// asks.
+    /// </summary>
+    internal enum WriteIdentity
+    {
+        /// <summary>
+        /// The BFF's application user (a System Administrator), acting for no person: the Update Record node and the action
+        /// seam without an impersonated user, a playbook's output mapping, Repair, the profile output mapper. Every refusal.
+        /// </summary>
+        AppOnly,
+
+        /// <summary>
+        /// A person, through their own Dataverse privileges and field security: the field-mapping push. Only the refusals
+        /// the push asked before #2251 (a document's Access Permission and own narrowing, its D7 links, its BFF-owned columns;
+        /// on every table, the owner and the creator) and the table-name check. Not <see cref="AccessTables"/>,
+        /// <see cref="SecureRootColumns"/> or <see cref="AccessColumns"/>: what the person may write there is Dataverse's
+        /// call (<c>sprk_accesspermission</c> on a matter stays editable by a Write holder;
+        /// <c>scripts/Set-SecureFlagFieldSecurity.ps1</c>).
+        /// </summary>
+        Caller,
+    }
+
+    /// <summary>
     /// #2251: the tables whose rows ARE access: a row grants it, denies it, or records the membership it is derived from.
     /// The BFF app user is a System Administrator, so a generic writer naming one of these, with any column, could point a
     /// grant at another contact or raise its level or reactivate it, move a contact into an organisation (and its grants),
@@ -720,6 +759,9 @@ internal static class InheritedAccessPermission
     /// whether the materializer grants, keeps (Adopted, Declined) or revokes access.</item>
     /// <item><c>teammembership</c>: team membership (<c>NoAccessEnforcementStore</c>, the isolation census). Dataverse
     /// refuses an update of this intersect table anyway; listing it gives the same answer before any call.</item>
+    /// <item><c>fieldpermission</c> (#2253 fix round 1, found by <c>AccessTableReaderScanTests</c>): a field security
+    /// profile's Read / Update grant on a secured column (<c>SecureRootInheritance.PlatformReadableTablesAsync</c> reads it).
+    /// A row decides who may read or write the field-secured binding, invite and access columns.</item>
     /// </list>
     /// </summary>
     internal static readonly IReadOnlySet<string> AccessTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -729,6 +771,7 @@ internal static class InheritedAccessPermission
         Sprk.Bff.Api.Infrastructure.ExternalAccess.NoAccessListReader.EntityLogicalName,
         Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore.EntityLogicalName,
         "teammembership",
+        "fieldpermission",
     };
 
     /// <summary>
@@ -756,6 +799,68 @@ internal static class InheritedAccessPermission
                     ],
                     StringComparer.OrdinalIgnoreCase),
                 StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// #2253 fix round 1 (F1-b): per table that is not a secure root, the columns an access decision reads, refused to an
+    /// app-only generic writer with <see cref="AppOnlyAccessColumnWriteReasonCode"/> in every form (as
+    /// <see cref="SecureRootColumns"/>). The BFF app user is a System Administrator, so field security does not stop it.
+    /// Each entry is its reader's own constant; their writers are the BFF's typed ones (the identity binder and invite flow,
+    /// the standing-grant endpoints, the task-141 link, container provisioning), none of which uses these paths.
+    /// <list type="bullet">
+    /// <item><c>contact</c>, the identity binding (<c>ContactBindingDecision</c>): <c>sprk_externalobjectid</c> (who a
+    /// contact IS), its uniqueness mirror <c>sprk_externalobjectidkey</c> (a held mirror denies a bind),
+    /// <c>sprk_identityplane</c>, <c>sprk_externaltenantid</c> (a WorkforceHome contact's directory), and the pending
+    /// invite <c>sprk_externalinvitedon</c> / <c>sprk_externalinvitecodehash</c> (they open the email bind).</item>
+    /// <item><c>contact</c> and <c>sprk_organization</c>, the standing grant (<c>SubjectStandingGrantReader</c>):
+    /// <c>sprk_standinggrant</c> and <c>sprk_accesspermissiongrant</c>, the standing term of the accessible set.</item>
+    /// <item><c>systemuser</c>: the A9 home link <c>sprk_hometenantid</c> / <c>sprk_homeobjectid</c> (which user a home
+    /// sign-in becomes; <c>ContactBindingDecision</c>) and its uniqueness mirrors <c>sprk_hometenantidkey</c> /
+    /// <c>sprk_homeobjectidkey</c> (<c>DataverseContactIdentityStore</c>; a held mirror blocks a link); the task-141 link
+    /// <c>sprk_primarycontact</c> and <c>sprk_isexternal</c> (<c>AssignedAccessStore</c>'s link candidates, the container
+    /// membership sync, the secure-child share sync, Office edit access).</item>
+    /// <item><c>businessunit</c>: <c>sprk_containerid</c>, the unit's default container
+    /// (<see cref="Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.ContainerColumn"/>; its users' standing
+    /// writer grants, <c>SpeContainerMembershipSync</c>).</item>
+    /// </list>
+    /// Data, not branching: a table with no entry has no such column.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, IReadOnlySet<string>> AccessColumns =
+        new Dictionary<string, IReadOnlySet<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            [Sprk.Bff.Api.Infrastructure.ExternalAccess.SubjectStandingGrantReader.ContactEntity] = new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase)
+            {
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactBindingDecision.ExternalObjectIdColumn,
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactBindingDecision.KeyMirrorColumn,
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactBindingDecision.IdentityPlaneColumn,
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactBindingDecision.ExternalTenantIdColumn,
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactBindingDecision.ExternalInvitedOnColumn,
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactBindingDecision.ExternalInviteCodeHashColumn,
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.SubjectStandingGrantReader.StandingGrantAttribute,
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.SubjectStandingGrantReader.BaselineAttribute,
+            },
+            [Sprk.Bff.Api.Infrastructure.ExternalAccess.SubjectStandingGrantReader.OrganizationEntity] = new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase)
+            {
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.SubjectStandingGrantReader.StandingGrantAttribute,
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.SubjectStandingGrantReader.BaselineAttribute,
+            },
+            [Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.SystemUserEntity] = new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase)
+            {
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactBindingDecision.HomeTenantIdColumn,
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactBindingDecision.HomeObjectIdColumn,
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.DataverseContactIdentityStore.HomeTenantIdKeyColumn,
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.DataverseContactIdentityStore.HomeObjectIdKeyColumn,
+                Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore.PrimaryContactColumn,
+                Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore.IsExternalColumn,
+            },
+            [Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.BusinessUnitEntity] = new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase)
+            {
+                Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.ContainerColumn,
+            },
+        };
 
     /// <summary>
     /// Task 189 fix round C (K5): an APP-ONLY generic writer never writes a document's <see cref="Column"/> or its
@@ -788,22 +893,46 @@ internal static class InheritedAccessPermission
     /// (<see cref="SecureRootColumns"/>), refused with <see cref="AppOnlySecureRootWriteReasonCode"/> in the same forms. The
     /// table is matched trimmed and in any case. Out of scope, as for every code above: a write that impersonates its user
     /// (the action seam's apply, which skips this refusal) runs under that user's own privileges, and the chat create tool
-    /// checks the caller's own privileges before it writes. The field-mapping push also runs as its caller, but it asks this
-    /// per rule (above), so a rule naming one of these is skipped there too.</para>
-    /// <para><b>Precedence</b> (the first match decides the code): an access table; then, on a document, its Access
-    /// Permission or own-narrowing record, then its D7 links, then its BFF-owned columns; then a secure root's columns; then,
-    /// on every table, the owner, then the creator.</para>
+    /// checks the caller's own privileges before it writes. The field-mapping push also runs as its caller: it asks per rule
+    /// (above) as <see cref="WriteIdentity.Caller"/>, which does not ask these two (#2253 fix round 1, K2).</para>
+    /// <para>#2253 fix round 1: nor, on a table that is not a secure root, a column an access decision reads
+    /// (<see cref="AccessColumns"/>: a contact's identity binding and standing grant, an organisation's standing grant, a
+    /// user's home link, task-141 link and external flag, a business unit's container), refused with
+    /// <see cref="AppOnlyAccessColumnWriteReasonCode"/>. Whatever the identity, a table that is not a bare identifier after
+    /// trimming is refused first (<see cref="AppOnlyTableNameInvalidReasonCode"/>): the write would paste it into a URL.</para>
+    /// <para><b>Identity</b> (<paramref name="identity"/>, K2): <see cref="WriteIdentity.Caller"/> (the field-mapping push,
+    /// which runs as its caller) asks the table-name check and only the refusals it asked before #2251 (the document codes,
+    /// the owner, the creator); the three #2251-and-later sets are left to that person's own Dataverse privileges and field
+    /// security.</para>
+    /// <para><b>Precedence</b> (the first match decides the code): a table that is not an identifier; then an access table;
+    /// then, on a document, its Access Permission or own-narrowing record, then its D7 links, then its BFF-owned columns;
+    /// then a secure root's columns; then a non-root table's access columns; then, on every table, the owner, then the
+    /// creator.</para>
     /// </summary>
     /// <returns>The refusal (nothing is written), or <see langword="null"/> when the write may proceed.</returns>
-    internal static RecordOwnerResolution? RefuseAppOnlyWrite(string? table, IEnumerable<string> keys)
+    /// <param name="table">The table the write names (trimmed here).</param>
+    /// <param name="keys">The payload's keys, in any form a writer sends.</param>
+    /// <param name="identity">Who the write runs as; app-only unless the caller says otherwise.</param>
+    internal static RecordOwnerResolution? RefuseAppOnlyWrite(
+        string? table, IEnumerable<string> keys, WriteIdentity identity = WriteIdentity.AppOnly)
     {
         ArgumentNullException.ThrowIfNull(keys);
         var trimmed = table?.Trim();
+
+        // #2253 fix round 1 (F1-a): only a bare identifier is compared with the sets below; anything else would reach the
+        // metadata URL as something other than what the sets saw. Every identity, first.
+        if (!Spaarke.Dataverse.DataverseIdentifier.IsTableName(trimmed))
+        {
+            return RecordOwnerResolution.Refused(AppOnlyTableNameInvalidReasonCode,
+                "the table named is not a Dataverse table name, so nothing was written");
+        }
+
+        var appOnly = identity == WriteIdentity.AppOnly;
         var narrows = RecordsOwnNarrowing(trimmed);
         var links = string.Equals(trimmed, Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDocumentNarrowing.DocumentTable, StringComparison.OrdinalIgnoreCase);
 
         // #2251: a table whose rows are access (AccessTables) is refused whole, whatever the payload names.
-        if (trimmed is not null && AccessTables.Contains(trimmed))
+        if (appOnly && AccessTables.Contains(trimmed))
         {
             return RecordOwnerResolution.Refused(AppOnlyAccessTableWriteReasonCode,
                 $"{trimmed.ToLowerInvariant()} records are set by Spaarke (they decide who may see what), so nothing was written");
@@ -832,12 +961,21 @@ internal static class InheritedAccessPermission
         }
 
         // #2251: a secure root's secure flag, access columns and container are the BFF's typed writers' (SecureRootColumns).
-        if (trimmed is not null && SecureRootColumns.TryGetValue(trimmed, out var rootColumns)
+        if (appOnly && SecureRootColumns.TryGetValue(trimmed, out var rootColumns)
             && columns.FirstOrDefault(rootColumns.Contains) is { } rootColumn)
         {
             return RecordOwnerResolution.Refused(AppOnlySecureRootWriteReasonCode,
                 $"{rootColumn} of a secure root is set by Spaarke (it decides whether the record is secure, who may see it and " +
                 "where its files are), so it was not written");
+        }
+
+        // #2253 fix round 1 (F1-b): a non-root table's access columns are the BFF's typed writers' (AccessColumns).
+        if (appOnly && AccessColumns.TryGetValue(trimmed, out var accessColumns)
+            && columns.FirstOrDefault(accessColumns.Contains) is { } accessColumn)
+        {
+            return RecordOwnerResolution.Refused(AppOnlyAccessColumnWriteReasonCode,
+                $"{accessColumn} of a {trimmed.ToLowerInvariant()} is set by Spaarke (it decides who may see what), so it was " +
+                "not written");
         }
 
         // #2247: on every table, the row's owner and its creator are the BFF's typed writers' (OwnerColumns, CreatorColumns).

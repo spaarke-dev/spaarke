@@ -2835,16 +2835,49 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
     }
 
     /// <summary>
-    /// K3, the field-mapping push: a rule onto <c>sprk_issecure</c> writes nothing. #2251: the push asks the app-only refusal
-    /// per rule, so the rule is skipped (a secure root's secure flag) before the filing gate sees the record.
+    /// #2253 fix round 1 (K4): an update that impersonates its user skips the app-only refusal, so the filing gate's K3
+    /// refusal still answers a <c>sprk_issecure</c> write on a project or a work assignment there, and nothing is written. The
+    /// gate's refusal stays pinned at the writer level, not only behind the app-only one.
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_project")]
+    [InlineData("sprk_workassignment")]
+    public async Task ActionCore_AnImpersonatedSecureFlagWrite_IsRefusedByTheFilingGate_AndNothingIsWritten(string table)
+    {
+        var record = Guid.NewGuid();
+        _fixture.SeedWorkAssignment(record, isSecure: true);
+        var services = new ServiceCollection()
+            .AddSingleton(new StampWorld().Restamper)
+            .AddSingleton<IRecordOwnershipResolver>(new RecordOwnershipResolverDouble())
+            .AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.EntitySetNameFixtures.Service())
+            .AddSingleton(_gate)
+            .BuildServiceProvider();
+        var core = new UpdateRecordActionCore(
+            FieldMappingWritingToTheWorld().Object, services.GetRequiredService<IServiceScopeFactory>(), NullLogger.Instance);
+
+        var act = () => core.UpdateAsync(
+            new UpdateRecordActionInput(table, record, FieldMappings: null,
+                LegacyFields: new Dictionary<string, string?> { ["sprk_issecure"] = "false" }, Lookups: null,
+                ImpersonateSystemUserId: Guid.Parse("0000c158-0000-0000-0000-0000000e2253")),
+            CancellationToken.None);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>())
+            .Which.RefusalCode.Should().Be(AccessFollowsParent.SecureFlagReasonCode);
+        _writes.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// K3, the field-mapping push: a rule onto <c>sprk_issecure</c> fails that record, nothing written. #2253 fix round 1
+    /// (K2): the push runs as its caller and asks the refusal as <c>WriteIdentity.Caller</c>, which leaves a secure root's
+    /// columns alone, so the filing gate's K3 refusal answers it, as before #2251.
     /// </summary>
     [Fact]
-    public async Task FieldMappingPush_OntoTheSecureFlag_SkipsThatRule_AndWritesNothing()
+    public async Task FieldMappingPush_OntoTheSecureFlag_FailsThatRecord_AndWritesNothing()
     {
         var workAssignment = Guid.NewGuid();
         _fixture.SeedWorkAssignment(workAssignment, isSecure: false);
 
-        var (updated, failed, skipped, errors, results) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+        var (updated, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
             FieldMappingWritingToTheWorld().Object,
             new StampWorld().Restamper,
             [
@@ -2862,10 +2895,8 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
             CancellationToken.None,
             rootFiling: _gate);
 
-        (updated, failed, skipped).Should().Be((0, 0, 1));
-        errors.Should().BeEmpty();
-        results.Should().ContainSingle().Which.Should().Match<FieldMappingResultDto>(r =>
-            r.Status == FieldMappingStatus.Skipped && r.TargetField == "sprk_issecure");
+        (updated, failed).Should().Be((0, 1));
+        errors.Should().ContainSingle(e => e.RecordId == workAssignment && e.Error.Contains(AccessFollowsParent.SecureFlagReasonCode));
         _writes.Should().BeEmpty();
     }
 }

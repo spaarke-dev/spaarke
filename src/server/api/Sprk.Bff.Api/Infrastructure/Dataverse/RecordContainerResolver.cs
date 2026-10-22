@@ -73,11 +73,17 @@ public sealed partial class RecordContainerResolver
     /// </summary>
     private const string OwningBusinessUnitColumn = "owningbusinessunit";
 
-    /// <summary>The business unit entity, whose <c>sprk_containerid</c> is the non-secure default.</summary>
-    private const string BusinessUnitEntity = "businessunit";
+    /// <summary>
+    /// The business unit entity, whose <c>sprk_containerid</c> is the non-secure default. <c>internal</c> (#2253 fix round
+    /// 1): the app-only generic writers refuse that column on it (<c>InheritedAccessPermission.AccessColumns</c>).
+    /// </summary>
+    internal const string BusinessUnitEntity = "businessunit";
 
-    /// <summary>The Dataverse user entity, for the no-record case (<see cref="ResolveForActingUserAsync"/>).</summary>
-    private const string SystemUserEntity = "systemuser";
+    /// <summary>
+    /// The Dataverse user entity, for the no-record case (<see cref="ResolveForActingUserAsync"/>). <c>internal</c> (#2253
+    /// fix round 1): <c>InheritedAccessPermission.AccessColumns</c> names its access columns.
+    /// </summary>
+    internal const string SystemUserEntity = "systemuser";
 
     /// <summary>
     /// The <c>systemuser</c> column carrying the user's Entra object id.
