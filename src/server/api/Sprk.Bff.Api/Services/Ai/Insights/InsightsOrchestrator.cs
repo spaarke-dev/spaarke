@@ -661,6 +661,9 @@ public sealed class InsightsOrchestrator : IInsightsAi
         var runRequest = new PlaybookRunRequest
         {
             PlaybookId = playbookId,
+            // #2257 (owner round 123): the ingest job runs the routed universal-ingest playbook with no person in the run;
+            // it writes app-only, behind the deny-lists.
+            StartedBy = PlaybookRunStartedBy.System,
             // Universal-ingest does NOT process ad-hoc DocumentIds (each playbook node
             // reads from parameters.documentText / parameters.chunks). Pass an empty array
             // to satisfy the required[] contract; nodes ignore it.

@@ -410,7 +410,7 @@ public sealed class AuthorizationModuleCiamTests
     [Fact]
     public async Task DefaultScheme_BareClientIdAudience_EveryHostInTheProcess_Returns200()
     {
-        // The Copilot merge runs once per PROCESS (_jwtPostConfigureApplied); the bare-id audience must not depend on it.
+        // The bare-id audience (task 077) comes from its own PostConfigure, not the Copilot merge; every host gets it.
         using var first = await StartHostAsync(ciamAudience: StampCiamAppId, ciamTenantId: CiamTenantId);
         using var second = await StartHostAsync(ciamAudience: StampCiamAppId, ciamTenantId: CiamTenantId);
 
@@ -585,17 +585,6 @@ public sealed class AuthorizationModuleCiamTests
                         UseLocalSigningMetadata(options, WorkforceIssuerV2);
                         // Worst case for FR-23: library issuer validation accepts every issuer.
                         options.TokenValidationParameters.IssuerValidator = (issuer, _, _) => issuer;
-                        // The Copilot audience merge in AddAuthorizationModule runs once per PROCESS (the
-                        // _jwtPostConfigureApplied flag), so in a shared test process another host may have
-                        // consumed it. Re-adding the same configured audience here keeps the Copilot case
-                        // deterministic; what this task can break — the guard rejecting a Copilot token —
-                        // is still exercised end to end.
-                        var audiences = new HashSet<string>(
-                            options.TokenValidationParameters.ValidAudiences ?? [], StringComparer.OrdinalIgnoreCase);
-                        if (audiences.Add(CopilotAudience))
-                        {
-                            options.TokenValidationParameters.ValidAudiences = audiences;
-                        }
                     });
                 })
                 .Configure(app =>

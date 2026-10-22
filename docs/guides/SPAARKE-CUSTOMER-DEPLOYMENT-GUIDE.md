@@ -980,6 +980,16 @@ shares to when `createdby` is the BFF application user. Without the column, ever
 `-Verify` (must exit 0); re-run `-Apply` when a business unit is added. Details:
 `docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md` §7b.
 
+**Dataverse prerequisite — the child tables: `scripts/Set-ChildRecordCreatorPersonSchema.ps1 -Verify` must exit 0
+BEFORE deploying a BFF that stamps a NEW table** (one added to `RecordCreatorPerson.StampedTables` or
+`StampedChildTables`). Since #2273 the BFF trusts `sprk_createdbyperson` as "who created this row" ONLY on those
+tables — the secure-exit creator check and people-targeting both read it — and that trust holds only while the
+column there is field-secured so that only the BFF can write it. On an unsecured column any user with Write can
+name themselves as creator and move the row out of secure isolation. Run it with the same `-BffApplicationIds` and
+the stamp's `-OntologyWriterApplicationId` — dry run, then `-Apply`, then `-Verify` (must exit 0). In source, the
+ArchTest `CreatorPersonColumnSecuredGuardTests` fails a build where a stamped table's `Entity.xml` does not declare
+the column `<IsSecured>1</IsSecured>`; it cannot see the environment, so the `-Verify` run is the deploy gate.
+
 #### 6.5.3 Identity collisions — the operator procedure
 
 A **collision** is any of: an email match on a contact bound to a different oid; an oid carried by more than one
@@ -2469,6 +2479,7 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 | 2026-10-05 | §6.5.4: only `dev` carries the marker today — Spaarke's production operator environment (`demo`, declared `false`) adds it in the change that stands it up; the registry declaration must be a JSON boolean and the deploy fails on any other type (`[bool]"false"` is true in PowerShell) | `unified-access-control-r2` task 165, round 57 (`task/uac-r2-165-h`) |
 | 2026-10-08 | §5 handler table: **H4b** row added — the BFF app settings are written through the ARM SDK on both slots (merge, never replace), no longer by running the generated Configure script; **H6** row — the org-settings contract is one Dataverse Web API PATCH and H6 installs no application. The L2 Worker runs no shell tool (G38) | `customer-provisioning-orchestration-r1` T253 |
 | 2026-10-20 | §7.4: the document Access Permission schema — `scripts/Set-DocumentAccessPermissionSchema.ps1` (`sprk_document.sprk_accessinheritance`, not field-secured) runs BEFORE a BFF carrying task 189 is deployed; until it has, that BFF only raises a document's Access Permission to what its parents give and never lowers one (documents listed under `tablesWithoutColumn`, raises counted in `raisedOnly`). A raise kept in that window is recorded as the document's own on the first run after the script and is never widened again: the schema must go first, and §7.4 says how to find such documents and widen them by hand | `unified-access-control-r2` task 189 (D7 T7a, #2126; security pass 2) |
+| 2026-10-22 | §6.5.2: `scripts/Set-ChildRecordCreatorPersonSchema.ps1 -Verify` must exit 0 before deploying a BFF that stamps a new table — the BFF trusts `sprk_createdbyperson` only on stamped tables, and only a field-secured column makes that safe; source guard `CreatorPersonColumnSecuredGuardTests` | #2273 fix round 1 (PR #2277) |
 
 ---
 

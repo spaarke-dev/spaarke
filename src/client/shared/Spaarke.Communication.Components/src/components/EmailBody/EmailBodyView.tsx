@@ -113,11 +113,23 @@ const useStyles = makeStyles({
   noteTitle: {
     fontWeight: tokens.fontWeightSemibold,
   },
+  // Containment for the UNTRUSTED client-sanitized `sprk_body` (ISS-003 / #1636; same set as the external SPA's
+  // `RecordMessages` body): `contain: paint` clips painting to this box and makes it the containing block for any
+  // fixed/absolute descendant, `position: relative` anchors absolute descendants here, `overflowX: auto` keeps a wide
+  // table/image scrollable sideways, `overflowY: hidden` clips only out-of-flow paint (an auto-height box never
+  // overflows in flow). `flexShrink: 0` is required here: `root` is a height-constrained flex column (`minHeight: 0`)
+  // and an overflow box has a flex automatic minimum size of 0, so without it the body would be shrunk to the pane
+  // height and the end of a long email clipped with no scrollbar instead of scrolling the pane.
   fallbackBody: {
     padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM}`,
     color: tokens.colorNeutralForeground1,
     overflowWrap: 'anywhere',
     wordBreak: 'break-word',
+    position: 'relative',
+    contain: 'paint',
+    overflowX: 'auto',
+    overflowY: 'hidden',
+    flexShrink: 0,
   },
   skeleton: {
     display: 'flex',

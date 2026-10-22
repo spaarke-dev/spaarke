@@ -239,14 +239,19 @@ export class BffClient {
 
       return (await response.json()) as DeleteDocumentResponse;
     } catch (error) {
-      // Special handling for 409 Conflict (document locked)
-      if (error instanceof ApiError && error.status === 409) {
-        const errorBody = error.problemDetails as unknown as DocumentLockedError;
-        if (errorBody) {
-          throw new DocumentLockedException(errorBody);
-        }
-      }
       if (error instanceof ApiError) {
+        // A delete answers 409 for more than a lock: since R3 ISS-004 (#1650) also "the pointer was refused" and "child
+        // documents exist", and 503 when the file could not be deleted right now and the document was kept. Choose the
+        // exception by the problem's code, never by the status alone.
+        const problem = error.problemDetails as Record<string, unknown> | null;
+        const reasonCode = problemCodeOf(problem);
+        if (error.status === 409 && reasonCode === 'document_locked' && problem) {
+          throw new DocumentLockedException(problem as unknown as DocumentLockedError);
+        }
+        const detail = stringMember(problem, 'detail');
+        if ((error.status === 409 || error.status === 503) && detail) {
+          throw new BffProblemError(detail, error.status, reasonCode);
+        }
         this.handleApiError(error, correlationId);
       }
       throw error;
@@ -422,4 +427,47 @@ export class DocumentLockedException extends Error {
     this.name = 'DocumentLockedException';
     this.lockedError = error;
   }
+}
+
+/**
+ * A BFF refusal that is not a lock: its `message` IS the problem's `detail`, the sentence the BFF wrote for the user
+ * (for example "The document's file could not be deleted right now, so the document was kept ... Try again shortly.").
+ */
+export class BffProblemError extends Error {
+  public readonly status: number;
+  /** The problem's stable code (`reasonCode`, else `code`), e.g. `document_file_not_deleted`; absent when the body had none. */
+  public readonly reasonCode?: string;
+
+  constructor(detail: string, status: number, reasonCode?: string) {
+    super(detail);
+    this.name = 'BffProblemError';
+    this.status = status;
+    this.reasonCode = reasonCode;
+  }
+}
+
+/** A non-empty string member of a parsed problem body, else undefined. */
+function stringMember(problem: Record<string, unknown> | null | undefined, name: string): string | undefined {
+  const value = problem?.[name];
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/**
+ * The stable code of a problem body. ProblemDetails extensions are flattened by the BFF (`reasonCode`); the lock body
+ * (`DocumentLockedError`) names its code `error`; `code` is the older spelling.
+ */
+function problemCodeOf(problem: Record<string, unknown> | null | undefined): string | undefined {
+  return stringMember(problem, 'reasonCode') ?? stringMember(problem, 'code') ?? stringMember(problem, 'error');
+}
+
+/**
+ * The sentence to show the user when a delete failed. The BFF's own `detail` (a lock, a refused pointer, "try again
+ * shortly") and the friendly messages `BffClient` maps from other statuses are shown as written; anything else — a
+ * network failure, a non-Error — gets a neutral sentence, not a raw message.
+ */
+export function describeDeleteFailure(error: unknown): string {
+  if (error instanceof Error && !(error instanceof TypeError) && error.message) {
+    return error.message;
+  }
+  return 'The document could not be deleted. Check your connection and try again.';
 }

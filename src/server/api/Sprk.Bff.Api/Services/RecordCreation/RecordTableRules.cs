@@ -66,8 +66,10 @@ internal static class RecordTableRules
     /// The secure flag and the access columns of a secure root (matter, project): the BFF's own, written only through the
     /// secure endpoints and the Secure Record setup, never by a field-mapping rule (#2220). Compile-time constants only, so
     /// declaring them here cannot create a static-initialisation cycle. Declared before <see cref="All"/>.
+    /// <c>internal</c> (#2251): the update side reads the same set (<c>InheritedAccessPermission.SecureRootColumns</c>,
+    /// refused to the app-only generic writers on every root), so create and update cannot drift.
     /// </summary>
-    private static readonly string[] SecureRootAccessColumns =
+    internal static readonly IReadOnlyList<string> SecureRootAccessColumns =
     [
         SecurableEntityRegistry.SecureFlagAttribute,
         InheritedAccessPermission.Column,

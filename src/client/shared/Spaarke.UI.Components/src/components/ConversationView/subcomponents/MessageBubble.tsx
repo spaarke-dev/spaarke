@@ -140,8 +140,19 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground3,
     color: tokens.colorNeutralForeground1,
   },
+  // Containment for the UNTRUSTED sanitized email HTML (ISS-003 / #1636; same set as the external SPA's
+  // `RecordMessages` body): `contain: paint` clips painting to this box and makes it the containing block for any
+  // fixed/absolute descendant, `position: relative` anchors absolute descendants here, `overflowX: auto` keeps a wide
+  // table/image scrollable sideways inside the bubble, `overflowY: hidden` clips only out-of-flow paint (an auto-height
+  // box never overflows in flow). `flexShrink: 0` stops a height-constrained flex parent from shrinking the body (an
+  // overflow box has a flex automatic minimum size of 0) and clipping the end of a long email.
   bodyHtml: {
     wordBreak: 'break-word',
+    position: 'relative',
+    contain: 'paint',
+    overflowX: 'auto',
+    overflowY: 'hidden',
+    flexShrink: 0,
   },
   bodyText: {
     whiteSpace: 'pre-wrap',

@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Options;
@@ -27,15 +28,18 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 /// </summary>
 public static class AuthorizationModule
 {
-    // Idempotency guard for the JwtBearerOptions PostConfigure delegate (task 046).
-    // The DI container can invoke PostConfigure<TOptions> delegates more than once when the
-    // options instance is reconfigured (e.g. via IOptionsMonitor reload, named-vs-default
-    // resolution, or repeat module registration). Without a guard, every invocation would
-    // re-chain a new OnAuthenticationFailed handler on top of the previous one and re-merge
-    // the audience set, masking the real source of audience-list mutations.
-    // 0 = not yet configured, 1 = configured. Interlocked.CompareExchange guarantees only
-    // the first caller wins, even if PostConfigure is called concurrently during host build.
-    private static int _jwtPostConfigureApplied;
+    // Idempotency guard for the default scheme's Copilot-audience PostConfigure delegate (task 046; per options
+    // instance since ISS-001 / #1623).
+    // The delegate chains an OnAuthenticationFailed handler on top of the existing one, so running it twice on the
+    // SAME JwtBearerOptions instance would wrap the event twice (every failure logged twice). The guard is therefore
+    // keyed on the options INSTANCE: the first pass on an instance wins and any later pass on it is a no-op, while a
+    // new instance (a second host in the process, or an instance rebuilt after a configuration reload) is configured
+    // in full. It was a process-wide flag until ISS-001, which left every instance after the first without the
+    // Copilot audience (Copilot tokens answered 401) and without the CopilotAuth failure logging.
+    // ConditionalWeakTable holds its keys weakly, so a discarded instance is not kept alive by this table, and TryAdd
+    // is atomic, so only one caller can claim an instance even if PostConfigure ran concurrently.
+    private static readonly ConditionalWeakTable<JwtBearerOptions, object> _copilotMergeApplied = new();
+    private static readonly object _copilotMergeMarker = new();
 
     /// <summary>
     /// Adds authentication (Azure AD JWT), authorization handler, and all authorization policies.
@@ -114,10 +118,10 @@ public static class AuthorizationModule
             JwtBearerDefaults.AuthenticationScheme,
             options =>
             {
-                // Idempotency guard (task 046): ensure the audience-merge + event-handler
-                // wiring runs at most once per process. CompareExchange returns the original
-                // value; if it was already 1, another caller already ran the delegate.
-                if (Interlocked.CompareExchange(ref _jwtPostConfigureApplied, 1, 0) != 0)
+                // Idempotency guard (task 046; per options instance since ISS-001): the audience merge and the
+                // event-handler wrap run at most once for THIS instance. TryAdd is false when the instance was
+                // already configured, so a second pass over it is a no-op; every other instance is configured in full.
+                if (!_copilotMergeApplied.TryAdd(options, _copilotMergeMarker))
                 {
                     return;
                 }
@@ -182,8 +186,9 @@ public static class AuthorizationModule
 
         // Task 077 (ADR-028 A9): the default scheme accepts the BFF app's audience in both forms, so the app's switch
         // to requestedAccessTokenVersion = 2 (aud = the bare app id for every caller) does not turn into a 401 on every
-        // workforce surface. A SEPARATE PostConfigure, NOT inside the Copilot delegate above: that one runs once per
-        // process and only when AgentToken:CopilotAudience is set. Only the audience changes (AddWorkforceAudiences).
+        // workforce surface. A SEPARATE PostConfigure, NOT inside the Copilot delegate above: that one has its own
+        // per-instance guard and only merges when AgentToken:CopilotAudience is set. Only the audience changes
+        // (AddWorkforceAudiences).
         // An ID token issued to a client signing in AS the BFF app also carries aud = the bare app id; it is refused here
         // (077 review F4) because it carries neither azpacr (v2) nor appidacr (v1), which every Entra access token has.
         services.PostConfigure<JwtBearerOptions>(
@@ -220,9 +225,9 @@ public static class AuthorizationModule
         // A third rule — the tenant path segment of iss equals Ciam:TenantId — is a strict superset that also
         // catches a tid-less token and CIAM custom URL domains (relies on Ciam:TenantId being set).
         //
-        // Deliberately a SEPARATE PostConfigure, NOT inside the delegate above: that delegate is guarded by
-        // a process-wide once-flag (_jwtPostConfigureApplied), so any later JwtBearerOptions instance would
-        // be built WITHOUT it. A security guard must apply to every instance of the default scheme.
+        // Deliberately a SEPARATE PostConfigure, NOT inside the Copilot delegate above: a security guard must not
+        // share that delegate's early return (_copilotMergeApplied) or its AgentToken:CopilotAudience condition.
+        // It applies to every instance of the default scheme on its own.
         //
         // Effect on the shared ExternalCollaboration policy (Ciam + default): a CIAM token still
         // authenticates there through the Ciam scheme; only the default scheme's attempt fails.

@@ -63,9 +63,9 @@ So deleting a request does not delete staff messages, staff documents, analyses 
 
 **Why file first:** a kept row can always be retried or cleaned by staff. The reverse order (row first) would leave an unreachable SPE file that nothing points at, which is invisible and so worse.
 
-**Known limit:** if step 5 fails after step 4, the row points at a deleted file. A retry by the caller is refused by the pointer check (409 `document_storage_unverified`, because the item no longer exists). Staff can delete the row in the model-driven app. The 500 response tells the caller the record could not be removed.
+**Known limit:** if step 5 fails after step 4, the row points at a deleted file. A retry by the caller was refused by the pointer check (409 `document_storage_unverified`, because the item no longer exists). Staff can delete the row in the model-driven app. The 500 response tells the caller the record could not be removed. **Resolved 2026-10-22 (R3 ISS-004 review F1, #1650):** the delete's pointer check (`RecordContainerResolver.VerifyDocumentPointerForDeleteAsync`) now reports an item that is gone as already deleted when the row's `sprk_graphitemidbound` equals the pointer, the drive is an owned container and Graph answers 404; the retry then deletes the row without touching a file. A mismatched or unbound pointer or an unowned container is still 409; a fault in the check is 503.
 
-**Internal route behaviour is unchanged:** `DELETE /api/documents/{id}` still swallows SPE failures and deletes the row (`BestEffort`), as test `InternalDelete_BestEffort_IsUnchanged_AFileFaultStillDeletesTheRow` records. **Observation, not changed:** that route can leave an orphaned SPE file. Recommend filing it for the owner of the internal plane.
+**Internal route behaviour is unchanged:** `DELETE /api/documents/{id}` still swallows SPE failures and deletes the row (`BestEffort`), as test `InternalDelete_BestEffort_IsUnchanged_AFileFaultStillDeletesTheRow` records. **Observation, not changed:** that route can leave an orphaned SPE file. Recommend filing it for the owner of the internal plane. **Superseded 2026-10-22 (R3 ISS-004, #1650, owner decision):** the internal route now uses `VerifiedFileFirstKeepRowOnFailure` like the external one (503 keeps the row), and `InternalDelete_BestEffort_IsUnchanged_...` was replaced.
 
 ## §11 component justification (new surface)
 
@@ -158,7 +158,7 @@ The pointer check is the REAL `RecordContainerResolver` (`TestRecordContainerRes
 
 - TOCTOU window: the check and the delete are separate calls; a parent lost between them is not re-checked.
 - An unlinked-systemuser outage gives 403 instead of 503: pre-existing resolver behaviour, not changed here.
-- No retry after a half-done document delete (file gone, row kept): only a staff delete clears it.
+- No retry after a half-done document delete (file gone, row kept): only a staff delete clears it. **Resolved 2026-10-22 (R3 ISS-004 review F1):** see the Known limit under step 5.
 - `DocumentDestroyAuthorizationTestFixture` overrides only the 3-arg `DeleteAsync`.
 
 **Verification.** `dotnet build src/server/api/Sprk.Bff.Api/`: 0 warnings, 0 errors. `dotnet test tests/Spaarke.ArchTests/`: 940 passed. Filtered Sprk.Bff.Api.Tests (`ExternalAccess|DocumentCheckout|DocumentOperations|EventReadPath`): 2121 passed.

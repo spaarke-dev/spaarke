@@ -114,9 +114,17 @@ public record NodeExecutionContext
 
     /// <summary>
     /// The Dataverse systemuserid of the target user for this execution.
-    /// Set by PlaybookSchedulerService for notification playbooks that run per-user.
+    /// Set by PlaybookSchedulerService for notification playbooks that run per-user. On a
+    /// <see cref="PlaybookRunStartedBy.Person"/> run it is the person who started it (the run's user).
     /// </summary>
     public Guid? UserId { get; init; }
+
+    /// <summary>
+    /// Who started the run (#2257, owner round 123). A writing node writes AS <see cref="UserId"/> on a
+    /// <see cref="PlaybookRunStartedBy.Person"/> run, and refuses to write when it is unknown; only a
+    /// <see cref="PlaybookRunStartedBy.System"/> run writes app-only (<see cref="PlaybookRunWriteIdentity"/>).
+    /// </summary>
+    public PlaybookRunStartedBy StartedBy { get; init; } = PlaybookRunStartedBy.Person;
 
     /// <summary>
     /// The Entra object id (<c>oid</c>) of the signed-in user who started the run (<c>PlaybookRunContext.StartedByOid</c>).
