@@ -957,7 +957,108 @@ public sealed partial class RecordContainerResolver
             return false;
         }
 
-        return creator.Name?.StartsWith($"{communicationId:N}_", StringComparison.OrdinalIgnoreCase) == true;
+        return IsArchiveItemNameFor(creator.Name, communicationId);
+    }
+
+    /// <summary>
+    /// The archive's naming rule: every archive writer names its upload for communication <c>C</c> <c>{C:N}_…</c>
+    /// (<c>CommunicationService</c>, <c>IncomingCommunicationProcessor</c>, <c>MessageAttachmentMaterializer</c>). One
+    /// definition, read by the pointer check's archive path and by <see cref="CommunicationAttachmentItemRefusalAsync"/>.
+    /// </summary>
+    internal static bool IsArchiveItemNameFor(string? itemName, Guid communicationId)
+        => communicationId != Guid.Empty
+           && itemName?.StartsWith($"{communicationId:N}_", StringComparison.OrdinalIgnoreCase) == true;
+
+    /// <summary>
+    /// #2246: is the drive item a <c>sprk_communicationattachment</c> row names one fit to bind to a new document of
+    /// communication <paramref name="communicationId"/>? <see langword="null"/> when it is; otherwise why not. Read before the
+    /// on-demand archive binds a new <c>sprk_document</c> (pointer AND its field-secured bound copy) to the row's item.
+    /// <paramref name="communicationContainer"/> is <see cref="DeriveCommunicationContainersAsync"/>'s answer for the
+    /// communication, derived ONCE per archive call by the caller (PR #2248 fix round 1, K4), not once per attachment.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why the row's own columns are not evidence.</b> <c>sprk_communicationattachment.sprk_graphitemid</c> and
+    /// <c>sprk_graphdriveid</c> are ordinary columns: a user with Write on the row, or an app-only generic writer (a
+    /// playbook update-record node), can set them to ANOTHER communication's attachment item in the shared archive
+    /// container. Copying them into a new document's pointer and bound copy would launder that pointer — the binding check
+    /// (<see cref="Spaarke.Dataverse.DocumentPointerBinding"/>, <see cref="ItemBindingRefusal"/>) then passes, because the
+    /// BFF wrote both columns.</para>
+    /// <para><b>What this check proves</b>, from Graph read app-only (<see cref="Sprk.Bff.Api.Infrastructure.Graph.ISpeFileOperations.GetItemCreatorAsync"/>,
+    /// uncached) and the communication's own container derivation — never from a column a caller can write: (1) the item
+    /// EXISTS in the drive the row names (a Graph 404 is "not in that drive"); (2) that drive is the container derived for
+    /// THIS communication (<see cref="DeriveCommunicationContainersAsync"/> — the same answer every archive writer and the
+    /// relocator use); (3) the item was written by the BFF application identity (<see cref="IsUploadedByTheBffIdentity"/>);
+    /// and (4) its name carries THIS communication's archive prefix <c>{C:N}_</c> (<see cref="IsArchiveItemNameFor"/>). That
+    /// rules out another communication's attachment (its name carries that communication's id) and any file a person wrote
+    /// to the container directly.</para>
+    /// <para><b>What it does NOT prove</b> is that the archive wrote the item. The BFF also writes app-only on a person's
+    /// behalf, with a name the caller chooses: <c>PUT /api/obo/records/{entity}/{id}/files/{*path}</c>
+    /// (<c>OBOEndpoints</c>) uploads into the record's derived container as the application. A user who may upload to the
+    /// communication's regarding record can therefore create an item named <c>{C:N}_x.pdf</c> in C's container, and it
+    /// passes (1)–(4). That remaining case discloses nothing: to bind it, the attacker also needs Write on one of C's
+    /// <c>sprk_communicationattachment</c> rows (to point it at the item), and the bytes bound are ones the attacker could
+    /// already upload into C's container — the new document lands in that same container, owned like C's content, so no
+    /// one gains access to a file they could not already reach.</para>
+    /// <para><b>Fail closed.</b> Anything undecidable — no item reader, an underivable container, a Graph or Dataverse
+    /// fault — is a refusal with its reason. Cancellation propagates.</para>
+    /// <para><b>Not admitted:</b> an item from before the 2026-08-28 flattening, stored as <c>communications/{C:N}/attachments/{name}</c>
+    /// — its name carries no prefix. Such a row's document was always created with it, so it reaches this path only when
+    /// that document was removed; it is refused and counted, never archived silently.</para>
+    /// </remarks>
+    internal async Task<string?> CommunicationAttachmentItemRefusalAsync(
+        Guid communicationId, DocumentContainerDerivation communicationContainer, string? drive, string? item,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(communicationContainer);
+        if (communicationId == Guid.Empty || string.IsNullOrWhiteSpace(drive) || string.IsNullOrWhiteSpace(item))
+        {
+            return "the attachment names no communication, drive or item";
+        }
+
+        if (_speFiles is null)
+        {
+            return "no SharePoint Embedded reader is available to verify the item";
+        }
+
+        if (!communicationContainer.Decided)
+        {
+            return $"the communication's container cannot be derived ({communicationContainer.Reason})";
+        }
+
+        var driveId = drive.Trim();
+        if (!communicationContainer.Allows(driveId))
+        {
+            return $"the attachment names a drive that is not the communication's container ({communicationContainer.Reason})";
+        }
+
+        try
+        {
+            var facts = await _speFiles.GetItemCreatorAsync(driveId, item.Trim(), ct).ConfigureAwait(false);
+            if (facts is null)
+            {
+                return "the item is not in the drive the attachment names";
+            }
+
+            if (!IsUploadedByTheBffIdentity(facts))
+            {
+                return "the item was not uploaded by the archive (the BFF identity, app-only)";
+            }
+
+            return IsArchiveItemNameFor(facts.Name, communicationId)
+                ? null
+                : "the item is not one the archive wrote for this communication (its name lacks the communication's prefix)";
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogInformation(ex,
+                "[DOCUMENT-POINTER] The attachment item {Item} of communication {CommunicationId} could not be verified.",
+                item, communicationId);
+            return $"the item could not be verified ({ex.GetType().Name})";
+        }
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════

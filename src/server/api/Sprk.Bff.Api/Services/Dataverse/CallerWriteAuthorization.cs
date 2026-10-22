@@ -108,7 +108,7 @@ internal static class CallerWriteAuthorization
             {
                 return new Outcome
                 {
-                    Denied = $"Column '{secured}' is field-secured and cannot be set from chat on a record the application creates for you.",
+                    Denied = $"Column '{secured}' is field-secured and cannot be set on a record the application creates for you.",
                 };
             }
         }
@@ -221,6 +221,7 @@ internal static class CallerWriteAuthorization
                 {
                     Denied = "You do not have permission to file this record under the record type it names.",
                     ParentUnavailable = true,
+                    RefusedColumn = SecureRootInheritance.PairIdColumn,
                 })
                 : new PairTarget(null, new Outcome { ClientFailure = typeRow });
         }
@@ -346,6 +347,7 @@ internal static class CallerWriteAuthorization
                 {
                     Denied = $"You do not have permission to file this record under the {lookup.RelatedTable} it names.",
                     ParentUnavailable = true,
+                    RefusedColumn = lookup.Column,
                 };
             }
         }

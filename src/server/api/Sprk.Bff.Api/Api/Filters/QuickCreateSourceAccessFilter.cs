@@ -360,7 +360,7 @@ public sealed class QuickCreateSourceAccessFilter : IEndpointFilter
         => Deny(httpContext, AssigneeDeniedReasonCode, AssigneeDeniedDetail);
 
     /// <summary>A 403 in the Office ProblemDetails shape (<see cref="EntityAccessFilter"/>'s: errorCode + reasonCode + correlationId).</summary>
-    private static IResult Deny(HttpContext httpContext, string reasonCode, string detail)
+    internal static IResult Deny(HttpContext httpContext, string reasonCode, string detail)
         => Results.Problem(
             statusCode: StatusCodes.Status403Forbidden,
             title: "Forbidden",
