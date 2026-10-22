@@ -116,7 +116,7 @@
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Amended for EB-D-148 (2026-10-21): export files moved from SPE Documents to Stored Files (model section 10, section 15 answer 4); dep 090 added. Shared append points: FinanceModule.cs and the Finance endpoint-mapping call site — re-read before editing. P6-A runs with 152; 152 adds an index enqueue inside the lifecycle service, this task only calls it, so no file overlap. Stored Files are not indexed; 153 verifies the export file is absent from search. No schema change expected (023 covers FR-13); if one is needed, write an idempotent script under scripts/ebilling/ and list it for 153.</notes>
+  <notes>Amended for EB-D-148 (2026-10-21): export files moved from SPE Documents to Stored Files (model section 10, section 15 answer 4); dep 090 added. Shared append points: FinanceModule.cs and the Finance endpoint-mapping call site — re-read before editing. P6-A runs with 152; 152 adds an index enqueue inside the lifecycle service, this task only calls it, so no file overlap. Stored Files are not indexed; 153 verifies the export file is absent from search. No schema change expected (023 covers FR-13); if one is needed, write an idempotent script under scripts/ebilling/ and list it for 153. 088 retype 2026-10-22 (uac-r2): sprk_storedfile.sprk_sizebytes is a whole number (max 2,147,483,647). An export file larger than that is refused with a clear code before any write, through 090's checked conversion; never cast or clamp. Point uac-r2 at the test in the review.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

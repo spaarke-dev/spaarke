@@ -4,7 +4,7 @@
     <title>Stored File schema, the sprk_document submission marker (field-secured, app-only refusal) and invoice status Superseded</title>
     <phase>3 Rules (WP3) — Procedures and files (EB-D-148), wave P3-A</phase>
     <gate>Startable for steps 1-6 (script, code change, -WhatIf, review). The real dev run (step 8) waits for ontology-r1's full schema-review PASS, both before-notices, the owner's OK, AND 080's real run (the Stored File's sprk_procedureversion lookup needs that table).</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF code (ParentLineage.cs) and adds an isolation guard; plus a new table with field security on dev, owner-gated.</rigor-reason>
     <model-tier>opus</model-tier>

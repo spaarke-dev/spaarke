@@ -217,3 +217,20 @@ The pre-flight used to require the reader field-security profile on ALL default 
 **Known limits.**
 - **A file larger than 2,147,483,647 bytes (2 GiB) cannot be stored.** `sprk_sizebytes` is capped there; task 090 refuses such a file (fail closed, see its constraints).
 - `RetrieveDependenciesForDelete` was not run before the delete; the platform's own refusal of a delete with dependencies was the guard.
+
+## 9. Run 2 and the idempotence run on dev (2026-10-22)
+
+Before-notices went to ontology-r1 and uac-r2 on 2026-10-22. uac-r2 accepted the ParentLineage diff and the profile reuse, on the condition that the reader pre-flight checks a named set of business units (§6.5). ontology-r1 passed the schema gate, then the pre-run fixes (§6.6), then the retype (44c1ef6a2d..5af7f6c879). The owner's OK covers dev schema runs of 080/115/088, and the retype was approved separately on 2026-10-22. 080 had already run on 2026-10-21 (notes/080-dev-run-2026-10-21.md).
+
+- **Run 2** (5af7f6c879), exit 0. Created 13: the two retyped columns and 11 field-permission rows. Changed 6: secured sourceversion, sourcesha256, sha256, contenttype, sizebytes and blobpath. Skipped 31. Verify passed: "all 18 expected columns present with the right type and target; every check above passed".
+- **Run 3**, exit 0. Created 0, changed 0, skipped 39. Output: "nothing changed - no publish" and "Idempotent: nothing was created or changed."
+- **Verify results:**
+  - 15 columns secured. Each has a writer row (R/C/U). 14 also have a reader row (R); blobpath has none.
+  - The marker is secured and no document holds Yes.
+  - Superseded 659490005 is at statecode 1 and no invoice holds it.
+  - All 6 relationships are NoCascade except on delete, and each has its Related menu set to DoNotDisplay. On delete, sourcedocument and sourcecommunication are Restrict and the other four are RemoveLink.
+  - The table has only the platform-default forms (3) and views (7).
+- **Independent read-backs:** uac-r2 and ontology-r1 each did one on 2026-10-22, and both match the verify item for item. ontology-r1 logged it in its deploy-log.
+- **Publish size:** unchanged; see §4.
+- **Logs:** in the session scratchpad (088-run1.txt, 088-run2.txt, 088-run3.txt). The run 2 summary and verify are quoted in the after-notices.
+

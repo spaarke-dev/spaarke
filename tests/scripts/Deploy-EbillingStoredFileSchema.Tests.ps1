@@ -23,7 +23,7 @@
 #      business units only (-ReaderBusinessUnits), never every default team (UAC 191's External Collaborators BU must never hold it).
 # The script's constants are taken from the script itself (its top-level assignments), not retyped here.
 #
-# Pester 3.4:  Import-Module Pester -RequiredVersion 3.4.0 ; Invoke-Pester tests/scripts/Deploy-EbillingStoredFileSchema.Tests.ps1
+# Pester 3.4 under pwsh 7 (not Windows PowerShell 5.1, not Pester 6):  Import-Module Pester -RequiredVersion 3.4.0 ; Invoke-Pester tests/scripts/Deploy-EbillingStoredFileSchema.Tests.ps1
 # ---------------------------------------------------------------------------
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..' '..')).Path
