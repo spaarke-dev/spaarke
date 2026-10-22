@@ -43,6 +43,58 @@ public static class DataverseIdentifier
                 "A Dataverse column or navigation name must be a bare identifier (a letter or an underscore, then letters, " +
                 "digits or underscores); nothing was sent.", paramName);
 
+    /// <summary>
+    /// The metadata collections a multi-row read may name under one table's definition (#2253 fix round 3, F1). Closed:
+    /// the field-mapping push reads <c>Attributes</c> and <c>ManyToOneRelationships</c>; the other three are the
+    /// remaining per-table metadata collections of the same shape, which add no new capability.
+    /// </summary>
+    private static readonly HashSet<string> MetadataCollections = new(StringComparer.Ordinal)
+    {
+        "Attributes", "ManyToOneRelationships", "OneToManyRelationships", "ManyToManyRelationships", "Keys",
+    };
+
+    private const string MetadataPathPrefix = "EntityDefinitions(LogicalName='";
+    private const string MetadataPathKeyEnd = "')/";
+
+    /// <summary>
+    /// Whether <paramref name="path"/> may be the collection of a multi-row read: exactly one of two shapes.
+    /// <list type="bullet">
+    ///   <item><description>A bare entity-set name (<see cref="IsTableName"/>).</description></item>
+    ///   <item><description><c>EntityDefinitions(LogicalName='{table}')/{Collection}</c>, where <c>{table}</c> is a bare
+    ///   table name and <c>{Collection}</c> is one of <c>Attributes</c>, <c>ManyToOneRelationships</c>,
+    ///   <c>OneToManyRelationships</c>, <c>ManyToManyRelationships</c> or <c>Keys</c> (ordinal).</description></item>
+    /// </list>
+    /// </summary>
+    /// <remarks>#2253 fix round 3 (F1): the field-mapping push reads a table's attribute and relationship metadata through
+    /// the impersonated multi-row read, so a bare-only guard refused every push. The quoted key is still a bare
+    /// identifier, so a crafted name cannot end it early.</remarks>
+    public static bool IsCollectionPath([NotNullWhen(true)] string? path)
+    {
+        if (IsTableName(path))
+            return true;
+
+        if (path is null || !path.StartsWith(MetadataPathPrefix, StringComparison.Ordinal))
+            return false;
+
+        var rest = path[MetadataPathPrefix.Length..];
+        var keyEnd = rest.IndexOf(MetadataPathKeyEnd, StringComparison.Ordinal);
+        if (keyEnd < 0)
+            return false;
+
+        return IsTableName(rest[..keyEnd])
+               && MetadataCollections.Contains(rest[(keyEnd + MetadataPathKeyEnd.Length)..]);
+    }
+
+    /// <summary>Returns <paramref name="path"/> when it is a multi-row read's collection (<see cref="IsCollectionPath"/>).</summary>
+    /// <exception cref="ArgumentException">It is not; nothing was built or sent.</exception>
+    public static string RequireCollectionPath(string? path, string paramName) =>
+        IsCollectionPath(path)
+            ? path!
+            : throw new ArgumentException(
+                "A Dataverse multi-row read must name a bare entity set, or EntityDefinitions(LogicalName='<table>')/" +
+                "<Attributes|ManyToOneRelationships|OneToManyRelationships|ManyToManyRelationships|Keys>; nothing was sent.",
+                paramName);
+
     private static bool IsIdentifier([NotNullWhen(true)] string? name, bool leadingUnderscore)
     {
         if (string.IsNullOrEmpty(name))

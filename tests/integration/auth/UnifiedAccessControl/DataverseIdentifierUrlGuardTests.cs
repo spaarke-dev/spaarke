@@ -184,6 +184,122 @@ public class DataverseIdentifierUrlGuardTests
         handler.Requests.Should().Contain(r => r.Query.Contains("$select=sprk_name,_ownerid_value", StringComparison.Ordinal));
     }
 
+    // ── #2253 fix round 3 (F1): the multi-row read accepts one table's metadata collection ─────────────────────
+
+    private static readonly Guid Caller = Guid.Parse("22530003-0000-4000-8000-000000000001");
+
+    [Fact]
+    public async Task ThePushAttributeRead_ThroughTheRealService_SendsOneRequest_ForTheMetadataPath()
+    {
+        var handler = new RecordingHandler(_ => Json("{\"value\":[]}"));
+        var sut = new OfflineService(handler);
+
+        await sut.RetrieveMultipleImpersonatedAsync(
+            Sprk.Bff.Api.Api.FieldMappings.FieldMappingPushLookups.AttributeMetadataPath("sprk_matter"),
+            Sprk.Bff.Api.Api.FieldMappings.FieldMappingPushLookups.AttributeMetadataQuery,
+            Caller);
+
+        handler.Requests.Should().ContainSingle().Which.PathAndQuery.Should().Be(
+            "/api/data/v9.2/EntityDefinitions(LogicalName='sprk_matter')/Attributes"
+            + "?$select=LogicalName,AttributeType,IsValidODataAttribute");
+    }
+
+    [Fact]
+    public async Task ThePushParentLookupRead_ThroughTheRealService_SendsOneRequest_ForTheMetadataPath()
+    {
+        var handler = new RecordingHandler(_ => Json("{\"value\":[]}"));
+        var sut = new OfflineService(handler);
+
+        await sut.RetrieveMultipleImpersonatedAsync(
+            Sprk.Bff.Api.Api.FieldMappings.FieldMappingEndpoints.ParentLookupMetadataPath("sprk_event"),
+            Sprk.Bff.Api.Api.FieldMappings.FieldMappingEndpoints.ParentLookupMetadataQuery,
+            Caller);
+
+        handler.Requests.Should().ContainSingle().Which.PathAndQuery.Should().Be(
+            "/api/data/v9.2/EntityDefinitions(LogicalName='sprk_event')/ManyToOneRelationships"
+            + "?$select=ReferencingAttribute,ReferencedEntity,ReferencingEntityNavigationPropertyName");
+    }
+
+    [Theory]
+    [InlineData("sprk_communications")]
+    [InlineData("EntityDefinitions(LogicalName='sprk_matter')/Attributes")]
+    [InlineData("EntityDefinitions(LogicalName='sprk_matter')/ManyToOneRelationships")]
+    [InlineData("EntityDefinitions(LogicalName='sprk_matter')/OneToManyRelationships")]
+    [InlineData("EntityDefinitions(LogicalName='sprk_matter')/ManyToManyRelationships")]
+    [InlineData("EntityDefinitions(LogicalName='account')/Keys")]
+    public async Task TheMultiRowRead_ABareSetOrAMetadataCollection_IsSentAsGiven(string path)
+    {
+        DataverseIdentifier.IsCollectionPath(path).Should().BeTrue();
+
+        var handler = new RecordingHandler(_ => Json("{\"value\":[]}"));
+        var sut = new OfflineService(handler);
+
+        await sut.RetrieveMultipleImpersonatedAsync(path, "$top=1", Caller);
+        await sut.RetrieveMultipleAppOnlyAsync(path, null);
+
+        handler.Requests.Select(r => r.PathAndQuery).Should().Equal(
+            $"/api/data/v9.2/{path}?$top=1",
+            $"/api/data/v9.2/{path}");
+    }
+
+    public static TheoryData<string?> NotCollectionPaths() => new()
+    {
+        "EntityDefinitions(LogicalName='x')?$select=y#')/Attributes",
+        "EntityDefinitions(LogicalName='sprk_matter')/Attributes?$select=x",
+        "EntityDefinitions(LogicalName='sprk_matter')/Attributes/x",
+        "EntityDefinitions(LogicalName='sprk_matter')/Attributes#",
+        "EntityDefinitions(LogicalName='sprk_matter')/attributes",
+        "EntityDefinitions(LogicalName='sprk_matter')/Privileges",
+        "EntityDefinitions(LogicalName='sprk_matter')/",
+        "EntityDefinitions(LogicalName='sprk_matter')",
+        "EntityDefinitions(LogicalName='sprk matter')/Attributes",
+        "EntityDefinitions(LogicalName='')/Attributes",
+        "EntityDefinitions(LogicalName='_x')/Attributes",
+        "EntityDefinitions(LogicalName='sprk_matter')/Attributes\n",
+        "entitydefinitions(LogicalName='sprk_matter')/Attributes",
+        "EntityDefinitions(MetadataId=00000000-0000-0000-0000-000000000000)/Attributes",
+        "RelationshipDefinitions(SchemaName='x')",
+        "systemusers(00000000-0000-0000-0000-000000000000)/systemuserroles_association",
+        "sprk_matters(00000000-0000-0000-0000-000000000000)",
+        "/sprk_matters",
+        Crafted,
+        "",
+        null,
+    };
+
+    [Theory]
+    [MemberData(nameof(NotCollectionPaths))]
+    public async Task TheMultiRowRead_ACraftedPath_IsRefused_AndNothingIsSent(string? path)
+    {
+        DataverseIdentifier.IsCollectionPath(path).Should().BeFalse();
+        FluentActions.Invoking(() => DataverseIdentifier.RequireCollectionPath(path, "path"))
+            .Should().Throw<ArgumentException>().Which.ParamName.Should().Be("path");
+
+        var handler = new RecordingHandler(_ => Json("{\"value\":[]}"));
+        var sut = new OfflineService(handler);
+
+        await FluentActions.Awaiting(() => sut.RetrieveMultipleImpersonatedAsync(path!, null, Caller))
+            .Should().ThrowAsync<ArgumentException>();
+        await FluentActions.Awaiting(() => sut.RetrieveMultipleAppOnlyAsync(path!, null))
+            .Should().ThrowAsync<ArgumentException>();
+
+        handler.Requests.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("x')?$select=y#")]
+    [InlineData("sprk_matter')/Attributes?x=")]
+    [InlineData("_sprk_matter")]
+    [InlineData("1sprk_matter")]
+    [InlineData("sprk_matter\n")]
+    public void ThePushMetadataPaths_RefuseACraftedTable_WhereTheyAreBuilt(string table)
+    {
+        FluentActions.Invoking(() => Sprk.Bff.Api.Api.FieldMappings.FieldMappingPushLookups.AttributeMetadataPath(table))
+            .Should().Throw<ArgumentException>();
+        FluentActions.Invoking(() => Sprk.Bff.Api.Api.FieldMappings.FieldMappingEndpoints.ParentLookupMetadataPath(table))
+            .Should().Throw<ArgumentException>();
+    }
+
     private static HttpResponseMessage Json(string body) =>
         new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
 

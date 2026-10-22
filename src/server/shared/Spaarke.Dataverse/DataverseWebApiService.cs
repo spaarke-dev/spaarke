@@ -1235,7 +1235,8 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         Guid? impersonateSystemUserId,
         CancellationToken ct)
     {
-        DataverseIdentifier.RequireTableName(entitySetName, nameof(entitySetName));
+        // #2253 fix round 3 (F1): a bare set, or one table's metadata collection (the field-mapping push reads both).
+        DataverseIdentifier.RequireCollectionPath(entitySetName, nameof(entitySetName));
         var url = string.IsNullOrWhiteSpace(odataQuery)
             ? entitySetName
             : $"{entitySetName}?{odataQuery}";

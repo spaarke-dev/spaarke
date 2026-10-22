@@ -873,8 +873,10 @@ public static class FieldMappingEndpoints
     /// relationships (task 166 r1, owner round 21 item 3). <paramref name="targetEntity"/> has passed
     /// <see cref="IsLogicalName"/>, so it cannot break out of the quoted key.
     /// </summary>
+    /// <remarks>#2253 fix round 3 (F1): <see cref="IsLogicalName"/> admits a leading digit or underscore, so the bare
+    /// table-name check is asked here too, where the key is built.</remarks>
     internal static string ParentLookupMetadataPath(string targetEntity)
-        => $"EntityDefinitions(LogicalName='{targetEntity}')/ManyToOneRelationships";
+        => $"EntityDefinitions(LogicalName='{DataverseIdentifier.RequireTableName(targetEntity, nameof(targetEntity))}')/ManyToOneRelationships";
 
     /// <summary>
     /// The columns read from each relationship (filtered in memory, so no metadata $filter support is assumed). The
