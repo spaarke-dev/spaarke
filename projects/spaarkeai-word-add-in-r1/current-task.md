@@ -29,7 +29,7 @@
   - **We reviewed it 2026-10-22: no objection.** UAC builds all of it in one PR (including our one line); we review before merge. **UAC accepted all five points** (no record version bump: an older BFF ignores the field and keeps own = Restricted). **Draft PR #2234** (head `d5448eddd4`) reviewed 2026-10-22. Our scope is approved: the factory swap at `OfficeDocumentPersistence.cs:144`, our test helpers asserting the marker, and I-19.
   - **F1 sent:** a released attachment child can end up wider than its person-Restricted .eml, because the release falls back to the TOPS floor (`ParentLineage.cs:525-538`), which ignores an intermediate document's own narrowing. Suggested fix: no release while any document on the walk carries a non-provisional own narrowing, plus a must-not-fire test.
   - **K sent:** confirming the same value can't make a provisional Restricted the person's; state it in I-19.
-  - Re-check UAC's F1 fix diff when they send it.
+  - **Fix round 1 (`96ab2be917`) re-checked 2026-10-22: F1 closed; we approved from our side.** The release now walks every node to the link and refuses on any person-set narrowing. It also has an Undecidable state that is carried to the next run, a field-security gate, and a copy constructor that drops the marker. Noted, no change needed: a chain-refused child isn't carried; it stays Restricted until its row changes or a sweep pass reaches it. UAC merges after their pass 2.
   - Our five points:
     1. The release needs the link field security (`Set-DocumentNarrowingFieldSecurity.ps1`) applied first, or a stated window.
     2. Single-attachment saves are never released: a known limit.
