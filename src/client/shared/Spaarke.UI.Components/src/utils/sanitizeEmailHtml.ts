@@ -330,8 +330,12 @@ const VIEWPORT_UNIT = /\d\s*(?:[dsl]?v(?:w|h|i|b|min|max)|cq(?:w|h|i|b|min|max))
  */
 const EXTERNAL_RESOURCE_CSS = /url\s*\(|image-set\s*\(|cross-fade\s*\(|element\s*\(|\bsrc\s*\(|\bimage\s*\(/i;
 
-/** `var()` / `env()` make a value unknowable here (`margin-top:var(--m)` with `--m:-5000px`), so such declarations are dropped. */
-const INDIRECT_CSS = /\b(?:var|env)\s*\(/i;
+/**
+ * `var()` / `env()` make a value unknowable here (`margin-top:var(--m)` with `--m:-5000px`), so such declarations are
+ * dropped. `attr()` too: a typed `attr(title type(<length>))` reads a sender-controlled attribute, so the unit and
+ * resource checks would never see the real value (ISS-003 second review).
+ */
+const INDIRECT_CSS = /\b(?:var|env|attr)\s*\(/i;
 
 /**
  * Returns the safe subset of an inline `style` attribute, or `''` when nothing safe is left.
@@ -431,8 +435,13 @@ function hardenNode(node: Element, allowRemoteImages: boolean): void {
   // 3. No image is fetched on open unless the caller opted in. Every `src` that survives step 2 is http(s) (or a
   //    scheme-less value DOMPurify already dropped), i.e. remote; `alt`, `width` and `height` are kept so the layout
   //    holds and a 1x1 tracking pixel stays invisible. `srcset` / `background=` are not allow-listed at all.
-  if (!allowRemoteImages && (node.nodeName === 'IMG' || node.nodeName === 'SOURCE')) {
-    node.removeAttribute('src');
+  if (node.nodeName === 'IMG' || node.nodeName === 'SOURCE') {
+    // With the opt-in, keep only an absolute http(s) URL: `https:/x` passes the scheme check, but a browser on an
+    // https page resolves it as a same-origin path, i.e. a cookie-bearing GET to the host (ISS-003 second review).
+    const src = node.getAttribute('src');
+    if (!allowRemoteImages || src === null || !/^https?:\/\//i.test(src.trim())) {
+      node.removeAttribute('src');
+    }
   }
 
   // 4. Scrub dangerous CSS from an allowed style attribute: the legacy script tokens drop the whole attribute; the

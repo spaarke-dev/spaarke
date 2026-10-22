@@ -200,6 +200,9 @@ const useStyles = makeStyles({
     contain: 'paint',
     overflowX: 'auto',
     overflowY: 'hidden',
+    // Parity with the other three consumers: an overflow-clipped flex item may shrink to 0, so a future
+    // min-height:0 ancestor would cut the end of a long email with no scrollbar.
+    flexShrink: 0,
   },
   compose: {
     display: 'flex',

@@ -732,6 +732,27 @@ describe('sanitizeEmailHtml — allowRemoteImages opt-in (ISS-003)', () => {
     expect(styleOf(out, '[title="x"]')).toBe('color:red');
   });
 
+  it('blocks attr() indirection: a typed attr() cannot smuggle a viewport unit or URL through an allowed attribute', () => {
+    const out = sanitizeEmailHtml(
+      '<div title="100vw" style="width:attr(title type(<length>));height:10px;color:red">a</div>' +
+        '<div title="100cqw" style="width:ATTR( title type(<length>) )">b</div>' +
+        '<div title="https://t.example/u.gif" style="background-image:attr(title type(<url>))">c</div>'
+    );
+    expect(out).not.toMatch(/attr\s*\(/i);
+    expect(styleOf(out, '[title="100vw"]')).toBe('height:10px;color:red');
+  });
+
+  it('{ allowRemoteImages: true } keeps only an absolute http(s) src: https:/x and http:x are dropped', () => {
+    const out = sanitizeEmailHtml(
+      '<img src="https:/track/x" alt="a"><img src="http:track" alt="b"><img src="https://cdn.example/ok.png" alt="c">',
+      { allowRemoteImages: true }
+    );
+    const imgs = Array.from(parse(out).querySelectorAll('img'));
+    expect(imgs[0].hasAttribute('src')).toBe(false);
+    expect(imgs[1].hasAttribute('src')).toBe(false);
+    expect(imgs[2].getAttribute('src')).toBe('https://cdn.example/ok.png');
+  });
+
   it('does not leak between calls: an opt-in call does not make the next default call permissive', () => {
     sanitizeEmailHtml(PIXEL, { allowRemoteImages: true });
     expect(sanitizeEmailHtml(PIXEL)).not.toContain('t.example');
