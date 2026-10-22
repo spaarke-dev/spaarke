@@ -542,3 +542,17 @@ The POML's open question: do scorecard grades, `InsightsSearchEndpoint` and `Wor
 - **Correction to the inventory agent.** It reported Insights search as having "no per-document check". That is wrong: the code above shows the trim. The inventory is not cited further.
 
 T191a (spikes) is unblocked.
+
+## T191a read-only results (dev, 2026-10-22, GET only)
+
+Raw output: `C:/Users/RALPHS~1/AppData/Local/Temp/uac191a/` (not in the repo); researcher memory `uac191a-flagged-external-dataverse-baseline-2026-10-21.md`.
+
+- **Hierarchy security: off.** `ishierarchicalsecuritymodelenabled = false`; 0 `hierarchysecurityconfigurations`. Not a leak path on dev (closes the §7 open item for dev; every other environment must be read the same way).
+- **Matrix business units: on.** `EnableOwnershipAcrossBusinessUnits = true`. `DoNotRemoveRolesOnChangeBusinessUnit` and `AlwaysMoveRecordToOwnerBusinessUnit` are unset, so the defaults apply: a business-unit change **removes the user's roles** and **moves the records they own** (Learn, *create-edit-business-units*). S2 confirms this live.
+- **Today's leak, measured.** The 2 flagged users (1 enabled) are guests in the root business unit. They get Spaarke Basic User, Office Add In User and Console User through the root default team (inherited roles), and Spaarke Basic User directly. Spaarke Basic User reads document, event, matter and to-do at **Deep from the root business unit, which is org-wide**. Office Add In User grants Write, Assign and Share on matter at Deep. Neither user owns any row, and no "External Collaborators" business unit or team exists.
+- **Design change (§3.2):** `prvReadUser` and `prvWriteUser` are not Basic-capable (`canbebasic = false`).
+  - The external role holds `prvReadUser` at **Local**: it sees the users of its own business unit only. Lookup display names still render from the parent row's formatted values, and S1 verifies this.
+  - The role holds **no** `prvWriteUser`. The platform Basic User role doesn't hold it either, so a flagged user can't edit their own systemuser row or clear the flag.
+- **S3 baseline:** 5 share rows for the flagged users (self-shares plus 1 activity). The org has 1,980 share rows in total. Table sizes: document 600, communication 319, event 83, to-do 66, matter 62, project 23. Mirroring every non-secure, non-Restricted row to one team is roughly 1,100 share rows on dev.
+- **S4 (docs only):** SPE item sharing with a non-member is documented (`driveItem invite` / permission create; "sharing an item doesn't grant access to the container"). App-only invites work for existing guests (`sendInvitation:false`). Office web edit is implied but not stated. Two things are open live: whether the restrictive sharing model blocks app-only invites, and the tenant's guest-sharing policy.
+- **The writes that remain** (S1 setup and negatives, S2 move, S3 about 1,000 shares, S4 invite) are listed with undo steps in the researcher's report. They need the owner's in-session approval (POA constraint).
