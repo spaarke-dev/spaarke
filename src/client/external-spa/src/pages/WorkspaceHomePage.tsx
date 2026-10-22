@@ -33,7 +33,12 @@ import {
   useWorkspaceTabs,
   QUICK_START_TAB,
 } from '../components/shell';
-import { fetchMeEntitlements, type MeEntitlementsResponse } from '../api/me-client';
+import {
+  fetchMeEntitlements,
+  OwnerUnconfiguredError,
+  OWNER_UNCONFIGURED_MESSAGE,
+  type MeEntitlementsResponse,
+} from '../api/me-client';
 import {
   defaultWidgetIdsFor,
   getWidgetDefinition,
@@ -97,6 +102,13 @@ export const WorkspaceHomePage: React.FC<WorkspaceHomePageProps> = ({ teamsHost 
       })
       .catch((err: unknown) => {
         if (cancelled) return;
+        // ISS-005 (#1673): the organization's sign-in is not configured. Same denied state as a 403, with a FIXED
+        // sentence (the server text is never shown) - not a default workspace whose widgets would all 500.
+        if (err instanceof OwnerUnconfiguredError) {
+          setMeDeniedDetail(OWNER_UNCONFIGURED_MESSAGE);
+          setMeAccessFailure('denied');
+          return;
+        }
         const failure = accessFailureOf(err);
         setMeDeniedDetail(deniedDetailOf(err));
         if (failure) setMeAccessFailure(failure);
