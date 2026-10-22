@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated**: 2026-10-22, later (checkpoint: W3-8 running; #2255 applied on dev; the owner's decisions on #2235 and the stamp storage)
+> **Last Updated**: 2026-10-22, evening (checkpoint: master merged, 081 merged, 090 round 2 running)
 > **Format**: CURRENT state only. Rewrite each checkpoint; target ≤ 10 KB.
 
 ---
@@ -9,49 +9,40 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Wave W3-8 RUNNING: 081 (branch task/ebill-081-procedure-service) and 090 (branch task/ebill-090-file-store), each a background opus/high task-execute agent in its own worktree, based on 162369cdf5. Model FINAL (EB-D-148); draft PR #1911. |
-| **Status** | 080, 088, 091, 099 and 119 ✅. #2255 soft delete (30 days) merged (b6edd748d8) and applied on dev. The combined tip passed: 5 projects build, unit 8563 and Arch 1349. work/ebilling-r1 is pushed. |
-| **Next Action** | (1) When the 081 agent reports, send its range to uac-r2 (and to ontology-r1 if it touches their paths). Merge it FIRST. Run the broad tests and build all 5 projects. Push. (2) When the 090 agent reports, rebase it onto the 081 merge, then send it to uac-r2 and point them at the sizebytes test. Merge, run the tests, push. (3) Create a new task (task-create, main session) for the #2235 fix: field-secure sprk_invoicesubmission.sprk_findingsjson (BFF read/write only; this also closes DEF-029) and take it off the main form; Decision Records store the generic Duplicate sentence. Includes a schema run with notices. (4) Later: merge #1911 to master (check #2184 first), then tell customer-provisioning and R3 (#1829 closes). |
+| **Task** | 090 (file store service) round 2 RUNNING as a background opus/high implementer in worktree `C:/code_files/spaarke/.claude/worktrees/agent-acd148d1d111e78ef`, branch task/ebill-090-file-store (was 12329abebe). Model FINAL (EB-D-148); draft PR #1911. |
+| **Status** | work/ebilling-r1 pushed at e371dce6bf: master merged (51591469df, UAC #2253 in), post-merge fixes (3cf4141bc0..dae66dab5c), 081 merged (1b1eda6fec, ontology PASS + uac accepted). Tip: 5 test projects build; broad unit filter 14149/0 fail; ArchTests 1516/1516. 080, 081, 088, 091, 099, 119 ✅. |
+| **Next Action** | (1) When uac-r2 reviews e371dce6bf (master-merge ParentLineage resolution, sprk_invoicesubmission AccessColumns, NotAccessTables reasons, the 188 test rewrite), fix anything they raise. (2) When the 090 agent reports, run the broad filter in its worktree output, send its range to uac-r2 (F4 + round-1 Ks + stamping), then merge 090 into work, build 5, broad filter, push. (3) Owner asks (below). (4) task-create for the #2235 fix (after 090). (5) Later: merge #1911 to master (check #2184 first; next master merge conflicts in DataverseUpdateHandler with #2257 a94b1d7f14), then tell customer-provisioning and R3. |
 
-### Lanes
-| Task | State | Waiting on |
-|---|---|---|
-| 081 Procedure service | Agent running. Merges first; it shares uac's creator-person files with 090 | Agent report |
-| 090 File store service | Built (bedf2580e9). uac-r2 review: 4 F findings. A fix agent is working on F1–F3 and the cheap Ks in the 090 worktree; send that diff to uac-r2 for a diff-only re-check. F4 waits for UAC #2253 to reach master (uac-r2 will message when it does). Then merge master into work/ebilling-r1 (252+ commits behind) and rebase 090. F4 itself: add StoredFileSchema.Entity (the constant, not a literal) to ParentLineage AccessTables, refused whole, with a reason comment naming the typed writer StoredFileService and "no playbook node, output mapping or field-mapping rule writes it"; add Services/Finance/Files to ScannedFolders; put sprk_procedureversion and sprk_billingexport in NotAccessTables with true reasons; add a must-fire row in TheAccessTableSet_IsExactlyTheseTables. Earlier note: Its POML carries: the checked sizebytes conversion (refuse > int.MaxValue), one canonical source-version string, and downloads only on a clean scan time no earlier than Last-Modified (091 condition 3) | Agent report; rebase after 081 |
-| O-14 prototype | First cut in spaarke-prototype/projects/ebilling.r1 | 084/089 correct its assumed DTOs |
+### 090 round 2 brief (the running agent)
+Merge origin/work/ebilling-r1 into the 090 branch (no force push; Stored File registry row becomes **I-23**); F4: `StoredFileSchema.Entity` in AccessTables (reason names StoredFileService, "no playbook node, output mapping or field-mapping rule writes it"), Services/Finance/Files in ScannedFolders, sprk_procedureversion + sprk_billingexport in NotAccessTables, must-fire exact-set row; uac round-1 re-check: production-constructor OrganizationId test (fix-now), K1 ETag ifMatch on both deletes (412 = kept), K2 "F4 merged" hard precondition for enabling StoredFileReconcileJob (notes + 079 POML), K4 size-cast misses as known limit, IOptionsDriftTests TenantId wording; stamp creator on sprk_ruleset + sprk_procedureassignment (StampedChildTables + schema script gate + #2277 allow-list if present).
 
-### Owner decisions 2026-10-22 (later; do not ask again)
-- #2235: FIX (approach above; a new task after 090).
-- #2255: 30-day blob soft delete in all environments including dev. Done on dev (091 §8.8).
-- Stamp storage: a DEDICATED eBilling storage account per customer stamp. customer-provisioning wires it in #2232 after #1911: the stamp creates the account, and the module is the sole owner of its blobServices. Recorded on #2232.
-- The owner deleted `C:\p119`.
+### Owner asks (open; the user has not answered)
+- **081 dev schema run**: `scripts/Set-ChildRecordCreatorPersonSchema.ps1` dry run → `-Apply` → `-Verify` on dev, notices to ontology-r1 and uac-r2 before/after. HARD RULE: -Verify exits 0 in an environment before any BFF carrying ebilling (081+) deploys there (UAC #2273/#2277). After 090 merges, its two tables join the same run.
+- **#2285 (DEF-042)**: should Billing policy and rule-set rows be hidden from internal users using Dataverse directly? ontology: Read on sprk_policy is intended (Console worklist outer link) and must stay; any fix is row scoping or a split.
+- Business rules from ontology (raise with 082): does a Procedure correction apply retroactively to already-evaluated invoices? Clean slate for a re-added rule vs D-11 30-day suppression?
+- Firm visibility settable on its own (081 agent's question).
+- Owner's machine: Pester 6.2.0 `Pester.ScriptScope.ps1` overwritten 2026-10-16 with the sidecar script (reinstall Pester). Leftover conflict markers on master in projects/ai-advanced-capabilities-agreements-r1/notes/uat4-execution-notes.md (not ours).
+
+### Decisions this session (2026-10-22, recorded in notes)
+- Registry renumber: master I-19 (email-derived document link) stays; invoice-family I-20, submission firm link I-21, Procedures I-22, Stored File I-23.
+- ParentLineage: 088 submission marker sits in master's narrowing check (sprk_document only, both WriteIdentity tiers, shared AppOnlyDocumentWriteReasonCode, own message). uac agreed.
+- sprk_invoicesubmission AccessColumns: sprk_vendororg + three sprk_regarding* lookups (pending uac review).
+- 188 r4b finance reject tests rewritten to "refused at step 0" on one StatedCaller helper (uac approved, conditions met).
+- InvoiceSubmissionPersister keeps copying the submission's sprk_createdbyperson (safe via universal empty gate + -Verify-before-deploy).
+- I-P2: Procedure tables are not access tables.
+- 082 must-dos from ontology are in its POML (remove the Procedure skip in BillingFactLoader + 2 must-fire tests; nothing may set sprk_ruleset.sprk_procedure on an in-force set before 082 is live).
 
 ### Filed this session (open)
-- #2237 (uac-r2 owns; DEF-036): DocumentProfileOutputMapper writes app-only without the refusal. Whichever of 088 and #2237 merges second adds sprk_restrictedbysubmission to the filtered set.
-- #2242, #2259 and #2263: all closed by 050b, which deletes InvoiceExtractionJobHandler, the only caller of OutputOrchestratorService and DataverseUpdateHandler. The 050b POML notes the overlap with UAC #2258 and the guard exemption to drop.
-- #1829 (R3 DEF-004): built by 051; R3 relabels it and closes it when #1911 merges.
-- #2254 (DEF-037): /review accepts a submission planted by a user-writable sprk_invoice link; fix: InvoiceIdFor(submission.Id) == invoiceId.
+#2274 (DEF-039), #2280 (DEF-040), #2284 (DEF-041), #2285 (DEF-042); earlier #2237 (uac, merged), #2254 (DEF-037), #2255 (applied on dev).
 
-### Owner decisions 2026-10-21/22 (do not ask again)
-- 080 re-run yes. AddedFee key by fee kind (and exact code set for `other`). 091 option A. O-14 prototype started.
-- Dev file store: new dedicated account; scanning "not enabled" on dev. P-3: not in R1. Matter spend stays visible to flagged-external users.
-- 088 BigInt columns retyped (2026-10-22): sourceversion String(20), sizebytes Integer. The two empty columns were deleted on dev with the owner's OK.
-- Earlier: dev schema runs of 080/115/088 after ontology PASS and notices; no Key Vault changes; 096 one release after word-add-in-r1's; 095 from-email shapes frozen.
-
-### Agreed with peers
-- uac-r2 delete design §15 (53569f3581): the planner keeps any row a Restrict relationship references from outside the plan ("kept: source of an invoice file"). 117 relies on it and needs no executor change.
-- 095: the submission's own Restricted on the .eml is a NON-provisional own narrowing (not via ApplyEmailCommunicationOutcome's unidentified branch); must-fire test.
-- 086: no sprk_storedfile privilege for External Collaborator or flagged-external users (UAC 191 records the same).
-- 088's reader pre-flight checks 6 named business units (-ReaderBusinessUnits), never every default team.
-- Later-task findings from ontology's 088 gate are in the POMLs: 094 (409 pre-check counts Stored File sources), 097 (Superseded is not an Active prior), 117, 150 (sizebytes cap), 097/098 (Restrict refusal).
-- customer-provisioning: #2232 sequenced after the module reaches master. **Tell them when #1911 merges.**
-- R3: OK for any dev BFF deploy whose changes don't touch finance, ebilling or sprk_invoice*. Dev runs master 1283c41817, which still lacks e0df773395 (015), so the sprk_invoicestatus delete stays blocked.
-- 157 is on master (aa3dc49897). Master ArchTests timeout is now 10 min (#2252).
+### Peer state
+- R3: ebilling OK given for dev BFF deploy at f5bf481185 and 1fa0cf5cb8 (master; no ebilling branch code). The owner approves in R3's session.
+- uac-r2: has e371dce6bf for one-pass review. customer-provisioning: #2232 after #1911 merges (dedicated account per stamp).
 
 ### Standing rules (unchanged)
-- Worktrees: agents work in their own worktree; remove only with Remove-WorktreeSafe.ps1; never bare git stash; never --no-verify.
+- Worktrees: agents in their own worktree; remove only with Remove-WorktreeSafe.ps1; never bare git stash; never --no-verify.
 - After merges: build all 5 test projects and run the broad filter on the combined tip before pushing or sending ranges.
 - Deploys: Import-SolutionScoped.ps1 only; dev BFF and SPA only via SPA-r3.
 - Live writes and role changes need the owner's OK; schema runs need notices to ontology-r1 and uac-r2, before and after.
-- Gates: no line upload route before #2047; 100 and 105 not to dev or master before the Core User check on dev; no dev invoice seeding until REAL-2026-123456.01 is answered.
+- Gates: no line upload route before #2047; 100 and 105 not to dev or master before the Core User check on dev; no dev invoice seeding until REAL-2026-123456.01 is answered; StoredFileReconcileJob not enabled anywhere before F4 is merged.
 - Dataverse BigInt columns can't be field-secured (memory note).
