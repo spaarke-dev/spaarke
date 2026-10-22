@@ -141,79 +141,227 @@ public class ContactCreateOwnerPolicyGuardTests
         Assert.Matches(Declaration, declaringCode);
     }
 
-    // ── No ownerless CreateAsync("contacts") anywhere in the BFF (ISS-005 invite create, #1673 review F1) ──────────────
+    // ── No ownerless contact create anywhere in server code (ISS-005, #1673; UAC re-check K3) ───────────────────
 
+    private const string ServerRoot = "src/server/";
     private const string BffRoot = "src/server/api/Sprk.Bff.Api/";
+    private const string StoreFile = BffRoot + "Infrastructure/ExternalAccess/ContactIdentityStore.cs";
+    private const string InviteFile = BffRoot + "Api/ExternalAccess/ExternalInviteService.cs";
 
-    /// <summary>A Dataverse Web API create into the contact entity set: the literal, or a constant named like it.</summary>
-    private static readonly Regex ContactCreate = new(
-        @"\.CreateAsync\s*\(\s*(?:""contacts""|\w*Contacts?EntitySet\b)", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    /// <summary>
+    /// A reference to the contact table in a create call: the entity-set / logical-name LITERAL, a constant named like the
+    /// entity set (<c>*ContactEntitySet</c>), or a string constant anywhere in server code that holds <c>"contact"</c> /
+    /// <c>"contacts"</c> (<paramref name="constantNames"/>, found by <see cref="ContactConstantNames"/>), possibly qualified
+    /// (<c>Type.Name</c>).
+    /// </summary>
+    private static string ContactRef(IEnumerable<string> constantNames)
+    {
+        var names = new[] { @"\w*Contacts?EntitySet" }.Concat(constantNames.Distinct().Select(Regex.Escape));
+        return @"(?:""contacts?""|(?:[A-Za-z_]\w*\.)*(?:" + string.Join("|", names) + @")\b)";
+    }
+
+    /// <summary>A string constant holding the contact table: <c>const string X = "contacts";</c> or <c>static readonly string X = "contact";</c>.</summary>
+    private static readonly Regex ContactConstant = new(
+        @"\b(?:const|static\s+readonly)\s+string\s+(\w+)\s*=\s*""contacts?""\s*;", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    /// <summary>The names of the string constants in one file's code that hold <c>"contact"</c> or <c>"contacts"</c>.</summary>
+    internal static IReadOnlyList<string> ContactConstantNames(string code)
+        => ContactConstant.Matches(code).Select(m => m.Groups[1].Value).ToList();
+
+    private enum Shape
+    {
+        /// <summary><c>x.CreateAsync(contacts, payload)</c> (the Web API client, <c>DataverseWebApiClient</c>).</summary>
+        WebApiCreateAsync,
+
+        /// <summary>
+        /// <c>WriteAsync(HttpMethod.Post, "contacts", ...)</c>, a <c>(HttpMethod.Post, "contacts", payload)</c> request tuple or a
+        /// <c>new HttpRequestMessage(HttpMethod.Post, "contacts")</c>.
+        /// </summary>
+        HttpPost,
+
+        /// <summary>
+        /// <c>new Entity("contact")</c>, the SDK entity that <c>IGenericEntityService.CreateAsync(Entity)</c> and
+        /// <c>IOrganizationService.Create</c> take (so an <c>IGenericEntityService</c> contact create is seen where its entity is
+        /// built with a literal or a discovered constant).
+        /// </summary>
+        SdkEntity,
+    }
+
+    /// <summary>Each shape's regex; <c>{0}</c> is the contact reference. Braces are doubled for <see cref="string.Format(string, object)"/>.</summary>
+    private static readonly (Shape Shape, string Pattern)[] ShapePatterns =
+    {
+        (Shape.WebApiCreateAsync, @"\.CreateAsync\s*\(\s*{0}"),
+        (Shape.HttpPost, @"\bHttpMethod\.Post\s*,\s*{0}"),
+        (Shape.SdkEntity, @"\bnew\s+(?:[A-Za-z_]\w*\.)*Entity\s*(?:\(\s*{0}|\{{\s*LogicalName\s*=\s*{0})"),
+    };
 
     /// <summary>The start of a member declaration (an access modifier at the head of a line, up to its opening parenthesis).</summary>
     private static readonly Regex MemberStart = new(
         @"\n[ \t]*(?:public|private|internal|protected)\b[^\n;=]*\(", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
+    /// <summary>
+    /// Evidence that a member binds an owner: the Web API bind, the identity store's key constant, or the SDK
+    /// <c>ownerid</c> attribute (the literal or <c>OwnerAttribute</c>).
+    /// </summary>
     private static readonly Regex OwnerBind = new(
-        @"ownerid@odata\.bind|\bOwnerBindKey\b", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+        @"ownerid@odata\.bind|\bOwnerBindKey\b|""ownerid""|\bOwnerAttribute\b", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    /// <summary>A known contact-create seam: where it is, and why it is allowed (or invisible to the scan).</summary>
+    internal sealed record ContactCreateSeam(string File, string MemberDeclaration, string Reason);
 
     /// <summary>
-    /// The contact creates in one BFF file's code whose enclosing member (from its declaration to the call) never sets
-    /// <c>ownerid@odata.bind</c>: "line N" for each. A contact created through the Web API without an owner is owned by the
-    /// calling application user in the root business unit (ISS-005). Known limit: a payload built in ANOTHER member and passed
-    /// in is flagged too (build it where it is created), and a create that is not <c>CreateAsync("contacts"</c> or a constant
-    /// named <c>*ContactEntitySet</c> (the identity store's own create, which binds the owner through
-    /// <c>ContactIdentityStore.OwnerBindKey</c>) is not seen.
+    /// The known seams that MATCH a create shape and bind their owner elsewhere. Each is allow-listed by file and member, with
+    /// the reason; <see cref="EveryAllowedSeam_IsStillExercised_ByARealFile"/> fails when one stops matching, so the list cannot
+    /// rot into dead entries. A NEW create shape matches no entry and fails the build.
     /// </summary>
-    internal static IReadOnlyList<string> OwnerlessContactCreates(string relativePath, string code)
+    internal static readonly IReadOnlyList<ContactCreateSeam> AllowedSeams = new[]
     {
-        var violations = new List<string>();
-        if (!relativePath.StartsWith(BffRoot, StringComparison.Ordinal))
+        new ContactCreateSeam(
+            StoreFile,
+            "BuildCreateRequest(",
+            "The identity store's one create (registration, first sign-in, licensed-user link): the request is the pure pair "
+            + "BuildCreateRequest/CreatePayload, and CreatePayload pins ownerid@odata.bind on the Workforce plane (a "
+            + "WorkforceHome create without an owner throws). The binders resolve that owner through "
+            + "ContactIdentityBinder.ResolveCustomerOwnerTeamAsync before they call the store."),
+    };
+
+    /// <summary>
+    /// Contact creates this guard CANNOT see, by design, and why each is outside the rule. Not allow-list entries (nothing
+    /// matches them): <see cref="TheUndetectableSeams_StillExist"/> pins them so a rename shows up here.
+    /// </summary>
+    internal static readonly IReadOnlyList<ContactCreateSeam> UndetectableSeams = new[]
+    {
+        new ContactCreateSeam(
+            BffRoot + "Services/Ai/Handlers/DataverseCreateRecordHandler.cs",
+            "tablename",
+            "Chat dataverse.create_record with tablename=contact: the table is a RUNTIME tool argument, so no source text names it. "
+            + "App-only, owned by the caller's business-unit team via the general record-first resolver (OwnedChildWrite), and "
+            + "it does NOT use ExternalAccess:CustomerBusinessUnitId: it is not an identity-contact create."),
+    };
+
+    /// <summary>One contact create found in a file: where, which shape, whether its member binds an owner, and the member's head.</summary>
+    internal readonly record struct ContactCreateHit(int Index, int Line, string Shape, bool Owned, string Header);
+
+    /// <summary>
+    /// Every contact create in one server file's code (any of the three shapes), with whether the enclosing member binds an
+    /// owner. The Web API shapes look from the member's declaration to the call (the payload is built before it); the SDK
+    /// shape looks to the end of the member (the owner is set on the entity between its construction and the create).
+    /// </summary>
+    internal static IReadOnlyList<ContactCreateHit> ContactCreates(
+        string relativePath, string code, IReadOnlyCollection<string>? constantNames = null)
+    {
+        var hits = new List<ContactCreateHit>();
+        if (!relativePath.StartsWith(ServerRoot, StringComparison.Ordinal))
         {
-            return violations;
+            return hits;
         }
 
+        var contact = ContactRef(constantNames ?? Array.Empty<string>());
         var memberStarts = MemberStart.Matches(code).Select(m => m.Index).ToList();
-        foreach (Match create in ContactCreate.Matches(code))
+        foreach (var (shape, pattern) in ShapePatterns)
         {
-            var start = memberStarts.Where(i => i < create.Index).DefaultIfEmpty(0).Max();
-            if (!OwnerBind.IsMatch(code.Substring(start, create.Index - start)))
+            var regex = new Regex(
+                string.Format(System.Globalization.CultureInfo.InvariantCulture, pattern, contact), RegexOptions.CultureInvariant);
+            foreach (Match create in regex.Matches(code))
             {
-                violations.Add($"line {SourceScan.LineOf(code, create.Index)}");
+                var start = memberStarts.Where(i => i < create.Index).DefaultIfEmpty(0).Max();
+                var next = memberStarts.Where(i => i > create.Index).DefaultIfEmpty(code.Length).Min();
+                var evidenceEnd = shape == Shape.SdkEntity ? next : create.Index;
+                hits.Add(new ContactCreateHit(
+                    create.Index,
+                    SourceScan.LineOf(code, create.Index),
+                    shape.ToString(),
+                    OwnerBind.IsMatch(code.Substring(start, evidenceEnd - start)),
+                    code.Substring(start, create.Index - start)));
             }
         }
 
-        return violations;
+        return hits.OrderBy(h => h.Index).ToList();
     }
 
-    [Fact(DisplayName = "ISS-005: no CreateAsync(\"contacts\") in Sprk.Bff.Api is ownerless")]
-    public void EveryContactCreate_InTheBff_SetsAnOwner()
+    private static bool IsAllowedSeam(string relativePath, ContactCreateHit hit)
+        => AllowedSeams.Any(a => a.File == relativePath && hit.Header.Contains(a.MemberDeclaration, StringComparison.Ordinal));
+
+    /// <summary>
+    /// The contact creates in one server file's code that bind no owner and are not an allow-listed seam: "line N (shape)" for
+    /// each. A contact created through the Web API without an owner is owned by the calling application user in the root
+    /// business unit (ISS-005). Known limits (the scan is name-based, <see cref="SourceScan"/>): a payload built in ANOTHER member
+    /// and passed in is flagged too (build it where it is created); a create whose table is a runtime value
+    /// (<c>dataverse.create_record</c>'s <c>tablename</c>, <c>ChildRecordEndpoints</c>), a <c>CreateRequest</c> / <c>ExecuteAsync</c>,
+    /// a table name built by concatenation, or a constant that is not a <c>const</c>/<c>static readonly string</c> holding the
+    /// literal is NOT seen (<see cref="UndetectableSeams"/> names the known ones); an <c>IGenericEntityService.CreateAsync</c> is
+    /// seen only through its entity's <c>new Entity("contact")</c>; owner evidence is by name and does not prove the value is a
+    /// resolved team.
+    /// </summary>
+    internal static IReadOnlyList<string> OwnerlessContactCreates(
+        string relativePath, string code, IReadOnlyCollection<string>? constantNames = null)
+        => ContactCreates(relativePath, code, constantNames)
+            .Where(h => !h.Owned && !IsAllowedSeam(relativePath, h))
+            .Select(h => $"line {h.Line} ({h.Shape})")
+            .ToList();
+
+    /// <summary>Every server source file as (relative path, code text).</summary>
+    private static IReadOnlyList<(string Path, string Code)> ServerCode()
+        => SourceScan.ServerSourceFiles()
+            .Select(f => (SourceScan.Relative(f).Replace('\\', '/'), SourceScan.CodeText(File.ReadAllLines(f))))
+            .ToList();
+
+    private static IReadOnlyCollection<string> AllContactConstantNames(IEnumerable<(string Path, string Code)> files)
+        => files.SelectMany(f => ContactConstantNames(f.Code)).Distinct().ToList();
+
+    [Fact(DisplayName = "ISS-005: no contact create in server code is ownerless (CreateAsync, HttpMethod.Post, new Entity)")]
+    public void EveryContactCreate_InServerCode_SetsAnOwner_OrIsAnAllowListedSeam()
     {
+        var files = ServerCode();
+        var names = AllContactConstantNames(files);
         var offenders = new List<string>();
         var seen = 0;
-        foreach (var file in SourceScan.ServerSourceFiles())
+        foreach (var (path, code) in files)
         {
-            var path = SourceScan.Relative(file).Replace('\\', '/');
-            if (!path.StartsWith(BffRoot, StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            var code = SourceScan.CodeText(File.ReadAllLines(file));
-            seen += ContactCreate.Matches(code).Count;
-            offenders.AddRange(OwnerlessContactCreates(path, code).Select(v => $"{path}: {v}"));
+            seen += ContactCreates(path, code, names).Count;
+            offenders.AddRange(OwnerlessContactCreates(path, code, names).Select(v => $"{path}: {v}"));
         }
 
-        Assert.True(seen > 0, "the scan saw no CreateAsync(\"contacts\") at all (the invite create): the guard is vacuous");
+        Assert.True(seen > 0, "the scan saw no contact create at all (the invite create, the store request): the guard is vacuous");
         Assert.True(
             offenders.Count == 0,
-            "A contact created through the Web API with no ownerid@odata.bind is owned by the BFF's application user in the root "
-            + "business unit (ISS-005, #1673). Resolve the owner team (ContactIdentityBinder.ResolveCreateOwnerAsync) and bind it. "
-            + "Offending creates:\n" + string.Join("\n", offenders));
+            "A contact created with no ownerid is owned by the BFF's application user in the root business unit (ISS-005, #1673). "
+            + "Resolve the owner team (ContactIdentityBinder.ResolveCreateOwnerAsync) and bind it, or - for a create that is owned "
+            + "by construction elsewhere - add an AllowedSeams entry with the reason. Offending creates:\n" + string.Join("\n", offenders));
     }
 
-    private const string InviteFile = BffRoot + "Api/ExternalAccess/ExternalInviteService.cs";
+    [Fact(DisplayName = "ISS-005 guard, non-vacuous: every allow-listed seam is still matched by a real file")]
+    public void EveryAllowedSeam_IsStillExercised_ByARealFile()
+    {
+        var files = ServerCode();
+        var names = AllContactConstantNames(files);
+        foreach (var seam in AllowedSeams)
+        {
+            var (path, code) = files.Single(f => f.Path == seam.File);
+            Assert.True(
+                ContactCreates(path, code, names).Any(h => IsAllowedSeam(path, h)),
+                $"allow-listed seam {seam.File} / {seam.MemberDeclaration} no longer matches a contact create: remove or update the entry.");
+        }
 
-    [Fact(DisplayName = "ISS-005 guard, must-fire: an ownerless contact create is caught")]
+        // The invite create is the other real create, and it is owned (not a seam).
+        var invite = files.Single(f => f.Path == InviteFile);
+        Assert.Contains(ContactCreates(invite.Path, invite.Code, names), h => h.Owned && h.Shape == nameof(Shape.WebApiCreateAsync));
+    }
+
+    [Fact(DisplayName = "ISS-005 guard: the seams it cannot detect still exist where the doc comment says")]
+    public void TheUndetectableSeams_StillExist()
+    {
+        foreach (var seam in UndetectableSeams)
+        {
+            var path = Path.Combine(SourceScan.RepoRoot, seam.File.Replace('/', Path.DirectorySeparatorChar));
+            Assert.True(File.Exists(path), $"{seam.File} moved: update UndetectableSeams (the record-first chat create).");
+            Assert.Contains(seam.MemberDeclaration, File.ReadAllText(path), StringComparison.Ordinal);
+        }
+    }
+
+    // ── Controls: must fire (one per create shape, and the constant form) ────────────────────────────
+
+    [Fact(DisplayName = "ISS-005 guard, must-fire: an ownerless contact CreateAsync is caught")]
     public void Control_AnOwnerlessContactCreate_IsCaught()
         => Assert.Single(OwnerlessContactCreates(InviteFile, """
             private static async Task<Guid> CreateContactAsync(DataverseWebApiClient client, string email)
@@ -235,9 +383,76 @@ public class ContactCreateOwnerPolicyGuardTests
             }
             """));
 
-    [Fact(DisplayName = "ISS-005 guard, must-not-fire: a contact create that binds the owner passes")]
+    [Fact(DisplayName = "ISS-005 guard, must-fire: WriteAsync(HttpMethod.Post, \"contacts\") is caught")]
+    public void Control_AWriteAsyncPostToContacts_IsCaught()
+        => Assert.Single(OwnerlessContactCreates(BffRoot + "Services/X/NewStore.cs", """
+            public async Task<StoreWriteResult> MakeAsync(Dictionary<string, object?> payload, CancellationToken ct)
+            {
+                return await WriteAsync(HttpMethod.Post, "contacts", payload, null, ct);
+            }
+            """));
+
+    [Fact(DisplayName = "ISS-005 guard, must-fire: a (HttpMethod.Post, \"contacts\", payload) request tuple is caught outside the allow-list")]
+    public void Control_ARequestTuple_OutsideTheAllowList_IsCaught()
+        => Assert.Single(OwnerlessContactCreates(BffRoot + "Services/X/NewStore.cs", """
+            public static (HttpMethod Method, string Path, Dictionary<string, object?> Payload) BuildCreateRequest(Guid oid)
+                => (HttpMethod.Post, "contacts", new Dictionary<string, object?>());
+            """));
+
+    [Fact(DisplayName = "ISS-005 guard, must-fire: new Entity(\"contact\") with no owner is caught, in each spelling")]
+    public void Control_AnSdkContactEntity_WithNoOwner_IsCaught()
+    {
+        Assert.Single(OwnerlessContactCreates(BffRoot + "Services/X/Makes.cs", """
+            private async Task<Guid> MakeAsync(IGenericEntityService entities, CancellationToken ct)
+            {
+                var entity = new Entity("contact");
+                entity["lastname"] = "Example";
+                return await entities.CreateAsync(entity, ct);
+            }
+            """));
+        Assert.Single(OwnerlessContactCreates(BffRoot + "Services/X/Makes.cs", """
+            private Task<Guid> MakeAsync(IGenericEntityService entities, CancellationToken ct)
+                => entities.CreateAsync(new Microsoft.Xrm.Sdk.Entity("contact") { ["lastname"] = "Example" }, ct);
+            """));
+        Assert.Single(OwnerlessContactCreates(BffRoot + "Services/X/Makes.cs", """
+            private Task<Guid> MakeAsync(IGenericEntityService entities, CancellationToken ct)
+                => entities.CreateAsync(new Entity { LogicalName = "contact" }, ct);
+            """));
+    }
+
+    [Fact(DisplayName = "ISS-005 guard, must-fire: a string constant holding \"contact\" is followed into the create call")]
+    public void Control_AStringConstantHoldingContact_IsFollowed()
+    {
+        // The constant is declared in ONE file and used in another: the names are collected across server code.
+        var names = ContactConstantNames("public const string Person = \"contact\";\ninternal static readonly string PersonSet = \"contacts\";");
+        Assert.Equal(new[] { "Person", "PersonSet" }, names);
+
+        Assert.Single(OwnerlessContactCreates(BffRoot + "Services/X/Makes.cs", """
+            private Task<Guid> MakeAsync(IGenericEntityService entities, CancellationToken ct)
+            {
+                var entity = new Entity(Names.Person);
+                return entities.CreateAsync(entity, ct);
+            }
+            """, names));
+        Assert.Single(OwnerlessContactCreates(BffRoot + "Services/X/Makes.cs", """
+            private Task<Guid> MakeAsync(DataverseWebApiClient client, object payload, CancellationToken ct)
+                => client.CreateAsync(PersonSet, payload, ct);
+            """, names));
+
+        // Without the discovered names the same code is invisible: the constants pass is what makes it fire.
+        Assert.Empty(OwnerlessContactCreates(BffRoot + "Services/X/Makes.cs", "return client.CreateAsync(PersonSet, payload, ct);"));
+    }
+
+    [Fact(DisplayName = "ISS-005 guard, must-fire: a create outside the BFF, in shared server code, is caught")]
+    public void Control_ACreateOutsideTheBff_IsCaught()
+        => Assert.Single(OwnerlessContactCreates("src/server/shared/Spaarke.Dataverse/X.cs", "return await client.CreateAsync(\"contacts\", payload, ct);"));
+
+    // ── Controls: must not fire ──────────────────────────────────────────────────────────────────────
+
+    [Fact(DisplayName = "ISS-005 guard, must-not-fire: a contact create that binds the owner passes (Web API and SDK)")]
     public void Control_AnOwnedContactCreate_HasNoViolation()
-        => Assert.Empty(OwnerlessContactCreates(InviteFile, """
+    {
+        Assert.Empty(OwnerlessContactCreates(InviteFile, """
             private static async Task<Guid> CreateContactAsync(DataverseWebApiClient client, string email, Guid team)
             {
                 var payload = new Dictionary<string, object?>
@@ -249,11 +464,56 @@ public class ContactCreateOwnerPolicyGuardTests
             }
             """));
 
-    [Fact(DisplayName = "ISS-005 guard, must-not-fire: creates in other entity sets, and files outside the BFF, pass")]
-    public void Control_OtherEntitySets_AndOtherProjects_HaveNoViolation()
+        // The SDK owner is set AFTER the construction and before the create: the whole member is the evidence.
+        Assert.Empty(OwnerlessContactCreates(BffRoot + "Services/X/Makes.cs", """
+            private async Task<Guid> MakeAsync(IGenericEntityService entities, Guid team, CancellationToken ct)
+            {
+                var entity = new Entity("contact");
+                entity["lastname"] = "Example";
+                entity["ownerid"] = new EntityReference("team", team);
+                return await entities.CreateAsync(entity, ct);
+            }
+            """));
+        Assert.Empty(OwnerlessContactCreates(BffRoot + "Services/X/Makes.cs", """
+            private async Task<Guid> MakeAsync(IGenericEntityService entities, Guid team, CancellationToken ct)
+            {
+                var entity = new Entity("contact");
+                entity[OwnerAttribute] = new EntityReference("team", team);
+                return await entities.CreateAsync(entity, ct);
+            }
+            """));
+    }
+
+    [Fact(DisplayName = "ISS-005 guard, must-not-fire: the identity store's BuildCreateRequest tuple is the allow-listed seam")]
+    public void Control_TheIdentityStoresRequestTuple_IsAllowListed()
+        => Assert.Empty(OwnerlessContactCreates(StoreFile, """
+            public static (HttpMethod Method, string Path, Dictionary<string, object?> Payload) BuildCreateRequest(
+                Guid oid, IdentityPlaneMarker plane, NewContactDetails details)
+                => (HttpMethod.Post, "contacts", CreatePayload(oid, plane, details));
+            """));
+
+    [Fact(DisplayName = "ISS-005 guard, must-not-fire: creates in other tables, EntityReference to a contact, reads and PATCHes pass")]
+    public void Control_OtherTables_References_AndReads_HaveNoViolation()
     {
         Assert.Empty(OwnerlessContactCreates(InviteFile, "return await client.CreateAsync(\"accounts\", payload, ct);"));
-        Assert.Empty(OwnerlessContactCreates("src/server/shared/Spaarke.Dataverse/X.cs", "return await client.CreateAsync(\"contacts\", payload, ct);"));
+        Assert.Empty(OwnerlessContactCreates(InviteFile, "var e = new Entity(\"sprk_todo\"); e[\"sprk_assignedto\"] = new EntityReference(\"contact\", id);"));
+        Assert.Empty(OwnerlessContactCreates(InviteFile, "var row = await client.RetrieveAsync<Contact>(\"contacts\", id, ct);"));
+        Assert.Empty(OwnerlessContactCreates(InviteFile, "return await WriteAsync(HttpMethod.Patch, \"contacts(\" + id + \")\", payload, null, ct);"));
+        Assert.Empty(OwnerlessContactCreates(InviteFile, "return await WriteAsync(HttpMethod.Post, \"accounts\", payload, null, ct);"));
+        Assert.Empty(OwnerlessContactCreates("src/client/X.cs", "return await client.CreateAsync(\"contacts\", payload, ct);"));
+        Assert.Empty(OwnerlessContactCreates(InviteFile, "var e = new Entity(Names.Person);", new[] { "Other" }));
+    }
+
+    [Fact(DisplayName = "ISS-005 guard, must-not-fire: a seam's allow-list entry does not excuse the same shape in another file or member")]
+    public void Control_TheAllowList_IsPerFileAndMember()
+    {
+        const string tuple = """
+            public static (HttpMethod Method, string Path, Dictionary<string, object?> Payload) BuildCreateRequest(Guid oid)
+                => (HttpMethod.Post, "contacts", new Dictionary<string, object?>());
+            """;
+        Assert.Empty(OwnerlessContactCreates(StoreFile, tuple));
+        Assert.Single(OwnerlessContactCreates(BffRoot + "Services/X/Other.cs", tuple));
+        Assert.Single(OwnerlessContactCreates(StoreFile, tuple.Replace("BuildCreateRequest", "BuildAnotherRequest", StringComparison.Ordinal)));
     }
 
     // ── The type's shape: there is no other way to say "no owner" ────────────────────────────────────
