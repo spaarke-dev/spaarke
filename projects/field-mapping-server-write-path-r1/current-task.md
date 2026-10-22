@@ -2,7 +2,8 @@
 
 > **Last updated**: 2026-10-21 (016 on master; next 017/018)
 > **Phase**: Wave 2. Done (13/43): 001–006, 010–016, ALL on master. 016 = #2228 (a7b956fb55); #2220 = #2223
-> (ef5912c7e8). Portfolio synced (Tasks Completed = 13).
+> (ef5912c7e8). Portfolio synced (Tasks Completed = 13). **Live on dev: a7b956fb55** (R3, 2026-10-22 02:18Z,
+> healthz 200).
 
 ## Quick Recovery
 
