@@ -1054,6 +1054,9 @@ public partial class RouteAuthorizationGuardTests
         new CreditedForm("AddFinanceAuthorizationFilter", "Api/Filters/FinanceAuthorizationFilter.cs",
             "Each route declares the id it authorizes; the filter evaluates it as the caller via GetCallerRecordAccessAsync + "
             + "OperationAccessPolicy.HasRequiredRights (FinanceAuthorizationFilter.cs:409-412), uniform 404 on deny (task 130)."),
+        new CreditedForm("RequireWriteOnTheRuleSetsProcedure", "Api/Finance/BillingAdminAuthorization.cs",
+            "Reads the route rule set's Procedure (BillingAdminAuthorization.cs:155) and, when set, runs FinanceAuthorizationFilter's "
+            + "Record-path write check on sprk_procedures as the caller (:172); a read fault is 403 (:161) (ebilling-r1 081, uac D)."),
         new CreditedForm("AddRecordRouteAccessAuthorizationFilter", "Api/Filters/RecordRouteAccessAuthorizationFilter.cs",
             "RetrievePrincipalAccess on the route record over OBO via CallerRecordAccessProbe "
             + "(RecordRouteAccessAuthorizationFilter.cs:110), 403 on deny (:155); the probe throwing is a denial (task 076)."),
