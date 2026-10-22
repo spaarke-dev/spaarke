@@ -45,7 +45,15 @@
 - **R4 design §9:** 8 questions.
 - **073** is blocked (ACME gate).
 - **C-1:** portal settings in Dewey Cheatham.
-- **Issue triage proposed** (`notes/issue-triage-2026-10-22.md`, dd33fee617). Waiting on the owner to approve the split and to decide ISS-004 (internal delete policy) and ISS-005 (which BU owns a licensed user's contact). No fixes or hand-offs have started.
+- **Issue triage approved 2026-10-22** (`notes/issue-triage-2026-10-22.md`). R3 fixes ISS-001, 002, 003, 004, 005, 007, 011 and 012.
+  - **Running** in isolated-worktree implementer agents, each on a local branch: `fix/r3-iss-012-*`, `fix/r3-iss-011-hasfile`, `fix/r3-iss-004-*`, `fix/r3-iss-001-*`.
+  - **Queued** (4-agent cap): ISS-005 (brief agreed with UAC), then ISS-003, ISS-007 and ISS-002.
+  - **Review:** auth/security/tenant-isolation (001, 005, 003) gets two adversarial passes; UAC reviews the 001 and 005 diffs before merge.
+  - **ISS-005 must not merge until the owner confirms** that "top-level BU" = `ExternalAccess:CustomerBusinessUnitId` (the customer unit under root), not root.
+  - **ISS-005 behaviour change:** first sign-in refuses when the setting is unset. Provisioning writes the setting in faf36207d, which is on their branch only; #2265 and task 265 do the read-back.
+  - **Board:** #1830 → UAC task 192; #1864 and #2125 → UAC T191g; #2127 closed (fixed by #2170); #1829 → ebilling, closes when #1911 merges; #2001 → provisioning 264. ISS-017, ISS-019 and DEF-003 are in R4 design.md lines 30-32.
+  - **Owner question open:** the issue-owner-label convention (`.claude/skills` edit needs approval).
+- **PR #2264** (branch sync to master, auto-merge) is open.
 
 ## Peer threads in flight
 - **Ontology:** #2233 (157, earlier-invoice detail hidden) waits on #2252 (ArchTests CI timeout 5→10 min). It will be in the next candidate.
