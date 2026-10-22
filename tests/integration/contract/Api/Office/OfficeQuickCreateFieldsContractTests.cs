@@ -11,6 +11,7 @@ using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Ai.Context;
@@ -287,6 +288,72 @@ public class OfficeQuickCreateFieldsContractTests
             Email = "ralph@spaarke.test",
         });
     }
+
+    [Fact]
+    public async Task GetDefaults_WhenTheCallerMayAppendToTheirContact_AsksThatAsTheCaller_AndKeepsTheContact()
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(factory);
+        using var host = WithMakersContact(factory, MakersContact);
+        ArrangeMakersContactRow(factory);
+
+        var response = await host.CreateClient().GetAsync("/api/office/quickcreate/defaults");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await response.Content.ReadFromJsonAsync<QuickCreateDefaultsResponse>())!.AssignedTo!.Id.Should().Be(MakersContact);
+        factory.CallerDataverse.Requests.Should().Contain(r => r.Contains("RetrievePrincipalAccess") && r.Contains(MakersContact.ToString("D")),
+            "the AppendTo check is asked of Dataverse as the caller (018b fix round 2, K1)");
+    }
+
+    [Fact]
+    public async Task GetDefaults_WhenTheCallerHasNoAppendToOnTheirContact_ReturnsNoPrefill_SoTheCreateDropsTheMakerDefault()
+    {
+        // K1: the pane echoes the prefill back as assignedToContactId, which the create REFUSES when it cannot be appended to
+        // (assignee_inaccessible) - whereas the maker default is dropped with a warning. So the default is not offered.
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(factory);
+        using var host = WithMakersContact(factory, MakersContact);
+        ArrangeMakersContactRow(factory);
+        factory.CallerDataverse.NoAppendTo.Add(("contact", MakersContact));
+
+        var response = await host.CreateClient().GetAsync("/api/office/quickcreate/defaults");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await ReadJsonAsync(response)).GetProperty("assignedTo").ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    [Theory]
+    [InlineData("throws")]
+    [InlineData("answers500")]
+    public async Task GetDefaults_WhenTheAppendToCheckCannotComplete_ReturnsNoPrefill_FailClosed(string how)
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(factory);
+        using var host = WithMakersContact(factory, MakersContact);
+        ArrangeMakersContactRow(factory);
+        if (how == "throws")
+        {
+            factory.CallerDataverse.Fault = path =>
+                path.Contains("RetrievePrincipalAccess", StringComparison.Ordinal) ? new HttpRequestException("Dataverse is down") : null;
+        }
+        else
+        {
+            factory.CallerDataverse.Respond = path =>
+                path.Contains("RetrievePrincipalAccess", StringComparison.Ordinal)
+                    ? DataverseUserResponse.Fail(500, DataverseUserClientErrorCodes.ServiceError, "Dataverse could not answer.")
+                    : null;
+        }
+
+        var response = await host.CreateClient().GetAsync("/api/office/quickcreate/defaults");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await ReadJsonAsync(response)).GetProperty("assignedTo").ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    private static void ArrangeMakersContactRow(OfficeQuickCreateTestWebAppFactory factory) =>
+        factory.Entities
+            .Setup(e => e.RetrieveAsync("contact", MakersContact, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("contact", MakersContact) { ["fullname"] = "Ralph Schroeder", ["emailaddress1"] = "ralph@spaarke.test" });
 
     [Fact]
     public async Task GetDefaults_WhenTheCallerHasNoLinkedContact_ReturnsNoPrefill()

@@ -2467,10 +2467,18 @@ internal class OfficeService : IOfficeService
             (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.OwnerUnresolved,
                 Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ParentUndetermined)
                 => new(refusal.Code, Forbidden, $"The {noun} was not created: {refusal.Detail}."),
-            (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.OwnerUnresolved, _)
+            // Ownership is record-first: the caller's own business unit is the cause only when the resolver names it (no
+            // default team for the caller's unit, or the acting user could not be resolved). Any other code (a parent in
+            // another unit with no owner team, a plan/resolver race's "Try again", the ownership exception) keeps the
+            // service's own text — never Dataverse's — so the user is not told to check a unit that is not the cause.
+            (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.OwnerUnresolved,
+                Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.NoDefaultOwnerTeam
+                or Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ActingUserUnresolved)
                 => new(OfficeErrorCodes.RecordOwnerUnresolved, Forbidden,
                     $"The new {noun} could not be assigned to your business unit's team, so it was not created. Ask an "
                     + "administrator to check that your user has a business unit and that the unit has its default team."),
+            (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.OwnerUnresolved, _)
+                => new(OfficeErrorCodes.RecordOwnerUnresolved, Forbidden, refusal.Detail),
 
             // ── Conflict ──
             (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Conflict,

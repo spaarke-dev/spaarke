@@ -218,6 +218,50 @@ public class OfficeQuickCreateRefusalMapTests
         }
     }
 
+    /// <summary>The caller's own business unit is named only where it really is the cause (018b fix round 2, F1-1).</summary>
+    [Theory]
+    [InlineData(RecordOwnerRefusal.NoDefaultOwnerTeam)]
+    [InlineData(RecordOwnerRefusal.ActingUserUnresolved)]
+    public void OwnerUnresolved_WhereTheCallersOwnUnitIsTheCause_NamesTheCallersBusinessUnit(string code)
+    {
+        var mapped = OfficeService.MapQuickCreateRefusal(
+            new RecordCreationRefusal(RecordCreationRefusalKind.OwnerUnresolved, code, "the service's own detail"), "project", AssignedTo);
+
+        (mapped.Code, mapped.Status).Should().Be((OfficeErrorCodes.RecordOwnerUnresolved, Forbidden));
+        mapped.Detail.Should().Contain("your business unit's team").And.Contain("default team").And.NotContain("the service's own detail");
+    }
+
+    /// <summary>
+    /// Every other owner code is not about the caller's unit (record-first ownership: a project filed under a matter in another
+    /// unit that has no owner team, a plan/resolver race's "Try again", the ownership exception), so the service's text passes.
+    /// </summary>
+    [Theory]
+    [InlineData(RecordOwnerRefusal.NoOwnerSource, "The matter changed while the project was being created. Try again.")]
+    [InlineData(RecordOwnerRefusal.ParentUnresolved, "the matter it is filed under has no owning business unit")]
+    [InlineData(RecordOwnerRefusal.SecureParentNotIsolated, "the parent matter is marked secure but is not isolated")]
+    [InlineData(RecordOwnerRefusal.SecureBusinessUnitAmbiguous, "more than one business unit carries the Secure Record name")]
+    [InlineData(RecordCreationRefusal.OwnershipExceptionCode, "a project filed under nothing keeps its creator")]
+    public void OwnerUnresolved_WhereTheCallersOwnUnitIsNotTheCause_PassesTheServicesDetailThrough(string code, string detail)
+    {
+        var mapped = OfficeService.MapQuickCreateRefusal(
+            new RecordCreationRefusal(RecordCreationRefusalKind.OwnerUnresolved, code, detail), "project", AssignedTo);
+
+        (mapped.Code, mapped.Status).Should().Be((OfficeErrorCodes.RecordOwnerUnresolved, Forbidden));
+        mapped.Detail.Should().Be(detail);
+        mapped.Detail.Should().NotContainEquivalentOf("your business unit");
+    }
+
+    [Fact]
+    public void OwnerUnresolved_NoOwnerSource_KeepsTheTryAgainTheServiceGave()
+    {
+        var mapped = OfficeService.MapQuickCreateRefusal(
+            new RecordCreationRefusal(RecordCreationRefusalKind.OwnerUnresolved, RecordOwnerRefusal.NoOwnerSource,
+                "Whether this 'sprk_project' is filed under a secure record could not be decided consistently. It was NOT created. Try again."),
+            "project", AssignedTo);
+
+        mapped.Detail.Should().Contain("Try again");
+    }
+
     public static TheoryData<string> Kinds()
     {
         var data = new TheoryData<string>();
