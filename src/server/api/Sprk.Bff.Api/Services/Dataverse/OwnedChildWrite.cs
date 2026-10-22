@@ -241,6 +241,14 @@ internal static class OwnedChildWrite
         /// </summary>
         public bool ParentUnavailable { get; init; }
 
+        /// <summary>
+        /// Task 018b-1s (G5): with <see cref="ParentUnavailable"/>, the lookup column whose record was refused — the logical
+        /// column name without <c>@odata.bind</c> (<c>sprk_regardingmatter</c>), or <c>sprk_regardingrecordid</c> for the
+        /// ADR-024 regarding pair's record. <c>null</c> for every other refusal. A structured answer so no caller parses
+        /// <see cref="Denied"/>'s text; it names a column of the caller's own payload, never the record.
+        /// </summary>
+        public string? RefusedColumn { get; init; }
+
         /// <summary>Refused by the owner decision — the stable <see cref="RecordOwnerRefusal"/> code and its reason.</summary>
         public RecordOwnerResolution? OwnerRefusal { get; init; }
 
