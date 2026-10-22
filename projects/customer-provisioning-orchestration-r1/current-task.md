@@ -12,6 +12,13 @@
 | **Status** | Run **Completed** (H14m mailbox `sprk-acme-mail@demo.spaarke.com` in `Spaarke-AppAccess-acme`; H13 8/8 gates; cost drift −74.7 % advisory). 6a: registry already Ready, nothing reconciled. 6b: `runs/b6941254-….md`. 6e: secure-record §7 15/15 PASS (probes deleted). 7: `provisioning-runs/acme-b6941254-…/lessons-learned.md` + INDEX row. |
 | **Next Action** | 1) **6f Copilot gate** (owner, Teams developer portal): pre-check passed (BFF app pre-authorizes `3a36eac4-…`; `sprk_bffappid` set). Owner creates auth config `spaarke-copilot-acme` → gives the OAuth client registration ID → PATCH `sprk_copilotauthconfigid` (confirm first) → render package (`scripts/copilot-agent/Render-CopilotAgentPackage.ps1`). 2) Carry the open lessons into the guide + prereqs (run log rows not yet `applied`: L1–L3, L5–L8, L11, L13–L16, L22, L30, L49, L56; many "fixed in code" rows still need their status column set to applied with the doc). 3) Merge the branch to master (`Closes #2034`, `#2040`, `#2027`), then redeploy the control plane. |
 
+## Active: task 264 (FULL, sonnet@high, directional) — `removeUnverifiedEmailClaim` (#2001, R3 ISS-013; NOT this project's ISS-013 #1500)
+
+- POML `tasks/264-remove-unverified-email-claim.poml`. Step 8: implementer subagent building H3 step (2d) + T7 clause + tests + guide rows (uncommitted until it reports). Then Step 9.5: code-review + adr-check + 2 adversarial passes (auth tag).
+- Facts (read-only, 2026-10-22): Graph v1.0 accepts the property (Learn still says beta); SDK 6.5.0 has it. ACME BFF b4882848 = null (gap); dev 1e40baad = true; SPA client 5859e812 = true (no change).
+- Next after 264: **task 265** (#2265) — T7 read-back of `ExternalAccess__CustomerBusinessUnitId` on both slots (write already in `faf36207d`). Commented on #2265 and told uac-r2 + R3.
+- After the code: ACME's BFF app needs a one-off PATCH (owner OK — live Entra write; a re-run of H3 is gated with the BFF upgrade). Then close #2001 (comment to R3 with the commit).
+
 ## Live state
 
 - **ACME BFF upgrade is gated** (project CLAUDE.md §3, R3 2026-10-20): no build with UAC #2128 on `sprk-acme-prod-api` until A9 home sign-in is in place for ACME. R3 tracks the production-SPA gate in `projects/spaarke-SPA-external-access-platform-r3/notes/task-073-gate-acme.md`. H4b now writes `ExternalAccess__CustomerBusinessUnitId` (H10, `faf36207d`) and `SessionFileStore__BlobEndpoint` (H2a, `d2860c45f`); ACME gets both at its next (gated) run.
