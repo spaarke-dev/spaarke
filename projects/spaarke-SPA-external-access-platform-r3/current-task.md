@@ -66,6 +66,9 @@
   - A named assignee needs AppendTo, otherwise 403 OFFICE_009.
   - The defaults endpoint no longer offers an assignee the caller can't AppendTo.
   - After the deploy, R3 sends field-mapping the SHA. Field-mapping asks the owner to make the Office creates (a Matter, plus a Project under an ordinary matter and one under a secure matter), then checks the results read-only. R3 does not run this smoke.
+- **UAC #1830 config for the next dev deploy:** remove `b!MVasATu…` (the dead container of secure project 65a3fab2) from `SharePointEmbedded__OwnedContainerIds`, keep `b!vzGD…`, then re-provision 65a3fab2's container.
+  - Batch it with #2253, #2258 and #2268 (one restart). UAC sends the exact steps.
+  - UAC says the owner approved it in UAC's session. That does NOT count here, so name it explicitly in R3's owner approval request, with the rollback (re-add the id).
 - **Round 122:** shipped in 1283c41817. Known limit: a single-attachment save stays Restricted.
 
 ## Standing dependencies and gates
