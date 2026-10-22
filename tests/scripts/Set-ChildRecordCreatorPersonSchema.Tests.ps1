@@ -99,7 +99,7 @@ Describe 'the script''s table and solution wiring' {
         # UAC #2276: the empty-before-securing gate is universal, not a list of tables. Every unsecured column is counted before it is
         # secured, in (c) and in (c2).
         $text | Should -Not -Match 'AssertEmptyBeforeSecuring'
-        ([regex]::Matches($text, '(?m)^\s*if \(\$(attrs\[\$t\]|a)\.IsSecured -ne \$Secured -and -not \(Test-ColumnEmptyBeforeSecuring \$t\)\) \{ continue \}\s*$')).Count | Should -Be 2
+        ([regex]::Matches($text, '(?m)^\s*if \(\$(attrs\[\$t\]|a)\.IsSecured -ne \$Secured -and -not \(Test-ColumnEmptyBeforeSecuring \$t\)\) \{ (\$gatedOut\[\$t\] = \$true; )?continue \}\s*$')).Count | Should -Be 2
         ([regex]::Matches($text, 'Set-ColumnSecured \$t; Assert-ColumnStillEmptyAfterSecuring \$t')).Count | Should -Be 2
     }
 
@@ -178,6 +178,11 @@ Describe 'a simulated run' {
                     # scenarios sprk_procedure's column starts unsecured, so a grant is accepted only after this run secured it.
                     $securedNow = @($global:SimCpWrites | Where-Object { $_ -like "PUT EntityDefinitions(LogicalName='$permTable')/Attributes*" }).Count -gt 0
                     if ($global:SimCpScenario -like 'proc-unsecured-*' -and $permTable -eq 'sprk_procedure' -and -not $securedNow) {
+                        throw "0x8004f508: The attribute sprk_createdbyperson is NOT secured for entity fieldpermission"
+                    }
+                    # Same for the non-ebilling table the 'br-unsecured-valued' scenario leaves unsecured: the gate refuses to secure it,
+                    # so the narrow profile's grant (c2) must not be attempted (the old script sent it and the run died here).
+                    if ($global:SimCpScenario -eq 'br-unsecured-valued' -and $permTable -eq 'sprk_budgetrevision' -and -not $securedNow) {
                         throw "0x8004f508: The attribute sprk_createdbyperson is NOT secured for entity fieldpermission"
                     }
                 }
@@ -613,13 +618,39 @@ Describe 'a simulated run' {
 
     It 'UAC #2276 must fire: -Apply does NOT secure an unsecured sprk_budgetrevision column (not an ebilling table) that holds values, and exits 1' {
         SimCp-Reset; $global:SimCpScenario = 'br-unsecured-valued'
+        # the narrow profile holds no row on the budget revision (the column was never secured, so it cannot); the seeded 4/4 row would hide the grant
+        $global:SimCpNarrow.Remove('sprk_budgetrevision')
         $run = Invoke-SimulatedRun @{ Apply = $true }
         $run.Text | Should -Match 'FAIL\s+sprk_budgetrevision\.sprk_createdbyperson already holds 2 value\(s\) while unsecured; it is NOT secured'
         $run.Text | Should -Not -Match 'DONE\s+secured sprk_budgetrevision\.sprk_createdbyperson'
         @($run.Writes | Where-Object { $_ -like "PUT EntityDefinitions(LogicalName='sprk_budgetrevision')/Attributes*" }).Count | Should -Be 0
         @($global:SimCpPermissionPosts | Where-Object { $_ -eq 'sprk_budgetrevision' }).Count | Should -Be 0
+        # uac-r2 round 2: (c2) skips the table (c) refused; the grant it used to send was refused 0x8004f508 and killed the run before (d)/(e)
+        $run.Text | Should -Not -Match 'not yet seen as secured'
+        $run.Text | Should -Match 'Published '
         $run.Text | Should -Match 'APPLY INCOMPLETE'
         $run.ExitCode | Should -Be 1
+    }
+
+    It 'uac-r2 round 2 must fire: the dry run on that table FAILs, and prints no WOULD-grant (or any narrow-profile line) for the column the gate refused to secure' {
+        SimCp-Reset; $global:SimCpScenario = 'br-unsecured-valued'
+        $global:SimCpNarrow.Remove('sprk_budgetrevision')
+        $run = Invoke-SimulatedRun @{}
+        $run.Text | Should -Match 'FAIL\s+sprk_budgetrevision\.sprk_createdbyperson already holds 2 value\(s\) while unsecured'
+        $run.Text | Should -Not -Match 'WOULD\s+grant [^
+]* on sprk_budgetrevision\.sprk_createdbyperson'
+        $run.Text | Should -Not -Match 'WOULD\s+secure sprk_budgetrevision\.sprk_createdbyperson'
+        $run.Writes.Count | Should -Be 0
+        @($global:SimCpPermissionPosts | Where-Object { $_ -eq 'sprk_budgetrevision' }).Count | Should -Be 0
+        $run.ExitCode | Should -Be 1
+    }
+
+    It 'uac-r2 round 2 must not fire: the OTHER narrow-profile tables are still granted in the same run' {
+        SimCp-Reset; $global:SimCpScenario = 'br-unsecured-valued'
+        $global:SimCpNarrow.Remove('sprk_budgetrevision'); $global:SimCpNarrow.Remove('sprk_signal')
+        $run = Invoke-SimulatedRun @{}
+        $run.Text | Should -Match 'WOULD\s+grant Spaarke Ontology Writer Field Writers on sprk_signal\.sprk_createdbyperson'
+        $run.Text | Should -Not -Match 'WOULD\s+grant Spaarke Ontology Writer Field Writers on sprk_budgetrevision\.sprk_createdbyperson'
     }
 
     It '081 must not fire: an already secured Procedure column is not re-counted (no row read), and the dry run only reports' {

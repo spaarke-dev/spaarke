@@ -464,11 +464,14 @@ function Ensure-FieldPermission([string]$ProfileId, [string]$ProfileName, [strin
     }
     Report 'DONE' "granted $ProfileName on $Table.$Column"
 }
+# Tables the empty-before-securing gate refused: their column stays unsecured, so nothing may be granted on it (live Dataverse refuses a
+# field permission on an unsecured column, 0x8004f508) and (c2) skips them.
+$gatedOut = @{}
 foreach ($t in $Tables) {
     if (-not $attrs[$t]) { Report $(if ($Verify) { 'MISSING' } else { 'WOULD' }) "secure $t.$Column and grant both profiles (after the column exists)"; continue }
 
     # Task 081 / UAC #2276: the empty-before-securing gate, on every table.
-    if ($attrs[$t].IsSecured -ne $Secured -and -not (Test-ColumnEmptyBeforeSecuring $t)) { continue }
+    if ($attrs[$t].IsSecured -ne $Secured -and -not (Test-ColumnEmptyBeforeSecuring $t)) { $gatedOut[$t] = $true; continue }
 
     if ($attrs[$t].IsSecured -eq $Secured) { Report 'OK' "$t.$Column is field-secured" }
     elseif ($Verify) { Report 'MISSING' "$t.$Column is NOT field-secured — any user with Write can name someone else as the record's creator" }
@@ -492,6 +495,8 @@ foreach ($t in $Tables) {
 # Exactly $OntologyWriterTables, this one column, read/create/update = 4/4/4, and nothing else on the profile.
 Write-Host "`n(c2) $OntologyWriterProfileName (D-136)"
 foreach ($t in $OntologyWriterTables) {
+    # (c) refused this table's securing (the column holds values); the narrow profile cannot hold a permission on an unsecured column.
+    if ($gatedOut[$t]) { continue }
     $a = $attrs[$t]
     if (-not $a -and $t -notin $Tables) { $a = Try-DvGet (ColumnAttributePath $t) }   # a narrow-profile table not in $Tables (none since task 143)
     if (-not $a) {
@@ -620,4 +625,12 @@ if ($Verify) {
     $gaps | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
     exit 1
 }
-if ($IsDryRun) { Write-Host "`nDRY RUN complete — nothing was written. Re-run with -Apply." -ForegroundColor Cyan }
+if ($IsDryRun) {
+    Write-Host "`nDRY RUN complete — nothing was written. Re-run with -Apply." -ForegroundColor Cyan
+    # A FAIL in a dry run (e.g. a column the empty-before-securing gate refuses to secure) is the same gap -Apply would end on: exit 1.
+    if ($gaps.Count -gt 0) {
+        Write-Host "`nDRY RUN found $($gaps.Count) problem(s) that -Apply cannot fix by itself:" -ForegroundColor Red
+        $gaps | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
+        exit 1
+    }
+}
