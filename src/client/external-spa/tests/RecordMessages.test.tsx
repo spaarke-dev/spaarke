@@ -282,22 +282,43 @@ describe('message bodies', () => {
     expect(css).toMatch(/overflow-x:\s*auto/);
   });
 
-  it('a body with style="position:fixed" still renders inside its message container (DOM structure)', async () => {
+  it('a body with style="position:fixed" renders inside its message container, and the shared sanitizer has already dropped the overlay styles (DOM structure)', async () => {
     thread = [dto(1, { sprk_body: OVERLAY_HTML, sprk_bodyformat: HTML })];
     renderMessages();
 
     const host = await screen.findByTestId('record-message-html');
     const overlay = host.querySelector('div');
-    // The payload survives sanitizing (the shared util keeps style), so containment is what has to hold it.
+    // Defence in depth: the shared sanitizer (ISS-003) strips the overlay declarations at source, so the box is an
+    // ordinary in-flow block ...
     expect(overlay).not.toBeNull();
     expect(overlay?.textContent).toContain('Sign in to continue');
-    expect(overlay?.getAttribute('style') ?? '').toMatch(/position:\s*fixed/);
+    expect(overlay?.getAttribute('style') ?? '').not.toMatch(/position|inset|z-index/);
+    // ... and the containment on the host (previous test) would still clip it if a future sanitizer change let one through.
     // It is a descendant of the host, which is inside its message <li>, which is inside the Messages section.
     expect(host.contains(overlay)).toBe(true);
     expect(overlay?.closest('li[data-testid="record-message"]')).not.toBeNull();
     expect(overlay?.closest('[data-testid="record-detail-messages"]')).not.toBeNull();
     // A direct child of the host: not hoisted out to the document body or a portal.
     expect(overlay?.parentElement).toBe(host);
+  });
+
+  it('an HTML body cannot phone home on open: a remote tracking pixel and a CSS url() background are not loaded (ISS-003)', async () => {
+    thread = [
+      dto(1, {
+        sprk_body:
+          '<p>Hi</p><img src="https://t.example/p.gif" alt="pixel" width="1" height="1">' +
+          '<div style="background-image:url(https://t.example/bg.gif);color:#333">styled</div>',
+        sprk_bodyformat: HTML,
+      }),
+    ];
+    renderMessages();
+
+    const host = await screen.findByTestId('record-message-html');
+    expect(host.textContent).toContain('Hi');
+    expect(host.querySelector('img')?.hasAttribute('src')).toBe(false);
+    expect(host.querySelector('img')?.getAttribute('alt')).toBe('pixel');
+    expect(host.querySelector('div')?.getAttribute('style')).toBe('color:#333');
+    expect(host.innerHTML).not.toContain('t.example');
   });
 
   it('a message I just typed that contains markup is posted as typed and rendered as text after the re-read', async () => {
