@@ -20,4 +20,11 @@ public sealed record ArchiveCommunicationResult
 
     /// <summary>Number of per-attachment sprk_document records created in this call.</summary>
     public required int AttachmentDocumentsCreated { get; init; }
+
+    /// <summary>
+    /// #2246: attachments NOT archived because their SharePoint Embedded item could not be verified as one the archive
+    /// wrote for this communication (reason code <c>sdap.communication.attachment_item_unverified</c>, logged per
+    /// attachment). Zero when every candidate was verified.
+    /// </summary>
+    public int AttachmentsRefusedUnverified { get; init; }
 }

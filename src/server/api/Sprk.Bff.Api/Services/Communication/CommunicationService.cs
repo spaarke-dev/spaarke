@@ -249,7 +249,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         // 2. Archive any attachments that lack a Document — run INDEPENDENTLY of the .eml
         // gate so an attachment added after a prior archive is still picked up on a later
         // call (code-review W3/S5). Each created Document is linked back onto its attachment.
-        var attachmentsCreated = await ArchiveExistingAttachmentsAsync(communicationId, ct, requestedBy);
+        var (attachmentsCreated, attachmentsRefused) = await ArchiveExistingAttachmentsAsync(communicationId, ct, requestedBy);
 
         // 3. Idempotency for the .eml archive — already archived? Return the existing archive
         // Document (plus any newly-archived attachments above), no .eml duplicate.
@@ -265,6 +265,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 ArchiveDocumentId = existingArchiveId,
                 AlreadyArchived = true,
                 AttachmentDocumentsCreated = attachmentsCreated,
+                AttachmentsRefusedUnverified = attachmentsRefused,
             };
         }
 
@@ -343,6 +344,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             ArchiveDocumentId = archiveDocumentId,
             AlreadyArchived = false,
             AttachmentDocumentsCreated = attachmentsCreated,
+            AttachmentsRefusedUnverified = attachmentsRefused,
         };
     }
 
@@ -459,13 +461,30 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     }
 
     /// <summary>
+    /// The reason code of an attachment the on-demand archive refused because its item could not be verified as one the
+    /// archive wrote for this communication (#2246). Logged per refusal and counted in
+    /// <see cref="ArchiveCommunicationResult.AttachmentsRefusedUnverified"/>.
+    /// </summary>
+    public const string AttachmentItemUnverifiedCode = "sdap.communication.attachment_item_unverified";
+
+    /// <summary>
     /// Creates a <c>sprk_document</c> for each attachment of the communication that lacks one (has an SPE
     /// item id but no linked document), using the attachment's OWN drive id (code-review W2), links the
     /// created Document back onto the attachment so a later archive skips it (idempotency, code-review W3),
-    /// and enqueues AI analysis for parity with the send path. Returns the number archived. Per-attachment
-    /// failures are non-fatal.
+    /// and enqueues AI analysis for parity with the send path. Returns the number archived and the number refused
+    /// because the item was not verified (#2246). Per-attachment failures are non-fatal.
     /// </summary>
-    private async Task<int> ArchiveExistingAttachmentsAsync(
+    /// <remarks>
+    /// <b>#2246: the item is verified before a document is bound to it.</b> The row's <c>sprk_graphitemid</c> /
+    /// <c>sprk_graphdriveid</c> are columns a user with Write on the row, or an app-only generic writer, can set, so they
+    /// are not evidence that the item belongs to this communication. Copying them unverified into the new document's
+    /// pointer AND its field-secured bound copy would launder a foreign item through the binding check. Each item is
+    /// therefore checked against server-trusted facts (Graph's own record of the item, read app-only, and the
+    /// communication's derived container) by <see cref="RecordContainerResolver.CommunicationAttachmentItemRefusalAsync"/>,
+    /// which states the trust argument. A refusal, including a failed verification read, creates nothing, is logged with
+    /// <see cref="AttachmentItemUnverifiedCode"/>, and is counted: never a silent success.
+    /// </remarks>
+    private async Task<(int Created, int RefusedUnverified)> ArchiveExistingAttachmentsAsync(
         Guid communicationId, CancellationToken ct, Sprk.Bff.Api.Services.Dataverse.RecordRequester? requestedBy = null)
     {
         var query = new QueryExpression("sprk_communicationattachment")
@@ -480,6 +499,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         var attachments = await _genericEntityService.RetrieveMultipleAsync(query, ct);
         var correlationId = Guid.NewGuid().ToString();
         var created = 0;
+        var refusedUnverified = 0;
 
         // Task 146: attachment documents are owned like their communication. A refusal creates none of them (logged;
         // the .eml archive below refuses the same way and that is what the caller reports).
@@ -491,8 +511,13 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             _logger.LogWarning(
                 "On-demand attachment documents NOT created for communication {CommunicationId}: {Reason} ({Code}) (task 146)",
                 communicationId, docOwner.Reason, docOwner.RefusalCode);
-            return 0;
+            return (0, 0);
         }
+
+        // #2246: the item verifier is task 166's resolver (Scoped, so resolved per operation, R9). When none is available
+        // every candidate is refused below (fail closed), never archived unverified.
+        using var verifyScope = attachments.Entities.Count == 0 ? null : _scopeFactory?.CreateScope();
+        var itemVerifier = verifyScope?.ServiceProvider.GetService<RecordContainerResolver>();
 
         foreach (var att in attachments.Entities)
         {
@@ -510,6 +535,19 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
             try
             {
+                // #2246: verify the item BEFORE binding a document to it (see remarks). A failed read refuses.
+                var refusal = itemVerifier is null
+                    ? "no item verifier is available"
+                    : await itemVerifier.CommunicationAttachmentItemRefusalAsync(communicationId, driveId, itemId, ct);
+                if (refusal is not null)
+                {
+                    refusedUnverified++;
+                    _logger.LogWarning(
+                        "Attachment {AttachmentId} of communication {CommunicationId} NOT archived: {Reason} ({Code}) | Drive: {DriveId}, Item: {ItemId}",
+                        att.Id, communicationId, refusal, AttachmentItemUnverifiedCode, driveId, itemId);
+                    continue;
+                }
+
                 var attachmentDoc = new DataverseEntity("sprk_document")
                 {
                     ["sprk_documentname"] = TruncateTo(fileName, 200),
@@ -545,7 +583,14 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             }
         }
 
-        return created;
+        if (refusedUnverified > 0)
+        {
+            _logger.LogWarning(
+                "On-demand archive of communication {CommunicationId}: {Refused} attachment(s) refused unverified ({Code}); {Created} archived",
+                communicationId, refusedUnverified, AttachmentItemUnverifiedCode, created);
+        }
+
+        return (created, refusedUnverified);
     }
 
     /// <summary>
