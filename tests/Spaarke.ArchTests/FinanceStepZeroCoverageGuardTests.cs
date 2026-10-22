@@ -166,6 +166,32 @@ public sealed class FinanceStepZeroCoverageGuardTests
         }
     }
 
+    /// <summary>
+    /// The markers trusted to mean "this route's filter runs step 0 first". The coverage check above accepts ANY implementer of
+    /// <see cref="IFinanceStepZeroFilter"/>, so a new one must be a reviewed edit HERE (task 090, review pass 1): its filter must call
+    /// <c>FinanceAuthorizationFilter.EvaluateStepZeroAsync</c> before any record read, proven by its own must-fire tests.
+    /// </summary>
+    private static readonly string[] TrustedStepZeroMarkers =
+    [
+        "Sprk.Bff.Api.Api.Filters.FinanceAuthorizationFilterAttached",
+        "Sprk.Bff.Api.Api.Finance.StoredFileAccessFilterAttached",
+    ];
+
+    [Fact(DisplayName = "Task 090: the implementers of IFinanceStepZeroFilter are exactly the reviewed set (a new step-0 marker is a reviewed edit, never silent)")]
+    public void StepZeroMarkersAreAClosedSet()
+    {
+        var implementers = typeof(IFinanceStepZeroFilter).Assembly.GetTypes()
+            .Where(t => t is { IsClass: true } && typeof(IFinanceStepZeroFilter).IsAssignableFrom(t))
+            .Select(t => t.FullName!)
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(TrustedStepZeroMarkers.OrderBy(n => n, StringComparer.Ordinal), implementers);
+
+        // Must-fire control: the comparison notices one more implementer.
+        Assert.NotEqual(TrustedStepZeroMarkers.OrderBy(n => n, StringComparer.Ordinal), implementers.Append("Planted.Marker").ToArray());
+    }
+
     [Fact(DisplayName = "Task 099: the NonFinanceFilterUsers list is current - the real table holds exactly those non-finance users of the Finance filter, no more, no fewer")]
     public void TheNonFinanceFilterUsersListIsCurrent()
     {

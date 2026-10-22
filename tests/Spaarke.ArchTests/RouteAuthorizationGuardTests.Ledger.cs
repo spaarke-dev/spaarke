@@ -1052,9 +1052,9 @@ public partial class RouteAuthorizationGuardTests
             + "OperationAccessPolicy.HasRequiredRights (FinanceAuthorizationFilter.cs:409-412), uniform 404 on deny (task 130)."),
         new CreditedForm("AddStoredFileAccessFilter", "Api/Finance/StoredFileEndpoints.cs",
             "StoredFileAccessFilter decides before the handler: step 0 via FinanceAuthorizationFilter.EvaluateStepZeroAsync "
-            + "(StoredFileEndpoints.cs:201, 403), then RetrievePrincipalAccess as the caller over OBO via "
-            + "CallerRecordAccessProbe.GetCallerRightsForAuthorizationGateAsync on the row's parent (:224) and, for a copy, its source "
-            + "document (:232), uniform 404 on deny (:184); any unexpected fault refuses with 503 (:168) (ebilling-r1 task 090)."),
+            + "(StoredFileEndpoints.cs:241, 403), then RetrievePrincipalAccess as the caller over OBO via "
+            + "CallerRecordAccessProbe.GetCallerRightsForAuthorizationGateAsync on the row's parent (:264) and, for a copy, its source "
+            + "document (:280), uniform 404 on deny (:224); any unexpected fault refuses with 503 (:207) (ebilling-r1 task 090)."),
         new CreditedForm("AddRecordRouteAccessAuthorizationFilter", "Api/Filters/RecordRouteAccessAuthorizationFilter.cs",
             "RetrievePrincipalAccess on the route record over OBO via CallerRecordAccessProbe "
             + "(RecordRouteAccessAuthorizationFilter.cs:110), 403 on deny (:155); the probe throwing is a denial (task 076)."),

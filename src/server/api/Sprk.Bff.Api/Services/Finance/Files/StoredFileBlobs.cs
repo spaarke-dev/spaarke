@@ -42,7 +42,10 @@ public sealed class StoredFileBlobs
     public const string ScanMaliciousValue = "Malicious";
 
     /// <summary>Blob metadata keys written at stage (lower case: metadata keys are C# identifiers on the wire).</summary>
-    internal const string MetadataSha256 = "sha256", MetadataPurpose = "purpose", MetadataSubmission = "submissionid";
+    internal const string MetadataSha256 = "sha256", MetadataPurpose = "purpose", MetadataSubmission = "submissionid", MetadataEnvironment = "environment";
+
+    /// <summary>The environment marker of the test constructor's default.</summary>
+    internal const string TestEnvironment = "storedfile-test.crm.dynamics.com";
 
     private const int CopyBufferBytes = 81920;
 
@@ -51,11 +54,14 @@ public sealed class StoredFileBlobs
 
     /// <summary>Production constructor: the bound <c>Finance:FileStore</c> section and the shared managed-identity credential.</summary>
     /// <exception cref="InvalidOperationException">A configured endpoint or tenant is unusable (start-up validation reports it first).</exception>
-    public StoredFileBlobs(IOptions<FinanceOptions> options, TokenCredential credential, ILogger<StoredFileBlobs> logger)
+    public StoredFileBlobs(
+        IOptions<FinanceOptions> options, IOptions<DataverseOptions> dataverse, TokenCredential credential, ILogger<StoredFileBlobs> logger)
     {
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(dataverse);
         ArgumentNullException.ThrowIfNull(credential);
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        Environment = EnvironmentMarkerOf(dataverse.Value.EnvironmentUrl);
 
         var fileStore = options.Value.FileStore ?? new FinanceFileStoreOptions();
         ScanningEnabled = fileStore.ScanningEnabled;
@@ -75,7 +81,7 @@ public sealed class StoredFileBlobs
     }
 
     /// <summary>Test constructor: a substitute gateway (<c>null</c> = not configured).</summary>
-    internal StoredFileBlobs(BlobGateway? gateway, Guid tenantId, bool? malwareScanningEnabled, ILogger logger)
+    internal StoredFileBlobs(BlobGateway? gateway, Guid tenantId, bool? malwareScanningEnabled, ILogger logger, string? environment = TestEnvironment)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         if (gateway is not null && tenantId == Guid.Empty)
@@ -86,10 +92,30 @@ public sealed class StoredFileBlobs
         _gateway = gateway;
         TenantId = tenantId;
         ScanningEnabled = malwareScanningEnabled != false;
+        Environment = environment;
     }
 
     /// <summary>True when an endpoint is configured.</summary>
     public bool IsConfigured => _gateway is not null;
+
+    /// <summary>
+    /// This deployment's environment marker: the lower-case host of <c>Dataverse:EnvironmentUrl</c> (one Dataverse environment per
+    /// BFF deployment), written into every staged blob's metadata. The tenant segment partitions names; it does not tell apart two
+    /// environments that share an account and a tenant id, so the reconcile job deletes a row-less blob only when it carries THIS
+    /// marker (<c>null</c> when the URL is unusable: then no row-less blob is ever deleted).
+    /// </summary>
+    public string? Environment { get; }
+
+    /// <summary>True when <paramref name="metadata"/> carries this deployment's environment marker.</summary>
+    internal bool IsThisEnvironments(IReadOnlyDictionary<string, string> metadata) =>
+        Environment is not null
+        && metadata.TryGetValue(MetadataEnvironment, out var marker)
+        && string.Equals(marker, Environment, StringComparison.Ordinal);
+
+    internal static string? EnvironmentMarkerOf(string? environmentUrl) =>
+        Uri.TryCreate(environmentUrl?.Trim(), UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.Host)
+            ? uri.Host.ToLowerInvariant()
+            : null;
 
     /// <summary>The tenant segment of every name (<see cref="Guid.Empty"/> when not configured).</summary>
     public Guid TenantId { get; }
@@ -167,6 +193,11 @@ public sealed class StoredFileBlobs
             if (submissionId is { } submission)
             {
                 metadata[MetadataSubmission] = submission.ToString("D");
+            }
+
+            if (Environment is not null)
+            {
+                metadata[MetadataEnvironment] = Environment;
             }
 
             var outcome = await gateway.CreateIfNotExistsAsync(container, name, source, contentType, metadata, ct).ConfigureAwait(false);

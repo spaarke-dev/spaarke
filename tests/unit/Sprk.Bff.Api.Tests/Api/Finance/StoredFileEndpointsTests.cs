@@ -376,11 +376,19 @@ public sealed class StoredFileEndpointsTests
         (await host.SendAsync(Url(file))).StatusCode.Should().Be(HttpStatusCode.Conflict);
     }
 
-    [Theory(DisplayName = "A malformed stored content type is served as application/octet-stream")]
-    [InlineData("text/html; charset=utf-8", "text/html")]
-    [InlineData("not a type", "application/octet-stream")]
-    [InlineData("", "application/octet-stream")]
-    public async Task ContentType_Safe(string stored, string served)
+    [Theory(DisplayName = "Content type (review pass 1): allow-listed types are served as themselves; HTML, SVG, XML, script or a malformed value as an octet-stream attachment")]
+    [InlineData("application/pdf", "application/pdf", false)]
+    [InlineData("text/plain; charset=utf-8", "text/plain", false)]
+    [InlineData("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", false)]
+    [InlineData("IMAGE/PNG", "image/png", false)]
+    [InlineData("text/html; charset=utf-8", "application/octet-stream", true)]
+    [InlineData("image/svg+xml", "application/octet-stream", true)]
+    [InlineData("application/xhtml+xml", "application/octet-stream", true)]
+    [InlineData("application/xml", "application/octet-stream", true)]
+    [InlineData("text/javascript", "application/octet-stream", true)]
+    [InlineData("not a type", "application/octet-stream", true)]
+    [InlineData("", "application/octet-stream", true)]
+    public async Task ContentType_Safe(string stored, string served, bool attachment)
     {
         await using var host = await Host.StartAsync();
         var file = host.SeedServable(contentType: stored);
@@ -390,6 +398,55 @@ public sealed class StoredFileEndpointsTests
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         response.Content.Headers.ContentType!.MediaType.Should().Be(served);
+        (response.Content.Headers.ContentDisposition?.DispositionType == "attachment").Should().Be(attachment);
+    }
+
+    [Fact(DisplayName = "Must-fire (review pass 1, copy rule): a source communication without a source document → 404 identical to an unknown id's")]
+    public async Task CommunicationOnlyCopy_404()
+    {
+        await using var host = await Host.StartAsync();
+        var file = host.SeedServable();
+        host.Rig.Dataverse.Rows[file][StoredFileSchema.SourceCommunication] =
+            new Microsoft.Xrm.Sdk.EntityReference(StoredFileSchema.CommunicationTable, Guid.NewGuid());
+        host.GrantParentRead();
+
+        (await Shape(await host.SendAsync(Url(file)))).Should().Be(await host.UnknownShapeAsync());
+        host.Rig.Gateway.StorageCalls.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "Must-fire (h, review pass 1): a non-storage fault opening the blob (I/O, transport) → 503, not 500")]
+    public async Task OpenOtherFault_503()
+    {
+        await using var host = await Host.StartAsync();
+        var file = host.SeedServable();
+        host.GrantParentRead();
+        host.Rig.Gateway.FailOp["open"] = new IOException("connection reset");
+
+        var response = await host.SendAsync(Url(file));
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        host.AuditEvents.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "Review pass 1: the download filter asks rights ONLY through the timing-equalized gate variant (source scan, with controls)")]
+    public void RightsAskedOnlyThroughTheGateVariant()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "src", "server", "api", "Sprk.Bff.Api")))
+        {
+            dir = dir.Parent;
+        }
+
+        var source = File.ReadAllText(Path.Combine(dir!.FullName, "src", "server", "api", "Sprk.Bff.Api", "Api", "Finance", "StoredFileEndpoints.cs"));
+        var direct = new System.Text.RegularExpressions.Regex(@"\.GetCallerRights(Async|ForRecordsAsync)\s*\(");
+        var gate = new System.Text.RegularExpressions.Regex(@"\.GetCallerRightsForAuthorizationGateAsync\s*\(");
+
+        direct.IsMatch(source).Should().BeFalse("a direct GetCallerRightsAsync call would answer no-access faster than not-found");
+        gate.Matches(source).Count.Should().Be(2, "the parent Read and the copy rule");
+
+        // Controls: the patterns see what they must, and not each other.
+        direct.IsMatch("await probe.GetCallerRightsAsync(token, set, id, ct)").Should().BeTrue();
+        direct.IsMatch("await probe.GetCallerRightsForAuthorizationGateAsync(token, set, id, ct)").Should().BeFalse();
     }
 
     // =============================================================================================================================

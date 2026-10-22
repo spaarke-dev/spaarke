@@ -69,10 +69,14 @@ public sealed class StoredFileReconcileJobTests
         }
 
         /// <summary>A row-less blob, written at <paramref name="at"/>, optionally naming a submission.</summary>
-        public string SeedOrphan(DateTimeOffset at, string? submission = null)
+        public string SeedOrphan(DateTimeOffset at, string? submission = null, string? environment = StoredFileBlobs.TestEnvironment)
         {
             var path = PathOf(new StoredFileParent(StoredFileParentKind.Invoice, Guid.NewGuid()), Guid.NewGuid());
             var metadata = new Dictionary<string, string> { ["sha256"] = "00" };
+            if (environment is not null)
+            {
+                metadata["environment"] = environment;
+            }
             if (submission is not null)
             {
                 metadata["submissionid"] = submission;
@@ -365,6 +369,22 @@ public sealed class StoredFileReconcileJobTests
         var result = await faulty.RunAsync();
         faulty.Rig.Gateway.Get("invoice-files", path).Should().NotBeNull();
         faulty.Counts(result)["unitFaults"].GetInt32().Should().Be(1);
+    }
+
+    [Theory(DisplayName = "Must-fire (review pass 1): a row-less blob of ANOTHER environment sharing the account and tenant id, or with no marker, is kept")]
+    [InlineData("other-env.crm.dynamics.com")]
+    [InlineData("STOREDFILE-TEST.CRM.DYNAMICS.COM")]
+    [InlineData(null)]
+    public async Task Orphan_OtherEnvironment_Kept(string? marker)
+    {
+        var h = new Harness();
+        var path = h.SeedOrphan(h.Clock.GetUtcNow().AddDays(-30), environment: marker);
+
+        var result = await h.RunAsync();
+
+        h.Rig.Gateway.Get("invoice-files", path).Should().NotBeNull();
+        h.Counts(result)["blobsOfOtherEnvironments"].GetInt32().Should().Be(1);
+        h.Rig.Dataverse.Calls.Should().NotContain(c => c.StartsWith("retrieve", StringComparison.Ordinal), "another environment's blob is not judged at all");
     }
 
     [Fact(DisplayName = "Another tenant's blob in the same container is never listed or deleted")]

@@ -279,9 +279,18 @@ public sealed class StoredFileServiceTests
         var blob = rig.Gateway.Get(container, expected)!;
         blob.Content.Should().Equal(Pdf);
         blob.Metadata.Should().Contain("sha256", Sha(Pdf)).And.Contain("purpose", ((int)purpose).ToString(CultureInfo.InvariantCulture))
-            .And.Contain("submissionid", Submission.ToString("D"));
+            .And.Contain("submissionid", Submission.ToString("D")).And.Contain("environment", StoredFileBlobs.TestEnvironment);
         blob.Tags.Should().BeEmpty("the store never writes index tags");
     }
+
+    [Theory(DisplayName = "The environment marker is the lower-case Dataverse host; an unusable URL gives none (no row-less blob is then ever deleted)")]
+    [InlineData("https://SpaarkeDev1.crm.dynamics.com/", "spaarkedev1.crm.dynamics.com")]
+    [InlineData(" https://org.crm4.dynamics.com ", "org.crm4.dynamics.com")]
+    [InlineData("", null)]
+    [InlineData(null, null)]
+    [InlineData("not a url", null)]
+    public void EnvironmentMarker(string? url, string? expected) =>
+        StoredFileBlobs.EnvironmentMarkerOf(url).Should().Be(expected);
 
     [Fact(DisplayName = "Stage: a purpose under the wrong parent is refused before any storage call")]
     public async Task Stage_WrongParent_Refused()

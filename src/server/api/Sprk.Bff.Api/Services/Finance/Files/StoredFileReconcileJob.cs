@@ -357,6 +357,14 @@ public sealed class StoredFileReconcileJob : IScheduledJob
                 continue;
             }
 
+            // Another environment sharing the account (and tenant id) has rows this one cannot see: its blobs are never ours to
+            // judge. Only a blob staged by THIS deployment (its environment marker) may be deleted as row-less.
+            if (!_blobs.IsThisEnvironments(blob.Metadata))
+            {
+                counts.BlobsOfOtherEnvironments++;
+                continue;
+            }
+
             try
             {
                 // The row read above may be a page old: ask again, and act only on a successful not-found.
@@ -438,11 +446,11 @@ public sealed class StoredFileReconcileJob : IScheduledJob
         _logger.LogInformation(
             Heartbeat,
             "Stored file reconcile attempt {Attempt}: failed={Failed} skipped={Skipped} rows={Rows} unreadable={Unreadable} rowsDeleted={RowsDeleted} "
-            + "blobs={Blobs} blobsDeleted={BlobsDeleted} inGrace={InGrace} openSubmissions={OpenSubmissions} notServable={NotServable} "
-            + "unitFaults={UnitFaults} truncated={Truncated} correlationId={CorrelationId}",
+            + "blobs={Blobs} blobsDeleted={BlobsDeleted} inGrace={InGrace} openSubmissions={OpenSubmissions} otherEnvironments={OtherEnvironments} "
+            + "notServable={NotServable} unitFaults={UnitFaults} truncated={Truncated} correlationId={CorrelationId}",
             context.Attempt, counts.Failed, counts.SkippedReason ?? "no", counts.RowsExamined, counts.RowsUnreadable, counts.RowsDeleted,
-            counts.BlobsExamined, counts.BlobsDeleted, counts.BlobsInGrace, counts.BlobsOfOpenSubmissions, counts.NotServableDetected,
-            counts.UnitFaults, counts.RowsTruncated, context.CorrelationId);
+            counts.BlobsExamined, counts.BlobsDeleted, counts.BlobsInGrace, counts.BlobsOfOpenSubmissions, counts.BlobsOfOtherEnvironments,
+            counts.NotServableDetected, counts.UnitFaults, counts.RowsTruncated, context.CorrelationId);
 
     private static string Serialize(ReconcileCounts counts) => JsonSerializer.Serialize(counts, ResultJsonOptions);
 
@@ -460,6 +468,7 @@ public sealed class StoredFileReconcileJob : IScheduledJob
         public int BlobsDeleted { get; set; }
         public int BlobsInGrace { get; set; }
         public int BlobsOfOpenSubmissions { get; set; }
+        public int BlobsOfOtherEnvironments { get; set; }
         public int NotServableDetected { get; set; }
         public int UnitFaults { get; set; }
     }

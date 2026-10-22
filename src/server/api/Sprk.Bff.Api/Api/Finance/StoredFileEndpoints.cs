@@ -82,8 +82,9 @@ public static class StoredFileEndpoints
             // Changed since its verdict was read: the new content has none yet.
             return StoredFileAccessFilter.ScanPending(httpContext);
         }
-        catch (RequestFailedException ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
+            // Any other fault (transport, credential, I/O): nothing served, a 503 the client can retry.
             logger.LogError(ex, "Stored file {FileId}: opening the blob faulted (503)", fileId);
             return StoredFileAccessFilter.Unavailable(httpContext);
         }
@@ -101,14 +102,53 @@ public static class StoredFileEndpoints
         headers[HeaderNames.XContentTypeOptions] = "nosniff";
         headers[HeaderNames.CacheControl] = "no-store";
         headers[HeaderNames.ContentSecurityPolicy] = "sandbox; default-src 'none'";
-        return Results.Stream(stream, SafeContentType(file.ContentType));
+        var servedType = SafeContentType(file.ContentType);
+        if (servedType == OctetStream)
+        {
+            // Not a type a client may render: a download, never inline content.
+            headers[HeaderNames.ContentDisposition] = "attachment";
+        }
+
+        return Results.Stream(stream, servedType);
     }
 
-    /// <summary>The row's content type when it is a well-formed media type; otherwise <c>application/octet-stream</c>.</summary>
-    internal static string SafeContentType(string? contentType) =>
-        MediaTypeHeaderValue.TryParse(contentType, out var parsed) && parsed.MediaType.HasValue && parsed.MediaType.Value!.Contains('/')
-            ? parsed.ToString()
-            : "application/octet-stream";
+    internal const string OctetStream = "application/octet-stream";
+
+    /// <summary>
+    /// The media types served as themselves (documents, images, plain text, office and archive files). Anything else — HTML, SVG,
+    /// XML, script, a malformed value — is served as <see cref="OctetStream"/> with <c>Content-Disposition: attachment</c>, so a
+    /// client that renders the response by its type (a <c>blob:</c> URL in the client's own origin, where this route's CSP does not
+    /// apply) never renders active content a firm or user uploaded.
+    /// </summary>
+    private static readonly HashSet<string> InlineTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "application/pdf",
+        "image/png", "image/jpeg", "image/gif", "image/tiff", "image/bmp", "image/webp",
+        "text/plain", "text/csv",
+        "application/msword", "application/vnd.ms-excel", "application/vnd.ms-powerpoint", "application/vnd.ms-outlook",
+        "application/zip",
+    };
+
+    private const string OfficeOpenXmlPrefix = "application/vnd.openxmlformats-officedocument.";
+
+    /// <summary>The row's media type (without parameters other than a charset on text) when allow-listed; otherwise <see cref="OctetStream"/>.</summary>
+    internal static string SafeContentType(string? contentType)
+    {
+        if (!MediaTypeHeaderValue.TryParse(contentType, out var parsed) || !parsed.MediaType.HasValue)
+        {
+            return OctetStream;
+        }
+
+        var mediaType = parsed.MediaType.Value!.ToLowerInvariant();
+        if (!InlineTypes.Contains(mediaType) && !mediaType.StartsWith(OfficeOpenXmlPrefix, StringComparison.Ordinal))
+        {
+            return OctetStream;
+        }
+
+        return mediaType.StartsWith("text/", StringComparison.Ordinal) && parsed.Charset.HasValue
+            ? $"{mediaType}; charset={parsed.Charset.Value}"
+            : mediaType;
+    }
 }
 
 /// <summary>Adds <see cref="StoredFileAccessFilter"/> to the download route.</summary>
@@ -224,6 +264,14 @@ public sealed class StoredFileAccessFilter : IEndpointFilter
         var parentRights = await probe.GetCallerRightsForAuthorizationGateAsync(token, parent.EntitySet, parent.Id, ct);
         if (!parentRights.HasFlag(AccessRights.Read))
         {
+            return StoredFileDownloadDecision.NotFound;
+        }
+
+        // A copy whose source is a communication but no document has no source this rule can check (design v5.5 retired that
+        // shape): refused, never served on the parent's Read alone.
+        if (row.SourceCommunicationId is not null && row.SourceDocumentId is null)
+        {
+            logger?.LogWarning("Stored file {FileId}: a source communication without a source document; refusing (copy rule)", fileId);
             return StoredFileDownloadDecision.NotFound;
         }
 

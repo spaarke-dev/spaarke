@@ -533,6 +533,9 @@ internal sealed record StoredFileRow
 
     public Guid? SourceDocumentId { get; init; }
 
+    /// <summary>The <c>sprk_sourcecommunication</c> lookup (a copy of an email attachment).</summary>
+    public Guid? SourceCommunicationId { get; init; }
+
     public string? Sha256 { get; init; }
 
     public string? ContentType { get; init; }
@@ -584,6 +587,7 @@ internal sealed record StoredFileRow
             Parent = parent,
             NoParentLookups = setParents.Count == 0,
             SourceDocumentId = entity.GetAttributeValue<EntityReference>(StoredFileSchema.SourceDocument)?.Id,
+            SourceCommunicationId = entity.GetAttributeValue<EntityReference>(StoredFileSchema.SourceCommunication)?.Id,
             Sha256 = entity.GetAttributeValue<string>(StoredFileSchema.Sha256),
             ContentType = entity.GetAttributeValue<string>(StoredFileSchema.ContentType),
             BlobPath = entity.GetAttributeValue<string>(StoredFileSchema.BlobPath),
