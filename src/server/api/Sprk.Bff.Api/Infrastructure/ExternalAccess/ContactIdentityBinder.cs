@@ -229,44 +229,28 @@ public sealed class ContactIdentityBinder
     private readonly IOptionsMonitor<WorkforceIdentityOptions> _options;
     private readonly TimeProvider _time;
     private readonly ILogger<ContactIdentityBinder> _logger;
-    private readonly IOptionsMonitor<ExternalAccessOptions>? _externalAccess;
-    private readonly IConfiguration? _configuration;
+    private readonly ContactCreateOwner _createOwner;
 
-    /// <summary>
-    /// Creates the binder over <paramref name="store"/>. The last two arguments are the customer-owner inputs of ISS-005; they
-    /// are both given (the DI-registered binder) or both omitted (a binder over another environment).
-    /// </summary>
-    /// <param name="externalAccess">
-    /// ISS-005 (#1673): <c>ExternalAccess:CustomerBusinessUnitId</c>, the unit whose default owner team owns every contact this
-    /// binder creates on the Workforce plane (first sign-in and the licensed-user link). The DI-registered binder - the one
-    /// over THIS BFF's own Dataverse environment - always receives it (and an unset value refuses the create). It is null
-    /// ONLY for a binder over ANOTHER environment (<see cref="ContactIdentityBinderFactory"/>), where the setting names a
-    /// unit of a different environment and does not apply: those creates are unchanged (no owner is bound).
-    /// </param>
-    /// <param name="configuration">
-    /// Read for the Secure Record business unit's name (<c>SecureRecordOwnerTeam.BusinessUnitName</c>); null together with
-    /// <paramref name="externalAccess"/>.
+    /// <summary>Creates the binder over <paramref name="store"/>.</summary>
+    /// <param name="createOwner">
+    /// ISS-005 (#1673): who owns the contacts this binder creates on the Workforce plane (first sign-in and the licensed-user
+    /// link). REQUIRED, with no default, so a binder cannot be built without saying: the DI-registered binder - the one over
+    /// THIS BFF's own Dataverse environment - takes <see cref="ContactCreateOwner.FromCustomerBusinessUnit"/>, and an unset
+    /// setting refuses the create; only a binder over ANOTHER environment (<see cref="ContactIdentityBinderFactory"/>) takes
+    /// <see cref="ContactCreateOwner.NoneForForeignEnvironment"/>.
     /// </param>
     public ContactIdentityBinder(
         IContactIdentityStore store,
         IOptionsMonitor<WorkforceIdentityOptions> options,
         TimeProvider time,
         ILogger<ContactIdentityBinder> logger,
-        IOptionsMonitor<ExternalAccessOptions>? externalAccess = null,
-        IConfiguration? configuration = null)
+        ContactCreateOwner createOwner)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _time = time ?? throw new ArgumentNullException(nameof(time));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        if ((externalAccess is null) != (configuration is null))
-        {
-            throw new ArgumentException(
-                "The customer-owner inputs come together: pass both externalAccess and configuration, or neither.");
-        }
-
-        _externalAccess = externalAccess;
-        _configuration = configuration;
+        _createOwner = createOwner ?? throw new ArgumentNullException(nameof(createOwner));
     }
 
     /// <summary>The store this binder writes through (the job reuses it for its scans).</summary>
@@ -886,8 +870,9 @@ public sealed class ContactIdentityBinder
         LookupFailed,
 
         /// <summary>
-        /// Only from <see cref="ResolveWorkforceCreateOwnerAsync"/>: this binder is not over this BFF's own environment, so the
-        /// setting does not apply and the create binds no owner (as before ISS-005).
+        /// Only from <see cref="ResolveWorkforceCreateOwnerAsync"/>: this binder was built with
+        /// <see cref="ContactCreateOwner.NoneForForeignEnvironment"/> (it is over another environment, where the setting does
+        /// not apply), so the create binds no owner.
         /// </summary>
         NotApplicable,
     }
@@ -950,23 +935,33 @@ public sealed class ContactIdentityBinder
     }
 
     /// <summary>
-    /// ISS-005 (#1673): the owner of a Workforce-plane contact create (first sign-in, licensed-user link), from the setting and
-    /// the Secure Record unit name this binder was given. <see cref="OwnerTeamStatus.NotApplicable"/> for a binder over another
-    /// environment (see the constructor).
+    /// ISS-005 (#1673): the owner of a Workforce-plane contact create (first sign-in, licensed-user link), decided by the
+    /// <see cref="ContactCreateOwner"/> this binder was built with: the customer business unit's default owner team (or a
+    /// refusal), or, for <see cref="ContactCreateOwner.NoneForForeignEnvironment"/>,
+    /// <see cref="OwnerTeamStatus.NotApplicable"/> with the reason logged at Debug once per create.
     /// </summary>
     private Task<OwnerTeamResolution> ResolveWorkforceCreateOwnerAsync(string operation, Guid oid, CancellationToken ct)
     {
-        if (_externalAccess is null || _configuration is null)
+        var who = $"oid#{HashForLog(oid)}";
+        switch (_createOwner)
         {
-            return Task.FromResult(new OwnerTeamResolution(OwnerTeamStatus.NotApplicable));
-        }
+            case ContactCreateOwner.CustomerBusinessUnit customer:
+                return ResolveCustomerOwnerTeamAsync(
+                    customer.Options.CurrentValue.CustomerBusinessUnitId,
+                    SecureRecordOwnerTeam.BusinessUnitName(customer.Configuration),
+                    operation,
+                    who,
+                    ct);
 
-        return ResolveCustomerOwnerTeamAsync(
-            _externalAccess.CurrentValue.CustomerBusinessUnitId,
-            SecureRecordOwnerTeam.BusinessUnitName(_configuration),
-            operation,
-            $"oid#{HashForLog(oid)}",
-            ct);
+            case ContactCreateOwner.ForeignEnvironment foreign:
+                _logger.LogDebug("[ID-BIND] {Operation} for {Who} binds no owner: {Reason}", operation, who, foreign.Reason);
+                return Task.FromResult(new OwnerTeamResolution(OwnerTeamStatus.NotApplicable));
+
+            default:
+                // Unreachable: ContactCreateOwner's constructor is private, so the two variants above are the whole set.
+                throw new InvalidOperationException(
+                    $"Unknown contact create owner policy {_createOwner.GetType().Name}.");
+        }
     }
 
     /// <summary>
@@ -1945,7 +1940,21 @@ public class ContactIdentityBinderFactory
         => new DataverseContactIdentityStore(
             _httpClientFactory, getToken, dataverseBaseUrl, _loggerFactory.CreateLogger<DataverseContactIdentityStore>());
 
-    /// <summary>A binder writing to <paramref name="dataverseBaseUrl"/>.</summary>
+    /// <summary>
+    /// A binder writing to <paramref name="dataverseBaseUrl"/>, an environment other than this BFF's own: contacts it creates
+    /// carry no owner (<c>ExternalAccess:CustomerBusinessUnitId</c> names a unit of THIS environment). The owner-aware binder of
+    /// the own environment is the DI-registered one, which <c>RegistrationDataverseService.ContactBinderFor</c> returns for it.
+    /// The ownerless creates here are a known gap, tracked in #2270.
+    /// </summary>
     public ContactIdentityBinder CreateBinder(string dataverseBaseUrl, Func<CancellationToken, Task<string>> getToken)
-        => new(CreateStore(dataverseBaseUrl, getToken), _options, _time, _loggerFactory.CreateLogger<ContactIdentityBinder>());
+        => new(
+            CreateStore(dataverseBaseUrl, getToken),
+            _options,
+            _time,
+            _loggerFactory.CreateLogger<ContactIdentityBinder>(),
+            ContactCreateOwner.NoneForForeignEnvironment(
+                $"foreign Dataverse environment {HostOf(dataverseBaseUrl)}; see #2270"));
+
+    private static string HostOf(string dataverseBaseUrl)
+        => Uri.TryCreate(dataverseBaseUrl, UriKind.Absolute, out var uri) ? uri.Host : "(unparseable url)";
 }

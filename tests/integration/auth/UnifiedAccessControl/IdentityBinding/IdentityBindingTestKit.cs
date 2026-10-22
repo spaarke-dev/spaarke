@@ -24,10 +24,18 @@ public static class IdentityBindingTestKit
             CustomerTenantIds = tenants.Select(t => t.ToString("D")).ToList(),
         });
 
+    /// <summary>
+    /// The create-owner policy of a test binder whose test is not about who owns a created contact (the CIAM plane never creates;
+    /// the member-test, binding and invite tests assert the binding, not the owner). Named for what it is: a binder that binds
+    /// no owner. Tests of the owner use <see cref="OwnerAwareBinder"/> or the real DI registration.
+    /// </summary>
+    public static ContactCreateOwner NoOwnerUnderTest { get; } =
+        ContactCreateOwner.NoneForForeignEnvironment("test binder: contact ownership is not under test");
+
     public static ContactIdentityBinder Binder(
         InMemoryContactIdentityStore store, BindingLogCapture<ContactIdentityBinder>? log = null, params Guid[] tenants)
         => new(store, Tenants(tenants.Length == 0 ? new[] { CustomerTenant } : tenants), new FakeTimeProvider(Now),
-            log ?? new BindingLogCapture<ContactIdentityBinder>());
+            log ?? new BindingLogCapture<ContactIdentityBinder>(), NoOwnerUnderTest);
 
     /// <summary>
     /// The DI-registered (own-environment) binder of a <c>RegistrationDataverseService</c> whose test never links a contact
@@ -43,8 +51,9 @@ public static class IdentityBindingTestKit
     public static ContactIdentityBinder OwnerAwareBinder(
         InMemoryContactIdentityStore store, Guid? customerBusinessUnitId, IDictionary<string, string?>? configuration = null)
         => new(store, Tenants(CustomerTenant), new FakeTimeProvider(Now), new BindingLogCapture<ContactIdentityBinder>(),
-            new StaticOptionsMonitor<ExternalAccessOptions>(new ExternalAccessOptions { CustomerBusinessUnitId = customerBusinessUnitId }),
-            new ConfigurationBuilder().AddInMemoryCollection(configuration ?? new Dictionary<string, string?>()).Build());
+            ContactCreateOwner.FromCustomerBusinessUnit(
+                new StaticOptionsMonitor<ExternalAccessOptions>(new ExternalAccessOptions { CustomerBusinessUnitId = customerBusinessUnitId }),
+                new ConfigurationBuilder().AddInMemoryCollection(configuration ?? new Dictionary<string, string?>()).Build()));
 
     /// <summary>A delegated (user) workforce token. Every claim is optional so a test can drop exactly one.</summary>
     public static ClaimsPrincipal WorkforceUser(

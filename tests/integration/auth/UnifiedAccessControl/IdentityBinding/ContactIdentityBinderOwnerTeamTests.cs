@@ -1,11 +1,13 @@
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Sprk.Bff.Api.Api.ExternalAccess;
+using Sprk.Bff.Api.Infrastructure.DI;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Xunit;
 using static Sprk.Bff.Api.Tests.AccessControl.IdentityBinding.IdentityBindingTestKit;
@@ -39,7 +41,9 @@ public class ContactIdentityBinderOwnerTeamTests
         external.SetupGet(o => o.CurrentValue).Returns(new ExternalAccessOptions { CustomerBusinessUnitId = customerBusinessUnitId });
         return new ContactIdentityBinder(
             store ?? _store, Tenants(CustomerTenant), new FakeTimeProvider(Now), new BindingLogCapture<ContactIdentityBinder>(),
-            external.Object, new ConfigurationBuilder().AddInMemoryCollection(configuration ?? new Dictionary<string, string?>()).Build());
+            ContactCreateOwner.FromCustomerBusinessUnit(
+                external.Object,
+                new ConfigurationBuilder().AddInMemoryCollection(configuration ?? new Dictionary<string, string?>()).Build()));
     }
 
     private static System.Security.Claims.ClaimsPrincipal Member(Guid oid)
@@ -321,11 +325,14 @@ public class ContactIdentityBinderOwnerTeamTests
     [Fact]
     public async Task ABinderOverAnotherEnvironment_StillCreatesWithoutAnOwner_AndReadsNoOwnerTeam()
     {
+        // By design and tracked in #2270: the setting names a business unit of THIS environment, so a binder the factory
+        // builds over another one (demo / customer targets) creates ownerless contacts. Its owner policy says so, and why.
         var oid = Guid.NewGuid();
         var userId = Guid.NewGuid();
         var other = new InMemoryContactIdentityStore();
         other.AddSystemUser(userId, oid, "new.user@demo.spaarke.com");
-        var factory = new StoreBinderFactory(other);
+        var log = new BindingLogCapture<ContactIdentityBinder>();
+        var factory = new StoreBinderFactory(other, log);
 
         var binder = factory.CreateBinder("https://spaarke-demo.crm.dynamics.com", _ => Task.FromResult("token"));
         var result = await binder.EnsureSystemUserLinkAsync(userId, applyWrites: true, CancellationToken.None);
@@ -334,36 +341,82 @@ public class ContactIdentityBinderOwnerTeamTests
         var payload = other.CreatePayloads.Should().ContainSingle().Subject;
         payload.Should().NotContainKey(OwnerBind);
         other.Reads.Should().NotContain(new[] { "owner-team", "business-unit" });
+        var reason = log.Entries.Should().ContainSingle(e => e.Message.Contains("binds no owner")).Subject;
+        reason.Level.Should().Be(LogLevel.Debug, "the reason is a diagnostic, once per create");
+        reason.Message.Should().Contain("foreign Dataverse environment spaarke-demo.crm.dynamics.com; see #2270");
     }
 
-    [Fact]
-    public void TheCustomerOwnerInputs_ComeTogether()
-    {
-        var external = Mock.Of<IOptionsMonitor<ExternalAccessOptions>>();
-        var configuration = new ConfigurationBuilder().Build();
+    // ── The owner policy is required, and says why when there is none ─────────────────────────────────
 
-        FluentActions.Invoking(() => new ContactIdentityBinder(
-                _store, Tenants(CustomerTenant), new FakeTimeProvider(Now), new BindingLogCapture<ContactIdentityBinder>(), external))
-            .Should().Throw<ArgumentException>();
-        FluentActions.Invoking(() => new ContactIdentityBinder(
+    [Fact]
+    public void ABinder_CannotBeBuiltWithoutAnOwnerPolicy()
+        => FluentActions.Invoking(() => new ContactIdentityBinder(
                 _store, Tenants(CustomerTenant), new FakeTimeProvider(Now), new BindingLogCapture<ContactIdentityBinder>(),
-                externalAccess: null, configuration: configuration))
+                createOwner: null!))
+            .Should().Throw<ArgumentNullException>().WithParameterName("createOwner");
+
+    [Fact]
+    public void TheCustomerBusinessUnitPolicy_NeedsItsInputs()
+    {
+        FluentActions.Invoking(() => ContactCreateOwner.FromCustomerBusinessUnit(null!, new ConfigurationBuilder().Build()))
+            .Should().Throw<ArgumentNullException>().WithParameterName("options");
+        FluentActions.Invoking(() => ContactCreateOwner.FromCustomerBusinessUnit(Mock.Of<IOptionsMonitor<ExternalAccessOptions>>(), null!))
+            .Should().Throw<ArgumentNullException>().WithParameterName("configuration");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void TheNoOwnerPolicy_NeedsAReason(string? reason)
+        => FluentActions.Invoking(() => ContactCreateOwner.NoneForForeignEnvironment(reason!))
             .Should().Throw<ArgumentException>();
+
+    [Fact]
+    public async Task TheNoOwnerPolicy_LogsItsReasonOncePerCreate_AtDebug()
+    {
+        var log = new BindingLogCapture<ContactIdentityBinder>();
+        var store = new InMemoryContactIdentityStore();
+        var binder = new ContactIdentityBinder(
+            store, Tenants(CustomerTenant), new FakeTimeProvider(Now), log,
+            ContactCreateOwner.NoneForForeignEnvironment("test reason"));
+        var first = Guid.NewGuid();
+        var second = Guid.NewGuid();
+
+        await binder.ResolveWorkforceCallerAsync(
+            WorkforceUser(first, CustomerTenant, acct: "0", email: "first@customer.example"), first, Stamp, CancellationToken.None);
+        await binder.ResolveWorkforceCallerAsync(
+            WorkforceUser(second, CustomerTenant, acct: "0", email: "second@customer.example"), second, Stamp, CancellationToken.None);
+
+        log.Entries.Where(e => e.Message.Contains("binds no owner: test reason")).Should().HaveCount(2)
+            .And.OnlyContain(e => e.Level == LogLevel.Debug);
     }
 
     // ── The DI-registered binder is the one over this BFF's own environment: it carries the setting ────────
 
+    /// <summary>
+    /// The binder as the container builds it: the REAL <c>ExternalAccessModule</c> registration (<c>AddExternalAccess</c>), over
+    /// configuration keys the app reads (<c>ExternalAccess:CustomerBusinessUnitId</c>, <c>WorkforceIdentity:CustomerTenantIds</c>).
+    /// Only the Dataverse-backed store is replaced, by the in-memory one: the registration under test is not copied here, so a
+    /// registration that passed the wrong owner policy would fail these tests.
+    /// </summary>
     private ContactIdentityBinder ResolveFromDi(Guid? customerBusinessUnitId)
     {
+        var settings = new Dictionary<string, string?>
+        {
+            ["WorkforceIdentity:CustomerTenantIds:0"] = CustomerTenant.ToString("D"),
+        };
+        if (customerBusinessUnitId is { } unit)
+        {
+            settings["ExternalAccess:CustomerBusinessUnitId"] = unit.ToString("D");
+        }
+
         var services = new ServiceCollection();
-        services.AddOptions();
         services.AddLogging();
-        services.AddSingleton<IContactIdentityStore>(_store);
-        services.AddSingleton(Tenants(CustomerTenant));
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().AddInMemoryCollection(settings).Build());
         services.AddSingleton<TimeProvider>(new FakeTimeProvider(Now));
-        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
-        services.Configure<ExternalAccessOptions>(o => o.CustomerBusinessUnitId = customerBusinessUnitId);
-        services.AddSingleton<ContactIdentityBinder>();
+        services.AddExternalAccess();
+        services.AddSingleton<IContactIdentityStore>(_store);
         return services.BuildServiceProvider().GetRequiredService<ContactIdentityBinder>();
     }
 
@@ -393,10 +446,24 @@ public class ContactIdentityBinderOwnerTeamTests
         _store.CreatePayloads.Should().ContainSingle().Which[OwnerBind].Should().Be($"/teams({CustomerTeam:D})");
     }
 
-    private sealed class StoreBinderFactory(IContactIdentityStore store) : ContactIdentityBinderFactory(
-        Mock.Of<IHttpClientFactory>(), NullLoggerFactory.Instance, Tenants(CustomerTenant), new FakeTimeProvider(Now))
+    private sealed class StoreBinderFactory(IContactIdentityStore store, ILogger? binderLog = null) : ContactIdentityBinderFactory(
+        Mock.Of<IHttpClientFactory>(), new CaptureLoggerFactory(binderLog), Tenants(CustomerTenant), new FakeTimeProvider(Now))
     {
         public override IContactIdentityStore CreateStore(string dataverseBaseUrl, Func<CancellationToken, Task<string>> getToken)
             => store;
+    }
+
+    /// <summary>A logger factory that hands every category the one capture (or discards, when none is given).</summary>
+    private sealed class CaptureLoggerFactory(ILogger? capture) : ILoggerFactory
+    {
+        public ILogger CreateLogger(string categoryName) => capture ?? NullLogger.Instance;
+
+        public void AddProvider(ILoggerProvider provider)
+        {
+        }
+
+        public void Dispose()
+        {
+        }
     }
 }

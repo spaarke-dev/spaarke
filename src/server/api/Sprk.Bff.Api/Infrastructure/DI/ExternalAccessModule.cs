@@ -202,7 +202,18 @@ public static class ExternalAccessModule
         // The one binding writer, shared by the workforce resolver, the CIAM strategy, the invite endpoints and
         // the reconciliation job. Concrete (ADR-010). Its factory builds a binder over ANOTHER environment for
         // RegistrationDataverseService (a new systemuser's link goes to the environment it was created in).
-        services.AddSingleton<ContactIdentityBinder>();
+        // ISS-005 (#1673): this is the binder over THIS BFF's own environment, so its contacts are owned by the default
+        // owner team of ExternalAccess:CustomerBusinessUnitId (or not created). The owner policy is a required constructor
+        // argument, hence the explicit factory: the container cannot build a ContactCreateOwner on its own, and nothing but
+        // ContactIdentityBinderFactory may choose "no owner" (ContactCreateOwnerPolicyGuardTests).
+        services.AddSingleton(sp => new ContactIdentityBinder(
+            sp.GetRequiredService<IContactIdentityStore>(),
+            sp.GetRequiredService<IOptionsMonitor<WorkforceIdentityOptions>>(),
+            sp.GetRequiredService<TimeProvider>(),
+            sp.GetRequiredService<ILogger<ContactIdentityBinder>>(),
+            ContactCreateOwner.FromCustomerBusinessUnit(
+                sp.GetRequiredService<IOptionsMonitor<ExternalAccessOptions>>(),
+                sp.GetRequiredService<IConfiguration>())));
         services.AddSingleton<ContactIdentityBinderFactory>();
 
         // Workforce-token → principal resolver (ADR-028 Amendment A2 · teams-app-r1 FR-04, task 020).
