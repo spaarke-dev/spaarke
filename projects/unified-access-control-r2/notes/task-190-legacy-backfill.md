@@ -105,3 +105,24 @@ The census was run with the operator's own token and printed counts only. The sc
   - `Spe.Integration.Tests`: 9 failed (the same 9 fail on master, #2229), 344 passed, 23 skipped.
 - **CI:** Tier 1 `Arch Tests (full suite, blocking)` was cancelled by its 5-minute job timeout, not by a test failure. The same timeout cancelled master's runs at 18:59Z and 00:07Z. Evidence is on #2224; the job is re-run.
 - **Apply run (owner go):** follow the §4 gate procedure. Save the run's `ResultJson` to this note straight after Apply, because the in-memory store loses it on the next restart.
+
+## 6. Deploy and server gate (2026-10-22): PASS
+
+- **Deploy:** batched with #2223 and fm-016, as master `a7b956fb55` (owner go in R3's session). Live `1.0.0+a7b956fb55` from 02:18:52Z; the previous live build f1b3dadcf5 is its ancestor. No app setting changed. Rollback snapshot: R3 `deploy/rollback/wwwroot-20261022T021635Z`.
+- **Registration:** `email-archive-communication-link-sweep` is enabled=false, cron `45 3 * * *`, 0 runs (status before the trigger).
+- **Step 1, `document-container-migration` report-only** (`DocumentContainerMigration:WritesEnabled` not set): triggered 02:20:52Z, Succeeded 02:23:56Z.
+  - examined 100, all `InPlace`; `wouldNewlyRefuse` 0, `servedOnlyAfterFlip` 5, `relocatedButRefused` 0.
+  - `passComplete: false` (one batch). The full pass is still owed before Apply.
+- **Sweep dry run:** triggered 02:21:03Z, Succeeded 02:21:07Z. `mode: dry-run`, `apply: false`.
+  - examined 120: `wouldLink` 29, `linked` **0** (no write), `noKey` 68, `exchangeItemId` 23, `hasParent` 0, `noCommunication` 0, `ambiguous` 0, `changedSinceRead` 0, `failed` 0;
+  - `childrenCovered` 39, `childrenOfUnmatched` 20;
+  - `communicationAlreadyArchived` total 0, `alreadyArchivedCheckFailed` false; `passComplete` true; batch 200/200, not clamped.
+  - **This equals the §1 census exactly.**
+- **Saved ResultJson** (contains document ids, so it is not in the repo): `C:/Users/RALPHS~1/AppData/Local/Temp/uac190gate/*.status.json`.
+- **Exception reading:** R3's 30-minute exception and reconciliation reading of the deploy window.
+- **Closed on merge + deploy + server gate (round 90).**
+- **Apply stays an owner item:** setting `EmailArchiveLinkSweep:Apply=true` restarts the BFF.
+  - Before it: the migration report-only to `passComplete`, with its lists saved.
+  - After Apply: migration report-only again (§4 steps 3–4), and save the run's ResultJson here.
+- **Unmatched for the owner's Restricted call:** 68 with no key + 23 with an Exchange id (+20 children under them). Their ids are in the saved ResultJson.
+- **Follow-up from round 122:** a linked `.eml` whose own Restricted was set because the email could not be identified at save follows its communication. Design: `notes/task-190-round122-linked-eml-access.md`.

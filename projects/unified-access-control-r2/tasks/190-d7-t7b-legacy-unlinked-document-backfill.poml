@@ -3,7 +3,7 @@
   <metadata>
     <title>D7 T7b: link legacy email documents to their communication by recorded keys only; list the rest for the owner (#2126)</title>
     <phase>Session 28: UAC (owner round 110, 2026-10-20)</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>A data backfill whose writes change partner visibility; a wrong match would expose.</rigor-reason>
     <model-tier>opus</model-tier>
