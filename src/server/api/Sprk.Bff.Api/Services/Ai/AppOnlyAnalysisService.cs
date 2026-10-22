@@ -889,6 +889,9 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         var runRequest = new PlaybookRunRequest
         {
             PlaybookId = playbookId,
+            // #2257 (owner round 123): a Service Bus job (profile on upload, email analysis) runs a playbook the routing
+            // table chose, with no person in the run; it writes app-only, behind the deny-lists.
+            StartedBy = PlaybookRunStartedBy.System,
             DocumentIds = [documentId],
             UserContext = null,
             Document = documentContext

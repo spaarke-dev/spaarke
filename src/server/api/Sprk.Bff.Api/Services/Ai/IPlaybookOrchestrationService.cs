@@ -144,10 +144,75 @@ public record PlaybookRunRequest
     /// and the default notification recipient (<see cref="PlaybookRunContext.UserId"/>). Set ONLY by an HTTP entry route,
     /// from the AUTHENTICATED caller (WhoAmI over the caller's OBO token, resolved by <c>PlaybookAuthorizationFilter</c>),
     /// never from caller input: a caller-supplied <c>userId</c> parameter is refused by
-    /// <see cref="PlaybookParameterPolicy"/> (unified-access-control-r2 task 164, owner round 16 item 3). <c>null</c> on
-    /// every other path, which then behaves as before.
+    /// <see cref="PlaybookParameterPolicy"/> (unified-access-control-r2 task 164, owner round 16 item 3). An HTTP run
+    /// (<see cref="IPlaybookOrchestrationService.ExecuteAsync"/>) that arrives without it resolves it the same way, from
+    /// the request's own OBO token (#2257). On a <see cref="PlaybookRunStartedBy.Person"/> run it is the identity the
+    /// playbook's record writes run AS (<see cref="PlaybookRunWriteIdentity"/>).
     /// </summary>
     public Guid? RunUserId { get; init; }
+
+    /// <summary>
+    /// Who started this run (#2257, owner round 123). <see cref="PlaybookRunStartedBy.Person"/> — the default — writes AS
+    /// <see cref="RunUserId"/>, and refuses to write when it is unknown. Only a background entry with no person in the run
+    /// (a scheduler, a Service Bus job running an operator-routed playbook) sets <see cref="PlaybookRunStartedBy.System"/>,
+    /// and only <see cref="IPlaybookOrchestrationService.ExecuteAppOnlyAsync"/> honours it: an HTTP run is always a person's.
+    /// </summary>
+    public PlaybookRunStartedBy StartedBy { get; init; } = PlaybookRunStartedBy.Person;
+}
+
+/// <summary>
+/// Who started a playbook run, so a run with no user is never an accident (#2257, owner round 123: "run as the user").
+/// </summary>
+public enum PlaybookRunStartedBy
+{
+    /// <summary>A person started the run. Record writes run AS the run's user, or are refused when it is unknown.</summary>
+    Person = 0,
+
+    /// <summary>
+    /// No person is in the run (scheduled or system). Record writes run app-only, behind
+    /// <c>InheritedAccessPermission.RefuseAppOnlyWrite</c>'s deny-lists.
+    /// </summary>
+    System = 1,
+}
+
+/// <summary>
+/// THE rule for the identity a playbook's record write runs as (#2257, owner round 123): a person's run writes AS that
+/// person (<c>MSCRMCallerID</c>); a system run writes app-only; a person's run whose user is unknown writes nothing — it
+/// never falls back to app-only. Shared by the Update Record node and the output mapping.
+/// </summary>
+public static class PlaybookRunWriteIdentity
+{
+    /// <summary>Stable reason code: a person's run whose user could not be resolved; nothing was written.</summary>
+    public const string RunUserUnresolvedCode = "playbook.run_user_unresolved";
+
+    /// <summary>Stable reason code: Dataverse refused the write made AS the run's user (no Write, or no AppendTo on a bind).</summary>
+    public const string WriteAccessDeniedCode = "playbook.write_access_denied";
+
+    /// <summary>
+    /// Resolves the identity a write runs as. <c>true</c> with <paramref name="impersonateSystemUserId"/> set for a person's
+    /// run, or <c>null</c> (app-only) for a system run; <c>false</c> when a person's run has no usable user.
+    /// </summary>
+    public static bool TryResolve(PlaybookRunStartedBy startedBy, Guid? runUserId, out Guid? impersonateSystemUserId)
+    {
+        impersonateSystemUserId = null;
+        if (startedBy == PlaybookRunStartedBy.System)
+        {
+            return true;
+        }
+
+        if (runUserId is { } person && person != Guid.Empty)
+        {
+            impersonateSystemUserId = person;
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>Whether a write made AS the run's user was refused by Dataverse for lack of rights (HTTP 403).</summary>
+    public static bool IsAccessDenied(Exception exception, Guid? impersonateSystemUserId) =>
+        impersonateSystemUserId is not null
+        && exception is HttpRequestException { StatusCode: System.Net.HttpStatusCode.Forbidden };
 }
 
 /// <summary>

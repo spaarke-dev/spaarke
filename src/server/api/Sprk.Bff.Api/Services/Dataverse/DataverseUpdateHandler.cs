@@ -15,11 +15,15 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
     private readonly Sprk.Bff.Api.Services.Access.SecureRootFilingGate _rootFiling;
     private readonly ILogger<DataverseUpdateHandler> _logger;
     private readonly Sprk.Bff.Api.Services.Access.SecureChildReconciler _children;
+    private readonly Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? _shares;
 
     /// <param name="children">#2091: the ONE step after a re-file (<see cref="Sprk.Bff.Api.Services.Access.SecureChildReconciler.AfterRefileAsync"/>).
     /// REQUIRED: without it a re-file into a Secure record would silently leave the row business-unit readable. Scoped, like
     /// this handler (ExternalAccessModule registers it unconditionally). It also lets a re-filed communication's thread follow
     /// the filing (spaarkeai-word-add-in-r1 task 129), which this handler used to ask the thread resolver for itself.</param>
+    /// <param name="shares">#2257: the record-access seam a write made AS a person asks for that person's rights when it moves a
+    /// row out of a secure root (<see cref="Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForImpersonatedUser"/>), as the
+    /// Update Record core does. Optional: without it that question faults, and such a move is refused (fail closed).</param>
     public DataverseUpdateHandler(
         IFieldMappingDataverseService fieldMappingService,
         IGenericEntityService genericEntityService,
@@ -27,9 +31,11 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         IRecordOwnershipResolver ownership,
         Sprk.Bff.Api.Services.Access.SecureRootFilingGate rootFiling,
         ILogger<DataverseUpdateHandler> logger,
-        Sprk.Bff.Api.Services.Access.SecureChildReconciler children)
+        Sprk.Bff.Api.Services.Access.SecureChildReconciler children,
+        Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? shares = null)
     {
         _children = children ?? throw new ArgumentNullException(nameof(children));
+        _shares = shares;
         _fieldMappingService = fieldMappingService ?? throw new ArgumentNullException(nameof(fieldMappingService));
         _genericEntityService = genericEntityService ?? throw new ArgumentNullException(nameof(genericEntityService));
         _restamper = restamper ?? throw new ArgumentNullException(nameof(restamper));
@@ -50,13 +56,17 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         Dictionary<string, object?> fields,
         ConcurrencyMode concurrencyMode,
         int maxRetries,
-        CancellationToken ct)
+        CancellationToken ct,
+        Guid? impersonateSystemUserId = null)
     {
+        // #2257 (owner round 123): a write made AS the person whose run this is runs under that person's own Dataverse
+        // privileges, which decide it — as the Update Record core treats its impersonated caller. Only an app-only write (a
+        // run with no person in it) is asked the deny-lists below.
         // unified-access-control-r2 task 189 fix round C (K5): this handler writes a playbook's output mapping app-only (the
         // output orchestrator), so it never writes a document's Access Permission or its own-narrowing record; only the
         // document rule's writers do. Refused before anything is read or written. Task 188 round 4e: nor its D7 link columns
         // (sprk_parentdocument, sprk_relatedcommunication), set, cleared or bound (InheritedAccessPermission.DocumentLinkColumns).
-        if (InheritedAccessPermission.RefuseAppOnlyWrite(entityLogicalName, fields.Keys) is { } documentRefusal)
+        if (impersonateSystemUserId is null && InheritedAccessPermission.RefuseAppOnlyWrite(entityLogicalName, fields.Keys) is { } documentRefusal)
         {
             throw new RecordOwnerUnresolvedException(entityLogicalName, documentRefusal);
         }
@@ -99,9 +109,10 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         // holds) is written and is no re-file, so the step does not run.
         var refiled = false;
         RecordOwnerResolution? refiledBy = null;
+        Sprk.Bff.Api.Services.Access.SecureRemovalCaller? secureExitCaller = null;
         if (parentChanges.Count == 0)
         {
-            await WriteAsync(entityLogicalName, recordId, fields, concurrencyMode, maxRetries, ct);
+            await WriteAsync(entityLogicalName, recordId, fields, concurrencyMode, maxRetries, ct, impersonateSystemUserId);
         }
         else
         {
@@ -111,8 +122,14 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
                     EntityLogicalName = entityLogicalName,
                     RecordId = recordId,
                     ParentChanges = parentChanges,
+                    // #2257: as the Update Record core — a move out of a secure root (F3) is asked of the person this write
+                    // runs AS; an app-only write passes no caller and is refused such a move.
+                    CallerSystemUserId = impersonateSystemUserId,
+                    SecureExitCaller = secureExitCaller = impersonateSystemUserId is { } person
+                        ? Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForImpersonatedUser(person, _shares)
+                        : null,
                 },
-                token => WriteAsync(entityLogicalName, recordId, fields, concurrencyMode, maxRetries, token),
+                token => WriteAsync(entityLogicalName, recordId, fields, concurrencyMode, maxRetries, token, impersonateSystemUserId),
                 ct);
             if (reparent.IsRefused)
             {
@@ -139,7 +156,9 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         // 129). Never throws; the write stands.
         if (refiled && wasIsolated is not null)
         {
-            await _children.AfterRefileAsync(refiledTable, recordId, wasIsolated, refiledBy, CancellationToken.None).ConfigureAwait(false);
+            await _children.AfterRefileAsync(
+                refiledTable, recordId, wasIsolated, Sprk.Bff.Api.Services.Access.RefileThreadStep.Reconcile,
+                secureExitCaller, refiledBy, CancellationToken.None).ConfigureAwait(false);
         }
     }
 
@@ -149,18 +168,19 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         Dictionary<string, object?> fields,
         ConcurrencyMode concurrencyMode,
         int maxRetries,
-        CancellationToken ct)
+        CancellationToken ct,
+        Guid? impersonateSystemUserId)
     {
         if (concurrencyMode == ConcurrencyMode.Optimistic)
         {
             await UpdateWithOptimisticConcurrencyAsync(
-                entityLogicalName, recordId, fields, maxRetries, ct);
+                entityLogicalName, recordId, fields, maxRetries, ct, impersonateSystemUserId);
         }
         else
         {
             // Simple update - last write wins
             await _fieldMappingService.UpdateRecordFieldsAsync(
-                entityLogicalName, recordId, fields, ct);
+                entityLogicalName, recordId, fields, ct, impersonateSystemUserId);
 
             _logger.LogInformation(
                 "Updated {EntityType} {RecordId} with {FieldCount} fields (no concurrency control)",
@@ -177,7 +197,8 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         Guid recordId,
         Dictionary<string, object?> fields,
         int maxRetries,
-        CancellationToken ct)
+        CancellationToken ct,
+        Guid? impersonateSystemUserId)
     {
         var attempt = 0;
         Exception? lastException = null;
@@ -216,7 +237,7 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
 
                 // 3. Update with version check
                 await _fieldMappingService.UpdateRecordFieldsAsync(
-                    entityLogicalName, recordId, fieldsWithVersion, ct);
+                    entityLogicalName, recordId, fieldsWithVersion, ct, impersonateSystemUserId);
 
                 _logger.LogInformation(
                     "Updated {EntityType} {RecordId} with optimistic concurrency (version {Version}, {FieldCount} fields)",
