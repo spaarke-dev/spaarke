@@ -801,7 +801,7 @@ public class ExternalDataService
     internal const string CreatedByContactBindKey = "sprk_CreatedByContact@odata.bind";
 
     /// <summary>Columns that name who created or requested a row. The server alone writes them (FR-11, FR-25).</summary>
-    private static readonly string[] CreatorColumns =
+    internal static readonly string[] CreatorColumns =
     {
         RecordCreatorPersonColumn.LogicalName, "sprk_createdbycontact", "sprk_requestedby", "createdby", "createdonbehalfby",
     };
