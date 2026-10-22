@@ -125,6 +125,26 @@ Known limits (K), reported rather than fixed:
 
 Optimistic concurrency was read on dev (2026-10-22, read-only metadata GET) and is enabled on `sprk_procedure`, `sprk_procedureversion` and `sprk_procedureassignment`. Whether a same-value touch moves the row version is confirmed at the first live write.
 
+## Ontology review (2026-10-22)
+
+**F1 (fixed).** `SignalClosureService.SelectOpenSignalsOfPolicyAsync` had put `sprk_regardinginvoice` and `sprk_regardinginvoiceline` into the one shared ColumnSet. That selection also serves the nightly sweep (`ClosePoliciesNotInForceAsync`, every policy, Ontology included) and the admin retire close (`ClosePolicyRetiredNowAsync`). The two columns exist only where ebilling's Signal schema is deployed, so elsewhere every per-policy select would return 400: the sweep swallows it (no Off/Retired policy ever closes its Signals) and the admin retire close throws.
+
+- Fix: the criteria live in one builder, `SignalClosureService.OpenSignalsOfPolicyQuery(policyId, withBillingSubject)`. The flag changes only the ColumnSet (adds `BillingSubjectColumns`), so "preview = sweep" still holds for which rows are selected.
+- `SelectOpenSignalsOfPolicyAsync` and `ClosePolicySignalsRetiredAsync` take `withBillingSubject` (no default). Only the Procedure retire preview and the Procedure retire close pass `true`; the sweep and `ClosePolicyRetiredNowAsync` pass `false`.
+- Tests (`SignalReevaluationJobTests.ProcedureRetire`): must-fire, the sweep and the admin retire close select neither invoice column and close their Signals against a store that answers 400 to either column; and every PolicyRetired caller (Procedure preview, Procedure close, admin close, sweep) sends the builder's criteria, with columns differing only by the opt-in. `ProcedureServiceTests` asserts the preview and the close pass `true`.
+- Seed: with the builder temporarily always adding the two columns, both new tests failed (the sweep reported a policy failure instead of `(1, 0, 0)`; the admin close's ColumnSet held 6 columns, not 4). Restored; they pass.
+
+**ArchTest.** `tests/Spaarke.ArchTests/SignalClosureServiceDerivationGuardTests.cs`: no type in the `Sprk.Bff.Api` assembly derives from `SignalClosureService` (reflection over that assembly only, so test subclasses and mocks do not count). Must-fire: a direct and an indirect subclass fixture in the test assembly are reported. Must-not-fire: the base type and unrelated types are not.
+
+**Ordering rule.** Until 082 is live in an environment, nothing there may set `sprk_ruleset.sprk_procedure` on a rule set whose rules are in force today, otherwise those rules silently stop being evaluated (`BillingFactLoader` skips Procedure rule sets until 082). On dev today 0 rule sets have it set and 081 writes none. Recorded as a constraint in the 082 POML, with the removal of the skip as MUST-DO acceptance criteria.
+
+**Ontology's answers to the open questions.**
+
+- **075's legacy-set rules** attach to a Procedure only by copy-forward into a Draft Procedure Version. Never PATCH `sprk_procedureversion` onto an existing policy version (D-14). The legacy rule is turned off in the same transaction as the publish that puts its copy in force, and none of this happens before 082.
+- **Corrections** are a new Draft version (copy-forward), then publish; never an edit of a published version.
+- **A re-added rule** gets a new policy version under the current Draft (highest + 1); the old chain is untouched. Earlier PolicyRetired Signals stay closed, and the D-11 30-day per (policy, matter) suppression still counts.
+- **The unsealed `SignalClosureService`** is accepted with the ArchTest above.
+
 ## Live steps left for the main session (none run here)
 
 1. **Run `scripts/Set-ChildRecordCreatorPersonSchema.ps1` on dev: dry run, then `-Apply`, then `-Verify`, BEFORE the BFF carrying 081 is deployed.**
