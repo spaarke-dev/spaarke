@@ -281,13 +281,15 @@ public class OfficeQuickCreateRefusalMapTests
     [InlineData(RecordOwnerRefusal.SecureParentNotIsolated, "the parent matter is marked secure but is not isolated")]
     [InlineData(RecordOwnerRefusal.SecureBusinessUnitAmbiguous, "more than one business unit carries the Secure Record name")]
     [InlineData(RecordCreationRefusal.OwnershipExceptionCode, "a project filed under nothing keeps its creator")]
+    [InlineData(RecordOwnerRefusal.ParentUnresolved, "a read failed")]
     public void OwnerUnresolved_WhereTheCallersOwnUnitIsNotTheCause_PassesTheServicesDetailThrough(string code, string detail)
     {
         var mapped = OfficeService.MapQuickCreateRefusal(
             new RecordCreationRefusal(RecordCreationRefusalKind.OwnerUnresolved, code, detail), "project", AssignedTo, filedUnderParent: false);
 
         (mapped.Code, mapped.Status).Should().Be((OfficeErrorCodes.RecordOwnerUnresolved, Forbidden));
-        mapped.Detail.Should().Be(detail);
+        mapped.Detail.Should().Be($"The project was not created: {detail.TrimEnd('.')}.",
+            "a service owner detail may be a fragment, so it is wrapped, never shown bare (UAC-r2 018b re-check F4)");
         mapped.Detail.Should().NotContainEquivalentOf("your business unit");
     }
 

@@ -2489,8 +2489,11 @@ internal class OfficeService : IOfficeService
                 => new(OfficeErrorCodes.RecordOwnerUnresolved, Forbidden,
                     $"The new {noun} could not be assigned to your business unit's team, so it was not created. Ask an "
                     + "administrator to check that your user has a business unit and that the unit has its default team."),
+            // UAC-r2 018b re-check F4: the service's owner details are often fragments written to be embedded ("a read
+            // failed"), so they are wrapped the way the ParentUndetermined row and RecordCreationProblemMap wrap them.
             (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.OwnerUnresolved, _)
-                => new(OfficeErrorCodes.RecordOwnerUnresolved, Forbidden, refusal.Detail),
+                => new(OfficeErrorCodes.RecordOwnerUnresolved, Forbidden,
+                    $"The {noun} was not created: {refusal.Detail.TrimEnd().TrimEnd('.')}."),
 
             // ── Conflict ──
             (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Conflict,
