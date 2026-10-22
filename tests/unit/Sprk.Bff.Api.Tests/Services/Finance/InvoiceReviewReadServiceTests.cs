@@ -208,7 +208,8 @@ public sealed class InvoiceReviewReadServiceTests
         }
     }
 
-    private static Guid LineId(int sequence) => Guid.Parse($"10000000-0000-4000-8000-{sequence:D12}");
+    /// <summary>The id of the line with 1-based <paramref name="sequence"/>: the persister's rule, which the plan subjects of the stored findings follow too (D-176 K4).</summary>
+    private static Guid LineId(int sequence) => InvoiceSubmissionPersister.LineIdFor(SubmissionId, sequence - 1);
 
     private const string Extraction =
         "{\"fields\":{\"Hours\":{\"confidence\":0.95,\"combined\":0.70,\"page\":3,\"repair\":\"None\",\"box\":{\"page\":3,\"x\":0.1,\"y\":0.2,\"w\":0.3,\"h\":0.05}},"
@@ -788,6 +789,36 @@ public sealed class InvoiceReviewReadServiceTests
         JsonSerializer.Serialize(review).Should().Contain(EarlierNumber, "the readable group is returned whole");
         ShouldNotLeak(review, otherNumber, OtherEarlierInvoice);
         w.CallerReads("sprk_invoices").Should().Be(1, "one check for both groups");
+    }
+
+    [Fact(DisplayName = "119 r3 (K4): a line whose sequence was edited never takes another index's plan sentence: plan and findings are keyed on the same line index")]
+    public async Task EditedLineSequence_CannotPairOneIndexsFindingsWithAnotherIndexsSentence()
+    {
+        const string readableNumber = "F-080.1";
+        const string readableSentence = "Invoice F-100, the line dated 2026-09-01 for J. Smith, duplicates F-080.1.";
+        var w = new World();
+        var indexZero = w.AddLine(1, InvoiceLineStatus.Flagged);
+        var indexOne = w.AddLine(2, InvoiceLineStatus.Flagged);
+        indexZero["sprk_linesequence"] = 2;
+        indexOne["sprk_linesequence"] = 1;
+        w.Submission = SubmissionRow(Stored(
+            [
+                Finding(0, "BILL-DUP", "DuplicateOfPriorSubmissionLine", 0, EarlierNumber, EarlierInvoice),
+                Finding(1, "BILL-DUP", "DuplicateOfPriorSubmissionLine", 1, readableNumber, OtherEarlierInvoice),
+            ],
+            [
+                Plan("BILL-DUP", InvoiceSubmissionPersister.LineIdFor(SubmissionId, 0), DuplicateSentence, "DuplicateOfPriorSubmissionLine"),
+                Plan("BILL-DUP", InvoiceSubmissionPersister.LineIdFor(SubmissionId, 1), readableSentence, "DuplicateOfPriorSubmissionLine"),
+            ]));
+        w.ReadableInvoices.Add(OtherEarlierInvoice);
+
+        var review = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!;
+
+        ShouldBeWithheld(review.Lines.Single(l => l.Sequence == 1).Findings.Single());
+        review.Lines.Single(l => l.Sequence == 1).Findings.Single().Message.Should().Be(EarlierInvoiceReadability.WithheldSentence);
+        review.Lines.Single(l => l.Sequence == 2).Findings.Single().Message.Should().Be(readableSentence);
+        ShouldNotLeak(review, EarlierNumber, EarlierInvoice);
+        JsonSerializer.Serialize(review).Should().NotContain(DuplicateSentence);
     }
 
     [Fact(DisplayName = "119: one check per response: one caller invoice read and one submission read whatever the number of Duplicates")]

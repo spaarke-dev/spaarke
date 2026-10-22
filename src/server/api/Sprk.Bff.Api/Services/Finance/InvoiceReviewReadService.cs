@@ -430,7 +430,9 @@ public sealed class InvoiceReviewReadService
         foreach (var row in lineRows.OrderBy(l => bySequence[l.Id]).ThenBy(l => l.Id))
         {
             var sequence = bySequence[row.Id];
-            var findings = FindingsFor(parsed, "Line", sequence - 1, row.Id, overridden, withheld);
+            // The plan and the findings are both keyed on the line INDEX (D-176 K4): a row whose sequence was edited cannot pair one index's findings with another's plan sentence.
+            var planSubject = submission is null ? row.Id : InvoiceSubmissionPersister.LineIdFor(submission.Dto.SubmissionId, sequence - 1);
+            var findings = FindingsFor(parsed, "Line", sequence - 1, planSubject, overridden, withheld);
             lines.Add(ToLine(row, sequence, findings, roster: rosterTask.Result, threshold));
         }
 
