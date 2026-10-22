@@ -5,6 +5,7 @@ using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.FieldMappings;
 using Sprk.Bff.Api.Api.FieldMappings.Dtos;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Models.FieldMapping;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Nodes;
@@ -24,9 +25,11 @@ namespace Sprk.Bff.Api.Tests.DataMutation.ChildAccessPermission;
 /// acting for no person (<see cref="UpdateRecordActionCore"/>), a playbook's output mapping
 /// (<see cref="DataverseUpdateHandler"/>), and the field-mapping push (a rule targeting one is skipped). The BFF app user is a
 /// System Administrator, so before this an <c>ownerid@odata.bind</c> re-owned any row and a <c>sprk_CreatedByPerson@odata.bind</c>
-/// forged the creator the move-out-of-secure check reads. Must fire: each column, in its plain, case-variant,
-/// <c>@odata.bind</c> and <c>_{column}_value</c> forms, on a document, a matter, an event and a work assignment. Must not
-/// fire: neighbouring names.
+/// forged the creator the move-out-of-secure check reads, and a <c>sprk_RequestedBy@odata.bind</c> handed a service request
+/// to another contact (its requester scope, message and document access and hard delete). Must fire: each column, in its
+/// plain, case-variant, <c>@odata.bind</c> and <c>_{column}_value</c> forms, on a document, a matter, an event, a work
+/// assignment and a service request. Must not fire: neighbouring names. Drift: every column the external plane's creator
+/// list names (<c>ExternalDataService.CreatorColumns</c>) is refused here too.
 /// </summary>
 public class OwnerCreatorColumnAppOnlyWriterTests
 {
@@ -35,8 +38,15 @@ public class OwnerCreatorColumnAppOnlyWriterTests
     private static readonly Guid Forged = Guid.Parse("22470000-0000-0000-0000-00000000e4ff");
 
     private static readonly string[] Owner = ["ownerid", "owninguser", "owningteam", "owningbusinessunit"];
-    private static readonly string[] Creator = ["sprk_createdbyperson", "sprk_createdbycontact"];
-    private static readonly string[] Tables = ["sprk_document", "sprk_matter", "sprk_event", "sprk_workassignment"];
+    private static readonly string[] Creator = ["sprk_createdbyperson", "sprk_createdbycontact", "sprk_requestedby"];
+    private static readonly string[] Tables = ["sprk_document", "sprk_matter", "sprk_event", "sprk_workassignment", "sprk_servicerequest"];
+
+    /// <summary>
+    /// Platform audit columns Dataverse itself refuses to take from a create or update payload (they are read-only; the
+    /// platform sets them from the calling identity), so <see cref="InheritedAccessPermission.RefuseAppOnlyWrite"/> need not
+    /// list them. The external plane's creator list strips them from client input all the same.
+    /// </summary>
+    private static readonly string[] PlatformAuditColumns = ["createdby", "modifiedby", "createdonbehalfby"];
 
     private readonly Mock<IFieldMappingDataverseService> _writes = new();
 
@@ -68,6 +78,7 @@ public class OwnerCreatorColumnAppOnlyWriterTests
             data.Add(table, "OwnerId@odata.bind", "ownerid", InheritedAccessPermission.AppOnlyOwnerWriteReasonCode);
             data.Add(table, "sprk_CreatedByPerson@odata.bind", "sprk_createdbyperson", InheritedAccessPermission.AppOnlyCreatorWriteReasonCode);
             data.Add(table, "sprk_CreatedByContact@odata.bind", "sprk_createdbycontact", InheritedAccessPermission.AppOnlyCreatorWriteReasonCode);
+            data.Add(table, ExternalDataService.RequestedByBindKey, "sprk_requestedby", InheritedAccessPermission.AppOnlyCreatorWriteReasonCode);
         }
 
         return data;
@@ -84,6 +95,7 @@ public class OwnerCreatorColumnAppOnlyWriterTests
             data.Add(table, "OwningTeam", InheritedAccessPermission.AppOnlyOwnerWriteReasonCode);
             data.Add(table, "sprk_CreatedByPerson@odata.bind", InheritedAccessPermission.AppOnlyCreatorWriteReasonCode);
             data.Add(table, "sprk_createdbycontact", InheritedAccessPermission.AppOnlyCreatorWriteReasonCode);
+            data.Add(table, "sprk_RequestedBy@odata.bind", InheritedAccessPermission.AppOnlyCreatorWriteReasonCode);
         }
 
         return data;
@@ -114,6 +126,9 @@ public class OwnerCreatorColumnAppOnlyWriterTests
     [InlineData("sprk_createdbyperson_old")]
     [InlineData("sprk_createdbycontactname")]
     [InlineData("xsprk_createdbycontact")]
+    [InlineData("sprk_requestedbyname")]
+    [InlineData("sprk_requestedby_old")]
+    [InlineData("sprk_requestedon")]
     [InlineData("sprk_name")]
     public void ANeighbouringName_IsNotRefused(string key)
     {
@@ -128,6 +143,24 @@ public class OwnerCreatorColumnAppOnlyWriterTests
     [Fact]
     public void TheCreatorSet_IsExactlyTheseColumns() =>
         InheritedAccessPermission.CreatorColumns.Should().BeEquivalentTo(Creator);
+
+    [Fact]
+    public void EveryExternalCreatorColumn_IsRefused_OrIsAPlatformAuditColumn() =>
+        NotRefused(ExternalDataService.CreatorColumns).Should().BeEmpty(
+            "every column the external plane says only the server writes is refused to the app-only generic writers too");
+
+    [Fact]
+    public void TheDriftCheck_FiresOnAnExternalCreatorColumnTheRefusalDoesNotList() =>
+        NotRefused([.. ExternalDataService.CreatorColumns, "sprk_submittedbycontact"]).Should().Equal("sprk_submittedbycontact");
+
+    /// <summary>The columns of <paramref name="creatorColumns"/> that some table does not refuse as an owner or creator
+    /// column, less the platform audit columns.</summary>
+    private static IEnumerable<string> NotRefused(IEnumerable<string> creatorColumns) =>
+        creatorColumns
+            .Where(c => !PlatformAuditColumns.Contains(c, StringComparer.OrdinalIgnoreCase))
+            .Where(c => Tables.Any(t => Code(t, c) is not (InheritedAccessPermission.AppOnlyOwnerWriteReasonCode
+                or InheritedAccessPermission.AppOnlyCreatorWriteReasonCode)))
+            .ToList();
 
     [Fact]
     public void OnADocument_TheDocumentsCodesComeFirst_ThenTheOwner_ThenTheCreator()
@@ -167,6 +200,7 @@ public class OwnerCreatorColumnAppOnlyWriterTests
     [InlineData("sprk_event", "ownerid", "team", InheritedAccessPermission.AppOnlyOwnerWriteReasonCode)]
     [InlineData("sprk_workassignment", "sprk_CreatedByPerson", "systemuser", InheritedAccessPermission.AppOnlyCreatorWriteReasonCode)]
     [InlineData("sprk_document", "sprk_CreatedByPerson", "systemuser", InheritedAccessPermission.AppOnlyCreatorWriteReasonCode)]
+    [InlineData("sprk_servicerequest", "sprk_RequestedBy", "contact", InheritedAccessPermission.AppOnlyCreatorWriteReasonCode)]
     public async Task APlaybookLookup_OntoTheOwnerOrTheCreator_IsRefused_AndNothingIsWritten(
         string table, string field, string target, string code)
     {
@@ -249,6 +283,7 @@ public class OwnerCreatorColumnAppOnlyWriterTests
     [InlineData("sprk_matter", "OwningUser")]
     [InlineData("sprk_workassignment", "sprk_createdbyperson")]
     [InlineData("sprk_document", "sprk_createdbycontact")]
+    [InlineData("sprk_servicerequest", "sprk_requestedby")]
     public async Task APushRule_TargetingTheOwnerOrTheCreator_IsSkipped_AndTheOtherColumnsArePushed(string table, string target)
     {
         var (updated, failed, skipped, errors, results) = await Push(

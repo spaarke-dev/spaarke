@@ -675,12 +675,18 @@ internal static class InheritedAccessPermission
     /// #2247: a row's creator. <c>sprk_createdbyperson</c> (<see cref="RecordCreatorPerson.Column"/>, on 28 tables) is read by
     /// the move-out-of-secure creator check (<c>RecordOwnershipResolver</c>), provisioning resume, event visibility and the
     /// document-pointer creator rule; <c>sprk_createdbycontact</c> (field-secured, the BFF its only writer) by the external
-    /// delete-own check. Their writers are the create paths' typed stamps, none of which uses these paths.
+    /// delete-own check; <c>sprk_requestedby</c> (a service request's requester, a contact) by the external Service Requests
+    /// module's scope, message and document access on a service request, and the requester-only hard delete
+    /// (<c>ExternalProjectDataEndpoints</c>). Their writers are the create paths' typed stamps (for the requester, the
+    /// intake create, <c>ExternalDataService.BuildServiceRequestCreatePayload</c>), none of which uses these paths. Every
+    /// column of <c>ExternalDataService.CreatorColumns</c> is refused here or is a platform audit column
+    /// (<c>OwnerCreatorColumnAppOnlyWriterTests</c>).
     /// </summary>
     internal static readonly IReadOnlySet<string> CreatorColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         RecordCreatorPerson.Column,
         Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDataService.CreatedByContactColumn,
+        "sprk_requestedby",
     };
 
     /// <summary>
