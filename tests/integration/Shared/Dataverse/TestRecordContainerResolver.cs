@@ -201,8 +201,15 @@ internal static class TestRecordContainerResolver
         /// <summary>The environment does not have the <c>sprk_createdbyperson</c> column on documents (owner round 17).</summary>
         public bool CreatedByPersonColumnMissing { get; init; }
 
-        /// <summary>The Graph creator read throws (Graph unavailable).</summary>
-        public Exception? ItemReadFault { get; init; }
+        /// <summary>The Graph creator read throws (Graph unavailable). Settable so a test can fault a world its helper already built.</summary>
+        public Exception? ItemReadFault { get; set; }
+
+        /// <summary>
+        /// Drives this stamp does NOT own: the creator read refuses them with the ownership guard's own 404
+        /// <c>spe_container_not_owned</c> problem before any item is read, as the real <c>GetItemCreatorAsync</c> does
+        /// (it opens with <c>SpeContainerOwnershipGuard.ForOwnedContainerAsync</c>). Every other drive is owned.
+        /// </summary>
+        public HashSet<string> UnownedDrives { get; } = new(StringComparer.Ordinal);
 
         /// <summary>The resolver is built with NO SharePoint Embedded item reader (a host that registers none).</summary>
         public bool NoItemReader { get; init; }
@@ -536,6 +543,13 @@ internal static class TestRecordContainerResolver
             speFiles.Setup(f => f.GetItemCreatorAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string drive, string item, CancellationToken _) =>
                 {
+                    if (UnownedDrives.Contains(drive))
+                    {
+                        throw new Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException(
+                            Sprk.Bff.Api.Infrastructure.Graph.SpeContainerOwnershipGuard.NotOwnedErrorCode,
+                            "Not Found", "SharePoint Embedded container not found.", 404);
+                    }
+
                     if (ItemReadFault is not null)
                     {
                         throw ItemReadFault;
