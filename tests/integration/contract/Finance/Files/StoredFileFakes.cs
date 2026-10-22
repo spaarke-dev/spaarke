@@ -490,12 +490,19 @@ internal sealed class StoredFileRig
     public Entity SeedFile(
         Guid fileId, StoredFileParent parent, byte[] bytes, StoredFileStatus status = StoredFileStatus.Servable,
         StoredFilePurpose purpose = StoredFilePurpose.InvoicePdf, Guid? sourceDocument = null, IDictionary<string, string>? tags = null,
-        string? blobPathOverride = null, string contentType = "application/pdf")
+        string? blobPathOverride = null, string contentType = "application/pdf", string? environment = StoredFileBlobs.TestEnvironment)
     {
         var path = blobPathOverride ?? StoredFileBlobName.Build(TenantId, parent, fileId);
         var sha = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes));
+        var metadata = new Dictionary<string, string> { ["sha256"] = sha };
+        if (environment is not null)
+        {
+            // As StageAsync writes it: the staging deployment's environment marker.
+            metadata["environment"] = environment;
+        }
+
         Gateway.Seed(StoredFileSchema.ContainerOf(purpose), StoredFileBlobName.Build(TenantId, parent, fileId), bytes,
-            new Dictionary<string, string> { ["sha256"] = sha }, tags ?? CleanTags(Gateway.Now.AddMinutes(1)));
+            metadata, tags ?? CleanTags(Gateway.Now.AddMinutes(1)));
         var row = new Entity(StoredFileSchema.Entity, fileId)
         {
             [StoredFileSchema.Purpose] = new OptionSetValue((int)purpose),

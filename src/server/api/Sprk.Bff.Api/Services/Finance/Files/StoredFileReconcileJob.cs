@@ -279,7 +279,23 @@ public sealed class StoredFileReconcileJob : IScheduledJob
                 // Only the row's OWN blob (its file id in the name): a path naming another file is never followed to a delete.
                 if (StoredFileBlobName.TryParseForTenant(row.BlobPath, _blobs.TenantId, out var pathParent, out var pathFile) && pathFile == row.Id)
                 {
-                    if (await _blobs.DeleteAsync(ContainerOfTable(pathParent.Kind), row.BlobPath!, ct).ConfigureAwait(false))
+                    // uac-r2 review round 1 F1: the same environment check as the row-less pass. Another environment sharing the
+                    // account and the name segment (a copy of this environment's rows) may still serve these bytes: a blob without
+                    // THIS deployment's marker is never deleted, and neither is the row. The row is kept on purpose: it is the only
+                    // record of the blob, it cannot be served (its parent is gone), and deleting it would leave bytes no pass may
+                    // ever judge again (the row-less pass refuses an unmarked blob too); kept, it is counted on every run.
+                    var container = ContainerOfTable(pathParent.Kind);
+                    var properties = await _blobs.GetPropertiesAsync(container, row.BlobPath!, ct).ConfigureAwait(false);
+                    if (properties is not null && !_blobs.IsThisEnvironments(properties.Metadata))
+                    {
+                        counts.BlobsOfOtherEnvironments++;
+                        _logger.LogWarning(
+                            "Stored file reconcile: file {FileId} (parent gone) has a blob without this environment's marker; blob and row kept",
+                            row.Id);
+                        continue;
+                    }
+
+                    if (properties is not null && await _blobs.DeleteAsync(container, row.BlobPath!, ct).ConfigureAwait(false))
                     {
                         counts.BlobsDeleted++;
                     }

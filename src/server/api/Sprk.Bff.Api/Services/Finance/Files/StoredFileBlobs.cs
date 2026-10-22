@@ -310,6 +310,12 @@ public sealed class StoredFileBlobs
         return scannedAt >= lastModified ? StoredFileScanState.Clean : StoredFileScanState.Pending;
     }
 
+    /// <summary>The blob's properties and metadata, or <c>null</c> when it does not exist (the reconcile job's environment check).</summary>
+    /// <exception cref="ArgumentException"><paramref name="blobPath"/> is not a name of this tenant (nothing is called).</exception>
+    /// <exception cref="RequestFailedException">A storage fault.</exception>
+    internal Task<BlobPropertiesInfo?> GetPropertiesAsync(string container, string blobPath, CancellationToken ct) =>
+        RequireOwnBlob(container, blobPath).GetPropertiesAsync(container, blobPath, ct);
+
     /// <summary>
     /// A read stream over the blob pinned to <paramref name="etag"/> (the version whose verdict was read), or <c>null</c> when it is
     /// gone. A blob changed since then fails with <see cref="RequestFailedException"/> status 412.

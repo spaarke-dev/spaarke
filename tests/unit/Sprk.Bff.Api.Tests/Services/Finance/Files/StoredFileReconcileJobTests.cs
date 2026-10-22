@@ -189,6 +189,45 @@ public sealed class StoredFileReconcileJobTests
         h.Counts(result)["rowsWithForeignPath"].GetInt32().Should().Be(1);
     }
 
+    [Theory(DisplayName = "Must-fire (uac-r2 round 1 F1): a parent-gone row whose blob carries ANOTHER environment's marker, or none, keeps its blob AND its row")]
+    [InlineData("prod.crm.dynamics.com")]
+    [InlineData("STOREDFILE-TEST.CRM.DYNAMICS.COM")]
+    [InlineData(null)]
+    public async Task ParentGone_OtherEnvironmentsBlob_BlobAndRowKept(string? marker)
+    {
+        // A copy of production in UAT (shared account and name segment): the invoice is deleted in UAT, prod still serves the blob.
+        var h = new Harness();
+        var goneParent = new StoredFileParent(StoredFileParentKind.Invoice, Guid.NewGuid());
+        var file = Guid.NewGuid();
+        h.Rig.SeedFile(file, goneParent, Pdf, environment: marker);
+
+        var result = await h.RunAsync();
+
+        h.Rig.Gateway.Get("invoice-files", h.PathOf(goneParent, file)).Should().NotBeNull("another environment's bytes are never deleted");
+        h.Rig.Dataverse.Rows.Should().ContainKey(file, "the row is the only record of the blob; it is kept and counted");
+        h.Rig.Gateway.Calls.Should().NotContain(c => c.StartsWith("delete", StringComparison.Ordinal));
+        h.Counts(result)["blobsOfOtherEnvironments"].GetInt32().Should().Be(1);
+        h.Counts(result)["rowsDeleted"].GetInt32().Should().Be(0);
+        h.Counts(result)["blobsDeleted"].GetInt32().Should().Be(0);
+    }
+
+    [Fact(DisplayName = "Must-not-fire (uac-r2 round 1 F1): a parent-gone row whose blob is already gone is deleted (no blob delete is attempted)")]
+    public async Task ParentGone_BlobAlreadyGone_RowDeleted()
+    {
+        var h = new Harness();
+        var goneParent = new StoredFileParent(StoredFileParentKind.Invoice, Guid.NewGuid());
+        var file = Guid.NewGuid();
+        h.Rig.SeedFile(file, goneParent, Pdf);
+        (await h.Rig.Gateway.DeleteIfExistsAsync("invoice-files", h.PathOf(goneParent, file), CancellationToken.None)).Should().BeTrue();
+        h.Rig.Gateway.FailOp["delete"] = new RequestFailedException(503, "a delete must not be attempted");
+
+        var result = await h.RunAsync();
+
+        h.Rig.Dataverse.Rows.Should().NotContainKey(file);
+        h.Counts(result)["rowsDeleted"].GetInt32().Should().Be(1);
+        h.Counts(result)["unitFaults"].GetInt32().Should().Be(0);
+    }
+
     [Fact(DisplayName = "Must-fire (review F1): a row whose secured columns come back masked (absent) is NOT parentless: row and blob kept, counted unreadable")]
     public async Task MaskedRow_Kept()
     {
