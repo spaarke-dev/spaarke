@@ -97,7 +97,9 @@ internal static class CreateTimeFieldMapping
 
     /// <summary>
     /// The FR-02 fill-only entry point: applies every rule, in <c>ExecutionOrder</c>, onto <paramref name="target"/>, but a
-    /// mapped value is written only to a column the caller did not supply. Never throws. <paramref name="target"/> is the
+    /// mapped value is written only to a column the caller did not supply. A faulting rule never escapes (it becomes a
+    /// warning); the supplied-column snapshot taken first is not guarded, which holds because every caller passes a plain
+    /// set. <paramref name="target"/> is the
     /// caller's payload; what it holds when this method is
     /// entered is "supplied" (snapshotted once, so one rule's output never blocks another rule, and rules aimed at the
     /// same column keep their last-rule-wins order). "Not supplied" means exactly:

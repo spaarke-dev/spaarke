@@ -719,7 +719,7 @@ Deleted (no caller left). `ApplyFillOnly`, `CollectSourceColumns` and `Regarding
 
 ### §11 answers
 
-No new surface in `src`: no endpoint, DI registration, package, column or class. `IOfficeService.ResolveDefaultAssigneeAsync` is a member moved from the deleted concrete class onto the interface the endpoint already takes.
+No new surface in `src`: no endpoint, DI registration, package, column or class. `IOfficeService.ResolveDefaultAssigneeAsync` is a member moved from the deleted concrete class (which the endpoint took before) onto `IOfficeService`: `OfficeModule` registers only the interface, and the method uses `OfficeService`'s own fields, so an interface member is the smallest surface (a concrete parameter would need a new DI registration).
 1. **Existing:** `OfficeRecordCreationService.ResolveDefaultAssigneeAsync`, which is deleted here.
 2. **Extension:** `IOfficeService` is extended; nothing new is added.
 3. **Cost of doing nothing:** the defaults endpoint keeps the 1588-line dead core alive, with its own maker-contact resolution beside the adapter's, so the prefill could drift from the server default (task 100).
@@ -741,3 +741,13 @@ The two test-fixture switches on `SecureRootCreateRouteFixture` are test-only.
 - (a) `ResolveDefaultAssigneeAsync` always returns null: `GetDefaults_ThePrefill_IsTheContactTheCreateAssigns_AndNoneWithoutALink` fails (2 of 2 cases).
 - (b) `Apply` restored, with an unmasked call site in `OfficeService`: `EverySourceHandedToTheMappingEngine_PassedThroughTheCallerMask` and `TheEngine_OffersNoOtherPathThatTakesASourceEntity` fail (2 of 79).
 - (c) the Office allow-list entry re-added: `CreateOwnerResolutionGuardTests.EveryAllowlistEntry_StillUsesTheName` fails (a stale entry for a gone file).
+
+### 018c review (Opus adversarial, one pass)
+
+No production defect. **F3** (fixed): `OfficeQuickCreate_FromAnOrdinaryMatter_IsAnOrdinaryProject_FiledUnderIt(true)` set
+`SourceCallerReadFailStatus` without proving the read failed; it now asserts `SourceUnavailableWarning`. **K4** (fixed): the
+`ApplyFillOnly` "Never throws" comment now says a faulting rule never escapes and the snapshot is unguarded; the §11
+sentence above is corrected. **K2** (known limit, not fixed): the re-pointed cancellation seam test cancels in the number
+read-back, not in the create callback, and covers Matter only (the deleted test covered Project too). Not a live defect:
+nothing observes `ct` between step 11 and the read-back, and step 12 uses `CancellationToken.None`. A step that starts
+using `ct` there would still be caught.

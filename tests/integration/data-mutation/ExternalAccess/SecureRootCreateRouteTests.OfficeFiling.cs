@@ -166,6 +166,9 @@ public partial class SecureRootCreateRouteTests
         _fixture.OfficeCreates.Single().GetAttributeValue<bool>("sprk_issecure").Should().BeFalse("an ordinary matter passes no isolation on");
         _fixture.OwningTeamOf(project).Should().Be(RecordOwnershipResolverDouble.DefaultTeamId, "the record-first owner, never the secure team");
         _fixture.SharesOn(project).Should().BeEmpty();
+        if (callerReadFails)
+            (await WarningsOf(response)).Should().Contain(MappingSourceReadProbe.SourceUnavailableWarning,
+                "the case must prove the source read really failed, or it pins nothing (018c review F3)");
     }
 
     /// <summary>#2191 K2 review F3: a project created from a SECURE PROJECT is filed under that project and created into isolation.</summary>
