@@ -4,7 +4,6 @@ using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Registration;
-using Sprk.Bff.Api.Services.Signals;
 using static Sprk.Bff.Api.Api.ExternalAccess.InviteExternalUserEndpoint;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
@@ -353,20 +352,30 @@ public sealed class ExternalInviteService
                     {
                         contactId = await CreateContactAsync(dataverseClient, request, owner.TeamId, logger, ct);
                     }
-                    catch (Exception ex) when (!ct.IsCancellationRequested && SignalWriter.IsDataverseAccessDenied(ex))
+                    catch (Exception ex) when (!ct.IsCancellationRequested && IsOwnerPrivilegeRefusal(ex))
                     {
-                        // K1 (UAC re-check): Dataverse refused the owned create for a privilege (0x80040299: the owner team holds no
-                        // role with contact Read). The same refusal as an unresolved owner: 500 + reason code, nothing created.
-                        // The shared Web API client's EnsureSuccessStatusCode drops the body, so any 403 on this create is read as
-                        // that fault (the same detector the Signal writer uses); the BFF identity's own create privilege is
-                        // provisioned with the app user, and registration (which keeps the body) separates the two.
+                        // K1 (UAC re-check, round 3): Dataverse refused the owned create for the OWNER's privilege (0x80040299: the owner
+                        // team holds no role with contact Read). The same refusal as an unresolved owner: 500 + reason code, nothing
+                        // created. Only that exact Dataverse error code counts (read by DataverseWebApiClient.CreateAsync, which never
+                        // reads the message); any other 403, including the BFF identity's own 0x80040220, is NOT an owner fault.
                         logger.LogError(ex,
                             "[EXT-INVITE] Invite create refused ({ReasonCode}): Dataverse refused the owner of the new contact " +
-                            "(Read Privilege Check For Owner). The default owner team of the business unit named by " +
+                            "(0x80040299, Read Privilege Check For Owner). The default owner team of the business unit named by " +
                             "ExternalAccess:CustomerBusinessUnitId must hold a security role with Read on contact " +
                             "(and Create/Append as needed). Nothing was created.",
                             ContactBindingDecision.DenyOwnerUnconfigured);
                         return OwnerUnconfiguredOutcome();
+                    }
+                    catch (HttpRequestException ex) when (!ct.IsCancellationRequested
+                                                          && ex.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                    {
+                        // A 403 that is not the owner fault keeps its previous, generic failure path (it propagates). Name the
+                        // Dataverse error code (never its message) so the operator can tell it from the owner fault.
+                        logger.LogError(ex,
+                            "[EXT-INVITE] Invite create refused with HTTP 403, Dataverse error code {DataverseErrorCode}: not the " +
+                            "owner-privilege fault (0x80040299), reported as a generic failure. Nothing was created.",
+                            DataverseWebApiClient.ErrorCodeOf(ex) ?? "(none)");
+                        throw;
                     }
 
                     break;
@@ -554,6 +563,18 @@ public sealed class ExternalInviteService
             "(ExternalAccess:CustomerBusinessUnitId) — nothing created", email);
         return OwnerUnconfiguredOutcome();
     }
+
+    /// <summary>The Dataverse error code of "Read Privilege Check For Owner failed" (the owner team cannot own the row).</summary>
+    private const string OwnerPrivilegeErrorCode = "0x80040299";
+
+    /// <summary>
+    /// True only when the create failed with a 403 whose Dataverse <c>error.code</c> is exactly 0x80040299. NOT
+    /// <c>SignalWriter.IsDataverseAccessDenied</c>: that also accepts 0x80040220 (the BFF identity's own missing privilege)
+    /// and a bare 403, and neither is an owner fault. Pure.
+    /// </summary>
+    internal static bool IsOwnerPrivilegeRefusal(Exception ex)
+        => ex is HttpRequestException { StatusCode: System.Net.HttpStatusCode.Forbidden }
+           && string.Equals(DataverseWebApiClient.ErrorCodeOf(ex), OwnerPrivilegeErrorCode, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The 500 <see cref="ContactBindingDecision.DenyOwnerUnconfigured"/> answer, whichever way the owner failed.</summary>
     private static ProvisionOutcome OwnerUnconfiguredOutcome()

@@ -1,7 +1,9 @@
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -34,10 +36,23 @@ public class InviteContactOwnerTests
     private static InviteExternalUserRequest Request()
         => new(Email, Guid.Empty, (int)ExternalAccessLevel.Collaborate, "Pat", "Partner", null, null, "matter", Guid.Empty);
 
-    private Task<InviteExternalUserEndpoint.ProvisionOutcome> Invite(ContactIdentityBinder binder)
+    private Task<InviteExternalUserEndpoint.ProvisionOutcome> Invite(ContactIdentityBinder binder, ILogger? logger = null)
         => InviteExternalUserEndpoint.ProvisionAsync(
-            Request(), _h.Grants, _h.Ciam, _h.Emails, binder, PortalUrl, CustomerKey, NullLogger<Program>.Instance,
+            Request(), _h.Grants, _h.Ciam, _h.Emails, binder, PortalUrl, CustomerKey, logger ?? NullLogger<Program>.Instance,
             resolution: null, CancellationToken.None);
+
+    /// <summary>The exception the Web API client throws for a failed create: the status plus the Dataverse error CODE only.</summary>
+    private static HttpRequestException Refused(System.Net.HttpStatusCode status, string? dataverseErrorCode)
+    {
+        var ex = new HttpRequestException(
+            $"Response status code does not indicate success: {(int)status} ({status}).", null, status);
+        if (dataverseErrorCode is not null)
+        {
+            ex.Data[DataverseWebApiClient.ErrorCodeDataKey] = dataverseErrorCode;
+        }
+
+        return ex;
+    }
 
     private ContactIdentityBinder Owned(Guid? businessUnit)
         => IdentityBindingTestKit.OwnerAwareBinder(_h.Identities, businessUnit);
@@ -123,8 +138,7 @@ public class InviteContactOwnerTests
     public async Task WhenDataverseRefusesTheOwnersPrivilege_TheInviteIsRefused500OwnerUnconfigured_NotAGeneric500()
     {
         GivenOneDefaultTeam();
-        _h.Grants.ContactCreateFailure = new HttpRequestException(
-            "Response status code does not indicate success: 403 (Forbidden).", null, System.Net.HttpStatusCode.Forbidden);
+        _h.Grants.ContactCreateFailure = Refused(System.Net.HttpStatusCode.Forbidden, "0x80040299");
 
         var outcome = await Invite(Owned(CustomerBu));
 
@@ -137,6 +151,57 @@ public class InviteContactOwnerTests
         _h.Emails.Sent.Should().BeEmpty();
         _h.Emails.Onboarding.Should().BeEmpty();
         _h.Identities.Writes.Should().BeEmpty("no invite marker, no binding");
+    }
+
+    // Must not fire (UAC round 3 K1): a 403 that is not the owner fault is not remapped. 0x80040220 is the BFF identity's OWN
+    // missing privilege, and a bare 403 names no fault at all. Both keep the previous generic path (the exception propagates),
+    // with a log that names the Dataverse code - never the message.
+    [Theory]
+    [InlineData("0x80040220")]
+    [InlineData(null)]
+    public async Task AForbiddenCreateThatIsNotTheOwnerFault_IsNotRemapped_ItStillThrows_AndLogsTheCode(string? code)
+    {
+        GivenOneDefaultTeam();
+        _h.Grants.ContactCreateFailure = Refused(System.Net.HttpStatusCode.Forbidden, code);
+        var log = new BindingLogCapture<Program>();
+
+        var act = () => Invite(Owned(CustomerBu), log);
+
+        await act.Should().ThrowAsync<HttpRequestException>();
+        _h.Ciam.Attempts.Should().BeEmpty();
+        _h.Emails.Sent.Should().BeEmpty();
+        var entry = log.Entries.Should().ContainSingle(e => e.Message.Contains("not the owner-privilege fault")).Subject;
+        entry.Level.Should().Be(LogLevel.Error);
+        entry.Message.Should().Contain(code ?? "(none)").And.NotContain("Read Privilege Check For Owner")
+            .And.NotContain(ContactBindingDecision.DenyOwnerUnconfigured);
+    }
+
+    [Fact]
+    public async Task TheOwnerFault_IsLoggedByCode_AndNoDataverseMessageIsLoggedOrSurfaced()
+    {
+        GivenOneDefaultTeam();
+        _h.Grants.ContactCreateFailure = Refused(System.Net.HttpStatusCode.Forbidden, "0x80040299");
+        var log = new BindingLogCapture<Program>();
+
+        var outcome = await Invite(Owned(CustomerBu), log);
+
+        outcome.Failure!.ReasonCode.Should().Be(ContactBindingDecision.DenyOwnerUnconfigured);
+        log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error).Which.Message.Should().Contain("0x80040299")
+            .And.NotContain(Email).And.NotContain(CustomerBu.ToString()).And.NotContain(CustomerTeam.ToString());
+        outcome.Failure.Message.Should().NotContain("0x80040299").And.NotContain("Privilege");
+    }
+
+    [Theory]
+    [InlineData(System.Net.HttpStatusCode.BadRequest, "0x80040299")]          // the code on a non-403 is not the owner refusal
+    [InlineData(System.Net.HttpStatusCode.InternalServerError, "0x80040299")]
+    public async Task TheOwnerCode_OnAnotherStatus_IsNotRemapped(System.Net.HttpStatusCode status, string code)
+    {
+        GivenOneDefaultTeam();
+        _h.Grants.ContactCreateFailure = Refused(status, code);
+
+        var act = () => Invite(Owned(CustomerBu));
+
+        await act.Should().ThrowAsync<HttpRequestException>();
     }
 
     [Fact]
