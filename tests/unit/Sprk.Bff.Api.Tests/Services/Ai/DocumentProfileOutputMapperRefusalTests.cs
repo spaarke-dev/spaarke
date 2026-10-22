@@ -64,6 +64,9 @@ public sealed class DocumentProfileOutputMapperRefusalTests
         { "sprk_isemailarchive", "true", "sprk_isemailarchive", InheritedAccessPermission.AppOnlyDocumentBffColumnWriteReasonCode },
         { "SPRK_GraphItemIdBound@odata.bind", "\"/sprk_POINTER(01)\"", "sprk_graphitemidbound", InheritedAccessPermission.AppOnlyDocumentBffColumnWriteReasonCode },
         { "_sprk_filepath_value", "\"POINTER\"", "sprk_filepath", InheritedAccessPermission.AppOnlyDocumentBffColumnWriteReasonCode },
+        // #2247: the owner and the creator, on every table (a document included).
+        { "ownerid", "\"5b1e7a4c-0f6d-4a52-9d1b-3f0c2e8a7d11\"", "ownerid", InheritedAccessPermission.AppOnlyOwnerWriteReasonCode },
+        { "sprk_CreatedByPerson@odata.bind", "\"/systemusers(5b1e7a4c-0f6d-4a52-9d1b-3f0c2e8a7d11)\"", "sprk_createdbyperson", InheritedAccessPermission.AppOnlyCreatorWriteReasonCode },
     };
 
     [Theory]
@@ -124,7 +127,6 @@ public sealed class DocumentProfileOutputMapperRefusalTests
     public static TheoryData<string, string> NotProfileKeys => new()
     {
         // key named by the configured schema, JSON value
-        { "ownerid", "\"5b1e7a4c-0f6d-4a52-9d1b-3f0c2e8a7d11\"" },
         { "sprk_containerid", "\"b!POINTERCONTAINER\"" },
         { "sprk_whatever", "\"POINTER\"" },
         // neighbouring names of refused columns are not profile columns either

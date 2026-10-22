@@ -645,6 +645,45 @@ internal static class InheritedAccessPermission
     };
 
     /// <summary>
+    /// #2247: the reason code when an app-only generic writer names a row's owner (<see cref="OwnerColumns"/>;
+    /// <see cref="RefuseAppOnlyWrite"/>), on any table.
+    /// </summary>
+    internal const string AppOnlyOwnerWriteReasonCode = "sdap.access.owner_server_only";
+
+    /// <summary>
+    /// #2247: the reason code when an app-only generic writer names a row's creator (<see cref="CreatorColumns"/>;
+    /// <see cref="RefuseAppOnlyWrite"/>), on any table.
+    /// </summary>
+    internal const string AppOnlyCreatorWriteReasonCode = "sdap.access.creator_server_only";
+
+    /// <summary>
+    /// #2247: a row's owner, in every column Dataverse names it by. The owner decides who may read the row, and the BFF app
+    /// user is a System Administrator, so an app-only write of <c>ownerid</c> re-owns any row (permanently on a standard
+    /// record; under a secure root the reconciler puts it back within minutes). Its writers are the BFF's typed ones (the
+    /// create's owner step, the reparent, the reconciler, Repair's owner step), none of which asks this refusal over it. The
+    /// other three are read-only in Dataverse; they are listed so a configuration naming them is refused, not sent.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> OwnerColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "ownerid",
+        "owninguser",
+        "owningteam",
+        "owningbusinessunit",
+    };
+
+    /// <summary>
+    /// #2247: a row's creator. <c>sprk_createdbyperson</c> (<see cref="RecordCreatorPerson.Column"/>, on 28 tables) is read by
+    /// the move-out-of-secure creator check (<c>RecordOwnershipResolver</c>), provisioning resume, event visibility and the
+    /// document-pointer creator rule; <c>sprk_createdbycontact</c> (field-secured, the BFF its only writer) by the external
+    /// delete-own check. Their writers are the create paths' typed stamps, none of which uses these paths.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> CreatorColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        RecordCreatorPerson.Column,
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDataService.CreatedByContactColumn,
+    };
+
+    /// <summary>
     /// Task 189 fix round C (K5): an APP-ONLY generic writer never writes a document's <see cref="Column"/> or its
     /// own-narrowing record (<see cref="AccessInheritance.Column"/>). These writers are the Update Record playbook node and
     /// the action seam when they act for no person (<c>UpdateRecordActionCore</c>), and an AI output mapping
@@ -665,6 +704,12 @@ internal static class InheritedAccessPermission
     /// legacy item id, relocation record, file path and email-archive key), refused with
     /// <see cref="AppOnlyDocumentBffColumnWriteReasonCode"/> in the same forms. Their writers are the BFF's typed ones (the upload and Office persistence, the pointer binder, the
     /// relocator, the email archive), none of which uses these paths.</para>
+    /// <para>#2247: on EVERY table, nor a row's owner (<see cref="OwnerColumns"/>, refused with
+    /// <see cref="AppOnlyOwnerWriteReasonCode"/>) or its creator (<see cref="CreatorColumns"/>, refused with
+    /// <see cref="AppOnlyCreatorWriteReasonCode"/>), in the same forms. A writer that decides one of these itself (Repair's owner
+    /// step) asks this refusal only over the columns a configuration gave it, never over the one it decided.</para>
+    /// <para><b>Precedence</b> (the first match decides the code): on a document, its Access Permission or own-narrowing
+    /// record, then its D7 links, then its BFF-owned columns; then, on every table, the owner, then the creator.</para>
     /// </summary>
     /// <returns>The refusal (nothing is written), or <see langword="null"/> when the write may proceed.</returns>
     internal static RecordOwnerResolution? RefuseAppOnlyWrite(string? table, IEnumerable<string> keys)
@@ -673,8 +718,6 @@ internal static class InheritedAccessPermission
         var trimmed = table?.Trim();
         var narrows = RecordsOwnNarrowing(trimmed);
         var links = string.Equals(trimmed, Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDocumentNarrowing.DocumentTable, StringComparison.OrdinalIgnoreCase);
-        if (!narrows && !links)
-            return null;
 
         var columns = keys.Select(SecureRootInheritance.NormalizeColumn).ToList();
         if (narrows && columns.FirstOrDefault(k => k is Column or AccessInheritance.Column) is { } named)
@@ -692,10 +735,24 @@ internal static class InheritedAccessPermission
 
         // #2240: the document's pointer, relocation and email-archive columns are the BFF's own (BffOwnedDocumentColumns).
         var owned = links ? columns.FirstOrDefault(BffOwnedDocumentColumns.Contains) : null;
-        return owned is null
-            ? null
-            : RecordOwnerResolution.Refused(AppOnlyDocumentBffColumnWriteReasonCode,
+        if (owned is not null)
+        {
+            return RecordOwnerResolution.Refused(AppOnlyDocumentBffColumnWriteReasonCode,
                 $"{owned} of a document is set by Spaarke (it names the document's file or its email), so it was not written");
+        }
+
+        // #2247: on every table, the row's owner and its creator are the BFF's typed writers' (OwnerColumns, CreatorColumns).
+        if (columns.FirstOrDefault(OwnerColumns.Contains) is { } owner)
+        {
+            return RecordOwnerResolution.Refused(AppOnlyOwnerWriteReasonCode,
+                $"{owner} of a record is set by Spaarke (it decides who may see the record), so it was not written");
+        }
+
+        var creator = columns.FirstOrDefault(CreatorColumns.Contains);
+        return creator is null
+            ? null
+            : RecordOwnerResolution.Refused(AppOnlyCreatorWriteReasonCode,
+                $"{creator} of a record is set by Spaarke (it records who created the record), so it was not written");
     }
 
     /// <summary>What to hold and what to write on one row of a <see cref="RecordTables"/> table (task 189).</summary>
