@@ -5,6 +5,8 @@ using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Resolution;
 using Sprk.Bff.Api.Services.Finance.Coding;
+using Sprk.Bff.Api.Services.Finance.Files;
+using Spaarke.Scheduling;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Finance.Tools;
 using Sprk.Bff.Api.Services.Jobs;
@@ -369,6 +371,21 @@ public static class FinanceModule
         //         RemainingBudget, BudgetUtilizationPercent, MonthOverMonthVelocity,
         //         AverageInvoiceAmount, MonthlySpendTimeline
         services.AddScoped<FinanceRollupService>();
+
+        // ============================================================================
+        // Finance file store (ebilling-r1 task 090; procedure-and-file-model section 4; EB-D-148)
+        // ============================================================================
+        // Placement (ADR-052 B2, B3): in the BFF - request-scoped authorization over the caller's token, short app-only writes and
+        // an hourly sweep; no new process, no new package (Azure.Storage.Blobs is already referenced by the session store).
+        //   * StoredFileBlobs - singleton: one managed-identity BlobGateway (Infrastructure/Storage, shared with SessionFileBlobStore)
+        //     over the shared TokenCredential. An empty Finance:FileStore:BlobEndpoint is a runtime state ("not configured"), not
+        //     a DI state, so the registration is unconditional (ADR-032 P1; the flag rule above).
+        //   * StoredFileService - scoped like its scoped IGenericEntityService. Concrete (ADR-010: one implementation).
+        //   * StoredFileReconcileJob - the ONE scheduled job of the store (ADR-036 A1 rule 6: AddScheduledJob, no BackgroundService);
+        //     it reads Ebilling:Enabled itself (ADR-018).
+        services.AddSingleton<StoredFileBlobs>();
+        services.AddScoped<StoredFileService>();
+        services.AddScheduledJob<StoredFileReconcileJob>(StoredFileReconcileJob.DefaultCronSchedule);
 
         return services;
     }
