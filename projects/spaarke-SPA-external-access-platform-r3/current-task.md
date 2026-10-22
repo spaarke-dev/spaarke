@@ -57,7 +57,7 @@
   - Field mapping is fill-only.
   - A named assignee needs AppendTo, otherwise 403 OFFICE_009.
   - The defaults endpoint no longer offers an assignee the caller can't AppendTo.
-  - Post-deploy smoke: one Matter quick-create, plus one Project under an ordinary matter and one under a secure matter. Check the owner team and that the normal maker gets no 403.
+  - After the deploy, R3 sends field-mapping the SHA. Field-mapping asks the owner to make the Office creates (a Matter, plus a Project under an ordinary matter and one under a secure matter), then checks the results read-only. R3 does not run this smoke.
 - **Round 122:** shipped in 1283c41817. Known limit: a single-attachment save stays Restricted.
 
 ## Standing dependencies and gates
