@@ -52,7 +52,9 @@ internal sealed record LookupBindPlan(string? BindKey, string? BindValue, string
 internal static class FieldMappingPushLookups
 {
     /// <summary>The source's attribute catalog: its logical name, type and whether it is a Web API property.</summary>
-    internal static string AttributeMetadataPath(string entity) => $"EntityDefinitions(LogicalName='{entity}')/Attributes";
+    /// <remarks>#2253 fix round 3 (F1): the name is pasted into the quoted key, so only a bare table name is accepted.</remarks>
+    internal static string AttributeMetadataPath(string entity)
+        => $"EntityDefinitions(LogicalName='{DataverseIdentifier.RequireTableName(entity, nameof(entity))}')/Attributes";
 
     /// <summary>Filtered in memory, so no metadata <c>$filter</c> support is assumed.</summary>
     internal const string AttributeMetadataQuery = "$select=LogicalName,AttributeType,IsValidODataAttribute";

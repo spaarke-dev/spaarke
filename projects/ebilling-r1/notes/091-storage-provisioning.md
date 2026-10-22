@@ -413,3 +413,60 @@ All three ended `RESULT: PASS` and `exit 0`. Probe b was never created, because 
 The first paste attempt did not run. Bracketed-paste markers broke the first word, and the base64 decode carried CRLF line endings. The paste line now starts with `true; ` and passes the decode through `tr -d '
 '`.
 
+
+### 8.8 Blob soft delete, 30 days, every environment (DEF-038, #2255; owner decision 2026-10-22)
+
+Owner decision 2026-10-22: turn on blob soft delete with 30-day retention for the file store in every environment, including dev. The module change is on `task/ebill-2255-softdelete`. **Applied on dev 2026-10-22 by the main session (owner OK: all environments including dev, after a what-if).** The record is at the end of this section.
+
+**Change** (`modules/ebilling-file-store.bicep` and its recompile `.json`):
+- `blobServices/default` was a reference (`existing`); it is now declared, with `properties.deleteRetentionPolicy = { enabled: true, days: blobSoftDeleteRetentionDays }` and nothing else. The containers now depend on it.
+- New parameter `blobSoftDeleteRetentionDays`: default 30, range 1..365. customer-provisioning (#2232) passes it per environment; an environment that does not override gets 30.
+- Not set, on purpose: versioning, change feed, container soft delete, restore policy, CORS, `allowPermanentDelete`. Role, assignments, network and the Defender setting are untouched.
+- Tests (`CustomerStampKeylessTemplateTests`): must-fire `FileStoreBlobService_EnablesSoftDeleteWithParameterDays` (enabled, days = the parameter, default 30, 1..365), `FileStoreContainers_DependOnBlobService`, `FileStoreBlobService_Deviation_IsFlagged` (9 cases: disabled, literal days, missing policy, versioning, change feed, container soft delete, CORS, restore policy, permanent delete); must-not-fire `FileStoreBlobService_ExactShape_IsAccepted`. The `FileStoreRole_*` tests are unchanged and still pass.
+
+**Why the PUT must be read before the apply.** The §8.6 "== 1. before reads" block read only `deleteRetentionPolicy` (enabled false, days null, allowPermanentDelete false) and `containerDeleteRetentionPolicy` (null). Versioning, change feed, CORS, restore policy, last-access-time tracking and the default service version were not read. The template writes none of them; the expectation is that an ARM PUT leaves unstated blob-service properties alone, but that is not verified here. So capture the full blob-service properties before and after, and diff them: only `deleteRetentionPolicy` may change.
+
+Run from the worktree root, PowerShell 7, signed in as before (variables as in §8.5, `$params` extended):
+
+```powershell
+$sub       = '484bc857-3802-427f-9ea5-ca47b43db0f0'
+$rg        = 'rg-spaarke-dev'
+$account   = 'sprkspaarkedevebillsa'
+$principal = '9fd47efb-7962-492b-ac44-e5ccd0268ebb'      # mi-bff-api-dev
+$scan      = 'false'                                      # unchanged dev choice (§8.6)
+$cap       = 5000
+$days      = 30
+$module    = 'infrastructure/bicep/modules/ebilling-file-store.bicep'
+$params    = @("storageAccountName=$account", "principalId=$principal", "enableMalwareScanning=$scan", "malwareScanningCapGBPerMonth=$cap", "blobSoftDeleteRetentionDays=$days")
+
+# 1. BEFORE read: the whole blob service, not just soft delete (save the output here)
+az storage account blob-service-properties show --account-name $account -g $rg --subscription $sub -o json
+
+# 2. Build, then what-if (show the owner before step 3)
+az bicep build --file $module --stdout | Out-Null
+az deployment group what-if -g $rg --subscription $sub --name ebilling-file-store-dev --template-file $module --parameters @params
+
+# 3. Apply - only after the owner's OK on the what-if
+az deployment group create -g $rg --subscription $sub --name ebilling-file-store-dev --template-file $module --parameters @params
+
+# 4. AFTER read: diff against step 1; only deleteRetentionPolicy (enabled true, days 30) may differ
+az storage account blob-service-properties show --account-name $account -g $rg --subscription $sub -o json
+./scripts/ebilling/Test-EbillingFileStoreRole.ps1 -SubscriptionId $sub -ResourceGroup $rg -StorageAccountName $account -PrincipalId $principal
+```
+
+**What the what-if should show:** `Modify` on `.../blobServices/default` with `deleteRetentionPolicy.enabled: false -> true` and `days: null -> 30`; the role definition, the three assignments and the three containers unchanged (or `Ignore`/no-change); no Defender resource (`scan=false`). Anything else, stop and tell the owner.
+
+**Side effect:** blobs deleted from now on stay recoverable for 30 days and still count toward storage. The §8.7 tag-write probe's "delete probe a" now leaves a soft-deleted blob in each container for 30 days; harmless.
+
+**Dev run, 2026-10-22** (main session, as ralph.schroeder@spaarke.com; the steps above):
+- **Before read:** saved the whole blob service. `deleteRetentionPolicy` was `{allowPermanentDelete:false, days:null, enabled:false}`.
+- **What-if:** `blobServices/default` showed Modify: `deleteRetentionPolicy.enabled` false -> true and `days` null -> 30. The what-if also listed three items that changed nothing, as the next two reads prove:
+  - `allowPermanentDelete` false -> null. It is still false after the apply.
+  - The role definition `type` "CustomRole" -> "customRole", a case-only difference.
+  - On each container, `defaultEncryptionScope` "$account-encryption-key" -> null and `denyEncryptionScopeOverride` false -> null. An encryption scope can't change after the container is created.
+  The 3 assignments were NoChange. There was no Defender resource.
+- **Apply:** `Succeeded`.
+- **After read, diffed with the before read:** the only difference is `deleteRetentionPolicy` `{allowPermanentDelete:false, days:30, enabled:true}`.
+- **Containers, read before and after:** identical. Each has scope `$account-encryption-key`, deny false, publicAccess None, and no immutability policy or legal hold.
+- **`Test-EbillingFileStoreRole.ps1`:** exit 0, with conditions 1 and 4 still [PASS].
+

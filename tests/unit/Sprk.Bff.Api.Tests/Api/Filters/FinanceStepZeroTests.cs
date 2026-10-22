@@ -23,7 +23,7 @@ namespace Sprk.Bff.Api.Tests.Api.Filters;
 /// on a route flagged <see cref="FinanceInternalCallersOnly"/>, a caller whose systemuser is flagged
 /// <c>sprk_isexternal</c>, has no row, or whose flag or lookup faults is refused with the route's own denial BEFORE the
 /// target declaration runs and before any record check; a flag that reads false or blank passes. Run against the REAL filter
-/// and the REAL caller resolvers (substituted only at the Dataverse seam, <see cref="FinanceStepZeroCaller"/>). The route
+/// and the REAL caller resolvers (substituted only at the Dataverse seam, <see cref="StatedCaller"/>). The route
 /// wiring of every real <c>/api/finance</c> route is proven per route in the Finance contract tests and by
 /// FinanceStepZeroCoverageGuardTests (ArchTests).
 /// </summary>
@@ -152,7 +152,7 @@ public sealed class FinanceStepZeroTests
     public static TheoryData<StepZeroCallerKind> RefusedKindsOnly()
     {
         var data = new TheoryData<StepZeroCallerKind>();
-        foreach (var kind in FinanceStepZeroCaller.RefusedKinds)
+        foreach (var kind in StatedCaller.RefusedKinds)
         {
             data.Add(kind);
         }
@@ -218,7 +218,7 @@ public sealed class FinanceStepZeroTests
         private int _handlerCalls;
 
         public FinanceEndpointsAuthorizationContractTests.RecordingAccessDataSource Access { get; } = new();
-        public FinanceStepZeroCaller StepZero { get; private set; } = null!;
+        public StatedCaller StepZero { get; private set; } = null!;
         public int TargetDeclarations => _targetDeclarations;
         public int HandlerCalls => _handlerCalls;
         public bool VerdictSeenOnDenial { get; private set; }
@@ -241,7 +241,7 @@ public sealed class FinanceStepZeroTests
             builder.Services.AddScoped<AuthorizationService>();
 
             var throwaway = new ServiceCollection();
-            host.StepZero = FinanceStepZeroCaller.Register(registerResolvers ? builder.Services : throwaway, kind);
+            host.StepZero = StatedCaller.Register(registerResolvers ? builder.Services : throwaway, kind);
 
             builder.WebHost.UseTestServer();
             host._app = builder.Build();

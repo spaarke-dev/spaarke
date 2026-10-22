@@ -179,6 +179,21 @@ export const CODE_EBILLING_DISABLED = 'ebilling.disabled';
 export const CODE_ALREADY_DRAFTED = 'ruleset.already_drafted';
 
 export const isForbidden = (f: ApiFailure): boolean => f.status === 403;
+
+/** `reasonCode` of the billing-admin gate's 403: the caller does not hold the billing administrator right. */
+export const REASON_INSUFFICIENT_PRIVILEGE = 'sdap.access.deny.insufficient_privilege';
+
+/**
+ * The 403 that means "you are not a billing administrator". Any other 403 (a Procedure's `insufficient_rights`, a `system_failure`)
+ * is a refusal of that one call only: it says nothing about the caller's billing-admin right (uac-r2 re-check round 3, F1).
+ */
+export const isBillingAdminRefusal = (f: ApiFailure): boolean => f.status === 403 && f.reasonCode === REASON_INSUFFICIENT_PRIVILEGE;
+
+/** What the page knows of the caller's right: decided by the server's answers, never guessed. */
+export type PageAccess = 'unknown' | 'admin' | 'readOnly';
+
+/** The page's access after a failed call: read-only only on the billing-admin refusal; any other failure leaves it as it was. */
+export const accessAfterFailure = (prev: PageAccess, f: ApiFailure): PageAccess => (isBillingAdminRefusal(f) ? 'readOnly' : prev);
 export const isEbillingDisabled = (f: ApiFailure): boolean => f.errorCode === CODE_EBILLING_DISABLED;
 /** The rule changed after the page showed it (or the set was edited / published meanwhile): reload and look again. */
 export const isStale = (f: ApiFailure): boolean => f.status === 409 && f.errorCode === CODE_CONCURRENT_EDIT;

@@ -1,3 +1,6 @@
+using Sprk.Bff.Api.Tests.AccessControl;
+using Sprk.Bff.Api.Tests.Services.Ai.Handlers;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -94,9 +97,9 @@ public class FinanceEndpointsAuthorizationContractTests
         ["finance-matter-recalculate", true], ["finance-project-recalculate", true],
     ];
 
-    public static IEnumerable<object[]> FinanceRoutesRefused => FinanceStepZeroCaller.Cross(FinanceRoutes, FinanceStepZeroCaller.RefusedKinds);
+    public static IEnumerable<object[]> FinanceRoutesRefused => StatedCaller.Cross(FinanceRoutes, StatedCaller.RefusedKinds);
 
-    public static IEnumerable<object[]> FinanceRoutesInternal => FinanceStepZeroCaller.Cross(FinanceRoutes, FinanceStepZeroCaller.InternalKinds);
+    public static IEnumerable<object[]> FinanceRoutesInternal => StatedCaller.Cross(FinanceRoutes, StatedCaller.InternalKinds);
 
     [Theory(DisplayName = "Task 099 must-fire: every /api/finance route of this host refuses a flagged-external, row-less or unreadable caller with its own denial, before any rights call")]
     [MemberData(nameof(FinanceRoutesRefused))]
@@ -144,8 +147,8 @@ public class FinanceEndpointsAuthorizationContractTests
     }
 
     public static IEnumerable<object[]> RecalculateRefusedKinds =>
-        FinanceStepZeroCaller.Cross(
-            [["finance-matter-recalculate", Matters], ["finance-project-recalculate", Projects]], FinanceStepZeroCaller.RefusedKinds);
+        StatedCaller.Cross(
+            [["finance-matter-recalculate", Matters], ["finance-project-recalculate", Projects]], StatedCaller.RefusedKinds);
 
     [Theory(DisplayName = "Task 099: a step-0 refusal on POST /api/finance/{matters|projects}/{id}/recalculate is indistinguishable from an internal caller's 404 for a record deleted after the check (the handler's own uniform 404)")]
     [MemberData(nameof(RecalculateRefusedKinds))]
@@ -835,6 +838,132 @@ public class FinanceEndpointsAuthorizationContractTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
+    // ── Task 188 round 4b (F1-2) meets task 099: on /api/finance, step 0 refuses an external caller first ─────────
+    //
+    // The reject route's Document path still goes through THE external document narrowing (InternalPlaneDocumentNarrowing;
+    // EveryDocumentResourceGrant_GoesThroughTheNarrowingHelper requires it). That call is unreachable for a flagged,
+    // row-less or unreadable caller behind step 0 (FinanceInternalCallersOnly) and stays as defence in depth. The pins
+    // below say so: step 0 answers, and neither the rights check nor the narrowing nor the write runs.
+
+    private const int RestrictedPermission = 100000002;
+
+    /// <summary>
+    /// Seeds <paramref name="host"/>'s app-only world with a body document the narrowing WOULD hide for an external caller
+    /// (the caller holds Read and Write on it, so only the narrowing could deny) and returns it.
+    /// </summary>
+    private static Guid ArrangeHiddenFinanceDocument(FinanceAuthHost host, string @case)
+    {
+        var world = host.World;
+        Guid documentId;
+        switch (@case)
+        {
+            case "own-restricted":
+                documentId = world.Document(Guid.NewGuid(), permission: RestrictedPermission);
+                break;
+            case "internal-only-communication":
+                var communication = Guid.NewGuid();
+                var thread = Guid.NewGuid();
+                world.Thread(thread, 100000000);
+                world.Communication(communication, internalOnly: true, thread);
+                documentId = world.Document(Guid.NewGuid(), communication: communication);
+                break;
+            case "restricted-parent":
+                documentId = world.Document(Guid.NewGuid(), parent: world.Document(Guid.NewGuid(), permission: RestrictedPermission));
+                break;
+            case "narrowing-fault":
+                documentId = world.Document(Guid.NewGuid());
+                world.Faults["sprk_documents"] = HttpStatusCode.ServiceUnavailable;
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(@case), @case, null);
+        }
+
+        host.Access.Grant(Documents, documentId, AccessRights.Read | AccessRights.Write);
+        return documentId;
+    }
+
+    private static HttpRequestMessage RejectRequest(Guid documentId)
+    {
+        var request = Authenticated(HttpMethod.Post, "/api/finance/invoice-review/reject");
+        request.Content = JsonContent.Create(new { documentId });
+        return request;
+    }
+
+    /// <summary>Step 0 answered, and nothing behind it ran: no rights check, no privilege check, no narrowing call or
+    /// app-only read, no reject write.</summary>
+    private static async Task AssertRejectRefusedAtStepZeroAsync(FinanceAuthHost host, HttpResponseMessage response, StepZeroCallerKind kind)
+    {
+        await host.StepZero.AssertRefusedAsync(response, kind, uniformNotFound: false);
+        host.Access.Calls.Should().BeEmpty("step 0 refuses before the record-rights check (AuthorizeAsync)");
+        host.Probe.Calls.Should().BeEmpty("step 0 refuses before any privilege check");
+        host.World.Calls.Should().Be(0, "step 0 refuses before the narrowing");
+        host.World.AllReads.Should().BeEmpty();
+        host.Review.Verify(r => r.RejectInvoiceAsync(It.IsAny<InvoiceReviewRejectRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory(DisplayName = "Task 188 r4b F1-2 / task 099: finance reject — an external caller whose body document the narrowing would hide is refused at step 0 (internal_callers_only); no rights check, no narrowing call, the write never runs")]
+    [InlineData("own-restricted")]
+    [InlineData("internal-only-communication")]
+    [InlineData("restricted-parent")]
+    [InlineData("narrowing-fault")]
+    public async Task Reject_ExternalCaller_HiddenDocument_IsRefusedAtStepZero(string @case)
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        host.StepZero.Kind = StepZeroCallerKind.FlagTrue;
+        var hidden = ArrangeHiddenFinanceDocument(host, @case);
+
+        var response = await host.SendAsync(RejectRequest(hidden));
+
+        await AssertRejectRefusedAtStepZeroAsync(host, response, StepZeroCallerKind.FlagTrue);
+    }
+
+    [Fact(DisplayName = "Task 188 r4b F1-2 / task 099: finance reject — a caller whose systemuser lookup faults is refused at step 0 (system_failure); no rights check, no narrowing call, the write never runs")]
+    public async Task Reject_ExternalCaller_HiddenDocument_LookupFault_IsRefusedAtStepZero()
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        host.StepZero.Kind = StepZeroCallerKind.LookupFault;
+        var hidden = ArrangeHiddenFinanceDocument(host, "own-restricted");
+
+        var response = await host.SendAsync(RejectRequest(hidden));
+
+        await AssertRejectRefusedAtStepZeroAsync(host, response, StepZeroCallerKind.LookupFault);
+    }
+
+    [Theory(DisplayName = "Task 099 regression pin: finance reject — a flagged-external, row-less or flag-unreadable caller is refused at step 0 with its reason (internal_callers_only or system_failure); no rights check, no narrowing call, the write never runs")]
+    [InlineData(StepZeroCallerKind.FlagTrue)]
+    [InlineData(StepZeroCallerKind.NoSystemUserRow)]
+    [InlineData(StepZeroCallerKind.FlagReadFault)]
+    public async Task Reject_RefusedCaller_IsRefusedAtStepZero_BeforeNarrowing(StepZeroCallerKind kind)
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        host.StepZero.Kind = kind;
+        var documentId = host.World.Document(Guid.NewGuid()); // visible: only step 0 can refuse
+        host.Access.Grant(Documents, documentId, AccessRights.Read | AccessRights.Write);
+
+        var response = await host.SendAsync(RejectRequest(documentId));
+
+        await AssertRejectRefusedAtStepZeroAsync(host, response, kind);
+    }
+
+    [Fact(DisplayName = "Task 188 r4b F1-2: must not fire — an internal caller (ebilling) rejects a Restricted document with no narrowing call and no app-only read")]
+    public async Task Reject_InternalCaller_RestrictedDocument_IsNotNarrowed()
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var documentId = host.World.Document(Guid.NewGuid(), permission: RestrictedPermission);
+        host.Access.Grant(Documents, documentId, AccessRights.Read | AccessRights.Write);
+        host.Review.Setup(r => r.RejectInvoiceAsync(
+                It.Is<InvoiceReviewRejectRequest>(q => q.DocumentId == documentId), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new InvoiceReviewRejectResult { DocumentId = documentId });
+
+        var response = await host.SendAsync(RejectRequest(documentId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.World.Calls.Should().Be(0);
+        host.World.AllReads.Should().BeEmpty();
+        host.Review.Verify(r => r.RejectInvoiceAsync(
+            It.Is<InvoiceReviewRejectRequest>(q => q.DocumentId == documentId), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     [Fact]
     public async Task Reject_DocumentDeletedAfterTheCheck_Returns404WithReasonCode()
     {
@@ -1047,7 +1176,12 @@ public class FinanceEndpointsAuthorizationContractTests
 
         public Exception? ThrowOnEveryCall { get; set; }
 
+        private readonly HashSet<(string Set, Guid Id)> _faulted = new();
+
         public void Grant(string set, Guid id, AccessRights rights) => _rights[(set, id)] = rights;
+
+        /// <summary>Dataverse gave no answer for this record: rights None with <see cref="AccessSnapshot.Faulted"/> true (an unknown, not a denial).</summary>
+        public void Fault(string set, Guid id) => _faulted.Add((set, id));
 
         public Task<AccessSnapshot> GetUserAccessAsync(
             string userId, string resourceId, string? userAccessToken = null, CancellationToken ct = default)
@@ -1076,6 +1210,7 @@ public class FinanceEndpointsAuthorizationContractTests
                 UserId = userId,
                 ResourceId = id.ToString(),
                 AccessRights = _rights.TryGetValue((set, id), out var rights) ? rights : AccessRights.None,
+                Faulted = _faulted.Contains((set, id)),
             });
         }
     }
@@ -1083,14 +1218,17 @@ public class FinanceEndpointsAuthorizationContractTests
     /// <summary>A minimal host over the three REAL endpoint mappers.</summary>
     internal sealed class FinanceAuthHost : IAsyncDisposable
     {
-        /// <summary>The step-0 caller (task 099); internal unless a test changes <see cref="FinanceStepZeroCaller.Kind"/>.</summary>
-        public FinanceStepZeroCaller StepZero { get; private set; } = null!;
+        /// <summary>The step-0 caller (task 099); internal unless a test changes <see cref="StatedCaller.Kind"/>.</summary>
+        public StatedCaller StepZero { get; private set; } = null!;
 
         private WebApplication? _app;
         private HttpClient? _client;
 
         public RecordingAccessDataSource Access { get; } = new();
         public RecordingPrivilegeProbe Probe { get; } = new();
+
+        /// <summary>Task 188 round 4b: what the BFF's app-only identity reads (the REAL predicate behind the real seam).</summary>
+        internal AppOnlyDocumentWorld World { get; } = new();
         public Mock<IInvoiceReviewService> Review { get; } = new(MockBehavior.Strict);
         public Mock<IInvoiceSearchService> Search { get; } = new(MockBehavior.Strict);
         public Mock<IFinanceSummaryService> Summary { get; } = new(MockBehavior.Strict);
@@ -1124,7 +1262,7 @@ public class FinanceEndpointsAuthorizationContractTests
                 .AddScheme<AuthenticationSchemeOptions, FinanceAuthzTestAuthHandler>(
                     FinanceAuthzTestAuthHandler.SchemeName, _ => { });
             builder.Services.AddAuthorization();
-            StepZero = FinanceStepZeroCaller.Register(builder.Services); // task 099: every /api/finance route runs step 0
+            StepZero = StatedCaller.Register(builder.Services); // task 099: every /api/finance route runs step 0
             builder.Services.AddRateLimiter(opt =>
                 opt.AddPolicy("dataverse-query", _ => RateLimitPartition.GetNoLimiter("dataverse-query-test")));
 
@@ -1132,6 +1270,9 @@ public class FinanceEndpointsAuthorizationContractTests
             builder.Services.AddSingleton<IAccessDataSource>(Access);
             builder.Services.AddScoped<IAuthorizationRule, OperationAccessRule>();
             builder.Services.AddScoped<AuthorizationService>();
+            // Task 188 round 4b: what the app-only identity reads for THE external document narrowing. The caller is the
+            // one StepZero states above (StatedCaller): step 0 and the narrowing ask the same two resolvers.
+            builder.Services.AddNarrowingWorld(() => World);
             if (registerProbe)
             {
                 builder.Services.AddSingleton<CallerRecordAccessProbe>(Probe);

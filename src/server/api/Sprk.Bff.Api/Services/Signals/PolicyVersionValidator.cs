@@ -243,6 +243,27 @@ public sealed class PolicyVersionValidator
     }
 
     /// <summary>
+    /// ebilling-r1 task 081 (procedure model 7.2, O-24): whether a policy version may carry <c>sprk_procedureversion</c>. Ontology-area
+    /// Procedures are document-only in R1, so the link is refused unless the policy is Billing-domain (<paramref name="policyDomain"/> is
+    /// its <c>sprk_domain</c> option value; null or empty is Ontology, as everywhere else). A version that names no Procedure Version
+    /// (<paramref name="procedureVersionId"/> null) passes whatever the domain. Pure; never throws. Every BFF create of a policy version that
+    /// sets the link calls it (the Procedure copy-forward and the re-keyed edit in <c>RuleSetService</c>).
+    /// </summary>
+    public static PolicyVersionValidationResult ValidateProcedureVersionLink(int? policyDomain, Guid? procedureVersionId)
+    {
+        if (procedureVersionId is null)
+        {
+            return PolicyVersionValidationResult.Success();
+        }
+
+        return policyDomain == RuleDomains.PolicyDomainBilling && procedureVersionId != Guid.Empty
+            ? PolicyVersionValidationResult.Success()
+            : PolicyVersionValidationResult.Failure(
+                OntologyWriterFailureReason.ProcedureVersionWrongDomain,
+                "sprk_procedureversion: only a Billing-domain policy version may belong to a Procedure Version (Ontology-area Procedures are document-only).");
+    }
+
+    /// <summary>
     /// <see cref="ValidateForSave"/> plus the authorable-column allow-list (task 102a, owner option 101(b)): a body naming a column
     /// outside <see cref="AuthorableColumns"/> is refused with <see cref="OntologyWriterFailureReason.ColumnNotAuthorable"/>. The check
     /// runs before the template check. This is the ONE validation every BFF authoring path uses (validate, dry run, save, publish), so

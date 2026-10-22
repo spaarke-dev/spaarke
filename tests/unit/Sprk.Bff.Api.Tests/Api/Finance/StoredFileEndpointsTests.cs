@@ -35,9 +35,9 @@ public sealed class StoredFileEndpointsTests
 
     private static string Url(Guid id) => $"/api/finance/files/{id}/content";
 
-    public static IEnumerable<object[]> RefusedKinds => FinanceStepZeroCaller.RefusedKinds.Select(k => new object[] { k });
+    public static IEnumerable<object[]> RefusedKinds => StatedCaller.RefusedKinds.Select(k => new object[] { k });
 
-    public static IEnumerable<object[]> InternalKinds => FinanceStepZeroCaller.InternalKinds.Select(k => new object[] { k });
+    public static IEnumerable<object[]> InternalKinds => StatedCaller.InternalKinds.Select(k => new object[] { k });
 
     // =============================================================================================================================
     // Authentication and step 0: (a)-(c), before any row read
@@ -347,7 +347,7 @@ public sealed class StoredFileEndpointsTests
 
         var audit = host.AuditEvents.Should().ContainSingle().Subject;
         audit.Message.Should().Contain(file.ToString()).And.Contain("sprk_invoice").And.Contain(InvoiceId.ToString())
-            .And.Contain("systemuser").And.Contain(FinanceStepZeroCaller.SystemUserId.ToString()).And.Contain("route internal");
+            .And.Contain("systemuser").And.Contain(StatedCaller.SystemUserId.ToString()).And.Contain("route internal");
         host.Timeline.Should().Equal("audit", "first-byte");
     }
 
@@ -466,7 +466,7 @@ public sealed class StoredFileEndpointsTests
         private HttpClient _client = null!;
 
         public StoredFileRig Rig { get; private set; } = null!;
-        public FinanceStepZeroCaller StepZero { get; private set; } = null!;
+        public StatedCaller StepZero { get; private set; } = null!;
         public ConcurrentQueue<string> Timeline { get; } = new();
         public CapturingProvider Logs { get; private set; } = null!;
 
@@ -490,7 +490,7 @@ public sealed class StoredFileEndpointsTests
                 })
                 .AddScheme<AuthenticationSchemeOptions, FinanceAuthzTestAuthHandler>(FinanceAuthzTestAuthHandler.SchemeName, _ => { });
             builder.Services.AddAuthorization();
-            host.StepZero = FinanceStepZeroCaller.Register(builder.Services);
+            host.StepZero = StatedCaller.Register(builder.Services);
             builder.Services.AddOptions<EbillingOptions>().Configure(o => o.Enabled = ebillingEnabled);
             builder.Services.AddSingleton(host.Rig.Service);
             builder.Services.AddSingleton<CallerRecordAccessProbe>(host.Rig.Probe);

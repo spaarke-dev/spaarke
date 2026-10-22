@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="131" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Tell the Outlook user when a save could not file its email to the record (#2171)</title>
+    <phase>8 — UAT findings and cross-project fixes</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF response contract (additive) plus Outlook add-in client change on the save path.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Additive, fully specified contract field and a client notice; no access-control decision changes.</model-tier-reason>
+    <effort>high</effort>
+    <deps>130</deps>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same files as task 130 (OfficeService, its tests); runs after 130 on the same branch.</parallel-reason>
+    <tags>bff-api, office, office-addins, frontend, communication, unit-test</tags>
+  </metadata>
+  <prompt>GitHub #2171 (filed by UAC-r2 from #2150 round 8). Owner decision 2026-10-20: a separate task after 130. An Office save that reconciles to an existing, unfiled sprk_communication files it to the save's record (task 121, `ReconciledEmailFiling.FileIfUnfiledAsync`). Task 130 added a second call site: a single attachment save files its parent email. Both calls in `OfficeService.SaveAsync` (email branch and attachment branch) ignore the `ReconciledFilingResult`, and `SaveResponse` (`Models/Office/SaveResponse.cs`) has no field for it. When the filing is refused (`NotPermitted`, e.g. the email sits in a secure record's thread and the caller may not move it) or `Failed`, the user is told the save worked and is never told the email was not filed. ReconciledEmailFiling's own remarks name the gap ("SaveResponse has no warnings channel").
+
+Interplay: UAC #2150 changes the filing path to carry the caller's F3 identity (`SecureRemovalCaller.ForBearerToken` → `ApplyToExistingRecordAsync` / `AfterRefileAsync`). Whichever of 130/#2150 merges second wires the attachment-branch call; check its state before starting.</prompt>
+  <steps mode="directional">
+    <step>Add an optional, additive field to SaveResponse describing the email filing outcome (e.g. `emailFiling`: filed / alreadyFiled / notPermitted / failed; absent when not applicable). Map ReconciledFilingResult to it in both OfficeService call sites. Never fail the save.</step>
+    <step>Duplicate/idempotent responses: decide and document whether the field is absent or replayed; it must never claim a filing that did not happen.</step>
+    <step>Outlook task pane (`src/client/office-addins/shared/taskpane/hooks/useSaveFlow.ts` and its success UI) and Quick Save command (`src/client/office-addins/outlook/commands/index.ts`): show a short, non-blocking notice for notPermitted and failed (Fluent v9, ADR-021). Older clients ignore the field.</step>
+    <step>Update `ReconciledEmailFiling` remarks (the "no warnings channel" sentence).</step>
+  </steps>
+  <goal>When an Outlook save could not file its email to the chosen record, the user sees that it was saved but not filed; everything else about the save is unchanged.</goal>
+  <constraints>
+    <constraint>Additive contract only: no field renamed or removed; existing clients keep working (ADR contract-first). No new endpoint.</constraint>
+    <constraint>The notice reveals nothing about the record the email is filed under or why access was refused beyond "you may not change it".</constraint>
+    <constraint>BFF §10: publish-size delta vs a fresh master build; CVE check; tests. Office add-in deploy only with the owner's go.</constraint>
+  </constraints>
+  <acceptance-criteria>
+    <criterion testable="true">Must-fire: an email save whose reconciled communication refuses Write returns SaveResponse with the filing outcome notPermitted; the same for an attachment save's parent email.</criterion>
+    <criterion testable="true">Must-fire: a filing that succeeds returns filed; a Failed filing returns failed; the save is 202 in every case.</criterion>
+    <criterion testable="true">Must-not-fire: a save that creates its own communication, names no record, or saves a Word document carries no filing outcome.</criterion>
+    <criterion testable="true">Client: the task pane and Quick Save show the notice for notPermitted and failed, and nothing for filed / absent (unit tests in the existing useSaveFlow and commands test suites).</criterion>
+  </acceptance-criteria>
+  <justification>
+    <existing>ReconciledEmailFiling (returns ReconciledFilingResult), SaveResponse, useSaveFlow success UI, Outlook Quick Save notification.</existing>
+    <extension>Yes: one optional field on the existing SaveResponse and the existing success UI; no new service, endpoint or component.</extension>
+    <cost-of-doing-nothing>A user whose email could not be filed (secure thread, no Write) is told the save worked and believes the email is on the record (#2171).</cost-of-doing-nothing>
+  </justification>
+</task>

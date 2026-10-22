@@ -4,7 +4,7 @@
     <title>Repair mode: fill-only, idempotent repair of an existing row (FR-14)</title>
     <phase>2 W2 Unified RecordCreationService</phase>
     <gate>015 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in Sprk.Bff.Api; tags include bff-api, ownership; Repair can change ownerid of existing rows (security-adjacent); adds tests at KEEP paths (TEST-MODIFYING override).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -108,7 +108,15 @@
     <criterion testable="true">ebilling-r1 (2026-10-21): repair writes stored rows with no pre-write step. When the invoice-family guard is on master (ebilling-r1 #1911), a repair write to a sprk_invoice or sprk_billingevent row calls InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync (app-only, D-96) before writing and skips the row with a logged reason on refusal. Test it with a must-fire case and a must-not-fire case. Do not widen pre-write rules to updates.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-14, FR-25, NFR-03. Forward-only selection (go-live watermark) is task 052's job; Repair itself operates on any row it is given.</notes>
+  <notes>Spec FR-14, FR-25, NFR-03. Forward-only selection (go-live watermark) is task 052's job; Repair itself operates on any row it is given.
+Completed 2026-10-21.
+- What landed: RecordCreationService.RepairAsync (new partial RecordCreationService.Repair.cs). One whole-row read; steps 7 (owner; systemuser-owned rows only, record-first via ResolveOwnerOverAsync/OwnerDecided), 3 (fill-only mapping), 8 (search index, only when the owner after repair is a team) and 10 (empty I-1 stamps) build one patch; one UpdateIfRowVersionMatchesAsync; an empty patch is zero writes; RefuseAppOnlyWrite before the write; membership cache invalidated after an owner write. Decision Records skipped (table_append_only); invoice family skipped until #1911 (TODO seam).
+- Never mapped by Repair (every table): secure flag, sprk_accesspermission, sprk_accessinheritance, sprk_securitybu, sprk_containerid (mapped_value_confers_access); the regarding pair (mapped_value_would_refile_pair); Assigned* and AccessConferringRegistry columns (mapped_value_assigns_access). A secure source maps only into an isolated row, fail closed.
+- #2188: owner chose option 1 (2026-10-21). Field-secured source columns are skipped via task 033's app-only metadata reader (seam SourceColumnsRepairMayCopy, TODO task 033); 052 hard-blocked on 033. #2188 guard has a per-member UnmaskedCallExemptions entry (RepairMappingAsync, Uses = 1); KnownCallSites = 3. #2170 guard member-keyed (UAC option c).
+- No production caller: RecordRepairReachabilityTests (IL scan, member-keyed, wrapper/method-group/lambda controls).
+- Reviews: opus adversarial pass + scoped re-checks; UAC-r2 condition (b) review found F1-1, F2-1, F3-1, F3-2, F4-1, F4-2, all fixed; UAC-r2 ACCEPT of the fix round (2026-10-21). K1 (DataverseUpdateHandler exemptions, now IL-asserted) and K2 (no post-create steps; access converges through the jobs, narrower not wider) recorded. The create-side matter-flag gap was filed as #2220 and fixed separately in #2223 (ef5912c7e8).
+- Open owner questions: cross-BU re-own on ownership-parent tables (currently skipped, record_repair.owner_moves_business_unit); whether Repair re-owns roots; SYSTEM/INTEGRATION-owned unfiled rows. Flagged for 052: K-3 (I-16 refresh after a stamp fill), K-1 (Money/unknown-column Default rules fail until 033).
+- Verified on the work branch at ccb732ceb6 (master ef5912c7e8 merged): sln 0/0, ArchTests 1347/1347, related suites 3492 passed / 7 skipped.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

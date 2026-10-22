@@ -784,10 +784,21 @@ public class AiAuthorizationFilter : IEndpointFilter
                 foreach (var (driveId, itemId) in checks.SpeItems)
                 {
                     // The caller's OWN read of the item (OBO): a null (not found / no access) or a fault denies.
-                    if (await files.GetFileMetadataAsUserAsync(httpContext, driveId, itemId, ct) is null)
+                    var item = await files.GetFileMetadataAsUserAsync(httpContext, driveId, itemId, ct);
+                    if (item is null)
                     {
                         _logger?.LogWarning(
                             "[AI-AUTH-FILTER] Chat-context DENIED for caller {UserId}: SPE item not readable as the caller", userId);
+                        return false;
+                    }
+
+                    // Task 188 round 4b (R4a-1) / 4c: when the item is a document's file, the document decision. Keyed on
+                    // the CANONICAL item id SPE returned, not the stored string.
+                    if (!await IsSpeItemShownToCallerAsync(httpContext, item.Id, ct))
+                    {
+                        _logger?.LogWarning(
+                            "[AI-AUTH-FILTER] Chat-context DENIED for caller {UserId}: the SPE item's document is hidden from the caller",
+                            userId);
                         return false;
                     }
                 }
@@ -814,6 +825,93 @@ public class AiAuthorizationFilter : IEndpointFilter
             _logger?.LogError(ex, "[AI-AUTH-FILTER] Chat-context decision faulted for caller {UserId}; denying (fail closed)", userId);
             return false;
         }
+    }
+
+    /// <summary>The narrowing's log label for a chat SPE item (no ids).</summary>
+    private const string SpeItemNarrowingSurface = "chat-spe-item";
+
+    /// <summary>
+    /// Task 188 round 4b (R4a-1, the Compose Path B active document), hardened in round 4c: the document decision for a
+    /// chat context id that is an SPE item. A caller who is not a resolved internal systemuser
+    /// (<see cref="InternalPlaneDocumentNarrowing.IsExternalOrUnknownCallerAsync"/>; a failed lookup counts as external):
+    /// <list type="number">
+    /// <item>the <c>sprk_document</c> rows on the item are found by the SAME app-only lookup the Compose gate uses
+    /// (<see cref="Sprk.Bff.Api.Services.Compose.ComposeRecordResolution.TryFindDocumentByGraphItemIdAsync"/>, the
+    /// <c>sprk_graphitemid</c> key), so a row the caller cannot read no longer looks like no row;</item>
+    /// <item>plus the caller's OWN read on <c>sprk_graphitemid</c> or <c>sprk_driveitemid</c> (OData literal escaped), which
+    /// keeps the legacy drive-item key the Compose lookup does not have (a failed or malformed read denies);</item>
+    /// <item>no row at all: SPE's own check (the caller's OBO read above) stands, as before. Otherwise the ids go through
+    /// <see cref="IAiAuthorizationService.AuthorizeAsync"/> (the caller's Read, then THE narrowing, round 4a) and the
+    /// item is shown when ANY of them is authorized (slice A's any-visible-row rule); a row with no usable id cannot be
+    /// shown.</item>
+    /// </list>
+    /// An internal systemuser: nothing is read and nothing changes. Logs counts only.
+    /// </summary>
+    private async Task<bool> IsSpeItemShownToCallerAsync(HttpContext httpContext, string itemId, CancellationToken ct)
+    {
+        if (!await InternalPlaneDocumentNarrowing.IsExternalOrUnknownCallerAsync(httpContext, SpeItemNarrowingSurface, _logger, ct))
+        {
+            return true;
+        }
+
+        var entities = httpContext.RequestServices.GetService<Spaarke.Dataverse.IGenericEntityService>();
+        var user = httpContext.RequestServices.GetService<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient>();
+        if (entities is null || user is null)
+        {
+            _logger?.LogWarning("[AI-AUTH-FILTER] {Surface}: no Dataverse client; denying (fail closed)", SpeItemNarrowingSurface);
+            return false;
+        }
+
+        // (1) App-only, as the Compose gate finds the row of a drive item (a throw is caught by the caller: deny).
+        var appOnlyRow = await Sprk.Bff.Api.Services.Compose.ComposeRecordResolution
+            .ForDocumentLookups(entities, (ILogger?)_logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance)
+            .TryFindDocumentByGraphItemIdAsync(itemId, ct);
+
+        // (2) The caller's own read, on both item keys.
+        var literal = Uri.EscapeDataString(itemId.Replace("'", "''"));
+        var response = await user.GetAsync(
+            $"sprk_documents?$select=sprk_documentid&$filter=sprk_graphitemid eq '{literal}' or sprk_driveitemid eq '{literal}'",
+            ct);
+        if (!response.IsSuccess
+            || response.Body is not { ValueKind: System.Text.Json.JsonValueKind.Object } body
+            || !body.TryGetProperty("value", out var rows)
+            || rows.ValueKind != System.Text.Json.JsonValueKind.Array)
+        {
+            _logger?.LogWarning("[AI-AUTH-FILTER] {Surface}: the item's document read failed; denying (fail closed)", SpeItemNarrowingSurface);
+            return false;
+        }
+
+        if (appOnlyRow is null && rows.GetArrayLength() == 0)
+        {
+            return true;
+        }
+
+        var documentIds = new HashSet<Guid>();
+        if (appOnlyRow is not null && appOnlyRow.Id != Guid.Empty)
+        {
+            documentIds.Add(appOnlyRow.Id);
+        }
+
+        foreach (var row in rows.EnumerateArray())
+        {
+            if (row.ValueKind == System.Text.Json.JsonValueKind.Object
+                && row.TryGetProperty("sprk_documentid", out var id)
+                && id.ValueKind == System.Text.Json.JsonValueKind.String
+                && Guid.TryParse(id.GetString(), out var documentId)
+                && documentId != Guid.Empty)
+            {
+                documentIds.Add(documentId);
+            }
+        }
+
+        if (documentIds.Count == 0)
+        {
+            _logger?.LogWarning("[AI-AUTH-FILTER] {Surface}: the item's document rows carry no usable id; denying", SpeItemNarrowingSurface);
+            return false;
+        }
+
+        var decision = await _authorizationService.AuthorizeAsync(httpContext.User, documentIds.ToList(), httpContext, ct);
+        return decision.AuthorizedDocumentIds.Count > 0;
     }
 
     /// <summary>

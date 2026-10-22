@@ -66,7 +66,8 @@ public sealed record InvoiceDocumentRefileResult(InvoiceDocumentRefileStatus Sta
 /// owner is reassigned (a separate write, read back) when it differs. A refusal = Refused, nothing written; a fault propagates.</item>
 /// <item><see cref="SecureChildReconciler.AfterRefileAsync"/>, unless the reparent reports
 /// <see cref="RecordOwnerResolution.ParentsUnchanged"/>: the document's secure-child mirror and the pass over what is filed under it, with
-/// <see cref="CancellationToken.None"/> (the re-file has landed). It never throws.</item>
+/// the reparent's answer (#2159 slice 2: a release it permits is recorded first) and <see cref="CancellationToken.None"/> (the re-file has
+/// landed). It never throws.</item>
 /// </list>
 /// Every step is idempotent: a redelivery that finds the link already written skips the write, re-derives the owner (the invoice is also
 /// passed as an inherited parent, so the owner is decided even when the link holds) and runs the step after the re-file again.
@@ -210,10 +211,11 @@ public sealed class InvoiceDocumentRefile
                 return new InvoiceDocumentRefileResult(InvoiceDocumentRefileStatus.Refused, reparent.RefusalCode ?? RefileRefusedCode);
             }
 
-            // 4. The ONE step after a re-file (#2091 / #2095). CancellationToken.None: the re-file has landed. It never throws.
+            // 4. The ONE step after a re-file (#2091 / #2095). CancellationToken.None: the re-file has landed. It never throws. With the
+            // reparent's answer (#2159 slice 2), as every re-file writer passes it: a release the answer permits is recorded first.
             if (!reparent.ParentsUnchanged)
             {
-                await _children.AfterRefileAsync(DocumentEntity, document, () => Task.FromResult(wasIsolated), CancellationToken.None)
+                await _children.AfterRefileAsync(DocumentEntity, document, () => Task.FromResult(wasIsolated), reparent, CancellationToken.None)
                     .ConfigureAwait(false);
             }
 

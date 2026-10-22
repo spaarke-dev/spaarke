@@ -1044,7 +1044,7 @@ Each restamps afterwards, but none refuses any of these:
 
 | Field | Value |
 |---|---|
-| **Status** | Open (owner decision: fix or accept as known limit) |
+| **Status** | Decided 2026-10-22: fix (owner). Field-secure sprk_findingsjson (BFF read/write only, also closes DEF-029) and remove it from the submission form; Decision Records store the generic Duplicate sentence. New task after 090. |
 | **Urgency** | medium |
 | **Filed** | 2026-10-21 |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2235 |
@@ -1088,12 +1088,60 @@ The BFF routes (`/review`, `/blocked`) are covered by 119.
 
 | Field | Value |
 |---|---|
-| **Status** | Open (owner decision: retention period, and whether dev gets it) |
+| **Status** | Decided 2026-10-22: 30 days, all environments incl. dev; module change on task/ebill-2255-softdelete; applied on dev 2026-10-22 (091 §8.8); other environments get it through the stamp wiring (#2232) |
 | **Urgency** | medium |
 | **Filed** | 2026-10-22 |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2255 |
 
 **Description**: Raised by uac-r2 in the 091 review. `ebilling-file-store.bicep` leaves blob soft delete and versioning off, and the BFF identity can delete blobs (the 091 probe returned 202). A wrong delete of an invoice file cannot be recovered. Options: soft delete or versioning with retention in the module, at least for non-dev environments, with each environment's value coming in through the stamp wiring (#2232).
+
+---
+### DEF-039 — Rule-set firm-visibility columns are not refused to app-only generic writers
+
+| Field | Value |
+|---|---|
+| **Status** | Open: do it with the first consumer of RuleSetService.GetFirmClauseAsync |
+| **Urgency** | medium |
+| **Filed** | 2026-10-22 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2274 |
+
+**Description**: Raised by uac-r2 in the 081 review. `sprk_ruleset.sprk_visibletofirms`, `sprk_scope` and `sprk_firm` decide which firm sees clause quotes (`GetFirmClauseAsync`), which has no consumer yet. When one lands, add the three columns to `InheritedAccessPermission.AccessColumns` with a must-fire test.
+
+---
+### DEF-040 — Creator-person schema script: a raced secure FAIL is not reported on re-run
+
+| Field | Value |
+|---|---|
+| **Status** | Open: needs a design (legitimate stamps on a secured column cannot be told apart afterwards) |
+| **Urgency** | low |
+| **Filed** | 2026-10-22 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2280 |
+
+**Description**: Raised by uac-r2 in the 081 re-check. `Set-ChildRecordCreatorPersonSchema.ps1` fails a run when a value lands between its count and the secure, but a re-run sees the column secured and exits 0; values written on columns secured before the gate existed are never counted. Dev was checked read-only (9 existing values, all app-user stamps).
+
+---
+### DEF-041 — Rule sets: 403 vs 404 reveals a Procedure-owned rule set exists
+
+| Field | Value |
+|---|---|
+| **Status** | Open: known limit accepted by uac-r2; a uniform 404 if wanted |
+| **Urgency** | low |
+| **Filed** | 2026-10-22 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2284 |
+
+**Description**: Raised by uac-r2 in the 081 round-2 re-check. A billing admin without Read on a Procedure gets 403 on its rule set where a missing set gives 404; the 409 procedure_owned answers reveal the same. The caller already holds the GUID and the billing-admin privilege.
+
+---
+### DEF-042 — Basic/Core User read sprk_ruleset and sprk_policy around the BFF Procedure Read gate
+
+| Field | Value |
+|---|---|
+| **Status** | Open: OWNER decision on the issue (should Billing policy and rule-set rows be hidden from internal users using Dataverse directly?). ontology: Read on sprk_policy is intended (Console worklist outer link) and must stay; any fix is row scoping or a split |
+| **Urgency** | medium |
+| **Filed** | 2026-10-22 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2285 |
+
+**Description**: Raised by uac-r2 in the 081 round-2 re-check; pre-existing. Spaarke Basic User holds prvReadsprk_ruleset and prvReadsprk_Policy at Deep, Spaarke Core User prvReadsprk_ruleset at Deep, so internal users read rule sets and policies in Dataverse whether or not they can Read the Procedure. UAC 191 covers flagged-external users only.
 
 ---
 

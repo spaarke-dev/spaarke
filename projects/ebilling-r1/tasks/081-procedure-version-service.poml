@@ -4,7 +4,8 @@
     <title>Procedure and Procedure Version service: I-P1 to I-P5, copy-forward, publish, dates, retire with a caller-scoped preview</title>
     <phase>3 Rules (WP3) — Procedure model (EB-D-148), wave W3-B</phase>
     <gate>080 and 088 schema live on dev (Procedure tables, sprk_publishstate, sprk_procedureversion on policy version, sprk_storedfile); 099 merged; ontology-r1 reviews the SignalClosureService and PolicyVersionValidator edits; uac-r2 reviews the authorization</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <status-note>2026-10-22: code, tests and the task's reviews done on task/ebill-081-procedure-service (notes/081-procedure-version-service.md). Open for the main session: the ontology-r1 and uac-r2 review records (gate), the creator-person schema run on dev before the BFF deploy, and the TASK-INDEX update at merge.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>New service and routes with caller authorization (step 0, Write plus billing-admin privilege) and a reconcile that closes Signals on invoices across Secure records.</rigor-reason>
     <model-tier>opus</model-tier>

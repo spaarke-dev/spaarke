@@ -68,8 +68,9 @@ public static class QuickCreateSourceAccessFilterExtensions
 /// <c>GET /api/office/search/{list}</c>, so they carry no per-record access, and the creation service verifies each
 /// one exists (an unknown id is dropped with a warning).</para>
 ///
-/// <para><b>Residual</b> (notes/030 §9): Read is a RECORD-level check. An app-only read does not apply column-level
-/// (field-level security) masking, so a secured column named in an admin-authored profile would still be copied.</para>
+/// <para><b>Column level</b> (notes/030 §9 residual, closed by #2188): Read is a RECORD-level check, and the app-only read does
+/// not apply field-level security. The creation service therefore masks the app read to what the caller can read
+/// (<see cref="MappingSourceCallerMask"/>) before any rule is applied; this filter is unchanged.</para>
 ///
 /// <para><b>The TARGET table's Create privilege (unified-access-control-r2 task 166, sweep finding S-69; owner G5).</b>
 /// Matter, project and invoice are created APP-ONLY and team-owned (the server invariant G5 keeps), so until this
@@ -359,7 +360,7 @@ public sealed class QuickCreateSourceAccessFilter : IEndpointFilter
         => Deny(httpContext, AssigneeDeniedReasonCode, AssigneeDeniedDetail);
 
     /// <summary>A 403 in the Office ProblemDetails shape (<see cref="EntityAccessFilter"/>'s: errorCode + reasonCode + correlationId).</summary>
-    private static IResult Deny(HttpContext httpContext, string reasonCode, string detail)
+    internal static IResult Deny(HttpContext httpContext, string reasonCode, string detail)
         => Results.Problem(
             statusCode: StatusCodes.Status403Forbidden,
             title: "Forbidden",

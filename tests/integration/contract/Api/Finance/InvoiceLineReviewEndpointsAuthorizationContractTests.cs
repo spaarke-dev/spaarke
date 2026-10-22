@@ -108,9 +108,9 @@ public sealed class InvoiceLineReviewEndpointsAuthorizationContractTests
         host.Probe.SystemUserIdCalls.Should().Be(0);
     }
 
-    public static IEnumerable<object[]> RoutesRefused() => FinanceStepZeroCaller.Cross(Routes(), FinanceStepZeroCaller.RefusedKinds);
+    public static IEnumerable<object[]> RoutesRefused() => StatedCaller.Cross(Routes(), StatedCaller.RefusedKinds);
 
-    public static IEnumerable<object[]> RoutesInternal() => FinanceStepZeroCaller.Cross(Routes(), FinanceStepZeroCaller.InternalKinds);
+    public static IEnumerable<object[]> RoutesInternal() => StatedCaller.Cross(Routes(), StatedCaller.InternalKinds);
 
     [Theory(DisplayName = "Task 099 must-fire: /review and every line-decision route refuse a flagged-external, row-less or unreadable caller with 403, before any rights call, even one holding Read and Write")]
     [MemberData(nameof(RoutesRefused))]
@@ -429,8 +429,8 @@ public sealed class InvoiceLineReviewEndpointsAuthorizationContractTests
 
     private sealed class Host : IAsyncDisposable
     {
-        /// <summary>The step-0 caller (task 099); internal unless a test changes <see cref="FinanceStepZeroCaller.Kind"/>.</summary>
-        public FinanceStepZeroCaller StepZero { get; private set; } = null!;
+        /// <summary>The step-0 caller (task 099); internal unless a test changes <see cref="StatedCaller.Kind"/>.</summary>
+        public StatedCaller StepZero { get; private set; } = null!;
 
         private WebApplication _app = null!;
         private HttpClient _client = null!;
@@ -458,7 +458,7 @@ public sealed class InvoiceLineReviewEndpointsAuthorizationContractTests
                 })
                 .AddScheme<AuthenticationSchemeOptions, FinanceAuthzTestAuthHandler>(FinanceAuthzTestAuthHandler.SchemeName, _ => { });
             builder.Services.AddAuthorization();
-            host.StepZero = FinanceStepZeroCaller.Register(builder.Services); // task 099: every /api/finance route runs step 0
+            host.StepZero = StatedCaller.Register(builder.Services); // task 099: every /api/finance route runs step 0
             builder.Services.AddOptions<EbillingOptions>().Configure(o => o.Enabled = ebillingEnabled);
 
             // The REAL authorization stack, substituted only at the access-data boundary.

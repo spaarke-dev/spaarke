@@ -88,9 +88,9 @@ public sealed class InvoiceRelatedWorkEndpointsAuthorizationContractTests
         host.Search.VerifyNoOtherCalls();
     }
 
-    public static IEnumerable<object[]> RefusedKinds => FinanceStepZeroCaller.RefusedKinds.Select(k => new object[] { k });
+    public static IEnumerable<object[]> RefusedKinds => StatedCaller.RefusedKinds.Select(k => new object[] { k });
 
-    public static IEnumerable<object[]> InternalKinds => FinanceStepZeroCaller.InternalKinds.Select(k => new object[] { k });
+    public static IEnumerable<object[]> InternalKinds => StatedCaller.InternalKinds.Select(k => new object[] { k });
 
     [Theory(DisplayName = "Task 099 must-fire: /related-work refuses a flagged-external, row-less or unreadable caller with 403, before any rights call, read or search, even when it holds Read")]
     [MemberData(nameof(RefusedKinds))]
@@ -301,8 +301,8 @@ public sealed class InvoiceRelatedWorkEndpointsAuthorizationContractTests
 
     private sealed class Host : IAsyncDisposable
     {
-        /// <summary>The step-0 caller (task 099); internal unless a test changes <see cref="FinanceStepZeroCaller.Kind"/>.</summary>
-        public FinanceStepZeroCaller StepZero { get; private set; } = null!;
+        /// <summary>The step-0 caller (task 099); internal unless a test changes <see cref="StatedCaller.Kind"/>.</summary>
+        public StatedCaller StepZero { get; private set; } = null!;
 
         private WebApplication _app = null!;
         private HttpClient _client = null!;
@@ -328,7 +328,7 @@ public sealed class InvoiceRelatedWorkEndpointsAuthorizationContractTests
                 })
                 .AddScheme<AuthenticationSchemeOptions, TenantAwareAuthHandler>(TenantAwareAuthHandler.SchemeName, _ => { });
             builder.Services.AddAuthorization();
-            host.StepZero = FinanceStepZeroCaller.Register(builder.Services); // task 099: every /api/finance route runs step 0
+            host.StepZero = StatedCaller.Register(builder.Services); // task 099: every /api/finance route runs step 0
             builder.Services.AddOptions<EbillingOptions>().Configure(o => o.Enabled = ebillingEnabled);
 
             // The REAL authorization stack, substituted only at the access-data boundary.

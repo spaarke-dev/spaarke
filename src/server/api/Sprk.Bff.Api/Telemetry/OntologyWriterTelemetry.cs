@@ -426,6 +426,12 @@ public static class OntologyWriterFailureReason
     /// <see cref="RuleTypeUnsupported"/>, which means the type is unknown or the consumer cannot evaluate it at all.</summary>
     public const string RuleTypeWrongDomain = "rule_type_wrong_domain";
 
+    /// <summary>ebilling-r1 task 081 (procedure model 7.2, O-24): a policy version names a Procedure Version
+    /// (<c>sprk_policyversion.sprk_procedureversion</c>) but its policy is not Billing-domain. Ontology-area Procedures are document-only
+    /// in R1, so no Ontology (or domain-less) policy version is ever keyed to a Procedure Version. Returned by
+    /// <see cref="Sprk.Bff.Api.Services.Signals.PolicyVersionValidator.ValidateProcedureVersionLink"/>.</summary>
+    public const string ProcedureVersionWrongDomain = "procedure_version_wrong_domain";
+
     /// <summary>ebilling-r1 task 073 (FR-26, I-5, D-89): a billing version's <c>sprk_consequence</c> is one its rule type may not carry
     /// (Reject on a type that is not reject-eligible or holds only, or a value outside the defined three). Returned by
     /// <see cref="Sprk.Bff.Api.Services.Signals.PolicyVersionValidator.ValidateForSave"/> when it is given the consequence (the

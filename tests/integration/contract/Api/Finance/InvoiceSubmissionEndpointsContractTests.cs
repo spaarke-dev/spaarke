@@ -42,8 +42,8 @@ namespace Sprk.Bff.Api.Tests.Api.Finance;
 /// </remarks>
 public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
 {
-    /// <summary>The step-0 caller (task 099); internal unless a test changes <see cref="FinanceStepZeroCaller.Kind"/>.</summary>
-    public FinanceStepZeroCaller StepZero { get; private set; } = null!;
+    /// <summary>The step-0 caller (task 099); internal unless a test changes <see cref="StatedCaller.Kind"/>.</summary>
+    public StatedCaller StepZero { get; private set; } = null!;
 
     private static readonly Guid FirmId = InvoiceSubmissionServiceTests.FirmId;
     private static readonly Guid MatterId = InvoiceSubmissionServiceTests.MatterId;
@@ -79,7 +79,7 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
             })
             .AddScheme<AuthenticationSchemeOptions, FinanceAuthzTestAuthHandler>(FinanceAuthzTestAuthHandler.SchemeName, _ => { });
         builder.Services.AddAuthorization();
-        StepZero = FinanceStepZeroCaller.Register(builder.Services); // task 099: every /api/finance route runs step 0
+        StepZero = StatedCaller.Register(builder.Services); // task 099: every /api/finance route runs step 0
         builder.Services.AddRateLimiter(opt =>
             opt.AddPolicy("dataverse-query", _ => RateLimitPartition.GetNoLimiter("dataverse-query-test")));
 
@@ -1057,12 +1057,12 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     // ═══════════════════════════════════════════════════════════════════════════
 
     public static IEnumerable<object[]> SubmitRoutesRefused =>
-        FinanceStepZeroCaller.Cross(InternalSegments.Select(row => row), FinanceStepZeroCaller.RefusedKinds);
+        StatedCaller.Cross(InternalSegments.Select(row => row), StatedCaller.RefusedKinds);
 
     public static IEnumerable<object[]> SubmitRoutesInternal =>
-        FinanceStepZeroCaller.Cross(InternalSegments.Select(row => row), FinanceStepZeroCaller.InternalKinds);
+        StatedCaller.Cross(InternalSegments.Select(row => row), StatedCaller.InternalKinds);
 
-    public static IEnumerable<object[]> RefusedKinds => FinanceStepZeroCaller.RefusedKinds.Select(k => new object[] { k });
+    public static IEnumerable<object[]> RefusedKinds => StatedCaller.RefusedKinds.Select(k => new object[] { k });
 
     [Theory(DisplayName = "Task 099 must-fire: every internal submit route refuses a flagged-external, row-less or unreadable caller with 403, before any rights call, read or write")]
     [MemberData(nameof(SubmitRoutesRefused))]

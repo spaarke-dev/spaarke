@@ -146,12 +146,13 @@ public sealed class RecordCreationServiceSecureRootSeamTests : IClassFixture<Pro
     }
 
     /// <summary>
-    /// UAC-r2 F-2: the plan callback's "already checked" set is keyed by (table, id), never by id alone. A client may pick a
-    /// new row's id, so a row assigned to a CONTACT whose id equals a secure matter's, and filed under that matter by a
-    /// lookup the SERVER set (so step 5 did not ask its AppendTo), must still have the matter's own AppendTo asked by the
-    /// plan callback: the contact's AppendTo, which step 5 did ask, does not stand in for it. Ported from
-    /// <c>SecureRootInheritanceWriterTests.ChatCreate_AssignedToAContactWithASecureMattersId_...</c>; the pair shapes of that
-    /// test are refused earlier here (step 5 asks the pair's record), so this drives the callback itself.
+    /// UAC-r2 F-2: a row assigned to a CONTACT whose id equals a secure matter's, and filed under that matter by a lookup the
+    /// SERVER set (so step 5 did not ask its AppendTo), must still have the matter's own AppendTo asked: the contact's
+    /// AppendTo, which step 5 did ask, does not stand in for it. Ported from
+    /// <c>SecureRootInheritanceWriterTests.ChatCreate_AssignedToAContactWithASecureMattersId_...</c>. Since task 014 a
+    /// server-set work assignment filing lookup is asked AppendTo BEFORE the plan (step 6's pre-plan check), so this no
+    /// longer reaches the plan callback; the callback's (table, id) key is pinned by
+    /// <see cref="CreateAsync_AssignedToAContactWithASecureMattersId_AndFiledUnderAnInvoiceOfThatMatter_IsTheUniformNotFound_AndCreatesNothing"/>.
     /// </summary>
     [Fact]
     public async Task CreateAsync_AssignedToAContactWithASecureMattersId_AndFiledUnderThatMatterByTheServer_IsTheUniformNotFound_AndCreatesNothing()
@@ -165,10 +166,48 @@ public sealed class RecordCreationServiceSecureRootSeamTests : IClassFixture<Pro
         toSecure.Succeeded.Should().BeFalse("a row is never filed under a secure matter the caller may not append to");
         toSecure.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.NotFoundOrDenied);
         toSecure.Refusal.OwnerDecision!.RefusalCode.Should().Be(DataverseUserClientErrorCodes.AccessDenied,
-            "refused by the plan's own AppendTo on the matter, not by step 5 (which asked only about the contact)");
+            "refused by step 6's pre-plan AppendTo on the server-set matter (in the plan's own shape), not by step 5 (which " +
+            "asked only about the contact)");
         var problem = Problem(toSecure);
         problem.Status.Should().Be(StatusCodes.Status404NotFound, "the uniform not-found: never a 403 that says the matter exists and is secure");
         JsonSerializer.Serialize(problem).Should().NotContain(secure.ToString("D"));
+        _writes.Should().BeEmpty("nothing is created");
+    }
+
+    /// <summary>
+    /// Task 014 fix round 3 (UAC-r2 review, F-A): the plan callback's "already checked" set is keyed by (table, id), never by
+    /// id alone. The row is filed under an INVOICE of a secure matter (the plan reaches the matter through it, so no lookup
+    /// names the matter and nothing is server-set) and assigned to a CONTACT whose id equals that matter's. Step 5 asks
+    /// AppendTo on the contact and the invoice only; the matter's own AppendTo is the callback's to ask — an id-only key would
+    /// read the contact's as the matter's and file the row under a secure matter nobody asked about.
+    /// </summary>
+    [Fact]
+    public async Task CreateAsync_AssignedToAContactWithASecureMattersId_AndFiledUnderAnInvoiceOfThatMatter_IsTheUniformNotFound_AndCreatesNothing()
+    {
+        var secure = Guid.NewGuid();
+        SecureMatter(_fixture, secure);
+        var invoice = InvoiceOf(_fixture, secure);
+        _caller.NoAppendToIn.Add(("sprk_matters", secure)); // the caller may append to the CONTACT with that id, not the matter
+
+        var mapped = await DataverseWriteItemMapper.MapAsync(_caller, "sprk_workassignment", JsonSerializer.SerializeToElement(new
+        {
+            sprk_name = "Review the lease",
+            sprk_assignedto = new { relatedTable = "contact", recordId = secure },
+            sprk_regardinginvoice = new { relatedTable = "sprk_invoice", recordId = invoice },
+        }), CancellationToken.None);
+        mapped.Item.Should().NotBeNull(mapped.ValidationError);
+        var request = new RecordCreationRequest("sprk_workassignment", new RecordCreationPayload.Mapped(mapped.Item!))
+        {
+            CorrelationId = FixedCorrelation,
+        };
+
+        var outcome = await Service().CreateAsync(request, AsCaller(), CancellationToken.None);
+
+        outcome.Refusal.Should().NotBeNull("a row is never filed under a secure matter the caller may not append to");
+        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.NotFoundOrDenied);
+        outcome.Refusal.OwnerDecision!.RefusalCode.Should().Be(DataverseUserClientErrorCodes.AccessDenied,
+            "refused by the plan callback's own AppendTo on the matter: the contact with the same id does not stand in for it");
+        Problem(outcome).Status.Should().Be(StatusCodes.Status404NotFound);
         _writes.Should().BeEmpty("nothing is created");
     }
 
@@ -211,16 +250,53 @@ public sealed class RecordCreationServiceSecureRootSeamTests : IClassFixture<Pro
         _fixture.Grants.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task CreateAsync_AProjectUnderASecureMatter_IsCreatedIntoIsolation_WithTheSecureBusinessUnitsSearchDefaults()
+    {
+        // Task 015 review round 1 (F6), FR-10: step 8 reads the OWNING unit — for a row created into isolation, the named
+        // team's unit (the Secure BU), never the caller's.
+        var secure = Guid.NewGuid();
+        SecureMatter(_fixture, secure);
+        var secureIndex = Guid.NewGuid();
+        var unitReads = new List<Guid>();
+        var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        entities
+            .Setup(e => e.RetrieveAsync("team", SecureTeam, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("team", SecureTeam)
+            {
+                ["businessunitid"] = new EntityReference("businessunit", ProvisionProjectTestFixture.SecureBuId),
+            });
+        entities
+            .Setup(e => e.RetrieveAsync("businessunit", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, string[], CancellationToken>((_, id, _, _) => unitReads.Add(id))
+            .ReturnsAsync(new Entity("businessunit", ProvisionProjectTestFixture.SecureBuId)
+            {
+                ["sprk_searchindexname"] = "spaarke-secure-index",
+                ["sprk_ai_search_index"] = new EntityReference("sprk_aisearchindex", secureIndex),
+            });
+
+        var outcome = await Service(entities.Object).CreateAsync(await ProjectUnder(secure), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        outcome.Isolated.Should().BeTrue();
+        outcome.OwningTeamId.Should().Be(SecureTeam);
+        unitReads.Should().Equal([ProvisionProjectTestFixture.SecureBuId], "the isolated owner's unit, read once");
+        var (table, _, fields) = _writes.Should().ContainSingle().Subject;
+        table.Should().Be("sprk_project");
+        fields["sprk_searchindexname"].Should().Be("spaarke-secure-index");
+        fields["sprk_AI_Search_Index@odata.bind"].Should().Be($"/sprk_aisearchindexes({secureIndex:D})");
+    }
+
     // ── Harness ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
-    private RecordCreationService Service()
+    private RecordCreationService Service(IGenericEntityService? entities = null)
     {
         var stamps = new StampWorld();
         var restamper = new CoreAncestorRestamper(stamps.Service, stamps.Resolver, NullLogger<CoreAncestorRestamper>.Instance);
         return new RecordCreationService(
             new Mock<IRecordOwnershipResolver>(MockBehavior.Strict).Object,
             AppCreatesIntoTheWorld(),
-            new Mock<IGenericEntityService>(MockBehavior.Strict).Object,
+            entities ?? new Mock<IGenericEntityService>(MockBehavior.Strict).Object,
             _fixture.Services.GetRequiredService<SecureRootFilingGate>(),
             restamper,
             SecureChildShareWorld.SynchronizerOver(() => World, new FakeRecordShareTable()),
@@ -240,6 +316,22 @@ public sealed class RecordCreationServiceSecureRootSeamTests : IClassFixture<Pro
         }), CancellationToken.None);
         mapped.Item.Should().NotBeNull(mapped.ValidationError);
         return new RecordCreationRequest("sprk_workassignment", new RecordCreationPayload.Mapped(mapped.Item!))
+        {
+            CorrelationId = FixedCorrelation,
+        };
+    }
+
+    /// <summary>A project filed under <paramref name="matter"/> by its ADR-024 pair (its only filing).</summary>
+    private async Task<RecordCreationRequest> ProjectUnder(Guid matter)
+    {
+        var mapped = await DataverseWriteItemMapper.MapAsync(_caller, "sprk_project", JsonSerializer.SerializeToElement(new
+        {
+            sprk_projectname = "Phase 2",
+            sprk_regardingrecordid = matter.ToString("D"),
+            sprk_regardingrecordtype = new { relatedTable = "sprk_recordtype_ref", recordId = RecordTypeRef(_fixture, "sprk_matter") },
+        }), CancellationToken.None);
+        mapped.Item.Should().NotBeNull(mapped.ValidationError);
+        return new RecordCreationRequest("sprk_project", new RecordCreationPayload.Mapped(mapped.Item!))
         {
             CorrelationId = FixedCorrelation,
         };
@@ -275,11 +367,19 @@ public sealed class RecordCreationServiceSecureRootSeamTests : IClassFixture<Pro
             .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((table, id, fields, _, _) =>
             {
                 _journal.Add("create");
-                table.Should().Be("sprk_workassignment");
+                table.Should().BeOneOf("sprk_workassignment", "sprk_project");
                 _writes.Add((table, id, fields));
-                _fixture.SeedWorkAssignment(id, owningTeamId: BoundId(fields, "ownerid@odata.bind"),
-                    isSecure: fields.TryGetValue("sprk_issecure", out var flag) && flag is true,
-                    createdBy: AppUser, createdByPerson: BoundId(fields, "sprk_CreatedByPerson@odata.bind"));
+                var isSecure = fields.TryGetValue("sprk_issecure", out var flag) && flag is true;
+                if (table == "sprk_project")
+                {
+                    _fixture.SeedProject(id, owningTeamId: BoundId(fields, "ownerid@odata.bind"), isSecure: isSecure,
+                        createdBy: AppUser, createdByPerson: BoundId(fields, "sprk_CreatedByPerson@odata.bind"));
+                }
+                else
+                {
+                    _fixture.SeedWorkAssignment(id, owningTeamId: BoundId(fields, "ownerid@odata.bind"), isSecure: isSecure,
+                        createdBy: AppUser, createdByPerson: BoundId(fields, "sprk_CreatedByPerson@odata.bind"));
+                }
                 if (BoundId(fields, "sprk_RegardingMatter@odata.bind") is { } matter)
                     World.Set(table, id, "sprk_regardingmatter", new EntityReference("sprk_matter", matter));
                 _creatorShareAtCreate = _fixture.ShareMaskOf(id, Creator);

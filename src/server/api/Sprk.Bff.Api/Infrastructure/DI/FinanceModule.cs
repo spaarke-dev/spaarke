@@ -6,6 +6,7 @@ using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Resolution;
 using Sprk.Bff.Api.Services.Finance.Coding;
 using Sprk.Bff.Api.Services.Finance.Files;
+using Sprk.Bff.Api.Services.Finance.Procedures;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Finance.Tools;
@@ -109,6 +110,13 @@ public static class FinanceModule
         // Concrete (ADR-010: no interface, no second implementation). Scoped: holds the scoped SPE facade and ownership resolver; it uses the
         // singleton PolicyVersionValidator and RuleBodyDescriber (SignalsModule). Unconditional (flag rule above); the routes carry the kill switch.
         services.AddScoped<RuleSetService>();
+        // Procedures and Procedure Versions (ebilling-r1 task 081, EB-D-148): create, version (copy-forward), publish in one transaction,
+        // retire, and the caller-scoped retire preview. Concrete (ADR-010: no interface, no second implementation). Scoped: it holds the
+        // scoped RuleSetService and ownership resolver; it uses the singleton SignalClosureService (SignalsModule) for the one selection and
+        // close. AffectedInvoiceCounter is the one caller-scoped "open invoices you can see" count (081 and 089 share it); scoped over the
+        // per-request CallerRecordAccessProbe (ExternalAccessModule). Unconditional (flag rule above); the routes carry the kill switch.
+        services.AddScoped<AffectedInvoiceCounter>();
+        services.AddScoped<ProcedureService>();
 
         // Rule drafting job (ebilling-r1 task 075, FR-27): ADR-004 IJobHandler, the same shape as the other Finance handlers. Reads the rule
         // set's source document, asks IInvoiceAi.DraftRulesAsync (which has its Null peer, so AI-off is a clear Poisoned outcome, not a

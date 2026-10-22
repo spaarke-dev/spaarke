@@ -56,7 +56,7 @@ Placement: in the BFF (ADR-052 — short, event-free, Dataverse + blob I/O on th
 | `BlobGateway.IsAlreadyExists` | the 409 check in `SessionFileBlobStore` | Moved into the gateway | A large-upload 412 reads as a fault instead of "already there" |
 | `environment` metadata | none | — | Shared accounts cross-delete in-flight blobs |
 
-Registry: `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md` §5 row **I-21** (added by this task).
+Registry: `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md` §5 row **I-23** (added by this task; numbered I-21 on the task branch, renumbered at the 2026-10-22 merge after master I-19 and 081 I-22).
 
 ## 6. Decisions and readings (POML vs code)
 
@@ -90,7 +90,7 @@ Pass-2 reviewer independently confirmed that removing the ETag pin or the scan-t
 - `tests/integration/Shared/**` not touched (the five-project build rule does not apply).
 - Publish size (`dotnet publish -c Release -r linux-x64 --self-contained false`, zipped Optimal, fresh worktrees): master `3891cc098f` 39,582,191 B (37.75 MB); base `162369cdf5` 40,157,067 B (38.30 MB); tip 40,214,881 B (38.35 MB). **Task delta +57,814 B (+0.06 MB)**; vs master +0.60 MB (the rest is earlier ebilling-r1 work). Under every §10 threshold.
 - CVE: `dotnet list package --vulnerable --include-transitive` — none; no csproj change.
-- `/conflict-check`: only shared file is `DATAVERSE-WRITE-PATH-ARCHITECTURE.md` (UAC PRs #2258, #2253 edit row I-16; this task adds I-21 — different lines). 081 shares `FinanceModule` (planned: 081 merges first, 090 rebases; separate block).
+- `/conflict-check`: only shared file is `DATAVERSE-WRITE-PATH-ARCHITECTURE.md` (UAC PRs #2258, #2253 edit row I-16; this task adds I-23 (I-21 before the merge) — different lines). 081 shares `FinanceModule` (planned: 081 merges first, 090 rebases; separate block).
 
 ## 8. Reviews
 
@@ -114,7 +114,7 @@ Two adversarial passes (opus), code-review, adr-check.
 | Pass 2: retry accepted on path + SHA only | K2 | Known limit, documented in §2 for consumers |
 | Pass 2: 412 on large (block-list) uploads | K2 | Mitigated by `IsAlreadyExists`; live item L3 |
 | Code review K3 (found in passing): the inner-exception not-found walk is duplicated in `CoreAncestorResolver`, `InvoiceFamilyCoreRecordGuard`, `InvoiceSubmissionAfterSteps`, `InvoiceSubmissionPersister`, `InvoiceSubmissionProcessingJobHandler`, `SignalReevaluationJob` | K3 | Reported, not fixed here (six files outside scope); candidate for one shared helper |
-| adr-check: ADR-002 WP-1 registry row missing | F4 | Fixed: I-21 |
+| adr-check: ADR-002 WP-1 registry row missing | F4 | Fixed: I-23 (I-21 before the merge) |
 
 ## 9. Live steps left for the main session
 

@@ -461,7 +461,7 @@ internal sealed class StoredFileRig
         Blobs = new StoredFileBlobs(configured ? Gateway : null, configured ? TenantId : Guid.Empty, malwareScanningEnabled, Logger,
             timeProvider: new GatewayClock(Gateway), organizationId: organizationId);
         var services = new ServiceCollection();
-        StepZero = FinanceStepZeroCaller.Register(services, stepZero);
+        StepZero = StatedCaller.Register(services, stepZero);
         Provider = services.BuildServiceProvider();
         Owners.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => OwnerAnswer);
@@ -477,7 +477,7 @@ internal sealed class StoredFileRig
     public Mock<IRecordOwnershipResolver> Owners { get; } = new(MockBehavior.Strict);
     public RecordOwnerResolution OwnerAnswer { get; set; } = RecordOwnerResolution.Owned(TeamId);
     public ILogger Logger { get; } = NullLogger.Instance;
-    public FinanceStepZeroCaller StepZero { get; }
+    public StatedCaller StepZero { get; }
     public ServiceProvider Provider { get; }
     public StoredFileBlobs Blobs { get; }
     public StoredFileService Service { get; }

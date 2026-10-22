@@ -702,7 +702,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["sprk_document"] = "sprk_documents", ["sprk_communication"] = "sprk_communications",
             ["task"] = "tasks", ["systemuser"] = "systemusers", ["contact"] = "contacts",
             ["sprk_workassignment"] = "sprk_workassignments", ["sprk_workspacelayout"] = "sprk_workspacelayouts",
-            ["sprk_mattertype_ref"] = "sprk_mattertype_refs",
+            ["sprk_mattertype_ref"] = "sprk_mattertype_refs", ["sprk_practicearea_ref"] = "sprk_practicearea_refs",
             // Task 147 r1: the browser child-record routes' tables.
             ["sprk_memo"] = "sprk_memos", ["sprk_event"] = "sprk_events", ["sprk_budget"] = "sprk_budgets",
             ["sprk_invoice"] = "sprk_invoices", ["sprk_reportcard"] = "sprk_reportcards", ["sprk_analysis"] = "sprk_analysises",
@@ -762,6 +762,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 ("sprk_assignedtointernal", "contact", "sprk_AssignedToInternal"),
                 ("sprk_createdbyperson", "systemuser", "sprk_CreatedByPerson"),
+                // Field mapping task 018a (K-3): the matter's organization-owned references (live navigation-property casing).
+                ("sprk_mattertype", "sprk_mattertype_ref", "sprk_MatterType"),
+                ("sprk_practicearea", "sprk_practicearea_ref", "sprk_PracticeArea"),
             },
             ["sprk_project"] = new[]
             {
@@ -777,6 +780,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 // #1616 fix round / task 046 r3: the Create Work Assignment wizard also files under an invoice or an event.
                 ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
                 ("sprk_regardingevent", "sprk_event", "sprk_RegardingEvent"),
+                // Field mapping task 014 fix round 3 (F-B): an ownership-parent lookup no filing list names (#2190).
+                ("sprk_regardingcommunication", "sprk_communication", "sprk_RegardingCommunication"),
                 ("sprk_assignedto", "contact", "sprk_AssignedTo"),
                 ("sprk_assignedtointernal", "contact", "sprk_AssignedToInternal"),
                 ("sprk_createdbyperson", "systemuser", "sprk_CreatedByPerson"),
@@ -913,6 +918,10 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         /// <summary>Ontology task 126 fault switch: a <c>RetrieveUserSetOfPrivilegesByNames</c> question naming this privilege
         /// fails with this status (other privilege questions, e.g. the table's Create, still answer).</summary>
         public (string Privilege, int Status)? PrivilegesFault { get; set; }
+
+        /// <summary>Field mapping task 018a (K-a) fault switch: a <c>RetrieveUserSetOfPrivilegesByNames</c> question naming this
+        /// privilege THROWS (a transport fault) instead of answering.</summary>
+        public string? PrivilegesThrowFor { get; set; }
 
         /// <summary>Ontology task 126 fault switch: the status the <c>UnderOrEqual</c> question fails with.</summary>
         public int? HierarchyFault { get; set; }
@@ -1108,6 +1117,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 var asked = JsonSerializer.Deserialize<string[]>(path[(path.IndexOf("@p1=", StringComparison.Ordinal) + 4)..])!;
                 PrivilegeQuestions.Add(asked);
+                if (PrivilegesThrowFor is { } throwFor && asked.Contains(throwFor, StringComparer.OrdinalIgnoreCase))
+                    throw new TimeoutException("privilege read timed out at 10.0.0.11");
                 if (PrivilegesFault is { } privilegesFault && asked.Contains(privilegesFault.Privilege, StringComparer.OrdinalIgnoreCase))
                     return DataverseUserResponse.Fail(privilegesFault.Status, DataverseUserClientErrorCodes.BadRequest, "Scripted fault.");
 

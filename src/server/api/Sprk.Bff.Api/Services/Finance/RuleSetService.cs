@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
@@ -11,6 +12,7 @@ using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Finance.Procedures;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using Sprk.Bff.Api.Telemetry;
@@ -60,7 +62,12 @@ public sealed record RuleSetCreateRequest(
 /// <summary>A rule set row as the admin sees it.</summary>
 public sealed record RuleSetSummary(
     Guid Id, string Name, string Status, string Scope, Guid? FirmId, bool VisibleToFirms,
-    DateOnly? EffectiveFrom, DateOnly? EffectiveTo, int RuleCount);
+    DateOnly? EffectiveFrom, DateOnly? EffectiveTo, int RuleCount)
+{
+    /// <summary>The Procedure whose rules the set holds (<c>sprk_ruleset.sprk_procedure</c>), or null for a legacy set. Internal and never
+    /// serialized: the list route reads it to leave out the Procedure sets the caller cannot Read (uac-r2 re-check round 2, I-P5).</summary>
+    internal Guid? ProcedureId { get; init; }
+}
 
 /// <summary>A created rule set: Draft, with its source document stored in the Procedure Library.</summary>
 public sealed record RuleSetCreated(
@@ -255,6 +262,33 @@ public class RuleSetService
     internal const string CodeSystemRule = "ruleset.system_rule";
     internal const string CodePublishInProgress = "ruleset.publish_in_progress";
 
+    /// <summary>Task 081: a Procedure's rule set is published by publishing a Procedure Version, never by the rule-set publish.</summary>
+    internal const string CodeProcedurePublish = "ruleset.procedure_publish";
+
+    /// <summary>Task 081: a Procedure's rules are edited and decided on its Draft version; there is none.</summary>
+    internal const string CodeNoDraftVersion = "ruleset.no_draft_version";
+
+    /// <summary>
+    /// Task 081 (I-P4, review F): a Procedure's rule set mirrors the Procedure's scope and visibility (ProcedureService writes both, under the
+    /// caller's Write on the Procedure and the scope lock), so the rule-set assignment and visibility routes refuse it.
+    /// </summary>
+    internal const string CodeProcedureOwned = "ruleset.procedure_owned";
+
+    // ── Task 081 (EB-D-148, procedure model 7.2): the version chain re-keyed per (policy, Procedure Version). ──
+
+    /// <summary><c>sprk_ruleset.sprk_procedure</c>: the Procedure whose rules the set holds (080). A set without it is a legacy set.</summary>
+    internal const string ProcedureColumn = "sprk_procedure";
+
+    /// <summary><c>sprk_policyversion.sprk_procedureversion</c>: the Procedure Version a billing policy version belongs to (080).</summary>
+    internal const string ProcedureVersionColumn = "sprk_procedureversion";
+
+    /// <summary><c>sprk_policyversion.sprk_publishstate</c> (global choice, 080): Draft or Published. Only Published versions are ever loaded
+    /// for evaluation (082); <c>sprk_currentversion</c> means "latest published", for display only (ontology-r1 D-14 amendment).</summary>
+    internal const string PublishStateColumn = "sprk_publishstate";
+
+    internal const int PublishStateDraft = 100000000;
+    internal const int PublishStatePublished = 100000001;
+
     /// <summary>
     /// How long the publish claim of a rule set lives if its holder dies without releasing it (the stale-claim timeout). A publish
     /// is a handful of Dataverse round trips (at most a few thousand rows, 1,000 per transaction), so ten minutes is far past any
@@ -312,13 +346,13 @@ public class RuleSetService
     {
         "sprk_policy", "sprk_versionnumber", "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate", "sprk_shortheadline",
         "sprk_consequence", "sprk_proposalstatus", "sprk_clausereference", "sprk_clauselocation", "sprk_inforcefrom", "sprk_inforceto",
-        RowVersionColumn, RejectionReasonColumn,
+        RowVersionColumn, RejectionReasonColumn, ProcedureVersionColumn, PublishStateColumn,
     };
 
     private static readonly string[] RuleSetColumns =
     {
         "sprk_name", "sprk_scope", "sprk_firm", "sprk_visibletofirms", "sprk_effectivefrom", "sprk_effectiveto", "sprk_sourcedocument",
-        "sprk_notconverted", "statuscode", RuleDomains.PolicyDomainColumn,
+        "sprk_notconverted", "statuscode", RuleDomains.PolicyDomainColumn, ProcedureColumn,
     };
 
     private readonly IGenericEntityService _entities;
@@ -1280,7 +1314,11 @@ public class RuleSetService
                 return RuleSetOutcome<ProposalEdited>.OwnerRefused(owner);
             }
 
-            var number = rule.Versions.Max(v => v.Number) + 1;
+            // Task 081: a rule loaded for one Procedure Version sees only that version's rows, so its next number is the POLICY's (numbers and
+            // the deterministic ids are per policy, across Procedure Versions).
+            var number = work.ProcedureVersionId is null
+                ? rule.Versions.Max(v => v.Number) + 1
+                : await NextVersionNumberAsync(policyId, ct);
             var created = new Entity(VersionEntity, VersionIdFor(policyId, number))
             {
                 ["sprk_name"] = $"{rule.Policy.Code} v{number.ToString(CultureInfo.InvariantCulture)}",
@@ -1304,6 +1342,21 @@ public class RuleSetService
             if (merged.ClauseLocation is not null)
             {
                 created["sprk_clauselocation"] = merged.ClauseLocation;
+            }
+
+            if (work.ProcedureVersionId is { } procedureVersionId)
+            {
+                if (PolicyVersionValidator.ValidateProcedureVersionLink(rule.Policy.Domain, procedureVersionId) is { IsValid: false } link)
+                {
+                    return RuleSetOutcome<ProposalEdited>.Invalid(CodeInvalid, new[]
+                    {
+                        new RuleSetError(policyId, rule.Policy.Name, ProcedureVersionColumn, link.Errors[0], link.Reason),
+                    });
+                }
+
+                // Task 081: the new version stays in its Procedure Version's chain, as a draft until that version (or a correction) publishes.
+                created[ProcedureVersionColumn] = new EntityReference(ProcedureEntity.VersionEntity, procedureVersionId);
+                created[PublishStateColumn] = new OptionSetValue(PublishStateDraft);
             }
 
             owner.ApplyTo(created);
@@ -1536,6 +1589,15 @@ public class RuleSetService
         if (status == RuleSetRetired)
         {
             return RuleSetOutcome<RuleSetPublished>.Refused(StatusCodes.Status409Conflict, CodeRetired, "A retired rule set cannot be published.");
+        }
+
+        // Task 081 (model 7.2): a Procedure's rules go into force by publishing a Procedure Version (ProcedureService), which marks them Published
+        // under that version. This publish would stamp end dates and move pointers on the legacy chain, which the re-keyed chain does not use.
+        if (set.GetAttributeValue<EntityReference>(ProcedureColumn) is not null)
+        {
+            return RuleSetOutcome<RuleSetPublished>.Refused(
+                StatusCodes.Status409Conflict, CodeProcedurePublish,
+                "This rule set belongs to a Procedure. Publish the Procedure's Draft version instead; that puts its rules in force.");
         }
 
         var setErrors = new List<RuleSetError>();
@@ -1893,6 +1955,26 @@ public class RuleSetService
         return new Guid(bytes, bigEndian: true);
     }
 
+    /// <summary>Task 081: the next version number of <paramref name="policyId"/> across every Procedure Version (highest existing + 1).</summary>
+    private async Task<int> NextVersionNumberAsync(Guid policyId, CancellationToken ct)
+    {
+        var query = new QueryExpression(VersionEntity) { ColumnSet = new ColumnSet("sprk_versionnumber"), TopCount = 1 };
+        query.Criteria.AddCondition("sprk_policy", ConditionOperator.Equal, policyId);
+        query.Orders.Add(new OrderExpression("sprk_versionnumber", OrderType.Descending));
+        var top = (await _entities.RetrieveMultipleAsync(query, ct)).Entities.FirstOrDefault();
+        return (top?.GetAttributeValue<int?>("sprk_versionnumber") ?? 0) + 1;
+    }
+
+    /// <summary>Task 081: the Procedure's Draft version (the highest-numbered when, against the one-draft rule, there are several); null when none.</summary>
+    private async Task<Guid?> FindDraftProcedureVersionAsync(Guid procedureId, CancellationToken ct)
+    {
+        var query = new QueryExpression(ProcedureEntity.VersionEntity) { ColumnSet = new ColumnSet(ProcedureEntity.VersionNumberColumn), TopCount = 1 };
+        query.Criteria.AddCondition(ProcedureEntity.VersionProcedureColumn, ConditionOperator.Equal, procedureId);
+        query.Criteria.AddCondition(ProcedureEntity.VersionStatusColumn, ConditionOperator.Equal, ProcedureEntity.VersionStatusDraft);
+        query.Orders.Add(new OrderExpression(ProcedureEntity.VersionNumberColumn, OrderType.Descending));
+        return (await _entities.RetrieveMultipleAsync(query, ct)).Entities.FirstOrDefault()?.Id;
+    }
+
     /// <summary>Whether <paramref name="policyId"/> has a version numbered <paramref name="number"/> (read after a failed create).</summary>
     private async Task<bool> VersionNumberExistsAsync(Guid policyId, int number)
     {
@@ -1918,6 +2000,11 @@ public class RuleSetService
         if (set.GetAttributeValue<OptionSetValue>("statuscode")?.Value == RuleSetRetired)
         {
             return RuleSetOutcome<RuleSetSummary>.Refused(StatusCodes.Status409Conflict, CodeRetired, "A retired rule set cannot be changed.");
+        }
+
+        if (ProcedureOwned<RuleSetSummary>(set) is { } owned)
+        {
+            return owned;
         }
 
         var errors = new List<RuleSetError>();
@@ -1962,8 +2049,20 @@ public class RuleSetService
             return RuleSetOutcome<RuleSetSummary>.Refused(StatusCodes.Status409Conflict, CodeRetired, "A retired rule set cannot be changed.");
         }
 
+        if (ProcedureOwned<RuleSetSummary>(set) is { } owned)
+        {
+            return owned;
+        }
+
         return await UpdateSetAsync(ruleSetId, set, new Dictionary<string, object> { ["sprk_visibletofirms"] = visibleToFirms }, ct);
     }
+
+    /// <summary>Task 081: the 409 for a rule set that belongs to a Procedure (<see cref="CodeProcedureOwned"/>); null for any other set.</summary>
+    private static RuleSetOutcome<T>? ProcedureOwned<T>(Entity set) where T : class =>
+        set.GetAttributeValue<EntityReference>(ProcedureColumn) is null
+            ? null
+            : RuleSetOutcome<T>.Refused(StatusCodes.Status409Conflict, CodeProcedureOwned,
+                "This rule set belongs to a Procedure. Change who it applies to, or its type, on the Procedure.");
 
     private async Task<RuleSetOutcome<RuleSetSummary>> UpdateSetAsync(Guid ruleSetId, Entity set, Dictionary<string, object> fields, CancellationToken ct)
     {
@@ -1989,6 +2088,273 @@ public class RuleSetService
 
         var loaded = await LoadRulesAsync(ruleSetId, ct);
         return RuleSetOutcome<RuleSetSummary>.Done(Summarize(set, loaded.Rules.Count));
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────────────────
+    // A Procedure's rules (task 081, EB-D-148, procedure model 7.2)
+    // ───────────────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The rule set row of a new Procedure (task 081, model 3.3: "a Procedure is the document; the rule set is the rules drawn from it"):
+    /// Billing domain, Draft, linked to the Procedure, its scope and firm mirroring the Procedure's (<see cref="ProcedureScope"/>), and the
+    /// initial clause-visibility flag of its type (D-66). The caller applies the owner and places the create in its own transaction.
+    /// </summary>
+    internal static Entity NewProcedureRuleSet(Guid ruleSetId, string name, Guid procedureId, Guid? firmId, bool visibleToFirms)
+    {
+        var row = new Entity(RuleSetEntity, ruleSetId)
+        {
+            ["sprk_name"] = name,
+            [RuleDomains.PolicyDomainColumn] = new OptionSetValue(RuleDomains.PolicyDomainBilling),
+            [ProcedureColumn] = new EntityReference(ProcedureEntity.Entity, procedureId),
+            ["sprk_visibletofirms"] = visibleToFirms,
+            ["statecode"] = new OptionSetValue(0),
+            ["statuscode"] = new OptionSetValue(RuleSetDraft),
+        };
+        foreach (var (column, value) in ProcedureScope(firmId))
+        {
+            if (value is not DBNull) row[column] = value;
+        }
+
+        return row;
+    }
+
+    /// <summary>
+    /// A Procedure rule set's <c>sprk_scope</c> and <c>sprk_firm</c> for the Procedure's firm (task 081). Applicability is the Procedure's
+    /// (Applies to, Firm; read by 082's resolver), so these exist only for the legacy readers that still read the set (the D-79 firm clause):
+    /// a Procedure naming a firm is a Firm set of that firm, otherwise a client default set with no firm. <see cref="DBNull"/> clears.
+    /// </summary>
+    internal static IReadOnlyList<(string Column, object Value)> ProcedureScope(Guid? firmId) => firmId is { } firm
+        ? new (string, object)[] { ("sprk_scope", new OptionSetValue((int)RuleSetScope.Firm)), ("sprk_firm", new EntityReference(FirmEntity, firm)) }
+        : new (string, object)[] { ("sprk_scope", new OptionSetValue((int)RuleSetScope.ClientDefault)), ("sprk_firm", DBNull.Value) };
+
+    /// <summary>The Billing rule set of a Procedure (task 081): null when it has none. Read through the billing filter, as every read here.</summary>
+    internal async Task<Entity?> LoadProcedureRuleSetAsync(Guid procedureId, CancellationToken ct)
+    {
+        var query = new QueryExpression(RuleSetEntity) { ColumnSet = new ColumnSet(RuleSetColumns), TopCount = 2 };
+        query.Criteria.AddCondition(ProcedureColumn, ConditionOperator.Equal, procedureId);
+        RuleDomains.AddBillingFilter(query);
+        query.Orders.Add(new OrderExpression("createdon", OrderType.Ascending));
+        var rows = (await _entities.RetrieveMultipleAsync(query, ct)).Entities
+            .Where(r => RuleDomains.IsBillingRow(r) && r.GetAttributeValue<EntityReference>(ProcedureColumn)?.Id == procedureId)
+            .ToList();
+        if (rows.Count > 1)
+        {
+            // One rule set per Procedure (the service creates exactly one, with the Procedure, in one transaction). The first is used.
+            _logger.LogError("Procedure {ProcedureId} has more than one billing rule set; the earliest, {RuleSetId}, is used", procedureId, rows[0].Id);
+        }
+
+        return rows.FirstOrDefault();
+    }
+
+    /// <summary>The live (statecode Active) Billing policies of a rule set, with their enabled flag and row version (task 081: the retire).</summary>
+    internal async Task<(IReadOnlyList<PolicyRow> Policies, bool Truncated)> LoadPoliciesAsync(Guid ruleSetId, CancellationToken ct)
+    {
+        var policies = await _entities.RetrieveMultipleAsync(PolicyQuery("sprk_ruleset", ConditionOperator.Equal, new object[] { ruleSetId }), ct);
+        var rows = policies.Entities
+            .Where(p => RuleDomains.IsBillingRow(p) && p.GetAttributeValue<EntityReference>("sprk_ruleset")?.Id == ruleSetId)
+            .Select(p => new PolicyRow(
+                p.Id,
+                p.GetAttributeValue<string>("sprk_policycode") ?? p.Id.ToString(),
+                p.GetAttributeValue<string>("sprk_name") ?? p.Id.ToString(),
+                p.GetAttributeValue<EntityReference>("sprk_currentversion")?.Id,
+                p.GetAttributeValue<long?>(RowVersionColumn),
+                p.GetAttributeValue<OptionSetValue>(RuleDomains.PolicyDomainColumn)?.Value,
+                p.GetAttributeValue<bool?>("sprk_enabled")))
+            .ToList();
+        return (rows, policies.MoreRecords);
+    }
+
+    /// <summary>What a copy-forward creates (task 081): the creates, in order, and how many rules they copy.</summary>
+    internal sealed record CopyForwardPlan(IReadOnlyList<OrganizationRequest> Creates, int Copied, bool Truncated, IReadOnlyList<RuleSetError> Errors);
+
+    /// <summary>
+    /// Copy-forward (task 081, model 7.2 "v2 copies v1", O-12): for every enabled Billing policy of the set with a version PUBLISHED under
+    /// <paramref name="fromProcedureVersionId"/>, a Draft copy of the latest such version under <paramref name="toProcedureVersionId"/> — the SAME
+    /// policy, the policy's next number, its deterministic id (<see cref="VersionIdFor"/>), Accepted (it is v(n)'s content, already accepted;
+    /// an edit sends it back to Proposed as any edit does), owned by <paramref name="owner"/> with the caller as creator person. Nothing is
+    /// written here: the caller places the creates in the same transaction as the new Procedure Version. A policy with no published version
+    /// under the source is not copied, and a system rule (D-125) never is. A rule the new version then rejects is "dropped": it stays enabled
+    /// with no version published under the new Procedure Version (model 7.2).
+    /// </summary>
+    internal async Task<CopyForwardPlan> PlanCopyForwardAsync(
+        Guid ruleSetId, Guid fromProcedureVersionId, Guid toProcedureVersionId, RecordOwnerResolution owner, CancellationToken ct)
+    {
+        var loaded = await LoadRulesAsync(ruleSetId, ct); // every version of every policy: the next number is per policy
+        if (loaded.Truncated)
+        {
+            return new CopyForwardPlan(Array.Empty<OrganizationRequest>(), 0, true, Array.Empty<RuleSetError>());
+        }
+
+        var creates = new List<OrganizationRequest>();
+        var errors = new List<RuleSetError>();
+        foreach (var rule in loaded.Rules)
+        {
+            if (rule.Policy.Enabled == false || rule.Versions.Any(v => v.RuleType == (int)RuleType.SubmissionIntegrity))
+            {
+                continue;
+            }
+
+            var source = rule.Versions
+                .Where(v => v.ProcedureVersionId == fromProcedureVersionId && v.IsPublishedUnderProcedure)
+                .MaxBy(v => v.Number);
+            if (source is null)
+            {
+                continue;
+            }
+
+            if (PolicyVersionValidator.ValidateProcedureVersionLink(rule.Policy.Domain, toProcedureVersionId) is { IsValid: false } link)
+            {
+                errors.Add(new RuleSetError(rule.Policy.Id, rule.Policy.Name, ProcedureVersionColumn, link.Errors[0], link.Reason));
+                continue;
+            }
+
+            var number = rule.Versions.Max(v => v.Number) + 1;
+            var copy = new Entity(VersionEntity, VersionIdFor(rule.Policy.Id, number))
+            {
+                ["sprk_name"] = $"{rule.Policy.Code} v{number.ToString(CultureInfo.InvariantCulture)}",
+                ["sprk_policy"] = new EntityReference(PolicyEntity, rule.Policy.Id),
+                ["sprk_versionnumber"] = number,
+                ["sprk_proposalstatus"] = new OptionSetValue((int)ProposalState.Accepted),
+                [ProcedureVersionColumn] = new EntityReference(ProcedureEntity.VersionEntity, toProcedureVersionId),
+                [PublishStateColumn] = new OptionSetValue(PublishStateDraft),
+                // Required column; provisional until the Procedure Version publishes and sets the effective date.
+                ["sprk_inforcefrom"] = DateTime.UtcNow,
+            };
+            if (source.RuleType is { } type) copy["sprk_ruletype"] = new OptionSetValue(type);
+            if (source.RuleBody is not null) copy["sprk_rulebody"] = source.RuleBody;
+            if (source.Template is not null) copy["sprk_messagetemplate"] = source.Template;
+            if (source.Headline is not null) copy["sprk_shortheadline"] = source.Headline;
+            if (source.Consequence is { } consequence)
+            {
+                copy["sprk_consequence"] = new OptionSetValue(consequence);
+                copy["sprk_proposedaction"] = ProposedActionText(consequence);
+            }
+
+            if (source.ClauseReference is not null) copy["sprk_clausereference"] = source.ClauseReference;
+            if (source.ClauseLocation is not null) copy["sprk_clauselocation"] = source.ClauseLocation;
+            owner.ApplyTo(copy);
+            creates.Add(new CreateRequest { Target = copy });
+        }
+
+        return new CopyForwardPlan(creates, creates.Count, false, errors);
+    }
+
+    /// <summary>The rule-set side of a Procedure Version publish (task 081): the conditional updates, what they put in force, or the errors.</summary>
+    internal sealed record ProcedureRulesPublishPlan(
+        IReadOnlyList<OrganizationRequest> Updates, IReadOnlyList<PublishedRuleVersion> Published, int Rejected,
+        IReadOnlyList<RuleSetError> Errors, bool Truncated);
+
+    /// <summary>
+    /// Plans the publish of a Procedure Version's rules (task 081, model 7.2): every Accepted Draft policy version under
+    /// <paramref name="procedureVersionId"/> is marked Published with <c>sprk_inforcefrom</c> = <paramref name="effectiveFrom"/>, and its policy's
+    /// <c>sprk_currentversion</c> ("latest published", display only) moves to it with <c>sprk_enabled</c> = Yes. Rejected versions stay Draft (the
+    /// version dropped them); a Proposed one refuses the whole publish (every rule is decided before a version goes into force). Draft policy
+    /// versions under OTHER Procedure Versions are never touched (the rows are loaded for this one only). The set is marked Published.
+    /// Every candidate is validated first (<see cref="PolicyVersionValidator.ValidateForSave"/>, Billing, consequence; and
+    /// <see cref="PolicyVersionValidator.ValidateProcedureVersionLink"/>); one failure plans nothing. Version and policy updates are
+    /// conditional on the row versions read. Nothing is written here: the caller sends the updates in ONE transaction with the Procedure
+    /// Version's own writes, so the rules and the version go into force together or not at all (I-P1). A version already marked Published
+    /// (a retry) is not planned again.
+    /// </summary>
+    internal async Task<ProcedureRulesPublishPlan> PlanProcedureVersionPublishAsync(
+        Guid ruleSetId, Guid procedureVersionId, DateOnly effectiveFrom, CancellationToken ct)
+    {
+        var set = await LoadRuleSetAsync(ruleSetId, ct);
+        if (set is null)
+        {
+            return new ProcedureRulesPublishPlan(Array.Empty<OrganizationRequest>(), Array.Empty<PublishedRuleVersion>(), 0,
+                new[] { new RuleSetError(null, null, "ruleSet", "The Procedure's rule set was not found.", null) }, false);
+        }
+
+        var loaded = await LoadRulesAsync(ruleSetId, ct, procedureVersionId);
+        if (loaded.Truncated)
+        {
+            return new ProcedureRulesPublishPlan(Array.Empty<OrganizationRequest>(), Array.Empty<PublishedRuleVersion>(), 0, Array.Empty<RuleSetError>(), true);
+        }
+
+        var errors = new List<RuleSetError>();
+        var candidates = new List<RuleSetRule>();
+        var rejected = 0;
+        foreach (var rule in loaded.Rules)
+        {
+            var work = rule.Working;
+            if (!work.IsDraft(rule.Policy))
+            {
+                continue; // already Published under this version (a retry of a publish whose last write landed)
+            }
+
+            switch (work.StateOrProposed)
+            {
+                case ProposalState.Accepted:
+                    candidates.Add(rule);
+                    errors.AddRange(ValidateRule(rule.Policy, work.RuleType?.ToString(CultureInfo.InvariantCulture), work));
+                    if (PolicyVersionValidator.ValidateProcedureVersionLink(rule.Policy.Domain, procedureVersionId) is { IsValid: false } link)
+                    {
+                        errors.Add(new RuleSetError(rule.Policy.Id, rule.Policy.Name, ProcedureVersionColumn, link.Errors[0], link.Reason));
+                    }
+
+                    break;
+                case ProposalState.Rejected:
+                    rejected++;
+                    break;
+                default:
+                    errors.Add(new RuleSetError(rule.Policy.Id, rule.Policy.Name, "state",
+                        "This rule is still Proposed. Accept or reject every rule of the version before publishing it.", null));
+                    break;
+            }
+        }
+
+        if (errors.Count > 0)
+        {
+            return new ProcedureRulesPublishPlan(Array.Empty<OrganizationRequest>(), Array.Empty<PublishedRuleVersion>(), rejected, errors, false);
+        }
+
+        var effectiveStart = ToUtcDate(effectiveFrom);
+        var updates = new List<OrganizationRequest>();
+        try
+        {
+            foreach (var rule in candidates)
+            {
+                var version = new Entity(VersionEntity, rule.Working.Id)
+                {
+                    [PublishStateColumn] = new OptionSetValue(PublishStatePublished),
+                    ["sprk_inforcefrom"] = effectiveStart,
+                    RowVersion = RequireRowVersion(rule.Working.RowVersion, VersionEntity, rule.Working.Id).ToString(CultureInfo.InvariantCulture),
+                };
+                updates.Add(new UpdateRequest { Target = version, ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches });
+
+                var policy = new Entity(PolicyEntity, rule.Policy.Id)
+                {
+                    ["sprk_currentversion"] = new EntityReference(VersionEntity, rule.Working.Id),
+                    ["sprk_enabled"] = true,
+                    RowVersion = RequireRowVersion(rule.Policy.RowVersion, PolicyEntity, rule.Policy.Id).ToString(CultureInfo.InvariantCulture),
+                };
+                updates.Add(new UpdateRequest { Target = policy, ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches });
+            }
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogError(ex, "Procedure Version {ProcedureVersionId} publish stopped before any write: a row was read without its row version", procedureVersionId);
+            return new ProcedureRulesPublishPlan(Array.Empty<OrganizationRequest>(), Array.Empty<PublishedRuleVersion>(), rejected,
+                new[] { new RuleSetError(null, null, "rules", "A rule could not be read completely. Reload and publish again.", null) }, false);
+        }
+
+        // The set: Published (the legacy readers, e.g. the D-79 firm clause, require it), with its first effective date.
+        var setRow = new Entity(RuleSetEntity, ruleSetId)
+        {
+            ["statecode"] = new OptionSetValue(0),
+            ["statuscode"] = new OptionSetValue(RuleSetPublished),
+        };
+        if (set.GetAttributeValue<DateTime?>("sprk_effectivefrom") is null)
+        {
+            setRow["sprk_effectivefrom"] = effectiveStart;
+        }
+
+        updates.Add(new UpdateRequest { Target = setRow });
+        return new ProcedureRulesPublishPlan(
+            updates,
+            candidates.Select(c => new PublishedRuleVersion(c.Policy.Id, c.Working.Id, c.Working.Number, c.Predecessor?.Id)).ToList(),
+            rejected, Array.Empty<RuleSetError>(), false);
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -2019,7 +2385,7 @@ public class RuleSetService
 
         var versionQuery = new QueryExpression(VersionEntity)
         {
-            ColumnSet = new ColumnSet("sprk_policy", "sprk_clausereference", "sprk_clauselocation", "sprk_inforceto"),
+            ColumnSet = new ColumnSet("sprk_policy", "sprk_clausereference", "sprk_clauselocation", "sprk_inforceto", PublishStateColumn),
             Criteria = { Conditions = { new ConditionExpression("sprk_policyversionid", ConditionOperator.Equal, policyVersionId) } },
             TopCount = 1,
         };
@@ -2036,8 +2402,11 @@ public class RuleSetService
             return FirmClauseText.None;
         }
 
+        // Task 081 (model 7.2): a version published under a Procedure Version was in force for its window, whatever the pointer says
+        // (sprk_currentversion is "latest published", display only); a Draft one never was.
         var wasInForce = policy.GetAttributeValue<EntityReference>("sprk_currentversion")?.Id == policyVersionId
-            || version.GetAttributeValue<DateTime?>("sprk_inforceto") is not null;
+            || version.GetAttributeValue<DateTime?>("sprk_inforceto") is not null
+            || version.GetAttributeValue<OptionSetValue>(PublishStateColumn)?.Value == PublishStatePublished;
         if (!wasInForce)
         {
             return FirmClauseText.None;
@@ -2067,28 +2436,54 @@ public class RuleSetService
     // ───────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <param name="RowVersion">The row's <c>versionnumber</c> as read; the publish's pointer move is conditional on it.</param>
-    internal sealed record PolicyRow(Guid Id, string Code, string Name, Guid? CurrentVersionId, long? RowVersion = null);
+    /// <param name="Domain">Task 081: the row's <c>sprk_domain</c> as read (the Procedure Version link is checked against it).</param>
+    /// <param name="Enabled">Task 081: the row's <c>sprk_enabled</c> as read (null when not read).</param>
+    internal sealed record PolicyRow(Guid Id, string Code, string Name, Guid? CurrentVersionId, long? RowVersion = null, int? Domain = null, bool? Enabled = null);
 
     /// <param name="RowVersion">The row's <c>versionnumber</c> as read; the publish and decide writes are conditional on it.</param>
     internal sealed record VersionRow(
         Guid Id, int Number, int? RuleType, string? RuleBody, string? Template, string? Headline, int? Consequence, int? State,
         string? ClauseReference, string? ClauseLocation, DateTime? InForceFrom, DateTime? InForceTo, long? RowVersion = null,
-        string? RejectionReason = null)
+        string? RejectionReason = null, Guid? ProcedureVersionId = null, int? PublishState = null)
     {
         public ProposalState StateOrProposed =>
             State is { } s && Enum.IsDefined(typeof(ProposalState), s) ? (ProposalState)s : ProposalState.Proposed;
 
-        /// <summary>A draft: not current and never ended. Only a draft is ever updated in place.</summary>
-        public bool IsDraft(PolicyRow policy) => policy.CurrentVersionId != Id && InForceTo is null;
+        /// <summary>
+        /// A draft: only a draft is ever updated in place. Task 081 (model 7.2): a version keyed to a Procedure Version is a draft until it
+        /// is marked Published (<c>sprk_publishstate</c>), whatever the pointer says, because <c>sprk_currentversion</c> is display only for it;
+        /// a legacy version (no Procedure Version) is a draft when it is not current and never ended, as before.
+        /// </summary>
+        public bool IsDraft(PolicyRow policy) => ProcedureVersionId is not null
+            ? PublishState != PublishStatePublished
+            : policy.CurrentVersionId != Id && InForceTo is null;
+
+        /// <summary>Task 081: a version marked Published under a Procedure Version.</summary>
+        public bool IsPublishedUnderProcedure => ProcedureVersionId is not null && PublishState == PublishStatePublished;
     }
 
     /// <summary>One rule: its policy, every version, the working (highest-numbered) version, and the version it would replace.</summary>
+    /// <remarks>Task 081: when the rule was loaded for one Procedure Version (<see cref="LoadRulesAsync"/> with a version id), every row in
+    /// <see cref="Versions"/> belongs to that Procedure Version, so the working version and the predecessor are per (policy, Procedure Version).</remarks>
     internal sealed record RuleSetRule(PolicyRow Policy, IReadOnlyList<VersionRow> Versions, VersionRow Working)
     {
-        /// <summary>The policy's current version when it is not the working one: what a publish of the working version stamps ended.</summary>
-        public VersionRow? Predecessor =>
-            Policy.CurrentVersionId is { } current && current != Working.Id ? Versions.FirstOrDefault(v => v.Id == current) : null;
+        /// <summary>
+        /// Legacy: the policy's current version when it is not the working one (what a publish of the working version stamps ended).
+        /// Task 081 (model 7.2): for a version keyed to a Procedure Version, the latest PUBLISHED version under the same Procedure Version (the
+        /// version a correction follows); nothing is stamped ended under the re-keyed chain, the Procedure Version's window ends it.
+        /// </summary>
+        public VersionRow? Predecessor => Working.ProcedureVersionId is { } procedureVersion
+            ? Versions.Where(v => v.Id != Working.Id && v.ProcedureVersionId == procedureVersion && v.IsPublishedUnderProcedure).MaxBy(v => v.Number)
+            : Policy.CurrentVersionId is { } current && current != Working.Id ? Versions.FirstOrDefault(v => v.Id == current) : null;
     }
+
+    /// <summary>
+    /// ebilling-r1 task 081 (uac-r2 review item D, procedure model I-P5): the Procedure a billing rule set belongs to
+    /// (<c>sprk_ruleset.sprk_procedure</c>), or null for a legacy set or no such set. The proposal routes' authorization reads it (app-only)
+    /// to require the caller's Write on that Procedure. A read fault throws (the caller denies).
+    /// </summary>
+    internal virtual async Task<Guid?> ProcedureOfRuleSetAsync(Guid ruleSetId, CancellationToken ct) =>
+        (await LoadRuleSetAsync(ruleSetId, ct))?.GetAttributeValue<EntityReference>(ProcedureColumn)?.Id;
 
     private async Task<Entity?> LoadRuleSetAsync(Guid ruleSetId, CancellationToken ct)
     {
@@ -2117,7 +2512,10 @@ public class RuleSetService
         return query;
     }
 
-    private async Task<(List<RuleSetRule> Rules, bool Truncated)> LoadRulesAsync(Guid ruleSetId, CancellationToken ct)
+    /// <param name="procedureVersionId">Task 081: when given, only the policy versions keyed to this Procedure Version are loaded, so each rule
+    /// is the (policy, Procedure Version) chain: its working version, draft state and predecessor are that chain's. A policy with no version
+    /// under it is not a rule of that Procedure Version (a rule the version dropped).</param>
+    private async Task<(List<RuleSetRule> Rules, bool Truncated)> LoadRulesAsync(Guid ruleSetId, CancellationToken ct, Guid? procedureVersionId = null)
     {
         var policies = await _entities.RetrieveMultipleAsync(PolicyQuery("sprk_ruleset", ConditionOperator.Equal, new object[] { ruleSetId }), ct);
         if (policies.MoreRecords)
@@ -2132,7 +2530,9 @@ public class RuleSetService
                 p.GetAttributeValue<string>("sprk_policycode") ?? p.Id.ToString(),
                 p.GetAttributeValue<string>("sprk_name") ?? p.GetAttributeValue<string>("sprk_policycode") ?? p.Id.ToString(),
                 p.GetAttributeValue<EntityReference>("sprk_currentversion")?.Id,
-                p.GetAttributeValue<long?>(RowVersionColumn)))
+                p.GetAttributeValue<long?>(RowVersionColumn),
+                p.GetAttributeValue<OptionSetValue>(RuleDomains.PolicyDomainColumn)?.Value,
+                p.GetAttributeValue<bool?>("sprk_enabled")))
             .ToList();
 
         var versionsByPolicy = new Dictionary<Guid, List<VersionRow>>();
@@ -2140,6 +2540,11 @@ public class RuleSetService
         {
             var query = new QueryExpression(VersionEntity) { ColumnSet = new ColumnSet(VersionColumns) };
             query.Criteria.AddCondition("sprk_policy", ConditionOperator.In, batch);
+            if (procedureVersionId is { } procedureVersion)
+            {
+                query.Criteria.AddCondition(ProcedureVersionColumn, ConditionOperator.Equal, procedureVersion);
+            }
+
             // A stable order, so the working version (the highest number, MaxBy below) is the same on every read even if two rows ever
             // share a number (rows created before edits had deterministic ids): the earliest created of them, then the lowest id.
             query.Orders.Add(new OrderExpression("sprk_versionnumber", OrderType.Ascending));
@@ -2191,7 +2596,21 @@ public class RuleSetService
             return (null, RuleSetOutcome<T>.Refused(StatusCodes.Status409Conflict, CodeRetired, "A retired rule set cannot be changed."));
         }
 
-        var loaded = await LoadRulesAsync(ruleSetId, ct);
+        // Task 081 (model 7.2): a Procedure's rules are edited and decided on the Procedure's Draft version, so the rule is the (policy, Draft
+        // version) chain. A published version's rules are never changed here (a correction under a published version is a later task).
+        Guid? procedureVersionId = null;
+        if (set.GetAttributeValue<EntityReference>(ProcedureColumn)?.Id is { } procedureId)
+        {
+            procedureVersionId = await FindDraftProcedureVersionAsync(procedureId, ct);
+            if (procedureVersionId is null)
+            {
+                return (null, RuleSetOutcome<T>.Refused(
+                    StatusCodes.Status409Conflict, CodeNoDraftVersion,
+                    "This Procedure has no Draft version. Create a new version of the Procedure to change its rules."));
+            }
+        }
+
+        var loaded = await LoadRulesAsync(ruleSetId, ct, procedureVersionId);
         if (loaded.Truncated)
         {
             return (null, RuleSetOutcome<T>.Refused(
@@ -2224,7 +2643,9 @@ public class RuleSetService
         v.GetAttributeValue<DateTime?>("sprk_inforcefrom"),
         v.GetAttributeValue<DateTime?>("sprk_inforceto"),
         v.GetAttributeValue<long?>(RowVersionColumn),
-        v.GetAttributeValue<string>(RejectionReasonColumn));
+        v.GetAttributeValue<string>(RejectionReasonColumn),
+        v.GetAttributeValue<EntityReference>(ProcedureVersionColumn)?.Id,
+        v.GetAttributeValue<OptionSetValue>(PublishStateColumn)?.Value);
 
     private static RuleSetSummary Summarize(Entity set, int ruleCount)
     {
@@ -2244,7 +2665,10 @@ public class RuleSetService
             set.GetAttributeValue<bool>("sprk_visibletofirms"),
             set.GetAttributeValue<DateTime?>("sprk_effectivefrom") is { } from ? DateOnly.FromDateTime(from) : null,
             set.GetAttributeValue<DateTime?>("sprk_effectiveto") is { } to ? DateOnly.FromDateTime(to) : null,
-            ruleCount);
+            ruleCount)
+        {
+            ProcedureId = set.GetAttributeValue<EntityReference>(ProcedureColumn)?.Id,
+        };
     }
 
     /// <param name="carryRowVersion">

@@ -90,8 +90,8 @@ public class FinanceRollupEndpointsContractTests : IClassFixture<FinanceRollupEn
 /// </summary>
 public sealed class FinanceRollupEndpointsTestFixture : IAsyncLifetime, IDisposable
 {
-    /// <summary>The step-0 caller (task 099); internal unless a test changes <see cref="FinanceStepZeroCaller.Kind"/>.</summary>
-    public FinanceStepZeroCaller StepZero { get; private set; } = null!;
+    /// <summary>The step-0 caller (task 099); internal unless a test changes <see cref="StatedCaller.Kind"/>.</summary>
+    public StatedCaller StepZero { get; private set; } = null!;
 
     public Mock<IDataverseService> DataverseMock { get; } = new(MockBehavior.Strict);
 
@@ -115,7 +115,7 @@ public sealed class FinanceRollupEndpointsTestFixture : IAsyncLifetime, IDisposa
             .AddScheme<AuthenticationSchemeOptions, FinanceTestAuthHandler>(
                 FinanceTestAuthHandler.SchemeName, _ => { });
         builder.Services.AddAuthorization();
-        StepZero = FinanceStepZeroCaller.Register(builder.Services); // task 099: every /api/finance route runs step 0
+        StepZero = StatedCaller.Register(builder.Services); // task 099: every /api/finance route runs step 0
 
         builder.Services.AddRateLimiter(opt =>
         {

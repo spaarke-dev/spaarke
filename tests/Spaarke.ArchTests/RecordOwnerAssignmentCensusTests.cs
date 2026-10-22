@@ -140,6 +140,9 @@ public class RecordOwnerAssignmentCensusTests
         + "matter scope, this waiver ends and the creates must be routed. "
         + "Condition (2): both creates, the first version and the edit-path version, resolve the owner the same way "
         + "(RuleSetServiceOwnerTests pins the identical no-parent context and the ApplyTo). "
+        + "ebilling-r1 task 081 adds a third sprk_policyversion create, the Procedure copy-forward (PlanCopyForwardAsync): it applies the "
+        + "owner ProcedureService resolved with the same no-parent context and the caller as RequestedBy (ProcedureServiceTests pins it), "
+        + "so the waiver covers it on the same conditions. "
         + "Condition (3): it covers only Billing-domain rows written by RuleSetService; Ontology-domain policies stay under the authoring "
         + "entries. "
         + "Known limit: a matter set on a Billing policy outside the BFF (form edit) is not seen here; the next edit-path version is "
@@ -271,7 +274,7 @@ public class RecordOwnerAssignmentCensusTests
         // keys on (file, table), so the one waiver is two entries with one text: sprk_policy (1 site: CreateDraftRuleAsync's policy) and
         // sprk_policyversion (2 sites: CreateDraftRuleAsync's first version and EditAsync's edit-path version, created with the caller-chosen id VersionIdFor).
         new CensusEntry("RuleSetService.cs", "sprk_policy", 1, Disposition.Waived, RuleSetServicePolicyWaiver, WaiverKind.Pending),
-        new CensusEntry("RuleSetService.cs", "sprk_policyversion", 2, Disposition.Waived, RuleSetServicePolicyWaiver, WaiverKind.Pending),
+        new CensusEntry("RuleSetService.cs", "sprk_policyversion", 3, Disposition.Waived, RuleSetServicePolicyWaiver, WaiverKind.Pending),
         // WorkAssignmentEndpoints.cs's sprk_workassignment create is gone: task 166 deleted the caller-less route (S-76,
         // owner round 10 item 1), so its Pending waiver went with it (batch-4 integration).
 
@@ -592,22 +595,24 @@ public class RecordOwnerAssignmentCensusTests
             "or the team is in the Secure Record business unit, or the row is user-owned. The write is a conditional Web API PATCH " +
             "(If-Match on the guard read's versionnumber; a 412 is Conflict, a 404 NotFound) that shares the pass's evict and " +
             "read-back (WriteOwnerAndReadBackAsync). No identity gains Write on a Decision Record."),
-        new OwnerWriteEntry("OfficeRecordCreationService.cs", "CreateMatterAsync", 1, OwnerWriteKind.Root,
-            "Office quick-create of a MATTER (a root) — owned by the resolver's team for the acting user (task 080)."),
-        new OwnerWriteEntry("OfficeRecordCreationService.cs", "CreateProjectAsync", 1, OwnerWriteKind.Root,
-            "Office quick-create of a PROJECT (a root) — owned by the resolver's team for the acting user (task 080)."),
-        new OwnerWriteEntry("OfficeRecordCreationService.cs", "IsolateProjectCreate", 1, OwnerWriteKind.Root,
-            "Task 158 r1 (owner round 31 item 2): a PROJECT (a root) filed under a secure record is created INTO isolation, " +
-            "owned by the named Secure Record Owners team provisioning's topology names (SecureRootInheritance.PlanCreateAsync)."),
+        // The Office quick-create of a MATTER or PROJECT (a root) writes its owner through the unified create below
+        // (RecordCreationService.cs: OwnedCreateFields, IsolatedCreateFields) since field mapping task 018; task 018c deleted
+        // the Office creation core and its three owner writes (CreateMatterAsync, CreateProjectAsync, IsolateProjectCreate).
         new OwnerWriteEntry("OwnedChildWrite.cs", "CreateIntoIsolationAsync", 1, OwnerWriteKind.Root,
             "Task 158 r1 (owner round 31 item 2): a chat-created work assignment / project (a root) filed under a secure record " +
             "is created INTO isolation, owned by the named team provisioning's topology names (SecureRootInheritance.PlanCreateAsync)."),
         // field-mapping-server-write-path-r1 task 013: the unified create (Services/RecordCreation/RecordCreationService.cs)
-        // ports OwnedChildWrite's two owner writes unchanged; existing callers still call OwnedChildWrite until tasks 017/018
-        // re-point them. The Office create above is Services/Office/OfficeRecordCreationService.cs (renamed in fix round 2,
-        // UAC-r2 F-3: ServerFiles() keys files by NAME, so the two shared one name and one satisfied the other's checks).
+        // ports OwnedChildWrite's two owner writes unchanged; tasks 017/018 re-pointed the callers. (UAC-r2 F-3: ServerFiles()
+        // keys files by NAME — why the Office core was renamed away from this file's name before 018c deleted it.)
         new OwnerWriteEntry("RecordCreationService.cs", "OwnedCreateFields", 1, OwnerWriteKind.Routed,
             "Task 013: the unified create of an OWNED row — the resolver's team (DecideOwnerAsync), after the as-the-caller checks."),
+        // field-mapping-server-write-path-r1 task 016: Repair mode (FR-14) re-owns an EXISTING systemuser-owned row.
+        new OwnerWriteEntry("RecordCreationService.cs", "RepairOwnerAsync", 1, OwnerWriteKind.Routed,
+            "Task 016: Repair of a user- or application-owned EXISTING row — the resolver's team over the row's own parents " +
+            "(ResolveOwnerOverAsync, the create's step 7), fill-only: a team-owned row, a registry ownership exception, a " +
+            "secure-flagged root (flag not an explicit false; task 144 provisions it), a refusal, or — on an ownership-parent " +
+            "table only — an owner in another business unit leaves it unchanged (a leaf row, which nothing inherits access " +
+            "through, is moved); one conditional update, then the owner-change eviction."),
         new OwnerWriteEntry("RecordCreationService.cs", "IsolatedCreateFields", 1, OwnerWriteKind.Root,
             "Task 013: a work assignment / project (a root) filed under a secure record, created INTO isolation by the unified " +
             "create — owned by the named team SecureRootFilingGate.PlanCreateAsync resolves (OwnedChildWrite.CreateIntoIsolationAsync's)."),
@@ -2447,7 +2452,43 @@ public class RecordOwnerAssignmentCensusTests
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateAttachmentArtifactAsync", "seam: maps CreatedByPersonId"),
         new PersonBearingWriter("DataverseWebApiService.cs", "BuildCreateEventPayload", "seam: binds CreatedByPersonId"),
         new PersonBearingWriter("DataverseWebApiService.cs", "CreateEventLogAsync", "seam: binds createdByPersonId"),
+        // ebilling-r1 task 081 (procedure model 13, O-23): the calling admin creates Procedures, their versions and the copied policy
+        // versions; ProcedureService's one owner decision names them (RequestedBy), which ApplyTo stamps on sprk_procedure(version).
+        new PersonBearingWriter("ProcedureService.cs", "OwnerContext", "the calling admin (oid) of a Procedure, version or copy-forward create"),
     };
+
+    /// <summary>
+    /// Stamped tables that are deliberately NOT in the codified Secure Record Owner child set: they record their creator person but are not
+    /// a secure record's children, so task 146's role set does not govern them. Each entry names why. Anything else in
+    /// <c>StampedChildTables</c> must be a codified child.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> StampedOutsideCodifiedChildren =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sprk_procedure"] = "ebilling-r1 task 081: a Procedure is a billing document filed under no record (model 5.1: owned by the "
+                + "admin's business-unit team, no parents); it records the admin who created it (model 13, O-23)",
+            ["sprk_procedureversion"] = "ebilling-r1 task 081: a version of a Procedure, owned and recorded as the Procedure is",
+        };
+
+    private static List<string> StampedOutsideCodified(
+        IEnumerable<string> stamped, IReadOnlySet<string> codifiedChildren, IReadOnlyDictionary<string, string> exempt) =>
+        stamped.Where(t => !codifiedChildren.Contains(t) && !exempt.ContainsKey(t)).OrderBy(t => t, StringComparer.Ordinal).ToList();
+
+    [Fact(DisplayName = "Task 081: controls — a stamped table outside the codified set is reported unless it is a listed exemption")]
+    public void StampedOutsideCodified_Controls()
+    {
+        var codified = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_todo" };
+        var exempt = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["sprk_procedure"] = "reason" };
+
+        // Must fire: a stamped table that is neither codified nor exempt.
+        Assert.Equal(new[] { "sprk_newtable" }, StampedOutsideCodified(new[] { "sprk_todo", "sprk_procedure", "sprk_newtable" }, codified, exempt));
+
+        // Must not fire: codified or exempt tables only.
+        Assert.Empty(StampedOutsideCodified(new[] { "sprk_todo", "sprk_procedure" }, codified, exempt));
+
+        // Every exemption names a reason and is actually stamped (a stale entry is reported by the test below too).
+        Assert.All(StampedOutsideCodifiedChildren, e => Assert.False(string.IsNullOrWhiteSpace(e.Value)));
+    }
 
     /// <summary>
     /// The census writers that act for NOBODY, and so record no person — reviewed, not assumed (each reason names why no
@@ -2524,10 +2565,14 @@ public class RecordOwnerAssignmentCensusTests
             .Where(t => t.GetProperty("kind").GetString() == "child")
             .Select(t => t.GetProperty("logicalName").GetString()!)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var outside = stamped.Where(t => !codifiedChildren.Contains(t)).OrderBy(t => t, StringComparer.Ordinal).ToList();
+        var outside = StampedOutsideCodified(stamped, codifiedChildren, StampedOutsideCodifiedChildren);
         Assert.True(outside.Count == 0,
             "Stamped child tables outside the codified Secure Record Owner child set (the tables task 146 governs): "
             + string.Join(", ", outside));
+
+        // An exemption for a table that is no longer stamped, or that has since been codified, is stale.
+        var stale = StampedOutsideCodifiedChildren.Keys.Where(t => !stamped.Contains(t) || codifiedChildren.Contains(t)).ToList();
+        Assert.True(stale.Count == 0, "Stale StampedOutsideCodifiedChildren entries: " + string.Join(", ", stale));
     }
 
     [Fact(DisplayName = "Task 146 c1-r1: every app-create writer that acts for a person names that person")]

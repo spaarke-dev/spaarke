@@ -17,7 +17,7 @@ namespace Sprk.Bff.Api.Tests.Services.Finance.Files;
 /// The Finance file store's contracts and service (ebilling-r1 task 090; procedure-and-file-model 4.1-4.3, 9.1): ids, the canonical
 /// source version, the checked size, the blob-name rule, staging, BuildRow, the verified flip, the caller upload, the app create, the
 /// job read and the scan verdict. Blob, Dataverse and caller rights are fakes (StoredFileFakes.cs); step 0 is the REAL definition over
-/// the shared step-0 Dataverse seam (FinanceStepZeroCaller).
+/// the shared step-0 Dataverse seam (StatedCaller).
 /// </summary>
 public sealed class StoredFileServiceTests
 {
@@ -661,7 +661,7 @@ public sealed class StoredFileServiceTests
         var row = rig.Dataverse.Rows[result.FileId!.Value];
         row.GetAttributeValue<OptionSetValue>("sprk_filestatus").Value.Should().Be(100000001);
         row.GetAttributeValue<bool>("sprk_firmvisible").Should().BeFalse();
-        row.GetAttributeValue<EntityReference>("sprk_createdbyperson").Id.Should().Be(FinanceStepZeroCaller.SystemUserId);
+        row.GetAttributeValue<EntityReference>("sprk_createdbyperson").Id.Should().Be(StatedCaller.SystemUserId);
         rig.Owners.Verify(o => o.ResolveOwnerAsync(It.Is<RecordOwnershipContext>(c => c.TargetEntityLogicalName == "sprk_invoice" && c.TargetRecordId == InvoiceId), It.IsAny<CancellationToken>()), Moq.Times.Once);
     }
 
