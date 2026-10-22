@@ -420,5 +420,10 @@ Verification after the fix: `dotnet build` 0 warnings, 0 errors. Handler classes
 - **Deploy:** detached `C:/wtbffe-128`. Package 37.73 MB; 4 critical files SHA-256 verified; CORS OK.
 - **Read-back** (12:50:18Z): `1.0.0+1283c41817cefab38063486105d59ddd199b08b9`. healthz and healthz/dataverse 200; `/api/me` anonymous 401.
 - **Ontology smoke:** PASS.
-- **Still due:** the 30-minute reading (about 13:20Z). UAC's server gate and client redeploys are in UAC's session.
+- **30 minutes (to 13:20Z):**
+  - No new exception class (Graph noise ×6).
+  - DOC-PROFILE warnings 0; `document_bff_column_server_only` 0; `releaseRefusedLinkColumnsNotSecured` 17 lines, all value 0.
+  - No 409s; reconciliation runs Succeeded.
+  - UAC's first gate reading is also clean.
+  - Client redeploys (CommunicationActions, EmailPage, LegalWorkspace, Console) are UAC's, in its session.
 - **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261022T124709Z` (= `a7b956fb55`).

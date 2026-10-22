@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-22 13:00Z (86% checkpoint). Dev BFF 1283c41817 live (12:50Z); 30-min gate due 13:20Z. Dev SPA 3531ed65e. R4 design.md drafted.
+> **Last Updated**: 2026-10-22 13:00Z (86% checkpoint). Dev BFF 1283c41817 live (12:50Z); 30-min gate clean. Dev SPA 3531ed65e. R4 design.md drafted.
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -11,7 +11,7 @@
 |-------|-------|
 | **Task** | No task mid-implementation. R3 is acting as the dev BFF deploy coordinator for peer sessions. Open, owner-driven: 070/071 (Teams), 074 (A9 probes), 002 (grid columns). R4 `design.md` is drafted and waiting for owner review. |
 | **Status** | **Dev BFF = `1283c41817`**, deployed 2026-10-22 12:49–12:50:18Z; owner: "yes, deploy 1283c41817". All six peers said OK. It adds to a7b956fb55: UAC #2234 (round 122 provisional own-Restricted release), #2239 (AI profile writer limited to 6 ACT-011 columns), field-mapping 018a (dormant), #2244 and #2249 (app-only refusal covers BFF-owned document, owner and creator columns) and #2248 (archive verifies attachment item). **BFF rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261022T124709Z` (= a7b956fb55). Flag `ExternalAccess__ImpersonatedRootSets__Enabled` has been ON since 2026-10-20 23:51Z. **Dev SPA = `3531ed65e`** (rollback tag `external-spa-dev-rollback-28274e04e`). Deploy records: `notes/task-078-notes.md` (one section per deploy). |
-| **Next Action** | (1) When background task b7resdzof finishes (about 13:20Z), send UAC the 30-minute reading: exceptions, reconciliation runs, DOC-PROFILE "not profile columns"/"no mappable profile fields", document_bff_column_server_only, releaseRefusedLinkColumnsNotSecured; expect all 0 apart from the Graph noise. Then append a "1283c41817" section to task-078-notes, update this file, and commit by pathspec. (2) UAC redeploys the CommunicationActions PCF and the EmailPage/LegalWorkspace/Console code pages in its own session with the owner's go. |
+| **Next Action** | No deploy pending. Wait for the next peer candidate (ontology #2233 after #2252) or owner items below. UAC client redeploys are in UAC's session. |
 
 ### Uncommitted files
 - `.claude/agent-memory/researcher/MEMORY.md` (modified) and three untracked researcher files belong to the OWNER. Never commit or discard them. Commit by pathspec only.
