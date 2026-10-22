@@ -240,8 +240,10 @@ public static class BillingRuleCatalogue
     /// (D-112, <see cref="BillingFinding.DetailWithheld"/>). It names no token: the finding carries no tracking number, no
     /// invoice or line detail. The variant of the Duplicate template (see <c>BillingRuleDraftTranslator.Wording</c>), which names
     /// <c>{{duplicateOf.trackingNumber}}</c>; a message composer uses this text, not the policy version's template, for such a finding.
+    /// It IS <see cref="EarlierInvoiceReadability.WithheldSentence"/> (ontology task 157 owns the text; D-176, task 119), so a finding
+    /// withheld at write time and one withheld at read time read alike and the two cannot drift.
     /// </summary>
-    public const string WithheldDuplicateTemplate = "This matches an earlier submission.";
+    public const string WithheldDuplicateTemplate = EarlierInvoiceReadability.WithheldSentence;
 
     /// <summary>
     /// The <c>{{field}}</c> tokens of a withheld finding's message (D-112): none. A withheld Duplicate finding is built against this

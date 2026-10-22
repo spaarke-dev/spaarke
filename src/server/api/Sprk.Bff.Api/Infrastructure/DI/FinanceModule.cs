@@ -123,7 +123,8 @@ public static class FinanceModule
         services.AddScoped<InvoiceRelatedWorkService>();
         // Invoice Review read model and line decisions (ebilling-r1 task 100, FR-31, D-64, D-75). Two concrete services (ADR-010: no interface, one
         // implementation each). Scoped: per request, they hold the scoped AuthorizationService (read) and the singleton generic Dataverse client, 016 totals,
-        // 074 recorder and processing lock (decisions). Unconditional (flag rule above); the routes carry the kill switch.
+        // 074 recorder and processing lock (decisions). Unconditional (flag rule above); the routes carry the kill switch. The read model also takes
+        // the caller's IDataverseUserClient and EarlierInvoiceReadability (SignalsModule, unconditional) for the D-176 Duplicate check (task 119).
         services.AddScoped<InvoiceReviewReadService>();
         services.AddScoped<InvoiceLineDecisionService>();
         // UTBMS line coding (ebilling-r1 task 047, FR-22, D-46): resolves an invoice's code set (CodeSetResolver), codes its

@@ -5,6 +5,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals;
 
@@ -134,7 +135,8 @@ public sealed record ReviewSuggestionDto(string Kind, decimal? Amount);
 /// <param name="Consequence">The policy version's consequence (<c>Flag</c> or <c>Reject</c>), as 073 saw it; null when none was recorded.</param>
 /// <param name="Rejects">073 decided this finding rejected the submission.</param>
 /// <param name="HeldBecause">073's hold reason code when it would have rejected but did not (a read field below the threshold).</param>
-/// <param name="DetailWithheld">The values read are not returned (a duplicate across a secure wall, D-112).</param>
+/// <param name="DetailWithheld">The values read are not returned: a duplicate across a secure wall (D-112, at write time), or a Duplicate whose
+/// earlier invoice the caller cannot read (D-176, at read time).</param>
 /// <param name="Overridden">The submission this finding blocked was overridden (an <c>override-submission</c> Decision Record exists for the invoice).</param>
 public sealed record ReviewFindingDto(
     string RuleType,
@@ -286,7 +288,15 @@ internal sealed record LineExtraction(
 /// <remarks>
 /// <para><b>Scope.</b> The route's filter has already authorized Read on the invoice as the caller; every read here is bounded by that invoice
 /// (the lines are the rows whose <c>sprk_invoice</c> is it, the submission the one linked to it, the Decision Records those regarding it or one of
-/// its lines), app-only like every read in this namespace. No id other than the invoice's comes from the request.</para>
+/// its lines), app-only like every read in this namespace. No id other than the invoice's comes from the request. The one exception is the
+/// D-176 earlier-invoice check below, which reads AS THE CALLER.</para>
+/// <para><b>D-176 (#2118, task 119): a Duplicate's earlier invoice.</b> A stored Duplicate finding quotes an earlier submission
+/// (<c>duplicateOf.invoiceId</c>, <c>duplicateOf.trackingNumber</c>) and the duplicated line's values. Its detail is returned only when the
+/// caller's own read returns that earlier invoice: the rule of <see cref="EarlierInvoiceReadability"/>, shared with the worklist's
+/// <see cref="SignalReadService"/> (ontology task 157), called once per response with the caller's <see cref="IDataverseUserClient"/>. Otherwise
+/// the finding's whole (policy, subject) group takes the write-time withheld shape (D-112, as the persister scrubs it): no values read, no
+/// suggestion, <c>detailWithheld</c>, and <see cref="EarlierInvoiceReadability.WithheldSentence"/> as the group's sentence. A fault withholds
+/// every Duplicate group; the page still loads.</para>
 /// <para><b>Where the findings come from.</b> From the submission's stored <c>sprk_findingsjson</c> (task 049, notes section 5): per finding the rule
 /// type, policy, version, clause and its location, the reason code, 073's decision, the values read and (task 100) the suggested adjustment; the
 /// Signal plan in the same JSON gives each group's severity and sentence. They are NOT read back through the Signal read route: that route strips the
@@ -296,7 +306,9 @@ internal sealed record LineExtraction(
 /// <para><b>Queries (independent of the line count; NFR-02).</b> One invoice read, one read of all the invoice's lines, then in parallel: the
 /// linked submission (1), the Decision Records of the invoice and its lines (1, one OR filter), the roster entries of the matched timekeepers
 /// (1, none when no line has one) and the caller's Write check (a rights lookup, not an entity read). At most four entity reads after the header
-/// and lines; each is paged (5,000 rows a page), so 150 lines is one page.</para>
+/// and lines; each is paged (5,000 rows a page), so 150 lines is one page. When the stored findings hold a Duplicate that quotes an earlier
+/// invoice, the caller's earlier-invoice check adds one <c>sprk_invoices</c> read and, when a Duplicate quotes only a tracking number, one
+/// <c>sprk_invoicesubmissions</c> read (each per 200 values), whatever the number of Duplicates.</para>
 /// <para><b>Component justification (CLAUDE.md section 11).</b> Existing: <see cref="InvoiceContextService"/> (task 106) assembles the context panel
 /// and reads none of the lines, findings or history. Extension: the panel's sections are other invoices and rollups, a different shape and
 /// different failure semantics (it degrades per section; this is the page's own data). Cost of doing nothing: the review page has no data (FR-31).</para>
@@ -354,17 +366,24 @@ public sealed class InvoiceReviewReadService
     private readonly IGenericEntityService _entities;
     private readonly AuthorizationService _authorization;
     private readonly IEbillingSettingsReader _settings;
+    private readonly IDataverseUserClient _user;
+    private readonly EarlierInvoiceReadability _earlierInvoices;
     private readonly ILogger<InvoiceReviewReadService> _logger;
 
+    /// <param name="user">The CALLER's Dataverse client (OBO): the D-176 earlier-invoice check reads with it, never app-only (ADR-028).</param>
     public InvoiceReviewReadService(
         IGenericEntityService entities,
         AuthorizationService authorization,
         IEbillingSettingsReader settings,
+        IDataverseUserClient user,
+        EarlierInvoiceReadability earlierInvoices,
         ILogger<InvoiceReviewReadService> logger)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _authorization = authorization ?? throw new ArgumentNullException(nameof(authorization));
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+        _user = user ?? throw new ArgumentNullException(nameof(user));
+        _earlierInvoices = earlierInvoices ?? throw new ArgumentNullException(nameof(earlierInvoices));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -403,16 +422,18 @@ public sealed class InvoiceReviewReadService
         var overridden = history.Any(h => string.Equals(h.ActionCode, "override-submission", StringComparison.Ordinal));
 
         var parsed = submission?.Findings;
+        var withheld = await DuplicateGroupsWithheldAsync(
+            parsed, invoice.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.InvoiceVendorOrg)?.Id, ct).ConfigureAwait(false);
         var bySequence = lineRows.ToDictionary(l => l.Id, l => l.GetAttributeValue<int?>(InvoiceSubmissionPersister.LineSequence) ?? 0);
         var lines = new List<ReviewLineDto>(lineRows.Count);
         foreach (var row in lineRows.OrderBy(l => bySequence[l.Id]).ThenBy(l => l.Id))
         {
             var sequence = bySequence[row.Id];
-            var findings = FindingsFor(parsed, "Line", sequence - 1, row.Id, overridden);
+            var findings = FindingsFor(parsed, "Line", sequence - 1, row.Id, overridden, withheld);
             lines.Add(ToLine(row, sequence, findings, roster: rosterTask.Result, threshold));
         }
 
-        var invoiceFindings = FindingsFor(parsed, "Invoice", null, invoiceId, overridden);
+        var invoiceFindings = FindingsFor(parsed, "Invoice", null, invoiceId, overridden, withheld);
 
         return new InvoiceReviewDto(
             ToHeader(invoice, known ? lifecycle.ToString() : "Unknown", statusCode, held),
@@ -689,7 +710,10 @@ public sealed class InvoiceReviewReadService
             }
             : null;
 
-    private static IReadOnlyList<ReviewFindingDto> FindingsFor(ParsedFindings? parsed, string subject, int? lineIndex, Guid subjectId, bool overridden)
+    /// <param name="withheld">The (policy, subject) groups whose earlier-invoice detail the caller may not see (D-176): every finding of such a
+    /// group is returned in the write-time withheld shape, and the group's sentence is <see cref="EarlierInvoiceReadability.WithheldSentence"/>.</param>
+    private static IReadOnlyList<ReviewFindingDto> FindingsFor(
+        ParsedFindings? parsed, string subject, int? lineIndex, Guid subjectId, bool overridden, IReadOnlySet<FindingGroup> withheld)
     {
         if (parsed is null)
         {
@@ -702,16 +726,136 @@ public sealed class InvoiceReviewReadService
             {
                 var plan = parsed.PlanFor(f.PolicyCode, subjectId);
                 var primary = plan is not null && plan.ReasonCodes.Count > 0 && string.Equals(plan.ReasonCodes[0], f.ReasonCode, StringComparison.Ordinal);
+                var hidden = withheld.Contains(FindingGroup.Of(f));
                 return new ReviewFindingDto(
                     f.RuleType, f.PolicyCode, f.PolicyId, f.PolicyVersionId, f.Clause, f.ClauseLocation, f.ReasonCode,
-                    primary ? plan!.Sentence : null,
+                    primary ? (hidden ? EarlierInvoiceReadability.WithheldSentence : plan!.Sentence) : null,
                     plan?.Severity,
-                    f.Consequence, f.Rejects, f.HeldBecause, f.DetailWithheld,
+                    f.Consequence, f.Rejects, f.HeldBecause, f.DetailWithheld || hidden,
                     overridden && f.Rejects,
-                    f.Suggestion,
-                    f.Values);
+                    hidden ? null : f.Suggestion,
+                    hidden ? [] : f.Values);
             })
             .ToList();
+    }
+
+    // ── D-176: a Duplicate's earlier invoice, judged as the caller (task 119) ──
+
+    /// <summary><c>valuesRead</c> name of the earlier invoice's id (ebilling's <c>DuplicateHandler</c>, #2118).</summary>
+    internal const string DuplicateOfInvoiceIdValue = "duplicateOf.invoiceId";
+
+    /// <summary><c>valuesRead</c> name of the earlier submission's tracking number (ebilling's <c>DuplicateHandler</c>).</summary>
+    internal const string DuplicateOfTrackingNumberValue = "duplicateOf.trackingNumber";
+
+    /// <summary>A (policy, subject) group of the stored findings: the unit the persister scrubs (D-112) and the Signal plan words.</summary>
+    private readonly record struct FindingGroup(string PolicyCode, string Subject, int? Line)
+    {
+        public static FindingGroup Of(StoredFinding finding) => new(finding.PolicyCode, finding.Subject, finding.Line);
+    }
+
+    private static readonly IReadOnlySet<FindingGroup> NoGroups = new HashSet<FindingGroup>();
+
+    /// <summary>
+    /// D-176: the groups holding a Duplicate whose earlier invoice the caller may not see. One
+    /// <see cref="EarlierInvoiceReadability.ShownAsync{TKey}"/> call for the whole response, with the caller's client; it owns the rule (at
+    /// least one reference, every one readable; nothing shown on a fault). Any exception other than the request's cancellation withholds every
+    /// Duplicate group (fail closed) and is logged at Warning by type only: the page never fails because of this check.
+    /// </summary>
+    private async Task<IReadOnlySet<FindingGroup>> DuplicateGroupsWithheldAsync(ParsedFindings? parsed, Guid? vendorOrg, CancellationToken ct)
+    {
+        var referencesOf = DuplicateReferences(parsed, vendorOrg);
+        if (referencesOf.Count == 0)
+        {
+            return NoGroups;
+        }
+
+        IReadOnlySet<FindingGroup> shown;
+        try
+        {
+            shown = await _earlierInvoices.ShownAsync(_user, referencesOf, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                "Invoice review: the earlier-invoice check faulted ({ExceptionType}); every Duplicate's earlier-invoice detail is withheld (D-176, fail closed).",
+                ex.GetType().Name);
+            shown = NoGroups;
+        }
+
+        var withheld = referencesOf.Keys.Where(group => !shown.Contains(group)).ToHashSet();
+        if (withheld.Count > 0)
+        {
+            _logger.LogInformation(
+                "Invoice review: the earlier-invoice detail of {Count} Duplicate group(s) is withheld (an earlier invoice the caller cannot read, an unresolved number, or a fault; D-176).",
+                withheld.Count);
+        }
+
+        return withheld;
+    }
+
+    /// <summary>
+    /// The references (priors) of every group that holds a Duplicate: a finding whose values read name <c>duplicateOf.invoiceId</c> or
+    /// <c>duplicateOf.trackingNumber</c> (names compared without regard to case, as the Signal read does). ONLY such groups are keyed: a group
+    /// with no reference is withheld by the rule. One reference per prior: its id when <c>duplicateOf.invoiceId</c> is a non-empty GUID (the
+    /// number is then ignored), else its tracking number within the CURRENT invoice's vendor org (the prior is always the same firm's). A
+    /// Duplicate naming neither adds a reference that identifies nothing, so its group is withheld. A finding withheld at write time carries no
+    /// <c>duplicateOf.*</c> value and is not keyed: it is returned as stored.
+    /// </summary>
+    private static Dictionary<FindingGroup, IReadOnlyCollection<EarlierInvoiceReadability.Reference>> DuplicateReferences(
+        ParsedFindings? parsed, Guid? vendorOrg)
+    {
+        var groups = new Dictionary<FindingGroup, List<EarlierInvoiceReadability.Reference>>();
+        foreach (var finding in parsed?.Findings ?? [])
+        {
+            var duplicate = false;
+            var ids = new List<Guid>();
+            var numbers = new List<string>();
+            foreach (var value in finding.Values)
+            {
+                if (string.Equals(value.Name, DuplicateOfInvoiceIdValue, StringComparison.OrdinalIgnoreCase))
+                {
+                    duplicate = true;
+                    if (System.Guid.TryParse(value.Value, CultureInfo.InvariantCulture, out var id) && id != System.Guid.Empty)
+                    {
+                        ids.Add(id);
+                    }
+                }
+                else if (string.Equals(value.Name, DuplicateOfTrackingNumberValue, StringComparison.OrdinalIgnoreCase))
+                {
+                    duplicate = true;
+                    if (!string.IsNullOrWhiteSpace(value.Value))
+                    {
+                        numbers.Add(value.Value);
+                    }
+                }
+            }
+
+            if (!duplicate)
+            {
+                continue;
+            }
+
+            var group = FindingGroup.Of(finding);
+            if (!groups.TryGetValue(group, out var references))
+            {
+                groups[group] = references = [];
+            }
+
+            if (ids.Count > 0)
+            {
+                references.AddRange(ids.Distinct().Select(id => new EarlierInvoiceReadability.Reference(id, null, null)));
+            }
+            else if (numbers.Count > 0)
+            {
+                references.AddRange(numbers.Distinct(StringComparer.Ordinal).Select(n => new EarlierInvoiceReadability.Reference(null, vendorOrg, n)));
+            }
+            else
+            {
+                references.Add(new EarlierInvoiceReadability.Reference(null, null, null));
+            }
+        }
+
+        return groups.ToDictionary(g => g.Key, g => (IReadOnlyCollection<EarlierInvoiceReadability.Reference>)g.Value);
     }
 
     // ── The stored findings JSON (task 049, notes section 5) ──
