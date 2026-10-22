@@ -279,3 +279,203 @@ Verification (K-a):
 - ArchTests, built separately and run in full: 1347 passed, 0 failed.
 - The same filtered set: 2781 passed, 7 skipped, 0 failed (2788 in total).
 - The unfiltered suite was not run.
+
+## 018b-1: inventory, then stopped before the swap (2026-10-22)
+
+FULL rigor, opus at high effort, branch `task/fm-018b1` from `6ce5ec7929`. Item 0 (NFR-01) is done below. The swap was **not
+started**, for the two reasons the brief names:
+
+- **An inventory item has no landing place and no covering decision:** G1, "No matter type was supplied".
+- **Further decisions are needed** before the adapter can be written without guessing (G2 to G7).
+- **Size:** the pass is well over the agent's ~100-step limit (see "Sizing and proposed split").
+
+No code or test changed. File:line references are at `6ce5ec7929`. Old core = `Services/Office/OfficeRecordCreationService.cs`;
+service = `Services/RecordCreation/RecordCreationService.cs` (`.Mapping.cs` where stated).
+
+### Inventory: the Matter and Project legs of `OfficeRecordCreationService`
+
+The Office entry points are `OfficeService.QuickCreateAsync` (dispatch :1964-1969), `QuickCreateViaCreationServiceAsync`
+(:2064-2108) and `MapCreationFailureStatus` (:2117).
+
+| # | Old behaviour (file:line) | Lands in | Note |
+|---|---|---|---|
+| 1 | Not Matter/Project → `entity_type_not_supported` 400 (:615-623) | Unreachable: the dispatch sends only Matter/Project (OfficeService.cs:1964) | Goes with 018c |
+| 2 | Name trimmed; blank → `name_required` 400 (:628-633, :763-768) | Endpoint `OFFICE_007` (`QuickCreateFieldRequirements.Validate`) and the `OfficeService` null guard (:1957-1961); the adapter trims into the payload | Unreachable code |
+| 3 | No resolved `OwnerSystemUserId` → `owner_unresolved` 403 (:637-650, :772-785) | Service step 1 WhoAmI (service :299-316) → `PrincipalUnresolved`, mapped to `owner_unresolved` 403; **plus G3** | G2, G3 |
+| 4 | Description trimmed; blank omitted (:655-658, :790-793) | Adapter payload | — |
+| 5 | Matter type: `Guid.Empty` = unset; an app-only existence read (`CheckReferenceAsync` :1325-1355); not found → "…was not found…" warning, a fault → "…could not be checked…"; never refused (:660-677) | Service step 2 reference pass: `ReferenceLookupColumns` = `RecordTableRule.OptionalReferenceLookups` (RecordTableRules.cs:111; service :388-402; Mapping.cs:725-765). Checked **as the caller**: the AppendTo privilege plus a caller read of the row (CallerWriteAuthorization.cs:387-405) | Wording changes to K-3's uniform text (Mapping.cs:62, :763): **G6** |
+| 6 | Practice area: the same (`ApplyReferenceAsync` :681, :1297-1312) | The same pass (RecordTableRules.cs:111) | G6 |
+| 7 | Project type: the same (:796) | The same pass (RecordTableRules.cs:136) | G6 |
+| 8 | BU defaults from the **caller's** BU: `sprk_searchindexname` (fill) and the `sprk_ai_search_index` lookup; a read fault → warning (:1427-1484) | Service step 8 `SearchIndexDefaultAsync` (service :1082-1131) from the **owning** team's BU. Same warning text. | Decided (FR-10, Q9): the same BU for an unfiled matter, the matter's BU for a project under it |
+| 9a | Profile read fault → warning (:1505-1522) | Mapping.cs:233-243, the same text (`MappingConfigurationUnreadable` Mapping.cs:45) | — |
+| 9b | No profile → silent no-op (:1524-1528) | Mapping.cs:245 | — |
+| 9c | Profile with no rules → warning (:1530-1535) | Mapping.cs:247-253, the same text | — |
+| 9d | Source read app-only and masked (#2188, :1537-1574); unreadable → `SourceUnreadableWarning` (:1583), and Default rules **still applied** | Mapping.cs:255-288: Read probe as the caller (FR-04), then `MappingSourceCallerMask` | **G7**: different text, and no Default rules when the source is unavailable |
+| 9e | Rules overwrite (`CreateTimeFieldMapping.Apply`, :1576) | `ApplyFillOnly` (Mapping.cs:306) | Decided: Q6, ruling 1 of 2026-10-21 |
+| 9f | Protected targets (`Matter/ProjectProtectedAttributes` :258-277) | `ProtectedFromMapping` (Mapping.cs:182-199): the same registry set, plus the server-owned columns; the same engine warnings | — |
+| 10 | Mapping blanks the name → the requested name is restored, with a warning (:693, :824, :1363-1376) | Intentionally gone: fill-only never replaces the caller's name | Decided ruling 1; 2 of the 4 rewrites |
+| 11 | Mapping writes a non-matter-type value → reverted to the requested type, or removed (:696, :1383-1409) | Intentionally gone: a requested type wins (fill-only). With none, a mapped reference to another table does not map into the merged item and is dropped with `mapped_value_dropped` (Mapping.cs:360-391; `Fits` :943 checks only "is a reference") | Decided ruling 1; 2 of the 4 rewrites |
+| 12 | **"No matter type was supplied. Open the matter and set its type."**, unless a type warning was already given (:696-700) | **None**: see G1 | **G1** |
+| 13a | Assigned To: the requested contact wins (:384-388) | Adapter: a bind in the caller's payload | It now gets AppendTo as the caller (step 5); decided, UAC-r2 (b) item 1. The code is pass 2's: G5 |
+| 13b | A mapped value is kept (:390-395) | Fill-only | — |
+| 13c | Else the maker's linked contact (:397-401; `ResolveMakerContactIdAsync` :415-431, which never throws) | `PostMappingDefaults` keyed by `rule.ForPerson.Column` (RecordTableRules.cs:97, :125; Mapping.cs:602-715). The adapter resolves the value with the same identity service | A default the caller cannot AppendTo is dropped (decided 2026-10-22). Its warning reaches `QuickCreateResponse.Warnings` through `outcome.Warnings` (service :259-260); pass 2 adds the tests |
+| 13d | No linked contact → log `assigned_internal_unset`, blank (:403-406) | Adapter log | — |
+| 14 | Owner = the caller's BU default team; none → `OFFICE_022` 403 (:501-513, :708-713, :840-845) | Service step 7, record-first (service :705-743): an unfiled matter gets the acting user's team (the same answer); a project under a matter gets the matter's BU team. `OwnerUnresolved` is mapped to `OFFICE_022` 403 (the service says 409) | Decided Q9 |
+| 15 | Creator person stamp (:717, :848) | Service step 9 (service :1188-1211); the requester is WhoAmI's id | — |
+| 16 | The number is never written, and is protected from mapping (:184-188) | Step 2 blocks the autonumber column in the caller's payload (service :374-378); `ProtectedFromMapping` adds it (Mapping.cs:188-189) | — |
+| 17 | Number retry ×3 → `record_number_unavailable` 409 (:540-564, :719-722, :870-873) | Service step 11 (service :199-238), `Conflict`, the same code; a 412 is classified too (:1322-1324) | Mapped to 409, same code |
+| 18 | Any other create fault propagates (→ 500 `OFFICE_INTERNAL`) | The service rethrows (service :230-237); the endpoint's generic catch is unchanged | — |
+| 19 | Number read-back warning (:576-604) | Service step 12 `WarnIfNumberMissingAsync` (service :1450-1472), the same text | — |
+| 20 | Assigned-access materializer after the create (:357-358, :730, :927) | Service step 12, roots (service :1387-1392) | — |
+| 21 | `sprk_containerid` never written | Protected (RecordTableRules.cs:93, :121); never in the adapter's payload | — |
+| 22 | Project: the pair is derived from the source **before** mapping (:800-814; `IsFiledUnderItsSource` :1051-1056; `DeriveFiledUnderPairAsync` :1064-1098). No catalog row → `record_owner_parent_undetermined` "ask an administrator"; a read fault → the same code, "Try again" (`FiledUnderUndetermined` :1236-1242) | Adapter (request mapping): `sprk_regardingrecordid` (canonical lower-case "D") and the `sprk_RegardingRecordType` bind, in the caller's payload | `OfficeSearchService.ResolveRegardingRecordTypeIdAsync` (OfficeSearchService.cs:554-574) collapses a fault and a missing row to `null`, so keeping both wordings needs the old read ported into the adapter, not reused |
+| 23 | `CallerMayFileUnderAsync`: AppendTo **as the caller** on the derived pair, for every source (:1001-1026, :1116-1119) → `caller_cannot_file_under_parent` 403; no probe or token → `caller_rights_unverifiable` 500 | Service step 5: `CheckCallerMayCreateAsync` (2) always asks AppendTo on the pair's record, ordinary or secure (CallerWriteAuthorization.cs:114-131) → `NotFoundOrDenied` `record_creation.not_found`, mapped to `caller_cannot_file_under_parent` 403. No token → step 1 (G2) | G2, G5 |
+| 24 | A mapped pair is fill-only over the derived pair; the canonical id spelling (:1121-1148) | Kept by construction: the adapter writes the canonical pair; `ApplyFillOnly` never writes a pair (CreateTimeFieldMapping.cs:186-199) | — |
+| 25 | A secure source with any other pair → `secure_source_filing_mismatch` 403; an unreadable flag → undetermined (retryable); an **empty** flag → `record_owner_parent_undetermined` (non-retryable) (:1150-1177). Reached only when a **mapped** pair differs from the derived one | The mismatch is **unreachable** on the new path: G4. The empty-flag refusal still holds through the step-6 plan (SecureRootInheritance.cs:3740; SecureRootFilingGate.cs:128 → `record_owner_parent_undetermined`; `PlanRefused` default arm, service :1268), mapped to 403 | **G4** |
+| 26 | Into isolation: `prvCreatesprk_project` plus AppendTo on every secure parent, as the caller; no token → `caller_rights_unverifiable` 500; `caller_cannot_create` 403 (:855-865, :945-994) | Step 6 plan with `CallerMayFileUnder` (service :613-616, :1218-1238); the Create privilege is step 5's (CallerWriteAuthorization.cs:63-90) → `Forbidden` `record_creation.denied`, mapped to `caller_cannot_create` 403 | — |
+| 27 | Isolated create: the Secure team owner and `sprk_issecure` in the create (:867-868, :1249-1253) | Step 9 `IsolatedCreateFields` (service :1202-1211) | — |
+| 28 | `CompleteIsolatedCreateAsync`: removed → 500 with its reason code; stranded or incomplete → warnings (:882-924) | Step 12 (service :1352-1385): `Undecided` 500, the same codes, the same texts with the noun templated | Mapped to 500, code passed through |
+| 29 | `KindFor` (:1265-1273), `MapCreationFailureStatus` (OfficeService.cs:2117) | The service's `PlanRefused` (service :1257-1270) plus the adapter's refusal map | — |
+| 30 | Membership event in the endpoint (OfficeEndpoints.cs:1860-1871) | Step 12 (service :1422-1427; `MembershipPublishingTables` :74-75), with the known owner team | Remove the endpoint publish in the swap commit |
+| 31 | — (new) | A field-secured column in the caller's own payload is refused (step 5, CallerWriteAuthorization.cs:93-112); the I-1 re-stamp and I-16 run after the create (service :1394-1406) | The first is ADR-008 path A / FR-08 (the POML's purpose); the second was accepted by UAC-r2 (b) |
+
+### Gaps and decisions needed before the swap
+
+- **G1, no landing place: "No matter type was supplied" (old :696-700).**
+  - The adapter cannot tell whether field mapping filled `sprk_mattertype`. `RecordCreationOutcome` reports no written
+    columns, and the mapping warnings name only drops.
+  - It is pinned by `Post_Matter_NameOnly_…`, `…WithEmptyGuidMatterType_…`, `…WithTypeSetOnlyByFieldMapping_…` (no
+    warning) and `…AndNoTypeWasRequested_RemovesIt`.
+  - Options:
+    - (a) add `RecordCreationOutcome.WrittenColumns` (`Decision.Item.Columns` at step 11), which is new service surface
+      and needs §11;
+    - (b) the adapter reads `sprk_mattertype` back after the create, which costs one more app-only read;
+    - (c) drop the warning, which needs an owner decision.
+  - **Recommend (a).** The adapter also keeps the old suppression: no "not supplied" warning after a
+    `reference_value_dropped` on `sprk_mattertype`.
+- **G2, no token vs no Dataverse identity.**
+  - Step 1 folds the WhoAmI failures `AccessDenied`, `UserContextRequired`, `OboExchangeFailed` and
+    `OboNotConfigured` into one `PrincipalUnresolved` `sdap.access.deny.caller_unresolved`, with no `ClientFailure`
+    (service :303-313; `ChildRecordEndpoints.IsUnresolvedCaller` :412-416).
+  - Office needs 500 `caller_rights_unverifiable` for no token (UAC-r2 (b) item 2) and 403 `owner_unresolved` for no
+    identity. The adapter cannot tell them apart.
+  - Options:
+    - (a) the service carries the WhoAmI failure as `ClientFailure` on that refusal (one property set; no new type);
+    - (b) the adapter checks that a bearer token is present before calling, which is an adapter-side check (the
+      ADR-008 tension).
+  - **Recommend (a)**, mapping:
+    - `UserContextRequired`, `OboNotConfigured` and `OboExchangeFailed` → 500 `caller_rights_unverifiable`;
+    - `AccessDenied` → 403 `owner_unresolved`.
+- **G3, the `owner_unresolved` precondition.**
+  - Old: refused when the endpoint's app-only `ICallerSystemUserResolver` (OfficeEndpoints.cs:1815-1816) did not
+    resolve the caller.
+  - The adapter needs that systemuser id **before** the call anyway, to resolve the maker's contact for
+    `PostMappingDefaults`. The service exposes no WhoAmI id.
+  - **Recommend:** keep it as the adapter's input precondition, recorded as not an authorization check. The service's
+    WhoAmI stays the identity check (ADR-028).
+  - If it is dropped instead, a caller whom the resolver misses but WhoAmI names would be created without the maker
+    default. That is a live change.
+- **G4, `secure_source_filing_mismatch` is unreachable on the new path.**
+  - The adapter writes the derived pair, and fill-only mapping never writes a pair. So with a secure source, a
+    profile rule aimed at the pair is skipped with `mapping_rule_skipped`, and the project is created under the derived
+    pair, into isolation.
+  - Old: 403. New: 201. Isolation is kept; the refusal is not.
+  - The mismatch tests construct `OfficeRecordCreationService` directly (SecureRootInheritanceWriterTests), so they
+    stay green until 018c regardless.
+  - **Decide:** is "only the derived pair is accepted" held by construction (recommended), or must the adapter refuse
+    when a rule targets the pair under a secure source?
+- **G5, `NotFoundOrDenied` is one refusal for several lookups.**
+  - Step 5 returns one uniform `record_creation.not_found` whether the refused lookup is the derived pair's record or
+    the named Assigned To contact (CallerWriteAuthorization.cs:327-351).
+  - Pass 1 can only map all of it to `caller_cannot_file_under_parent` 403. Pass 2's Assigned To code then needs the
+    refusal to name the refusing lookup, which is a service change. Do not parse the `Detail` text.
+  - Plan this into pass 2.
+- **G6, the reference-drop wording (decided by 018a K-3, but not among the brief's four rewrites).**
+  - `Post_Matter_WithUnknownMatterType_…` asserts "matter type was not found".
+    `OfficeQuickCreateFieldsContractTests.cs:111` asserts "practice area was not found".
+  - The service says: "The value you chose for 'sprk_mattertype' was not written: it was not found, or you do not have
+    permission to use it; the matter was created without it."
+  - The "could not be checked" test can pass unchanged when its fault is a throw. A 503 instead reads as "not found or
+    no permission" (018a K-a observation).
+  - **Sign-off needed** to rewrite those assertions. Any project-type equivalent is in the same class.
+- **G7, an unavailable mapping source.**
+  - Old: the warning was `SourceUnreadableWarning`, and **Default rules still applied**.
+  - New (FR-04): the warning is `MappingSourceReadProbe.SourceUnavailableWarning` ("The related record is not available
+    to you, so no fields were copied from it."), and nothing is mapped.
+  - An unreadable source is refused earlier by `QuickCreateSourceAccessFilter`, so this happens only when the app read
+    or the caller read faults.
+  - Pinned by `OfficeQuickCreateSourceFieldSecurityTests.cs:120`, and by `SecureRootInheritanceWriterTests.cs:1061` (the
+    old class, green until 018c).
+  - **Sign-off needed:** it is FR-04, but not on the brief's decided list.
+
+### Draft refusal map (for the swap; final after G2 and G5)
+
+| Service kind | Service code | Office code | Status |
+|---|---|---|---|
+| PrincipalUnresolved | `sdap.access.deny.caller_unresolved` | `owner_unresolved`, or `caller_rights_unverifiable` (G2) | 403 / 500 |
+| OwnerUnresolved | `record_owner_parent_undetermined` | the same | 403 |
+| OwnerUnresolved | any other (`record_owner_no_source`, resolver codes, `record_creation.ownership_exception`) | `OFFICE_022` | 403 |
+| Conflict | `record_number_unavailable` | the same | 409 |
+| Forbidden | `record_creation.denied` | `caller_cannot_create` | 403 |
+| Forbidden | plan codes (`ReasonCreatorNoAccess`, `sdap.access.secure_flag_transition_only`, AccessInheritance server-only) | passed through | 403 |
+| NotFoundOrDenied | `record_creation.not_found` | `caller_cannot_file_under_parent` (G5) | 403 |
+| Undecided | plan or provisioning codes (`ReasonCreatorNoAccessUnverifiable`, `record_owner_secure_team_unresolved`, `sdap.inherit.*` row removed) | passed through | 500 |
+| Undecided | `record_creation.no_decision` | `OFFICE_INTERNAL` | 500 |
+| Unavailable | `record_creation.check_failed`, `record_creation.owner_unavailable` | `OFFICE_INTERNAL` (the old core propagated faults to the generic 500) | 500 |
+| Invalid, BlockedColumn | any (the adapter builds the payload, so this means a server defect) | `OFFICE_INTERNAL` | 500 |
+| Upstream | `DATAVERSE_*` | `OFFICE_INTERNAL` | 500 |
+| any unmapped kind | — | `OFFICE_INTERNAL` (fail closed) | 500 |
+
+The generic Office failure is `OFFICE_INTERNAL` 500: the endpoint's catch-all (OfficeEndpoints.cs QuickCreateAsync) and
+the old core's fault path.
+
+### Sizing and proposed split
+
+These suites drive Matter/Project quick-create over HTTP through `OfficeQuickCreateTestWebAppFactory`:
+
+| Suite | Tests |
+|---|---|
+| contract Matter | 33 |
+| contract Project | 16 |
+| contract Fields | 13 |
+| `OfficeRecordOwnershipTests` | 12 |
+| `SecureRootCreateRouteTests.OfficeQuickCreate_*` | 4 |
+| `OfficeQuickCreateSourceFieldSecurityTests` | 4 |
+| Issue1079 | 1 |
+
+That is about 83 tests, plus `OfficeMembershipPublishingTests` (7, the endpoint publish).
+
+- **The fixture models the old app-only boundary:** `IGenericEntityService.CreateAsync`, app reads of reference rows,
+  and `CallerRecordAccessProbe` for AppendTo.
+- **The host's `IDataverseUserClient` is `MappingSourceCallerReadDouble`,** which answers only the #2188 mask read.
+- **The service asks the caller's Dataverse:**
+  - WhoAmI;
+  - table metadata (`Privileges`, `OwnershipType`, `PrimaryIdAttribute`);
+  - `RetrieveUserSetOfPrivilegesByNames`;
+  - attribute `IsSecured`;
+  - `RetrievePrincipalAccess` for each lookup;
+  - caller reads of organization-owned reference rows;
+  - the record-type catalog;
+  - mapping metadata (navigation properties, entity sets, `AttributeType`, `IsValidForCreate`);
+  - the mask read.
+- **The nearest reusable double** is `SecureChildOwnershipAiToolTests.ScriptedUserClient`. Its fixed lookup table lacks
+  `sprk_projecttype_ref` and the mapping targets the contract profiles use (for example `sprk_client`).
+
+Proposed split, each part on the same PR:
+
+1. **018b-1a (this commit):** the inventory and G1 to G7.
+2. **018b-1b, fixture only, no live change:**
+   - a contract-host caller-Dataverse double: the mask read exactly as `MappingSourceCallerReadDouble` answers it, plus
+     scripted caller answers that each test can configure;
+   - wired into `OfficeQuickCreateTestWebAppFactory`;
+   - a write-capture helper that views `UpdateRecordFieldsAsync`'s dictionary as an SDK `Entity`.
+   - Every suite stays green on the old path. About 40 steps.
+3. **018b-1c, the swap:**
+   - the adapter;
+   - the refusal map with its table-driven test;
+   - removing the endpoint publish, in the same commit;
+   - removing the constructor parameter;
+   - re-pointing each test's mechanism helpers;
+   - the agreed assertion rewrites;
+   - mutants.
+   - About 70 steps, once G1 to G7 are answered.
