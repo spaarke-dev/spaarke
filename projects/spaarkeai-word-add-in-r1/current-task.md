@@ -19,7 +19,16 @@
 - **Deploy dependency:** a BFF with T8 REQUIRES `sprk_document.sprk_accessinheritance` (`Set-DocumentAccessPermissionSchema.ps1`, guide §7.4). It is applied in dev; prod needs it before any BFF with 189 or T8. A deploy needs the owner's go, coordinated with R3, and the build must contain 077.
 
 ## Live in dev
-- **BFF `spaarke-bff-dev`: master `1.0.0+a7b956fb55`** since 2026-10-22 02:18:52Z (deployed by R3 on our OK; healthz 200). It adds to `f1b3dadcf5`:
+- **BFF `spaarke-bff-dev`: master `1.0.0+1283c41817`** since 2026-10-22 12:50:18Z (deployed by R3 on our OK; healthz 200). It adds to `a7b956fb55`:
+  - UAC #2234 (round 122, the provisional own-Restricted release; our save line);
+  - #2239 / #2237 (the AI profile writer is limited to the ACT-011 columns);
+  - #2244 (the generic writers refuse the BFF-owned document columns);
+  - #2249 (and the owner and creator columns);
+  - #2248 (the on-demand archive verifies each attachment's Graph item, #2246);
+  - field-mapping 018a (dormant).
+
+  None of these changes Office save files.
+- Before it: `a7b956fb55` from 02:18:52Z, which added to `f1b3dadcf5`:
   - field-mapping #2223 and #2228;
   - UAC #2221 / task 190, the .eml-to-communication link sweep, registered disabled with Apply off.
 
