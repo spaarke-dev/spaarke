@@ -77,7 +77,7 @@ None of them takes a token or fact (`BillingFindingSignalMapper.cs:342-351` on `
 - **A prior submission with no invoice link** (no `duplicateOf.invoiceId`, and the submission's `_sprk_invoice_value` is null): the Duplicate is withheld for everyone. Fails closed.
 - **Id path vs tracking-number path:** the id path checks only the earlier invoice. The tracking-number path also needs the caller to read the submission, the current invoice and (line-level) the billing event. So an older Signal can be withheld where a newer one about the same prior is shown. Accepted under D-176.
 - **URL length:** about 200 very long tracking numbers in one chunk could exceed Dataverse's URL limit. The read then faults and the page's Duplicates are withheld (fail closed). Real numbers are about 20 characters.
-- **No paging on the submission read (round 2):** the read follows no `@odata.nextLink`. A chunk is at most 200 numbers and each (org, number) pair is unique under the alternate key, so a page holds at most 200 matching rows (under Dataverse's 5,000-row page) unless the org In-filter is dropped (more than 20 orgs in the chunk) and the same number recurs across many orgs. A missing row then reads as "no match", which withholds (fail closed).
+- **One page per read (round 3):** a read never follows `@odata.nextLink`; a page that carries one is a fault (Warning logged, every Duplicate on the page withheld). Every submission read names at most 20 orgs and 200 numbers, so under the (org, number) alternate key it holds at most 4,000 rows and cannot reach the 5,000-row page; the guard is a backstop.
 - **Structural characters (round 2):** apostrophe, `"` and backslash are proven live; other characters JSON-encode under `UnsafeRelaxedJsonEscaping` and are then URL-escaped once, but have no live test.
 - **Case (round 2):** the (org, number) pair is matched `OrdinalIgnoreCase` after the read; Dataverse's In match follows the org collation (case-insensitive on dev). A culture-specific fold that differs from ordinal case-folding could leave a returned row unmatched, which withholds (fail closed).
 - **"Two submissions → withhold"** cannot occur live (the Active alternate key on tracking number + vendor org); it is defensive.
@@ -191,3 +191,18 @@ the batching route test adds a 201-number page (2 submission reads). ArchTests 1
 
 **Seeding (e).** In `ShownAsync`, `Count: > 0` removed (an item with no references counted as shown): `ShownAsync_AnItemWithNoReferences_IsNotShown_AndCausesNoRead` fails, and two
 D176 route tests (`...TrackingNumberOnly...`, `...LineLevelRepeatOfAnEarlierLine...`) fail. Restored; all pass.
+
+## Round 3 (ebilling F3: a truncated page withheld silently)
+
+**Finding (ebilling round-2 re-check).** With more than 20 vendor orgs in a chunk, the submission read dropped its org filter. Tracking numbers are
+`{firmInvoiceNumber}.{seq}` (ebilling `TrackingNumberAllocator.cs:202`), so values such as `1001.1` recur across firms, and a page could reach Dataverse's
+5,000-row cap. `ReadAsCallerAsync` read only `value`, so the rows past the page resolved to "no row" and readable priors were withheld with nothing logged.
+It never leaked (the exact pair match still applied), but it was wrong visible behaviour.
+
+**Fix.** Both of ebilling's options:
+- `ResolveByTrackingNumberAsync` reads each chunk of 200 numbers in groups of `OrgsPerRead` (20) vendor orgs. Every read carries the org In-filter and
+  asks only its own orgs' numbers (was `MaxOrgsInFilter`, above which the filter was dropped).
+- `ReadAsCallerAsync` treats a body that carries `@odata.nextLink` as a fault: a Warning is logged and null is returned. This is shared by every D-176 read.
+
+**Tests.** The 21-org test is rewritten: two reads (20 orgs and 1), each carrying its org list, and the single-org read alone asks the number only that org
+holds. The fault theory gains a `nextLink` case for each table.

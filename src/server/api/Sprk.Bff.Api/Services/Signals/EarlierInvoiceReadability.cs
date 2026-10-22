@@ -14,8 +14,9 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// <para><b>Fail closed.</b> No submission row, more than one, a row with no invoice, or a reference with neither an id nor a vendor
 /// org and number: not readable. A 403 on a table is a verdict (none of its rows is readable). Any other failure (a 401, a 5xx, an
 /// unparseable body, an exception) is a fault, and a fault makes NOTHING readable: the caller then withholds every Duplicate it judged.</para>
-/// <para><b>Bounded.</b> One submission read per chunk of <see cref="ChunkSize"/> (200) distinct tracking numbers, across vendor
-/// orgs, and one invoice read per chunk of 200 distinct invoice ids; never one read per reference or per vendor org.</para>
+/// <para><b>Bounded.</b> One submission read per chunk of <see cref="ChunkSize"/> (200) distinct tracking numbers and group of
+/// <see cref="OrgsPerRead"/> (20) vendor orgs, and one invoice read per chunk of 200 distinct invoice ids; never one read per
+/// reference. Every read fits one page: a body that still carries <c>@odata.nextLink</c> is a fault, never a short answer.</para>
 /// <para><b>Callers.</b> <see cref="SignalReadService"/> (the worklist) and ebilling task 119's invoice-review read apply this one rule.
 /// Each resolves its own CURRENT invoice and vendor org; this class judges only the earlier invoice.</para>
 /// <para>Component justification (CLAUDE.md section 11). Existing: <c>SignalReadService.WitnessesTheCallerReadsAsync</c> (D-142) reads
@@ -38,8 +39,12 @@ public sealed class EarlierInvoiceReadability
     /// <summary>Values per batched read (In lists of at most 200, as the D-142 witness read).</summary>
     internal const int ChunkSize = 200;
 
-    /// <summary>A submission read also filters on the vendor orgs only when its chunk names at most this many (keeps the URL short).</summary>
-    internal const int MaxOrgsInFilter = 20;
+    /// <summary>
+    /// The vendor orgs one submission read names (keeps the URL short). A chunk naming more is read in groups of this size, so every
+    /// read filters on its orgs: under the (org, number) alternate key a page then holds at most 200 x 20 = 4,000 rows, inside
+    /// Dataverse's 5,000-row page. Without the org filter, numbers such as <c>1001.1</c> recur across firms and a page could truncate.
+    /// </summary>
+    internal const int OrgsPerRead = 20;
 
     internal const string InvoiceEntitySet = "sprk_invoices";
     internal const string InvoiceKey = "sprk_invoiceid";
@@ -189,8 +194,9 @@ public sealed class EarlierInvoiceReadability
 
     /// <summary>
     /// A batched read AS THE CALLER, with this check's fail-closed rules: the rows on success; none on a 403 (no Read on the table);
-    /// null on anything else (a 401 is the token failing mid-request, so a fault, not a verdict; a 5xx; an unparseable body; an
-    /// exception), logged at Warning with the table and the error code only. <see cref="SignalReadService"/> reads the current
+    /// null on anything else (a 401 is the token failing mid-request, so a fault, not a verdict; a 5xx; an unparseable body; a page
+    /// that carries <c>@odata.nextLink</c>, whose missing rows would otherwise read as "no row"; an exception), logged at Warning
+    /// with the table and the error code only. <see cref="SignalReadService"/> reads the current
     /// invoice through this too, so the D-176 reads share one rule.
     /// </summary>
     internal async Task<IReadOnlyList<JsonElement>?> ReadAsCallerAsync(
@@ -213,6 +219,14 @@ public sealed class EarlierInvoiceReadability
             && response.Body is { } body && body.ValueKind == JsonValueKind.Object
             && body.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.Array)
         {
+            if (body.TryGetProperty("@odata.nextLink", out _))
+            {
+                _logger.LogWarning(
+                    "Duplicate earlier-invoice check: the caller's read of {Table} returned more than one page; every Duplicate's earlier-invoice detail is withheld (D-176, fail closed).",
+                    table);
+                return null;
+            }
+
             return value.EnumerateArray().Select(e => e.Clone()).ToList();
         }
 
@@ -237,9 +251,8 @@ public sealed class EarlierInvoiceReadability
 
     /// <summary>
     /// Each number-only reference's earlier invoice: the ONE submission of that vendor org with that tracking number, and its invoice.
-    /// One read per chunk of <see cref="ChunkSize"/> distinct tracking numbers, across vendor orgs: an In list on the number, and an
-    /// In list on the vendor org when the chunk names at most <see cref="MaxOrgsInFilter"/> orgs. The exact (org, number) pair is
-    /// matched after the read. Zero rows, more than one, or no invoice: absent (not readable). Null on a fault.
+    /// One read per chunk of <see cref="ChunkSize"/> distinct tracking numbers and group of <see cref="OrgsPerRead"/> vendor orgs: an
+    /// In list on the number and an In list on the vendor org. The exact (org, number) pair is matched after the read. Zero rows, more than one, or no invoice: absent (not readable). Null on a fault.
     /// </summary>
     private async Task<Dictionary<Reference, Guid>?> ResolveByTrackingNumberAsync(
         IDataverseUserClient caller, IReadOnlyList<Reference> references, CancellationToken ct)
@@ -251,22 +264,25 @@ public sealed class EarlierInvoiceReadability
         {
             var asked = chunk.ToHashSet(StringComparer.OrdinalIgnoreCase);
             var inChunk = references.Where(r => asked.Contains(r.TrackingNumber!)).ToList();
-            var orgs = inChunk.Select(r => r.VendorOrgId!.Value).Distinct().ToList();
-
-            var filter = $"Microsoft.Dynamics.CRM.In(PropertyName='{TrackingNumberColumn}',PropertyValues=[{string.Join(',', chunk.Select(Literal))}])";
-            if (orgs.Count <= MaxOrgsInFilter)
+            var rows = new List<JsonElement>();
+            foreach (var orgs in inChunk.Select(r => r.VendorOrgId!.Value).Distinct().Chunk(OrgsPerRead))
             {
-                filter += " and " + SignalReadService.InFilter(VendorOrgLogicalName, orgs);
-            }
+                var numbers = inChunk.Where(r => orgs.Contains(r.VendorOrgId!.Value)).Select(r => r.TrackingNumber!)
+                    .Distinct(StringComparer.OrdinalIgnoreCase);
+                var filter = $"Microsoft.Dynamics.CRM.In(PropertyName='{TrackingNumberColumn}',PropertyValues=[{string.Join(',', numbers.Select(Literal))}])"
+                    + " and " + SignalReadService.InFilter(VendorOrgLogicalName, orgs);
 
-            var rows = await ReadAsCallerAsync(
-                caller,
-                $"{SubmissionEntitySet}?$select={TrackingNumberColumn},{VendorOrgColumn},{InvoiceColumn}&$filter={Uri.EscapeDataString(filter)}",
-                "sprk_invoicesubmission",
-                ct).ConfigureAwait(false);
-            if (rows is null)
-            {
-                return null;
+                var page = await ReadAsCallerAsync(
+                    caller,
+                    $"{SubmissionEntitySet}?$select={TrackingNumberColumn},{VendorOrgColumn},{InvoiceColumn}&$filter={Uri.EscapeDataString(filter)}",
+                    "sprk_invoicesubmission",
+                    ct).ConfigureAwait(false);
+                if (page is null)
+                {
+                    return null;
+                }
+
+                rows.AddRange(page);
             }
 
             var submissions = rows

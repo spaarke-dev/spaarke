@@ -48,7 +48,7 @@ public sealed class EarlierInvoiceReadabilityTests
     {
         _paths.Add(path);
         var set = path[..path.IndexOf('?')];
-        if (_faults.TryGetValue(set, out var fault))
+        if (_faults.TryGetValue(set, out var fault) && fault != "nextLink")
         {
             return fault switch
             {
@@ -62,6 +62,18 @@ public sealed class EarlierInvoiceReadabilityTests
         }
 
         var filter = Uri.UnescapeDataString(path[(path.IndexOf("$filter=", StringComparison.Ordinal) + 8)..]);
+        if (fault == "nextLink")
+        {
+            // A truncated page: the rows it holds are right, but more follow.
+            return Task.FromResult(DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new Dictionary<string, object>
+            {
+                ["value"] = set == "sprk_invoices"
+                    ? _readableInvoices.Select(id => new Dictionary<string, object?> { ["sprk_invoiceid"] = id }).ToList()
+                    : Submissions(filter),
+                ["@odata.nextLink"] = $"https://example.crm.dynamics.com/api/data/v9.2/{set}?$skiptoken=2",
+            })));
+        }
+
         object rows = set switch
         {
             "sprk_invoices" => Regex.Matches(filter, "'([0-9a-f-]{36})'").Select(m => Guid.Parse(m.Groups[1].Value))
@@ -173,6 +185,8 @@ public sealed class EarlierInvoiceReadabilityTests
     [InlineData("sprk_invoicesubmissions", "401")]
     [InlineData("sprk_invoicesubmissions", "unparseable")]
     [InlineData("sprk_invoicesubmissions", "throw")]
+    [InlineData("sprk_invoices", "nextLink")]
+    [InlineData("sprk_invoicesubmissions", "nextLink")]
     public async Task AFaultInEitherRead_MakesNothingReadable(string set, string fault)
     {
         var invoice = Invoice(readable: true);
@@ -230,17 +244,22 @@ public sealed class EarlierInvoiceReadabilityTests
     }
 
     [Fact]
-    public async Task TheVendorOrgFilterIsOmittedWhenAChunkNamesMoreThan20Orgs_AndThePairIsStillMatchedExactly()
+    public async Task AChunkNamingMoreThan20Orgs_IsReadInGroupsOf20Orgs_EachFilteredOnItsOrgs_AndThePairIsStillMatchedExactly()
     {
-        var orgs = Enumerable.Range(0, EarlierInvoiceReadability.MaxOrgsInFilter + 1).Select(_ => Guid.NewGuid()).ToList();
+        var orgs = Enumerable.Range(0, EarlierInvoiceReadability.OrgsPerRead + 1).Select(_ => Guid.NewGuid()).ToList();
         foreach (var org in orgs) _submissions.Add((org, "SAME", Invoice(readable: true)));
         _submissions.Add((OtherOrg, "SAME", Invoice(readable: true))); // a firm nobody asked about
+        _submissions.Add((orgs[^1], "ONLY-IN-LAST", Invoice(readable: true)));
 
-        var readable = await ReadableAsync(orgs.Select(o => ByNumber("SAME", o)).ToArray());
+        var readable = await ReadableAsync([.. orgs.Select(o => ByNumber("SAME", o)), ByNumber("ONLY-IN-LAST", orgs[^1])]);
 
-        readable.Should().HaveCount(orgs.Count);
-        Reads("sprk_invoicesubmissions").Should().Be(1);
-        Uri.UnescapeDataString(SubmissionPath()).Should().NotContain("PropertyName='sprk_vendororg'", "more than 20 orgs: the number list alone bounds the read");
+        readable.Should().HaveCount(orgs.Count + 1);
+        var reads = _paths.Where(p => p.StartsWith("sprk_invoicesubmissions?", StringComparison.Ordinal)).Select(Uri.UnescapeDataString).ToList();
+        reads.Should().HaveCount(2, "21 orgs: groups of 20 and 1");
+        reads.Should().AllSatisfy(r => r.Should().Contain("PropertyName='sprk_vendororg'", "every read names its orgs, so a page cannot truncate"));
+        reads.Select(r => InList(r, "sprk_vendororg").Count).Should().BeEquivalentTo([20, 1]);
+        reads.Single(r => InList(r, "sprk_vendororg").Count == 1).Should().Contain("ONLY-IN-LAST");
+        reads.Single(r => InList(r, "sprk_vendororg").Count == 20).Should().NotContain("ONLY-IN-LAST", "a group asks only its own orgs' numbers");
     }
 
     [Fact]
