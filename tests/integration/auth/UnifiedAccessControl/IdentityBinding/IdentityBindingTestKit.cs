@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -27,6 +28,23 @@ public static class IdentityBindingTestKit
         InMemoryContactIdentityStore store, BindingLogCapture<ContactIdentityBinder>? log = null, params Guid[] tenants)
         => new(store, Tenants(tenants.Length == 0 ? new[] { CustomerTenant } : tenants), new FakeTimeProvider(Now),
             log ?? new BindingLogCapture<ContactIdentityBinder>());
+
+    /// <summary>
+    /// The DI-registered (own-environment) binder of a <c>RegistrationDataverseService</c> whose test never links a contact
+    /// in the own environment: an empty in-memory store, so any use of it would show.
+    /// </summary>
+    public static ContactIdentityBinder InertOwnEnvironmentBinder() => Binder(new InMemoryContactIdentityStore());
+
+    /// <summary>
+    /// A binder over THIS BFF's own environment as DI builds it (ISS-005, #1673): the customer-owner inputs are given, so a
+    /// Workforce-plane create is owned by the default owner team of <paramref name="customerBusinessUnitId"/>, or refused
+    /// when that is unset.
+    /// </summary>
+    public static ContactIdentityBinder OwnerAwareBinder(
+        InMemoryContactIdentityStore store, Guid? customerBusinessUnitId, IDictionary<string, string?>? configuration = null)
+        => new(store, Tenants(CustomerTenant), new FakeTimeProvider(Now), new BindingLogCapture<ContactIdentityBinder>(),
+            new StaticOptionsMonitor<ExternalAccessOptions>(new ExternalAccessOptions { CustomerBusinessUnitId = customerBusinessUnitId }),
+            new ConfigurationBuilder().AddInMemoryCollection(configuration ?? new Dictionary<string, string?>()).Build());
 
     /// <summary>A delegated (user) workforce token. Every claim is optional so a test can drop exactly one.</summary>
     public static ClaimsPrincipal WorkforceUser(

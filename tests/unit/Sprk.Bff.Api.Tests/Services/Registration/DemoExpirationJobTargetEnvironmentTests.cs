@@ -295,6 +295,7 @@ public class DemoExpirationJobTargetEnvironmentTests
             NullLogger<RegistrationDataverseService>.Instance,
             new ContactIdentityBinderFactory(
                 Mock.Of<IHttpClientFactory>(), NullLoggerFactory.Instance, Tenants(CustomerTenant), new FakeTimeProvider(Now)),
+            InertOwnEnvironmentBinder(),
             new NullMembershipCacheInvalidator(NullLogger<NullMembershipCacheInvalidator>.Instance));
 
         var options = Options.Create(new DemoProvisioningOptions { DemoUsersGroupId = "group-1" });

@@ -184,6 +184,7 @@ public class RegistrationSecureRecordPlacementTests
                 new SingleHandlerFactory(_dataverse), NullLoggerFactory.Instance,
                 IdentityBinding.IdentityBindingTestKit.Tenants(IdentityBinding.IdentityBindingTestKit.CustomerTenant),
                 TimeProvider.System),
+            IdentityBinding.IdentityBindingTestKit.InertOwnEnvironmentBinder(),
             // Task 132: the team/BU eviction hook — inert here; its behaviour is pinned in AccessCacheFaultCachingTests.
             new Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator(
                 NullLogger<Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator>.Instance));
