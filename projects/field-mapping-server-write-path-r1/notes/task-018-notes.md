@@ -520,3 +520,64 @@ Fixture only; no `src/` change.
 - `HeldPrivileges` (endpoint filter) and `CallerDataverse.Held` are separate.
 - `sprk_client` is a fixture-only lookup.
 - A caller PATCH from step 12 would throw and must be scripted.
+
+## 018b-1c: the swap (048058b8fe), re-pointed suites (2aa3b69650), new tests (09ec9d7d35)
+
+**Live change.** Office quick-create Matter and Project now create through `RecordCreationService` as the caller (`OfficeService.QuickCreateViaCreationServiceAsync`).
+
+- **Payload:** trimmed name and description, plus the registry's optional references through `ReferenceLookupColumns`.
+- **Assigned To:**
+  - a contact the caller names is a bind in the caller payload, so it is checked and refused as the caller;
+  - otherwise the maker's linked contact is a `PostMappingDefaults` entry on `rule.ForPerson.Column`;
+  - if there is no contact, the adapter logs `assigned_internal_unset`.
+- **Project:** the pair is derived before the call, with both `record_owner_parent_undetermined` wordings. The id is lower-case "D".
+- **G3:** the endpoint-resolved systemuser stays an input precondition (403 `owner_unresolved`).
+- **G1:** the adapter emits `NoMatterTypeWarning` from `WrittenColumns`, suppressed after a `reference_value_dropped` on `sprk_mattertype`.
+- **Membership:** the endpoint's membership publish was removed in the same commit. Service step 12 publishes once, for matters only.
+- **`OfficeService` is now `internal`,** because its constructor takes internal types. It no longer depends on `OfficeRecordCreationService`; the class and its DI registration stay until 018c.
+- **Invoice leg:** unchanged apart from the marker comment.
+
+**Refusal map (`MapQuickCreateRefusal`), with a table test over the service codes (75 cases):**
+
+| Service | Office | Status |
+|---|---|---|
+| PrincipalUnresolved + `AccessDenied` | `owner_unresolved` | 403 |
+| PrincipalUnresolved, other or missing failure | `caller_rights_unverifiable` | 500 |
+| NotFoundOrDenied, `RefusedColumn` = Assigned To | `assignee_inaccessible` (an existing Office code, so no NFR-07 addition) | 403 |
+| NotFoundOrDenied, any other column or none | `caller_cannot_file_under_parent` | 403 |
+| Forbidden `record_creation.denied` | `caller_cannot_create` | 403 |
+| Forbidden plan codes (creator no access, secure flag, server-only) | passed through | 403 |
+| OwnerUnresolved `record_owner_parent_undetermined` | passed through | 403 |
+| OwnerUnresolved, other | `OFFICE_022` | 403 |
+| Conflict `record_number_unavailable` | passed through | 409 |
+| Undecided: creator-no-access-unverifiable, secure team unresolved, `sdap.inherit.*` | passed through | 500 |
+| Anything else (fail closed) | `OFFICE_INTERNAL` | 500 |
+
+**Changed assertions (agreed: fill-only rulings, G6, G7):**
+1. Unknown matter type: "matter type was not found" → the K-3 drop text.
+2. Unknown practice area: the same, for `'sprk_practicearea'`.
+3. The two blanked-name tests: the "name you entered was kept" warning is now asserted absent.
+4. A mapped non-type value, with a type requested: the "not a matter type" warning is now asserted absent.
+5. A mapped non-type value, with no type requested: `mapped_value_dropped` plus the no-type warning.
+6. `OfficeQuickCreateSourceFieldSecurityTests` → `MappingSourceReadProbe.SourceUnavailableWarning`.
+7. Hard-coded ids → the captured id.
+
+Mechanism-only re-points keep each test's claim. The full list is in commit 2aa3b69650.
+
+**New tests (09ec9d7d35):**
+- `OfficeQuickCreateAdapterContractTests`: Assigned To refused or written; the maker default dropped (warning, one write), used, or absent; G1 ×3; the WhoAmI theory (no token → 500, no user → 403); the `QuickCreateRequest` regarding-member reflection pin.
+- `OfficeQuickCreateMembershipPublishTests`: one event per matter with the owner team; none for a project.
+- `SecureRootCreateRouteTests`: G4 pins (secure and ordinary, with extra regarding members); G4 conditions 2 and 3; the AppendTo check is now asserted through the caller's Dataverse.
+- `OfficeQuickCreateSourceFieldSecurityTests`: the BU read is scripted, and the warning is asserted absent.
+- `ConfidentialClientMigrationSeamTests`: the real `DataverseUserClient` with no bearer token returns `UserContextRequired` before any exchange.
+
+**Mutants (14, all killed):**
+- one per map row group (m01–m07);
+- G1 suppression;
+- `Wrote` case-sensitivity;
+- the endpoint publish re-added;
+- the pair written in upper case;
+- the `PostMappingDefaults` entry removed;
+- `RegardingRecordId` added to the request (the reflection test fails with UAC-r2's exact message).
+
+**Counts:** filtered suites plus Issue1079: 3927 passed, 7 skipped, 0 failed. ArchTests: 1352 of 1352.
