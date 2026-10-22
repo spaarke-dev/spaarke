@@ -27,7 +27,7 @@
       F3  Field security, reusing unified-access-control-r2's profile pair as task 080 does (permission rows only, never a member):
             writer ("Spaarke BFF-Managed Field Writers", the BFF application users only): Read / Create / Update on every F2 column
             except sprk_name and sprk_createdbyperson, and on F4;
-            reader ("Spaarke BFF-Managed Field Readers", every business unit's default team): Read on the same columns EXCEPT
+            reader ("Spaarke BFF-Managed Field Readers", the default team of each business unit named in -ReaderBusinessUnits): Read on the same columns EXCEPT
             sprk_blobpath, which has the writer row only (server-only, like the old S8 column). A reader row found on
             sprk_blobpath is reported as a finding (exit 1), never deleted.
       F4  sprk_document.sprk_restrictedbysubmission (two options "Restricted by invoice submission", default No). Field-secured
@@ -63,7 +63,12 @@
     Unmanaged solution the created components are added to (header MSCRM.SolutionUniqueName).
 
 .PARAMETER ReaderProfileName
-    Field security profile that reads the F3 columns for every user. Default: uac-r2's "Spaarke BFF-Managed Field Readers".
+    Field security profile that reads the F3 columns for the users of the named business units. Default: uac-r2's "Spaarke BFF-Managed Field Readers".
+
+.PARAMETER ReaderBusinessUnits
+    Names of the business units whose default team must hold the reader profile (the pre-flight stops, exit 2, when one does not, or
+    when a named business unit has no enabled default team). Default: the six dev business units whose default teams hold it today.
+    Default teams of any OTHER business unit are not checked and never fail the run; they are listed in one informational line.
 
 .PARAMETER WriterProfileName
     Field security profile that creates / updates the F3 columns. Default: uac-r2's "Spaarke BFF-Managed Field Writers".
@@ -90,6 +95,7 @@ param(
     [string]$EnvironmentUrl = $(if ($env:DATAVERSE_URL) { $env:DATAVERSE_URL } else { 'https://spaarkedev1.crm.dynamics.com' }),
     [string]$SolutionUniqueName = 'SpaarkeMaster',
     [string]$ReaderProfileName = 'Spaarke BFF-Managed Field Readers',
+    [string[]]$ReaderBusinessUnits = @('Secure Record', 'Spaarke Business Unit 1', 'Spaarke Demo', 'Spaarke Dev 1', 'Spaarke Test 1', 'Spaarke'),
     [string]$WriterProfileName = 'Spaarke BFF-Managed Field Writers',
     [string[]]$BffApplicationIds = @('5967251e-171c-46fe-a6c2-ef843c90309d', '1e40baad-e065-4aea-a8d4-4b7ab273458c')
 )
@@ -491,9 +497,22 @@ function Test-ProfilePreconditions {
     elseif ($readers.Count -eq 1) {
         $script:ReaderId = $readers[0].fieldsecurityprofileid
         $onReader = @((Invoke-Dv "fieldsecurityprofiles($($script:ReaderId))/teamprofiles_association?`$select=teamid,name").value | ForEach-Object { $_.teamid.ToString().ToLowerInvariant() })
-        foreach ($t in $defaultTeams) {
+        # The reader profile is checked against an EXPLICIT, named set of business units (-ReaderBusinessUnits), never "every default team":
+        # a field-security reader row grants COLUMN read, not ROW read, so the profile must never be the boundary for flagged-external
+        # users. UAC task 191 adds an "External Collaborators" business unit whose default team must NEVER get this profile; a check
+        # over every default team would fail on it, or push someone to add the profile there. Default teams of business units outside
+        # the set are reported once and never fail the run. This script never adds a team to the profile.
+        $named = @($defaultTeams | Where-Object { $_.businessunitid.name -in $ReaderBusinessUnits })
+        $others = @($defaultTeams | Where-Object { $_.businessunitid.name -notin $ReaderBusinessUnits })
+        foreach ($bu in $ReaderBusinessUnits) {
+            if (-not ($named | Where-Object { $_.businessunitid.name -eq $bu })) { $problems.Add("-ReaderBusinessUnits names '$bu', but no enabled business unit of that name has a default team: fix the name") }
+        }
+        foreach ($t in $named) {
             if ($onReader -contains $t.teamid.ToString().ToLowerInvariant()) { Write-Report 'OK' "reader profile '$ReaderProfileName' is on default team '$($t.name)' (BU '$($t.businessunitid.name)')" }
             else { $problems.Add("default team '$($t.name)' (BU '$($t.businessunitid.name)') is NOT on '$ReaderProfileName': its users would read the F3 columns EMPTY. Adding a team is a team change (the owner's / uac-r2's); this script never adds a member to a profile") }
+        }
+        if ($others.Count -gt 0) {
+            Write-Report 'INFO' "default teams of business units outside -ReaderBusinessUnits are not checked (column read is not row read; they may or may not hold '$ReaderProfileName'): $((($others | ForEach-Object { "'$($_.businessunitid.name)'" }) | Sort-Object) -join ', ')"
         }
     }
     else { $problems.Add("reader profile '$ReaderProfileName' does not exist (uac-r2 creates it). This script reuses the pair and never creates a profile") }
@@ -857,7 +876,7 @@ try {
     Add-SupersededStatus
 
     # --- 5. F3 field security of the Stored File columns (the marker was secured in step 3) ---------------------------------
-    Write-Host "5. F3 field security (writer: BFF application user(s) only; reader: every user, except on $BlobPathColumn)" -ForegroundColor Cyan
+    Write-Host "5. F3 field security (writer: BFF application user(s) only; reader: the named business units' users, except on $BlobPathColumn)" -ForegroundColor Cyan
     foreach ($spec in @($script:Secured | Where-Object { $_.Table -eq $StoredFile })) { Invoke-ColumnSecurity $spec }
     Test-OtherProfiles
 

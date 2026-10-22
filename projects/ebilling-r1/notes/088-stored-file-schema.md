@@ -172,6 +172,10 @@ Step 9.5 gates on the fix diff (2026-10-22):
   - ADR-038 detail: tests are in the `data-mutation` KEEP path, with no banned mocks.
   - 0 violations, 0 warnings.
 
+### 6.5 Reader pre-flight: named business units, not every default team (uac-r2 condition, 2026-10-22)
+
+The pre-flight used to require the reader field-security profile on ALL default teams (6 on dev). A field-security reader row grants column read, not row read, and UAC task 191 will add an "External Collaborators" business unit whose default team must NEVER hold the reader profile: the profile must never be the boundary for flagged-external users, and an "every default team" check would fail there or push someone to add the profile. The script now takes `-ReaderBusinessUnits` (default: the six dev BUs whose default teams hold the profile today: Secure Record, Spaarke Business Unit 1, Spaarke Demo, Spaarke Dev 1, Spaarke Test 1, Spaarke) and checks only those. A named BU whose default team lacks the profile, or that has no enabled default team (a misspelt name), stops the run (exit 2, owner decision). Default teams of other BUs are not checked; one INFO line lists them. The script still never adds or removes a profile member. The writer check (only the two BFF app users) is unchanged. Pester pins: a named BU lacking the profile fires; an extra BU (External Collaborators) lacking it does not, and the INFO line names it. `-WhatIf` on dev: exit 0, 51 created / 16 changed / 0 skipped, no INFO line (no extra BU yet).
+
 ## 7. Open questions for the owner and the peers
 
 1. Forms and views: is "none authored, platform defaults only" acceptable (5.1)?

@@ -9,7 +9,9 @@
 #      ESCALATION (exit 2, nothing written) when 659490005 or the label exists with another meaning, a task-012 value is missing
 #      or relabelled, or statuscode holds a value the task does not know;
 #   3. the F1 values and the cascade comparison the verify uses;
-#   4. the script text: no form, view, role, profile-member, invoice-row or document-row write, and no PublishAllXml.
+#   4. the script text: no form, view, role, profile-member, invoice-row or document-row write, and no PublishAllXml;
+#   5. the profile pre-flight (Test-ProfilePreconditions, Dataverse reads stubbed): the reader profile is checked against the NAMED
+#      business units only (-ReaderBusinessUnits), never every default team (UAC 191's External Collaborators BU must never hold it).
 # The script's constants are taken from the script itself (its top-level assignments), not retyped here.
 #
 # Pester 3.4:  Import-Module Pester -RequiredVersion 3.4.0 ; Invoke-Pester tests/scripts/Deploy-EbillingStoredFileSchema.Tests.ps1
@@ -36,7 +38,7 @@ foreach ($st in $script:Ast.EndBlock.Statements) {
 }
 
 # The functions under test (the script cannot be dot-sourced: it runs on load).
-foreach ($name in 'New-LookupSpec', 'Get-NewTableRel', 'Get-ExpectedCascade', 'Get-CascadeMismatches', 'Get-StoredFilePlan', 'Get-Grants', 'ConvertTo-LabelKey', 'Get-StatusDecision', 'Get-ChoiceOptions', 'Get-PublishEntities') {
+foreach ($name in 'New-LookupSpec', 'Get-NewTableRel', 'Get-ExpectedCascade', 'Get-CascadeMismatches', 'Get-StoredFilePlan', 'Get-Grants', 'ConvertTo-LabelKey', 'Get-StatusDecision', 'Get-ChoiceOptions', 'Get-PublishEntities', 'Test-ProfilePreconditions') {
     $fn = $script:Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true) | Select-Object -First 1
     if (-not $fn) { throw "function $name not found in the script" }
     Invoke-Expression $fn.Extent.Text
@@ -44,6 +46,10 @@ foreach ($name in 'New-LookupSpec', 'Get-NewTableRel', 'Get-ExpectedCascade', 'G
 
 # Variables Get-Grants reads from the script scope.
 $WriterProfileName = 'Writers'; $ReaderProfileName = 'Readers'; $script:WriterId = 'w-id'; $script:ReaderId = 'r-id'
+
+# The script's default reader business units (its param default), so a change there is what the tests see.
+$rbu = $script:Ast.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -eq 'ReaderBusinessUnits' }
+$DefaultReaderBusinessUnits = @(& ([scriptblock]::Create($rbu.DefaultValue.Extent.Text)))
 
 function New-Status([int]$Value, [int]$State, [string]$Label) { [pscustomobject]@{ Value = $Value; State = $State; Label = $Label } }
 function Get-SevenStatuses { @($KnownStatus | ForEach-Object { New-Status $_.Value $_.State $_.Label }) }
@@ -118,6 +124,58 @@ Describe 'Get-Grants (F3 permission rows)' {
         $g = @(Get-Grants @{ Table = 'sprk_storedfile'; Column = 'sprk_blobpath'; Kind = 'String'; Reader = $false })
         $g.Count | Should Be 1
         $g[0].Name | Should Be 'Writers'
+    }
+}
+
+# Test-ProfilePreconditions with the Dataverse reads stubbed (no call, no write). Teams: name == its BU's name, as on dev.
+function Write-Report([string]$StateText, [string]$What) { $script:Reports += ,@($StateText, $What) }
+function Get-ProfileByName([string]$Name) { if ($Name -eq 'Readers') { @([pscustomobject]@{ fieldsecurityprofileid = 'r-id' }) } else { @([pscustomobject]@{ fieldsecurityprofileid = 'w-id' }) } }
+function Invoke-Dv {
+    param([string]$Path)
+    if ($Path -like 'teams?*') { return [pscustomobject]@{ value = @($script:DefaultTeams | ForEach-Object { [pscustomobject]@{ teamid = $_.Id; name = $_.Bu; businessunitid = [pscustomobject]@{ name = $_.Bu; isdisabled = $false } } }) } }
+    if ($Path -like 'fieldsecurityprofiles(r-id)/teamprofiles_association*') { return [pscustomobject]@{ value = @($script:ReaderTeamIds | ForEach-Object { [pscustomobject]@{ teamid = $_; name = 'x' } }) } }
+    if ($Path -like 'fieldsecurityprofiles(w-id)/systemuserprofiles_association*') { return [pscustomobject]@{ value = @([pscustomobject]@{ systemuserid = 'u-bff'; fullname = 'bff'; applicationid = 'app-1' }) } }
+    if ($Path -like 'fieldsecurityprofiles(w-id)/teamprofiles_association*') { return [pscustomobject]@{ value = @() } }
+    if ($Path -like 'systemusers?*') { return [pscustomobject]@{ value = @([pscustomobject]@{ systemuserid = 'u-bff'; fullname = 'bff' }) } }
+    throw "unexpected read: $Path"
+}
+function Set-PreflightWorld([string[]]$Bus, [string[]]$BusWithReader) {
+    $script:DefaultTeams = @($Bus | ForEach-Object { [pscustomobject]@{ Id = "team-$_"; Bu = $_ } })
+    $script:ReaderTeamIds = @($BusWithReader | ForEach-Object { "team-$_" })
+    $script:Reports = @()
+}
+
+Describe 'Test-ProfilePreconditions (the reader profile is checked against the named business units only)' {
+    $BffApplicationIds = @('app-1')
+
+    It 'defaults to the six dev business units' {
+        (($DefaultReaderBusinessUnits | Sort-Object) -join ',') | Should Be 'Secure Record,Spaarke,Spaarke Business Unit 1,Spaarke Demo,Spaarke Dev 1,Spaarke Test 1'
+    }
+    It 'passes when every named business unit default team holds the profile (must-not-fire)' {
+        $ReaderBusinessUnits = $DefaultReaderBusinessUnits
+        Set-PreflightWorld $DefaultReaderBusinessUnits $DefaultReaderBusinessUnits
+        { Test-ProfilePreconditions } | Should Not Throw
+        @($script:Reports | Where-Object { $_[0] -eq 'INFO' }).Count | Should Be 0
+    }
+    It 'escalates (exit 2) when a named business unit default team lacks the profile (must-fire)' {
+        $ReaderBusinessUnits = $DefaultReaderBusinessUnits
+        Set-PreflightWorld $DefaultReaderBusinessUnits @($DefaultReaderBusinessUnits | Where-Object { $_ -ne 'Spaarke Demo' })
+        { Test-ProfilePreconditions } | Should Throw "default team 'Spaarke Demo' (BU 'Spaarke Demo') is NOT on 'Readers'"
+        try { Test-ProfilePreconditions } catch { $_.Exception.GetType().Name | Should Be 'EscalationException' }
+    }
+    It 'does NOT fail on an extra business unit whose default team lacks the profile, and names it in one INFO line (must-not-fire)' {
+        $ReaderBusinessUnits = $DefaultReaderBusinessUnits
+        Set-PreflightWorld (@($DefaultReaderBusinessUnits) + 'External Collaborators') $DefaultReaderBusinessUnits
+        { Test-ProfilePreconditions } | Should Not Throw
+        $info = @($script:Reports | Where-Object { $_[0] -eq 'INFO' })
+        $info.Count | Should Be 1
+        $info[0][1] | Should Match "'External Collaborators'"
+        @($script:Reports | Where-Object { $_[1] -match 'External Collaborators' -and $_[0] -eq 'OK' }).Count | Should Be 0
+    }
+    It 'escalates when a named business unit has no default team (a misspelt name must not pass silently) (must-fire)' {
+        $ReaderBusinessUnits = @($DefaultReaderBusinessUnits) + 'Spaarke Dvo 1'
+        Set-PreflightWorld $DefaultReaderBusinessUnits $DefaultReaderBusinessUnits
+        { Test-ProfilePreconditions } | Should Throw "names 'Spaarke Dvo 1'"
     }
 }
 
@@ -213,6 +271,13 @@ Describe 'the script text (what it never does)' {
     It 'publishes entity-scoped only (no PublishAllXml)' {
         $script:Text -match "(?i)-Path\s+['`"]PublishAllXml" | Should Be $false
         $script:Text -match "(?i)-Path\s+'PublishXml'" | Should Be $true
+    }
+    It 'never checks the reader profile against every default team (the check is over -ReaderBusinessUnits; no loop over $defaultTeams adds a problem)' {
+        $script:Text -match '(?s)foreach \(\$t in \$defaultTeams\)' | Should Be $false
+        $script:Text.Contains('-in $ReaderBusinessUnits') | Should Be $true
+    }
+    It 'never assigns the reader profile to a team (no $ref post, no associate call)' {
+        $script:Text -match '(?i)teamprofiles_association/`?\$ref|/\$ref' | Should Be $false
     }
     It 'refuses any environment but dev before the first read' {
         $script:Text -match "if \(\`$EnvironmentUrl -ne \`$DevUrl\)" | Should Be $true
