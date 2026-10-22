@@ -731,6 +731,10 @@ Client startup validates no hardcoded URL fallbacks (per task 024).
   settings file (`ImpersonationNegativeCanaryTests` fails the build unless every checked-in value is literally `false`).
 - `PowerBi__AllowedWorkspaces__{n}__WorkspaceId` (+ optional `__CustomerBusinessUnitId`) when the Reporting module is
   enabled — the workspaces the catalog may act on; empty refuses every report ([reporting-admin.md](reporting-admin.md#environment-variables)).
+- `ExternalAccess__CustomerBusinessUnitId` — **REQUIRED on every stamp** ([§6.5.5](#655-customer-contact-owner-externalaccess__customerbusinessunitid--required-per-stamp),
+  ISS-005 / #1673). The customer's own business unit: a child of the root with exactly one default Owner team, never the Secure
+  Record business unit. When it is absent the BFF creates no customer contact and registration and first sign-in answer 500
+  `sdap.access.registration_owner_unconfigured`.
 
 #### 6.5.1 Customer identity (`Customer__Id`) — required per stamp
 
@@ -847,12 +851,13 @@ It is checked in two places:
    (`WorkforcePrincipalResolver.cs:190`): an enabled systemuser is resolved and admitted there, before any member test
    — a licensed B2B guest and a Model 1 Spaarke staff member included (`WorkforcePrincipalResolver.cs:207-251`); a
    disabled one is denied (`:257`). Only the contact-only branch runs `WorkforceMembershipTest`, on every sign-in and
-   before any contact lookup — an existing binding does not override it (`ContactIdentityBinder.cs:327-332`). On that
+   before any contact lookup — an existing binding does not override it (`ContactIdentityBinder.ResolveWorkforceCallerAsync`,
+   `ContactIdentityBinder.cs:337-345`). On that
    branch only a direct member of a listed tenant (`tid` ∈ list, `acct = 0`) passes: the Model 2 / dev path. No guest
    is admitted on that branch (ADR-028 A9): customer workforce users sign in at their home directory and register (2.
    below). A Spaarke-tenant B2B guest whose home tenant (from `idp`) is listed still answers `Member` from the member
    test, and the binder refuses it `sdap.access.deny.workforce_guest_use_home_signin` before any store call
-   (`ContactIdentityBinder.cs:303-317`; #2128 retired the R3 FR-15 guest admission). A guest from any other home tenant
+   (`ContactIdentityBinder.cs:313-328`; #2128 retired the R3 FR-15 guest admission). A guest from any other home tenant
    gets its member-test deny: `sdap.access.deny.workforce_tenant_not_customer`, or `sdap.access.deny.workforce_guest`
    where the stamp lists its own tenant (dev).
 2. ~~**Workforce self-registration** (R3 FR-14, task 060)~~ — **superseded by ADR-028 A9.** FR-14 invited the person
@@ -863,7 +868,7 @@ It is checked in two places:
    for a caller who already resolves; otherwise, for the token's email, it refuses a licensed user's email
    (`licensed_user_link_required`), answers 409 `existing_record_found` for one bindable existing contact and binds it
    on the confirmed resubmit, refuses contacts it cannot bind (`registration_contact_conflict`), or creates one
-   WorkforceHome contact (`ContactIdentityBinder.RegisterHomeContactAsync`, `ContactIdentityBinder.cs:673`). Nothing
+   WorkforceHome contact (`ContactIdentityBinder.RegisterHomeContactAsync`, `ContactIdentityBinder.cs:686`). Nothing
    is invited into Spaarke's tenant.
 
 **Without the list**, anyone with any Microsoft work account could register as that customer's staff, and a guest
@@ -1067,6 +1072,46 @@ that stands it up). It is a deployment setting, not a Dataverse column, because 
   marker.
 - A customer root-unit admin calling those routes gets `403 spe.admin.deny.platform_operator_required` — the same answer as
   a leaf admin anywhere.
+
+#### 6.5.5 Customer contact owner (`ExternalAccess__CustomerBusinessUnitId`) — required per stamp
+
+> Added 2026-10-22 by `spaarke-SPA-external-access-platform-r3` ISS-005 (#1673; owner wording of the rule pending). The write
+> rule it serves is invariant I-6 in [`DATAVERSE-WRITE-PATH-ARCHITECTURE.md`](../architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md).
+
+**Every contact the BFF creates for a customer's people is owned at creation by the default Owner team of one business unit —
+the customer's own.** A contact created with no owner team is owned by the BFF's own application user, in whatever
+business unit that user sits (the root business unit on dev), not by the customer's team. The BFF creates a customer contact in three places, and all three read this one
+setting: **registration** (`POST /api/v1/external/registration`, a WorkforceHome contact), a Type-2 workforce user's **first
+sign-in** (a contact keyed by their `oid`; §6.5.2), and the **licensed-user link** (a contact for a licensed systemuser who has
+none — registration approval, the first resolution of a licensed user, and the identity-link reconciliation job).
+
+| | |
+|---|---|
+| **Setting** | `ExternalAccess__CustomerBusinessUnitId` (configuration key `ExternalAccess:CustomerBusinessUnitId`) — **REQUIRED on every stamp**, on both slots |
+| **Value** | the GUID of the customer's own business unit: a **child of the root** business unit, with **exactly one default Owner team** (Dataverse creates one with the unit), and **never the Secure Record business unit** (the unit named by `SecureRecord__BusinessUnitName`). A value that is not a GUID **fails startup** |
+| **Absent, empty or the all-zero GUID** | **REFUSE, create nothing.** Registration answers `500 sdap.access.registration_owner_unconfigured`; a first sign-in that would create a contact answers `500` with the same code; the licensed-user link is not made (the reconciliation job reports the user `Denied` with the same code, report-only runs included). Binding an **existing** contact (by `oid` or by email) needs no owner and still works |
+| **Also refused with the same code** | the unit is the Secure Record business unit (decided by id) or the Secure Record name is ambiguous; the unit has no default Owner team, or more than one. An **unreadable** lookup refuses with `sdap.access.deny.contact_lookup_failed` (retryable; its HTTP status is tracked in #2269) |
+| **Not checked today** | that the unit is a child of the root. The BFF accepts the root unit; refusing it is an open owner decision, so the operator must not set it |
+| **Written by** | provisioning — **H4b** writes it on both slots from the unit H10 creates, and **H13 trap T7** reads it back (T265), once `customer-provisioning-orchestration-r1` merges (#2265). Until then, and for Spaarke's own environments (dev), set it by hand on **both** slots |
+
+```bash
+az webapp config appsettings set --resource-group <rg> --name <app-service-name> \
+  --settings ExternalAccess__CustomerBusinessUnitId=<customer-business-unit-guid>
+az webapp config appsettings set --resource-group <rg> --name <app-service-name> --slot staging \
+  --settings ExternalAccess__CustomerBusinessUnitId=<customer-business-unit-guid>
+```
+
+⚠️ **Behaviour change for an existing stamp (ISS-005).** Before ISS-005 a first sign-in on a stamp without this setting created an
+**unowned** contact; it now **refuses** (a Type-2 user with no existing contact cannot sign in until the setting is set), and a
+licensed user with no contact is no longer given one. Set the setting on every existing stamp **before** the BFF build that
+contains ISS-005 reaches it.
+
+**Known limit — contacts created in a FOREIGN environment are ownerless (#2270).** The setting names a business unit of **this**
+BFF's Dataverse environment. When registration approval links a new systemuser's contact in a *different* environment (a demo or
+customer target environment the BFF provisions users into, built by `ContactIdentityBinderFactory`), that unit does not exist
+there, so the contact is created with no owner by design (`ContactCreateOwner.NoneForForeignEnvironment`, used by the factory
+alone). The BFF's own environment is never treated that way: `RegistrationDataverseService.ContactBinderFor` returns the
+owner-aware binder for it, however its URL is spelled (`IsSameEnvironment`).
 
 ---
 
