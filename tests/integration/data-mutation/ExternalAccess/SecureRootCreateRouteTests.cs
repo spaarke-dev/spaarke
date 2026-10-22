@@ -111,6 +111,7 @@ public class SecureRootCreateRouteTests : IClassFixture<SecureRootCreateRouteFix
         var matter = Guid.NewGuid();
         SecureMatter(_fixture, matter);
         _fixture.MapProjectsUnder(matter, RecordTypeRef(_fixture, "sprk_matter"));
+        _fixture.CallerNoAppendTo.Add(matter); // the caller's own Dataverse withholds AppendTo on the secure matter
 
         var response = await _fixture.CreateAuthenticatedClient().PostAsJsonAsync(OfficeRoute, new
         {
@@ -202,6 +203,9 @@ public sealed class SecureRootCreateRouteFixture : ProvisionProjectTestFixture
     /// <summary>The chat tool's app-only creates (table, id).</summary>
     public List<(string Table, Guid Id)> ChatCreates { get; } = new();
 
+    /// <summary>Records on which the caller's own Dataverse answers WITHOUT AppendTo (RetrievePrincipalAccess as the caller).</summary>
+    public HashSet<Guid> CallerNoAppendTo { get; } = new();
+
     private PendingInvocation? _pending;
     private Guid? _mappedMatter;
     private Guid? _mappedType;
@@ -213,6 +217,7 @@ public sealed class SecureRootCreateRouteFixture : ProvisionProjectTestFixture
     {
         OfficeCreates.Clear();
         ChatCreates.Clear();
+        CallerNoAppendTo.Clear();
         _pending = null;
         _mappedMatter = null;
         _mappedType = null;
@@ -276,8 +281,17 @@ public sealed class SecureRootCreateRouteFixture : ProvisionProjectTestFixture
             // ── Chat: the caller's own Dataverse (scripted OBO), the session, the gate store, the tool catalog ──
             services.RemoveAll<IDataverseUserClient>();
             // #2188: the Office mapping-source caller read is answered as the app read was (a caller who reads every column).
-            services.AddScoped<IDataverseUserClient>(_ => MappingSourceCallerReadDouble.MirroringAppReads(officeEntities)
-                .RoutedOver(new SecureChildOwnershipAiToolTests.ScriptedUserClient(CallerSystemUserId)));
+            // Field mapping task 018b: the Office create now asks as the caller too — the pair's record-type row from this
+            // fixture's catalog, and AppendTo on the record it is filed under (CallerNoAppendTo withholds it).
+            services.AddScoped<IDataverseUserClient>(_ =>
+            {
+                var caller = new SecureChildOwnershipAiToolTests.ScriptedUserClient(CallerSystemUserId)
+                {
+                    RecordTypeOf = id => ChildWorld.ValueOf<string>("sprk_recordtype_ref", id, "sprk_recordlogicalname"),
+                };
+                caller.NoAppendTo.UnionWith(CallerNoAppendTo);
+                return MappingSourceCallerReadDouble.MirroringAppReads(officeEntities).RoutedOver(caller);
+            });
             services.RemoveAll<ChatSessionManager>();
             services.AddSingleton<ChatSessionManager>(_sessions);
             services.RemoveAll<PendingPlanManager>();
@@ -352,12 +366,19 @@ public sealed class SecureRootCreateRouteFixture : ProvisionProjectTestFixture
                 ],
             }));
 
-        // The chat tool's app-only create (create-by-upsert) lands in the provisioning fixture's Dataverse.
+        // The app-only create (create-by-upsert) of both routes lands in the provisioning fixture's Dataverse: the Office
+        // quick-create's project (RecordCreationService step 11, field mapping task 018b) and the chat tool's create.
         mappings
             .Setup(m => m.UpdateRecordFieldsAsync(
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), null))
             .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((table, id, fields, _, _) =>
             {
+                if (table == "sprk_project")
+                {
+                    RecordOfficeProjectCreate(id, fields);
+                    return;
+                }
+
                 ChatCreates.Add((table, id));
                 SeedWorkAssignment(id, owningTeamId: Bound(fields, "ownerid@odata.bind"),
                     isSecure: fields.TryGetValue("sprk_issecure", out var flag) && flag is true,
@@ -367,6 +388,39 @@ public sealed class SecureRootCreateRouteFixture : ProvisionProjectTestFixture
             })
             .Returns(Task.CompletedTask);
         return mappings;
+    }
+
+    /// <summary>
+    /// The Office quick-create's project, as the service's Web API body sent it: recorded in <see cref="OfficeCreates"/> as the
+    /// SDK entity the old app-only create passed (owner, flag, pair, creator person) and seeded like the old create seam did.
+    /// </summary>
+    private void RecordOfficeProjectCreate(Guid id, IReadOnlyDictionary<string, object?> fields)
+    {
+        var owner = Bound(fields, "ownerid@odata.bind");
+        var isSecure = fields.TryGetValue("sprk_issecure", out var flag)
+                       && (flag is true || flag is JsonElement { ValueKind: JsonValueKind.True });
+        var creatorPerson = Bound(fields, "sprk_CreatedByPerson@odata.bind");
+        var pairId = fields.TryGetValue("sprk_regardingrecordid", out var rawPair)
+            ? rawPair is JsonElement { ValueKind: JsonValueKind.String } pairJson ? pairJson.GetString() : rawPair as string
+            : null;
+        var pairType = Bound(fields, "sprk_RegardingRecordType@odata.bind");
+
+        var row = new Entity("sprk_project", id) { ["sprk_issecure"] = isSecure };
+        if (owner is { } team)
+            row["ownerid"] = new EntityReference("team", team);
+        if (creatorPerson is { } person)
+            row[RecordCreatorPerson.Column] = new EntityReference("systemuser", person);
+        if (pairId is not null)
+            row["sprk_regardingrecordid"] = pairId;
+        if (pairType is { } type)
+            row["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", type);
+        OfficeCreates.Add(row);
+
+        SeedProject(id, owningTeamId: owner, isSecure: isSecure, createdBy: AppUser, createdByPerson: creatorPerson);
+        if (pairId is not null)
+            ChildWorld.Set("sprk_project", id, "sprk_regardingrecordid", pairId);
+        if (pairType is { } pairTypeId)
+            ChildWorld.Set("sprk_project", id, "sprk_regardingrecordtype", new EntityReference("sprk_recordtype_ref", pairTypeId));
     }
 
     private static Guid? Bound(IReadOnlyDictionary<string, object?> fields, string key) =>
