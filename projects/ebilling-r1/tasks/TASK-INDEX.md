@@ -81,7 +81,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 078 | ✅ [done] | Rate card and timekeeper import and publish | STANDARD | sonnet / high | P2-B | 017, 028, 029 |
 | 079 | 🔲 [open] | Deploy WP3 to dev: Procedure and Stored File schema, rule types, storage settings, solution sync, BFF and SPA via SPA-r3 | STANDARD | sonnet / high | none (deploy) | 053, 080–083, 085, 086, 088–094, 098, 099, 115, 116, 117 |
 | 080 | ✅ [done] | Procedure schema: Procedure, Procedure Version, assignments; rule-set record scope; policy-version and rate-card links | STANDARD | sonnet / high | P3-A | none |
-| 081 | 🔲 [open] | Procedure and Procedure Version service: I-P1 to I-P5, copy-forward, publish, dates, retire with a caller-scoped preview | FULL | opus / high | P3-B (p-safe false) | 080, 088, 099 |
+| 081 | ✅ [done] | Procedure and Procedure Version service: I-P1 to I-P5, copy-forward, publish, dates, retire with a caller-scoped preview | FULL | opus / high | P3-B (p-safe false) | 080, 088, 099 |
 | 082 | 🔲 [open] | Procedure resolver (7.1): firm condition, gaps and holds, re-keyed version selection (7.2), snapshot, ratchet ArchTest | FULL | opus / high | P3-D | 080, 081, 089 |
 | 083 | 🔲 [open] | Firm clause: GetFirmClauseAsync re-keyed to the invoice's snapshot, firm-facing name; 130-135 POML constraint lines | FULL | sonnet / high | P3-E | 082 |
 | 084 | 🔲 [open] | Procedures and rules-in-force on the record: back-end read models of 6.6 now; UI after the prototype (O-14) | FULL | sonnet / high | P3-E | 081, 089, 082 |
