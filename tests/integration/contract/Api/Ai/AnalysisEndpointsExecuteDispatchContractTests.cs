@@ -325,6 +325,54 @@ public class AnalysisEndpointsExecuteDispatchContractTests
     }
 
     [Theory]
+    [InlineData("{\"summary\":\"A summary\",\"tldr\":\"tldr\",\"documentType\":\"contract\"}", false)] // misconfigured schema
+    [InlineData("{\"sprk_filetldr\":\"tldr\"}", true)] // control: one profile column is a profile
+    public async Task Post_DocumentProfileWithNoMappableField_EndsInOneError_WritesNothing_AndSendsNoCompletionNotification(
+        string aiOutput, bool mapsAProfileColumn)
+    {
+        // #2239: an AI output that maps no profile column used to write an empty update (just the computed file type
+        // before that) and report Completed. It is a failed profile, as the app-only and Compose consumers treat it.
+        _fx.Reset();
+        var documentId = Guid.NewGuid();
+        _fx.ActionResolverMock
+            .Setup(a => a.ResolveAsync(ConsumerTypes.DocumentProfile, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AnalysisAction { Id = Guid.NewGuid(), Name = "Document Profiler" });
+        _fx.DocumentTextSourceMock
+            .Setup(t => t.ExtractFromDocumentIdAsync(documentId, It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DocumentText { DocumentId = documentId, FileName = "letter.pdf", ExtractedText = "Some text." });
+        _fx.ActionRunnerMock
+            .Setup(r => r.RunAsync(It.IsAny<AnalysisAction>(), It.IsAny<DocumentText>(), It.IsAny<LinearRunContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(JsonDocument.Parse(aiOutput).RootElement.Clone());
+        var notificationLookup = _fx.WatchForNotificationLookup();
+
+        var response = await _fx.CreateAuthenticatedClient().PostAsJsonAsync("/api/ai/analysis/execute", new
+        {
+            documentIds = new[] { documentId },
+            playbookId = AnalysisExecuteDispatchTestFixture.DocumentProfilePlaybookId,
+        });
+        var chunks = ParseChunks(await response.Content.ReadAsStringAsync());
+        var types = chunks.Select(c => c.GetProperty("type").GetString()).ToList();
+
+        if (mapsAProfileColumn)
+        {
+            types.Should().NotContain("error");
+            _fx.DocumentServiceMock.Verify(d => d.UpdateDocumentFieldsAsync(
+                documentId.ToString(),
+                It.Is<Dictionary<string, object?>>(f => f.ContainsKey("sprk_filetldr") && f.ContainsKey("sprk_filetype")),
+                It.IsAny<CancellationToken>()), Times.Once);
+            return;
+        }
+
+        types.Should().EndWith("error");
+        types.Count(t => t == "error").Should().Be(1);
+        types.Should().NotContain("done");
+        _fx.DocumentServiceMock.Verify(d => d.UpdateDocumentFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>()), Times.Never);
+        var completed = await Task.WhenAny(notificationLookup, Task.Delay(TimeSpan.FromSeconds(2)));
+        completed.Should().NotBeSameAs(notificationLookup, "a profile that mapped nothing is not a completed analysis");
+    }
+
+    [Theory]
     [InlineData("profile")]
     [InlineData("engine")]
     public async Task Post_AFailedRunWhoseTerminatorWriteThrows_StillEndsWithExactlyOneErrorChunk(string branch)
@@ -459,6 +507,11 @@ public sealed class AnalysisExecuteDispatchTestFixture : IAsyncLifetime, IDispos
     public Mock<IPlaybookOrchestrationService> PlaybookOrchestratorMock { get; } = new();
     public Mock<IActionResolver> ActionResolverMock { get; } = new();
 
+    /// <summary>#2239: the profile pipeline's text, run and write seams (loose; the default returns nothing).</summary>
+    public Mock<IDocumentTextSource> DocumentTextSourceMock { get; } = new();
+    public Mock<IActionRunner> ActionRunnerMock { get; } = new();
+    public Mock<IDocumentDataverseService> DocumentServiceMock { get; } = new();
+
     /// <summary>The Dataverse boundary of the fire-and-forget "analysis complete" notification.</summary>
     public Mock<IGenericEntityService> EntityServiceMock { get; } = new();
 
@@ -549,7 +602,7 @@ public sealed class AnalysisExecuteDispatchTestFixture : IAsyncLifetime, IDispos
         // fail-soft: null document → orchestrator still invoked).
         builder.Services.AddHttpContextAccessor();
         builder.Services.AddSingleton(Mock.Of<IAnalysisDataverseService>());
-        builder.Services.AddSingleton(Mock.Of<IDocumentDataverseService>());
+        builder.Services.AddSingleton(DocumentServiceMock.Object);
         builder.Services.AddSingleton(Mock.Of<ISpeFileOperations>());
         builder.Services.AddSingleton(Mock.Of<ITextExtractor>());
         builder.Services.AddSingleton<ITenantCache>(
@@ -562,8 +615,8 @@ public sealed class AnalysisExecuteDispatchTestFixture : IAsyncLifetime, IDispos
         // (the wrapper class was absorbed) — mocked Linear primitives; the Linear-branch
         // marker chunk ("document-profile:{id}") is emitted before any primitive is used.
         builder.Services.AddSingleton(ActionResolverMock.Object);
-        builder.Services.AddSingleton(Mock.Of<IDocumentTextSource>());
-        builder.Services.AddSingleton(Mock.Of<IActionRunner>());
+        builder.Services.AddSingleton(DocumentTextSourceMock.Object);
+        builder.Services.AddSingleton(ActionRunnerMock.Object);
         builder.Services.AddSingleton(Mock.Of<IPostUploadIndexingEnqueuer>());
 
         // Real NotificationService (fire-and-forget completion notification path).
@@ -630,6 +683,9 @@ public sealed class AnalysisExecuteDispatchTestFixture : IAsyncLifetime, IDispos
         ConsumerRoutingMock.Reset();
         PlaybookOrchestratorMock.Reset();
         ActionResolverMock.Reset();
+        DocumentTextSourceMock.Reset();
+        ActionRunnerMock.Reset();
+        DocumentServiceMock.Reset();
         ConfigureDefaults();
     }
 
