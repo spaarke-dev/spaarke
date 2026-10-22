@@ -54,12 +54,16 @@ public interface IActionSeam
     /// <b>A person-CONFIRMED proposal only</b> (#2257 fix round 2, K5). A call that sets
     /// <see cref="UpdateRecordRequest.ImpersonateSystemUserId"/> is treated as the apply of a proposal THAT person confirmed
     /// (<c>UpdateRecordPayloadSource.ConfirmedProposal</c>): it runs AS them and SKIPS the configuration deny-lists
-    /// (<c>InheritedAccessPermission.RefuseAppOnlyWrite</c>: a document's Access Permission, D7 links and BFF-owned columns,
-    /// every row's owner and creator), leaving the write to their own Dataverse privileges and field security. It must
+    /// (ALL of <c>InheritedAccessPermission.RefuseAppOnlyWrite</c>: the table-name check; every row of an access table
+    /// (<c>AccessTables</c>, #2251); a document's Access Permission, D7 links and BFF-owned columns; a secure root's secure
+    /// flag, access columns and container (<c>SecureRootColumns</c>, #2251); another table's access columns
+    /// (<c>AccessColumns</c>, #2253); every row's owner and creator), leaving the write to their own Dataverse privileges and
+    /// field security. It must
     /// therefore NEVER carry a payload built by a model or by configuration that the person did not confirm field by field;
     /// such a write goes through the Update Record node or the output mapping, which ask the deny-lists whoever they run as.
     /// The callers are pinned to <c>CommunicationProposalApplyService</c> and <c>CommunicationCreateTaskApplyService</c>
-    /// (ArchTest <c>ActionSeamUpdateRecordCallerGuardTests</c>). A call without a user (or with <see cref="Guid.Empty"/>) is
+    /// (ArchTest <c>ActionSeamUpdateRecordCallerGuardTests</c>, which also pins <c>ActionSeam</c> as the only claimer of
+    /// <c>ConfirmedProposal</c>). A call without a user (or with <see cref="Guid.Empty"/>) is
     /// asked the deny-lists.
     /// </remarks>
     Task<UpdateRecordResult> UpdateRecordAsync(

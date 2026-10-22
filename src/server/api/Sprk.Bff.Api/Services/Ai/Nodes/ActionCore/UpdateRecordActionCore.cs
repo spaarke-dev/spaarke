@@ -170,8 +170,9 @@ internal sealed class UpdateRecordActionCore
             }
         }
 
-        // unified-access-control-r2 task 189 fix round C (K5): a payload that acts for no person (the action seam without an
-        // impersonated user) never writes a document's Access Permission or its own-narrowing record; only the document
+        // unified-access-control-r2 task 189 fix round C (K5): a payload that is not a confirmed proposal written AS its
+        // confirming user (see #2257 below: the Update Record node's, whoever runs the playbook, and the action seam's without
+        // an impersonated user) never writes a document's Access Permission or its own-narrowing record; only the document
         // rule's writers do. Refused before anything is written. Task 188 round 4e: nor its D7 link columns
         // (sprk_parentdocument, sprk_relatedcommunication), set, cleared or bound (InheritedAccessPermission.DocumentLinkColumns).
         // #2251: nor any row of a table whose rows are access (grants, membership, ethical walls; AccessTables), nor a secure
