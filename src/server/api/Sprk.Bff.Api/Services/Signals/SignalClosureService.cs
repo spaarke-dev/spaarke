@@ -62,7 +62,7 @@ public sealed record SignalClosureOutcome(int Closed, int ChangedSinceRead, int 
 /// cannot close Signals immediately, and an Off or superseded policy's Signals stay Open in the worklist.</para>
 /// <para>Not sealed (ebilling-r1 task 081): <see cref="SelectOpenSignalsOfPolicyAsync"/> and <see cref="ClosePolicySignalsRetiredAsync"/> are
 /// virtual so the Procedure retire tests can run the real selection and observe the close without a full Signal writer. No other member is
-/// overridable and nothing in production derives from it.</para>
+/// overridable and nothing in production derives from it (enforced by <c>SignalClosureServiceDerivationGuardTests</c>).</para>
 /// </remarks>
 public class SignalClosureService
 {
@@ -90,7 +90,8 @@ public class SignalClosureService
         if (policyId == Guid.Empty) throw new ArgumentException("policyId must not be Guid.Empty.", nameof(policyId));
         var policy = await _entities.RetrieveAsync("sprk_policy", policyId, new[] { "sprk_policycode" }, ct).ConfigureAwait(false);
         var code = policy.GetAttributeValue<string>("sprk_policycode") ?? string.Empty;
-        return (await ClosePolicySignalsRetiredAsync(policyId, code, ct).ConfigureAwait(false)).Outcome;
+        // No billing subject: this close serves every domain, and sprk_signal has the invoice columns only where ebilling is deployed.
+        return (await ClosePolicySignalsRetiredAsync(policyId, code, withBillingSubject: false, ct).ConfigureAwait(false)).Outcome;
     }
 
     /// <summary>
@@ -101,10 +102,13 @@ public class SignalClosureService
     /// switched the policy Off; this method does not check. A selection fault throws (nothing was closed); a per-Signal fault is counted in
     /// the outcome, as everywhere else here.
     /// </summary>
-    internal virtual async Task<PolicySignalClosure> ClosePolicySignalsRetiredAsync(Guid policyId, string policyCode, CancellationToken ct)
+    /// <param name="withBillingSubject">True only for the Procedure retire, which reads the closed Signals' invoice subjects back; see
+    /// <see cref="SelectOpenSignalsOfPolicyAsync"/>.</param>
+    internal virtual async Task<PolicySignalClosure> ClosePolicySignalsRetiredAsync(
+        Guid policyId, string policyCode, bool withBillingSubject, CancellationToken ct)
     {
         if (policyId == Guid.Empty) throw new ArgumentException("policyId must not be Guid.Empty.", nameof(policyId));
-        var open = await SelectOpenSignalsOfPolicyAsync(policyId, ct).ConfigureAwait(false);
+        var open = await SelectOpenSignalsOfPolicyAsync(policyId, withBillingSubject, ct).ConfigureAwait(false);
         var closedIds = new HashSet<Guid>();
         var outcome = await CloseAsync(policyCode, open.Select(s => s.Signal).ToList(), SignalWriter.ResolutionPolicyRetired, ct, closedIds)
             .ConfigureAwait(false);
@@ -159,7 +163,9 @@ public class SignalClosureService
             ct.ThrowIfCancellationRequested();
             try
             {
-                var open = await SelectOpenSignalsOfPolicyAsync(policyId, ct).ConfigureAwait(false);
+                // No billing subject: the sweep reads every domain's policies (Ontology included), and sprk_signal has the invoice columns
+                // only where ebilling is deployed; selecting them elsewhere fails every per-policy read (ontology review F1, 2026-10-22).
+                var open = await SelectOpenSignalsOfPolicyAsync(policyId, withBillingSubject: false, ct).ConfigureAwait(false);
                 total = total.Plus(await CloseAsync(code, open.Select(s => s.Signal).ToList(), SignalWriter.ResolutionPolicyRetired, ct)
                     .ConfigureAwait(false));
             }
@@ -426,34 +432,55 @@ public class SignalClosureService
     /// <summary>A billing Signal's invoice-line subject (<c>sprk_signal.sprk_regardinginvoiceline</c> → <c>sprk_billingevent</c>).</summary>
     internal const string RegardingInvoiceLineColumn = "sprk_regardinginvoiceline";
 
-    /// <summary>The Signal columns the PolicyRetired selection reads: what the close needs, plus the billing subject lookups the
-    /// Procedure retire count maps to invoices (ebilling-r1 task 081).</summary>
+    /// <summary>The Signal columns every PolicyRetired selection reads: what the close needs. Every environment's <c>sprk_signal</c>
+    /// has them.</summary>
     internal static readonly string[] OpenSignalColumns =
     {
-        "sprk_signalstatus", "sprk_policyversion", "sprk_dedupekey", "versionnumber", RegardingInvoiceColumn, RegardingInvoiceLineColumn,
+        "sprk_signalstatus", "sprk_policyversion", "sprk_dedupekey", "versionnumber",
     };
 
+    /// <summary>The billing subject lookups the Procedure retire count maps to invoices (ebilling-r1 task 081). They exist only where
+    /// ebilling's Signal schema is deployed, and Dataverse answers 400 to a ColumnSet naming a column the table lacks, so only a caller
+    /// that opts in (<c>withBillingSubject</c>) selects them (ontology review F1, 2026-10-22).</summary>
+    internal static readonly string[] BillingSubjectColumns = { RegardingInvoiceColumn, RegardingInvoiceLineColumn };
+
     /// <summary>
-    /// THE selection of a policy's open Signals (ebilling-r1 task 081, model 15 answer 2 "preview = sweep"): every Open or Acknowledged
-    /// Signal of the policy, by the policy lookup (so no dedupe-key parsing and no Resolved row can be returned), with the row version the
-    /// conditional close needs and the billing subject (invoice or invoice line). The job's Off/Retired sweep
-    /// (<see cref="ClosePoliciesNotInForceAsync"/>), the immediate retire close (<see cref="ClosePolicyRetiredNowAsync"/>,
-    /// <see cref="ClosePolicySignalsRetiredAsync"/>) and the Procedure retire PREVIEW (<c>ProcedureService.PreviewRetireAsync</c>; task 089's
-    /// override-removal preview) all call this one method, so a preview never claims a set the close does not touch. No other BFF code
-    /// selects a policy's open Signals for a PolicyRetired close (<c>ProcedureRetireSelectionGuardTests</c>). Reads only; never writes.
+    /// THE criteria of "a policy's open Signals" (ebilling-r1 task 081, model 15 answer 2 "preview = sweep"): every Open or Acknowledged
+    /// Signal of the policy, by the policy lookup, paged and ordered by id. Every caller's query is built here; <paramref name="withBillingSubject"/>
+    /// changes only the ColumnSet (it adds <see cref="BillingSubjectColumns"/>), never which rows are selected.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The policy has more than <see cref="SignalEvaluator.MaxPages"/> pages of open Signals.</exception>
-    internal virtual async Task<IReadOnlyList<OpenPolicySignal>> SelectOpenSignalsOfPolicyAsync(Guid policyId, CancellationToken ct)
+    internal static QueryExpression OpenSignalsOfPolicyQuery(Guid policyId, bool withBillingSubject)
     {
         var query = new QueryExpression("sprk_signal")
         {
-            ColumnSet = new ColumnSet(OpenSignalColumns),
+            ColumnSet = new ColumnSet(withBillingSubject ? OpenSignalColumns.Concat(BillingSubjectColumns).ToArray() : OpenSignalColumns),
             PageInfo = new PagingInfo { Count = SignalEvaluator.PageSize, PageNumber = 1 },
         };
         query.Criteria.AddCondition("sprk_policy", ConditionOperator.Equal, policyId);
         query.Criteria.AddCondition("sprk_signalstatus", ConditionOperator.In,
             new object[] { SignalWriter.SignalStatusOpen, SignalWriter.SignalStatusAcknowledged });
         query.AddOrder("sprk_signalid", OrderType.Ascending);
+        return query;
+    }
+
+    /// <summary>
+    /// THE selection of a policy's open Signals (ebilling-r1 task 081, model 15 answer 2 "preview = sweep"): every Open or Acknowledged
+    /// Signal of the policy, by the policy lookup (so no dedupe-key parsing and no Resolved row can be returned), with the row version the
+    /// conditional close needs and, when <paramref name="withBillingSubject"/>, the billing subject (invoice or invoice line); the rows
+    /// selected are <see cref="OpenSignalsOfPolicyQuery"/>'s for every caller. The job's Off/Retired sweep
+    /// (<see cref="ClosePoliciesNotInForceAsync"/>), the immediate retire close (<see cref="ClosePolicyRetiredNowAsync"/>,
+    /// <see cref="ClosePolicySignalsRetiredAsync"/>) and the Procedure retire PREVIEW (<c>ProcedureService.PreviewRetireAsync</c>; task 089's
+    /// override-removal preview) all call this one method, so a preview never claims a set the close does not touch. No other BFF code
+    /// selects a policy's open Signals for a PolicyRetired close (<c>ProcedureRetireSelectionGuardTests</c>). Reads only; never writes.
+    /// </summary>
+    /// <param name="withBillingSubject">Select the invoice and invoice-line lookups too. Only the Procedure retire (its preview and its close)
+    /// passes true: those columns exist only where ebilling's Signal schema is deployed, while the sweep and the admin retire close run in
+    /// every environment (ontology review F1, 2026-10-22). False: both subject ids come back null.</param>
+    /// <exception cref="InvalidOperationException">The policy has more than <see cref="SignalEvaluator.MaxPages"/> pages of open Signals.</exception>
+    internal virtual async Task<IReadOnlyList<OpenPolicySignal>> SelectOpenSignalsOfPolicyAsync(
+        Guid policyId, bool withBillingSubject, CancellationToken ct)
+    {
+        var query = OpenSignalsOfPolicyQuery(policyId, withBillingSubject);
 
         var signals = new List<OpenPolicySignal>();
         for (var page = 1; ; page++)
@@ -498,7 +525,8 @@ public class SignalClosureService
 
 /// <summary>
 /// One open Signal of a policy as <see cref="SignalClosureService.SelectOpenSignalsOfPolicyAsync"/> selects it (ebilling-r1 task 081): what the
-/// close needs, and the billing subject a caller-scoped count maps to an invoice. Both subject ids are null for a non-billing Signal.
+/// close needs, and the billing subject a caller-scoped count maps to an invoice. Both subject ids are null for a non-billing Signal, and
+/// whenever the selection was made without <c>withBillingSubject</c>.
 /// </summary>
 internal sealed record OpenPolicySignal(ExistingSignal Signal, Guid? RegardingInvoiceId, Guid? RegardingInvoiceLineId);
 

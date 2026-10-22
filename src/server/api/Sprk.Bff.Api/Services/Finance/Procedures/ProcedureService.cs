@@ -129,7 +129,8 @@ public sealed record ProcedureRetired(
 /// (<c>procedure.firm_required</c>). I-P4: once any version has been in force (Active, Superseded, or Retired after a publish), Applies to and Firm are locked (<c>procedure.scope_locked</c>).
 /// I-P5: retiring a version closes nothing and leaves its policies enabled; retiring the Procedure switches every policy of its rule set Off
 /// and closes their open Signals PolicyRetired through <see cref="SignalClosureService.ClosePolicySignalsRetiredAsync"/>, the same selection
-/// the preview counts from (<see cref="SignalClosureService.SelectOpenSignalsOfPolicyAsync"/>).</para>
+/// the preview counts from (<see cref="SignalClosureService.SelectOpenSignalsOfPolicyAsync"/>). Both opt in to the invoice subject columns
+/// (<c>withBillingSubject</c>); the job sweep and the admin retire close select the same rows without them (ontology review F1).</para>
 /// <para><b>Identity.</b> The routes have already refused flagged-external callers (step 0) and checked the caller's own rights (Write or Read
 /// on the Procedure, the billing-admin privilege, or Create on <c>sprk_procedure</c>). The writes then run as the BFF application user, because
 /// the dates, status, Applies to and Firm are field-secured to it (I-P2). New rows are owned by the caller's business-unit team
@@ -853,7 +854,7 @@ public class ProcedureService
 
                 foreach (var policy in policies)
                 {
-                    signals.AddRange(await _closure.SelectOpenSignalsOfPolicyAsync(policy.Id, ct));
+                    signals.AddRange(await _closure.SelectOpenSignalsOfPolicyAsync(policy.Id, withBillingSubject: true, ct));
                 }
             }
 
@@ -939,7 +940,7 @@ public class ProcedureService
         {
             try
             {
-                var closure = await _closure.ClosePolicySignalsRetiredAsync(policy.Id, policy.Code, CancellationToken.None);
+                var closure = await _closure.ClosePolicySignalsRetiredAsync(policy.Id, policy.Code, withBillingSubject: true, CancellationToken.None);
                 outcome = outcome.Plus(closure.Outcome);
                 closed.AddRange(closure.Closed);
             }

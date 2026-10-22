@@ -52,6 +52,10 @@ public sealed class ProcedureServiceTests
         public readonly List<IReadOnlyList<(string EntitySet, Guid RecordId)>> RightsCalls = new();
         public readonly List<Guid> SelectedPolicies = new();
         public readonly List<Guid> ClosedPolicies = new();
+
+        /// <summary>Ontology review F1 (2026-10-22): the <c>withBillingSubject</c> each selection and close was asked with.</summary>
+        public readonly List<bool> SelectedWithBillingSubject = new();
+        public readonly List<bool> ClosedWithBillingSubject = new();
         public Guid? CallerSystemUser = CallerUserId;
         public bool RightsFault;
         public bool CallerFault;
@@ -69,21 +73,23 @@ public sealed class ProcedureServiceTests
                 NullLogger<SignalClosureService>.Instance) { CallBase = true };
 
             // The REAL selection over the fake store, recorded.
-            Closure.Setup(c => c.SelectOpenSignalsOfPolicyAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-                .Returns(async (Guid policyId, CancellationToken ct) =>
+            Closure.Setup(c => c.SelectOpenSignalsOfPolicyAsync(It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                .Returns(async (Guid policyId, bool withBillingSubject, CancellationToken ct) =>
                 {
                     SelectedPolicies.Add(policyId);
+                    SelectedWithBillingSubject.Add(withBillingSubject);
                     if (SelectFault) throw new InvalidOperationException("simulated selection fault");
-                    return await SelectReal(policyId, ct);
+                    return await SelectReal(policyId, withBillingSubject, ct);
                 });
 
             // The close: closes what the SAME selection returns at confirm time (PolicyRetired), as the real method does.
-            Closure.Setup(c => c.ClosePolicySignalsRetiredAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .Returns(async (Guid policyId, string _, CancellationToken ct) =>
+            Closure.Setup(c => c.ClosePolicySignalsRetiredAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                .Returns(async (Guid policyId, string _, bool withBillingSubject, CancellationToken ct) =>
                 {
                     ClosedPolicies.Add(policyId);
+                    ClosedWithBillingSubject.Add(withBillingSubject);
                     if (CloseFailsFor?.Invoke(policyId) == true) throw CloseFault ?? new InvalidOperationException("simulated close fault");
-                    var open = await Closure.Object.SelectOpenSignalsOfPolicyAsync(policyId, ct);
+                    var open = await Closure.Object.SelectOpenSignalsOfPolicyAsync(policyId, withBillingSubject, ct);
                     foreach (var s in open)
                     {
                         H.ConcurrentWrite("sprk_signal", s.Signal.Id, new Dictionary<string, object>
@@ -109,9 +115,9 @@ public sealed class ProcedureServiceTests
         }
 
         /// <summary>The base selection, bypassing the recording setup (Moq's CallBase for a set-up member is not reachable otherwise).</summary>
-        private Task<IReadOnlyList<OpenPolicySignal>> SelectReal(Guid policyId, CancellationToken ct) =>
+        private Task<IReadOnlyList<OpenPolicySignal>> SelectReal(Guid policyId, bool withBillingSubject, CancellationToken ct) =>
             new SignalClosureService((SignalWriter)RuntimeHelpers.GetUninitializedObject(typeof(SignalWriter)), H.Entities.Object,
-                TimeProvider.System, NullLogger<SignalClosureService>.Instance).SelectOpenSignalsOfPolicyAsync(policyId, ct);
+                TimeProvider.System, NullLogger<SignalClosureService>.Instance).SelectOpenSignalsOfPolicyAsync(policyId, withBillingSubject, ct);
 
         public ProcedureService Service() => new(
             H.Entities.Object, H.Service(), Closure.Object,
@@ -1060,6 +1066,8 @@ public sealed class ProcedureServiceTests
         outcome.Value.VisibleOpenInvoices.Should().Be(2);
 
         s.W.SelectedPolicies.Should().BeEquivalentTo(new[] { s.PolicyA, s.PolicyB }, "the preview selects through the close's own method");
+        s.W.SelectedWithBillingSubject.Should().Equal(new[] { true, true },
+            "the preview maps Signals to invoices, so it opts in to the invoice subject columns (ontology review F1)");
         s.W.RightsCalls.Should().ContainSingle("one batched rights call for the page")
             .Which.Select(t => t.RecordId).Should().BeEquivalentTo(new[] { s.Readable1, s.Readable2, s.Hidden }, "the three open invoices");
         s.W.RightsCalls[0].Should().OnlyContain(t => t.EntitySet == "sprk_invoices");
@@ -1139,6 +1147,8 @@ public sealed class ProcedureServiceTests
         s.W.H.Row("sprk_policy", s.PolicyA).GetAttributeValue<bool>("sprk_enabled").Should().BeFalse();
         s.W.H.Row("sprk_policy", s.PolicyB).GetAttributeValue<bool>("sprk_enabled").Should().BeFalse();
         s.W.ClosedPolicies.Should().BeEquivalentTo(new[] { s.PolicyA, s.PolicyB });
+        s.W.ClosedWithBillingSubject.Should().Equal(new[] { true, true },
+            "the retire counts the closed Signals' invoices, so its close opts in to the invoice subject columns (ontology review F1)");
         s.Signals.Should().OnlyContain(id =>
             s.W.H.Row("sprk_signal", id).GetAttributeValue<OptionSetValue>("sprk_resolutiontype").Value == SignalWriter.ResolutionPolicyRetired,
             "the action acts on every affected invoice, readable or not");
