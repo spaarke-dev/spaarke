@@ -90,4 +90,74 @@ The caller is an evaluating double, mirroring 157's: the invoice read returns th
     - K2: 157's point (b), above.
   - Found in passing, outside scope (ontology-owned): the doc comment at `EarlierInvoiceReadability.cs:34` still says `WithheldDuplicateTemplate` is "on `work/ebilling-r1`, not on this branch". After this task the template is defined from that constant, so the comment is stale. It is reported, not edited.
 
+## Round 2: blocked view (F1 of the second adversarial pass)
+
+Commits on `task/ebill-119-review-withhold` after `f28b1f1228`: `373f8d4cd4` (refactor), `f7aa46f0a1` (fix and tests), then this docs commit.
+
+**The defect.** `GET /api/finance/submissions/{submissionId}/blocked` (`Api/Finance/SubmissionOverrideEndpoints.cs`, `GetBlockedAsync` → `SubmissionOverrideService.GetAsync`) returned every stored finding's `valuesRead` as stored. That included `duplicateOf.trackingNumber`, `duplicateOf.invoiceId`, `duplicateOf.lineIndex` and the duplicated line's values, with no D-176 check. The POML note's claim that /review was the only other ebilling path returning Duplicate detail was wrong.
+
+**The refactor (`373f8d4cd4`).** The reference building, the (policy, subject, line) group key and the fail-closed wrap moved out of `InvoiceReviewReadService` into one internal static helper, `Services/Finance/DuplicateDetailGate.cs`:
+
+- `WithheldGroupsAsync<TFinding>` (`:52`): builds the references, makes the one `EarlierInvoiceReadability.ShownAsync` call per response with the caller's `IDataverseUserClient`, and returns the withheld groups. Any exception other than the request's cancellation withholds every Duplicate group and logs `"{Surface}: the earlier-invoice check faulted ({ExceptionType}); ..."` at Warning on the calling service's logger. The message names no earlier-invoice detail.
+- `References<TFinding>` (`:101`): the rule of note 11, unchanged.
+- `FindingGroup(PolicyCode, Subject, Line)`, `DuplicateOfInvoiceIdValue`, `DuplicateOfTrackingNumberValue`.
+
+`InvoiceReviewReadService.DuplicateGroupsWithheldAsync` is now a one-line call with surface `"Invoice review"`. Its 30 tests passed unchanged after the refactor (the Warning text they assert is identical).
+
+**The fix (`f7aa46f0a1`).** `SubmissionOverrideService.GetAsync` parses the findings as before (`ReadFindings`), then calls `DuplicateDetailGate.WithheldGroupsAsync` with surface `"Blocked submission"`:
+
+- **As the caller.** Both constructors take `IDataverseUserClient` (OBO) and `EarlierInvoiceReadability`. `FinanceModule`'s existing registration gained a comment; there is no new registration.
+- **Vendor org.** A number-only prior is resolved within the submission's own `sprk_vendororg` (`TrackingNumberAllocator.FirmColumn`, added to `SubmissionColumns`, so there is no extra read). This is the column `BillingFactLoader.LoadPriorsAsync` filters priors on, so it is the firm the Duplicate's resolution used.
+- **Withheld shape.** Every finding of a withheld group returns `DetailWithheld = true` and an empty `ValuesRead`. The view carries no sentence or reason text, so there is nothing to replace with `WithheldSentence`.
+- **Unchanged.** Step 0 (`RequireInternalFinanceCaller`) and the route's `FinanceAuthorizationFilter` (Read on the submission, as the caller) still run first. The override privilege check, `CanOverride` and `CanReturn` are untouched.
+- **DTO contract.** No change. `BlockedFindingView` already had `DetailWithheld`, and only its value and `ValuesRead` change for a withheld group. The doc comments of `BlockedFindingView` and `BlockedValueRead` now name D-176.
+
+**Reader inventory.** Every BFF reader of `sprk_findingsjson` or of Duplicate `valuesRead` was checked by grepping `SubmissionFindingsJson`, `sprk_findingsjson`, `valuesRead`/`ValuesRead` and `duplicateOf` over `Services/Finance`, `Services/Finance/Submission`, `Services/Signals/Billing`, `Services/Signals` and `Api/Finance`:
+
+| Reader | Returned by a route? | Finding |
+|---|---|---|
+| `InvoiceReviewReadService` (`GET .../invoices/{id}/review`) | Yes | Gated (round 1, now through the helper) |
+| `SubmissionOverrideService.GetAsync` (`GET .../submissions/{id}/blocked`) | Yes | **Gated (this round)** |
+| `SubmissionOverrideService` decide path (`POST .../override`, `.../return`) | Response is `BlockedDecisionResponse` (ids, outcome, record id) | No findings returned. Its Decision Record copies plan sentences: see K1 |
+| `InvoiceSubmissionService.GetAsync` and list (`GET .../invoice-submissions/{id}`) | Yes | `ViewColumns` exclude `sprk_findingsjson`; no findings returned |
+| `InvoiceSubmissionAfterSteps` (job) | No | Writes the reject Decision Record (K1) and the stored sets |
+| `AdminAttentionText` (job) | No | Reads only `signalPlanRefusals` and `signalWriteRefusals` into `sprk_adminattention`; no values |
+| `StoredSignalSetCheck`, `InvoiceSubmissionPersister` | No | Write side and set bookkeeping |
+| `SignalReadService` (worklist) | Yes | Reads `sprk_signal` evidence, not `sprk_findingsjson`; ontology 157 gates it |
+| `BillingFindingSignalMapper`, `SubmissionRejectionRule`, handlers | No | Evaluation time, in memory |
+
+No other route was found, so the helper has exactly two callers.
+
+**Tests.**
+
+- `SubmissionOverrideServiceTests`, "119 r2" cases (14). The World gained the same evaluating caller double as `InvoiceReviewReadServiceTests`. Cases:
+  - readable by id and by number: unchanged, read as the caller, the number resolved within the submission's firm;
+  - unreadable by id and by number: withheld;
+  - the fallback not found, more than one submission, a 500, and a throw: withheld, and the view still returns;
+  - write-time withheld: stays withheld and the caller is asked nothing;
+  - no Duplicate: every finding as stored and the caller asked nothing;
+  - mixed readability;
+  - one check per response for four Duplicates: one caller invoice read and one submission read;
+  - throwing fake: everything withheld, one Warning naming the exception type, and no log line carrying the earlier number or id;
+  - real cancellation propagates.
+- **K3 (both views).**
+  - A mixed-readability case on each view: two Duplicate groups, one readable and one not. Only the unreadable group is withheld, and the readable one is returned whole.
+  - Every unreadable case on both views asserts that `JsonSerializer.Serialize(dto)` contains neither the earlier tracking number nor the earlier invoice id. On /review those cases are: unreadable, not-primary, every fallback failure, and the throwing fake.
+  - The /review `DuplicateOfEarlierLine` unreadable case is exempt, because its "earlier invoice" is the current one.
+- **Seeding.** With the blocked view's check disabled (`Findings = findings`), 8 of the 14 r2 cases fail: unreadable ×2, fallback ×4, the throwing fake, and mixed. The 6 that still pass are the readable, write-time-withheld, no-Duplicate, one-check and cancellation cases, which do not depend on withholding. The edit was restored.
+
+**Verification.**
+
+- `dotnet build src/server/api/Sprk.Bff.Api/` succeeds with 0 warnings.
+- `tests/unit/Sprk.Bff.Api.Tests`, `tests/Spaarke.ArchTests` and `tests/integration/Sprk.Bff.Api.IntegrationTests` all build.
+- Unit tests filtered to Finance, Signals, InvoiceReview and SubmissionOverride: 6146 passed, 5 skipped, 0 failed. The route contract tests compile into this project and are included.
+- ArchTests (full): 1349 passed.
+
+**K1 (native surfaces; the main session is filing the issue).** D-176 is enforced on BFF routes only. Two places outside the BFF still carry earlier-invoice detail:
+
+- **The form.** The `sprk_invoicesubmission` main form binds `sprk_findingsjson` (`src/dataverse/solutions/SpaarkeMaster/Entities/sprk_invoicesubmission/FormXml/main/{c412f942-875e-45c4-9ea1-cae75a81f1b9}.xml:190`). Any user with Read on a submission sees its stored findings, Duplicate detail included.
+- **Decision Records.** Records copy the Signal plan sentences, which can name the earlier tracking number, into `sprk_factsnapshot`. That happens in the reject-invoice record (`InvoiceSubmissionAfterSteps.cs:1429`) and also in the override and return records (`SubmissionOverrideService.cs:1056`, `["reasons"][].sentence`, found during this round).
+
+Recorded only; this round makes no change to either.
+
 rework: fix-round-1 task 119
