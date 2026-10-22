@@ -1684,6 +1684,49 @@ public class SubmissionOverrideServiceTests
         ShouldNotLeak(view, EarlierNumber, EarlierInvoice);
     }
 
+    [Theory(DisplayName = "119 r5: blocked view, a Duplicate whose stored values give no usable reference to the earlier invoice (a non-GUID id, duplicateOf.* values that are blank, a number with no vendor org) is withheld, and the caller is asked nothing")]
+    [InlineData("not-a-guid")]
+    [InlineData("blank-values")]
+    [InlineData("number-without-org")]
+    public async Task Get_D176_UnusableReference_IsWithheld_AndAsksTheCallerNothing(string shape)
+    {
+        var duplicate = StoredFinding("BILL-DUP", "DuplicateOfPriorSubmissionLine", 0);
+        var values = (JsonArray)duplicate["valuesRead"]!;
+        switch (shape)
+        {
+            case "not-a-guid":
+                values.Add(ValueRead("duplicateOf.invoiceId", "not-a-guid", null));
+                break;
+            case "blank-values":
+                // The Duplicate names its prior but the values are empty. (A finding with NO duplicateOf.* name at all is not a Duplicate to
+                // the gate or to the Signal read: it quotes no earlier invoice and is returned as stored.)
+                values.Add(ValueRead("duplicateOf.invoiceId", "", null));
+                values.Add(ValueRead("duplicateOf.trackingNumber", "  ", null));
+                break;
+            case "number-without-org":
+                values.Add(ValueRead("duplicateOf.trackingNumber", EarlierNumber, null));
+                break;
+        }
+
+        var w = await DuplicateWorldAsync(duplicate);
+        if (shape == "number-without-org")
+        {
+            w.Submission.Attributes.Remove(TrackingNumberAllocator.FirmColumn);
+        }
+
+        // Everything the caller could read is readable: only the missing reference withholds.
+        w.ReadableInvoices.Add(EarlierInvoice);
+        w.CallerSubmissions.Add((FirmId, EarlierNumber, EarlierInvoice));
+
+        var view = (await GetBlockedAsync(w))!;
+
+        ShouldBeWithheld(Of(view, "BILL-DUP"));
+        OthersUntouched(view);
+        ShouldNotLeak(view, EarlierNumber, EarlierInvoice);
+        JsonSerializer.Serialize(view).Should().NotContain("not-a-guid");
+        w.CallerPaths.Should().BeEmpty("no usable reference: no caller read is made for the earlier-invoice check");
+    }
+
     [Theory(DisplayName = "119 r2: blocked view, the fallback not found, more than one submission, a 500 or a throw withholds; the view still loads")]
     [InlineData("not-found")]
     [InlineData("more-than-one")]

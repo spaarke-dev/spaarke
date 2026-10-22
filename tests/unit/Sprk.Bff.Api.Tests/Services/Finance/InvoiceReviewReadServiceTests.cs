@@ -686,6 +686,64 @@ public sealed class InvoiceReviewReadServiceTests
         ShouldNotLeak(review, EarlierNumber, EarlierInvoice);
     }
 
+    // ── 119 round 5 (F4-1, ontology-r1): a Duplicate whose stored values give NO usable reference to the earlier invoice ──
+
+    [Theory(DisplayName = "119 r5: a Duplicate whose stored values give no usable reference to the earlier invoice (a non-GUID id, duplicateOf.* values that are blank, a number with no vendor org) is withheld, and the caller is asked nothing")]
+    [InlineData("not-a-guid")]
+    [InlineData("blank-values")]
+    [InlineData("number-without-org")]
+    public async Task UnusableReference_IsWithheld_AndAsksTheCallerNothing(string shape)
+    {
+        var duplicate = Finding(0, "BILL-DUP", "DuplicateOfPriorSubmissionLine", 0);
+        var values = (JsonArray)duplicate["valuesRead"]!;
+        switch (shape)
+        {
+            case "not-a-guid":
+                values.Add(Value("duplicateOf.invoiceId", "not-a-guid"));
+                break;
+            case "blank-values":
+                // The Duplicate names its prior but the values are empty. (A finding with NO duplicateOf.* name at all is not a Duplicate to
+                // the gate or to the Signal read: it quotes no earlier invoice and is returned as stored.)
+                values.Add(Value("duplicateOf.invoiceId", ""));
+                values.Add(Value("duplicateOf.trackingNumber", "  "));
+                break;
+            case "number-without-org":
+                values.Add(Value("duplicateOf.trackingNumber", EarlierNumber));
+                break;
+        }
+
+        var w = new World();
+        w.AddLine(1, InvoiceLineStatus.Flagged);
+        w.Submission = SubmissionRow(Stored(
+            [
+                duplicate,
+                Finding(1, "BILL-RATE", "rate.above_card", 0, ruleType: "RateCard"),
+                Finding(2, "BILL-STAFF", "staffing.too_many", null, ruleType: "Staffing"),
+            ],
+            [
+                Plan("BILL-DUP", LineId(1), DuplicateSentence, "DuplicateOfPriorSubmissionLine"),
+                Plan("BILL-RATE", LineId(1), "The rate is above the agreed card.", "rate.above_card"),
+                Plan("BILL-STAFF", InvoiceId, "Too many timekeepers.", "staffing.too_many"),
+            ]));
+        if (shape == "number-without-org")
+        {
+            w.Submission.Attributes.Remove("sprk_vendororg");
+        }
+
+        // Everything the caller could read is readable: only the missing reference withholds.
+        w.ReadableInvoices.Add(EarlierInvoice);
+        w.CallerSubmissions.Add((FirmId, EarlierNumber, EarlierInvoice));
+
+        var review = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!;
+
+        var finding = review.Lines.Single().Findings.Single(f => f.PolicyCode == "BILL-DUP");
+        ShouldBeWithheld(finding);
+        OthersUntouched(review);
+        ShouldNotLeak(review, EarlierNumber, EarlierInvoice);
+        JsonSerializer.Serialize(review).Should().NotContain("not-a-guid");
+        w.CallerPaths.Should().BeEmpty("no usable reference: no caller read is made for the earlier-invoice check");
+    }
+
     // ── 119 round 4 (uac-r2): a number-only prior resolves within the SUBMISSION's vendor org, as /blocked does ──
 
     private static readonly Guid ChangedOrg = Guid.Parse("10000000-0000-4000-8000-0000000000f2");
