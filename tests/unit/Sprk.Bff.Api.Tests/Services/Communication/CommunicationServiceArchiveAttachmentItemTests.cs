@@ -438,6 +438,8 @@ public class CommunicationServiceArchiveAttachmentItemTests
         h.Created.Should().ContainSingle("nothing new is created");
         h.Updates.Should().ContainSingle().Which.Fields["sprk_document"].Should().BeOfType<EntityReference>()
             .Which.Id.Should().Be(h.Created.Single().Id);
+        h.Jobs.Should().ContainSingle("the first archive stopped before its enqueue; the repair profiles the document")
+            .Which.SubjectId.Should().Be(h.Created.Single().Id.ToString());
     }
 
     [Fact]

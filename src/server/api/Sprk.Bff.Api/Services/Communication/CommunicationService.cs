@@ -608,6 +608,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                         _logger.LogInformation(
                             "Attachment {AttachmentId} of communication {CommunicationId} linked to its existing document {DocumentId} (an earlier archive did not link it back)",
                             att.Id, communicationId, repairId);
+
+                        // The earlier archive stopped before its enqueue, so the document was never profiled. The job's
+                        // idempotency key (DocAnalysis:{documentId}) makes a second enqueue a no-op if one did run.
+                        await EnqueueDocumentAnalysisAsync(repairId, correlationId, ct);
                         continue;
                     }
                 }
