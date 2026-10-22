@@ -502,10 +502,13 @@ public sealed class AuthorizationModuleWorkforceHomeTests
             .Select(p => p.Value?.ToString() ?? string.Empty)
             .ToList();
 
-        /// <summary>The validation exceptions the WorkforceHome scheme reported (OnAuthenticationFailed).</summary>
+        /// <summary>
+        /// The token-validation exceptions (<see cref="SecurityTokenException"/>) the WorkforceHome scheme reported
+        /// (OnAuthenticationFailed). Unrelated exceptions that reach the event (e.g. a logger failure) are not auth outcomes.
+        /// </summary>
         public IReadOnlyList<Exception> Failures
         {
-            get { lock (_failures) return _failures.ToList(); }
+            get { lock (_failures) return _failures.Where(e => e is SecurityTokenException).ToList(); }
         }
 
         public static async Task<WorkforceHomeHost> StartAsync(
@@ -538,7 +541,10 @@ public sealed class AuthorizationModuleWorkforceHomeTests
                     .ConfigureServices(services =>
                     {
                         services.AddSingleton<IConfiguration>(configuration);
-                        services.AddLogging(logging => logging.AddProvider(logs).SetMinimumLevel(LogLevel.Trace));
+                        // ClearProviders (ISS-012 / #1930): AadIssuerValidator is cached per process and keeps the logger of the host that first built it,
+                        // so a provider this host inherits (Windows EventLog) can be disposed by a later host and throw ObjectDisposedException
+                        // into token validation. Only the capturing provider belongs on this host.
+                        services.AddLogging(logging => logging.ClearProviders().AddProvider(logs).SetMinimumLevel(LogLevel.Trace));
                         services.AddRouting();
                         services.AddAuthorizationModule(configuration);
                         foreach (var descriptor in services
