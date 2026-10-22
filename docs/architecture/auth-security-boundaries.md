@@ -172,7 +172,7 @@ services.PostConfigure<JwtBearerOptions>(
 
 Issuer/authority, signature validation, lifetime, and the primary audience are all derived from the `AzureAd` section (`TenantId`, `ClientId`, `Audience`) by Microsoft.Identity.Web.
 
-A second `PostConfigure` (external-access-r3 task 077, ADR-028 A9) adds the BFF app's audience in both forms, derived from a GUID `AzureAd:ClientId`: the bare app id (v2 access tokens, `requestedAccessTokenVersion` = 2) and `api://{appId}` (v1). It runs on every options instance, not once per process like the Copilot merge. Its `OnTokenValidated` refuses a token whose `aud` is the bare app id but which carries neither `azpacr` nor `appidacr`. That is an ID token issued to a client signing in as the BFF app, not an access token. Issuer, keys and lifetime are unchanged. The App Service settings `AzureAd__ValidAudiences__*` are not read by any code.
+A second `PostConfigure` (external-access-r3 task 077, ADR-028 A9) adds the BFF app's audience in both forms, derived from a GUID `AzureAd:ClientId`: the bare app id (v2 access tokens, `requestedAccessTokenVersion` = 2) and `api://{appId}` (v1). Like the Copilot merge (which is applied once per options instance, so a second host or an instance rebuilt after a configuration reload also gets the Copilot audience), it runs on every options instance. Its `OnTokenValidated` refuses a token whose `aud` is the bare app id but which carries neither `azpacr` nor `appidacr`. That is an ID token issued to a client signing in as the BFF app, not an access token. Issuer, keys and lifetime are unchanged. The App Service settings `AzureAd__ValidAudiences__*` are not read by any code.
 
 ---
 
