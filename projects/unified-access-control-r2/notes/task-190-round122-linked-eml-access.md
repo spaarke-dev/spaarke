@@ -55,3 +55,30 @@ Owner (round 122, 2026-10-22): "the access should match the 'parent'". The case:
 - **Known limits:** recorded in I-19 and the PR body (K2, K4, K5, K6, the single-attachment case, and `chain_own_narrowing`). A BFF restart is needed after reverting the field-security script.
 - **Deploy:** batched with the #2237 fix through R3, with the owner's go. Dev has the precondition (`Set-DocumentNarrowingFieldSecurity.ps1` applied) and 0 affected rows.
 - **Server gate after deploy:** the `secure-child-reconciliation` run report shows `releaseRefusedLinkColumnsNotSecured = 0` and no new exception class.
+
+## 6. Deployed and gated (2026-10-22)
+
+The batch went to dev in one R3 deploy, approved by the owner in R3's session: master **1283c41817**, replacing a7b956fb55 (snapshot `deploy/rollback/wwwroot-20261022T124709Z`). ProductVersion read back at 12:50:18Z; healthz and healthz/dataverse returned 200.
+
+**What it contains:**
+- #2234 (round 122)
+- #2239 (#2237)
+- 018a
+- #2244 (#2240)
+- #2249 (#2247)
+- #2248 (#2246)
+
+**Server gate, 12:50:18Z → 13:20Z** (App Insights `spe-insights-dev-67e2xz`, role `spaarke-bff-dev`; script in the session scratch area, read-only): **PASS**.
+
+| Check | Result |
+|---|---|
+| `[CHILD-ACCESS-PERMISSION]` runs | 17; `releaseRefusedLinkColumnsNotSecured` max 0, `failed` max 0, `failure` always `(null)`, 0 faults |
+| `[DOC-PROFILE]` warnings | 0 |
+| `*_server_only` refusals (`document_bff_column`, `owner`, `creator`, and the rest) | 0 |
+| `attachment_item_*` refusals | 0 |
+| New exception types | none. The only exceptions are 6 Graph `ODataError` "Invalid hostname for this tenancy" (#1830 / ISS-006), at the pre-deploy rate of 288 in 24 h |
+| R3's 30-minute reading (12:49:00Z → 13:20:13Z) | clean: no new class, the same counts, the 10 secure-child-reconciliation runs kept all Succeeded |
+
+**Not exercised in the window:** partner document reads, wizard uploads and email archives. Owner browser checks stay on the checklist.
+
+**#2248's clients** (CommunicationActions PCF, EmailPage, LegalWorkspace, Console) are being redeployed to dev with the owner's go, 2026-10-22.
