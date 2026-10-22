@@ -1720,23 +1720,16 @@ public static class OfficeEndpoints
     /// Creates a new entity with minimal required fields for inline creation from the Office add-in.
     /// </summary>
     /// <remarks>
-    /// R3 task 081 (2026-06-22): On successful Matter creation, fires a
-    /// <see cref="MembershipChangedEvent"/> via
-    /// <see cref="IMembershipEventPublisher"/> for the implicit
-    /// <c>ownerid</c> Lookup (matter cluster — only BFF-side mutation site
-    /// for sprk_matter per event-source-inventory §3A). Fire-and-forget
-    /// per FR-2P2.6 + Q2: publisher never throws; mutation succeeds even
-    /// if publish fails (nightly recon job task 085 is the backstop).
-    /// Internal (not private) so the test assembly (InternalsVisibleTo) runs the real handler and observes the owner
-    /// event it publishes (UAC-r2 task 152 verifier round 1, item 7).
+    /// Field mapping task 018b (UAC-r2 condition (b) item i): the matter's owner membership event is published ONCE, by the
+    /// unified create's post-create step (<c>RecordCreationService</c> step 12, with the owner team it wrote). This handler
+    /// no longer publishes it (R3 task 081 / UAC-r2 task 152 did, reading the owner back).
+    /// Internal (not private) so the test assembly (InternalsVisibleTo) runs the real handler.
     /// </remarks>
     internal static async Task<IResult> QuickCreateAsync(
         string entityType,
         QuickCreateRequest request,
         IOfficeService officeService,
-        IMembershipEventPublisher membershipEventPublisher,
         Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver callerResolver,
-        Spaarke.Dataverse.IGenericEntityService genericEntityService,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken cancellationToken)
@@ -1846,29 +1839,6 @@ public static class OfficeEndpoints
                 response.Id,
                 response.Name,
                 traceId);
-
-            // R3 task 081 — FR-2P2.6 + Q2 fire-and-forget membership event.
-            // Per event-source-inventory.md §3A + §6.3, the QuickCreate
-            // matter endpoint is the ONLY BFF-side write path for sprk_matter.
-            // UAC-r2 task 152 (ADR-034 A3): the event describes the row's REAL owner — the business-unit default
-            // owner TEAM RecordCreationService wrote (read back here; the service does not return it) — as
-            // PersonIdType=Team, PersonId=teamid: the key MembershipReconciliationJob builds for the same row. Before
-            // task 152 it carried the caller's AAD oid as a User under a comment claiming the junction updater
-            // resolves oid → systemuserid; it never did (it writes PersonId verbatim). When disabled (default
-            // Membership:EventPublisher:Enabled=false), the Null peer logs + returns (ADR-032 P2). Discarded Task =
-            // fire-and-forget; the 201 never waits on Service Bus.
-            if (parsedEntityType == QuickCreateEntityType.Matter)
-            {
-                _ = MembershipOwnerEvents.PublishOwnerAddedAsync(
-                    membershipEventPublisher,
-                    genericEntityService,
-                    "sprk_matter",
-                    response.Id,
-                    knownOwner: null,
-                    traceId,
-                    logger,
-                    cancellationToken);
-            }
 
             // Return 201 Created with location header
             return Results.Created(response.Url ?? $"/office/quickcreate/{entityType}/{response.Id}", response);
