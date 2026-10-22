@@ -5,6 +5,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Access;
+using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse.FieldMapping;
@@ -614,24 +615,13 @@ internal sealed partial class RecordCreationService
         try
         {
             var pair = OwnedChildWrite.PairOf(item);
-            // Only where the pair files the row on its own (a project); elsewhere a malformed pair is not an owner question.
-            var pairParent = pair.InvalidId && SecureRootInheritance.PairNamesAParentOnItsOwn(table)
-                ? (Parent: null, Undetermined: $"its {SecureRootInheritance.PairIdColumn} is not a record id")
-                : await PairParentAsync(_entities, table, pair.IdText, pair.TypeId, ct).ConfigureAwait(false);
-            if (pairParent.Undetermined is { } undetermined)
-            {
-                var refused = RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUndetermined,
-                    $"what it is filed under could not be told ({undetermined})");
-                return (null, new RecordCreationRefusal(RecordCreationRefusalKind.OwnerUnresolved, RecordOwnerRefusal.ParentUndetermined,
-                    refused.Reason!) { OwnerDecision = refused });
-            }
+            var resolved = await ResolveOwnerOverAsync(
+                    table, parents, pair.InvalidId, pair.IdText, pair.TypeId, callerObjectId, callerSystemUserId, requestedBy, ct)
+                .ConfigureAwait(false);
+            if (resolved.Refusal is { } undetermined)
+                return (null, undetermined);
 
-            if (pairParent.Parent is { } named)
-                parents = [.. parents, named];
-
-            owner = await _ownership.ResolveOwnerAsync(
-                RecordOwnershipContext.ForParents(parents, callerObjectId, callerSystemUserId) with { RequestedBy = requestedBy },
-                ct).ConfigureAwait(false);
+            owner = resolved.Owner!;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -645,6 +635,48 @@ internal sealed partial class RecordCreationService
                 $"The owner of the new {noun} could not be decided right now, so it was not created."));
         }
 
+        return OwnerDecided(table, owner);
+    }
+
+    /// <summary>
+    /// Step 7's resolution, shared by Create (<see cref="DecideOwnerAsync"/>) and Repair (task 016,
+    /// <see cref="RepairAsync"/>): the record the ADR-024 pair files the row under on its own (<see cref="PairParentAsync"/>,
+    /// a project) joins <paramref name="parents"/>, then the resolver's owner over them — the acting user's team when they
+    /// name nothing. A pair whose record cannot be told is refused (<see cref="RecordOwnerRefusal.ParentUndetermined"/>),
+    /// never read as "filed under nothing". A Dataverse fault propagates: each caller refuses it as the owner fault it is.
+    /// </summary>
+    private async Task<(RecordOwnerResolution? Owner, RecordCreationRefusal? Refusal)> ResolveOwnerOverAsync(
+        string table, IReadOnlyList<RecordOwnershipParent> parents, bool pairInvalidId, string? pairIdText, Guid? pairTypeId,
+        Guid? callerObjectId, Guid? callerSystemUserId, RecordRequester? requestedBy, CancellationToken ct)
+    {
+        // Only where the pair files the row on its own (a project); elsewhere a malformed pair is not an owner question.
+        var pairParent = pairInvalidId && SecureRootInheritance.PairNamesAParentOnItsOwn(table)
+            ? (Parent: null, Undetermined: $"its {SecureRootInheritance.PairIdColumn} is not a record id")
+            : await PairParentAsync(_entities, table, pairIdText, pairTypeId, ct).ConfigureAwait(false);
+        if (pairParent.Undetermined is { } undetermined)
+        {
+            var refused = RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUndetermined,
+                $"what it is filed under could not be told ({undetermined})");
+            return (null, new RecordCreationRefusal(RecordCreationRefusalKind.OwnerUnresolved, RecordOwnerRefusal.ParentUndetermined,
+                refused.Reason!) { OwnerDecision = refused });
+        }
+
+        if (pairParent.Parent is { } named)
+            parents = [.. parents, named];
+
+        var owner = await _ownership.ResolveOwnerAsync(
+            RecordOwnershipContext.ForParents(parents, callerObjectId, callerSystemUserId) with { RequestedBy = requestedBy },
+            ct).ConfigureAwait(false);
+        return (owner, null);
+    }
+
+    /// <summary>
+    /// Step 7's answer for a resolved owner, shared by Create and Repair (task 016): no owner is the resolver's refusal
+    /// (<see cref="RecordOwnerRefusal.NoOwnerSource"/> when it gave none); then the G5 core's two secure-filing refusals.
+    /// </summary>
+    private static (RecordOwnerResolution? Owner, RecordCreationRefusal? Refusal) OwnerDecided(
+        string table, RecordOwnerResolution owner)
+    {
         if (!owner.IsOwned)
         {
             var refused = owner.IsRefused
@@ -679,6 +711,188 @@ internal sealed partial class RecordCreationService
 
         return (owner, null);
     }
+
+    // ── Repair (task 016): step 7 for an existing row. Here, beside the create's step 7, because it is the same decision
+    // (ResolveOwnerOverAsync, OwnerDecided) and the owner-write census (RecordOwnerAssignmentCensusTests) proves a Routed
+    // write against the resolver calls of its own file. The rest of Repair is RecordCreationService.Repair.cs. ──────────
+
+    /// <summary>
+    /// What step 7 decided for a repair: the business unit the row is owned in afterwards, the owner refusal, and — review
+    /// F1-b — why the row's mapping must not run (its filing resolves to the Secure team that does not own it yet, or its
+    /// filing's owner could not be decided), or <c>null</c>.
+    /// </summary>
+    private sealed record OwnerRepair(Guid? BusinessUnit, RecordCreationRefusal? Refusal, string? MappingBlocked = null);
+
+    /// <summary>
+    /// Step 7 for an existing row (Repair, task 016; FR-09), decided BEFORE the mapping (review F1-b). Only a
+    /// systemuser-owned row (user- or application-owned) is re-owned; a team-owned row keeps its owner. The parents are the
+    /// row's own (<see cref="RecordOwnershipContext.ParentsOf(Entity)"/>, plus a message's record-thread filing,
+    /// <see cref="RecordThreadFiling"/>, as the reconciler and the reparent read them) and the create's resolution decides
+    /// (<see cref="ResolveOwnerOverAsync"/>, <see cref="OwnerDecided"/>). A row filed under nothing is owned by the team of
+    /// the PERSON who owns it (I-6, the acting user); an application-owned one has no such person and is refused
+    /// (<see cref="RecordOwnerRefusal.NoOwnerSource"/>) — never given the application user's team. A table's ownership
+    /// exception (an unfiled communication keeps its creator, E1) keeps the owner. Nothing is written here: the owner joins
+    /// the repair's one patch.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>A secure-flagged root is never re-owned</b> (review F1-a): a matter, project or work assignment whose
+    /// <c>sprk_issecure</c> is not an explicit <c>false</c> (empty reads as flagged, as the resolver reads it) is
+    /// provisioned by task 144's transition, never by a bare re-own (owner S6).</para>
+    /// <para><b>The mapping gate</b> (review F1-b): a FILED row's filing is resolved whatever happens to its owner. When it
+    /// resolves to the Secure team (I-2) and that team does not own the row yet, or it cannot be decided, the mapping is
+    /// blocked — Create never copies a secure record's data into a row that is not isolated.</para>
+    /// <para><b>Escalation (task 016 trigger 2), fail closed until the owner decides:</b> an owner in another business unit
+    /// than the row's is NOT written on a table whose rows can have children inheriting access (every ownership-parent
+    /// table) — the move would carry those children's access with it. A leaf table (no rows filed under it) is re-owned:
+    /// the move is the row's own.</para>
+    /// </remarks>
+    private async Task<OwnerRepair> RepairOwnerAsync(
+        string table, RecordTableRule rule, Entity row, Dictionary<string, object> patch, List<RecordRepairField> report,
+        List<RecordOwnershipParent> resolvedOver, CancellationToken ct)
+    {
+        var rowUnit = row.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn) is { } unit && unit.Id != Guid.Empty
+            ? unit.Id
+            : (Guid?)null;
+        var current = row.GetAttributeValue<EntityReference>(OwnerColumn);
+
+        // Why the owner is kept, when it is (state, reason); null when this repair may re-own the row.
+        (RecordRepairFieldState State, string Reason)? keep = null;
+        if (current is null || current.Id == Guid.Empty)
+            keep = (RecordRepairFieldState.Skipped, RecordRepairReason.OwnerUnknown);
+        else if (!string.Equals(current.LogicalName, "systemuser", StringComparison.OrdinalIgnoreCase))
+            keep = (RecordRepairFieldState.Present, RecordRepairReason.OwnerTeamOwned);
+        else if (rule.Kind == RecordTableKind.Root && row.GetAttributeValue<bool?>(AccessFollowsParent.SecureFlagColumn) != false)
+            keep = (RecordRepairFieldState.Skipped, RecordRepairReason.OwnerRootSecure);
+
+        var noun = NounOf(table);
+        var filed = false;
+        RecordOwnerResolution owner;
+        try
+        {
+            var threadParents = await RecordThreadFiling.ParentsAsync(_entities, table, RecordThreadFiling.ThreadOf(row), ct)
+                .ConfigureAwait(false);
+            var parents = RecordOwnershipContext.ParentsOf(row).Concat(threadParents).Distinct().ToArray();
+            var pairId = row.GetAttributeValue<string>(SecureRootInheritance.PairIdColumn);
+            var pairType = row.GetAttributeValue<EntityReference>(SecureRootInheritance.PairTypeColumn)?.Id;
+            filed = parents.Length > 0 || !string.IsNullOrWhiteSpace(pairId);
+
+            // Review F1-e (i): the records the owner is decided over are the only ones the mapping may copy from. The pair
+            // counts only where it files the row on its own (a project, PairParentAsync); read here once, and handed to the
+            // resolution as a parent. A pair that cannot be told is left to ResolveOwnerOverAsync, which refuses it.
+            var pairParent = await PairParentAsync(_entities, table, pairId, pairType, ct).ConfigureAwait(false);
+            if (pairParent.Parent is { } pairNamed)
+            {
+                parents = [.. parents, pairNamed];
+                pairId = null;
+            }
+
+            resolvedOver.AddRange(parents);
+            if (keep is null && rule.OwnershipException is not null && parents.Length == 0)
+                keep = (RecordRepairFieldState.Skipped, RecordRepairReason.OwnerKeptByException);
+
+            if (keep is { } kept && !filed)
+                return OwnerKept(rowUnit, kept, null, report); // nothing to re-own, and no filing to gate the mapping on
+
+            // I-6 for an unfiled row: the PERSON who owns it acts. An application user, or one that cannot be told, is no one.
+            Guid? actingUser = keep is null && parents.Length == 0
+                && await ApplicationUserCheck.IsApplicationUserAsync(_entities, current!.Id, _logger, ct).ConfigureAwait(false) == false
+                    ? current.Id
+                    : null;
+
+            var resolved = await ResolveOwnerOverAsync(
+                    table, parents, pairInvalidId: false, pairId, pairType, callerObjectId: null,
+                    callerSystemUserId: actingUser, requestedBy: null, ct)
+                .ConfigureAwait(false);
+            if (resolved.Refusal is { } undetermined)
+            {
+                return keep is { } keptOnRefusal
+                    ? OwnerKept(rowUnit, keptOnRefusal, RecordRepairReason.MappingFilingUndecided, report)
+                    : OwnerRefused(row, undetermined, report, filed ? RecordRepairReason.MappingFilingUndecided : null);
+            }
+
+            owner = resolved.Owner!;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[RECORD-REPAIR] the owner of {Table} {Id} could not be decided (fault); it was not changed", table, row.Id);
+            var blockedOnFault = filed ? RecordRepairReason.MappingFilingUndecided : null;
+            return keep is { } keptOnFault
+                ? OwnerKept(rowUnit, keptOnFault, blockedOnFault, report)
+                : OwnerRefused(row, OwnerUnavailable(noun), report, blockedOnFault);
+        }
+
+        // F1-b: a filing that resolves to the Secure team which does not own the row yet — or to no owner at all.
+        var mappingBlocked = !owner.IsOwned
+            ? (filed ? RecordRepairReason.MappingFilingUndecided : null)
+            : owner.IsSecureOwner && !(current is { LogicalName: "team" } && current.Id == owner.OwningTeamId)
+                ? RecordRepairReason.MappingSourceSecure
+                : null;
+
+        if (keep is { } keptAfterResolution)
+            return OwnerKept(rowUnit, keptAfterResolution, mappingBlocked, report);
+
+        var (decided, refusal) = OwnerDecided(table, owner);
+        if (refusal is not null)
+            return OwnerRefused(row, refusal, report, mappingBlocked);
+
+        var team = decided!.OwningTeamId!.Value;
+        Guid teamUnit;
+        try
+        {
+            teamUnit = await TeamBusinessUnitAsync(team, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[RECORD-REPAIR] the business unit of the owner team {Team} of {Table} {Id} could not be read; " +
+                                 "the owner was not changed", team, table, row.Id);
+            return OwnerRefused(row, OwnerUnavailable(noun), report, mappingBlocked);
+        }
+
+        if (rowUnit != teamUnit && RecordOwnershipResolver.IsOwnershipParent(table))
+        {
+            _logger.LogWarning(
+                "[RECORD-REPAIR] ESCALATION (task 016 trigger 2): re-owning {Table} {Id} would move it from business unit {From} " +
+                "to {To} while rows filed under it inherit its access; the owner was not changed", table, row.Id, rowUnit, teamUnit);
+            report.Add(RecordRepairField.Skipped(RecordRepairPart.Owner, OwnerColumn, RecordRepairReason.OwnerMovesBusinessUnit));
+            return new OwnerRepair(rowUnit, null, mappingBlocked);
+        }
+
+        patch[OwnerColumn] = new EntityReference("team", team);
+        report.Add(RecordRepairField.Repaired(RecordRepairPart.Owner, OwnerColumn));
+        return new OwnerRepair(teamUnit, null, mappingBlocked);
+    }
+
+    /// <summary>The owner is kept for <paramref name="kept"/>'s reason; the row stays in its own business unit.</summary>
+    private static OwnerRepair OwnerKept(
+        Guid? rowUnit, (RecordRepairFieldState State, string Reason) kept, string? mappingBlocked, List<RecordRepairField> report)
+    {
+        report.Add(new RecordRepairField(RecordRepairPart.Owner, OwnerColumn, kept.State, kept.Reason));
+        return new OwnerRepair(rowUnit, null, mappingBlocked);
+    }
+
+    /// <summary>The owner is unchanged, so the row stays in its own business unit; the refusal is reported, typed.</summary>
+    private OwnerRepair OwnerRefused(
+        Entity row, RecordCreationRefusal refusal, List<RecordRepairField> report, string? mappingBlocked)
+    {
+        _logger.LogInformation("[RECORD-REPAIR] the owner of {Table} {Id} was not changed: {Code}", row.LogicalName, row.Id, refusal.Code);
+        report.Add(RecordRepairField.Refused(RecordRepairPart.Owner, OwnerColumn, refusal.Code));
+        var unit = row.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn) is { } held && held.Id != Guid.Empty
+            ? held.Id
+            : (Guid?)null;
+        return new OwnerRepair(unit, refusal, mappingBlocked);
+    }
+
+    private static RecordCreationRefusal OwnerUnavailable(string noun) => new(
+        RecordCreationRefusalKind.Unavailable, RecordCreationRefusal.OwnerUnavailableCode,
+        $"The owner of this {noun} could not be decided right now, so it was not changed.");
 
     /// <summary>The G5 core's secure-filing refusal, answered as the owner refusal it is today (NoOwnerSource, 409).</summary>
     private static RecordCreationRefusal SecureFilingRefused(RecordOwnerResolution owner, string detail) =>
@@ -775,26 +989,18 @@ internal sealed partial class RecordCreationService
 
         try
         {
-            var team = await _entities.RetrieveAsync("team", owningTeam, ["businessunitid"], ct).ConfigureAwait(false);
-            if (team?.GetAttributeValue<EntityReference>("businessunitid") is not { } unit || unit.Id == Guid.Empty)
-                throw new InvalidOperationException($"The owner team {owningTeam:D} reported no business unit.");
-
-            var businessUnit = await _entities.RetrieveAsync(SearchIndexColumns.BusinessUnitEntity, unit.Id,
-                    [SearchIndexColumns.LegacyTextColumn, SearchIndexColumns.LookupColumn],
-                    ct)
-                .ConfigureAwait(false);
+            var unit = await TeamBusinessUnitAsync(owningTeam, ct).ConfigureAwait(false);
+            var defaults = await BusinessUnitSearchDefaultsAsync(unit, ct).ConfigureAwait(false);
 
             var fields = new Dictionary<string, object?>(StringComparer.Ordinal);
-            if (fillName && businessUnit?.GetAttributeValue<string>(SearchIndexColumns.LegacyTextColumn)?.Trim()
-                    is { Length: > 0 } indexName)
+            if (fillName && defaults.Name is { } indexName)
             {
                 fields[SearchIndexColumns.LegacyTextColumn] = indexName;
             }
 
-            if (fillLookup && businessUnit?.GetAttributeValue<EntityReference>(SearchIndexColumns.LookupColumn)
-                    is { } index && index.Id != Guid.Empty)
+            if (fillLookup && defaults.Index is { } index)
             {
-                fields[$"{SearchIndexNavigationProperty}@odata.bind"] = $"/{SearchIndexEntitySet}({index.Id:D})";
+                fields[$"{SearchIndexNavigationProperty}@odata.bind"] = $"/{SearchIndexEntitySet}({index:D})";
             }
 
             return new SearchIndexFill(
@@ -818,6 +1024,36 @@ internal sealed partial class RecordCreationService
                 "Business-unit search defaults could not be read, so they were not applied. Document indexing for this " +
                 $"{noun} falls back to its business unit's settings.");
         }
+    }
+
+    /// <summary>
+    /// The business unit of <paramref name="owningTeam"/>, read app-only (steps 7 and 8; shared with Repair, task 016).
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The team reported no business unit.</exception>
+    private async Task<Guid> TeamBusinessUnitAsync(Guid owningTeam, CancellationToken ct)
+    {
+        var team = await _entities.RetrieveAsync("team", owningTeam, ["businessunitid"], ct).ConfigureAwait(false);
+        if (team?.GetAttributeValue<EntityReference>("businessunitid") is not { } unit || unit.Id == Guid.Empty)
+            throw new InvalidOperationException($"The owner team {owningTeam:D} reported no business unit.");
+        return unit.Id;
+    }
+
+    /// <summary>
+    /// A business unit's two search-index defaults (FR-10), read app-only by the columns
+    /// <see cref="Sprk.Bff.Api.Services.Ai.SearchIndexNameResolver"/> reads at index time: the trimmed name (none when blank)
+    /// and the catalog row (none when unset). Shared by step 8 and Repair (task 016).
+    /// </summary>
+    private async Task<(string? Name, Guid? Index)> BusinessUnitSearchDefaultsAsync(Guid businessUnit, CancellationToken ct)
+    {
+        var row = await _entities.RetrieveAsync(SearchIndexColumns.BusinessUnitEntity, businessUnit,
+                [SearchIndexColumns.LegacyTextColumn, SearchIndexColumns.LookupColumn],
+                ct)
+            .ConfigureAwait(false);
+        var name = row?.GetAttributeValue<string>(SearchIndexColumns.LegacyTextColumn)?.Trim() is { Length: > 0 } text ? text : null;
+        var index = row?.GetAttributeValue<EntityReference>(SearchIndexColumns.LookupColumn) is { } reference && reference.Id != Guid.Empty
+            ? reference.Id
+            : (Guid?)null;
+        return (name, index);
     }
 
     /// <summary>Whether the row carries a search index NAME already (a non-blank string; a <c>null</c> is no value).</summary>

@@ -1,18 +1,17 @@
 # Current Task — field-mapping-server-write-path-r1
 
-> **Last updated**: 2026-10-21 (checkpoint after #2191 merged and the 014 step-3 mask)
-> **Phase**: Wave 2. Done (12/43): 001–006, 010–015. On master: 001–006, 010–013 (PR #2184) and the #2188 Office hotfix
-> (PR #2191, 583f90c1d9; live on dev). 014 + 015 are on the work branch, waiting on UAC-r2's scoped check of the step-3
-> mask, then a PR to master. 016 is in fix round 2.
+> **Last updated**: 2026-10-21 (016 ✅, UAC-r2 ACCEPT; PR to master next. #2220 fixed on master via #2223)
+> **Phase**: Wave 2. Done (13/43): 001–006, 010–016. On master: 001–006, 010–015, #2191, #2223 (ef5912c7e8, #2220).
+> 016 is on the work branch, with its PR to master in progress.
 
 ## Quick Recovery
 
 | Field | Value |
 |---|---|
-| **HEAD** | work branch `859752c0b1`: master 583f90c1d9 + 014 + 015 + the 014 step-3 mask (`task/fm-014-mask`). Verified: sln 0/0, ArchTests 1317/1317, related suites 2650 passed / 7 skipped. Pushed |
-| **Running** | **016 fix round 2**: implementer agent, branch `task/fm-016`, worktree `C:\code_files\spaarke\.claude\worktrees\agent-a10e5fe383a4dfcd2`. Items: F1-e (map only from a parent the owner step resolved over, plus a gate on the source's own secure status, fail closed on a fault); F1-f (`sprk_decisionrecord` skipped ENTIRELY by Repair: append-only); UAC condition 2 (never write `sprk_accesspermission`, `sprk_accessinheritance`, `sprk_parentdocument` or `sprk_relatedcommunication` on a document, through `InheritedAccessPermission.RefuseAppOnlyWrite`); six surviving mutants; K2 notes; a reachability answer (no caller of `RepairAsync`) |
-| **Waiting on** | UAC-r2's scoped check of `dfebc69803..859752c0b1` (014 step-3 mask, with guard before/after). The owner's answer on Repair field security (below) |
-| **Next Action** | (a) UAC passes the mask → open the PR work branch → master for 014 + 015 (ADR-008 path A cited; Placement Justification; publish delta against a fresh master; CVE check) → CI full rollup → merge → close #2188 citing 583f90c1d9 and the PR merge SHA; close #1617/#1614 per the 014 notes once on master. (b) 016 fix round 2 reports → verify → scoped re-check → merge `task/fm-016` into the work branch. The Roslyn guard WILL fail on Repair's `ApplyFillOnly` call until the owner decides (see below) → send the 016 diff to UAC-r2 (condition b: Decision Record exception, owner outcomes) → mark 016. (c) Then 017/018 (blocking criteria in their POMLs) |
+| **HEAD** | work branch `ccb732ceb6` = 016 (incl. fix round 73ef4e0845, merged as 33e36aafb9) + master ef5912c7e8. Verified: sln 0/0, ArchTests 1347/1347, related suites 3492 passed / 7 skipped. Pushed |
+| **016 state** | ✅ complete. UAC-r2 condition (b) found F1-1..F4-2; all fixed; UAC-r2 ACCEPT of the fix round. POML notes carry the summary. Draft PR body: scratchpad `pr-016.md` (update counts, master sha, the UAC line, the never-map codes, F2-1) |
+| **Running** | Publish delta ef5912c7e8 vs ccb732ceb6 (`C:\tmp\g16m`, `C:\tmp\g16a`; the script removes them) + CVE |
+| **Next Action** | (1) PR 016 → master; merge on Router + Client lint green and the full rollup explained (Tier 2 ADR job times out: #2224) → send UAC-r2 the merge SHA → portfolio sync (Tasks Completed = 13). (2) If #2221 lands first, add the `EmailArchiveCommunicationLinkSweepJob.LinkAsync` exemption (below). (3) Then 017/018. **Don't ask R3 to deploy**; UAC-r2 batches the candidate (016 + #2221 + #2223), and a BFF deploy needs the owner's go in R3's session |
 
 ## Key facts since the last checkpoint
 
@@ -25,7 +24,10 @@
   - The guard is a Roslyn syntax walker (`Microsoft.CodeAnalysis.CSharp` 5.9.0 in ArchTests).
   - A mask inside a local function, lambda or anonymous method doesn't count outside it.
   - `global using` and csproj `<Using>` imports of the engine are violations.
-- **#2188 stays OPEN** until the 014 PR lands (UAC-r2). The closing note cites both merge SHAs.
+- **#2188 CLOSED** citing 583f90c1d9 and cf0886360a. #1614/#1617 stay OPEN deliberately (no live route uses the
+  unified create yet; the Office mapped-X gap is live until 018); closing them is an 018 criterion.
+- **R3 deploy OKs given:** 84291ecea8, 583f90c1d9 (live), 446c83d927, f1b3dadcf5. The 30-minute reading after #2191
+  was clean, with 0 new refusals logged (no Office quick-create run yet).
 - **014 step 3** (`RecordCreationService.Mapping.cs`) now masks the source through `MappingSourceCallerMask.ApplyAsync`
   (`KnownCallSites` = 2).
 - **015:** UAC-r2 ACCEPT on condition (b). K1 (a step-7 catalog fault test) and K3 (the search-index bind-key case) are
@@ -48,10 +50,7 @@
 
 ## Open items for the owner
 
-1. **Repair field security (016; UAC-r2 concurs with option 1):** option 1, Repair skips any field-secured source
-   column using 033's metadata reader, under UAC's five conditions: fail closed on metadata; skip the document
-   access and D7 columns; a per-occurrence guard allow-list entry; tests; 052 blocked until 033. Option 3 (Repair never
-   maps) is the fallback. Option 2 was rejected.
+1. ~~Repair field security~~: DECIDED 2026-10-21, option 1 (notes/decisions.md); implemented in 016, the skip lands in 033.
 2. **016 owner questions:**
    - cross-BU owner moves on ownership-parent tables (recommend keeping the skip and having 052 report the count);
    - whether Repair re-owns roots at all;
@@ -74,11 +73,18 @@
 ## Cross-project obligations
 
 - **UAC-r2:**
-  - checking the 014 mask diff now;
+  - ACCEPTed the 014 mask (merged in #2214); deciding on the #2170 per-type ratchet vs 016;
   - reviews the 016 diff before merge (Decision Record exception, document column skip, owner outcomes);
   - reviews 017/018 on condition (b);
   - holds #2190 and #2169;
   - pending ArchTest #2170 (`EveryGenericUpdateWriter_AsksTheAppOnlyRefusal`) will cover Repair's write.
+  - **#2221 (UAC task 190, draft) vs 016's member-keyed #2170 guard:** whoever merges second adds the member exemption
+    `EmailArchiveCommunicationLinkSweepJob.LinkAsync` with UAC's reason verbatim: "the BFF's own typed link writer:
+    sets a NULL sprk_relatedcommunication to the exactly-one communication whose internet message id ordinal-equals
+    the document's recorded key; never clears or re-points; conditional on row version (uac-r2 task 190)".
+  - **#2220 (widened to matter + project, UAC 2026-10-21):** separate PR off master, branch
+    `fix/fm-2220-matter-protected`; UAC reviews the diff (condition b: Office matter/project quick-create skip-and-warn;
+    dev 0 rules).
 - **ebilling-r1:** the reconcile commit before 017; 016 and 040 call `CheckGenericUpdateAsync` once #1911 lands. 016
   has a `TODO(#1911)` seam that skips invoice and billing-event rows.
 - **R3 (external-access-r3):** deploys master to dev. Asks OK/HOLD per deploy; told when #2191 merged.

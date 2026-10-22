@@ -60,16 +60,36 @@ public class MappingSourceCallerMaskGuardTests
             "to the private ApplyAll — that is not a call site that reads a source.",
     };
 
+    /// <summary>
+    /// Unmasked engine calls tolerated PER MEMBER, keyed <c>"{repo-relative path}|{Type}.{Member}"</c>: how many, and why (the
+    /// shape of <see cref="CreateOwnerResolutionGuardTests.Allowlist"/>). A call inside a local function, lambda or anonymous
+    /// method counts for the declared member around it. Calls past <c>Uses</c> fail, and so does every unmasked call in any
+    /// other member of the same file; an entry with fewer unmasked calls than <c>Uses</c>, a member that is gone or an empty
+    /// reason fails <see cref="EveryUnmaskedCallExemption_IsStillUsed"/> (the ratchet).
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, (int Uses, string Reason)> UnmaskedCallExemptions =
+        new Dictionary<string, (int Uses, string Reason)>
+        {
+            ["src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.Repair.cs|RecordCreationService.RepairMappingAsync"] = (1,
+                "Repair runs as the system principal with no caller to mask against (owner decision 2026-10-21, option 1; UAC-r2 " +
+                "concurs). Secure sources are never mapped into a row that isn't isolated (Repair source gate, fail closed). " +
+                "Field-secured source columns will be skipped by Repair using the app-only metadata reader from task 033 (TODO " +
+                "task 033), failing closed when metadata is unavailable; no production caller until then " +
+                "(RecordRepairReachabilityTests; 052 hard-blocked on 033); the document access and D7 link columns are refused through " +
+                "RefuseAppOnlyWrite. Repair has no production caller until task 052, which is hard-blocked on 033 " +
+                "(RecordRepairReachabilityTests)."),
+        };
+
     /// <summary>The engine's simple type name, and its two guarded entry points.</summary>
     private const string EngineType = "CreateTimeFieldMapping";
 
     private static readonly string[] EngineMethods = ["Apply", "ApplyFillOnly"];
 
     /// <summary>
-    /// The engine call sites in the tree today (the Office quick-create's mapping step and the unified record-creation
-    /// service's step 3); the scan must see at least these.
+    /// The engine call sites in the tree today (the Office quick-create's mapping step, the unified record-creation
+    /// service's step 3 and its Repair mode); the scan must see at least these.
     /// </summary>
-    private const int KnownCallSites = 2;
+    private const int KnownCallSites = 3;
 
     [Fact(DisplayName = "#2188: every source handed to the field-mapping engine was masked to the caller's view first")]
     public void EverySourceHandedToTheMappingEngine_PassedThroughTheCallerMask()
@@ -85,9 +105,9 @@ public class MappingSourceCallerMaskGuardTests
                 continue;
             }
 
-            var scan = Scan(File.ReadAllText(file));
-            callSites += scan.CallSites;
-            offenders.AddRange(scan.Violations.Select(v => $"{relative}:{v}"));
+            var scan = ScanCalls(File.ReadAllText(file));
+            callSites += scan.Calls.Count;
+            offenders.AddRange(Offenders(relative, scan, UnmaskedCallExemptions).Select(v => $"{relative}:{v}"));
         }
 
         Assert.True(callSites >= KnownCallSites,
@@ -97,6 +117,133 @@ public class MappingSourceCallerMaskGuardTests
             "source is read app-only, which ignores field-level security; mask it first:\n" +
             "  source = await MappingSourceCallerMask.ApplyAsync(callerClient, table, id, appRead, sourceColumns, logger, ct);\n" +
             "and pass that local (or a literal null). " + string.Join("\n", offenders));
+    }
+
+    [Fact(DisplayName = "#2188: every per-member unmasked-call exemption is still used, names a member that exists and gives a reason")]
+    public void EveryUnmaskedCallExemption_IsStillUsed()
+    {
+        var stale = StaleExemptions(UnmaskedCallExemptions, relative =>
+        {
+            var path = Path.Combine(SourceScan.RepoRoot, relative.Replace('/', Path.DirectorySeparatorChar));
+            return File.Exists(path) ? File.ReadAllText(path) : null;
+        });
+
+        Assert.True(stale.Count == 0, "Fix or remove these UnmaskedCallExemptions entries (the ratchet):\n" + string.Join("\n", stale));
+    }
+
+    /// <summary>The synthetic file the exemption controls are judged as, and its one exempt member.</summary>
+    private const string ControlPath = "control/Svc.cs";
+
+    private static readonly IReadOnlyDictionary<string, (int Uses, string Reason)> ControlExemptions =
+        new Dictionary<string, (int Uses, string Reason)> { [$"{ControlPath}|Svc.Exempt"] = (1, "control: one unmasked call") };
+
+    public static TheoryData<string, string> ExemptionBypasses() => new()
+    {
+        {
+            "a second unmasked call in the exempt member",
+            """
+            class Svc
+            {
+                void Exempt()
+                {
+                    CreateTimeFieldMapping.ApplyFillOnly(r, t, read.Record, p, w, l);
+                    CreateTimeFieldMapping.Apply(r, t, read.Record, p, w, l);
+                }
+            }
+            """
+        },
+        {
+            "an unmasked call in a different member of the same file",
+            """
+            class Svc
+            {
+                void Exempt() { CreateTimeFieldMapping.ApplyFillOnly(r, t, read.Record, p, w, l); }
+                void Other() { CreateTimeFieldMapping.ApplyFillOnly(r, t, read.Record, p, w, l); }
+            }
+            """
+        },
+        {
+            "an unmasked call inside a lambda in a non-exempt member of the same file",
+            """
+            class Svc
+            {
+                void Exempt() { CreateTimeFieldMapping.ApplyFillOnly(r, t, read.Record, p, w, l); }
+                void Other() { Action a = () => CreateTimeFieldMapping.Apply(r, t, appRead, p, w, l); a(); }
+            }
+            """
+        },
+    };
+
+    [Theory(DisplayName = "#2188 exemption control: an unmasked call past the member's allowance, or outside the exempt member, fires")]
+    [MemberData(nameof(ExemptionBypasses))]
+    public void TheExemption_DoesNotCoverMoreThanItsOccurrences(string shape, string snippet)
+        => Assert.True(Offenders(ControlPath, ScanCalls(snippet, SourceCodeKind.Script), ControlExemptions).Count > 0,
+            $"The guard did not fire on: {shape}.");
+
+    public static TheoryData<string, string> ExemptionSanctioned() => new()
+    {
+        {
+            "exactly one unmasked call in the exempt member",
+            """
+            class Svc
+            {
+                void Exempt() { CreateTimeFieldMapping.ApplyFillOnly(r, t, read.Record, p, w, l); }
+                void Other() { CreateTimeFieldMapping.ApplyFillOnly(r, t, null, p, w, l); }
+            }
+            """
+        },
+        {
+            "exactly one unmasked call, in a local function of the exempt member (counted for that member)",
+            """
+            class Svc
+            {
+                void Exempt()
+                {
+                    void Map() => CreateTimeFieldMapping.ApplyFillOnly(r, t, read.Record, p, w, l);
+                    Map();
+                }
+            }
+            """
+        },
+    };
+
+    [Theory(DisplayName = "#2188 exemption control: the exempt member's allowed occurrence does not fire")]
+    [MemberData(nameof(ExemptionSanctioned))]
+    public void TheExemption_CoversItsOccurrence(string shape, string snippet)
+    {
+        var offenders = Offenders(ControlPath, ScanCalls(snippet, SourceCodeKind.Script), ControlExemptions);
+        Assert.True(offenders.Count == 0, $"The guard fired on the exempt shape: {shape}: {string.Join("; ", offenders)}");
+    }
+
+    [Fact(DisplayName = "#2188 exemption control: an entry naming a member with no unmasked call, a gone member or no reason is stale")]
+    public void AStaleExemption_IsReported()
+    {
+        const string source = """
+            class Svc
+            {
+                void Exempt() { CreateTimeFieldMapping.ApplyFillOnly(r, t, read.Record, p, w, l); }
+                void Masked() { CreateTimeFieldMapping.ApplyFillOnly(r, t, null, p, w, l); }
+            }
+            """;
+        var entries = new Dictionary<string, (int Uses, string Reason)>
+        {
+            [$"{ControlPath}|Svc.Exempt"] = (1, "control: used"),
+            [$"{ControlPath}|Svc.Masked"] = (1, "control: the member has zero unmasked calls"),
+            [$"{ControlPath}|Svc.Gone"] = (1, "control: no such member"),
+            [$"{ControlPath}|Svc.Exempt "] = (1, "control: malformed member name"),
+            ["control/Missing.cs|Svc.Exempt"] = (1, "control: no such file"),
+        };
+        var noReason = new Dictionary<string, (int Uses, string Reason)> { [$"{ControlPath}|Svc.Exempt"] = (1, " ") };
+
+        string? Read(string path) => path == ControlPath ? source : null;
+        var stale = StaleExemptions(entries, Read);
+
+        Assert.Equal(4, stale.Count);
+        Assert.Contains(stale, s => s.StartsWith($"{ControlPath}|Svc.Masked:", StringComparison.Ordinal));
+        Assert.Contains(stale, s => s.StartsWith($"{ControlPath}|Svc.Gone:", StringComparison.Ordinal));
+        Assert.Contains(stale, s => s.StartsWith("control/Missing.cs|Svc.Exempt:", StringComparison.Ordinal));
+        Assert.DoesNotContain(stale, s => s.StartsWith($"{ControlPath}|Svc.Exempt:", StringComparison.Ordinal));
+        Assert.Single(StaleExemptions(noReason, Read));
     }
 
     /// <summary>
@@ -805,6 +952,117 @@ public class MappingSourceCallerMaskGuardTests
     /// </summary>
     internal static (int CallSites, List<string> Violations) Scan(string text, SourceCodeKind kind = SourceCodeKind.Regular)
     {
+        var scan = ScanCalls(text, kind);
+        return (scan.Calls.Count, scan.Other.Concat(scan.Calls.SelectMany(c => c.Violations)).ToList());
+    }
+
+    /// <summary>One engine call: the declared member it counts for, its line, and what (if anything) leaves its source unmasked.</summary>
+    internal sealed record EngineCall(string Member, int Line, IReadOnlyList<string> Violations)
+    {
+        public bool Unmasked => Violations.Count > 0;
+    }
+
+    /// <summary>A file's engine calls, its violations that belong to no call (a global using, a method group), and its members.</summary>
+    internal sealed record CallScan(List<EngineCall> Calls, List<string> Other, IReadOnlySet<string> Members);
+
+    /// <summary>
+    /// The violations of one file: every non-call violation, and every unmasked call except up to <c>Uses</c> of them, in line
+    /// order, in a member <paramref name="exemptions"/> names for <paramref name="path"/>.
+    /// </summary>
+    internal static List<string> Offenders(
+        string path, CallScan scan, IReadOnlyDictionary<string, (int Uses, string Reason)> exemptions)
+    {
+        var offenders = new List<string>(scan.Other);
+        foreach (var member in scan.Calls.GroupBy(c => c.Member, StringComparer.Ordinal))
+        {
+            var allowed = exemptions.TryGetValue($"{path}|{member.Key}", out var exemption) ? exemption.Uses : 0;
+            var tolerated = 0;
+            foreach (var call in member.Where(c => c.Unmasked).OrderBy(c => c.Line))
+            {
+                if (tolerated < allowed)
+                {
+                    tolerated++;
+                    continue;
+                }
+
+                if (allowed > 0)
+                    offenders.Add($"{call.Line}: a further unmasked call in {member.Key}; its exemption permits {allowed}");
+                offenders.AddRange(call.Violations);
+            }
+        }
+
+        return offenders;
+    }
+
+    /// <summary>
+    /// The exemptions that no longer hold: an empty reason, a malformed key, a file or member that is gone, or fewer unmasked
+    /// calls in the member than <c>Uses</c>.
+    /// </summary>
+    internal static List<string> StaleExemptions(
+        IReadOnlyDictionary<string, (int Uses, string Reason)> exemptions, Func<string, string?> readFile)
+    {
+        var stale = new List<string>();
+        foreach (var (key, (uses, reason)) in exemptions.OrderBy(e => e.Key, StringComparer.Ordinal))
+        {
+            if (string.IsNullOrWhiteSpace(reason))
+            {
+                stale.Add($"{key}: the reason is empty");
+                continue;
+            }
+
+            var separator = key.IndexOf('|');
+            if (separator <= 0 || uses < 1)
+            {
+                stale.Add($"{key}: malformed (\"path|Type.Member\", Uses at least 1)");
+                continue;
+            }
+
+            if (readFile(key[..separator]) is not { } text)
+            {
+                stale.Add($"{key}: the file is gone — remove the entry");
+                continue;
+            }
+
+            var member = key[(separator + 1)..];
+            var scan = ScanCalls(text);
+            var unmasked = scan.Calls.Count(c => c.Member == member && c.Unmasked);
+            if (!scan.Members.Contains(member))
+                stale.Add($"{key}: the member no longer exists — remove the entry");
+            else if (unmasked < uses)
+                stale.Add($"{key}: {unmasked} unmasked call(s), fewer than the {uses} permitted — lower Uses or remove the entry");
+        }
+
+        return stale;
+    }
+
+    /// <summary>
+    /// <c>"{Type}.{Member}"</c> of a member scope (<see cref="ScopeOf"/>): the declared member a call counts for, so a call in a
+    /// local function, lambda or anonymous method counts for the member around it; an accessor counts for its property.
+    /// </summary>
+    private static string MemberKey(SyntaxNode scope)
+    {
+        var declaration = scope is AccessorDeclarationSyntax accessor ? accessor.Parent?.Parent ?? scope : scope;
+        var name = declaration switch
+        {
+            MethodDeclarationSyntax m => m.Identifier.ValueText,
+            ConstructorDeclarationSyntax => ".ctor",
+            DestructorDeclarationSyntax => ".dtor",
+            PropertyDeclarationSyntax p => p.Identifier.ValueText,
+            EventDeclarationSyntax e => e.Identifier.ValueText,
+            IndexerDeclarationSyntax => "this[]",
+            OperatorDeclarationSyntax o => $"operator {o.OperatorToken.ValueText}",
+            ConversionOperatorDeclarationSyntax c => $"operator {c.Type}",
+            BaseFieldDeclarationSyntax f => string.Join(",", f.Declaration.Variables.Select(v => v.Identifier.ValueText)),
+            _ => "<top level>",
+        };
+        var type = declaration.AncestorsAndSelf().OfType<BaseTypeDeclarationSyntax>()
+            .FirstOrDefault(t => t != declaration)?.Identifier.ValueText ?? "<script>";
+        return $"{type}.{name}";
+    }
+
+    /// <summary>The walker: parse <paramref name="text"/> and find every engine call, attributed to its declared member.</summary>
+    internal static CallScan ScanCalls(string text, SourceCodeKind kind = SourceCodeKind.Regular)
+    {
         var tree = CSharpSyntaxTree.ParseText(text, new CSharpParseOptions(LanguageVersion.Latest, kind: kind));
         var root = tree.GetRoot();
         var violations = new List<string>();
@@ -859,39 +1117,43 @@ public class MappingSourceCallerMaskGuardTests
             }
         }
 
-        var analysed = new HashSet<(SyntaxNode Scope, string Name, SyntaxNode? Boundary)>();
+        // Each call is judged on its own (an exemption counts calls, so a second call with the same source name is not folded
+        // into the first).
+        var engineCalls = new List<EngineCall>();
         foreach (var call in calls)
         {
+            var scope = ScopeOf(call);
+            var callViolations = new List<string>();
             var argument = SourceArgument(call);
-            if (argument is null)
+            switch (argument?.Expression)
             {
-                violations.Add($"{Line(call)}: the source argument could not be found");
-                continue;
-            }
+                case null:
+                    callViolations.Add($"{Line(call)}: the source argument could not be found");
+                    break;
 
-            switch (argument.Expression)
-            {
                 case var e when IsNullOrDefault(e):
                     break;
 
                 case IdentifierNameSyntax id:
-                    var scope = ScopeOf(call);
                     var name = id.Identifier.ValueText;
-                    var boundary = FunctionBoundary(call);
-                    if (analysed.Add((scope, name, boundary)))
-                    {
-                        violations.AddRange(UnsanctionedUses(scope, name, sourceArguments, call).Select(reason => $"{Line(call)}: '{name}' {reason}"));
-                    }
-
+                    callViolations.AddRange(UnsanctionedUses(scope, name, sourceArguments, call).Select(reason => $"{Line(call)}: '{name}' {reason}"));
                     break;
 
                 default:
-                    violations.Add($"{Line(call)}: the source is the expression '{Shorten(argument.Expression.ToString())}', not a masked local");
+                    callViolations.Add($"{Line(call)}: the source is the expression '{Shorten(argument.Expression.ToString())}', not a masked local");
                     break;
             }
+
+            engineCalls.Add(new EngineCall(MemberKey(scope), Line(call), callViolations));
         }
 
-        return (calls.Count, violations);
+        var members = root.DescendantNodes()
+            .Where(n => n is MemberDeclarationSyntax and not BaseTypeDeclarationSyntax and not BaseNamespaceDeclarationSyntax
+                        and not GlobalStatementSyntax and not DelegateDeclarationSyntax)
+            .Select(MemberKey)
+            .ToHashSet(StringComparer.Ordinal);
+
+        return new CallScan(engineCalls, violations, members);
     }
 
     /// <summary>The <c>source</c> argument: named <c>source:</c>, else the third positional one.</summary>
