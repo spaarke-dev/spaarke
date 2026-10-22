@@ -17,8 +17,8 @@ namespace Sprk.Bff.Api.Tests.DataMutation.ChildAccessPermission;
 
 /// <summary>
 /// #2240 (uac-r2): a document's BFF-owned columns (<see cref="InheritedAccessPermission.BffOwnedDocumentColumns"/>: the
-/// file pointer and its binding, the relocation record, the file path and the email-archive key) are written only by the
-/// BFF's typed writers. An app-only generic writer never writes them (<see cref="InheritedAccessPermission.RefuseAppOnlyWrite"/>,
+/// file pointer, its binding and the legacy item id, the relocation record, the file path and the email-archive key) are
+/// written only by the BFF's typed writers. An app-only generic writer never writes them (<see cref="InheritedAccessPermission.RefuseAppOnlyWrite"/>,
 /// reason <see cref="InheritedAccessPermission.AppOnlyDocumentBffColumnWriteReasonCode"/>): the Update Record playbook node
 /// and the action seam acting for no person (<see cref="UpdateRecordActionCore"/>), a playbook's output mapping
 /// (<see cref="DataverseUpdateHandler"/>), and the field-mapping push (a rule targeting one is skipped). These writers run
@@ -37,6 +37,7 @@ public class DocumentBffOwnedColumnAppOnlyWriterTests
         "sprk_graphdriveid",
         "sprk_graphitemid",
         "sprk_graphitemidbound",
+        "sprk_driveitemid",
         "sprk_relocationpending",
         "sprk_relocatedversions",
         "sprk_filepath",
@@ -77,6 +78,7 @@ public class DocumentBffOwnedColumnAppOnlyWriterTests
     [Theory]
     [InlineData("sprk_filepathnote")]
     [InlineData("sprk_graphitemidx")]
+    [InlineData("sprk_driveitemidx")]
     [InlineData("sprk_graphitemid_old")]
     [InlineData("sprk_graphdriveidname")]
     [InlineData("sprk_relocationpendingnote")]

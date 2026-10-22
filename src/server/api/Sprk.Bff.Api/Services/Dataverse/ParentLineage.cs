@@ -600,15 +600,26 @@ internal static class InheritedAccessPermission
     internal const string AppOnlyDocumentBffColumnWriteReasonCode = "sdap.access.document_bff_column_server_only";
 
     /// <summary>
-    /// #2240: the document columns only the BFF's own typed writers write. The generic writers run AS the BFF, so the field
-    /// security that locks the first five (<c>scripts/Set-DocumentPointerFieldSecurity.ps1</c>, target DocumentPointers)
-    /// does not stop them; this refusal does. None is a lookup, and the refusal's normalization covers every form anyway.
+    /// #2240: the document columns only the BFF's own typed writers write. The generic writers run AS the BFF, so field
+    /// security does not stop them; this refusal does. None is a lookup, and the refusal's normalization covers every form
+    /// anyway. <c>scripts/Set-DocumentPointerFieldSecurity.ps1</c> (target DocumentPointers) lists five of them and
+    /// field-secures four: <c>sprk_graphdriveid</c>, <c>sprk_graphitemidbound</c>, <c>sprk_relocationpending</c> and
+    /// <c>sprk_relocatedversions</c>. It lists <c>sprk_graphitemid</c> but skips it (an alternate key cannot be secured), and
+    /// it does not list <c>sprk_driveitemid</c>, <c>sprk_filepath</c>, <c>sprk_emailmessageid</c> or
+    /// <c>sprk_isemailarchive</c>; for those five this refusal is the only lock on these paths. Every column the script
+    /// lists must be in this set (<c>DocumentBffOwnedColumnAppOnlyWriterTests</c> reads the script).
     /// <list type="bullet">
     /// <item><c>sprk_graphdriveid</c>, <c>sprk_graphitemid</c>: the SharePoint Embedded pointer the BFF follows as the
     /// application (task 166, owner round 21). <c>sprk_graphitemid</c> cannot be field-secured (alternate key).</item>
     /// <item><c>sprk_graphitemidbound</c>: the BFF-only copy of the item id the pointer check compares with
     /// (<see cref="DocumentPointerBinding"/>, task 171). Setting it alone makes every app-only read refuse the document;
     /// setting it with the item id forges a pointer that passes the check.</item>
+    /// <item><c>sprk_driveitemid</c>: the legacy copy of the item id, and an access key. A caller passes the retrieval trim
+    /// (<c>RetrievalRecordKey.DocumentByDriveItem</c>) and the AI filter's item check
+    /// (<c>AiAuthorizationFilter.IsSpeItemShownToCallerAsync</c>) when they can read ANY document whose
+    /// <c>sprk_driveitemid</c> equals the item, so setting it on a document a partner can read shows them another
+    /// document's content. Its only writer is the relocator's re-key (<c>DocumentContainerRelocator.ReKeyedOwnColumns</c>,
+    /// a typed app-only update that does not ask this refusal).</item>
     /// <item><c>sprk_relocationpending</c>: the relocator's ledger; it names a source the BFF may later delete (task 166
     /// f1-v1). <c>sprk_relocatedversions</c>: the relocation's version record (task 166 f1-v2).</item>
     /// <item><c>sprk_filepath</c>: the item's web URL, written with the pointer (a resource-naming field the document
@@ -625,6 +636,7 @@ internal static class InheritedAccessPermission
         "sprk_graphdriveid",
         DocumentPointerBinding.ItemIdColumn,
         DocumentPointerBinding.BoundItemIdColumn,
+        "sprk_driveitemid",
         Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator.RelocationLedgerColumn,
         Sprk.Bff.Api.Services.Documents.RelocatedVersionHistory.Column,
         "sprk_filepath",
@@ -649,9 +661,9 @@ internal static class InheritedAccessPermission
     /// re-file routes (<c>RecordOwnershipResolver.ReparentAsync</c>, caller-checked), the Office create (I-19, the link in the
     /// create) and the BFF's own typed writers, none of which uses these paths. Every caller of the generic update is held to
     /// this by <c>ExternalDocumentNarrowingGuardTests</c> (round 4e).</para>
-    /// <para>#2240: nor a document's BFF-owned columns (<see cref="BffOwnedDocumentColumns"/>: its file pointer and binding,
-    /// relocation record, file path and email-archive key), refused with <see cref="AppOnlyDocumentBffColumnWriteReasonCode"/>
-    /// in the same forms. Their writers are the BFF's typed ones (the upload and Office persistence, the pointer binder, the
+    /// <para>#2240: nor a document's BFF-owned columns (<see cref="BffOwnedDocumentColumns"/>: its file pointer, binding and
+    /// legacy item id, relocation record, file path and email-archive key), refused with
+    /// <see cref="AppOnlyDocumentBffColumnWriteReasonCode"/> in the same forms. Their writers are the BFF's typed ones (the upload and Office persistence, the pointer binder, the
     /// relocator, the email archive), none of which uses these paths.</para>
     /// </summary>
     /// <returns>The refusal (nothing is written), or <see langword="null"/> when the write may proceed.</returns>

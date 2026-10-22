@@ -51,11 +51,12 @@ public sealed class DocumentProfileOutputMapperRefusalTests
         { "_sprk_parentdocument_value", "\"5b1e7a4c-0f6d-4a52-9d1b-3f0c2e8a7d11\"", "sprk_parentdocument", InheritedAccessPermission.AppOnlyDocumentLinkWriteReasonCode },
         // an object value (mapped as a JSON blob when not refused)
         { "sprk_accessinheritance", "{\"own\":0}", "sprk_accessinheritance", InheritedAccessPermission.AppOnlyDocumentWriteReasonCode },
-        // #2240: a document's BFF-owned columns (the pointer, its binding, the relocation record, the file path and the
-        // email-archive key) are refused too, so they are dropped with the refusal's code, not the list's
+        // #2240: a document's BFF-owned columns (the pointer, its binding, the legacy item id, the relocation record, the
+        // file path and the email-archive key) are refused too, so they are dropped with the refusal's code, not the list's
         { "sprk_graphitemid", "\"01ABCDEFPOINTERITEM\"", "sprk_graphitemid", InheritedAccessPermission.AppOnlyDocumentBffColumnWriteReasonCode },
         { "sprk_graphdriveid", "\"b!POINTERDRIVE\"", "sprk_graphdriveid", InheritedAccessPermission.AppOnlyDocumentBffColumnWriteReasonCode },
         { "sprk_graphitemidbound", "\"01ABCDEFPOINTERITEM\"", "sprk_graphitemidbound", InheritedAccessPermission.AppOnlyDocumentBffColumnWriteReasonCode },
+        { "sprk_driveitemid", "\"01ABCDEFPOINTERITEM\"", "sprk_driveitemid", InheritedAccessPermission.AppOnlyDocumentBffColumnWriteReasonCode },
         { "sprk_relocationpending", "\"{\\\"to\\\":\\\"POINTER\\\"}\"", "sprk_relocationpending", InheritedAccessPermission.AppOnlyDocumentBffColumnWriteReasonCode },
         { "sprk_relocatedversions", "\"[]\"", "sprk_relocatedversions", InheritedAccessPermission.AppOnlyDocumentBffColumnWriteReasonCode },
         { "sprk_filepath", "\"/POINTER/path.pdf\"", "sprk_filepath", InheritedAccessPermission.AppOnlyDocumentBffColumnWriteReasonCode },
