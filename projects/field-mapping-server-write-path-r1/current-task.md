@@ -1,19 +1,19 @@
 # Current Task — field-mapping-server-write-path-r1
 
-> **Last updated**: 2026-10-22 (checkpoint at 85%: 018a ready for its PR)
-> **Phase**: Wave 2. Done (13/43): 001–006, 010–016, ALL on master (016 = #2228 a7b956fb55; #2220 = #2223 ef5912c7e8).
-> **Live on dev: a7b956fb55** (R3, 2026-10-22 02:18Z). **Active: task 018, phase 018a** (service prerequisites,
-> no live change). UAC-r2 ACCEPT. PR next.
+> **Last updated**: 2026-10-22 (86% checkpoint: 018b in UAC-r2 condition (b) fix round 2)
+> **Phase**: Wave 2. Done (13/43): 001–006, 010–016 on master; 018a on master (36403e1f4b).
+> **Live on dev: 1283c41817** (R3, 12:50Z; dormant 018a). **Active: task 018, phase 018b** (live Office Matter/Project swap).
 
 ## Quick Recovery
 
 | Field | Value |
 |---|---|
 | **Active task** | 018 (Office quick-create adapter), run as 3 PRs under ONE POML: **018a** service prerequisites → **018b** Matter/Project adapter → **018c** delete the Office core. The Invoice leg is NOT moved (ebilling-r1, owner decision L; task 096 deletes it) |
-| **HEAD** | work branch `738b526a2d` = 018a (2a5f076857 + fix rounds 58e09ce726, 4530e597f0, K-a a4d77aa539) + master 230302c307 (#2234). Pushed. Uncommitted: none |
-| **Running** | (1) Full verify after the #2234 merge (filter includes the #2234 suites): output `scratchpad/v018a2/`. (2) Publish delta 230302c307 vs 738b526a2d (`C:\tmp\h18m`, `C:\tmp\h18a`; the script removes them) + CVE |
-| **Next Action** | Both green → write the 018a PR body (from the notes' "018a" section, the condition (b) statement, UAC-r2 ACCEPT, decisions.md 2026-10-22 K-5 deviation, publish delta, CVE) → `gh pr create` from the work branch → merge only on Router + Client lint green and the rollup clean or explained (#2224 = known ADR-job timeout) → tell UAC-r2 the SHA (don't ask R3 to deploy: 018a is dormant; UAC-r2 batches) → resume the implementer (agent a80d401ebbcfb9d3e) for **018b**, whose criteria are all in the 018 POML |
-| **018 progress** | 018a = PR #2243 (CI running; merge on Router + Client lint green, rollup clean/explained, then tell UAC-r2 the SHA). 018b split into 3 passes on ONE PR: **018b-1 running** (fresh opus implementer, branch `task/fm-018b1`: NFR-01 inventory FIRST, then the leg swap, refusal map + table test, single membership publish, drop the old-core ctor dependency, fixtures + the four fill-only rewrites); 018b-2 (Assigned To refusal code, dropped default surfaced, secure-matter Project, no-token/empty-flag tests); 018b-3 (`ResolveDefaultAssigneeAsync` move, owner-guard and census cleanup, isolated ordering, #2124, optional #2238, notes). Then an Opus review + UAC-r2 (b) on the whole of 018b |
+| **HEAD** | work branch = master 36403e1f4b + checkpoint docs (pushed). 018b = branch **`task/fm-018b1`** (worktree `C:\code_files\spaarke\.claude\worktrees\agent-a550606fde68f707f`), tip **d04ba0b4cd** (= 830c2b0f1c + #2253 decision note), pushed. Fix round 2 = branch **`task/fm-018b-fix2` @ 29d06d80f3** (pushed, NOT yet merged into task/fm-018b1). Uncommitted: none |
+| **Running** | Nothing |
+| **Next Action** | (1) **Close the F1-1 gap in the adapter**: `record_owner_no_default_team` on a Project FILED under a source (the adapter derived the pair) must NOT say "your business unit"; use neutral wording (the team that owns records where it is filed has no default owner team); keep the caller-unit wording for an unfiled Matter and `acting_user_unresolved`. No service change. Map/route test + mutant. (2) Merge task/fm-018b-fix2 into task/fm-018b1; verify (`scratchpad/v018b-m3/verify.sh`, repo= agent-a550606fde68f707f). (3) Send UAC-r2 the fix diff (d04ba0b4cd..new tip) for their own re-check, then ACCEPT. (4) Merge task/fm-018b1 into the work branch; fill `{VERDICT}` in `scratchpad/pr-018b.md` (add fix round 2: F1-1 + K1; publish delta +6,843 B / 37.75 MB at 830c2b0f1c, CVE none; re-measure if src changed materially); `gh pr create`; merge on Router + Client lint green (rollup clean or explained); close #1614/#1617 citing the SHA; tell UAC-r2 the SHA (018b is LIVE: deploy candidate; owner go in the R3 session); then 018c |
+| **018 progress** | 018a done (master). 018b: all passes + Opus review (4 F fixed) + Sonnet re-check (clean; K1 closed). UAC-r2 condition (b): every checklist item PASS; REJECT on F1-1 only (OwnerUnresolved wording). Fix round 2 (29d06d80f3, 4510 passed): F1-1 passes `refusal.Detail` except no_default_team / acting_user_unresolved (gap above); K1 the defaults endpoint offers no assignee the caller cannot AppendTo (fail closed). UAC-r2 notes: K2 (map test checks codes, not kind+code), K3 (SecureRootAccessColumnsNeverMappedOfficeTests + SecureRootInheritanceWriterTests mismatch tests still build the dead core: 018c). #2253 (UAC): whichever merges second adds `WriteIdentity.AppOnly` to `DropAppOnlyRefusedRules` + must-fire test (access-deciding contact column dropped at create). #2124 Repair half = 052 criterion |
+| **CI note** | #2252 raised the Tier 1 arch job timeout to 10 min (merged). The Tier 2 ADR job (#2224) may still be cancelled by its timeout; read the log |
 | **Cleanup left for the owner** | Empty, unregistered folders (Remove-WorktreeSafe partial delete, "Permission denied"): `C:\code_files\spaarke\.claude\worktrees\agent-a10e5fe383a4dfcd2`, `...\agent-a80d401ebbcfb9d3e` |
 
 ## 018 — what is decided (all in the 018 POML and notes/decisions.md)
