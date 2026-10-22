@@ -198,3 +198,18 @@ When a request names an optional reference lookup (`ReferenceLookupColumns`: the
 - it applies only to caller-owned optional references, never to a filing lookup, the for-person column, a protected column, or an access-conferring column (018a fix round F4-1: these are rejected by the registry allow-list).
 
 Raised by the 018a adversarial review (K-5). Cite this in the 018 PR and in UAC-r2's condition (b) review.
+
+## 2026-10-22 — 018b-1 inventory: answers to G1–G7 (main session)
+
+The 018b-1 inventory (`notes/task-018-notes.md`, "018b-1") left seven items open. The answers:
+
+- **G1, "No matter type was supplied":** keep the warning. The service adds `RecordCreationOutcome.WrittenColumns`, the column names of the step-11 item. The adapter warns when `sprk_mattertype` is not among them and no `reference_value_dropped` already names it.
+  - §11: it overlaps with no existing outcome member (`Warnings` names only drops). Reading back costs an extra app-only read and a race. Without it, the four pinned contract tests and the user's prompt to set the type are lost.
+- **G2, no token vs no Dataverse user:** the service sets the WhoAmI failure as `ClientFailure` on the `PrincipalUnresolved` refusal. It adds no type and changes no code.
+  - Office maps `UserContextRequired`, `OboNotConfigured` and `OboExchangeFailed` to 500 `caller_rights_unverifiable`, and `AccessDenied` to 403 `owner_unresolved`. An absent or unknown failure fails closed to 500 `caller_rights_unverifiable`.
+- **G3:** keep the endpoint-resolved systemuser id as the adapter's input precondition (403 `owner_unresolved`). It is an input the maker's-contact default needs, not an authorization check. The service's WhoAmI stays the identity check.
+- **G4, `secure_source_filing_mismatch`:** with a secure source, only the derived pair is written; this holds by construction. A profile rule aimed at the pair is skipped with `mapping_rule_skipped`, and the project is filed under the derived pair, into isolation. One test pins this.
+  - The 403 becomes a 201 in a misconfigured-profile case. Because this changes a refusal code on a live path, **it is sent to UAC-r2 under condition (b)**. The swap may build on it, but the 018b PR does not merge without UAC-r2's concurrence.
+- **G5:** the service names the refusing lookup on a `NotFoundOrDenied` step-5 refusal (`RefusedColumn`), so Office can map the pair's record to `caller_cannot_file_under_parent` and the Assigned To contact to its own `assignedTo` code (pass 2). This is done with G1 and G2 in pass 018b-1s, before the swap. Never parse `Detail`.
+- **G6, reference-drop wording:** sign off. NFR-07 pins error codes and response shape, not warning text. The assertions take 018a's K-3 text. Release note: Office warning texts follow the service.
+- **G7, an unavailable mapping source:** sign off. FR-04 says a source the caller can't read gives no mapping and a warning, so Default rules no longer apply in that case. This happens only on a read fault, because `QuickCreateSourceAccessFilter` already refuses an unreadable source. Release note.
