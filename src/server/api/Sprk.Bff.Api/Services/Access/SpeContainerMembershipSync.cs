@@ -367,6 +367,20 @@ public class SpeContainerMembershipSync
                         + "this stamp's containers; skipped.", entity, record.Id, container);
                     problems.Add($"{entity} {record.Id}: container {container} is not one of this stamp's containers; skipped");
                 }
+                catch (Exception ex) when (SpeContainerMembershipService.IsUnresolvableContainer(ex))
+                {
+                    // Graph cannot resolve the id in this tenancy (400 invalidRequest — "Invalid hostname for this tenancy"
+                    // once the container's SharePoint site is gone; #1830, task 192). Retrying will not change the answer
+                    // and no one reaches files through it, so it is reported, not counted failed — the same outcome as the
+                    // guard's refusal above, which is what an id NOT on the stamp's configured list gets for the same 400.
+                    // Fail closed all the same: nothing is read, removed or cleared there, and the next run reports it again.
+                    // The record's container pointer (or the stamp's configured id) is a data fault an operator must fix.
+                    _logger.LogWarning(
+                        "[SPE-MEMBERSHIP-SYNC] Secure {Entity} {RecordId} points at container {ContainerId}, which does not "
+                        + "resolve in this tenant (Graph 400 invalidRequest); its JIT grants cannot be checked — skipped.",
+                        entity, record.Id, container);
+                    problems.Add($"{entity} {record.Id}: container {container} does not resolve in this tenant; skipped");
+                }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex,
