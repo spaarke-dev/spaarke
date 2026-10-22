@@ -233,7 +233,8 @@ internal sealed partial class RecordCreationService
             var target = rule.TargetField;
             if (!string.IsNullOrWhiteSpace(target)
                 && !IsFillOnlyAtCreateExemption(table, target)
-                && InheritedAccessPermission.RefuseAppOnlyWrite(table, [target]) is { } refused)
+                && InheritedAccessPermission.RefuseAppOnlyWrite(
+                    table, [target], InheritedAccessPermission.WriteIdentity.AppOnly) is { } refused)
             {
                 var code = refused.RefusalCode ?? InheritedAccessPermission.AppOnlyDocumentWriteReasonCode;
                 warnings.Add(new RecordCreationWarning(RecordCreationWarning.MappingRuleSkippedCode, target,
