@@ -49,7 +49,20 @@
 
     THE ROW ID is supplied by the BFF (task 090: f(submission id, source version)); no column or key for it here.
 
-    PUBLISH. Only what this script changed: sprk_storedfile, sprk_document, sprk_invoice and the sprk_storedfilepurpose choice.
+    NAMES. The table's SchemaName is sprk_StoredFile and its primary column's sprk_Name (a SchemaName cannot be changed after the
+    create); every other column's SchemaName is PascalCase after the prefix as well. Logical names are the lowercase forms and are
+    what every pre-flight "name is free" check and the verify compare.
+
+    RELATED MENU. Each of the six lookups is created with AssociatedMenuConfiguration Behavior = DoNotDisplay, so none adds a
+    "Stored Files" entry to the Related menu of its target form (procedure version, invoice, billing export, document,
+    communication, user); the verify reads each back.
+
+    ORDER. The two big integer columns (sprk_sourceversion, sprk_sizebytes) are created right after the table, and their
+    CanBeSecuredFor* flags are checked at once, before any lookup or other column exists: if the platform refuses to secure that
+    type, the run stops (exit 2) with only the table and those two columns to remove by hand.
+
+    PUBLISH. Only what this script and its relationships touched: sprk_storedfile, sprk_document, sprk_invoice, sprk_communication,
+    sprk_procedureversion, sprk_billingexport, systemuser and the sprk_storedfilepurpose choice. Never PublishAllXml.
 
     NEVER: set any invoice to Superseded; write the marker on any row; create a form, view or subgrid for sprk_storedfile (the
     platform's own default system form and views come with every new table; none is created or changed here); change a role
@@ -120,6 +133,14 @@ $Communication = 'sprk_communication'
 $CreatorColumn = 'sprk_createdbyperson'
 $MarkerColumn = 'sprk_restrictedbysubmission'
 $BlobPathColumn = 'sprk_blobpath'
+# SchemaNames the create bodies carry (a table's SchemaName cannot change after the create): PascalCase after the prefix. The
+# logical names above are their lowercase forms.
+$StoredFileSchema = 'sprk_StoredFile'
+$StoredFileNameSchema = 'sprk_Name'
+# AssociatedMenuConfiguration.Behavior of every lookup: no entry on the target's Related menu.
+$RelatedMenuBehavior = 'DoNotDisplay'
+# The two big integer columns, created and checked for securability first (see ORDER).
+$BigIntColumns = @('sprk_sourceversion', 'sprk_sizebytes')
 
 # F1: values are assigned 100000000, 100000001, ... in label order.
 $PurposeChoice = @{ Name = 'sprk_storedfilepurpose'; Display = 'Stored File Purpose'; Description = 'What a Stored File is for: a Procedure Version''s source document, an invoice PDF, an invoice supporting file or an export file (ebilling-r1 task 088, model 4.1).'; Labels = @('Procedure source', 'Invoice PDF', 'Invoice supporting file', 'Export file') }
@@ -190,7 +211,7 @@ function ConvertTo-LabelKey([string]$Label) { return (($Label -replace '\s', '')
 
 # The many-to-one relationship of a lookup column, found by the column. $null when the column has none.
 function Get-LookupRelationship([string]$Table, [string]$Column) {
-    $r = Get-DvOrNull "EntityDefinitions(LogicalName='$Table')/ManyToOneRelationships?`$select=SchemaName,ReferencedEntity,CascadeConfiguration&`$filter=ReferencingAttribute eq '$Column'" -Retries 2
+    $r = Get-DvOrNull "EntityDefinitions(LogicalName='$Table')/ManyToOneRelationships?`$select=SchemaName,ReferencedEntity,CascadeConfiguration,AssociatedMenuConfiguration&`$filter=ReferencingAttribute eq '$Column'" -Retries 2
     return @($r.value) | Select-Object -First 1
 }
 
@@ -313,7 +334,7 @@ function Set-TableAudit([string]$Table) {
 
 # One lookup to create. Rel is the relationship schema name; Delete is the delete behaviour it must read. Nothing else cascades.
 function New-LookupSpec([string]$Table, [string]$Column, [string]$Schema, [string]$Rel, [string]$Target, [string]$Display, [string]$Desc, [string]$Delete) {
-    return [pscustomobject]@{ Table = $Table; Column = $Column; Schema = $Schema; Rel = $Rel; Target = $Target; Display = $Display; Desc = $Desc; Delete = $Delete }
+    return [pscustomobject]@{ Table = $Table; Column = $Column; Schema = $Schema; Rel = $Rel; Target = $Target; Display = $Display; Desc = $Desc; Delete = $Delete; Menu = $RelatedMenuBehavior }
 }
 
 # Relationship name for a lookup on a NEW table: {table}_{column}_{target}, sprk_ prefixes dropped from the column and the target
@@ -326,6 +347,13 @@ function Get-NewTableRel([string]$Table, [string]$Column, [string]$Target) {
 # NoCascade (no relationship of sprk_storedfile is parental).
 function Get-ExpectedCascade($s) {
     return @{ Delete = $s.Delete; Assign = 'NoCascade'; Share = 'NoCascade'; Unshare = 'NoCascade'; Reparent = 'NoCascade' }
+}
+
+# $null when a relationship's AssociatedMenuConfiguration reads back with the wanted Behavior (DoNotDisplay); else the problem text.
+function Get-AssociatedMenuProblem($Actual, [string]$Expected) {
+    $b = if ($Actual) { [string]$Actual.Behavior } else { '' }
+    if ($b -eq $Expected) { return $null }
+    return "AssociatedMenuConfiguration.Behavior is '$b', expected '$Expected'"
 }
 
 # The members of an actual CascadeConfiguration that differ from the expected ones; empty when it is exactly as expected.
@@ -375,8 +403,14 @@ function Get-StoredFilePlan {
     return [pscustomobject]@{ Lookups = $lookups; Columns = $columns; Secured = $secured }
 }
 
-# The entities PublishXml names: only what this script changed and owns.
-function Get-PublishEntities { return @($StoredFile, $Document, $Invoice) }
+# The entities PublishXml names: the new table, the two tables that gain a column or a status, and the four tables the new
+# relationships touch (their forms and Related menus). Never every entity.
+function Get-PublishEntities { return @($StoredFile, $Document, $Invoice, $Communication, $Version, $Export, 'systemuser') }
+
+# The PublishXml ParameterXml: the entities above and the purpose choice.
+function Get-PublishXml {
+    return "<importexportxml><entities>$((Get-PublishEntities | ForEach-Object { "<entity>$_</entity>" }) -join '')</entities><optionsets><optionset>$($PurposeChoice.Name)</optionset></optionsets></importexportxml>"
+}
 
 # Nothing may change an existing lookup: an existing one must already target the right table with the right delete behaviour,
 # and a missing one's relationship name must be free.
@@ -724,8 +758,7 @@ function Assert-Securable($Specs, [string]$Then) {
 function Publish-Changes {
     if ($DryRun) { Write-Host "  WhatIf: publish skipped" -ForegroundColor Cyan; return }
     if ($script:Created.Count -eq 0 -and $script:Changed.Count -eq 0) { Write-Host "  nothing changed - no publish" -ForegroundColor Yellow; return }
-    $xml = "<importexportxml><entities>$((Get-PublishEntities | ForEach-Object { "<entity>$_</entity>" }) -join '')</entities><optionsets><optionset>$($PurposeChoice.Name)</optionset></optionsets></importexportxml>"
-    Invoke-Dv -Path 'PublishXml' -Method POST -Body @{ ParameterXml = $xml } | Out-Null
+    Invoke-Dv -Path 'PublishXml' -Method POST -Body @{ ParameterXml = (Get-PublishXml) } | Out-Null
     Write-Host "  customizations published ($((Get-PublishEntities) -join ', '), $($PurposeChoice.Name))" -ForegroundColor Green
 }
 
@@ -818,10 +851,10 @@ try {
     $membersBefore = Get-ProfileMembers
 
     # The plan, for the schema review.
-    Write-Host "  lookup plan ($($script:Lookups.Count) lookups): table.column -> target | relationship | delete | assign/share/unshare/reparent" -ForegroundColor Cyan
+    Write-Host "  lookup plan ($($script:Lookups.Count) lookups): table.column -> target | relationship | delete | assign/share/unshare/reparent | Related menu" -ForegroundColor Cyan
     foreach ($s in $script:Lookups) {
         $c = Get-ExpectedCascade $s
-        Write-Host ("    {0}.{1} -> {2} | {3} | {4} | {5}/{6}/{7}/{8}" -f $s.Table, $s.Column, $s.Target, $s.Rel, $s.Delete, $c.Assign, $c.Share, $c.Unshare, $c.Reparent)
+        Write-Host ("    {0}.{1} -> {2} | {3} | {4} | {5}/{6}/{7}/{8} | Related menu {9}" -f $s.Table, $s.Column, $s.Target, $s.Rel, $s.Delete, $c.Assign, $c.Share, $c.Unshare, $c.Reparent, $s.Menu)
     }
     Write-Host "  field security plan ($($script:Secured.Count) columns): writer = read/create/update; reader = read" -ForegroundColor Cyan
     foreach ($spec in $script:Secured) { Write-Host ("    {0}.{1} ({2}): writer{3}" -f $spec.Table, $spec.Column, $spec.Kind, $(if ($spec.Reader) { ' + reader' } else { ' ONLY (server-only)' })) }
@@ -834,27 +867,31 @@ try {
     Write-Host "2. F2 table $StoredFile (user-owned, audited, primary sprk_name = file name, 400)" -ForegroundColor Cyan
     Add-Table -Table $StoredFile -Display 'Stored File' -Plural 'Stored Files' `
         -Description 'One file the BFF stores outside document management: a Procedure Version''s source, an invoice PDF or supporting file, or an export file. Bytes live in Blob storage at {tenant}/{parent table}/{parent id}/{file id}; this row is the file''s authority (purpose, status, parent, source ids, hashes). Written only by the BFF (ebilling-r1 task 088, model 4.1).' `
-        -PrimaryColumn 'sprk_name' -PrimaryDisplay 'File Name' -PrimaryDescription 'The file name.' -PrimaryLength 400 -Ownership UserOwned
+        -PrimaryColumn 'sprk_name' -PrimaryDisplay 'File Name' -PrimaryDescription 'The file name.' -PrimaryLength 400 -Ownership UserOwned `
+        -SchemaName $StoredFileSchema -PrimarySchema $StoredFileNameSchema
     if ($DryRun -and $script:Planned -contains $StoredFile) {
         Write-Host "  WOULD SET sprk_name max length -> 400 and required level -> ApplicationRequired after the create (Dataverse ignores both in the create body)" -ForegroundColor Cyan
     }
     Set-PrimaryNameLength $StoredFile 'sprk_name' 400
     Set-PrimaryNameRequired $StoredFile 'sprk_name'
     Set-TableAudit $StoredFile
+    # The big integer columns first, with their securable check, so a refusal leaves only the table and these two columns (ORDER).
+    Add-Column 'sprk_sourceversion' (New-BigIntDef 'sprk_SourceVersion' 'Source Version' 'The source document''s version number at staging; the commit''s IfRowVersionMatches guard pins it (uac-r2 F2-c). Written only by the BFF (field-secured).') 'BigInt'
+    Add-Column 'sprk_sizebytes' (New-BigIntDef 'sprk_SizeBytes' 'Size (bytes)' 'Size of the stored file in bytes. Written only by the BFF (field-secured).') 'BigInt'
+    Write-Host "  securable check of the big integer columns ($($BigIntColumns -join ', ')) before any other column exists" -ForegroundColor Cyan
+    Assert-Securable @($script:Secured | Where-Object { $_.Table -eq $StoredFile -and $_.Column -in $BigIntColumns }) "Only $StoredFile and its two big integer columns were created: no lookup, no other column, no marker; nothing was secured. If the type has to change, delete $StoredFile (it holds no rows) and re-run."
     foreach ($s in $script:Lookups) {
         Set-EbEntity $s.Table
-        Add-Lookup -Column $s.Column -SchemaName $s.Schema -RelSchema $s.Rel -Target $s.Target -Display $s.Display -Description $s.Desc -DeleteBehavior $s.Delete
+        Add-Lookup -Column $s.Column -SchemaName $s.Schema -RelSchema $s.Rel -Target $s.Target -Display $s.Display -Description $s.Desc -DeleteBehavior $s.Delete -MenuBehavior $s.Menu
     }
     Set-EbEntity $StoredFile
     Add-GlobalChoiceColumn 'sprk_purpose' 'sprk_Purpose' 'Purpose' 'Procedure source, Invoice PDF, Invoice supporting file or Export file. Written only by the BFF (field-secured).' $PurposeChoice.Name
     Add-Column 'sprk_firmvisible' (New-TwoOptionDef 'sprk_FirmVisible' 'Firm-visible' 'Yes only for an invoice PDF the firm uploaded through the SPA; a Submit Invoice copy, a supporting file, a Procedure file and an export file are always No (uac-r2 F1-d). The firm file route serves only Invoice PDF + Firm-visible + Servable. Written only by the BFF (field-secured). Default No.' $false) 'Boolean'
     Add-LocalChoice -Column 'sprk_filestatus' -Schema 'sprk_FileStatus' -Display 'File Status' -Description 'Not yet servable (staged, or committed but not yet re-checked), Servable, or Removed. Every reader refuses a row that is not Servable (model 4.1, 9.1 steps 4-6). Written only by the BFF (field-secured).' -Labels $FileStatusLabels
     Add-Column 'sprk_sourceattachmentidentity' (New-StringDef 'sprk_SourceAttachmentIdentity' 'Source Attachment Identity' 'For a Submit Invoice copy: the marked attachment''s identity inside the source (the .eml''s MIME part: ordinal, name; model 9.1 step 3). Never an Exchange item id. Written only by the BFF (field-secured).' 1000) 'String'
-    Add-Column 'sprk_sourceversion' (New-BigIntDef 'sprk_SourceVersion' 'Source Version' 'The source document''s version number at staging; the commit''s IfRowVersionMatches guard pins it (uac-r2 F2-c). Written only by the BFF (field-secured).') 'BigInt'
     Add-Column 'sprk_sourcesha256' (New-StringDef 'sprk_SourceSha256' 'Source SHA-256' 'SHA-256 of the source bytes at staging (hex), checked again by the flip to Servable (uac-r2 F2-1). Written only by the BFF (field-secured).' 64) 'String'
     Add-Column 'sprk_sha256' (New-StringDef 'sprk_Sha256' 'SHA-256' 'SHA-256 of the stored blob (hex). Written only by the BFF (field-secured).' 64) 'String'
     Add-Column 'sprk_contenttype' (New-StringDef 'sprk_ContentType' 'Content Type' 'MIME content type of the stored file. Written only by the BFF (field-secured).' 255) 'String'
-    Add-Column 'sprk_sizebytes' (New-BigIntDef 'sprk_SizeBytes' 'Size (bytes)' 'Size of the stored file in bytes. Written only by the BFF (field-secured).') 'BigInt'
     Add-Column $BlobPathColumn (New-StringDef 'sprk_BlobPath' 'Blob Path' 'Server-only: {tenantId}/{parent table}/{parent id}/{file id}. The download checks that its parent id equals the row''s parent (model 4.1, 4.2). Readable and writable only by the BFF (field-secured, no reader row).' 1024) 'String'
 
     # Every sprk_storedfile column must be securable BEFORE the marker is created and before any column is secured (review F1):
@@ -952,6 +989,8 @@ try {
             Write-Host ("  {0}.{1} -> {2}: {3}  delete {4}, assign {5}, share {6}, unshare {7}, reparent {8}" -f $s.Table, $s.Column, $s.Target, $rel.SchemaName, $cc.Delete, $cc.Assign, $cc.Share, $cc.Unshare, $cc.Reparent)
             foreach ($m in @(Get-CascadeMismatches $cc (Get-ExpectedCascade $s))) { $bad.Add("$($s.Table).$($s.Column) CascadeConfiguration: $m") }
             if ($rel.SchemaName -ne $s.Rel) { $bad.Add("$($s.Table).$($s.Column) relationship is named $($rel.SchemaName), expected $($s.Rel)") }
+            $menu = Get-AssociatedMenuProblem $rel.AssociatedMenuConfiguration $s.Menu
+            if ($menu) { $bad.Add("$($s.Table).$($s.Column) ($($rel.SchemaName)) $menu") } else { Write-Host "    $($rel.SchemaName): Related menu $($rel.AssociatedMenuConfiguration.Behavior)" }
         }
 
         # F3: IsSecured plus exactly the planned rows; sprk_name and sprk_createdbyperson stay unsecured.

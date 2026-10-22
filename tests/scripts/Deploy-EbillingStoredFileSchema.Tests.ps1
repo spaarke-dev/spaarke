@@ -10,6 +10,10 @@
 #      or relabelled, or statuscode holds a value the task does not know;
 #   3. the F1 values and the cascade comparison the verify uses;
 #   4. the script text: no form, view, role, profile-member, invoice-row or document-row write, and no PublishAllXml;
+#   4a. (task 088 pre-run fixes) the SchemaNames (table sprk_StoredFile, primary sprk_Name, every other column PascalCase after the
+#      prefix; logical names unchanged), AssociatedMenuConfiguration DoNotDisplay on all six relationship bodies (the module's
+#      Add-Lookup / Add-Table bodies are captured with Invoke-Dv mocked), the publish entity list (seven entities + the choice, no
+#      PublishAllXml) and the order (the big integer columns and their securable check come before any lookup or other column);
 #   5. the profile pre-flight (Test-ProfilePreconditions, Dataverse reads stubbed): the reader profile is checked against the NAMED
 #      business units only (-ReaderBusinessUnits), never every default team (UAC 191's External Collaborators BU must never hold it).
 # The script's constants are taken from the script itself (its top-level assignments), not retyped here.
@@ -30,7 +34,7 @@ $errs = $null; $tokens = $null
 $script:Ast = [System.Management.Automation.Language.Parser]::ParseFile($script:ScriptPath, [ref]$tokens, [ref]$errs)
 
 # The script's own constants (top-level assignments), so a change there is what the tests see.
-$constants = 'StoredFile', 'Document', 'Invoice', 'Version', 'Export', 'Communication', 'CreatorColumn', 'MarkerColumn', 'BlobPathColumn', 'PurposeChoice', 'FileStatusLabels', 'KnownStatus', 'SupersededStatus'
+$constants = 'StoredFile', 'Document', 'Invoice', 'Version', 'Export', 'Communication', 'CreatorColumn', 'MarkerColumn', 'BlobPathColumn', 'PurposeChoice', 'FileStatusLabels', 'KnownStatus', 'SupersededStatus', 'StoredFileSchema', 'StoredFileNameSchema', 'RelatedMenuBehavior', 'BigIntColumns'
 foreach ($st in $script:Ast.EndBlock.Statements) {
     if ($st -is [System.Management.Automation.Language.AssignmentStatementAst] -and $st.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and $st.Left.VariablePath.UserPath -in $constants) {
         Invoke-Expression $st.Extent.Text
@@ -38,7 +42,7 @@ foreach ($st in $script:Ast.EndBlock.Statements) {
 }
 
 # The functions under test (the script cannot be dot-sourced: it runs on load).
-foreach ($name in 'New-LookupSpec', 'Get-NewTableRel', 'Get-ExpectedCascade', 'Get-CascadeMismatches', 'Get-StoredFilePlan', 'Get-Grants', 'ConvertTo-LabelKey', 'Get-StatusDecision', 'Get-ChoiceOptions', 'Get-PublishEntities', 'Test-ProfilePreconditions') {
+foreach ($name in 'New-LookupSpec', 'Get-NewTableRel', 'Get-ExpectedCascade', 'Get-CascadeMismatches', 'Get-StoredFilePlan', 'Get-Grants', 'ConvertTo-LabelKey', 'Get-StatusDecision', 'Get-ChoiceOptions', 'Get-PublishEntities', 'Get-PublishXml', 'Get-AssociatedMenuProblem', 'Test-ProfilePreconditions') {
     $fn = $script:Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true) | Select-Object -First 1
     if (-not $fn) { throw "function $name not found in the script" }
     Invoke-Expression $fn.Extent.Text
@@ -226,8 +230,155 @@ Describe 'F1 values and the cascade comparison' {
         $shares = [pscustomobject]@{ Delete = 'Restrict'; Assign = 'NoCascade'; Share = 'Cascade'; Unshare = 'NoCascade'; Reparent = 'NoCascade' }
         @(Get-CascadeMismatches $shares (Get-ExpectedCascade $spec)).Count | Should Be 1
     }
-    It 'publishes only the three tables it changes' {
-        ((Get-PublishEntities) -join ',') | Should Be 'sprk_storedfile,sprk_document,sprk_invoice'
+    It 'publishes the three tables it changes and the four the relationships touch (K-c)' {
+        ((Get-PublishEntities) -join ',') | Should Be 'sprk_storedfile,sprk_document,sprk_invoice,sprk_communication,sprk_procedureversion,sprk_billingexport,systemuser'
+    }
+}
+
+Describe 'the SchemaNames (K-a): PascalCase after the prefix, logical names unchanged' {
+    It 'names the table sprk_StoredFile and its primary column sprk_Name; both lowercase to the logical names' {
+        $StoredFileSchema | Should BeExactly 'sprk_StoredFile'
+        $StoredFileNameSchema | Should BeExactly 'sprk_Name'
+        $StoredFileSchema.ToLowerInvariant() | Should BeExactly $StoredFile
+        $StoredFileNameSchema.ToLowerInvariant() | Should BeExactly 'sprk_name'
+        $StoredFile | Should BeExactly 'sprk_storedfile'
+    }
+    It 'passes both to Add-Table, so the create body carries them' {
+        $script:Text.Contains('-SchemaName $StoredFileSchema -PrimarySchema $StoredFileNameSchema') | Should Be $true
+    }
+    It 'gives every lookup column a PascalCase SchemaName that lowercases to its logical name' {
+        foreach ($l in @((Get-StoredFilePlan).Lookups)) {
+            $l.Schema.ToLowerInvariant() | Should BeExactly $l.Column
+            $l.Schema | Should Not BeExactly $l.Column
+        }
+    }
+    It 'gives every other column a PascalCase SchemaName (11: ten sprk_storedfile columns and the marker), each lowercasing to a planned column' {
+        $schemas = @([regex]::Matches($script:Text, "(?:New-\w+Def|-Schema|Add-GlobalChoiceColumn\s+'sprk_purpose')\s+'(sprk_\w+)'") | ForEach-Object { $_.Groups[1].Value })
+        $schemas.Count | Should Be 11
+        $logical = @((Get-StoredFilePlan).Columns | Where-Object { $_.Column -ne 'sprk_name' } | ForEach-Object { $_.Column } | Sort-Object)
+        (($schemas | ForEach-Object { $_.ToLowerInvariant() } | Sort-Object) -join ',') | Should Be ($logical -join ',')
+        foreach ($x in $schemas) { $x | Should Not BeExactly $x.ToLowerInvariant() }
+    }
+    It 'keeps the pre-flight and the verify on LOGICAL names (every EntityDefinitions read uses LogicalName=, except the audit PUT by metadata id; no SchemaName is compared)' {
+        @([regex]::Matches($script:Text, 'EntityDefinitions\((?!LogicalName=|\$\(\$ent\.MetadataId\))')).Count | Should Be 0
+        $script:Text -match "SchemaName='sprk_[A-Z]" | Should Be $false
+    }
+}
+
+Describe 'the Related menu (K-b): DoNotDisplay on all six relationships' {
+    It 'is DoNotDisplay on every planned lookup spec' {
+        $RelatedMenuBehavior | Should Be 'DoNotDisplay'
+        $lookups = @((Get-StoredFilePlan).Lookups)
+        $lookups.Count | Should Be 6
+        @($lookups | Where-Object { $_.Menu -eq 'DoNotDisplay' }).Count | Should Be 6
+    }
+    It 'passes the spec menu to the one Add-Lookup call, which every lookup goes through' {
+        @([regex]::Matches($script:Text, 'Add-Lookup\s[^\r\n]*-MenuBehavior \$s\.Menu')).Count | Should Be 1
+        @([regex]::Matches($script:Text, '(?m)^\s*Add-Lookup\s')).Count | Should Be 1
+    }
+    It 'reads each relationship back and fails the verify when it is not DoNotDisplay (must-fire) and not otherwise (must-not-fire)' {
+        Get-AssociatedMenuProblem ([pscustomobject]@{ Behavior = 'DoNotDisplay'; Group = 'Details' }) 'DoNotDisplay' | Should BeNullOrEmpty
+        (Get-AssociatedMenuProblem ([pscustomobject]@{ Behavior = 'UseCollectionName' }) 'DoNotDisplay') | Should Match "'UseCollectionName', expected 'DoNotDisplay'"
+        (Get-AssociatedMenuProblem $null 'DoNotDisplay') | Should Match 'expected'
+        $script:Text.Contains('Get-AssociatedMenuProblem $rel.AssociatedMenuConfiguration $s.Menu') | Should Be $true
+        $script:Text.Contains('CascadeConfiguration,AssociatedMenuConfiguration&') | Should Be $true
+    }
+}
+
+# The module's create bodies, captured: Invoke-Dv is mocked inside the module, so nothing leaves the machine.
+Describe 'the create bodies the module sends (Invoke-Dv mocked inside the module)' {
+    Import-Module (Join-Path $repoRoot 'scripts/ebilling/EbillingSchema.psm1') -Force
+    $null = Initialize-EbillingSchema -EnvironmentUrl 'https://example.invalid' -SolutionUniqueName 'S' -Entity 'sprk_storedfile'
+    Mock -ModuleName EbillingSchema Start-Sleep { }
+    Mock -ModuleName EbillingSchema Write-Host { }
+    Mock -ModuleName EbillingSchema Invoke-Dv {
+        if ($Method -eq 'POST') { $global:Sf088Posted += ,@{ Path = $Path; Body = $Body }; $global:Sf088Created = $true; return $null }
+        # A read is "absent" until something was posted; the exception: a table that is not the one being created (a lookup target).
+        if ($Path -match "^EntityDefinitions\(LogicalName='([a-z_]+)'\)\?" -and $Matches[1] -notin 'sprk_storedfile', 'sprk_other') { return [pscustomobject]@{ LogicalName = 'x' } }
+        if ($global:Sf088Created) { return [pscustomobject]@{ LogicalName = 'x'; AttributeType = 'Lookup' } }
+        $e = [System.Exception]::new('not found'); $e.Data['Status'] = 404; throw $e
+    }
+    BeforeEach { $global:Sf088Posted = @(); $global:Sf088Created = $false }
+
+    It 'sends AssociatedMenuConfiguration DoNotDisplay (Behavior, Group, Order) in all six lookup bodies built from the plan (K-b)' {
+        $bodies = @()
+        foreach ($l in @((Get-StoredFilePlan).Lookups)) {
+            $global:Sf088Posted = @(); $global:Sf088Created = $false
+            Set-EbEntity $l.Table
+            Add-Lookup -Column $l.Column -SchemaName $l.Schema -RelSchema $l.Rel -Target $l.Target -Display $l.Display -Description $l.Desc -DeleteBehavior $l.Delete -MenuBehavior $l.Menu
+            $rels = @($global:Sf088Posted | Where-Object { $_.Path -eq 'RelationshipDefinitions' })
+            $rels.Count | Should Be 1
+            $bodies += ,$rels[0].Body
+        }
+        $bodies.Count | Should Be 6
+        foreach ($b in $bodies) {
+            $b.AssociatedMenuConfiguration.Behavior | Should Be 'DoNotDisplay'
+            $b.AssociatedMenuConfiguration.Group | Should Be 'Details'
+            $b.AssociatedMenuConfiguration.Order | Should Be 10000
+        }
+    }
+    It 'sends no AssociatedMenuConfiguration when -MenuBehavior is not given (other scripts unchanged) (must-not-fire)' {
+        Set-EbEntity 'sprk_storedfile'
+        Add-Lookup -Column 'sprk_invoice' -SchemaName 'sprk_Invoice' -RelSchema 'r' -Target 'sprk_invoice' -Display 'd' -Description 'd'
+        @($global:Sf088Posted)[0].Body.ContainsKey('AssociatedMenuConfiguration') | Should Be $false
+    }
+    It 'sends SchemaName sprk_StoredFile and primary SchemaName sprk_Name, with the lowercase logical names kept (K-a)' {
+        Add-Table -Table 'sprk_storedfile' -Display 'Stored File' -Plural 'Stored Files' -Description 'd' -PrimaryColumn 'sprk_name' -PrimaryDisplay 'File Name' -PrimaryDescription 'p' -PrimaryLength 400 -Ownership UserOwned -SchemaName $StoredFileSchema -PrimarySchema $StoredFileNameSchema
+        $b = @($global:Sf088Posted | Where-Object { $_.Path -eq 'EntityDefinitions' })[0].Body
+        $b.SchemaName | Should BeExactly 'sprk_StoredFile'
+        $b.PrimaryNameAttribute | Should BeExactly 'sprk_name'
+        $b.Attributes[0].SchemaName | Should BeExactly 'sprk_Name'
+    }
+    It 'keeps SchemaName = the logical name when none is given (other scripts unchanged) (must-not-fire)' {
+        Add-Table -Table 'sprk_other' -Display 'O' -Plural 'Os' -Description 'd' -PrimaryColumn 'sprk_name' -PrimaryDisplay 'N' -PrimaryDescription 'p' -PrimaryLength 100
+        $b = @($global:Sf088Posted | Where-Object { $_.Path -eq 'EntityDefinitions' })[0].Body
+        $b.SchemaName | Should BeExactly 'sprk_other'
+        $b.Attributes[0].SchemaName | Should BeExactly 'sprk_name'
+    }
+    It 'refuses a SchemaName that does not lowercase to the logical name (must-fire)' {
+        { Add-Table -Table 'sprk_storedfile' -Display 'x' -Plural 'x' -Description 'd' -PrimaryColumn 'sprk_name' -PrimaryDisplay 'N' -PrimaryDescription 'p' -PrimaryLength 100 -SchemaName 'sprk_StoredFiles' } | Should Throw 'does not lowercase'
+    }
+}
+
+Describe 'the publish list (K-c)' {
+    It 'names the seven entities and the purpose choice in the PublishXml, and nothing else' {
+        $xml = Get-PublishXml
+        $ents = @([regex]::Matches($xml, '<entity>([^<]+)</entity>') | ForEach-Object { $_.Groups[1].Value })
+        (($ents | Sort-Object) -join ',') | Should Be (('sprk_storedfile', 'sprk_document', 'sprk_invoice', 'sprk_communication', 'sprk_procedureversion', 'sprk_billingexport', 'systemuser' | Sort-Object) -join ',')
+        $ents.Count | Should Be 7
+        $xml | Should Match '<optionsets><optionset>sprk_storedfilepurpose</optionset></optionsets>'
+    }
+    It 'is what Publish-Changes sends, and never PublishAllXml (must-fire if either comes back)' {
+        $script:Text.Contains("-Path 'PublishXml' -Method POST -Body @{ ParameterXml = (Get-PublishXml) }") | Should Be $true
+        $script:Text -match "(?i)-Path\s+['`"]PublishAllXml" | Should Be $false
+        $script:Text -match '(?i)PublishAllXml\s*-Method|Invoke-Dv\s+[''"]PublishAllXml' | Should Be $false
+    }
+}
+
+Describe 'the order (item 4): the big integer columns and their securable check come first' {
+    It 'creates the two big integer columns once each, right after the audit and before any lookup or other column' {
+        foreach ($c in $BigIntColumns) { @([regex]::Matches($script:Text, "Add-Column '$c'")).Count | Should Be 1 }
+        ($BigIntColumns -join ',') | Should Be 'sprk_sourceversion,sprk_sizebytes'
+        $audit = $script:Text.IndexOf('Set-TableAudit $StoredFile')
+        $b1 = $script:Text.IndexOf("Add-Column 'sprk_sourceversion'")
+        $b2 = $script:Text.IndexOf("Add-Column 'sprk_sizebytes'")
+        $bigCheck = $script:Text.IndexOf('Assert-Securable @($script:Secured | Where-Object { $_.Table -eq $StoredFile -and $_.Column -in $BigIntColumns })')
+        $lookup = $script:Text.IndexOf('Add-Lookup -Column')
+        $purpose = $script:Text.IndexOf("Add-GlobalChoiceColumn 'sprk_purpose'")
+        $string1 = $script:Text.IndexOf("Add-Column 'sprk_sourcesha256'")
+        $fullCheck = $script:Text.IndexOf('Assert-Securable @($script:Secured | Where-Object { $_.Table -eq $StoredFile })')
+        $marker = $script:Text.IndexOf('Add-Column $MarkerColumn')
+        $audit | Should BeGreaterThan 0
+        ($audit -lt $b1 -and $b1 -lt $b2 -and $b2 -lt $bigCheck) | Should Be $true
+        ($bigCheck -lt $lookup -and $bigCheck -lt $purpose -and $bigCheck -lt $string1) | Should Be $true
+        # the full pass and the marker rules are unchanged: full check, then the marker, and nothing is secured before either
+        ($string1 -lt $fullCheck -and $fullCheck -lt $marker) | Should Be $true
+        $firstSecure = $script:Text.IndexOf('Invoke-ColumnSecurity $spec')
+        ($bigCheck -lt $firstSecure -and $marker -lt $firstSecure) | Should Be $true
+    }
+    It 'lists exactly the BigInt-typed columns of the plan as the early ones (must-fire if a BigInt column is added without being listed)' {
+        $big = @((Get-StoredFilePlan).Columns | Where-Object { $_.Type -eq 'BigInt' } | ForEach-Object { $_.Column } | Sort-Object)
+        ($big -join ',') | Should Be (($BigIntColumns | Sort-Object) -join ',')
     }
 }
 

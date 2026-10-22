@@ -334,10 +334,14 @@ function Add-Column {
 # never cascades onto the child). Scripts that do not pass it are unchanged.
 # -RequiredLevel is what the create body asks for; Dataverse honours None and ApplicationRequired there, so a lookup that
 # must be SystemRequired is raised afterwards with Set-LookupRequiredLevel.
+# -MenuBehavior (UseCollectionName, UseLabel or DoNotDisplay) sets AssociatedMenuConfiguration, the entry the relationship adds to
+# the TARGET table's Related menu. Left empty the body carries none (the platform default: the entry is shown), so scripts that do
+# not pass it are unchanged. Task 088 passes DoNotDisplay.
 function Add-Lookup {
     param(
         [string]$Column, [string]$SchemaName, [string]$RelSchema, [string]$Target, [string]$Display, [string]$Description,
-        [string]$DeleteBehavior = 'RemoveLink', [string]$RequiredLevel = 'None', [switch]$Parental, [hashtable]$Cascade = $null
+        [string]$DeleteBehavior = 'RemoveLink', [string]$RequiredLevel = 'None', [switch]$Parental, [hashtable]$Cascade = $null,
+        [ValidateSet('', 'UseCollectionName', 'UseLabel', 'DoNotDisplay')][string]$MenuBehavior = ''
     )
     $table = $script:Entity
     $tally = Format-Tally $table $Column
@@ -379,6 +383,7 @@ function Add-Lookup {
             RequiredLevel  = @{ Value = $RequiredLevel }
         }
     }
+    if ($MenuBehavior) { $rel.AssociatedMenuConfiguration = @{ Behavior = $MenuBehavior; Group = 'Details'; Order = 10000 } }
     $r = Invoke-DvCreate -Path 'RelationshipDefinitions' -Body $rel -Column $Column -ExpectedType 'Lookup'
     if ($r -eq 'exists') { $script:Skipped.Add($tally); Write-Host "  skipped  $Column (exists, found via create refusal)" -ForegroundColor Yellow; return }
     Wait-AttrVisible $Column
@@ -510,11 +515,19 @@ function Add-LocalChoice {
 # Creates a table with its primary name column (pattern: Deploy-ChartDefinitionEntity.ps1). -Ownership is UserOwned or
 # OrganizationOwned. The primary name's MaxLength and RequiredLevel in this body are IGNORED by Dataverse (it comes back
 # as 850 / None): call Set-PrimaryNameLength and Set-PrimaryNameRequired afterwards.
+# $Table and $PrimaryColumn are LOGICAL names (lowercase). -SchemaName / -PrimarySchema are the SchemaNames the create body carries
+# (a table's and a column's SchemaName cannot be changed after the create); they default to the logical names, so scripts that do
+# not pass them are unchanged, and each must equal its logical name when lowercased (task 088: sprk_StoredFile, sprk_Name).
 function Add-Table {
     param(
         [string]$Table, [string]$Display, [string]$Plural, [string]$Description, [string]$PrimaryColumn, [string]$PrimaryDisplay,
-        [string]$PrimaryDescription, [int]$PrimaryLength, [ValidateSet('UserOwned', 'OrganizationOwned')][string]$Ownership = 'OrganizationOwned'
+        [string]$PrimaryDescription, [int]$PrimaryLength, [ValidateSet('UserOwned', 'OrganizationOwned')][string]$Ownership = 'OrganizationOwned',
+        [string]$SchemaName = '', [string]$PrimarySchema = ''
     )
+    if (-not $SchemaName) { $SchemaName = $Table }
+    if (-not $PrimarySchema) { $PrimarySchema = $PrimaryColumn }
+    if ($SchemaName.ToLowerInvariant() -ne $Table.ToLowerInvariant()) { throw "Add-Table: SchemaName '$SchemaName' does not lowercase to the logical name '$Table'." }
+    if ($PrimarySchema.ToLowerInvariant() -ne $PrimaryColumn.ToLowerInvariant()) { throw "Add-Table: PrimarySchema '$PrimarySchema' does not lowercase to the logical name '$PrimaryColumn'." }
     $script:Entity = $Table
     $ownLabel = if ($Ownership -eq 'UserOwned') { 'user-owned' } else { 'organization-owned' }
     $script:Expect.Add(@{ Table = $Table; Column = $PrimaryColumn; Type = 'String' })
@@ -529,7 +542,7 @@ function Add-Table {
     if ($script:DryRun) { $script:Planned.Add($Table); $script:Created.Add("table $Table"); Write-Host "  WOULD CREATE table $Table ($ownLabel)" -ForegroundColor Cyan; return }
     $def = @{
         '@odata.type'          = 'Microsoft.Dynamics.CRM.EntityMetadata'
-        SchemaName             = $Table
+        SchemaName             = $SchemaName
         DisplayName            = New-Label $Display
         DisplayCollectionName  = New-Label $Plural
         Description            = New-Label $Description
@@ -541,7 +554,7 @@ function Add-Table {
         Attributes             = @(
             @{
                 '@odata.type'  = 'Microsoft.Dynamics.CRM.StringAttributeMetadata'
-                SchemaName     = $PrimaryColumn
+                SchemaName     = $PrimarySchema
                 RequiredLevel  = @{ Value = 'ApplicationRequired' }
                 MaxLength      = $PrimaryLength
                 DisplayName    = New-Label $PrimaryDisplay
