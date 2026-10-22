@@ -1856,3 +1856,14 @@ Owner answers:
 
    Each write is undone afterwards. Out of bounds: `65a3fab2…`, the Secure Record business unit, the 3 Restricted matters, and Key Vault.
 2. **Test user: the existing flagged guest `e44317a0…`**, the only enabled flagged user. It owns no rows and holds only self-shares. It is moved back to the root business unit, with its direct role restored, afterwards.
+
+## Round 122 (2026-10-22): a linked .eml archive's access matches its parent
+
+Raised by word-add-in through R3, as a non-blocking question. The question as asked: "An Outlook .eml saved as own-Restricted (its email couldn't be identified at save) may later be linked to its communication by the task 190 sweep. Should it then lose its own Restricted?" The main session recommended keeping Restricted, with no automatic loosening.
+
+The owner's answer, verbatim: **"the access should match the 'parent'"**.
+
+Reading: once such an archive is linked to exactly one communication (by the 190 sweep or by `CrossPathLink`), its access follows that communication. The system-set "unidentifiable at save" Restricted gives way to the communication's value.
+- A Restricted set on the archive by hand still stays (round 87). The implementation must tell the two apart.
+- Dev today: 0 unlinked archives are own-Restricted (190 census: 119 blank, 1 Standard), so the 190 Apply on dev is unaffected.
+- The design check is running; the implementation follows as a task-190 follow-up.
