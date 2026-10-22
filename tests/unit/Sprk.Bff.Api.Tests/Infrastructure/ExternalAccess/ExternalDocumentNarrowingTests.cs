@@ -915,7 +915,8 @@ public sealed class ExternalDocumentNarrowingTests
 
         var act = () => FindLink(doc);
 
-        await act.Should().ThrowAsync<InvalidOperationException>("the caller turns a failed read into 'not linked'");
+        await act.Should().ThrowAsync<InvalidOperationException>(
+            "the caller turns a failed read into Undecidable (link_read_failed): no release, and the row is carried");
     }
 
     [Fact]
