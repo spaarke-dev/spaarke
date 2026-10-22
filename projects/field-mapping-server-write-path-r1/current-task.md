@@ -1,17 +1,17 @@
 # Current Task — field-mapping-server-write-path-r1
 
-> **Last updated**: 2026-10-21 (016 ✅, UAC-r2 ACCEPT; PR to master next. #2220 fixed on master via #2223)
-> **Phase**: Wave 2. Done (13/43): 001–006, 010–016. On master: 001–006, 010–015, #2191, #2223 (ef5912c7e8, #2220).
-> 016 is on the work branch, with its PR to master in progress.
+> **Last updated**: 2026-10-21 (016 on master; next 017/018)
+> **Phase**: Wave 2. Done (13/43): 001–006, 010–016, ALL on master. 016 = #2228 (a7b956fb55); #2220 = #2223
+> (ef5912c7e8). Portfolio synced (Tasks Completed = 13).
 
 ## Quick Recovery
 
 | Field | Value |
 |---|---|
-| **HEAD** | work branch `ccb732ceb6` = 016 (incl. fix round 73ef4e0845, merged as 33e36aafb9) + master ef5912c7e8. Verified: sln 0/0, ArchTests 1347/1347, related suites 3492 passed / 7 skipped. Pushed |
-| **016 state** | ✅ complete. UAC-r2 condition (b) found F1-1..F4-2; all fixed; UAC-r2 ACCEPT of the fix round. POML notes carry the summary. Draft PR body: scratchpad `pr-016.md` (update counts, master sha, the UAC line, the never-map codes, F2-1) |
-| **Running** | Publish delta ef5912c7e8 vs ccb732ceb6 (`C:\tmp\g16m`, `C:\tmp\g16a`; the script removes them) + CVE |
-| **Next Action** | (1) PR 016 → master; merge on Router + Client lint green and the full rollup explained (Tier 2 ADR job times out: #2224) → send UAC-r2 the merge SHA → portfolio sync (Tasks Completed = 13). (2) If #2221 lands first, add the `EmailArchiveCommunicationLinkSweepJob.LinkAsync` exemption (below). (3) Then 017/018. **Don't ask R3 to deploy**; UAC-r2 batches the candidate (016 + #2221 + #2223), and a BFF deploy needs the owner's go in R3's session |
+| **HEAD** | work branch `35c395b693` = master a7b956fb55's second parent; 0 commits not on master. Verified at 35c395b693: sln 0/0, ArchTests 1347/1347, related suites 3492 passed / 7 skipped, EmailArchive job tests 37/37. #2228 rollup CLEAN |
+| **Running** | nothing |
+| **Next Action** | Start 017 and 018 (both depend on 016; FULL, opus/high). First re-read their POML blocking criteria: #2188 (met), the invoice-family reconcile with ebilling-r1, FR-06 step 10 (owner item 5), 015's K1 (step-7 catalog fault test) / K3 (search-index bind key), R3-1/R3-2, and the #1614/#1617 closure (018). 017 and 018 share `RecordCreationService` files only via callers; run `/conflict-check` before parallelising. **Don't ask R3 to deploy**: UAC-r2 is batching #2223 + #2221 + 016 for R3, and a BFF deploy needs the owner's go in R3's session |
+| **Cleanup left for the owner** | Empty, unregistered folder `C:\code_files\spaarke\.claude\worktrees\agent-a10e5fe383a4dfcd2` (Remove-WorktreeSafe refused after a partial delete; nothing in it) |
 
 ## Key facts since the last checkpoint
 
@@ -78,13 +78,8 @@
   - reviews 017/018 on condition (b);
   - holds #2190 and #2169;
   - pending ArchTest #2170 (`EveryGenericUpdateWriter_AsksTheAppOnlyRefusal`) will cover Repair's write.
-  - **#2221 (UAC task 190, draft) vs 016's member-keyed #2170 guard:** whoever merges second adds the member exemption
-    `EmailArchiveCommunicationLinkSweepJob.LinkAsync` with UAC's reason verbatim: "the BFF's own typed link writer:
-    sets a NULL sprk_relatedcommunication to the exactly-one communication whose internet message id ordinal-equals
-    the document's recorded key; never clears or re-points; conditional on row version (uac-r2 task 190)".
-  - **#2220 (widened to matter + project, UAC 2026-10-21):** separate PR off master, branch
-    `fix/fm-2220-matter-protected`; UAC reviews the diff (condition b: Office matter/project quick-create skip-and-warn;
-    dev 0 rules).
+  - Done 2026-10-21: the `EmailArchiveCommunicationLinkSweepJob::LinkAsync` exemption (016 merged second); #2220 fixed
+    in #2223; #2224 filed (Tier 2 ADR job's 5-min timeout cancels after all tests pass; advisory, owner OK needed).
 - **ebilling-r1:** the reconcile commit before 017; 016 and 040 call `CheckGenericUpdateAsync` once #1911 lands. 016
   has a `TODO(#1911)` seam that skips invoice and billing-event rows.
 - **R3 (external-access-r3):** deploys master to dev. Asks OK/HOLD per deploy; told when #2191 merged.
