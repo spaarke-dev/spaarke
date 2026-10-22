@@ -52,6 +52,8 @@ public class AccessTableReaderScanTests
             ["sprk_communicationattachment"] = "An attachment row: its file pointer and its communication / document links are refused per column (AccessColumns).",
             // #2253 fix round 4 (F-1): the proposal's message decides who sees and applies it.
             ["sprk_emailreviewlog"] = "The proposal and decision log: its communication, which decides who sees and applies a proposal, is refused per column (AccessColumns); its target is re-checked against the caller's own rights.",
+            // ebilling-r1 (master merge): the external submission routes scope a submission by its firm and core record.
+            ["sprk_invoicesubmission"] = "An invoice submission: its firm (sprk_vendororg) and core-record lookups, which scope the external submission reads, are refused per column (AccessColumns); the rest is ordinary data.",
 
             // Not access, each read in the code:
             ["sprk_analysisskill"] = "A scope row /create associates; the check is the caller's own rights on the analysis, no column of it is read (AnalysisAuthorizationFilter).",
@@ -63,6 +65,9 @@ public class AccessTableReaderScanTests
             ["savedquery"] = "View definitions (SavedQueryService).",
             ["privilege"] = "Platform-defined and read-only (Dataverse refuses a write); UserPrivilegeChecker reads its names.",
             ["template"] = "Email templates; the filter checks the caller's own Read on the row (CommunicationRecordAuthorizationFilter).",
+            // ebilling-r1 (master merge): the invoice family's FR-05 guard reads these tables' filing lookups.
+            ["sprk_billingevent"] = "An invoice line, a child record: its access follows its parents (SecureChildLineage); the FR-05 guard reads its core-record lookups and its invoice to keep it filed with its invoice (InvoiceFamilyCoreRecordGuard, OwnedChildWrite), and no access decision reads its columns.",
+            ["sprk_externalidentifier"] = "A party's identifier for an invoice or core record (D-68), a child record: its access follows its parents (SecureChildLineage); the FR-05 guard reads its core-record and invoice lookups (InvoiceFamilyCoreRecordGuard), and nothing in the BFF reads its value to match or show anything.",
         };
 
     /// <summary>
@@ -74,6 +79,7 @@ public class AccessTableReaderScanTests
         {
             ["contains"] = "The OData function in a thread-name search filter (CommunicationThreadReadService).",
             ["sprk_entitylogicalname"] = "A column (on sprk_userentityassociation) whose constant's name ends in LogicalName.",
+            ["sprk_invoicesubmissions"] = "The entity SET name of sprk_invoicesubmission (FinanceAuthorizationFilter.InvoiceSubmissionEntitySet), a route constant the finance filter authorizes as the caller; the table is listed under its logical name.",
         };
 
     private static readonly string[] ScannedFolders =

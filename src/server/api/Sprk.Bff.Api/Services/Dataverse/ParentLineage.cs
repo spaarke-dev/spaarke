@@ -954,6 +954,16 @@ internal static class InheritedAccessPermission
     /// text, by it (<c>CommunicationQueueFeedService.LoadOpenProposalItemsAsync</c>). Re-pointed at a message the caller can
     /// see, a privileged message's proposal would be shown and applied. Its target columns are not listed: the apply checks
     /// the caller's own rights on the target.</item>
+    /// <item>ebilling-r1 (the #2253 reader scan, after the master merge). <c>sprk_invoicesubmission</c>: its firm
+    /// <c>sprk_vendororg</c> (<c>TrackingNumberAllocator.FirmColumn</c>) and its core-record lookups
+    /// <c>sprk_regardingmatter</c> / <c>sprk_regardingproject</c> / <c>sprk_regardingworkassignment</c>
+    /// (<see cref="InvoiceFamilyCoreRecordGuard.CoreRecordLookups"/>). The external submission routes read the row APP-ONLY
+    /// and scope it by exactly these: the list is the firm's rows filed under a record the caller can read
+    /// (<c>InvoiceSubmissionService.ListAsync</c>), and one row is shown only when its firm is one of the caller's and the
+    /// caller can read its core record (<c>ExternalInvoiceSubmissionAuthorizationFilter.DecideReadOneAsync</c>). Re-pointed,
+    /// a submission and its tracking number, status and document id would be shown to another firm, or under another
+    /// record's partners. Their writer is the intake (<c>InvoiceSubmissionService</c>, <c>TrackingNumberAllocator</c>); no
+    /// generic writer re-files a submission.</item>
     /// </list>
     /// Data, not branching: a table with no entry has no such column.
     /// </summary>
@@ -1036,6 +1046,11 @@ internal static class InheritedAccessPermission
             {
                 Sprk.Bff.Api.Api.Filters.CommunicationRecordAuthorizationFilter.ProposalCommunicationColumn,
             },
+            [Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity] = new HashSet<string>(
+                InvoiceFamilyCoreRecordGuard.CoreRecordLookups[Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity]
+                    .Select(l => l.Column)
+                    .Append(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.FirmColumn),
+                StringComparer.OrdinalIgnoreCase),
         };
 
     /// <summary>

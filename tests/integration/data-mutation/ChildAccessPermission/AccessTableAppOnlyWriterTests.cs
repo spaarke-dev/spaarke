@@ -105,6 +105,12 @@ public class AccessTableAppOnlyWriterTests
 
         // #2253 fix round 4 (F-1): the message a proposal belongs to decides who sees and applies it.
         ["sprk_emailreviewlog"] = ["sprk_communication"],
+
+        // ebilling-r1 (master merge): the firm and core record scope the external submission reads.
+        ["sprk_invoicesubmission"] =
+        [
+            "sprk_vendororg", "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment",
+        ],
     };
 
     /// <summary>
@@ -584,6 +590,11 @@ public class AccessTableAppOnlyWriterTests
                 Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator.AttachmentDocumentColumn),
             (Sprk.Bff.Api.Api.Filters.CommunicationRecordAuthorizationFilter.EmailReviewLogEntity,
                 Sprk.Bff.Api.Api.Filters.CommunicationRecordAuthorizationFilter.ProposalCommunicationColumn),
+            (Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity,
+                Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.FirmColumn),
+            .. Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.CoreRecordLookups[
+                    Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity]
+                .Select(l => (Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity, l.Column)),
         ];
         foreach (var (table, column) in readers)
             Code(table, column).Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, $"{column} on {table}");
@@ -639,6 +650,14 @@ public class AccessTableAppOnlyWriterTests
     // #2253 fix round 5 (K1): the communication's category lookup is a column, not the taxonomy table.
     [InlineData("sprk_communication", "sprk_triagecategory")]
     [InlineData("sprk_communication", "sprk_TriageCategory@odata.bind")]
+    // ebilling-r1 (master merge): a submission's other columns, and its firm and core lookups on the other family tables.
+    [InlineData("sprk_invoicesubmission", "sprk_trackingnumber")]
+    [InlineData("sprk_invoicesubmission", "sprk_processingstatus")]
+    [InlineData("sprk_invoicesubmission", "sprk_submitter")]
+    [InlineData("sprk_invoicesubmission", "sprk_adminattention")]
+    [InlineData("sprk_invoice", "sprk_vendororg")]
+    [InlineData("sprk_invoiceapproval", "sprk_regardingmatter")]
+    [InlineData("sprk_externalidentifier", "sprk_regardingproject")]
     public void AnOrdinaryColumn_OrAnAccessColumnOnAnotherTable_IsNotRefused(string table, string key) =>
         Code(table, key).Should().BeNull($"'{key}' on {table} decides no access");
 
