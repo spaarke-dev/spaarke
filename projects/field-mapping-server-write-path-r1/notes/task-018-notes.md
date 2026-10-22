@@ -228,3 +228,54 @@ Verification (re-check):
 - ArchTests, built separately and run in full: 1347 passed, 0 failed.
 - The same filtered set: 2779 passed, 7 skipped, 0 failed (2786 in total).
 - The unfiltered suite was not run.
+
+### UAC-r2 acceptance (`0cae77ab77..4530e597f0`: no F items) and K-a
+
+**UAC-r2's concurrence conditions for 018b.** UAC-r2 concurs with dropping the maker's-contact default (K-7), on two
+conditions:
+
+1. The Office adapter surfaces `record_creation.default_value_dropped` to the caller.
+2. Nothing writes Assigned To app-only after the drop. That covers the adapter, a post-create step, and any other
+   writer.
+
+**K-a: the "check could not complete → drop" path for references had no test.** It is test only; the behaviour is
+unchanged.
+
+- `ScriptedUserClient` (the `CreateWorld` caller) gains `PrivilegesThrowFor`, beside the existing `PrivilegesFault`
+  (a non-throwing status).
+- New seam theory `AReferenceWhoseCheckCannotComplete_IsDroppedWithAWarning_AndTheMatterIsCreated`, with two cases:
+  - the `prvAppendTosprk_mattertype_ref` privilege read **throws**;
+  - the same read **answers 503**.
+- In both cases the matter type is not written and the warning is `record_creation.reference_value_dropped` on
+  `sprk_mattertype`. The practice area, whose check completed, is kept, and the matter is created.
+
+**Observation (not changed, outside 018a's files).** The two cases end in different wording:
+
+- The thrown read reaches the reference pass's own catch: "it could not be checked".
+- The 503 is collapsed by `CallerWriteAuthorization.CallerMayAppendToOrganizationOwnedAsync` (lines 397-401) into
+  `false`, which is no AppendTo. It therefore reads as the not-usable wording: "it was not found, or you do not have
+  permission to use it".
+
+Both drop the reference, so both fail closed. The difference is only the caller-facing reason for an organization-owned
+reference, and it predates 018a. A 503 answer cannot produce the `ClientFailure → "could not be checked"` branch for a
+registry reference: every declared reference is organization-owned, and the table's own Create/Append read failing
+would refuse the create at step 5 anyway.
+
+Mutants (each run, then reverted):
+
+| Mutant | Result |
+|---|---|
+| Ka1: keep the reference when its check throws | Killed by the throws case. |
+| Ka2: keep the reference whenever its check does not succeed, which includes the 503 | Killed by the 503 case, and by the existing denied-reference test. |
+
+**#2238 (K-c, existed before 018a; for 018b, not fixed here).** At step 9, the server binds are not de-duplicated
+case-insensitively against a **system-principal** item: `ownerid@odata.bind`, the creator-person bind and
+`sprk_issecure`. The K3 removal of case-variant keys covers only the search-index columns. A server-built item that
+carries one of those keys under another spelling could reach the body twice.
+
+Verification (K-a):
+
+- `dotnet build Spaarke.sln`: 0 warnings, 0 errors.
+- ArchTests, built separately and run in full: 1347 passed, 0 failed.
+- The same filtered set: 2781 passed, 7 skipped, 0 failed (2788 in total).
+- The unfiltered suite was not run.

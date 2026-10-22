@@ -912,6 +912,10 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         /// fails with this status (other privilege questions, e.g. the table's Create, still answer).</summary>
         public (string Privilege, int Status)? PrivilegesFault { get; set; }
 
+        /// <summary>Field mapping task 018a (K-a) fault switch: a <c>RetrieveUserSetOfPrivilegesByNames</c> question naming this
+        /// privilege THROWS (a transport fault) instead of answering.</summary>
+        public string? PrivilegesThrowFor { get; set; }
+
         /// <summary>Ontology task 126 fault switch: the status the <c>UnderOrEqual</c> question fails with.</summary>
         public int? HierarchyFault { get; set; }
 
@@ -1099,6 +1103,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 var asked = JsonSerializer.Deserialize<string[]>(path[(path.IndexOf("@p1=", StringComparison.Ordinal) + 4)..])!;
                 PrivilegeQuestions.Add(asked);
+                if (PrivilegesThrowFor is { } throwFor && asked.Contains(throwFor, StringComparer.OrdinalIgnoreCase))
+                    throw new TimeoutException("privilege read timed out at 10.0.0.11");
                 if (PrivilegesFault is { } privilegesFault && asked.Contains(privilegesFault.Privilege, StringComparer.OrdinalIgnoreCase))
                     return DataverseUserResponse.Fail(privilegesFault.Status, DataverseUserClientErrorCodes.BadRequest, "Scripted fault.");
 
