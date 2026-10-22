@@ -101,6 +101,37 @@ public class ConfidentialClientMigrationSeamTests
             "dataverse.* tools require user-context OBO and must fail closed without it");
     }
 
+    /// <summary>
+    /// Field mapping task 018b (UAC-r2 condition (b) item 2): with OBO configured, a request that carries no bearer token
+    /// is answered <c>UserContextRequired</c> before any exchange — the WhoAmI failure the unified create carries on its
+    /// <c>PrincipalUnresolved</c> refusal, which Office quick-create maps to 500 <c>caller_rights_unverifiable</c>
+    /// (<c>OfficeQuickCreateAdapterContractTests</c>). No credential is minted and nothing is sent.
+    /// </summary>
+    [Fact]
+    public async Task DataverseUserClient_WithNoBearerToken_ReturnsUserContextRequired_BeforeAnyExchange()
+    {
+        var assertions = new CountingAssertionProvider();
+        var credentials = new Sprk.Bff.Api.Infrastructure.Auth.OrderedCredentialClientProvider(
+            Options.Create(new CredentialSelectionOptions { Order = new List<string> { nameof(CredentialKind.ManagedIdentityFederated) } }),
+            Config(),
+            NullLogger<Sprk.Bff.Api.Infrastructure.Auth.OrderedCredentialClientProvider>.Instance,
+            assertions);
+        var sut = new DataverseUserClient(
+            new HttpClient(new NoNetworkHandler()),
+            Options.Create(new DataverseOptions { EnvironmentUrl = DataverseUrl }),
+            Config(),
+            new HttpContextAccessor { HttpContext = new DefaultHttpContext() }, // authenticated or not, no Authorization header
+            NullLogger<DataverseUserClient>.Instance,
+            credentials);
+
+        var response = await sut.GetAsync("WhoAmI()", CancellationToken.None);
+
+        response.IsSuccess.Should().BeFalse();
+        response.ErrorCode.Should().Be(DataverseUserClientErrorCodes.UserContextRequired,
+            "no bearer token is no user context: the caller cannot be checked, never a fallback");
+        assertions.Mints.Should().Be(0, "the token's absence is detected before any credential is used");
+    }
+
     [Fact]
     public async Task AgentTokenService_WithNoCredentialProvider_ReturnsFailure_NeverAToken()
     {
@@ -202,5 +233,26 @@ public class ConfidentialClientMigrationSeamTests
         }
 
         internal sealed class Sentinel : Exception;
+    }
+
+    /// <summary>Counts credential mints and fails each one (no managed identity in a test).</summary>
+    private sealed class CountingAssertionProvider : IClientAssertionProvider
+    {
+        private int _mints;
+
+        public int Mints => _mints;
+
+        public Task<string> GetAssertionAsync(CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _mints);
+            return Task.FromException<string>(new MsalServiceException("managed_identity_unreachable_network", "test stub"));
+        }
+    }
+
+    /// <summary>Fails the test if anything reaches the network (hand-written, not a mocked handler).</summary>
+    private sealed class NoNetworkHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("No request may be sent by this test.");
     }
 }
