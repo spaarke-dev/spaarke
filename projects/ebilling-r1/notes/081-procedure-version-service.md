@@ -145,6 +145,63 @@ Optimistic concurrency was read on dev (2026-10-22, read-only metadata GET) and 
 - **A re-added rule** gets a new policy version under the current Draft (highest + 1); the old chain is untouched. Earlier PolicyRetired Signals stay closed, and the D-11 30-day per (policy, matter) suppression still counts.
 - **The unsealed `SignalClosureService`** is accepted with the ArchTest above.
 
+## UAC review (2026-10-22)
+
+**F1 (fixed): the affected-invoice count could come out lower instead of absent.** `CallerRecordAccessProbe.GetCallerRightsForRecordsAsync` never throws: a failed token exchange, a failed WhoAmI, or any `RetrievePrincipalAccess` answer other than 200 (a 429, a 5xx) came back as `AccessRights.None`. Under throttling the preview undercounted, and a failed page counted 0. The test doubles threw `HttpRequestException`, which the real probe never does.
+
+- Fix: a new batched `GetCallerRightsForRecordsOrUnknownAsync` next to the existing method (UAC approved adding it in 081). It returns null (unknown) per record for any answer other than 200 or 403, and for every record on a failed exchange or WhoAmI; 403 stays None. The existing method's behaviour is unchanged: `RetrievePrincipalAccessAsync` reads the shared core's unknown as None.
+- `AffectedInvoiceCounter` asks the new method and gives no number if any entry is unknown.
+- The `ProcedureServiceTests` doubles return unknown instead of throwing.
+- `ExternalPlaneNoOboGuardTests` forbids the new method on the external plane too (it is a token-taking question), with a must-fire control.
+- Tests: `CallerRecordAccessProbeRecordsOrUnknownTests` (wire-seam style of `AuthorizationGateTimingTests`). Must-fire: 429, 500, 503, 401, 404, a transport fault, a failed exchange, a failed WhoAmI and no token each give unknown. Must-not-fire: 200 gives the rights, 403 gives None, and the existing method still gives None. `Preview_WhenOneInvoicesRightsAreUnknown_ShowsNoCount_NeverALowerOne` covers the counter.
+- Seeds: with the probe core reading every non-200 as None, the 5 status-code must-fire cases failed. With the counter treating unknown as not visible, the counter test failed (count 1 instead of none). Both restored.
+
+**A–E.**
+
+- **A** is F1 above.
+- **B, `Set-ChildRecordCreatorPersonSchema.ps1`.**
+  - The empty-before-securing gate is now universal (UAC #2276). Before securing ANY unsecured `sprk_createdbyperson`, on any table, the script counts rows holding a value. A non-zero count FAILs that table: no PUT, no grant, exit 1.
+  - After `-Apply` secures a column it counts again. A value that arrived in between FAILs the run (exit 1); the column stays secured.
+  - The help text describes both.
+  - Pester (41/41, run with a clean Pester 5.7.1): `-Verify` and the dry run on an unsecured Procedure column, empty and valued; the race; and a must-fire on an unsecured, valued `sprk_budgetrevision` (no PUT, exit 1).
+  - Seeds: without the re-count, 3 tests failed (the race must-fire among them). With the gate back to the four ebilling tables, 2 failed (the `sprk_budgetrevision` must-fire among them).
+  - On dev, uac-r2 found 9 existing values on `sprk_budgetrevision`, `sprk_decisionrecord` and `sprk_signal`, all stamped by an app user at create, so nothing needs clearing there. Any non-zero count on dev would therefore be new.
+- **C.** `ProcedureRolePrivilegeGuardTests` scans `src/dataverse/solutions/**/Roles/*.xml` recursively, with a selector control. Today all 12 role files are under SpaarkeMaster.
+- **D, I-P5.** The rule-set proposal edit, accept and reject routes, on a set with `sprk_procedure` set, also need the caller's Write on that Procedure. This is the same Record-path `write` check on `sprk_procedures` the Procedure routes declare, run by `FinanceAuthorizationFilter` from a new endpoint filter (`BillingAdminAuthorization.RequireWriteOnTheRuleSetsProcedure`). It reads the set's Procedure app-only through `RuleSetService.ProcedureOfRuleSetAsync`.
+  - Without Write the routes return 403 `insufficient_rights`. A fault reading the set is a 403 `system_failure`. A legacy set is unchanged.
+  - Must-fire and must-not-fire tests are in `RuleSetEndpointsTests`. Seed: without the filter on the routes, 6 of the 12 new tests failed.
+  - Cost: on a proposal route, step 0 runs twice (once per filter).
+- **E.** `RecordCreatorPerson.cs` now names `RecordOwnerAssignmentCensusTests.StampedOutsideCodifiedChildren` as the exemption list.
+
+**Known limits accepted by uac-r2.**
+
+- The retire preview's timing channel.
+- The app-only firm and contact existence checks. Follow-up in 116: check the caller's Read through the probe.
+
+**I-P2 is not enforced against app-only generic writers.** Decision: Procedure tables are not access tables (090's F4 lists `sprk_procedureversion` in NotAccessTables). No playbook node, output mapping or field-mapping rule writes them; the Procedure service is the only writer.
+
+**Unconfirmed until the first live smoke test:**
+
+- that a same-value status rewrite moves the row version;
+- that `0x80060882` inside a transaction maps through `ExecuteTransactionFault`.
+
+**Task 191** must, in the same change:
+
+- flip `UntilTask191`;
+- add org Read (O-6), plus Create and Write for billing-admin;
+- give the external role nothing (design §3.8).
+
+Until then GET is sysadmin-only too. (No `projects/ebilling-r1/tasks/191*.poml` exists yet, so this note lives here only.)
+
+**Hard rule (UAC #2273).** `Set-ChildRecordCreatorPersonSchema.ps1 -Verify` must exit 0 in an environment before the BFF carrying 081 deploys there.
+
+**Creator-person copy at persist (decision 2026-10-22, UAC #2277 review).** `InvoiceSubmissionPersister` copies the submission's `sprk_createdbyperson` onto the invoice, its lines and the approval, and that copy stays.
+
+- It is safe because of the universal empty-before-securing gate plus a hard deploy order: `Set-ChildRecordCreatorPersonSchema.ps1 -Verify` must exit 0 in an environment before any BFF carrying ebilling deploys there.
+- The owner cannot be re-resolved at persist time: the persister runs app-only in a job, and the submitter's systemuser is known only from intake.
+
+**Stamping `sprk_ruleset` and `sprk_procedureassignment`** belongs to 090, not 081.
+
 ## Live steps left for the main session (none run here)
 
 1. **Run `scripts/Set-ChildRecordCreatorPersonSchema.ps1` on dev: dry run, then `-Apply`, then `-Verify`, BEFORE the BFF carrying 081 is deployed.**
@@ -155,13 +212,13 @@ Optimistic concurrency was read on dev (2026-10-22, read-only metadata GET) and 
 
 ## Open questions
 
-- **uac-r2:**
+- **uac-r2** (answered 2026-10-22: see "UAC review" above):
   - the preview timing channel;
   - app-only lookup existence checks;
   - the rule-set proposal edit and decide routes on a Procedure set need only the admin marker, not Write on the Procedure (the task 076 route contract);
   - only System Administrators hold `prvCreatesprk_procedure` until task 191;
   - `sprk_ruleset` and `sprk_procedureassignment` creator-person stamping (080 created the columns; not stamped here).
-- **ontology-r1:**
+- **ontology-r1** (answered 2026-10-22: see "Ontology review" above):
   - the unsealed `SignalClosureService`;
   - task 075 drafting creates policy versions with no Procedure Version link;
   - corrections under a published Procedure Version;
