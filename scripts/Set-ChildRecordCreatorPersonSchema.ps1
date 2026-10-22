@@ -41,7 +41,13 @@
                      member (user or team), a row that is not 4/4/4, a missing row, or any permission outside those three
                      columns. The profile travels in SpaarkeMaster (membership is per environment and is not in the source).
       (c) FLS        Each column becomes field-secured; the reader profile gets read=4, the writer profile read=4 create=4
-                     update=4. Any OTHER profile (besides the platform's System Administrator profile, and the D-136 narrow
+                     update=4. EMPTY-BEFORE-SECURING GATE (every table; ebilling-r1 081, UAC #2276): before this script
+                     secures ANY sprk_createdbyperson that is currently unsecured, it counts the rows holding a value. A
+                     value written while the column was unsecured could name anyone, and the BFF trusts the column on a
+                     stamped table (UAC #2277). A non-zero count FAILs that table: it is NOT secured (no PUT), no field
+                     permission is granted, and the run exits 1 (-Apply and -Verify; the dry run reports it). After
+                     -Apply secures a column it counts AGAIN: a value that arrived between the count and the secure FAILs
+                     the run (exit 1) -- the column stays secured; review those rows before deploying the BFF. Any OTHER profile (besides the platform's System Administrator profile, and the D-136 narrow
                      profile on its three tables) that can create or update the column is reported FAIL.
       (d) SOLUTION   The lookups, their relationships and both profiles are in -SolutionUniqueName (SpaarkeCore). A column
                      or relationship counts as included when its table is in the solution with rootcomponentbehavior = 0
@@ -155,10 +161,9 @@ $ColumnSchemaName = 'sprk_CreatedByPerson'
 $NavigationProperty = 'sprk_CreatedByPerson'
 $TargetEntity = 'systemuser'
 $Tables = @('sprk_document', 'sprk_todo', 'sprk_event', 'sprk_eventlog', 'sprk_communication', 'sprk_communicationthread', 'sprk_communicationattachment', 'sprk_communicationparticipant', 'sprk_emailreviewlog', 'sprk_analysis', 'sprk_analysisoutput', 'sprk_emailartifact', 'sprk_attachmentartifact', 'sprk_fileversion', 'sprk_invoice', 'sprk_spendsignal', 'sprk_spendsnapshot', 'sprk_memo', 'sprk_reportcard', 'sprk_budget', 'sprk_kpiassessment', 'sprk_billingevent', 'sprk_budgetrevision', 'sprk_decisionrecord', 'sprk_signal', 'sprk_invoicesubmission', 'sprk_invoiceapproval', 'sprk_externalidentifier', 'sprk_invoicecorrection', 'sprk_procedure', 'sprk_procedureversion', 'sprk_policy', 'sprk_policyversion')
-# ebilling-r1 task 081 (procedure model 13, O-23; ontology F4-1 / D-173 for the policy tables): 080 created these four columns UNSECURED.
-# Before this script secures one, it asserts the column holds no value yet (a value written while it was unsecured could name anyone): a
-# non-null count FAILs and that table is skipped (not secured, no field permission granted).
-$AssertEmptyBeforeSecuring = @('sprk_procedure', 'sprk_procedureversion', 'sprk_policy', 'sprk_policyversion')
+# ebilling-r1 task 081 (procedure model 13, O-23; ontology F4-1 / D-173; UAC #2276): before this script secures ANY unsecured column, on any
+# table, it asserts the column holds no value yet (Test-ColumnEmptyBeforeSecuring, section (c)). 080 created the four Procedure/policy
+# columns unsecured; the owner created sprk_budgetrevision's, sprk_decisionrecord's and sprk_signal's by hand.
 $ReaderProfileName = 'Spaarke BFF-Managed Field Readers'
 $WriterProfileName = 'Spaarke BFF-Managed Field Writers'
 # D-136 (owner 2026-10-13): the ontology writer's narrow profile. Fixed id so the live profile and SpaarkeMaster's source
@@ -402,6 +407,32 @@ function Set-ColumnSecured([string]$Table) {
     Invoke-DvWrite PUT "EntityDefinitions(LogicalName='$Table')/Attributes(LogicalName='$Column')" $typed @{ 'MSCRM.MergeLabels' = 'true' } | Out-Null
     Report 'DONE' "secured $Table.$Column"
 }
+# Task 081 / UAC #2276: how many rows of $Table hold a value in $Column (every mode reads; nothing is written).
+function Measure-ColumnValues([string]$Table) {
+    $set = (Invoke-DvGet "EntityDefinitions(LogicalName='$Table')?`$select=EntitySetName").EntitySetName
+    Measure-DvRows "$set`?`$select=$($Table)id&`$filter=_$($Column)_value ne null"
+}
+# The empty-before-securing gate, for EVERY table whose column is not secured yet: $true when it holds no value (safe to secure);
+# otherwise FAIL, and the caller secures nothing and grants nothing on that table (a field permission on an unsecured column is
+# refused 0x8004f508, so granting would only stall).
+function Test-ColumnEmptyBeforeSecuring([string]$Table) {
+    $valued = Measure-ColumnValues $Table
+    if ($valued -gt 0) {
+        Report 'FAIL' "$Table.$Column already holds $valued value(s) while unsecured; it is NOT secured and no permission is granted by this run -- review those rows first"
+        return $false
+    }
+    Report 'OK' "$Table.$Column holds no value yet (safe to secure)"
+    return $true
+}
+# Count-then-secure is a race (uac-r2 review): a value written between the count and the secure stays behind the now-secured column,
+# unreviewed. Counted again after -Apply secured it; any value FAILs the run (exit 1).
+function Assert-ColumnStillEmptyAfterSecuring([string]$Table) {
+    $raced = Measure-ColumnValues $Table
+    if ($raced -gt 0) {
+        Report 'FAIL' "$Table.$Column gained $raced value(s) between the empty check and securing; the column IS now secured, but those rows were written by someone other than this run -- review them before deploying the BFF"
+    }
+    else { Report 'OK' "$Table.$Column still holds no value after securing" }
+}
 # One profile's read/create/update on $Table.$Column: checked in every mode, written by -Apply only. Create/Update are the
 # expected levels (read is always 4).
 function Ensure-FieldPermission([string]$ProfileId, [string]$ProfileName, [string]$Table, [int]$Create, [int]$Update) {
@@ -436,22 +467,13 @@ function Ensure-FieldPermission([string]$ProfileId, [string]$ProfileName, [strin
 foreach ($t in $Tables) {
     if (-not $attrs[$t]) { Report $(if ($Verify) { 'MISSING' } else { 'WOULD' }) "secure $t.$Column and grant both profiles (after the column exists)"; continue }
 
-    if ($attrs[$t].IsSecured -ne $Secured -and $t -in $AssertEmptyBeforeSecuring) {
-        # Task 081: zero non-null values before securing (every mode reads; nothing is written here).
-        $set = (Invoke-DvGet "EntityDefinitions(LogicalName='$t')?`$select=EntitySetName").EntitySetName
-        $valued = Measure-DvRows "$set`?`$select=$($t)id&`$filter=_$($Column)_value ne null"
-        if ($valued -gt 0) {
-            # Skip the table entirely: a field permission on an unsecured column is refused (0x8004f508), so granting would only stall.
-            Report 'FAIL' "$t.$Column already holds $valued value(s) while unsecured; it is NOT secured and no permission is granted by this run -- review those rows first"
-            continue
-        }
-        Report 'OK' "$t.$Column holds no value yet (safe to secure)"
-    }
+    # Task 081 / UAC #2276: the empty-before-securing gate, on every table.
+    if ($attrs[$t].IsSecured -ne $Secured -and -not (Test-ColumnEmptyBeforeSecuring $t)) { continue }
 
     if ($attrs[$t].IsSecured -eq $Secured) { Report 'OK' "$t.$Column is field-secured" }
     elseif ($Verify) { Report 'MISSING' "$t.$Column is NOT field-secured — any user with Write can name someone else as the record's creator" }
     elseif ($IsDryRun) { Report 'WOULD' "secure $t.$Column" }
-    else { Set-ColumnSecured $t }
+    else { Set-ColumnSecured $t; Assert-ColumnStillEmptyAfterSecuring $t }
 
     foreach ($spec in @(@{ Id = $readerId; Name = $ReaderProfileName; Create = 0; Update = 0 }, @{ Id = $writerId; Name = $WriterProfileName; Create = 4; Update = 4 })) {
         Ensure-FieldPermission $spec.Id $spec.Name $t $spec.Create $spec.Update
@@ -479,11 +501,12 @@ foreach ($t in $OntologyWriterTables) {
     }
     if ($t -notin $Tables) {
         $attrs[$t] = $a
-        # (c) secured every $Tables column already; these two are secured here, by the same write.
+        # (c) secured every $Tables column already; these are secured here, by the same write and the same empty gate.
+        if ($a.IsSecured -ne $Secured -and -not (Test-ColumnEmptyBeforeSecuring $t)) { continue }
         if ($a.IsSecured -eq $Secured) { Report 'OK' "$t.$Column is field-secured" }
         elseif ($Verify) { Report 'MISSING' "$t.$Column is NOT field-secured" }
         elseif ($IsDryRun) { Report 'WOULD' "secure $t.$Column" }
-        else { Set-ColumnSecured $t }
+        else { Set-ColumnSecured $t; Assert-ColumnStillEmptyAfterSecuring $t }
     }
     Ensure-FieldPermission $ontologyWriterProfileId $OntologyWriterProfileName $t 4 4
 }

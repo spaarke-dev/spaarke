@@ -8,6 +8,7 @@
 # Task 143 (#1783 / D-135): sprk_signal joins $Tables and $SolutionHomes exactly as the Decision Record did.
 # ebilling-r1 task 081 (model 13, O-23): sprk_procedure and sprk_procedureversion join $Tables with SpaarkeMaster as their only home, and
 # their column (created unsecured by 080) is secured only after the script finds it holds no value.
+# uac-r2 review and UAC #2276: the empty-before-securing gate covers EVERY table, and -Apply counts again after securing (a race FAILs).
 #
 # The script talks to a live environment on load, so it is never run here. The relationship-name functions are read out of
 # the script's own AST and exercised against a fake reader: the code under test is the shipped code, not a copy.
@@ -88,14 +89,18 @@ Describe 'the script''s table and solution wiring' {
                 'sprk_procedureversion', 'sprk_signal')
     }
 
-    It 'ebilling-r1 081: lists the Procedure and policy tables in $Tables with SpaarkeMaster as their only home, and asserts them empty before securing' {
+    It 'ebilling-r1 081: lists the Procedure and policy tables in $Tables with SpaarkeMaster as their only home; the empty-before-securing gate covers every table (UAC #2276)' {
         $text = Get-Content -Raw $script:ScriptPath
         $homes = [regex]::Match($text, '(?ms)^\$SolutionHomes = @\{(.*?)^\}').Groups[1].Value
         foreach ($t in 'sprk_procedure', 'sprk_procedureversion', 'sprk_policy', 'sprk_policyversion') {
             $text | Should -Match "(?m)^\`$Tables = @\([^)]*'$t'[^)]*\)"
             $homes | Should -Match "(?m)^\s+$t\s+= @\('SpaarkeMaster'\)"
         }
-        $text | Should -Match '(?m)^\$AssertEmptyBeforeSecuring = @\(''sprk_procedure'', ''sprk_procedureversion'', ''sprk_policy'', ''sprk_policyversion''\)\s*$'
+        # UAC #2276: the empty-before-securing gate is universal, not a list of tables. Every unsecured column is counted before it is
+        # secured, in (c) and in (c2).
+        $text | Should -Not -Match 'AssertEmptyBeforeSecuring'
+        ([regex]::Matches($text, '(?m)^\s*if \(\$(attrs\[\$t\]|a)\.IsSecured -ne \$Secured -and -not \(Test-ColumnEmptyBeforeSecuring \$t\)\) \{ continue \}\s*$')).Count | Should -Be 2
+        ([regex]::Matches($text, 'Set-ColumnSecured \$t; Assert-ColumnStillEmptyAfterSecuring \$t')).Count | Should -Be 2
     }
 
     It 'ebilling-r1 013: lists the four eBilling tables in $Tables with SpaarkeMaster as their only solution home' {
@@ -187,6 +192,8 @@ Describe 'a simulated run' {
                 # Task 081: 'proc-unsecured-empty' / 'proc-unsecured-valued' leave sprk_procedure's column unsecured, as 080 created it.
                 # (Set-ColumnSecured then reads the untyped attribute, answered below.)
                 $secured = -not ($global:SimCpScenario -like 'proc-unsecured-*' -and $Matches[1] -eq 'sprk_procedure')
+                # UAC #2276: a NON-ebilling table (the owner created sprk_budgetrevision's column by hand) left unsecured.
+                if ($global:SimCpScenario -eq 'br-unsecured-valued' -and $Matches[1] -eq 'sprk_budgetrevision') { $secured = $false }
                 return @{ LogicalName = 'sprk_createdbyperson'; Targets = @('systemuser'); IsSecured = $secured; MetadataId = (SimCp-Guid "attr-$($Matches[1])") }
             }
             if ($path -match "^RelationshipDefinitions\(SchemaName='([^']+)'\)/Microsoft.Dynamics.CRM.OneToMany") {
@@ -253,9 +260,18 @@ Describe 'a simulated run' {
                 # Set-ColumnSecured's read of the attribute before it PUTs it back with IsSecured (task 081 scenarios only reach it).
                 return [pscustomobject]@{ LogicalName = 'sprk_createdbyperson'; IsSecured = $false }
             }
+            if ($path -like 'sprk_budgetrevisions?*_sprk_createdbyperson_value ne null*') {
+                # UAC #2276: the universal gate's count on a non-ebilling table. Two valued rows in 'br-unsecured-valued'.
+                if ($global:SimCpScenario -eq 'br-unsecured-valued') { return @{ value = @(@{ sprk_budgetrevisionid = 'b1' }, @{ sprk_budgetrevisionid = 'b2' }) } }
+                return @{ value = @() }
+            }
             if ($path -like 'sprk_procedures?*_sprk_createdbyperson_value ne null*') {
                 # Task 081: the zero-non-null read before securing. One valued row in the 'proc-unsecured-valued' scenario.
                 if ($global:SimCpScenario -eq 'proc-unsecured-valued') { return @{ value = @(@{ sprk_procedureid = 'p1' }) } }
+                # uac-r2 review: 'proc-unsecured-raced' is empty at the check, and a writer stamps one row before the secure lands, so
+                # the count AFTER this run's PUT finds it.
+                $securedByRun = @($global:SimCpWrites | Where-Object { $_ -like "PUT EntityDefinitions(LogicalName='sprk_procedure')/Attributes*" }).Count -gt 0
+                if ($global:SimCpScenario -eq 'proc-unsecured-raced' -and $securedByRun) { return @{ value = @(@{ sprk_procedureid = 'p2' }) } }
                 return @{ value = @() }
             }
             if ($path -match '^EntityDefinitions\(LogicalName=''(\w+)''\)\?\$select=MetadataId') { return @{ MetadataId = (SimCp-Guid "table-$($Matches[1])") } }
@@ -525,6 +541,59 @@ Describe 'a simulated run' {
         # then both BFF profiles are granted on the newly secured column (the grant after the PUT is accepted)
         @($global:SimCpPermissionPosts | Where-Object { $_ -eq 'sprk_procedure' }).Count | Should -Be 2
         $run.Text | Should -Match 'DONE\s+granted Spaarke BFF-Managed Field Writers on sprk_procedure\.sprk_createdbyperson'
+        # uac-r2 review: counted again after the secure, and still empty
+        $run.Text | Should -Match 'OK\s+sprk_procedure\.sprk_createdbyperson still holds no value after securing'
+        $run.Text | Should -Not -Match 'gained \d+ value'
+    }
+
+    It '081 uac must fire: -Apply counts again after securing, and FAILs (exit 1) when a value was written between the check and the secure' {
+        SimCp-Reset; $global:SimCpScenario = 'proc-unsecured-raced'
+        $run = Invoke-SimulatedRun @{ Apply = $true }
+        $run.Text | Should -Match 'OK\s+sprk_procedure\.sprk_createdbyperson holds no value yet'
+        $run.Text | Should -Match 'DONE\s+secured sprk_procedure\.sprk_createdbyperson'
+        $run.Text | Should -Match 'FAIL\s+sprk_procedure\.sprk_createdbyperson gained 1 value\(s\) between the empty check and securing'
+        $run.Text | Should -Not -Match 'still holds no value after securing'
+        $run.Text | Should -Match 'APPLY INCOMPLETE'
+        $run.ExitCode | Should -Be 1
+    }
+
+    It '081 uac: -Verify on an unsecured, EMPTY Procedure column reports it safe to secure but NOT secured, writes nothing, and exits 1' {
+        SimCp-Reset; $global:SimCpScenario = 'proc-unsecured-empty'
+        $run = Invoke-SimulatedVerify
+        $run.Text | Should -Match 'OK\s+sprk_procedure\.sprk_createdbyperson holds no value yet'
+        $run.Text | Should -Match 'MISSING\s+sprk_procedure\.sprk_createdbyperson is NOT field-secured'
+        $run.Text | Should -Not -Match 'after securing'
+        $run.Writes.Count | Should -Be 0
+        $run.ExitCode | Should -Be 1
+    }
+
+    It '081 uac: -Verify on an unsecured Procedure column that HOLDS a value FAILs on the value, writes nothing, and exits 1' {
+        SimCp-Reset; $global:SimCpScenario = 'proc-unsecured-valued'
+        $run = Invoke-SimulatedVerify
+        $run.Text | Should -Match 'FAIL\s+sprk_procedure\.sprk_createdbyperson already holds 1 value\(s\) while unsecured'
+        $run.Text | Should -Not -Match 'holds no value yet'
+        $run.Writes.Count | Should -Be 0
+        $run.ExitCode | Should -Be 1
+    }
+
+    It '081 uac: the dry run on an unsecured, EMPTY Procedure column says it WOULD secure and grant, and writes nothing' {
+        SimCp-Reset; $global:SimCpScenario = 'proc-unsecured-empty'
+        $run = Invoke-SimulatedRun @{}
+        $run.Text | Should -Match 'OK\s+sprk_procedure\.sprk_createdbyperson holds no value yet'
+        $run.Text | Should -Match 'WOULD\s+secure sprk_procedure\.sprk_createdbyperson'
+        $run.Text | Should -Match 'WOULD\s+grant Spaarke BFF-Managed Field Writers on sprk_procedure\.sprk_createdbyperson'
+        $run.Text | Should -Not -Match 'after securing'
+        $run.Writes.Count | Should -Be 0
+    }
+
+    It '081 uac: the dry run on an unsecured Procedure column that HOLDS a value FAILs on it, would not secure it, and writes nothing' {
+        SimCp-Reset; $global:SimCpScenario = 'proc-unsecured-valued'
+        $run = Invoke-SimulatedRun @{}
+        $run.Text | Should -Match 'FAIL\s+sprk_procedure\.sprk_createdbyperson already holds 1 value\(s\) while unsecured'
+        $run.Text | Should -Not -Match 'WOULD\s+secure sprk_procedure\.sprk_createdbyperson'
+        $run.Text | Should -Not -Match 'WOULD\s+grant [^
+]* on sprk_procedure\.sprk_createdbyperson'
+        $run.Writes.Count | Should -Be 0
     }
 
     It '081 must fire: -Apply does NOT secure sprk_procedure.sprk_createdbyperson when it already holds a value, grants nothing on it, carries on, and exits non-zero' {
@@ -539,6 +608,17 @@ Describe 'a simulated run' {
         # the run goes on: the next tables are still checked and the publish step is reached
         $run.Text | Should -Match 'OK\s+sprk_procedureversion\.sprk_createdbyperson is field-secured'
         $run.Text | Should -Match 'Published '
+        $run.ExitCode | Should -Be 1
+    }
+
+    It 'UAC #2276 must fire: -Apply does NOT secure an unsecured sprk_budgetrevision column (not an ebilling table) that holds values, and exits 1' {
+        SimCp-Reset; $global:SimCpScenario = 'br-unsecured-valued'
+        $run = Invoke-SimulatedRun @{ Apply = $true }
+        $run.Text | Should -Match 'FAIL\s+sprk_budgetrevision\.sprk_createdbyperson already holds 2 value\(s\) while unsecured; it is NOT secured'
+        $run.Text | Should -Not -Match 'DONE\s+secured sprk_budgetrevision\.sprk_createdbyperson'
+        @($run.Writes | Where-Object { $_ -like "PUT EntityDefinitions(LogicalName='sprk_budgetrevision')/Attributes*" }).Count | Should -Be 0
+        @($global:SimCpPermissionPosts | Where-Object { $_ -eq 'sprk_budgetrevision' }).Count | Should -Be 0
+        $run.Text | Should -Match 'APPLY INCOMPLETE'
         $run.ExitCode | Should -Be 1
     }
 
