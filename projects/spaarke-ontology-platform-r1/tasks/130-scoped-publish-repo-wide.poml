@@ -4,7 +4,7 @@
     <title>D-83: remove tenant-wide publish repo-wide; one scoped "import, then publish only the imported components" procedure for scripts and deploy skills</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable. CODE + skill amendments MERGED to master 2026-10-09 (#1467 script, #1542 skills ba2f222cc); remaining: the live proof, run on the D-112 full E2E dev deploy</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes every Dataverse deploy path in the repo (scripts + shared skills used by all projects); a wrong scoped publish leaves components unpublished.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -55,6 +55,13 @@ The skills are .claude/skills/dataverse-deploy/SKILL.md (lines ~99, 169, 437, 46
   </acceptance-criteria>
 
   <notes>Created 2026-10-08 by the main session on owner decision D-83 (from task 121's findings).</notes>
+
+  <completion date="2026-10-21">
+    Code and skill amendments are on master (#1467 script, #1542 skills ba2f222cc). The owner approved the live proof as D-176. The scoped PublishXml for six theme web resources ran on spaarkedev1 at 20:28Z: exit 0, before and after snapshots showed 0 pending, and no unrelated web resource, sitemap or app module was published. The seven new saved queries are ebilling 080's sprk_procedureversion default views, created at the same time. Evidence is in notes/deploy-log.md (2026-10-21).
+    Criterion 1: git grep on origin/master finds tenant-wide publish only in the frozen .claude/archive and in the module's explanatory comments.
+    Criterion 4: no tenant-wide publish ran.
+    Known limit (K-class): the live proof covers the web-resource branch only; the other branches are covered by unit tests and by ebilling's entity deploys, which use the same module.
+  </completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
