@@ -202,6 +202,23 @@ Until then GET is sysadmin-only too. (No `projects/ebilling-r1/tasks/191*.poml` 
 
 **Stamping `sprk_ruleset` and `sprk_procedureassignment`** belongs to 090, not 081.
 
+### UAC re-check round 2 (2026-10-22)
+
+1. **`Set-ChildRecordCreatorPersonSchema.ps1`, (c2) granted the narrow profile on a column the gate refused to secure.**
+   - Live Dataverse refuses a field permission on an unsecured column (0x8004f508): 12 retries of 10 s, then a throw, so the run died before (d) and the publish and printed no APPLY INCOMPLETE summary. The dry run printed "WOULD grant" right after its own FAIL.
+   - (c) now records each table the empty-before-securing gate refuses; (c2) skips it before any output or grant. `-Apply` reaches the publish and the APPLY INCOMPLETE summary and exits 1.
+   - The dry run now exits 1 when it has a FAIL or MISSING (it exited 0 before, whatever it had found).
+   - Pester (43/43, clean Pester 5.7.1): the simulator refuses a fieldpermission POST on the unsecured `sprk_budgetrevision` column, as live does, and the seeded narrow row for that table is dropped in the scenario. Seed: without the (c2) skip, 3 tests failed (the Apply must-fire, the dry-run must-fire, and the other-tables must-not-fire).
+2. **I-P5, `/draft`.** `POST .../{ruleSetId}/draft` carries `RequireWriteOnTheRuleSetsProcedure()` too, because `sprk_ruleset.sprk_sourcedocument` is not field-secured and a billing admin could set it on a Procedure's set. Tests: no Write on the Procedure gives 403 and queues nothing; a set with no Procedure is unchanged; Write lets it through.
+3. **I-P5, reads of a Procedure's rules.**
+   - New `BillingAdminAuthorization.RequireReadOnTheRuleSetsProcedure` on `GET .../{ruleSetId}`, a sibling of the Write filter (one shared body, same server-side resolution of the Procedure, same ordering: step 0, billing admin, Procedure). It asks the caller's Read on the Procedure through `CallerReadCheck`, which keeps "Dataverse said no" apart from "Dataverse said nothing": denied is 403 `insufficient_rights`; an unanswered question, or a fault reading the set, is 403 `system_failure`.
+   - The shared body now uses `CallerReadCheck` for the Write filter too, so an unanswered question on the edit, accept and reject routes is also `system_failure` (it was `insufficient_rights`; still 403).
+   - `GET .../rulesets` (the list) leaves out each Procedure set whose Procedure the caller cannot Read, and each whose rights are unknown (fail closed); legacy sets are unchanged; one rights question per distinct Procedure. The Procedure id travels on an internal, never serialized `RuleSetSummary.ProcedureId`.
+   - Routes covered: GET one, GET list, `/draft`, PATCH, accept, reject. Judged out of scope: `PUT .../assignment` and `PUT .../visibility` (they return only the set's summary, no rules or clause text, and are billing-admin writes on the set's own metadata), `POST .../publish` (returns counts and a visibility flag; a Procedure's versions are published through the Procedure routes), and `POST .../rulesets` create (creates a new, Procedure-less set). Open question for UAC: whether publish, assignment and visibility on a Procedure's set should need Write on the Procedure too.
+   - Ledger: `RequireReadOnTheRuleSetsProcedure` is credited; the Write entry's line references are refreshed. Tests in `RuleSetEndpointsTests` (must-fire for denied and unknown, must-not-fire for legacy sets, list).
+4. **Doc fix, `CallerRecordAccessProbe.GetCallerRightsForRecordsOrUnknownAsync`.** The remark said only the caller's own cancellation is rethrown. That holds per record; a cancellation during the OBO exchange or `WhoAmI` is caught by those steps and becomes "every entry unknown". Corrected. Two tests added: cancellation during `WhoAmI` (the production step) gives all-unknown; a 200 with an unreadable body gives unknown for that record. Not tested: cancellation inside the OBO exchange itself (it needs a real MSAL client; the same catch-all shape as `WhoAmI`).
+5. Race FAIL is not sticky, and values written before the gate existed are never counted: filed as a GitHub issue (number added by the main session).
+
 ## Live steps left for the main session (none run here)
 
 1. **Run `scripts/Set-ChildRecordCreatorPersonSchema.ps1` on dev: dry run, then `-Apply`, then `-Verify`, BEFORE the BFF carrying 081 is deployed.**
