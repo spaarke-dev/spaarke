@@ -121,23 +121,38 @@ public partial class ChildAccessPermissionReconcileTests
     }
 
     [Fact]
-    public async Task Round122_AProvisionalChildInACycle_KeepsRestricted()
+    public async Task Round122_AProvisionalChildWhoseChainLoops_KeepsRestricted_ThoughItsFloorIsDecided_UntilTheLoopGivesWayToALink()
     {
-        // Fail closed: the walk meets a document already on its chain before any link. The floor is still decidable here
-        // (the cycle's first node is also filed under a matter), so only the walk keeps it.
+        // Fix round 1 (K4): the loop decides the outcome. The walk visits every document on a loop before it sees the loop,
+        // so a link ON the loop would be found; what the loop does is end the walk before the document that carries the
+        // link. Here b's parent is a (the loop) instead of the linked c: the floor is decided (a is also filed under a
+        // matter), and only the loop keeps the child Restricted. Re-pointing b to c, nothing else changed, releases it.
         var job = new Harness();
-        var matter = job.Root("sprk_matter", Standard);
+        var (matter, communication) = CommunicationUnder(job, Standard);
+        var c = SavedUnidentified(job);
+        Link(job, c, communication);
         var a = SavedUnidentified(job, ("sprk_matter", "sprk_matter", matter));
         var b = SavedUnidentified(job, ("sprk_parentdocument", "sprk_document", a));
         job.World.Set("sprk_document", a, "sprk_parentdocument", new EntityReference("sprk_document", b));
         var child = SavedUnidentified(job, ("sprk_parentdocument", "sprk_document", a));
 
-        await job.RunAsync();
+        var first = await job.RunAsync();
         await job.RunAsync();
 
-        ValueOf(job, child).Should().Be(Restricted);
+        ValueOf(job, child).Should().Be(Restricted, "its walk ends at the loop, before any link");
         RecordOf(job, child).OwnProvisional.Should().BeTrue();
+        RecordOf(job, child).FloorPermission.Should().Be(Standard, "its floor was decided: only the loop keeps it Restricted");
         job.World.AccessPermissionWrites.Should().NotContain(w => w.Id == child);
+        first.GetProperty("accessPermission").GetProperty("undetermined").GetInt32().Should().Be(
+            0, "a loop is no link within the bound, not an undecidable step: it is not carried");
+        ValueOf(job, c).Should().Be(Standard, "the linked document beside it is released");
+
+        job.World.Set("sprk_document", b, "sprk_parentdocument", new EntityReference("sprk_document", c)); // the loop gives way
+        job.World.Modified("sprk_document", b, job.Now.UtcDateTime);
+        await job.RunAsync();
+
+        ValueOf(job, child).Should().Be(Standard, "the same chain without the loop reaches c's link at 3 hops");
+        RecordOf(job, child).OwnProvisional.Should().BeFalse();
     }
 
     [Fact]
