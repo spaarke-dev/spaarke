@@ -33,6 +33,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Microsoft.Identity.Web;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Protocols;
@@ -42,6 +43,7 @@ using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Authorization;
 using Sprk.Bff.Api.Infrastructure.DI;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Tests.AccessControl;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Infrastructure.DI;
@@ -344,6 +346,27 @@ public sealed class AuthorizationModuleWorkforceHomeTests
 
         status.Should().Be(HttpStatusCode.Unauthorized);
         host.Failures.Should().Contain(e => e is SecurityTokenExpiredException);
+    }
+
+    [Fact]
+    public async Task ExpiredToken_ReportsExpired_EvenAfterAnotherHostWasDisposed()
+    {
+        // ISS-012 / #1930. A real BFF host (WebApplication.CreateBuilder: Windows EventLog provider included) is built and
+        // disposed first. Without IdentityModelLoggerIsolation, Identity Web binds IdentityModel's process-wide logger
+        // (LogHelper.Logger) to THAT host's logger factory, and the validation below writes through its disposed EventLog:
+        // ObjectDisposedException replaces the SecurityTokenExpiredException this scheme should report.
+        var disposedHost = new ExternalWorkforceLinkEndpointsTests.LinkFixture();
+        _ = disposedHost.Services.GetRequiredService<IOptionsMonitor<JwtBearerOptions>>().Get(JwtBearerDefaults.AuthenticationScheme);
+        await disposedHost.DisposeAsync();
+
+        using var host = await WorkforceHomeHost.StartAsync();
+
+        var status = await host.StatusAsync(ExternalRoute, HomeToken(expires: DateTime.UtcNow.AddMinutes(-30)));
+
+        status.Should().Be(HttpStatusCode.Unauthorized);
+        host.Failures.Should().ContainSingle()
+            .Which.Should().BeOfType<SecurityTokenExpiredException>(
+                "a disposed host's logger must not replace the validation outcome: {0}", string.Join(" | ", host.Failures));
     }
 
     [Fact]

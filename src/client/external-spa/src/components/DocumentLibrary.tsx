@@ -926,7 +926,10 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
               renderHeaderCell: () => '',
               renderCell: item => (
                 <div className={styles.actionButtons}>
-                  {canActOnDocuments && (
+                  {/* R3 ISS-011 (#1886): a document with no file stays listed but offers neither action (both would answer
+                      409 no_file_attached). Only an explicit false hides them: a BFF that does not send hasFile is an old
+                      BFF, and its rows keep today's behaviour. */}
+                  {canActOnDocuments && item.hasFile !== false && (
                     <>
                       <Tooltip content="Download" relationship="label">
                         <Button

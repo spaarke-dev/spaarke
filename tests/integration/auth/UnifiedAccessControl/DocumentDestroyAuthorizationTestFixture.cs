@@ -81,6 +81,14 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
     public ConcurrentDictionary<Guid, int> RowDeleteFaultCodes { get; } = new();
 
     /// <summary>
+    /// R3 ISS-004 (#1650): document ids whose SPE FILE delete is not done, so C2's double answers
+    /// <see cref="FileNotDeletedDeleteResult"/> (the row kept) with this HTTP status: 503
+    /// (<see cref="DocumentCheckoutService.FileNotDeletedCode"/>, a Graph fault) or 409 (the pointer check refused).
+    /// Absent = the file delete succeeds.
+    /// </summary>
+    public ConcurrentDictionary<Guid, int> FileNotDeletedStatuses { get; } = new();
+
+    /// <summary>
     /// A document id for which the access check THROWS. ADR-003 requires an errored check to deny;
     /// this is the only way a test can reach that catch block.
     /// </summary>
@@ -100,6 +108,7 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
         DownloadedItemIds.Clear();
         ChildDocumentCounts.Clear();
         RowDeleteFaultCodes.Clear();
+        FileNotDeletedStatuses.Clear();
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -143,7 +152,8 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
                 NullLogger<DocumentCheckoutService>.Instance,
                 DeletedDocumentIds,
                 ChildDocumentCounts,
-                RowDeleteFaultCodes));
+                RowDeleteFaultCodes,
+                FileNotDeletedStatuses));
 
             // C3's destroy path.
             services.RemoveAll<IDocumentDataverseService>();
@@ -350,6 +360,7 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
         private readonly ConcurrentBag<Guid> _deleted;
         private readonly ConcurrentDictionary<Guid, int> _childCounts;
         private readonly ConcurrentDictionary<Guid, int> _rowDeleteFaults;
+        private readonly ConcurrentDictionary<Guid, int> _fileNotDeletedStatuses;
 
         public RecordingCheckoutService(
             HttpClient httpClient,
@@ -359,7 +370,8 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
             ILogger<DocumentCheckoutService> logger,
             ConcurrentBag<Guid> deleted,
             ConcurrentDictionary<Guid, int> childCounts,
-            ConcurrentDictionary<Guid, int> rowDeleteFaults)
+            ConcurrentDictionary<Guid, int> rowDeleteFaults,
+            ConcurrentDictionary<Guid, int> fileNotDeletedStatuses)
             : base(httpClient, speFileStore, configuration, credential, new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), logger,
                 // Only DeleteAsync is exercised (overridden); no preview/edit URL is minted.
                 TestRecordContainerResolver.ForBusinessUnitContainers())
@@ -367,6 +379,7 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
             _deleted = deleted;
             _childCounts = childCounts;
             _rowDeleteFaults = rowDeleteFaults;
+            _fileNotDeletedStatuses = fileNotDeletedStatuses;
         }
 
         public override Task<DeleteResult> DeleteAsync(
@@ -380,6 +393,12 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
             if (_rowDeleteFaults.TryGetValue(documentId, out var code)
                 && code == unchecked((int)0x80040227))
                 return Task.FromResult<DeleteResult>(new HasChildDocumentsDeleteResult(null, correlationId, FileGone: true));
+
+            // R3 ISS-004: the file step did not delete the file, so the real service keeps the row (503 for a Graph fault).
+            if (_fileNotDeletedStatuses.TryGetValue(documentId, out var fileStatus))
+                return Task.FromResult<DeleteResult>(new FileNotDeletedDeleteResult(
+                    fileStatus == 503 ? DocumentCheckoutService.FileNotDeletedCode : "document_storage_unverified",
+                    fileStatus, correlationId));
 
             _deleted.Add(documentId);
 

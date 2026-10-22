@@ -81,9 +81,22 @@ const useStyles = makeStyles({
   timestamp: {
     color: tokens.colorNeutralForeground3,
   },
+  // Containment for the UNTRUSTED sanitized email HTML (ISS-003 / #1636; same set as the external SPA's
+  // `RecordMessages` body). The sanitizer drops the CSS that paints outside a box, but a host must not rely on it alone:
+  // `contain: paint` clips painting to this box (a huge shadow/outline/reflection stays inside) and makes it the
+  // containing block for any fixed/absolute descendant; `position: relative` anchors absolute descendants here.
+  // `overflowX: auto` keeps a wide table/image scrollable sideways instead of cut; `overflowY: hidden` because normal
+  // flow never overflows an auto-height box, so only an out-of-flow descendant could, and that must be clipped.
+  // `flexShrink: 0`: an overflow box has a flex automatic minimum size of 0, so without it a height-constrained flex
+  // parent could shrink the body and clip the end of a long email with no scrollbar.
   bodyHtml: {
     color: tokens.colorNeutralForeground1,
     wordBreak: 'break-word',
+    position: 'relative',
+    contain: 'paint',
+    overflowX: 'auto',
+    overflowY: 'hidden',
+    flexShrink: 0,
   },
   bodyText: {
     color: tokens.colorNeutralForeground1,
