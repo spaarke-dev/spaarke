@@ -125,7 +125,8 @@ public static class ExternalAccessModule
         // their own requests and adds legal-front-door to their default modules. Read by the entitlement resolver
         // below and by the "service-requests" descriptor. ValidateOnStart so an invalid value fails startup rather
         // than the first external module read: ANY non-boolean value, INCLUDING EMPTY (""), fails startup - remove
-        // the setting to turn it off. No custom validator (a bound bool has no other invalid value).
+        // the setting to turn it off. The validator registered below (ExternalAccessOptionsValidator) never fails startup: it
+        // only logs a warning when CustomerBusinessUnitId is unset; a bound bool has no other invalid value.
         services.AddOptions<ExternalAccessOptions>()
             .BindConfiguration(ExternalAccessOptions.SectionName)
             .ValidateOnStart();

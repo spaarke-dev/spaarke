@@ -835,6 +835,26 @@ public class IdentityLinkReconciliationTests
         result.ErrorMessage.Should().Contain("ExternalAccess:CustomerBusinessUnitId");
     }
 
+    // ISS-005 (#1673 UAC re-check K4): an owner-team read that cannot be answered refuses the create with
+    // DenyContactLookupFailed. The user was not reconciled, so the run is Partial - never an Ok that hid the unreadable lookup.
+    [Fact]
+    public async Task ARun_WhoseOwnerLookupCouldNotBeRead_IsPartial_NotOk()
+    {
+        var customerBu = Guid.NewGuid();
+        _store.DefaultTeams[customerBu] = new List<Guid> { Guid.NewGuid() };
+        _store.FailTeamLookup = true;
+
+        var result = await RunAsync(writes: true, ownerAwareBinder: OwnerAwareBinder(_store, customerBu));
+
+        Outcome(result, "Denied").Should().BeGreaterThan(0, "the licensed users with no contact are refused, not created");
+        _store.CreatePayloads.Should().BeEmpty("nothing was created without a readable owner");
+        using var doc = JsonDocument.Parse(result.ResultJson!);
+        doc.RootElement.GetProperty("status").GetString().Should().Be("partial");
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("could not be answered").And.NotContain(customerBu.ToString());
+        result.ErrorMessage.Should().NotContain("CustomerBusinessUnitId", "this is not the unconfigured-setting message");
+    }
+
     [Fact]
     public async Task ARun_WhoseCreatesAreOwned_IsNotMadePartialByTheOwnerCheck()
     {

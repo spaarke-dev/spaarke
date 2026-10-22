@@ -682,6 +682,13 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
         /// Partial (never a silent Ok).
         /// </summary>
         public int OwnerUnconfigured;
+
+        /// <summary>
+        /// ISS-005 (#1673 UAC re-check K4): systemusers refused with <see cref="ContactBindingDecision.DenyContactLookupFailed"/>
+        /// (a contact read, or the owner-team read of a create, could not be answered). Retryable, but the user was not
+        /// reconciled, so the run is Partial, never a silent Ok.
+        /// </summary>
+        public int LookupFailed;
         public readonly HashSet<Guid> ScannedOids = new();
         public readonly HashSet<Guid> DecidedOids = new();
         public readonly HashSet<(Guid ContactId, Guid Oid)> CollisionsThisRun = new();
@@ -700,6 +707,11 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
             if (result.Outcome == SystemUserLinkOutcome.Denied && result.DenyCode == ContactBindingDecision.DenyOwnerUnconfigured)
             {
                 OwnerUnconfigured++;
+            }
+
+            if (result.Outcome == SystemUserLinkOutcome.Denied && result.DenyCode == ContactBindingDecision.DenyContactLookupFailed)
+            {
+                LookupFailed++;
             }
 
             if (result.WritesApplied && result.Outcome is not (SystemUserLinkOutcome.Failed or SystemUserLinkOutcome.Denied))
@@ -757,6 +769,13 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
                 problems.Add(
                     $"{p}{OwnerUnconfigured} contact create(s) refused: ExternalAccess:CustomerBusinessUnitId is not configured "
                     + "(or names no single default owner team). Set it for this environment; the next run retries them.");
+            }
+
+            if (LookupFailed > 0)
+            {
+                problems.Add(
+                    $"{p}{LookupFailed} systemuser(s) were not reconciled: a contact or owner-team read could not be answered. "
+                    + "Nothing was created for them; the next run retries them.");
             }
 
             var failed = Count(SystemUserLinkOutcome.Failed) + ClearFailed;

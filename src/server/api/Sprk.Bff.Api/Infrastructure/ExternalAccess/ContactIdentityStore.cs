@@ -104,6 +104,15 @@ public enum StoreWriteStatus
     Forbidden,
 
     /// <summary>
+    /// A contact CREATE was refused because the OWNER it names may not own the row: Dataverse's
+    /// <c>0x80040299</c> "Read Privilege Check For Owner failed", raised when none of the owner team's security roles holds
+    /// Read on <c>contact</c> (ISS-005 UAC re-check K1, #1673). A permanent configuration fault of the customer business
+    /// unit's default team, so the create routes answer it as <c>sdap.access.registration_owner_unconfigured</c>, not as a
+    /// generic failure. See <see cref="DataverseContactIdentityStore.IsOwnerPrivilegeFault"/>. Only a POST returns it.
+    /// </summary>
+    OwnerPrivilegeMissing,
+
+    /// <summary>
     /// The write would put the oid into the uniqueness mirror while ANOTHER contact already holds it — Dataverse's
     /// duplicate-key fault on the alternate key's unique index (<c>0x80060892</c>, HTTP 412). Not a version race:
     /// re-reading and retrying changes nothing, so the binder denies and flags the holder (owner round 4 item 4, B2).
@@ -781,9 +790,13 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     /// (<see cref="BuildCreateRequest"/>).
     /// </summary>
     /// <remarks>
-    /// The owner rule (ISS-005, #1673; DATAVERSE-WRITE-PATH-ARCHITECTURE I-6): every contact this BFF creates in its own
-    /// environment is owned by the default owner team of <c>ExternalAccess:CustomerBusinessUnitId</c>, whatever the plane; the
-    /// payload carries <c>ownerid@odata.bind</c> on any plane, refuses an empty team, and requires one for WorkforceHome.
+    /// The owner rule (ISS-005, #1673; DATAVERSE-WRITE-PATH-ARCHITECTURE I-6): every IDENTITY contact this BFF creates in its own
+    /// environment - the four external-access creates (registration, first sign-in, licensed-user link, invite) - is owned by the
+    /// default owner team of <c>ExternalAccess:CustomerBusinessUnitId</c>, whatever the plane; the payload carries
+    /// <c>ownerid@odata.bind</c> on any plane, refuses an empty team, and requires one for WorkforceHome. This is NOT the only
+    /// contact create in the BFF: the chat <c>dataverse.create_record</c> tool can create a <c>contact</c> row app-only, owned by the
+    /// caller's business-unit team, record-first through the general resolver (<c>OwnedChildWrite</c>), and it does not read
+    /// <c>CustomerBusinessUnitId</c> (see <c>ContactCreateOwnerPolicyGuardTests.UndetectableSeams</c>).
     /// </remarks>
     public static Dictionary<string, object?> CreatePayload(Guid oid, IdentityPlaneMarker plane, NewContactDetails details)
     {
@@ -999,6 +1012,19 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
            || (status == HttpStatusCode.BadRequest && body is not null
                && (body.Contains("privilege", StringComparison.OrdinalIgnoreCase)
                    || body.Contains("0x80040220", StringComparison.OrdinalIgnoreCase)));
+
+    /// <summary>
+    /// True when a create's refusal is Dataverse's OWNER read-check: HTTP 403 (a 400 is tolerated) whose body carries
+    /// <c>0x80040299</c> or "Privilege Check For Owner" - the owner team's roles hold no Read on the table (seen live on
+    /// <c>sprk_signal</c> and <c>sprk_decisionrecord</c>). Narrower than <see cref="IsPermissionFault"/> on purpose: a missing
+    /// privilege of the BFF's own identity (<c>0x80040220</c>, "missing prvCreateContact") is not an owner fault and keeps its
+    /// <see cref="StoreWriteStatus.Forbidden"/> mapping. Pure.
+    /// </summary>
+    public static bool IsOwnerPrivilegeFault(HttpStatusCode status, string? body)
+        => status is HttpStatusCode.Forbidden or HttpStatusCode.BadRequest
+           && body is not null
+           && (body.Contains("0x80040299", StringComparison.OrdinalIgnoreCase)
+               || body.Contains("Privilege Check For Owner", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
     /// True when a write's error text says a choice value is not an option of its choice - Dataverse's "The value N of 'col'
@@ -1595,6 +1621,11 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
             }
 
             _logger.LogWarning("[ID-BIND] {Method} {Path} failed: {Status} {Body}", method, path, (int)response.StatusCode, Trim(body));
+            if (method == HttpMethod.Post && IsOwnerPrivilegeFault(response.StatusCode, body))
+            {
+                return new StoreWriteResult(StoreWriteStatus.OwnerPrivilegeMissing, Error: $"{(int)response.StatusCode}: {Trim(body)}");
+            }
+
             if (IsPermissionFault(response.StatusCode, body))
             {
                 return new StoreWriteResult(StoreWriteStatus.Forbidden, Error: $"{(int)response.StatusCode}: {Trim(body)}");

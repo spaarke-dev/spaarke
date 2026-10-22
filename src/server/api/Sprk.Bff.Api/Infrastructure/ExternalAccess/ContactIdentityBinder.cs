@@ -906,6 +906,12 @@ public sealed class ContactIdentityBinder
         var secure = await _store.FindBusinessUnitsByNameAsync(secureBusinessUnitName, ct).ConfigureAwait(false);
         if (secure.Status != LookupStatus.Read)
         {
+            // K4 (UAC re-check): an unreadable answer refuses the create, so the operator must be able to see why.
+            // Business unit id and the read's status only: no email, no secret.
+            _logger.LogWarning(
+                "[ID-BIND] {Operation} for {Who} refused: the Secure Record business unit could not be read ({Status}) while "
+                + "resolving the owner for ExternalAccess:CustomerBusinessUnitId {BusinessUnitId}. Nothing was created; retryable.",
+                operation, who, secure.Status, bu);
             return new OwnerTeamResolution(OwnerTeamStatus.LookupFailed);
         }
 
@@ -921,6 +927,10 @@ public sealed class ContactIdentityBinder
         var teams = await _store.FindDefaultOwnerTeamsAsync(bu, ct).ConfigureAwait(false);
         if (teams.Status != LookupStatus.Read)
         {
+            _logger.LogWarning(
+                "[ID-BIND] {Operation} for {Who} refused: the default owner team of business unit {BusinessUnitId} could not be "
+                + "read ({Status}). Nothing was created; retryable.",
+                operation, who, bu, teams.Status);
             return new OwnerTeamResolution(OwnerTeamStatus.LookupFailed);
         }
 
@@ -934,6 +944,19 @@ public sealed class ContactIdentityBinder
 
         return new OwnerTeamResolution(OwnerTeamStatus.Resolved, teams.TeamIds[0]);
     }
+
+    /// <summary>
+    /// K1 (UAC re-check): the log line of a contact create Dataverse refused for its OWNER (0x80040299: the owner team holds no
+    /// role with contact Read). No id of a person: <paramref name="who"/> is a hash or a label. The business unit id is
+    /// configuration, not personal data.
+    /// </summary>
+    private void LogOwnerPrivilegeMissing(string operation, string who)
+        => _logger.LogError(
+            "[ID-BIND] {Operation} for {Who} refused ({DenyCode}): Dataverse refused the owner of the new contact (0x80040299, "
+            + "Read Privilege Check For Owner). The default owner team of the business unit named by "
+            + "ExternalAccess:CustomerBusinessUnitId must hold a security role with Read on contact (and Create/Append as "
+            + "needed). Nothing was created.",
+            operation, who, ContactBindingDecision.DenyOwnerUnconfigured);
 
     /// <summary>
     /// ISS-005 (#1673): the owner of a Workforce-plane contact create (first sign-in, licensed-user link), decided by the
@@ -1032,9 +1055,14 @@ public sealed class ContactIdentityBinder
                     who, ContactBindingDecision.DenyContactCreateUnavailable, ContactBindingDecision.KeyMirrorColumn);
                 return HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactCreateUnavailable);
 
+            case StoreWriteStatus.OwnerPrivilegeMissing:
+                // K1 (UAC re-check): Dataverse refused the owner (0x80040299): the customer unit's default team holds no
+                // role with contact Read. The same refusal as an unresolved owner, so the operator is told the same thing.
+                LogOwnerPrivilegeMissing("Registration", who);
+                return new HomeRegistrationResult(HomeRegistrationOutcome.OwnerUnconfigured);
+
             case StoreWriteStatus.Forbidden:
-                // A missing privilege (the owner team holds no role with contact read, or the application user cannot
-                // Assign): permanent, an operator fix - not retryable.
+                // A missing privilege (the application user cannot Create/Assign): permanent, an operator fix - not retryable.
                 _logger.LogError(
                     "[ID-BIND] Registration for {Who} refused ({DenyCode}): Dataverse refused the create for a missing "
                     + "privilege (the customer business unit's default owner team needs a role with contact read, and the BFF "
@@ -1320,6 +1348,10 @@ public sealed class ContactIdentityBinder
                                 + "scripts/Set-ContactIdentityBindingSchema.ps1.",
                                 ContactBindingDecision.DenyContactCreateUnavailable, ContactBindingDecision.KeyMirrorColumn);
                             return ContactBindingResult.Denied(ContactBindingDecision.DenyContactCreateUnavailable);
+                        case StoreWriteStatus.OwnerPrivilegeMissing:
+                            // K1 (UAC re-check): the owner team may not own a contact (no role with contact Read).
+                            LogOwnerPrivilegeMissing("First sign-in create", $"oid#{HashForLog(request.CallerOid)}");
+                            return ContactBindingResult.Denied(ContactBindingDecision.DenyOwnerUnconfigured);
                         default:
                             return ContactBindingResult.Denied(ContactBindingDecision.DenyContactCreateFailed);
                     }
@@ -1604,6 +1636,15 @@ public sealed class ContactIdentityBinder
                 if (create.Status == StoreWriteStatus.Written && create.ContactId is null)
                 {
                     return null; // created but the id was not returned: re-decide; the oid lookup now finds it
+                }
+
+                if (create.Status == StoreWriteStatus.OwnerPrivilegeMissing)
+                {
+                    // K1 (UAC re-check): the owner team may not own a contact. A configuration fault that repeats every run,
+                    // counted with the other owner refusals (the reconciliation job's OwnerUnconfigured), nothing written.
+                    LogOwnerPrivilegeMissing("Licensed-user link create", $"oid#{HashForLog(request.CallerOid)}");
+                    return Result(suid, SystemUserLinkOutcome.Denied, null, ContactBindingDecision.DenyOwnerUnconfigured,
+                        null, none, Array.Empty<IdentityChange>(), false);
                 }
 
                 if (create.Status != StoreWriteStatus.Written)

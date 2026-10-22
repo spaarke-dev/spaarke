@@ -1078,6 +1078,53 @@ public class DataverseContactIdentityStoreTests
     public void IsPermissionFault_IsA403OrAPrivilege400_NeverAThrottleOr5xx(HttpStatusCode status, string? body, bool expected)
         => DataverseContactIdentityStore.IsPermissionFault(status, body).Should().Be(expected);
 
+    // ── ISS-005 UAC re-check K1: the owner read-check fault (0x80040299) is its own status on a create ──────────
+
+    [Theory]
+    [InlineData(HttpStatusCode.Forbidden, "{\"error\":{\"code\":\"0x80040299\",\"message\":\"Read Privilege Check For Owner failed\"}}", true)]
+    [InlineData(HttpStatusCode.Forbidden, "{\"error\":{\"message\":\"read privilege check for owner failed.\"}}", true)]
+    [InlineData(HttpStatusCode.BadRequest, "{\"error\":{\"code\":\"0x80040299\"}}", true)]
+    // Must not fire: the BFF identity's own missing privilege, other faults, throttles and 5xx stay as they were.
+    [InlineData(HttpStatusCode.Forbidden, "{\"error\":{\"code\":\"0x80040220\",\"message\":\"Principal user is missing prvCreateContact privilege\"}}", false)]
+    [InlineData(HttpStatusCode.Forbidden, "anything", false)]
+    [InlineData(HttpStatusCode.BadRequest, "A required property is missing.", false)]
+    [InlineData(HttpStatusCode.InternalServerError, "{\"error\":{\"code\":\"0x80040299\"}}", false)]
+    [InlineData(HttpStatusCode.Forbidden, null, false)]
+    public void IsOwnerPrivilegeFault_IsTheOwnerReadCheck_NotTheBffIdentitysOwnPrivilege(HttpStatusCode status, string? body, bool expected)
+        => DataverseContactIdentityStore.IsOwnerPrivilegeFault(status, body).Should().Be(expected);
+
+    [Theory]
+    [InlineData(HttpStatusCode.Forbidden, "{\"error\":{\"code\":\"0x80040299\",\"message\":\"Read Privilege Check For Owner failed\"}}", StoreWriteStatus.OwnerPrivilegeMissing)]
+    // Every other fault keeps its existing mapping.
+    [InlineData(HttpStatusCode.Forbidden, "{\"error\":{\"code\":\"0x80040220\",\"message\":\"Principal user is missing prvCreateContact privilege\"}}", StoreWriteStatus.Forbidden)]
+    [InlineData(HttpStatusCode.InternalServerError, "{\"error\":{\"message\":\"boom\"}}", StoreWriteStatus.Failed)]
+    [InlineData(HttpStatusCode.PreconditionFailed, "{\"error\":{\"code\":\"0x80060892\",\"message\":\"A record that has the attribute values External Object ID already exists.\"}}", StoreWriteStatus.KeyConflict)]
+    public async Task AnOwnedContactCreate_MapsOnlyTheOwnerReadCheckFault_ToOwnerPrivilegeMissing(
+        HttpStatusCode code, string body, StoreWriteStatus expected)
+    {
+        var http = new ScriptedHttp((code, body));
+
+        var write = await http.Store().CreateContactForOidAsync(
+            Oid, IdentityPlaneMarker.Workforce,
+            new NewContactDetails("Pat", "Example", "pat@customer.example") { OwningTeamId = Team }, CancellationToken.None);
+
+        write.Status.Should().Be(expected);
+        http.Requests.Should().ContainSingle().Which.Method.Should().Be(HttpMethod.Post);
+    }
+
+    [Fact]
+    public async Task ANonCreateWrite_IsNeverClassifiedAsAnOwnerFault()
+    {
+        // Only a POST sets an owner; a PATCH that meets the same body keeps the generic permission mapping.
+        var http = new ScriptedHttp((HttpStatusCode.Forbidden,
+            "{\"error\":{\"code\":\"0x80040299\",\"message\":\"Read Privilege Check For Owner failed\"}}"));
+
+        var write = await http.Store().BindOidAndConsumeInviteAsync(IntentContact, "W/\"42\"", Oid,
+            IdentityPlaneMarker.External, CancellationToken.None);
+
+        write.Status.Should().Be(StoreWriteStatus.Forbidden);
+    }
+
     [Fact]
     public void TheSecureBusinessUnitRead_IsTheBusinessUnitByName_WithTheSharedSecureRecordFilter()
         => DataverseContactIdentityStore.BuildBusinessUnitByNamePath("Secure Record").Should().Be(

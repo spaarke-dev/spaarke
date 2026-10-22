@@ -117,6 +117,42 @@ public class InviteContactOwnerTests
         AssertNothingCreatedOrSent();
     }
 
+    // ── K1 (UAC re-check): Dataverse refuses the owner of the create (403, Read Privilege Check For Owner) ─────────
+
+    [Fact]
+    public async Task WhenDataverseRefusesTheOwnersPrivilege_TheInviteIsRefused500OwnerUnconfigured_NotAGeneric500()
+    {
+        GivenOneDefaultTeam();
+        _h.Grants.ContactCreateFailure = new HttpRequestException(
+            "Response status code does not indicate success: 403 (Forbidden).", null, System.Net.HttpStatusCode.Forbidden);
+
+        var outcome = await Invite(Owned(CustomerBu));
+
+        var failure = outcome.Failure!;
+        outcome.Failure.Should().NotBeNull("it is a defined refusal, not an exception");
+        failure.ReasonCode.Should().Be(ContactBindingDecision.DenyOwnerUnconfigured);
+        failure.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
+        failure.Message.Should().NotContainAny(CustomerBu.ToString(), CustomerTeam.ToString(), Email);
+        _h.Ciam.Attempts.Should().BeEmpty("no CIAM account");
+        _h.Emails.Sent.Should().BeEmpty();
+        _h.Emails.Onboarding.Should().BeEmpty();
+        _h.Identities.Writes.Should().BeEmpty("no invite marker, no binding");
+    }
+
+    [Fact]
+    public async Task AnyOtherCreateFault_KeepsItsExistingMapping_ItStillThrows()
+    {
+        // Must not fire: a fault that is not a privilege refusal is not remapped (the endpoint's generic handler answers it).
+        GivenOneDefaultTeam();
+        _h.Grants.ContactCreateFailure = new HttpRequestException(
+            "Response status code does not indicate success: 500 (Internal Server Error).", null, System.Net.HttpStatusCode.InternalServerError);
+
+        var act = () => Invite(Owned(CustomerBu));
+
+        await act.Should().ThrowAsync<HttpRequestException>();
+        _h.Ciam.Attempts.Should().BeEmpty();
+    }
+
     // ── Must not fire: an existing contact keeps the owner it has ────────────────────────────────────
 
     [Fact]

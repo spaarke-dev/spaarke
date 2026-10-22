@@ -687,6 +687,12 @@ internal static class AssignedAccessTestDoubles
         public List<string> ContactCreates { get; } = new();
 
         /// <summary>
+        /// UAC re-check K1: when set, a <c>contacts</c> create throws this (with <see cref="AcceptContactCreates"/>), as the Web API
+        /// client throws a bare <see cref="HttpRequestException"/> on Dataverse's 403 "Read Privilege Check For Owner failed".
+        /// </summary>
+        public Exception? ContactCreateFailure { get; set; }
+
+        /// <summary>
         /// Task 099b review round 1: when set, every GRANT-row create throws this — as the Web API client throws a bare
         /// <see cref="HttpRequestException"/> on Dataverse's 403 "Read Privilege Check For Owner failed".
         /// </summary>
@@ -696,6 +702,9 @@ internal static class AssignedAccessTestDoubles
         {
             if (entitySetName == "contacts" && AcceptContactCreates)
             {
+                if (ContactCreateFailure is { } contactFailure)
+                    throw contactFailure;
+
                 lock (_gate)
                     ContactCreates.Add(JsonSerializer.Serialize(entity));
                 return Task.FromResult(Guid.NewGuid());

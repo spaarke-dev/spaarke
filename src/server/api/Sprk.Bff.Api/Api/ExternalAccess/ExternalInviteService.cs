@@ -4,6 +4,7 @@ using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Registration;
+using Sprk.Bff.Api.Services.Signals;
 using static Sprk.Bff.Api.Api.ExternalAccess.InviteExternalUserEndpoint;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
@@ -348,7 +349,26 @@ public sealed class ExternalInviteService
                         return OwnerNotResolved(owner.Status, request.Email, logger);
                     }
 
-                    contactId = await CreateContactAsync(dataverseClient, request, owner.TeamId, logger, ct);
+                    try
+                    {
+                        contactId = await CreateContactAsync(dataverseClient, request, owner.TeamId, logger, ct);
+                    }
+                    catch (Exception ex) when (!ct.IsCancellationRequested && SignalWriter.IsDataverseAccessDenied(ex))
+                    {
+                        // K1 (UAC re-check): Dataverse refused the owned create for a privilege (0x80040299: the owner team holds no
+                        // role with contact Read). The same refusal as an unresolved owner: 500 + reason code, nothing created.
+                        // The shared Web API client's EnsureSuccessStatusCode drops the body, so any 403 on this create is read as
+                        // that fault (the same detector the Signal writer uses); the BFF identity's own create privilege is
+                        // provisioned with the app user, and registration (which keeps the body) separates the two.
+                        logger.LogError(ex,
+                            "[EXT-INVITE] Invite create refused ({ReasonCode}): Dataverse refused the owner of the new contact " +
+                            "(Read Privilege Check For Owner). The default owner team of the business unit named by " +
+                            "ExternalAccess:CustomerBusinessUnitId must hold a security role with Read on contact " +
+                            "(and Create/Append as needed). Nothing was created.",
+                            ContactBindingDecision.DenyOwnerUnconfigured);
+                        return OwnerUnconfiguredOutcome();
+                    }
+
                     break;
                 }
 
@@ -532,6 +552,12 @@ public sealed class ExternalInviteService
         logger.LogError(
             "[EXT-INVITE] Invite for {Email} refused: no owner team could be resolved for the new contact " +
             "(ExternalAccess:CustomerBusinessUnitId) — nothing created", email);
+        return OwnerUnconfiguredOutcome();
+    }
+
+    /// <summary>The 500 <see cref="ContactBindingDecision.DenyOwnerUnconfigured"/> answer, whichever way the owner failed.</summary>
+    private static ProvisionOutcome OwnerUnconfiguredOutcome()
+    {
         return new ProvisionOutcome(Guid.Empty, "OwnerUnconfigured",
             Failure: new InviteLookupFailure(
                 ContactBindingDecision.DenyOwnerUnconfigured,

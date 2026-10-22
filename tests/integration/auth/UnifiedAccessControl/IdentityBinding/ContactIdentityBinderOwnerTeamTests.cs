@@ -36,12 +36,13 @@ public class ContactIdentityBinderOwnerTeamTests
 
     /// <summary>A binder over THIS BFF's own environment: the setting and the configuration are handed in, as DI does.</summary>
     private ContactIdentityBinder OwnedBinder(
-        Guid? customerBusinessUnitId, IDictionary<string, string?>? configuration = null, InMemoryContactIdentityStore? store = null)
+        Guid? customerBusinessUnitId, IDictionary<string, string?>? configuration = null, InMemoryContactIdentityStore? store = null,
+        BindingLogCapture<ContactIdentityBinder>? log = null)
     {
         var external = new Mock<IOptionsMonitor<ExternalAccessOptions>>();
         external.SetupGet(o => o.CurrentValue).Returns(new ExternalAccessOptions { CustomerBusinessUnitId = customerBusinessUnitId });
         return new ContactIdentityBinder(
-            store ?? _store, Tenants(CustomerTenant), new FakeTimeProvider(Now), new BindingLogCapture<ContactIdentityBinder>(),
+            store ?? _store, Tenants(CustomerTenant), new FakeTimeProvider(Now), log ?? new BindingLogCapture<ContactIdentityBinder>(),
             ContactCreateOwner.FromCustomerBusinessUnit(
                 external.Object,
                 new ConfigurationBuilder().AddInMemoryCollection(configuration ?? new Dictionary<string, string?>()).Build()));
@@ -360,6 +361,113 @@ public class ContactIdentityBinderOwnerTeamTests
         writePass.DenyCode.Should().Be(ContactBindingDecision.DenyBindingColumnMasked);
         _store.Reads.Should().NotContain(new[] { "owner-team", "business-unit" }, "a masked column refuses before any owner read");
         AssertNothingWasCreated();
+    }
+
+    // ── K4 (UAC re-check): an unreadable owner lookup is logged (Warning), with no email and no secret ──────────
+
+    [Theory]
+    [InlineData(Unreadable.SecureRecordUnitRead, "Secure Record business unit could not be read")]
+    [InlineData(Unreadable.DefaultOwnerTeamRead, "default owner team of business unit")]
+    public async Task AnUnreadableOwnerLookup_IsLoggedAtWarning_NamingTheBusinessUnit_NeverAnEmail(Unreadable cause, string expected)
+    {
+        var log = new BindingLogCapture<ContactIdentityBinder>();
+        var binder = OwnedBinder(Arrange(cause), log: log);
+        var oid = Guid.NewGuid();
+
+        await binder.ResolveWorkforceCallerAsync(Member(oid), oid, Stamp, CancellationToken.None);
+
+        var warning = log.Entries.Should().ContainSingle(e => e.Message.Contains(expected)).Subject;
+        warning.Level.Should().Be(LogLevel.Warning);
+        warning.Message.Should().Contain(CustomerBu.ToString("D"), "the business unit id is configuration, not personal data")
+            .And.Contain("Nothing was created");
+        log.Messages.Should().NotContain(m => m.Contains(Email) || m.Contains("customer.example"), "no email in the log");
+    }
+
+    [Fact]
+    public async Task AReadableOwnerLookup_LogsNoLookupWarning()
+    {
+        // Must not fire: the happy path and the configuration refusals are not "could not be read".
+        GivenOneDefaultTeam();
+        var log = new BindingLogCapture<ContactIdentityBinder>();
+        var oid = Guid.NewGuid();
+
+        await OwnedBinder(CustomerBu, log: log).ResolveWorkforceCallerAsync(Member(oid), oid, Stamp, CancellationToken.None);
+
+        log.Messages.Should().NotContain(m => m.Contains("could not be read"));
+    }
+
+    // ── K1 (UAC re-check): Dataverse refuses the owner of the create (0x80040299) -> the owner-unconfigured refusal ──
+
+    private void GivenDataverseRefusesTheOwner() => _store.CreateStatusOverride = StoreWriteStatus.OwnerPrivilegeMissing;
+
+    [Fact]
+    public async Task TheFirstSignInCreate_RefusedForItsOwnersPrivilege_IsTheOwnerUnconfiguredRefusal_AndLogsWhyAtError()
+    {
+        GivenOneDefaultTeam();
+        GivenDataverseRefusesTheOwner();
+        var log = new BindingLogCapture<ContactIdentityBinder>();
+        var oid = Guid.NewGuid();
+
+        var result = await OwnedBinder(CustomerBu, log: log).ResolveWorkforceCallerAsync(Member(oid), oid, Stamp, CancellationToken.None);
+
+        result.IsResolved.Should().BeFalse();
+        result.DenyCode.Should().Be(ContactBindingDecision.DenyOwnerUnconfigured);
+        _store.Contacts.Should().BeEmpty();
+        var entry = log.Entries.Should().ContainSingle(e => e.Message.Contains("Read Privilege Check For Owner")).Subject;
+        entry.Level.Should().Be(LogLevel.Error);
+        entry.Message.Should().Contain("security role with Read on contact").And.NotContain(Email);
+    }
+
+    [Fact]
+    public async Task TheLicensedUserLinkCreate_RefusedForItsOwnersPrivilege_IsDeniedOwnerUnconfigured_NotFailed()
+    {
+        GivenOneDefaultTeam();
+        GivenDataverseRefusesTheOwner();
+        var userId = GivenALicensedUserWithNoContact(out _);
+
+        var result = await OwnedBinder(CustomerBu).EnsureSystemUserLinkAsync(userId, applyWrites: true, CancellationToken.None);
+
+        result.Outcome.Should().Be(SystemUserLinkOutcome.Denied, "a configuration fault, counted with the other owner refusals");
+        result.DenyCode.Should().Be(ContactBindingDecision.DenyOwnerUnconfigured);
+        result.IsLinked.Should().BeFalse();
+        _store.Contacts.Should().BeEmpty();
+        _store.SystemUsers[userId].PrimaryContactId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Registration_RefusedForItsOwnersPrivilege_IsTheOwnerUnconfiguredOutcome()
+    {
+        GivenOneDefaultTeam();
+        GivenDataverseRefusesTheOwner();
+
+        var reason = await RegistrationsReasonAsync(OwnedBinder(CustomerBu), CustomerBu);
+
+        reason.Should().Be(ContactBindingDecision.DenyOwnerUnconfigured);
+        _store.Contacts.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(StoreWriteStatus.Failed)]
+    [InlineData(StoreWriteStatus.Forbidden)]
+    public async Task AnyOtherCreateFault_KeepsItsExistingMapping_AndIsNotTheOwnerRefusal(StoreWriteStatus fault)
+    {
+        // Must not fire: only the owner's privilege fault is remapped. The expectations are what the code answered before.
+        GivenOneDefaultTeam();
+        _store.CreateStatusOverride = fault;
+        var oid = Guid.NewGuid();
+        var userId = GivenALicensedUserWithNoContact(out _);
+        var binder = OwnedBinder(CustomerBu);
+
+        var signIn = await binder.ResolveWorkforceCallerAsync(Member(oid), oid, Stamp, CancellationToken.None);
+        var link = await binder.EnsureSystemUserLinkAsync(userId, applyWrites: true, CancellationToken.None);
+        var registration = await RegistrationsReasonAsync(binder, CustomerBu);
+
+        signIn.DenyCode.Should().Be(ContactBindingDecision.DenyContactCreateFailed);
+        link.Outcome.Should().Be(SystemUserLinkOutcome.Failed);
+        link.DenyCode.Should().Be(ContactBindingDecision.DenyContactCreateFailed);
+        registration.Should().Be(fault == StoreWriteStatus.Forbidden
+            ? ContactBindingDecision.DenyContactCreateUnavailable
+            : ContactBindingDecision.DenyContactCreateFailed);
     }
 
     // ── Must not fire: an existing contact needs no owner ──────────────────────────────────────────
