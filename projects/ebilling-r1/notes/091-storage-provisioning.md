@@ -395,3 +395,20 @@ Spaarke eBilling File Store Blob Data (2bit77dli45c2) | sprkspaarkedevebillsa/bl
 - The account is unchanged apart from the module's resources: network Allow (as created), shared key off, public blob off, no soft delete, Defender off.
 - The identity's only storage roles are the three container-scope grants.
 - Condition 2 (step 6) is still open. 090 downloads stay off on every environment until it passes.
+
+### 8.7 uac-r2 condition 2 (c): tag-write proof as the identity (2026-10-22)
+
+The operator ran `scripts/ebilling/test-ebilling-file-store-tag-write.sh` in the spaarke-bff-dev App Service SSH console, which means it ran as mi-bff-api-dev with a token from the App Service managed-identity endpoint. It ran once per container against `sprkspaarkedevebillsa`. Every container got the same result:
+
+| Step | Expected | invoice-files | procedures | billing-exports |
+|---|---|---|---|---|
+| 1 Put Blob, no tags (control) | 201 | 201 | 201 | 201 |
+| 2 Set Blob Tags | 403 | 403 AuthorizationPermissionMismatch | 403 AuthorizationPermissionMismatch | 403 AuthorizationPermissionMismatch |
+| 3 Put Blob with x-ms-tags | 403 | 403 AuthorizationPermissionMismatch | 403 AuthorizationPermissionMismatch | 403 AuthorizationPermissionMismatch |
+| 4 Get Blob Tags (control) | 200 | 200 | 200 | 200 |
+| 5 Delete probe a | 202 | 202 | 202 | 202 |
+
+All three ended `RESULT: PASS` and `exit 0`. Probe b was never created, because step 3 was refused. The identity can write blobs and read tags, but cannot write tags, so it cannot forge the malware-scan verdict. All three uac-r2 conditions are met.
+
+The first paste attempt did not run. Bracketed-paste markers broke the first word, and the base64 decode carried CRLF line endings. The paste line now starts with `true; ` and passes the decode through `tr -d ''`.
+

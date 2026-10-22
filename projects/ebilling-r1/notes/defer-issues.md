@@ -1070,3 +1070,17 @@ The BFF routes (`/review`, `/blocked`) are covered by 119.
 **Description**: Found by 088's adversarial pass, pre-existing. `DocumentProfileOutputMapper.BuildFields` (`DocumentProfileOutputMapper.cs:50-106`) maps every top-level property of the Document Profiler output to a `sprk_document` column of the same name. Two app-only writers use it, at `AppOnlyAnalysisService.cs:570` and `PublicContracts/DocumentProfileAi.cs:169`. Neither runs the `ParentLineage` app-only refusal that protects the access columns and, after 088, `sprk_restrictedbysubmission`. Fix options: run the refusal on the dictionary, or limit the mapper to an allowlist of profile columns.
 
 ---
+
+### DEF-037 — /review shows a submission planted by a user-writable sprk_invoice link
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | medium |
+| **Filed** | 2026-10-22 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2254 |
+
+**Description**: Found by ontology-r1's 119 review; it dates from task 100. `InvoiceReviewReadService.ReadSubmissionAsync` takes the latest submission whose user-writable `sprk_invoice` points at the invoice, and has no planted-link check like `/blocked`'s (`SubmissionOverrideService.cs:458-459`). The D-176 gate still applies, so this is an integrity problem, not a disclosure. Fix: accept a submission only when `InvoiceIdFor(submission.Id)` equals the invoice id, with a must-fire test.
+
+---
+

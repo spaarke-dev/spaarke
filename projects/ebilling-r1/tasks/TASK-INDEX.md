@@ -91,7 +91,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 088 | 🔲 [open] | Stored File schema, the sprk_document submission marker (field-secured, app-only refusal) and invoice status Superseded | FULL | opus / high | P3-A | 080 |
 | 089 | 🔲 [open] | Assignment and override service (pin, exclude, change rule, removal preview); secure-child registration; K-2 pin test | FULL | opus / high | P3-C (p-safe false) | 080, 081 |
 | 090 | 🔲 [open] | File store service: staged blob, Not yet servable row, verified flip; internal download route; orphan reconcile job | FULL | opus / high | P3-B | 088, 099 |
-| 091 | 🟡 [wip] | File store provisioning: blob containers, container-scoped role, malware-scan setting, customer-provisioning hand-off | FULL | opus / high | P3-A | none |
+| 091 | ✅ [done] | File store provisioning: blob containers, container-scoped role, malware-scan setting, customer-provisioning hand-off | FULL | opus / high | P3-A | none |
 | 092 | 🔲 [open] | Submission on the file store: uploads stage Stored Files, extraction reads the blob, review gets file id, 028 retires | FULL | opus / high | P3-C | 090 |
 | 093 | 🔲 [open] | Firm file routes GET /api/v1/external/invoices/{id}/files and …/content; the four invoice-document routes retire | FULL | opus / high | P3-D (p-safe false) | 090, 098 |
 | 094 | 🔲 [open] | Submit Invoice from a source Document: all-or-nothing steps 1-6, file first (A), copy rule (B), 050a re-file retired | FULL | opus / high | P3-E | 086, 090, 092, 098 |

@@ -4,7 +4,7 @@
     <title>File store provisioning: blob containers, container-scoped role, malware-scan setting, customer-provisioning hand-off</title>
     <phase>3 Rules (WP3) — Procedures and files (EB-D-148), wave P3-A</phase>
     <gate>Startable for steps 1-4 (read-only inventory, module, what-if). Every live Azure change (step 6) needs the owner's OK first.</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security-sensitive RBAC (who may read and write invoice and Procedure bytes) and a live Azure change on shared dev; azure-deployment constraints apply.</rigor-reason>
     <model-tier>opus</model-tier>
