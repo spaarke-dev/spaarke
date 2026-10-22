@@ -70,8 +70,8 @@ public class AffectedInvoiceCounter
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            _logger.LogWarning("Affected-invoice count: the invoices of {SignalCount} Signal(s) could not be read ({ExceptionType}); no count is shown",
-                signals.Count, ex.GetType().Name);
+            _logger.LogWarning(ex, "Affected-invoice count: the invoices of {SignalCount} Signal(s) could not be read; no count is shown",
+                signals.Count);
             return null;
         }
 
@@ -99,7 +99,7 @@ public class AffectedInvoiceCounter
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            _logger.LogWarning("Affected-invoice count: the caller's rights could not be read ({ExceptionType}); no count is shown", ex.GetType().Name);
+            _logger.LogWarning(ex, "Affected-invoice count: the caller's rights could not be read; no count is shown");
             return null;
         }
 

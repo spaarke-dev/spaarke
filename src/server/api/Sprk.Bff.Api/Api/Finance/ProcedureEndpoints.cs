@@ -72,7 +72,7 @@ public static class ProcedureEndpoints
             .AddFinanceAuthorizationFilter(BillingAdminAuthorization.WriteProcedure)
             .RequireEbillingEnabled()
             .WithName("UpdateProcedure")
-            .WithSummary("Change a Procedure (Applies to and Firm lock once a version has left Draft)")
+            .WithSummary("Change a Procedure (Applies to and Firm lock once a version has been in force)")
             .Produces<ProcedureView>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)

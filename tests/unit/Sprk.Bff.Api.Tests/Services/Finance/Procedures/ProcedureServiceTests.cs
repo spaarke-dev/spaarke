@@ -54,8 +54,10 @@ public sealed class ProcedureServiceTests
         public readonly List<Guid> ClosedPolicies = new();
         public Guid? CallerSystemUser = CallerUserId;
         public bool RightsFault;
+        public bool CallerFault;
         public bool SelectFault;
         public Func<Guid, bool>? CloseFailsFor;
+        public Exception? CloseFault;
 
         public World()
         {
@@ -80,7 +82,7 @@ public sealed class ProcedureServiceTests
                 .Returns(async (Guid policyId, string _, CancellationToken ct) =>
                 {
                     ClosedPolicies.Add(policyId);
-                    if (CloseFailsFor?.Invoke(policyId) == true) throw new InvalidOperationException("simulated close fault");
+                    if (CloseFailsFor?.Invoke(policyId) == true) throw CloseFault ?? new InvalidOperationException("simulated close fault");
                     var open = await Closure.Object.SelectOpenSignalsOfPolicyAsync(policyId, ct);
                     foreach (var s in open)
                     {
@@ -95,7 +97,7 @@ public sealed class ProcedureServiceTests
                 });
 
             Probe.Setup(p => p.GetCallerSystemUserIdAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(() => CallerSystemUser);
+                .ReturnsAsync(() => CallerFault ? throw new HttpRequestException("simulated token-exchange fault") : CallerSystemUser);
             Probe.Setup(p => p.GetCallerRightsForRecordsAsync(It.IsAny<string?>(), It.IsAny<IReadOnlyList<(string, Guid)>>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string? token, IReadOnlyList<(string EntitySet, Guid RecordId)> targets, CancellationToken _) =>
                 {
@@ -352,6 +354,20 @@ public sealed class ProcedureServiceTests
         w.H.Rows.GetValueOrDefault("sprk_procedure").Should().BeNullOrEmpty("the rule set failing undoes the Procedure");
     }
 
+    [Fact]
+    public async Task Create_WhenTheTransactionOutcomeIsUnknown_SaysTheProcedureMayExist_AndNamesIt()
+    {
+        var w = new World();
+        w.H.TransactionOutcomeUnknown = true;
+
+        var outcome = await w.Service().CreateAsync(Create(), CallerOid, default);
+
+        outcome.ErrorCode.Should().Be("procedure.write_failed");
+        var sent = w.H.Transactions.Single().OfType<CreateRequest>().Single(c => c.Target.LogicalName == "sprk_procedure").Target.Id;
+        outcome.Detail.Should().Contain("may or may not have been created").And.Contain(sent.ToString(),
+            "the caller can open the Procedure that may exist instead of creating a second one");
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // Update (I-P3, I-P4)
     // ═══════════════════════════════════════════════════════════════════════════
@@ -420,6 +436,103 @@ public sealed class ProcedureServiceTests
         var outcome = await w.Service().UpdateAsync(p, Update(clearFirm: true), default);
 
         outcome.ErrorCode.Should().Be("procedure.firm_required");
+        w.H.Transactions.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("InternalStandard", "Guideline", true)]
+    [InlineData("Guideline", "Other", false)]
+    public async Task Update_ATypeChange_SetsTheRuleSetsVisibilityToFirms_InTheSameTransaction(string from, string to, bool visible)
+    {
+        var w = new World();
+        var p = w.Procedure(Enum.Parse<ProcedureType>(from));
+        var set = w.RuleSetOf(p);
+        w.H.Row("sprk_ruleset", set)["sprk_visibletofirms"] = !visible;
+        w.Version(p, 1, ProcedureEntity.VersionStatusActive, Jan1); // not scope: allowed after a version is in force
+
+        var outcome = await w.Service().UpdateAsync(p, Update(type: to), default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
+        w.H.Row("sprk_ruleset", set).GetAttributeValue<bool>("sprk_visibletofirms").Should().Be(visible);
+        w.H.Transactions.Should().ContainSingle();
+    }
+
+    [Theory]
+    [InlineData(10, 3, "v3")]
+    [InlineData(200, 12, "v12")]
+    public void VersionName_FitsTheVersionsNameColumn(int nameLength, int number, string suffix)
+    {
+        var name = ProcedureService.VersionName(new string('a', nameLength), number);
+
+        name.Length.Should().BeLessThanOrEqualTo(200);
+        name.Should().EndWith(" " + suffix).And.StartWith("aaa");
+    }
+
+    [Fact]
+    public async Task Update_WhenTheSendTimesOut_SaysTheChangeMayHaveBeenSaved_NotThatNothingWas()
+    {
+        var w = new World();
+        var p = w.Procedure();
+        w.RuleSetOf(p);
+        w.H.TransactionThrows = new TaskCanceledException("simulated HttpClient timeout");
+
+        var outcome = await w.Service().UpdateAsync(p, Update(name: "Acme OCG 2027"), default);
+
+        outcome.ErrorCode.Should().Be("procedure.write_failed");
+        outcome.Detail.Should().Contain("may or may not have been saved", "a send cancelled by its own timeout may have committed");
+    }
+
+    [Fact]
+    public async Task Update_TheAnswerIsBuiltFromWhatWasWritten_SoAFailingReReadCannotTurnACommittedChangeInto500()
+    {
+        var w = new World();
+        var p = w.Procedure();
+        var set = w.RuleSetOf(p);
+        w.H.AfterQuery = q =>
+        {
+            if (w.H.Transactions.Count > 0 && q.EntityName is "sprk_procedure" or "sprk_procedureversion")
+            {
+                throw new InvalidOperationException("simulated read fault after the commit");
+            }
+        };
+
+        var outcome = await w.Service().UpdateAsync(p, Update(name: "Acme OCG 2027", appliesTo: "Firm", firm: FirmId), default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
+        outcome.Value!.Name.Should().Be("Acme OCG 2027");
+        outcome.Value.AppliesTo.Should().Be("Firm");
+        outcome.Value.FirmId.Should().Be(FirmId);
+        outcome.Value.FirmFacingName.Should().Be("Acme Outside Counsel Guidelines", "unchanged members come from the row as read");
+        outcome.Value.RuleSetId.Should().Be(set);
+    }
+
+    [Fact]
+    public async Task Update_ScopeChange_AfterADraftWasRetiredWithoutPublishing_Succeeds_ItNeverGovernedAnything()
+    {
+        var w = new World();
+        var p = w.Procedure();
+        var set = w.RuleSetOf(p);
+        var v1 = w.Version(p, 1, ProcedureEntity.VersionStatusRetired);
+        w.Rule(set, "BILL-A", v1, published: false);
+
+        var outcome = await w.Service().UpdateAsync(p, Update(appliesTo: "Firm", firm: FirmId), default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
+        w.H.Row("sprk_procedure", p).GetAttributeValue<EntityReference>("sprk_firm").Id.Should().Be(FirmId);
+    }
+
+    [Fact]
+    public async Task Update_ScopeChange_AfterARetiredVersionPutARuleInForce_Is409ScopeLocked_AndWritesNothing()
+    {
+        var w = new World();
+        var p = w.Procedure();
+        var set = w.RuleSetOf(p);
+        var v1 = w.Version(p, 1, ProcedureEntity.VersionStatusRetired, Jan1);
+        w.Rule(set, "BILL-A", v1, published: true);
+
+        var outcome = await w.Service().UpdateAsync(p, Update(appliesTo: "Firm", firm: FirmId), default);
+
+        outcome.ErrorCode.Should().Be("procedure.scope_locked");
         w.H.Transactions.Should().BeEmpty();
     }
 
@@ -740,6 +853,36 @@ public sealed class ProcedureServiceTests
         s.W.StatusOf("sprk_procedureversion", s.V1).Should().Be(ProcedureEntity.VersionStatusActive);
     }
 
+    [Theory]
+    [InlineData("publish")]
+    [InlineData("dates")]
+    [InlineData("retireVersion")]
+    public async Task EveryVersionWrite_WhenTheProcedureChangesMeanwhile_Is409ConcurrentEdit_AndChangesNothing(string operation)
+    {
+        // Each version write carries a conditional touch of the Procedure, so two admins acting on one Procedure at once cannot both win.
+        var w = new World();
+        var p = w.Procedure();
+        var set = w.RuleSetOf(p);
+        var v1 = w.Version(p, 1, ProcedureEntity.VersionStatusDraft, Jan1);
+        var (_, a1) = w.Rule(set, "BILL-A", v1, published: false);
+        w.SourceFile(v1);
+        w.ChangeProcedureAfterEveryRead(p);
+        var service = w.Service();
+
+        var outcome = operation switch
+        {
+            "publish" => (await service.PublishVersionAsync(p, v1, null, default)).ErrorCode,
+            "dates" => (await service.ChangeDatesAsync(p, v1, Mar1, null, false, default)).ErrorCode,
+            _ => (await service.RetireVersionAsync(p, v1, default)).ErrorCode,
+        };
+
+        outcome.Should().Be("procedure.concurrent_edit");
+        w.H.Transactions.Should().NotBeEmpty("the write was sent and refused by Dataverse, not skipped");
+        w.StatusOf("sprk_procedureversion", v1).Should().Be(ProcedureEntity.VersionStatusDraft);
+        w.DateOf(v1, "sprk_effectivefrom").Should().Be(Jan1);
+        w.H.Row("sprk_policyversion", a1).GetAttributeValue<OptionSetValue>("sprk_publishstate").Value.Should().Be(Draft);
+    }
+
     [Fact]
     public async Task Publish_AVersionOfAnotherProcedure_Is404_AndWritesNothing()
     {
@@ -1018,6 +1161,23 @@ public sealed class ProcedureServiceTests
     }
 
     [Fact]
+    public async Task Retire_WhenOnePolicysCloseTimesOut_ItGoesOnToTheNextPolicy_AndReportsTheCloseIncomplete_NotA500()
+    {
+        var s = SceneRetire();
+        s.W.CloseFailsFor = id => id == s.PolicyA;
+        s.W.CloseFault = new TaskCanceledException("simulated HttpClient timeout");
+
+        var outcome = await s.W.Service().RetireAsync(s.Procedure, Token, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        outcome.Value!.CloseComplete.Should().BeFalse();
+        s.W.ClosedPolicies.Should().BeEquivalentTo(new[] { s.PolicyA, s.PolicyB }, "a timeout on one policy does not stop the others");
+        s.W.H.Row("sprk_signal", s.Signals[3]).GetAttributeValue<OptionSetValue>("sprk_resolutiontype").Value
+            .Should().Be(SignalWriter.ResolutionPolicyRetired, "policy B's findings were closed");
+        s.W.StatusOf("sprk_procedure", s.Procedure).Should().Be(ProcedureEntity.StatusRetired);
+    }
+
+    [Fact]
     public async Task Retire_Again_OnARetiredProcedure_FinishesAnIncompleteRun()
     {
         var s = SceneRetire();
@@ -1058,11 +1218,46 @@ public sealed class ProcedureServiceTests
         outcome.Value.AffectedText.Should().BeNull();
     }
 
+    [Fact]
+    public async Task Retire_WhenTheCountThrowsAfterTheCommit_TheRetireIsStillReportedDone_WithNoCount()
+    {
+        var s = SceneRetire();
+        s.W.CallerFault = true; // throws out of the counter (the caller lookup is outside its own catch)
+
+        var outcome = await s.W.Service().RetireAsync(s.Procedure, Token, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, "the Procedure is Retired and its findings closed; a failed count must not read as a failed retire");
+        outcome.Value!.CloseComplete.Should().BeTrue();
+        outcome.Value.VisibleOpenInvoices.Should().BeNull();
+        s.W.StatusOf("sprk_procedure", s.Procedure).Should().Be(ProcedureEntity.StatusRetired);
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // RuleSetService on a Procedure's rule set (model 7.2: re-keyed per Procedure Version)
     // ═══════════════════════════════════════════════════════════════════════════
 
     private static ProposalEdit Headline(string text) => new(null, null, null, text, null, null, null, CallerOid);
+
+    [Theory]
+    [InlineData("assign")]
+    [InlineData("visibility")]
+    public async Task RuleSetAssignOrVisibility_OnAProceduresSet_Is409ProcedureOwned_AndWritesNothing(string route)
+    {
+        // I-P4: who a Procedure's rules apply to is the Procedure's (scope-locked) Applies to and Firm; the rule-set routes cannot go around it.
+        var w = new World();
+        var p = w.Procedure(appliesTo: ProcedureAppliesTo.Firm, firm: FirmId);
+        var set = w.RuleSetOf(p);
+        w.Version(p, 1, ProcedureEntity.VersionStatusActive, Jan1);
+
+        var outcome = route == "assign"
+            ? await w.H.Service().AssignAsync(set, RuleSetScope.Firm, OtherFirmId, default)
+            : await w.H.Service().SetVisibilityAsync(set, false, default);
+
+        outcome.StatusCode.Should().Be(409);
+        outcome.ErrorCode.Should().Be("ruleset.procedure_owned");
+        w.H.Writes.Should().BeEmpty();
+        w.H.Transactions.Should().BeEmpty();
+    }
 
     [Fact]
     public async Task RuleSetEdit_OnAProceduresSet_ChangesTheDraftVersionsCopyInPlace_AndLeavesThePublishedOneAlone()

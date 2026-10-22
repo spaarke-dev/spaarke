@@ -126,7 +126,7 @@ public sealed record ProcedureRetired(
 /// Superseded) versions never overlap; publishing version n from D sets the previous Active version's <c>to</c> = D and marks it Superseded in
 /// the SAME transaction as version n going Active and its rules going Published, so the predecessor write failing leaves nothing Active
 /// (<see cref="IGenericEntityService.ExecuteTransactionAsync"/> is all or nothing). I-P3: a Rate card names its firm
-/// (<c>procedure.firm_required</c>). I-P4: once any version has left Draft, Applies to and Firm are locked (<c>procedure.scope_locked</c>).
+/// (<c>procedure.firm_required</c>). I-P4: once any version has been in force (Active, Superseded, or Retired after a publish), Applies to and Firm are locked (<c>procedure.scope_locked</c>).
 /// I-P5: retiring a version closes nothing and leaves its policies enabled; retiring the Procedure switches every policy of its rule set Off
 /// and closes their open Signals PolicyRetired through <see cref="SignalClosureService.ClosePolicySignalsRetiredAsync"/>, the same selection
 /// the preview counts from (<see cref="SignalClosureService.SelectOpenSignalsOfPolicyAsync"/>).</para>
@@ -293,6 +293,10 @@ public class ProcedureService
                     procedureId, name, firmFacing, type.ToString(), appliesTo.ToString(), request.FirmId, request.IssuedById, request.ExternalContactId,
                     request.InternalContactId, "Active", procedure.GetAttributeValue<string>(ProcedureEntity.NotesColumn), ruleSetId,
                     Array.Empty<ProcedureVersionView>()));
+            case SendResult.Unknown:
+                // Never "nothing was saved" here: a retry would create a second Procedure. The id lets the caller look before retrying.
+                return WriteFailed<ProcedureView>(
+                    $"The Procedure may or may not have been created (id {procedureId}). Open it before trying again, so it is not created twice.");
             default:
                 return WriteFailed<ProcedureView>("The Procedure could not be created and nothing was saved. Try again; if it keeps failing, contact support.");
         }
@@ -314,7 +318,7 @@ public class ProcedureService
 
     /// <summary>
     /// Changes a Procedure's details. I-P3: a Rate card keeps a firm (400 <c>procedure.firm_required</c>). I-P4: Applies to and Firm change only
-    /// while every version is still a Draft (409 <c>procedure.scope_locked</c>); its rule set's scope and firm follow, in the same transaction.
+    /// until a version has been in force (Active, Superseded, or Retired after a publish; 409 <c>procedure.scope_locked</c>); its rule set's scope and firm follow, in the same transaction.
     /// </summary>
     public virtual async Task<RuleSetOutcome<ProcedureView>> UpdateAsync(Guid procedureId, ProcedureUpdateRequest request, CancellationToken ct)
     {
@@ -381,7 +385,7 @@ public class ProcedureService
 
         var versions = await LoadVersionsAsync(procedureId, ct);
         var scopeChanges = appliesTo != currentAppliesTo || firm != currentFirm;
-        if (scopeChanges && versions.Any(v => v.Status != ProcedureEntity.VersionStatusDraft))
+        if (scopeChanges && await ScopeLockedAsync(versions, ct))
         {
             return Refused<ProcedureView>(StatusCodes.Status409Conflict, CodeScopeLocked, ScopeLockedDetail);
         }
@@ -407,23 +411,38 @@ public class ProcedureService
 
         requests.Add(update);
         var ruleSet = await _ruleSets.LoadProcedureRuleSetAsync(procedureId, ct);
-        if (firm != currentFirm && ruleSet is not null)
+        var currentType = procedure.GetAttributeValue<OptionSetValue>(ProcedureEntity.TypeColumn)?.Value;
+        var typeChanges = request.Type is not null && currentType != (int)type;
+        if ((firm != currentFirm || typeChanges) && ruleSet is not null)
         {
             var setRow = new Entity(RuleSetService.RuleSetEntity, ruleSet.Id);
-            foreach (var (column, value) in RuleSetService.ProcedureScope(firm))
+            if (firm != currentFirm)
             {
-                setRow[column] = value is DBNull ? null : value;
+                foreach (var (column, value) in RuleSetService.ProcedureScope(firm))
+                {
+                    setRow[column] = value is DBNull ? null : value;
+                }
             }
 
+            // Visible to firms follows the type (set at create the same way): the rule set's own visibility route refuses a Procedure's set
+            // (ruleset.procedure_owned), so the type is the one place it changes.
+            if (typeChanges) setRow["sprk_visibletofirms"] = InitialVisibleToFirms(type);
             requests.Add(new UpdateRequest { Target = setRow });
         }
 
         switch (await SendAsync(requests, procedureId, "update"))
         {
             case SendResult.Done:
-                return await GetAsync(procedureId, ct);
+                // The answer is built from what was written (the conditional update matched the row as read), not re-read: a failed re-read
+                // must not turn a committed change into an error.
+                var written = new Entity(ProcedureEntity.Entity, procedureId);
+                foreach (var attribute in procedure.Attributes) written[attribute.Key] = attribute.Value;
+                foreach (var (column, value) in fields) written[column] = value is DBNull ? null : value;
+                return RuleSetOutcome<ProcedureView>.Done(View(written, versions, ruleSet?.Id));
             case SendResult.Conflict:
                 return Concurrent<ProcedureView>();
+            case SendResult.Unknown:
+                return WriteFailed<ProcedureView>("The change may or may not have been saved. Reload the Procedure before trying again.");
             default:
                 return WriteFailed<ProcedureView>("The Procedure could not be changed and nothing was saved. Try again; if it keeps failing, contact support.");
         }
@@ -484,7 +503,7 @@ public class ProcedureService
             var versionId = Guid.NewGuid();
             var row = new Entity(ProcedureEntity.VersionEntity, versionId)
             {
-                [ProcedureEntity.NameColumn] = $"{procedure.GetAttributeValue<string>(ProcedureEntity.NameColumn)} v{number.ToString(CultureInfo.InvariantCulture)}",
+                [ProcedureEntity.NameColumn] = VersionName(procedure.GetAttributeValue<string>(ProcedureEntity.NameColumn), number),
                 [ProcedureEntity.VersionProcedureColumn] = new EntityReference(ProcedureEntity.Entity, procedureId),
                 [ProcedureEntity.VersionNumberColumn] = number,
                 [ProcedureEntity.VersionStatusColumn] = new OptionSetValue(ProcedureEntity.VersionStatusDraft),
@@ -542,7 +561,7 @@ public class ProcedureService
             }
 
             // A clash on the (Procedure, version number) key, or the Procedure row moved (another create landed first): re-read and retry once.
-            if (sent is SendResult.Conflict or SendResult.Failed && attempt == 1
+            if ((sent is SendResult.Conflict or SendResult.Failed) && attempt == 1
                 && (sent == SendResult.Conflict || await VersionNumberTakenAsync(procedureId, number, ct)))
             {
                 _logger.LogWarning("Procedure {ProcedureId}: version {Number} was taken (or the Procedure changed) while creating it; retrying once", procedureId, number);
@@ -621,6 +640,7 @@ public class ProcedureService
         {
             SendResult.Done => RuleSetOutcome<ProcedureVersionView>.Done(version.View with { EffectiveFrom = from, EffectiveTo = to }),
             SendResult.Conflict => Concurrent<ProcedureVersionView>(),
+            SendResult.Unknown => WriteFailed<ProcedureVersionView>("The dates may or may not have been changed. Reload the Procedure before trying again."),
             _ => WriteFailed<ProcedureVersionView>("The dates could not be changed and nothing was saved. Try again; if it keeps failing, contact support."),
         };
     }
@@ -796,6 +816,7 @@ public class ProcedureService
         {
             SendResult.Done => RuleSetOutcome<ProcedureVersionView>.Done(version.View with { Status = "Retired" }),
             SendResult.Conflict => Concurrent<ProcedureVersionView>(),
+            SendResult.Unknown => WriteFailed<ProcedureVersionView>("The version may or may not have been retired. Reload the Procedure before trying again."),
             _ => WriteFailed<ProcedureVersionView>("The version could not be retired and nothing was changed. Try again; if it keeps failing, contact support."),
         };
     }
@@ -840,8 +861,7 @@ public class ProcedureService
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            _logger.LogWarning("Procedure {ProcedureId}: the retire preview could not select the open findings ({ExceptionType}); the warning shows without a count",
-                procedureId, ex.GetType().Name);
+            _logger.LogWarning(ex, "Procedure {ProcedureId}: the retire preview could not select the open findings; the warning shows without a count", procedureId);
         }
 
         return RuleSetOutcome<ProcedureRetirePreview>.Done(new ProcedureRetirePreview(RetireWarning, AffectedText(count), count));
@@ -923,15 +943,28 @@ public class ProcedureService
                 outcome = outcome.Plus(closure.Outcome);
                 closed.AddRange(closure.Closed);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex)
             {
+                // Every failure, a timeout included (the close runs with CancellationToken.None): the Procedure is already Retired and the policy
+                // Off, so report the close incomplete and go on to the next policy; a retry or the nightly sweep finishes it.
                 outcome = outcome with { PolicyFailures = outcome.PolicyFailures + 1 };
-                _logger.LogError("Procedure {ProcedureId}: the open findings of policy {PolicyCode} could not be selected ({ExceptionType}); the policy is Off, so the nightly run closes them",
-                    procedureId, policy.Code, ex.GetType().Name);
+                _logger.LogError(ex, "Procedure {ProcedureId}: the open findings of policy {PolicyCode} could not be closed now; the policy is Off, so the nightly run closes them",
+                    procedureId, policy.Code);
             }
         }
 
-        var count = await _counter.CountVisibleOpenInvoicesAsync(closed, callerBearerToken, ct);
+        // The retire is committed and the findings closed: nothing from here on may turn that into an error. The count is shown or left out.
+        int? count;
+        try
+        {
+            count = await _counter.CountVisibleOpenInvoicesAsync(closed, callerBearerToken, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Procedure {ProcedureId} retired; the affected-invoice count could not be made, so none is shown", procedureId);
+            count = null;
+        }
+
         _logger.LogInformation("Procedure {ProcedureId} retired: {Off} rule(s) switched Off, {Closed} finding(s) closed, complete={Complete}",
             procedureId, switchedOff.Count, outcome.Closed, outcome.IsComplete);
         return RuleSetOutcome<ProcedureRetired>.Done(new ProcedureRetired(
@@ -1019,6 +1052,31 @@ public class ProcedureService
             .Count(r => r.GetAttributeValue<EntityReference>(ProcedureEntity.StoredFileProcedureVersionColumn)?.Id == versionId);
     }
 
+    /// <summary>
+    /// I-P4: whether a version has been in force, which locks Applies to and Firm. Active and Superseded versions were; a Retired one was when
+    /// it put a rule in force (its publish marked policy versions under it Published), and a Draft retired without publishing never was.
+    /// Known limit: a version published with no rule and then retired does not lock (it governed nothing, so nothing depends on its scope).
+    /// </summary>
+    private async Task<bool> ScopeLockedAsync(IReadOnlyList<VersionRow> versions, CancellationToken ct)
+    {
+        if (versions.Any(v => v.Status is ProcedureEntity.VersionStatusActive or ProcedureEntity.VersionStatusSuperseded))
+        {
+            return true;
+        }
+
+        var retired = versions.Where(v => v.Status == ProcedureEntity.VersionStatusRetired).Select(v => (object)v.Id).ToArray();
+        if (retired.Length == 0)
+        {
+            return false;
+        }
+
+        var query = new QueryExpression(RuleSetService.VersionEntity) { ColumnSet = new ColumnSet(RuleSetService.ProcedureVersionColumn), TopCount = 1 };
+        query.Criteria.AddCondition(RuleSetService.ProcedureVersionColumn, ConditionOperator.In, retired);
+        query.Criteria.AddCondition(RuleSetService.PublishStateColumn, ConditionOperator.Equal, RuleSetService.PublishStatePublished);
+        return (await _entities.RetrieveMultipleAsync(query, ct)).Entities.Any(r =>
+            r.GetAttributeValue<EntityReference>(RuleSetService.ProcedureVersionColumn)?.Id is { } id && retired.Contains(id));
+    }
+
     private async Task<bool> VersionNumberTakenAsync(Guid procedureId, int number, CancellationToken ct)
     {
         try
@@ -1027,6 +1085,8 @@ public class ProcedureService
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            _logger.LogWarning(ex, "Procedure {ProcedureId}: could not re-read its versions to tell whether number {Number} was taken; not retrying",
+                procedureId, number);
             return false;
         }
     }
@@ -1092,6 +1152,12 @@ public class ProcedureService
         catch (DataverseTransactionException ex) when (ex.OutcomeUnknown)
         {
             _logger.LogError(ex, "Procedure {ProcedureId}: the {What} transaction returned no answer; it may have committed", procedureId, what);
+            return SendResult.Unknown;
+        }
+        catch (OperationCanceledException ex)
+        {
+            // The send runs with CancellationToken.None, so a cancellation here is the client's timeout: the transaction may have committed.
+            _logger.LogError(ex, "Procedure {ProcedureId}: the {What} transaction timed out; it may have committed", procedureId, what);
             return SendResult.Unknown;
         }
         catch (Exception ex)
@@ -1199,7 +1265,16 @@ public class ProcedureService
     }
 
     /// <summary>A DateOnly column's value (date-only behaviour: no time zone).</summary>
-    private static DateTime ToDate(DateOnly d) => d.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
+    /// <summary>A date-only column value, as the rest of Finance writes them (<c>RuleSetService.ToUtcDate</c>, <c>RateCardImportService.ToDate</c>).</summary>
+    private static DateTime ToDate(DateOnly d) => new(d.Year, d.Month, d.Day, 0, 0, 0, DateTimeKind.Utc);
+
+    /// <summary>"{Procedure name} v{n}", the Procedure name shortened so the whole fits the version's 200-character name column.</summary>
+    internal static string VersionName(string? procedureName, int number)
+    {
+        var suffix = " v" + number.ToString(CultureInfo.InvariantCulture);
+        var name = procedureName ?? string.Empty;
+        return (name.Length + suffix.Length > MaxNameChars ? name[..(MaxNameChars - suffix.Length)].TrimEnd() : name) + suffix;
+    }
 
     private static RecordOwnershipContext OwnerContext(Guid? callerObjectId) =>
         RecordOwnershipContext.ForParents(Array.Empty<RecordOwnershipParent>(), callerObjectId) with

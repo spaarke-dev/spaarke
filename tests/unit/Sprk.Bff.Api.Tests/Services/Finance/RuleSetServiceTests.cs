@@ -293,6 +293,11 @@ public sealed class RuleSetServiceTests
                         throw new DataverseTransactionException("simulated timeout: no fault came back", null, true, new TimeoutException());
                     }
 
+                    if (TransactionThrows is { } thrown)
+                    {
+                        throw thrown;
+                    }
+
                     var snapshot = TakeSnapshot();
                     for (var i = 0; i < requests.Count; i++)
                     {
@@ -326,6 +331,9 @@ public sealed class RuleSetServiceTests
 
         /// <summary>The transaction returns no fault at all (a timeout): <see cref="DataverseTransactionException.OutcomeUnknown"/>, nothing applied.</summary>
         public bool TransactionOutcomeUnknown;
+
+        /// <summary>The transaction throws this exception as is, nothing applied (e.g. an HttpClient timeout's TaskCanceledException).</summary>
+        public Exception? TransactionThrows;
 
         private (int Code, string Message)? ApplyInTransaction(OrganizationRequest request)
         {

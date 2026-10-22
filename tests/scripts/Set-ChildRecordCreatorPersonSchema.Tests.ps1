@@ -80,21 +80,22 @@ Describe 'the script''s table and solution wiring' {
         $text | Should -Match '(?m)^\$Tables = @\([^)]*''sprk_signal''[^)]*\)'
         $homes = [regex]::Match($text, '(?ms)^\$SolutionHomes = @\{(.*?)^\}').Groups[1].Value
         $homes | Should -Match '(?m)^\s+sprk_signal\s+= @\(''SpaarkeMaster'', ''OntologyPlatformSolution''\)'
-        # exactly the three ontology tables, the four eBilling tables (ebilling-r1 task 013) and the two Procedure tables (task 081)
-        # have solution homes; every other child's column stays in SpaarkeCore
+        # exactly the three ontology tables, the four eBilling tables (ebilling-r1 task 013), the two Procedure tables and the two
+        # policy tables (task 081) have solution homes; every other child's column stays in SpaarkeCore
         @([regex]::Matches($homes, '(?m)^\s+(sprk_\w+)\s+=') | ForEach-Object { $_.Groups[1].Value } | Sort-Object) |
             Should -Be @('sprk_budgetrevision', 'sprk_decisionrecord', 'sprk_externalidentifier', 'sprk_invoiceapproval',
-                'sprk_invoicecorrection', 'sprk_invoicesubmission', 'sprk_procedure', 'sprk_procedureversion', 'sprk_signal')
+                'sprk_invoicecorrection', 'sprk_invoicesubmission', 'sprk_policy', 'sprk_policyversion', 'sprk_procedure',
+                'sprk_procedureversion', 'sprk_signal')
     }
 
-    It 'ebilling-r1 081: lists the two Procedure tables in $Tables with SpaarkeMaster as their only home, and asserts them empty before securing' {
+    It 'ebilling-r1 081: lists the Procedure and policy tables in $Tables with SpaarkeMaster as their only home, and asserts them empty before securing' {
         $text = Get-Content -Raw $script:ScriptPath
         $homes = [regex]::Match($text, '(?ms)^\$SolutionHomes = @\{(.*?)^\}').Groups[1].Value
-        foreach ($t in 'sprk_procedure', 'sprk_procedureversion') {
+        foreach ($t in 'sprk_procedure', 'sprk_procedureversion', 'sprk_policy', 'sprk_policyversion') {
             $text | Should -Match "(?m)^\`$Tables = @\([^)]*'$t'[^)]*\)"
             $homes | Should -Match "(?m)^\s+$t\s+= @\('SpaarkeMaster'\)"
         }
-        $text | Should -Match '(?m)^\$AssertEmptyBeforeSecuring = @\(''sprk_procedure'', ''sprk_procedureversion''\)\s*$'
+        $text | Should -Match '(?m)^\$AssertEmptyBeforeSecuring = @\(''sprk_procedure'', ''sprk_procedureversion'', ''sprk_policy'', ''sprk_policyversion''\)\s*$'
     }
 
     It 'ebilling-r1 013: lists the four eBilling tables in $Tables with SpaarkeMaster as their only solution home' {
@@ -134,6 +135,7 @@ Describe 'a simulated run' {
         function global:SimCp-Reset {
             $global:SimCpScenario = 'ok'
             $global:SimCpWrites.Clear()
+            if ($global:SimCpPermissionPosts) { $global:SimCpPermissionPosts.Clear() }
             $global:SimCpNarrowExists = $true
             $global:SimCpNarrow = @{ sprk_budgetrevision = @{ c = 4; u = 4 }; sprk_decisionrecord = @{ c = 4; u = 4 }; sprk_signal = @{ c = 4; u = 4 } }
             $global:SimCpNarrowUsers = @((SimCp-Guid 'mi'))
@@ -145,7 +147,11 @@ Describe 'a simulated run' {
         # ebilling-r1 task 013: tables whose column travels in SpaarkeMaster only (the eBilling schema scripts create it with
         # the canonical relationship name).
         $global:SimCpMasterOnlyTables = @('sprk_invoicesubmission', 'sprk_invoiceapproval', 'sprk_externalidentifier', 'sprk_invoicecorrection',
-            'sprk_procedure', 'sprk_procedureversion')
+            'sprk_procedure', 'sprk_procedureversion', 'sprk_policy', 'sprk_policyversion')
+        # Task 081: the tables a field-permission POST was sent for (the write list records only "POST fieldpermissions"), and no
+        # real waiting: Ensure-FieldPermission's retry sleeps are shadowed so a refused grant fails fast instead of after two minutes.
+        $global:SimCpPermissionPosts = [System.Collections.Generic.List[string]]::new()
+        function global:Start-Sleep { }
         function global:SimCp-Rel([string]$t) {
             # the maker-made lookups (D-135 Q27) carry the maker's relationship name
             if ($t -in $global:SimCpHomeTables) { "$($t)_CreatedByPerson_systemuser" } else { "sprk_systemuser_$($t)_createdbyperson" }
@@ -160,6 +166,16 @@ Describe 'a simulated run' {
             # Every write is recorded, never performed.
             if ($Method -and $Method -ne 'Get') {
                 $global:SimCpWrites.Add("$Method $path")
+                if ($path -eq 'fieldpermissions' -and "$Body" -match '"entityname":"(\w+)"') {
+                    $permTable = $Matches[1]
+                    $global:SimCpPermissionPosts.Add($permTable)
+                    # As live: a field permission on a column that is not (yet) secured is refused 0x8004f508. In the task 081
+                    # scenarios sprk_procedure's column starts unsecured, so a grant is accepted only after this run secured it.
+                    $securedNow = @($global:SimCpWrites | Where-Object { $_ -like "PUT EntityDefinitions(LogicalName='$permTable')/Attributes*" }).Count -gt 0
+                    if ($global:SimCpScenario -like 'proc-unsecured-*' -and $permTable -eq 'sprk_procedure' -and -not $securedNow) {
+                        throw "0x8004f508: The attribute sprk_createdbyperson is NOT secured for entity fieldpermission"
+                    }
+                }
                 if ($path -eq 'fieldsecurityprofiles') { return @{ fieldsecurityprofileid = $narrow } }
                 return $null
             }
@@ -224,6 +240,10 @@ Describe 'a simulated run' {
                 # who can write the column on the budget revision / decision record / signal: the narrow profile does, and the script must allow it there
                 return @{ value = @(@{ fieldsecurityprofileid = @{ name = $narrowName } }) }
             }
+            if ($global:SimCpScenario -like 'proc-unsecured-*' -and $path -like "fieldpermissions?*_fieldsecurityprofileid_value eq *entityname eq 'sprk_procedure'*") {
+                # Task 081: the column was never secured, so neither BFF profile holds a permission on it yet.
+                return @{ value = @() }
+            }
             if ($path -like 'fieldpermissions?*_fieldsecurityprofileid_value eq *') {
                 $w = $path -like "*eq $writer*"
                 return @{ value = @(@{ fieldpermissionid = 'p'; canread = 4; cancreate = $(if ($w) { 4 } else { 0 }); canupdate = $(if ($w) { 4 } else { 0 }) }) }
@@ -279,14 +299,15 @@ Describe 'a simulated run' {
         function script:Invoke-SimulatedRun([hashtable]$Mode = @{ Verify = $true }) {
             $global:LASTEXITCODE = 0
             $global:SimCpWrites.Clear()
+            $global:SimCpPermissionPosts.Clear()
             $text = & $script:ScriptPath -EnvironmentUrl 'https://sim.crm.dynamics.com' -BffApplicationIds (SimCp-Guid 'app') -OntologyWriterApplicationId (SimCp-Guid 'mi-app') @Mode *>&1 | Out-String
             [pscustomobject]@{ Text = $text; ExitCode = $global:LASTEXITCODE; Writes = @($global:SimCpWrites) }
         }
         function script:Invoke-SimulatedVerify { Invoke-SimulatedRun @{ Verify = $true } }
     }
     AfterAll {
-        foreach ($f in 'az', 'Invoke-RestMethod', 'SimCp-Guid', 'SimCp-Rel', 'SimCp-Reset') { Remove-Item "function:global:$f" -ErrorAction SilentlyContinue }
-        Remove-Variable SimCpTables, SimCpHomeTables, SimCpMasterOnlyTables, SimCpScenario, SimCpWrites, SimCpNarrowExists, SimCpNarrow, SimCpNarrowUsers, SimCpNarrowTeams, SimCpNarrowExtra -Scope Global -ErrorAction SilentlyContinue
+        foreach ($f in 'az', 'Invoke-RestMethod', 'SimCp-Guid', 'SimCp-Rel', 'SimCp-Reset', 'Start-Sleep') { Remove-Item "function:global:$f" -ErrorAction SilentlyContinue }
+        Remove-Variable SimCpTables, SimCpHomeTables, SimCpMasterOnlyTables, SimCpScenario, SimCpWrites, SimCpNarrowExists, SimCpNarrow, SimCpNarrowUsers, SimCpNarrowTeams, SimCpNarrowExtra, SimCpPermissionPosts -Scope Global -ErrorAction SilentlyContinue
     }
 
     It 'passes: the maker relationship name is accepted, and the column is found in SpaarkeMaster and OntologyPlatformSolution, not reported missing from SpaarkeCore' {
@@ -501,14 +522,23 @@ Describe 'a simulated run' {
         $run.Text | Should -Match 'OK\s+sprk_procedure\.sprk_createdbyperson holds no value yet'
         $run.Text | Should -Match 'DONE\s+secured sprk_procedure\.sprk_createdbyperson'
         @($run.Writes | Where-Object { $_ -like "PUT EntityDefinitions(LogicalName='sprk_procedure')/Attributes*" }).Count | Should -Be 1
+        # then both BFF profiles are granted on the newly secured column (the grant after the PUT is accepted)
+        @($global:SimCpPermissionPosts | Where-Object { $_ -eq 'sprk_procedure' }).Count | Should -Be 2
+        $run.Text | Should -Match 'DONE\s+granted Spaarke BFF-Managed Field Writers on sprk_procedure\.sprk_createdbyperson'
     }
 
-    It '081 must fire: -Apply does NOT secure sprk_procedure.sprk_createdbyperson when it already holds a value, FAILs, and exits non-zero' {
+    It '081 must fire: -Apply does NOT secure sprk_procedure.sprk_createdbyperson when it already holds a value, grants nothing on it, carries on, and exits non-zero' {
         SimCp-Reset; $global:SimCpScenario = 'proc-unsecured-valued'
         $run = Invoke-SimulatedRun @{ Apply = $true }
         $run.Text | Should -Match 'FAIL\s+sprk_procedure\.sprk_createdbyperson already holds 1 value\(s\) while unsecured; it is NOT secured'
         $run.Text | Should -Not -Match 'DONE\s+secured sprk_procedure\.sprk_createdbyperson'
         @($run.Writes | Where-Object { $_ -like "PUT EntityDefinitions(LogicalName='sprk_procedure')/Attributes*" }).Count | Should -Be 0
+        # no grant on the unsecured column (live refuses it 0x8004f508 and the script would stall, then abort the run)
+        @($global:SimCpPermissionPosts | Where-Object { $_ -eq 'sprk_procedure' }).Count | Should -Be 0
+        $run.Text | Should -Not -Match 'not yet seen as secured'
+        # the run goes on: the next tables are still checked and the publish step is reached
+        $run.Text | Should -Match 'OK\s+sprk_procedureversion\.sprk_createdbyperson is field-secured'
+        $run.Text | Should -Match 'Published '
         $run.ExitCode | Should -Be 1
     }
 

@@ -263,6 +263,12 @@ public class RuleSetService
     /// <summary>Task 081: a Procedure's rules are edited and decided on its Draft version; there is none.</summary>
     internal const string CodeNoDraftVersion = "ruleset.no_draft_version";
 
+    /// <summary>
+    /// Task 081 (I-P4, review F): a Procedure's rule set mirrors the Procedure's scope and visibility (ProcedureService writes both, under the
+    /// caller's Write on the Procedure and the scope lock), so the rule-set assignment and visibility routes refuse it.
+    /// </summary>
+    internal const string CodeProcedureOwned = "ruleset.procedure_owned";
+
     // ── Task 081 (EB-D-148, procedure model 7.2): the version chain re-keyed per (policy, Procedure Version). ──
 
     /// <summary><c>sprk_ruleset.sprk_procedure</c>: the Procedure whose rules the set holds (080). A set without it is a legacy set.</summary>
@@ -1991,6 +1997,11 @@ public class RuleSetService
             return RuleSetOutcome<RuleSetSummary>.Refused(StatusCodes.Status409Conflict, CodeRetired, "A retired rule set cannot be changed.");
         }
 
+        if (ProcedureOwned<RuleSetSummary>(set) is { } owned)
+        {
+            return owned;
+        }
+
         var errors = new List<RuleSetError>();
         if (scope == RuleSetScope.Firm && (firmId is null || firmId == Guid.Empty))
         {
@@ -2033,8 +2044,20 @@ public class RuleSetService
             return RuleSetOutcome<RuleSetSummary>.Refused(StatusCodes.Status409Conflict, CodeRetired, "A retired rule set cannot be changed.");
         }
 
+        if (ProcedureOwned<RuleSetSummary>(set) is { } owned)
+        {
+            return owned;
+        }
+
         return await UpdateSetAsync(ruleSetId, set, new Dictionary<string, object> { ["sprk_visibletofirms"] = visibleToFirms }, ct);
     }
+
+    /// <summary>Task 081: the 409 for a rule set that belongs to a Procedure (<see cref="CodeProcedureOwned"/>); null for any other set.</summary>
+    private static RuleSetOutcome<T>? ProcedureOwned<T>(Entity set) where T : class =>
+        set.GetAttributeValue<EntityReference>(ProcedureColumn) is null
+            ? null
+            : RuleSetOutcome<T>.Refused(StatusCodes.Status409Conflict, CodeProcedureOwned,
+                "This rule set belongs to a Procedure. Change who it applies to, or its type, on the Procedure.");
 
     private async Task<RuleSetOutcome<RuleSetSummary>> UpdateSetAsync(Guid ruleSetId, Entity set, Dictionary<string, object> fields, CancellationToken ct)
     {

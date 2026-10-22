@@ -112,6 +112,10 @@ public static class RecordCreatorPerson
         // Not in the Secure Record Owner role set (Procedures are not secure-record children): ChildRecordCreatorPersonSchemaAgreementTests
         // lists them as stamped outside it.
         "sprk_procedure", "sprk_procedureversion",
+        // ebilling-r1 task 081 (080 hand-off; ontology F4-1, D-173): 080 created the column on the policy tables too. RuleSetService and
+        // the Procedure copy-forward create them app-only for the calling admin, so they record that person; the script empty-checks,
+        // secures and publishes both (SpaarkeMaster).
+        "sprk_policy", "sprk_policyversion",
     };
 
     /// <summary>Whether <paramref name="entityLogicalName"/> carries the column: a secure root or a stamped child table.</summary>

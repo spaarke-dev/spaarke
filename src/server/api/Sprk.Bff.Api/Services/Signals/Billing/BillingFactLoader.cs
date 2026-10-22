@@ -208,6 +208,9 @@ public sealed class BillingFactLoader
     internal const string InvoiceEntity = "sprk_invoice";
     internal const string LineEntity = "sprk_billingevent";
 
+    /// <summary>ebilling-r1 task 081: <c>sprk_ruleset.sprk_procedure</c>, set on a Procedure's rule set (not read here until task 082).</summary>
+    internal const string ProcedureColumn = "sprk_procedure";
+
     private const int RuleSetPublished = 659490000;
     private const int StateActive = 0;
     private const string OpenedDateColumn = "sprk_openeddate";
@@ -281,11 +284,15 @@ public sealed class BillingFactLoader
     {
         var setQuery = new QueryExpression(RuleSetEntity)
         {
-            ColumnSet = new ColumnSet("sprk_scope", "sprk_firm", "statuscode", RuleDomains.PolicyDomainColumn),
+            ColumnSet = new ColumnSet("sprk_scope", "sprk_firm", "statuscode", RuleDomains.PolicyDomainColumn, ProcedureColumn),
             NoLock = true,
         };
         RuleDomains.AddBillingFilter(setQuery);
         setQuery.Criteria.AddCondition("statuscode", ConditionOperator.Equal, RuleSetPublished);
+        // ebilling-r1 task 081 (EB-D-148): a Procedure's rule set is in force per Procedure Version (its window, its Applies to, the rules the
+        // version kept), which this set-level reader cannot honour: it would apply an "Assigned records only" Procedure to every invoice and
+        // keep a dropped rule firing. Until the resolver (task 082) reads Procedure Versions, a Procedure's set is not evaluated here at all.
+        setQuery.Criteria.AddCondition(ProcedureColumn, ConditionOperator.Null);
         var scope = new FilterExpression(LogicalOperator.Or);
         scope.AddCondition("sprk_scope", ConditionOperator.Equal, (int)RuleSetScope.ClientDefault);
         var firm = new FilterExpression(LogicalOperator.And);
@@ -298,7 +305,8 @@ public sealed class BillingFactLoader
         var sets = new Dictionary<Guid, RuleSetScope>();
         foreach (var row in await AllAsync(setQuery, ct).ConfigureAwait(false))
         {
-            if (!RuleDomains.IsBillingRow(row) || row.GetAttributeValue<OptionSetValue>("statuscode")?.Value != RuleSetPublished)
+            if (!RuleDomains.IsBillingRow(row) || row.GetAttributeValue<OptionSetValue>("statuscode")?.Value != RuleSetPublished
+                || row.GetAttributeValue<EntityReference>(ProcedureColumn) is not null)
             {
                 continue;
             }
