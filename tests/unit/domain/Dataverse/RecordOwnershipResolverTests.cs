@@ -3569,7 +3569,10 @@ public class RecordOwnershipResolverTests
             request, _ => { applied = true; return Task.CompletedTask; }, CancellationToken.None);
 
         resolution.IsRefused.Should().BeTrue("only the creator may take an unidentified secure row out, and the caller is not it");
-        resolution.SecureRemovalRefusal!.Basis.Should().NotBe(Sprk.Bff.Api.Services.Access.SecureRemovalBasis.Creator);
+        // Exactly the unidentified refusal: a forged value read as the creator would have admitted (no refusal at all), and a
+        // value read as "column absent" would name a different basis.
+        resolution.RefusalCode.Should().Be(Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.PermissionUnverifiableReasonCode);
+        resolution.SecureRemovalRefusal!.Basis.Should().Be(Sprk.Bff.Api.Services.Access.SecureRemovalBasis.SecureRecordUnidentified);
         applied.Should().BeFalse();
         directory.Assignments.Should().BeEmpty();
     }
