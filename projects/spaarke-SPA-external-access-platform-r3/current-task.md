@@ -61,6 +61,7 @@
   4. ISS-004: should staff delete refuse rows with an unverifiable pointer (unclaimed container, unbound or mismatched item)? Merged as "refuse".
   5. Should the owner setting refuse a ROOT BU (UAC K5)?
   6. #2270, foreign-environment contact owner: (a) registry row BU, or (b) the systemuser BU (I lean b).
+- **UPDATE:** ISS-003 is MERGED into R3 as 70d9ebc689 (2 security passes; the 2nd-pass items were applied in 02d00604cf). The in-flight ISS-003 note in Quick Recovery is superseded.
 - **Filed today (R3 label):** #2269 (binder faults 403→503), #2270 (foreign-environment ownerless contacts), #2271 (lock 409 not ProblemDetails), #2275 (SPA test cold-start flake).
 - **Peers:** provisioning finished ISS-013 (#2001, task 264) and #2265 (faf36207d + 527162e5d) on their branch only. R3 owes an ISS-013 regression check once their branch merges. ACME needs a one-off PATCH, waiting for the owner via provisioning.
 - **Stale agent worktrees** under `C:/code_files/spaarke/.claude/worktrees/agent-*` (and C:/wtr3-suite) can be cleaned up after the batch, via Remove-WorktreeSafe.ps1 with the owner's OK.
