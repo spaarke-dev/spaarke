@@ -170,3 +170,11 @@ The 018 implementer stopped before writing code (the budget, plus live changes b
    - **018b:** the Matter/Project adapter, after item 3.
    - **018c:** delete the Office core and re-point or retire the nine test files.
    - The Invoice leg waits for ebilling-r1; it uses nothing from `OfficeRecordCreationService`.
+
+## 2026-10-21 — The Office Invoice quick-create leg is not moved (ebilling-r1, owner decision L)
+
+ebilling-r1 says the owner decided (decision L, model §4/§9) that invoices are created only by submission (FR-17, FR-20).
+- ebilling task 096 deletes the Office Invoice quick-create leg (`QuickCreateRequest.cs:180`) and the Invoice save target (`OfficeDocumentPersistence.cs:47`). It ships one release after word-add-in-r1's add-in release, because cached add-in clients can still call those legs.
+- Task 018 therefore moves only Matter and Project. It leaves the Invoice leg exactly as it is, apart from a marker comment, and adds no `RecordCreationService` path for `sprk_invoice` from Office.
+- The 018 Invoice criterion is withdrawn.
+- The #1911 reconcile still adds the invoice-family `PreWriteRule` for `sprk_invoice` / `sprk_billingevent`, for the submission path.
