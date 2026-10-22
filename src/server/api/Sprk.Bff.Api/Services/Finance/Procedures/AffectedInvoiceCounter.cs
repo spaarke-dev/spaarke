@@ -15,21 +15,23 @@ namespace Sprk.Bff.Api.Services.Finance.Procedures;
 /// <remarks>
 /// <para><b>Counted as the caller, never app-only (uac-r2, ontology-r1 v5.9).</b> The Signal set and the invoice states are read as the
 /// application (they are the action's own scope); the number is narrowed by the caller's own rights, asked of Dataverse as the caller in one
-/// batched <see cref="CallerRecordAccessProbe.GetCallerRightsForRecordsAsync"/> call per page of invoices. The result never says how many
+/// batched <see cref="CallerRecordAccessProbe.GetCallerRightsForRecordsOrUnknownAsync"/> call per page of invoices. The result never says how many
 /// invoices were left out. An app-only count would tell a billing admin how many invoices exist under Secure or Restricted records they cannot
 /// read.</para>
 /// <para><b>Fail closed to "no count".</b> If the caller cannot be established (<see cref="CallerRecordAccessProbe.GetCallerSystemUserIdAsync"/>
 /// answers null: no token, OBO failure, WhoAmI empty), if the rights call throws, or if any app read of the invoices faults, the answer is
-/// <c>null</c>: the caller sees the warning with no number, never the app-only one. A single record whose rights question fails answers
-/// <see cref="AccessRights.None"/> inside the probe and is not counted (K2: the count can only be lower than what the caller can see, never
-/// higher).</para>
+/// <c>null</c>: the caller sees the warning with no number, never the app-only one. So is ANY record whose rights question was not
+/// answered (unknown: a 429, a 5xx, a failed exchange or <c>WhoAmI</c>; uac-r2 review F1, 2026-10-22): a number is shown only when every
+/// invoice was answered, so the count is never lower than what the caller can see because Dataverse was throttling. A 403 is an answer
+/// (not visible).</para>
 /// <para><b>Open invoice.</b> <c>statecode</c> Active and <c>statuscode</c> In Review (<see cref="InvoiceStatusCodes.InReview"/>): the invoices
 /// the D-170 close acts on (model 15 answer 2 "on In Review invoices"). A pending invoice has no evaluation yet, so it has no billing Signal.
 /// A Signal about an invoice LINE (<c>sprk_regardinginvoiceline</c>) counts its line's invoice (<c>sprk_billingevent.sprk_invoice</c>); an
 /// invoice is counted once however many of its Signals are in the set.</para>
 /// <para>§11: <i>Existing</i> — the probe answers rights per record; nothing maps Signals to open invoices. <i>Extension</i> — the probe is
-/// reused as is; this is the counting rule the model asks to be shared by 081 and 089, so it is one class, not two copies. <i>Cost of doing
-/// nothing</i> — the retire confirmation would have no count, or 089 would copy the rule and the two could disagree.</para>
+/// extended by one batched method that keeps "unknown" apart from "no access" (uac-r2 F1; the existing method is unchanged); this is
+/// the counting rule the model asks to be shared by 081 and 089, so it is one class, not two copies. <i>Cost of doing nothing</i>
+/// — the retire confirmation would have no count, or 089 would copy the rule and the two could disagree.</para>
 /// </remarks>
 public class AffectedInvoiceCounter
 {
@@ -92,9 +94,16 @@ public class AffectedInvoiceCounter
         {
             foreach (var page in open.OrderBy(id => id).Chunk(RightsPageSize))
             {
-                var rights = await _probe.GetCallerRightsForRecordsAsync(
+                var rights = await _probe.GetCallerRightsForRecordsOrUnknownAsync(
                     callerBearerToken, page.Select(id => (FinanceAuthorizationFilter.InvoiceEntitySet, id)).ToList(), ct).ConfigureAwait(false);
-                visible += rights.Count(r => (r & AccessRights.Read) == AccessRights.Read);
+                if (rights.Count != page.Length || rights.Any(r => r is null))
+                {
+                    _logger.LogWarning("Affected-invoice count: the caller's rights on {Unknown} of {PageCount} invoice(s) were not answered; no count is shown",
+                        rights.Count(r => r is null) + Math.Max(0, page.Length - rights.Count), page.Length);
+                    return null;
+                }
+
+                visible += rights.Count(r => (r!.Value & AccessRights.Read) == AccessRights.Read);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)

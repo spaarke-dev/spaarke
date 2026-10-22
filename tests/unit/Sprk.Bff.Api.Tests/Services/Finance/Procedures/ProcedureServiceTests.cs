@@ -57,7 +57,11 @@ public sealed class ProcedureServiceTests
         public readonly List<bool> SelectedWithBillingSubject = new();
         public readonly List<bool> ClosedWithBillingSubject = new();
         public Guid? CallerSystemUser = CallerUserId;
+        /// <summary>The probe answered no record (a failed exchange or WhoAmI): every entry unknown. The real probe never throws.</summary>
         public bool RightsFault;
+
+        /// <summary>uac-r2 F1: records whose rights question was not answered (a 429 or a 5xx): unknown, not None.</summary>
+        public readonly HashSet<Guid> UnknownRights = new();
         public bool CallerFault;
         public bool SelectFault;
         public Func<Guid, bool>? CloseFailsFor;
@@ -104,13 +108,16 @@ public sealed class ProcedureServiceTests
 
             Probe.Setup(p => p.GetCallerSystemUserIdAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() => CallerFault ? throw new HttpRequestException("simulated token-exchange fault") : CallerSystemUser);
-            Probe.Setup(p => p.GetCallerRightsForRecordsAsync(It.IsAny<string?>(), It.IsAny<IReadOnlyList<(string, Guid)>>(), It.IsAny<CancellationToken>()))
+            // uac-r2 F1: the unknown-aware batched question, answered as the real probe answers (never a throw): the rights, None for
+            // a 403, null (unknown) for a record not answered, or for every record when the caller's exchange fails.
+            Probe.Setup(p => p.GetCallerRightsForRecordsOrUnknownAsync(It.IsAny<string?>(), It.IsAny<IReadOnlyList<(string, Guid)>>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string? token, IReadOnlyList<(string EntitySet, Guid RecordId)> targets, CancellationToken _) =>
                 {
                     RightsCalls.Add(targets);
                     token.Should().Be(Token, "the rights are asked as the caller");
-                    if (RightsFault) throw new HttpRequestException("simulated rights fault");
-                    return targets.Select(t => Readable.Contains(t.RecordId) ? AccessRights.Read | AccessRights.Write : AccessRights.None).ToList();
+                    return targets.Select(t => RightsFault || UnknownRights.Contains(t.RecordId)
+                        ? (AccessRights?)null
+                        : Readable.Contains(t.RecordId) ? AccessRights.Read | AccessRights.Write : AccessRights.None).ToList();
                 });
         }
 
@@ -1094,6 +1101,22 @@ public sealed class ProcedureServiceTests
         outcome.Value!.Warning.Should().NotBeNullOrEmpty();
         outcome.Value.AffectedText.Should().BeNull();
         outcome.Value.VisibleOpenInvoices.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Preview_WhenOneInvoicesRightsAreUnknown_ShowsNoCount_NeverALowerOne()
+    {
+        // uac-r2 F1 must-fire: a 429 or 5xx on one readable invoice used to come back None and lower the count from 2 to 1.
+        var s = SceneRetire();
+        s.W.UnknownRights.Add(s.Readable2);
+
+        var outcome = await s.W.Service().PreviewRetireAsync(s.Procedure, Token, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        outcome.Value!.Warning.Should().NotBeNullOrEmpty();
+        outcome.Value.VisibleOpenInvoices.Should().BeNull("one unanswered invoice means the number cannot be told");
+        outcome.Value.AffectedText.Should().BeNull();
+        s.W.RightsCalls.Should().ContainSingle();
     }
 
     [Fact]
