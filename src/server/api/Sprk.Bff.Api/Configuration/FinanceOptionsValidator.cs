@@ -93,7 +93,8 @@ public sealed class FinanceOptionsValidator : IValidateOptions<FinanceOptions>
             if (!Guid.TryParse(fileStore.TenantId?.Trim(), out var tenant) || tenant == Guid.Empty)
             {
                 failures.Add($"{tenantKey} must be a non-empty GUID when {endpointKey} is set: it is the first segment of every stored file's "
-                    + "blob name, and every name is checked against it.");
+                    + "blob name, and every name is checked against it. Set it to this Dataverse environment's OrganizationId (checked at "
+                    + "the store's first operation).");
             }
         }
 

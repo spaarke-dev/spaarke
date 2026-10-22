@@ -126,9 +126,12 @@ public sealed class FinanceFileStoreOptions
     public string BlobEndpoint { get; set; } = string.Empty;
 
     /// <summary>
-    /// The tenant segment of every blob name (<c>{tenantId}/{parent table}/{parent id}/{file id}</c>): a GUID, required when
-    /// <see cref="BlobEndpoint"/> is set. Every finished name is re-checked against it, and a stored path naming another tenant is
-    /// refused. App setting <c>Finance__FileStore__TenantId</c>.
+    /// The first segment of every blob name (<c>{tenantId}/{parent table}/{parent id}/{file id}</c>): the OrganizationId of the
+    /// Dataverse ENVIRONMENT this deployment serves (not the Entra tenant id, not a customer id: a customer's prod and UAT must never
+    /// share a prefix). A GUID, required when <see cref="BlobEndpoint"/> is set; start-up checks the shape only, and the store checks
+    /// it against the environment's <c>organization</c> row before its first operation (a mismatch refuses every operation). Every
+    /// finished name is re-checked against it, and a stored path naming another segment is refused. Set once per environment and
+    /// never changed while rows exist (a row's path is stable for its lifetime). App setting <c>Finance__FileStore__TenantId</c>.
     /// </summary>
     public string TenantId { get; set; } = string.Empty;
 

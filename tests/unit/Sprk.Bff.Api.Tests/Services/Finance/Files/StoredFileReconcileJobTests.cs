@@ -30,9 +30,12 @@ public sealed class StoredFileReconcileJobTests
 
     private sealed class Harness
     {
-        public Harness(bool ebilling = true, bool configured = true, int graceMinutes = 1440, int alertMinutes = 60, int pageSize = 5000, int maxPages = 50)
+        public Harness(
+            bool ebilling = true, bool configured = true, int graceMinutes = 1440, int alertMinutes = 60, int pageSize = 5000, int maxPages = 50,
+            Guid? organizationId = null)
         {
-            Rig = new StoredFileRig(configured: configured);
+            Rig = new StoredFileRig(
+                configured: configured, organizationId: organizationId is { } org ? _ => Task.FromResult(org) : null);
             Clock = new FakeTimeProvider(Rig.Gateway.Now.AddHours(25));
             var services = new ServiceCollection();
             services.AddSingleton(Rig.Dataverse.Service);
@@ -552,6 +555,34 @@ public sealed class StoredFileReconcileJobTests
 
         // A1-5 (review F4): the failed attempt still logs its one heartbeat.
         h.Log.Entries.Where(e => e.EventId.Id == 9092).Should().ContainSingle().Which.Message.Should().Contain("failed=True");
+    }
+
+    [Fact(DisplayName = "Must-fire (uac-r2 round 1): a name segment that is not this environment's OrganizationId fails the run (A1-4) and deletes nothing")]
+    public async Task OrganizationMismatch_Throws_NothingDeleted()
+    {
+        var h = new Harness(organizationId: Guid.Parse("0e900000-0000-4000-8000-000000000001"));
+        var goneParent = new StoredFileParent(StoredFileParentKind.Invoice, Guid.NewGuid());
+        h.Rig.SeedFile(Guid.NewGuid(), goneParent, Pdf);
+        h.SeedOrphan(h.Clock.GetUtcNow().AddDays(-2));
+
+        var act = () => h.RunAsync();
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*OrganizationId*");
+        h.Rig.Gateway.StorageCalls.Should().Be(0);
+        h.Rig.Dataverse.Writes.Should().Be(0);
+        h.Log.Entries.Where(e => e.EventId.Id == 9092).Should().ContainSingle().Which.Message.Should().Contain("failed=True");
+    }
+
+    [Fact(DisplayName = "Must-not-fire (uac-r2 round 1): the segment equal to this environment's OrganizationId runs normally")]
+    public async Task OrganizationMatch_Runs()
+    {
+        var h = new Harness(organizationId: StoredFileRig.Tenant);
+        var path = h.SeedOrphan(h.Clock.GetUtcNow().AddDays(-2));
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue();
+        h.Rig.Gateway.Get("invoice-files", path).Should().BeNull();
     }
 
     [Fact(DisplayName = "A1-4: the blob listing faulting throws")]

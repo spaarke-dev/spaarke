@@ -116,6 +116,10 @@ public sealed class StoredFileReconcileJob : IScheduledJob
 
         try
         {
+            // The name segment must be this environment's OrganizationId before anything is judged: a mismatch (or a fault reading
+            // it) means no progress is possible (A1-4: throw).
+            await _blobs.EnsureEnvironmentAsync(cancellationToken).ConfigureAwait(false);
+
             using var scope = _scopeFactory.CreateScope();
             var entities = scope.ServiceProvider.GetRequiredService<IGenericEntityService>();
 

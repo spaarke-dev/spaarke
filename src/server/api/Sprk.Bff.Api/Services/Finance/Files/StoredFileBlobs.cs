@@ -4,6 +4,8 @@ using System.Security.Cryptography;
 using Azure;
 using Azure.Core;
 using Microsoft.Extensions.Options;
+using Microsoft.Xrm.Sdk.Query;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Storage;
 
@@ -28,6 +30,12 @@ namespace Sprk.Bff.Api.Services.Finance.Files;
 /// <c>2026-04-17 17:40:38Z</c>, which <see cref="ScanTimeFormats"/> accepts. An absent, unreadable or future scan time refuses
 /// (Pending), so an unconfirmed key or format fails closed and is a live verification for the first environment with scanning on
 /// (notes/090-file-store-service.md). This type never writes tags (091: tag writes are refused by the role anyway).</para>
+/// <para><b>The name segment is the Dataverse environment's OrganizationId</b> (uac-r2 review round 1). <c>Finance:FileStore:TenantId</c>
+/// is set per environment and must equal the OrganizationId of the environment this deployment serves, so a customer's prod and UAT
+/// never share a prefix. Start-up validation cannot call Dataverse, so the first operation reads the <c>organization</c> row ONCE
+/// (app-only) and compares: a match is cached for the process; a mismatch refuses every operation for the process (an error log
+/// names both ids); a fault is not cached (the next operation asks again). The segment is configuration, never read per call, so a
+/// row's path stays stable for its lifetime.</para>
 /// </remarks>
 public sealed class StoredFileBlobs
 {
@@ -64,13 +72,20 @@ public sealed class StoredFileBlobs
     private readonly BlobGateway? _gateway;
     private readonly ILogger _logger;
     private readonly TimeProvider _time;
+    private readonly Func<CancellationToken, Task<Guid>>? _organizationId;
+    private readonly object _environmentGate = new();
+    private Task<bool>? _environmentCheck;
 
-    /// <summary>Production constructor: the bound <c>Finance:FileStore</c> section and the shared managed-identity credential.</summary>
+    /// <summary>
+    /// Production constructor: the bound <c>Finance:FileStore</c> section, the shared managed-identity credential, and the app-only
+    /// Dataverse service the one OrganizationId check reads through.
+    /// </summary>
     /// <exception cref="InvalidOperationException">A configured endpoint or tenant is unusable (start-up validation reports it first).</exception>
     public StoredFileBlobs(
-        IOptions<FinanceOptions> options, IOptions<DataverseOptions> dataverse, TokenCredential credential, TimeProvider timeProvider,
-        ILogger<StoredFileBlobs> logger)
+        IOptions<FinanceOptions> options, IOptions<DataverseOptions> dataverse, TokenCredential credential, IGenericEntityService entities,
+        TimeProvider timeProvider, ILogger<StoredFileBlobs> logger)
     {
+        ArgumentNullException.ThrowIfNull(entities);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(dataverse);
         ArgumentNullException.ThrowIfNull(credential);
@@ -93,15 +108,20 @@ public sealed class StoredFileBlobs
 
         TenantId = tenant;
         _gateway = new AzureBlobGateway(endpoint, credential);
+        _organizationId = ct => ReadOrganizationIdAsync(entities, ct);
     }
 
-    /// <summary>Test constructor: a substitute gateway (<c>null</c> = not configured) and clock (<c>null</c> = the system clock).</summary>
+    /// <summary>
+    /// Test constructor: a substitute gateway (<c>null</c> = not configured), clock (<c>null</c> = the system clock) and OrganizationId
+    /// source (<c>null</c> = no check).
+    /// </summary>
     internal StoredFileBlobs(
         BlobGateway? gateway, Guid tenantId, bool? malwareScanningEnabled, ILogger logger, string? environment = TestEnvironment,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null, Func<CancellationToken, Task<Guid>>? organizationId = null)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _time = timeProvider ?? TimeProvider.System;
+        _organizationId = organizationId;
         if (gateway is not null && tenantId == Guid.Empty)
         {
             throw new ArgumentException("A configured store needs a tenant.", nameof(tenantId));
@@ -135,8 +155,78 @@ public sealed class StoredFileBlobs
             ? uri.Host.ToLowerInvariant()
             : null;
 
-    /// <summary>The tenant segment of every name (<see cref="Guid.Empty"/> when not configured).</summary>
+    /// <summary>
+    /// The first segment of every name: this Dataverse environment's OrganizationId (<c>Finance:FileStore:TenantId</c>, checked against
+    /// Dataverse before the first operation, see remarks; <see cref="Guid.Empty"/> when not configured).
+    /// </summary>
     public Guid TenantId { get; }
+
+    /// <summary>
+    /// Throws unless <see cref="TenantId"/> is confirmed to be this environment's OrganizationId (see remarks). The reconcile job calls
+    /// it first, so a mismatch fails the run (no progress possible) rather than each unit.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The configured segment is not this environment's OrganizationId.</exception>
+    internal async Task EnsureEnvironmentAsync(CancellationToken ct)
+    {
+        if (!await EnvironmentConfirmedAsync(ct).ConfigureAwait(false))
+        {
+            throw new InvalidOperationException(
+                $"'{FinanceFileStoreOptions.SectionPath}:TenantId' is not this Dataverse environment's OrganizationId; the file store refuses every operation.");
+        }
+    }
+
+    /// <summary>
+    /// True when the segment is this environment's OrganizationId (or no check is configured). One read per process: the answer is
+    /// shared by concurrent callers and cached unless the read faulted (a fault throws to this caller and the next call asks again).
+    /// </summary>
+    private Task<bool> EnvironmentConfirmedAsync(CancellationToken ct)
+    {
+        if (_organizationId is null)
+        {
+            return Task.FromResult(true);
+        }
+
+        Task<bool> check;
+        lock (_environmentGate)
+        {
+            if (_environmentCheck is null || _environmentCheck.IsFaulted || _environmentCheck.IsCanceled)
+            {
+                _environmentCheck = CheckEnvironmentAsync(_organizationId);
+            }
+
+            check = _environmentCheck;
+        }
+
+        return check.WaitAsync(ct);
+    }
+
+    private async Task<bool> CheckEnvironmentAsync(Func<CancellationToken, Task<Guid>> organizationId)
+    {
+        // Not the caller's token: the answer is shared and cached for the process.
+        var organization = await organizationId(CancellationToken.None).ConfigureAwait(false);
+        if (organization == TenantId)
+        {
+            return true;
+        }
+
+        _logger.LogError(
+            "Finance file store refused: {Key} is {Configured} but this Dataverse environment's OrganizationId is {OrganizationId}; "
+            + "every file-store operation refuses until the setting is corrected ({Code})",
+            FinanceFileStoreOptions.SectionPath + ":TenantId", TenantId, organization, StoredFileRefusal.NotConfigured);
+        return false;
+    }
+
+    /// <summary>The OrganizationId of the environment <paramref name="entities"/> is connected to (its one <c>organization</c> row).</summary>
+    /// <exception cref="InvalidOperationException">The row did not come back.</exception>
+    internal static async Task<Guid> ReadOrganizationIdAsync(IGenericEntityService entities, CancellationToken ct)
+    {
+        var query = new QueryExpression("organization") { ColumnSet = new ColumnSet("organizationid"), TopCount = 1 };
+        var rows = await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        var id = rows.Entities.Count == 1
+            ? rows.Entities[0].GetAttributeValue<Guid?>("organizationid") ?? rows.Entities[0].Id
+            : Guid.Empty;
+        return id != Guid.Empty ? id : throw new InvalidOperationException("The Dataverse organization row could not be read.");
+    }
 
     /// <summary>False only when <c>MalwareScanningEnabled</c> is explicitly <c>false</c>.</summary>
     public bool ScanningEnabled { get; }
@@ -164,6 +254,11 @@ public sealed class StoredFileBlobs
             || (submissionId is { } s && s == Guid.Empty))
         {
             return StageResult.Refused(StoredFileRefusal.InvalidRequest);
+        }
+
+        if (!await EnvironmentConfirmedAsync(ct).ConfigureAwait(false))
+        {
+            return StageResult.Refused(StoredFileRefusal.NotConfigured);
         }
 
         var container = StoredFileSchema.ContainerOf(purpose);
@@ -260,7 +355,7 @@ public sealed class StoredFileBlobs
     /// <exception cref="RequestFailedException">A storage fault.</exception>
     internal async Task<Verification> VerifyAsync(string container, string blobPath, string? expectedSha256, CancellationToken ct)
     {
-        var gateway = RequireOwnBlob(container, blobPath);
+        var gateway = await RequireOwnBlobAsync(container, blobPath, ct).ConfigureAwait(false);
         await using var stream = await gateway.OpenReadAsync(container, blobPath, ifMatch: null, ct).ConfigureAwait(false);
         if (stream is null)
         {
@@ -280,7 +375,7 @@ public sealed class StoredFileBlobs
     internal async Task<(StoredFileScanState State, BlobPropertiesInfo Properties)?> GetScanStateAsync(
         string container, string blobPath, CancellationToken ct)
     {
-        var gateway = RequireOwnBlob(container, blobPath);
+        var gateway = await RequireOwnBlobAsync(container, blobPath, ct).ConfigureAwait(false);
         var properties = await gateway.GetPropertiesAsync(container, blobPath, ct).ConfigureAwait(false);
         if (properties is null)
         {
@@ -352,15 +447,15 @@ public sealed class StoredFileBlobs
     /// <summary>The blob's properties and metadata, or <c>null</c> when it does not exist (the reconcile job's environment check).</summary>
     /// <exception cref="ArgumentException"><paramref name="blobPath"/> is not a name of this tenant (nothing is called).</exception>
     /// <exception cref="RequestFailedException">A storage fault.</exception>
-    internal Task<BlobPropertiesInfo?> GetPropertiesAsync(string container, string blobPath, CancellationToken ct) =>
-        RequireOwnBlob(container, blobPath).GetPropertiesAsync(container, blobPath, ct);
+    internal async Task<BlobPropertiesInfo?> GetPropertiesAsync(string container, string blobPath, CancellationToken ct) =>
+        await (await RequireOwnBlobAsync(container, blobPath, ct).ConfigureAwait(false)).GetPropertiesAsync(container, blobPath, ct).ConfigureAwait(false);
 
     /// <summary>
     /// A read stream over the blob pinned to <paramref name="etag"/> (the version whose verdict was read), or <c>null</c> when it is
     /// gone. A blob changed since then fails with <see cref="RequestFailedException"/> status 412.
     /// </summary>
-    internal Task<Stream?> OpenReadAsync(string container, string blobPath, ETag etag, CancellationToken ct) =>
-        RequireOwnBlob(container, blobPath).OpenReadAsync(container, blobPath, etag, ct);
+    internal async Task<Stream?> OpenReadAsync(string container, string blobPath, ETag etag, CancellationToken ct) =>
+        await (await RequireOwnBlobAsync(container, blobPath, ct).ConfigureAwait(false)).OpenReadAsync(container, blobPath, etag, ct).ConfigureAwait(false);
 
     /// <summary>The whole blob pinned to <paramref name="etag"/>, or <c>null</c> when it is gone (jobs only: at most 2 GiB by the size rule).</summary>
     internal async Task<BinaryData?> ReadAllAsync(string container, string blobPath, ETag etag, CancellationToken ct)
@@ -378,16 +473,17 @@ public sealed class StoredFileBlobs
 
     /// <summary>Deletes one blob of this tenant (with snapshots); <c>false</c> when it was already gone.</summary>
     /// <exception cref="ArgumentException"><paramref name="blobPath"/> is not a name of this tenant (nothing is called).</exception>
-    public Task<bool> DeleteAsync(string container, string blobPath, CancellationToken ct) =>
-        RequireOwnBlob(container, blobPath).DeleteIfExistsAsync(container, blobPath, ct);
+    public async Task<bool> DeleteAsync(string container, string blobPath, CancellationToken ct) =>
+        await (await RequireOwnBlobAsync(container, blobPath, ct).ConfigureAwait(false)).DeleteIfExistsAsync(container, blobPath, ct).ConfigureAwait(false);
 
     /// <summary>
     /// The gateway, after checking that <paramref name="blobPath"/> is a stored-file name of THIS tenant in one of the three
-    /// containers. Every blob-level read and delete goes through it, so no caller of this class can reach another tenant's bytes
-    /// even when it skips the service's own-path check.
+    /// containers and that the tenant segment is this environment's OrganizationId. Every blob-level read and delete goes through
+    /// it, so no caller of this class can reach another tenant's bytes even when it skips the service's own-path check.
     /// </summary>
     /// <exception cref="ArgumentException">Not a stored-file blob of this tenant (nothing is called).</exception>
-    private BlobGateway RequireOwnBlob(string container, string? blobPath)
+    /// <exception cref="InvalidOperationException">Not configured, or the segment is not this environment's (nothing is called).</exception>
+    private async Task<BlobGateway> RequireOwnBlobAsync(string container, string? blobPath, CancellationToken ct)
     {
         var gateway = RequireGateway();
         if (!StoredFileSchema.Containers.Contains(container) || !StoredFileBlobName.TryParseForTenant(blobPath, TenantId, out _, out _))
@@ -395,6 +491,7 @@ public sealed class StoredFileBlobs
             throw new ArgumentException("Not a stored-file blob of this tenant.", nameof(blobPath));
         }
 
+        await EnsureEnvironmentAsync(ct).ConfigureAwait(false);
         return gateway;
     }
 
@@ -405,6 +502,7 @@ public sealed class StoredFileBlobs
     internal async IAsyncEnumerable<StoredBlobListing> ListAllAsync([EnumeratorCancellation] CancellationToken ct)
     {
         var gateway = RequireGateway();
+        await EnsureEnvironmentAsync(ct).ConfigureAwait(false);
         var prefix = TenantId.ToString("D") + "/";
         foreach (var container in StoredFileSchema.Containers)
         {

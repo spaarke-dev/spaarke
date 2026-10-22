@@ -454,12 +454,12 @@ internal sealed class StoredFileRig
 
     public StoredFileRig(
         bool? malwareScanningEnabled = true, bool configured = true, StepZeroCallerKind stepZero = StepZeroCallerKind.FlagFalse,
-        InMemoryBlobGateway? sharedGateway = null, Guid? tenant = null)
+        InMemoryBlobGateway? sharedGateway = null, Guid? tenant = null, Func<CancellationToken, Task<Guid>>? organizationId = null)
     {
         Gateway = sharedGateway ?? new InMemoryBlobGateway();
         TenantId = tenant ?? Tenant;
         Blobs = new StoredFileBlobs(configured ? Gateway : null, configured ? TenantId : Guid.Empty, malwareScanningEnabled, Logger,
-            timeProvider: new GatewayClock(Gateway));
+            timeProvider: new GatewayClock(Gateway), organizationId: organizationId);
         var services = new ServiceCollection();
         StepZero = FinanceStepZeroCaller.Register(services, stepZero);
         Provider = services.BuildServiceProvider();

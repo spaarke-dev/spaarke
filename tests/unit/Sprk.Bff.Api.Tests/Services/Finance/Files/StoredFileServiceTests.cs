@@ -315,6 +315,87 @@ public sealed class StoredFileServiceTests
     public void EnvironmentMarker(string? url, string? expected) =>
         StoredFileBlobs.EnvironmentMarkerOf(url).Should().Be(expected);
 
+    // =============================================================================================================================
+    // The name segment is this Dataverse environment's OrganizationId (uac-r2 round 1)
+    // =============================================================================================================================
+
+    [Fact(DisplayName = "OrganizationId must-not-fire: a segment equal to the environment's OrganizationId works, and the organization is read ONCE")]
+    public async Task Organization_Match_ReadOnce()
+    {
+        var reads = 0;
+        var rig = new StoredFileRig(organizationId: _ => { Interlocked.Increment(ref reads); return Task.FromResult(StoredFileRig.Tenant); });
+        var spec = Spec();
+
+        (await rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None)).Blob.Should().NotBeNull();
+        (await rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None)).Blob!.Reused.Should().BeTrue();
+        var path = StoredFileBlobName.Build(StoredFileRig.Tenant, Invoice, spec.FileId);
+        (await rig.Blobs.GetScanStateAsync("invoice-files", path, CancellationToken.None)).Should().NotBeNull();
+        (await rig.Blobs.DeleteAsync("invoice-files", path, CancellationToken.None)).Should().BeTrue();
+
+        reads.Should().Be(1, "the answer is cached for the process");
+    }
+
+    [Fact(DisplayName = "OrganizationId must-fire: a segment that is not the environment's OrganizationId refuses every operation before any storage call")]
+    public async Task Organization_Mismatch_RefusesEverything()
+    {
+        var reads = 0;
+        var otherEnvironment = Guid.Parse("0e900000-0000-4000-8000-000000000001");
+        var rig = new StoredFileRig(organizationId: _ => { Interlocked.Increment(ref reads); return Task.FromResult(otherEnvironment); });
+        var path = StoredFileBlobName.Build(StoredFileRig.Tenant, Invoice, Guid.NewGuid());
+
+        (await rig.Service.StageAsync(Spec(), new MemoryStream(Pdf), CancellationToken.None)).RefusalCode.Should().Be(StoredFileRefusal.NotConfigured);
+        await rig.Blobs.Invoking(b => b.GetScanStateAsync("invoice-files", path, CancellationToken.None)).Should().ThrowAsync<InvalidOperationException>();
+        await rig.Blobs.Invoking(b => b.GetPropertiesAsync("invoice-files", path, CancellationToken.None)).Should().ThrowAsync<InvalidOperationException>();
+        await rig.Blobs.Invoking(b => b.VerifyAsync("invoice-files", path, null, CancellationToken.None)).Should().ThrowAsync<InvalidOperationException>();
+        await rig.Blobs.Invoking(b => b.OpenReadAsync("invoice-files", path, default, CancellationToken.None)).Should().ThrowAsync<InvalidOperationException>();
+        await rig.Blobs.Invoking(b => b.ReadAllAsync("invoice-files", path, default, CancellationToken.None)).Should().ThrowAsync<InvalidOperationException>();
+        await rig.Blobs.Invoking(b => b.DeleteAsync("invoice-files", path, CancellationToken.None)).Should().ThrowAsync<InvalidOperationException>();
+        var list = async () =>
+        {
+            await foreach (var _ in rig.Blobs.ListAllAsync(CancellationToken.None))
+            {
+            }
+        };
+        await list.Should().ThrowAsync<InvalidOperationException>();
+
+        rig.Gateway.StorageCalls.Should().Be(0);
+        reads.Should().Be(1, "a mismatch is cached: the setting is per deployment");
+    }
+
+    [Fact(DisplayName = "OrganizationId: a fault reading the organization is not cached; the next operation asks again")]
+    public async Task Organization_Fault_NotCached()
+    {
+        var reads = 0;
+        var rig = new StoredFileRig(organizationId: _ => Interlocked.Increment(ref reads) == 1
+            ? Task.FromException<Guid>(new TimeoutException("Dataverse slow"))
+            : Task.FromResult(StoredFileRig.Tenant));
+
+        await rig.Service.Invoking(s => s.StageAsync(Spec(), new MemoryStream(Pdf), CancellationToken.None)).Should().ThrowAsync<TimeoutException>();
+        rig.Gateway.StorageCalls.Should().Be(0);
+
+        (await rig.Service.StageAsync(Spec(), new MemoryStream(Pdf), CancellationToken.None)).Blob.Should().NotBeNull();
+        reads.Should().Be(2);
+    }
+
+    [Fact(DisplayName = "OrganizationId: the production reader takes the id of the one organization row; no row throws")]
+    public async Task Organization_ReaderReadsTheOrganizationRow()
+    {
+        var organization = Guid.Parse("0e900000-0000-4000-8000-0000000000aa");
+        var entities = new Mock<Spaarke.Dataverse.IGenericEntityService>(MockBehavior.Strict);
+        Microsoft.Xrm.Sdk.Query.QueryExpression? asked = null;
+        entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Callback<Microsoft.Xrm.Sdk.Query.QueryExpression, CancellationToken>((q, _) => asked = q)
+            .ReturnsAsync(new EntityCollection([new Entity("organization", organization) { ["organizationid"] = organization }]));
+
+        (await StoredFileBlobs.ReadOrganizationIdAsync(entities.Object, CancellationToken.None)).Should().Be(organization);
+        asked!.EntityName.Should().Be("organization");
+
+        entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection());
+        var empty = () => StoredFileBlobs.ReadOrganizationIdAsync(entities.Object, CancellationToken.None);
+        await empty.Should().ThrowAsync<InvalidOperationException>();
+    }
+
     [Fact(DisplayName = "Stage: a purpose under the wrong parent is refused before any storage call")]
     public async Task Stage_WrongParent_Refused()
     {
