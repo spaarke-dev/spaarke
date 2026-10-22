@@ -121,7 +121,8 @@ public static class OfficeErrorCodes
     /// <para>Refusing is deliberate: the alternative is an app-owned row in the ROOT business unit, invisible to the
     /// very user who saved it. A named-but-unreadable target in particular must never fall back to the caller's
     /// own business unit — for a secure record that would place its child outside the secure business unit.</para>
-    /// <para>Same 403 as <c>RecordCreationFailureKind.OwnerUnresolved</c>, the quick-create's equivalent refusal.</para>
+    /// <para>Same 403 as the quick-create's equivalent refusal (the unified create's
+    /// <c>RecordCreationRefusalKind.OwnerUnresolved</c>, mapped by <c>OfficeService.MapQuickCreateRefusal</c>).</para>
     /// </remarks>
     public const string RecordOwnerUnresolved = "OFFICE_022";
 

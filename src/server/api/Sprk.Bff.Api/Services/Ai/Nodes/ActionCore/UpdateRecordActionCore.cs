@@ -148,6 +148,9 @@ internal sealed class UpdateRecordActionCore
         // seam without an impersonated user) never writes a document's Access Permission or its own-narrowing record; only
         // the document rule's writers do. Refused before anything is written. Task 188 round 4e: nor its D7 link columns
         // (sprk_parentdocument, sprk_relatedcommunication), set, cleared or bound (InheritedAccessPermission.DocumentLinkColumns).
+        // #2251: nor any row of a table whose rows are access (grants, membership, ethical walls; AccessTables), nor a secure
+        // root's secure flag, access columns or container (SecureRootColumns). An update that impersonates its user is not
+        // asked: it runs under that user's own Dataverse privileges, which decide it.
         if (input.ImpersonateSystemUserId is null
             && InheritedAccessPermission.RefuseAppOnlyWrite(input.EntityLogicalName, updatePayload.Keys) is { } documentRefusal)
         {

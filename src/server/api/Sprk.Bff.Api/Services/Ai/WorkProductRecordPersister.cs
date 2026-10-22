@@ -130,7 +130,7 @@ public sealed partial class TopicRegistryWorkProductPersister : IWorkProductReco
     /// <summary>Envelope schema version — pinned by <c>infra/dataverse/outputschemas/work-product-envelope-v1.schema.json</c>.</summary>
     internal const string EnvelopeSchemaVersion = "1.0";
 
-    [GeneratedRegex(@"^[a-z][a-z0-9_]*$")]
+    [GeneratedRegex(@"^[a-z][a-z0-9_]*\z")]
     private static partial Regex LogicalNameRegex();
 
     private static readonly JsonSerializerOptions EnvelopeSerializerOptions = new()

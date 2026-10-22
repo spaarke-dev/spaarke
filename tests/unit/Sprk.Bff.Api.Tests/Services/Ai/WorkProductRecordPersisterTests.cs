@@ -149,14 +149,16 @@ public class WorkProductRecordPersisterTests
             .Which.Message.Should().Contain("matter").And.Contain("sprk_project");
     }
 
-    [Fact]
-    public async Task PersistAsync_MalformedTargetField_ThrowsLoudBeforeAnyWrite()
+    [Theory]
+    [InlineData("sprk_field);DROP")]
+    [InlineData("sprk_field\\n")] // JSON-escaped: the row reads "sprk_field" + LF. #2253 fix round 3 (K): `$` matched before a final newline; `\z` does not.
+    public async Task PersistAsync_MalformedTargetField_ThrowsLoudBeforeAnyWrite(string targetField)
     {
         // The registry is maker-editable NVARCHAR data — a non-logical-name value must be
         // rejected before it reaches an OData path or PATCH body.
         SetupEntitySet(TopicRegistryWorkProductPersister.RegistryLogicalName, "sprk_aitopicregistries");
         SetupRegistryRows("matter-summary",
-            ("sprk_matter", "sprk_field);DROP"));
+            ("sprk_matter", targetField));
 
         var act = () => CreateSut().PersistAsync(BuildEntry(), BuildBinding(), BuildHostContext());
 

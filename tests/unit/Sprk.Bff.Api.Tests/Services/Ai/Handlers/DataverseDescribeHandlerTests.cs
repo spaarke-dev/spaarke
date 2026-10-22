@@ -237,6 +237,24 @@ public sealed class DataverseDescribeHandlerTests : TypedToolHandlerTestFixture
         citations.Should().ContainSingle(c => c.ChunkId == $"tables/account/records/{recordId:D}" && c.SourceName == "account");
     }
 
+    // #2253 fix round 3 (K): `$` matches before a final "\n", and the segment is lower-cased but not trimmed, so
+    // "sprk_document\n" passed the name check and then missed the external-caller guard, which compares names exactly.
+    [Theory]
+    [InlineData("tables/sprk_document\n/records/6f0c1a52-0000-4000-8000-000000002253")]
+    [InlineData("tables/sprk_document\n/")]
+    public async Task ExecuteChatAsync_ATableNameWithATrailingNewline_IsRefused_AndNothingIsAsked(string path)
+    {
+        AsExternalCaller();
+        var ctx = BuildChatInvocationContext(
+            toolArgumentsJson: JsonSerializer.Serialize(new { path }));
+
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildDescribeTool(), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(ToolErrorCodes.ValidationFailed);
+        _dataverse.Verify(d => d.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     [Fact]
     public async Task ExecuteChatAsync_RecordUserCannotRead_SurfacesAccessDeniedNotEscalation()
     {
