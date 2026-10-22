@@ -748,6 +748,11 @@ public class DocumentCheckoutService
     /// (<c>AddDocumentAuthorizationFilter("delete")</c>, finding C2, task 022) — there is no
     /// defence in depth here. Any NEW call-site that reaches this method without that filter is
     /// an unauthenticated destroy path.</para>
+    /// <para><b>File policy</b> (R3 ISS-004, #1650; owner decision 2026-10-22): the internal route uses
+    /// <see cref="DocumentFileDeletePolicy.VerifiedFileFirstKeepRowOnFailure"/>, the same as the external delete-own
+    /// route. If the SPE file cannot be deleted or its pointer verified, the Dataverse row is KEPT and the result is
+    /// <see cref="FileNotDeletedDeleteResult"/> (503 retryable, or 409 for a refused pointer), so a transient Graph
+    /// failure can no longer orphan the file. A file that is already gone counts as deleted, so a retry succeeds.</para>
     /// </remarks>
     // `virtual` per ADR-038 §4 (substitution seam), added by task 022 for the same reason task 009
     // made UpdateTodoAsync virtual: the C2 gate is only meaningfully verifiable if a test can assert
@@ -757,7 +762,7 @@ public class DocumentCheckoutService
         Guid documentId,
         string correlationId,
         CancellationToken ct = default)
-        => DeleteCoreAsync(documentId, correlationId, DocumentFileDeletePolicy.BestEffort, ct);
+        => DeleteCoreAsync(documentId, correlationId, DocumentFileDeletePolicy.VerifiedFileFirstKeepRowOnFailure, ct);
 
     /// <summary>
     /// Delete a document (both SPE file and Dataverse record) under an explicit <see cref="DocumentFileDeletePolicy"/>.
@@ -766,8 +771,10 @@ public class DocumentCheckoutService
     /// <para>The SAME delete as <see cref="DeleteAsync(Guid, string, CancellationToken)"/> (one implementation,
     /// <see cref="DeleteCoreAsync"/>): checkout lock, then the SPE file through <see cref="SpeFileStore"/> (app-only,
     /// <c>SpeContainerOwnershipGuard</c>), then the row. The policy changes only what happens when the FILE cannot be
-    /// deleted. The external delete-own route (spaarke-SPA-external-access-platform-r3 task 032, FR-26) passes
-    /// <see cref="DocumentFileDeletePolicy.VerifiedFileFirstKeepRowOnFailure"/>.</para>
+    /// deleted. Both production routes now pass
+    /// <see cref="DocumentFileDeletePolicy.VerifiedFileFirstKeepRowOnFailure"/>: the external delete-own route
+    /// (spaarke-SPA-external-access-platform-r3 task 032, FR-26) and, through the three-argument overload, the internal
+    /// route (R3 ISS-004). <see cref="DocumentFileDeletePolicy.BestEffort"/> has no remaining production caller.</para>
     /// <para>Like the three-argument overload this performs NO authorization: its caller decides who may delete.</para>
     /// </remarks>
     // `virtual` for the same ADR-038 §4 substitution reason as the three-argument overload.
@@ -847,7 +854,7 @@ public class DocumentCheckoutService
         }
         else
         {
-            // The internal route's behaviour, unchanged: a file that cannot be deleted is logged, and the row goes.
+            // BestEffort (no production caller since R3 ISS-004): a file that cannot be deleted is logged, and the row goes.
             try
             {
                 if (!string.IsNullOrEmpty(document.DriveId) && !string.IsNullOrEmpty(document.ItemId))
@@ -1693,7 +1700,7 @@ public record FailedDeleteResult(string Message, string CorrelationId)
 
 /// <summary>
 /// The document's SPE file was NOT deleted, so its row was kept (<see cref="DocumentFileDeletePolicy.VerifiedFileFirstKeepRowOnFailure"/>
-/// only; task 032). <paramref name="Code"/> is the pointer check's code (409) or
+/// only; task 032; the internal route too since R3 ISS-004). <paramref name="Code"/> is the pointer check's code (409) or
 /// <see cref="DocumentCheckoutService.FileNotDeletedCode"/> (503).
 /// </summary>
 public record FileNotDeletedDeleteResult(string Code, int FailureStatusCode, string CorrelationId)
@@ -1712,9 +1719,10 @@ public record FileNotDeletedDeleteResult(string Code, int FailureStatusCode, str
 /// <param name="CorrelationId">The request's correlation id.</param>
 /// <param name="FileGone"><see langword="false"/> when NOTHING was deleted (the pre-check). <see langword="true"/> when
 /// the refusal came at the row, after the file step had removed the file (or found it already gone): the row is kept
-/// without its file. Once the children are gone, a later internal (<see cref="DocumentFileDeletePolicy.BestEffort"/>)
-/// delete treats the missing file as deleted and removes the row; the external route's pointer check refuses a missing
-/// item, so there a retry is refused (the task 032 known limit).</param>
+/// without its file. Once the children are gone, a later delete treats the missing file as deleted
+/// (<see cref="SpeFileStore.DeleteFileAsync"/> returns <see langword="false"/>) and removes the row, unless the
+/// pointer check (<see cref="DocumentFileDeletePolicy.VerifiedFileFirstKeepRowOnFailure"/>) refuses the missing item
+/// first (the task 032 known limit, now on both routes).</param>
 public record HasChildDocumentsDeleteResult(int? ChildCount, string CorrelationId, bool FileGone = false)
     : DeleteResult(false, CorrelationId)
 {
@@ -1725,13 +1733,16 @@ public record HasChildDocumentsDeleteResult(int? ChildCount, string CorrelationI
 public enum DocumentFileDeletePolicy
 {
     /// <summary>
-    /// The internal <c>DELETE /api/documents/{documentId}</c> behaviour (unchanged): a file delete that fails is logged
-    /// and the row is deleted anyway.
+    /// A file delete that fails is logged and the row is deleted anyway. This was the internal
+    /// <c>DELETE /api/documents/{documentId}</c> behaviour until R3 ISS-004 (#1650), which orphaned the file after a
+    /// transient Graph failure; that route now uses <see cref="VerifiedFileFirstKeepRowOnFailure"/>. Retained, with no
+    /// production caller, until its removal is decided.
     /// </summary>
     BestEffort = 0,
 
     /// <summary>
-    /// The external delete-own route (spaarke-SPA-external-access-platform-r3 task 032, FR-26; ADR-007): the row's pointer
+    /// The external delete-own route (spaarke-SPA-external-access-platform-r3 task 032, FR-26; ADR-007) and, since R3
+    /// ISS-004 (#1650), the internal <c>DELETE /api/documents/{documentId}</c>: the row's pointer
     /// is verified, the file is deleted FIRST, and if it cannot be the row is KEPT and the result is
     /// <see cref="FileNotDeletedDeleteResult"/>. A file already gone counts as deleted.
     /// </summary>

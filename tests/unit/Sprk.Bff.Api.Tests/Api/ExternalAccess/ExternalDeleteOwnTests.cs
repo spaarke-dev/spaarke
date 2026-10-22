@@ -597,7 +597,7 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
         var result = await service.DeleteAsync(id, "corr-188d");
 
         result.Should().BeOfType<HasChildDocumentsDeleteResult>().Which.ChildCount.Should().Be(2);
-        _fixture.Steps.Should().BeEmpty("BestEffort deletes the file before the row; the refusal must come first");
+        _fixture.Steps.Should().BeEmpty("the file is deleted before the row; the refusal must come first");
         _fixture.Exists(DeletableKind.Document, id).Should().BeTrue();
     }
 
@@ -947,15 +947,77 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
         handler.Requests.Should().BeEmpty();
     }
 
+    // R3 ISS-004 (#1650, owner decision 2026-10-22): the internal DELETE /api/documents/{id} (the three-argument
+    // DeleteAsync) uses the SAME policy as the external route, VerifiedFileFirstKeepRowOnFailure. It replaces the
+    // task 032 test InternalDelete_BestEffort_IsUnchanged_AFileFaultStillDeletesTheRow, which pinned the old behaviour
+    // (a failed file delete was logged and the row deleted anyway, orphaning the file).
+
     [Fact]
-    public async Task InternalDelete_BestEffort_IsUnchanged_AFileFaultStillDeletesTheRow()
+    public async Task InternalDelete_WhenTheFileDeleteFails_KeepsTheRow_AndAnswers503()
     {
-        // The internal DELETE /api/documents/{id} keeps its behaviour: the strict policy is opt-in for the external route.
         var id = _fixture.Seed(DeletableKind.Document, contact: CallerContact, parents: Project(RecordA));
         _fixture.FileFault = new InvalidOperationException("Graph said 503");
         var service = _fixture.Services.GetRequiredService<DocumentCheckoutService>();
 
-        var result = await service.DeleteAsync(id, "corr-032");
+        var result = await service.DeleteAsync(id, "corr-iss004");
+
+        var kept = result.Should().BeOfType<FileNotDeletedDeleteResult>().Subject;
+        kept.StatusCode.Should().Be(503);
+        kept.Code.Should().Be(DocumentCheckoutService.FileNotDeletedCode);
+        _fixture.Exists(DeletableKind.Document, id).Should().BeTrue("the row is kept when its file was not deleted");
+        _fixture.Steps.Should().Equal($"file-delete:drive-{id:N}/item-{id:N}");
+    }
+
+    [Fact]
+    public async Task InternalDelete_WhenTheFileDeletes_DeletesTheFileThenTheRow()
+    {
+        var id = _fixture.Seed(DeletableKind.Document, contact: CallerContact, parents: Project(RecordA));
+        var service = _fixture.Services.GetRequiredService<DocumentCheckoutService>();
+
+        var result = await service.DeleteAsync(id, "corr-iss004");
+
+        result.Should().BeOfType<SuccessDeleteResult>();
+        _fixture.Exists(DeletableKind.Document, id).Should().BeFalse();
+        _fixture.Steps.Should().Equal($"file-delete:drive-{id:N}/item-{id:N}", $"row-delete:{id}");
+    }
+
+    [Fact]
+    public async Task InternalDelete_WhenTheFileIsAlreadyGone_StillDeletesTheRow()
+    {
+        // "File not found" is success: the issue's suggested fix, and the retry that clears an earlier 503.
+        var id = _fixture.Seed(DeletableKind.Document, contact: CallerContact, parents: Project(RecordA));
+        _fixture.FileAlreadyGone = true;
+        var service = _fixture.Services.GetRequiredService<DocumentCheckoutService>();
+
+        var result = await service.DeleteAsync(id, "corr-iss004");
+
+        result.Should().BeOfType<SuccessDeleteResult>();
+        _fixture.Exists(DeletableKind.Document, id).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task InternalDelete_WhosePointerIsRefused_KeepsTheRow_And409_AndTheFileIsNotTouched()
+    {
+        var id = _fixture.Seed(DeletableKind.Document, contact: CallerContact, parents: Project(RecordA),
+            driveId: "b!foreign-container");
+        var service = _fixture.Services.GetRequiredService<DocumentCheckoutService>();
+
+        var result = await service.DeleteAsync(id, "corr-iss004");
+
+        result.Should().BeOfType<FileNotDeletedDeleteResult>().Which.StatusCode.Should().Be(409);
+        _fixture.Exists(DeletableKind.Document, id).Should().BeTrue();
+        _fixture.Steps.Should().BeEmpty("a refused pointer is never followed");
+    }
+
+    [Fact]
+    public async Task InternalDelete_WithBestEffortPolicy_StillDeletesTheRowAfterAFileFault()
+    {
+        // The BestEffort policy is retained (it has no production caller after ISS-004); it behaves as before.
+        var id = _fixture.Seed(DeletableKind.Document, contact: CallerContact, parents: Project(RecordA));
+        _fixture.FileFault = new InvalidOperationException("Graph said 503");
+        var service = _fixture.Services.GetRequiredService<DocumentCheckoutService>();
+
+        var result = await service.DeleteAsync(id, "corr-iss004", DocumentFileDeletePolicy.BestEffort);
 
         result.Should().BeOfType<SuccessDeleteResult>();
         _fixture.Exists(DeletableKind.Document, id).Should().BeFalse();
