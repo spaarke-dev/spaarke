@@ -739,7 +739,7 @@ public sealed class GateDecisionRecordSharingTests
 
         await world.Sharing.ShareAtWriteAsync(RecordId, CommunicationId, Owner);
 
-        world.Rows[(GateSharingWorld.Record, RecordId)].GetAttributeValue<EntityReference>("owningteam")?.Id.Should().Be(MatterTeam,
+        world.Rows[(GateSharingWorld.Record, RecordId)].GetAttributeValue<EntityReference>("owningteam")!.Id.Should().Be(MatterTeam,
             "a join owns the communication to the matter's team without stamping its parents; its record must follow, not stay user-owned");
         world.Rows[(GateSharingWorld.Record, RecordId)].Contains("owningteam").Should().BeTrue("the record must have been re-owned to a team");
         world.Calls.Should().NotContain(c => c.StartsWith("grant:", StringComparison.Ordinal));
@@ -759,7 +759,7 @@ public sealed class GateDecisionRecordSharingTests
         world.Ownership.Verify(r => r.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()), Times.Once);
         world.Log.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning, "a Secure answer is a defined outcome, not a failed re-own");
         world.Calls.Should().NotContain(c => c.StartsWith("assign:", StringComparison.Ordinal), "a Secure answer is the SecureChildReconciler's");
-        world.Rows[(GateSharingWorld.Record, RecordId)].GetAttributeValue<EntityReference>("owninguser")?.Id.Should().Be(Owner);
+        world.Rows[(GateSharingWorld.Record, RecordId)].GetAttributeValue<EntityReference>("owninguser")!.Id.Should().Be(Owner);
         world.Calls.Should().NotContain(c => c.StartsWith("grant:", StringComparison.Ordinal));
         world.RecordSharees(RecordId).Should().BeEmpty();
     }
@@ -777,7 +777,7 @@ public sealed class GateDecisionRecordSharingTests
         // with no share (never shared to the communication's sharees instead), and the fault is logged once (uac-r2 #2113 review F3).
         world.Calls.Should().NotContain(c => c.StartsWith("assign:", StringComparison.Ordinal));
         world.Calls.Should().NotContain(c => c.StartsWith("grant:", StringComparison.Ordinal));
-        world.Rows[(GateSharingWorld.Record, RecordId)].GetAttributeValue<EntityReference>("owninguser")?.Id.Should().Be(Owner);
+        world.Rows[(GateSharingWorld.Record, RecordId)].GetAttributeValue<EntityReference>("owninguser")!.Id.Should().Be(Owner);
         world.RecordSharees(RecordId).Should().BeEmpty();
         world.Log.Entries.Where(e => e.Level >= LogLevel.Warning).Should().ContainSingle("the resolver's fault is logged once")
             .Which.Should().Match<LogEntry>(e => e.EventId == DecisionRecordEvents.FilingReownFailed && ReferenceEquals(e.Exception, fault));
