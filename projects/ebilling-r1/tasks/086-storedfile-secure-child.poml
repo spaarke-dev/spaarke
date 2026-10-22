@@ -109,7 +109,7 @@
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Rewritten for EB-D-148 (model 13, row 086: "What remains: secure child registration for invoice Stored Files"). The rate-card secure-family work of the old 086 is dropped with D-120 / 085's re-key. Two adversarial passes (tenant isolation).</notes>
+  <notes>Rewritten for EB-D-148 (model 13, row 086: "What remains: secure child registration for invoice Stored Files"). The rate-card secure-family work of the old 086 is dropped with D-120 / 085's re-key. Two adversarial passes (tenant isolation). ontology-r1 088 gate 2026-10-22, K-d: on dev, one enabled flagged-external user is in the 'Spaarke' business unit, which is one of 088's six -ReaderBusinessUnits, so that user has column read on Stored File columns. The user has no table privilege until this task; the same exposure exists today on the 8 secured sprk_document columns. This task (and UAC 191) must keep External Collaborator and flagged-external users off the sprk_storedfile table privilege; add a must-not-fire test for a flagged-external caller.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
