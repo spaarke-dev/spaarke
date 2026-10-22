@@ -274,19 +274,91 @@ public class ContactIdentityBinderOwnerTeamTests
         (await RegistrationsReasonAsync(binder, setting)).Should().Be(ContactBindingDecision.DenyContactLookupFailed);
     }
 
+    // ── The report-only pass (K1) decides the owner too: it reports the refusal, and still writes nothing ──────
+
     [Fact]
-    public async Task TheReportOnlyLinkPass_WritesNothing_AndReadsNoOwner()
+    public async Task TheReportOnlyLinkPass_WithAnOwnerTeam_PlansTheCreate_SaysOwnerSet_AndWritesNothing()
     {
-        // applyWrites = false never creates, so it never asks for an owner either (no refusal in a dry run).
-        var binder = OwnedBinder(customerBusinessUnitId: null);
+        GivenOneDefaultTeam();
+        var binder = OwnedBinder(CustomerBu);
         var userId = GivenALicensedUserWithNoContact(out _);
 
         var result = await binder.EnsureSystemUserLinkAsync(userId, applyWrites: false, CancellationToken.None);
 
-        result.Outcome.Should().Be(SystemUserLinkOutcome.CreatedAndLinked, "the plan is unchanged");
+        result.Outcome.Should().Be(SystemUserLinkOutcome.CreatedAndLinked, "the plan is unchanged when an owner resolves");
         result.WritesApplied.Should().BeFalse();
-        _store.Writes.Should().BeEmpty();
-        _store.Reads.Should().NotContain(new[] { "owner-team", "business-unit" });
+        var change = result.Changes.Should().ContainSingle(c => c.Entity == "contact").Subject;
+        change.After.Should().Contain("ownerid=(set)", "the #2130 change line names the column, never the team")
+            .And.NotContain(CustomerTeam.ToString("D"));
+        AssertNothingWasCreated();
+        _store.SystemUsers[userId].PrimaryContactId.Should().BeNull("a dry run links nothing");
+        _store.Reads.Should().Contain(new[] { "business-unit", "owner-team" }, "the dry run resolves the owner (reads only)");
+    }
+
+    [Theory]
+    [InlineData(Refused.SettingUnset)]
+    [InlineData(Refused.SettingEmptyGuid)]
+    [InlineData(Refused.CustomerUnitIsTheSecureRecordUnit)]
+    [InlineData(Refused.SecureRecordUnitAmbiguous)]
+    [InlineData(Refused.NoDefaultOwnerTeam)]
+    [InlineData(Refused.TwoDefaultOwnerTeams)]
+    public async Task TheReportOnlyLinkPass_ReportsTheRefusal_TheWritePassWouldMake_AndWritesNothing(Refused cause)
+    {
+        var binder = OwnedBinder(Arrange(cause));
+        var userId = GivenALicensedUserWithNoContact(out _);
+
+        var dryRun = await binder.EnsureSystemUserLinkAsync(userId, applyWrites: false, CancellationToken.None);
+
+        dryRun.Outcome.Should().Be(SystemUserLinkOutcome.Denied, "the dry run must not promise a create the write pass refuses");
+        dryRun.IsLinked.Should().BeFalse();
+        dryRun.DenyCode.Should().Be(ContactBindingDecision.DenyOwnerUnconfigured);
+        dryRun.WritesApplied.Should().BeFalse();
+        dryRun.Changes.Should().BeEmpty();
+        AssertNothingWasCreated();
+
+        var writePass = await binder.EnsureSystemUserLinkAsync(userId, applyWrites: true, CancellationToken.None);
+        writePass.Outcome.Should().Be(dryRun.Outcome, "one decision, two passes");
+        writePass.DenyCode.Should().Be(dryRun.DenyCode);
+    }
+
+    [Theory]
+    [InlineData(Unreadable.SecureRecordUnitRead)]
+    [InlineData(Unreadable.DefaultOwnerTeamRead)]
+    public async Task TheReportOnlyLinkPass_ReportsAnUnreadableOwnerLookup_AsTheWritePassDoes(Unreadable cause)
+    {
+        var binder = OwnedBinder(Arrange(cause));
+        var userId = GivenALicensedUserWithNoContact(out _);
+
+        var dryRun = await binder.EnsureSystemUserLinkAsync(userId, applyWrites: false, CancellationToken.None);
+
+        dryRun.Outcome.Should().Be(SystemUserLinkOutcome.Denied);
+        dryRun.DenyCode.Should().Be(ContactBindingDecision.DenyContactLookupFailed);
+        AssertNothingWasCreated();
+        (await binder.EnsureSystemUserLinkAsync(userId, applyWrites: true, CancellationToken.None)).DenyCode
+            .Should().Be(dryRun.DenyCode);
+    }
+
+    [Fact]
+    public async Task TheReportOnlyLinkPass_StillNeverProbesTheBindingColumn_AndTheWritePassStillRefusesAMaskedOneFirst()
+    {
+        // Precedence is unchanged: the write pass probes the (possibly masked) binding column BEFORE it reads the owner; the
+        // report-only pass never probes it.
+        GivenOneDefaultTeam();
+        _store.FailProbe = true;
+        var binder = OwnedBinder(customerBusinessUnitId: null);
+        var userId = GivenALicensedUserWithNoContact(out _);
+
+        var dryRun = await binder.EnsureSystemUserLinkAsync(userId, applyWrites: false, CancellationToken.None);
+
+        dryRun.DenyCode.Should().Be(ContactBindingDecision.DenyOwnerUnconfigured, "the dry run does not probe the column");
+        _store.Reads.Should().NotContain("probe");
+
+        _store.Reads.Clear();
+        var writePass = await binder.EnsureSystemUserLinkAsync(userId, applyWrites: true, CancellationToken.None);
+
+        writePass.DenyCode.Should().Be(ContactBindingDecision.DenyBindingColumnMasked);
+        _store.Reads.Should().NotContain(new[] { "owner-team", "business-unit" }, "a masked column refuses before any owner read");
+        AssertNothingWasCreated();
     }
 
     // ── Must not fire: an existing contact needs no owner ──────────────────────────────────────────
@@ -321,6 +393,22 @@ public class ContactIdentityBinderOwnerTeamTests
     }
 
     // ── The binder over ANOTHER environment is unchanged (the setting names a unit of THIS environment) ────
+
+    [Fact]
+    public async Task TheReportOnlyLinkPass_OfABinderOverAnotherEnvironment_PlansTheCreate_SaysOwnerNone_AndReadsNoOwnerTeam()
+    {
+        var userId = Guid.NewGuid();
+        var other = new InMemoryContactIdentityStore();
+        other.AddSystemUser(userId, Guid.NewGuid(), "new.user@demo.spaarke.com");
+        var binder = new StoreBinderFactory(other).CreateBinder("https://spaarke-demo.crm.dynamics.com", _ => Task.FromResult("token"));
+
+        var result = await binder.EnsureSystemUserLinkAsync(userId, applyWrites: false, CancellationToken.None);
+
+        result.Outcome.Should().Be(SystemUserLinkOutcome.CreatedAndLinked);
+        result.Changes.Should().ContainSingle(c => c.Entity == "contact").Which.After.Should().Contain("ownerid=(none)");
+        other.Writes.Should().BeEmpty();
+        other.Reads.Should().NotContain(new[] { "owner-team", "business-unit" });
+    }
 
     [Fact]
     public async Task ABinderOverAnotherEnvironment_StillCreatesWithoutAnOwner_AndReadsNoOwnerTeam()

@@ -1543,25 +1543,19 @@ public sealed class ContactIdentityBinder
                     user.FirstName,
                     LastNameFor(user.LastName, null, user.InternalEmail),
                     user.InternalEmail);
-                // #2130: the change log names WHICH columns are written, never a person's values. The email and the last
-                // name (which falls back to the email's local part, LastNameFor) are "(set)" / "(none)".
-                changes.Add(new IdentityChange("contact", null, "(no contact)",
-                    $"create contact lastname={SetOrNone(details.LastName)} emailaddress1={SetOrNone(details.Email)} "
-                    + $"sprk_externalobjectid={request.CallerOid:D} sprk_identityplane={IdentityPlaneMarker.Workforce}"));
-                changes.Add(LinkChange(suid, null));
-                if (!applyWrites)
-                {
-                    return Result(suid, SystemUserLinkOutcome.CreatedAndLinked, null, null, null, none, changes, false);
-                }
 
-                if (await MaskedAsync(ct).ConfigureAwait(false))
+                // A write pass refuses a masked binding column before anything else is read. A report-only pass never probes it.
+                if (applyWrites && await MaskedAsync(ct).ConfigureAwait(false))
                 {
                     return Result(suid, SystemUserLinkOutcome.Denied, null, ContactBindingDecision.DenyBindingColumnMasked,
                         null, none, Array.Empty<IdentityChange>(), false);
                 }
 
                 // ISS-005 (#1673): the contact is owned by the customer business unit's default team, or it is not created.
-                var owner = await ResolveWorkforceCreateOwnerAsync("Licensed-user link create", request.CallerOid, ct)
+                // K1: the report-only pass decides the owner too (reads only), so it reports the refusal the write pass would
+                // make instead of promising a create (CreatedAndLinked) that the write pass would then refuse.
+                var owner = await ResolveWorkforceCreateOwnerAsync(
+                        applyWrites ? "Licensed-user link create" : "Licensed-user link create (report-only)", request.CallerOid, ct)
                     .ConfigureAwait(false);
                 switch (owner.Status)
                 {
@@ -1571,6 +1565,19 @@ public sealed class ContactIdentityBinder
                     case OwnerTeamStatus.LookupFailed:
                         return Result(suid, SystemUserLinkOutcome.Denied, null, ContactBindingDecision.DenyContactLookupFailed,
                             null, none, Array.Empty<IdentityChange>(), false);
+                }
+
+                // #2130: the change log names WHICH columns are written, never a person's values. The email and the last
+                // name (which falls back to the email's local part, LastNameFor) are "(set)" / "(none)"; so is the owner
+                // (ownerid is "(set)" when a team owns the contact, "(none)" when this binder binds no owner), never the team id.
+                changes.Add(new IdentityChange("contact", null, "(no contact)",
+                    $"create contact lastname={SetOrNone(details.LastName)} emailaddress1={SetOrNone(details.Email)} "
+                    + $"ownerid={(owner.Status == OwnerTeamStatus.Resolved ? "(set)" : "(none)")} "
+                    + $"sprk_externalobjectid={request.CallerOid:D} sprk_identityplane={IdentityPlaneMarker.Workforce}"));
+                changes.Add(LinkChange(suid, null));
+                if (!applyWrites)
+                {
+                    return Result(suid, SystemUserLinkOutcome.CreatedAndLinked, null, null, null, none, changes, false);
                 }
 
                 var create = await _store.CreateContactForOidAsync(
