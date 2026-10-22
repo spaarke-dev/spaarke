@@ -205,4 +205,7 @@ It never leaked (the exact pair match still applied), but it was wrong visible b
 - `ReadAsCallerAsync` treats a body that carries `@odata.nextLink` as a fault: a Warning is logged and null is returned. This is shared by every D-176 read.
 
 **Tests.** The 21-org test is rewritten: two reads (20 orgs and 1), each carrying its org list, and the single-org read alone asks the number only that org
-holds. The fault theory gains a `nextLink` case for each table.
+holds. The fault theory gains a `nextLink` case for each table. Signals unit 396/396; `SignalReadRouteTests` 83/83; ArchTests 1093/1093;
+`--no-incremental -warnaserror` build 0 warnings.
+
+**Seeding.** With the `@odata.nextLink` check disabled, exactly the two new `nextLink` cases fail (27 others pass). Restored; all pass.
