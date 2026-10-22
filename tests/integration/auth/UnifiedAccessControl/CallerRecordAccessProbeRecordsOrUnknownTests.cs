@@ -82,6 +82,35 @@ public class CallerRecordAccessProbeRecordsOrUnknownTests
     }
 
     [Fact]
+    public async Task WhenTheCallerCancelsDuringWhoAmI_EveryRecordIsUnknown_NotRethrown()
+    {
+        // The per-record step rethrows the caller's cancellation; the per-set steps (the OBO exchange, WhoAmI) catch everything and
+        // return "no caller", so a cancellation there reads as "every entry unknown" (uac-r2 re-check round 2, doc correction).
+        using var cts = new CancellationTokenSource();
+        var probe = new WireProbe(new HttpClient(new CancellingHandler(cts))) { UseRealWhoAmI = true };
+
+        var rights = await probe.GetCallerRightsForRecordsOrUnknownAsync(
+            "caller-token", new[] { (Set, Guid.NewGuid()), (Set, Guid.NewGuid()) }, cts.Token);
+
+        rights.Should().HaveCount(2).And.OnlyContain(r => r == null);
+        probe.Asks.Should().Be(0, "no record was asked about once the caller could not be established");
+    }
+
+    [Fact]
+    public async Task ARecordWhoseOkBodyCannotBeRead_IsUnknown_AndTheOthersStillAnswer()
+    {
+        var unreadable = Guid.NewGuid();
+        var visible = Guid.NewGuid();
+        var probe = new WireProbe();
+        probe.UnreadableBodyRecords.Add(unreadable);
+
+        var rights = await probe.GetCallerRightsForRecordsOrUnknownAsync("caller-token", new[] { (Set, unreadable), (Set, visible) });
+
+        rights[0].Should().BeNull("a 200 whose body cannot be parsed is no answer");
+        rights[1].Should().Be(AccessRights.Read);
+    }
+
+    [Fact]
     public async Task WithNoCallerToken_EveryRecordIsUnknown()
     {
         var probe = new WireProbe();
@@ -123,14 +152,25 @@ public class CallerRecordAccessProbeRecordsOrUnknownTests
             .Should().Equal(AccessRights.None);
     }
 
+    /// <summary>Cancels the caller's token as the request is sent, then fails the way a cancelled HttpClient call does.</summary>
+    private sealed class CancellingHandler(CancellationTokenSource cts) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            cts.Cancel();
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+        }
+    }
+
     /// <summary>The shipped probe, with its wire steps answered in memory and its waits recorded.</summary>
     private sealed class WireProbe : CallerRecordAccessProbe
     {
         private int _asks;
 
-        public WireProbe()
+        public WireProbe(HttpClient? http = null)
             : base(
-                new HttpClient(),
+                http ?? new HttpClient(),
                 new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
                 {
                     ["AzureAd:TenantId"] = "00000000-0000-0000-0000-0000000000aa",
@@ -150,6 +190,11 @@ public class CallerRecordAccessProbeRecordsOrUnknownTests
         public ConcurrentBag<Guid> ThrowingRecords { get; } = new();
         public bool FailExchange { get; init; }
         public bool FailWhoAmI { get; init; }
+
+        /// <summary>Run the PRODUCTION WhoAmI step (over the HttpClient given) instead of the in-memory answer.</summary>
+        public bool UseRealWhoAmI { get; init; }
+
+        public ConcurrentBag<Guid> UnreadableBodyRecords { get; } = new();
         public int Asks => Volatile.Read(ref _asks);
         public ConcurrentQueue<TimeSpan> WaitQueue { get; } = new();
         public IReadOnlyList<TimeSpan> Waits => WaitQueue.ToList();
@@ -158,7 +203,9 @@ public class CallerRecordAccessProbeRecordsOrUnknownTests
             => Task.FromResult<string?>(FailExchange ? null : "dataverse-token");
 
         protected override Task<Guid?> ResolveCallerSystemUserIdAsync(string dataverseToken, CancellationToken ct)
-            => Task.FromResult<Guid?>(FailWhoAmI ? null : Guid.Parse("08108108-1111-4000-8000-0000000000ff"));
+            => UseRealWhoAmI
+                ? base.ResolveCallerSystemUserIdAsync(dataverseToken, ct)
+                : Task.FromResult<Guid?>(FailWhoAmI ? null : Guid.Parse("08108108-1111-4000-8000-0000000000ff"));
 
         protected override Task<(HttpStatusCode Status, string Body)> SendPrincipalAccessRequestAsync(
             string url, string dataverseToken, CancellationToken ct)
@@ -166,6 +213,9 @@ public class CallerRecordAccessProbeRecordsOrUnknownTests
             Interlocked.Increment(ref _asks);
             if (ThrowingRecords.Any(id => url.Contains(id.ToString(), StringComparison.OrdinalIgnoreCase)))
                 throw new HttpRequestException("simulated transport fault");
+
+            if (UnreadableBodyRecords.Any(id => url.Contains(id.ToString(), StringComparison.OrdinalIgnoreCase)))
+                return Task.FromResult((HttpStatusCode.OK, "this is not json {"));
 
             var match = StatusByRecord.FirstOrDefault(kv => url.Contains(kv.Key.ToString(), StringComparison.OrdinalIgnoreCase));
             (HttpStatusCode, string) answer = match.Key == Guid.Empty

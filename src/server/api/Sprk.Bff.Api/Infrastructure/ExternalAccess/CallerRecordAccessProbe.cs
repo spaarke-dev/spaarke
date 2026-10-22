@@ -403,8 +403,10 @@ public class CallerRecordAccessProbe
     /// treats both as a denial); a counter asks this one and shows no number when any entry is unknown.</para>
     /// <para><b>Unknown</b>, per record: any <c>RetrievePrincipalAccess</c> answer other than 200 or 403 (a 404 after the re-asks
     /// <see cref="NotFoundRetryDelay"/> schedules, a 429, a 5xx, a 401), a transport fault or an unreadable body. For EVERY record:
-    /// no caller token, no OBO configuration, a failed exchange or a failed <c>WhoAmI</c>. Only the caller's own cancellation is
-    /// rethrown. The same per-set and per-record steps, bound and order as <see cref="GetCallerRightsForRecordsAsync"/>.</para>
+    /// no caller token, no OBO configuration, a failed exchange or a failed <c>WhoAmI</c>. The caller's own cancellation is
+    /// rethrown PER RECORD only (during a <c>RetrievePrincipalAccess</c> ask). A cancellation during the OBO exchange or <c>WhoAmI</c> is caught
+    /// by those steps like any other failure and becomes "every entry unknown", not an exception. The same per-set and per-record steps, bound
+    /// and order as <see cref="GetCallerRightsForRecordsAsync"/>.</para>
     /// </remarks>
     public virtual async Task<IReadOnlyList<AccessRights?>> GetCallerRightsForRecordsOrUnknownAsync(
         string? callerBearerToken,
