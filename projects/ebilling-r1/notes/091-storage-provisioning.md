@@ -162,10 +162,10 @@ The four actions and the first five dataActions are built-in Storage Blob Data C
 
 | # | Condition | Met by | State |
 |---|---|---|---|
-| 1 | The role is exact; must-fire on tags/write or any `*`; must-not-fire on the exact set | Template: `CustomerStampKeylessTemplateTests.FileStoreRole_IsExactlyContributorPlusTagRead` (the real compiled definition — the must-not-fire control on the real role), `FileStoreRole_ExactSet_IsAccepted` (exact set, any order), `FileStoreRole_Deviation_IsFlagged` (14 must-fire cases: tags/write, tags/*, blobs/*, an action wildcard, `*`, missing tags/read, missing action, extra action, notActions, notDataActions, a second block, a condition, subscription- and account-assignable). Live: `scripts/ebilling/Test-EbillingFileStoreRole.ps1` step 1 diffs the DEPLOYED role against the LIVE built-in Contributor + tags/read (Pester `tests/scripts/Test-EbillingFileStoreRole.Tests.ps1`). | Authored; tests pass. Live step not run. |
-| 2 | Live proof: under the role, Set Blob Tags and Put Blob with `x-ms-tags` are both 403 | `scripts/ebilling/test-ebilling-file-store-tag-write.sh`, run **as the identity** in the App Service SSH console (§8.5 step 6). Controls: Put Blob without tags 201, Get Blob Tags 200. | **Authored, NOT run** (an agent cannot act as the UAMI). |
+| 1 | The role is exact; must-fire on tags/write or any `*`; must-not-fire on the exact set | Template: `CustomerStampKeylessTemplateTests.FileStoreRole_IsExactlyContributorPlusTagRead` (the real compiled definition — the must-not-fire control on the real role), `FileStoreRole_ExactSet_IsAccepted` (exact set, any order), `FileStoreRole_Deviation_IsFlagged` (14 must-fire cases: tags/write, tags/*, blobs/*, an action wildcard, `*`, missing tags/read, missing action, extra action, notActions, notDataActions, a second block, a condition, subscription- and account-assignable). Live: `scripts/ebilling/Test-EbillingFileStoreRole.ps1` step 1 diffs the DEPLOYED role against the LIVE built-in Contributor + tags/read (Pester `tests/scripts/Test-EbillingFileStoreRole.Tests.ps1`). | Met live 2026-10-21: §8.6 block `== 4. Test-EbillingFileStoreRole`, step 1 [PASS], exit 0. |
+| 2 | Live proof: under the role, Set Blob Tags and Put Blob with `x-ms-tags` are both 403 | `scripts/ebilling/test-ebilling-file-store-tag-write.sh`, run **as the identity** in the App Service SSH console (§8.5 step 6). Controls: Put Blob without tags 201, Get Blob Tags 200. | **Met live 2026-10-22**: §8.7, all 3 containers PASS. |
 | 3 | Downloads need a clean scan time no earlier than the blob's Last-Modified | Task 090's code. 090's POML notes already state it: "The download serves only when the tag 'Malware Scanning scan result' = 'No threats found' AND the scan time is no earlier than the blob's Last-Modified. A missing tag, an unreadable tag or an older scan refuses. Pinned by a test: tagged clean, then Last-Modified later, then refused. Keep the time check even if dev shows an overwrite clears tags." Restated here as binding on 091's hand-off: the role keeps blob write, so the time check is what stops an overwritten blob inheriting an earlier clean verdict. | Stated in both; implementation is 090's. |
-| 4 | Per-container assignments only | Template: `FileStoreRole_IsAssignedPerContainerOnly` on the module, and the existing `StampBlobDataRoles_AreContainerScoped` on `customer.json` — `BlobDataRoleScopeViolations` now also counts a custom role defined in the same template with any blob data action, so an account-, RG- or deployment-scope grant of it fails (`CustomBlobRoleScope_NegativeControl`). Live: `Test-EbillingFileStoreRole.ps1` step 2 (every assignment of the role in the subscription is at one of the expected containers; the principal holds it on each). | Authored; tests pass. Live step not run. |
+| 4 | Per-container assignments only | Template: `FileStoreRole_IsAssignedPerContainerOnly` on the module, and the existing `StampBlobDataRoles_AreContainerScoped` on `customer.json` — `BlobDataRoleScopeViolations` now also counts a custom role defined in the same template with any blob data action, so an account-, RG- or deployment-scope grant of it fails (`CustomBlobRoleScope_NegativeControl`). Live: `Test-EbillingFileStoreRole.ps1` step 2 (every assignment of the role in the subscription is at one of the expected containers; the principal holds it on each). | Met live 2026-10-21: §8.6 block `== 4. Test-EbillingFileStoreRole`, step 2 [PASS], exit 0. |
 
 **If step 3 of the data-plane proof returns 201** (Put Blob with `x-ms-tags` accepted under blob write alone), stop: an uploader could then write a forged "No threats found" tag and scan time at upload, which condition 3's time check does not catch. Report to uac-r2 before enabling downloads.
 
@@ -250,7 +250,7 @@ Owner decisions 2026-10-21:
 - Apply after the what-if.
 - Dev scanning: **"Scanning not enabled"** (`enableMalwareScanning=false`; files are served as "Not scanned" on dev).
 
-Steps 0–5 were run by the main session as ralph.schroeder@spaarke.com. Step 6, the data-plane proof as the identity, is **not yet run**.
+Steps 0–5 were run by the main session as ralph.schroeder@spaarke.com. Step 6, the data-plane proof as the identity, ran 2026-10-22 (§8.7).
 
 ```
 == 0. create account
@@ -410,5 +410,6 @@ The operator ran `scripts/ebilling/test-ebilling-file-store-tag-write.sh` in the
 
 All three ended `RESULT: PASS` and `exit 0`. Probe b was never created, because step 3 was refused. The identity can write blobs and read tags, but cannot write tags, so it cannot forge the malware-scan verdict. All three uac-r2 conditions are met.
 
-The first paste attempt did not run. Bracketed-paste markers broke the first word, and the base64 decode carried CRLF line endings. The paste line now starts with `true; ` and passes the decode through `tr -d ''`.
+The first paste attempt did not run. Bracketed-paste markers broke the first word, and the base64 decode carried CRLF line endings. The paste line now starts with `true; ` and passes the decode through `tr -d '
+'`.
 
