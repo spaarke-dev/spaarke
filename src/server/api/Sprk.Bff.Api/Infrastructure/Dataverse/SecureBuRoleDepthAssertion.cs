@@ -303,12 +303,18 @@ public static class SecureBuRoleDepthAssertion
     /// <remarks>
     /// A grant of a codified CHILD table's Read (<see cref="EffectiveGrant.CodifiedChildTable"/>, UAC 2026-10-23) is
     /// graded by exactly the same rules — same reach, same allow-list, same verdict and severity, because its secure rows
-    /// are disclosed the same way — and its finding names the table, so it reads apart from a root reach.
+    /// are disclosed the same way. Child-table reaches are AGGREGATED: one finding per principal, role, anchor BU,
+    /// team path and depth, listing every codified child table that grant reaches (sorted), so one broad role does not
+    /// emit a line per table on every run. Root findings stay one per root privilege, worded as before — the control
+    /// plane parses the verdict.
     /// </remarks>
     private static IEnumerable<SecureBuFinding> EvaluateDepthClause(
         SecureBuRoleDepthCensus census,
         BusinessUnitNode secureBu)
     {
+        var childReaches = new Dictionary<ChildReachKey, SortedSet<string>>();
+        var childReachOrder = new List<ChildReachKey>();
+
         foreach (var grant in census.Grants)
         {
             if (!grant.PrincipalIsHuman)
@@ -347,6 +353,23 @@ public static class SecureBuRoleDepthAssertion
                 continue;
             }
 
+            if (grant.CodifiedChildTable is { } childTable)
+            {
+                // UAC 2026-10-23: collected, then reported once per grant shape below (see remarks).
+                var key = new ChildReachKey(
+                    administrative, grant.PrincipalId, grant.RoleName, grant.AnchorBusinessUnitId, grant.HeldViaTeam,
+                    grant.Depth);
+                if (!childReaches.TryGetValue(key, out var tables))
+                {
+                    tables = new SortedSet<string>(StringComparer.Ordinal);
+                    childReaches[key] = tables;
+                    childReachOrder.Add(key);
+                }
+
+                tables.Add(childTable);
+                continue;
+            }
+
             if (administrative)
             {
                 // An administrative role reaching the secure BU through TEAM membership is not a
@@ -358,35 +381,65 @@ public static class SecureBuRoleDepthAssertion
                     $"systemuser {grant.PrincipalId} reaches the "
                         + $"secure business unit '{secureBu.Name}' through the ALLOW-LISTED administrative "
                         + $"role '{grant.RoleName}' ({grant.PrivilegeName} @ {grant.Depth}, anchored at BU "
-                        + $"{grant.AnchorBusinessUnitId}"
-                        + (grant.CodifiedChildTable is { } adminChildTable
-                            ? $", codified child table {adminChildTable}"
-                            : string.Empty)
-                        + $") — but holds it via team '{grant.HeldViaTeam}', "
-                        + "not by direct assignment. The allow-list exempts a DELIBERATE per-identity "
-                        + "administrator; a role on a team promotes every current and future member at "
-                        + "once, and a default business-unit owner team's membership is platform-managed "
-                        + "and cannot be curated. Either assign the administrative role directly to the "
-                        + "identities that should hold it, or remove it from the team.");
+                        + $"{grant.AnchorBusinessUnitId}) — but holds it via team '{grant.HeldViaTeam}', "
+                        + AdministrativeTeamRemedy);
                 continue;
             }
 
             yield return new SecureBuFinding(
                 SecureBuVerdict.HumanPrincipalReachesSecureBusinessUnit,
-                (grant.CodifiedChildTable is { } childTable
-                    ? $"SECURE CHILD RECORDS ARE NOT ISOLATED (codified child table {childTable}): "
-                    : "SECURE PROJECTS ARE NOT ISOLATED: ")
-                    + $"systemuser {grant.PrincipalId} "
+                $"SECURE PROJECTS ARE NOT ISOLATED: systemuser {grant.PrincipalId} "
                     + "— a non-administrator human — holds "
                     + $"'{grant.RoleName}' granting {grant.PrivilegeName} at {grant.Depth} depth anchored "
                     + $"at business unit {grant.AnchorBusinessUnitId}"
                     + (grant.HeldViaTeam is null ? string.Empty : $" (via team '{grant.HeldViaTeam}')")
                     + $", which REACHES '{secureBu.Name}' ({secureBu.Id}). Every secure record of that type is "
-                    + "readable by this principal, with no error and no log line. Fix per design §5.2: "
-                    + "move the principal (or the team) into a subtree that is not an ancestor of the "
-                    + "secure BU, or narrow the depth. This is a MERGE GATE (spec NFR-05).");
+                    + "readable by this principal, with no error and no log line. " + HumanReachRemedy);
+        }
+
+        foreach (var key in childReachOrder)
+        {
+            var tables = string.Join(", ", childReaches[key]);
+
+            if (key.Administrative)
+            {
+                yield return new SecureBuFinding(
+                    SecureBuVerdict.AdministrativeRoleHeldByTeam,
+                    $"systemuser {key.PrincipalId} reaches the "
+                        + $"secure business unit '{secureBu.Name}' through the ALLOW-LISTED administrative "
+                        + $"role '{key.RoleName}' (Read @ {key.Depth} on codified child tables {tables}, anchored at "
+                        + $"BU {key.AnchorBusinessUnitId}) — but holds it via team '{key.HeldViaTeam}', "
+                        + AdministrativeTeamRemedy);
+                continue;
+            }
+
+            yield return new SecureBuFinding(
+                SecureBuVerdict.HumanPrincipalReachesSecureBusinessUnit,
+                $"SECURE CHILD RECORDS ARE NOT ISOLATED (codified child tables {tables}): systemuser "
+                    + $"{key.PrincipalId} — a non-administrator human — holds '{key.RoleName}' granting Read on each "
+                    + $"of those tables at {key.Depth} depth anchored at business unit {key.AnchorBusinessUnitId}"
+                    + (key.HeldViaTeam is null ? string.Empty : $" (via team '{key.HeldViaTeam}')")
+                    + $", which REACHES '{secureBu.Name}' ({secureBu.Id}). Every secure record of those tables is "
+                    + "readable by this principal, with no error and no log line. " + HumanReachRemedy);
         }
     }
+
+    private const string AdministrativeTeamRemedy =
+        "not by direct assignment. The allow-list exempts a DELIBERATE per-identity "
+        + "administrator; a role on a team promotes every current and future member at "
+        + "once, and a default business-unit owner team's membership is platform-managed "
+        + "and cannot be curated. Either assign the administrative role directly to the "
+        + "identities that should hold it, or remove it from the team.";
+
+    private const string HumanReachRemedy =
+        "Fix per design §5.2: "
+        + "move the principal (or the team) into a subtree that is not an ancestor of the "
+        + "secure BU, or narrow the depth. This is a MERGE GATE (spec NFR-05).";
+
+    /// <summary>One aggregated child-table reach (UAC 2026-10-23): everything a clause-1 finding names except the tables.</summary>
+    private sealed record ChildReachKey(
+        bool Administrative, Guid PrincipalId, string RoleName, Guid AnchorBusinessUnitId, string? HeldViaTeam,
+        PrivilegeDepth Depth);
 
     /// <summary>
     /// Whether the same principal also holds the same role by DIRECT assignment — i.e. whether the

@@ -446,7 +446,7 @@ public class SecureBuRoleDepthAssertionTests
             "a child-table reach is the same exposure, at the same severity, as a root reach");
         finding.Message.Should().Contain("SECURE CHILD RECORDS ARE NOT ISOLATED")
             .And.Contain("sprk_policy")
-            .And.Contain("prvReadsprk_Policy")
+            .And.Contain("(codified child tables sprk_policy)")
             .And.Contain(holder.ToString())
             .And.NotContain("SECURE PROJECTS ARE NOT ISOLATED");
     }
@@ -553,13 +553,149 @@ public class SecureBuRoleDepthAssertionTests
             .Should().BeEquivalentTo(set.Tables.Select(t => t.PrivilegeName), "every privilegeName in the file is guarded");
 
         var outcome = SecureBuRoleDepthAssertion.Evaluate(census);
-        outcome.Findings.Should().HaveCount(set.Tables.Count)
+        var children = set.Tables.Where(t => t.Kind != "root").Select(t => t.LogicalName).Order(StringComparer.Ordinal);
+        outcome.Findings.Should().HaveCount(SecureBuRoleDepthAssertion.GuardedPrivileges.Count + 1,
+                "one finding per root privilege, and ONE aggregated child-table finding for the role")
             .And.OnlyContain(f => f.Verdict == SecureBuVerdict.HumanPrincipalReachesSecureBusinessUnit);
-        foreach (var child in set.Tables.Where(t => t.Kind != "root"))
+        outcome.Findings.Should().ContainSingle(f => f.Message.Contains(
+            $"(codified child tables {string.Join(", ", children)})"),
+            "every codified child table is guarded, and the finding lists them all, sorted");
+    }
+
+    // ── Aggregation: one child-table finding per grant shape (coordinator review of 84e9bd1e2a) ─────
+
+    /// <summary>Must-fire: three child Reads through ONE role at Global are ONE finding naming all three, sorted.</summary>
+    [Fact]
+    public void Build_WhenOneRoleReachesThreeChildTables_ReportsOneFindingNamingAllThree()
+    {
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(CensusOfRoles(
+            ("Spaarke Wide Reader", PrivilegeDepth.Global, new[] { "prvReadsprk_Todo", "prvReadsprk_Policy", "prvReadsprk_Memo" })));
+
+        outcome.Findings.Should().ContainSingle(outcome.Message)
+            .Which.Message.Should().Contain("(codified child tables sprk_memo, sprk_policy, sprk_todo)");
+    }
+
+    /// <summary>Two roles reaching child tables are two findings — one per role.</summary>
+    [Fact]
+    public void Build_WhenTwoRolesReachChildTables_ReportsOneFindingPerRole()
+    {
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(CensusOfRoles(
+            ("Spaarke Policy Reader", PrivilegeDepth.Global, new[] { "prvReadsprk_Policy", "prvReadsprk_PolicyVersion" }),
+            ("Spaarke Basic User", PrivilegeDepth.Deep, new[] { "prvReadsprk_Document", "prvReadsprk_Todo" })));
+
+        outcome.Findings.Should().HaveCount(2, outcome.Message);
+        outcome.Findings.Should().ContainSingle(f => f.Message.Contains("'Spaarke Policy Reader'")
+            && f.Message.Contains("(codified child tables sprk_policy, sprk_policyversion)"));
+        outcome.Findings.Should().ContainSingle(f => f.Message.Contains("'Spaarke Basic User'")
+            && f.Message.Contains("(codified child tables sprk_document, sprk_todo)"));
+    }
+
+    /// <summary>
+    /// A role reaching a root and child tables keeps its root finding exactly as before (one per root privilege, the
+    /// parsed prefix unchanged) and adds ONE child-table finding.
+    /// </summary>
+    [Fact]
+    public void Build_WhenOneRoleReachesARootAndChildTables_ReportsTheRootFindingPlusOneChildFinding()
+    {
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(CensusOfRoles(
+            ("Spaarke Basic User", PrivilegeDepth.Deep, new[] { "prvReadsprk_Matter", "prvReadsprk_Document", "prvReadsprk_Todo" })));
+
+        outcome.Findings.Should().HaveCount(2, outcome.Message);
+        outcome.Findings.Should().ContainSingle(f => f.Message.StartsWith("SECURE PROJECTS ARE NOT ISOLATED: ")
+            && f.Message.Contains("prvReadsprk_Matter"));
+        outcome.Findings.Should().ContainSingle(f => f.Message.StartsWith("SECURE CHILD RECORDS ARE NOT ISOLATED ")
+            && f.Message.Contains("(codified child tables sprk_document, sprk_todo)"));
+    }
+
+    /// <summary>
+    /// The allow-listed-administrator-via-team branch aggregates the same way: one finding for the team-held role,
+    /// listing its child tables, beside its per-root findings.
+    /// </summary>
+    [Fact]
+    public void Build_WhenAnAdministrativeRoleOnATeamReachesChildTables_ReportsOneAggregatedChildFinding()
+    {
+        var adminRole = Guid.NewGuid();
+        var ownerRole = Guid.NewGuid();
+        var member = Guid.NewGuid();
+        var depths = OwnerRoleCoveringTheWholeSet(ownerRole);
+        foreach (var privilege in new[] { "prvReadsprk_Project", "prvReadsprk_Policy", "prvReadsprk_Todo" })
         {
-            outcome.Findings.Should().ContainSingle(f => f.Message.Contains($"(codified child table {child.LogicalName})"),
-                $"{child.PrivilegeName} is guarded and its finding names {child.LogicalName}");
+            depths[(adminRole, privilege)] = PrivilegeDepth.Global;
         }
+
+        var census = SecureBuRoleDepthCensusBuilder.Build(
+            SecureRecordOwnerTeam.DefaultBusinessUnitName,
+            OwnerTeamName,
+            BusinessUnits,
+            depths,
+            new[]
+            {
+                new CensusRole(adminRole, "System Administrator", RootBu, adminRole),
+                new CensusRole(ownerRole, SecureBuRoleDepthAssertion.SecureOwnerRoleName, SecureBu, ownerRole)
+            },
+            new[] { new CensusUser(member, IsHuman: true, RootBu, Array.Empty<Guid>()) },
+            new[]
+            {
+                new CensusTeam(Guid.NewGuid(), "Spaarke", RootBu, IsDefault: true, TeamType: 0, new[] { adminRole }, new[] { member }),
+                new CensusTeam(Guid.NewGuid(), OwnerTeamName, SecureBu, IsDefault: false, TeamType: 0, new[] { ownerRole }, Array.Empty<Guid>())
+            },
+            SecureRecordOwnerRoleSet.Embedded,
+            SecureBuRoleDepthCensusBuilder.CensusPrivilegeNames(SecureRecordOwnerRoleSet.Embedded));
+
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(census);
+
+        outcome.Findings.Should().HaveCount(2, outcome.Message)
+            .And.OnlyContain(f => f.Verdict == SecureBuVerdict.AdministrativeRoleHeldByTeam);
+        outcome.Findings.Should().ContainSingle(f => f.Message.Contains("(prvReadsprk_Project @ Global"));
+        outcome.Findings.Should().ContainSingle(f => f.Message.Contains("on codified child tables sprk_policy, sprk_todo,"));
+    }
+
+    /// <summary>
+    /// A builder census in the owner role's steady state, plus ONE human at the root BU holding each given role directly,
+    /// each granting its privileges at its depth.
+    /// </summary>
+    private static SecureBuRoleDepthCensus CensusOfRoles(
+        params (string RoleName, PrivilegeDepth Depth, string[] Privileges)[] heldRoles)
+    {
+        var ownerRole = Guid.NewGuid();
+        var depths = OwnerRoleCoveringTheWholeSet(ownerRole);
+        var adminRole = Guid.NewGuid();
+        foreach (var root in SecureBuRoleDepthAssertion.GuardedPrivileges)
+        {
+            depths[(adminRole, root)] = PrivilegeDepth.Global; // a direct administrator, so the census is never vacuous
+        }
+
+        var roles = new List<CensusRole>
+        {
+            new(ownerRole, SecureBuRoleDepthAssertion.SecureOwnerRoleName, SecureBu, ownerRole),
+            new(adminRole, "System Administrator", RootBu, adminRole)
+        };
+        var roleIds = new List<Guid>();
+        foreach (var held in heldRoles)
+        {
+            var id = Guid.NewGuid();
+            roles.Add(new CensusRole(id, held.RoleName, RootBu, id));
+            roleIds.Add(id);
+            foreach (var privilege in held.Privileges)
+            {
+                depths[(id, privilege)] = held.Depth;
+            }
+        }
+
+        return SecureBuRoleDepthCensusBuilder.Build(
+            SecureRecordOwnerTeam.DefaultBusinessUnitName,
+            OwnerTeamName,
+            BusinessUnits,
+            depths,
+            roles,
+            new[]
+            {
+                new CensusUser(Guid.NewGuid(), IsHuman: true, RootBu, roleIds),
+                new CensusUser(Guid.NewGuid(), IsHuman: true, RootBu, new[] { adminRole })
+            },
+            new[] { new CensusTeam(Guid.NewGuid(), OwnerTeamName, SecureBu, IsDefault: false, TeamType: 0, new[] { ownerRole }, Array.Empty<Guid>()) },
+            SecureRecordOwnerRoleSet.Embedded,
+            SecureBuRoleDepthCensusBuilder.CensusPrivilegeNames(SecureRecordOwnerRoleSet.Embedded));
     }
 
     /// <summary>
