@@ -167,3 +167,64 @@ describe('createWorklistOpenRecord (the subject opens in a modal, never as a pag
     expect(createWorklistOpenRecord({})).toBeUndefined();
   });
 });
+
+describe('createWorklistOpenLookup with a data source (task 160, D-179: the inquiry To lookup adds the contact by its address)', () => {
+  const CONTACT = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
+  const source = (rows: Record<string, unknown>[] | Error) => ({
+    retrieveMultipleRecords: jest.fn(async (_entity: string, _options?: string) => {
+      if (rows instanceof Error) throw rows;
+      return { entities: rows };
+    }),
+  });
+  const person = { kind: 'Person' as const, entity: 'contact', parameterCode: 'to', core: null };
+
+  it('a Person pick carries the contact emailaddress1, read once for that contact', async () => {
+    const s = source([{ contactid: CONTACT, emailaddress1: 'lead@firm.example' }]);
+    const out = await createWorklistOpenLookup(
+      nav([{ id: `{${CONTACT.toUpperCase()}}`, name: 'Lead', entityType: 'contact' }]),
+      s
+    )(person);
+
+    expect(out).toEqual({ id: `{${CONTACT.toUpperCase()}}`, name: 'Lead', email: 'lead@firm.example' });
+    expect(s.retrieveMultipleRecords).toHaveBeenCalledTimes(1);
+    expect(s.retrieveMultipleRecords).toHaveBeenCalledWith(
+      'contact',
+      `?$select=emailaddress1&$filter=contactid eq ${CONTACT}&$top=1`
+    );
+  });
+
+  it('a contact with no address, or a failed read, is returned without an email', async () => {
+    const pane = () => nav([{ id: CONTACT, name: 'No Mail', entityType: 'contact' }]);
+    expect(
+      await createWorklistOpenLookup(pane(), source([{ contactid: CONTACT, emailaddress1: null }]))(person)
+    ).toEqual({
+      id: CONTACT,
+      name: 'No Mail',
+    });
+    expect(await createWorklistOpenLookup(pane(), source(new Error('offline')))(person)).toEqual({
+      id: CONTACT,
+      name: 'No Mail',
+    });
+  });
+
+  it('must-not-fire: a Lookup pick, a cancel or a non-GUID id reads nothing', async () => {
+    const s = source([{ emailaddress1: 'x@y.example' }]);
+    await createWorklistOpenLookup(
+      nav([{ id: 'b1', name: 'Budget', entityType: 'sprk_budget' }]),
+      s
+    )({
+      kind: 'Lookup',
+      entity: 'sprk_budget',
+      parameterCode: 'budget',
+      core: null,
+    });
+    expect(await createWorklistOpenLookup(nav([]), s)(person)).toBeNull();
+    expect(
+      await createWorklistOpenLookup(nav([{ id: 'not-a-guid', name: 'X', entityType: 'contact' }]), s)(person)
+    ).toEqual({
+      id: 'not-a-guid',
+      name: 'X',
+    });
+    expect(s.retrieveMultipleRecords).not.toHaveBeenCalled();
+  });
+});

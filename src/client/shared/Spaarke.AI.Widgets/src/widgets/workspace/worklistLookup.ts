@@ -96,8 +96,12 @@ export const WORKLIST_OPEN_LOOKUP_ENTITIES: readonly string[] = ['sprk_budget', 
  *   - `sprk_organization`     -> firms
  *   - `sprk_budget`           -> active budgets of the item's own matter or project (with no core, active budgets only)
  * Any other entity opens nothing (null), as the inline search returns no candidates for it. Single select; null on cancel.
+ * With `source` (task 160), a Person pick also carries the contact's `emailaddress1` as `email`.
  */
-export function createWorklistOpenLookup(navigation: Pick<INavigationService, 'openLookup'>): DecisionOpenLookup {
+export function createWorklistOpenLookup(
+  navigation: Pick<INavigationService, 'openLookup'>,
+  source?: WorklistLookupDataSource
+): DecisionOpenLookup {
   const openLookup: DecisionOpenLookup = async request => {
     let filters: { entityLogicalName: string; filterXml: string }[] | undefined;
 
@@ -124,10 +128,31 @@ export function createWorklistOpenLookup(navigation: Pick<INavigationService, 'o
     });
     // An empty result (cancel) is possible at runtime even though the array type says otherwise.
     const picked = results.length > 0 ? results[0] : undefined;
-    return picked?.id ? { id: picked.id, name: picked.name } : null;
+    if (!picked?.id) return null;
+    // Task 160 (D-179): a Person pick also carries the contact's address when the host can read it, so the inquiry's To lookup
+    // adds the contact by its address (the address is what is committed). No address, or a read that fails: none.
+    const email = request.kind === 'Person' && source ? await contactEmail(source, picked.id) : null;
+    return email ? { id: picked.id, name: picked.name, email } : { id: picked.id, name: picked.name };
   };
   // K2: the tables handled above. The wizard keeps the inline field for any other table instead of a dead pane field.
   return Object.assign(openLookup, { supportedEntities: WORKLIST_OPEN_LOOKUP_ENTITIES });
+}
+
+/** The contact's `emailaddress1`, or null when it has none, the id is not a GUID or the read fails. */
+async function contactEmail(source: WorklistLookupDataSource, contactId: string): Promise<string | null> {
+  const id = contactId.replace(/[{}]/g, '').toLowerCase();
+  if (!GUID.test(id)) return null;
+  try {
+    const result = await source.retrieveMultipleRecords(
+      'contact',
+      `?$select=emailaddress1&$filter=contactid eq ${id}&$top=1`
+    );
+    const email = result.entities[0]?.['emailaddress1'];
+    return typeof email === 'string' && email.trim() !== '' ? email.trim() : null;
+    // eslint-disable-next-line no-restricted-syntax -- an unreadable address is "no address": the pick adds nothing to To
+  } catch {
+    return null;
+  }
 }
 
 /** Opens a record in a platform modal above the wizard. Undefined when the host cannot (never `openForm`, which would leave the wizard). */
