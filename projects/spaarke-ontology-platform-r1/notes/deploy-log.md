@@ -364,6 +364,12 @@ Criterion 89 (blank the writer client id, expect the writer-failure alert to fir
   - Read-back: 21 → 19 privileges. Neither Read is left; `prvReadsprk_Signal` is kept.
   - A first attempt at 11:21:18Z used the wrong payload (`PrivilegeId`). It was rejected with 0x80048d19, and the read-back confirmed nothing had changed. The working payload is `{"Privilege":{"@odata.type":"Microsoft.Dynamics.CRM.privilege","privilegeid":…}}`, as in `Remove-ConsoleSignalWriteAndDecisionRecordCreate.ps1:307`.
   - Spaarke Basic User was not changed (see security-roles §19).
+- **uac-r2 server gate: PASS** (window 11:18:00–11:51:05Z):
+  - 77 requests: 0 403, 0 5xx; the 9 failures are all 401 probes.
+  - 0 `worklist_unavailable`, 0 `signal_unreadable`.
+  - No new exception class (one restart-class Redis lease exception at 11:21:20Z).
+  - Not covered: no traffic reached the worklist or the inquiry routes, so the owner's browser checks cover them.
+  - Evidence: `projects/unified-access-control-r2/notes/deploy-gate-2026-10-23-58ffc37da3.md`.
 
 ## 2026-10-23 — Spaarke Core User: AppendTo on `sprk_eventtype_ref` (D-110, task 159), spaarkedev1
 
