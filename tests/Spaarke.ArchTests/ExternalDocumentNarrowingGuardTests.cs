@@ -1248,6 +1248,22 @@ public class ExternalDocumentNarrowingGuardTests
             ReferencersOf("PatchAsync"));
     }
 
+    [Fact(DisplayName = "UAC review K1 (on e371dce6bf): FinanceRollupService.WriteRollupAsync, listed as writing only its own rollup fields, has the one production caller that passes them")]
+    public void FinanceRollupWriteRollupAsync_IsReachedOnlyFromRecalculateForEntityAsync()
+    {
+        // WriteRollupAsync takes the parent table and the counted fields as parameters, and stays internal for its unit test
+        // (FinanceRollupPendingSpendWriteTests). Its GenericWritersThatUpdateNoDocument reason holds only while its one BFF caller
+        // passes BuildRollupFields to sprk_matter or sprk_project; a second caller fails here.
+        var rollup = typeof(Sprk.Bff.Api.Services.Finance.FinanceRollupService);
+        var referencers = new SortedSet<string>(
+            IlCallScan.MethodReferences(BffTypes.Value)
+                .Where(r => r.Target.DeclaringType == rollup && r.Target.Name == "WriteRollupAsync")
+                .Select(r => SourceKey(r.Caller, r.CallerMethod)),
+            StringComparer.Ordinal);
+
+        Assert.Equal(new[] { $"{rollup.FullName}::RecalculateForEntityAsync" }, referencers);
+    }
+
     [Fact(DisplayName = "Task 188 r4e / #2170 / #2237: negative control — per member: a write beside a refusing member, a mention only, the concrete service and an unasked document field update are found; a refusal in a lambda, a listed member, a typed update and an asked document field update are not; stale member entries are reported")]
     public void GenericWriterDetector_MustFireAndMustNotFire()
     {
