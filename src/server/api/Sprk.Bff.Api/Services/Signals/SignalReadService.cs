@@ -200,6 +200,7 @@ public sealed class SignalReadService
     internal const string TodoMatterColumn = "_sprk_regardingmatter_value";
     private const string RecordTypeRefEntity = "sprk_recordtype_ref";
     private const string ConfigurationEntity = "sprk_gridconfiguration";
+    private const string PolicyEntity = "sprk_policy";
 
     /// <summary>A Do-lane subject table's "mine" rule. Each part is OR-ed, each compared with the caller.</summary>
     /// <param name="Table">The subject table.</param>
@@ -448,6 +449,10 @@ public sealed class SignalReadService
                     visible = [.. visible.Where(v => decisions.ContainsKey(v.Row.SignalId))];
                 }
             }
+
+            // (11) D-185 (task 163, #2285): the policy short name, work type and severity of the rows that are returned, read as the
+            // BFF. A read fault is caught below as "fault" (503): severity ranks the list, so rows are never returned without it.
+            visible = await ApplyPolicyColumnsAsync(visible, ct).ConfigureAwait(false);
 
             _logger.LogInformation(
                 "Signal read: set {Set}, {Read} Signals read as the caller, {Visible} returned.", set, rows.Count, visible.Count);
@@ -716,6 +721,50 @@ public sealed class SignalReadService
         {
             return null;
         }
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // (11) policy columns, as the BFF (D-185)
+    // ---------------------------------------------------------------------------------------------------------------
+
+    /// <summary>The three <c>sprk_policy</c> columns the worklist shows and ranks by.</summary>
+    private sealed record PolicyColumns(string? ShortName, int? WorkType, int? Severity);
+
+    /// <summary>
+    /// D-185 (task 163, #2285): the rule short name, work type and severity come from ONE batched BFF read of <c>sprk_policy</c> by id
+    /// (<see cref="IdChunk"/> ids per query), not from a caller-run join, so a user needs no Read on <c>sprk_policy</c>. This is
+    /// configuration, not matter data, so the read is the BFF's own (as <c>DecisionPlanService</c>). Only the rows that are already
+    /// visible to the caller are enriched, and the read reveals nothing beyond the three columns the worklist already shows. It runs
+    /// whether or not the configuration still carries the old <c>policy</c> link, so the BFF and the configuration deploy in either order.
+    /// A row with no policy id, or whose policy no longer exists, keeps what its Signal row carried (today's missing-alias behaviour:
+    /// no short name or work type, severity unknown, ranked last). A faulted read throws to the caller's catch (unavailable).
+    /// </summary>
+    private async Task<List<VisibleRow>> ApplyPolicyColumnsAsync(List<VisibleRow> visible, CancellationToken ct)
+    {
+        var ids = visible.Select(v => v.Row.PolicyId).Where(id => id is { } g && g != Guid.Empty).Select(id => id!.Value).Distinct().ToArray();
+        if (ids.Length == 0)
+        {
+            return visible;
+        }
+
+        var found = new Dictionary<Guid, PolicyColumns>();
+        foreach (var chunk in ids.Chunk(IdChunk))
+        {
+            var query = new QueryExpression(PolicyEntity) { ColumnSet = new ColumnSet("sprk_shortname", "sprk_worktype", "sprk_severity") };
+            query.Criteria.AddCondition("sprk_policyid", ConditionOperator.In, chunk.Cast<object>().ToArray());
+            var result = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            foreach (var policy in result.Entities.Where(e => chunk.Contains(e.Id)))
+            {
+                found[policy.Id] = new PolicyColumns(
+                    policy.GetAttributeValue<string>("sprk_shortname"),
+                    policy.GetAttributeValue<OptionSetValue>("sprk_worktype")?.Value,
+                    policy.GetAttributeValue<OptionSetValue>("sprk_severity")?.Value);
+            }
+        }
+
+        return [.. visible.Select(v => v.Row.PolicyId is { } id && found.TryGetValue(id, out var p)
+            ? v with { Row = v.Row with { RuleShortName = p.ShortName, WorkType = p.WorkType, Severity = p.Severity } }
+            : v)];
     }
 
     // ---------------------------------------------------------------------------------------------------------------
@@ -1801,6 +1850,7 @@ public sealed class SignalReadService
         Guid? CoreId,
         bool HasNoCore,
         Guid? PolicyVersionId,
+        Guid? PolicyId,
         string? EvidenceRefs,
         string? RuleShortName,
         int? WorkType,
@@ -1840,6 +1890,7 @@ public sealed class SignalReadService
                 hasType && hasCoreId ? coreId : null,
                 noCore,
                 TryReadGuid(raw, "_sprk_policyversion_value", out var version) ? version : null,
+                TryReadGuid(raw, "_sprk_policy_value", out var policyId) ? policyId : null,
                 ReadString(raw, "sprk_evidencerefs"),
                 AsString(Aliased(raw, "sprk_shortname")),
                 Int(Aliased(raw, "sprk_worktype")),
@@ -1854,8 +1905,9 @@ public sealed class SignalReadService
             return true;
         }
 
-        /// <summary>The <c>policy</c> link-entity column: the Web API names it <c>policy.{column}</c> (verified live on spaarkedev1,
-        /// 2026-10-14); the OData-escaped <c>policy_x002e_{column}</c> is accepted too.</summary>
+        /// <summary>The <c>policy</c> link-entity column, present only under the pre-D-185 configuration: the Web API names it
+        /// <c>policy.{column}</c> (verified live on spaarkedev1, 2026-10-14); the OData-escaped <c>policy_x002e_{column}</c> is accepted
+        /// too. Since D-185 the BFF reads these columns itself (<c>ApplyPolicyColumnsAsync</c>) and the configuration has no link.</summary>
         private static JsonElement? Aliased(JsonElement raw, string column) =>
             raw.TryGetProperty($"policy.{column}", out var v) || raw.TryGetProperty($"policy_x002e_{column}", out v) ? v : null;
 
