@@ -213,6 +213,7 @@ DEPLOYMENT PLAN
   Phases:
     Phase 1: Build all client components
     Phase 2: Deploy BFF API (per environment)
+    Phase 2b: Apply and verify the worklist grid configuration (per environment; only after a successful Phase 2; blocks Phase 3 if it fails)
     Phase 3: Import SpaarkeMaster — the CI-published package, typed per environment (none on dev)
     Phase 4: Deploy web resources (per environment)
     Phase 5: Validate deployment (per environment)
@@ -228,7 +229,7 @@ DEPLOYMENT PLAN
 - The operator can accept or provide a different version
 - Version must match `v{major}.{minor}.{patch}` format
 
-**Phase skipping**: If the operator wants to skip phases, ask which ones. Valid skip values: `Build`, `BffApi`, `Solutions`, `WebResources`, `Validation`.
+**Phase skipping**: If the operator wants to skip phases, ask which ones. Valid skip values: `Build`, `BffApi`, `OntologyConfig`, `Solutions`, `WebResources`, `Validation`. Skipping `OntologyConfig` does not block Phase 3. A failed BFF or a failed Phase 2b always blocks Phase 3, even with `-StopOnFailure $false`.
 
 Wait for the operator to type **"yes"** or **"proceed"**. Any other response (including "y") should prompt for clarification.
 
@@ -395,7 +396,7 @@ Is this a full production release to existing environments?
 | `-CustomerId` | string | **(required)** | Phase 4 target via the `sprk_dataverseenvironment` registry; `^[a-z][a-z0-9]{2,7}$`. Dev = `dev`. See Step 5 |
 | `-AdminEnvironmentUrl` | string | `$env:SPAARKE_ADMIN_DATAVERSE_URL`, else the registry's platform-admin entry, else the first non-template entry (dev) | Where the registry lives |
 | `-Version` | string | auto-suggested | `v{major}.{minor}.{patch}` format |
-| `-SkipPhase` | string[] | none | `Build`, `BffApi`, `Solutions`, `WebResources`, `Validation` |
+| `-SkipPhase` | string[] | none | `Build`, `BffApi`, `OntologyConfig`, `Solutions`, `WebResources`, `Validation` |
 | `-SkipBuild` | switch | $false | Shortcut for `-SkipPhase Build` |
 | `-StopOnFailure` | bool | $true | Stop remaining environments on failure |
 | `-ClientSecret` | string | (none) | **Ignored since T218f (2026-10-08)** — prints a warning. Phase 3 imports SpaarkeMaster with the operator's own az/pac sign-in; no service principal secret is used anywhere in the release. Kept so older invocations do not break. |
