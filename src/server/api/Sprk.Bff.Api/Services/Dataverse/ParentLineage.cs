@@ -1111,6 +1111,13 @@ internal static class InheritedAccessPermission
                 Sprk.Bff.Api.Services.Signals.SignalClosureService.RegardingInvoiceLineColumn,
                 CoreAncestorResolver.RegardingRecordTypeColumn,
                 CoreAncestorResolver.RegardingRecordIdColumn,
+                // Ontology pass 2 (F1): the lane is a typed-writer-only access input (the Do-lane "private to its assignee" rule in
+                // SignalCoreRecordAccess, and the Decide-lane listing), and the policy and policy version decide which policy's
+                // name, work type and severity a reader is shown app-only (D-185). SignalWriter sets all three at create on its own
+                // client; re-evaluation against a new version also goes through SignalWriter.
+                "sprk_lane",
+                "sprk_policy",
+                "sprk_policyversion",
             },
         };
 

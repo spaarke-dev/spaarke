@@ -123,6 +123,8 @@ public class AccessTableAppOnlyWriterTests
         [
             "sprk_corerecordtype", "sprk_corerecordid", "sprk_regardinginvoice", "sprk_regardinginvoiceline",
             "sprk_regardingrecordtype", "sprk_regardingrecordid",
+            // Ontology pass 2 (F1): the lane and the policy pair are typed-writer-only access inputs.
+            "sprk_lane", "sprk_policy", "sprk_policyversion",
         ],
     };
 
@@ -621,6 +623,9 @@ public class AccessTableAppOnlyWriterTests
             (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, Sprk.Bff.Api.Services.Signals.SignalClosureService.RegardingInvoiceLineColumn),
             (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, CoreAncestorResolver.RegardingRecordTypeColumn),
             (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, CoreAncestorResolver.RegardingRecordIdColumn),
+            (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, "sprk_lane"),
+            (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, "sprk_policy"),
+            (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, "sprk_policyversion"),
         ];
         foreach (var (table, column) in readers)
             Code(table, column).Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, $"{column} on {table}");
@@ -641,6 +646,10 @@ public class AccessTableAppOnlyWriterTests
                      "sprk_regardinginvoice", "sprk_RegardingInvoice@odata.bind", "sprk_regardinginvoiceline", "_sprk_regardinginvoiceline_value",
                      "sprk_regardingrecordid", " SPRK_RegardingRecordId ", "sprk_regardingrecordtype", "sprk_RegardingRecordType@odata.bind",
                      "_sprk_regardingrecordtype_value",
+                     // Ontology pass 2 (F1): the lane and the policy pair, in every key form.
+                     "sprk_lane", " SPRK_Lane ",
+                     "sprk_policy", "sprk_Policy@odata.bind", "_sprk_policy_value",
+                     "sprk_policyversion", "sprk_PolicyVersion@odata.bind", "_sprk_policyversion_value",
                  })
         {
             Code("sprk_signal", key).Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
@@ -675,6 +684,14 @@ public class AccessTableAppOnlyWriterTests
         Code("sprk_event", "sprk_regardinginvoice").Should().BeNull();
         Code("sprk_decisionrecord", "sprk_corerecordid").Should().BeNull();
         CallerCode("sprk_signal", "sprk_regardinginvoice").Should().BeNull("the caller's own privileges decide");
+
+        // Must not fire: the lane and policy columns on the policy tables (RuleSetService, ontology authoring) and on a
+        // Decision Record, and the caller's own write.
+        Code("sprk_policy", "sprk_lane").Should().BeNull();
+        Code("sprk_policyversion", "sprk_policy").Should().BeNull();
+        Code("sprk_decisionrecord", "sprk_policyversion").Should().BeNull();
+        CallerCode("sprk_signal", "sprk_lane").Should().BeNull("the caller's own privileges decide");
+        CallerCode("sprk_signal", "sprk_policy").Should().BeNull("the caller's own privileges decide");
     }
 
     [Fact]
