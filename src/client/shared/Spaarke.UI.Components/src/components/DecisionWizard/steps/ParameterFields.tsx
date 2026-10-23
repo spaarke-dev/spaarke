@@ -4,14 +4,17 @@
  *
  * - Text / TextArea / Choice / Money / Date: Fluent inputs. The shown value is what the user typed, else the starting value
  *   (a templated draft, D-53), which is marked "Prefilled from this item" until it is edited.
- * - Person / Lookup: the shared `LookupField` over the host's `lookup` search. A Lookup that has exactly one candidate is
- *   pre-selected (D-18: a matter with one budget); with several the user picks.
+ * - Person / Lookup: when the host provides `openLookup`, a read-only field that opens the platform's side-pane lookup (single
+ *   select, scoped by the host; D-182) and shows the pick. Without it, the shared `LookupField` over the host's `lookup` search.
+ *   A required Lookup that has exactly one candidate is pre-selected, without opening anything (D-18: a matter with one
+ *   budget); with several the user picks.
  *
  * Fluent v9 tokens only (ADR-021). React 16/17-safe.
  */
 
 import * as React from 'react';
 import {
+  Button,
   Caption1,
   Field,
   Input,
@@ -22,6 +25,7 @@ import {
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
+import { SearchRegular } from '@fluentui/react-icons';
 import { LookupField } from '../../LookupField/LookupField';
 import type { ILookupItem } from '../../../types/LookupTypes';
 import { fieldLabel, fieldValue, parameterValid, withLookup, withValue } from '../decisionDraft';
@@ -32,6 +36,7 @@ import type { DecisionAction, DecisionParameter } from '../decisionWizardTypes';
 const useStyles = makeStyles({
   form: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalM },
   prefilled: { color: tokens.colorNeutralForeground3 },
+  pickInput: { cursor: 'pointer' },
 });
 
 const INVALID: Partial<Record<DecisionParameter['kind'], string>> = {
@@ -56,7 +61,7 @@ interface FieldProps {
 }
 
 const LookupParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
-  const { draft, update, lookup, item, locked } = useDecisionItem();
+  const { draft, update, lookup, openLookup, item, locked } = useDecisionItem();
   const styles = useStyles();
   const id = fieldValue(draft, scope, parameter.code);
   const name = fieldLabel(draft, scope, parameter.code);
@@ -70,6 +75,35 @@ const LookupParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
         : Promise.resolve([]),
     [lookup, kind, parameter.lookupEntity, parameter.code]
   );
+
+  // D-182: the side-pane lookup. A Person is a contact; a Lookup needs the catalog's table, and without one the inline field stays.
+  const paneEntity = kind === 'Person' ? 'contact' : (parameter.lookupEntity ?? null);
+  const usePane = openLookup != null && paneEntity != null;
+  // Single flight: a second activation while the pane is open opens nothing.
+  const picking = React.useRef(false);
+  const [paneOpen, setPaneOpen] = React.useState(false);
+  const mounted = React.useRef(true);
+  React.useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const openPane = React.useCallback(async () => {
+    if (!openLookup || !paneEntity || picking.current) return;
+    picking.current = true;
+    setPaneOpen(true);
+    try {
+      const picked = await openLookup({ kind, entity: paneEntity, parameterCode: parameter.code });
+      // Cancelling (null) changes nothing; the pick fills the field exactly as the inline pick does.
+      if (picked?.id) update(d => withLookup(d, scope, parameter.code, { id: picked.id, name: picked.name }));
+    } catch {
+      // A pane that failed is treated as a cancel: the field is unchanged and can be tried again.
+    } finally {
+      picking.current = false;
+      if (mounted.current) setPaneOpen(false);
+    }
+  }, [openLookup, paneEntity, kind, parameter.code, update, scope]);
 
   // D-18: one candidate is pre-selected as a starting value; several are left for the user to pick.
   const preselected = React.useRef(false);
@@ -94,6 +128,38 @@ const LookupParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
       <div data-testid={`field-${parameter.code}`}>
         <Field label={parameter.label} required={parameter.required}>
           <Input readOnly disabled value={id ? (name ?? 'Selected record') : ''} />
+        </Field>
+      </div>
+    );
+  }
+
+  if (usePane) {
+    return (
+      <div data-testid={`field-${parameter.code}`}>
+        <Field label={parameter.label} required={parameter.required} hint={parameter.hint ?? undefined}>
+          <Input
+            readOnly
+            className={styles.pickInput}
+            value={value?.name ?? ''}
+            placeholder={`Select ${parameter.label.toLowerCase()}`}
+            aria-busy={paneOpen}
+            onClick={() => void openPane()}
+            onKeyDown={e => {
+              if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
+                e.preventDefault();
+                void openPane();
+              }
+            }}
+            contentAfter={
+              <Button
+                appearance="transparent"
+                size="small"
+                icon={<SearchRegular />}
+                aria-label={`Select ${parameter.label.toLowerCase()}`}
+                onClick={() => void openPane()}
+              />
+            }
+          />
         </Field>
       </div>
     );

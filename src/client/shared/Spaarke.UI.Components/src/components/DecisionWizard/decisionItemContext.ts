@@ -14,6 +14,8 @@ import type {
   DecisionCommitFailure,
   DecisionCommitResult,
   DecisionLookupRequest,
+  DecisionOpenLookupRequest,
+  DecisionOpenRecord,
   DecisionPlan,
   DecisionResolution,
   DecisionWizardItem,
@@ -21,6 +23,11 @@ import type {
 } from './decisionWizardTypes';
 
 export type DecisionLookup = (request: Omit<DecisionLookupRequest, 'core'>) => Promise<ILookupItem[]>;
+
+/** The side-pane lookup as a step sees it: the item's core record is already filled in. */
+export type DecisionOpenLookupForItem = (
+  request: Omit<DecisionOpenLookupRequest, 'core'>
+) => Promise<{ id: string; name: string } | null>;
 
 export interface DecisionItemContextValue {
   item: DecisionWizardItem;
@@ -44,6 +51,10 @@ export interface DecisionItemContextValue {
   recordResult: DecisionCommitResult | null;
   /** Absent when the host cannot search; a Lookup / Person field then says so. */
   lookup: DecisionLookup | null;
+  /** The host's side-pane lookup (D-182). Absent: Person / Lookup fields keep the inline type-ahead over `lookup`. */
+  openLookup: DecisionOpenLookupForItem | null;
+  /** The host's open-record-in-a-modal (D-182). Absent: the subject in What was found is plain text. */
+  openRecord: DecisionOpenRecord | null;
   /** Other open items remaining after this one (for the status bar). */
   openItemsLeft: number | null;
   /** "Now" for ages and due states; injectable for tests. */

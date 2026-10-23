@@ -322,5 +322,29 @@ export interface DecisionLookupRequest {
 
 export type DecisionLookupSearch = (request: DecisionLookupRequest) => Promise<ILookupItem[]>;
 
+/**
+ * What the host needs to open the platform's side-pane lookup for one Person / Lookup field (D-182). The host builds the row
+ * filter from this (a budget: active, on the item's own record), exactly as its inline search scopes today; the wizard never
+ * names a filter.
+ */
+export interface DecisionOpenLookupRequest {
+  kind: 'Person' | 'Lookup';
+  /** The table to pick from: `contact` for a Person, the catalog's `lookupEntity` for a Lookup. */
+  entity: string;
+  /** The parameter's code (for example `budget`), so a host may scope the pane. */
+  parameterCode: string;
+  /** The item's core record, for scoping (the matter's budgets). Null for a Not filed item. */
+  core: { recordType: string; recordId: string } | null;
+}
+
+/**
+ * The host's side-pane lookup (`INavigationService.openLookup`, single select). Resolves to the picked record, or null when the
+ * user cancelled or the host could not open the pane. The shared library has no Xrm (ADR-012), so only the host calls it.
+ */
+export type DecisionOpenLookup = (request: DecisionOpenLookupRequest) => Promise<{ id: string; name: string } | null>;
+
+/** The host's "open this record in a modal above the wizard" (`INavigationService.openRecordModal`). */
+export type DecisionOpenRecord = (entityName: string, entityId: string) => Promise<void> | void;
+
 /** The host's loader for one item. Rejects when the item cannot be read. */
 export type DecisionItemLoader = (signalId: string) => Promise<DecisionWizardItem>;

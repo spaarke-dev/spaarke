@@ -289,9 +289,14 @@ export type { AnalysisHubWidgetData } from './widgets/workspace/AnalysisHubWidge
 // ---------------------------------------------------------------------------
 // Worklist lookup (ontology task 156): the decision wizard's Person / Lookup search over Dataverse
 // (contacts, sprk_budget, sprk_organization). Exported so LegalWorkspace's `worklist` section shim can
-// fill `WorklistWidget`'s `lookup` slot exactly as `WorklistWorkspaceWidget` does.
+// fill `WorklistWidget`'s `lookup` slot exactly as `WorklistWorkspaceWidget` does. Task 158 (D-182): the same two
+// hosts also fill `openLookup` / `openRecord` (the side-pane lookup and the record modal) from `INavigationService`.
 // ---------------------------------------------------------------------------
-export { createWorklistLookup } from './widgets/workspace/worklistLookup';
+export {
+  createWorklistLookup,
+  createWorklistOpenLookup,
+  createWorklistOpenRecord,
+} from './widgets/workspace/worklistLookup';
 export type { WorklistLookupDataSource } from './widgets/workspace/worklistLookup';
 
 // ---------------------------------------------------------------------------

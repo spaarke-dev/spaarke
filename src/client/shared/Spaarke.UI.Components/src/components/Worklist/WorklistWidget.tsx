@@ -37,7 +37,12 @@ import {
 import { SparkleRegular } from '@fluentui/react-icons';
 import { launchDecisionWizard } from '../DecisionWizard/decisionWizardLauncher';
 import type { DecisionWizardLaunchRequest, DecisionWizardLaunchResult } from '../DecisionWizard/decisionWizardLauncher';
-import type { DecisionItemLoader, DecisionLookupSearch } from '../DecisionWizard/decisionWizardTypes';
+import type {
+  DecisionItemLoader,
+  DecisionLookupSearch,
+  DecisionOpenLookup,
+  DecisionOpenRecord,
+} from '../DecisionWizard/decisionWizardTypes';
 import type { LaneFilterKey } from './laneCountFilters';
 import type { OpenItemEvent, WorklistLane } from './types';
 import { useWorklistData } from './useWorklistData';
@@ -67,6 +72,10 @@ export interface WorklistWidgetProps {
   service: WorklistService;
   /** The wizard's search for Person / Lookup fields (the item's own budgets, firms, people). */
   lookup?: DecisionLookupSearch;
+  /** The wizard's side-pane lookup for Person / Lookup fields (D-182); absent keeps the inline type-ahead. */
+  openLookup?: DecisionOpenLookup;
+  /** The wizard's open-record-in-a-modal for the subject link (D-182); absent leaves the subject as text. */
+  openRecord?: DecisionOpenRecord;
   /** Opens the decision wizard. Defaults to the in-app host's launcher; tests inject one. */
   launchWizard?: (request: DecisionWizardLaunchRequest) => Promise<DecisionWizardLaunchResult>;
   /** The email aggregate row (task 054's card), placed at the top of the Do lane. */
@@ -127,6 +136,8 @@ const coreRef = (core: { recordType: string; recordId: string } | null) =>
 export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
   service,
   lookup,
+  openLookup,
+  openRecord,
   launchWizard = launchDecisionWizard,
   aggregateRow,
   narrative,
@@ -227,6 +238,8 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
           ...event,
           loadItem: loaderFor(sourceSet),
           lookup,
+          openLookup,
+          openRecord,
           onRecorded: () => {
             outcome.recorded = true;
           },
@@ -242,7 +255,7 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
       // What was recorded has left the lanes: read them again once the wizard is closed.
       if (outcome.recorded && opens.current.mounted) reload();
     },
-    [launchWizard, loaderFor, lookup, reload]
+    [launchWizard, loaderFor, lookup, openLookup, openRecord, reload]
   );
 
   // A Do row whose subject is a To Do may be an inquiry-outcome To Do (D-111): ask the BFF first. Only the lanes can hold one (a closed
