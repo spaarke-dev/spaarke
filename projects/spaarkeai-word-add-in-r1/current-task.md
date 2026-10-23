@@ -8,7 +8,7 @@
 
 | Field | Value |
 |---|---|
-| **Task** | No code task active. **130 ✅** (#2177, `4e36c1929d`) and **131 ✅** (#2182, `733c65063c`) merged 2026-10-21; C:\wt131 removed. Open: 042 (UAT), 125 (guest live check), 090 (wrap-up). |
+| **Task** | **132 🔄 in progress** (owner go 2026-10-22: "yes fix the 'already in spaarke' issues" + "yes fix the 'send date' error issue (we do not need to fix the dev test data)"). Worktree `C:\wt132`, branch `work/spaarkeai-word-add-in-r1-132` off master `1d8cf7b794`. Implementer agent (opus/high) is running; next: Step 9.5 review (code-review + adr-check + one adversarial pass), publish-size delta, PR, R3 for the BFF deploy. Conflict check: no open PR overlap. Invoice removal waits on ebilling (owner confirmed). 130 ✅ / 131 ✅. Open: 042 (UAT), 125, 090. |
 | **Status** | 130 and 131 are both live in dev. BFF `583f90c1d9` (R3, 18:04:37Z) contains 733c65063c, 4e36c1929d and 077. The add-in auto-deployed on the #2182 merge push (`deploy-office-addins.yml`, 16:50:34Z, success). The notice text is in the hosted `150.bundle.js`, which both the Outlook taskpane and commands (Quick Save) load. No manual add-in deploy is needed. |
 | **Next Action** | 0. **Dev BFF is now `1fa0cf5cb8`** (2026-10-23 00:00:36Z, R3, on our OK; our healthz check: 200). It is `f5bf481185` plus field-mapping #2282.
    - The save path is untouched. The Office change is field-mapping 018b/018c: the Matter/Project quick-create now runs on RecordCreationService.
