@@ -1911,3 +1911,13 @@ Reading:
 - This lifts the "don't touch 65a3fab2" rule for this one action only.
 
 The code fix is PR #2268: the sweep reports a container that does not resolve as a warning, not a failure. #2267 (filed) covers checking configured container ids at startup.
+
+### Round 126 (2026-10-23): owner answers on R3's design questions for the private finding GHSA-hq7m-w2pf-v8j7
+
+R3 asked three design questions, (a)–(c), and the owner answered all three in UAC's session with "follow recommendation". The decisions and the evidence went to R3 privately. This entry is a reference only: the repo is public, so the mechanism and the design details stay out of it.
+
+- **(a)** A first-sign-in bind needs stronger proof than the email address alone.
+- **(b)** Removing a person entirely is admin-only, and so is undoing a removal.
+- **(c)** Every contact column the BFF trusts gets field security where Dataverse allows it, and a fail-closed check in the BFF where it does not.
+
+R3 sends the implementer brief and the diff to UAC for review, with two security passes, before any merge. ISS-005 merges with or after this fix.
