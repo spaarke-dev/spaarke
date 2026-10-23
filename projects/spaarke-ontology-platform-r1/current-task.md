@@ -9,27 +9,28 @@
 
 | Field | Value |
 |---|---|
-| **Task** | UAT round 1. **On master** `0317579272` (PR #2303): 158, 159, 161, 162, 163, 164. **160** in fix round 1 (PR #2305, `C:\wts-160`): Opus review found F1 stored XSS (`EmailMessageFields.tsx:46` innerHTML), F2 silent no-email pick, F3 send-wiring + Cc/warning tests, pre-existing bad-address orphan; plus K1/K3 and R3's two suggestions (token drift guard, portal-link wording). R3 reviewed GrantAccessNotifier: no F. |
-| **Status** | Dev BFF deploy requested from R3 at `0317579272` (contains `283466d40`; live `1fa0cf5cb8` is an ancestor). The owner approves in R3's session. Console auto-deploy run 39899451640 in progress → send after-notices to word-add-in, R3, uac-r2. |
-| **Next Action** | (1) Console deploy done → after-notices. (2) 160 fix round reports → scoped Sonnet re-check (XSS fix is security) → merge to docs. (3) R3 deploys → ask the owner before the worklist config apply (step 2a below). **Live Basic User already lacks `prvReadsprk_Policy` and `prvReadsprk_ruleset`**: not ontology, ebilling, R3 or uac-r2, no import, role `modifiedon` 2026-10-23 00:01Z by the owner's account; asked the owner. So step 2c changes only Console User. |
+| **Task** | UAT round 1. **On master** `0317579272` (PR #2303): 158, 159, 161, 162, 163, 164 (164 ✅). Console deployed from it (run 39899451640, 04:20Z; after-notices sent). **160** (PR #2305, `C:\wts-160`, head `97baf3acd0`): Opus review → fix round 1 (F1 stored XSS via innerHTML in `EmailMessageFields.toPlainText` + same in `BodyEditor.htmlToPlainText`, F2, F3a/b, bad-address orphan, K1, K3, R3-a/b) → scoped re-check: **no F**, 4 K. |
+| **Status** | Main session is fixing 160's re-check K items itself in `C:\wts-160` (uncommitted, nothing written yet): K-2 `EmailMessageFields.tsx:109` `catch { return null; }` → visible `lookup-failed` warning; K-3 clear the no-email/lookup warning when To changes (in `onStateChange`, if `changed` includes `to`); K-4 `InquiryRecordFacts.cs` ~:220 `catch (OperationCanceledException) when (!ct.IsCancellationRequested)` + rethrow on request cancel (observe `all` in both). Tests: Jest `__tests__/DecisionWizardEmailComposer.test.tsx` (copy the F2 tests at :199-249); .NET `tests/unit/Sprk.Bff.Api.Tests/Services/Signals/BudgetInquiryComposerAndLinkTests.cs` (hang test :315, fixture `ReadDeadline` :482). |
+| **Next Action** | Finish K-2/3/4 + tests → run Jest (DecisionWizard + EmailComposer) and the filtered BFF tests → commit, push → CI → merge PR #2305 into docs → docs→master PR (it changes Console + BFF; notices before and after). |
 
 ## Next, in order
 
-1. **After 163 merges:** docs→master PR. Then ask R3 (`spaarke-wt-spa-external-access-platform-08`) for a dev BFF deploy, giving the **exact candidate SHA**. R3 gets the owner's own approval in its session (a relayed approval does not count), collects the peers' OKs and runs its 30-minute gate. The candidate must contain R3 077 (`283466d40`). Send before/after notices to word-add-in, R3 and uac-r2. The Console auto-deploys from master.
+1. **Dev BFF:** R3 (`spaarke-wt-spa-external-access-platform-08`) will deploy master **`cdb149cc2d`** (our `0317579272` + word-add-in 132; ontology OK sent). It waits for the **owner's approval naming that SHA in R3's session**. uac-r2 runs its server gate after.
 2. **After that BFF is on dev, in order:**
-   - (a) Apply the worklist config: `Apply-WorklistGridConfiguration.ps1 -WhatIf`, then apply, then `-Verify -RequireRow`. That config is a dev data change, and we have not yet asked the owner about it; ask first.
-   - (b) POL-MATTER-NOBUDGET v2: `Apply-DoLanePolicies.ps1 -DefinitionPath config/know-promotion.policies.json` (owner approved, D-186). The `-WhatIf` run was clean on 2026-10-23: it creates v2 (`assign-task`, next steps add-todo and assign-work), ends v1 at 2026-10-22T00:00Z and moves the pointer. Then `-Verify`.
-   - (c) D-185 role change (owner-authorised, main session). Use `RemovePrivilegesRole`: Basic User loses `prvReadsprk_Policy`; Console User loses `prvReadsprk_Policy` and `prvReadsprk_PolicyVersion`. Read back before and after. Test the worklist as a non-Console user and as a Console user. Write a security-roles.md §19 "applied" entry and a deploy-log entry. Tell uac-r2 (#1355, read-back reference) and ebilling, before and after. Nobody exports roles from dev between the XML change and this step.
-   - (d) Dev checks:
-     - 158: side pane above the wizard; the record modal returns to the same step; light and dark.
-     - 159: Assign Task creates a Task event.
-     - 161: Create budget on a matter with no budget.
-     - 162: upload a file to a work assignment, an invoice and a project (zz- rows) and confirm it shows on the parent's Documents list.
-     - Then close 114. #2281 was verified by the owner on 1fa0cf5cb8.
-3. **R2** (D-183): the owner answers design.md §9 Q1–Q6, then run `/design-to-spec` in the R2 worktree.
-4. **105 UAT** with the owner (`notes/uat-v4-log.md`). Open: C2 (keyboard and screen reader), C4, and the rest of R1–R24.
-5. Re-run `SignalReadRouteLiveTests` as a non-Console user (DI-83, #1882), then close #1882. 111 row 4 (owner upload URL test), then close 111. Then the 090 wrap-up.
-6. Check tonight's `[SIGNAL-EVALUATOR]` heartbeat with `deploycheck.py`.
+   - (a) Worklist config: `Apply-WorklistGridConfiguration.ps1 -WhatIf`, apply, `-Verify -RequireRow`. **Ask the owner first** (a dev data change, not yet approved).
+   - (b) POL-MATTER-NOBUDGET v2: `Apply-DoLanePolicies.ps1 -DefinitionPath config/know-promotion.policies.json` (owner-approved, D-186), then `-Verify`.
+   - (c) D-185: `RemovePrivilegesRole` on **Console User only** (`prvReadsprk_Policy`, `prvReadsprk_PolicyVersion`). Basic User already lacks `prvReadsprk_Policy`: see security-roles §19, removed 2026-10-23 00:01:07Z by the owner's account, and every peer session has ruled itself out. Read back before and after; send uac-r2 the #1355 read-back with UTC times (they run an App Insights gate); write the §19 "applied" entry and a deploy-log entry; tell ebilling.
+   - (d) Dev checks: 158 side pane plus record modal; 159 Assign Task → Task event; 161 Create budget; 162 uploads to WA, invoice and project show on the parent's Documents (zz- rows); 160 once merged. Then close 114.
+3. **ebilling F4(b):** pass 2 found their 5 commits clean. They are adding `sprk_lane`, `sprk_policy` and `sprk_policyversion` to the `sprk_signal` AccessColumns in their PR (uac-r2 agrees, conditions sent). They also fix the duplicate `using` in `DecisionActionCatalogTests.cs` after merging master (CS0105). On their SHA → scoped re-check.
+4. R2 §9 owner answers → `/design-to-spec`; 105 UAT; #1882 live re-run; 111 row 4; 090 wrap-up; the `[SIGNAL-EVALUATOR]` heartbeat.
+
+## Open owner questions
+
+- Did the owner edit Spaarke Basic User around 20:01 EDT on 10-22? It doesn't block anything.
+- Approve `cdb149cc2d` in R3's session.
+- Worklist config apply on dev (step 2a).
+- Long-term document parent column (`sprk_X` vs `sprk_related*`).
+- `C:\wb160p` (publish output folder) couldn't be deleted by the lane; remove it by hand.
 
 ## Lane facts to carry
 
@@ -72,7 +73,7 @@
 - Core User has AppendTo on `sprk_eventtype_ref` (Global), granted on 2026-10-23 for task 159; the repo XML now matches.
 - The Console auto-deploys from master. The landing tab is the Worklist (D-164).
 - Worktrees:
-  - `C:\wts-160`, `C:\wts-163` and `C:\wts-164` are lane worktrees.
+  - `C:\wts-160` is the only lane worktree (163 and 164 were removed).
   - R2: `C:\code_files\spaarke-wt-spaarke-ontology-platform-r2`.
   - Remove a worktree only with `scripts/worktree/Remove-WorktreeSafe.ps1`.
 - Pester 5.7.1 for local runs is at `C:\Users\RALPHS~1\AppData\Local\Temp\p571\Pester\5.7.1`. Pester 6 fails on this machine only; CI is fine.
