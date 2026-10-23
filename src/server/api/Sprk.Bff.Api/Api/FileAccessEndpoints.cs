@@ -238,8 +238,11 @@ public static class FileAccessEndpoints
         //      the RFC id, which is how mailbox-captured and Spaarke-sent archives are found; one app-only query). None:
         //      it returns 200 {resolved:false, reason:"not_saved"} itself. Otherwise it writes that id into the route
         //      values as `documentId`.
-        //   2. DocumentAuthorizationFilter("read") — 403 with no metadata when the caller may not read THAT row. An older
-        //      copy the caller could read is not searched (no oracle; one authorization per request).
+        //   2. DocumentAuthorizationFilter("read") — refuses when the caller may not read THAT row (no right, or hidden by
+        //      the external document narrowing). That refusal never reaches the caller as such: filter 1 folds it into the
+        //      200 not_saved answer, identical to no match, because the keys are caller-supplied and (task 132) the match
+        //      covers captured and Spaarke-sent mail — a distinct refusal would be an existence signal. An older copy the
+        //      caller could read is not searched (one authorization per request).
         // Task 132: a captured archive carries no direct slot; its record is the communication's regarding. That record is
         // shown only when the caller may read it (BuildIdentityResponseAsync, shared by all three identity routes).
         // No rate-limit policy, matching the sibling routes: the pane calls this once per open and after a save.
@@ -249,12 +252,11 @@ public static class FileAccessEndpoints
             .WithName("ResolveEmailDocumentIdentity")
             .WithTags("File Access")
             .WithDescription("Find the saved Spaarke document (.eml) of an Outlook email by its message id. " +
-                "resolved=false with reason not_saved (200) means it is not saved; 403 means the newest saved copy " +
-                "is not readable by the caller; 503 means it could not be determined.")
+                "resolved=false with reason not_saved (200) means it is not saved or not readable by the caller (the " +
+                "two are deliberately indistinguishable); 503 means it could not be determined.")
             .Produces<DocumentIdentityResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
         return app;
