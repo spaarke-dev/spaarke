@@ -14,6 +14,7 @@
 // reason to change, and it lives here. The CIAM resolution moved here from ExternalParticipationService
 // for the same reason: two copies of the rule is how the workforce plane shipped without the CIAM guard.
 
+using System.Collections.Concurrent;
 using System.Security.Claims;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
@@ -2001,6 +2002,11 @@ public class ContactIdentityBinderFactory
     private readonly TimeProvider _time;
     private readonly IConfiguration _configuration;
 
+    // One readability proof per (environment, table, column set), shared by every store this factory builds, so a proof
+    // made by one binder holds for the next one (SecuredColumnReadProof.ProofLifetime, on the injected TimeProvider). Only
+    // a proven outcome is held, inside the proof; a failed proof is made again at the next use.
+    private readonly ConcurrentDictionary<string, SecuredColumnReadProof> _readProofs = new(StringComparer.Ordinal);
+
     /// <param name="configuration">
     /// Read for <c>Dataverse:ServiceUrl</c>, this BFF's own environment, which <see cref="CreateBinder"/> refuses (ISS-005,
     /// #1673 review K2). Read on each call, so a changed setting applies without a restart.
@@ -2021,8 +2027,32 @@ public class ContactIdentityBinderFactory
 
     /// <summary>The store for <paramref name="dataverseBaseUrl"/>, authenticated by <paramref name="getToken"/>.</summary>
     public virtual IContactIdentityStore CreateStore(string dataverseBaseUrl, Func<CancellationToken, Task<string>> getToken)
-        => new DataverseContactIdentityStore(
-            _httpClientFactory, getToken, dataverseBaseUrl, _loggerFactory.CreateLogger<DataverseContactIdentityStore>());
+    {
+        var logger = _loggerFactory.CreateLogger<DataverseContactIdentityStore>();
+        return new DataverseContactIdentityStore(_httpClientFactory, getToken, dataverseBaseUrl, logger,
+            (source, table, columns) => SharedReadProof(dataverseBaseUrl, source, table, columns, logger));
+    }
+
+    /// <summary>
+    /// The one readability proof for <paramref name="columns"/> of <paramref name="table"/> in
+    /// <paramref name="dataverseBaseUrl"/>'s environment, made the first time through <paramref name="source"/> (the
+    /// requesting store's channel). Every store of one environment reads as the same application identity, so the proof
+    /// holds for each of them. The column set is keyed in a stable order, so the same columns share one proof.
+    /// </summary>
+    internal SecuredColumnReadProof SharedReadProof(
+        string dataverseBaseUrl, IColumnReadPermissionSource source, string table, IReadOnlyCollection<string> columns,
+        ILogger logger)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(dataverseBaseUrl);
+        ArgumentException.ThrowIfNullOrWhiteSpace(table);
+        ArgumentNullException.ThrowIfNull(columns);
+        var key = string.Join("|",
+            dataverseBaseUrl.Trim().TrimEnd('/').ToLowerInvariant(),
+            table.Trim().ToLowerInvariant(),
+            string.Join(",", columns.Where(c => !string.IsNullOrWhiteSpace(c)).Select(c => c.Trim().ToLowerInvariant())
+                .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)));
+        return _readProofs.GetOrAdd(key, _ => new SecuredColumnReadProof(source, table, columns, logger, _time));
+    }
 
     /// <summary>
     /// A binder writing to <paramref name="dataverseBaseUrl"/>, an environment other than this BFF's own: contacts it creates
