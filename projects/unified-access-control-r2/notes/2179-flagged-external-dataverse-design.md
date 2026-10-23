@@ -580,3 +580,12 @@ Scripts, snapshots and logs: `C:/Users/RALPHS~1/AppData/Local/Temp/uac191b/` (no
 - **Constraint for 191 (and ebilling 086).** The External Collaborator role gets **no** privilege on `sprk_storedfile`.
 - **Why it matters.** One flagged-external user on dev sits in the "Spaarke" BU, which is in 088's reader-profile BU set. That gives column read only, with no table privilege, the same exposure that already exists on the secured `sprk_document` columns.
 - **What 191 checks.** It keeps the table privilege at none, and its role test (T191) asserts that.
+
+## D-185 input (owner via ontology and ebilling, 2026-10-23)
+
+- **Decision.** Only billing roles may read rule sets and rules directly in Dataverse (#2285).
+  - ebilling sets `prvReadsprk_ruleset` to None on Spaarke Basic User and Core User.
+  - Ontology removes `prvReadsprk_Policy` from Basic and Console User, and `prvReadsprk_PolicyVersion` from Console User, after its task 163.
+- **Constraint for 191.** The External Collaborator role gets **no** privilege on `sprk_ruleset`, `sprk_policy` or `sprk_policyversion`, and T191's role test asserts it.
+- **Not 191's scope.** 191 creates no billing-admin role. Granting explicit Read on those three tables (org depth, O-6) to the billing-admin role or roles belongs to whoever creates them, which is ebilling. Today the billing admins are System Administrators.
+- **UAC impact.** No UAC surface reads those tables as the caller. `SecureChildLineage` and `RecordOwnershipResolver` read them app-only.
