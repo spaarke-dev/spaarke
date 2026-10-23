@@ -124,6 +124,7 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
 
         // A message on the record, in a per-user Direct thread: the message is the record's child; the thread is not.
         world.UserOwnedChild("sprk_communicationthread", family.DirectThread);
+        world.Set("sprk_communicationthread", family.DirectThread, "sprk_threadtype", new Microsoft.Xrm.Sdk.OptionSetValue(100000001)); // #2143 r7d
         Child("sprk_communication", family.MessageInDirectThread,
             (regarding, rootTable, rootId), ("sprk_communicationthread", "sprk_communicationthread", family.DirectThread));
 

@@ -83,7 +83,8 @@ public sealed class ArmWhatIfDriftDetector : IUpgradeDriftDetector
             Parameters = parameters,
             WhatIfResultFormat = WhatIfResultFormat.FullResourcePayloads,
         };
-        var whatIfContent = new ArmDeploymentWhatIfContent(whatIfProperties);
+        // Subscription scope requires a location, as for the deploy itself (T186 L20 — ARM 400 InvalidDeployment).
+        var whatIfContent = new ArmDeploymentWhatIfContent(whatIfProperties) { Location = new AzureLocation(request.Location) };
 
         // Subscription-scope deployment resource reference. Does not need to
         // pre-exist — the ARM what-if REST operation previews the deployment

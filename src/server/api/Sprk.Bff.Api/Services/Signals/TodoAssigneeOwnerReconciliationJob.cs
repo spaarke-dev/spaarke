@@ -653,7 +653,8 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
     /// condition a retry does not change (<see cref="CoreAncestorResult.IsPermanent"/>) is refused and not carried.</summary>
     private async Task<ToDoAnswer> FiledAnswerAsync(Run run, Guid todoId, CancellationToken ct)
     {
-        var core = await _coreAncestors.ResolveStampsAsync(TodoTable, todoId, ct).ConfigureAwait(false);
+        // Read-only (GitHub #2002): the answer only classifies the To Do; nothing is written against it, so an unfiled one is not a Warning.
+        var core = await _coreAncestors.ResolveStampsAsync(TodoTable, todoId, ct, CoreAncestorIntent.ReadOnly).ConfigureAwait(false);
         if (!core.Succeeded && core.IsPermanent)
         {
             _logger.LogWarning("{Prefix} To Do {TodoId}: its core record cannot be derived ({Error}); its rows are refused, not "

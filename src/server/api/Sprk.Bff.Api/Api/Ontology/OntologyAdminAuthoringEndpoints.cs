@@ -133,6 +133,7 @@ public static class OntologyAdminAuthoringEndpoints
         OntologyAdminAuthoringService.ReasonDryRunRequired => "Run Test on this exact rule before saving it; any edit needs a new test run.",
         OntologyAdminAuthoringService.ReasonPolicyCodeTaken => "Another rule already uses this code.",
         OntologyAdminAuthoringService.ReasonPolicyRetired => "The rule is retired; a retired rule cannot be published.",
+        OntologyAdminAuthoringService.ReasonRuleHeldSecure => OntologyAdminAuthoringService.RuleHeldSecureMessage,
         _ => "The rule changed while this was being saved. Nothing new is in force; reload and try again.",
     };
 

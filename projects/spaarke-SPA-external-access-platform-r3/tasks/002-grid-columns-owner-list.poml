@@ -77,7 +77,9 @@
     <criterion testable="true">The previous column JSON for every changed record is saved in the task notes as the rollback.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-09. Owner review is the verification (success criterion 4).</notes>
+  <notes>Spec FR-09. Owner review is the verification (success criterion 4).
+
+    OWNER CHECK 2 (2026-10-13): the Service Requests grid header shows "Servicereque…" because grid config 403e5d37 has no columns-map label for sprk_servicerequestnumber (configResolution.ts:334 falls back to humanizeLogicalName; the BFF AttributeDto carries no display name). Include labels for sprk_servicerequestnumber ("Request Number") and statuscode ("Status") in the grid config update. Raw-JSON Status values are task 061.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

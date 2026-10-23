@@ -390,7 +390,8 @@ public class RegistrationEmailService
     /// <summary>
     /// Sends an expiration warning email 3 days before demo access expires.
     /// </summary>
-    public async Task SendExpirationWarningAsync(
+    /// <remarks><c>virtual</c> is the substitution seam (ADR-038 §4) for <c>DemoExpirationJob</c>'s send-once tests.</remarks>
+    public virtual async Task SendExpirationWarningAsync(
         string recipientEmail,
         string firstName,
         DateTimeOffset expirationDate,
@@ -426,7 +427,8 @@ public class RegistrationEmailService
     /// <summary>
     /// Sends an expired notification after demo access has ended.
     /// </summary>
-    public async Task SendExpiredNotificationAsync(
+    /// <remarks><c>virtual</c> is the substitution seam (ADR-038 §4) for <c>DemoExpirationJob</c>'s send-once tests.</remarks>
+    public virtual async Task SendExpiredNotificationAsync(
         string recipientEmail,
         string firstName,
         CancellationToken cancellationToken = default)

@@ -70,6 +70,7 @@ jobs:
           VITE_TEAMS_MSAL_CLIENT_ID: ${{ vars.VITE_TEAMS_MSAL_CLIENT_ID }}
           VITE_TEAMS_MSAL_TENANT_ID: ${{ vars.VITE_TEAMS_MSAL_TENANT_ID }}
           VITE_TEAMS_MSAL_BFF_SCOPE: ${{ vars.VITE_TEAMS_MSAL_BFF_SCOPE }}
+          VITE_WORKFORCE_HOME_MSAL_CLIENT_ID: ${{ vars.VITE_WORKFORCE_HOME_MSAL_CLIENT_ID }}
         run: |
           fail=0
           guid='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
@@ -78,9 +79,10 @@ jobs:
           # not constrained: the SPA accepts any https authority host (src/auth/msal-config.ts).
           authority='^https://[^/?#[:space:]]+/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/?$'
           need() { if [ -z "${!1}" ]; then echo "::error::GitHub environment variable $1 is not set for the '$TARGET' environment"; fail=1; fi; }
-          match() { if [ -n "${!1}" ] && ! printf '%s' "${!1}" | grep -Eq "$2"; then echo "::error::$1 has the wrong format ($3)"; fail=1; fi; }
+          match() { if [ -n "${!1}" ] && ! [[ ${!1} =~ $2 ]]; then echo "::error::$1 has the wrong format ($3)"; fail=1; fi; }
           for k in VITE_MSAL_AUTHORITY VITE_MSAL_CLIENT_ID VITE_MSAL_TENANT_ID VITE_MSAL_BFF_SCOPE \
-                   VITE_TEAMS_MSAL_CLIENT_ID VITE_TEAMS_MSAL_TENANT_ID VITE_TEAMS_MSAL_BFF_SCOPE; do need "$k"; done
+                   VITE_TEAMS_MSAL_CLIENT_ID VITE_TEAMS_MSAL_TENANT_ID VITE_TEAMS_MSAL_BFF_SCOPE \
+                   VITE_WORKFORCE_HOME_MSAL_CLIENT_ID; do need "$k"; done
           # Backend: VITE_BACKENDS (a JSON list) or the one-entry VITE_BFF_API_URL fallback - at least one.
           if [ -z "$VITE_BACKENDS" ] && [ -z "$VITE_BFF_API_URL" ]; then
             echo "::error::Set VITE_BACKENDS or VITE_BFF_API_URL for the '$TARGET' environment"; fail=1
@@ -89,9 +91,23 @@ jobs:
           match VITE_MSAL_TENANT_ID "$guid" "GUID"
           match VITE_TEAMS_MSAL_CLIENT_ID "$guid" "GUID"
           match VITE_TEAMS_MSAL_TENANT_ID "$guid" "GUID"
+          match VITE_WORKFORCE_HOME_MSAL_CLIENT_ID "$guid" "GUID"
+          # The multitenant home client (ADR-028 A9) and the single-tenant A8 client are separate applications: the SPA
+          # refuses the pair at run time (config.ts getWorkforceHomeClientConfig), so refuse it here, before building.
+          if [ -n "$VITE_WORKFORCE_HOME_MSAL_CLIENT_ID" ] && [ "$(printf '%s' "$VITE_WORKFORCE_HOME_MSAL_CLIENT_ID" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s' "$VITE_TEAMS_MSAL_CLIENT_ID" | tr '[:upper:]' '[:lower:]')" ]; then
+            echo "::error::VITE_WORKFORCE_HOME_MSAL_CLIENT_ID must differ from VITE_TEAMS_MSAL_CLIENT_ID (separate applications, ADR-028 A8/A9)"; fail=1
+          fi
           match VITE_MSAL_BFF_SCOPE "$scope" "api://{app id}/user_impersonation, ADR-028 A8"
           match VITE_TEAMS_MSAL_BFF_SCOPE "$scope" "api://{app id}/user_impersonation, ADR-028 A8"
           match VITE_MSAL_AUTHORITY "$authority" "https://{host}/{tenant GUID}, no query or fragment"
+          # The Partner (CIAM) plane counts only accounts of VITE_MSAL_TENANT_ID (#2166), so it must be the authority's
+          # tenant: on a mismatch every partner would go round the sign-in redirect with no end and no message.
+          if [ -n "$VITE_MSAL_AUTHORITY" ] && [ -n "$VITE_MSAL_TENANT_ID" ]; then
+            authority_tid=$(printf '%s' "${VITE_MSAL_AUTHORITY%/}" | sed 's#.*/##' | tr '[:upper:]' '[:lower:]')
+            if [ "$authority_tid" != "$(printf '%s' "$VITE_MSAL_TENANT_ID" | tr '[:upper:]' '[:lower:]')" ]; then
+              echo "::error::VITE_MSAL_TENANT_ID must be the tenant in VITE_MSAL_AUTHORITY (the Partner plane counts only that tenant's accounts, #2166)"; fail=1
+            fi
+          fi
           if [ -n "$VITE_BFF_API_URL" ]; then match VITE_BFF_API_URL '^https://' "https URL"; fi
           if [ -n "$VITE_BACKENDS" ] && ! printf '%s' "$VITE_BACKENDS" | python3 -c 'import json,sys; assert isinstance(json.load(sys.stdin), list)'; then
             echo "::error::VITE_BACKENDS must be a JSON list"; fail=1
@@ -106,9 +122,10 @@ jobs:
       # Vite gives real process env vars the highest priority, so these VITE_* values OVERRIDE the #{...}#
       # placeholders in .env.production at build time (no separate token-substitution step needed). All values are
       # NON-SECRET identifiers (NFR-06) held as GitHub environment variables (see the header). Both planes request
-      # api://{app id}/user_impersonation (ADR-028 A8); the workforce client is ONE single-tenant Spaarke public
-      # client whose authority is pinned to Spaarke's tenant. VITE_BACKENDS is optional (empty = unset): with it
-      # unset, VITE_BFF_API_URL + the two *_BFF_SCOPE values form a one-entry backend list (task 041, FR-17) until
+      # api://{app id}/user_impersonation (ADR-028 A8); the Teams / guest-token client is ONE single-tenant Spaarke
+      # public client whose authority is pinned to Spaarke's tenant, and the browser company-account sign-in is ONE
+      # multitenant public client (VITE_WORKFORCE_HOME_MSAL_CLIENT_ID, ADR-028 A9). VITE_BACKENDS is optional (empty =
+      # unset): with it unset, VITE_BFF_API_URL + the two *_BFF_SCOPE values form a one-entry backend list (task 041, FR-17) until
       # the T240c directory ships.
       - name: Build (Vite production)
         working-directory: src/client/external-spa
@@ -122,6 +139,7 @@ jobs:
           VITE_TEAMS_MSAL_CLIENT_ID: ${{ vars.VITE_TEAMS_MSAL_CLIENT_ID }}
           VITE_TEAMS_MSAL_TENANT_ID: ${{ vars.VITE_TEAMS_MSAL_TENANT_ID }}
           VITE_TEAMS_MSAL_BFF_SCOPE: ${{ vars.VITE_TEAMS_MSAL_BFF_SCOPE }}
+          VITE_WORKFORCE_HOME_MSAL_CLIENT_ID: ${{ vars.VITE_WORKFORCE_HOME_MSAL_CLIENT_ID }}
         run: npm run build
 
       # Scan the BUILT bundle before it is staged for upload (task 042 review, FR-18): no dev-mock identity or canned

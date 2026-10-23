@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Fill-only applier + refusal of pair/protected targets (FR-02, FR-05e)</title>
+    <phase>1 W1 Canonical engine and configuration</phase>
+    <gate>001 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in Sprk.Bff.Api; tags include bff-api; adds tests at KEEP paths (TEST-MODIFYING override).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified extension of a static engine with an exact "not supplied" definition; no security boundary in this task (source authorization is task 003).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W1-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>001</deps>
+    <tags>bff-api, field-mapping, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Extend the canonical engine at `Services/Dataverse/FieldMapping/CreateTimeFieldMapping.cs` (moved there by task 001) so mapped values are written only for columns the caller did not supply (fill-only), and so any rule whose target is the ADR-024 regarding pair, a resolver field or a protected column is skipped with a warning. Add the Report Card regression test. Prefer adding a method to the existing engine over a new class (root CLAUDE.md §11).</prompt>
+  <role>SPAARKE platform developer, .NET 10 BFF, Dataverse Web API value typing. Follow ADRs strictly.</role>
+  <goal>A caller-supplied value for a mapped column survives; an unsupplied column receives the mapped value; the Report Card Law Firm 1 / Assigned External / Assigned Internal case is a named regression test; a rule targeting `sprk_regardingrecordid`, `sprk_regardingrecordtype`, a resolver field or a protected column never writes and yields one warning.</goal>
+
+  <context>
+    <background>spec.md FR-02 and FR-05(e); design.md §4. Today the client engine and `RecordCreationService.ApplyFieldMappingsAsync` (~:1193 in Services/Office/RecordCreationService.cs) overwrite what the caller entered; evidence notes §2 show the Report Card wizard losing its picked law firm/assignee values. "Not supplied" means exactly: scalars absent, null, or empty/whitespace string (normalised to null); lookups no bind; booleans and option sets absent only. Task 001 moved the engine; re-grep the new location before editing.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/FieldMapping/CreateTimeFieldMapping.cs (created by task 001; add the fill-only entry point and the pair/protected-target guard)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/RecordCreationService.cs (~:1193 ApplyFieldMappingsAsync — only if its call must pass the caller-supplied column set; otherwise untouched)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Dataverse/FieldMapping/CreateTimeFieldMappingFillOnlyTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/OwnedChildWrite.cs (grep for the regarding-pair column names and pair resolution; do not edit)</file>
+      <file role="canonical-reference">projects/field-mapping-server-write-path-r1/notes/design-review-2026-10-19.md §2 (overwrite evidence)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/CreateReportCardWizard/CreateReportCardStep.tsx (~:168-186, the pickers that were overwritten; read only)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="required">The engine must already live under Services/Dataverse/FieldMapping/ with its characterization tests green.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Scope: the engine. It stays `internal static`; no DI registration is added.</constraint>
+    <constraint source="ADR-002">Scope: invariants. The engine never enforces ownership or authorization; it only decides which mapped values are written. One server-side owner per invariant.</constraint>
+    <constraint source="ADR-024">Scope: the pair guard. The five resolver fields and `sprk_regardingrecordid` / `sprk_regardingrecordtype` are the polymorphic pair; a mapping rule may never write them (the pair is set by the caller and checked by CallerWriteAuthorization).</constraint>
+    <constraint source="ADR-038">Scope: tests added by this task. Unit tests under `tests/unit/Sprk.Bff.Api.Tests/`; no `Mock&lt;HttpMessageHandler&gt;`; no DI-registration tests.</constraint>
+    <constraint source="project">Scope: behaviour. Existing overwrite-free semantics from task 001 (Copy/Default/Concat/Template typing, null skip, execution order) are unchanged; only the "skip if supplied" and "refuse pair/protected target" behaviours are new. Push (`ApplyMappingRule`) is NOT touched here (task 040).</constraint>
+    <constraint source="CLAUDE.md §10">Scope: BFF publish. State Placement Justification in the PR (extension of an existing static engine); measure publish-size delta against a fresh master build per root CLAUDE.md §10.4; run `dotnet list package --vulnerable --include-transitive`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Field mapping engine; fill-only semantics</topic>
+    <files>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Value shapes for lookups, option sets, booleans.</pattern>
+      <pattern name="polymorphic-resolver" location=".claude/patterns/dataverse/polymorphic-resolver.md">The regarding pair and resolver field names.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; read spec FR-02 and FR-05(e), design §4, evidence notes §2; confirm task 001 is complete and re-grep the engine's new location and its callers.</step>
+    <step order="1">Add to the engine an entry point that takes the set of columns the caller supplied (or the caller's entity) and applies the exact "not supplied" test per target type: scalars absent/null/whitespace (whitespace normalised to null), lookups no bind, booleans and option sets absent only. A supplied column is skipped with no warning (an expected outcome).</step>
+    <step order="2">Add the target guard: a rule whose target is `sprk_regardingrecordid`, `sprk_regardingrecordtype`, any ADR-024 resolver field, or a protected column for the table is skipped with exactly one warning naming the rule and target.</step>
+    <step order="3">Write unit tests: supplied scalar survives; whitespace string is treated as unsupplied and filled; null filled; lookup with an existing bind survives, without one is filled; boolean false supplied survives (absent only is unsupplied); option set 0 supplied survives; the Report Card regression (Law Firm 1, Assigned External, Assigned Internal supplied by the caller are not overwritten, an unsupplied sibling is filled).</step>
+    <step order="4">Negative tests: each of `sprk_regardingrecordid`, `sprk_regardingrecordtype`, one resolver field and one protected column as a rule target produces no output column and one warning.</step>
+    <step order="5">Build + run tests; measure publish size; run the CVE check.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If an existing caller (Office quick-create) depends on mapping overwriting a caller-supplied value, STOP and escalate per CLAUDE.md §6 rather than special-casing it.</trigger>
+    <trigger>If the set of resolver field names cannot be derived from one existing source (grep the polymorphic-resolver pattern and OwnedChildWrite), escalate instead of hard-coding a guessed list.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The only new file is a test class; grep for `FillOnly` in src/ and tests/ finds no existing fill-only test or applier. Task 001's CreateTimeFieldMappingTests covers overwrite-free typing, not caller-supplied detection.</existing>
+    <extension>The applier is added to the existing engine (no new production class, per spec §11 row "Mapping-source resolver + fill-only applier": extends it). A separate test file keeps task 001's characterization tests unchanged.</extension>
+    <cost-of-doing-nothing>User-entered values (the Report Card Law Firm 1 / Assigned External / Assigned Internal pickers) keep being overwritten by mapping, and rules aimed at the regarding pair could corrupt the ADR-024 pair.</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="dotnet">Build/test .NET</tool></tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Dataverse/FieldMapping/CreateTimeFieldMapping.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Dataverse/FieldMapping/CreateTimeFieldMappingFillOnlyTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A caller-supplied value for a mapped column survives; an unsupplied column receives the mapped value, for scalar, lookup, boolean and option-set targets using the FR-02 "not supplied" definition (whitespace string = unsupplied; boolean false and option-set 0 = supplied).</criterion>
+    <criterion testable="true">A regression test named for the Report Card case proves Law Firm 1, Assigned External and Assigned Internal supplied by the caller are not overwritten.</criterion>
+    <criterion testable="true">A rule targeting `sprk_regardingrecordid`, `sprk_regardingrecordtype`, a resolver field or a protected column never writes and produces one warning.</criterion>
+    <criterion testable="true">Negative: with every candidate column supplied by the caller, the mapped output is empty and no warning is emitted for the supplied columns.</criterion>
+    <criterion testable="true">Task 001's characterization tests still pass unchanged, except the two pinned defects of DI-001 / #2124 (`Default_MoneyTarget_WritesAPlainDecimalNotAMoney`, `Expression_NonTextNonLookupTarget_WritesTheResolvedStringWithoutConversion`), which are updated to the fixed behaviour; BFF build 0 errors; publish-size delta and CVE result recorded in the task notes.</criterion>
+    <criterion testable="true">DI-001 / #2124 fixed: Default into a Money target writes a `Money`; Concat/Template into a non-text, non-lookup target is converted typed or skipped with one warning (never written as a string). Close #2124.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-02 and FR-05(e). Source resolution and Read authorization are task 003; wiring into the unified service is task 014.
+Completed 2026-10-20 (task/fm-002, merged b6e0b2440). 37 fill-only + 97 engine cases; publish +875 B (task-branch vs master); no CVE. DI-001: expression targets fixed; Default→Money fixed only when the caller passes moneyAttributes, which task 014 supplies (#2124 stays open until then). Pair guard on ApplyFillOnly only; legacy Apply unchanged (Office secure filing reads the mapped pair; carried to 014/018). Details: notes/task-002-notes.md.
+rework: fix-round-1 task 002</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

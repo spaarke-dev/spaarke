@@ -288,8 +288,10 @@ public static class CommunicationModule
         //     Stateless pass-through over the singleton DataverseWebApiService → singleton.
         //   • CommunicationThreadReadService — SCOPED, because it consumes the Scoped ICallerSystemUserResolver
         //     (a captive scoped dependency inside the Singleton CommunicationService would be an anti-pattern).
-        //   • ICallerSystemUserResolver — REUSED (§11) for oid→systemuserid; TryAdd so this module is self-contained
-        //     even if the AI module (its usual registrant) is not composed, without clobbering that registration.
+        //   • ICallerSystemUserResolver — REUSED (§11) for oid→systemuserid; TryAdd so the registration exists even if
+        //     the AI module (its usual registrant) is not composed, without clobbering that registration. It depends on
+        //     ISystemUserIdentityResolver (issue #1576: the disabled-user filter lives there), which NotificationsModule
+        //     registers unconditionally from Program.cs — this module is NOT self-contained without it.
         services.AddSingleton<IImpersonatedCommunicationQuery, DataverseImpersonatedCommunicationQuery>();
         // The app-only twin for the EXTERNAL-plane message read only (spaarke-SPA-external-access-platform-r3 task 033,
         // FR-04): a contact has no systemuser to impersonate and the external plane forbids OBO. Consumed solely by
@@ -619,6 +621,14 @@ public static class CommunicationModule
         // the resolver it calls, so it exists wherever the resolver does (bff-extensions.md §F.1).
         services.AddScheduledJob<CommunicationThreadFilingSweepJob>(
             CommunicationThreadFilingSweepJob.DefaultCronSchedule, enabled: false);
+
+        // unified-access-control-r2 task 190 (D7 T7b, #2126) — the backfill / safety-net sweep that links each unlinked .eml
+        // archive document to the ONE communication its recorded message id names exactly, so the document narrowing sees it
+        // (ADR-036 IScheduledJob, ADR-052 "BFF, schedule"). Registered DISABLED: it runs only when an admin triggers it
+        // (POST /api/admin/jobs/email-archive-communication-link-sweep/trigger, SystemAdmin) or enables the schedule, and
+        // writes only while EmailArchiveLinkSweep:Apply is true. Beside the capture-side link (CrossPathLink) it backfills.
+        services.AddScheduledJob<EmailArchiveCommunicationLinkSweepJob>(
+            EmailArchiveCommunicationLinkSweepJob.DefaultCronSchedule, enabled: false);
         services.TryAddSingleton(TimeProvider.System);
     }
 

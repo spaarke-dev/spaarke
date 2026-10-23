@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Office /api/office/todo and Office document save through the service, with the association set in the create (FR-18)</title>
+    <phase>3 W3 Product creators onto the service</phase>
+    <gate>019 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in Sprk.Bff.Api; tags include bff-api, office, documents; touches a worker that creates documents (data-mutation); adds tests at KEEP paths (TEST-MODIFYING override).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Document save is a two-step create-then-update flow with duplicate detection, SPE pointers and Service Bus retries; collapsing the association into the create needs careful judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W3-server</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>019</deps>
+    <tags>bff-api, office, documents, testing</tags>
+    <estimated-effort>8-12 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Route `POST /api/office/todo` (`OfficeService.CreateTodoAsync`, `Services/Office/OfficeService.cs` ~:2092-2295) and Office document save (`OfficeDocumentPersistence.CreateDocumentWithSpePointersAsync` ~:124, `Workers/Office/UploadFinalizationWorker.cs` create-then-update ~:615-690) through `RecordCreationService`, with the document's association set IN the create request, not by a follow-up update (word gaps G1/G2). Office Invoice quick-create is already done in task 018.</prompt>
+  <role>SPAARKE platform developer, .NET 10 BFF, Office add-in and SharePoint Embedded document persistence. Follow ADRs strictly.</role>
+  <goal>An Office-created To Do and an Office-saved document each carry mapping (if profiled), I-1 stamp, record-first owner and search index at create; document save issues one create call carrying the association and no separate association update; Office contract tests pass unchanged.</goal>
+
+  <context>
+    <background>spec.md FR-18, FR-06/FR-07, NFR-07. Today `CreateTodoAsync` builds a `sprk_todo` entity, resolves its owner itself (`ResolveTodoOwnerTeamAsync`, owner set at ~:2285) and calls `_genericEntityService.CreateAsync` (~:2289). Document save creates the document via `_documentService.CreateDocumentAsync` (OfficeDocumentPersistence ~:283) and then updates it (~:287-330) with SPE pointers; the UploadFinalizationWorker also creates then updates, applying the association lookup in the update (`ApplyAssociationLookup`, ~:672). The worker's owner uses `ResolveDocumentOwnerTeamAsync` (~:121), where a CARRIED `OwningTeamId` wins (so email attachment children match their parent). The caller is the add-in user for the To Do (caller principal); for the worker the requesting user is carried in the payload (use the system principal with `RequestedBy` = the payload user, since the worker has no caller token).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs (CreateTodoAsync ~:2092; ResolveTodoOwnerTeamAsync, grep for the symbol)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs (CreateDocumentWithSpePointersAsync ~:124; create ~:283, update ~:287-330)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Workers/Office/UploadFinalizationWorker.cs (owner ~:121-140, create/update ~:615-690, ApplyAssociationLookup ~:1161)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordTableRules.cs (sprk_todo and sprk_document entries if a column default or exception is missing)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs (tasks 013-016)</file>
+      <file role="canonical-reference">tests/integration/contract/Api/Office/OfficeTodoRegardingContractTests.cs</file>
+      <file role="canonical-reference">tests/integration/contract/Api/Office/OfficeTodoSourceAuthorizationContractTests.cs</file>
+      <file role="canonical-reference">tests/integration/contract/Api/Office/OfficeSaveDocumentStampContractTests.cs</file>
+      <file role="canonical-reference">tests/integration/data-mutation/OfficeVersionSave/ (grep for the document save tests)</file>
+      <file role="new">tests/integration/data-mutation/RecordOwnership/OfficeDocumentCreateAssociationTests.cs (association in the create; one create call; no association update)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="019" status="required">W2 service deployed and reviewed.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008 (path A, spec ADR Tensions)">Scope: authorization. Office route filters stay; the To Do's payload-dependent checks (regarding record, document, communication carriers) run in `CallerWriteAuthorization` via the service; do not keep a private copy of those checks in OfficeService. The worker, having no caller token, uses the system principal and relies on the checks already done at the route that enqueued the job.</constraint>
+    <constraint source="ADR-019">Scope: errors. The To Do and save endpoints keep their existing status codes and error codes (NFR-07); service refusals map to them through the Office adapter, unmapped kinds fail closed to the existing generic failure.</constraint>
+    <constraint source="ADR-028">Scope: identity. To Do: caller principal (WhoAmI on the caller token inside the service). Worker: system principal with `RequestedBy` from the payload user; never impersonation; the create stays app-only.</constraint>
+    <constraint source="ADR-010">Scope: DI. Use the already-registered scoped service; the worker obtains it from a scope created per message (as it does for other scoped services); no new registration.</constraint>
+    <constraint source="ADR-036">Scope: worker. The UploadFinalizationWorker's retry/idempotency semantics are unchanged: a redelivered message must not create a second document (the existing content-duplicate detection ~:238 stays the guard), and the service create is not retried blindly after an ambiguous failure (NFR-03).</constraint>
+    <constraint source="NFR-01 (spec)">Scope: Office paths. Fail closed: a refused or failed service call creates nothing and the existing error path runs; the carried `OwningTeamId` rule (email attachment children match their parent) is preserved as an explicit input to the service, not dropped.</constraint>
+    <constraint source="project">Scope: no follow-up association update. The document's association lookup (matter/project/invoice/other direct slots, task 055's four slots) is a column in the create payload. SPE pointers that are only known after upload may remain a separate step ONLY if the pointer values cannot exist at create time; record that determination and its evidence in the task notes. The association must never depend on that update.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: BFF publish. Placement Justification in the PR; fresh-master publish-size delta per §10.4; `dotnet list package --vulnerable --include-transitive`; no package.</constraint>
+    <constraint source="ADR-038">Scope: tests added or modified. KEEP paths; no Mock&lt;HttpMessageHandler&gt;; no DI-registration tests. Existing Office contract tests change only to follow a moved type, never by weakening an assertion. Cover the stated contract plus the named edge cases only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Office To Do and document save; SPE document persistence</topic>
+    <files>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Create payload shapes.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; read spec FR-18; read the To Do and document-save code listed above; re-grep every caller of `CreateDocumentWithSpePointersAsync` and `ApplyAssociationLookup`.</step>
+    <step order="1">Write failing tests first: Office document save under a Matter carries the association, I-1 stamp, owner (BU default Owner team, or the carried OwningTeamId) and search index in the CREATE, and exactly one create call is made with no association update; Office To Do goes through the service with the caller principal; redelivered finalization message creates no second document.</step>
+    <step order="2">Convert `CreateTodoAsync`: pass user-entered values and regarding carriers to the service; delete its private owner resolution and creator-person stamp once the registry covers them (task 012/013 handle creator person); keep the response `CreateTodoResponse` and endpoint codes.</step>
+    <step order="3">Convert document save (persistence class and worker) to one service create carrying the association columns; determine which SPE pointer fields (drive/item ids, hash) are known at create and pass those; if a pointer update must remain, keep it as a pointer-only update and record the evidence.</step>
+    <step order="4">Preserve the carried-OwningTeamId rule as an explicit service input; preserve content-duplicate detection and the worker's retry semantics.</step>
+    <step order="5">Build; run Office contract tests, the OfficeVersionSave data-mutation tests, OfficeRecordOwnershipTests, SecureChildOwnershipAiToolTests*, RouteAuthorizationGuardTests unchanged; publish-size delta; CVE check.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the association cannot be set in the create because Dataverse rejects the bind before the SPE pointers exist (a required pointer column), STOP and escalate per CLAUDE.md §6 with the exact error; do not reintroduce an association-only follow-up update.</trigger>
+    <trigger>If the UploadFinalizationWorker cannot obtain a scoped service per message without a DI change, STOP and escalate (ADR-010) before adding any registration.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Grep `_documentService.CreateDocumentAsync` / `UpdateDocumentAsync` in Services/Office/OfficeDocumentPersistence.cs (~:283, ~:330) and Workers/Office/UploadFinalizationWorker.cs (~:636, ~:687), and `_genericEntityService.CreateAsync` in OfficeService.cs (~:2289). Existing tests: tests/integration/contract/Api/Office/OfficeSaveDocumentStampContractTests.cs and OfficeTodo*ContractTests.cs cover stamp and regarding authorization, not the association-in-create invariant.</existing>
+    <extension>Yes for production code: both paths call the existing service; no new production file. The only new file is a test class, because the association-in-create/one-call assertion belongs to no existing suite and the existing contract tests must pass unchanged.</extension>
+    <cost-of-doing-nothing>An Office-created document under a Matter is created without the association, so it misses mapping, I-1 stamp, owner and search index at create and relies on a follow-up update that can fail between the two calls (spec FR-18 acceptance, word gaps G1/G2).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs (To Do)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Workers/Office/UploadFinalizationWorker.cs</output>
+    <output type="test">tests/integration/data-mutation/RecordOwnership/OfficeDocumentCreateAssociationTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">An Office-saved document under a Matter carries its association, mapping (if a profile exists), I-1 stamp, record-first owner and search-index default in the create; no separate association update is issued (asserted by a call-count test).</criterion>
+    <criterion testable="true">`POST /api/office/todo` creates through `RecordCreationService` with the caller principal; `OfficeService.CreateTodoAsync` no longer calls `_genericEntityService.CreateAsync` for `sprk_todo`; the response and error codes are unchanged.</criterion>
+    <criterion testable="true">A carried `OwningTeamId` on the finalization payload still wins as the owner (email attachment children match their parent), asserted by a test.</criterion>
+    <criterion testable="true">A redelivered upload-finalization message does not create a second document (existing duplicate detection still the guard).</criterion>
+    <criterion testable="true">Negative: an Office To Do naming a regarding record the caller cannot AppendTo is refused with the existing uniform outcome and no row is created; a refused or failed service call in the worker creates no document and takes the existing error path.</criterion>
+    <criterion testable="true">BFF build 0 errors; Office contract tests (OfficeTodo*, OfficeSaveDocumentStamp*, OfficeQuickCreate*), OfficeVersionSave data-mutation tests, OfficeRecordOwnershipTests, SecureChildOwnershipAiToolTests* and RouteAuthorizationGuardTests pass unchanged; publish-size delta and CVE result recorded in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-18. Office Invoice quick-create was done in task 018. If document save keeps a pointer-only update, the determination and evidence are recorded in the task notes, and the live check is task 036.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

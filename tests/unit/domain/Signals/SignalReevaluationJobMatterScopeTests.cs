@@ -400,6 +400,7 @@ public partial class SignalReevaluationJobTests
         var service = new OntologyAdminAuthoringService(caller,
             new PolicyVersionValidator(schema, new PredicateCompiler(schema, h.Clock), NullLogger<PolicyVersionValidator>.Instance),
             new MirroredEngine(h, caller, ScopedPolicyCode),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), // #2084: an ordinary owner, as before
             new TenantCache(new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())), NullLogger<TenantCache>.Instance),
             h.Clock, NullLogger<OntologyAdminAuthoringService>.Instance);
         var principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim("oid", "admin"), new Claim("tid", "tenant-102b")], "test"));

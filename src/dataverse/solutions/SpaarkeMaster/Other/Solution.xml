@@ -8,7 +8,7 @@
     <Descriptions>
       <Description description="Complete Spaarke platform solution - all sprk_ components plus customized standard entities" languagecode="1033" />
     </Descriptions>
-    <Version>1.2.3.0</Version>
+    <Version>1.2.3.1</Version>
     <Managed>2</Managed>
     <Publisher>
       <UniqueName>Spaarke</UniqueName>

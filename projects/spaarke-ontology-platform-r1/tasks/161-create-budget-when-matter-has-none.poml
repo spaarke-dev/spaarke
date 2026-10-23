@@ -4,7 +4,7 @@
     <title>Revise budget on a matter with no budget becomes "Create budget" (D-180, UAT round 1)</title>
     <phase>11 UAT</phase>
     <gate>startable (D-180, owner 2026-10-22)</gate>
-    <status>not-started</status>
+    <status>pr-open-awaiting-merge (lane stopped before step 3; merge, dev deploy and step 4 belong to the main session; see notes/task-161-notes.md)</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds a catalog action, an executor and a plan substitution in Sprk.Bff.Api (.cs); client prefill (.tsx).</rigor-reason>
     <model-tier>sonnet</model-tier>

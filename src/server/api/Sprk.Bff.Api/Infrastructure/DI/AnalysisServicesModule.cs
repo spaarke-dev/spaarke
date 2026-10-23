@@ -1395,7 +1395,10 @@ public static class AnalysisServicesModule
         // retrieval path applies after searching the document index — chat tools, playbook retrieval, Insights search.
         // One caller-scoped (OBO) read of sprk_documents per page through IDataverseUserClient (registered
         // unconditionally in SpaarkeCore). Every consumer is compound-ON, so it lives here. Scoped: it uses the
-        // request's principal and user client.
+        // request's principal and user client. Task 188 round 3: an external caller's document keys also pass THE external
+        // document narrowing; its dependencies (ICallerSystemUserResolver, ISystemUserIdentityResolver,
+        // AppOnlyDocumentNarrowing) are registered unconditionally by CommunicationModule, NotificationsModule and
+        // AddExternalAccess.
         services.AddScoped<IRetrievalAccessTrim, RetrievalAccessTrim>();
 
         services.AddScoped<IBriefingAi, BriefingAi>();

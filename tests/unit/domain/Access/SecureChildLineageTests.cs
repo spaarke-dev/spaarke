@@ -85,6 +85,89 @@ public class SecureChildLineageTests
             SecureChildLineage.IsChild(table).Should().BeTrue($"{table} is owned by the Secure team under a secure parent");
     }
 
+    /// <summary>
+    /// #2084 (owner round 102 item 4): a rule is filed under its matter, a version under its rule (solution XML:
+    /// sprk_policy_matter, sprk_policyversion_policy). The rule is a reparentable child of the resolver; the version is a lineage
+    /// child only, because Signals and Decision Records name the version they cite.
+    /// </summary>
+    [Fact]
+    public void ARuleIsFiledUnderItsMatter_AndAVersionUnderItsRule()
+    {
+        var rule = SecureChildLineage.Children["sprk_policy"];
+        rule.EntitySet.Should().Be("sprk_policies");
+        rule.Lookups.Should().BeEquivalentTo(new Dictionary<string, string> { ["sprk_matter"] = "sprk_matter" },
+            "sprk_currentversion names the rule's own version and can add no root");
+
+        var version = SecureChildLineage.Children["sprk_policyversion"];
+        version.EntitySet.Should().Be("sprk_policyversions");
+        version.Lookups.Should().BeEquivalentTo(new Dictionary<string, string> { ["sprk_policy"] = "sprk_policy" });
+
+        RecordOwnershipResolver.IsReparentableChild("sprk_policy").Should().BeTrue();
+        RecordOwnershipResolver.IsOwnershipParent("sprk_policyversion").Should().BeFalse(
+            "a Signal or Decision Record citing a version is not filed under it");
+    }
+
+    /// <summary>
+    /// #2084: a Signal CITES the rule that raised it; it is not filed under it. Reading an existing row's parents drops the
+    /// citation (must fire), and the same lookup on a version still files the version under its rule (must not fire).
+    /// </summary>
+    [Fact]
+    public void ASignalsRuleIsACitation_NotAParent_WhileAVersionsRuleIsItsParent()
+    {
+        var (rule, matter) = (Guid.NewGuid(), Guid.NewGuid());
+        var signal = new Microsoft.Xrm.Sdk.Entity("sprk_signal", Guid.NewGuid())
+        {
+            ["sprk_policy"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_policy", rule),
+            ["sprk_matter"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", matter),
+        };
+        var version = new Microsoft.Xrm.Sdk.Entity("sprk_policyversion", Guid.NewGuid())
+        {
+            ["sprk_policy"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_policy", rule),
+        };
+
+        RecordOwnershipContext.ParentsOf(signal).Should().Equal(new RecordOwnershipParent("sprk_matter", matter));
+        RecordOwnershipContext.ParentsOf(version).Should().Equal(new RecordOwnershipParent("sprk_policy", rule));
+        RecordOwnershipResolver.IsCitation("SPRK_SIGNAL", "Sprk_Policy").Should().BeTrue("logical names compare case-insensitively");
+        RecordOwnershipResolver.IsCitation("sprk_policyversion", "sprk_policy").Should().BeFalse();
+    }
+
+    /// <summary>
+    /// #2084 round 2: ONE predicate for every parent derivation of a row being created — the attribute form keyed by its table,
+    /// <see cref="RecordOwnershipContext.ForChild"/>, and the create tool's <see cref="OwnedChildWrite.ParentsOf"/>. A Signal created
+    /// naming its rule is filed under its matter only (must fire); a version naming its rule is filed under it (must not fire).
+    /// </summary>
+    [Fact]
+    public void ACreatedSignalsRule_IsACitationOnEveryCreatePath_WhileAVersionsRuleIsItsParent()
+    {
+        var (rule, matter) = (Guid.NewGuid(), Guid.NewGuid());
+        var signal = new Microsoft.Xrm.Sdk.Entity("sprk_signal")
+        {
+            ["sprk_policy"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_policy", rule),
+            ["sprk_matter"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", matter),
+        };
+
+        RecordOwnershipContext.ParentsOf(signal.Attributes, "sprk_signal").Should().Equal(new RecordOwnershipParent("sprk_matter", matter));
+        var context = RecordOwnershipContext.ForChild(signal);
+        context.Parents.Should().Equal(new RecordOwnershipParent("sprk_matter", matter));
+        context.TargetEntityLogicalName.Should().Be("sprk_matter");
+
+        var item = new DataverseWriteItemMapper.MappedItem("{}", [])
+        {
+            Lookups =
+            [
+                new DataverseWriteItemMapper.MappedLookup("sprk_policy", "sprk_policy", "sprk_policies", rule),
+                new DataverseWriteItemMapper.MappedLookup("sprk_matter", "sprk_matter", "sprk_matters", matter),
+            ],
+        };
+        OwnedChildWrite.ParentsOf("sprk_signal", item).Should().Equal(new RecordOwnershipParent("sprk_matter", matter));
+        OwnedChildWrite.ParentsOf("sprk_policyversion", item).Should().Equal(
+            new RecordOwnershipParent("sprk_policy", rule), new RecordOwnershipParent("sprk_matter", matter));
+        RecordOwnershipContext.ForChild(new Microsoft.Xrm.Sdk.Entity("sprk_policyversion")
+        {
+            ["sprk_policy"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_policy", rule),
+        }).Parents.Should().Equal(new RecordOwnershipParent("sprk_policy", rule));
+    }
+
     // ── What a child receives (Dataverse AccessRights values as literals) ────────────────────────────────────────────
 
     // Owner round 91 (2026-10-10, task 179): Share is carried where the root share holds it; never Assign or Create.

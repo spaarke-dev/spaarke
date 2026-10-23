@@ -163,6 +163,92 @@ public class FieldMappingPushAuthorizationContractTests
     }
 
     // =========================================================================================
+    // #2253 fix round 3 (F1): the push end to end through the REAL impersonated seam and Web API service
+    // =========================================================================================
+
+    [Fact]
+    public async Task Push_ThroughTheRealImpersonatedSeam_ReadsTheMetadataPaths_AndWritesTheChildren()
+    {
+        // The strict IImpersonatedCommunicationQuery mock hid #2253 round 1's regression: the URL guard refused the
+        // push's own metadata paths, and every push answered 500. Here only Dataverse itself is stood in for.
+        var dataverse = new FakeDataverse(request =>
+        {
+            var path = Uri.UnescapeDataString(request.RequestUri!.AbsolutePath);
+            if (path.EndsWith("EntityDefinitions(LogicalName='sprk_matter')/Attributes", StringComparison.Ordinal))
+            {
+                return Rows(
+                    new { LogicalName = "sprk_matterid", AttributeType = "Uniqueidentifier", IsValidODataAttribute = true },
+                    new { LogicalName = "sprk_clientreference", AttributeType = "String", IsValidODataAttribute = true });
+            }
+
+            if (path.EndsWith("EntityDefinitions(LogicalName='sprk_event')/ManyToOneRelationships", StringComparison.Ordinal))
+            {
+                return Rows(new
+                {
+                    ReferencingAttribute = "sprk_regardingmatter",
+                    ReferencedEntity = "sprk_matter",
+                    ReferencingEntityNavigationPropertyName = "sprk_regardingmatter",
+                });
+            }
+
+            if (path.EndsWith("/sprk_matters", StringComparison.Ordinal))
+            {
+                return Rows(new { sprk_matterid = MatterId, sprk_clientreference = "REF-166" });
+            }
+
+            if (path.EndsWith("/sprk_events", StringComparison.Ordinal))
+            {
+                return Rows(new { sprk_eventid = ChildA }, new { sprk_eventid = ChildB });
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        await using var host = await PushHost.StartAsync(dataverse);
+        host.Probe.Rights = AccessRights.Read;
+        host.ArrangeHappyPathData();
+
+        var response = await host.SendAsync(Authenticated(PushBody()));
+        var text = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, text);
+        JsonNode.Parse(text)!["updatedCount"]!.GetValue<int>().Should().Be(2);
+
+        dataverse.Requests.Select(r => Uri.UnescapeDataString(r.Uri.AbsolutePath)).Should().BeEquivalentTo(new[]
+        {
+            "/api/data/v9.2/EntityDefinitions(LogicalName='sprk_matter')/Attributes",
+            "/api/data/v9.2/sprk_matters",
+            "/api/data/v9.2/EntityDefinitions(LogicalName='sprk_event')/ManyToOneRelationships",
+            "/api/data/v9.2/sprk_events",
+        });
+        dataverse.Requests.Should().OnlyContain(r => r.CallerId == CallerSystemUserId.ToString(),
+            "every read on the push, metadata included, impersonates the caller");
+        host.FieldMappings.Verify(f => f.UpdateRecordFieldsAsync(
+            "sprk_event", ChildA, It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), CallerSystemUserId), Times.Once);
+        host.FieldMappings.Verify(f => f.UpdateRecordFieldsAsync(
+            "sprk_event", ChildB, It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), CallerSystemUserId), Times.Once);
+    }
+
+    private static HttpResponseMessage Rows(params object[] rows) => new(HttpStatusCode.OK)
+    {
+        // Default options, not JsonContent's web (camelCase) ones: Dataverse's property names are as written.
+        Content = JsonContent.Create(new { value = rows }, options: new JsonSerializerOptions()),
+    };
+
+    /// <summary>Stands in for Dataverse; records each request's URI and impersonated caller.</summary>
+    private sealed class FakeDataverse(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
+    {
+        public List<(Uri Uri, string? CallerId)> Requests { get; } = new();
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Requests.Add((request.RequestUri!,
+                request.Headers.TryGetValues(DataverseImpersonation.CallerIdHeader, out var values) ? values.Single() : null));
+            return Task.FromResult(respond(request));
+        }
+    }
+
+    // =========================================================================================
     // Task 166 r2: the SOURCE's mapped fields are read AS THE CALLER (field-level security applies)
     // =========================================================================================
 
@@ -569,11 +655,20 @@ public class FieldMappingPushAuthorizationContractTests
 
         public Mock<IGenericEntityService> Entities { get; } = new(MockBehavior.Loose);
 
-        private PushHost() => Probe = new SeamProbe(ProbedSources);
+        /// <summary>#2253 fix round 3 (F1): when set, the impersonated seam is the REAL
+        /// <see cref="DataverseImpersonatedCommunicationQuery"/> over the REAL <see cref="DataverseWebApiService"/>,
+        /// and this handler stands in for Dataverse, so a URL guard on that path is exercised, not mocked away.</summary>
+        private readonly HttpMessageHandler? _dataverse;
 
-        public static async Task<PushHost> StartAsync()
+        private PushHost(HttpMessageHandler? dataverse = null)
         {
-            var host = new PushHost();
+            Probe = new SeamProbe(ProbedSources);
+            _dataverse = dataverse;
+        }
+
+        public static async Task<PushHost> StartAsync(HttpMessageHandler? dataverse = null)
+        {
+            var host = new PushHost(dataverse);
             await host.InitializeAsync();
             return host;
         }
@@ -743,7 +838,9 @@ public class FieldMappingPushAuthorizationContractTests
                 opt.AddPolicy("dataverse-query", _ => RateLimitPartition.GetNoLimiter("dataverse-query-test")));
             builder.Services.AddSingleton<CallerRecordAccessProbe>(Probe);
             builder.Services.AddSingleton(FieldMappings.Object);
-            builder.Services.AddSingleton(Impersonated.Object);
+            builder.Services.AddSingleton<IImpersonatedCommunicationQuery>(_dataverse is null
+                ? Impersonated.Object
+                : new DataverseImpersonatedCommunicationQuery(new OfflineWebApiService(_dataverse)));
             builder.Services.AddSingleton(Entities.Object);
             // Batch-4 integration (task 156): the push re-stamps each written child's descendants after its own write —
             // a module boundary here (no child in these tests has descendants); the restamp is not this file's subject.
@@ -776,6 +873,32 @@ public class FieldMappingPushAuthorizationContractTests
                 await _app.DisposeAsync();
             }
         }
+    }
+}
+
+/// <summary>The production <see cref="DataverseWebApiService"/>, built through its protected test constructor with a
+/// static token, over a stand-in for Dataverse (#2253 fix round 3, F1).</summary>
+internal sealed class OfflineWebApiService(HttpMessageHandler handler) : DataverseWebApiService(
+    new HttpClient(handler),
+    new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+    {
+        ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
+    }).Build(),
+    NullLogger<DataverseWebApiService>.Instance,
+    new Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator(
+        NullLogger<Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator>.Instance),
+    confidentialClients: null,
+    credential: new OfflineWebApiService.StaticToken())
+{
+    internal sealed class StaticToken : Azure.Core.TokenCredential
+    {
+        private static readonly Azure.Core.AccessToken Token = new("test-token", DateTimeOffset.MaxValue);
+
+        public override Azure.Core.AccessToken GetToken(Azure.Core.TokenRequestContext requestContext, CancellationToken cancellationToken)
+            => Token;
+
+        public override ValueTask<Azure.Core.AccessToken> GetTokenAsync(
+            Azure.Core.TokenRequestContext requestContext, CancellationToken cancellationToken) => new(Token);
     }
 }
 

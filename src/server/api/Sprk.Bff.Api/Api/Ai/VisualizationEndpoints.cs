@@ -435,10 +435,10 @@ public static class VisualizationEndpoints
     /// </para>
     /// <para>
     /// <b>Batched, not concurrent.</b> The distinct ids go to <c>IAiAuthorizationService</c> in ONE call,
-    /// which walks them sequentially. That sequencing is not an oversight: <c>DataverseAccessDataSource</c>
-    /// assigns <c>_httpClient.DefaultRequestHeaders.Authorization</c> before each request and the client
-    /// is shared within a request scope, so concurrent checks would mutate the header mid-send —
-    /// <c>HttpHeaders</c> is not thread-safe and the failure presents as an intermittent phantom denial.
+    /// which walks them sequentially. That sequencing was once forced: <c>DataverseAccessDataSource</c>
+    /// assigned the shared <c>_httpClient.DefaultRequestHeaders.Authorization</c> before each request. Since issue
+    /// #1576 every read there carries its own token; the walk stays sequential because nothing above the data source
+    /// has been reviewed for concurrent use within one request scope.
     /// </para>
     /// <para>
     /// <b>ADR-044.</b> Ids reach this method as the bare-lowercase form <c>VisualizationDocument

@@ -192,22 +192,30 @@ public class DataverseAccessDataSource : IAccessDataSource
     }
 
     /// <summary>
-    /// Ensures the HttpClient has a valid authentication token.
-    /// Uses service principal (app-only) authentication.
+    /// Returns a valid service-principal (app-only) Dataverse token, refreshing <c>_currentToken</c> when it is
+    /// missing or within five minutes of expiry.
     /// </summary>
-    private async Task EnsureAuthenticatedAsync(CancellationToken ct = default)
+    /// <remarks>
+    /// Issue #1576 (c): this method used to ALSO write the token onto <c>_httpClient.DefaultRequestHeaders</c>, and
+    /// the OBO branch of <see cref="GetUserAccessAsync"/> wrote the caller's token there too. Every request this class
+    /// sends now carries its token on its own <see cref="HttpRequestMessage"/>, so the shared default header is never
+    /// written: an app-only call can no longer run under a previous caller's OBO identity, and two concurrent calls
+    /// cannot race each other's identity onto their reads.
+    /// </remarks>
+    private async Task<string> EnsureAuthenticatedAsync(CancellationToken ct = default)
     {
-        if (_currentToken == null || _currentToken.Value.ExpiresOn <= DateTimeOffset.UtcNow.AddMinutes(5))
+        var token = _currentToken;
+        if (token == null || token.Value.ExpiresOn <= DateTimeOffset.UtcNow.AddMinutes(5))
         {
-            _currentToken = await _credential.GetTokenAsync(
+            token = await _credential.GetTokenAsync(
                 new TokenRequestContext(new[] { _dataverseScope }),
                 ct);
-
-            _httpClient.DefaultRequestHeaders.Authorization =
-                new AuthenticationHeaderValue("Bearer", _currentToken.Value.Token);
+            _currentToken = token;
 
             _logger.LogDebug("DataverseAccessDataSource: Refreshed service principal access token");
         }
+
+        return token.Value.Token;
     }
 
     /// <summary>
@@ -294,23 +302,19 @@ public class DataverseAccessDataSource : IAccessDataSource
                 // Use OBO to call Dataverse as the user
                 _logger.LogDebug("[UAC-DIAG] Using OBO authentication for user context");
                 dataverseToken = await GetDataverseTokenViaOBOAsync(userAccessToken, ct);
-
-                // CRITICAL: Set the OBO token on HttpClient headers for all subsequent API calls
-                _httpClient.DefaultRequestHeaders.Authorization =
-                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", dataverseToken);
-
-                _logger.LogDebug("[UAC-DIAG] Set OBO token on HttpClient authorization header");
             }
             else
             {
                 // Use service principal (app-only) authentication
                 _logger.LogDebug("[UAC-DIAG] Using service principal authentication");
-                await EnsureAuthenticatedAsync(ct);
-                dataverseToken = _currentToken!.Value.Token;
+                dataverseToken = await EnsureAuthenticatedAsync(ct);
             }
 
+            // Every read below carries dataverseToken on its own request (issue #1576 (c)) — never the shared
+            // _httpClient.DefaultRequestHeaders, which a previous or concurrent call could have set to another identity.
+
             // Map Azure AD Object ID to Dataverse systemuserid
-            var lookup = await LookupDataverseUserIdAsync(userId, ct);
+            var lookup = await LookupDataverseUserIdAsync(dataverseToken, userId, ct);
             if (string.IsNullOrEmpty(lookup.SystemUserId))
             {
                 // Task 132 (C12): "no such user" (the lookup SUCCEEDED and found no row) is an answer and may be
@@ -337,10 +341,10 @@ public class DataverseAccessDataSource : IAccessDataSource
             var permissions = await QueryUserPermissionsAsync(dataverseUserId, resourceId, dataverseToken, ct);
 
             // Query team memberships using Dataverse user ID
-            var teams = await QueryUserTeamMembershipsAsync(dataverseUserId, ct);
+            var teams = await QueryUserTeamMembershipsAsync(dataverseUserId, dataverseToken, ct);
 
             // Query user roles using Dataverse user ID
-            var roles = await QueryUserRolesAsync(dataverseUserId, ct);
+            var roles = await QueryUserRolesAsync(dataverseUserId, dataverseToken, ct);
 
             // Determine granular access rights based on permissions
             var accessRights = DetermineAccessLevel(permissions.Records);
@@ -451,9 +455,9 @@ public class DataverseAccessDataSource : IAccessDataSource
             var dataverseToken = await GetDataverseTokenViaOBOAsync(userAccessToken, ct);
 
             // Resolve oid -> systemuserid. Done with an EXPLICIT per-request token rather than by
-            // mutating _httpClient.DefaultRequestHeaders (which GetUserAccessAsync does): that field is
-            // shared across concurrent requests, so setting it here would race another caller's identity
-            // onto this request. RetrievePrincipalAccess is bound to the principal, so a wrong
+            // mutating _httpClient.DefaultRequestHeaders (no path in this class writes it since issue #1576):
+            // that field is shared across concurrent requests, so setting it would race another caller's
+            // identity onto this request. RetrievePrincipalAccess is bound to the principal, so a wrong
             // systemuserid would silently authorize the wrong person.
             var lookup = await LookupDataverseUserIdAsync(dataverseToken, userId, ct);
             if (string.IsNullOrEmpty(lookup.SystemUserId))
@@ -561,7 +565,7 @@ public class DataverseAccessDataSource : IAccessDataSource
     {
         try
         {
-            var url = $"{entitySetName}({recordId})?$select=createdon";
+            var url = $"{DataverseIdentifier.RequireTableName(entitySetName, nameof(entitySetName))}({recordId})?$select=createdon";
 
             using var requestMessage = new HttpRequestMessage(HttpMethod.Get, url)
             {
@@ -608,9 +612,15 @@ public class DataverseAccessDataSource : IAccessDataSource
     }
 
     /// <summary>
-    /// Looks up the Dataverse systemuserid for an Azure AD Object ID using an EXPLICIT token, so the
+    /// Looks up the ACTIVE Dataverse systemuserid for an Azure AD Object ID using an EXPLICIT token, so the
     /// call does not depend on (or mutate) <c>_httpClient.DefaultRequestHeaders</c>.
     /// </summary>
+    /// <remarks>
+    /// Issue #1576: filters <c>isdisabled eq false</c>. A disabled systemuser keeps its oid, so without the filter a
+    /// disabled account resolved and its rights were computed; it now resolves to "no such user" (an answer), which
+    /// the callers turn into <see cref="AccessRights.None"/>. Enforced by <c>SystemUserOidLookupDisabledGuardTests</c>
+    /// (Spaarke.ArchTests).
+    /// </remarks>
     private async Task<UserLookup> LookupDataverseUserIdAsync(
         string dataverseToken,
         string azureAdObjectId,
@@ -618,7 +628,7 @@ public class DataverseAccessDataSource : IAccessDataSource
     {
         try
         {
-            var url = $"systemusers?$filter=azureactivedirectoryobjectid eq '{azureAdObjectId}'"
+            var url = $"systemusers?$filter=azureactivedirectoryobjectid eq '{azureAdObjectId}' and isdisabled eq false"
                       + "&$select=systemuserid";
 
             using var requestMessage = new HttpRequestMessage(HttpMethod.Get, url)
@@ -664,62 +674,6 @@ public class DataverseAccessDataSource : IAccessDataSource
                 exception: ex,
                 message: "[UAC-DIAG] systemuser lookup threw for AzureAdOid={AzureAdOid}. Fail-closed: null (faulted).",
                 azureAdObjectId);
-            return UserLookup.Fault;
-        }
-    }
-
-    /// <summary>
-    /// Looks up the Dataverse systemuserid for a given Azure AD Object ID.
-    /// </summary>
-    /// <param name="azureAdObjectId">Azure AD Object ID (from token 'oid' claim)</param>
-    /// <param name="ct">Cancellation token</param>
-    /// <returns>The lookup outcome — found, not found (an answer), or faulted (task 132).</returns>
-    private async Task<UserLookup> LookupDataverseUserIdAsync(string azureAdObjectId, CancellationToken ct)
-    {
-        try
-        {
-            // Query systemusers by azureactivedirectoryobjectid
-            var url = $"systemusers?$filter=azureactivedirectoryobjectid eq '{azureAdObjectId}'&$select=systemuserid,fullname";
-
-            _logger.LogDebug("Looking up Dataverse user for Azure AD OID {AzureAdOid}: {Url}", azureAdObjectId, url);
-
-            var response = await _httpClient.GetAsync(url, ct);
-
-            if (!response.IsSuccessStatusCode)
-            {
-                _logger.LogWarning("Failed to lookup Dataverse user: {StatusCode}", response.StatusCode);
-                return UserLookup.Fault;
-            }
-
-            var result = await response.Content.ReadFromJsonAsync<ODataResponse<SystemUserDto>>(ct);
-
-            if (result?.Value == null)
-            {
-                // A 2xx without a value array is not a Dataverse answer.
-                return UserLookup.Fault;
-            }
-
-            if (!result.Value.Any())
-            {
-                _logger.LogWarning("No Dataverse user found for Azure AD OID {AzureAdOid}", azureAdObjectId);
-                return UserLookup.NotFound;
-            }
-
-            var user = result.Value.First();
-            // PII (D9-01): user full name removed from this authorization-path log. The systemuserid
-            // and Azure AD OID GUIDs are sufficient non-PII correlation identifiers for diagnostics.
-            _logger.LogInformation("Found Dataverse user (systemuserid: {SystemUserId}) for Azure AD OID {AzureAdOid}",
-                user.SystemUserId, azureAdObjectId);
-
-            return string.IsNullOrEmpty(user.SystemUserId) ? UserLookup.Fault : new UserLookup(user.SystemUserId, false);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(exception: ex, message: "Error looking up Dataverse user for Azure AD OID {AzureAdOid}", azureAdObjectId);
             return UserLookup.Fault;
         }
     }
@@ -837,7 +791,7 @@ public class DataverseAccessDataSource : IAccessDataSource
             // The function is bound to the PRINCIPAL; Target names the record. The response carries a
             // comma-separated rights string ("ReadAccess,WriteAccess,AppendToAccess,...") — exactly the
             // shape MapDataverseAccessRights and PrincipalAccessResponse were written to consume.
-            var target = $"{{\"@odata.id\":\"{entitySetName}({resourceId})\"}}";
+            var target = $"{{\"@odata.id\":\"{DataverseIdentifier.RequireTableName(entitySetName, nameof(entitySetName))}({resourceId})\"}}";
             var url = $"systemusers({userId})/Microsoft.Dynamics.CRM.RetrievePrincipalAccess(Target=@p1)"
                       + $"?@p1={Uri.EscapeDataString(target)}";
 
@@ -1009,7 +963,7 @@ public class DataverseAccessDataSource : IAccessDataSource
     /// </summary>
     /// <remarks>Task 132 (C12): a failed read still yields an empty list for this request, but is marked faulted so
     /// the snapshot carrying it is never cached; a successful read of zero teams is an answer.</remarks>
-    private async Task<SubRead> QueryUserTeamMembershipsAsync(string userId, CancellationToken ct)
+    private async Task<SubRead> QueryUserTeamMembershipsAsync(string userId, string dataverseToken, CancellationToken ct)
     {
         try
         {
@@ -1018,7 +972,13 @@ public class DataverseAccessDataSource : IAccessDataSource
 
             _logger.LogDebug("Querying team memberships: {Url}", url);
 
-            var response = await _httpClient.GetAsync(url, ct);
+            // Per-request token (issue #1576 (c)), the shape the RetrievePrincipalAccess call uses.
+            using var requestMessage = new HttpRequestMessage(HttpMethod.Get, url)
+            {
+                Headers = { Authorization = new AuthenticationHeaderValue("Bearer", dataverseToken) }
+            };
+
+            var response = await _httpClient.SendAsync(requestMessage, ct);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -1050,7 +1010,7 @@ public class DataverseAccessDataSource : IAccessDataSource
     /// Queries user's security roles.
     /// </summary>
     /// <remarks>Task 132 (C12): classified exactly as <see cref="QueryUserTeamMembershipsAsync"/>.</remarks>
-    private async Task<SubRead> QueryUserRolesAsync(string userId, CancellationToken ct)
+    private async Task<SubRead> QueryUserRolesAsync(string userId, string dataverseToken, CancellationToken ct)
     {
         try
         {
@@ -1059,7 +1019,13 @@ public class DataverseAccessDataSource : IAccessDataSource
 
             _logger.LogDebug("Querying user roles: {Url}", url);
 
-            var response = await _httpClient.GetAsync(url, ct);
+            // Per-request token (issue #1576 (c)), the shape the RetrievePrincipalAccess call uses.
+            using var requestMessage = new HttpRequestMessage(HttpMethod.Get, url)
+            {
+                Headers = { Authorization = new AuthenticationHeaderValue("Bearer", dataverseToken) }
+            };
+
+            var response = await _httpClient.SendAsync(requestMessage, ct);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -1143,14 +1109,5 @@ public class DataverseAccessDataSource : IAccessDataSource
 
         [System.Text.Json.Serialization.JsonPropertyName("name")]
         public string? Name { get; set; }
-    }
-
-    private class SystemUserDto
-    {
-        [System.Text.Json.Serialization.JsonPropertyName("systemuserid")]
-        public string? SystemUserId { get; set; }
-
-        [System.Text.Json.Serialization.JsonPropertyName("fullname")]
-        public string? FullName { get; set; }
     }
 }

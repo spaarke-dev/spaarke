@@ -115,14 +115,13 @@
     <PackageReference Include="Azure.Identity" Version="1.21.0" />
     <PackageReference Include="Azure.ResourceManager.AppService" Version="1.5.0" />
 
-    <!-- Azure.ResourceManager.CognitiveServices + .Compute — task 120 (Wave
-         G-2, Option D hybrid per DS-1b) SDK ports of two of H0's four
-         preflight probes (ArmCognitiveServicesTpmProbe, ArmComputeVCpuProbe),
-         replacing `az cognitiveservices usage list` / `az vm list-usage`
-         shell-outs. DefaultAzureCredential pinned to the L2 UAMI per
-         ADR-028 MI-outbound. -->
+    <!-- Azure.ResourceManager.CognitiveServices — task 120 (Wave
+         G-2, Option D hybrid per DS-1b) SDK port of H0's
+         ArmCognitiveServicesTpmProbe, replacing the `az cognitiveservices
+         usage list` shell-out. (Azure.ResourceManager.Compute, which backed
+         the ArmComputeVCpuProbe, was removed 2026-10-15, T186 L17.) DefaultAzureCredential pinned to the
+         L2 UAMI per ADR-028 MI-outbound. -->
     <PackageReference Include="Azure.ResourceManager.CognitiveServices" Version="1.5.2" />
-    <PackageReference Include="Azure.ResourceManager.Compute" Version="1.16.0" />
     <PackageReference Include="Azure.ResourceManager.Resources" Version="1.11.2" />
 
     <!-- Azure.Security.KeyVault.Secrets — H4's SecretClientKvWriter and H14's
@@ -139,8 +138,8 @@
          GetManagedServicesRegistrationAssignments(...) for the Lighthouse
          delegation check (Microsoft.ManagedServices/registrationAssignments,
          CustomerOwned tenancy branch only). Version 1.14.0 matches the
-         Azure.ResourceManager version already pulled in transitively by
-         Azure.ResourceManager.Compute 1.16.0 (task 120) — pinned explicitly
+         Azure.ResourceManager version previously pulled in transitively by
+         Azure.ResourceManager.Compute 1.16.0 (removed T186 L17) — pinned explicitly
          here because this project's code references ArmClient/SubscriptionResource
          types directly. DefaultAzureCredential pinned to the L2 UAMI per
          ADR-028 MI-outbound (reuses the TokenCredential singleton registered

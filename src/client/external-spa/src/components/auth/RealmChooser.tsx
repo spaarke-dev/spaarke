@@ -5,7 +5,9 @@
  * This is the EXTERNAL partner portal, so the sign-in is now **Partner-primary** rather than a
  * symmetric "My organization / Partner" choice (which UAT found confusing — a partner shouldn't have
  * to reason about planes). The primary action signs in as a Partner (CIAM); a subtle secondary link
- * covers the minority internal/workforce browser case. It is shown ONLY in a browser and ONLY when
+ * covers the workforce contact who signs in with their COMPANY account (ADR-028 A9, task 058): "Work for
+ * {customer}? Sign in with your company account", where {customer} is the configured customer a
+ * `?customer={key}` link names, else "your organization". It is shown ONLY in a browser and ONLY when
  * the tab has no stored realm yet; it NEVER appears inside Teams (the Teams host does silent
  * workforce SSO). The workforce link is kept BEFORE any authority redirect so an employee is never
  * stranded on the partner IdP (which a full auto-redirect-to-CIAM would risk).
@@ -21,6 +23,11 @@ import type { Realm } from '../../auth/realm';
 export interface RealmChooserProps {
   /** Invoked with the plane the user picked; the bootstrap then signs in against that authority. */
   onChoose: (realm: Realm) => void;
+  /**
+   * The display name of the configured customer a `?customer={key}` link names (`landingCustomerName`), or null/absent
+   * for "your organization". Display only: it never selects a backend.
+   */
+  customerName?: string | null;
 }
 
 const useStyles = makeStyles({
@@ -54,7 +61,7 @@ const useStyles = makeStyles({
   },
 });
 
-export const RealmChooser: React.FC<RealmChooserProps> = ({ onChoose }) => {
+export const RealmChooser: React.FC<RealmChooserProps> = ({ onChoose, customerName }) => {
   const s = useStyles();
   return (
     <div className={s.root}>
@@ -73,7 +80,8 @@ export const RealmChooser: React.FC<RealmChooserProps> = ({ onChoose }) => {
           Continue as Partner
         </Button>
         <Text className={s.workforceRow} block>
-          Spaarke employee? <Link onClick={() => onChoose('workforce')}>Sign in with your work account</Link>
+          Work for {customerName ?? 'your organization'}?{' '}
+          <Link onClick={() => onChoose('workforce')}>Sign in with your company account</Link>
         </Text>
       </div>
     </div>

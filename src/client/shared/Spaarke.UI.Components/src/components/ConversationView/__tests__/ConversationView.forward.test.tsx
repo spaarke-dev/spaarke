@@ -271,7 +271,17 @@ describe('ConversationView forward → SendEmailDialog forward mode (FR-08, ADR-
     await userEvent.click(within(anchor).getByRole('button', { name: /^Forward/ }));
 
     // SendEmailDialog uses modalType="alert" (no light dismiss) → role="alertdialog".
-    const dialog = await screen.findByRole('alertdialog', {}, { timeout: 4000 });
+    //
+    // `hidden: true` (FAILURE-MODES G-21; nightly quality alert #1906): in jsdom, Fluent's
+    // focus manager (tabster) puts `aria-hidden="true"` on this DialogSurface on a 250 ms
+    // debounce. jsdom has no layout, so Fluent's focus-first-element effect finds nothing
+    // focusable and focuses the surface itself; that focus lands before tabster has created
+    // the surface's modalizer, so the modalizer is never marked active and the sweep hides
+    // it. Whether an accessible-only query or `toHaveAccessibleName` runs before or after
+    // that sweep depends on machine load, so every dialog query here opts in to hidden
+    // nodes. They are scoped to this single `alertdialog` (`within(dialog)`), so they
+    // cannot match background content.
+    const dialog = await screen.findByRole('alertdialog', { hidden: true }, { timeout: 4000 });
 
     // Forward mode header (EmailComposer renders "Forward" for mode === 'forward').
     // SprkModal (ADR-050) renders a custom header — a plain `<span>` wired via
@@ -280,13 +290,22 @@ describe('ConversationView forward → SendEmailDialog forward mode (FR-08, ADR-
     // dialog's header DOM without updating this pre-existing assertion).
     // Assert the dialog's actual accessible-name contract instead of a
     // `role="heading"` this shell deliberately does not render.
-    expect(dialog).toHaveAccessibleName('Forward');
+    //
+    // `toHaveAccessibleName` returns '' for a root that is itself `aria-hidden` (G-21), so
+    // assert the same name contract directly: the surface is labelled (`aria-labelledby`)
+    // by a header element INSIDE it whose text is exactly 'Forward'.
+    const labelId = dialog.getAttribute('aria-labelledby');
+    expect(labelId).toBeTruthy();
+    const label = document.getElementById(labelId as string);
+    expect(label).not.toBeNull();
+    expect(dialog).toContainElement(label as HTMLElement);
+    expect(label).toHaveTextContent(/^Forward$/);
 
     // Subject prefilled via deriveForwardState → dedupSubjectPrefix(..,'Fwd:').
-    expect(within(dialog).getByRole('textbox', { name: 'Subject' })).toHaveValue('Fwd: Contract draft');
+    expect(within(dialog).getByRole('textbox', { name: 'Subject', hidden: true })).toHaveValue('Fwd: Contract draft');
 
     // Quoted body prefilled — the forwarded-message header + the source body.
-    const body = within(dialog).getByRole('textbox', { name: 'Message body' }) as HTMLTextAreaElement;
+    const body = within(dialog).getByRole('textbox', { name: 'Message body', hidden: true }) as HTMLTextAreaElement;
     expect(body.value).toContain('Forwarded message');
     expect(body.value).toContain('Original body text');
 
@@ -298,9 +317,9 @@ describe('ConversationView forward → SendEmailDialog forward mode (FR-08, ADR-
     // 2026-07-24, added collapsible attachments defaulting to COLLAPSED —
     // this test predates that change and never expanded the section before
     // asserting. Expand it the way a real user would: click the header.
-    await userEvent.click(within(dialog).getByRole('button', { name: /^Attachments/ }));
+    await userEvent.click(within(dialog).getByRole('button', { name: /^Attachments/, hidden: true }));
     expect(within(dialog).getByText('contract.pdf')).toBeInTheDocument();
-    expect(within(dialog).getByRole('checkbox', { name: 'Attach contract.pdf as a file' })).toBeChecked();
+    expect(within(dialog).getByRole('checkbox', { name: 'Attach contract.pdf as a file', hidden: true })).toBeChecked();
 
     // NOTE: the dialog's `regarding` prop is accepted additively (task 020) and
     // passed here, but in FORWARD mode the composer's `deriveForwardState`

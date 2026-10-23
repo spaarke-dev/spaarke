@@ -79,15 +79,15 @@ public static class ChildRecordEndpoints
     /// unit it is isolated in (provisioning, <c>SecureRecordRoot</c>) and its Access Permission (the cascade, task 175).
     /// None is field-secured (live, spaarkedev1 2026-10-10), so the G5 check would let an app-only create carry a caller's
     /// value: refused here. The secure flag and the access
-    /// record are field-secured and refused by the G5 check and the secure-create plan (task 175).
+    /// record are field-secured and refused by the G5 check and the secure-create plan (task 175). D-113 / task 175: a filed
+    /// work assignment takes its Access Permission from its parent; the column is form-locked but NOT field-secured, and
+    /// nothing on the create path sets it from the parent, so a caller's value is refused.
     /// </summary>
-    internal static readonly IReadOnlySet<string> RootServerOwnedColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        "sprk_containerid", "sprk_securitybu",
-        // D-113 / task 175: a filed work assignment takes its Access Permission from its parent; the column is form-locked
-        // but NOT field-secured, and nothing on the create path sets it from the parent, so a caller's value is refused.
-        "sprk_accesspermission",
-    };
+    /// <remarks>Field-mapping-server-write-path-r1 task 012: a view over the work assignment's
+    /// <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordTableRule.TableServerOwnedColumns"/> in the registry, the one
+    /// source (the only root this route creates); deleted when task 013 switches this route to the registry.</remarks>
+    internal static readonly IReadOnlySet<string> RootServerOwnedColumns =
+        Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.Get(SecureRootInheritance.WorkAssignment).TableServerOwnedColumns;
 
     /// <summary>
     /// The tables a browser writer re-files through <c>PATCH /api/v1/child-records/{table}/{id}</c> (note §2b). An event
@@ -226,7 +226,7 @@ public static class ChildRecordEndpoints
 
         // Ontology task 046 (NFR-10, D-29): a caller who cannot be named in Dataverse is the single 403, before anything about
         // the payload or the records it binds is asked. WhoAmI needs no privilege, so only "no Dataverse identity" fails it.
-        var who = await OwnedChildWrite.WhoAmIAsync(user, ct).ConfigureAwait(false);
+        var who = await CallerWriteAuthorization.WhoAmIAsync(user, ct).ConfigureAwait(false);
         if (who.Failure is { } whoFailure)
         {
             if (IsUnresolvedCaller(whoFailure))
@@ -384,7 +384,7 @@ public static class ChildRecordEndpoints
     /// <summary>
     /// Ontology task 046: the secure-create plan's refusal (task 158 r1), in this route's contract. No AppendTo on a secure
     /// parent named only by the polymorphic pair is the uniform not-found (a typed lookup's is, too — the plan must not tell
-    /// a caller which record is secure; the core (<see cref="OwnedChildWrite.PairTargetAsync"/>, #1612) decides the pair before
+    /// a caller which record is secure; the core (<see cref="CallerWriteAuthorization.PairTargetAsync"/>, #1612) decides the pair before
     /// the plan runs, so this arm is defence in depth); a caller walled off a secure parent is 403; a check that could not be made or a
     /// named team that could not be resolved is 500; a server-only column is 403; anything else (an unreadable parent flag)
     /// is the owner refusal, 409 — never "not secure". The split is <c>RecordCreationService.KindFor</c>'s.
@@ -409,7 +409,7 @@ public static class ChildRecordEndpoints
     /// request, or no On-Behalf-Of token for them — the codes <c>SignalCoreRecordAccess</c> reads as unresolved (D-29).
     /// Throttling, a 5xx or a transport fault says nothing about who they are and stays their own error.
     /// </summary>
-    private static bool IsUnresolvedCaller(DataverseUserResponse failure) =>
+    internal static bool IsUnresolvedCaller(DataverseUserResponse failure) =>
         failure.ErrorCode is DataverseUserClientErrorCodes.AccessDenied
             or DataverseUserClientErrorCodes.UserContextRequired
             or DataverseUserClientErrorCodes.OboExchangeFailed
@@ -494,9 +494,21 @@ public static class ChildRecordEndpoints
                 $"Column '{serverOwned}' is set by the server — omit it.");
         }
 
-        var outcome = await OwnedChildWrite.RefileAsync(
-            user, ownership, entity, id, entitySet, primaryId, mapped.Item!, CallerObjectId(httpContext), ct)
-            .ConfigureAwait(false);
+        OwnedChildWrite.RefileOutcome outcome;
+        try
+        {
+            outcome = await OwnedChildWrite.RefileAsync(
+                user, ownership, entity, id, entitySet, primaryId, mapped.Item!, CallerObjectId(httpContext), ct)
+                .ConfigureAwait(false);
+        }
+        catch (RecordOwnerUnsettledException)
+        {
+            // #2143: a concurrent writer kept the re-filed row's owner from settling. The caller's PATCH was written and its
+            // filing put back or superseded (RecordOwnerUnsettledException remarks): reload and retry — not the global 500.
+            logger.LogWarning("[CHILD-RECORD] re-file of {Entity} {Id}: its owner could not be settled against concurrent writers",
+                entity, id);
+            return ProblemDetailsHelper.RecordOwnerUnsettled(Noun(entity), httpContext.TraceIdentifier);
+        }
 
         if (outcome.NotARefile)
         {
@@ -534,20 +546,25 @@ public static class ChildRecordEndpoints
 
         // Task 173 (owner rounds 81/84): after a re-file, or a caller's own update of the column on a record that has a
         // parent (locked on the form), the row shows what its parents give it now. A parentless row is left as written.
+        // Task 189: a document shows max(its own narrowing, what its parents give it); its own narrowing is never widened.
         if (outcome.Written || mapped.Item!.Columns.Contains(InheritedAccessPermission.Column, StringComparer.OrdinalIgnoreCase))
             await restamper.RefreshInheritedAccessPermissionAsync(entity, id, CancellationToken.None).ConfigureAwait(false);
 
-        if (outcome.Written)
+        // #2091: not when the reparent moved none of the row's parents (ParentsUnchanged — a re-bind onto the record a column
+        // already holds): written, but no re-file.
+        if (outcome.Written && !outcome.ParentsUnchanged)
         {
             // After the re-file, inline (task 147; round 36): the row's own mirror (moved under a secure record → shared with
             // its sharees now; moved OUT → its mirror goes now, only from a row that WAS isolated — its owning team, read as
             // the caller before the write, rides along on `row`), then task 148's pass over everything filed under it when
             // it moved under, out of or between secure records. One implementation for every re-file writer (it also lets a
             // re-filed communication's thread follow the filing — spaarkeai-word-add-in-r1 task 129).
+            // #2143 round 7 (F1): with the caller the re-file's F3 check acted for, so the thread that follows moves on it.
             await children.AfterRefileAsync(
                 entity, id,
                 async () => GetString(row.Body, "_owningteam_value") is { } before && Guid.TryParse(before, out var beforeTeam)
                             && await children.IsSecureOwnerTeamAsync(beforeTeam, CancellationToken.None).ConfigureAwait(false),
+                RefileThreadStep.Reconcile, outcome.SecureExitCaller, outcome.Resolution,
                 CancellationToken.None).ConfigureAwait(false);
         }
 

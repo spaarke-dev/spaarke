@@ -28,7 +28,9 @@
 // resolved principal (task 020). No caller-token exchange (no OBO), no Graph SDK types, no
 // AI-internal types.
 
+using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;               // AccessRights — the rights type (root CLAUDE.md §11: reuse, do not fork)
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
 using Sprk.Bff.Api.Services.Identity;
@@ -294,11 +296,19 @@ public sealed class AccessibleRecordSet
 /// </para>
 /// </para>
 /// </param>
+/// <param name="ImpersonatedRootSet">
+/// systemuser → Dataverse's own answer (FR-20, task 036): the root ids came from the impersonated read as the caller
+/// (<see cref="IImpersonatedRootSetSource"/>), at Read only, INSTEAD of the ADR-034 membership walk
+/// (<paramref name="SystemUserMembership"/> is then <c>false</c>). Set only while
+/// <c>ExternalAccess:ImpersonatedRootSets:Enabled</c> is on. A principal composed this way has its writes confirmed against
+/// Dataverse (<c>CallerPrincipal.DataverseConfirmsWrites</c>).
+/// </param>
 public readonly record struct AccessibleRecordSetSources(
     bool SystemUserMembership,
     bool ContactGrants,
     bool StandingGrantMembership,
-    bool OrgExpansionMembership = false);
+    bool OrgExpansionMembership = false,
+    bool ImpersonatedRootSet = false);
 
 /// <summary>
 /// The outcome of the ONE read of a subject's organization memberships (<c>sprk_contactorganization</c>):
@@ -639,7 +649,8 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     }
 
     /// <summary>
-    /// The systemuser plane's Restricted survivor: its ADR-034 membership term — EXCEPT on a Restricted record when the
+    /// The systemuser plane's Restricted survivor: its own term — the ADR-034 membership term, or with
+    /// <c>ExternalAccess:ImpersonatedRootSets:Enabled</c> on, Dataverse's answer at Read (task 036) — EXCEPT on a Restricted record when the
     /// systemuser is flagged <c>sprk_isexternal = true</c> (task 114 verifier K1, owner round 67: a Restricted record is for
     /// internal use only, and <see cref="Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.IsBarredOnRestricted"/> is
     /// the one predicate). There membership survives nothing, exactly as a contact's access does not. Inactive-only records
@@ -775,6 +786,461 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// detect it.
     /// </remarks>
     private static readonly string[] OrganizationIdentityTypeOnly = { "Organization" };
+
+    /// <summary>
+    /// Narrows a systemuser-plane membership walk to REAL OWNERSHIP descriptors only (#2121): the platform columns
+    /// <c>ownerid</c> (SystemUser and Team) and <c>owningteam</c> (Team) — the user owns the record or is in its owning
+    /// team. <c>owningbusinessunit</c> (BusinessUnit) is deliberately NOT here (#2121 round 1, K6).
+    /// </summary>
+    /// <remarks>
+    /// <para>This narrowing selects exactly those descriptors because of how the access-conferring filter
+    /// (<c>MembershipResolverService.FilterToAccessConferringRoles</c>, applied by <c>AccessConferringOnly</c>) works:
+    /// it admits the three platform columns by NAME, and admits a registry "Assigned …" column only when it is
+    /// declared Contact or Organization typed (any other declared type is rejected as malformed). So under
+    /// <c>AccessConferringOnly</c> no registry column can carry one of these identity types, and every descriptor that
+    /// does is ownership. Pinned by <c>ResolveByContactAsync_MalformedRegistryEntry_IsIgnoredAndLogged_NeverWidened</c>
+    /// (a Team-typed entry is rejected) and <c>ResolveAsync_AccessConferringOnly_MakerAuthoredSystemUserLookup_ConfersNothing</c>
+    /// (an unregistered SystemUser lookup confers nothing). If the registry ever
+    /// admits a SystemUser- or Team-typed column, this split must be revisited.</para>
+    /// <para><b>Why not BusinessUnit (K6).</b> The main walk's <c>owningbusinessunit</c> match (the record's owning business
+    /// unit is the user's — <c>MembershipResolverService.BuildFetchXml</c>, the <c>BusinessUnit</c> branch) assumes a
+    /// business-unit-depth read role and never checks it, so the model-driven app is not guaranteed to grant it. On a
+    /// Secure record that over-granted <see cref="MembershipTermRights"/>. A Secure id reached ONLY that way is therefore
+    /// treated as an unconfirmed reach, like a lookup-only one: Dataverse is asked (<see cref="ConfirmSecureLookupOnlyAsync"/>)
+    /// and it is kept at exactly Read when Dataverse grants Read. A non-Secure business-unit reach is untouched (the main
+    /// walk still matches it).</para>
+    /// </remarks>
+    private static readonly string[] OwnershipIdentityTypes = { "SystemUser", "Team" };
+
+    /// <summary>
+    /// The systemuser plane's membership ids that Secure suppresses (#2121, FR-22): the effectively Secure ids the
+    /// main walk reached ONLY through a registry lookup column or business-unit ownership (K6), never through the user's
+    /// own or their team's ownership. They lose <see cref="MembershipTermRights"/>; <see cref="ConfirmSecureLookupOnlyAsync"/>
+    /// then keeps, at Read only, the ones Dataverse says the user can read (option (b)).
+    /// </summary>
+    /// <remarks>
+    /// <para>The main walk returns one flat id set and does not say which descriptor matched an id (its <c>ByRole</c> map
+    /// attributes a row to every role whose column is merely populated, so it cannot answer this). So the ownership half is
+    /// read with a second walk through the SAME resolver, narrowed to <see cref="OwnershipIdentityTypes"/>. That walk runs
+    /// only when a membership id is effectively Secure (NFR-02); most compositions never make it.</para>
+    /// <para>Fails closed. A Secure id that the ownership walk does not return loses its membership, including when that
+    /// walk is capped. A walk that throws propagates, and the caller denies wholesale, as for the main walk.</para>
+    /// </remarks>
+    private async Task<IReadOnlySet<Guid>> SecureLookupOnlyMembershipAsync(
+        Guid systemUserId,
+        string entityType,
+        IReadOnlyCollection<Guid> membershipIds,
+        IReadOnlyDictionary<Guid, RootRecordFlags> flags,
+        CancellationToken ct)
+    {
+        // The same predicate as the systemuser deny veto's: an unreadable flag row counts as Secure (fail closed).
+        var secure = membershipIds
+            .Where(id => flags.TryGetValue(id, out var f) && (f.IsSecure || f.IsUnreadable))
+            .ToList();
+        if (secure.Count == 0)
+        {
+            return EmptyDeniedSet;
+        }
+
+        var ownership = await WalkMembershipPagesAsync(
+            (options, token) => _membership.ResolveAsync(systemUserId, entityType, options, token),
+            entityType,
+            $"systemuser {systemUserId} (ownership)",
+            ct,
+            accessConferringOnly: true,
+            identityTypes: OwnershipIdentityTypes).ConfigureAwait(false);
+
+        var lookupOnly = secure.Where(id => !ownership.Ids.Contains(id)).ToHashSet();
+        if (lookupOnly.Count > 0)
+        {
+            _logger.LogInformation(
+                "[WF-AUTHZ] Systemuser {SystemUserId}: {Count} Secure {EntityType} record(s) reached only through a registry " +
+                "lookup column or business-unit ownership keep no membership-term access (FR-22, #2121). Membership from " +
+                "the user's own or their team's ownership is kept.",
+                systemUserId, lookupOnly.Count, entityType);
+
+            if (_logger.IsEnabled(LogLevel.Debug))
+            {
+                _logger.LogDebug(
+                    "[WF-AUTHZ] Systemuser {SystemUserId}: the Secure {EntityType} record(s) dropped from the membership term " +
+                    "(#2121): {RecordIds}.",
+                    systemUserId, entityType, string.Join(",", lookupOnly));
+            }
+        }
+
+        if (ownership.Capped && lookupOnly.Count > 0)
+        {
+            _logger.LogWarning(
+                "[WF-AUTHZ] The ownership walk for systemuser {SystemUserId} on {EntityType} was capped: a Secure record the user " +
+                "owns past the ceiling loses its membership-term access (fail closed, #2121).",
+                systemUserId, entityType);
+        }
+
+        return lookupOnly;
+    }
+
+    /// <summary>
+    /// The rights a lookup-only Secure id carries when Dataverse confirms the systemuser can Read it (#2121 option (b)):
+    /// exactly <see cref="AccessRights.Read"/>, never <see cref="MembershipTermRights"/>.
+    /// </summary>
+    /// <remarks>
+    /// The same rule as task 036's flag-on own term (round 59): "MembershipTermRights must never reach a Dataverse-term
+    /// record" — the set confers Read; every write is confirmed against Dataverse at its own route.
+    /// </remarks>
+    internal const AccessRights DataverseConfirmedTermRights = AccessRights.Read;
+
+    /// <summary>
+    /// Most lookup-only Secure ids one composition asks Dataverse about (#2121 option (b), NFR-02). Normally a handful; any
+    /// beyond this are dropped with a Warning and never asked (fail closed).
+    /// </summary>
+    internal const int MaxSecureLookupRightsChecks = 50;
+
+    /// <summary>
+    /// The default whole-batch budget for <see cref="ConfirmSecureLookupOnlyAsync"/>: the 15 s every app-only Dataverse
+    /// client in this module is given (ExternalAccessModule), so a slow Dataverse cannot hang the request. An id still
+    /// unanswered when it runs out is dropped with a Warning.
+    /// </summary>
+    internal static readonly TimeSpan DefaultSecureLookupRightsBudget = TimeSpan.FromSeconds(15);
+
+    /// <summary>
+    /// The budget in force (#2121 round 1, K1): <see cref="DefaultSecureLookupRightsBudget"/> unless a test sets it (the
+    /// <c>GrantAccessNotifier.SendTimeout</c> convention), so the budget path is provable without a 15 s test.
+    /// </summary>
+    internal TimeSpan SecureLookupRightsBudget { get; init; } = DefaultSecureLookupRightsBudget;
+
+    /// <summary>
+    /// <see cref="ITenantCache"/> resource for one Dataverse rights answer (#2121 round 1, F1). On-wire key
+    /// <c>tenant:{tenantId}:secure-lookup-rights:{systemUserId:D}:{entitySet}:{recordId:D}:v{n}</c>: GUIDs and a set
+    /// name only, no PII.
+    /// </summary>
+    internal const string SecureLookupRightsCacheResource = "secure-lookup-rights";
+
+    /// <summary>Cache schema version per ADR-009. Bump when <see cref="CachedPrincipalRights"/> or the question changes.</summary>
+    internal const int SecureLookupRightsCacheVersion = 1;
+
+    /// <summary>
+    /// The cache id of one answer: the SYSTEMUSER (the subject, so one user's answer never serves another; ADR-009's
+    /// subject-discrimination MUST), the entity set and the record.
+    /// </summary>
+    internal static string SecureLookupRightsCacheId(Guid systemUserId, string entitySet, Guid recordId)
+        => SecureLookupRightsCacheId(systemUserId.ToString("D"), entitySet, recordId.ToString("D"));
+
+    /// <summary>
+    /// The composition behind <see cref="SecureLookupRightsCacheId(Guid, string, Guid)"/>, over segments, so the central
+    /// eviction patterns (<c>MembershipCacheInvalidator</c>, task 132; #2121 round 2, F4) are built by the same code with
+    /// the Redis glob <c>*</c> for the segments they do not fix, and cannot drift from the key a composition wrote.
+    /// </summary>
+    internal static string SecureLookupRightsCacheId(string systemUserSegment, string entitySetSegment, string recordSegment)
+        => $"{systemUserSegment}:{entitySetSegment}:{recordSegment}";
+
+    /// <summary>
+    /// The entity set, in the spelling a <see cref="SecureLookupRightsCacheResource"/> key carries, when
+    /// <paramref name="entitySetName"/> is one this cache can hold: a secure root's
+    /// (<see cref="Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.EntitySetFor"/>, the set
+    /// <see cref="ConfirmSecureLookupOnlyAsync"/> asks about). For the central eviction (#2121 round 2, F4), whose callers
+    /// pass a set in any casing: a pattern for a set no entry carries would scan the key space for nothing. False otherwise.
+    /// </summary>
+    internal static bool TryGetSecureLookupRightsSet(string? entitySetName, out string entitySet)
+    {
+        foreach (var type in Enum.GetValues<ExternalGrantRootType>())
+        {
+            var set = ExternalGrantRoot.BindFor(type).EntitySet;
+            if (string.Equals(set, entitySetName?.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                entitySet = set;
+                return true;
+            }
+        }
+
+        entitySet = string.Empty;
+        return false;
+    }
+
+    /// <summary>
+    /// Of the systemuser's lookup-only Secure membership ids (<see cref="SecureLookupOnlyMembershipAsync"/>), the ones
+    /// Dataverse says that user can READ: <c>RetrievePrincipalAccess</c> bound to the user and read with the APP token, no
+    /// OBO and no <c>MSCRMCallerID</c> header. #2121 option (b), owner-approved 2026-10-20.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>One implementation (CLAUDE.md §11).</b> The call is the No Access enforcer's own
+    /// <see cref="NoAccessEnforcementStore.GetPrincipalRightsAsync"/> (task 143), reused, not copied: it throws on any
+    /// non-success with the status in <see cref="HttpRequestException.StatusCode"/>, so a 404 and a fault are told apart
+    /// here. Not <c>DataverseWebApiService.RetrievePrincipalRightsAsync</c>: that one also impersonates (needs
+    /// <c>prvActOnBehalfOfAnotherUser</c>) and maps every 403/404 to "no rights", hiding a fault. It is the same app-only
+    /// named-principal question as the ADR-028 A5 mechanism and task 036 option C; 036 consolidates the systemuser plane on
+    /// one Dataverse-answer mechanism.</para>
+    /// <para><b>Why.</b> This plane does not read Dataverse shares (K1). Without this check, dropping lookup-only Secure ids
+    /// also dropped an internal user's legitimate share-held access (the ADR-034 A4 flow: lookup, suggested share,
+    /// confirmed share). Dataverse's own answer covers shares, roles, teams and business unit, so a kept id is one the
+    /// model-driven app also opens.</para>
+    /// <para><b>Fails closed, per id (ADR-003).</b> Kept only on an answer that carries <see cref="AccessRights.Read"/>. No
+    /// Read: dropped (a denial, Debug). 404: dropped (the record is gone, Information). Any other fault (a non-2xx, a
+    /// timeout, an impersonation or privilege error): dropped with a Warning naming the id, entity type and status. One id's
+    /// fault never throws the composition; only the CALLER's cancellation propagates.</para>
+    /// <para><b>Bounded (NFR-02).</b> Only lookup-only Secure ids are asked; at most <see cref="MaxSecureLookupRightsChecks"/>
+    /// (the rest dropped, never asked), <see cref="CallerRecordAccessProbe.MaxConcurrentRecordLookups"/> at once, inside
+    /// <see cref="SecureLookupRightsBudget"/> for the batch.</para>
+    /// <para><b>Cached (#2121 round 1, F1).</b> Every <c>/api/v1/external</c> request composes all three root types, each
+    /// asking up to the ceiling, on the BFF's one app user. So each answer Dataverse GAVE (the rights it reported, Read or
+    /// not) is cached per (systemuser, entity set, record) for the grant cache's TTL
+    /// (<see cref="ExternalParticipationService.CacheTtl"/>, 60 s), through <see cref="ITenantCache"/>, as
+    /// <see cref="ImpersonatedRootSetSource"/> caches its Dataverse answer. What is cached is Dataverse's data (the reported
+    /// rights); the keep-at-Read decision is made again from it on every composition. A 404 or a fault is NEVER cached:
+    /// the next composition asks again. A cache fault falls through to a live question (fail open on the cache, never on
+    /// the answer), logged once per composition. A share, owner or user-access write the BFF makes evicts the affected
+    /// answers through the central task-132 eviction (<c>MembershipCacheInvalidator</c>; #2121 round 2, F4), so the TTL
+    /// is only the backstop.</para>
+    /// </remarks>
+    private async Task<IReadOnlySet<Guid>> ConfirmSecureLookupOnlyAsync(
+        Guid systemUserId, string entityType, IReadOnlySet<Guid> lookupOnly, CancellationToken ct)
+    {
+        if (lookupOnly.Count == 0)
+        {
+            return EmptyDeniedSet;
+        }
+
+        if (_principalRights is null)
+        {
+            _logger.LogWarning(
+                "[WF-AUTHZ] No principal-rights reader is wired: {Count} lookup-only Secure {EntityType} record(s) for systemuser " +
+                "{SystemUserId} cannot be confirmed against Dataverse and stay dropped (fail closed, #2121).",
+                lookupOnly.Count, entityType, systemUserId);
+            return EmptyDeniedSet;
+        }
+
+        string entitySet;
+        try
+        {
+            entitySet = Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.EntitySetFor(entityType);
+        }
+        catch (ArgumentException)
+        {
+            _logger.LogWarning(
+                "[WF-AUTHZ] {EntityType} has no secure-root entity set: {Count} lookup-only Secure record(s) for systemuser " +
+                "{SystemUserId} cannot be confirmed against Dataverse and stay dropped (fail closed, #2121).",
+                entityType, lookupOnly.Count, systemUserId);
+            return EmptyDeniedSet;
+        }
+
+        // Deterministic order, so the same ids are asked (and the same ones dropped over the ceiling) on every composition.
+        var ordered = lookupOnly.OrderBy(id => id).ToList();
+        var asked = ordered.Take(MaxSecureLookupRightsChecks).ToList();
+        var overCap = ordered.Count - asked.Count;
+        if (overCap > 0)
+        {
+            _logger.LogWarning(
+                "[WF-AUTHZ] Systemuser {SystemUserId} has {Count} lookup-only Secure {EntityType} record(s), over the ceiling of " +
+                "{Max}: the {OverCap} past it are dropped without a Dataverse check (fail closed, NFR-02, #2121).",
+                systemUserId, ordered.Count, entityType, MaxSecureLookupRightsChecks, overCap);
+        }
+
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        budget.CancelAfter(SecureLookupRightsBudget);
+        using var gate = new SemaphoreSlim(CallerRecordAccessProbe.MaxConcurrentRecordLookups);
+        var cacheFaults = new RightsCacheFaults();
+
+        var answers = await Task.WhenAll(asked.Select(id =>
+                AskSecureLookupAsync(systemUserId, entityType, entitySet, id, gate, cacheFaults, budget.Token, ct)))
+            .ConfigureAwait(false);
+
+        if (cacheFaults.Count > 0)
+        {
+            // ONE Warning per composition, not one per id (#2121 round 2, K2): a cache outage would otherwise log up to
+            // MaxSecureLookupRightsChecks entries for each root type of every request.
+            _logger.LogWarning(cacheFaults.First,
+                "[WF-AUTHZ] The rights cache faulted {Count} time(s) for systemuser {SystemUserId} on Secure {EntityType}; " +
+                "each affected id was asked of Dataverse live (#2121).",
+                cacheFaults.Count, systemUserId, entityType);
+        }
+
+        var confirmed = new HashSet<Guid>();
+        for (var i = 0; i < asked.Count; i++)
+        {
+            if (answers[i] == SecureLookupAnswer.Read)
+            {
+                confirmed.Add(asked[i]);
+            }
+        }
+
+        _logger.LogInformation(
+            "[WF-AUTHZ] Systemuser {SystemUserId}: Dataverse confirmed Read on {Confirmed} of {Asked} lookup-only Secure " +
+            "{EntityType} record(s) (denied {Denied}, gone {Gone}, faulted {Faulted}, over the ceiling {OverCap}); a confirmed " +
+            "record carries Read only (#2121 option (b)).",
+            systemUserId, confirmed.Count, asked.Count, entityType,
+            answers.Count(a => a == SecureLookupAnswer.Denied),
+            answers.Count(a => a == SecureLookupAnswer.Gone),
+            answers.Count(a => a == SecureLookupAnswer.Fault),
+            overCap);
+        return confirmed;
+    }
+
+    /// <summary>One id's question for <see cref="ConfirmSecureLookupOnlyAsync"/>; never throws except for the caller's cancellation.</summary>
+    private async Task<SecureLookupAnswer> AskSecureLookupAsync(
+        Guid systemUserId, string entityType, string entitySet, Guid id, SemaphoreSlim gate, RightsCacheFaults cacheFaults,
+        CancellationToken budget, CancellationToken ct)
+    {
+        var tenantId = ImpersonatedRootSetSource.CacheTenantFor(_httpContextAccessor?.HttpContext?.User);
+        var cacheId = SecureLookupRightsCacheId(systemUserId, entitySet, id);
+        try
+        {
+            if (await TryGetCachedRightsAsync(tenantId, cacheId, cacheFaults, budget).ConfigureAwait(false) is { } cached)
+            {
+                return ClassifyRights(systemUserId, entityType, id, cached);
+            }
+
+            await gate.WaitAsync(budget).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                "[WF-AUTHZ] Dataverse rights check FAULTED for systemuser {SystemUserId} on Secure {EntityType} {RecordId} " +
+                "(status: {Status}): dropped (fail closed, #2121).",
+                systemUserId, entityType, id, "timeout");
+            return SecureLookupAnswer.Fault;
+        }
+
+        try
+        {
+            // Debug: this method logs every outcome itself (a 404 at Information, a fault at Warning), so the store's own
+            // Error for the same non-success would be a second, misleading entry (#2121 round 1, F2).
+            var rights = await _principalRights!
+                .GetPrincipalRightsAsync(systemUserId, entitySet, id, budget, LogLevel.Debug).ConfigureAwait(false);
+
+            // Only an answer Dataverse GAVE is cached (Read or not); a 404 and a fault leave through the catches below.
+            await TrySetCachedRightsAsync(tenantId, cacheId, rights, cacheFaults, ct).ConfigureAwait(false);
+            return ClassifyRights(systemUserId, entityType, id, rights);
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            _logger.LogInformation(
+                "[WF-AUTHZ] Secure {EntityType} {RecordId} answered 404 to the rights check for systemuser {SystemUserId}: " +
+                "the record is gone; dropped (#2121).",
+                entityType, id, systemUserId);
+            return SecureLookupAnswer.Gone;
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex,
+                "[WF-AUTHZ] Dataverse rights check FAULTED for systemuser {SystemUserId} on Secure {EntityType} {RecordId} " +
+                "(status: {Status}): dropped (fail closed, #2121).",
+                systemUserId, entityType, id, FaultStatus(ex));
+            return SecureLookupAnswer.Fault;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    /// <summary>Read when Dataverse's answer carries Read; otherwise a denial (logged at Debug).</summary>
+    private SecureLookupAnswer ClassifyRights(Guid systemUserId, string entityType, Guid id, AccessRights rights)
+    {
+        if (rights.HasFlag(AccessRights.Read))
+        {
+            return SecureLookupAnswer.Read;
+        }
+
+        _logger.LogDebug(
+            "[WF-AUTHZ] Dataverse denies systemuser {SystemUserId} Read on Secure {EntityType} {RecordId} ({Rights}): " +
+            "dropped (#2121).",
+            systemUserId, entityType, id, rights);
+        return SecureLookupAnswer.Denied;
+    }
+
+    // ── Rights cache: fail open on the CACHE, never on the ANSWER (ImpersonatedRootSetSource's contract) ─────────────
+    // A cache fault degrades to a live Dataverse question and is counted, so the composition logs it ONCE (K2). Only a
+    // cancellation of the token passed is rethrown: the caller's propagates, and the budget's is the id's timeout
+    // (AskSecureLookupAsync's catches). A cancellation the cache raised itself (an inner timeout, the token NOT cancelled)
+    // is a cache fault like any other (#2121 round 2, K2): read as a Dataverse timeout, it would drop the id.
+
+    private async Task<AccessRights?> TryGetCachedRightsAsync(
+        string tenantId, string cacheId, RightsCacheFaults faults, CancellationToken ct)
+    {
+        if (_rightsCache is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var cached = await _rightsCache.GetAsync<CachedPrincipalRights>(
+                tenantId, SecureLookupRightsCacheResource, cacheId, SecureLookupRightsCacheVersion, ct: ct).ConfigureAwait(false);
+            return cached is null ? null : (AccessRights)cached.Rights;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            faults.Record(ex);
+            return null;
+        }
+    }
+
+    private async Task TrySetCachedRightsAsync(
+        string tenantId, string cacheId, AccessRights rights, RightsCacheFaults faults, CancellationToken ct)
+    {
+        if (_rightsCache is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _rightsCache.SetAsync(
+                tenantId, SecureLookupRightsCacheResource, cacheId, SecureLookupRightsCacheVersion,
+                new CachedPrincipalRights((int)rights), ExternalParticipationService.CacheTtl, ct: ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            faults.Record(ex);
+        }
+    }
+
+    /// <summary>
+    /// The rights-cache faults of one <see cref="ConfirmSecureLookupOnlyAsync"/> (#2121 round 2, K2): counted across its
+    /// concurrent ids and logged once, with the first fault, after they all answer.
+    /// </summary>
+    private sealed class RightsCacheFaults
+    {
+        private int _count;
+        private Exception? _first;
+
+        public int Count => Volatile.Read(ref _count);
+
+        public Exception? First => Volatile.Read(ref _first);
+
+        public void Record(Exception ex)
+        {
+            Interlocked.CompareExchange(ref _first, ex, null);
+            Interlocked.Increment(ref _count);
+        }
+    }
+
+    /// <summary>The cached payload: the rights Dataverse reported, as their integer flags (ADR-009: data, not a decision).</summary>
+    internal sealed record CachedPrincipalRights(int Rights);
+
+    /// <summary>The status a rights-check fault is logged with: the HTTP status code, "timeout", or the exception type.</summary>
+    private static string FaultStatus(Exception ex) => ex switch
+    {
+        HttpRequestException { StatusCode: { } status } => ((int)status).ToString(System.Globalization.CultureInfo.InvariantCulture),
+        OperationCanceledException or TimeoutException => "timeout",
+        _ => ex.GetType().Name,
+    };
+
+    /// <summary>One lookup-only Secure id's Dataverse answer (<see cref="ConfirmSecureLookupOnlyAsync"/>).</summary>
+    private enum SecureLookupAnswer
+    {
+        Read,
+        Denied,
+        Gone,
+        Fault,
+    }
 
     /// <summary>
     /// Reads the subject's organization memberships ONCE per composition, for both the org-expansion term
@@ -1443,6 +1909,11 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     private readonly ISystemUserIdentityResolver _systemUsers;
     private readonly IGenericEntityService _dataverse;
     private readonly ILogger<AccessibleRecordSetService> _logger;
+    private readonly NoAccessEnforcementStore? _principalRights;
+    private readonly ITenantCache? _rightsCache;
+    private readonly IHttpContextAccessor? _httpContextAccessor;
+    private readonly IImpersonatedRootSetSource? _impersonatedRootSets;
+    private readonly IOptions<ExternalAccessOptions>? _externalAccessOptions;
 
     /// <param name="membership">ADR-034 membership.</param>
     /// <param name="participations">Grants, flags, organization reads.</param>
@@ -1457,6 +1928,23 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// under, secure or not (owner round 82), for the systemuser-plane veto — through <see cref="SecureRootInheritance.ReadSecureParentsOfManyAsync"/>, the ONE
     /// parent walk the write-time guard and the enforcer use (registered unconditionally, GraphModule).</param>
     /// <param name="logger">Logger.</param>
+    /// <param name="principalRights">#2121 option (b): Dataverse's app-only answer about the systemuser, asked only for its
+    /// lookup-only Secure membership ids (<see cref="ConfirmSecureLookupOnlyAsync"/>), through the No Access store's
+    /// named-principal read. The store is registered unconditionally (ExternalAccessModule's typed HttpClient), so DI always
+    /// supplies it. Optional so the existing direct constructions keep compiling; WITHOUT it nothing is confirmed and every
+    /// lookup-only Secure id stays dropped (fail closed, logged as a Warning). Asked only while FR-20 is OFF: with
+    /// <c>ExternalAccess:ImpersonatedRootSets:Enabled</c> on, Dataverse's own answer is the whole systemuser term and this
+    /// is never consulted (task 036).</param>
+    /// <param name="rightsCache">#2121 round 1 (F1): caches each answer <paramref name="principalRights"/> gave, per
+    /// (systemuser, entity set, record), for the grant cache's TTL. Registered unconditionally (CacheModule). Optional for the
+    /// same reason; without it every composition asks Dataverse again.</param>
+    /// <param name="httpContextAccessor">The caller's tenant claim for the cache key's namespace
+    /// (<see cref="ImpersonatedRootSetSource.CacheTenantFor"/>); the key's isolator is the systemuser id.</param>
+    /// <param name="impersonatedRootSets">FR-20 (task 036): Dataverse's own answer for a systemuser's root ids, read as the
+    /// caller. Consulted only while <c>ExternalAccess:ImpersonatedRootSets:Enabled</c> is on; both it and the options are
+    /// registered unconditionally (ExternalAccessModule), so DI always supplies them. Optional only so the existing
+    /// constructions keep compiling: a composition with the flag on and no source fails closed.</param>
+    /// <param name="externalAccessOptions">The <c>ExternalAccess</c> options carrying the FR-20 flag. Absent reads as off.</param>
     public AccessibleRecordSetService(
         IMembershipResolverService membership,
         ExternalParticipationService participations,
@@ -1465,7 +1953,12 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         IContactIdentityStore identityStore,
         ISystemUserIdentityResolver systemUsers,
         IGenericEntityService dataverse,
-        ILogger<AccessibleRecordSetService> logger)
+        ILogger<AccessibleRecordSetService> logger,
+        NoAccessEnforcementStore? principalRights = null,
+        ITenantCache? rightsCache = null,
+        IHttpContextAccessor? httpContextAccessor = null,
+        IImpersonatedRootSetSource? impersonatedRootSets = null,
+        IOptions<ExternalAccessOptions>? externalAccessOptions = null)
     {
         ArgumentNullException.ThrowIfNull(membership);
         ArgumentNullException.ThrowIfNull(participations);
@@ -1483,6 +1976,11 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         _systemUsers = systemUsers;
         _dataverse = dataverse;
         _logger = logger;
+        _principalRights = principalRights;
+        _rightsCache = rightsCache;
+        _httpContextAccessor = httpContextAccessor;
+        _impersonatedRootSets = impersonatedRootSets;
+        _externalAccessOptions = externalAccessOptions;
     }
 
     /// <inheritdoc />
@@ -1852,15 +2350,48 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         // ⚠️ This SHRINKS the composed set. That is the intended direction, but it is a BEHAVIOUR
         // change for internal callers, not a refactor.
         //
-        // NOTE on the task brief: the POML describes this as "the flag-off branch of 036". There is no
-        // such branch — 036 is still open (and gated behind 034), so this single call IS the membership
-        // path today. 036 will add the impersonated Dataverse answer alongside it.
-        var walk = await WalkMembershipPagesAsync(
-            (options, token) => _membership.ResolveAsync(systemUserId, entityType, options, token),
-            entityType,
-            $"systemuser {systemUserId}",
-            ct,
-            accessConferringOnly: true).ConfigureAwait(false);
+        // ── FR-20 (task 036): WHO decides this systemuser's access — read ONCE per composition ─────────────────
+        // Off (the default): the ADR-034 membership walk below, unchanged. On: Dataverse's own answer, an impersonated
+        // read as the caller, REPLACES the walk for ACCESS on this plane (ADR-034 Amendment A2, owner round 75). The
+        // walk is then not run at all: its business-unit and owning-team matches are the over-grant this closes, and its
+        // Read|Write|Create constant is what the impersonated set must never inherit (round 59: the set confers Read; every
+        // write is confirmed against Dataverse at its route). Everything after this block is the same in both states —
+        // the contact-grants union, the deny list, the Restricted veto, the no-Read sweep.
+        var dataverseDecides = _externalAccessOptions?.Value.ImpersonatedRootSets.Enabled == true;
+        _logger.LogInformation(
+            "[WF-AUTHZ] Access source for systemuser {SystemUserId} on {EntityType}: {Source} " +
+            "(ExternalAccess:ImpersonatedRootSets:Enabled={Enabled}).",
+            systemUserId, entityType, dataverseDecides ? "ImpersonatedRootSet" : "Membership", dataverseDecides);
+
+        // The systemuser's OWN term — the one that is not contact-sourced, and so the one that survives Restricted.
+        IReadOnlyCollection<Guid> ownTermIds;
+        AccessRights ownTermRights;
+        bool capped;
+        int capLimit;
+        var pages = 0;
+        if (dataverseDecides)
+        {
+            var answer = await ReadDataverseRootSetAsync(systemUserId, entityType, ct).ConfigureAwait(false);
+            ownTermIds = answer.Ids;
+            ownTermRights = AccessRights.Read;
+            // NFR-03 through the existing cap fields (round 59 item 3): the source's row cap is this set's ceiling.
+            capped = answer.Truncated;
+            capLimit = ImpersonatedRootSetSource.RowCap;
+        }
+        else
+        {
+            var walk = await WalkMembershipPagesAsync(
+                (options, token) => _membership.ResolveAsync(systemUserId, entityType, options, token),
+                entityType,
+                $"systemuser {systemUserId}",
+                ct,
+                accessConferringOnly: true).ConfigureAwait(false);
+            ownTermIds = walk.Ids;
+            ownTermRights = MembershipTermRights;
+            capped = walk.Capped;
+            capLimit = MembershipResolveOptions.MaxLimit;
+            pages = walk.Pages;
+        }
 
         // ── ADDITIVE TERMS (design §4.5) ───────────────────────────────────────────────────────────
         // Each term contributes (recordId -> rights); AccumulateTerm merges them highest-wins.
@@ -1912,7 +2443,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         }
 
         // ── FLAGS: ONE batched read over every candidate id (NFR-02) ───────────────────────────────
-        var candidates = walk.Ids
+        var candidates = ownTermIds
             .Concat(grants is null ? Enumerable.Empty<Guid>() : GrantedIdsFor(grants, entityType))
             .ToList();
         // Task 174 (owner round 84; #1442): the EFFECTIVE flags — each candidate's own, folded with every record it is filed
@@ -1924,15 +2455,57 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             await _participations.GetRootRecordFlagsAsync(entityType, candidates, ct).ConfigureAwait(false), ancestry);
         var isDirectOnly = DirectOnlyPredicate(flags);
 
-        // Term 1 — ADR-034 membership. NOT contact-sourced, so it survives BOTH vetoes: it is the
-        // systemuser's own Dataverse-governed access, which is exactly what Restricted preserves
-        // ("only system users may have access") and what Secure and Limited leave alone (the Secure BU covers
-        // the Dataverse half; the suppression covers the grant half — design §5.1). Task 138: Limited governs
-        // which CONTACT grant types count, never internal access, so this term never consults isDirectOnly.
-        var membershipTerm = walk.Ids
-            .Select(id => KeyValuePair.Create(id, MembershipTermRights))
-            .ToList();
-        AccumulateTerm(composed, membershipTerm);
+        // Term 1 — the systemuser's own term: ADR-034 membership (flag off) or Dataverse's answer at Read (flag on, task
+        // 036). NOT contact-sourced, so it survives BOTH vetoes: it is the systemuser's own Dataverse-governed access,
+        // which is exactly what Restricted preserves ("only system users may have access") and what Secure and Limited
+        // leave alone (the Secure BU covers the Dataverse half; the suppression covers the grant half — design §5.1).
+        // Task 138: Limited governs which CONTACT grant types count, never internal access, so this term never consults
+        // isDirectOnly.
+        // ⚠️ Flag on, ownTermRights is Read: MembershipTermRights must never reach a Dataverse-term record (round 59).
+        //
+        // ── Flag OFF only — #2121 (FR-22): Secure DOES act on half of the membership walk. The walk unions:
+        //   - OWNERSHIP (ownerid / owningteam): the user owns the record or is in the owning team. It survives Secure:
+        //     it is Dataverse ownership, which the model-driven app honours as well.
+        //   - BUSINESS-UNIT ownership (owningbusinessunit): the record's owning BU is the user's. An approximation that
+        //     ignores security-role depth (a BU-level read right is assumed, never checked), so the model-driven app is
+        //     not guaranteed to grant it. On a Secure record it no longer counts as ownership (#2121 round 1, K6): a
+        //     Secure id reached ONLY this way is treated like a lookup-only one below. Elsewhere the approximation
+        //     stays while the flag is off; flag on, the FR-20 impersonated read replaces it.
+        //   - REGISTRY LOOKUP columns ("Assigned …", matched through the linked contact or its organization): derived
+        //     access that Dataverse knows nothing about. When the user holds no Dataverse share on the record, the
+        //     Secure BU blocks them in the model-driven app, so on an effectively Secure record (folded flags,
+        //     IsSecure — not IsDirectOnly) this match is suppressed here, as the contact plane's membership walk is.
+        //     An id matched both ways keeps its membership.
+        // The walk does NOT read Dataverse shares (K1). So, before a lookup-only (or BU-only) Secure id is dropped, Dataverse
+        // is asked app-only whether THIS user can read it (#2121 option (b), owner-approved 2026-10-20): a user who holds a
+        // share (or any other Dataverse access) keeps it, at Read only (DataverseConfirmedTermRights; task 036's round-59
+        // rule). Anything else (no Read, 404, a fault, over the ceiling) stays dropped. The confirmed ids are part of this
+        // term, so they are the systemuser's own access for the Restricted survivor below, exactly as the Dataverse term.
+        //
+        // ── Flag ON: none of that runs. The set IS Dataverse's own answer (shares, roles, teams, BU depth, the Secure BU
+        // included), already at Read; asking Dataverse again per id could only repeat it, and the membership walk the
+        // #2121 filter corrects is never run. No principal-rights question is asked (merge of #2122 into task 036).
+        List<KeyValuePair<Guid, AccessRights>> ownTerm;
+        if (dataverseDecides)
+        {
+            ownTerm = ownTermIds
+                .Select(id => KeyValuePair.Create(id, ownTermRights))
+                .ToList();
+        }
+        else
+        {
+            var secureLookupOnly = await SecureLookupOnlyMembershipAsync(systemUserId, entityType, ownTermIds, flags, ct)
+                .ConfigureAwait(false);
+            var dataverseConfirmed = await ConfirmSecureLookupOnlyAsync(systemUserId, entityType, secureLookupOnly, ct)
+                .ConfigureAwait(false);
+            ownTerm = ownTermIds
+                .Where(id => !secureLookupOnly.Contains(id) || dataverseConfirmed.Contains(id))
+                .Select(id => KeyValuePair.Create(
+                    id, secureLookupOnly.Contains(id) ? DataverseConfirmedTermRights : ownTermRights))
+                .ToList();
+        }
+
+        AccumulateTerm(composed, ownTerm);
 
         // Term 2 — contact grants, with direct-only suppression applied BEFORE the max: on a Secure or
         // Limited record only the caller's OWN grant rows contribute; org-inherited access is suppressed
@@ -2013,28 +2586,96 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             composed,
             veto.RemoveWhole,
             flags,
-            await SurvivesRestrictedForSystemUserAsync(systemUserId, entityType, membershipTerm, flags, ct).ConfigureAwait(false),
+            // Flag on, this is the Dataverse term at Read (amendment 3 of 2026-09-30): the constant cannot creep back here.
+            await SurvivesRestrictedForSystemUserAsync(systemUserId, entityType, ownTerm, flags, ct).ConfigureAwait(false),
             veto.ContactSourcedOnly);
 
         // Last: no key without Read (task 136 · C2). On this plane the reachable case is the linked contact's
         // organization-only grant on a Secure or Limited root, which term 2 enters at None.
         RemoveEntriesWithoutRead(composed);
 
+        if (dataverseDecides)
+        {
+            _logger.LogInformation(
+                "[WF-AUTHZ] Composed accessible set for systemuser {SystemUserId} on {EntityType}: " +
+                "{Count} records (source ImpersonatedRootSet: Dataverse's answer at Read; contact-grants " +
+                "union applied: {ContactGrants}; truncated: {Capped}).",
+                systemUserId, entityType, composed.Count, contactGrantsApplied, capped);
+
+            return new AccessibleRecordSet
+            {
+                PrincipalKind = WorkforcePrincipalKind.SystemUser,
+                EntityType = entityType,
+                Rights = composed,
+                Capped = capped,
+                CapLimit = capLimit,
+                Sources = new AccessibleRecordSetSources(
+                    SystemUserMembership: false, ContactGrants: contactGrantsApplied, StandingGrantMembership: false,
+                    ImpersonatedRootSet: true),
+            };
+        }
+
         _logger.LogInformation(
             "[WF-AUTHZ] Composed accessible set for systemuser {SystemUserId} on {EntityType}: " +
             "{Count} records over {Pages} membership page(s) (ADR-034 membership; contact-grants " +
             "union applied: {ContactGrants}; capped: {Capped}).",
-            systemUserId, entityType, composed.Count, walk.Pages, contactGrantsApplied, walk.Capped);
+            systemUserId, entityType, composed.Count, pages, contactGrantsApplied, capped);
 
         return new AccessibleRecordSet
         {
             PrincipalKind = WorkforcePrincipalKind.SystemUser,
             EntityType = entityType,
             Rights = composed,
-            Capped = walk.Capped,
+            Capped = capped,
             Sources = new AccessibleRecordSetSources(
                 SystemUserMembership: true, ContactGrants: contactGrantsApplied, StandingGrantMembership: false),
         };
+    }
+
+    /// <summary>
+    /// FR-20 (task 036): Dataverse's own answer for this systemuser's root ids, read as the caller through
+    /// <see cref="IImpersonatedRootSetSource"/>. Throws on every failure, so the composition fails and the request is
+    /// refused (NFR-01).
+    /// </summary>
+    /// <remarks>
+    /// There is no fallback: not to the membership walk, not to an app-only read, not to a constant. A missing
+    /// systemuserid (<see cref="Guid.Empty"/>), a source that is not registered, an unsupported entity type and a failed
+    /// read all throw. The caller-principal filter does not catch it, so no handler runs (the same posture as a membership
+    /// fault today). Logged <c>[WF-AUTHZ]</c> with the active source. Cancellation by the caller is rethrown unlogged.
+    /// </remarks>
+    private async Task<RootIdSet> ReadDataverseRootSetAsync(Guid systemUserId, string entityType, CancellationToken ct)
+    {
+        if (_impersonatedRootSets is null)
+        {
+            _logger.LogError(
+                "[WF-AUTHZ] ExternalAccess:ImpersonatedRootSets:Enabled is on but no IImpersonatedRootSetSource is " +
+                "available: the composition for systemuser {SystemUserId} on {EntityType} FAILS (source ImpersonatedRootSet; " +
+                "no fallback to membership, NFR-01).", systemUserId, entityType);
+            throw new InvalidOperationException(
+                "ExternalAccess:ImpersonatedRootSets:Enabled is on but no impersonated root-set source is registered.");
+        }
+
+        if (systemUserId == Guid.Empty)
+        {
+            _logger.LogError(
+                "[WF-AUTHZ] A systemuser principal with an empty SystemUserId reached the Dataverse-decided composition on " +
+                "{EntityType}: it FAILS (source ImpersonatedRootSet; no fallback to membership, NFR-01).", entityType);
+            throw new InvalidOperationException(
+                "The Dataverse-decided composition needs the caller's systemuserid; Guid.Empty is never impersonated.");
+        }
+
+        try
+        {
+            return await _impersonatedRootSets.GetAsync(systemUserId, entityType, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
+        {
+            _logger.LogError(ex,
+                "[WF-AUTHZ] Dataverse's answer for systemuser {SystemUserId} on {EntityType} could not be read (source " +
+                "ImpersonatedRootSet): the composition FAILS and the request is refused. No fallback to membership, an " +
+                "app-only read or a constant (NFR-01, task 036).", systemUserId, entityType);
+            throw;
+        }
     }
 
     // ── workforce contact plane: grants ∪ (standing membership IFF flag set) ∪ org expansion ─────

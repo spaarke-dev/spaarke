@@ -25,8 +25,7 @@
 //   - Run not found in Cosmos partition → Failure(Resumable, RunNotFound)
 //   - HandlerId mismatch → throws InvalidOperationException
 //   - Writer failure → Failure(Resumable, ModelDeploymentWriteFailed)
-//   - Optimistic-concurrency race on success write → Failure(Resumable, ConcurrentWriteConflict); no H14 enqueue
-//   - H14 enqueue failure → still returns Success (reconciler re-emits)
+//   - Optimistic-concurrency race on success write → Failure(Resumable, ConcurrentWriteConflict)
 //   - Idempotency-key + endpoint-hash determinism
 // -----------------------------------------------------------------------------
 
@@ -54,14 +53,13 @@ public sealed class H12cRuntimeReferencesHandlerTests
     [Theory]
     [InlineData(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1))]
     [InlineData(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2))]
-    public async Task HappyPath_WriterInvokedWithStampEndpoint_AndEnqueuesH14(string tenancyModel)
+    public async Task HappyPath_WriterInvokedWithStampEndpoint_AndDoesNotChainH14(string tenancyModel)
     {
         var run = BuildRun(tenancyModel);
         run.InterStepState.OpenAiEndpoint = DedicatedEndpoint;
         var repo = new FakeRepository(run, etag: "etag-1");
-        var enqueuer = new FakeEnqueuer();
         var writer = new FakeWriter();
-        var handler = NewHandler(repo, writer, enqueuer);
+        var handler = NewHandler(repo, writer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -77,12 +75,10 @@ public sealed class H12cRuntimeReferencesHandlerTests
         writer.LastRequest.Deployments.Should().OnlyContain(d => d.EndpointUri == DedicatedEndpoint);
 
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Running);
-        repo.LastWrittenRun.CurrentPhase.Should().Be(H12cRuntimeReferencesHandler.DownstreamHandlerId);
+        repo.LastWrittenRun.CurrentPhase.Should().Be(H12cRuntimeReferencesHandler.HandlerIdentifier,
+            "T186 L19: H12c records itself; the reconciler dispatches H14.");
         repo.LastWrittenRun.CompletedPhases.Should().ContainSingle(cp => cp.Phase == H12cRuntimeReferencesHandler.HandlerIdentifier);
         repo.LastWrittenRun.GateStates.Should().ContainKey(RuntimeReferencesGates.RuntimeReferencesWritten);
-
-        enqueuer.Sent.Should().ContainSingle();
-        enqueuer.Sent[0].HandlerId.Should().Be("H14");
     }
 
     // ---------- AC-4 Pinned model catalog ----------
@@ -105,7 +101,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
         run.InterStepState.OpenAiEndpoint = DedicatedEndpoint;
         var repo = new FakeRepository(run, etag: "etag-1");
         var writer = new FakeWriter();
-        var handler = NewHandler(repo, writer, new FakeEnqueuer());
+        var handler = NewHandler(repo, writer);
 
         await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -134,9 +130,8 @@ public sealed class H12cRuntimeReferencesHandlerTests
             JobId = "prior-job",
         });
         var repo = new FakeRepository(run, etag: "etag-1");
-        var enqueuer = new FakeEnqueuer();
         var writer = new FakeWriter();
-        var handler = NewHandler(repo, writer, enqueuer);
+        var handler = NewHandler(repo, writer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -144,7 +139,6 @@ public sealed class H12cRuntimeReferencesHandlerTests
             .Which.IdempotencyKey.Should().Be(expectedKey);
         writer.CallCount.Should().Be(0, "durable no-op MUST NOT invoke the writer.");
         repo.WriteCount.Should().Be(0, "durable no-op MUST NOT rewrite Cosmos.");
-        enqueuer.Sent.Should().BeEmpty("durable no-op MUST NOT re-enqueue H14.");
     }
 
     [Fact]
@@ -173,9 +167,8 @@ public sealed class H12cRuntimeReferencesHandlerTests
     {
         var run = BuildRun("SomeUnknownTier");
         var repo = new FakeRepository(run, etag: "etag-1");
-        var enqueuer = new FakeEnqueuer();
         var writer = new FakeWriter();
-        var handler = NewHandler(repo, writer, enqueuer);
+        var handler = NewHandler(repo, writer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -185,7 +178,6 @@ public sealed class H12cRuntimeReferencesHandlerTests
         failure.Diagnostic.Should().Contain("SomeUnknownTier");
 
         writer.CallCount.Should().Be(0, "unknown tenancyModel MUST NOT upsert.");
-        enqueuer.Sent.Should().BeEmpty();
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
     }
 
@@ -198,7 +190,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
         run.Parameters.NonSecret.Remove("tenantId");
         var repo = new FakeRepository(run, etag: "etag-1");
         var writer = new FakeWriter();
-        var handler = NewHandler(repo, writer, new FakeEnqueuer());
+        var handler = NewHandler(repo, writer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -215,7 +207,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
         var run = BuildRun(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2), includeUpstreamCompletion: false);
         var repo = new FakeRepository(run, etag: "etag-1");
         var writer = new FakeWriter();
-        var handler = NewHandler(repo, writer, new FakeEnqueuer());
+        var handler = NewHandler(repo, writer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -240,7 +232,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
         });
         var repo = new FakeRepository(run, etag: "etag-1");
         var writer = new FakeWriter();
-        var handler = NewHandler(repo, writer, new FakeEnqueuer());
+        var handler = NewHandler(repo, writer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -258,7 +250,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
         run.InterStepState.DataverseEnvUrl = null;
         var repo = new FakeRepository(run, etag: "etag-1");
         var writer = new FakeWriter();
-        var handler = NewHandler(repo, writer, new FakeEnqueuer());
+        var handler = NewHandler(repo, writer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -278,7 +270,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
         run.InterStepState.OpenAiEndpoint = null; // H2a hasn't run / populated yet.
         var repo = new FakeRepository(run, etag: "etag-1");
         var writer = new FakeWriter();
-        var handler = NewHandler(repo, writer, new FakeEnqueuer());
+        var handler = NewHandler(repo, writer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -294,7 +286,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
     {
         var repo = new FakeRepository(runOrNull: null);
         var writer = new FakeWriter();
-        var handler = NewHandler(repo, writer, new FakeEnqueuer());
+        var handler = NewHandler(repo, writer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -309,8 +301,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
     {
         var handler = NewHandler(
             new FakeRepository(BuildRun(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2)), "etag-1"),
-            new FakeWriter(),
-            new FakeEnqueuer());
+            new FakeWriter());
         var wrongEnvelope = new HandlerEnvelope
         {
             HandlerId = "H12b", // Wrong — expected H12c.
@@ -335,7 +326,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
         run.InterStepState.OpenAiEndpoint = DedicatedEndpoint;
         var repo = new FakeRepository(run, etag: "etag-1");
         var writer = new FakeWriter { NextOutcome = new ModelDeploymentReferenceWriteOutcome.Failure("PATCH sprk_aimodeldeployments failed: 503") };
-        var handler = NewHandler(repo, writer, new FakeEnqueuer());
+        var handler = NewHandler(repo, writer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -352,7 +343,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
         run.InterStepState.OpenAiEndpoint = DedicatedEndpoint;
         var repo = new FakeRepository(run, etag: "etag-1");
         var writer = new FakeWriter { ThrowOnNext = new InvalidOperationException("token acquisition failed") };
-        var handler = NewHandler(repo, writer, new FakeEnqueuer());
+        var handler = NewHandler(repo, writer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -364,7 +355,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
     // ---------- Defensive: Optimistic-concurrency race on success write ----------
 
     [Fact]
-    public async Task ConcurrentWriteConflict_OnSuccessWrite_ReturnsFailure_NoH14Enqueue()
+    public async Task ConcurrentWriteConflict_OnSuccessWrite_ReturnsFailure_StateWriteLost()
     {
         var run = BuildRun(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2));
         run.InterStepState.OpenAiEndpoint = DedicatedEndpoint;
@@ -374,34 +365,13 @@ public sealed class H12cRuntimeReferencesHandlerTests
         {
             NextReplaceResult = new ReplaceRunResult.Conflict(new ProvisioningRunReadResult(winningRun, "etag-2")),
         };
-        var enqueuer = new FakeEnqueuer();
         var writer = new FakeWriter();
-        var handler = NewHandler(repo, writer, enqueuer);
+        var handler = NewHandler(repo, writer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.RejectionCode.Should().Be(RuntimeReferencesRejectionCodes.ConcurrentWriteConflict);
-        enqueuer.Sent.Should().BeEmpty("no H14 enqueue when the success write LOST the ETag race.");
-    }
-
-    // ---------- Defensive: H14 enqueue failure still returns Success ----------
-
-    [Fact]
-    public async Task EnqueueFailure_StillReturnsSuccess_ReconcilerReEmits()
-    {
-        var run = BuildRun(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2));
-        run.InterStepState.OpenAiEndpoint = DedicatedEndpoint;
-        var repo = new FakeRepository(run, etag: "etag-1");
-        var enqueuer = new FakeEnqueuer { ThrowOnNext = new InvalidOperationException("SB broker unreachable") };
-        var writer = new FakeWriter();
-        var handler = NewHandler(repo, writer, enqueuer);
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        result.Should().BeOfType<HandlerResult.Success>(
-            "Cosmos state already records H12c complete; enqueue failure is a Wave-C5 reconciler concern.");
-        repo.LastWrittenRun!.CurrentPhase.Should().Be("H14");
     }
 
     // ---------- HandlerId matches design constant ----------
@@ -411,8 +381,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
     {
         var handler = NewHandler(
             new FakeRepository(BuildRun(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2)), "etag-1"),
-            new FakeWriter(),
-            new FakeEnqueuer());
+            new FakeWriter());
         handler.HandlerId.Should().Be("H12c", "value MUST match design.md §4.1 handler-catalog verbatim.");
     }
 
@@ -469,13 +438,11 @@ public sealed class H12cRuntimeReferencesHandlerTests
 
     private static H12cRuntimeReferencesHandler NewHandler(
         IProvisioningRunRepository repository,
-        IModelDeploymentReferenceWriter writer,
-        IHandlerEnqueuer enqueuer)
+        IModelDeploymentReferenceWriter writer)
     {
         return new H12cRuntimeReferencesHandler(
             repository,
             writer,
-            enqueuer,
             NullLogger<H12cRuntimeReferencesHandler>.Instance);
     }
 
@@ -572,25 +539,6 @@ public sealed class H12cRuntimeReferencesHandlerTests
                 return Task.FromResult(configured);
             }
             return Task.FromResult<ReplaceRunResult>(new ReplaceRunResult.Success(run, "etag-next"));
-        }
-    }
-
-    // --- FakeEnqueuer ---
-    private sealed class FakeEnqueuer : IHandlerEnqueuer
-    {
-        public List<HandlerEnvelope> Sent { get; } = new();
-        public Exception? ThrowOnNext { get; set; }
-
-        public Task EnqueueAsync(HandlerEnvelope envelope, CancellationToken cancellationToken)
-        {
-            if (ThrowOnNext is not null)
-            {
-                var toThrow = ThrowOnNext;
-                ThrowOnNext = null;
-                throw toThrow;
-            }
-            Sent.Add(envelope);
-            return Task.CompletedTask;
         }
     }
 

@@ -362,6 +362,89 @@ public class ActionSeamTests
             Times.Never);
     }
 
+    // ── UpdateRecord: a proposal a real person confirmed (#2257 with #2253) ───────────────────
+
+    private static readonly Guid ConfirmingUser = Guid.Parse("22570000-0000-4000-8000-00000000a0c1");
+
+    /// <summary>
+    /// The #2251 / #2253 sets a playbook run's write is refused even AS its person (the must-fire tests in
+    /// <c>UpdateRecordNodeExecutorRunIdentityTests</c> and <c>OutputMappingRunIdentityTests</c>): an access table, an access
+    /// column on a non-root table, a secure root's container.
+    /// </summary>
+    public static TheoryData<string, string, string, string> AccessSetWrites => new()
+    {
+        { "sprk_communicationaccount", "sprk_name", "x", InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode },
+        { "sprk_communication", "sprk_isinternalonly", "false", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode },
+        { "sprk_matter", "sprk_containerid", "b!confirmed", InheritedAccessPermission.AppOnlySecureRootWriteReasonCode },
+    };
+
+    private static UpdateRecordRequest ConfirmedProposal(string table, Guid recordId, string column, string value, Guid? user) => new()
+    {
+        EntityLogicalName = table,
+        RecordId = recordId,
+        LegacyFields = new Dictionary<string, string?> { [column] = value },
+        ImpersonateSystemUserId = user,
+    };
+
+    [Theory]
+    [MemberData(nameof(AccessSetWrites))]
+    public async Task UpdateRecordAsync_AConfirmedProposalOfARealPerson_OntoAnAccessTableOrColumn_IsWrittenAsThatPerson(
+        string table, string column, string value, string code)
+    {
+        // Must not fire: ActionSeam's apply is the person's own confirmed edit, so the deny-lists are not asked; the
+        // impersonated Dataverse write (MSCRMCallerID) decides it on that person's own privileges and field security.
+        var recordId = Guid.NewGuid();
+
+        var result = await CreateSeam().UpdateRecordAsync(
+            ConfirmedProposal(table, recordId, column, value, ConfirmingUser), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.Error);
+        result.Error.Should().BeNull($"{code} is for a payload no person confirmed");
+        _fieldMappingMock.Verify(s => s.UpdateRecordFieldsAsync(
+            table, recordId, It.Is<Dictionary<string, object?>>(f => f.ContainsKey(column)), It.IsAny<CancellationToken>(),
+            ConfirmingUser), Times.Once);
+        _fieldMappingMock.Verify(s => s.UpdateRecordFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), null),
+            Times.Never, "a confirmed proposal is written AS its person, never app-only");
+    }
+
+    [Theory]
+    [MemberData(nameof(AccessSetWrites))]
+    public async Task UpdateRecordAsync_AConfirmedProposal_ThePersonMayNotWrite_IsRefusedByDataverse_AndNeverAppOnly(
+        string table, string column, string value, string code)
+    {
+        // Skipping the deny-lists is not skipping the person's rights: Dataverse refuses the impersonated write.
+        _fieldMappingMock
+            .Setup(s => s.UpdateRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(),
+                ConfirmingUser))
+            .ThrowsAsync(new HttpRequestException("403 (Forbidden)", inner: null, System.Net.HttpStatusCode.Forbidden));
+
+        var act = () => CreateSeam().UpdateRecordAsync(
+            ConfirmedProposal(table, Guid.NewGuid(), column, value, ConfirmingUser), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<HttpRequestException>()).Which.StatusCode.Should().Be(System.Net.HttpStatusCode.Forbidden);
+        _fieldMappingMock.Verify(s => s.UpdateRecordFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), null),
+            Times.Never, $"a refused person's write is never repeated app-only ({code} not asked)");
+    }
+
+    [Theory]
+    [MemberData(nameof(AccessSetWrites))]
+    public async Task UpdateRecordAsync_WithNoPerson_OntoAnAccessTableOrColumn_IsRefused_AndNeverPatches(
+        string table, string column, string value, string code)
+    {
+        // The bound: the same payload with no person to confirm it is asked every set (WriteIdentity.AppOnly).
+        var result = await CreateSeam().UpdateRecordAsync(
+            ConfirmedProposal(table, Guid.NewGuid(), column, value, user: null), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().StartWith(code);
+        _fieldMappingMock.Verify(s => s.UpdateRecordFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(),
+            It.IsAny<Guid?>()), Times.Never);
+    }
+
     // ── Helpers (metadata cache-HIT for the Choice fail-loud path) ────────────────────────────
 
     private void UseMetadataFor(string entityLogicalName, EntityMetadataDto dto)

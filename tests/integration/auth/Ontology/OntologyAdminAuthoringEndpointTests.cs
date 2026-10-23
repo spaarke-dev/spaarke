@@ -20,10 +20,12 @@ using Microsoft.Extensions.Options;
 using Moq;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Ontology;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using Sprk.Bff.Api.Tests.Integration.Workspace;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.AccessControl.Ontology;
@@ -206,7 +208,9 @@ public partial class OntologyAdminAuthoringEndpointTests : IClassFixture<Ontolog
             list.EnumerateArray().Select(a => (a.GetProperty("code").GetString()!, a.GetProperty("label").GetString()!,
                 a.GetProperty("excludes").EnumerateArray().Select(e => e.GetString()!).ToArray()));
         static IEnumerable<(string Code, string Label, string[] Excludes)> Expected(IEnumerable<DecisionActionDefinition> defs) =>
-            defs.Select(d => (d.Code, d.Label, d.Excludes.ToArray()));
+            // Task 161 (D-180): a substitution-only action (create-budget) is never authorable, nor named as an exclusion.
+            defs.Where(d => !d.SubstitutionOnly).Select(d => (d.Code, d.Label,
+                d.Excludes.Where(e => !(DecisionActionCatalog.TryGet(e, out var excluded) && excluded.SubstitutionOnly)).ToArray()));
         static IEnumerable<(int, string)> Options(JsonElement list) =>
             list.EnumerateArray().Select(o => (o.GetProperty("value").GetInt32(), o.GetProperty("label").GetString()!));
 
@@ -226,7 +230,7 @@ public partial class OntologyAdminAuthoringEndpointTests : IClassFixture<Ontolog
 
         // Spot checks against the catalog's declared shape, so a test that only mirrors the source cannot hide a broken source.
         var decide = Actions(lanes[0].GetProperty("actions")).ToDictionary(a => a.Code);
-        decide.Keys.Should().Equal("send-budget-inquiry", "revise-budget", "approve-variance", "assign-work");
+        decide.Keys.Should().Equal("send-budget-inquiry", "revise-budget", "approve-variance", "assign-task", "assign-work");
         decide["revise-budget"].Excludes.Should().Equal("approve-variance");
         decide["approve-variance"].Excludes.Should().Equal("revise-budget");
         var doActions = Actions(lanes[1].GetProperty("actions")).ToDictionary(a => a.Code);
@@ -364,6 +368,23 @@ public partial class OntologyAdminAuthoringEndpointTests : IClassFixture<Ontolog
         own.GetProperty("valid").GetBoolean().Should().BeTrue(own.ToString());
         _fixture.World.Requests.Should().Contain(r => r.Contains($"sprk_policyid eq {PolicyId:D} and (sprk_domain eq null or sprk_domain eq 100000001)",
             StringComparison.Ordinal), "the policy is read as the caller through the domain allow-list");
+        _fixture.World.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Validate_AndSave_RefuseADraftThatNamesCreateBudget_ItIsOnlyEverSubstituted_D180()
+    {
+        // Task 161 (D-180): create-budget replaces revise-budget when the server builds the plan for a matter with no budget; a rule author
+        // can never name it, so a published plan is never edited by it (D-14).
+        var draft = Draft(plan: """{"actions":["send-budget-inquiry","create-budget","approve-variance"]}""");
+
+        var validate = await Json(await Validate(draft));
+        var save = await Save(draft: draft);
+
+        validate.GetProperty("valid").GetBoolean().Should().BeFalse();
+        ValidateErrors(validate)["decisionPlan"].Single().Should().Contain("action_not_allowed").And.Contain("Decide lane's catalog");
+        save.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await Json(save)).GetProperty("errors").GetProperty("decisionPlan")[0].GetString().Should().Be(ValidateErrors(validate)["decisionPlan"].Single());
         _fixture.World.Writes.Should().BeEmpty();
     }
 
@@ -1035,7 +1056,7 @@ public partial class OntologyAdminAuthoringEndpointTests : IClassFixture<Ontolog
                 It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("redis is down"));
         var service = new OntologyAdminAuthoringService(w, _fixture.Services.GetRequiredService<PolicyVersionValidator>(), _fixture.Engine,
-            cache.Object, TimeProvider.System, NullLogger<OntologyAdminAuthoringService>.Instance);
+            _fixture.Ownership, cache.Object, TimeProvider.System, NullLogger<OntologyAdminAuthoringService>.Instance);
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim("oid", "oid-" + w.Caller.ToString("N")), new Claim("tid", WorkspaceTestConstants.TestTenantId)], "test"));
 
@@ -1464,11 +1485,18 @@ public sealed class OntologyAdminAuthoringTestFixture : WorkspaceTestFixture
 
     public RecordingEngine Engine { get; } = new();
 
+    /// <summary>#2084: the ownership resolver a publish asks before any write. Answers an ordinary team unless a test says otherwise.</summary>
+    public RecordOwnershipResolverDouble Ownership { get; } = new();
+
     public void Reset()
     {
         World.Reset();
         Engine.Reset();
         Engine.World = World;
+        Ownership.TeamId = RecordOwnershipResolverDouble.DefaultTeamId;
+        Ownership.IsSecureOwner = false;
+        Ownership.Fault = null;
+        Ownership.Requests.Clear();
     }
 
     public HttpClient ClientFor(string oid)
@@ -1493,6 +1521,8 @@ public sealed class OntologyAdminAuthoringTestFixture : WorkspaceTestFixture
             services.AddScoped<IDataverseUserClient>(_ => World);
             services.RemoveAll<IOntologyAdminAuthoringSignalEngine>();
             services.AddSingleton<IOntologyAdminAuthoringSignalEngine>(Engine);
+            services.RemoveAll<IRecordOwnershipResolver>();
+            services.AddSingleton<IRecordOwnershipResolver>(Ownership);
 
             services.AddAuthentication()
                 .AddScheme<AuthenticationSchemeOptions, AuthoringCallerHandler>(AuthoringCallerHandler.SchemeName, _ => { });
@@ -1603,6 +1633,9 @@ public sealed class AuthoringWorld : IDataverseUserClient
 
         /// <summary>Task 102b: the policy's matter scope (<c>sprk_matter</c>); null for all matters.</summary>
         public Guid? Matter { get; set; }
+
+        /// <summary>#2084 round 2: the policy's owner (<c>_ownerid_value</c>); null when the read returns none.</summary>
+        public Guid? Owner { get; set; }
     }
 
     public sealed class VersionState
@@ -1829,6 +1862,7 @@ public sealed class AuthoringWorld : IDataverseUserClient
                         ["statecode"] = p.Value.State,
                         ["_sprk_currentversion_value"] = p.Value.Current?.ToString("D"),
                         ["_sprk_matter_value"] = p.Value.Matter?.ToString("D"),
+                        ["_ownerid_value"] = p.Value.Owner?.ToString("D"),
                         ["versionnumber"] = p.Value.RowVersion,
                         ["sprk_domain"] = p.Value.Domain,
                     })

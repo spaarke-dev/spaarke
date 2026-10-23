@@ -1,9 +1,10 @@
 // unified-access-control-r2 task 152 — the two Office owner-event publishers, which had no publishing tests.
 // Verifier round 1 (item 7): the tests now RUN each site instead of the shared helper plus a whitespace-exact grep.
 //
-//   - Quick-create matter (OfficeEndpoints.QuickCreateAsync, POST /office/quickcreate/matter): RecordCreationService
-//     writes the business-unit default owner TEAM and does not return it, so the site reads the owner back. The tests
-//     execute the real handler.
+//   - Quick-create matter (POST /office/quickcreate/matter): field mapping task 018b moved the matter create onto the
+//     unified RecordCreationService, whose post-create step publishes the owner event with the team it wrote. The endpoint's
+//     own publish is removed (UAC-r2 condition (b) item i: exactly once). The single publish is asserted over HTTP in
+//     tests/integration/contract/Api/Office/OfficeQuickCreateMembershipPublishTests.cs; here a guard pins the removal.
 //   - Office save (OfficeService, POST /office/save): the document is owned by the team the save resolved (task 080).
 //     SaveAsync depends on a dozen concrete collaborators (SPE upload, job store, persistence) and has no unit harness,
 //     so the site's own decisions — the table, the team reference, the read-back fallback — live in
@@ -36,47 +37,20 @@ public class OfficeMembershipPublishingTests
     private static readonly Guid RecordId = Guid.Parse("ffffffff-0000-0000-0000-0000000000aa");
     private static readonly Guid OwnerSystemUserId = Guid.Parse("abababab-3333-3333-3333-abababababab");
 
-    // ── Quick-create: the real handler ──────────────────────────────────────────────────────────────────────
+    // ── Quick-create: the endpoint no longer publishes (field mapping task 018b) ──────────────────────────────
 
     [Fact]
-    public async Task QuickCreateMatter_ReadsTheOwnerBackFromTheRowItCreated_AndPublishesTheTeam()
+    public void QuickCreate_TheEndpointPublishesNoOwnerEvent_TheUnifiedCreatePublishesTheMatters()
     {
-        var site = new QuickCreateSite(rowOwner: new EntityReference("team", OwnerEventTestKit.TeamId));
+        // UAC-r2 condition (b) item i: one publish per Office matter create. The unified create's step 12 publishes it
+        // (MembershipPublishingTables names sprk_matter); a second publish at the endpoint would make it two.
+        var endpoints = OwnerEventTestKit.ReadSource("Api", "Office", "OfficeEndpoints.cs");
+        endpoints.Should().NotContain("PublishOwnerAddedAsync", "the quick-create endpoint's own publish is removed");
+        endpoints.Should().NotContain("IMembershipEventPublisher", "no Office endpoint publishes an owner event itself");
 
-        var result = await site.RunAsync("matter");
-
-        (result as IStatusCodeHttpResult)?.StatusCode.Should().Be(StatusCodes.Status201Created);
-        var evt = site.Publisher.Published.Should().ContainSingle().Subject;
-        evt.EntityLogicalName.Should().Be("sprk_matter");
-        evt.EntityRecordId.Should().Be(RecordId, "the event is for the matter this request created");
-        evt.PersonIdType.Should().Be(PersonIdentityType.Team);
-        evt.PersonId.Should().Be(OwnerEventTestKit.TeamId);
-        evt.PersonId.Should().NotBe(OwnerEventTestKit.CallerOid, "no publisher emits an AAD oid");
-        evt.SourceField.Should().Be("ownerid");
-        evt.CorrelationId.Should().Be(QuickCreateSite.TraceId);
-        site.Dataverse.Verify(d => d.RetrieveAsync("sprk_matter", RecordId, It.Is<string[]>(c => c.Contains("ownerid")), It.IsAny<CancellationToken>()),
-            Times.Once, "RecordCreationService does not return the owner, so the site reads it back");
-    }
-
-    [Fact]
-    public async Task QuickCreateMatter_RowOwnedByAnApplicationUser_PublishesNothing()
-    {
-        var site = new QuickCreateSite(rowOwner: new EntityReference("systemuser", OwnerEventTestKit.ApplicationUserId));
-
-        await site.RunAsync("matter");
-
-        site.Publisher.Published.Should().BeEmpty("an application user is not a person — reconciliation applies the same rule");
-    }
-
-    [Fact]
-    public async Task QuickCreateProject_PublishesNoOwnerEvent()
-    {
-        // The matter is the only quick-create entity this site publishes for (event-source-inventory §3A).
-        var site = new QuickCreateSite(rowOwner: new EntityReference("team", OwnerEventTestKit.TeamId));
-
-        await site.RunAsync("project");
-
-        site.Publisher.Published.Should().BeEmpty();
+        Regex.Replace(OwnerEventTestKit.ReadSource("Services", "RecordCreation", "RecordCreationService.cs"), @"\s+", " ")
+            .Should().Contain("{ \"sprk_matter\", \"sprk_event\", \"sprk_document\" }",
+                "the unified create publishes the matter's owner event in its post-create step");
     }
 
     // ── Office save: the site's publish decision ────────────────────────────────────────────────────────────
@@ -132,49 +106,5 @@ public class OfficeMembershipPublishingTests
     {
         OwnerEventTestKit.ReadSource("Api", "Office", "OfficeEndpoints.cs")
             .Should().NotContain("resolve oid → systemuserid via Dataverse lookup", "the false comment is removed");
-    }
-
-    /// <summary>The POST /office/quickcreate/{entityType} site with boundary fakes; runs the real handler.</summary>
-    private sealed class QuickCreateSite
-    {
-        public const string TraceId = "trace-qc";
-
-        public QuickCreateSite(EntityReference rowOwner)
-        {
-            Dataverse = OwnerEventTestKit.Dataverse(rowOwner);
-            CallerResolver.Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(CallerSystemUserResolution.Resolved(OwnerSystemUserId.ToString("D")));
-            Office.Setup(o => o.QuickCreateAsync(
-                    It.IsAny<QuickCreateEntityType>(), It.IsAny<QuickCreateRequest>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((QuickCreateEntityType type, QuickCreateRequest request, string _, string? _, CancellationToken _) =>
-                    new QuickCreateResponse
-                    {
-                        Id = RecordId,
-                        EntityType = type,
-                        LogicalName = QuickCreateFieldRequirements.GetLogicalName(type),
-                        Name = request.Name ?? string.Empty,
-                    });
-        }
-
-        public Mock<IOfficeService> Office { get; } = new(MockBehavior.Strict);
-        public Mock<ICallerSystemUserResolver> CallerResolver { get; } = new(MockBehavior.Strict);
-        public Mock<Spaarke.Dataverse.IGenericEntityService> Dataverse { get; }
-        public RecordingMembershipEventPublisher Publisher { get; } = new();
-
-        public Task<IResult> RunAsync(string entityType)
-        {
-            var context = new DefaultHttpContext { TraceIdentifier = TraceId };
-            context.Items[OfficeAuthFilter.UserIdKey] = OwnerEventTestKit.CallerOid.ToString("D");
-            return OfficeEndpoints.QuickCreateAsync(
-                entityType,
-                new QuickCreateRequest { Name = "Acme v. Beta" },
-                Office.Object,
-                Publisher,
-                CallerResolver.Object,
-                Dataverse.Object,
-                NullLogger<Program>.Instance,
-                context,
-                CancellationToken.None);
-        }
     }
 }

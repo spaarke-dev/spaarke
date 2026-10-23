@@ -40,16 +40,17 @@
 //   Status = Failed with a distinct RejectionCode per failing check, but no
 //   quarantine is warranted. Operator addresses the missing precondition
 //   (subscription access grant / Lighthouse offer acceptance) then invokes
-//   POST /api/runs/{id}/resume, which re-dispatches H1 with the same
-//   envelope.
+//   POST /api/runs/{id}/resume, which re-dispatches H1 with a fresh-attempt envelope (RunControlService).
 //
-// DOWNSTREAM ENQUEUE (WAVE C4 TEMPORARY BRIDGE):
-//   Same pattern as H0PreflightHandler + H05ConsentCaptureHandler in this
-//   wave: the wave-C5 reconciler does not exist yet, so H1 enqueues H2a
-//   (task 044 sibling) directly here as a TEMPORARY BRIDGE. When the wave-C5
-//   reconciler ships, this handler's enqueue call moves to the reconciler +
-//   the IHandlerEnqueuer contract note (Enqueue/IHandlerEnqueuer.cs § NOT
-//   CONSUMED BY) applies unchanged.
+// DOWNSTREAM CHAINING (NOT THIS HANDLER'S JOB):
+//   H1 does not enqueue H2a (or anything else). Handler-to-handler chaining is
+//   owned by the state reconciler (Core/Reconciler/StateReconcilerService.cs +
+//   DagAdvancer.HandlerDependencies). The wave-C4 handler-side enqueue was
+//   removed (T186 L19, 2026-10-15): it duplicated the reconciler's H2a dispatch
+//   under a DIFFERENT envelope (different ParametersJson -> different MessageId),
+//   so the dispatcher's Level-2 lock (keyed on MessageId) did not stop two
+//   concurrent H2a (Bicep) runs. On success H1 only records itself complete
+//   (CurrentPhase = H1).
 //
 // IDEMPOTENCY (3-level per ADR-004 + design.md §4.1):
 //   Level 1 (wire): ServiceBusHandlerEnqueuer sets a deterministic
@@ -94,13 +95,6 @@ public sealed class H1SubscriptionReadinessHandler : IProvisioningHandler
     /// <summary>Handler identifier — matches design.md § 4.1 catalog verbatim.</summary>
     public const string HandlerIdentifier = HandlerIds.H1;
 
-    /// <summary>
-    /// Handler identifier of the downstream handler H1 chains to on success.
-    /// Sibling task 044 owns the H2a implementation; H1 only needs the
-    /// string constant to enqueue.
-    /// </summary>
-    public const string DownstreamHandlerId = "H2a";
-
     /// <summary>Non-secret parameter key carrying the Entra tenant id (§ 4D I1).</summary>
     public const string TenantIdParameterKey = "tenantId";
 
@@ -128,7 +122,6 @@ public sealed class H1SubscriptionReadinessHandler : IProvisioningHandler
     };
 
     private readonly IProvisioningRunRepository _repository;
-    private readonly IHandlerEnqueuer _enqueuer;
     private readonly ISubscriptionReadinessProbe _probe;
     private readonly SubscriptionReadinessOptions _options;
     private readonly ILogger<H1SubscriptionReadinessHandler> _logger;
@@ -140,25 +133,21 @@ public sealed class H1SubscriptionReadinessHandler : IProvisioningHandler
     /// Constructs the H1 subscription-readiness handler.
     /// </summary>
     /// <param name="repository">Cosmos-backed run state store (task 037).</param>
-    /// <param name="enqueuer">Service Bus enqueuer used to dispatch H2a on success (wave-C4 temporary bridge — see file header).</param>
     /// <param name="probe">The ARM readiness probe — <see cref="ArmSubscriptionReadinessProbe"/> in production (task 121, Wave G-2; real Azure.ResourceManager SDK calls).</param>
     /// <param name="options">HANDLER-04 options — canonical required-provider list + poll timeout / interval (Wave 2 pre-dispatch remediation).</param>
     /// <param name="logger">Structured logger.</param>
     public H1SubscriptionReadinessHandler(
         IProvisioningRunRepository repository,
-        IHandlerEnqueuer enqueuer,
         ISubscriptionReadinessProbe probe,
         IOptions<SubscriptionReadinessOptions> options,
         ILogger<H1SubscriptionReadinessHandler> logger)
     {
         ArgumentNullException.ThrowIfNull(repository);
-        ArgumentNullException.ThrowIfNull(enqueuer);
         ArgumentNullException.ThrowIfNull(probe);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
 
         _repository = repository;
-        _enqueuer = enqueuer;
         _probe = probe;
         _options = options.Value;
         _logger = logger;
@@ -471,7 +460,7 @@ public sealed class H1SubscriptionReadinessHandler : IProvisioningHandler
             }
         }
 
-        // (7) All checks passed — mark H1 complete + enqueue H2a (wave-C4 bridge — see file header).
+        // (7) All checks passed — mark H1 complete; the reconciler dispatches H2a (see file header).
         stopwatch.Stop();
         _logger.LogInformation(
             "H1 subscription readiness succeeded: runId={RunId} customerId={CustomerId} " +
@@ -613,7 +602,7 @@ public sealed class H1SubscriptionReadinessHandler : IProvisioningHandler
         var startedAt = completedAt - TimeSpan.FromMilliseconds(1); // Approximate; probe start not tracked separately.
 
         run.Status = RunStatus.Running;
-        run.CurrentPhase = DownstreamHandlerId; // The reconciler observes this + knows to dispatch H2a next.
+        run.CurrentPhase = HandlerIdentifier; // Reconciler observes + fans out
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = HandlerIdentifier,
@@ -676,38 +665,6 @@ public sealed class H1SubscriptionReadinessHandler : IProvisioningHandler
                 RejectionCode: SubscriptionReadinessRejectionCodes.RunDeletedDuringCheck,
                 Diagnostic: $"ProvisioningRun '{run.RunId}' was deleted while H1 subscription-readiness " +
                              $"was in flight.");
-        }
-
-        // Enqueue H2a — TEMPORARY WAVE-C4 BRIDGE (see file header). When
-        // the wave-C5 reconciler ships, this call moves to the reconciler +
-        // the enqueuer contract note (Enqueue/IHandlerEnqueuer.cs § NOT
-        // CONSUMED BY) applies unchanged. H2a is owned by sibling task 044;
-        // this handler only knows the string HandlerId.
-        var downstreamEnvelope = new HandlerEnvelope
-        {
-            HandlerId = DownstreamHandlerId,
-            RunId = envelope.RunId,
-            CustomerId = envelope.CustomerId,
-            ParametersJson = "{}", // H2a reads its own parameters from Cosmos.
-            EnqueuedAt = completedAt,
-        };
-        try
-        {
-            await _enqueuer.EnqueueAsync(downstreamEnvelope, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            // The Cosmos state already records H1 complete + CurrentPhase =
-            // H2a. Enqueue failure is recoverable — the reconciler's
-            // background scan (wave C5, design.md § crash recovery I6) will
-            // re-emit the H2a job. Log + return success so the handler
-            // outcome accurately reflects the H1 completion; the enqueue
-            // failure is a downstream concern.
-            _logger.LogError(
-                ex,
-                "H1 succeeded but H2a downstream enqueue failed — reconciler scan will re-emit: " +
-                "runId={RunId} customerId={CustomerId}",
-                run.RunId, run.CustomerId);
         }
 
         return new HandlerResult.Success(idempotencyKey);

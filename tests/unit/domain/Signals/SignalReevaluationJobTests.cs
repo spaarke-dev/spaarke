@@ -3415,6 +3415,7 @@ public partial class SignalReevaluationJobTests
 
         public Task<Guid> CreateAsync(Entity entity, CancellationToken ct = default) => throw Write();
         public Task<(Guid Id, bool Created)> UpsertAsync(Entity entity, CancellationToken ct = default) => throw Write();
+        public Task UpdateIfRowVersionMatchesAsync(string entityLogicalName, Guid id, string rowVersion, Dictionary<string, object> fields, CancellationToken ct = default) => throw Write();
         public Task UpdateAsync(string entityLogicalName, Guid id, Dictionary<string, object> fields, CancellationToken ct = default) => throw Write();
         public Task BulkUpdateAsync(string entityLogicalName, List<(Guid id, Dictionary<string, object> fields)> updates, CancellationToken ct = default) => throw Write();
         public Task DeleteAsync(string entityLogicalName, Guid id, CancellationToken ct = default) => throw Write();

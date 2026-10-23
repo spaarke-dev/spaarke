@@ -1,18 +1,17 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Security.Claims;
 using FluentAssertions;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
-using Sprk.Bff.Api.Api;
-using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Models.Office;
-using Sprk.Bff.Api.Services;
+using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Dataverse;
-using Sprk.Bff.Api.Services.Office;
+using Sprk.Bff.Api.Tests.Api.Office;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
+using EntityReference = Microsoft.Xrm.Sdk.EntityReference;
 
 namespace Sprk.Bff.Api.Tests.Integration.DataMutation.CreatorPerson;
 
@@ -25,6 +24,10 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.CreatorPerson;
 /// <para><b>The failure mode.</b> Secure provisioning's resume shares a stranded secure record to the person who created
 /// it. For an app-created row there was nobody to share to (createdonbehalfby is empty, live 2026-10-01), so the resume
 /// could only refuse. A writer that forgot the stamp would pass every create test and silently bring that back.</para>
+/// <para>Field mapping task 018c: the Office quick-create of a matter or project now creates through the unified
+/// <c>RecordCreationService</c> (step 9 stamps the person WhoAmI names), so these tests drive the real route over the Office
+/// contract host (<see cref="OfficeQuickCreateTestWebAppFactory"/>, the caller's Dataverse <see cref="OfficeCallerDataverseDouble"/>,
+/// the create captured by <see cref="RecordCreationWriteCapture"/>) instead of the deleted Office creation core.</para>
 /// <para>The chat create (<c>dataverse.create_record</c>, created by the app since task 146; its stamp rides that create
 /// per owner round 10) is pinned in <c>SecureChildOwnershipAiToolTests</c>, and its refusal of an item naming the column
 /// in <c>DataverseCreateRecordHandlerTests</c>;
@@ -34,59 +37,36 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.CreatorPerson;
 [Trait("status", "task-133-uac-r2")]
 public class RecordCreatorPersonStampTests
 {
-    private static readonly Guid Caller = Guid.Parse("aaaaaaaa-0000-0000-0000-0000000000c1");
-    private static readonly Guid Team = Guid.Parse("dddddddd-0000-0000-0000-00000000000d");
-    private static readonly Guid SourceRecord = Guid.Parse("bbbbbbbb-0000-0000-0000-00000000000b");
+    private static readonly Guid Caller = OfficeQuickCreateWorld.FieldsCaller;
+    private static readonly Guid BusinessUnit = OfficeQuickCreateWorld.FieldsBusinessUnit;
+    private static readonly Guid SourceProject = OfficeQuickCreateWorld.ContractSourceProject;
     private static readonly Guid SomeoneElse = Guid.Parse("eeeeeeee-0000-0000-0000-00000000000e");
 
-    private readonly Mock<IGenericEntityService> _entities = new(MockBehavior.Loose);
-    private readonly Mock<IFieldMappingDataverseService> _fieldMappings = new();
-    private readonly List<Entity> _created = new();
-
-    public RecordCreatorPersonStampTests()
-    {
-        _entities.Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-            .Callback<Entity, CancellationToken>((e, _) => _created.Add(e))
-            .ReturnsAsync(Guid.NewGuid());
-    }
+    public static TheoryData<string> MatterAndProject => new() { "matter", "project" };
 
     private static EntityReference PersonOf(Entity row) =>
         row.GetAttributeValue<EntityReference>(RecordCreatorPerson.Column);
 
     // =====================================================================================
-    // Office quick-create — RecordCreationService (matter, project)
+    // Office quick-create — the unified create behind the Office adapter (matter, project)
     // =====================================================================================
 
-    private RecordCreationService OfficeCreator()
-    {
-        var ownership = new Mock<IRecordOwnershipResolver>();
-        ownership.Setup(o => o.ResolveOwningTeamAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Team);
-        return new RecordCreationService(
-            _entities.Object, _fieldMappings.Object, ownership.Object,
-            IdentityNormalizationFixtures.NoLinkedContact(),
-            Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(),
-            Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(),
-            NullLogger<RecordCreationService>.Instance);
-    }
-
     [Theory]
-    [InlineData(QuickCreateEntityType.Matter)]
-    [InlineData(QuickCreateEntityType.Project)]
-    public async Task OfficeQuickCreate_RecordsTheCallerAsTheCreatorPerson(QuickCreateEntityType type)
+    [MemberData(nameof(MatterAndProject))]
+    public async Task OfficeQuickCreate_RecordsTheCallerAsTheCreatorPerson(string type)
     {
-        var result = await OfficeCreator().CreateAsync(new RecordCreationRequest
-        {
-            EntityType = type,
-            Name = "New record",
-            CallerUserId = "oid",
-            OwnerSystemUserId = Caller.ToString("D"),
-        });
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(factory);
+        var created = CaptureCreate(factory, type);
 
-        result.Succeeded.Should().BeTrue();
-        PersonOf(_created.Single()).Should().BeEquivalentTo(new EntityReference("systemuser", Caller),
+        var response = await factory.CreateClient().PostAsJsonAsync(
+            $"/api/office/quickcreate/{type}", new QuickCreateRequest { Name = "New record" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        PersonOf(created.Entity!).Should().BeEquivalentTo(new EntityReference("systemuser", Caller),
             "the create is app-only, so createdby is the BFF application user — this column is the person");
-        _created.Single()["ownerid"].Should().BeEquivalentTo(new EntityReference("team", Team),
+        created.Entity!.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(
+            new EntityReference("team", RecordOwnershipResolverDouble.DefaultTeamId),
             "access still comes from the team; the column decides only who a resume shares to");
     }
 
@@ -95,19 +75,29 @@ public class RecordCreatorPersonStampTests
     /// protected from mapping like the owner, and the caller is what lands.
     /// </summary>
     [Theory]
-    [InlineData(QuickCreateEntityType.Matter, "sprk_project", "sprk_matter")]
-    [InlineData(QuickCreateEntityType.Project, "sprk_matter", "sprk_project")]
-    public async Task OfficeQuickCreate_AMappingRuleCannotChooseTheCreatorPerson(
-        QuickCreateEntityType type, string sourceEntity, string targetEntity)
+    [MemberData(nameof(MatterAndProject))]
+    public async Task OfficeQuickCreate_AMappingRuleCannotChooseTheCreatorPerson(string type)
     {
-        _fieldMappings
-            .Setup(m => m.GetFieldMappingProfileWithRulesAsync(sourceEntity, targetEntity, true, It.IsAny<CancellationToken>()))
+        var targetTable = type == "matter" ? "sprk_matter" : "sprk_project";
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(factory);
+        factory.AccessProbe
+            .Setup(p => p.GetCallerRightsAsync(It.IsAny<string>(), "sprk_projects", SourceProject, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AccessRights.Read | AccessRights.AppendTo);
+        factory.Entities
+            .Setup(e => e.RetrieveAsync("sprk_project", SourceProject, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_project", SourceProject)
+            {
+                [RecordCreatorPerson.Column] = new EntityReference("systemuser", SomeoneElse),
+            });
+        factory.FieldMappings
+            .Setup(m => m.GetFieldMappingProfileWithRulesAsync("sprk_project", targetTable, true, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new FieldMappingProfileEntity
             {
                 Id = Guid.NewGuid(),
                 Name = "copy creator",
-                SourceEntity = sourceEntity,
-                TargetEntity = targetEntity,
+                SourceEntity = "sprk_project",
+                TargetEntity = targetTable,
                 IsActive = true,
                 Rules =
                 [
@@ -120,29 +110,54 @@ public class RecordCreatorPersonStampTests
                     },
                 ],
             });
-        _entities
-            .Setup(e => e.RetrieveAsync(sourceEntity, SourceRecord, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Entity(sourceEntity, SourceRecord)
-            {
-                [RecordCreatorPerson.Column] = new EntityReference("systemuser", SomeoneElse),
-            });
+        var created = CaptureCreate(factory, type);
 
-        var result = await OfficeCreator().CreateAsync(new RecordCreationRequest
+        var response = await factory.CreateClient().PostAsJsonAsync($"/api/office/quickcreate/{type}", new QuickCreateRequest
         {
-            EntityType = type,
             Name = "New record",
-            CallerUserId = "oid",
-            OwnerSystemUserId = Caller.ToString("D"),
-            SourceEntityLogicalName = sourceEntity,
-            SourceRecordId = SourceRecord,
+            SourceEntityType = "sprk_project",
+            SourceRecordId = SourceProject,
         });
 
-        result.Succeeded.Should().BeTrue();
-        PersonOf(_created.Single()).Id.Should().Be(Caller, "the source record's creator is not this record's creator");
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        PersonOf(created.Entity!).Id.Should().Be(Caller, "the source record's creator is not this record's creator");
     }
 
     // POST /api/v1/work-assignments (WorkAssignmentEndpoints) no longer exists: task 166 deleted the route as caller-less
     // (sweep finding S-76, owner round 10 item 1; absence pinned by DeadRouteRetirementTests), so the work-assignment
     // stamp tests that drove its handler went with it. Work assignments are created through the MDA and the Create Work
     // Assignment wizard, which run as the user (createdby is the person).
+
+    // ── Helpers (the Office contract host's, as OfficeQuickCreateAdapterContractTests arranges them) ──────────────────
+
+    private static void ArrangeResolvedCaller(OfficeQuickCreateTestWebAppFactory factory)
+    {
+        factory.CallerResolver
+            .Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CallerSystemUserResolution.Resolved(Caller.ToString("D")));
+        factory.Entities
+            .Setup(e => e.RetrieveAsync("team", RecordOwnershipResolverDouble.DefaultTeamId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("team", RecordOwnershipResolverDouble.DefaultTeamId)
+            {
+                ["businessunitid"] = new EntityReference("businessunit", BusinessUnit),
+            });
+        factory.Entities
+            .Setup(e => e.RetrieveAsync("businessunit", BusinessUnit, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("businessunit", BusinessUnit));
+    }
+
+    /// <summary>The service's step-11 write, and the created row's number read-back (any id: the service picks it).</summary>
+    private static RecordCreationWriteCapture CaptureCreate(OfficeQuickCreateTestWebAppFactory factory, string type)
+    {
+        var table = type == "matter" ? "sprk_matter" : "sprk_project";
+        var numberColumn = type == "matter" ? "sprk_matternumber" : "sprk_projectnumber";
+        var capture = factory.CaptureRecordCreationWrite();
+        factory.Entities
+            .Setup(e => e.RetrieveAsync(
+                table, It.Is<Guid>(id => id != SourceProject),
+                It.Is<string[]>(columns => columns.Length == 1 && columns[0] == numberColumn),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, Guid id, string[] _, CancellationToken _) => new Entity(table, id) { [numberColumn] = "NUM-133" });
+        return capture;
+    }
 }

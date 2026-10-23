@@ -1,8 +1,11 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
+using Sprk.Bff.Api.Services.Identity;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
 
@@ -29,11 +32,32 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// <para>
 /// <b>User-OBO ONLY (spec MUST rule)</b>: the search executes through
 /// <see cref="IDataverseUserClient"/> — Dataverse Search applies the calling user's security
-/// roles + row-level security to results. No app-only client is reachable (task-012 audit).
+/// roles + row-level security to results. No app-only client is reachable (task-012 audit), except the one below.
+/// </para>
+/// <para>
+/// <b>The "User-OBO ONLY" rule is AMENDED for ONE dependency — unified-access-control-r2 task 188, main-session decision
+/// 2026-10-20 (CLAUDE.md §6.5 path B; APPROVED, owner round 111, 2026-10-21)</b>: an EXTERNAL caller's <c>sprk_document</c> rows
+/// are decided by THE external document narrowing through <see cref="AppOnlyDocumentNarrowing"/>, which re-reads those
+/// documents BY ID under the BFF's app-only identity (the external plane's reader) and returns ONLY a hide decision: a
+/// link field security masks for the user can never read as "no link". It can only HIDE a row the user's own read returned;
+/// no app-only data reaches the result, and nothing else of the app-only reader is reachable (a delegate). Every query whose
+/// rows reach the model still runs as the user.
+/// Task 188 round 3 slice C: an external caller's <c>sprk_analysis</c> and <c>sprk_analysisoutput</c> rows are hidden when
+/// their source document or an analysis's output file is (or cannot be decided), through the same seam's hide-only overload
+/// (<see cref="AppOnlyDocumentNarrowingExtensions.HiddenDocumentIdsAsync"/>); their source links are read as the user
+/// (<see cref="ExternalCallerCommunicationGuard.ReadSourceDocumentIdsAsync"/>).
 /// </para>
 /// <para>
 /// <b>ADR-015 / NFR-07</b>: telemetry carries query LENGTH + entity filter + result count +
 /// duration — never the query text (user-authored) and never result content.
+/// </para>
+/// <para>
+/// <b>ISS-010 quick fix (external-access r3 task 078)</b>: for an EXTERNAL caller (systemuser flagged
+/// <c>sprk_isexternal</c>, or unresolvable — fail closed) no hit from a communication-family table reaches the result:
+/// family names are removed from the entity filter (a filter of only family names makes no search call) and family hits
+/// are dropped by <c>entityname</c> after every call, the unscoped retry included; a <c>sprk_document</c> hit whose
+/// related communication fails the rule is dropped too. Counts are post-filter and no warning reveals a drop. See
+/// <see cref="ExternalCallerCommunicationGuard"/>. Internal callers are unchanged.
 /// </para>
 /// </remarks>
 public sealed partial class DataverseSearchDataHandler : IToolHandler
@@ -43,18 +67,31 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
     /// <summary>Result cap sent to the Dataverse Search API (ADR-016 quota posture).</summary>
     internal const int SearchTop = 25;
 
-    [GeneratedRegex(@"^[a-z][a-z0-9_]*$")]
+    [GeneratedRegex(@"^[a-z][a-z0-9_]*\z")]
     private static partial Regex LogicalNameRegex();
 
     private readonly IDataverseUserClient _dataverse;
     private readonly ILogger<DataverseSearchDataHandler> _logger;
+    private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly ICallerSystemUserResolver _callerResolver;
+    private readonly ISystemUserIdentityResolver _identityResolver;
+    /// <summary>Task 188: THE document narrowing, app-only by id (see the remarks: the one amended dependency).</summary>
+    private readonly AppOnlyDocumentNarrowing _narrowDocuments;
 
     public DataverseSearchDataHandler(
         IDataverseUserClient dataverse,
-        ILogger<DataverseSearchDataHandler> logger)
+        ILogger<DataverseSearchDataHandler> logger,
+        IHttpContextAccessor httpContextAccessor,
+        ICallerSystemUserResolver callerResolver,
+        ISystemUserIdentityResolver identityResolver,
+        AppOnlyDocumentNarrowing narrowDocuments)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
+        _callerResolver = callerResolver ?? throw new ArgumentNullException(nameof(callerResolver));
+        _identityResolver = identityResolver ?? throw new ArgumentNullException(nameof(identityResolver));
+        _narrowDocuments = narrowDocuments ?? throw new ArgumentNullException(nameof(narrowDocuments));
     }
 
     /// <inheritdoc />
@@ -154,6 +191,30 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
 
         try
         {
+            // ISS-010 (task 078): externality is resolved lazily — only when the entity filter names a
+            // communication-family table or a family hit comes back — so every other search is byte-identical.
+            bool? isExternal = null;
+            async Task<bool> IsExternalCallerAsync() =>
+                isExternal ??= await ExternalCallerCommunicationGuard.IsExternalCallerAsync(
+                    _httpContextAccessor, _callerResolver, _identityResolver, cancellationToken).ConfigureAwait(false);
+
+            if (entityFilter.Exists(ExternalCallerCommunicationGuard.IsCommunicationFamily) &&
+                await IsExternalCallerAsync().ConfigureAwait(false))
+            {
+                // Removed silently (no warning reveals it). A filter that named ONLY family tables makes no search
+                // call at all — never an unscoped search.
+                entityFilter.RemoveAll(ExternalCallerCommunicationGuard.IsCommunicationFamily);
+                _logger.LogInformation(
+                    "[dataverse.search_data] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
+                    ExternalCallerCommunicationGuard.FamilyPrefix + "*", "family_filter_removed", context.DecisionId);
+                if (entityFilter.Count == 0)
+                {
+                    stopwatch.Stop();
+                    return Completed(context, tool, query.Length, "(none)", new List<object>(), new List<ToolResultCitation>(),
+                        warnings, startedAt, stopwatch.ElapsedMilliseconds);
+                }
+            }
+
             // Dataverse Search API v2 — executes under the USER's OBO token; results respect
             // the user's security roles and row-level security (Dataverse-enforced).
             var requestBody = new Dictionary<string, object?>
@@ -218,15 +279,86 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
 
             var results = new List<object>();
             var citations = new List<ToolResultCitation>();
+            var droppedHits = 0;
+            var hiddenDocumentIds = new List<Guid>();
+            var hiddenDerivedSources = new List<Guid>();
+            DocumentNarrowingResult? narrowing = null;
             var value = FindResultsArray(response.Body);
             if (value is { } resultsArray)
             {
+                var hits = new List<(JsonElement Hit, string EntityName, Guid RecordId)>();
                 foreach (var hit in resultsArray.EnumerateArray())
                 {
                     var entityName = GetString(hit, "entityname") ?? GetString(hit, "EntityName");
                     var objectIdRaw = GetString(hit, "objectid") ?? GetString(hit, "ObjectId") ?? GetString(hit, "id") ?? GetString(hit, "Id");
                     if (entityName is null || !Guid.TryParse(objectIdRaw, out var recordId))
                     {
+                        continue;
+                    }
+
+                    // ISS-010 (task 078): an external caller gets no communication-family hit, whatever the filter was
+                    // (the H8 unscoped retry included).
+                    if (ExternalCallerCommunicationGuard.IsCommunicationFamily(entityName) &&
+                        await IsExternalCallerAsync().ConfigureAwait(false))
+                    {
+                        droppedHits++;
+                        continue;
+                    }
+
+                    hits.Add((hit, entityName, recordId));
+                }
+
+                // ISS-010 review round 1 (F1), task 188 (D7, #2126): for an external caller, a sprk_document hit THE external
+                // document predicate hides is dropped silently (same posture as family hits). The hit documents are read by id
+                // APP-ONLY (main-session decision 2026-10-20), then the predicate's own batched reads; a document that does
+                // not come back is dropped; a fault throws into the error result below (no data).
+                var documentIds = hits
+                    .Where(h => ExternalCallerCommunicationGuard.IsDocumentTable(h.EntityName))
+                    .Select(h => h.RecordId)
+                    .ToList();
+                if (documentIds.Count > 0 && await IsExternalCallerAsync().ConfigureAwait(false))
+                {
+                    narrowing = await _narrowDocuments(documentIds, cancellationToken).ConfigureAwait(false);
+                }
+
+                // Task 188 round 3 slice C: for an external caller, a hit on a table that derives from a document
+                // (sprk_analysis; sprk_analysisoutput through its analysis) is dropped silently when its source document is
+                // hidden or cannot be decided. The hits' source links are read BY ID as the user (one batched read per table
+                // and level), then the hide-only overload decides every source document of the page APP-ONLY in ONE call.
+                // A hit with no source document is unaffected. A fault throws into the error result below (no data).
+                var derivedSources = new Dictionary<string, IReadOnlyDictionary<Guid, IReadOnlyList<Guid>>>(StringComparer.OrdinalIgnoreCase);
+                IReadOnlySet<Guid>? hiddenSources = null;
+                var derivedHits = hits.Where(h => ExternalCallerCommunicationGuard.IsDocumentDerivedTable(h.EntityName)).ToList();
+                if (derivedHits.Count > 0 && await IsExternalCallerAsync().ConfigureAwait(false))
+                {
+                    foreach (var table in derivedHits.GroupBy(h => h.EntityName, StringComparer.OrdinalIgnoreCase))
+                    {
+                        derivedSources[table.Key] = await ExternalCallerCommunicationGuard.ReadSourceDocumentIdsAsync(
+                            _dataverse, table.Key, table.Select(h => h.RecordId).ToList(), cancellationToken).ConfigureAwait(false);
+                    }
+
+                    hiddenSources = await _narrowDocuments.HiddenDocumentIdsAsync(
+                        derivedSources.Values.SelectMany(sources => sources.Values.SelectMany(documents => documents)), cancellationToken)
+                        .ConfigureAwait(false);
+                }
+
+                foreach (var (hit, entityName, recordId) in hits)
+                {
+                    if (narrowing is not null &&
+                        ExternalCallerCommunicationGuard.IsDocumentTable(entityName) &&
+                        !narrowing.IsVisible(recordId))
+                    {
+                        hiddenDocumentIds.Add(recordId);
+                        continue;
+                    }
+
+                    if (hiddenSources is not null &&
+                        ExternalCallerCommunicationGuard.IsDocumentDerivedTable(entityName) &&
+                        ExternalCallerCommunicationGuard.IsDerivedRowHidden(
+                            recordId, derivedSources.GetValueOrDefault(entityName), hiddenSources,
+                            out var source))
+                    {
+                        hiddenDerivedSources.Add(source);
                         continue;
                     }
 
@@ -264,37 +396,34 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
                 }
             }
 
-            stopwatch.Stop();
-            // ADR-015 / NFR-07: query LENGTH + entity filter + counts + duration ONLY.
-            // NEVER the query text (user-authored) or result content.
-            _logger.LogInformation(
-                "[dataverse.search_data][ADR-015] queryLen={QueryLen} entityFilter={EntityFilter} results={ResultCount} decisionId={DecisionId} durationMs={DurationMs}",
-                query.Length,
-                entityFilter.Count > 0 ? string.Join(",", entityFilter) : "(all)",
-                results.Count,
-                context.DecisionId,
-                stopwatch.ElapsedMilliseconds);
-
-            return ToolResult.Ok(
-                HandlerId, tool.Id, tool.Name,
-                data: new
-                {
-                    tool = DataverseToolNames.SearchData,
-                    results,
-                    count = results.Count,
-                    citations = citations.Select(c => new { path = c.ChunkId, entity = c.SourceName })
-                },
-                summary: results.Count > 0
-                    ? $"Found {results.Count} matching record(s) visible to the current user. Use dataverse.describe on a result path to read the full record."
-                    : "No matching records were found (within the records visible to the current user).",
-                confidence: 1.0,
-                execution: Timed(startedAt),
-                warnings: warnings) with
+            if (droppedHits > 0)
             {
-                Metadata = citations.Count > 0
-                    ? new Dictionary<string, object?> { [ToolResultMetadataKeys.Citations] = citations }
-                    : null
-            };
+                // ADR-015: entity + reason code only — never the query or hit content.
+                _logger.LogInformation(
+                    "[dataverse.search_data] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
+                    ExternalCallerCommunicationGuard.FamilyPrefix + "*", "family_hits_dropped", context.DecisionId);
+            }
+            if (hiddenDocumentIds.Count > 0)
+            {
+                // ADR-015: entity + reason codes with counts only — never the query or hit content.
+                _logger.LogInformation(
+                    "[dataverse.search_data] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
+                    ExternalCallerCommunicationGuard.DocumentTable,
+                    narrowing!.HiddenSummary(hiddenDocumentIds), context.DecisionId);
+            }
+            if (hiddenDerivedSources.Count > 0)
+            {
+                // ADR-015: reason codes with counts only — never the query, ids or hit content.
+                _logger.LogInformation(
+                    "[dataverse.search_data] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
+                    "document-derived",
+                    ExternalCallerCommunicationGuard.DerivedHiddenSummary(hiddenDerivedSources), context.DecisionId);
+            }
+
+            stopwatch.Stop();
+            return Completed(context, tool, query.Length,
+                entityFilter.Count > 0 ? string.Join(",", entityFilter) : "(all)",
+                results, citations, warnings, startedAt, stopwatch.ElapsedMilliseconds);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -310,6 +439,45 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
+
+    /// <summary>The success result (and its ADR-015 telemetry line) — shared by the search path and the ISS-010
+    /// "filter named only communication-family tables" path, so the two read identically to the model.</summary>
+    private ToolResult Completed(
+        ChatInvocationContext context, AnalysisTool tool, int queryLength, string entityFilterLabel,
+        List<object> results, List<ToolResultCitation> citations, List<string> warnings,
+        DateTimeOffset startedAt, long durationMs)
+    {
+        // ADR-015 / NFR-07: query LENGTH + entity filter + counts + duration ONLY.
+        // NEVER the query text (user-authored) or result content.
+        _logger.LogInformation(
+            "[dataverse.search_data][ADR-015] queryLen={QueryLen} entityFilter={EntityFilter} results={ResultCount} decisionId={DecisionId} durationMs={DurationMs}",
+            queryLength,
+            entityFilterLabel,
+            results.Count,
+            context.DecisionId,
+            durationMs);
+
+        return ToolResult.Ok(
+            HandlerId, tool.Id, tool.Name,
+            data: new
+            {
+                tool = DataverseToolNames.SearchData,
+                results,
+                count = results.Count,
+                citations = citations.Select(c => new { path = c.ChunkId, entity = c.SourceName })
+            },
+            summary: results.Count > 0
+                ? $"Found {results.Count} matching record(s) visible to the current user. Use dataverse.describe on a result path to read the full record."
+                : "No matching records were found (within the records visible to the current user).",
+            confidence: 1.0,
+            execution: Timed(startedAt),
+            warnings: warnings) with
+        {
+            Metadata = citations.Count > 0
+                ? new Dictionary<string, object?> { [ToolResultMetadataKeys.Citations] = citations }
+                : null
+        };
+    }
 
     internal static bool TryParseArgs(string? argsJson, out string query, out string? scope, out string? error)
     {

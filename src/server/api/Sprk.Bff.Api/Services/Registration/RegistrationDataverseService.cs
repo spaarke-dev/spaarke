@@ -293,7 +293,8 @@ public class RegistrationDataverseService : IDisposable
     }
 
     /// <summary>
-    /// Queries registration requests filtered by status.
+    /// Queries registration requests filtered by status, following <c>@odata.nextLink</c> until every page is read
+    /// (or <paramref name="top"/> rows are), so a status holding more than one page (5,000 rows) is read whole (#1363).
     /// </summary>
     public async Task<List<RegistrationRequestRecord>> GetRequestsByStatusAsync(
         RegistrationStatus status, int? top = null, CancellationToken ct = default)
@@ -313,12 +314,47 @@ public class RegistrationDataverseService : IDisposable
 
         _logger.LogDebug("GET registration requests by status {Status}", status);
 
-        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Get, url, ct);
-        var response = await _httpClient.SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
+        var records = new List<RegistrationRequestRecord>();
+        var seenLinks = new HashSet<string>(StringComparer.Ordinal);
+        string? next = url;
+        while (next is not null)
+        {
+            using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Get, next, ct);
+            using var response = await _httpClient.SendAsync(request, ct);
+            response.EnsureSuccessStatusCode();
 
-        var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
-        return result?.Value?.Select(MapToRecord).ToList() ?? new List<RegistrationRequestRecord>();
+            var page = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
+            if (page?.Value is not null)
+                records.AddRange(page.Value.Select(MapToRecord));
+
+            if (top.HasValue && records.Count >= top.Value)
+                return records.Take(top.Value).ToList();
+
+            next = page?.NextLink;
+            if (next is not null)
+            {
+                // The next page must come from the same Dataverse (same scheme, host and port; an absolute link only):
+                // the bearer token is never sent anywhere else, nor in cleartext.
+                var baseAddress = _httpClient.BaseAddress!;
+                if (!Uri.TryCreate(next, UriKind.Absolute, out var nextUri)
+                    || !string.Equals(nextUri.Scheme, baseAddress.Scheme, StringComparison.OrdinalIgnoreCase)
+                    || !string.Equals(nextUri.Host, baseAddress.Host, StringComparison.OrdinalIgnoreCase)
+                    || nextUri.Port != baseAddress.Port)
+                {
+                    throw new InvalidOperationException(
+                        $"Dataverse returned a next page link outside {baseAddress.GetLeftPart(UriPartial.Authority)}; the {status} list was not read whole.");
+                }
+
+                // A link already followed would loop forever (with no top, only a missing link ends the read).
+                if (!seenLinks.Add(nextUri.AbsoluteUri))
+                {
+                    throw new InvalidOperationException(
+                        $"Dataverse repeated a next page link; the {status} list was not read whole.");
+                }
+            }
+        }
+
+        return records;
     }
 
     /// <summary>
@@ -457,7 +493,7 @@ public class RegistrationDataverseService : IDisposable
     /// environment (<paramref name="targetDataverseUrl"/>, else <c>DATAVERSE_URL</c>) is a different one — a demo or
     /// customer target — has nothing here to evict, and is skipped. When either URL is unknown it evicts: an
     /// unnecessary eviction costs one re-read; a missing one leaves old access for the TTLs.</para>
-    /// <para><b>Works with no HttpContext</b> (<c>DemoExpirationService</c> is a background path): the eviction is
+    /// <para><b>Works with no HttpContext</b> (<c>DemoExpirationJob</c> is a background path): the eviction is
     /// tenant-agnostic. <b>Never fails the write</b> — it has already happened; the TTL is the backstop. Not bound to
     /// the caller's token, for the same reason.</para>
     /// </remarks>
@@ -677,12 +713,37 @@ public class RegistrationDataverseService : IDisposable
     /// <param name="systemUserId">Dataverse systemuser ID.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <param name="targetDataverseUrl">Target Dataverse URL. If null, uses the default (admin) environment.</param>
+    /// <remarks>Idempotent (#1363): a user who is not a member is left as they are — demo expiry repeats every cleanup step
+    /// on its next run when any one failed, so a second removal must succeed without a change.</remarks>
     public async Task RemoveUserFromTeamAsync(
         string teamName, Guid systemUserId, CancellationToken ct = default,
         string? targetDataverseUrl = null)
     {
         // Removal is never guarded: taking a member OUT of any team cannot widen access (task 144 guards additions).
         var (teamId, _) = await ResolveTeamAsync(teamName, ct, targetDataverseUrl);
+
+        // Idempotent: check whether the user is actually a member (the GraphUserService.RemoveFromGroupAsync shape).
+        using (var membership = await SendGetAsync(
+                   $"{TeamEntitySet}({teamId})/teammembership_association?$select=systemuserid&$filter=systemuserid eq {systemUserId}",
+                   ct, targetDataverseUrl))
+        {
+            membership.EnsureSuccessStatusCode();
+            var members = await membership.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
+            if (members?.Value is null)
+            {
+                // No collection is not "no members": the membership is unread, so the removal is not skipped on it.
+                throw new InvalidOperationException(
+                    $"Dataverse returned no membership collection for team {teamName}; systemuser {systemUserId} was not removed.");
+            }
+
+            if (members.Value.Count == 0)
+            {
+                _logger.LogInformation(
+                    "Systemuser {UserId} is not a member of team {TeamName}, nothing to remove", systemUserId, teamName);
+                return;
+            }
+        }
+
         var navigationUrl = $"{TeamEntitySet}({teamId})/teammembership_association({systemUserId})/$ref";
 
         _logger.LogInformation("Removing systemuser {UserId} from team {TeamName}", systemUserId, teamName);
@@ -709,7 +770,7 @@ public class RegistrationDataverseService : IDisposable
         finally
         {
             // Task 132 (C12): the OVER-GRANT direction — without this the removed user keeps every team-owned record
-            // for the identity + membership TTLs. Runs with no HttpContext too (DemoExpirationService).
+            // for the identity + membership TTLs. Runs with no HttpContext too (DemoExpirationJob).
             await EvictUserAccessAsync(systemUserId, targetDataverseUrl, "team remove").ConfigureAwait(false);
         }
     }
@@ -724,6 +785,8 @@ public class RegistrationDataverseService : IDisposable
     public async Task<Guid?> ResolveSystemUserIdByAadObjectIdAsync(
         string aadObjectId, CancellationToken ct = default, string? targetDataverseUrl = null)
     {
+        // includes disabled: the one caller is DemoExpirationService, which removes an EXPIRED demo user from the demo
+        // team after disabling their Entra account — that systemuser may already be disabled and must still resolve.
         var filter = $"azureactivedirectoryobjectid eq '{EscapeODataValue(aadObjectId)}'";
         var url = $"{SystemUserEntitySet}?$filter={filter}&$select=systemuserid&$top=1";
 

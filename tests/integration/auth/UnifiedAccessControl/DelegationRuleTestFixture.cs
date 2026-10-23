@@ -96,6 +96,37 @@ public class DelegationRuleTestFixture : WorkspaceTestFixture
     }
 
     /// <summary>
+    /// Task 099a: the active grant rows <c>GET /record-grants</c> lists, keyed by root record id. Only a SEEDED root is
+    /// answered by this table (or by <see cref="FaultingGrantRoots"/>); every other grant-row query falls through to the
+    /// mock's default, so no pre-099a test in a class using this fixture sees a different answer.
+    /// </summary>
+    private readonly ConcurrentDictionary<Guid, List<ExternalGrantRow>> _rootGrantRows = new();
+
+    /// <summary>Task 099a: roots whose grant-row query throws, as an unreachable Dataverse would.</summary>
+    public ConcurrentDictionary<Guid, bool> FaultingGrantRoots { get; } = new();
+
+    /// <summary>Task 099a: every (filter, select) the root grant-row query was sent for a seeded or faulting root.</summary>
+    public ConcurrentBag<(string? Filter, string? Select)> RootGrantQueries { get; } = new();
+
+    /// <summary>Task 099a: seeds the active grant rows of one root record for <c>GET /record-grants</c>.</summary>
+    internal void SeedRootGrantRows(Guid rootId, params ExternalGrantRow[] rows) => _rootGrantRows[rootId] = rows.ToList();
+
+    private bool AnswersRootGrantQuery(string? filter)
+        => filter is not null
+           && (_rootGrantRows.Keys.Any(id => filter.Contains(id.ToString(), StringComparison.OrdinalIgnoreCase))
+               || FaultingGrantRoots.Keys.Any(id => filter.Contains(id.ToString(), StringComparison.OrdinalIgnoreCase)));
+
+    private List<ExternalGrantRow> AnswerRootGrantQuery(string? filter, string? select, int? top)
+    {
+        RootGrantQueries.Add((filter, select));
+        if (FaultingGrantRoots.Keys.Any(id => filter!.Contains(id.ToString(), StringComparison.OrdinalIgnoreCase)))
+            throw new HttpRequestException("Simulated Dataverse failure reading the record's grant rows.");
+
+        var rootId = _rootGrantRows.Keys.First(id => filter!.Contains(id.ToString(), StringComparison.OrdinalIgnoreCase));
+        return _rootGrantRows[rootId].Take(top ?? int.MaxValue).ToList();
+    }
+
+    /// <summary>
     /// Task 185 slice F: <c>false</c> builds a host with NO <c>Ciam:*</c> configuration (only the portal URL) — a stamp
     /// without CIAM (<see cref="NoCiamHostInviteTests"/>).
     /// </summary>
@@ -163,6 +194,14 @@ public class DelegationRuleTestFixture : WorkspaceTestFixture
                     GrantEntitySet, It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string _, Guid id, string? _, CancellationToken _) =>
                     _grantRows.TryGetValue(id, out var row) ? row : null);
+
+            // Task 099a: GET /record-grants' one row read — answered only for a seeded (or faulting) root.
+            clientMock
+                .Setup(c => c.QueryAsync<ExternalGrantRow>(
+                    GrantEntitySet, It.Is<string?>(f => AnswersRootGrantQuery(f)), It.IsAny<string?>(),
+                    It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string _, string? filter, string? select, int? top, int? _, CancellationToken _) =>
+                    AnswerRootGrantQuery(filter, select, top));
 
             services.AddSingleton(clientMock.Object);
             DataverseClient = clientMock;

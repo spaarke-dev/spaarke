@@ -2,22 +2,30 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Json;
 using Azure.Core;
+using Azure.Messaging.ServiceBus;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
+using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Jobs;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Tests.AccessControl;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
@@ -147,6 +155,287 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         // ViewOnly still reads: the denial is the Create gate, not a broken route.
         using var list = await client.GetAsync($"/api/v1/external/{segment}/{RecordA}/documents");
         list.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    // =====================================================================
+    // Task 036 (FR-20, owner round 59 item 2): a caller whose access Dataverse decided (Read only on its own term) uploads
+    // only where Dataverse, asked as the caller, lets it attach — AppendTo on the record; for an invoice, on the invoice
+    // itself, before the secure-roots gate.
+    // =====================================================================
+
+    [Theory]
+    [MemberData(nameof(RootParents))]
+    public async Task Fr20_Upload_ReadAndWriteButNoAppendToInDataverse_Is403_AndWritesNothing(string segment)
+    {
+        _fixture.Principal = SystemUserReading(segment, RecordA, dataverseDecides: true);
+        _fixture.Probe.AnswerAppOnly(CallerUser, EntitySetOf(segment), RecordA, AccessRights.Read | AccessRights.Write);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/{segment}/{RecordA}/documents", FileForm());
+
+        upload.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        _fixture.Uploads.Should().BeEmpty("nothing reaches SPE unless Dataverse confirms the write");
+        _fixture.Data.Documents.Should().BeEmpty();
+        _fixture.Probe.AppOnlyCalls.Should().ContainSingle().Which.Should().Match<(Guid SystemUserId, string EntitySet, Guid RecordId)>(
+            c => c.SystemUserId == CallerUser && c.EntitySet == EntitySetOf(segment) && c.RecordId == RecordA, "Dataverse is asked about the target record");
+    }
+
+    [Theory]
+    [MemberData(nameof(RootParents))]
+    public async Task Fr20_Upload_AppendToInDataverse_Is201(string segment)
+    {
+        _fixture.Principal = SystemUserReading(segment, RecordA, dataverseDecides: true);
+        _fixture.Probe.AnswerAppOnly(CallerUser, EntitySetOf(segment), RecordA, AccessRights.Read | AccessRights.AppendTo)
+            .HoldsAppOnly(CallerUser, DocumentCreatePrivilege);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/{segment}/{RecordA}/documents", FileForm());
+
+        upload.StatusCode.Should().Be(HttpStatusCode.Created, await upload.Content.ReadAsStringAsync());
+        _fixture.Uploads.Should().ContainSingle();
+        _fixture.Data.Documents.Should().ContainSingle();
+        _fixture.Probe.AppOnlyPrivilegeCalls.Should().Equal(new[] { (CallerUser, DocumentCreatePrivilege) });
+    }
+
+    // Task 036 fix round 1 (F1): the document is written app-only, so AppendTo on the parent is not enough — the caller
+    // must also hold Create on sprk_document, as MDA would require of them.
+    private const string DocumentCreatePrivilege = "prvCreatesprk_Document";
+
+    [Theory]
+    [MemberData(nameof(RootParents))]
+    public async Task Fr20_Upload_AppendToButNoCreatePrivilegeOnSprkDocument_Is403_AndWritesNothing(string segment)
+    {
+        _fixture.Principal = SystemUserReading(segment, RecordA, dataverseDecides: true);
+        _fixture.Probe.AnswerAppOnly(CallerUser, EntitySetOf(segment), RecordA,
+            AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo | AccessRights.Delete);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/{segment}/{RecordA}/documents", FileForm());
+
+        upload.StatusCode.Should().Be(HttpStatusCode.Forbidden, "MDA would refuse a user without prvCreatesprk_Document");
+        _fixture.Uploads.Should().BeEmpty();
+        _fixture.Data.Documents.Should().BeEmpty();
+        _fixture.Probe.AppOnlyPrivilegeCalls.Should().Equal(new[] { (CallerUser, DocumentCreatePrivilege) });
+    }
+
+    // Task 036 fix round 3 (F3-2): Dataverse's CreateAccess on the parent is the table's create privilege, not leave to
+    // attach to this record. With the document Create privilege held and no AppendTo, the upload is refused.
+    [Theory]
+    [MemberData(nameof(RootParents))]
+    public async Task Fr20_Upload_DataverseCreateAccessWithoutAppendTo_Is403_AndWritesNothing(string segment)
+    {
+        _fixture.Principal = SystemUserReading(segment, RecordA, dataverseDecides: true);
+        _fixture.Probe.AnswerAppOnly(CallerUser, EntitySetOf(segment), RecordA, AccessRights.Read | AccessRights.Create)
+            .HoldsAppOnly(CallerUser, DocumentCreatePrivilege);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/{segment}/{RecordA}/documents", FileForm());
+
+        upload.StatusCode.Should().Be(HttpStatusCode.Forbidden, "CreateAccess is not AppendTo");
+        _fixture.Uploads.Should().BeEmpty();
+        _fixture.Data.Documents.Should().BeEmpty();
+    }
+
+    [Theory]
+    [MemberData(nameof(RootParents))]
+    public async Task Fr20_Upload_APrivilegeReadThatFaults_Is503_AndWritesNothing(string segment)
+    {
+        _fixture.Principal = SystemUserReading(segment, RecordA, dataverseDecides: true);
+        _fixture.Probe.AnswerAppOnly(CallerUser, EntitySetOf(segment), RecordA, AccessRights.Read | AccessRights.AppendTo)
+            .HoldsAppOnly(CallerUser, DocumentCreatePrivilege);
+        _fixture.Probe.AppOnlyPrivilegeFault = new HttpRequestException("RetrieveUserSetOfPrivilegesByNames failed");
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/{segment}/{RecordA}/documents", FileForm());
+
+        // Fix round 4 (F1): a failed privilege read adds no Create (NFR-01), and is a retry-able 503, not a denial.
+        await ShouldBeDataverseUnavailable(upload);
+        _fixture.Uploads.Should().BeEmpty();
+        _fixture.Data.Documents.Should().BeEmpty();
+    }
+
+    [Theory]
+    [MemberData(nameof(RootParents))]
+    public async Task Fr20_Upload_AProbeThatFaults_Is503_AndWritesNothing(string segment)
+    {
+        _fixture.Principal = SystemUserReading(segment, RecordA, dataverseDecides: true);
+        _fixture.Probe.AnswerAppOnly(CallerUser, EntitySetOf(segment), RecordA, AccessRights.Read | AccessRights.AppendTo);
+        _fixture.Probe.AppOnlyFault = new HttpRequestException("Dataverse unreachable");
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/{segment}/{RecordA}/documents", FileForm());
+
+        // Fix round 4 (F1): a failed confirmation adds no rights (NFR-01), and is a retry-able 503, not a denial.
+        await ShouldBeDataverseUnavailable(upload);
+        _fixture.Uploads.Should().BeEmpty();
+        _fixture.Data.Documents.Should().BeEmpty();
+    }
+
+    /// <summary>Task 036 fix round 4 (F1): every confirmed parent, against each way Dataverse can fail to answer — the rights
+    /// question, and the sprk_document Create privilege after Dataverse answered AppendTo.</summary>
+    public static TheoryData<string, string, string> ParentsByUnansweredShape()
+    {
+        var data = new TheoryData<string, string, string>();
+        foreach (var segment in new[] { "projects", "matters", "workassignments", "invoices" })
+        {
+            foreach (var shape in new[]
+                     {
+                         CallerRecordAccessProbeDouble.WireShape.Timeout, CallerRecordAccessProbeDouble.WireShape.Unknown,
+                         CallerRecordAccessProbeDouble.WireShape.ServerFault,
+                     })
+            {
+                data.Add(segment, shape, CallerRecordAccessProbeDouble.WireShape.Held);
+                data.Add(segment, CallerRecordAccessProbeDouble.WireShape.AppendTo, shape);
+            }
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(ParentsByUnansweredShape))]
+    public async Task Fr20_Upload_DataverseGivesNoAnswer_OverTheWire_Is503_AndWritesNothing(
+        string segment, string rights, string privilege)
+    {
+        _fixture.Principal = SystemUserReading(segment, RecordA, dataverseDecides: true);
+        _fixture.Probe.UseAppOnlyWire(rights, privilege);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/{segment}/{RecordA}/documents", FileForm());
+
+        await ShouldBeDataverseUnavailable(upload);
+        _fixture.Uploads.Should().BeEmpty("nothing reaches SPE on a question Dataverse did not answer");
+        _fixture.Data.Documents.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("projects", CallerRecordAccessProbeDouble.WireShape.Denial, CallerRecordAccessProbeDouble.WireShape.Held)]
+    [InlineData("invoices", CallerRecordAccessProbeDouble.WireShape.Denial, CallerRecordAccessProbeDouble.WireShape.Held)]
+    [InlineData("matters", CallerRecordAccessProbeDouble.WireShape.AppendTo, CallerRecordAccessProbeDouble.WireShape.NotHeld)]
+    public async Task Fr20_Upload_ARealDenial_OverTheWire_StaysA403_AndWritesNothing(string segment, string rights, string privilege)
+    {
+        _fixture.Principal = SystemUserReading(segment, RecordA, dataverseDecides: true);
+        _fixture.Probe.UseAppOnlyWire(rights, privilege);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/{segment}/{RecordA}/documents", FileForm());
+
+        upload.StatusCode.Should().Be(HttpStatusCode.Forbidden, await upload.Content.ReadAsStringAsync());
+        _fixture.Uploads.Should().BeEmpty();
+        _fixture.Data.Documents.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(CallerRecordAccessProbeDouble.WireShape.Timeout)]
+    [InlineData(CallerRecordAccessProbeDouble.WireShape.Unknown)]
+    [InlineData(CallerRecordAccessProbeDouble.WireShape.ServerFault)]
+    public async Task Fr20_List_DataverseGivesNoAnswer_OverTheWire_StillLists_WithCanCreateFalse(string shape)
+    {
+        // The list's canCreate is a UI affordance: an unanswered question offers no upload, and the list is still served.
+        _fixture.Principal = SystemUserReading("projects", RecordA, dataverseDecides: true);
+        _fixture.Probe.UseAppOnlyWire(shape);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.GetAsync($"/api/v1/external/projects/{RecordA}/documents");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await response.Content.ReadFromJsonAsync<ExternalDocumentListResponse>())!.CanCreate.Should().BeFalse();
+    }
+
+    private static async Task ShouldBeDataverseUnavailable(HttpResponseMessage response)
+    {
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, body);
+        System.Text.Json.JsonDocument.Parse(body).RootElement.GetProperty("reasonCode").GetString()
+            .Should().Be("sdap.access.dataverse_unavailable");
+        body.Should().Contain("nothing was written").And.Contain("Try again");
+    }
+
+    [Theory]
+    [MemberData(nameof(RootParents))]
+    public async Task Fr20_Upload_FlagOff_TheComposedRightsDecide_AndDataverseIsNeverAsked(string segment)
+    {
+        // The same Read-only caller with the flag off: Dataverse would say AppendTo, but nobody asks — still 403.
+        _fixture.Principal = SystemUserReading(segment, RecordA, dataverseDecides: false);
+        _fixture.Probe.AnswerAppOnly(CallerUser, EntitySetOf(segment), RecordA, AccessRights.Read | AccessRights.AppendTo);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/{segment}/{RecordA}/documents", FileForm());
+
+        upload.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        _fixture.Uploads.Should().BeEmpty();
+        _fixture.Probe.AppOnlyCalls.Should().BeEmpty("flag off is byte-equivalent: no Dataverse confirmation");
+    }
+
+    // Task 036 fix round 1 (F4, open question g settled): a Dataverse-decided caller's list reports the UPLOAD ROUTE's own
+    // answer as canCreate — one probe for the record in hand (+ the sprk_document privilege when Dataverse says AppendTo).
+
+    public static TheoryData<string, AccessRights, bool, bool> Fr20ListCanCreateCases()
+    {
+        var data = new TheoryData<string, AccessRights, bool, bool>();
+        foreach (var segment in new[] { "projects", "matters", "workassignments", "invoices" })
+        {
+            data.Add(segment, AccessRights.Read | AccessRights.Write | AccessRights.AppendTo, true, true);
+            data.Add(segment, AccessRights.Read | AccessRights.Write | AccessRights.AppendTo, false, false);
+            data.Add(segment, AccessRights.Read, true, false);
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(Fr20ListCanCreateCases))]
+    public async Task Fr20_List_CanCreate_IsTheUploadRoutesDataverseAnswer(
+        string segment, AccessRights dataverse, bool holdsCreate, bool expected)
+    {
+        _fixture.Principal = SystemUserReading(segment, RecordA, dataverseDecides: true);
+        _fixture.Probe.AnswerAppOnly(CallerUser, EntitySetOf(segment), RecordA, dataverse);
+        if (holdsCreate)
+        {
+            _fixture.Probe.HoldsAppOnly(CallerUser, DocumentCreatePrivilege);
+        }
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.GetAsync($"/api/v1/external/{segment}/{RecordA}/documents");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "Read is unchanged: Dataverse only widens a parent already held");
+        var list = await response.Content.ReadFromJsonAsync<ExternalDocumentListResponse>();
+        list!.CanCreate.Should().Be(expected);
+        _fixture.Probe.AppOnlyCalls.Should().ContainSingle().Which.Should().Match<(Guid SystemUserId, string EntitySet, Guid RecordId)>(
+            c => c.SystemUserId == CallerUser && c.EntitySet == EntitySetOf(segment) && c.RecordId == RecordA, "one probe, for the record in hand");
+    }
+
+    [Theory]
+    [MemberData(nameof(RootParents))]
+    public async Task Fr20_List_AProbeThatFaults_ReportsCanCreateFalse_AndStillLists(string segment)
+    {
+        _fixture.Principal = SystemUserReading(segment, RecordA, dataverseDecides: true);
+        _fixture.Probe.AnswerAppOnly(CallerUser, EntitySetOf(segment), RecordA, AccessRights.Read | AccessRights.AppendTo)
+            .HoldsAppOnly(CallerUser, DocumentCreatePrivilege);
+        _fixture.Probe.AppOnlyFault = new HttpRequestException("Dataverse unreachable");
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.GetAsync($"/api/v1/external/{segment}/{RecordA}/documents");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await response.Content.ReadFromJsonAsync<ExternalDocumentListResponse>())!.CanCreate.Should().BeFalse(
+            "a failed confirmation adds no rights (NFR-01)");
+    }
+
+    [Theory]
+    [MemberData(nameof(RootParents))]
+    public async Task Fr20_List_FlagOff_ReportsCanCreateFromTheComposedRights_AndAsksDataverseNothing(string segment)
+    {
+        _fixture.Principal = SystemUserReading(segment, RecordA, dataverseDecides: false);
+        _fixture.Probe.AnswerAppOnly(CallerUser, EntitySetOf(segment), RecordA, AccessRights.Read | AccessRights.AppendTo)
+            .HoldsAppOnly(CallerUser, DocumentCreatePrivilege);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var list = await client.GetFromJsonAsync<ExternalDocumentListResponse>($"/api/v1/external/{segment}/{RecordA}/documents");
+
+        list!.CanCreate.Should().BeFalse("flag off, the composed Read decides, exactly as before");
+        _fixture.Probe.AppOnlyCalls.Should().BeEmpty("flag off is byte-equivalent: no Dataverse confirmation");
+        _fixture.Probe.AppOnlyPrivilegeCalls.Should().BeEmpty();
     }
 
     // =====================================================================
@@ -848,6 +1137,153 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
     }
 
     // =====================================================================
+    // Task 063 (owner decision 2026-10-13): an external upload is queued for app-only indexing AND the document profile
+    // =====================================================================
+
+    [Theory]
+    [MemberData(nameof(AllParents))]
+    public async Task Upload_QueuesAppOnlyIndexing_AndTheDocumentProfile_OnceEach_ForTheNewDocument(string segment)
+    {
+        _fixture.Principal = CollaborateOn(segment, RecordA);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/{segment}/{RecordA}/documents", FileForm());
+
+        upload.StatusCode.Should().Be(HttpStatusCode.Created, await upload.Content.ReadAsStringAsync());
+        var created = await upload.Content.ReadFromJsonAsync<ExternalDocumentDto>();
+        var row = _fixture.Data.Documents.Should().ContainSingle().Subject;
+
+        // Indexing: the app-only seam, with the pointers the row was written with (not a second derivation of them).
+        var index = _fixture.IndexRequests.Should().ContainSingle().Subject;
+        index.DocumentId.Should().Be(created!.SprkDocumentid);
+        index.DriveId.Should().Be(row.DriveId);
+        index.ItemId.Should().Be(row.ItemId);
+        index.FileName.Should().Be("brief.pdf");
+        index.FileSizeBytes.Should().Be(3);
+        index.TenantId.Should().Be("test-tenant-id", "the Spaarke tenant from configuration, never the caller token's tid");
+        index.Source.Should().Be("ExternalUpload");
+
+        // Profile: one AppOnlyDocumentAnalysis job for the new document, under its document key.
+        var documentId = Guid.Parse(created.SprkDocumentid!);
+        var job = _fixture.SubmittedJobs.Should().ContainSingle().Subject;
+        job.JobType.Should().Be(AppOnlyDocumentAnalysisJobHandler.JobTypeName);
+        job.SubjectId.Should().Be(documentId.ToString());
+        job.IdempotencyKey.Should().Be(AppOnlyDocumentAnalysisJobHandler.ProfileIdempotencyKey(documentId));
+        job.Payload!.RootElement.GetProperty("DocumentId").GetGuid().Should().Be(documentId);
+        job.Payload.RootElement.GetProperty("Source").GetString().Should().Be("ExternalUpload");
+
+        // Both queues run under a bounded token of their own: a hung Service Bus must not hold the 201 (was None).
+        // And that token is NOT the request's own: HttpContext.RequestAborted is also cancellable and not yet cancelled, so
+        // the check above alone would pass a route that still queued under the caller's token (cancelled on disconnect).
+        var calls = _fixture.QueueTokens.ToList();
+        calls.Should().HaveCount(2);
+        calls.Should().OnlyContain(c => c.Queue.CanBeCanceled && !c.Queue.IsCancellationRequested);
+        calls.Should().OnlyContain(c => c.Request.HasValue && c.Request.Value.CanBeCanceled,
+            "the double must have seen the request's RequestAborted token for the comparison to mean anything");
+        calls.Should().OnlyContain(c => c.Queue != c.Request!.Value, "the queues must not run under HttpContext.RequestAborted");
+    }
+
+    // The production enqueuer returns Failed (it catches its own failures); the route logs that and still answers 201.
+    [Fact]
+    public async Task Upload_WhenTheIndexEnqueueReturnsFailed_IsLoggedWithTheDocumentAndParent_AndStill201()
+    {
+        _fixture.Principal = CollaborateOn("matters", RecordA);
+        _fixture.IndexReturnsFailed = true;
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/matters/{RecordA}/documents", FileForm());
+
+        upload.StatusCode.Should().Be(HttpStatusCode.Created, await upload.Content.ReadAsStringAsync());
+        var created = await upload.Content.ReadFromJsonAsync<ExternalDocumentDto>();
+        _fixture.SubmittedJobs.Should().ContainSingle("a failed index enqueue does not stop the profile");
+        _fixture.Logs.Entries.Should().Contain(e =>
+            e.Level == LogLevel.Warning && e.Message.Contains("[EXT-UPLOAD]") && e.Message.Contains("indexing")
+            && e.Message.Contains(created!.SprkDocumentid!) && e.Message.Contains(RecordA.ToString()));
+    }
+
+    // The production enqueuer catches and logs its own failures; this pins the route's defensive catch, so that no
+    // enqueuer (or a future one) that throws can turn a stored upload into a 500.
+    [Fact]
+    public async Task Upload_WhenTheIndexEnqueueThrows_IsLogged_AndStill201_AndTheProfileIsStillQueued()
+    {
+        _fixture.Principal = CollaborateOn("matters", RecordA);
+        _fixture.IndexFault = new InvalidOperationException("service bus down");
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/matters/{RecordA}/documents", FileForm());
+
+        upload.StatusCode.Should().Be(HttpStatusCode.Created, await upload.Content.ReadAsStringAsync());
+        var created = await upload.Content.ReadFromJsonAsync<ExternalDocumentDto>();
+        created!.SprkDocumentid.Should().Be(_fixture.Data.Documents.Should().ContainSingle().Subject.Id.ToString());
+        _fixture.IndexRequests.Should().ContainSingle();
+        _fixture.SubmittedJobs.Should().ContainSingle("an indexing failure does not stop the profile");
+        _fixture.Logs.Entries.Should().Contain(e =>
+            e.Level == LogLevel.Warning && e.Message.Contains("[EXT-UPLOAD]") && e.Message.Contains("indexing")
+            && e.Message.Contains(created.SprkDocumentid!));
+    }
+
+    [Fact]
+    public async Task Upload_WhenTheProfileSubmitThrows_IsLogged_AndStill201_AndIndexingIsStillQueued()
+    {
+        _fixture.Principal = CollaborateOn("projects", RecordA);
+        _fixture.JobFault = new InvalidOperationException("service bus down");
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/projects/{RecordA}/documents", FileForm());
+
+        upload.StatusCode.Should().Be(HttpStatusCode.Created, await upload.Content.ReadAsStringAsync());
+        var created = await upload.Content.ReadFromJsonAsync<ExternalDocumentDto>();
+        created!.SprkDocumentid.Should().Be(_fixture.Data.Documents.Should().ContainSingle().Subject.Id.ToString());
+        _fixture.IndexRequests.Should().ContainSingle();
+        _fixture.Logs.Entries.Should().Contain(e =>
+            e.Level == LogLevel.Warning && e.Message.Contains("[EXT-UPLOAD]") && e.Message.Contains("profile")
+            && e.Message.Contains(created.SprkDocumentid!));
+    }
+
+    [Fact]
+    public async Task Upload_ANameCollision_EnqueuesNothing()
+    {
+        _fixture.Principal = CollaborateOn("projects", RecordA);
+        _fixture.UploadFault = new SpaarkeStorageException("exists", statusCode: 409);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/projects/{RecordA}/documents", FileForm());
+
+        upload.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        _fixture.IndexRequests.Should().BeEmpty();
+        _fixture.SubmittedJobs.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Upload_WithNoUploadHandle_EnqueuesNothing()
+    {
+        _fixture.Principal = CollaborateOn("projects", RecordA);
+        _fixture.UploadReturnsNoHandle = true;
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/projects/{RecordA}/documents", FileForm());
+
+        upload.StatusCode.Should().Be(HttpStatusCode.BadGateway);
+        _fixture.IndexRequests.Should().BeEmpty();
+        _fixture.SubmittedJobs.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Upload_WhenTheDocumentCreateFails_EnqueuesNothing()
+    {
+        _fixture.Principal = CollaborateOn("projects", RecordA);
+        _fixture.Data.CreateFault = new HttpRequestException("dataverse down");
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/projects/{RecordA}/documents", FileForm());
+
+        ((int)upload.StatusCode).Should().BeGreaterThanOrEqualTo(500);
+        _fixture.Uploads.Should().ContainSingle("the bytes landed before the row create failed");
+        _fixture.IndexRequests.Should().BeEmpty();
+        _fixture.SubmittedJobs.Should().BeEmpty();
+    }
+
+    // =====================================================================
     // The list query and the create bind per parent (pure)
     // =====================================================================
 
@@ -1012,10 +1448,15 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
                          + "&$select=sprk_documentid,sprk_documentname,sprk_documenttype,sprk_filesummary,_sprk_project_value"
                          + ",_sprk_relatedproject_value,_sprk_matter_value,_sprk_relatedmatter_value"
                          + ",_sprk_workassignment_value,_sprk_relatedworkassignment_value,createdon"
+                         // R3 ISS-011 (#1886): the SPE pointers, read only to derive hasFile (never put on the wire).
+                         + ",sprk_graphdriveid,sprk_graphitemid"
                          + ",_sprk_createdbyperson_value,_sprk_createdbycontact_value"
                          // Task 187: the document's other parents, whose LIVE roots the rule takes in.
                          + ",_sprk_canonicaldocument_value,_sprk_invoice_value,_sprk_parentdocument_value,_sprk_relatedagreement_value"
                          + ",_sprk_relatedcommunication_value,_sprk_relatedevent_value,_sprk_relatedinvoice_value,_sprk_relatedtodo_value"
+                         // Task 188: the document's own Access Permission, which the document narrowing reads (its two
+                         // lookups, the related communication and the parent document, are already selected above).
+                         + ",sprk_accesspermission"
                          + "&$orderby=createdon desc,sprk_documentid asc");
     }
 
@@ -1097,6 +1538,26 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         };
     }
 
+    private static readonly Guid CallerUser = Guid.Parse("77777777-7777-7777-7777-777777777031");
+
+    /// <summary>Task 036: a licensed systemuser holding Read only on <paramref name="record"/> (for an invoice, on its
+    /// parent matter) — the own term a flag-on composition gives. <paramref name="dataverseDecides"/> is the flag.</summary>
+    private CallerPrincipal SystemUserReading(string segment, Guid record, bool dataverseDecides)
+    {
+        var reads = Principal(segment, record, ExternalAccessLevel.ViewOnly);
+        return new CallerPrincipal
+        {
+            Plane = CallerPrincipalPlane.Workforce,
+            SystemUserId = CallerUser,
+            ContactId = CallerContact,
+            Email = "licensed@customer.test",
+            ProjectAccess = reads.ProjectAccess,
+            MatterAccess = reads.MatterAccess,
+            WorkAssignmentAccess = reads.WorkAssignmentAccess,
+            DataverseConfirmsWrites = dataverseDecides,
+        };
+    }
+
     /// <summary>A workforce contact principal (a customer staff member with no Dataverse licence): a requester.</summary>
     private static CallerPrincipal WorkforceContact() => new()
     {
@@ -1170,26 +1631,74 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         /// <summary>Every SPE download, as (drive, item).</summary>
         public ConcurrentQueue<(string Drive, string Item)> Downloads { get; } = new();
 
+        /// <summary>Task 063: every app-only index request the upload route made.</summary>
+        public ConcurrentQueue<PostUploadIndexingRequest> IndexRequests { get; } = new();
+
+        /// <summary>Task 063: every job submitted to the job queue (the document profile).</summary>
+        public ConcurrentQueue<JobContract> SubmittedJobs { get; } = new();
+
+        /// <summary>
+        /// Task 063: for each post-upload queue call, the token it received and the token of the request being served
+        /// (<c>HttpContext.RequestAborted</c>, read through <see cref="IHttpContextAccessor"/> inside the double). A queue
+        /// token that equals the request's would be cancelled with the caller's disconnect.
+        /// </summary>
+        public ConcurrentQueue<(CancellationToken Queue, CancellationToken? Request)> QueueTokens { get; } = new();
+
+        /// <summary>Set to make the index enqueue throw (after recording the request).</summary>
+        public Exception? IndexFault { get; set; }
+
+        /// <summary>Set to make the index enqueue return <see cref="PostUploadIndexingResult.Failed"/> (the production enqueuer's failure shape).</summary>
+        public bool IndexReturnsFailed { get; set; }
+
+        /// <summary>Set to make the job submit throw (nothing is recorded).</summary>
+        public Exception? JobFault { get; set; }
+
+        /// <summary>Set to make the SPE upload throw.</summary>
+        public Exception? UploadFault { get; set; }
+
+        /// <summary>Set to make the SPE upload return no handle.</summary>
+        public bool UploadReturnsNoHandle { get; set; }
+
+        /// <summary>Every log entry the host wrote.</summary>
+        public CapturingLoggerProvider Logs { get; } = new();
+
         public CallerPrincipal? Principal
         {
             get => _principals.Principal;
             set => _principals.Principal = value;
         }
 
+        /// <summary>Task 036: the caller's own Dataverse rights, as the upload route asks a Dataverse-decided caller for them.</summary>
+        public CallerRecordAccessProbeDouble Probe { get; } = new();
+
         public void Reset()
         {
             Data.Reset();
+            Probe.Reset();
             Principal = null;
             Ownership.TeamId = RecordOwnershipResolverDouble.DefaultTeamId;
             Ownership.Requests.Clear();
             Uploads.Clear();
             Downloads.Clear();
+            IndexRequests.Clear();
+            SubmittedJobs.Clear();
+            QueueTokens.Clear();
+            IndexFault = null;
+            IndexReturnsFailed = false;
+            JobFault = null;
+            UploadFault = null;
+            UploadReturnsNoHandle = false;
+            Logs.Clear();
             _spe.Clear();
             _itemDrives.Clear();
             Rows.Clear();
             RowFaults.Clear();
             VerifyPointers = false;
         }
+
+        /// <summary>The served request's <c>RequestAborted</c> token, or null when no request is in flight on this flow.</summary>
+        private CancellationToken? RequestAbortedToken() =>
+            Services.GetRequiredService<IHttpContextAccessor>().HttpContext?.RequestAborted;
 
         /// <summary>The row the container resolver reads for (<paramref name="entity"/>, <paramref name="id"/>).</summary>
         private Entity RecordRow(string entity, Guid id)
@@ -1235,6 +1744,7 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
             {
                 services.AddScoped<ICallerPrincipalResolver>(_ => _principals);
                 services.AddScoped(_ => (ExternalDataService)Data);
+                services.AddScoped<CallerRecordAccessProbe>(_ => Probe); // task 036 (overrides the typed client)
                 services.RemoveAll<IRecordOwnershipResolver>();
                 services.AddSingleton<IRecordOwnershipResolver>(Ownership);
 
@@ -1275,6 +1785,11 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
                         It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<ConflictBehavior>(), It.IsAny<CancellationToken>()))
                     .Returns((string container, string path, Stream content, ConflictBehavior _, CancellationToken _) =>
                     {
+                        if (UploadFault is { } uploadFault)
+                            throw uploadFault;
+                        if (UploadReturnsNoHandle)
+                            return Task.FromResult<FileHandleDto?>(null);
+
                         Uploads.Enqueue((container, path));
                         using var buffer = new MemoryStream();
                         content.CopyTo(buffer);
@@ -1306,9 +1821,84 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
                     });
                 services.RemoveAll<IDocumentStorageResolver>();
                 services.AddSingleton(pointers.Object);
+
+                // Task 063: the two post-upload queues, recorded. The index enqueue records the request, then throws when
+                // IndexFault is set; the job submit throws when JobFault is set.
+                services.AddHttpContextAccessor();
+                var indexing = new Mock<IPostUploadIndexingEnqueuer>();
+                indexing.Setup(i => i.EnqueueAppOnlyIfApplicableAsync(It.IsAny<PostUploadIndexingRequest>(), It.IsAny<CancellationToken>()))
+                    .Returns((PostUploadIndexingRequest request, CancellationToken token) =>
+                    {
+                        IndexRequests.Enqueue(request);
+                        QueueTokens.Enqueue((token, RequestAbortedToken()));
+                        if (IndexFault is { } fault)
+                            return Task.FromException<PostUploadIndexingResult>(fault);
+                        return Task.FromResult(IndexReturnsFailed
+                            ? PostUploadIndexingResult.Failed("ServiceBusException")
+                            : PostUploadIndexingResult.Submitted(Guid.NewGuid()));
+                    });
+                services.RemoveAll<IPostUploadIndexingEnqueuer>();
+                services.AddSingleton(indexing.Object);
+
+                var serviceBusOptions = new Mock<IOptions<ServiceBusOptions>>();
+                serviceBusOptions.Setup(o => o.Value).Returns(new ServiceBusOptions { QueueName = "test-jobs" });
+                var jobs = new Mock<JobSubmissionService>(
+                    MockBehavior.Loose,
+                    serviceBusOptions.Object,
+                    NullLogger<JobSubmissionService>.Instance,
+                    new Mock<ServiceBusClient>().Object);
+                jobs.Setup(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
+                    .Returns((JobContract job, CancellationToken token) =>
+                    {
+                        if (JobFault is { } fault)
+                            return Task.FromException(fault);
+                        SubmittedJobs.Enqueue(job);
+                        QueueTokens.Enqueue((token, RequestAbortedToken()));
+                        return Task.CompletedTask;
+                    });
+                services.RemoveAll<JobSubmissionService>();
+                services.AddSingleton(jobs.Object);
+
+                services.AddSingleton<ILoggerProvider>(Logs);
             });
         }
     }
+
+    /// <summary>Captures every log entry (task 063: the post-upload queue failures are logged).</summary>
+    public sealed class CapturingLoggerProvider : ILoggerProvider
+    {
+        private readonly List<LogEntry> _entries = new();
+
+        public IReadOnlyList<LogEntry> Entries
+        {
+            get { lock (_entries) return _entries.ToList(); }
+        }
+
+        public void Clear()
+        {
+            lock (_entries) _entries.Clear();
+        }
+
+        public ILogger CreateLogger(string categoryName) => new CapturingLogger(this);
+
+        public void Dispose() { }
+
+        private sealed class CapturingLogger(CapturingLoggerProvider owner) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+                Func<TState, Exception?, string> formatter)
+            {
+                lock (owner._entries) owner._entries.Add(new LogEntry(logLevel, formatter(state, exception)));
+            }
+        }
+    }
+
+    /// <summary>One captured log entry.</summary>
+    public sealed record LogEntry(LogLevel Level, string Message);
 
     /// <summary>One stored document row: the payload the real builder produced and the creator it was stamped from.</summary>
     public sealed record StoredDocument(Guid Id, string Name, string DriveId, string ItemId,
@@ -1355,6 +1945,9 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         /// <summary>How many times an invoice's parents were read.</summary>
         public int InvoiceReads;
 
+        /// <summary>Task 063: set to make the document create fail the way an unreachable Dataverse does.</summary>
+        public Exception? CreateFault { get; set; }
+
         // ---- Task 187 fix round 2 (F1): the invoice gate's reads (GetInvoiceLookupsAsync, the flags, the live parents) ----
 
         /// <summary>Invoice id → the agreement it regards (<c>sprk_regardingagreement</c>). Absent = none.</summary>
@@ -1377,6 +1970,7 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
 
         public void Reset()
         {
+            CreateFault = null;
             lock (_documents) _documents.Clear();
             Requesters.Clear();
             DocumentReads.Clear();
@@ -1528,6 +2122,9 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
             DocumentParentKind parentKind, Guid parentId, ExternalUploadedFilePointers pointers, Guid owningTeamId,
             CallerPrincipal creator, CancellationToken ct = default)
         {
+            if (CreateFault is { } fault)
+                throw fault;
+
             var payload = BuildDocumentCreatePayload(parentKind, parentId, pointers, owningTeamId);
             StampCreator(payload, creator);
             var id = Guid.NewGuid();

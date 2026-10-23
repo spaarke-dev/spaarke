@@ -15,6 +15,8 @@ import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 const SPAARKE_TENANT = 'a221a95e-6abc-4434-aecc-e48338a1b2f2';
 const CLIENT_ID = '11111111-2222-3333-4444-555555555555';
+/** The CIAM tenant of the test build (vitest.config.ts VITE_MSAL_TENANT_ID): a partner account's tenant (#2166). */
+const CIAM_TID = '00000000-0000-0000-0000-000000000141';
 
 const CONTOSO = {
   customerKey: 'contoso',
@@ -61,11 +63,18 @@ function makeFakeInstance(name: string, behaviour: Behaviour, config: any): any 
     if (result?.account && !accounts.includes(result.account)) accounts.push(result.account);
     return result;
   };
-  const tokenFor = (req: any) => ({ accessToken: `token:${req.scopes[0]}`, account: accounts[0] ?? null });
+  // NAA-honest: the account is the host's; the token's own tenant is the tid claim (msal-browser 5.5.0).
+  const tokenFor = (req: any) => ({
+    accessToken: `token:${req.scopes[0]}`,
+    idTokenClaims: { tid: accounts[0]?.tenantId },
+    account: accounts[0] ?? null,
+  });
   return {
     name,
     config,
     initialize: vi.fn(async () => undefined),
+    handleRedirectPromise: vi.fn(async () => null),
+    addEventCallback: vi.fn(() => null),
     getActiveAccount: () => active,
     setActiveAccount: (a: any) => {
       active = a;
@@ -130,6 +139,8 @@ vi.mock('@microsoft/teams-js', () => ({
 }));
 
 function stubWorkforceEnv(): void {
+  // Task 075: the Teams strategy uses the multitenant home client (a different application from the A8 client).
+  vi.stubEnv('VITE_WORKFORCE_HOME_MSAL_CLIENT_ID', '66666666-7777-8888-9999-000000000001');
   vi.stubEnv('VITE_TEAMS_MSAL_CLIENT_ID', CLIENT_ID);
   vi.stubEnv('VITE_TEAMS_MSAL_TENANT_ID', SPAARKE_TENANT);
   vi.stubEnv('VITE_TEAMS_MSAL_BFF_SCOPE', scopeOf('99999999-8888-7777-6666-555555555555'));
@@ -631,20 +642,31 @@ describe('Same build, two backends: requests and token scopes go to whichever ba
 // ---------------------------------------------------------------------------------------------------------------
 
 describe('Both planes acquire tokens for the active backend’s scope', () => {
-  const workforceAccount = { homeAccountId: 'w', username: 'w@spaarke.test', tenantId: SPAARKE_TENANT };
+  // A9 (task 058): the browser workforce plane is the multitenant HOME plane. The sign-in asks for OIDC scopes only; the
+  // signed-in tenant (tid) picks the backend, and the BFF token request carries that entry's scope.
+  const FABRIKAM_TID = 'fabf0000-0000-4000-8000-00000000000f';
+  const workforceAccount = { homeAccountId: 'w', username: 'w@fabrikam.test', tenantId: FABRIKAM_TID };
 
-  it('workforce browser plane: login scope and MSAL token request are the selected backend’s; the BFF call goes to its host', async () => {
-    stubTwoBackends();
+  it('workforce home plane: the login scope is OIDC-only; the MSAL token request is the signed-in tenant’s backend scope; the BFF call goes to its host', async () => {
+    vi.stubEnv('VITE_WORKFORCE_HOME_MSAL_CLIENT_ID', '33333333-2222-3333-4444-555555555555');
+    vi.stubEnv(
+      'VITE_BACKENDS',
+      JSON.stringify([
+        { ...CONTOSO, homeTenantIds: ['c0c0c0c0-0000-4000-8000-000000000001'] },
+        { ...FABRIKAM, homeTenantIds: [FABRIKAM_TID] },
+      ])
+    );
     stubWorkforceEnv();
     h.accounts = [workforceAccount];
-    const { selection, msalAuth, bff } = await load();
+    const { msalAuth, bff } = await load();
     const plane = await import('../src/auth/standalone-plane');
 
-    selection.activateBackend('workforce', { ...FABRIKAM });
-    const resolved = plane.resolveStandalonePlane('workforce');
+    const prepared = await plane.prepareWorkforceHomePlane({ search: '' });
+    expect(prepared.kind).toBe('plane');
+    const resolved = (prepared as { plane: any }).plane;
     expect(resolved.bffScope).toBe(scopeOf(FABRIKAM.bffAppId));
     plane.applyStandalonePlane(resolved);
-    expect(msalAuth.getActiveLoginScope()).toBe(scopeOf(FABRIKAM.bffAppId));
+    expect(msalAuth.getActiveLoginScope()).toBe('openid');
 
     await bff.bffApiCall('/api/v1/external/me');
     const workforcePca = h.pcas.find(p => p.instance === resolved.instance)!;
@@ -658,7 +680,7 @@ describe('Both planes acquire tokens for the active backend’s scope', () => {
 
   it('CIAM plane uses the same seam: its scope is the selected backend’s api://{CIAM app id}/user_impersonation', async () => {
     stubTwoBackends();
-    h.accounts = [{ homeAccountId: 'c', username: 'c@partner.test', tenantId: '7052feba-bfc4-43e0-b09e-65014b429131' }];
+    h.accounts = [{ homeAccountId: 'c', username: 'c@partner.test', tenantId: CIAM_TID }];
     const { selection, msalAuth, bff } = await load();
     const plane = await import('../src/auth/standalone-plane');
     const msalConfig = await import('../src/auth/msal-config');
@@ -683,7 +705,7 @@ describe('Both planes acquire tokens for the active backend’s scope', () => {
 
   it('the default CIAM acquirer (no plane applied) also follows the active CIAM backend', async () => {
     stubTwoBackends();
-    h.accounts = [{ homeAccountId: 'c', username: 'c@partner.test', tenantId: 'x' }];
+    h.accounts = [{ homeAccountId: 'c', username: 'c@partner.test', tenantId: CIAM_TID }];
     const { selection, bff } = await load();
     selection.activateBackend('ciam', { ...FABRIKAM });
     await bff.bffApiCall('/api/v1/external/me');
@@ -693,7 +715,7 @@ describe('Both planes acquire tokens for the active backend’s scope', () => {
 
   it('acquireBffToken handed to a library as a callback ignores any argument: the scope is always the active backend’s', async () => {
     stubTwoBackends();
-    h.accounts = [{ homeAccountId: 'c', username: 'c@partner.test', tenantId: 'x' }];
+    h.accounts = [{ homeAccountId: 'c', username: 'c@partner.test', tenantId: CIAM_TID }];
     const { selection, msalAuth } = await load();
     selection.activateBackend('ciam', { ...FABRIKAM });
     const asCallback = msalAuth.acquireBffToken as unknown as (arg: string) => Promise<string>;
@@ -715,7 +737,7 @@ describe('Both planes acquire tokens for the active backend’s scope', () => {
     ],
   ])('the token seam refuses %s: nothing reaches acquireTokenSilent / NAA', async (_label, arg) => {
     stubTwoBackends();
-    h.accounts = [{ homeAccountId: 'c', username: 'c@partner.test', tenantId: 'x' }];
+    h.accounts = [{ homeAccountId: 'c', username: 'c@partner.test', tenantId: CIAM_TID }];
     const { selection, msalAuth } = await load();
     selection.activateBackend('ciam', { ...FABRIKAM });
     const seam = msalAuth.acquireActiveBffToken as unknown as (a: unknown) => Promise<string>;
@@ -726,7 +748,7 @@ describe('Both planes acquire tokens for the active backend’s scope', () => {
 
   it('the token seam passes a backend snapshot’s user_impersonation scope through to the acquirer (and only that)', async () => {
     stubTwoBackends();
-    h.accounts = [{ homeAccountId: 'c', username: 'c@partner.test', tenantId: 'x' }];
+    h.accounts = [{ homeAccountId: 'c', username: 'c@partner.test', tenantId: CIAM_TID }];
     const { selection, msalAuth } = await load();
     const active = selection.activateBackend('ciam', { ...FABRIKAM });
     await expect(msalAuth.acquireActiveBffToken(active)).resolves.toBe(`token:${scopeOf(FABRIKAM.bffAppId)}`);
@@ -735,7 +757,7 @@ describe('Both planes acquire tokens for the active backend’s scope', () => {
 
   it('a backend resolved for the workforce plane never yields a CIAM token request (plane mismatch fails closed)', async () => {
     stubTwoBackends();
-    h.accounts = [{ homeAccountId: 'c', username: 'c@partner.test', tenantId: 'x' }];
+    h.accounts = [{ homeAccountId: 'c', username: 'c@partner.test', tenantId: CIAM_TID }];
     const { selection, msalAuth } = await load();
     selection.activateBackend('workforce', { ...FABRIKAM });
     await expect(msalAuth.acquireBffToken()).rejects.toThrow(/workforce plane, not ciam/);
@@ -749,12 +771,14 @@ describe('Both planes acquire tokens for the active backend’s scope', () => {
     async () => {
       stubTwoBackends();
       stubWorkforceEnv();
+      // The NAA host account belongs to the Teams context tenant (task 075: a token for any other tenant is refused).
+      h.accounts = [{ homeAccountId: 'n', username: 'n@fabrikam.test', tenantId: SPAARKE_TENANT }];
       h.nestable = async config => makeFakeInstance('naa', {}, config);
       const { selection, msalAuth, bff } = await load();
       const { createTeamsHostAdapter } = await import('../src/host/TeamsHostAdapter');
 
       selection.activateBackend('workforce', { ...FABRIKAM });
-      await createTeamsHostAdapter().initialize();
+      await createTeamsHostAdapter(SPAARKE_TENANT).initialize();
       await bff.bffApiCall('/api/v1/external/me');
       await expect(msalAuth.acquireActiveBffToken()).resolves.toBe(`token:${scopeOf(FABRIKAM.bffAppId)}`);
 

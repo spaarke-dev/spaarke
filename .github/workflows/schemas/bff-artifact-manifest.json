@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://spaarke.dev/schemas/bff-artifact-manifest.json",
   "title": "BFF Artifact Manifest (latest.json)",
-  "description": "Schema for the latest.json manifest pushed alongside bff-api-{buildId}.zip to the platform provisioning-artifacts blob container by .github/workflows/deploy-bff-api.yml (customer-provisioning-orchestration-r1 task 116, design.md DS-4 §5). H9's handler (Sprk.Provisioning.ControlPlane task 132, Wave G-3) reads this file to resolve-verify-download-deploy the platform BFF artifact without shelling out to dotnet publish or re-running the r3 gates at provision time. The `gates` values mirror Sprk.Provisioning.ControlPlane.Handlers.BffDeploy.R3GateStatus (Passed/Skipped/Failed) exactly so task 132 can deserialize straight into that existing enum -- no new vocabulary.",
+  "description": "Schema for the latest.json manifest pushed alongside bff-api-{buildId}.zip to the platform provisioning-artifacts blob container by .github/workflows/publish-bff-artifact.yml (T186 L42; originally deploy-bff-api.yml, customer-provisioning-orchestration-r1 task 116, design.md DS-4 §5). H9's handler (Sprk.Provisioning.ControlPlane task 132, Wave G-3) reads this file to resolve-verify-download-deploy the platform BFF artifact without shelling out to dotnet publish or re-running the r3 gates at provision time. The `gates` values mirror Sprk.Provisioning.ControlPlane.Handlers.BffDeploy.R3GateStatus (Passed/Skipped/Failed) exactly so task 132 can deserialize straight into that existing enum -- no new vocabulary.",
   "type": "object",
   "additionalProperties": false,
   "required": ["buildId", "sha", "sizeBytes", "publishedAt", "artifactBlobName", "gates"],

@@ -14,7 +14,7 @@
 | **Build & Test (Debug)**: full suite, two-pass classifier | Mapped | Tier 2 `Full Unit Tests (Debug)`, 4 shards, same classifier (`scripts/ci/classify-and-retry.ps1`). Master failures now raise `tier2-master/full-unit-tests` (`master-ci-alert.yml`). |
 | Build & Test: coverage collection + upload | Mapped | `nightly-health.yml` `coverage-observation` (ADR-038: coverage is observation, never a gate). |
 | Build & Test: `Release` matrix entry (removed 2026-06-24; FR-B07 restore) | **Preserved** | `ci-standalone-checks.yml` `release-build`: Release build of the whole solution. Tests stay in Debug (Tier 2). |
-| Build & Test: `dotnet test` where the Router `bff` filter does not match (review fix F2) | **Preserved** | `ci-standalone-checks.yml` `unit-tests-outside-router` (ControlPlane.Tests, Core.Tests, Scheduling.Tests, Bff.Api.IntegrationTests, Spe.Integration.Tests) and `bff-seam-contract-tests` (the test classes in changed `tests/integration/{seam,contract,tenant,Shared}` / `tests/unit/domain` files, which compile into `Sprk.Bff.Api.Tests`). The cleaner fix is widening the Router `bff` filter (`src/server/services/**`, `tests/unit/**`, `tests/integration/**`), which needs the no-edit rule released. |
+| Build & Test: `dotnet test` where the Router `bff` filter does not match (review fix F2) | **Mapped** (2026-10-15, PR #1922) | Tier 2 `Full Unit Tests`, triggered by the Router's `dotnet_tests` filter; the interim standalone jobs `unit-tests-outside-router` / `bff-seam-contract-tests` were removed. Gap: BFF source-scan tests reading `src/client/**` / `src/solutions/**` run nightly only. |
 | **Eval Gate (Golden Utterances)** | Mapped | Tier 1 `eval-gate` (same command, blocking). |
 | **Client Quality**: PCF ESLint | **Preserved** | `ci-standalone-checks.yml` `pcf-eslint` (same command). Tier 2 `lint` runs it only when SpaarkeAi/BFF paths change, and `client-lint.yml` does not cover `src/client/pcf/**`, so a PCF-only PR would otherwise get no ESLint. |
 | Client Quality: Prettier check | Mapped (legacy check was vacuous) | It ran **after** `prettier --write`, so it could never fail. Tier 2 `lint` runs a real `prettier --check` on SpaarkeAi/BFF PRs; `.husky/pre-commit` formats staged files. A real check finds **48** unformatted files under `src/client/` today (local run 2026-10-14), which the legacy job hid. |
@@ -47,7 +47,7 @@ Both legacy files were **moved** to `docs/archive/workflows/` (GitHub does not e
 | `ci-standalone/compose-client-gate` | same | job not success | next green master run |
 | `ci-standalone/client-typecheck` | same | job not success | next green master run |
 | `ci-standalone/pcf-eslint` | same | job not success | next green master run |
-| `ci-standalone/unit-tests-outside-router`, `/bff-seam-contract-tests`, `/verdict-script-tests` | same | job not success | next green master run |
+| `ci-standalone/verdict-script-tests` (the `unit-tests-outside-router` / `bff-seam-contract-tests` alerts were retired with those jobs in #1922; failures now raise `tier2-master/full-unit-tests`) | same | job not success | next green master run |
 | `ci-standalone/trivy-fs` | same | the scan itself errored (findings never fail it) | next green master run |
 | `master-ci-alert/evaluation` | `master-ci-alert.yml` | the verdict script failed (GitHub API errors after 3 retries, script bug), so the two alerts above were not updated | next successful evaluation |
 

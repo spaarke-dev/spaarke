@@ -9,8 +9,8 @@
 //   test — no external processes).
 //
 // COVERAGE (POML acceptance criteria mapping):
-//   AC-1  SpaarkeOwned happy path       — Success + Cosmos advances to H2a
-//   AC-2  CustomerOwned happy w/ LH     — Success + H2a enqueued
+//   AC-1  SpaarkeOwned happy path       — Success + Cosmos records H1 complete
+//   AC-2  CustomerOwned happy w/ LH     — Success (records H1; no H2a dispatch)
 //   AC-3  CustomerOwned + LH missing    — Failure(Resumable, LighthouseDelegationMissing)
 //   AC-4  Subscription unreachable      — Failure(Resumable, SubscriptionUnreachable)
 //   AC-5  Idempotency (durable no-op)   — second call short-circuits Success
@@ -23,7 +23,6 @@
 //   - Run not found in Cosmos partition
 //   - HandlerId mismatch (defensive dispatch bug detector)
 //   - Optimistic-concurrency race on the success-write
-//   - Enqueue failure — H1 still returns Success (reconciler re-emits)
 //   - Idempotency key determinism (customerId → single key)
 //   - Tenancy-model normalization (Model1Shared / SpaarkeOwned / Model2Dedicated / CustomerOwned)
 // -----------------------------------------------------------------------------
@@ -74,13 +73,12 @@ public sealed class H1SubscriptionReadinessHandlerTests
     }
 
     [Fact]
-    public async Task AC1_SpaarkeOwnedHappyPath_ReturnsSuccessAndEnqueuesH2a()
+    public async Task AC1_SpaarkeOwnedHappyPath_ReturnsSuccess_RecordsH1Complete_AndDoesNotChainH2a()
     {
         var run = BuildRun(tenancy: "SpaarkeOwned");
         var repo = new FakeRepository(run, etag: "etag-1");
-        var enqueuer = new FakeEnqueuer();
         var probe = FakeProbe.AllPass();
-        var handler = NewHandler(repo, enqueuer, probe);
+        var handler = NewHandler(repo, probe);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -93,18 +91,12 @@ public sealed class H1SubscriptionReadinessHandlerTests
 
         // Cosmos state advanced.
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Running);
-        repo.LastWrittenRun.CurrentPhase.Should().Be("H2a");
+        // T186 L19: H1 records itself; the reconciler (not H1) dispatches H2a.
+        repo.LastWrittenRun.CurrentPhase.Should().Be("H1");
         repo.LastWrittenRun.CompletedPhases.Should().ContainSingle(cp => cp.Phase == "H1");
         repo.LastWrittenRun.GateStates.Should().ContainKey(SubscriptionReadinessGates.SubscriptionReachable);
         repo.LastWrittenRun.GateStates.Should().NotContainKey(SubscriptionReadinessGates.LighthouseDelegation,
             "SpaarkeOwned tenancy MUST NOT record a Lighthouse gate entry.");
-
-        // H2a enqueued.
-        enqueuer.Sent.Should().ContainSingle();
-        var next = enqueuer.Sent[0];
-        next.HandlerId.Should().Be("H2a");
-        next.RunId.Should().Be(RunId);
-        next.CustomerId.Should().Be(CustomerId);
     }
 
     // ---------- T228: the subscription must be this customer's alone (ADR-027) ----------
@@ -114,10 +106,9 @@ public sealed class H1SubscriptionReadinessHandlerTests
     {
         var run = BuildRun(tenancy: "SpaarkeOwned");
         var repo = new FakeRepository(run, etag: "etag-1");
-        var enqueuer = new FakeEnqueuer();
         var probe = FakeProbe.AllPass();
         probe.DedicationResult = new(false, "holds rg-spaarke-other-prod", null);
-        var handler = NewHandler(repo, enqueuer, probe);
+        var handler = NewHandler(repo, probe);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -126,7 +117,6 @@ public sealed class H1SubscriptionReadinessHandlerTests
         failure.RejectionCode.Should().Be(SubscriptionReadinessRejectionCodes.SubscriptionNotDedicated);
         probe.LastDedicationCustomerId.Should().Be(CustomerId);
         probe.ProviderRegistrationCalls.Should().Be(0, "provider registration writes to the subscription — never on another customer's");
-        enqueuer.Sent.Should().BeEmpty();
     }
 
     [Fact]
@@ -134,7 +124,7 @@ public sealed class H1SubscriptionReadinessHandlerTests
     {
         var probe = FakeProbe.AllPass();
         probe.DedicationResult = new(false, "listing failed (PRQ-S-04)", null, ListingFailed: true);
-        var handler = NewHandler(new FakeRepository(BuildRun(tenancy: "SpaarkeOwned"), etag: "etag-1"), new FakeEnqueuer(), probe);
+        var handler = NewHandler(new FakeRepository(BuildRun(tenancy: "SpaarkeOwned"), etag: "etag-1"), probe);
 
         var failure = (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None))
             .Should().BeOfType<HandlerResult.Failure>().Subject;
@@ -149,7 +139,7 @@ public sealed class H1SubscriptionReadinessHandlerTests
         foreach (var tenancy in new[] { "SpaarkeOwned", "CustomerOwned" })
         {
             var probe = FakeProbe.AllPass();
-            var handler = NewHandler(new FakeRepository(BuildRun(tenancy: tenancy), etag: "etag-1"), new FakeEnqueuer(), probe);
+            var handler = NewHandler(new FakeRepository(BuildRun(tenancy: tenancy), etag: "etag-1"), probe);
             (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None)).Should().BeOfType<HandlerResult.Success>();
             probe.DedicationCalls.Should().Be(1, "{0}: one subscription per customer applies to both models", tenancy);
         }
@@ -174,9 +164,8 @@ public sealed class H1SubscriptionReadinessHandlerTests
     {
         var run = BuildRun(tenancy: "CustomerOwned");
         var repo = new FakeRepository(run, etag: "etag-1");
-        var enqueuer = new FakeEnqueuer();
         var probe = FakeProbe.AllPass();
-        var handler = NewHandler(repo, enqueuer, probe);
+        var handler = NewHandler(repo, probe);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -187,7 +176,6 @@ public sealed class H1SubscriptionReadinessHandlerTests
         repo.LastWrittenRun!.GateStates.Should().ContainKey(SubscriptionReadinessGates.SubscriptionReachable);
         repo.LastWrittenRun.GateStates.Should().ContainKey(SubscriptionReadinessGates.LighthouseDelegation,
             "CustomerOwned tenancy MUST record a Lighthouse gate entry on success.");
-        enqueuer.Sent.Should().ContainSingle();
     }
 
     [Theory]
@@ -201,9 +189,8 @@ public sealed class H1SubscriptionReadinessHandlerTests
     {
         var run = BuildRun(tenancy: tenancyValue);
         var repo = new FakeRepository(run, etag: "etag-1");
-        var enqueuer = new FakeEnqueuer();
         var probe = FakeProbe.AllPass();
-        var handler = NewHandler(repo, enqueuer, probe);
+        var handler = NewHandler(repo, probe);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -218,13 +205,12 @@ public sealed class H1SubscriptionReadinessHandlerTests
     {
         var run = BuildRun(tenancy: "CustomerOwned");
         var repo = new FakeRepository(run, etag: "etag-1");
-        var enqueuer = new FakeEnqueuer();
         var probe = new FakeProbe
         {
             ReachabilityResult = new SubscriptionReadinessCheckResult(true, "ok", null),
             LighthouseResult = new SubscriptionReadinessCheckResult(false, "Lighthouse offer not accepted", null),
         };
-        var handler = NewHandler(repo, enqueuer, probe);
+        var handler = NewHandler(repo, probe);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -234,7 +220,6 @@ public sealed class H1SubscriptionReadinessHandlerTests
 
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
         repo.LastWrittenRun.CurrentPhase.Should().Be("H1");
-        enqueuer.Sent.Should().BeEmpty("no H2a enqueue on H1 failure.");
     }
 
     // ---------- AC-4 Subscription unreachable ----------
@@ -244,13 +229,12 @@ public sealed class H1SubscriptionReadinessHandlerTests
     {
         var run = BuildRun(tenancy: "CustomerOwned"); // Even in CustomerOwned, reachability fails first.
         var repo = new FakeRepository(run, etag: "etag-1");
-        var enqueuer = new FakeEnqueuer();
         var probe = new FakeProbe
         {
             ReachabilityResult = new SubscriptionReadinessCheckResult(false, "Subscription not found", null),
             LighthouseResult = new SubscriptionReadinessCheckResult(true, "unused", null),
         };
-        var handler = NewHandler(repo, enqueuer, probe);
+        var handler = NewHandler(repo, probe);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -260,7 +244,6 @@ public sealed class H1SubscriptionReadinessHandlerTests
 
         probe.LighthouseCalls.Should().Be(0,
             "Lighthouse check MUST short-circuit when reachability fails — no wasted ARM call.");
-        enqueuer.Sent.Should().BeEmpty();
     }
 
     // ---------- HANDLER-04 provider-registration (Wave 2 pre-dispatch remediation 2026-08-27) ----------
@@ -270,7 +253,6 @@ public sealed class H1SubscriptionReadinessHandlerTests
     {
         var run = BuildRun(tenancy: "SpaarkeOwned");
         var repo = new FakeRepository(run, etag: "etag-h04-ok");
-        var enqueuer = new FakeEnqueuer();
         var probe = FakeProbe.AllPass();
         var options = new SubscriptionReadinessOptions
         {
@@ -278,7 +260,7 @@ public sealed class H1SubscriptionReadinessHandlerTests
             PollInterval = TimeSpan.FromSeconds(1),
             PollTotalTimeout = TimeSpan.FromSeconds(30),
         };
-        var handler = NewHandler(repo, enqueuer, probe, options);
+        var handler = NewHandler(repo, probe, options);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -293,13 +275,12 @@ public sealed class H1SubscriptionReadinessHandlerTests
     {
         var run = BuildRun(tenancy: "SpaarkeOwned");
         var repo = new FakeRepository(run, etag: "etag-h04-skip");
-        var enqueuer = new FakeEnqueuer();
         var probe = FakeProbe.AllPass();
         var options = new SubscriptionReadinessOptions
         {
             RequiredResourceProviders = new List<string>(),
         };
-        var handler = NewHandler(repo, enqueuer, probe, options);
+        var handler = NewHandler(repo, probe, options);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -312,7 +293,6 @@ public sealed class H1SubscriptionReadinessHandlerTests
     {
         var run = BuildRun(tenancy: "SpaarkeOwned");
         var repo = new FakeRepository(run, etag: "etag-h04-fail");
-        var enqueuer = new FakeEnqueuer();
         var probe = new FakeProbe
         {
             ReachabilityResult = new SubscriptionReadinessCheckResult(true, "ok", null),
@@ -325,7 +305,7 @@ public sealed class H1SubscriptionReadinessHandlerTests
         {
             RequiredResourceProviders = new List<string> { "Microsoft.KeyVault", "Microsoft.Cache" },
         };
-        var handler = NewHandler(repo, enqueuer, probe, options);
+        var handler = NewHandler(repo, probe, options);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -334,7 +314,6 @@ public sealed class H1SubscriptionReadinessHandlerTests
         failure.RejectionCode.Should().Be(SubscriptionReadinessRejectionCodes.ProviderRegistrationFailed);
         failure.Diagnostic.Should().Contain("Microsoft.Cache=Registering");
         probe.LighthouseCalls.Should().Be(0, "provider-registration failure MUST short-circuit the Lighthouse branch");
-        enqueuer.Sent.Should().BeEmpty();
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
     }
 
@@ -343,13 +322,12 @@ public sealed class H1SubscriptionReadinessHandlerTests
     {
         var run = BuildRun(tenancy: "CustomerOwned");
         var repo = new FakeRepository(run, etag: "etag-h04-order");
-        var enqueuer = new FakeEnqueuer();
         var probe = FakeProbe.AllPass();
         var options = new SubscriptionReadinessOptions
         {
             RequiredResourceProviders = new List<string> { "Microsoft.KeyVault" },
         };
-        var handler = NewHandler(repo, enqueuer, probe, options);
+        var handler = NewHandler(repo, probe, options);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -375,9 +353,8 @@ public sealed class H1SubscriptionReadinessHandlerTests
             JobId = "prior-job",
         });
         var repo = new FakeRepository(run, etag: "etag-1");
-        var enqueuer = new FakeEnqueuer();
         var probe = FakeProbe.AllPass();
-        var handler = NewHandler(repo, enqueuer, probe);
+        var handler = NewHandler(repo, probe);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -387,7 +364,6 @@ public sealed class H1SubscriptionReadinessHandlerTests
         probe.ReachabilityCalls.Should().Be(0, "durable no-op MUST NOT invoke probes.");
         probe.LighthouseCalls.Should().Be(0);
         repo.WriteCount.Should().Be(0, "durable no-op MUST NOT rewrite Cosmos.");
-        enqueuer.Sent.Should().BeEmpty("durable no-op MUST NOT re-enqueue H2a.");
     }
 
     // ---------- AC-6 Missing tenantId (§ 4D I1) ----------
@@ -398,9 +374,8 @@ public sealed class H1SubscriptionReadinessHandlerTests
         var run = BuildRun(tenancy: "SpaarkeOwned");
         run.Parameters.NonSecret.Remove("tenantId"); // §4D I1 — no fallback allowed.
         var repo = new FakeRepository(run, etag: "etag-1");
-        var enqueuer = new FakeEnqueuer();
         var probe = FakeProbe.AllPass();
-        var handler = NewHandler(repo, enqueuer, probe);
+        var handler = NewHandler(repo, probe);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -410,7 +385,6 @@ public sealed class H1SubscriptionReadinessHandlerTests
 
         probe.ReachabilityCalls.Should().Be(0, "no ARM call may fire against a default-tenant fallback (§4D I1).");
         probe.LighthouseCalls.Should().Be(0);
-        enqueuer.Sent.Should().BeEmpty();
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
     }
 
@@ -422,9 +396,8 @@ public sealed class H1SubscriptionReadinessHandlerTests
         var run = BuildRun(tenancy: "SpaarkeOwned");
         run.Parameters.NonSecret.Remove("subscriptionId");
         var repo = new FakeRepository(run, etag: "etag-1");
-        var enqueuer = new FakeEnqueuer();
         var probe = FakeProbe.AllPass();
-        var handler = NewHandler(repo, enqueuer, probe);
+        var handler = NewHandler(repo, probe);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -443,9 +416,8 @@ public sealed class H1SubscriptionReadinessHandlerTests
     {
         var run = BuildRun(tenancy: tenancyValue);
         var repo = new FakeRepository(run, etag: "etag-1");
-        var enqueuer = new FakeEnqueuer();
         var probe = FakeProbe.AllPass();
-        var handler = NewHandler(repo, enqueuer, probe);
+        var handler = NewHandler(repo, probe);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -461,9 +433,8 @@ public sealed class H1SubscriptionReadinessHandlerTests
     public async Task RunNotFound_ReturnsFailure_RunNotFound()
     {
         var repo = new FakeRepository(runOrNull: null);
-        var enqueuer = new FakeEnqueuer();
         var probe = FakeProbe.AllPass();
-        var handler = NewHandler(repo, enqueuer, probe);
+        var handler = NewHandler(repo, probe);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -476,7 +447,7 @@ public sealed class H1SubscriptionReadinessHandlerTests
     [Fact]
     public async Task HandlerIdMismatch_Throws_InvalidOperationException()
     {
-        var handler = NewHandler(new FakeRepository(BuildRun(), "etag-1"), new FakeEnqueuer(), FakeProbe.AllPass());
+        var handler = NewHandler(new FakeRepository(BuildRun(), "etag-1"), FakeProbe.AllPass());
         var wrongEnvelope = new HandlerEnvelope
         {
             HandlerId = "H2a", // Wrong — expected H1.
@@ -504,34 +475,13 @@ public sealed class H1SubscriptionReadinessHandlerTests
         {
             NextReplaceResult = new ReplaceRunResult.Conflict(new ProvisioningRunReadResult(winningRun, "etag-2")),
         };
-        var enqueuer = new FakeEnqueuer();
         var probe = FakeProbe.AllPass();
-        var handler = NewHandler(repo, enqueuer, probe);
+        var handler = NewHandler(repo, probe);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.RejectionCode.Should().Be(SubscriptionReadinessRejectionCodes.ConcurrentWriteConflict);
-        enqueuer.Sent.Should().BeEmpty("no H2a enqueue when the success write LOST the ETag race.");
-    }
-
-    // ---------- Defensive: Enqueue failure still returns Success (reconciler re-emits) ----------
-
-    [Fact]
-    public async Task EnqueueFailure_StillReturnsSuccess_ReconcilerReEmits()
-    {
-        var run = BuildRun(tenancy: "SpaarkeOwned");
-        var repo = new FakeRepository(run, etag: "etag-1");
-        var enqueuer = new FakeEnqueuer { ThrowOnNext = new InvalidOperationException("SB broker unreachable") };
-        var probe = FakeProbe.AllPass();
-        var handler = NewHandler(repo, enqueuer, probe);
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        result.Should().BeOfType<HandlerResult.Success>(
-            "Cosmos state already records H1 complete; enqueue failure is a Wave-C5 reconciler concern.");
-        repo.LastWrittenRun!.CurrentPhase.Should().Be("H2a",
-            "Cosmos state MUST reflect H1-complete-CurrentPhase-H2a even when enqueue fails.");
     }
 
     // ---------- Idempotency-key determinism ----------
@@ -586,7 +536,7 @@ public sealed class H1SubscriptionReadinessHandlerTests
     [Fact]
     public void HandlerId_MatchesDesignDocConstant()
     {
-        var handler = NewHandler(new FakeRepository(BuildRun(), "etag-1"), new FakeEnqueuer(), FakeProbe.AllPass());
+        var handler = NewHandler(new FakeRepository(BuildRun(), "etag-1"), FakeProbe.AllPass());
         handler.HandlerId.Should().Be("H1", "value MUST match design.md §4.1 handler-catalog verbatim.");
     }
 
@@ -613,8 +563,7 @@ public sealed class H1SubscriptionReadinessHandlerTests
 
         var run = BuildRun(tenancy: "SpaarkeOwned");
         var repo = new FakeRepository(run, etag: "etag-1");
-        var enqueuer = new FakeEnqueuer();
-        var handler = NewHandler(repo, enqueuer, probe);
+        var handler = NewHandler(repo, probe);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -645,8 +594,7 @@ public sealed class H1SubscriptionReadinessHandlerTests
 
         var run = BuildRun(tenancy: "CustomerOwned");
         var repo = new FakeRepository(run, etag: "etag-1");
-        var enqueuer = new FakeEnqueuer();
-        var handler = NewHandler(repo, enqueuer, probe);
+        var handler = NewHandler(repo, probe);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -663,7 +611,6 @@ public sealed class H1SubscriptionReadinessHandlerTests
 
     private static H1SubscriptionReadinessHandler NewHandler(
         IProvisioningRunRepository repository,
-        IHandlerEnqueuer enqueuer,
         ISubscriptionReadinessProbe probe,
         SubscriptionReadinessOptions? options = null)
     {
@@ -679,7 +626,6 @@ public sealed class H1SubscriptionReadinessHandlerTests
         };
         return new H1SubscriptionReadinessHandler(
             repository,
-            enqueuer,
             probe,
             Microsoft.Extensions.Options.Options.Create(boundOptions),
             NullLogger<H1SubscriptionReadinessHandler>.Instance);
@@ -757,25 +703,6 @@ public sealed class H1SubscriptionReadinessHandlerTests
                 return Task.FromResult(configured);
             }
             return Task.FromResult<ReplaceRunResult>(new ReplaceRunResult.Success(run, "etag-next"));
-        }
-    }
-
-    // --- FakeEnqueuer ---
-    private sealed class FakeEnqueuer : IHandlerEnqueuer
-    {
-        public List<HandlerEnvelope> Sent { get; } = new();
-        public Exception? ThrowOnNext { get; set; }
-
-        public Task EnqueueAsync(HandlerEnvelope envelope, CancellationToken cancellationToken)
-        {
-            if (ThrowOnNext is not null)
-            {
-                var toThrow = ThrowOnNext;
-                ThrowOnNext = null;
-                throw toThrow;
-            }
-            Sent.Add(envelope);
-            return Task.CompletedTask;
         }
     }
 

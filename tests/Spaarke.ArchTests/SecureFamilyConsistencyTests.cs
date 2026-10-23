@@ -102,6 +102,50 @@ public class SecureFamilyConsistencyTests
         Assert.StartsWith("sprk_signal: has a lineage row but no kind \"child\" entry", Assert.Single(problems), StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The kinds a role-config entry may carry, with what each means. Only <c>child</c> takes part in the three-list
+    /// comparison above, so an entry of any other kind is outside it: an unknown or misspelt kind would drop a table out of
+    /// the comparison unseen. <c>grant</c> (UAC task 099b review round 3, F4): <c>sprk_externalrecordaccess</c>, owned by its
+    /// root's team (D-11) — a row the Secure team owns, but not a lineage child (nothing is filed under a grant, and the share
+    /// mirror never covers it), so it has no lineage or census-child row.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> RoleSetKinds = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["root"] = "carries sprk_issecure; the Secure team owns the record itself",
+        ["child"] = "a secure root's child: a lineage row, a census entry, re-owned and mirrored",
+        ["grant"] = "an external-access grant row: owned by its root's team (D-11), moved with the root, never mirrored",
+    };
+
+    [Fact(DisplayName = "UAC 099b r3 F4: every role-config entry has a known kind")]
+    public void EveryRoleConfigEntry_HasAKnownKind()
+    {
+        var unknown = UnknownKinds(File.ReadAllText(RoleConfigPath));
+
+        Assert.True(unknown.Count == 0,
+            "Role-config entries of a kind this guard does not know (only 'child' is compared with the lineage and the census, "
+            + "so any other kind must be listed in RoleSetKinds with its meaning): " + string.Join(", ", unknown));
+    }
+
+    [Fact(DisplayName = "UAC 099b r3 F4: negative control — an unknown kind fails, the grant kind passes")]
+    public void UnknownKinds_NegativeControl()
+    {
+        const string Json = """
+            {"tables":[
+              {"logicalName":"t_root","kind":"root"},{"logicalName":"t_child","kind":"child"},
+              {"logicalName":"t_grant","kind":"grant"},{"logicalName":"t_typo","kind":"chlid"},{"logicalName":"t_none"}]}
+            """;
+
+        Assert.Equal(new[] { "t_typo (kind 'chlid')", "t_none (kind '')" }, UnknownKinds(Json));
+    }
+
+    /// <summary>Every role-config entry whose kind is not in <see cref="RoleSetKinds"/>.</summary>
+    private static List<string> UnknownKinds(string json) =>
+        JsonNode.Parse(json)!["tables"]!.AsArray()
+            .Select(t => (Table: (string)t!["logicalName"]!, Kind: (string?)t["kind"] ?? string.Empty))
+            .Where(t => !RoleSetKinds.ContainsKey(t.Kind))
+            .Select(t => $"{t.Table} (kind '{t.Kind}')")
+            .ToList();
+
     /// <summary>The <c>logicalName</c> of every <c>tables[]</c> entry of kind <c>child</c> in the role config.</summary>
     private static IReadOnlyList<string> RoleSetChildTables(string json) =>
         JsonNode.Parse(json)!["tables"]!.AsArray()

@@ -274,3 +274,38 @@ describe('ConversationView — in-conversation compose (FR-06)', () => {
     expect(screen.getByRole('button', { name: 'Send message' })).toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// "External" | "Internal Only" tags (task 068; owner 2026-10-14)
+// ---------------------------------------------------------------------------
+
+describe('ConversationView - compose bar External / Internal Only tags', () => {
+  it('shows one "External" / "Internal Only" choice with External selected, and sends isInternalOnly: false', async () => {
+    const { fetchMock, store } = buildStatefulFetch();
+    renderView({ authenticatedFetch: fetchMock as unknown as ConversationViewProps['authenticatedFetch'] });
+
+    expect(screen.getAllByRole('radiogroup', { name: 'Who can see this message' })).toHaveLength(1);
+    expect(screen.getByRole('radio', { name: 'External' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Internal Only' })).not.toBeChecked();
+
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message' }), 'plain');
+    await userEvent.click(screen.getByRole('button', { name: 'Send message' }));
+
+    await waitFor(() => expect(store.sends).toHaveLength(1));
+    expect(store.sends[0]).toHaveProperty('isInternalOnly', false);
+  });
+
+  it('sends isInternalOnly: true when Internal Only is selected, and returns to External after the send', async () => {
+    const { fetchMock, store } = buildStatefulFetch();
+    renderView({ authenticatedFetch: fetchMock as unknown as ConversationViewProps['authenticatedFetch'] });
+
+    await userEvent.click(screen.getByRole('radio', { name: 'Internal Only' }));
+    expect(screen.getByRole('radio', { name: 'Internal Only' })).toBeChecked();
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message' }), 'staff only');
+    await userEvent.click(screen.getByRole('button', { name: 'Send message' }));
+
+    await waitFor(() => expect(store.sends).toHaveLength(1));
+    expect(store.sends[0]).toHaveProperty('isInternalOnly', true);
+    await waitFor(() => expect(screen.getByRole('radio', { name: 'External' })).toBeChecked());
+  });
+});

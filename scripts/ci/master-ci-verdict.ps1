@@ -294,11 +294,11 @@ $tier2Body = Get-OpenAlertBody 'tier2-master/full-unit-tests' $Tier2AlertBodyPat
 $shardNames = @($shardState.Values | ForEach-Object { $_.Shard })
 $carriedShards = @(Get-FailingName $tier2Body 'Shard' | Where-Object { $_ -notin $shardNames })
 if ($shardState.Count -eq 0 -and $carriedShards.Count -eq 0) {
-    $out.note += " No Tier 2 unit-test shard ran in a compiling master run in this window (they run only when the BFF changed); the tier2 alert is left as is."
+    $out.note += " No Tier 2 unit-test shard ran in a compiling master run in this window (they run only when the Router's dotnet_tests paths change: BFF, server services or .NET test projects); the tier2 alert is left as is."
 } else {
     $bad = @()
     foreach ($name in $carriedShards) {
-        $bad += "Shard ``$name`` was failing and has **not executed since** $windowLabel (shards run only when BFF paths change, and not in a run where master did not compile); its last known verdict is still not pass."
+        $bad += "Shard ``$name`` was failing and has **not executed since** $windowLabel (shards run only when the Router's dotnet_tests paths change, and not in a run where master did not compile); its last known verdict is still not pass."
     }
     foreach ($group in ($shardState.Values | Group-Object { $_.Run.id })) {
         $rid = $group.Name
@@ -332,7 +332,7 @@ if ($shardState.Count -eq 0 -and $carriedShards.Count -eq 0) {
             ($bad | ForEach-Object { "- $_" })
             ''
             'Tier 2 is advisory (it never blocks a merge), which is why this alert exists: otherwise nobody sees it.'
-            'The shard log names the failing tests. This alert closes itself once every shard listed passes on a later master run that changes BFF paths (shards run only then).'
+            'The shard log names the failing tests. This alert closes itself once every shard listed passes on a later master run that changes .NET code or test paths (shards run only then).'
         ) -join "`n"
     } else {
         $out.tier2_status = 'ok'

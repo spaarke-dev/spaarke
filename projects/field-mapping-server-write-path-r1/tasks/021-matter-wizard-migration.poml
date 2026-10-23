@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Migrate Create Matter wizard to the server write path; NFR-02 latency before/after (FR-16)</title>
+    <phase>3 W3 Product creators onto the service</phase>
+    <gate>020 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts/.tsx in Spaarke.UI.Components; tags include frontend, deploy, testing (TEST-MODIFYING override).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Reference migration with a clear pattern; the route and rules are delivered by 012/020, so no new architecture.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W3-wizards</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Wizards migrate one at a time, each live-verified before the next (spec FR-16).</parallel-reason>
+    <deps>020</deps>
+    <tags>frontend, fluent-ui, bff-api, field-mapping, deploy, testing</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Migrate the Create Matter wizard so it creates through POST /api/v1/child-records/sprk_matter sending only user-entered values, with no applyFieldMappings and no client-generated matter number. Measure the wizard create p95 on dev before changing code and after, and report the delta (NFR-02). This is the reference migration for 022-029.</prompt>
+  <role>SPAARKE platform developer, React 18 / Fluent UI v9 code pages, Dataverse. Follow ADRs strictly.</role>
+  <goal>matterService.createMatter no longer calls applyFieldMappings or generates {typeCode}-{random6}; the entity payload holds only user-entered values; the create goes through the BFF child-records adapter; mapped fields appear on first load; owner = team (FR-09); the p95 delta is measured and within +500 ms or escalated.</goal>
+
+  <context>
+    <background>spec.md FR-16, NFR-02, I-11 (autonumber, owner decision 2026-10-02 task 076). The service builds the entity, generates a matter number from the Matter Type code at ~:257-269, calls applyFieldMappings at ~:322 and creates through the injected dataService (Xrm) at ~:337. The wizard component already imports withBffChildWrites (CreateMatterWizard.tsx ~:48, used ~:628). Hosts: src/solutions/CreateMatterWizard/src/main.tsx (web resource sprk_creatematterwizard) and the SpaarkeAi QuickStartModal in-app host.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts (number generation ~:257-269 REMOVED; applyFieldMappings ~:322 REMOVED; createRecord ~:337 to BFF adapter)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/CreateMatterWizard.tsx (dataService wiring ~:628 via withBffChildWrites; createRecord ~:704)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/__tests__/matterService.fieldMapping.test.ts (rewrite: payload contains only user-entered values; no mapping call)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/__tests__/matterService.cascade.test.ts (keep passing; adjust only if it asserts applyFieldMappings)</file>
+      <file role="modify">src/solutions/CreateMatterWizard/src/main.tsx (code-page host; only if it constructs the data service)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/utils/adapters/bffChildWriteAdapter.ts (createChildRecordViaBff ~:184; createRecordViaBffWithWarnings ~:198; withBffChildWrites ~:299)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordTableRules.cs (created by task 012; Matter row: autonumber column, server defaults, owner rule)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/eventService.ts (existing withBffChildWrites create ~:384 to copy the call shape)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="complete">Route accepts sprk_matter/sprk_project and mappingSource.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: this wizard only. One wizard per task, live-verified on dev before the next starts (spec FR-16). Do not edit another wizard's files or bffChildWriteAdapter.ts beyond what task 020 delivered; if the adapter needs a change, stop and escalate.</constraint>
+    <constraint source="project">Scope: the create payload. The wizard sends ONLY values the user entered or picked (plus the filing/regarding keys the route needs). It must not call applyFieldMappings, read a mapping profile or pre-fill mapped fields; mapping, owner, search-index and I-1 stamp are applied by the server (FR-02, FR-06, FR-09, FR-10).</constraint>
+    <constraint source="ADR-012">Scope: the shared UI library. Edits stay in Spaarke.UI.Components (or the named package) and the wizard's code-page host; no copy of shared logic into the host.</constraint>
+    <constraint source="ADR-021">Scope: any UI touched by this task. Fluent v9 tokens only, no hard-coded colors, dark mode must render correctly.</constraint>
+    <constraint source="project">Scope: deployment. Deploy through the code-page-deploy skill (build with the host's own npm script, never a hand-edited web resource). Rollback is redeploying the previous bundle; no runtime flag is added (spec rollout decision).</constraint>
+    <constraint source="CLAUDE.md §9">Scope: auth. The wizard sends no owner, owning-team or impersonation value; the BFF decides ownership from the caller (FR-09). The route stays authenticated (existing authenticatedFetch).</constraint>
+    <constraint source="project">Scope: matter number. The client stops generating sprk_matternumber entirely; the platform autonumber supplies it (I-11). The Matter Type code lookup that fed it may remain only if another field still needs it.</constraint>
+    <constraint source="project">Scope: NFR-02 measurement. p95 of 'Finish click to record id' is measured on dev BEFORE any code change (at least 20 creates, same user, parent and network), then AFTER deploy; method and numbers go in notes/nfr02-matter-p95.md.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Create Matter wizard; BFF child-records adapter; autonumber</topic>
+    <files>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/webresource.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Lookup bind / option-set value shapes the payload still uses for user-entered fields.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; read spec FR-16 (and FR-16, NFR-02 and I-11), the create-surface inventory in notes/design-review-2026-10-19.md, CreateMatterWizard/matterService.ts, and the existing tests listed in relevant-files. Re-grep the line numbers cited here before editing (they are approximate).</step>
+    <step order="1">BEFORE touching code: on dev, measure the Matter wizard create p95 (click Finish to record id) over at least 20 creates using performance.mark in devtools or the network panel; record method and raw numbers in notes/nfr02-matter-p95.md.</step>
+    <step order="2">Inventory every key the service puts on `entity` (object literal and `entity[...] =` assignments in matterService.ts). Classify each as user-entered or client default. List the client defaults in the task notes and confirm each is a server table rule in the Matter row of the task-012 registry (RecordTableRules.cs); a default missing there is added to the registry (small, scoped server edit) or dropped, never kept on the client.</step>
+    <step order="3">Delete the {typeCode}-{random6} generation (~:257-269) so sprk_matternumber is never sent.</step>
+    <step order="4">Delete the applyFieldMappings call (~:322) and its import (~:34), plus any code that only consumed its result (warnings, mapped-key tracking).</step>
+    <step order="5">Create via the BFF adapter (withBffChildWrites / createChildRecordViaBff) instead of the injected Xrm dataService (~:337); pass mappingSource only when the filed-under parent differs from the intended mapping source (grep the wizard for the parent/regarding choice); surface route warnings through the existing warnings path.</step>
+    <step order="6">Rewrite matterService.fieldMapping.test.ts: assert the payload passed to the adapter contains only user-entered keys, no sprk_matternumber, and applyFieldMappings is never imported or called.</step>
+    <step order="7">Build the shared library and src/solutions/CreateMatterWizard; run jest; deploy with the code-page-deploy skill (sprk_creatematterwizard); do the live dev check: mapped fields present on first load, user value kept, owner = owning team (FR-09), number from autonumber.</step>
+    <step order="8">Re-measure p95 on dev with the same method; record before, after and delta in notes/nfr02-matter-p95.md; if the delta is above +500 ms, escalate (do not add profile caching without sign-off).</step>
+    <step order="9">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="10">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the p95 delta is above +500 ms, STOP and escalate per spec NFR-02 / design §4 (profile caching is an owner decision).</trigger>
+    <trigger>If the autonumber column is not configured on dev (matter created with an empty number), STOP: schema is out of scope here.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Matter wizard renders"><steps><step>Open the Matter wizard code page on dev from its launch command</step><step>Step through to the last step</step></steps><expected>All steps render with no console errors; Fluent v9 styling intact.</expected></test>
+    <test name="Matter create flow"><steps><step>Fill the required fields and click Finish</step></steps><expected>The record is created through POST /api/v1/child-records/{table}; the success state shows the new record; no direct Xrm.WebApi create call for the table. The Matter number comes from the platform autonumber, not the client.</expected></test>
+    <test name="Mapped values visible on first load"><steps><step>Create the record under a parent that has an active field-mapping profile</step><step>Open the new record immediately (first load, no refresh or save)</step></steps><expected>Every field the active Mapping Profile maps from the parent is populated on the new record at first load; no client write filled them.</expected></test>
+    <test name="User value preserved"><steps><step>Type a value into a field the profile also maps</step><step>Finish and open the record</step></steps><expected>The user's own value is stored; the mapped value did not overwrite it (fill-only, FR-02).</expected></test>
+    <test name="ADR-021 dark mode"><steps><step>Switch the host to dark mode (theme toggle or prefers-color-scheme)</step><step>Open the wizard and step through every step</step></steps><expected>No unreadable text, no hard-coded light backgrounds, focus rings visible.</expected></test>
+  </ui-tests>
+
+  <tools><tool name="npm">Build/test the code page and shared library</tool><tool name="code-page-deploy">Deploy the wizard web resource to dev</tool><tool name="ui-test">Browser verification on dev</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/__tests__/matterService.fieldMapping.test.ts</output>
+    <output type="docs">projects/field-mapping-server-write-path-r1/notes/nfr02-matter-p95.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">matterService.ts contains no applyFieldMappings call or import and no matter-number generation; sprk_matternumber is never in the payload.</criterion>
+    <criterion testable="true">A jest test proves the payload sent to the adapter contains only user-entered values.</criterion>
+    <criterion testable="true">The create goes through the BFF child-records route (no direct Xrm create for sprk_matter).</criterion>
+    <criterion testable="true">notes/nfr02-matter-p95.md holds before and after p95 with method; the delta is &lt;= +500 ms or an escalation is recorded.</criterion>
+    <criterion testable="true">Each client default found is either in the Matter registry row or dropped, listed in the task notes.</criterion>
+    <criterion testable="true">Negative: with a user value and a mapped value for the same field, the user value is stored; a mapped field the user never touched is populated on first load of the new record; the wizard payload contains no key the user did not enter.</criterion>
+    <criterion testable="true">Deployed to dev via code-page-deploy; live check recorded in the task notes (mapped fields present on first load, user values kept, owner = owning team per FR-09); rollback bundle noted.</criterion>
+    <criterion testable="true">`applyFieldMappings` no longer appears in CreateMatterWizard/matterService.ts; jest for the shared library and the host build pass; no existing test outside this wizard changes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-16, NFR-02, I-11. Reference migration: later wizard tasks copy this task's payload-test and live-check shape. Hosts: sprk_creatematterwizard web resource and the in-app QuickStartModal.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

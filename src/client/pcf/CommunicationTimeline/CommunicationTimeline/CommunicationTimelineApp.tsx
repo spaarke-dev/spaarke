@@ -31,7 +31,7 @@ import { authenticatedFetch } from '@spaarke/auth';
 import { CommunicationTimeline, type CommunicationTimelineProps, cleanGuid, getXrm } from '@spaarke/ui-components';
 import { IInputs } from './generated/ManifestTypes';
 import { initializeAuth, resolveDataverseUrl } from './authInit';
-import { resolveThreadId } from './hostContext';
+import { resolveThreadId, resolveThreadIsPrivate } from './hostContext';
 import { getMsalClientId, getBffApiAppId, getApiBaseUrl, getTenantId } from '../../shared/utils/environmentVariables';
 
 // React 16 type seam: the shared lib's .d.ts is emitted against newer React
@@ -89,6 +89,19 @@ function getHostEntityName(): string | undefined {
     /* ignore */
   }
   return undefined;
+}
+
+function getHostThreadPrivacyState(): unknown {
+  // The thread form's own `sprk_privacystate` value - read from the form that is already loaded, never from
+  // Dataverse (task 068). `undefined` when the form does not carry the field.
+  // `any` view: typed XrmContext does not declare the members used below.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm = getXrm('page') as any;
+  try {
+    return xrm?.Page?.getAttribute?.('sprk_privacystate')?.getValue?.() ?? undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export interface ICommunicationTimelineAppProps {
@@ -179,6 +192,17 @@ export const CommunicationTimelineApp: React.FC<ICommunicationTimelineAppProps> 
     [hostEntityName, hostRecordId, threadLookupId]
   );
 
+  // "Internal Only" (task 068): a thread the host form says is Private locks the compose box's switch on.
+  // Read from the already-loaded form, never from Dataverse; unknown -> unlocked (the BFF floor covers it).
+  const threadIsPrivate = React.useMemo(
+    () =>
+      resolveThreadIsPrivate(
+        hostEntityName,
+        hostEntityName === 'sprk_communicationthread' ? getHostThreadPrivacyState() : undefined
+      ),
+    [hostEntityName]
+  );
+
   if (authError) {
     return (
       <div className={s.notice}>
@@ -215,6 +239,7 @@ export const CommunicationTimelineApp: React.FC<ICommunicationTimelineAppProps> 
       <div className={s.content}>
         <CommunicationTimelineR16
           threadId={threadId}
+          threadIsPrivate={threadIsPrivate}
           authenticatedFetch={authenticatedFetch}
           bffBaseUrl={bffBaseUrl}
           pollIntervalMs={POLL_INTERVAL_MS}

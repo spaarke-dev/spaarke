@@ -1564,7 +1564,7 @@ RUN PLAN
 
   Manual gates you MAY encounter mid-run:
     - Model 2 admin consent URL (H0.5) — customer admin clicks
-    - Azure quota bump (if H1 hits soft cap) — operator opens support ticket; advance via /gates/{gateId}/advance (SKILL-07 fix)
+    - Azure quota bump (if H1 hits soft cap) — operator opens support ticket; advance via /gates/{gateId}/advance once the condition is met — it re-runs the gate's verifier now (SKILL-07 fix; T186 L18)
     - SPE container replication wait (H8) — empirically near-instant per operator memory feedback_spe_container_timing; 25h fallback ceiling in the SKILL, rarely fires
 
   DESTRUCTIVE OPERATIONS: none in fresh-provisioning mode. Upgrade mode may
@@ -1738,9 +1738,9 @@ function Invoke-L2PollWithTokenRefresh {
 $run = Invoke-L2PollWithTokenRefresh -Uri "$l2Base/api/runs/$runId`?customerId=$encodedCustomerId" -Env $environment
 ```
 
-**Reconciler liveness check (EXEC-05)**: if 3 consecutive polls return identical `updatedAt` on the run doc AND the current handler is not one of the long-running ones (H2a bicep = 30min, H8 SPE 25h fallback, H12a AI-seed = 15min), fetch `$l2Base/healthz` to verify L2 is still up, then issue `POST /api/runs/{runId}/resume?customerId={cid}` (which per RunsEndpoints.cs re-enqueues the CurrentPhase envelope). This nudges a stuck reconciler; do NOT auto-retry if it doesn't unstick within another 3 polls — escalate as Fallback F3.
+**Reconciler liveness check (EXEC-05)**: if 3 consecutive polls return identical state AND the current handler is not one of the long-running ones (H2a bicep = 30min, H8 SPE 25h fallback, H12a AI-seed = 15min), fetch `$l2Base/healthz` to verify L2 is still up. If the run is `WaitingOnGate` and the gate's condition is met, `POST /api/runs/{runId}/gates/{gateId}/advance?customerId={cid}` re-dispatches the gate's verifier with a fresh attempt. A stuck `Running` run has no nudge: escalate as Fallback F3.
 
-**Bucket B MED#8 SESSION 18 clarification for EXEC-05 semantics** (customer-provisioning-orchestration-r1 adversarial e2e verify workflow wepdcb8we): Step 4b at line 1140/1337 documents `/resume` as "ONLY for retrying a Failed run per RunsEndpoints.cs:232-244". EXEC-05's use of `/resume` against a `Running` run is a documented DIVERGENCE from that contract, permitted because: (a) `RunsEndpoints.cs` PostResume does NOT gate on Status — it re-enqueues the CurrentPhase envelope regardless (verified against Reconciler liveness precedent, task 107); (b) the L2 dispatcher's Level-1 Service Bus dedup + Level-3 handler CompletedPhase check ensure the re-enqueued envelope is a no-op if the handler has already completed the current phase; (c) the retry counter mutation in HandlerOutcomeApplier (task 107) only fires on Failure branches, NOT on Running-branch re-dispatches, so EXEC-05 does NOT decrement any retry budget. If a future L2 change adds a status-gate to PostResume (e.g., rejecting non-Failed runs with 409), EXEC-05 breaks and this note must be removed. Verified 2026-08-27 against RunsEndpoints.cs:232-244 (no status gate present).
+**`/resume` is for `Failed` runs only (T186 L18, 2026-10-15).** It used to enqueue a control envelope no Worker handler took (dead-lettered — resume, cancel and gate-advance were all no-ops). It now re-takes the customer guard, sets the run `Running` and dispatches `currentPhase` with a fresh attempt, and returns 409 `run-not-resumable` for any other status. The earlier EXEC-05 use of `/resume` on a `Running` run is removed.
 
 Track TodoWrite entries for each handler as it enters/exits `Running`:
 - `Handler H2a (bicep-apply) — Running`
@@ -1971,8 +1971,9 @@ Interactive-mode sub-flows below assume a live operator; batch mode returns befo
 🔔 MANUAL GATE: Azure quota bump required (H1)
 
   Handler: H1 resource-group provisioning
-  Reason:  Target subscription hit soft cap on {vCPUs / P1v3 count / Storage GB /
-           whatever the specific quota is}.
+  Reason:  Target subscription hit soft cap on {App Service PremiumV3 workers /
+           Storage GB / whatever the specific quota is}. H0 does not check
+           App Service quota (no readable API; T186 L17), so it surfaces here.
 
   ACTION FOR OPERATOR:
     1. Open Azure Portal → Subscription → Usage + Quotas → filter by {quota-name}

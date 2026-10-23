@@ -4,7 +4,7 @@
     <title>Decide lane "Assign Task" creates a sprk_event of type Task; the no-budget rule offers Add To Do and Assign Work as Next steps (D-178, UAT round 1)</title>
     <phase>11 UAT</phase>
     <gate>startable (D-178, owner 2026-10-22)</gate>
-    <status>not-started</status>
+    <status>in-progress (steps 1-2 done on branch task/159-assign-task; steps 3-4 pending: merge, R3 deploy, owner OK, apply v2, dev proof; see notes/task-159-notes.md)</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds a catalog action and an executor in Sprk.Bff.Api (.cs) and a new policy version.</rigor-reason>
     <model-tier>sonnet</model-tier>

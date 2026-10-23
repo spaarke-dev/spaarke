@@ -29,13 +29,21 @@ namespace Sprk.Bff.Api.Services.Identity;
 /// <c>BriefingService.ResolveSystemUserIdAsync</c>'s caching approach. Reads/writes fail open — a cache
 /// error falls through to a live Dataverse resolve rather than failing the caller.
 /// </para>
+/// <para>
+/// <b>Disabled systemusers never resolve (issue #1576).</b> A disabled account keeps its oid, so every lookup that
+/// maps an oid to a systemuser — here and in any ad-hoc copy — filters <c>isdisabled = false</c>, or carries an
+/// explicit <c>includes disabled: &lt;reason&gt;</c> comment where resolving a disabled user is the point (for example a
+/// No Access list). Both directions here apply the filter. Known limit: the 10-minute cache below means a newly
+/// disabled user can still resolve until the entry expires. Enforced by: <c>SystemUserOidLookupDisabledGuardTests</c>
+/// (tests/Spaarke.ArchTests, source scan with a ratchet baseline).
+/// </para>
 /// </remarks>
 public interface ISystemUserIdentityResolver
 {
     /// <summary>
     /// Resolves the Azure AD <c>oid</c> for a Dataverse <paramref name="systemUserId"/> via the
-    /// <c>systemuser.azureactivedirectoryobjectid</c> column (ADR-028). Returns the oid string ("D" GUID
-    /// format), or <c>null</c> when the systemuser row is missing or has no AAD mapping.
+    /// <c>systemuser.azureactivedirectoryobjectid</c> column (ADR-028; disabled users excluded). Returns the oid
+    /// string ("D" GUID format), or <c>null</c> when the systemuser row is missing, disabled or has no AAD mapping.
     /// </summary>
     Task<string?> ResolveOidAsync(Guid systemUserId, CancellationToken ct = default);
 
@@ -149,6 +157,7 @@ public sealed class SystemUserIdentityResolver : ISystemUserIdentityResolver
             NoLock = true
         };
         query.Criteria.AddCondition(SystemUserIdColumn, ConditionOperator.Equal, systemUserId);
+        query.Criteria.AddCondition("isdisabled", ConditionOperator.Equal, false);
 
         var results = await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
         if (results.Entities.Count == 0)

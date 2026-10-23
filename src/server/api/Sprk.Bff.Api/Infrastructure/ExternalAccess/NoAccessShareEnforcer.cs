@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Infrastructure.Cache;
@@ -55,6 +56,12 @@ public static class NoAccessEnforcementReason
 
     /// <summary>N2 mechanism: Dataverse still admits the user with no share or team behind it — a role, its depth, or the business unit.</summary>
     public const string RoleOrBusinessUnit = "role-or-business-unit";
+
+    /// <summary>
+    /// N2 mechanism (#1620): the user OWNS the record. Ownership is access no share revoke removes — their direct share is
+    /// still removed (as them: Dataverse lets only the owning user revoke it), and the record must be re-owned to wall them.
+    /// </summary>
+    public const string UserOwnership = "user-ownership";
 }
 
 /// <summary>A direct share the enforcer removed and confirmed gone by read-back.</summary>
@@ -198,6 +205,7 @@ public sealed class NoAccessShareEnforcer
     private readonly IScheduledJobLease _recordLock;
     private readonly SecureChildShareSynchronizer _secureChildShares;
     private readonly IGenericEntityService _dataverse;
+    private readonly IOptionsMonitor<WorkforceIdentityOptions> _workforceIdentity;
     private readonly ILogger<NoAccessShareEnforcer> _logger;
 
     /// <param name="store">The enforcer's Dataverse reads.</param>
@@ -225,8 +233,10 @@ public sealed class NoAccessShareEnforcer
         IScheduledJobLease recordLock,
         SecureChildShareSynchronizer secureChildShares,
         IGenericEntityService dataverse,
+        IOptionsMonitor<WorkforceIdentityOptions> workforceIdentity,
         ILogger<NoAccessShareEnforcer> logger)
     {
+        _workforceIdentity = workforceIdentity ?? throw new ArgumentNullException(nameof(workforceIdentity));
         _store = store;
         _participations = participations;
         _identityStore = identityStore;
@@ -785,22 +795,25 @@ public sealed class NoAccessShareEnforcer
             return false;
         }
 
-        Guid? owningTeam = null;
-        var owningTeamRead = true;
+        // #1620: the owner — team OR user. A walled user who owns the record has their share revoked as them (Dataverse
+        // refuses that one app-only, 0x80040223) and their ownership reported; a team owner is checked for membership.
+        DataversePrincipalRef? owner = null;
         try
         {
-            owningTeam = await _store.ReadOwningTeamAsync(binding.EntitySet, binding.IdColumn, recordId, ct).ConfigureAwait(false);
+            owner = await _store.ReadOwnerAsync(binding.EntitySet, binding.IdColumn, recordId, ct).ConfigureAwait(false);
+            if (owner is null)
+                _logger.LogWarning("[NO-ACCESS-ENFORCE] Owner of {Type} {RecordId} read as neither a user nor a team.",
+                    logicalName, recordId);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
-            owningTeamRead = false;
             _logger.LogWarning(ex, "[NO-ACCESS-ENFORCE] Owner of {Type} {RecordId} unreadable.", logicalName, recordId);
         }
 
         var removedBefore = run.Removed.Count;
         foreach (var userId in users)
         {
-            await EnforceForUserAsync(logicalName, binding.EntitySet, recordId, userId, owningTeam, owningTeamRead,
+            await EnforceForUserAsync(logicalName, binding.EntitySet, recordId, userId, owner,
                 cacheTenants, run, ct).ConfigureAwait(false);
         }
 
@@ -932,8 +945,7 @@ public sealed class NoAccessShareEnforcer
         string entitySet,
         Guid recordId,
         Guid userId,
-        Guid? owningTeam,
-        bool owningTeamRead,
+        DataversePrincipalRef? owner,
         IReadOnlyCollection<string> cacheTenants,
         Run run,
         CancellationToken ct)
@@ -957,7 +969,7 @@ public sealed class NoAccessShareEnforcer
 
         if (direct != 0)
         {
-            var removal = await RemoveUnderRecordLockAsync(logicalName, entitySet, recordId, userId, cacheTenants, run, ct)
+            var removal = await RemoveUnderRecordLockAsync(logicalName, entitySet, recordId, userId, owner, cacheTenants, run, ct)
                 .ConfigureAwait(false);
             if (removal is null)
             {
@@ -973,7 +985,7 @@ public sealed class NoAccessShareEnforcer
             return; // S5 kept the share on purpose; residual access through it is the share itself
         }
 
-        await ReportResidualAccessAsync(logicalName, entitySet, recordId, userId, shares, owningTeam, owningTeamRead, run, ct)
+        await ReportResidualAccessAsync(logicalName, entitySet, recordId, userId, shares, owner, run, ct)
             .ConfigureAwait(false);
     }
 
@@ -1001,6 +1013,7 @@ public sealed class NoAccessShareEnforcer
         string entitySet,
         Guid recordId,
         Guid userId,
+        DataversePrincipalRef? owner,
         IReadOnlyCollection<string> cacheTenants,
         Run run,
         CancellationToken ct)
@@ -1051,7 +1064,7 @@ public sealed class NoAccessShareEnforcer
             }
 
             return await RemoveDirectShareAsync(
-                    logicalName, entitySet, recordId, userId, direct, shares, (lockId, grant.Token), cacheTenants, run, ct)
+                    logicalName, entitySet, recordId, userId, owner, direct, shares, (lockId, grant.Token), cacheTenants, run, ct)
                 .ConfigureAwait(false);
         }
         finally
@@ -1089,6 +1102,7 @@ public sealed class NoAccessShareEnforcer
         string entitySet,
         Guid recordId,
         Guid userId,
+        DataversePrincipalRef? owner,
         int direct,
         IReadOnlyList<DataversePrincipalAccess> shares,
         (string Id, string Token) recordLock,
@@ -1145,7 +1159,14 @@ public sealed class NoAccessShareEnforcer
         Exception? failure = null;
         try
         {
-            await _recordShare.RevokeAccessAsync(entitySet, recordId, DataversePrincipalRef.User(userId), ct).ConfigureAwait(false);
+            // #1620: named owner → the owning user's own share is revoked as them. An owner that could not be read leaves the
+            // app-only revoke: right for every non-owner, and refused by Dataverse for the owner — then not confirmed below
+            // (incomplete, retried), never reported removed.
+            if (owner is { } recordOwner)
+                await _recordShare.RevokeAccessAsync(entitySet, recordId, DataversePrincipalRef.User(userId), recordOwner, ct)
+                    .ConfigureAwait(false);
+            else
+                await _recordShare.RevokeAccessAsync(entitySet, recordId, DataversePrincipalRef.User(userId), ct).ConfigureAwait(false);
             after = await _recordShare.GetPrincipalAccessOrThrowAsync(logicalName, recordId, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
@@ -1154,7 +1175,10 @@ public sealed class NoAccessShareEnforcer
         }
         finally
         {
-            foreach (var tenant in cacheTenants)
+            // A9 (r3 task 048, 046 review K1): also every customer home directory — a linked user's home sign-in reads
+            // under its tid.
+            foreach (var tenant in ImpersonatedRootSetSource.EvictionTenants(
+                         cacheTenants, ImpersonatedRootSetSource.CustomerTenantIdsOrNone(_workforceIdentity, _logger)))
             {
                 await ImpersonatedRootSetSource.InvalidateForTenantAsync(_cache, tenant, userId, logicalName, _logger)
                     .ConfigureAwait(false);
@@ -1216,8 +1240,8 @@ public sealed class NoAccessShareEnforcer
 
     /// <summary>
     /// Owner N2 / criterion 7: what the user still reaches the record through after its direct share is gone — a team
-    /// share or team ownership of a team it belongs to, or Dataverse's own answer with nothing behind it (a role or the
-    /// business unit). Reported, never revoked. A check that cannot be completed is a failure, never "nothing left".
+    /// share or team ownership of a team it belongs to, its OWN ownership of the record (#1620), or Dataverse's own answer with
+    /// nothing behind it (a role or the business unit). Reported, never revoked. A check that cannot be completed is a failure, never "nothing left".
     /// </summary>
     private async Task ReportResidualAccessAsync(
         string logicalName,
@@ -1225,11 +1249,11 @@ public sealed class NoAccessShareEnforcer
         Guid recordId,
         Guid userId,
         IReadOnlyList<DataversePrincipalAccess> shares,
-        Guid? owningTeam,
-        bool owningTeamRead,
+        DataversePrincipalRef? owner,
         Run run,
         CancellationToken ct)
     {
+        Guid? owningTeam = owner is { Kind: DataversePrincipalKind.Team } t ? t.Id : null;
         var shareTeams = shares
             .Where(s => s.Principal.Kind == DataversePrincipalKind.Team && s.AccessRightsMask != 0)
             .Select(s => s.Principal.Id)
@@ -1237,7 +1261,15 @@ public sealed class NoAccessShareEnforcer
             .ToList();
         var teams = owningTeam is { } ot ? shareTeams.Append(ot).Distinct().ToList() : shareTeams;
 
+        // #1620: the walled user OWNS the record — access no revoke removes. Reported, so the operator can re-own it.
         var attributed = false;
+        if (owner == DataversePrincipalRef.User(userId))
+        {
+            attributed = true;
+            run.NotEnforceable.Add(new NoAccessNotEnforceable(userId, logicalName, recordId,
+                NoAccessEnforcementReason.UserOwnership, null));
+        }
+
         try
         {
             if (teams.Count > 0)
@@ -1271,7 +1303,7 @@ public sealed class NoAccessShareEnforcer
             return;
         }
 
-        if (!owningTeamRead)
+        if (owner is null)
         {
             run.Fail(logicalName, recordId, userId, "residual-access-unverifiable",
                 "The record's owner could not be read, so access through team ownership could not be checked. Try again.");

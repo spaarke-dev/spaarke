@@ -84,6 +84,11 @@ export interface ODataDocument extends CreatorStamps {
   createdon?: string | null;
   /** Display name of the record creator */
   'createdby@OData.Community.Display.V1.FormattedValue'?: string | null;
+  /**
+   * Whether the document has a file Download and Versions can serve (R3 ISS-011, #1886). `false` = a listed document
+   * with no file: those actions are hidden. Absent (an older BFF) is treated as `true`.
+   */
+  hasFile?: boolean;
 }
 
 /**
@@ -231,8 +236,10 @@ interface ODataCollectionResponse<T> {
    */
   truncated?: boolean;
   /**
-   * Document lists only (task 054 review): `true` when the caller holds Create on the parent, the right the upload route
-   * checks. The BFF always writes it on a document list; absent from every other collection.
+   * Whether the caller may create under the record the list is scoped to: the answer that record's create route gives.
+   * Document lists always carry it (task 054 review: the upload route's Create). To-do lists and a project's event list
+   * carry it only for a caller whose write access is decided per record (`/me` `writeAccessPerRecord`,
+   * unified-access-control-r2 task 036 fix round 1); absent otherwise.
    */
   canCreate?: boolean;
 }
@@ -246,6 +253,8 @@ interface ODataCollectionResponse<T> {
 export interface ListResult<T> {
   items: T[];
   truncated: boolean;
+  /** The BFF's `canCreate` for the record the list is scoped to, when it wrote one (task 036 fix round 1); else absent. */
+  canCreate?: boolean | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -325,7 +334,12 @@ function buildQueryString(options: ODataQueryOptions): string {
  */
 async function getCollection<T>(bffPath: string, _options: ODataQueryOptions = {}): Promise<ListResult<T>> {
   const response = await bffApiCall<ODataCollectionResponse<T>>(bffPath);
-  return { items: response.value ?? [], truncated: response.truncated === true };
+  return {
+    items: response.value ?? [],
+    truncated: response.truncated === true,
+    // Only when the BFF said (task 036 fix round 1): a missing member stays absent, never read as "cannot".
+    ...(typeof response.canCreate === 'boolean' ? { canCreate: response.canCreate } : {}),
+  };
 }
 
 /**

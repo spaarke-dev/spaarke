@@ -334,6 +334,8 @@ public sealed class GrantAccessNotifier
     /// <remarks>
     /// A binding on the WORKFORCE plane is an employee's work identity, not an external contact's CIAM account: it is never
     /// emailed as one (task 036 review K4). An oid with no plane marker is a pre-141 CIAM binding (<see cref="ContactBindingDecision.ReadBinding"/>).
+    /// A WorkforceHome binding (ADR-028 A9, r3 task 047) IS emailed: that contact registered through, and signs in to, the
+    /// same external portal the email links to.
     /// </remarks>
     private static bool IsOnboardedWithEmail(ContactBindingRow contact)
     {
@@ -675,8 +677,13 @@ public sealed class GrantAccessNotifier
     {
         // Never the person who gave the access. When the caller's systemuser cannot be resolved nobody is excluded: the
         // worst case is a granter told about their own share.
-        var granterId = await GrantExternalAccessEndpoint.ResolveGrantedBySystemUserIdAsync(
-            _dataverse, CallerResolution.ResolveObjectId(caller), _logger, CancellationToken.None);
+        // ADR-028 A9 / task 046 guard (d): a WorkforceHome principal's oid is the CUSTOMER directory's, so it is never
+        // compared with systemuser.azureactivedirectoryobjectid. No lookup, nobody excluded: a home caller is not one of
+        // the systemuser recipients by oid.
+        var granterId = WorkforcePrincipalResolver.IsWorkforceHomePrincipal(caller)
+            ? null
+            : await GrantExternalAccessEndpoint.ResolveGrantedBySystemUserIdAsync(
+                _dataverse, CallerResolution.ResolveObjectId(caller), _logger, CancellationToken.None);
         var recipients = candidates
             .Where(id => id != Guid.Empty && !string.Equals(id.ToString(), granterId, StringComparison.OrdinalIgnoreCase))
             .ToList();

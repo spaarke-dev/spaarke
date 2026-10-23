@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Inbound communication and document ingestion create through the system principal (FR-21 part b)</title>
+    <phase>3 W3 Product creators onto the service</phase>
+    <gate>019 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in Sprk.Bff.Api; tags include bff-api, communication, documents, ownership; inbound paths carry race-proof dedupe and documented ownership exceptions (data-mutation, security-adjacent); adds tests at KEEP paths (TEST-MODIFYING override).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Four ingestion creators with race-proof dedupe, unfiled-communication ownership exceptions and thread filing; judgment needed about what the service must support versus what stays in the ingestor.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W3-server</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>019</deps>
+    <tags>bff-api, communication, documents, ownership, testing</tags>
+    <estimated-effort>10-14 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Route inbound communication and document ingestion through `RecordCreationService` with the SYSTEM principal: `MessagingIngestor` (`Services/Communication/Channels/MessagingIngestor.cs`, create ~:265), `IncomingCommunicationProcessor` (`Services/Communication/IncomingCommunicationProcessor.cs`, communication via `CreateCommunicationRaceProofAsync` ~:874, attachment documents ~:1135/~:1170, archived .eml document ~:1365), `EmailAttachmentProcessor` (`Services/Email/EmailAttachmentProcessor.cs`, `_documentService.CreateDocumentAsync` ~:311) and `EmailUploadCaptureService` (`Services/Communication/EmailUploadCaptureService.cs`, `CreateCommunicationRaceProofAsync` ~:194). Unfiled communications keep the creator (registry exception); direct threads stay an exception; a census test lists each of the four as routed.</prompt>
+  <role>SPAARKE platform developer, .NET 10 BFF, inbound email/messaging ingestion and Dataverse ownership. Follow ADRs strictly.</role>
+  <goal>Inbound communications and the documents created from them are created by the service with the system principal and the standard invariants; the UNIQUE-key race-proof dedupe and the unfiled-communication creator-owner exception are preserved; the census lists each ingestor as routed.</goal>
+
+  <context>
+    <background>spec.md FR-21 (part b), FR-07, FR-11. Today: `MessagingIngestor` builds a `sprk_communication` with NO owner ("unfiled communications keep their creator as owner", owner round 10 item 8, 2026-10-03; Census: a Permanent waiver in `RecordOwnerAssignmentCensusTests`) and calls `_genericEntityService.CreateAsync` (~:265); `IncomingCommunicationProcessor` and `EmailUploadCaptureService` create communications through `ICommunicationDataverseService.CreateCommunicationRaceProofAsync`, whose UNIQUE key on the internet message id makes concurrent deliveries idempotent; attachment documents and the archived .eml document are created with `ApplyOwner(doc, owner)` ("owned like its communication") through `_genericEntityService.CreateAsync`; `EmailAttachmentProcessor` creates documents through `_documentService.CreateDocumentAsync`. Filing happens later via `IncomingAssociationResolver` (`UnfiledOwnership.KeepCreator`, ~:247 and ~:517) and `ReparentAsync`. UAC-r2 PR #2110 also edits `CommunicationService.cs`; do not edit that file in this task.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/Channels/MessagingIngestor.cs (create ~:265)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs (communication create ~:874; documents ~:1135, ~:1170, ~:1365; ApplyOwner)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Email/EmailAttachmentProcessor.cs (document create ~:311)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/EmailUploadCaptureService.cs (communication create ~:194)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordTableRules.cs (sprk_communication: KeepCreator-when-unfiled exception; direct-thread exception; sprk_document owned-like-communication rule; each with rationale)</file>
+      <file role="modify">tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs (list the four as routed; replace the Permanent waiver with the named registry exception; run /conflict-check, UAC-r2 also edits this file)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs (KeepCreator ~:247, ~:517)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs (system principal, tasks 013-016)</file>
+      <file role="canonical-reference">tests/integration/seam/Communication/EmailUploadCaptureSeamTests.cs</file>
+      <file role="canonical-reference">tests/integration/seam/Communication/MessagingSpineSeamTests.cs</file>
+      <file role="canonical-reference">tests/integration/seam/Communication/GoldenMisfileRegressionTests.cs</file>
+      <file role="new">tests/integration/data-mutation/RecordOwnership/IngestionThroughServiceTests.cs (each ingestor creates through the service; unfiled keeps creator; filed document owned like its communication; dedupe holds)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="019" status="required">W2 service deployed and reviewed.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008 (path A, spec ADR Tensions)">Scope: authorization. Ingestors are non-HTTP system callers; the system principal skips only the as-caller checks. Inbound filing authorization (who may file a message under a record) stays in the association resolver and the existing communication routes; the ingestors gain no new inline checks and lose none.</constraint>
+    <constraint source="ADR-019">Scope: failures. Ingestors keep their existing failure handling (message-level retry/dead-letter, per-attachment failure logging); a service refusal maps to the same handling as today's create failure; no raw upstream text is stored in a communication row's status fields.</constraint>
+    <constraint source="ADR-028">Scope: identity. System principal, app-only under the managed identity; `RequestedBy` is recorded only when a user is known (an upload by a user for `EmailUploadCaptureService`). Inbound external senders are never a principal. Unfiled communications keep the CREATOR (the app identity) per the accepted exception; do not assign a user.</constraint>
+    <constraint source="ADR-010">Scope: DI. Ingestors obtain the already-registered scoped service within their existing per-message scope; no new registration; no static service locator.</constraint>
+    <constraint source="ADR-036">Scope: job idempotency. The UNIQUE-key race-proof create (`CreateCommunicationRaceProofAsync`) is the dedupe contract: a concurrent duplicate delivery must still resolve to the existing communication id. The service must either support that contract (a documented create option) or the ingestor keeps calling the race-proof method for the communication row only (see escalation). Never retry blindly after an ambiguous failure (NFR-03).</constraint>
+    <constraint source="NFR-01 (spec)">Scope: ingestion creates. Fail closed: an unresolved owner for a FILED row refuses and writes nothing; an UNFILED communication takes the registry exception (creator), never a guessed owner. A message with no resolvable parent is never silently filed.</constraint>
+    <constraint source="NFR-08 / CLAUDE.md §8.5">Scope: coordination. UAC-r2 PR #2110 edits CommunicationService.cs and the census tests; run /conflict-check FIRST. This task must not edit CommunicationService.cs.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: BFF publish. Placement Justification in the PR; fresh-master publish-size delta per §10.4; `dotnet list package --vulnerable --include-transitive`; no package.</constraint>
+    <constraint source="ADR-038">Scope: tests added or modified. KEEP paths; no Mock&lt;HttpMessageHandler&gt;; no DI-registration tests. Existing seam tests change only to follow a moved dependency, never by weakening an assertion. Cover the stated contract plus the named edge cases only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Inbound communication ingestion; ownership exceptions; SPE document attachments</topic>
+    <files>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Create payload shapes, alternate-key handling.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; read spec FR-21 and the four ingestors; re-grep every `_genericEntityService.CreateAsync`, `CreateCommunicationRaceProofAsync` and `CreateDocumentAsync` call in Services/Communication/ and Services/Email/.</step>
+    <step order="1">Run /conflict-check (UAC-r2 PR #2110: CommunicationService.cs and census tests). Record the result. Escalate if a PR changes these ingestors' create sites.</step>
+    <step order="2">Inventory, in the task notes, each ingestor's create sites and their current owner behaviour (KeepCreator when unfiled, ApplyOwner for documents, direct threads) and the registry rule that will carry each, with rationale.</step>
+    <step order="3">Write failing tests first: each ingestor creates through the service with the system principal; an unfiled communication keeps the creator (no ownerid set); a communication filed under a Matter gets the record-first team and the I-1 stamp; a document created from a communication is owned like its communication; a concurrent duplicate delivery returns the existing communication id with one row; census lists the four as routed.</step>
+    <step order="4">Convert the document creates first (attachment documents, archived .eml, EmailAttachmentProcessor), then the communication creates. Keep `ApplyOwner` semantics ("owned like its communication") as an explicit service input (carried owner), not a re-resolution, so attachment children match their parent.</step>
+    <step order="5">Resolve the race-proof dedupe per the ADR-036 constraint; document the chosen option and its evidence in the task notes.</step>
+    <step order="6">Update RecordOwnerAssignmentCensusTests: the four listed as routed; the Permanent waiver for unfiled communications becomes the named registry exception.</step>
+    <step order="7">Build; run Communication seam tests (EmailUploadCapture, MessagingSpine, GoldenMisfire, ThreadResolver), the SecureChildOwnership communication tests, SecureChildOwnershipAiToolTests*, RecordOwnerAssignmentCensusTests; publish-size delta; CVE check.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="9">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the unified service cannot honour the UNIQUE-key race-proof create (concurrent duplicate deliveries must resolve to one row) without a new create option, STOP and escalate per CLAUDE.md §6 with the two options (add a documented create option vs keep the race-proof call for the communication row only and route everything else).</trigger>
+    <trigger>If /conflict-check shows UAC-r2 PR #2110 edits the same lines of these ingestors or the census tests, STOP and ask the human to sequence the work.</trigger>
+    <trigger>If an ingestor creates a table that has no RecordTableRules entry and no obvious exception, STOP and escalate; do not add an exception without a stated rationale.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Grep `_genericEntityService.CreateAsync` (MessagingIngestor.cs ~:265; IncomingCommunicationProcessor.cs ~:1135, ~:1170, ~:1365), `CreateCommunicationRaceProofAsync` (IncomingCommunicationProcessor.cs ~:874; EmailUploadCaptureService.cs ~:194) and `_documentService.CreateDocumentAsync` (EmailAttachmentProcessor.cs ~:311). Existing tests: tests/integration/seam/Communication/ (EmailUploadCaptureSeamTests, MessagingSpineSeamTests) and tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs (Permanent waiver for unfiled communications).</existing>
+    <extension>Yes for production code: the ingestors call the existing service; exceptions are registry rows; no new production file. The only new file is a test class, because the existing communication seam suites must pass unchanged and none asserts that ingestion goes through the service.</extension>
+    <cost-of-doing-nothing>Inbound communications and the documents created from them stay outside the service, so their filed rows skip mapping, the standard stamp and the search-index default, and the census keeps a Permanent waiver instead of a named, rationalised exception (spec FR-21 acceptance).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+    <tool name="skill:conflict-check">Detect overlap with UAC-r2 PR #2110</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Channels/MessagingIngestor.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Email/EmailAttachmentProcessor.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/EmailUploadCaptureService.cs</output>
+    <output type="test">tests/integration/data-mutation/RecordOwnership/IngestionThroughServiceTests.cs</output>
+    <output type="test">tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs (four ingestors listed as routed)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`MessagingIngestor`, `IncomingCommunicationProcessor`, `EmailAttachmentProcessor` and `EmailUploadCaptureService` create their communication and document rows through `RecordCreationService` with the system principal (or, for the communication row only, through the documented race-proof option recorded in the task notes), and the census test lists each as routed.</criterion>
+    <criterion testable="true">An unfiled inbound communication keeps the creator as owner via a NAMED registry exception with a written rationale; the direct-thread exception is a named registry rule; the Permanent waiver in the census test is replaced by them.</criterion>
+    <criterion testable="true">A communication filed under a Matter is owned by the record-first team and carries the I-1 stamp; a document created from a communication is owned like its communication (carried owner), asserted by a test.</criterion>
+    <criterion testable="true">Concurrent duplicate deliveries of the same internet message id still resolve to exactly one communication row (existing dedupe contract preserved), asserted by a test.</criterion>
+    <criterion testable="true">Negative: a filed row whose owner cannot be resolved is refused and writes nothing; an unfiled communication never receives a guessed user or team owner.</criterion>
+    <criterion testable="true">Negative: no inbound external sender or message field can select the system principal or set `RequestedBy` (asserted by a test or a recorded grep).</criterion>
+    <criterion testable="true">BFF build 0 errors; Communication seam tests, SecureChildOwnership communication tests, SecureChildOwnershipAiToolTests* and RecordOwnerAssignmentCensusTests pass; publish-size delta, CVE result and /conflict-check result recorded in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-21 part b, FR-07, FR-11, NFR-08. System creators for To Do, task, Signal and Decision Record are task 033. The notification outbox exception is assessed in task 060.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

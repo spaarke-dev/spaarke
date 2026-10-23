@@ -791,42 +791,42 @@
             <options>
               <option value="100000000" ExternalValue="" IsHidden="0">
                 <labels>
-                  <label description="" languagecode="1033" />
+                  <label description="Granted" languagecode="1033" />
                 </labels>
               </option>
               <option value="100000001" ExternalValue="" IsHidden="0">
                 <labels>
-                  <label description="" languagecode="1033" />
+                  <label description="Shared" languagecode="1033" />
                 </labels>
               </option>
               <option value="100000002" ExternalValue="" IsHidden="0">
                 <labels>
-                  <label description="" languagecode="1033" />
+                  <label description="Covered by existing" languagecode="1033" />
                 </labels>
               </option>
               <option value="100000003" ExternalValue="" IsHidden="0">
                 <labels>
-                  <label description="" languagecode="1033" />
+                  <label description="Pending confirmation" languagecode="1033" />
                 </labels>
               </option>
               <option value="100000004" ExternalValue="" IsHidden="0">
                 <labels>
-                  <label description="" languagecode="1033" />
+                  <label description="Skipped" languagecode="1033" />
                 </labels>
               </option>
               <option value="100000005" ExternalValue="" IsHidden="0">
                 <labels>
-                  <label description="" languagecode="1033" />
+                  <label description="Declined" languagecode="1033" />
                 </labels>
               </option>
               <option value="100000006" ExternalValue="" IsHidden="0">
                 <labels>
-                  <label description="" languagecode="1033" />
+                  <label description="Adopted" languagecode="1033" />
                 </labels>
               </option>
               <option value="100000007" ExternalValue="" IsHidden="0">
                 <labels>
-                  <label description="" languagecode="1033" />
+                  <label description="Revoked" languagecode="1033" />
                 </labels>
               </option>
             </options>

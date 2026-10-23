@@ -100,6 +100,26 @@ public sealed partial class OntologyAdminAuthoringService
     internal const string ScopeMatterSecuredMessage =
         "A rule cannot be limited to a Secure or Restricted matter, or to one whose access level could not be read.";
 
+    /// <summary>
+    /// unified-access-control-r2 #2084 (owner round 102 item 4; option A3, agreed with spaarke-ontology-platform-r1): the stable code
+    /// a publish returns, as a 409 with NOTHING written, when <see cref="IRecordOwnershipResolver"/> answers that a new version of the
+    /// rule belongs to the Secure Record Owners team: the rule is held by a Secure matter (its own matter or the one the request
+    /// names). The version would have to be created owned by that team, which the caller cannot do (no Assign on the table, and user
+    /// roles are not widened). The message names no matter.
+    /// </summary>
+    internal const string ReasonRuleHeldSecure = "ontology.admin.rule_held_secure";
+    internal const string RuleHeldSecureMessage = "This rule is held by a Secure matter's team; publish a new rule instead.";
+
+    /// <summary>
+    /// #2084 round 2: the stable code of the 503 a publish returns when the new version's owner could not be decided (a resolver
+    /// refusal, an answer with no team, or a fault). Asked before any write, so NOTHING was written: the wizard says so, unlike a
+    /// 503 after a write began (<see cref="ReasonUnavailable"/>), whose outcome is unknown.
+    /// </summary>
+    internal const string ReasonOwnerUnavailable = "ontology.admin.owner_unavailable";
+
+    /// <summary>#2084: the rule table, as the ownership resolver names a parent (a version is filed under its rule).</summary>
+    private const string PolicyTable = "sprk_policy";
+
     /// <summary>The privilege the dry run requires, asked FRESH on every request as the caller (F1-1): creating a policy version is
     /// what authoring a rule means (D-22).</summary>
     internal const string AuthoringPrivilegeName = "prvCreatesprk_PolicyVersion";
@@ -172,6 +192,7 @@ public sealed partial class OntologyAdminAuthoringService
     private readonly IDataverseUserClient _user;
     private readonly PolicyVersionValidator _validator;
     private readonly IOntologyAdminAuthoringSignalEngine _engine;
+    private readonly IRecordOwnershipResolver _ownership;
     private readonly ITenantCache _cache;
     private readonly TimeProvider _clock;
     private readonly ILogger<OntologyAdminAuthoringService> _logger;
@@ -180,6 +201,7 @@ public sealed partial class OntologyAdminAuthoringService
         IDataverseUserClient user,
         PolicyVersionValidator validator,
         IOntologyAdminAuthoringSignalEngine engine,
+        IRecordOwnershipResolver ownership,
         ITenantCache cache,
         TimeProvider clock,
         ILogger<OntologyAdminAuthoringService> logger)
@@ -187,6 +209,7 @@ public sealed partial class OntologyAdminAuthoringService
         _user = user ?? throw new ArgumentNullException(nameof(user));
         _validator = validator ?? throw new ArgumentNullException(nameof(validator));
         _engine = engine ?? throw new ArgumentNullException(nameof(engine));
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -308,7 +331,8 @@ public sealed partial class OntologyAdminAuthoringService
     /// One lane's authoring lists (task 102a, owner option A), each read from its server source:
     /// <list type="bullet">
     /// <item>actions: <see cref="DecisionActionCatalog"/> codes whose plan lane is this one, the same test as
-    /// <see cref="DecisionPlanService.Resolve"/>;</item>
+    /// <see cref="DecisionPlanService.Resolve"/> (which also refuses a substitution-only action, task 161, so none is listed, nor named
+    /// as an exclusion);</item>
     /// <item>next steps: its <c>IsNextStep</c> codes;</item>
     /// <item>dismissal reasons: <see cref="DecisionActionCatalog.DismissalReasons"/>;</item>
     /// <item>severities and work types: the <c>sprk_policy</c> option labels of <see cref="OntologyAdminRulesService"/>, which
@@ -318,13 +342,14 @@ public sealed partial class OntologyAdminAuthoringService
     /// </summary>
     internal static OntologyCatalogLane LaneCatalog(DecisionLane lane)
     {
-        static OntologyCatalogAction ActionOf(DecisionActionDefinition a) => new(a.Code, a.Label, a.Excludes.ToList());
+        static OntologyCatalogAction ActionOf(DecisionActionDefinition a) => new(a.Code, a.Label,
+            a.Excludes.Where(code => !(DecisionActionCatalog.TryGet(code, out var excluded) && excluded.SubstitutionOnly)).ToList());
         static IReadOnlyList<OntologyCatalogOption> OptionsOf(IReadOnlyDictionary<int, string> labels) =>
             labels.OrderBy(kv => kv.Key).Select(kv => new OntologyCatalogOption(kv.Key, kv.Value)).ToList();
 
         return new OntologyCatalogLane(
             lane.ToString(),
-            DecisionActionCatalog.All.Where(a => a.PlanLane == lane).Select(ActionOf).ToList(),
+            DecisionActionCatalog.All.Where(a => a.PlanLane == lane && !a.SubstitutionOnly).Select(ActionOf).ToList(),
             DecisionActionCatalog.All.Where(a => a.IsNextStep).Select(ActionOf).ToList(),
             DecisionActionCatalog.DismissalReasons(lane).Select(r => new OntologyCatalogChoice(r.Code, r.Label)).ToList(),
             OptionsOf(OntologyAdminRulesService.SeverityLabels),
@@ -1145,6 +1170,13 @@ public sealed partial class OntologyAdminAuthoringService
                 }
             }
 
+            // #2084: the new version's owner, asked BEFORE any write (the version, the end stamp, the pointer and scope). A rule held by
+            // a Secure matter is refused with nothing written; an ordinary answer binds no owner, so the version stays the caller's.
+            if (await CheckVersionOwnerAsync(policy, request.MatterId, ct).ConfigureAwait(false) is { } held)
+            {
+                return held;
+            }
+
             var number = versions.Value!.Count == 0 ? 1 : versions.Value!.Max(v => v.Number) + 1;
             var versionId = Guid.NewGuid();
             var now = NowForDataverse();
@@ -1207,6 +1239,81 @@ public sealed partial class OntologyAdminAuthoringService
         {
             return Fault<OntologyVersionPublished>("publish", ex);
         }
+    }
+
+    /// <summary>
+    /// unified-access-control-r2 #2084 (owner round 102 item 4, option A3): who would own the version this publish creates, decided by
+    /// <see cref="IRecordOwnershipResolver"/> before anything is written. The version is filed under its rule; the rule's stored matter
+    /// and the matter the request names are passed too, so a rule whose matter turned Secure is caught while the reconciler has not yet
+    /// re-owned it, and so is a requested matter that turned Secure after <see cref="CheckScopeAsync"/> read it (secure-if-any).
+    /// <list type="bullet">
+    /// <item>The Secure Record Owners team, refused with nothing written: the caller cannot create a row owned by that team (no Assign
+    /// on the table, and user roles are not widened), and a version owned by the caller would expose the rule's text. Round 2: the
+    /// answer names what made it Secure. The rule itself is held (its <c>ownerid</c>, read with the policy, is that team): 409
+    /// <see cref="ReasonRuleHeldSecure"/>. Otherwise, when the request names a matter, that matter turned Secure after
+    /// <see cref="CheckScopeAsync"/> read it: the 400 <see cref="ReasonScopeMatterSecured"/> the scope check gives. With no matter
+    /// named, only the rule's own stored matter can be Secure (the reconciler has not yet re-owned the rule): 409
+    /// <see cref="ReasonRuleHeldSecure"/>.</item>
+    /// <item>An ordinary team, or <see cref="RecordOwnerOutcome.Unchanged"/>: null. No <c>ownerid</c> is bound; the version stays the
+    /// caller's, as before #2084.</item>
+    /// <item>A refusal (the owner could not be determined), an answer with no team, or a fault: 503 <see cref="ReasonOwnerUnavailable"/>,
+    /// fail closed, nothing written.</item>
+    /// </list>
+    /// </summary>
+    private async Task<OntologyAdminAuthoringResult<OntologyVersionPublished>?> CheckVersionOwnerAsync(
+        PolicyRow policy, Guid? matterScope, CancellationToken ct)
+    {
+        var parents = new List<RecordOwnershipParent> { new(PolicyTable, policy.Id) };
+        foreach (var matter in new[] { policy.MatterId, matterScope })
+        {
+            if (matter is { } id && id != Guid.Empty)
+            {
+                parents.Add(new RecordOwnershipParent(MatterSubject, id));
+            }
+        }
+
+        RecordOwnerResolution owner;
+        try
+        {
+            owner = await _ownership.ResolveOwnerAsync(
+                new RecordOwnershipContext { Parents = parents.Distinct().ToArray(), WhenUnfiled = UnfiledOwnership.KeepCreator }, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "Ontology authoring: the owner of a new version of policy {PolicyId} could not be resolved ({ExceptionType}); " +
+                "nothing was written.", policy.Id, ex.GetType().Name);
+            return Fail<OntologyVersionPublished>(Failure.OwnerUnavailable);
+        }
+
+        if (owner.IsOwned && owner.IsSecureOwner)
+        {
+            if (policy.OwnerId != owner.OwningTeamId && matterScope is { } requested && requested != Guid.Empty
+                && (policy.MatterId is not { } stored || stored == Guid.Empty || stored == requested))
+            {
+                // Round 2: the rule is not held, and the requested matter is the only matter that can have made the answer Secure
+                // (the rule stores no other), so it turned Secure after the scope check read it. When the rule still stores a
+                // DIFFERENT matter, that matter may be the cause (Secure, not yet re-owned); blaming the requested one would name a
+                // matter the caller cannot change, so that case falls through to "held" (round 3, ontology F3).
+                _logger.LogInformation("Ontology authoring: the matter a publish of policy {PolicyId} names is now Secure; the publish is " +
+                    "refused and nothing was written.", policy.Id);
+                return Invalid<OntologyVersionPublished>(
+                    new Dictionary<string, string[]>(StringComparer.Ordinal) { ["matterId"] = [ScopeMatterSecuredMessage] }, ReasonScopeMatterSecured);
+            }
+
+            _logger.LogInformation("Ontology authoring: policy {PolicyId} is held by a Secure matter's team; the publish is refused and nothing was written.",
+                policy.Id);
+            return Conflict<OntologyVersionPublished>(ReasonRuleHeldSecure);
+        }
+
+        if (owner.IsOwned || owner.Outcome == RecordOwnerOutcome.Unchanged)
+        {
+            return null;
+        }
+
+        _logger.LogWarning("Ontology authoring: the owner of a new version of policy {PolicyId} could not be determined ({RefusalCode}); " +
+            "nothing was written.", policy.Id, owner.RefusalCode ?? "no team");
+        return Fail<OntologyVersionPublished>(Failure.OwnerUnavailable);
     }
 
     /// <summary>
@@ -1857,6 +1964,9 @@ public sealed partial class OntologyAdminAuthoringService
         Forbidden,
         NotFound,
         Unavailable,
+
+        /// <summary>#2084 round 2: the new version's owner could not be decided, before any write (<see cref="ReasonOwnerUnavailable"/>).</summary>
+        OwnerUnavailable,
     }
 
     private readonly record struct Read<T>(T? Value, Failure? Failure)
@@ -1934,14 +2044,16 @@ public sealed partial class OntologyAdminAuthoringService
     }
 
     /// <param name="MatterId">Task 102b: the policy's matter scope (<c>sprk_matter</c>), null for all matters.</param>
+    /// <param name="OwnerId">#2084 round 2: the policy's current owner (<c>ownerid</c>, a user or a team), as the same read returns it.</param>
     internal sealed record PolicyRow(
-        Guid Id, string Code, DecisionLane Lane, bool Enabled, bool Active, Guid? CurrentVersionId, long RowVersion, Guid? MatterId = null);
+        Guid Id, string Code, DecisionLane Lane, bool Enabled, bool Active, Guid? CurrentVersionId, long RowVersion, Guid? MatterId = null,
+        Guid? OwnerId = null);
 
     /// <summary>One policy AS THE CALLER, through the domain allow-list. Absent, unreadable or not an Ontology policy: the uniform 404.</summary>
     private async Task<Read<PolicyRow>> ReadPolicyAsync(Guid policyId, CancellationToken ct)
     {
         var response = await _user.GetAsync(
-            $"{PolicyEntitySet}?$select=sprk_policyid,sprk_policycode,sprk_lane,sprk_enabled,statecode,_sprk_currentversion_value,versionnumber,_sprk_matter_value,{OntologyDomain.Column}"
+            $"{PolicyEntitySet}?$select=sprk_policyid,sprk_policycode,sprk_lane,sprk_enabled,statecode,_sprk_currentversion_value,versionnumber,_sprk_matter_value,_ownerid_value,{OntologyDomain.Column}"
             + $"&$filter=sprk_policyid eq {policyId:D} and {OntologyDomain.Filter}", ct).ConfigureAwait(false);
         if (!response.IsSuccess)
         {
@@ -1971,7 +2083,8 @@ public sealed partial class OntologyAdminAuthoringService
             ReadInt(row, "statecode") is null or 0,
             TryGuid(row, "_sprk_currentversion_value", out var current) ? current : null,
             rowVersion,
-            TryGuid(row, "_sprk_matter_value", out var matter) ? matter : null));
+            TryGuid(row, "_sprk_matter_value", out var matter) ? matter : null,
+            TryGuid(row, "_ownerid_value", out var owner) ? owner : null));
     }
 
     /// <summary>A version of the policy as the caller reads it. <paramref name="Ended"/>: it carries an <c>sprk_inforceto</c>.
@@ -2106,6 +2219,7 @@ public sealed partial class OntologyAdminAuthoringService
             Failure.Refused => new(OntologyAdminAuthoringOutcome.Refused, ReasonCode: ReasonRefused),
             Failure.Forbidden => new(OntologyAdminAuthoringOutcome.Forbidden, ReasonCode: ReasonForbidden),
             Failure.NotFound => new(OntologyAdminAuthoringOutcome.NotFound, ReasonCode: ReasonNotFound),
+            Failure.OwnerUnavailable => new(OntologyAdminAuthoringOutcome.Unavailable, ReasonCode: ReasonOwnerUnavailable),
             _ => new(OntologyAdminAuthoringOutcome.Unavailable, ReasonCode: ReasonUnavailable),
         };
 

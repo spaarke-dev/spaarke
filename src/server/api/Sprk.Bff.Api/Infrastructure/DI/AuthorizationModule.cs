@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Options;
@@ -7,6 +8,7 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Authorization;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Routing;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -26,15 +28,18 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 /// </summary>
 public static class AuthorizationModule
 {
-    // Idempotency guard for the JwtBearerOptions PostConfigure delegate (task 046).
-    // The DI container can invoke PostConfigure<TOptions> delegates more than once when the
-    // options instance is reconfigured (e.g. via IOptionsMonitor reload, named-vs-default
-    // resolution, or repeat module registration). Without a guard, every invocation would
-    // re-chain a new OnAuthenticationFailed handler on top of the previous one and re-merge
-    // the audience set, masking the real source of audience-list mutations.
-    // 0 = not yet configured, 1 = configured. Interlocked.CompareExchange guarantees only
-    // the first caller wins, even if PostConfigure is called concurrently during host build.
-    private static int _jwtPostConfigureApplied;
+    // Idempotency guard for the default scheme's Copilot-audience PostConfigure delegate (task 046; per options
+    // instance since ISS-001 / #1623).
+    // The delegate chains an OnAuthenticationFailed handler on top of the existing one, so running it twice on the
+    // SAME JwtBearerOptions instance would wrap the event twice (every failure logged twice). The guard is therefore
+    // keyed on the options INSTANCE: the first pass on an instance wins and any later pass on it is a no-op, while a
+    // new instance (a second host in the process, or an instance rebuilt after a configuration reload) is configured
+    // in full. It was a process-wide flag until ISS-001, which left every instance after the first without the
+    // Copilot audience (Copilot tokens answered 401) and without the CopilotAuth failure logging.
+    // ConditionalWeakTable holds its keys weakly, so a discarded instance is not kept alive by this table, and TryAdd
+    // is atomic, so only one caller can claim an instance even if PostConfigure ran concurrently.
+    private static readonly ConditionalWeakTable<JwtBearerOptions, object> _copilotMergeApplied = new();
+    private static readonly object _copilotMergeMarker = new();
 
     /// <summary>
     /// Adds authentication (Azure AD JWT), authorization handler, and all authorization policies.
@@ -81,6 +86,8 @@ public static class AuthorizationModule
             options.TokenValidationParameters.ValidateIssuerSigningKey = true;
         });
 
+        AddWorkforceHomeScheme(services, authenticationBuilder, configuration);
+
         // Named API key authentication schemes (task AUTHV2-045).
         // Replaces ad-hoc header validation on /api/ai/rag/enqueue-indexing. Each scheme binds
         // to its own configuration key so keys rotate independently with per-consumer blast radius.
@@ -111,10 +118,10 @@ public static class AuthorizationModule
             JwtBearerDefaults.AuthenticationScheme,
             options =>
             {
-                // Idempotency guard (task 046): ensure the audience-merge + event-handler
-                // wiring runs at most once per process. CompareExchange returns the original
-                // value; if it was already 1, another caller already ran the delegate.
-                if (Interlocked.CompareExchange(ref _jwtPostConfigureApplied, 1, 0) != 0)
+                // Idempotency guard (task 046; per options instance since ISS-001): the audience merge and the
+                // event-handler wrap run at most once for THIS instance. TryAdd is false when the instance was
+                // already configured, so a second pass over it is a no-op; every other instance is configured in full.
+                if (!_copilotMergeApplied.TryAdd(options, _copilotMergeMarker))
                 {
                     return;
                 }
@@ -177,6 +184,38 @@ public static class AuthorizationModule
                 };
             });
 
+        // Task 077 (ADR-028 A9): the default scheme accepts the BFF app's audience in both forms, so the app's switch
+        // to requestedAccessTokenVersion = 2 (aud = the bare app id for every caller) does not turn into a 401 on every
+        // workforce surface. A SEPARATE PostConfigure, NOT inside the Copilot delegate above: that one has its own
+        // per-instance guard and only merges when AgentToken:CopilotAudience is set. Only the audience changes
+        // (AddWorkforceAudiences).
+        // An ID token issued to a client signing in AS the BFF app also carries aud = the bare app id; it is refused here
+        // (077 review F4) because it carries neither azpacr (v2) nor appidacr (v1), which every Entra access token has.
+        services.PostConfigure<JwtBearerOptions>(
+            JwtBearerDefaults.AuthenticationScheme,
+            options =>
+            {
+                var clientId = configuration["AzureAd:ClientId"];
+                AddWorkforceAudiences(options.TokenValidationParameters, clientId);
+
+                options.Events ??= new JwtBearerEvents();
+                var existingOnTokenValidated = options.Events.OnTokenValidated;
+                options.Events.OnTokenValidated = async context =>
+                {
+                    if (IsIdTokenForApp(context.SecurityToken, context.Principal, clientId))
+                    {
+                        context.HttpContext.RequestServices.GetService<ILoggerFactory>()?
+                            .CreateLogger("WorkforceSchemeAudienceGuard")
+                            .LogWarning(
+                                "[AUTH] sdap.auth.deny.id_token_on_workforce_scheme: a token with aud = the BFF app id and no azpacr/appidacr (an ID token) was presented to the default (workforce) scheme and was rejected.");
+                        context.Fail("Only access tokens are accepted by the workforce scheme.");
+                        return;
+                    }
+
+                    if (existingOnTokenValidated != null) await existingOnTokenValidated(context);
+                };
+            });
+
         // FR-23 (external-access-platform-r3 task 010 · auth review R1): the DEFAULT (workforce) scheme
         // rejects every CIAM token — iss containing ciamlogin.com, or tid equal to Ciam:TenantId — the same
         // rule CallerPrincipalResolver.DeterminePlane uses to classify the CIAM plane. It runs after the
@@ -186,9 +225,9 @@ public static class AuthorizationModule
         // A third rule — the tenant path segment of iss equals Ciam:TenantId — is a strict superset that also
         // catches a tid-less token and CIAM custom URL domains (relies on Ciam:TenantId being set).
         //
-        // Deliberately a SEPARATE PostConfigure, NOT inside the delegate above: that delegate is guarded by
-        // a process-wide once-flag (_jwtPostConfigureApplied), so any later JwtBearerOptions instance would
-        // be built WITHOUT it. A security guard must apply to every instance of the default scheme.
+        // Deliberately a SEPARATE PostConfigure, NOT inside the Copilot delegate above: a security guard must not
+        // share that delegate's early return (_copilotMergeApplied) or its AgentToken:CopilotAudience condition.
+        // It applies to every instance of the default scheme on its own.
         //
         // Effect on the shared ExternalCollaboration policy (Ciam + default): a CIAM token still
         // authenticates there through the Ciam scheme; only the default scheme's attempt fails.
@@ -442,12 +481,18 @@ public static class AuthorizationModule
             // the CallerPrincipalAuthorizationFilter resolves either to a plane-agnostic principal. A
             // token validates against exactly one authority (only one scheme succeeds per request), so
             // the CIAM path is unchanged (FR-15) while the workforce plane is now served here.
+            //
+            // ADR-028 A9 (task 045): also the WorkforceHome scheme — a workforce contact's home-directory token.
+            // This is the ONLY policy that names it (app-only external plane, no OBO). A Spaarke-tenant or CIAM
+            // token fails WorkforceHome's allowlist, so it still authenticates through exactly one scheme here.
+            // AuthenticationSchemeCensusTests pins the scheme set, this policy, and the routes that carry it.
             options.AddPolicy(AuthPolicies.ExternalCollaboration, p =>
             {
                 p.AuthenticationSchemes = new[]
                 {
                     AuthSchemes.Ciam,
-                    JwtBearerDefaults.AuthenticationScheme
+                    JwtBearerDefaults.AuthenticationScheme,
+                    AuthSchemes.WorkforceHome
                 };
                 p.RequireAuthenticatedUser();
             });
@@ -477,6 +522,219 @@ public static class AuthorizationModule
     }
 
     private const string ApiUriPrefix = "api://";
+
+    /// <summary>The Entra instance A9 names: the authority, and the only host an accepted home token's <c>iss</c> may carry.</summary>
+    private const string EntraInstance = "https://login.microsoftonline.com/";
+
+    /// <summary>
+    /// Why the WorkforceHome allowlist refused a token (logged as <c>Reason</c>; never sent to the caller).
+    /// </summary>
+    internal static class WorkforceHomeDeny
+    {
+        /// <summary>The validated token is not a <see cref="Microsoft.IdentityModel.JsonWebTokens.JsonWebToken"/>; nothing can be read from it.</summary>
+        internal const string TokenUnreadable = "token_unreadable";
+
+        /// <summary>No <c>tid</c>, or one that is not a non-zero GUID.</summary>
+        internal const string TenantMissing = "tid_missing_or_malformed";
+
+        /// <summary><c>tid</c> = <c>AzureAd:TenantId</c>: a Spaarke-tenant token belongs to the default scheme.</summary>
+        internal const string SpaarkeTenant = "tid_is_spaarke_tenant";
+
+        /// <summary><c>AzureAd:TenantId</c> is not a non-zero GUID, so the "not the Spaarke tenant" rule cannot be applied: fail closed.</summary>
+        internal const string SpaarkeTenantUnknown = "spaarke_tenant_id_not_configured";
+
+        /// <summary><c>tid</c> = <c>Ciam:TenantId</c>: a CIAM token belongs to the Ciam scheme.</summary>
+        internal const string CiamTenant = "tid_is_ciam_tenant";
+
+        /// <summary><c>WorkforceIdentity:CustomerTenantIds</c> is empty: no home directory is accepted.</summary>
+        internal const string TenantListEmpty = "customer_tenant_list_empty";
+
+        /// <summary><c>tid</c> is not one of this stamp's customer home directories.</summary>
+        internal const string TenantNotListed = "tid_not_listed";
+
+        /// <summary><c>iss</c> is not exactly <c>https://login.microsoftonline.com/{tid}/v2.0</c> (a v1 issuer included).</summary>
+        internal const string IssuerNotExactV2 = "iss_not_exact_v2_for_tid";
+
+        /// <summary><c>idtyp</c> is present and is not <c>user</c>.</summary>
+        internal const string AppToken = "app_token";
+
+        /// <summary>No delegated <c>scp</c> containing <c>user_impersonation</c> (an app token without <c>idtyp</c> included).</summary>
+        internal const string ScopeMissing = "user_impersonation_scope_missing";
+
+        /// <summary>No <c>acct</c> claim: membership is never inferred.</summary>
+        internal const string AcctMissing = "acct_missing";
+
+        /// <summary><c>acct</c> is not <c>0</c> (a guest of the home directory, or an unrecognised value).</summary>
+        internal const string AcctNotMember = "acct_not_member";
+    }
+
+    /// <summary>
+    /// ADR-028 Amendment A9 (external-access-platform-r3 task 045 · design <c>notes/a9-bff-design.md</c> §2, §9): the
+    /// <see cref="AuthSchemes.WorkforceHome"/> JwtBearer scheme, for a workforce contact's token issued by their customer's
+    /// home directory to the stamp's BFF app.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Library layer (Microsoft.Identity.Web, unmodified).</b> Registered with <c>AddMicrosoftIdentityWebApi</c>
+    /// on the <c>organizations</c> authority, so Identity Web sets the multitenant <c>AadIssuerValidator</c> (the issuer must
+    /// be the v1 or v2 Entra issuer for the token's own <c>tid</c>) and calls <c>EnableAadSigningKeyIssuerValidation()</c>.
+    /// The issuer validator is NOT replaced and <c>ValidIssuers</c> is NOT set (design §9). The audience is the stamp BFF
+    /// app only, in both forms (bare id or <c>api://{id}</c>) — never the Copilot audience, which the default scheme's
+    /// merge adds to the default scheme only. No token acquisition is enabled: there is no OBO on this plane.</para>
+    /// <para><b>A9 allowlist (<c>OnTokenValidated</c>, after the library).</b> See
+    /// <see cref="WorkforceHomeDenyReason"/>. <c>WorkforceIdentity:CustomerTenantIds</c> is read through
+    /// <c>IOptionsMonitor</c> per request, so a change applies without a restart; an empty list rejects every token.</para>
+    /// <para><b>Where it is accepted.</b> Only the <see cref="AuthPolicies.ExternalCollaboration"/> policy names it.</para>
+    /// <para><b>Plane marker.</b> The identity it produces has <see cref="System.Security.Claims.ClaimsIdentity.AuthenticationType"/>
+    /// = <see cref="AuthSchemes.WorkforceHome"/>, set by the handler from <c>TokenValidationParameters</c> — no token
+    /// content can forge it — so principal resolution (task 046) branches on the authenticating scheme, not on <c>iss</c>.</para>
+    /// </remarks>
+    private static void AddWorkforceHomeScheme(
+        IServiceCollection services,
+        Microsoft.AspNetCore.Authentication.AuthenticationBuilder authenticationBuilder,
+        IConfiguration configuration)
+    {
+        var stampBffAppId = configuration["AzureAd:ClientId"];
+
+        authenticationBuilder.AddMicrosoftIdentityWebApi(
+            jwtBearer =>
+            {
+                // The same two-form derivation FR-22 uses for the Ciam audience; empty → no audience accepted.
+                jwtBearer.TokenValidationParameters.ValidAudiences = BuildCiamValidAudiences(stampBffAppId);
+                jwtBearer.TokenValidationParameters.AuthenticationType = AuthSchemes.WorkforceHome;
+            },
+            identity =>
+            {
+                identity.Instance = EntraInstance;
+                identity.TenantId = "organizations";
+                identity.ClientId = stampBffAppId;
+            },
+            AuthSchemes.WorkforceHome);
+
+        services.PostConfigure<JwtBearerOptions>(AuthSchemes.WorkforceHome, options =>
+        {
+            var spaarkeTenantId = configuration["AzureAd:TenantId"];
+            var ciamTenantId = configuration["Ciam:TenantId"];
+            options.Events ??= new JwtBearerEvents();
+            var existingOnTokenValidated = options.Events.OnTokenValidated;
+            options.Events.OnTokenValidated = async context =>
+            {
+                var customerTenantIds = context.HttpContext.RequestServices
+                    .GetService<IOptionsMonitor<WorkforceIdentityOptions>>()?
+                    .CurrentValue.ParsedCustomerTenantIds() ?? new HashSet<Guid>();
+
+                var reason = WorkforceHomeDenyReason(
+                    context.SecurityToken, customerTenantIds, spaarkeTenantId, ciamTenantId, out var tokenTenantId);
+                if (reason is not null)
+                {
+                    // A Spaarke-tenant or CIAM token reaches this scheme on every ExternalCollaboration request it makes
+                    // (the policy tries each scheme); that refusal is expected, so it is logged at Debug, not Warning.
+                    var expected = reason is WorkforceHomeDeny.SpaarkeTenant or WorkforceHomeDeny.CiamTenant;
+                    if (tokenTenantId is { Length: > 64 }) tokenTenantId = tokenTenantId[..64];
+                    context.HttpContext.RequestServices.GetService<ILoggerFactory>()?
+                        .CreateLogger("WorkforceHomeScheme")
+                        .Log(
+                            expected ? LogLevel.Debug : LogLevel.Warning,
+                            "[AUTH] sdap.auth.deny.workforce_home: a token was rejected by the WorkforceHome scheme ({Reason}). Tid={Tid}",
+                            reason,
+                            tokenTenantId);
+                    context.Fail("The token is not accepted by the WorkforceHome scheme.");
+                    return;
+                }
+
+                if (existingOnTokenValidated != null) await existingOnTokenValidated(context);
+            };
+        });
+    }
+
+    /// <summary>
+    /// The A9 allowlist for a token the library has already validated on the WorkforceHome scheme (signature with
+    /// signing-key issuer validation, the Entra issuer chain, the stamp audience, lifetime). Returns null when the token
+    /// is accepted, otherwise a <see cref="WorkforceHomeDeny"/> reason. Every claim is read from the validated token
+    /// itself, so inbound claim mapping cannot hide or rename one. Accepts only when ALL hold:
+    /// <list type="number">
+    ///   <item><c>tid</c> is a non-zero GUID, <c>AzureAd:TenantId</c> is a non-zero GUID (else every token is rejected), is neither <c>AzureAd:TenantId</c> nor <c>Ciam:TenantId</c>, and is in
+    ///   <paramref name="customerTenantIds"/> (empty rejects all);</item>
+    ///   <item><c>iss</c> equals <c>https://login.microsoftonline.com/{tid}/v2.0</c> exactly (ordinal);</item>
+    ///   <item>a user token: <c>idtyp</c>, if present, is <c>user</c>, and <c>scp</c> contains <c>user_impersonation</c>;</item>
+    ///   <item><c>acct</c> = <c>0</c>.</item>
+    /// </list>
+    /// </summary>
+    internal static string? WorkforceHomeDenyReason(
+        Microsoft.IdentityModel.Tokens.SecurityToken? token,
+        IReadOnlySet<Guid> customerTenantIds,
+        string? spaarkeTenantId,
+        string? ciamTenantId,
+        out string? tokenTenantId)
+    {
+        ArgumentNullException.ThrowIfNull(customerTenantIds);
+        tokenTenantId = null;
+
+        if (token is not Microsoft.IdentityModel.JsonWebTokens.JsonWebToken jwt)
+        {
+            return WorkforceHomeDeny.TokenUnreadable;
+        }
+
+        if (!jwt.TryGetPayloadValue<string>("tid", out var tid) ||
+            !Guid.TryParseExact(tid, "D", out var tenant) ||
+            tenant == Guid.Empty)
+        {
+            return WorkforceHomeDeny.TenantMissing;
+        }
+
+        tokenTenantId = tid;
+
+        // Fail closed: the "tid is not the Spaarke tenant" rule needs the Spaarke tenant. When AzureAd:TenantId is unset,
+        // a placeholder or otherwise not a non-zero GUID the rule cannot be applied, so no home token is accepted (it was
+        // skipped, i.e. fail open, before review K3). No startup refusal: the scheme just rejects until configured.
+        if (!Guid.TryParse(spaarkeTenantId?.Trim(), out var spaarke) || spaarke == Guid.Empty)
+        {
+            return WorkforceHomeDeny.SpaarkeTenantUnknown;
+        }
+
+        if (tenant == spaarke)
+        {
+            return WorkforceHomeDeny.SpaarkeTenant;
+        }
+
+        if (Guid.TryParse(ciamTenantId?.Trim(), out var ciam) && tenant == ciam)
+        {
+            return WorkforceHomeDeny.CiamTenant;
+        }
+
+        if (customerTenantIds.Count == 0)
+        {
+            return WorkforceHomeDeny.TenantListEmpty;
+        }
+
+        if (!customerTenantIds.Contains(tenant))
+        {
+            return WorkforceHomeDeny.TenantNotListed;
+        }
+
+        if (!string.Equals(jwt.Issuer, $"{EntraInstance}{tid}/v2.0", StringComparison.Ordinal))
+        {
+            return WorkforceHomeDeny.IssuerNotExactV2;
+        }
+
+        if (jwt.TryGetClaim("idtyp", out var idtyp) && !string.Equals(idtyp.Value, "user", StringComparison.Ordinal))
+        {
+            return WorkforceHomeDeny.AppToken;
+        }
+
+        if (!jwt.TryGetPayloadValue<string>("scp", out var scp) ||
+            !scp.Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains("user_impersonation", StringComparer.Ordinal))
+        {
+            return WorkforceHomeDeny.ScopeMissing;
+        }
+
+        if (!jwt.TryGetClaim(WorkforceCallerClaims.AcctClaim, out var acct) ||
+            string.IsNullOrWhiteSpace(acct.Value))
+        {
+            return WorkforceHomeDeny.AcctMissing;
+        }
+
+        return acct.Value.Trim() == "0" ? null : WorkforceHomeDeny.AcctNotMember;
+    }
 
     /// <summary>
     /// FR-23 startup refusal: throws when <c>Ciam:TenantId</c> and <c>AzureAd:TenantId</c> both parse as GUIDs
@@ -548,6 +806,65 @@ public static class AuthorizationModule
         return Guid.TryParseExact(audience, "D", out _)
             ? new[] { audience, ApiUriPrefix + audience }
             : new[] { audience };
+    }
+
+    /// <summary>
+    /// Task 077 (ADR-028 A9): adds the BFF app's own audience in both forms — the bare app id (v2 access tokens) and
+    /// <c>api://{appId}</c> (v1) — to the default scheme, merged with what is already accepted
+    /// (<c>AzureAd:Audience</c>, the Copilot audience).
+    /// </summary>
+    /// <remarks>
+    /// A9 sets <c>requestedAccessTokenVersion</c> = 2 on the BFF app, which makes <c>aud</c> the bare app id for every
+    /// caller; <c>AzureAd:Audience</c> holds only the <c>api://</c> form. Only a GUID client id adds anything, so an
+    /// unset value or an unreplaced placeholder leaves the parameters exactly as they were. Only the audience
+    /// properties change; idempotent.
+    /// </remarks>
+    internal static void AddWorkforceAudiences(Microsoft.IdentityModel.Tokens.TokenValidationParameters parameters, string? clientId)
+    {
+        ArgumentNullException.ThrowIfNull(parameters);
+        if (!Guid.TryParseExact(clientId?.Trim(), "D", out _))
+        {
+            return;
+        }
+
+        var audiences = new HashSet<string>(parameters.ValidAudiences ?? [], StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrEmpty(parameters.ValidAudience))
+        {
+            audiences.Add(parameters.ValidAudience);
+        }
+
+        audiences.UnionWith(BuildCiamValidAudiences(clientId));
+
+        parameters.ValidAudiences = audiences;
+        // Clear the singular so the plural list is the one source, as the Copilot merge does.
+        parameters.ValidAudience = null;
+    }
+
+    /// <summary>
+    /// Task 077 review F4: true when <paramref name="token"/> has <c>aud</c> = the bare BFF app id but neither
+    /// <c>azpacr</c> (v2 access tokens) nor <c>appidacr</c> (v1 access tokens), i.e. an ID token issued to a client that
+    /// signs in as the BFF app. Tokens with any other audience are not judged here (their behaviour is unchanged).
+    /// </summary>
+    internal static bool IsIdTokenForApp(
+        Microsoft.IdentityModel.Tokens.SecurityToken? token, System.Security.Claims.ClaimsPrincipal? principal, string? clientId)
+    {
+        if (!Guid.TryParseExact(clientId?.Trim(), "D", out var appId))
+        {
+            return false;
+        }
+
+        var bareAudience = appId.ToString("D");
+        if (token is Microsoft.IdentityModel.JsonWebTokens.JsonWebToken jwt)
+        {
+            return jwt.Audiences.Any(a => string.Equals(a, bareAudience, StringComparison.OrdinalIgnoreCase))
+                && !jwt.TryGetClaim("azpacr", out _) && !jwt.TryGetClaim("appidacr", out _);
+        }
+
+        // Any other token type (a legacy handler): judge from the principal's claims, as the FR-23 guard does, so the
+        // refusal cannot fail open on the handler type (077 re-check K2).
+        return principal is not null
+            && principal.FindAll("aud").Any(c => string.Equals(c.Value, bareAudience, StringComparison.OrdinalIgnoreCase))
+            && principal.FindFirst("azpacr") is null && principal.FindFirst("appidacr") is null;
     }
 
     /// <summary>

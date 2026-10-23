@@ -10,62 +10,67 @@
   <options>
     <option value="100000000" ExternalValue="" IsHidden="0">
       <labels>
-        <label description="" languagecode="1033" />
+        <label description="Bound to a different oid" languagecode="1033" />
       </labels>
     </option>
     <option value="100000001" ExternalValue="" IsHidden="0">
       <labels>
-        <label description="" languagecode="1033" />
+        <label description="Email carried by more than one contact" languagecode="1033" />
       </labels>
     </option>
     <option value="100000002" ExternalValue="" IsHidden="0">
       <labels>
-        <label description="" languagecode="1033" />
+        <label description="Oid carried by more than one contact" languagecode="1033" />
       </labels>
     </option>
     <option value="100000003" ExternalValue="" IsHidden="0">
       <labels>
-        <label description="" languagecode="1033" />
+        <label description="Linked to another user" languagecode="1033" />
       </labels>
     </option>
     <option value="100000004" ExternalValue="" IsHidden="0">
       <labels>
-        <label description="" languagecode="1033" />
+        <label description="Binding unreadable" languagecode="1033" />
       </labels>
     </option>
     <option value="100000005" ExternalValue="" IsHidden="0">
       <labels>
-        <label description="" languagecode="1033" />
+        <label description="Guest email matches a contact" languagecode="1033" />
       </labels>
     </option>
     <option value="100000006" ExternalValue="" IsHidden="0">
       <labels>
-        <label description="" languagecode="1033" />
+        <label description="Linked contact bound to a different oid" languagecode="1033" />
       </labels>
     </option>
     <option value="100000007" ExternalValue="" IsHidden="0">
       <labels>
-        <label description="" languagecode="1033" />
+        <label description="Link and binding name different contacts" languagecode="1033" />
       </labels>
     </option>
     <option value="100000008" ExternalValue="" IsHidden="0">
       <labels>
-        <label description="" languagecode="1033" />
+        <label description="Linked contact inactive" languagecode="1033" />
       </labels>
     </option>
     <option value="100000009" ExternalValue="" IsHidden="0">
       <labels>
-        <label description="" languagecode="1033" />
+        <label description="Guest linked to an unbound contact" languagecode="1033" />
       </labels>
     </option>
     <option value="100000010" ExternalValue="" IsHidden="0">
       <labels>
-        <label description="" languagecode="1033" />
+        <label description="Invite matches a workforce contact" languagecode="1033" />
       </labels>
     </option>
     <option value="100000011" ExternalValue="" IsHidden="0">
       <labels>
-        <label description="" languagecode="1033" />
+        <label description="Key mirror held by another contact" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000012" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Inactive contact email match" languagecode="1033" />
       </labels>
     </option>
   </options>

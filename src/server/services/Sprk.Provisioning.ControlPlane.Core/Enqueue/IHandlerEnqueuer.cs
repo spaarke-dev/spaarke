@@ -19,7 +19,11 @@
 // NOT CONSUMED BY:
 //   - Handler bodies themselves — the handlers run in BFF's IJobHandler
 //     infrastructure (per spec.md FR-22) and do NOT re-enqueue via L2.
-//     Any handler-to-handler chaining goes through the reconciler.
+//     Any handler-to-handler chaining goes through the reconciler
+//     (DagAdvancer.HandlerDependencies). Sole exception: H0.5 -> H0, the
+//     Model 2 entry chain, because both are DagAdvancer.EntryPointHandlers the
+//     reconciler never dispatches. Guarded by
+//     Tests/Handlers/HandlerEnqueuerUsageGuardTests.cs (T186 L19).
 // -----------------------------------------------------------------------------
 
 namespace Sprk.Provisioning.ControlPlane.Enqueue;

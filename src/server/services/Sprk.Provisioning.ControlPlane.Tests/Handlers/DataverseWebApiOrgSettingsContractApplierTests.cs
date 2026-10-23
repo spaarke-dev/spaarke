@@ -100,6 +100,23 @@ public sealed class DataverseWebApiOrgSettingsContractApplierTests
     }
 
     [Fact]
+    public async Task ApplyAsync_AColumnNameWithATrailingNewline_FailsWithNoHttpCall()
+    {
+        // #2253 fix round 3 (K): `$` matched before a final "\n"; `\z` does not, so the name never reaches $select.
+        var handler = new FakeHandler(OrganizationRow(maxUpload: 5242880));
+        var request = NewRequest() with
+        {
+            OrgSettings = new Dictionary<string, string> { ["maxuploadfilesize\n"] = "25600000" },
+        };
+
+        var outcome = await NewApplier(handler).ApplyAsync(request, CancellationToken.None);
+
+        outcome.Should().BeOfType<OrgSettingsContractOutcome.Failure>()
+            .Which.Diagnostic.Should().Contain("not an organization column name");
+        handler.Requests.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task ApplyAsync_TokenAcquisitionFails_FailsWithNoHttpCall()
     {
         var handler = new FakeHandler(OrganizationRow(maxUpload: 5242880));

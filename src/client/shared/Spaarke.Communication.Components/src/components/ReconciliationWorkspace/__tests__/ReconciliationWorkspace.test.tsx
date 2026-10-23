@@ -214,7 +214,18 @@ describe('ReconciliationWorkspace', () => {
     // `ConversationView.forward.test.tsx`'s `findByRole('alertdialog', …,
     // { timeout: 4000 })`) — rather than a global jest/testing-library
     // timeout change.
-    expect(await screen.findByRole('separator', { name: 'Resize panels' }, { timeout: 4000 })).toBeInTheDocument();
+    //
+    // Nightly #1906 (client-tests, 2026-10-15) — the actual failure was NOT the wait
+    // budget: the splitter IS in the DOM, but the SprkModal's Fluent `DialogSurface`
+    // carries `aria-hidden="true"` (tabster modalizer never activated — `activeId`
+    // undefined — because jsdom focuses the surface before the modalizer API is
+    // initialised; jsdom-only — in a real browser the surface is not aria-hidden,
+    // verified 2026-10-15; .claude/FAILURE-MODES.md G-21). Testing Library's default role query
+    // skips an aria-hidden subtree, so it can never find the splitter here no matter
+    // how long it waits. The assertion is "the splitter is rendered inside the
+    // two-pane body", so query the hidden-inclusive tree, scoped to that container.
+    const twoPane = screen.getByTestId('reconciliation-browse-two-pane');
+    expect(within(twoPane).getByRole('separator', { name: 'Resize panels', hidden: true })).toBeInTheDocument();
     // ADR-012 — the workspace's injected onRecordOpen handled it; no Xrm navigate.
     expect(navigateTo).not.toHaveBeenCalled();
   });

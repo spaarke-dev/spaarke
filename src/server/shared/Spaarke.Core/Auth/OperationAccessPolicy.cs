@@ -281,8 +281,10 @@ public static class OperationAccessPolicy
         // ========================================================================
         // RECORD-SCOPED SHARING OPERATION (unified-access-control-r2 task 072)
         // ========================================================================
-        // "share" — minting a shareable credential for the authorized record
-        // (POST /api/documents/{documentId}/share-link). The right is NOT a judgement call: this table
+        // "share" — minting a shareable credential for the authorized record. Its first consumer,
+        // POST /api/documents/{documentId}/share-link, was RETIRED 2026-10-16 (unified-access-control-r2, #1350:
+        // Graph refuses createLink in SPE containers); no route asks for "share" today. The key stays so the
+        // right is already decided if a record-scoped share act returns. The right is NOT a judgement call: this table
         // already answers it twice for the same act — "driveitem.createlink" (Share) and its legacy alias
         // "share_document" (Share). Task 072 follows that precedent rather than re-deriving it, and it
         // matches Graph's own permission model for driveitem.createLink.
@@ -301,7 +303,7 @@ public static class OperationAccessPolicy
         //
         // ⚠️ Same RPA dependency as "write"/"delete" above: DataverseAccessDataSource's fallback probe
         // (QueryReadAccessByProbeAsync) caps rights at Read by construction, so on a RetrievePrincipalAccess
-        // outage every "share" gate denies and share-link minting is unavailable rather than degraded.
+        // outage every "share" gate denies, so the act is unavailable rather than degraded.
         // That is the correct fail-closed direction and the same trade tasks 008/022 accepted; it is
         // recorded here so the behaviour is not mistaken for a bug. Watch the RPA-FALLBACK log marker.
         ["share"] = AccessRights.Share

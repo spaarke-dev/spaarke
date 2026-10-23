@@ -249,6 +249,15 @@ public interface INoAccessListReader
 /// <inheritdoc cref="INoAccessListReader" />
 public class NoAccessListReader : INoAccessListReader
 {
+    /// <summary>
+    /// The deny list's table (#2251: the app-only generic writers refuse it whole,
+    /// <c>InheritedAccessPermission.AccessTables</c>) and its Web API collection, which this reader queries.
+    /// </summary>
+    internal const string EntityLogicalName = "sprk_noaccessentry";
+
+    /// <inheritdoc cref="EntityLogicalName"/>
+    internal const string EntitySet = "sprk_noaccessentries";
+
     // ── Query shape (NFR-02: bounded, batched — no per-record round trip) ───────────────────────
 
     /// <summary>
@@ -758,7 +767,7 @@ public class NoAccessListReader : INoAccessListReader
             var apiUrl = GetDataverseApiUrl();
 
             var filter = CombineFilter(subjectFilter, objectFilter);
-            var query = $"{apiUrl}/sprk_noaccessentries?$filter={filter}&$select={RowSelect}";
+            var query = $"{apiUrl}/{EntitySet}?$filter={filter}&$select={RowSelect}";
 
             using var request = new HttpRequestMessage(HttpMethod.Get, query);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);

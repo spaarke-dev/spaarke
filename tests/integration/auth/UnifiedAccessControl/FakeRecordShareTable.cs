@@ -174,17 +174,52 @@ public sealed class FakeRecordShareTable : IDataverseRecordShareService
 
     public Task RevokeAccessAsync(
         string entitySetName, Guid recordId, DataversePrincipalRef principal, CancellationToken ct = default)
+        => Revoke(entitySetName, recordId, principal, asOwner: false);
+
+    /// <summary>
+    /// The owner-aware revoke (#1620): sent as the principal exactly when the caller-named owner is that systemuser — the
+    /// production client's rule — and app-only otherwise.
+    /// </summary>
+    public Task RevokeAccessAsync(
+        string entitySetName, Guid recordId, DataversePrincipalRef principal, DataversePrincipalRef recordOwner,
+        CancellationToken ct = default)
+        => Revoke(entitySetName, recordId, principal,
+            asOwner: principal.Kind == DataversePrincipalKind.SystemUser && recordOwner == principal);
+
+    private Task Revoke(string entitySetName, Guid recordId, DataversePrincipalRef principal, bool asOwner)
     {
         Target("RevokeAccess", entitySetName, recordId, principal, null);
         Write("RevokeAccess", () =>
         {
+            // Dataverse: the CURRENT owning user's own share is revoked only by that user (0x80040223), whoever asks.
+            if (!asOwner
+                && principal.Kind == DataversePrincipalKind.SystemUser
+                && OwningUsers.TryGetValue(recordId, out var owningUser) && owningUser == principal.Id)
+            {
+                throw new HttpRequestException(
+                    "Dataverse 400 (0x80040223): Only owner can revoke access to the owner.", null,
+                    System.Net.HttpStatusCode.BadRequest);
+            }
+
             if (!_shares.Remove(Key(entitySetName, recordId, principal)))
                 throw new InvalidOperationException(
                     "RevokeAccess for a principal holding no share is undocumented; the fake refuses it.");
+
+            if (asOwner)
+                RevokesAsOwner.Add((recordId, principal));
         });
 
         return Task.CompletedTask;
     }
+
+    /// <summary>
+    /// The record's CURRENT owning user, per record (#1620): an app-only revoke of THAT user's share is refused as Dataverse
+    /// refuses it (0x80040223). Unseeded: no owning user (team-owned), so nothing is refused.
+    /// </summary>
+    public Dictionary<Guid, Guid> OwningUsers { get; } = new();
+
+    /// <summary>The revokes that were sent as the owning user and applied (#1620).</summary>
+    public List<(Guid RecordId, DataversePrincipalRef Principal)> RevokesAsOwner { get; } = new();
 
     public Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessAsync(
         string entityLogicalName, Guid recordId, CancellationToken ct = default)

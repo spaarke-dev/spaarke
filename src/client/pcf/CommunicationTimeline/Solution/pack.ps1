@@ -1,4 +1,4 @@
-$version = "1.0.4"
+$version = "1.0.5"
 $solutionName = "CommunicationTimelineSolution"
 $outputPath = "bin"
 if (-not (Test-Path $outputPath)) { New-Item -ItemType Directory -Path $outputPath | Out-Null }

@@ -79,7 +79,7 @@ public class SpeWriteSinkContainerProvenanceGuardTests
     //   · container LIFECYCLE (CreateContainerAsync, PermanentDeleteContainerForConfigAsync) — creating or
     //     destroying the container itself does not place content into a container somebody else can read.
     //   · PERMISSIONS / membership (Containers[id].Permissions[...] in SpeContainerMembershipService,
-    //     DemoExpirationService, DemoProvisioningService) — a genuine additive-permission surface, but a
+    //     DemoExpirationJob, DemoProvisioningService) — a genuine additive-permission surface, but a
     //     DIFFERENT one, governed by task 020 and ADR-034. Mixing them would produce one list nobody reads.
     //   · list-COLUMN schema (DeleteColumnAsync) and change-notification SUBSCRIPTIONS
     //     (DeleteSubscriptionAsync) — no bytes, no container content.
@@ -755,7 +755,7 @@ public class SpeWriteSinkContainerProvenanceGuardTests
         new SinkSite("Services/DocumentCheckoutService.cs", "DeleteFileAsync", 2,
             Provenance.ServerDerivedRecord, "",
             "document.DriveId / document.ItemId off the authorized sprk_document row, verified by "
-            + "RecordContainerResolver.EnsureDocumentPointerContainerAsync before the delete",
+            + "RecordContainerResolver.VerifyDocumentPointerForDeleteAsync before the delete",
             "spaarke-SPA-external-access-platform-r3 task 032 (FR-26): the same delete as occurrence #1 under the "
             + "VerifiedFileFirstKeepRowOnFailure policy (DeleteFileOrRefuseAsync), used by the external delete-own "
             + "route. The pointer is read off the row the caller was authorized against (creator stamp + Read on "

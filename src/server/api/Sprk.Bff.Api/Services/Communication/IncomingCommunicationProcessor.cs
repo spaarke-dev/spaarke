@@ -382,28 +382,7 @@ public sealed class IncomingCommunicationProcessor
         // walks (email strategy) to join the parent's thread or create a new one. Same shared seam the chat
         // inbound path (MessagingIngestor) and the outbound send path (CommunicationService) call. A resolver
         // failure MUST NOT fail capture — the record already exists (without sprk_communicationthread).
-        if (_threadResolver is not null)
-        {
-            try
-            {
-                await _threadResolver.ResolveAndAssignThreadAsync(
-                    new ThreadResolutionRequest
-                    {
-                        CommunicationId = communicationId,
-                        ChannelType = CommunicationType.Email,
-                        Direction = CommunicationDirection.Incoming,
-                        Message = envelope,
-                    },
-                    ct);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(
-                    ex,
-                    "Thread resolution failed (non-fatal) | CommunicationId: {CommunicationId}, GraphMessageId: {GraphMessageId}",
-                    communicationId, graphMessageId);
-            }
-        }
+        await ResolveThreadAndShareabilityAsync(communicationId, envelope, graphMessageId, ct);
 
         // ── Step 4.7: Participant index (task 050 / FR-08 / ADR-048) — best-effort, non-fatal + idempotent ──
         // Write one sprk_communicationparticipant row per (message × person/address × role {From,To,Cc}) so the
@@ -732,6 +711,66 @@ public sealed class IncomingCommunicationProcessor
     }
 
     /// <summary>
+    /// Steps 4.6 and 4.6b: resolves the email's thread (best-effort, non-fatal) and then lowers
+    /// <c>sprk_isinternalonly</c> (written <c>true</c> at create) where the thread and the parent allow it. <c>internal</c>
+    /// so the writer tests drive it from an envelope (task 065 fix round 3).
+    /// </summary>
+    internal async Task ResolveThreadAndShareabilityAsync(
+        Guid communicationId, NormalizedMessage envelope, string graphMessageId, CancellationToken ct)
+    {
+        Guid? resolvedThreadId = null;
+        if (_threadResolver is not null)
+        {
+            try
+            {
+                resolvedThreadId = await _threadResolver.ResolveAndAssignThreadAsync(
+                    new ThreadResolutionRequest
+                    {
+                        CommunicationId = communicationId,
+                        ChannelType = CommunicationType.Email,
+                        Direction = CommunicationDirection.Incoming,
+                        Message = envelope,
+                    },
+                    ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Thread resolution failed (non-fatal) | CommunicationId: {CommunicationId}, GraphMessageId: {GraphMessageId}",
+                    communicationId, graphMessageId);
+            }
+        }
+
+        // ── Step 4.6b: Internal-only (task 065 fix round 3, owner 2026-10-14) — fail closed, non-fatal ──
+        // CreateCommunicationRecordAsync wrote the row internal-only because its thread was unknown. Lower it to shareable
+        // only when the thread resolved AND reads explicitly Open AND the parent it replies to (found the way the email
+        // thread key strategy finds it) is explicitly shareable. A reply to an internal-only, unflagged or unreadable
+        // parent, a Private thread, or an unresolved thread keeps it internal-only. Partners then see the email through the
+        // record it is filed to (the external read filters by regarding record and access), not by default.
+        // Cancellation is caught here, like MessagingIngestor does (fix round 5): the row exists, so it stays internal-only
+        // (true) and processing completes. Letting it escape made the retry dedup on the Graph message id and return early,
+        // and nothing would ever lower the row.
+        if (resolvedThreadId is not null)
+        {
+            try
+            {
+                var parentNotShareable = await CommunicationInternalOnlyFloor.HasParentNotExplicitlyShareableAsync(
+                    _communicationService, _genericEntityService, envelope, _logger, ct);
+                await CommunicationInternalOnlyFloor.LowerWhenSafeAsync(
+                    _genericEntityService, communicationId, resolvedThreadId, parentNotShareable, _logger, ct);
+            }
+            catch (OperationCanceledException ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Internal-only lowering cancelled (non-fatal; the row stays internal-only) | CommunicationId: {CommunicationId}, GraphMessageId: {GraphMessageId}",
+                    communicationId, graphMessageId);
+            }
+        }
+    }
+
+    /// <summary>
     /// Creates a sprk_communication record for the incoming email.
     /// Sets all required fields per schema; the regarding fields only when <paramref name="filingFields"/> carries them
     /// (an email owned from its filing — task 146 r2). Otherwise step 4.5 writes them. <c>internal</c> so the create
@@ -783,6 +822,11 @@ public sealed class IncomingCommunicationProcessor
             ["sprk_internetmessageid"] = message.InternetMessageId,
             ["sprk_sentat"] = message.ReceivedDateTime?.UtcDateTime ?? DateTime.UtcNow,
             ["sprk_receiveddate"] = message.ReceivedDateTime?.UtcDateTime ?? DateTime.UtcNow,
+
+            // Task 065 fix round 3 (owner 2026-10-14): a received email is hidden from partners unless its thread is
+            // confirmed Open and its parent is shareable. Both are unknown at create, so the row starts internal-only and
+            // ProcessAsync lowers it (Step 4.6b, CommunicationInternalOnlyFloor) once they are known.
+            [CommunicationInternalOnlyFloor.InternalOnlyField] = true,
 
             // Note: Regarding fields (sprk_regardingmatter, sprk_regardingorganization, sprk_regardingperson) come
             // from the filing fields below when the email is owned from its filing (task 146 r2), else step 4.5.

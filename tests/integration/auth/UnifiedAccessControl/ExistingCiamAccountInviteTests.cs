@@ -89,7 +89,7 @@ public class ExistingCiamAccountInviteTests
     private Task<IResult> InviteAndGrant(ILogger<Program>? logger = null, ContactIdentityBinder? binder = null) =>
         InviteAndGrantExternalUserEndpoint.InviteAndGrantAsync(
             Request() with { RecordId = _matter },
-            _h.Grants, _h.Participations, _h.AccessibleRecords, new EverythingProbe(),
+            _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new EverythingProbe(),
             _ciam, _h.Emails, binder ?? IdentityBindingTestKit.Binder(_h.Identities),
             PortalConfig(), Sprk.Bff.Api.Tests.TestInfrastructure.TestSpeOwnership.Customer(CustomerKey),
             _h.Materializer, _h.Notifier, Context(), logger ?? NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
@@ -717,6 +717,136 @@ public class ExistingCiamAccountInviteTests
             GrantedAccessLevel: ExternalAccessLevel.Collaborate, Narrowed: false, NotificationFailed: false,
             EmailSent: true, EmailErrorCode: null));
         _h.Emails.InviteUrls.Should().ContainSingle();
+    }
+
+    // ── #2005 K1: a contact with no row version is re-read before its mark, never marked under If-Match: * ──────────
+
+    /// <summary>
+    /// The invite core over a contact that carries NO row version (the state of a contact the invite just created; also a
+    /// row read without one). The resolution says it was an unbound contact to provision.
+    /// </summary>
+    private Task<InviteExternalUserEndpoint.ProvisionOutcome> InviteWithoutARowVersion(Guid contact) =>
+        InviteExternalUserEndpoint.ProvisionAsync(
+            Request(), _h.Grants, _ciam, _h.Emails, IdentityBindingTestKit.Binder(_h.Identities), PortalUrl, CustomerKey,
+            NullLogger<Program>.Instance,
+            new InviteContactResolution(InviteContactAction.ProvisionExisting, contact, ETag: null, null, null),
+            CancellationToken.None);
+
+    /// <summary>Nothing was marked, nothing was created or sent, and no mark was even attempted without a version.</summary>
+    private void ShouldBeUnmarked(Guid contact)
+    {
+        _h.Identities.Contacts[contact].InvitedOn.Should().BeNull("a contact that is not unbound is never marked");
+        _h.Identities.Contacts[contact].InviteCodeHash.Should().BeNull("a contact that is not unbound never holds a code hash");
+        _h.Identities.Writes.Should().NotContain(w => w.Op == "invite-marker" || w.Op == "refused-unversioned-invite-marker",
+            "the mark is made only under the re-read row's version, never unconditionally");
+        _ciam.Created.Should().BeEmpty("no CIAM account is created for a refused invite");
+        _h.Emails.InviteUrls.Should().BeEmpty("no invite email, so nobody holds a code");
+    }
+
+    /// <summary>
+    /// #2005 K1: between the invite's contact create and its mark, a workforce sign-in email-binds the contact (or an
+    /// internal user is linked to it). The workforce plane reads no invite marker, so a mark under <c>If-Match: *</c> put the
+    /// marker and the hash on a BOUND contact, the ExistingAccount path emailed the code, and an operator unbind revived the
+    /// link. Now the contact is re-read and refused exactly as an invite that resolved to it is: same reason code, same flag.
+    /// MUTATION PROOF: marking under <c>*</c> (or without the re-read) fails every case.
+    /// </summary>
+    [Theory]
+    [InlineData("workforce-bound", ContactBindingDecision.InviteWorkforceBoundContact)]
+    [InlineData("linked-to-internal-user", ContactBindingDecision.InviteContactLinkedToInternalUser)]
+    public async Task AContactBoundBeforeItsMark_IsNotMarked_AndTheInviteIsRefusedAsForABoundContact(string how, string reasonCode)
+    {
+        var contact = Guid.NewGuid();
+        var workforceOid = Guid.NewGuid();
+        if (how == "workforce-bound")
+        {
+            _h.Identities.AddContact(contact, email: Email, oid: workforceOid.ToString("D"), plane: IdentityPlaneMarker.Workforce);
+        }
+        else
+        {
+            _h.Identities.AddContact(contact, email: Email);
+            _h.Identities.AddSystemUser(Guid.NewGuid(), workforceOid, Email, primaryContactId: contact);
+        }
+
+        var outcome = await InviteWithoutARowVersion(contact);
+
+        outcome.Refusal.Should().NotBeNull("the invite is refused, as an invite of an already-bound contact is");
+        outcome.Refusal!.ReasonCode.Should().Be(reasonCode);
+        outcome.Failure.Should().BeNull();
+        ShouldBeUnmarked(contact);
+        _h.Identities.Contacts[contact].Flag.Should().NotBeNull("the collision is flagged for an operator, as today");
+        _h.Identities.Contacts[contact].Flag!.Reason.Should().Be(IdentityCollisionReason.InviteMatchesWorkforceContact);
+        if (how == "workforce-bound")
+        {
+            _h.Identities.Contacts[contact].Oid.Should().Be(workforceOid.ToString("D"), "the workforce binding is untouched");
+        }
+    }
+
+    /// <summary>
+    /// #2005 K1: the contact is unbound at the re-read, but changes before the conditional mark lands: the 412 refuses the
+    /// mark (the invite's existing retryable 503; a retry re-resolves the email and judges the contact as it now is).
+    /// </summary>
+    [Fact]
+    public async Task AContactChangedBetweenItsReReadAndItsMark_Is412_NotMarked_Retryable503()
+    {
+        var contact = UnboundContact();
+        _h.Identities.AfterRead = read =>
+        {
+            if (read == "references") _h.Identities.Touch(_h.Identities.Contacts[contact]);
+        };
+
+        var outcome = await InviteWithoutARowVersion(contact);
+
+        outcome.Failure.Should().NotBeNull();
+        outcome.Failure!.ReasonCode.Should().Be(ContactBindingDecision.InviteMarkerNotWritten);
+        _h.Identities.Contacts[contact].InvitedOn.Should().BeNull();
+        _h.Identities.Contacts[contact].InviteCodeHash.Should().BeNull();
+        _h.Identities.Writes.Should().NotContain(w => w.Op == "refused-unversioned-invite-marker");
+        _ciam.Created.Should().BeEmpty();
+        _h.Emails.InviteUrls.Should().BeEmpty();
+    }
+
+    /// <summary>#2005 K1: the re-read cannot be read: fail closed with the invite's own lookup-failure 503, nothing marked.</summary>
+    [Fact]
+    public async Task AReReadThatFails_FailsClosed_WithTheInviteLookupFailure_NothingMarked()
+    {
+        var contact = UnboundContact();
+        _h.Identities.FailGetContact = true;
+
+        var outcome = await InviteWithoutARowVersion(contact);
+
+        outcome.Failure.Should().NotBeNull();
+        outcome.Failure!.ReasonCode.Should().Be(ContactBindingDecision.InviteContactLookupFailed);
+        outcome.Refusal.Should().BeNull();
+        ShouldBeUnmarked(contact);
+    }
+
+    /// <summary>
+    /// #2005 K1: the normal path. A contact with no row version that is still active and unbound is marked under the
+    /// re-read row's version, then provisioned and bound as before (the bind consumes the hash).
+    /// </summary>
+    [Fact]
+    public async Task AnUnboundContactWithoutARowVersion_IsMarkedUnderItsReReadVersion_AndProvisioned()
+    {
+        var contact = UnboundContact();
+        DateTimeOffset? markerAtCreate = null;
+        string? hashAtCreate = null;
+        _ciam.OnCreate = () =>
+        {
+            markerAtCreate = _h.Identities.Contacts[contact].InvitedOn;
+            hashAtCreate = _h.Identities.Contacts[contact].InviteCodeHash;
+        };
+
+        var outcome = await InviteWithoutARowVersion(contact);
+
+        outcome.Status.Should().Be(InviteExternalUserEndpoint.ProvisionedStatus);
+        markerAtCreate.Should().NotBeNull("the marker landed before the CIAM account");
+        hashAtCreate.Should().NotBeNull("the hash landed with the marker");
+        _h.Identities.Writes.Should().ContainSingle(w => w.Op == "invite-marker");
+        _h.Identities.Writes.Should().NotContain(w => w.Op == "refused-unversioned-invite-marker");
+        _h.Identities.Contacts[contact].Oid.Should().Be(_ciam.Created.Should().ContainSingle().Subject.Oid.ToString("D"));
+        _h.Identities.Contacts[contact].InviteCodeHash.Should().BeNull("the bind consumed the code");
+        InviteCode.Matches(hashAtCreate!, CodeIn(_h.Emails.InviteUrls.Should().ContainSingle().Subject), contact)
+            .Should().BeTrue("the emailed code is the one marked");
     }
 
     // ── Doubles ─────────────────────────────────────────────────────────────────────────────────────────────

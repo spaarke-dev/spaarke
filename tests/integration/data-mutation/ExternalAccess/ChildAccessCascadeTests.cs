@@ -244,6 +244,75 @@ public class ChildAccessCascadeTests : IClassFixture<ProvisionProjectTestFixture
     }
 
     /// <summary>
+    /// Task 189 fix round, the "K1 variant" in task 175's shape (the rule is shared): the matter goes Restricted to Standard
+    /// and, before the next run, a user sets the work assignment to Limited. Limited is below the last floor but above the
+    /// live one, so it is the user's own. Compared with the last floor alone, it was put back to Standard. Must not fire
+    /// beside it: an unchanged inherited Restricted follows the matter back to Standard.
+    /// </summary>
+    [Fact]
+    public async Task ALimitedSetAfterTheParentWidened_IsKeptAsTheChildsOwn()
+    {
+        var (matter, child, inherited) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        OrdinaryMatter(matter, Restricted);
+        FiledWorkAssignment(_fixture, child, "sprk_regardingmatter", "sprk_matter", matter);
+        FiledWorkAssignment(_fixture, inherited, "sprk_regardingmatter", "sprk_matter", matter);
+        SetPermission("sprk_workassignment", child, Standard);
+        SetPermission("sprk_workassignment", inherited, Standard);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        PermissionOf("sprk_workassignment", child).Should().Be(Restricted);
+        RecordOf("sprk_workassignment", child)!.OwnPermission.Should().BeNull("its Restricted is inherited");
+
+        SetPermission("sprk_matter", matter, Standard);
+        SetPermission("sprk_workassignment", child, InheritedAccessPermission.Limited); // a user, before the next run
+        (await _job.RunAsync()).Success.Should().BeTrue();
+
+        PermissionOf("sprk_workassignment", child).Should().Be(InheritedAccessPermission.Limited);
+        RecordOf("sprk_workassignment", child)!.OwnPermission.Should().Be(InheritedAccessPermission.Limited);
+        PermissionOf("sprk_workassignment", inherited).Should().Be(Standard, "an unchanged inherited Restricted follows back");
+
+        SetPermission("sprk_matter", matter, Restricted);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        SetPermission("sprk_matter", matter, Standard);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        PermissionOf("sprk_workassignment", child).Should().Be(InheritedAccessPermission.Limited, "it is the child's own");
+        PermissionOf("sprk_workassignment", inherited).Should().Be(Standard);
+    }
+
+    /// <summary>
+    /// Task 189 fix round: this job writes the Access Permission first and its record last. When the record write fails after
+    /// the value followed a LOWER floor, the value holds max(own, live floor) beside the old record. The next run reads that
+    /// as unchanged, so an own Limited hidden under a Restricted floor survives and comes back when the matter loosens.
+    /// </summary>
+    [Fact]
+    public async Task AnOwnLimitedUnderTheFloor_SurvivesARecordWriteThatFailedAsTheFloorDropped()
+    {
+        var (matter, child) = (Guid.NewGuid(), Guid.NewGuid());
+        OrdinaryMatter(matter, Standard);
+        FiledWorkAssignment(_fixture, child, "sprk_regardingmatter", "sprk_matter", matter);
+        SetPermission("sprk_workassignment", child, Standard);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        SetPermission("sprk_workassignment", child, InheritedAccessPermission.Limited); // a user: its own Limited
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        SetPermission("sprk_matter", matter, Restricted);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        PermissionOf("sprk_workassignment", child).Should().Be(Restricted);
+
+        SetPermission("sprk_matter", matter, InheritedAccessPermission.Limited);
+        World.RefusingAccessRecordWritesOf(child);
+        (await _job.RunAsync()).Success.Should().BeFalse("the value followed the floor down; its record could not be written");
+        PermissionOf("sprk_workassignment", child).Should().Be(InheritedAccessPermission.Limited);
+        RecordOf("sprk_workassignment", child)!.FloorPermission.Should().Be(Restricted, "the old record is still there");
+
+        World.AcceptingAccessRecordWritesOf(child);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        RecordOf("sprk_workassignment", child)!.OwnPermission.Should().Be(InheritedAccessPermission.Limited);
+
+        SetPermission("sprk_matter", matter, Standard);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        PermissionOf("sprk_workassignment", child).Should().Be(InheritedAccessPermission.Limited, "its own Limited was kept");
+    }
+
+    /// <summary>
     /// Round 87 item 5 (verifier F1): a re-file NEVER loosens a child. A work assignment secure and Restricted through secure
     /// matter M, re-filed (a form edit) to ordinary Standard matter N, stays secure and Restricted; both become its own, so a
     /// later loosening of N does not take them either. And a secure parentless work assignment filed under an ordinary matter

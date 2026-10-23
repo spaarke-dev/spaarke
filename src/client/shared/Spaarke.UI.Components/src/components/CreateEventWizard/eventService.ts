@@ -15,7 +15,12 @@ import type { IDataService } from '../../types/serviceInterfaces';
 import type { IWebApiLike } from '../../types/WebApiLike';
 import { EntityCreationService } from '../../services/EntityCreationService';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
-import { applyResolverFields, discoverNavProps, cleanGuid } from '../../services/PolymorphicResolverService';
+import {
+  applyResolverFields,
+  discoverNavProps,
+  findNavProp,
+  cleanGuid,
+} from '../../services/PolymorphicResolverService';
 import { applyFieldMappings } from '../../services/FieldMappingService';
 import { getXrmUserId } from '../../utils/xrmUserId';
 
@@ -36,27 +41,9 @@ export interface ICreateEventResult {
 // Metadata discovery
 // ---------------------------------------------------------------------------
 
-// Nav-prop discovery is provided by the shared `discoverNavProps`
-// (PolymorphicResolverService) — consolidated 2026-07-09 (task 011, Path A).
-// The local `NavPropEntry` shape below is structurally identical to the shared
-// `INavPropEntry` returned by `discoverNavProps`, so `_findNavProp` accepts it.
-
-interface NavPropEntry {
-  columnName: string;
-  navPropName: string;
-  referencedEntity: string;
-}
-
-function _findNavProp(entries: NavPropEntry[], referencedEntity: string, columnHint?: string): string | undefined {
-  const matches = entries.filter(e => e.referencedEntity === referencedEntity);
-  if (matches.length === 0) return undefined;
-  if (matches.length === 1) return matches[0].navPropName;
-  if (columnHint) {
-    const hinted = matches.find(e => e.columnName.includes(columnHint));
-    if (hinted) return hinted.navPropName;
-  }
-  return matches[0].navPropName;
-}
+// Nav-prop discovery AND resolution are the shared `discoverNavProps` / `findNavProp`
+// (PolymorphicResolverService) — consolidated 2026-07-09 (task 011, Path A); task 162 retired the
+// local `_findNavProp` copy so the exact-column-first rule lives in one place.
 
 // ---------------------------------------------------------------------------
 // Regarding-parent resolution helpers (ADR-024)
@@ -264,7 +251,7 @@ export class EventService {
         }
         // Phase G: cascade BU's `sprk_ai_search_index` lookup onto the new Event.
         if (buDefaults.searchIndexId) {
-          const aiNavProp = _findNavProp(navProps, 'sprk_aisearchindex');
+          const aiNavProp = findNavProp(navProps, 'sprk_aisearchindex');
           if (aiNavProp) {
             entity[`${aiNavProp}@odata.bind`] = `/sprk_aisearchindexes(${cleanGuid(buDefaults.searchIndexId)})`;
             console.info(
@@ -295,7 +282,7 @@ export class EventService {
 
     // Event type lookup
     if (formValues.eventTypeId) {
-      const navProp = _findNavProp(navProps, 'sprk_eventtype_ref');
+      const navProp = findNavProp(navProps, 'sprk_eventtype_ref');
       if (navProp) {
         entity[`${navProp}@odata.bind`] = `/sprk_eventtype_refs(${cleanGuid(formValues.eventTypeId)})`;
       }
@@ -304,11 +291,11 @@ export class EventService {
     // Assigned To (contact) -- spaarkeai-assistant-enhancements-r1 task 014 /
     // FR-A4. Optional: an event/task may be created with no assignee. The
     // nav-prop is discovered dynamically (never hardcoded) per the
-    // established `discoverNavProps`/`_findNavProp` pattern used throughout
+    // established `discoverNavProps`/`findNavProp` pattern used throughout
     // this method -- avoids the SchemaName/LogicalName @odata.bind casing
     // gotcha (docs/standards/ODATA-NAMING-CONVENTION.md).
     if (formValues.assignedToId) {
-      const navProp = _findNavProp(navProps, 'contact', 'assignedto');
+      const navProp = findNavProp(navProps, 'contact', 'assignedto');
       if (navProp) {
         entity[`${navProp}@odata.bind`] = `/contacts(${cleanGuid(formValues.assignedToId)})`;
       } else {

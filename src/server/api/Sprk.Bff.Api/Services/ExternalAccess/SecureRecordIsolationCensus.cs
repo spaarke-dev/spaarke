@@ -110,19 +110,17 @@ public static class SecureRecordIsolationCensus
             "systemuserid", "roleid");
 
         var users = (await RetrieveAllAsync(dataverse,
-                Query("systemuser", "systemuserid", "fullname", "domainname", "accessmode", "applicationid",
+                Query("systemuser", "systemuserid", "accessmode", "applicationid",
                     "isdisabled", "businessunitid"), ct))
             .Select(row =>
             {
-                var name = row.GetAttributeValue<string>("fullname") ?? string.Empty;
                 var isHuman = SecureBuRoleDepthCensusBuilder.IsHumanPrincipal(
                     hasApplicationId: OptionalGuid(row, "applicationid") is { } appId && appId != Guid.Empty,
                     isDisabled: row.GetAttributeValue<bool>("isdisabled"),
-                    fullName: name,
                     accessMode: row.GetAttributeValue<OptionSetValue>("accessmode")?.Value ?? 0);
 
                 return new CensusUser(
-                    row.Id, name, row.GetAttributeValue<string>("domainname"), isHuman,
+                    row.Id, isHuman,
                     OptionalGuid(row, "businessunitid"),
                     userRoles.TryGetValue(row.Id, out var ids) ? ids : Array.Empty<Guid>());
             })

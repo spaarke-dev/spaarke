@@ -134,3 +134,14 @@ Owner direction: word-add-in-r1 merges to master (PR #1796, `99ec749cd`) and dep
 Independent check by R3: the live `Sprk.Bff.Api.dll` ProductVersion is `1.0.0+99ec749cd...`; that commit is on master and contains `ba1242b5a` (the R3 merge); `/healthz` 200, `/healthz/dataverse` 200. **R3 is live on dev.** Not in this build: PR #1799 (mapped `upn`, auto-merge) and the R3 branch's A8 clarification commit (docs only).
 
 The A6 package (`wwwroot-20261013T034808Z`) is the word-add-in `f9cc25f73` build. It is not a rollback target for this deploy; rolling back now means redeploying an earlier master commit, which the deploying session owns.
+
+### Intake 403 fix, 2026-10-13 (owner-approved: "approve intake fix", then "go")
+
+- **Repo:** `Spaarke Basic User.xml` gains `prvReadsprk_ServiceRequest` at Basic level (commit `5bfedfe3d`). Customers get it with the solution.
+- **Dev (live change):** `AddPrivilegesRole` on the root role `11f93c04-ddf6-f011-8406-7c1e520aa4df` (Spaarke Basic User), privilege `80592209-a062-49a9-b307-fb6177df6a46`, depth Basic. Before: False; after: True.
+  - The BU1 owning team `cf15f587` holds the BU copy `dc44312f…`, whose root is `11f93c04`.
+  - Rollback: `RemovePrivilegeRole` with the same privilege id (scratchpad `intake-role-fix.ps1 -Rollback`).
+- **Re-test:**
+  - First try right after the change: still 500, with the same `0x80040299`. Dataverse's security cache had not refreshed.
+  - About 2 minutes later: **C-W6 201** (service request `6af398b9-16c7-f111-a05c-3833c5e9614d`), then **C-W8b 204** (deleted through R3's delete-own route).
+  - Nothing is left behind. C-W6 and C-W8b: **PASS** (FR-05, FR-26).

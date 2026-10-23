@@ -139,12 +139,42 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
     public string Description =>
         "Links every enabled interactive systemuser to its contact by Entra oid (bind, create, or link), flags "
         + "identity collisions for an operator, and clears flags whose collision has been resolved — in this BFF's "
-        + "own environment and in every environment it provisions users into (DATAVERSE_URL and the active "
+        + "own environment and in every environment it provisions users into (DATAVERSE_URL and the active, set-up "
         + "sprk_dataverseenvironment rows). Never re-points or clears an existing link. Report-only until "
         + "IdentityLink:Reconciliation:WritesEnabled is true.";
 
     /// <summary>Report-only unless the switch parses to <c>true</c>.</summary>
     internal bool WritesEnabled => ContactIdentityBinder.LinkWritesEnabled(_configuration);
+
+    /// <summary>
+    /// The URLs of the registry rows this job reconciles: active rows whose setup has finished. A row still being
+    /// provisioned (<see cref="EnvironmentSetupStatus.NotStarted"/>, <see cref="EnvironmentSetupStatus.InProgress"/>) or
+    /// whose provisioning failed (<see cref="EnvironmentSetupStatus.Issue"/>) has no identity-binding schema and no BFF
+    /// access yet, so reading it fails every run (T186: the ACME placeholder failed the job every 5 minutes from
+    /// 2026-10-14). A row with no status predates the column and is kept, as before. Pure.
+    /// </summary>
+    public static IEnumerable<string?> ReconcilableRegistryUrls(IEnumerable<DataverseEnvironmentRecord> activeEnvironments)
+    {
+        ArgumentNullException.ThrowIfNull(activeEnvironments);
+        return activeEnvironments
+            .Where(e => e.SetupStatus is null or EnvironmentSetupStatus.Ready)
+            .Select(e => e.DataverseUrl);
+    }
+
+    /// <summary>
+    /// The active registry rows <see cref="ReconcilableRegistryUrls"/> leaves out, counted by setup status (ordered by
+    /// status). Pure.
+    /// </summary>
+    public static IReadOnlyDictionary<EnvironmentSetupStatus, int> SkippedRegistryRowsByStatus(
+        IEnumerable<DataverseEnvironmentRecord> activeEnvironments)
+    {
+        ArgumentNullException.ThrowIfNull(activeEnvironments);
+        return activeEnvironments
+            .Where(e => e.SetupStatus is { } status && status != EnvironmentSetupStatus.Ready)
+            .GroupBy(e => e.SetupStatus!.Value)
+            .OrderBy(g => g.Key)
+            .ToDictionary(g => g.Key, g => g.Count());
+    }
 
     /// <summary>
     /// The provisioning-target environments to reconcile besides this BFF's own: <paramref name="registrationEnvironment"/>
@@ -297,9 +327,21 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
         {
             var registry = services.GetService<DataverseEnvironmentService>()
                 ?? throw new InvalidOperationException("DataverseEnvironmentService is not registered.");
-            registryUrls = (await registry.GetActiveEnvironmentsAsync(ct).ConfigureAwait(false))
-                .Select(e => e.DataverseUrl)
-                .ToList();
+            var active = await registry.GetActiveEnvironmentsAsync(ct).ConfigureAwait(false);
+            registryUrls = ReconcilableRegistryUrls(active).ToList();
+
+            // Skipped rows are logged, so a live environment stuck in Issue (a failed re-provision) shows in the run log
+            // rather than silently dropping out of reconciliation (uac-r2 review of #1901).
+            var skipped = SkippedRegistryRowsByStatus(active);
+            if (skipped.Count > 0)
+            {
+                _logger.LogInformation(
+                    "[ID-LINK-RECON] Skipped {SkippedCount} registry row(s) whose setup is not Ready: {SkippedByStatus}. "
+                    + "correlationId={CorrelationId}",
+                    skipped.Values.Sum(),
+                    string.Join(", ", skipped.Select(kv => $"{kv.Key}={kv.Value}")),
+                    context.CorrelationId);
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -376,10 +418,12 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
                     }
                 }
 
+                // #2130 (CODE-QUALITY-RUBRIC D9): the user and the contact are named by id. The email was logged here for
+                // every enabled interactive user on every run.
                 _logger.LogInformation(
-                    "[ID-LINK-RECON] decision mode={Mode} environment={Environment} systemuser={SystemUserId} email={Email} "
+                    "[ID-LINK-RECON] decision mode={Mode} environment={Environment} systemuser={SystemUserId} "
                     + "outcome={Outcome} contact={ContactId} code={Code} reason={Reason} correlationId={CorrelationId}",
-                    mode, report.Environment, user.SystemUserId, user.InternalEmail, result.Outcome, result.ContactId,
+                    mode, report.Environment, user.SystemUserId, result.Outcome, result.ContactId,
                     result.DenyCode, result.Reason, context.CorrelationId);
 
                 foreach (var change in result.Changes)

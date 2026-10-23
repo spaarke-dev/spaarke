@@ -215,7 +215,29 @@ Ensure-Attribute 'sprk_state' 'Choice (8 states)' @{
     DisplayName = (New-Label 'State'); Description = (New-Label 'The Assigned-To decision for this subject (AssignedAccessState).')
     OptionSet = @{
         '@odata.type' = 'Microsoft.Dynamics.CRM.OptionSetMetadata'; IsGlobal = $false; OptionSetType = 'Picklist'
-        Options = @($States.Keys | ForEach-Object { @{ Value = [int]$_; Label = (New-Label $States[$_]) } })
+        Options = @($States.GetEnumerator() | ForEach-Object { @{ Value = [int]$_.Key; Label = (New-Label $_.Value) } })
+    }
+}
+
+# T186 L39: earlier runs created every state with an EMPTY label — $States[$_] on an [ordered] dictionary with int keys
+# indexes by POSITION, so it returned $null. A managed import of a package carrying an empty option label fails
+# ("Option Label ... description is null or empty"). Give each such state its label.
+$stateOptions = if ($entity) {
+    Try-DvGet "EntityDefinitions(LogicalName='$Table')/Attributes(LogicalName='sprk_state')/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?`$select=LogicalName&`$expand=OptionSet(`$select=Options)"
+}
+if ($stateOptions) {
+    $stateLabels = @{}; foreach ($e in $States.GetEnumerator()) { $stateLabels[[int]$e.Key] = $e.Value }
+    $unlabelled = @($stateOptions.OptionSet.Options | Where-Object { $stateLabels.ContainsKey([int]$_.Value) -and -not $_.Label.UserLocalizedLabel.Label })
+    foreach ($o in $unlabelled) {
+        $value = [int]$o.Value
+        if ($Verify) { Report 'FAIL' "$Table.sprk_state option $value has no label (expected '$($stateLabels[$value])')"; continue }
+        if ($IsDryRun) { Report 'WOULD' "label $Table.sprk_state option $value '$($stateLabels[$value])'"; continue }
+        Invoke-DvWrite POST 'UpdateOptionValue' @{ EntityLogicalName = $Table; AttributeLogicalName = 'sprk_state'; Value = $value
+            Label = (New-Label $stateLabels[$value]); MergeLabels = $true } | Out-Null
+        Report 'DONE' "labelled $Table.sprk_state option $value '$($stateLabels[$value])'"
+    }
+    if ($unlabelled.Count -gt 0 -and -not $Verify -and -not $IsDryRun) {
+        Invoke-DvWrite POST 'PublishXml' @{ ParameterXml = "<importexportxml><entities><entity>$Table</entity></entities></importexportxml>" } | Out-Null
     }
 }
 

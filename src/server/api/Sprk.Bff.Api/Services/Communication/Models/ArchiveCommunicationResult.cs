@@ -20,4 +20,14 @@ public sealed record ArchiveCommunicationResult
 
     /// <summary>Number of per-attachment sprk_document records created in this call.</summary>
     public required int AttachmentDocumentsCreated { get; init; }
+
+    /// <summary>
+    /// #2246: attachments NOT archived because their SharePoint Embedded item could not be verified as fit to bind to a
+    /// new document of this communication. Logged per attachment with its reason code:
+    /// <c>sdap.communication.attachment_item_unverified</c> (not verified as this communication's item in its container),
+    /// or <c>sdap.communication.attachment_item_already_bound</c> (a document already names the item, PR #2248 fix
+    /// round 1). Zero when every candidate was verified. Clients show it as "N attachment(s) could not be verified and
+    /// were not saved."
+    /// </summary>
+    public int AttachmentsRefusedUnverified { get; init; }
 }

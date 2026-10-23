@@ -493,19 +493,19 @@ describe('Escape and the backdrop never close; closing asks when anything is unr
     await u.click(button('Close'));
     expect(await screen.findByText('Discard unrecorded choices?')).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
-    const check = await screen.findByRole('alertdialog');
+    const check = await screen.findByRole('alertdialog', { hidden: true });
     const buttons = within(check)
-      .getAllByRole('button')
+      .getAllByRole('button', { hidden: true })
       .map(b => b.textContent);
     expect(buttons.indexOf('Keep deciding')).toBeLessThan(buttons.indexOf('Discard and close'));
 
-    await u.click(within(check).getByRole('button', { name: 'Keep deciding' }));
+    await u.click(within(check).getByRole('button', { name: 'Keep deciding', hidden: true }));
     expect(onClose).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByText('Discard unrecorded choices?')).toBeNull());
-    expect(((await screen.findByRole('textbox', { name: /^To\b/ })) as HTMLInputElement).value).toBe('typed');
+    expect(((await screen.findByRole('textbox', { name: /^To\b/, hidden: true })) as HTMLInputElement).value).toBe('typed');
 
-    await u.click(button('Close'));
-    const again = await screen.findByRole('alertdialog');
+    await u.click(screen.getByRole('button', { name: exact('Close'), hidden: true }));
+    const again = await screen.findByRole('alertdialog', { hidden: true });
     // Fluent's focus manager (tabster) marks a re-opened nested dialog aria-hidden in jsdom; the button is still the real one.
     await u.click(within(again).getByRole('button', { name: 'Discard and close', hidden: true }));
     expect(onClose).toHaveBeenCalledTimes(1);

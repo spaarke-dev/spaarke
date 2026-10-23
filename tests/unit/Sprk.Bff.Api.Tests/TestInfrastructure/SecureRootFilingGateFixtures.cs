@@ -53,6 +53,10 @@ internal static class SecureRootFilingGateFixtures
         entities
             .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EntityCollection());
+
+        // #2191 K2: the record-type catalog is reference data, not records — the Office quick-create files a project created from
+        // a matter under it, and the plan reads that pair's type back here. The matter itself is not here, so it confers nothing.
+        entities.AnswersRecordTypeCatalog();
         return entities.Object;
     }
 }

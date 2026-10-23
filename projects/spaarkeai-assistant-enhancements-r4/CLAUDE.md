@@ -23,6 +23,7 @@
 
 **Deploy gotchas**
 - `sprk_spaarkeai` and the BFF are **last-write-wins** across all projects: ALWAYS fast-forward the worktree to current `origin/master` before building/deploying, or you roll back other projects' work.
+- (2026-10-15) **Before any BFF deploy to dev, check what's live**: download `site/wwwroot/Sprk.Bff.Api.dll` via Kudu VFS (`https://spaarke-bff-dev.scm.azurewebsites.net/api/vfs/...`, bearer = `az account get-access-token --resource https://management.core.windows.net/`), read its `1.0.0+<sha>` ProductVersion, then `git merge-base --is-ancestor <live sha> <your sha>`. Not an ancestor → the live build holds work you don't have (e.g. another project's branch build) — coordinate with that project before deploying.
 - SpaarkeAi Vite resolves `@spaarke/*` to shared-lib **`src/`** (not `dist/`) — no shared-lib rebuild needed; clear `dist/ node_modules/.vite/ .vite/` and `npm run build`. Verify a change marker in `dist/spaarkeai.html` before deploying.
 - `npm run build` ends with `build:ribbon`, which fails locally on `@spaarke/sdap-client` (no `dist/` in worktree) — environmental; the ribbon scripts are not part of `sprk_spaarkeai`, deploy proceeds.
 - `npm install` churns `package-lock.json` (SpaarkeAi, AI.Widgets) — revert it before committing.

@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { MsalProvider } from '@azure/msal-react';
+import type { IPublicClientApplication } from '@azure/msal-browser';
 import { Button, FluentProvider, Spinner, Text, tokens } from '@fluentui/react-components';
 import { resolveCodePageTheme } from '@spaarke/ui-components/utils/themeStorage';
 import { msalInstance } from './auth/msal-config';
@@ -10,27 +11,35 @@ import {
   createTeamsHostAdapter,
   notifyTeamsAppLoaded,
   notifyTeamsFailureOther,
-  notifyTeamsSuccess,
+  readTeamsPreAuthContext,
   type ITeamsHostAdapter,
 } from './host/TeamsHostAdapter';
 import { getStoredRealm, setStoredRealm, clearStoredRealm, type Realm } from './auth/realm';
-import { syncActiveAccountOnInteractiveSignIn } from './auth/msal-auth';
-import { resolveStandalonePlane, applyStandalonePlane, type StandalonePlane } from './auth/standalone-plane';
+import { syncActiveAccountOnInteractiveSignIn, TeamsGuestAccountError } from './auth/msal-auth';
+import {
+  resolveStandalonePlane,
+  applyStandalonePlane,
+  clearStaleTeamsInteractionLock,
+  pickedKeyListsTenant,
+  prepareWorkforceHomePlane,
+  type StandalonePlane,
+} from './auth/standalone-plane';
 import {
   activateBackend,
   chooseBackend,
   clearActiveBackend,
+  landingCustomerName,
   resolveBackendSelection,
+  resolveHomeBackendSelection,
   type Backend,
-  type BackendPlane,
 } from './auth/backend-selection';
 import { RealmChooser } from './components/auth/RealmChooser';
 import { CustomerPicker } from './components/auth/CustomerPicker';
 import { TeamsAuthError } from './components/auth/TeamsAuthError';
+import { TeamsGuestAccount, TEAMS_GUEST_HEADING } from './components/auth/TeamsGuestAccount';
+import { OrganizationNotSetUp } from './components/auth/OrganizationNotSetUp';
 import { App } from './App';
 import { isDevMockEnabled } from './dev-mock';
-import { isJoinPath } from './auth/registration-client';
-import { JoinPage } from './pages/JoinPage';
 import { captureInviteCode, clearInviteCode } from './auth/invite-code';
 
 // Power Pages Code Page SPA — React 18 with createRoot (bundled, not platform-provided).
@@ -116,10 +125,14 @@ const bootstrapCenterStyle: React.CSSProperties = {
  * Live browser bootstrap component: home-realm discovery → per-context authority → MSAL init → App.
  *
  * State machine (all pre-auth screens are Fluent v9 semantic tokens only — ADR-021):
- *   - no stored realm            → <RealmChooser> ("My organization" | "Partner")
- *   - realm chosen               → run-time backend selection for that plane (task 041, FR-17): one backend (or a
+ *   - no stored realm            → <RealmChooser> ("Partner" | "company account")
+ *   - realm chosen (Partner)     → run-time backend selection for the CIAM plane (task 041, FR-17): one backend (or a
  *                                  valid `?customer=` / stored key) is activated; several and none active →
  *                                  <CustomerPicker>; none → fail closed (the error screen below; no request is made)
+ *   - realm chosen (company)     → the workforce HOME plane (ADR-028 A9, task 058): sign in to the person's own directory
+ *                                  first, then the signed-in tenant id picks the backend. No account yet → the app mounts
+ *                                  so AuthGuard starts the sign-in; a tenant no directory entry lists →
+ *                                  <OrganizationNotSetUp> (no token request, no BFF call); several entries → <CustomerPicker>
  *   - realm chosen, initializing → spinner
  *   - realm chosen, init failed  → fail-loud error + "choose a different sign-in" (criterion 4)
  *   - plane ready                → <MsalProvider instance={plane}><App/></MsalProvider>
@@ -134,12 +147,32 @@ const StandaloneBootstrap: React.FC = () => {
   // Customer picker options (several backends known, none active), and the key the user picked from them.
   const [pickOptions, setPickOptions] = React.useState<Backend[] | null>(null);
   const [pickedKey, setPickedKey] = React.useState<string | null>(null);
+  // The signed-in company directory is listed by no customer (A9): the sign-in instance, kept for "Sign out".
+  const [notSetUp, setNotSetUp] = React.useState<IPublicClientApplication | null>(null);
+  // "Work for {customer}?" on the landing, for a `?customer={key}` link that names a configured customer.
+  const customerName = React.useMemo(() => landingCustomerName(), []);
 
   React.useEffect(() => {
     if (!realm) return;
     let cancelled = false;
     void (async () => {
       try {
+        if (realm === 'workforce') {
+          // The company-account sign-in (A9): the plane depends on the signed-in tenant, so it is prepared as one step.
+          const prepared = await prepareWorkforceHomePlane({ pickedKey: pickedKey ?? undefined });
+          if (cancelled) return;
+          if (prepared.kind === 'pick') {
+            setPickOptions(prepared.options);
+            return;
+          }
+          if (prepared.kind === 'notSetUp') {
+            setNotSetUp(prepared.instance);
+            return;
+          }
+          applyStandalonePlane(prepared.plane);
+          setPlane(prepared.plane);
+          return;
+        }
         if (!pickedKey) {
           // Backend first (task 041): the plane's scope and every request URL come from the active backend.
           const selection = await resolveBackendSelection(realm);
@@ -196,6 +229,7 @@ const StandaloneBootstrap: React.FC = () => {
     setPlane(null);
     setPickOptions(null);
     setPickedKey(null);
+    setNotSetUp(null);
     setRealm(null);
   }, []);
 
@@ -203,7 +237,7 @@ const StandaloneBootstrap: React.FC = () => {
   if (!realm) {
     return (
       <FluentProvider theme={resolveCodePageTheme()} style={{ height: '100%' }}>
-        <RealmChooser onChoose={handleChoose} />
+        <RealmChooser onChoose={handleChoose} customerName={customerName} />
       </FluentProvider>
     );
   }
@@ -224,6 +258,15 @@ const StandaloneBootstrap: React.FC = () => {
             Choose a different sign-in
           </Button>
         </div>
+      </FluentProvider>
+    );
+  }
+
+  // The company directory is listed by no customer (A9): nothing was requested, nothing is active.
+  if (notSetUp) {
+    return (
+      <FluentProvider theme={resolveCodePageTheme()} style={{ height: '100%' }}>
+        <OrganizationNotSetUp instance={notSetUp} onChooseDifferent={handleResetRealm} />
       </FluentProvider>
     );
   }
@@ -258,27 +301,42 @@ const StandaloneBootstrap: React.FC = () => {
 };
 
 /**
- * Teams tab bootstrap. Delegates ALL Teams-specific concerns (app.initialize, context, theme,
- * deep-link, auth-strategy selection) to the host adapter - this function only sequences
- * "initialize, then render the SAME App" and handles the fail-loud error path.
+ * Teams tab bootstrap (ADR-028 A9 Teams amendment; task 075). Delegates ALL Teams-specific concerns (app.initialize,
+ * context, theme, deep-link, auth-strategy selection) to the host adapter - this function only sequences "read the Teams
+ * context tenant, find it in the directory, initialize, then render the SAME App" and handles the fail-loud paths.
+ *
+ * The backend is chosen by the Teams context tenant id (`user.tenant.id`) BEFORE anything is requested: a missing or
+ * invalid tid, or one no directory entry lists, shows the Teams "not set up" screen with zero token requests and zero BFF
+ * calls (the same guarantee as the browser home plane).
  */
 async function bootstrapTeams(root: Root): Promise<void> {
-  // Backend first (task 041, FR-17): the Teams token scope is the active workforce backend's.
-  const selection = await resolveBackendSelection('workforce');
+  // Teams never redirects, so an interaction lock found at page load is a popup the iframe reload interrupted: remove it
+  // before any MSAL instance is used, or every popup (guest link, BFF fallback, "Sign in") fails until Teams restarts.
+  clearStaleTeamsInteractionLock();
+  const { tenantId } = await readTeamsPreAuthContext();
+  if (!tenantId) {
+    renderTeamsNotSetUp(root);
+    return;
+  }
+  const selection = await resolveHomeBackendSelection(tenantId);
   if (selection.kind === 'none') {
     renderBackendUnavailable(root, selection.reason);
     return;
   }
+  if (selection.kind === 'notSetUp') {
+    renderTeamsNotSetUp(root);
+    return;
+  }
   if (selection.kind === 'pick') {
-    renderTeamsCustomerPicker(root, 'workforce', selection.options);
+    renderTeamsCustomerPicker(root, tenantId, selection.options);
     return;
   }
   activateBackend('workforce', selection.backend);
-  await bootstrapTeamsAuth(root);
+  await bootstrapTeamsAuth(root, tenantId);
 }
 
-/** Teams: the customer picker (several workforce backends, none active); the choice continues the bootstrap. */
-function renderTeamsCustomerPicker(root: Root, plane: BackendPlane, options: Backend[]): void {
+/** Teams: the customer picker (several entries list the tenant, none active); the choice continues the bootstrap. */
+function renderTeamsCustomerPicker(root: Root, tenantId: string, options: Backend[]): void {
   // The host's spinner stops once there is a screen to show (app.initialize() already ran in detectTeamsHost()).
   notifyTeamsAppLoaded();
   root.render(
@@ -287,15 +345,38 @@ function renderTeamsCustomerPicker(root: Root, plane: BackendPlane, options: Bac
         <CustomerPicker
           options={options}
           onChoose={key => {
-            try {
-              chooseBackend(plane, options, key);
-            } catch (err) {
-              renderBackendUnavailable(root, err instanceof Error ? err.message : String(err));
-              return;
-            }
-            void bootstrapTeamsAuth(root);
+            void (async () => {
+              try {
+                chooseBackend('workforce', options, key);
+                // Re-check the picked key against the tenant (as the browser does): a key that does not list it never
+                // reaches a token request.
+                if (!(await pickedKeyListsTenant(tenantId, key))) {
+                  clearActiveBackend();
+                  renderTeamsNotSetUp(root);
+                  return;
+                }
+              } catch (err) {
+                renderBackendUnavailable(root, err instanceof Error ? err.message : String(err));
+                return;
+              }
+              await bootstrapTeamsAuth(root, tenantId);
+            })();
           }}
         />
+      </FluentProvider>
+    </React.StrictMode>
+  );
+}
+
+/** Teams: the tenant is not set up - missing, invalid or listed by no customer. A message only; nothing was requested. */
+function renderTeamsNotSetUp(root: Root): void {
+  // Same signals as a failed start (loaded: a screen is showing; failed: Other), so Teams stops its spinner and records it.
+  notifyTeamsAppLoaded();
+  notifyTeamsFailureOther('This organization is not set up for Spaarke.');
+  root.render(
+    <React.StrictMode>
+      <FluentProvider theme={resolveCodePageTheme()} style={{ height: '100%' }}>
+        <OrganizationNotSetUp variant="teams" />
       </FluentProvider>
     </React.StrictMode>
   );
@@ -324,18 +405,39 @@ function renderBackendUnavailable(root: Root, reason: string): void {
 }
 
 /** Teams auth bootstrap once a backend is active: adapter initialize (NAA, then popup) → the SAME App. */
-async function bootstrapTeamsAuth(root: Root): Promise<void> {
-  const adapter = createTeamsHostAdapter();
+async function bootstrapTeamsAuth(root: Root, tenantId: string): Promise<void> {
+  const adapter = createTeamsHostAdapter(tenantId);
 
   try {
     await adapter.initialize();
   } catch (err) {
+    if (err instanceof TeamsGuestAccountError) {
+      renderTeamsGuestAccount(root);
+      return;
+    }
     console.error('[SecureProjectWorkspace] Teams workforce authentication failed:', err);
     renderTeamsAuthError(root, adapter, err);
     return;
   }
 
   renderTeamsApp(root, adapter);
+}
+
+/**
+ * Teams: the signed-in account is a B2B guest of the Teams tenant (found right after the token was acquired, in bootstrap or
+ * in recovery). A message only, and NO BFF call: the customer BFF would refuse the guest token (401) and a reload would loop.
+ */
+function renderTeamsGuestAccount(root: Root): void {
+  // Same signals as the not-set-up screen: loaded (a screen is showing) and failed (Other).
+  notifyTeamsAppLoaded();
+  notifyTeamsFailureOther(TEAMS_GUEST_HEADING);
+  root.render(
+    <React.StrictMode>
+      <FluentProvider theme={resolveCodePageTheme()} style={{ height: '100%' }}>
+        <TeamsGuestAccount />
+      </FluentProvider>
+    </React.StrictMode>
+  );
 }
 
 /** Render the SAME shared <App> under the Teams-signed-in MSAL instance (after bootstrap or after recovery). */
@@ -369,32 +471,19 @@ function renderTeamsAuthError(root: Root, adapter: ITeamsHostAdapter, err: unkno
           message={message}
           diagnostics={diagnostics}
           onSignIn={async () => {
-            await adapter.signInWithPopup();
+            try {
+              await adapter.signInWithPopup();
+            } catch (signInError) {
+              // A guest of the Teams tenant: another sign-in loops into the same 401, so the guest screen replaces this one.
+              if (signInError instanceof TeamsGuestAccountError) {
+                renderTeamsGuestAccount(root);
+                return;
+              }
+              throw signInError;
+            }
             renderTeamsApp(root, adapter);
           }}
         />
-      </FluentProvider>
-    </React.StrictMode>
-  );
-}
-
-/**
- * `/join?customer={key}` (task 056, FR-13): a pre-sign-in page, so it is rendered here — before the realm chooser, the
- * backend activation and any MSAL instance — in both hosts. The page itself decides what to show: "not available"
- * while `VITE_JOIN_ENABLED` is off, a browser-only message inside Teams (no redirect in the Teams iframe, NFR-04).
- */
-function renderJoin(root: Root, inTeams: boolean): void {
-  // Inside Teams the host's spinner stops once there is a screen to show (as for the other pre-auth screens), and the
-  // message is the whole tab (no sign-in follows), so the start is also reported as successful, as the Teams bootstrap
-  // does once it has something to show.
-  if (inTeams) {
-    notifyTeamsAppLoaded();
-    notifyTeamsSuccess();
-  }
-  root.render(
-    <React.StrictMode>
-      <FluentProvider theme={resolveCodePageTheme()} style={{ height: '100%' }}>
-        <JoinPage teamsHost={inTeams} />
       </FluentProvider>
     </React.StrictMode>
   );
@@ -408,10 +497,6 @@ async function main() {
   const root = createRoot(rootElement);
 
   const inTeams = await detectTeamsHost();
-  if (isJoinPath(window.location.pathname)) {
-    renderJoin(root, inTeams);
-    return;
-  }
   if (inTeams) {
     await bootstrapTeams(root);
   } else {

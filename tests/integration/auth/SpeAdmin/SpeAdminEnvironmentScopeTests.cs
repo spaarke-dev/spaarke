@@ -159,6 +159,19 @@ public sealed class SpeAdminEnvironmentScopeTests : IClassFixture<AdminSurfaceHo
         AssertUniformNotFound(await Problem(await client.GetAsync($"/api/spe/environments/{EnvA}"), HttpStatusCode.NotFound), EnvA);
     }
 
+    [Fact]
+    public async Task ADisabledCallerInTheRootBusinessUnit_ScopesNothing_AndGetsThe404()
+    {
+        // Issue #1576: a disabled systemuser keeps its oid. Were it resolved, this ROOT-unit row would list every
+        // environment; disabled, it scopes no business unit at all (fail closed), exactly like no systemuser.
+        _fixture.Reset();
+        SeedTenant(callerUnit: Root, callerDisabled: true);
+        using var client = Admin();
+
+        (await ListedIds(client)).Should().BeEmpty();
+        AssertUniformNotFound(await Problem(await client.GetAsync($"/api/spe/environments/{EnvA}"), HttpStatusCode.NotFound), EnvA);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // A platform operator (root business unit) — unchanged behaviour
     // ─────────────────────────────────────────────────────────────────────────
@@ -321,7 +334,7 @@ public sealed class SpeAdminEnvironmentScopeTests : IClassFixture<AdminSurfaceHo
 
     private HttpClient Admin() => _fixture.CreateCaller(new[] { "Admin" });
 
-    private void SeedTenant(Guid? callerUnit)
+    private void SeedTenant(Guid? callerUnit, bool callerDisabled = false)
     {
         var dv = _fixture.Dataverse;
         dv.Add("businessunits", new() { ["businessunitid"] = Root, ["_parentbusinessunitid_value"] = null });
@@ -335,6 +348,7 @@ public sealed class SpeAdminEnvironmentScopeTests : IClassFixture<AdminSurfaceHo
                 ["azureactivedirectoryobjectid"] = AdminSurfaceHostFixture.CallerOid,
                 ["systemuserid"] = Guid.Parse("5e5e5e5e-0000-0000-0000-000000000002"),
                 ["_businessunitid_value"] = unit,
+                ["isdisabled"] = callerDisabled,
             });
         }
 

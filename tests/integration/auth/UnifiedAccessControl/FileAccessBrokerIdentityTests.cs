@@ -6,10 +6,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Spaarke.Dataverse;
-using Microsoft.Xrm.Sdk;
-using Moq;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
-using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Xunit;
@@ -42,7 +39,6 @@ public class FileAccessBrokerIdentityTests : IClassFixture<FileAccessBrokerTestF
     {
         _fixture = fixture;
         _fixture.AppOnlyCalls.Clear();
-        _fixture.Flags.Flags.Clear();
     }
 
     [Theory(DisplayName = "Task 171: an allowed read route calls Graph APP-ONLY for the document's own pointer")]
@@ -86,7 +82,6 @@ public class FileAccessBrokerIdentityTests : IClassFixture<FileAccessBrokerTestF
     [InlineData("GET", "open-links")]
     [InlineData("GET", "versions")]
     [InlineData("GET", "versions/v-1/content")]
-    [InlineData("POST", "share-link")]
     public async Task ReadRoute_PointerRefused_Is409_AndMakesNoGraphCall(string method, string route)
     {
         // The caller is fully entitled on the ROW — so the only thing standing between a rogue pointer and an app-only
@@ -103,57 +98,18 @@ public class FileAccessBrokerIdentityTests : IClassFixture<FileAccessBrokerTestF
             "the application's identity reaches every container of the type, so an unverified pointer is never followed");
     }
 
-    [Theory(DisplayName = "Round 72 F10: share-link is REFUSED 403 for a document of a SECURE, RESTRICTED or unreadable record, and nothing is minted")]
-    [InlineData("secure", "sdap.access.deny.share_link_secure_record")]
-    [InlineData("restricted", "sdap.access.deny.share_link_restricted_record")]
-    [InlineData("unreadable", "sdap.access.deny.share_link_restricted_record")]
-    public async Task ShareLink_ProtectedRecord_Is403_AndMintsNothing(string protection, string expectedReason)
+    [Fact(DisplayName = "#1350: the retired share-link route is GONE — a Share holder gets 404 and nothing reaches Graph")]
+    public async Task ShareLink_RouteIsRetired_Is404_AndMakesNoGraphCall()
     {
-        _fixture.Flags.Flags[FileAccessBrokerTestFixture.ProtectedProjectId] = protection switch
-        {
-            "secure" => new RootRecordFlags(IsSecure: true, IsRestricted: false),
-            "restricted" => new RootRecordFlags(IsSecure: false, IsRestricted: true),
-            _ => RootRecordFlags.Unreadable,
-        };
-        using var sharer = _fixture.CreateClientWithRights("ReadAccess,ShareAccess");
+        // Retired 2026-10-16 (unified-access-control-r2; #1350, #1752 link half): Graph refused createLink in every SPE
+        // container (502 for every document), no client called it, and a working link would bypass Secure and No Access.
+        // A caller holding every right on the row must reach no handler at all — not a 403, not a 502.
+        using var sharer = _fixture.CreateClientWithRights("ReadAccess,WriteAccess,ShareAccess");
 
-        var response = await sharer.PostAsync(
-            $"/api/documents/{FileAccessBrokerTestFixture.ProtectedRecordDocumentId}/share-link", content: null);
-
-        var body = await response.Content.ReadAsStringAsync();
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, body);
-        body.Should().Contain(expectedReason);
-        _fixture.AppOnlyCalls.Should().NotContain(c => c.StartsWith("createlink:", StringComparison.Ordinal),
-            "a sharing link reaches people outside the record's access list — never for a secure or restricted record");
-    }
-
-    [Fact(DisplayName = "Round 72 F10: share-link for a document of a STANDARD record is minted as before")]
-    public async Task ShareLink_StandardRecord_IsMinted()
-    {
-        _fixture.Flags.Flags[FileAccessBrokerTestFixture.ProtectedProjectId] = new RootRecordFlags(IsSecure: false, IsRestricted: false);
-        using var sharer = _fixture.CreateClientWithRights("ReadAccess,ShareAccess");
-
-        var response = await sharer.PostAsync(
-            $"/api/documents/{FileAccessBrokerTestFixture.ProtectedRecordDocumentId}/share-link", content: null);
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
-        _fixture.AppOnlyCalls.Should().Contain(c => c.StartsWith("createlink:", StringComparison.Ordinal));
-    }
-
-    [Fact(DisplayName = "Task 171: share-link mints its link APP-ONLY, and only for a caller holding Share")]
-    public async Task ShareLink_IsMintedAppOnly_OnlyForAShareHolder()
-    {
-        using var reader = _fixture.CreateClientWithRights("ReadAccess");
-        (await reader.PostAsync($"/api/documents/{DocumentId}/share-link", content: null))
-            .StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        _fixture.AppOnlyCalls.Should().BeEmpty();
-
-        using var sharer = _fixture.CreateClientWithRights("ReadAccess,ShareAccess");
         var response = await sharer.PostAsync($"/api/documents/{DocumentId}/share-link", content: null);
 
-        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
-        _fixture.AppOnlyCalls.Should().ContainSingle()
-            .Which.Should().Be($"createlink:{FileAccessBrokerTestFixture.DriveFor(DocumentId)}/item-{DocumentId}");
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound, await response.Content.ReadAsStringAsync());
+        _fixture.AppOnlyCalls.Should().BeEmpty("no route mints a sharing link any more");
     }
 }
 
@@ -162,16 +118,6 @@ public sealed class FileAccessBrokerTestFixture : DocumentDestroyAuthorizationTe
 {
     /// <summary>Every app-only facade call, as "kind:drive/item".</summary>
     public ConcurrentQueue<string> AppOnlyCalls { get; } = new();
-
-    /// <summary>Round 72 F10: a document filed to <see cref="ProtectedProjectId"/>, whose flags a test states.</summary>
-    public const string ProtectedRecordDocumentId = "17130000-0000-4000-8000-0000000000aa";
-
-    /// <summary>The project <see cref="ProtectedRecordDocumentId"/> is filed to.</summary>
-    public static readonly Guid ProtectedProjectId = Guid.Parse("17130000-0000-4000-8000-0000000000ab");
-
-    /// <summary>Round 72 F10: the root-record flags the share-link refusal reads (default: standard).</summary>
-    internal GrantPolicyTestDoubles.FlagStubParticipationService Flags { get; } =
-        new(new RootRecordFlags(IsSecure: false, IsRestricted: false));
 
     /// <summary>The document whose row points at a container the pointer check refuses (finding 5).</summary>
     public const string RoguePointerDocumentId = "17130000-0000-4000-8000-0000000000ff";
@@ -195,17 +141,6 @@ public sealed class FileAccessBrokerTestFixture : DocumentDestroyAuthorizationTe
             services.AddScoped(_ => TestRecordContainerResolver.ForBusinessUnitContainers(
                 c => c.StartsWith("b!drive-", StringComparison.Ordinal)));
 
-            // Round 72 F10: the share-link refusal reads the document's record links and that record's flags.
-            services.RemoveAll<ExternalParticipationService>();
-            services.AddSingleton<ExternalParticipationService>(Flags);
-            var rows = new Mock<IGenericEntityService>();
-            rows.Setup(e => e.RetrieveAsync("sprk_document", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string _, Guid id, string[] _, CancellationToken _) =>
-                    id == Guid.Parse(ProtectedRecordDocumentId)
-                        ? new Entity("sprk_document", id) { ["sprk_project"] = new EntityReference("sprk_project", ProtectedProjectId) }
-                        : new Entity("sprk_document", id));
-            services.RemoveAll<IGenericEntityService>();
-            services.AddSingleton(rows.Object);
         });
     }
 
@@ -254,13 +189,6 @@ public sealed class FileAccessBrokerTestFixture : DocumentDestroyAuthorizationTe
         {
             _calls.Enqueue($"version:{driveId}/{itemId}/{versionId}");
             return Task.FromResult<Stream?>(new MemoryStream([1]));
-        }
-
-        public override Task<string?> CreateSharingLinkAsync(
-            string driveId, string itemId, string linkType, string scope, DateTimeOffset? expiration = null, CancellationToken ct = default)
-        {
-            _calls.Enqueue($"createlink:{driveId}/{itemId}");
-            return Task.FromResult<string?>("https://example.invalid/share");
         }
     }
 

@@ -68,6 +68,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
 
     public SecureChildOwnershipAiToolTests()
     {
+        // #2143: a PATCH Dataverse accepted is on the row when the resolver reads it after the change.
+        _user.OnPatch = _world.ApplyPatch;
         _appOnly
             .Setup(a => a.UpdateRecordFieldsAsync(
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), null))
@@ -84,6 +86,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
 
                 _appCreates.Add((t, id, f));
                 MaterializeInShareWorld(t, id, f);
+                _world.ApplyPatch(t, id, f); // #2143: an app-only PATCH to an existing row lands too
             })
             .Returns(Task.CompletedTask);
     }
@@ -468,9 +471,10 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
     [Fact]
     public async Task EmailDraft_RegardingASecureMatter_IsCreatedByTheAppOwnedByTheNamedTeam_WithTheDrafterAsSender()
     {
+        var (visibility, visibilityAccessor) = new Sprk.Bff.Api.Tests.TestInfrastructure.CommunicationVisibilityFixtures().Build();
         var handler = new EmailDraftToolHandler(
             _user, Mock.Of<IEmailDraftAi>(), CoreAncestorResolverFixtures.Inert(), CreateLogger<EmailDraftToolHandler>(),
-            _world.Resolver(), _appOnly.Object);
+            _world.Resolver(), _appOnly.Object, visibility, visibilityAccessor);
         var args = JsonSerializer.Serialize(new
         {
             subject = "Settlement",
@@ -498,9 +502,10 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
     {
         // An unfiled draft keeps its creator — the resolver's own answer for an unfiled communication (E1): a team-owned
         // draft would show one person's unsent email to their whole business unit.
+        var (visibility, visibilityAccessor) = new Sprk.Bff.Api.Tests.TestInfrastructure.CommunicationVisibilityFixtures().Build();
         var handler = new EmailDraftToolHandler(
             _user, Mock.Of<IEmailDraftAi>(), CoreAncestorResolverFixtures.Inert(), CreateLogger<EmailDraftToolHandler>(),
-            _world.Resolver(), _appOnly.Object);
+            _world.Resolver(), _appOnly.Object, visibility, visibilityAccessor);
         var args = JsonSerializer.Serialize(new { subject = "Hello", body = "Draft.", to = new[] { "a@b.example" } });
 
         var result = await handler.ExecuteChatAsync(
@@ -696,7 +701,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["sprk_document"] = "sprk_documents", ["sprk_communication"] = "sprk_communications",
             ["task"] = "tasks", ["systemuser"] = "systemusers", ["contact"] = "contacts",
             ["sprk_workassignment"] = "sprk_workassignments", ["sprk_workspacelayout"] = "sprk_workspacelayouts",
-            ["sprk_mattertype_ref"] = "sprk_mattertype_refs",
+            ["sprk_mattertype_ref"] = "sprk_mattertype_refs", ["sprk_practicearea_ref"] = "sprk_practicearea_refs",
             // Task 147 r1: the browser child-record routes' tables.
             ["sprk_memo"] = "sprk_memos", ["sprk_event"] = "sprk_events", ["sprk_budget"] = "sprk_budgets",
             ["sprk_invoice"] = "sprk_invoices", ["sprk_reportcard"] = "sprk_reportcards", ["sprk_analysis"] = "sprk_analysises",
@@ -705,6 +710,10 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["sprk_recordtype_ref"] = "sprk_recordtype_refs", ["sprk_organization"] = "sprk_organizations",
             // Ontology task 126: the business-owned lookup targets.
             ["team"] = "teams", ["businessunit"] = "businessunits",
+            // #2084 round 2: a Signal and the rule it cites.
+            ["sprk_signal"] = "sprk_signals", ["sprk_policy"] = "sprk_policies",
+            // #2110: a communication's thread.
+            ["sprk_communicationthread"] = "sprk_communicationthreads",
         };
 
         /// <summary>
@@ -752,6 +761,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 ("sprk_assignedtointernal", "contact", "sprk_AssignedToInternal"),
                 ("sprk_createdbyperson", "systemuser", "sprk_CreatedByPerson"),
+                // Field mapping task 018a (K-3): the matter's organization-owned references (live navigation-property casing).
+                ("sprk_mattertype", "sprk_mattertype_ref", "sprk_MatterType"),
+                ("sprk_practicearea", "sprk_practicearea_ref", "sprk_PracticeArea"),
             },
             ["sprk_project"] = new[]
             {
@@ -767,6 +779,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 // #1616 fix round / task 046 r3: the Create Work Assignment wizard also files under an invoice or an event.
                 ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
                 ("sprk_regardingevent", "sprk_event", "sprk_RegardingEvent"),
+                // Field mapping task 014 fix round 3 (F-B): an ownership-parent lookup no filing list names (#2190).
+                ("sprk_regardingcommunication", "sprk_communication", "sprk_RegardingCommunication"),
                 ("sprk_assignedto", "contact", "sprk_AssignedTo"),
                 ("sprk_assignedtointernal", "contact", "sprk_AssignedToInternal"),
                 ("sprk_createdbyperson", "systemuser", "sprk_CreatedByPerson"),
@@ -780,6 +794,10 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
                 ("sprk_sentby", "systemuser", "sprk_SentBy"),
                 ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
+                // #2091 (b): a communication's project filing (SecureChildLineage: sprk_communication.sprk_regardingproject).
+                ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
+                // #2110: a communication's thread — a lineage parent, not an ownership parent (SecureChildLineage).
+                ("sprk_communicationthread", "sprk_communicationthread", "sprk_CommunicationThread"),
             },
             ["sprk_document"] = new[]
             {
@@ -840,6 +858,12 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 // A person the event is assigned to — not a column the pair's readers match the pair against.
                 ("sprk_assignedto", "contact", "sprk_AssignedTo"),
             },
+            // #2084 round 2: a Signal's core matter (sprk_signal.sprk_matter) and the rule it CITES (sprk_signal.sprk_policy).
+            ["sprk_signal"] = new[]
+            {
+                ("sprk_matter", "sprk_matter", "sprk_Matter"),
+                ("sprk_policy", "sprk_policy", "sprk_Policy"),
+            },
             // Task 147 r1 E2 (the secure-record ribbon's "New Budget"): sprk_Matter_Budget_1n, live 2026-10-04.
             ["sprk_budget"] = new[]
             {
@@ -887,6 +911,10 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         /// <summary>Ontology task 126 fault switch: a <c>RetrieveUserSetOfPrivilegesByNames</c> question naming this privilege
         /// fails with this status (other privilege questions, e.g. the table's Create, still answer).</summary>
         public (string Privilege, int Status)? PrivilegesFault { get; set; }
+
+        /// <summary>Field mapping task 018a (K-a) fault switch: a <c>RetrieveUserSetOfPrivilegesByNames</c> question naming this
+        /// privilege THROWS (a transport fault) instead of answering.</summary>
+        public string? PrivilegesThrowFor { get; set; }
 
         /// <summary>Ontology task 126 fault switch: the status the <c>UnderOrEqual</c> question fails with.</summary>
         public int? HierarchyFault { get; set; }
@@ -942,6 +970,10 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         public int PatchStatus { get; set; } = 204;
         public List<(string Path, string Body)> Posts { get; } = new();
         public List<(string Path, string Body)> Patches { get; } = new();
+
+        /// <summary>#2143: called with every PATCH Dataverse accepted — the harness lands it on its rows, because the resolver
+        /// reads the row after the change.</summary>
+        public Action<string, string>? OnPatch { get; set; }
 
         /// <summary>Task 147 r1c-v1: every write Dataverse refused because its body named a property the type does not declare.</summary>
         public List<(string Path, string Property)> RefusedBodies { get; } = new();
@@ -1071,6 +1103,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 var asked = JsonSerializer.Deserialize<string[]>(path[(path.IndexOf("@p1=", StringComparison.Ordinal) + 4)..])!;
                 PrivilegeQuestions.Add(asked);
+                if (PrivilegesThrowFor is { } throwFor && asked.Contains(throwFor, StringComparer.OrdinalIgnoreCase))
+                    throw new TimeoutException("privilege read timed out at 10.0.0.11");
                 if (PrivilegesFault is { } privilegesFault && asked.Contains(privilegesFault.Privilege, StringComparer.OrdinalIgnoreCase))
                     return DataverseUserResponse.Fail(privilegesFault.Status, DataverseUserClientErrorCodes.BadRequest, "Scripted fault.");
 
@@ -1218,6 +1252,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 return Task.FromResult(secured);
 
             Patches.Add((relativePath, jsonBody));
+            OnPatch?.Invoke(relativePath, jsonBody);
             return Task.FromResult(DataverseUserResponse.Ok(204, null));
         }
 

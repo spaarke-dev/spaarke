@@ -50,8 +50,25 @@ public sealed partial class RecordContainerResolver
     /// </summary>
     internal const string UnfiledDefaultContainerKey = "EmailProcessing:DefaultContainerId";
 
+    /// <summary>
+    /// #2151: the configuration keys whose containers are DECLARED HOMES of an unfiled document — a container another owner
+    /// stores unfiled documents in on purpose (ebilling-r1: the Procedure Library's rule-set guidelines and rate-card
+    /// workbooks of Firm or ClientDefault scope, internal-only and CIAM-denied, D-63; and the generated eBilling outputs).
+    /// An UNFILED document whose pointer is the item the BFF bound to it (<see cref="Spaarke.Dataverse.DocumentPointerBinding"/>)
+    /// and whose drive is one of these containers derives to that container (<see cref="DeriveDocumentContainersAsync"/>):
+    /// the strict rule serves it there, and no relocation pulls it into a business unit's container. A third owner adds
+    /// its key here. A key that is unset or blank declares nothing.
+    /// </summary>
+    internal static readonly string[] DeclaredUnfiledHomeContainerKeys =
+    [
+        "Finance:ProcedureLibraryContainerId", "Finance:EbillingOutputContainerId",
+    ];
+
     /// <summary>An email attachment is a child document of the email document; its file lives where the email's does.</summary>
     private const string ParentDocumentColumn = "sprk_parentdocument";
+
+    /// <summary>The drive (container) half of a document's pointer — read by the declared-home derivation (#2151).</summary>
+    private const string PointerDriveColumn = "sprk_graphdriveid";
 
     /// <summary>The system column naming the identity that CREATED the row.</summary>
     private const string CreatedByColumn = "createdby";
@@ -66,11 +83,11 @@ public sealed partial class RecordContainerResolver
     /// </summary>
     internal const string CreatedByPersonColumn = "sprk_createdbyperson";
 
-    /// <summary><c>systemuser.applicationid</c>: set for an application user (an Entra app's Dataverse identity).</summary>
-    private const string ApplicationIdColumn = "applicationid";
+    /// <summary><c>systemuser.applicationid</c>: set for an application user (an Entra app's Dataverse identity). <c>internal</c> (#2253 fix round 2): <c>InheritedAccessPermission.AccessColumns</c> refuses it to app-only generic writers.</summary>
+    internal const string ApplicationIdColumn = "applicationid";
 
-    /// <summary><c>businessunit.parentbusinessunitid</c> — null on the root business unit only.</summary>
-    private const string ParentBusinessUnitColumn = "parentbusinessunitid";
+    /// <summary><c>businessunit.parentbusinessunitid</c> — null on the root business unit only. <c>internal</c> (#2253 fix round 5): <c>InheritedAccessPermission.AccessColumns</c> refuses it to app-only generic writers.</summary>
+    internal const string ParentBusinessUnitColumn = "parentbusinessunitid";
 
     /// <summary>The communication a document belongs to (the archive path's link; every archive writer stamps it).</summary>
     private const string CommunicationEntity = "sprk_communication";
@@ -108,6 +125,9 @@ public sealed partial class RecordContainerResolver
     /// <summary><see cref="UnfiledDefaultContainerKey"/>, when configured.</summary>
     private readonly string? _unfiledDefaultContainerId;
 
+    /// <summary>The containers under <see cref="DeclaredUnfiledHomeContainerKeys"/> that are configured (#2151).</summary>
+    private readonly IReadOnlyList<string> _declaredUnfiledHomes;
+
     // Per-SCOPE memo of the two directory reads every interim check repeats (task 166 f1, verifier item 13): the
     // resolver is registered Scoped, so this lives for one request (a bulk download of N documents reads the hierarchy
     // once, not N times) or one job run. Only SUCCESSFUL answers are kept — a faulted read is dropped, so a later call in
@@ -134,6 +154,17 @@ public sealed partial class RecordContainerResolver
 
         return ids;
     }
+
+    /// <summary>The non-blank containers under <see cref="DeclaredUnfiledHomeContainerKeys"/> (trimmed, distinct); none without configuration.</summary>
+    internal static IReadOnlyList<string> DeclaredUnfiledHomesFrom(Microsoft.Extensions.Configuration.IConfiguration? configuration)
+        => configuration is null
+            ? []
+            : DeclaredUnfiledHomeContainerKeys
+                .Select(key => configuration[key]?.Trim())
+                .Where(container => !string.IsNullOrEmpty(container))
+                .Select(container => container!)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
 
     /// <summary><see cref="StrictDerivedContainerKey"/> as a boolean; absent, blank or unparseable = the interim rule.</summary>
     internal static bool StrictDerivedContainerFrom(Microsoft.Extensions.Configuration.IConfiguration? configuration)
@@ -280,60 +311,9 @@ public sealed partial class RecordContainerResolver
             return false;
         }
 
-        var drive = pointerDriveId.Trim();
-        var item = pointerItemId.Trim();
         try
         {
-            var row = await _entityService.RetrieveAsync(
-                "sprk_document", documentId,
-                [CreatedByColumn, OwningBusinessUnitColumn, CrossPathLink.LinkedCommunicationAttribute,
-                 Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn], ct).ConfigureAwait(false);
-            if (row is null)
-            {
-                return Refuse(documentId, "the document row could not be read");
-            }
-
-            // Round 72 item 1: before anything else, the item must be the one the BFF bound to this row.
-            if (ItemBindingRefusal(row, item) is { } bindingRefusal)
-            {
-                return Refuse(documentId, bindingRefusal);
-            }
-
-            if (_speFiles is null)
-            {
-                return Refuse(documentId, "no SharePoint Embedded reader is available to verify the item");
-            }
-
-            var creator = await _speFiles.GetItemCreatorAsync(drive, item, ct).ConfigureAwait(false);
-            if (creator is null)
-            {
-                return Refuse(documentId, "the item is not in the drive the row names");
-            }
-
-            var refusal = await InterimRefusalAsync(documentId, row, drive, creator, ct).ConfigureAwait(false);
-            if (refusal is null)
-            {
-                return true;
-            }
-
-            // Round 37 item 3: a file the BFF identity placed is served when — and only when — the strict rule would
-            // serve it. Anything the strict test refuses (another container, an undecidable document) stays refused.
-            if (IsUploadedByTheBffIdentity(creator))
-            {
-                var strictRefusal = await StrictRefusalAsync(documentId, drive, item, creator, ct).ConfigureAwait(false);
-                if (strictRefusal is null)
-                {
-                    _logger.LogInformation(
-                        "[DOCUMENT-POINTER] served under the interim rule: document {DocumentId}'s item {Item} was placed by the "
-                        + "BFF identity in the document's derived container {Drive} (owner round 37 item 3).",
-                        documentId, item, drive);
-                    return true;
-                }
-
-                refusal = $"{refusal}; and, uploaded by the BFF identity, it fails the derived-container test ({strictRefusal})";
-            }
-
-            return Refuse(documentId, refusal);
+            return await InterimRuleCoreAsync(documentId, pointerDriveId.Trim(), pointerItemId.Trim(), ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -345,6 +325,65 @@ public sealed partial class RecordContainerResolver
                 "[DOCUMENT-POINTER] REFUSED: document {DocumentId}'s pointer could not be verified (fail closed).", documentId);
             return false;
         }
+    }
+
+    /// <summary>
+    /// The interim rule's body with FAULTS PROPAGATING: <see langword="false"/> is a refusal, an exception is a check that
+    /// could not be made. <see cref="IsAllowedUnderInterimRuleAsync"/> folds both into <see langword="false"/> (the contract
+    /// every download caller relies on); <see cref="VerifyDocumentPointerForDeleteAsync"/> tells them apart (R3 ISS-004).
+    /// </summary>
+    private async Task<bool> InterimRuleCoreAsync(Guid documentId, string drive, string item, CancellationToken ct)
+    {
+        var row = await _entityService.RetrieveAsync(
+            "sprk_document", documentId,
+            [CreatedByColumn, OwningBusinessUnitColumn, CrossPathLink.LinkedCommunicationAttribute,
+             Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn], ct).ConfigureAwait(false);
+        if (row is null)
+        {
+            return Refuse(documentId, "the document row could not be read");
+        }
+
+        // Round 72 item 1: before anything else, the item must be the one the BFF bound to this row.
+        if (ItemBindingRefusal(row, item) is { } bindingRefusal)
+        {
+            return Refuse(documentId, bindingRefusal);
+        }
+
+        if (_speFiles is null)
+        {
+            return Refuse(documentId, "no SharePoint Embedded reader is available to verify the item");
+        }
+
+        var creator = await _speFiles.GetItemCreatorAsync(drive, item, ct).ConfigureAwait(false);
+        if (creator is null)
+        {
+            return Refuse(documentId, "the item is not in the drive the row names");
+        }
+
+        var refusal = await InterimRefusalAsync(documentId, row, drive, creator, ct).ConfigureAwait(false);
+        if (refusal is null)
+        {
+            return true;
+        }
+
+        // Round 37 item 3: a file the BFF identity placed is served when — and only when — the strict rule would
+        // serve it. Anything the strict test refuses (another container, an undecidable document) stays refused.
+        if (IsUploadedByTheBffIdentity(creator))
+        {
+            var strictRefusal = await StrictRefusalAsync(documentId, drive, item, creator, ct).ConfigureAwait(false);
+            if (strictRefusal is null)
+            {
+                _logger.LogInformation(
+                    "[DOCUMENT-POINTER] served under the interim rule: document {DocumentId}'s item {Item} was placed by the "
+                    + "BFF identity in the document's derived container {Drive} (owner round 37 item 3).",
+                    documentId, item, drive);
+                return true;
+            }
+
+            refusal = $"{refusal}; and, uploaded by the BFF identity, it fails the derived-container test ({strictRefusal})";
+        }
+
+        return Refuse(documentId, refusal);
     }
 
     /// <summary>
@@ -360,26 +399,9 @@ public sealed partial class RecordContainerResolver
             return false;
         }
 
-        var drive = pointerDriveId.Trim();
-        var item = pointerItemId.Trim();
         try
         {
-            // Round 72 item 1: the item must be the one the BFF bound to this row (the strict derivation does not look at
-            // the item id, so without this a pre- or post-lock re-point inside the derived container would be served).
-            var row = await _entityService.RetrieveAsync(
-                "sprk_document", documentId, [Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn], ct).ConfigureAwait(false);
-            if (row is null)
-            {
-                return Refuse(documentId, "the document row could not be read");
-            }
-
-            if (ItemBindingRefusal(row, item) is { } bindingRefusal)
-            {
-                return Refuse(documentId, bindingRefusal);
-            }
-
-            var refusal = await StrictRefusalAsync(documentId, drive, item, knownItem: null, ct).ConfigureAwait(false);
-            return refusal is null || Refuse(documentId, refusal);
+            return await StrictRuleCoreAsync(documentId, pointerDriveId.Trim(), pointerItemId.Trim(), ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -392,6 +414,139 @@ public sealed partial class RecordContainerResolver
                 documentId);
             return false;
         }
+    }
+
+    /// <summary>The strict rule's body with faults propagating (see <see cref="InterimRuleCoreAsync"/>).</summary>
+    private async Task<bool> StrictRuleCoreAsync(Guid documentId, string drive, string item, CancellationToken ct)
+    {
+        // Round 72 item 1: the item must be the one the BFF bound to this row (the strict derivation does not look at
+        // the item id, so without this a pre- or post-lock re-point inside the derived container would be served).
+        var row = await _entityService.RetrieveAsync(
+            "sprk_document", documentId, [Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn], ct).ConfigureAwait(false);
+        if (row is null)
+        {
+            return Refuse(documentId, "the document row could not be read");
+        }
+
+        if (ItemBindingRefusal(row, item) is { } bindingRefusal)
+        {
+            return Refuse(documentId, bindingRefusal);
+        }
+
+        var refusal = await StrictRefusalAsync(documentId, drive, item, knownItem: null, ct).ConfigureAwait(false);
+        return refusal is null || Refuse(documentId, refusal);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    // The DELETE path's variant of the check (R3 ISS-004 review, F1) — the only caller is
+    // DocumentCheckoutService.DeleteFileOrRefuseAsync (VerifiedFileFirstKeepRowOnFailure).
+    // ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The pointer check as the document DELETE needs it: the same rule in force
+    /// (<see cref="IsDocumentPointerContainerAllowedAsync(Guid, string?, string?, CancellationToken)"/>), but a fault is
+    /// told apart from a refusal, and an item that is already gone from an OWNED container is not a reason to keep the row.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why the delete needs its own answer.</b> Both rules refuse an item Graph no longer has ("the item is not in
+    /// the drive the row names"), which is right for a download and wrong for a delete: a row whose file is already gone —
+    /// deleted by an earlier attempt that timed out, or by the task-188 race (file deleted, row kept for children) —
+    /// could then never be deleted. And both fold every exception into <see langword="false"/>, so a transient Graph 429
+    /// or Dataverse fault answered the delete with a permanent 409 instead of a retryable 503.</para>
+    /// <para><b>The one extra question</b>, asked only when the rule refused: is the file provably already gone? Yes only
+    /// when ALL hold — (i) the row's field-secured copy of the item id equals the pointer's item
+    /// (<see cref="Spaarke.Dataverse.DocumentPointerBinding.BindingState.Bound"/>, so the pointer is the one the BFF bound; an
+    /// EMPTY copy is not enough, unlike in the rule); (ii) the drive is a container this stamp owns, and (iii) Graph answers
+    /// a real 404 for the item. (ii) and (iii) are one call: <see cref="Sprk.Bff.Api.Infrastructure.Graph.ISpeFileOperations.GetItemCreatorAsync"/>
+    /// opens with <c>SpeContainerOwnershipGuard.ForOwnedContainerAsync</c> (a drive another customer owns, or none, is a
+    /// 404 <c>spe_container_not_owned</c> problem, no Graph read), and then returns <see langword="null"/> only for a Graph
+    /// 404; any other fault throws. Nothing is ever read or deleted through a pointer that fails (i) or (ii).</para>
+    /// </remarks>
+    internal async Task<DocumentPointerDeleteVerdict> VerifyDocumentPointerForDeleteAsync(
+        Guid documentId, string? pointerDriveId, string? pointerItemId, CancellationToken ct = default)
+    {
+        if (documentId == Guid.Empty || string.IsNullOrWhiteSpace(pointerDriveId) || string.IsNullOrWhiteSpace(pointerItemId))
+        {
+            return DocumentPointerDeleteVerdict.Refused;
+        }
+
+        var drive = pointerDriveId.Trim();
+        var item = pointerItemId.Trim();
+        try
+        {
+            var allowed = _strictDerivedContainer
+                ? await StrictRuleCoreAsync(documentId, drive, item, ct).ConfigureAwait(false)
+                : await InterimRuleCoreAsync(documentId, drive, item, ct).ConfigureAwait(false);
+            if (allowed)
+            {
+                return DocumentPointerDeleteVerdict.Verified;
+            }
+
+            if (await IsFileAlreadyGoneAsync(documentId, drive, item, ct).ConfigureAwait(false))
+            {
+                _logger.LogInformation(
+                    "[DOCUMENT-POINTER] delete: document {DocumentId}'s item {Item} is bound to the row, its drive {Drive} is "
+                    + "this stamp's and Graph reports the item gone; the file is already deleted, so the row may go.",
+                    documentId, item, drive);
+                return DocumentPointerDeleteVerdict.FileAlreadyGone;
+            }
+
+            return DocumentPointerDeleteVerdict.Refused;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (SdapProblemException ex) when (ex.StatusCode < 500 && ex.StatusCode != 429)
+        {
+            // A typed, deterministic refusal (an unowned container, ambiguous ownership...): the data is wrong, retrying
+            // cannot help. The same fail-closed answer the boolean check gives.
+            _logger.LogWarning(
+                "[DOCUMENT-POINTER] REFUSED (delete): document {DocumentId}'s pointer is refused ({Code}).", documentId, ex.Code);
+            return DocumentPointerDeleteVerdict.Refused;
+        }
+        catch (Microsoft.Graph.Models.ODataErrors.ODataError ex) when (ex.ResponseStatusCode is 400 or 403)
+        {
+            // R3 ISS-004 re-check F3-2: a Graph answer that is final for THIS pointer (400 a malformed item id, 403 the app
+            // may not read it). Retrying cannot help, so it is a refusal (409), not a 503 "try again" that never succeeds.
+            // 404 never reaches here (GetItemCreatorAsync maps it to null); 429 and 5xx stay faults below. Graph types are
+            // confined to this one catch (ADR-007; the ArchTest checks member signatures only, and SpeContainerMembershipService
+            // already catches ODataError outside Infrastructure.Graph) — changing GetItemCreatorAsync's exception type would
+            // change every other caller.
+            _logger.LogWarning(
+                "[DOCUMENT-POINTER] REFUSED (delete): document {DocumentId}'s item read was refused by Graph ({Status}).",
+                documentId, ex.ResponseStatusCode);
+            return DocumentPointerDeleteVerdict.Refused;
+        }
+        catch (Exception ex)
+        {
+            // Graph throttling or unavailability, a Dataverse fault, a timeout: the check could not be made. Not a refusal.
+            _logger.LogWarning(ex,
+                "[DOCUMENT-POINTER] delete: document {DocumentId}'s pointer could not be checked (a fault, not a refusal).",
+                documentId);
+            return DocumentPointerDeleteVerdict.Fault;
+        }
+    }
+
+    /// <summary>Is the document's file provably already gone? Conditions (i) to (iii) of <see cref="VerifyDocumentPointerForDeleteAsync"/>. Faults propagate.</summary>
+    private async Task<bool> IsFileAlreadyGoneAsync(Guid documentId, string drive, string item, CancellationToken ct)
+    {
+        if (_speFiles is null)
+        {
+            return false;
+        }
+
+        var row = await _entityService.RetrieveAsync(
+            "sprk_document", documentId, [Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn], ct).ConfigureAwait(false);
+        if (row is null
+            || Spaarke.Dataverse.DocumentPointerBinding.Compare(
+                   row.GetAttributeValue<string>(Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn), item)
+               != Spaarke.Dataverse.DocumentPointerBinding.BindingState.Bound)
+        {
+            return false;
+        }
+
+        return await _speFiles.GetItemCreatorAsync(drive, item, ct).ConfigureAwait(false) is null;
     }
 
     private bool Refuse(Guid documentId, string reason)
@@ -452,7 +607,10 @@ public sealed partial class RecordContainerResolver
             return "no SharePoint Embedded reader is available to verify the item";
         }
 
-        var derivation = await DeriveDocumentContainersAsync(documentId, ct).ConfigureAwait(false);
+        // Faults PROPAGATE here (R3 ISS-004 re-check F3-1): a Dataverse fault reading the row or one of its records is
+        // "could not check", not "not derivable" — folding it into Undecided made the delete answer a permanent 409
+        // instead of a retryable 503. The boolean wrappers (IsAllowedUnder*RuleAsync) catch it and refuse, as before.
+        var derivation = await DeriveDocumentContainersCoreAsync(documentId, ct).ConfigureAwait(false);
         if (!derivation.Decided)
         {
             return $"its container cannot be derived ({derivation.Reason})";
@@ -502,8 +660,10 @@ public sealed partial class RecordContainerResolver
     /// owns no content and is not consulted.</item>
     /// <item>No such link: the PARENT document's derivation (one level — an email attachment lives where its email
     /// does).</item>
-    /// <item>Still nothing (an unfiled document): the container of the document's OWNING business unit — where the
-    /// record-less upload routes put the bytes — else <see cref="UnfiledDefaultContainerKey"/>.</item>
+    /// <item>Still nothing (an unfiled document): a DECLARED HOME container (<see cref="DeclaredUnfiledHomeContainerKeys"/>,
+    /// #2151) when the document's own pointer names one and is the item the BFF bound to it; else the container of the
+    /// document's OWNING business unit — where the record-less upload routes put the bytes — else
+    /// <see cref="UnfiledDefaultContainerKey"/>.</item>
     /// </list>
     /// <para><b>A secure answer dominates.</b> If any link resolves to a SECURE container, that container is the ONLY
     /// allowed one (two different secure containers are ambiguous and undecidable). Otherwise every non-secure answer is
@@ -522,7 +682,7 @@ public sealed partial class RecordContainerResolver
 
         try
         {
-            return await DeriveCoreAsync(documentId, depth: 0, ct).ConfigureAwait(false);
+            return await DeriveDocumentContainersCoreAsync(documentId, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -534,6 +694,18 @@ public sealed partial class RecordContainerResolver
             return DocumentContainerDerivation.Undecided($"the document or one of its records could not be read ({ex.GetType().Name})");
         }
     }
+
+    /// <summary>
+    /// <see cref="DeriveDocumentContainersAsync"/> with FAULTS PROPAGATING: an <c>Undecided</c> result is a derivation that
+    /// ran and found nothing derivable; an exception is a derivation that could not be made (a Dataverse fault). The public
+    /// method folds the latter into <c>Undecided</c> (the contract the download, relocator and migration callers rely on);
+    /// the delete's pointer verdict (<see cref="StrictRefusalAsync"/>) tells them apart so a fault is a 503, not a 409
+    /// (R3 ISS-004 re-check F3-1). Cancellation of the caller propagates from both.
+    /// </summary>
+    private Task<DocumentContainerDerivation> DeriveDocumentContainersCoreAsync(Guid documentId, CancellationToken ct)
+        => documentId == Guid.Empty
+            ? Task.FromResult(DocumentContainerDerivation.Undecided("an empty document id names no document"))
+            : DeriveCoreAsync(documentId, depth: 0, ct);
 
     /// <summary>
     /// The container(s) a COMMUNICATION's content belongs in — the communication pipeline's own answer (its secure root's
@@ -584,6 +756,9 @@ public sealed partial class RecordContainerResolver
         var columns = DocumentLinkFields.LogicalNames
             .Append(ParentDocumentColumn)
             .Append(OwningBusinessUnitColumn)
+            .Append(PointerDriveColumn)
+            .Append(Spaarke.Dataverse.DocumentPointerBinding.ItemIdColumn)
+            .Append(Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn)
             .Distinct(StringComparer.Ordinal)
             .ToArray();
         var row = await _entityService.RetrieveAsync("sprk_document", documentId, columns, ct).ConfigureAwait(false);
@@ -674,24 +849,71 @@ public sealed partial class RecordContainerResolver
                 $"its records ({string.Join(", ", consulted)}) resolve to no container (their business units stamp none)");
         }
 
+        // #2151: unfiled, in a DECLARED HOME container, and the pointer is the item the BFF bound to this row — that
+        // container is where it belongs (its owner stores it there on purpose; D-63). The document's OWN pointer only
+        // (depth 0): a child document follows its parent's filing, never its parent's home.
+        if (depth == 0 && DeclaredUnfiledHomeOf(row) is { } home)
+        {
+            return new DocumentContainerDerivation(
+                true, [home], home, IsSecure: false,
+                "a declared home container of unfiled documents (its file was placed there by the BFF)")
+            { Unfiled = true, DeclaredHome = true };
+        }
+
         // Unfiled: the owning business unit's container — where the record-less upload routes store the bytes.
         var ownerContainer = await ResolveOwningBusinessUnitContainerAsync(row, "sprk_document", documentId, ct).ConfigureAwait(false);
         if (!string.IsNullOrWhiteSpace(ownerContainer))
         {
             return new DocumentContainerDerivation(
                 true, [ownerContainer.Trim()], ownerContainer.Trim(), IsSecure: false,
-                "the owning business unit's container (unfiled document)");
+                "the owning business unit's container (unfiled document)")
+            { Unfiled = true };
         }
 
         if (!string.IsNullOrWhiteSpace(_unfiledDefaultContainerId))
         {
             return new DocumentContainerDerivation(
                 true, [_unfiledDefaultContainerId.Trim()], _unfiledDefaultContainerId.Trim(), IsSecure: false,
-                $"{UnfiledDefaultContainerKey} (unfiled document; its business unit stamps no container)");
+                $"{UnfiledDefaultContainerKey} (unfiled document; its business unit stamps no container)")
+            { Unfiled = true };
         }
 
         return DocumentContainerDerivation.Undecided("it is unfiled and its business unit stamps no container");
     }
+
+    /// <summary>
+    /// #2151: the declared home container (<see cref="DeclaredUnfiledHomeContainerKeys"/>) the row's file sits in, when
+    /// the row's pointer is the item the BFF bound to it — else <see langword="null"/>. An empty or differing bound copy
+    /// is never a home: only a file the BFF placed there is. <paramref name="row"/> must carry the pointer and its copy.
+    /// </summary>
+    private string? DeclaredUnfiledHomeOf(Entity row)
+    {
+        if (_declaredUnfiledHomes.Count == 0)
+        {
+            return null;
+        }
+
+        var drive = row.GetAttributeValue<string>(PointerDriveColumn)?.Trim();
+        var item = row.GetAttributeValue<string>(Spaarke.Dataverse.DocumentPointerBinding.ItemIdColumn)?.Trim();
+        if (string.IsNullOrEmpty(drive) || string.IsNullOrEmpty(item)
+            || Spaarke.Dataverse.DocumentPointerBinding.Compare(
+                row.GetAttributeValue<string>(Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn), item)
+               != Spaarke.Dataverse.DocumentPointerBinding.BindingState.Bound)
+        {
+            return null;
+        }
+
+        return _declaredUnfiledHomes.FirstOrDefault(home => IsSameContainer(home, drive));
+    }
+
+    /// <summary>
+    /// #2159: does a business unit stamp <paramref name="drive"/> as its container (<c>businessunit.sprk_containerid</c>)?
+    /// The re-file relocation asks it before it moves an UNFILED document's file into its business unit's container: a
+    /// file in no business unit's container (a record's own, another owner's) is never pulled into one. Faults propagate
+    /// (the caller moves nothing).
+    /// </summary>
+    internal async Task<bool> IsBusinessUnitContainerAsync(string drive, CancellationToken ct = default)
+        => !string.IsNullOrWhiteSpace(drive) && (await BusinessUnitsClaimingAsync(drive.Trim(), ct).ConfigureAwait(false)).Count > 0;
 
     /// <summary>
     /// The relocation source check of the legacy migration (task 166 f1, owner round 26 item 3): may the BFF move this
@@ -874,7 +1096,108 @@ public sealed partial class RecordContainerResolver
             return false;
         }
 
-        return creator.Name?.StartsWith($"{communicationId:N}_", StringComparison.OrdinalIgnoreCase) == true;
+        return IsArchiveItemNameFor(creator.Name, communicationId);
+    }
+
+    /// <summary>
+    /// The archive's naming rule: every archive writer names its upload for communication <c>C</c> <c>{C:N}_…</c>
+    /// (<c>CommunicationService</c>, <c>IncomingCommunicationProcessor</c>, <c>MessageAttachmentMaterializer</c>). One
+    /// definition, read by the pointer check's archive path and by <see cref="CommunicationAttachmentItemRefusalAsync"/>.
+    /// </summary>
+    internal static bool IsArchiveItemNameFor(string? itemName, Guid communicationId)
+        => communicationId != Guid.Empty
+           && itemName?.StartsWith($"{communicationId:N}_", StringComparison.OrdinalIgnoreCase) == true;
+
+    /// <summary>
+    /// #2246: is the drive item a <c>sprk_communicationattachment</c> row names one fit to bind to a new document of
+    /// communication <paramref name="communicationId"/>? <see langword="null"/> when it is; otherwise why not. Read before the
+    /// on-demand archive binds a new <c>sprk_document</c> (pointer AND its field-secured bound copy) to the row's item.
+    /// <paramref name="communicationContainer"/> is <see cref="DeriveCommunicationContainersAsync"/>'s answer for the
+    /// communication, derived ONCE per archive call by the caller (PR #2248 fix round 1, K4), not once per attachment.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why the row's own columns are not evidence.</b> <c>sprk_communicationattachment.sprk_graphitemid</c> and
+    /// <c>sprk_graphdriveid</c> are ordinary columns: a user with Write on the row, or an app-only generic writer (a
+    /// playbook update-record node), can set them to ANOTHER communication's attachment item in the shared archive
+    /// container. Copying them into a new document's pointer and bound copy would launder that pointer — the binding check
+    /// (<see cref="Spaarke.Dataverse.DocumentPointerBinding"/>, <see cref="ItemBindingRefusal"/>) then passes, because the
+    /// BFF wrote both columns.</para>
+    /// <para><b>What this check proves</b>, from Graph read app-only (<see cref="Sprk.Bff.Api.Infrastructure.Graph.ISpeFileOperations.GetItemCreatorAsync"/>,
+    /// uncached) and the communication's own container derivation — never from a column a caller can write: (1) the item
+    /// EXISTS in the drive the row names (a Graph 404 is "not in that drive"); (2) that drive is the container derived for
+    /// THIS communication (<see cref="DeriveCommunicationContainersAsync"/> — the same answer every archive writer and the
+    /// relocator use); (3) the item was written by the BFF application identity (<see cref="IsUploadedByTheBffIdentity"/>);
+    /// and (4) its name carries THIS communication's archive prefix <c>{C:N}_</c> (<see cref="IsArchiveItemNameFor"/>). That
+    /// rules out another communication's attachment (its name carries that communication's id) and any file a person wrote
+    /// to the container directly.</para>
+    /// <para><b>What it does NOT prove</b> is that the archive wrote the item. The BFF also writes app-only on a person's
+    /// behalf, with a name the caller chooses: <c>PUT /api/obo/records/{entity}/{id}/files/{*path}</c>
+    /// (<c>OBOEndpoints</c>) uploads into the record's derived container as the application. A user who may upload to the
+    /// communication's regarding record can therefore create an item named <c>{C:N}_x.pdf</c> in C's container, and it
+    /// passes (1)–(4). That remaining case discloses nothing: to bind it, the attacker also needs Write on one of C's
+    /// <c>sprk_communicationattachment</c> rows (to point it at the item), and the bytes bound are ones the attacker could
+    /// already upload into C's container — the new document lands in that same container, owned like C's content, so no
+    /// one gains access to a file they could not already reach.</para>
+    /// <para><b>Fail closed.</b> Anything undecidable — no item reader, an underivable container, a Graph or Dataverse
+    /// fault — is a refusal with its reason. Cancellation propagates.</para>
+    /// <para><b>Not admitted:</b> an item from before the 2026-08-28 flattening, stored as <c>communications/{C:N}/attachments/{name}</c>
+    /// — its name carries no prefix. Such a row's document was always created with it, so it reaches this path only when
+    /// that document was removed; it is refused and counted, never archived silently.</para>
+    /// </remarks>
+    internal async Task<string?> CommunicationAttachmentItemRefusalAsync(
+        Guid communicationId, DocumentContainerDerivation communicationContainer, string? drive, string? item,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(communicationContainer);
+        if (communicationId == Guid.Empty || string.IsNullOrWhiteSpace(drive) || string.IsNullOrWhiteSpace(item))
+        {
+            return "the attachment names no communication, drive or item";
+        }
+
+        if (_speFiles is null)
+        {
+            return "no SharePoint Embedded reader is available to verify the item";
+        }
+
+        if (!communicationContainer.Decided)
+        {
+            return $"the communication's container cannot be derived ({communicationContainer.Reason})";
+        }
+
+        var driveId = drive.Trim();
+        if (!communicationContainer.Allows(driveId))
+        {
+            return $"the attachment names a drive that is not the communication's container ({communicationContainer.Reason})";
+        }
+
+        try
+        {
+            var facts = await _speFiles.GetItemCreatorAsync(driveId, item.Trim(), ct).ConfigureAwait(false);
+            if (facts is null)
+            {
+                return "the item is not in the drive the attachment names";
+            }
+
+            if (!IsUploadedByTheBffIdentity(facts))
+            {
+                return "the item was not uploaded by the archive (the BFF identity, app-only)";
+            }
+
+            return IsArchiveItemNameFor(facts.Name, communicationId)
+                ? null
+                : "the item is not one the archive wrote for this communication (its name lacks the communication's prefix)";
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogInformation(ex,
+                "[DOCUMENT-POINTER] The attachment item {Item} of communication {CommunicationId} could not be verified.",
+                item, communicationId);
+            return $"the item could not be verified ({ex.GetType().Name})";
+        }
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -1146,4 +1469,35 @@ public sealed record DocumentContainerDerivation(
     /// <summary>Is <paramref name="drive"/> one of the allowed containers? Never true when not decided.</summary>
     public bool Allows(string? drive)
         => Decided && AllowedContainers.Any(c => RecordContainerResolver.IsSameContainerId(c, drive));
+
+    /// <summary>
+    /// #2159: derived for an UNFILED document (no record link and no parent document's filing applied): its owning business
+    /// unit's container, the unfiled default, or a declared home (<see cref="DeclaredHome"/>).
+    /// </summary>
+    public bool Unfiled { get; init; }
+
+    /// <summary>#2151: the derivation is a declared home container of unfiled documents (the file was placed there by the BFF).</summary>
+    public bool DeclaredHome { get; init; }
+}
+
+/// <summary>
+/// What <see cref="RecordContainerResolver.VerifyDocumentPointerForDeleteAsync"/> decided about a document's pointer for a
+/// DELETE (R3 ISS-004 review, F1). The boolean pointer check cannot say which of "refused" and "could not check" it meant.
+/// </summary>
+internal enum DocumentPointerDeleteVerdict
+{
+    /// <summary>The pointer passes the rule in force: the BFF may follow it to delete the file.</summary>
+    Verified,
+
+    /// <summary>The pointer is refused (a mismatched or unbound item id, an unowned container, a container or item the rule refuses): keep the row, 409. Retrying cannot help.</summary>
+    Refused,
+
+    /// <summary>The check could not be made (Graph throttling or unavailable, a Dataverse fault, a timeout): keep the row, 503. Retrying can help.</summary>
+    Fault,
+
+    /// <summary>
+    /// The rule refused only because the item is gone, and the row's bound item id equals the pointer, the drive is this
+    /// stamp's and Graph answered 404: there is no file to delete, so the row may go. No file is touched on this path.
+    /// </summary>
+    FileAlreadyGone,
 }

@@ -105,7 +105,9 @@
     <criterion testable="true">Test scope: cover the stated contract plus the negative and edge cases named in these criteria. Anything beyond that needs a one-line justification in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-15; closes #1563. Two adversarial-review passes (auth + tenant isolation) per root CLAUDE.md §8.5.</notes>
+  <notes>Spec FR-15; closes #1563. Two adversarial-review passes (auth + tenant isolation) per root CLAUDE.md §8.5.
+
+    SUPERSEDED IN PART 2026-10-13 (ADR-028 A9): the registered-guest branch stays for licensed guests, but workforce contacts no longer use it (they sign in with their home directory, tasks 045-048). The code stays; the FR-15 path becomes unused for contacts. Status unchanged.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

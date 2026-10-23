@@ -599,6 +599,9 @@ public class OfficeTestWebAppFactory : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Task 188 r3 slice B: the internal document routes' narrowing is not under test here (see DocumentRouteExternalNarrowingTests).
+            Sprk.Bff.Api.Tests.TestInfrastructure.AllVisibleDocumentNarrowing.UseAllVisibleDocumentNarrowing(services);
+
             // Test hosts must not authenticate for real — see TestTokenCredential.
             services.UseStubTokenCredential();
 
@@ -1285,6 +1288,12 @@ public sealed class OfficeVersionSaveWorld
     public List<Guid?> CreatedDocumentPersons { get; } = new();
 
     /// <summary>
+    /// Every <c>CreateDocumentAsync</c> request, in order (spaarkeai-word-add-in-r1 task 130): the communication link and
+    /// the Access Permission an email-derived document is created with are fields of the create itself.
+    /// </summary>
+    public List<CreateDocumentRequest> CreatedDocumentRequests { get; } = new();
+
+    /// <summary>
     /// SECURE records by LOGICAL name + id → the record's own SPE container (task 080 review, F1). Empty by default,
     /// which keeps every other test's registry answer "nothing is securable", exactly as before. When populated, the
     /// factory's <see cref="ISecurableEntityRegistry"/> double reports those LOGICAL names securable — and only the
@@ -1390,6 +1399,7 @@ public sealed class OfficeVersionSaveWorld
             CreatedDocumentDescriptions.Add(request.Description);
             CreatedDocumentOwningTeams.Add(request.OwningTeamId);
             CreatedDocumentPersons.Add(request.CreatedByPersonId);
+            CreatedDocumentRequests.Add(request);
             // FR-02 (task 014): Dataverse accepts a caller-supplied primary key on Create, and the Office
             // document-create path now supplies one so the row's id matches the id stamped into the bytes it
             // uploaded. Honouring it here is what lets a test read the stamp out of the stored item and compare

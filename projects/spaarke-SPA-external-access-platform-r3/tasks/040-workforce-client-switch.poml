@@ -4,7 +4,7 @@
     <title>Workforce client switch: single-tenant client, Spaarke authority, NAA + popup (FR-16)</title>
     <phase>4 SPA auth and platform</phase>
     <gate>after 001 (A2 amendment approved) and the owner's client app registration</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Client auth change (tags auth, frontend)</rigor-reason>
     <model-tier>opus</model-tier>

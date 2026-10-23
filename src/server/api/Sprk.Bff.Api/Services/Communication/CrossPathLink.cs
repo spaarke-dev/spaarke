@@ -18,8 +18,8 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// a communication's archive via the reverse relationship. This is the message↔document bridge — distinct from task 021
 /// (message↔message dedup) and task 024 (file↔file content dedup).</para>
 /// <para>Direction-agnostic: BOTH arrival orders converge on the same write (set <see cref="LinkedCommunicationAttribute"/>
-/// on the document). Capture-then-upload links from the office side (<c>OfficeDocumentPersistence</c>, the canonical
-/// already exists); upload-then-capture links from the capture side (<c>IncomingCommunicationProcessor</c>, the archive
+/// on the document). Capture-then-upload links from the office side (<c>OfficeDocumentPersistence</c> writes the lookup
+/// in the document create itself, task 130); upload-then-capture links from the capture side (<c>IncomingCommunicationProcessor</c>, the archive
 /// document already exists — found via <see cref="FindAndLinkArchiveDocumentsAsync"/>).</para>
 /// <para>Idempotent: the link is only written when the document is not already linked to this communication (a
 /// single-valued lookup cannot duplicate; re-processing / SB redelivery is a no-op). Best-effort / non-fatal (NFR-04):
@@ -51,53 +51,9 @@ public static class CrossPathLink
 
     private const string DocumentIdAttribute = "sprk_documentid";
 
-    /// <summary>
-    /// Links <paramref name="documentId"/> to <paramref name="communicationId"/> by setting the document's
-    /// <see cref="LinkedCommunicationAttribute"/> lookup — but only when it is not ALREADY linked to that same
-    /// communication (idempotent; a single-valued lookup cannot double-link, so re-processing is a no-op).
-    /// Best-effort / non-fatal (NFR-04): any read/write failure logs and returns <c>false</c> without throwing.
-    /// Returns <c>true</c> iff a link was written.
-    /// </summary>
-    public static async Task<bool> LinkDocumentToCommunicationAsync(
-        IGenericEntityService dataverse,
-        Guid documentId,
-        Guid communicationId,
-        ILogger logger,
-        CancellationToken ct)
-    {
-        if (documentId == Guid.Empty || communicationId == Guid.Empty)
-            return false;
-
-        try
-        {
-            var row = await dataverse
-                .RetrieveAsync(DocumentLogicalName, documentId, new[] { LinkedCommunicationAttribute }, ct)
-                .ConfigureAwait(false);
-
-            // Idempotent: already linked to THIS communication → no write.
-            var current = row?.GetAttributeValue<EntityReference>(LinkedCommunicationAttribute);
-            if (current is not null && current.Id == communicationId)
-                return false;
-
-            await dataverse.UpdateAsync(
-                    DocumentLogicalName,
-                    documentId,
-                    new Dictionary<string, object>
-                    {
-                        [LinkedCommunicationAttribute] = new EntityReference(CommunicationLogicalName, communicationId)
-                    },
-                    ct)
-                .ConfigureAwait(false);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex,
-                "FR-C4 cross-path link failed (non-fatal) for document {DocumentId} → communication {CommunicationId}.",
-                documentId, communicationId);
-            return false;
-        }
-    }
+    // LinkDocumentToCommunicationAsync (the office side's post-create link) was removed by spaarkeai-word-add-in-r1
+    // task 130 (#2126): the Office save now writes sprk_relatedcommunication IN the document create
+    // (OfficeDocumentPersistence), so a failed best-effort second write can no longer leave the document unlinked.
 
     /// <summary>
     /// Capture-side entry (upload-then-capture): finds any pre-existing email-archive <c>sprk_document</c> whose

@@ -265,6 +265,7 @@ public sealed class GateDecisionRecordJobTests
         rig.Writer.Rows[("sprk_communication", CommunicationId)] = new Entity("sprk_communication", CommunicationId)
         {
             ["ownerid"] = new EntityReference("systemuser", CommunicationOwner),
+            ["owner.isdisabled"] = new AliasedValue("systemuser", "isdisabled", false),
         };
 
         var outcome = await rig.RunAsync(Payload());

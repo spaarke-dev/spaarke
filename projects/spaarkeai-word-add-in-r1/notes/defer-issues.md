@@ -903,6 +903,45 @@ carries `jobId` and `Location: /api/v1/documents/{id}`.
 
 ---
 
+## ISS-022 — Outlook: re-saving an email to the same record to add attachments is answered "already saved"
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-21 (the owner asked for it to be filed) |
+| **Source** | Found while reviewing ebilling-r1's `from-email` contract against `/office/save` |
+| **GitHub Issue** | [#2209](https://github.com/spaarke-dev/spaarke/issues/2209) |
+
+**Description**
+
+The email save's server idempotency key is content type | target type | target id | stored Message-ID
+(`OfficeService.GenerateIdempotencyKey`). It does not include the attachment selection
+(`SelectedAttachmentFileNames`). A second save of the same email to the same record by the same user therefore
+finds the first save's job and is answered as its duplicate: it returns only the job id, creates no Documents
+and runs no filing. The pane says "already saved", so the user is told, but they have no way to add an attachment
+they did not tick the first time.
+
+**Concrete failure**: a user saves an email to Matter M with one of its three attachments ticked, notices they
+missed one, ticks it and saves again to M. No new attachment Document is created; the only route is to save the
+attachment on its own, or the email to another record.
+
+**Entry-points**
+- `src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs:1239-1249` (`GenerateIdempotencyKey`, the Email leg)
+- `src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs:413-450` (`SaveAsync`'s duplicate path)
+- `src/server/api/Sprk.Bff.Api/Workers/Office/UploadFinalizationWorker.cs` (`SelectedAttachmentFileNames`: null = all,
+  `[]` = none, names = only those)
+
+**Suggested fix** (hypothesis): treat a re-save whose selection names attachments not yet saved under that `.eml`
+as an "add attachments" operation. Create only the missing children under the existing `.eml`, linked to its
+communication as task 130 does, rather than adding the selection to the key, which would create a second `.eml`.
+
+**Estimated effort**: 1–2 days, with tests.
+**Blockers**: none. Coordinate with ebilling-r1's `from-email`, which forces `SelectedAttachmentFileNames = []`.
+**Related**: task 130 (#2177), ISS-006 (another pane re-save edge).
+
+---
+
 ## Deferrals
 
 ### ✅ D-032-1 — WITHDRAWN 2026-09-10 (final). The cascade setting was the wrong question.

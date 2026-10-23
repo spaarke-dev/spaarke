@@ -17,10 +17,10 @@ public static class DelegationRuleFilterExtensions
     /// </summary>
     /// <remarks>
     /// Applied at the GROUP rather than per route, deliberately. The group is a closed
-    /// access-management surface — mutations, plus two reads: task 063's share list (which discloses who can
-    /// reach a record) and task 118's <c>/can-manage-access</c> (which reports THIS filter's verdict to the
-    /// client, so the Manage Access affordance gates on the server's rule rather than on a table-level proxy
-    /// for it) — and <see cref="DelegationRuleFilter"/> denies any request whose target
+    /// access-management surface — mutations, plus reads: task 063's share list and task 099a's grant list
+    /// (which disclose who can reach a record) and task 118's <c>/can-manage-access</c> (which reports THIS filter's
+    /// verdict to the client, so the Manage Access affordance gates on the server's rule rather than on a table-level
+    /// proxy for it) — and <see cref="DelegationRuleFilter"/> denies any request whose target
     /// it cannot identify — so a seventh route added tomorrow is gated from its first request
     /// instead of inheriting a hole. That failure is loud and immediate (the author hits 403 on the
     /// first call) rather than silent, which is the correct direction for an authorization default.
@@ -360,6 +360,14 @@ internal sealed class DelegationRuleFilter : IEndpointFilter
                 // code-before-config ordering exists to prevent.
                 case RecordAccessGateQuery gate:
                     return FromGrantRoot(GrantExternalAccessEndpoint.ResolveExplicitRoot(gate.RecordType, gate.RecordId));
+
+                // ── /record-grants (task 099a, #1010(a)) ─────────────────────────
+                // The Current Access list discloses who can reach a record, so it takes the /can-manage-access rule
+                // (Write and Share on the record): its reader is exactly the dialog's audience, whatever business unit
+                // owns the grant rows. Same explicit-root resolver as its handler, no legacy projectId, so the record
+                // authorized is the record listed. Without this case every caller would be denied (default branch).
+                case RecordGrantsQuery recordGrants:
+                    return FromGrantRoot(GrantExternalAccessEndpoint.ResolveExplicitRoot(recordGrants.RecordType, recordGrants.RecordId));
 
                 // ── /no-access/enforce (task 143) ────────────────────────────────
                 // The target is the No Access ENTRY itself, so the caller must hold Write on the entry (owner O2: the

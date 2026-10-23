@@ -12,7 +12,7 @@
  *
  * SCOPE (task 012 constraints — see the task POML):
  *   - Bootstrap + host-detection wiring ONLY. This adapter SELECTS — it does NOT implement — the
- *     Teams workforce auth strategy (NAA, then an MSAL popup; ADR-028 A8) in `../auth/msal-auth.ts`
+ *     Teams workforce auth strategy (NAA, then an MSAL popup; ADR-028 A9 Teams amendment, the multitenant client) in `../auth/msal-auth.ts`
  *     (`acquireTeamsWorkforceBffToken` / `getTeamsWorkforceSignedInInstance`). No token-acquisition
  *     algorithm lives in this file (ADR-028 A2).
  *   - Theme MUST use Fluent v9 semantic tokens (ADR-021). This adapter feeds the Teams-provided theme
@@ -39,12 +39,19 @@ import {
   captureTeamsDeepLink,
   getTeamsWorkforceMsalInstance,
   getTeamsWorkforceSignedInInstance,
+  isTeamsGuestAccount,
+  isWorkforceHomeAccount,
+  setActiveAccountFilter,
+  setActiveAccountTenantId,
   setActiveBffTokenAcquirer,
+  setGuestLinkHost,
+  setWorkforceHomePlaneActive,
   signInTeamsWorkforceViaPopup,
+  TeamsGuestAccountError,
   TeamsWorkforceAuthError,
   type TeamsWorkforceAuthConfig,
 } from '../auth/msal-auth';
-import { getWorkforceClientConfig } from '../config';
+import { getWorkforceHomeClientConfig, isTenantId } from '../config';
 import { activeBffScope } from '../auth/backend-selection';
 
 // ---------------------------------------------------------------------------
@@ -77,6 +84,8 @@ export interface ITeamsHostAdapter {
    *
    * @throws {TeamsWorkforceAuthError} When Teams workforce token acquisition fails — the caller
    *   (main.tsx) MUST surface a fail-loud sign-in error, never a blank/broken state.
+   * @throws {TeamsGuestAccountError} When the signed-in account is a B2B guest of the Teams tenant: main.tsx renders the
+   *   guest screen, and nothing is fetched.
    */
   initialize(): Promise<TeamsHostContext>;
   /** True once `initialize()` has resolved successfully — mirrors IHostAdapter.isInitialized(). */
@@ -88,12 +97,13 @@ export interface ITeamsHostAdapter {
    */
   getMsalInstance(): IPublicClientApplication;
   /**
-   * Recovery after `initialize()` failed on auth: run the MSAL popup sign-in (ADR-028 A8 fallback) and
+   * Recovery after `initialize()` failed on auth: run the MSAL popup sign-in (ADR-028 A9 Teams amendment fallback) and
    * finish the auth wiring `initialize()` would have done. MUST be called from a user gesture (the error
    * screen's "Sign in" button click) so the popup is not blocked; after it resolves the caller renders the
    * app with `getMsalInstance()`.
    *
    * @throws {TeamsWorkforceAuthError} When the popup fails (cancelled, blocked, consent missing).
+   * @throws {TeamsGuestAccountError} When the signed-in account is a B2B guest of the Teams tenant (nothing is fetched).
    */
   signInWithPopup(): Promise<void>;
 }
@@ -146,21 +156,6 @@ export function notifyTeamsAppLoaded(): void {
 }
 
 /**
- * Tell Teams the tab started successfully, for a screen that is final and needs no sign-in (the `/join` page: its
- * message is the whole tab). The adapter's own `initialize()` does the same after a sign-in; this is the pre-auth
- * counterpart, so the host's loading UI is dismissed definitively rather than timing out behind the message. Best-effort.
- */
-export function notifyTeamsSuccess(): void {
-  try {
-    void Promise.resolve(teamsApp.notifySuccess()).catch(err =>
-      console.warn('[TeamsHostAdapter] notifySuccess failed:', err)
-    );
-  } catch (err) {
-    console.warn('[TeamsHostAdapter] notifySuccess failed:', err);
-  }
-}
-
-/**
  * Tell Teams the tab failed to start for a non-auth reason (no customer backend could be resolved — fail closed),
  * so the host does not keep spinning behind the explicit "No organization available" screen. Best-effort.
  */
@@ -169,6 +164,25 @@ export function notifyTeamsFailureOther(message: string): void {
     teamsApp.notifyFailure({ reason: teamsApp.FailedReason.Other, message });
   } catch (err) {
     console.warn('[TeamsHostAdapter] notifyFailure failed:', err);
+  }
+}
+
+/**
+ * The pre-auth Teams context (task 075): the Teams context tenant id and the Teams theme, read BEFORE any backend or token
+ * decision. `tenantId` is `context.user.tenant.id` validated as a GUID and lower-cased; it is null when the context cannot
+ * be read or the value is missing or not a GUID, and the caller then shows the "not set up" screen with zero token
+ * requests. The theme is wired here too, so every pre-auth screen (not set up, customer picker) follows the Teams theme
+ * (ADR-021), as the signed-in app does. Never throws.
+ */
+export async function readTeamsPreAuthContext(): Promise<{ tenantId: string | null }> {
+  try {
+    const context = await teamsApp.getContext();
+    wireTeamsTheme(context.app?.theme);
+    const raw = context.user?.tenant?.id;
+    return { tenantId: isTenantId(raw) ? raw.toLowerCase() : null };
+  } catch (err) {
+    console.warn('[TeamsHostAdapter] Teams context could not be read:', err);
+    return { tenantId: null };
   }
 }
 
@@ -190,6 +204,30 @@ export function mapTeamsTheme(raw: string): 'light' | 'dark' {
   return raw === 'dark' || raw === 'contrast' ? 'dark' : 'light';
 }
 
+/**
+ * Feed the Teams-provided theme into the EXISTING `@spaarke/ui-components` cascade (localStorage 'spaarke-theme' key +
+ * THEME_CHANGE_EVENT) and follow later changes. teams-js has a single handler slot, so calling this again replaces the
+ * handler with an identical one. Returns the mapped initial theme.
+ */
+function wireTeamsTheme(rawTheme: string | undefined): 'light' | 'dark' {
+  const initialTheme = mapTeamsTheme(rawTheme ?? 'default');
+  // Theming is cosmetic and must never decide a bootstrap outcome: `setUserThemePreference` throws when storage is blocked,
+  // which (inside the tid read) would show "not set up" for a listed tenant. A failure leaves the default theme.
+  try {
+    setUserThemePreference(initialTheme);
+    teamsApp.registerOnThemeChangeHandler((raw: string) => {
+      try {
+        setUserThemePreference(mapTeamsTheme(raw));
+      } catch (err) {
+        console.warn('[TeamsHostAdapter] Teams theme change could not be applied:', err);
+      }
+    });
+  } catch (err) {
+    console.warn('[TeamsHostAdapter] Teams theme could not be applied:', err);
+  }
+  return initialTheme;
+}
+
 // ---------------------------------------------------------------------------
 // Adapter implementation
 // ---------------------------------------------------------------------------
@@ -197,6 +235,9 @@ export function mapTeamsTheme(raw: string): 'light' | 'dark' {
 class TeamsHostAdapter implements ITeamsHostAdapter {
   private initialized = false;
   private msalInstance: IPublicClientApplication | null = null;
+
+  /** @param tenantId The Teams context tenant id (lower-case GUID) the bootstrap already found in the directory. */
+  constructor(private readonly tenantId: string) {}
 
   getHostType(): 'teams' {
     return 'teams';
@@ -214,7 +255,7 @@ class TeamsHostAdapter implements ITeamsHostAdapter {
   }
 
   async signInWithPopup(): Promise<void> {
-    const cfg: TeamsWorkforceAuthConfig = teamsWorkforceAuthConfig();
+    const cfg: TeamsWorkforceAuthConfig = teamsWorkforceAuthConfig(this.tenantId);
     try {
       await signInTeamsWorkforceViaPopup(cfg);
     } catch (popupError) {
@@ -222,6 +263,7 @@ class TeamsHostAdapter implements ITeamsHostAdapter {
         ? popupError
         : new TeamsWorkforceAuthError('Teams workforce sign-in (MSAL popup) failed.', { naaError: null, popupError });
     }
+    this.assertNotGuest(cfg);
     await this.completeAuthSetup(cfg);
     if (!this.initialized) {
       this.initialized = true;
@@ -264,14 +306,9 @@ class TeamsHostAdapter implements ITeamsHostAdapter {
    * App.tsx (no duplicated feature component). Returns the initial mapped theme for the caller.
    */
   private wireTheme(rawTheme: string): 'light' | 'dark' {
-    const initialTheme = mapTeamsTheme(rawTheme);
-    setUserThemePreference(initialTheme);
-    teamsApp.registerOnThemeChangeHandler((raw: string) => {
-      setUserThemePreference(mapTeamsTheme(raw));
-    });
     // Note: teams-js's registerOnThemeChangeHandler has no unregister API (single handler slot per
-    // page) — the listener lives for the tab's natural lifetime, which matches the page's own.
-    return initialTheme;
+    // page) - the listener lives for the tab's natural lifetime, which matches the page's own.
+    return wireTeamsTheme(rawTheme);
   }
 
   /**
@@ -293,7 +330,7 @@ class TeamsHostAdapter implements ITeamsHostAdapter {
    * msal-auth.ts is never touched by the Teams path.
    */
   private async selectAuthStrategy(): Promise<void> {
-    const cfg: TeamsWorkforceAuthConfig = teamsWorkforceAuthConfig();
+    const cfg: TeamsWorkforceAuthConfig = teamsWorkforceAuthConfig(this.tenantId);
 
     try {
       await acquireTeamsWorkforceBffToken(cfg);
@@ -309,7 +346,20 @@ class TeamsHostAdapter implements ITeamsHostAdapter {
       throw failure; // Fail loud (acceptance criterion 4) — main.tsx renders an explicit error state.
     }
 
+    this.assertNotGuest(cfg);
     await this.completeAuthSetup(cfg);
+  }
+
+  /**
+   * A B2B guest of the Teams tenant cannot use this tab: NAA through `/{tid}` yields a guest token the customer BFF refuses
+   * (401), and signing in again would reload into the same 401. Throws {@link TeamsGuestAccountError} BEFORE the BFF
+   * acquirer is installed and before anything is fetched; main.tsx renders the guest screen. The account checked is the one
+   * the successful acquisition signed in (the signed-in instance's active account).
+   */
+  private assertNotGuest(cfg: TeamsWorkforceAuthConfig): void {
+    const instance = getTeamsWorkforceSignedInInstance();
+    const account = instance?.getActiveAccount() ?? instance?.getAllAccounts()[0] ?? null;
+    if (isTeamsGuestAccount(account, cfg.tenantId)) throw new TeamsGuestAccountError();
   }
 
   /** Re-point bff-client.ts at the Teams strategy and pick the instance that holds the signed-in account. */
@@ -320,21 +370,28 @@ class TeamsHostAdapter implements ITeamsHostAdapter {
       acquireTeamsWorkforceBffToken({ ...cfg, bffScope: scope ?? activeBffScope('workforce') }, options)
     );
     // The instance that holds the signed-in account: the NAA instance, or the popup fallback's
-    // instance when NAA failed (ADR-028 A8) — so useMsal() reflects the user either way.
+    // instance when NAA failed (ADR-028 A9 Teams amendment) — so useMsal() reflects the user either way.
     this.msalInstance = getTeamsWorkforceSignedInInstance() ?? (await getTeamsWorkforceMsalInstance(cfg));
+    // The Teams tab is the workforce HOME plane too (ADR-028 A9 Teams amendment): the registration gate runs here exactly
+    // as in the browser, and only this tenant's accounts count as the signed-in user. The A8 client is used in Teams ONLY
+    // for the silent guest-token link, which this flag routes through NAA.
+    setActiveAccountTenantId(cfg.tenantId);
+    setActiveAccountFilter(isWorkforceHomeAccount);
+    setWorkforceHomePlaneActive(true);
+    setGuestLinkHost('teams');
   }
 }
 
 /**
- * The Teams workforce auth config: the single-tenant client and Spaarke's tenant from config, and the BFF scope of
- * the active workforce backend (task 041, `backend-selection.ts`; main.tsx selects it before `initialize()`). Throws
- * (fail loud) when the client config is missing or no workforce backend can be resolved.
+ * The Teams auth config (ADR-028 A9): the MULTITENANT home client, the Teams context tenant id, and the BFF scope of the
+ * active workforce backend (the bootstrap selected it by that tid before `initialize()`). Throws (fail loud) when the client
+ * config is missing or no workforce backend is active.
  */
-function teamsWorkforceAuthConfig(): TeamsWorkforceAuthConfig {
-  return { ...getWorkforceClientConfig(), bffScope: activeBffScope('workforce') };
+function teamsWorkforceAuthConfig(tenantId: string): TeamsWorkforceAuthConfig {
+  return { ...getWorkforceHomeClientConfig(), tenantId, bffScope: activeBffScope('workforce') };
 }
 
 /** Factory mirroring the Office add-ins' `HostAdapterFactory.create()` convention. */
-export function createTeamsHostAdapter(): ITeamsHostAdapter {
-  return new TeamsHostAdapter();
+export function createTeamsHostAdapter(tenantId: string): ITeamsHostAdapter {
+  return new TeamsHostAdapter(tenantId);
 }

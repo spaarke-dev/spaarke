@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="046" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>BFF home principal resolution: stored link → systemuser, contact by (tid, oid), registration_required; guards (d)/(e)</title>
+    <phase>4b A9 workforce home sign-in</phase>
+    <gate>after 044 (columns exist on dev) and 045 (scheme)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags bff-api, auth; changes principal resolution</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Identity resolution and tenant isolation in shared UAC files (tags auth, security)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shares WorkforcePrincipalResolver/ContactBindingDecision/ContactIdentityStore/CallerPrincipalResolver with 047 and 048 and with UAC task 185</parallel-reason>
+    <deps>044, 045</deps>
+    <tags>bff-api, auth, security, tenant-isolation, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add the home-token branch to principal resolution exactly as notes/a9-bff-design.md §3 and §4 specify, with the finding (d) and (e) guards. Two adversarial review passes.</prompt>
+  <role>SPAARKE platform developer. BFF identity resolution and Dataverse expert. Follow ADRs strictly.</role>
+  <goal>A principal authenticated by WorkforceHome resolves in order: missing oid/tid → 401 missing_identity_claims; stored link (sprk_hometenantid, sprk_homeobjectid) → enabled systemuser (disabled → systemuser_disabled); contact with plane WorkforceHome + sprk_externaltenantid = tid + sprk_externalobjectid = oid; else 403 sdap.access.registration_required with givenName/familyName/email extensions from the token. Nothing is created at sign-in. Spaarke-tenant and CIAM resolution are unchanged.</goal>
+
+  <context>
+    <background>Design note §3/§4. Code: CallerPrincipalResolver.DeterminePlane (:394-414); WorkforcePrincipalResolver (:126-289), ResolveSystemUserAsync (:336-345); MembershipEndpoints.ResolveSystemUserIdAsync (:436-453); ContactBindingDecision (:607-743, E11 :725-740, oid lookup :1227-1248); ContactIdentityStore; ModuleEntitlementResolver (:185 roles). Builds on UAC #1801 (on master). If UAC task 185 merges first, rebase onto it before starting and re-read these files; UAC reviews the PR (WorkforceIdentityOptions.cs, WorkforcePrincipalResolver.cs, ContactIdentityBinder.cs).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/WorkforcePrincipalResolver.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactBindingDecision.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactIdentityStore.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ModuleEntitlementResolver.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/WorkforcePrincipalResolverTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Membership/MembershipEndpoints.cs (read only: confirm it stays on the default scheme)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028 A9">The resolver chooses the home strategy by the authenticating scheme (WorkforceHome), never by parsing iss. Identity is keyed on (tid, oid).</constraint>
+    <constraint source="design §3 finding (d)">For a home principal, no code path compares the home oid with systemuser.azureactivedirectoryobjectid: ResolveSystemUserAsync and MembershipEndpoints.ResolveSystemUserIdAsync are never reached. The only systemuser path is the stored link.</constraint>
+    <constraint source="design §3 finding (e)">For a home principal, ModuleEntitlementResolver ignores the roles claim; entitlements come from principal kind + the server-side map. Default modules: legal-front-door + policy-library (A8).</constraint>
+    <constraint source="design §4 / task 141">E10, oid-first and "never clear or re-point a link" stay. Contacts on plane External or the Spaarke-tenant workforce plane are never matched by a home principal, and a home principal never matches a contact without sprk_externaltenantid = tid.</constraint>
+    <constraint source="project">No create, update or bind happens in this task's code paths (registration is 047, link is 048).</constraint>
+    <constraint source="CLAUDE.md §10">BFF hygiene: placement line, publish-size delta, no new package.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/notes/a9-bff-design.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge; check whether UAC task 185 has merged (rebase if so); run /conflict-check; declare rigor/tier.</step>
+    <step order="1">Write the tests in acceptance criteria first; confirm they fail.</step>
+    <step order="2">Add the store reads: link lookup by a filter on the SECURED pair (sprk_hometenantid, sprk_homeobjectid), never by the unsecured key mirrors or the alternate key (a mirror edit must not be able to redirect a sign-in; design §5, owner 2026-10-14); contact lookup by plane + tid + oid.</step>
+    <step order="3">Add the home branch to the resolver and the registration_required problem details; add the (d) and (e) guards.</step>
+    <step order="4">Seeding proofs (one each): let the home branch fall through to ResolveSystemUserAsync → the (d) test fails; drop the tid predicate from the contact lookup → the cross-tenant test fails. Restore; record.</step>
+    <step order="5">dotnet build + test; publish-size delta; notes/task-046-notes.md.</step>
+    <step order="6">Two adversarial-reviewer passes; fix all F-class; status updates; drift check.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If UAC task 185 changed the binder/decision contract in a way that conflicts with §3/§4, STOP and escalate to the owner with both texts; do not merge the two designs on your own.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ (files listed)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/WorkforcePrincipalResolverTests.cs</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r3/notes/task-046-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Home principal without oid or tid → 401 missing_identity_claims.</criterion>
+    <criterion testable="true">Home principal with a stored link to an enabled systemuser → systemuser principal; to a disabled systemuser → systemuser_disabled.</criterion>
+    <criterion testable="true">Home principal matching a WorkforceHome contact with the same tid and oid → contact principal.</criterion>
+    <criterion testable="true">Same oid but a different tid, or a contact on plane External or the Spaarke-tenant plane → not matched → 403 sdap.access.registration_required with givenName, familyName, email extensions from the token.</criterion>
+    <criterion testable="true">Home principal whose oid equals some systemuser's azureactivedirectoryobjectid and with no stored link → registration_required (never that systemuser).</criterion>
+    <criterion testable="true">Home principal with a roles claim gets the same module entitlements as without it.</criterion>
+    <criterion testable="true">No Dataverse write occurs during resolution (store mock records none).</criterion>
+    <criterion testable="true">Existing Spaarke-tenant and CIAM resolver tests pass unchanged.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Design note §3/§4. Two adversarial passes. Send the PR to UAC for review. From 045 (notes/task-045-notes.md, Fix round 1 and re-check): 045 left a temporary guard at the top of WorkforcePrincipalResolver.ResolveAsync that denies any WorkforceHome identity (sdap.access.deny.workforce_home_resolution_pending). This task removes it along with the test ResolveAsync_WorkforceHomePrincipal_IsDeniedBeforeAnyLookup, and replaces both with the home branch. Also add a test proving that a WorkforceHome principal never resolves on the CIAM plane (CiamContactPrincipalStrategy calls ResolveCiamCallerAsync, which has no WorkforceHome check), or deny WorkforceHome for the CIAM strategy in CallerPrincipalResolver.ResolveAsync.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -87,10 +87,35 @@ public sealed class GraphWireMockFixture : IDisposable
     /// accident. Production's own auth providers are out of scope for a mapping test — what is under
     /// test is the request the SDK emits and the mapping of the response, not how a token was obtained.
     /// </remarks>
-    public GraphServiceClient CreateGraphClient()
+    /// <param name="pipeline">A handler to send through, as production's <c>GraphApiClient</c> does (#1755: the Graph
+    /// resilience handler). Its inner handler is set here. None by default: requests go straight to the fake.</param>
+    public GraphServiceClient CreateGraphClient(DelegatingHandler? pipeline = null) =>
+        CreateGraphClient(CreateHttpClient(pipeline));
+
+    /// <summary>
+    /// A <see cref="GraphServiceClient"/> over <paramref name="httpClient"/> — for a test that sends through the same
+    /// pipeline before the client does (#1755 round 2: a request that opens the handler's circuit first).
+    /// <paramref name="auth"/> replaces the anonymous provider (a token provider that fails, inside the SDK's send).
+    /// </summary>
+    public GraphServiceClient CreateGraphClient(HttpClient httpClient, IAuthenticationProvider? auth = null) =>
+        new(httpClient, auth ?? new AnonymousAuthenticationProvider(), BaseUrl);
+
+    /// <summary>An <see cref="HttpClient"/> on this fake, through <paramref name="pipeline"/> if given (its inner handler is set here).</summary>
+    public HttpClient CreateHttpClient(DelegatingHandler? pipeline = null)
     {
-        var httpClient = new HttpClient { BaseAddress = new Uri(BaseUrl) };
-        return new GraphServiceClient(httpClient, new AnonymousAuthenticationProvider(), BaseUrl);
+        HttpClient httpClient;
+        if (pipeline is null)
+        {
+            httpClient = new HttpClient();
+        }
+        else
+        {
+            pipeline.InnerHandler = new HttpClientHandler();
+            httpClient = new HttpClient(pipeline);
+        }
+
+        httpClient.BaseAddress = new Uri(BaseUrl);
+        return httpClient;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -154,15 +179,86 @@ public sealed class GraphWireMockFixture : IDisposable
         return this;
     }
 
-    /// <summary>Serves <paramref name="jsonBody"/> for a POST on EXACTLY <paramref name="path"/> (see <see cref="StubGetExact"/>).</summary>
-    public GraphWireMockFixture StubPostExact(string path, string jsonBody, int statusCode = 200)
+    /// <summary>
+    /// Serves <paramref name="jsonBody"/> for a POST on EXACTLY <paramref name="path"/> (see <see cref="StubGetExact"/>).
+    /// <paramref name="delay"/> holds the answer back, as on <see cref="StubPatch"/>. <paramref name="onReceived"/> runs
+    /// when the request arrives, before the answer is sent: a test acts mid-request without racing a timer (#1755).
+    /// </summary>
+    /// <param name="retryAfterSeconds">Sent as a <c>Retry-After</c> header (a 429's backoff — #1755 round 2).</param>
+    public GraphWireMockFixture StubPostExact(
+        string path, string jsonBody, int statusCode = 200, TimeSpan? delay = null, Action? onReceived = null,
+        int? retryAfterSeconds = null)
     {
-        _server
-            .Given(Request.Create().WithPath(path).UsingPost())
-            .RespondWith(Response.Create()
+        var response = onReceived is null
+            ? Response.Create()
                 .WithStatusCode(statusCode)
                 .WithHeader("Content-Type", "application/json")
-                .WithBody(jsonBody));
+                .WithBody(jsonBody)
+            : Response.Create().WithCallback(_ =>
+            {
+                onReceived();
+                return new WireMock.ResponseMessage
+                {
+                    StatusCode = statusCode,
+                    Headers = new Dictionary<string, WireMock.Types.WireMockList<string>>
+                    {
+                        ["Content-Type"] = new("application/json")
+                    },
+                    BodyData = new WireMock.Util.BodyData
+                    {
+                        BodyAsString = jsonBody,
+                        DetectedBodyType = WireMock.Types.BodyType.String,
+                        Encoding = System.Text.Encoding.UTF8
+                    }
+                };
+            });
+        if (delay is { } d)
+        {
+            response = response.WithDelay(d);
+        }
+
+        if (retryAfterSeconds is { } retryAfter)
+        {
+            response = response.WithHeader("Retry-After", retryAfter.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        _server
+            .Given(Request.Create().WithPath(path).UsingPost())
+            .RespondWith(response);
+
+        return this;
+    }
+
+    /// <summary>
+    /// Serves a DIFFERENT response to each successive POST on EXACTLY <paramref name="path"/>, in order; the last one
+    /// repeats. Used to show what a retrying client sends (#1755: a 429, then the create's 201).
+    /// </summary>
+    public GraphWireMockFixture StubPostExactSequence(string path, params (string Body, int StatusCode)[] responses)
+    {
+        if (responses.Length == 0)
+        {
+            throw new ArgumentException("At least one response is required.", nameof(responses));
+        }
+
+        var scenario = $"post-seq:{path}:{responses.Length}";
+        for (var i = 0; i < responses.Length; i++)
+        {
+            var step = _server.Given(Request.Create().WithPath(path).UsingPost()).InScenario(scenario);
+            if (i > 0)
+            {
+                step = step.WhenStateIs($"{scenario}#{i}");
+            }
+
+            if (i < responses.Length - 1)
+            {
+                step = step.WillSetStateTo($"{scenario}#{i + 1}");
+            }
+
+            step.RespondWith(Response.Create()
+                .WithStatusCode(responses[i].StatusCode)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody(responses[i].Body));
+        }
 
         return this;
     }
@@ -244,6 +340,42 @@ public sealed class GraphWireMockFixture : IDisposable
         _server
             .Given(Request.Create().WithPath(new WireMock.Matchers.WildcardMatcher($"{pathPrefix}*")).UsingPatch())
             .RespondWith(response);
+
+        return this;
+    }
+
+    /// <summary>
+    /// Serves a DIFFERENT response to each successive PATCH on <paramref name="pathPrefix"/>, in order; the last one
+    /// repeats. Used where two writes share a path — the business-unit stamp, then the ownership marker (#2032).
+    /// </summary>
+    public GraphWireMockFixture StubPatchSequence(string pathPrefix, params (string Body, int StatusCode)[] responses)
+    {
+        if (responses.Length == 0)
+        {
+            throw new ArgumentException("At least one response is required.", nameof(responses));
+        }
+
+        var scenario = $"patch-seq:{pathPrefix}:{responses.Length}";
+        for (var i = 0; i < responses.Length; i++)
+        {
+            var step = _server
+                .Given(Request.Create().WithPath(new WireMock.Matchers.WildcardMatcher($"{pathPrefix}*")).UsingPatch())
+                .InScenario(scenario);
+            if (i > 0)
+            {
+                step = step.WhenStateIs($"{scenario}#{i}");
+            }
+
+            if (i < responses.Length - 1)
+            {
+                step = step.WillSetStateTo($"{scenario}#{i + 1}");
+            }
+
+            step.RespondWith(Response.Create()
+                .WithStatusCode(responses[i].StatusCode)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody(responses[i].Body));
+        }
 
         return this;
     }
@@ -401,6 +533,23 @@ public sealed class GraphWireMockFixture : IDisposable
         _server.Stop();
         _server.Dispose();
     }
+}
+
+/// <summary>
+/// An <see cref="Sprk.Bff.Api.Infrastructure.Graph.IGraphClientFactory"/> whose app-only client is one a test built on a
+/// <see cref="GraphWireMockFixture"/> — for production classes that ask the factory for their client (#1755: the
+/// provisioning container create). Delegated clients are refused: these paths are app-only.
+/// </summary>
+internal sealed class WireMockGraphClientFactory(Func<GraphServiceClient> appOnly)
+    : Sprk.Bff.Api.Infrastructure.Graph.IGraphClientFactory
+{
+    public GraphServiceClient ForApp() => appOnly();
+
+    public Task<GraphServiceClient> ForUserAsync(Microsoft.AspNetCore.Http.HttpContext ctx, CancellationToken ct = default) =>
+        throw new InvalidOperationException("This path is app-only.");
+
+    public Task<GraphServiceClient> ForUserBetaAsync(Microsoft.AspNetCore.Http.HttpContext ctx, CancellationToken ct = default) =>
+        throw new InvalidOperationException("This path is app-only.");
 }
 
 /// <summary>One request observed by <see cref="GraphWireMockFixture"/>.</summary>
