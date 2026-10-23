@@ -90,9 +90,12 @@ overwritten.
   is trusted: every record is undetermined, nothing is written, and the job run fails with
   `sdap.inherit.access_record_not_secured`.
 - **An EMPTY record is decided on only once the BFF's read is proven.** Proof, once per job pass or request, is any one of:
-  - a non-empty record read in the same pass or request;
   - the BFF user holds the System Administrator role;
-  - one of its field security profiles grants Read on the column on both tables.
+  - one of its field security profiles grants Read on the column on that table (each table is proven separately). Today only profiles and roles the BFF user holds directly count; one held through a team is not seen, which leaves the record undetermined (fail closed).
+
+  A non-empty record read on a table is not proof: Dataverse can grant a secured field on one record (a record-level field
+  share), so one readable record says nothing about the empty ones (UAC 2026-10-23: a record-level field share must not
+  prove a column).
 
   Without proof, the record is undetermined (`access_record_hidden`) and nothing is written. An empty read the BFF cannot
   vouch for may hide a real record, so the backfill rule's guess must never overwrite it.

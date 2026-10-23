@@ -740,6 +740,65 @@ public class ChildAccessCascadeTests : IClassFixture<ProvisionProjectTestFixture
     }
 
     /// <summary>
+    /// UAC 2026-10-23 (a record-level field share must not prove a column): Dataverse can grant a secured field on ONE record,
+    /// so a non-empty work assignment record read in the pass proves nothing about the table. The platform does not grant the
+    /// BFF Read on the work assignment column: the OTHER, empty work assignment is undetermined (<c>access_record_hidden</c>),
+    /// nothing is written for it, and it stays secure.
+    /// </summary>
+    [Fact]
+    public async Task ANonEmptyRecordOnATable_DoesNotProveItsEmptyRecords_WhenThePlatformDoesNotGrantRead()
+    {
+        var (matter, withRecord, empty) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        SeedOneNonEmptyAndOneEmptyWorkAssignment(matter, withRecord, empty);
+        _fixture.AccessRecordReadTables.Remove("sprk_workassignment");
+
+        var pass = await FollowParentsPassAsync();
+
+        pass.Untrusted.Should().Be(SecureRootInheritance.ReasonMarkerHidden);
+        pass.Undetermined.Should().BeGreaterOrEqualTo(1);
+        pass.Problems.Should().Contain(p => p.Contains(SecureRootInheritance.ReasonMarkerHidden));
+        World.AccessRecordWrites.Should().NotContain(w => w.Id == empty, "one readable record does not prove its table");
+        World.ValueOf<string>("sprk_workassignment", empty, AccessInheritance.Column).Should().BeNull();
+        _fixture.IsSecureOf(empty).Should().BeTrue("an empty read the platform does not vouch for is never decided on");
+        _fixture.Updates.Should().NotContain(u => u.RecordId == empty);
+    }
+
+    /// <summary>
+    /// Must-not-fire control for the test above: the same records, and the platform grants the BFF Read on the work assignment
+    /// column — the empty record is decided as before (recorded, and followed out of secure with its ordinary matter).
+    /// </summary>
+    [Fact]
+    public async Task ANonEmptyRecordOnATable_TheEmptyRecordIsDecided_WhenThePlatformGrantsRead()
+    {
+        var (matter, withRecord, empty) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        SeedOneNonEmptyAndOneEmptyWorkAssignment(matter, withRecord, empty);
+
+        var pass = await FollowParentsPassAsync();
+
+        pass.Untrusted.Should().BeNull();
+        World.AccessRecordWrites.Should().Contain(w => w.Id == empty, "the platform proves the column readable on the table");
+        World.ValueOf<string>("sprk_workassignment", empty, AccessInheritance.Column).Should().NotBeNullOrEmpty();
+    }
+
+    /// <summary>An ordinary matter with two work assignments under it: one with an access record, one secure with none.</summary>
+    private void SeedOneNonEmptyAndOneEmptyWorkAssignment(Guid matter, Guid withRecord, Guid empty)
+    {
+        OrdinaryMatter(matter);
+        FiledWorkAssignment(_fixture, withRecord, "sprk_regardingmatter", "sprk_matter", matter);
+        SetPermission("sprk_workassignment", withRecord, Standard);
+        SeedRecord("sprk_workassignment", withRecord, floorSecure: false, Standard, ownSecure: false, ownPermission: null,
+            ("sprk_matter", matter));
+        SecureFiledWorkAssignment(_fixture, empty, matter);
+    }
+
+    private async Task<FollowParentsPass> FollowParentsPassAsync()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<SecureRootInheritance>()
+            .FollowParentsPassAsync("trace-uac-20261023", null, 25, 500, CancellationToken.None);
+    }
+
+    /// <summary>
     /// Fix round 3 (K1): with more records below a matter than the inline cap (50), the matter's un-secure records the first
     /// 50 and returns how many records with no access record it left unrecorded (<c>accessRecordsNotRecorded</c>); those stay
     /// secure (never loosened) and the job records them.
