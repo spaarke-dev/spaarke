@@ -31,7 +31,9 @@
      - 162: uploads to a WA, an invoice and a project show on the parent's Documents (zz- rows).
      - 160, only if the BFF carries `58ffc37da3`: the composer, the To pre-fill, and the link and label for internal and external recipients (zz- contact).
      - Then close 114, 160 (✅ + POML) and 163.
-3. R2 §9 owner answers → `/design-to-spec`; 105 UAT; #1882 live re-run; 111 row 4; 090 wrap-up; the `[SIGNAL-EVALUATOR]` heartbeat.
+3. **Next docs→master PR** carries the D-185 guard (#2316, `20d7cbd47c`) and today's docs. It is test-only, so it can ride with the next batch.
+4. **ebilling #1911:** they send the F1 merge SHA. Check `git diff origin/master <sha> -- Services/Signals/EarlierInvoiceReadability.cs` against the #2294 round. K1 (Billing Administrator policy Read goes to Deep, uac-r2) and K2 (Core User CRUD on BFF-only tables) go to the owner through ebilling.
+5. R2 §9 owner answers → `/design-to-spec`; 105 UAT; #1882 live re-run; 111 row 4; 090 wrap-up; the `[SIGNAL-EVALUATOR]` heartbeat.
 
 ## Open owner questions
 
