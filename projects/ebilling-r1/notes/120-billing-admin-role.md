@@ -210,3 +210,21 @@ pwsh -NoProfile -File scripts/ebilling/Deploy-EbillingBillingAdminRole.ps1 -Veri
 ```
 
 Defaults: `-EnvironmentUrl` is `$env:DATAVERSE_URL`, else `https://spaarkedev1.crm.dynamics.com`; `-SolutionUniqueName` is `SpaarkeMaster`. Auth is the operator's `az` login.
+
+## Live run on dev (2026-10-23, owner's direct OK in the main session)
+
+Pre-notices went to ontology-r1 and uac-r2. Ontology confirmed it did not change Basic User live, and said go ahead; uac-r2's depth change was taken first.
+
+1. **Plain run** at `8f7aa122a7` (exit 0, `changed: 17`):
+   - created `Spaarke Billing Administrator` (810926e0-a97c-44ea-9891-e80dadef73f0) in the root BU, in SpaarkeMaster;
+   - added 15 privileges: Read at Global; Create, Write, Append and AppendTo at Basic, on sprk_ruleset, sprk_Policy and sprk_PolicyVersion;
+   - removed `prvReadsprk_ruleset` (Deep) from Spaarke Core User;
+   - skipped Basic User, which already lacked it;
+   - the role is held by 0 users and 0 teams.
+2. **Second plain run:** `changed: 0` (idempotent).
+3. **-Verify:** the first attempt exited 1 because of a **script bug**, not a live gap.
+   - PowerShell variable names are case-insensitive, so step 4's loop variable `$roleName` overwrote the script-level `$RoleName`. Step 6 then flagged the Billing Administrator itself as "NOT ALLOWED (D-185)".
+   - The plain run's steps 1–3 run before step 4, so the live privileges were applied correctly.
+   - Fixed by renaming the loop variables (`$stripRoleName`, `$watchRoleName`). The re-run of -Verify exits 0: `VERIFY PASS: the task 120 / D-185 state holds.`
+
+**Open, not ebilling's:** who removed `prvReadsprk_ruleset` and `prvReadsprk_Policy` from live Basic User before this run. Ontology didn't, and no ebilling session made a privilege-removal call on that role. The result matches the agreed end state.

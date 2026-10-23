@@ -308,37 +308,37 @@ try {
     }
 
     # --- 4. Core and Basic User lose Read on sprk_ruleset ------------------------------------------------------------
-    foreach ($roleName in $StripRoles) {
+    foreach ($stripRoleName in $StripRoles) {
         Write-Host ""
-        Write-Host "4. $roleName - $StripPrivilegeName" -ForegroundColor Cyan
-        $role = Get-RootRole $roleName
-        if (-not $role) { throw [EscalationException]::new("Role '$roleName' was not found as a single root role in $EnvironmentUrl. Nothing was changed.") }
-        if ($role.BusinessUnitId -ne $rootBu) { throw [EscalationException]::new("Root role '$roleName' is not in the root business unit. Nothing was changed.") }
+        Write-Host "4. $stripRoleName - $StripPrivilegeName" -ForegroundColor Cyan
+        $role = Get-RootRole $stripRoleName
+        if (-not $role) { throw [EscalationException]::new("Role '$stripRoleName' was not found as a single root role in $EnvironmentUrl. Nothing was changed.") }
+        if ($role.BusinessUnitId -ne $rootBu) { throw [EscalationException]::new("Root role '$stripRoleName' is not in the root business unit. Nothing was changed.") }
         $before = Get-RolePrivilegeMap $role.Id
         Write-Host "  root role $($role.Id), $($before.Count) privileges; sprk_ruleset: $(Format-Held $before $ruleSetPrivs)"
         $heldRuleSet = @($ruleSetPrivs | Where-Object { $before.ContainsKey($_.Id) })
         $unexpected = @($heldRuleSet | Where-Object { $_.Id -ne $stripPriv.Id -or $before[$_.Id].Depth -ne $StripSourceDepth })
         if ($unexpected.Count) {
-            $msg = "$roleName holds $(($unexpected | ForEach-Object { "$($_.Name) ($($before[$_.Id].Depth))" }) -join ', ') on sprk_ruleset; the role source showed only $StripPrivilegeName ($StripSourceDepth)."
+            $msg = "$stripRoleName holds $(($unexpected | ForEach-Object { "$($_.Name) ($($before[$_.Id].Depth))" }) -join ', ') on sprk_ruleset; the role source showed only $StripPrivilegeName ($StripSourceDepth)."
             if ($Verify) { $Gaps.Add($msg) } else { throw [EscalationException]::new("$msg STOP and report (task 120 escalation): nothing further was changed.") }
         }
         if (-not $before.ContainsKey($stripPriv.Id)) {
-            $script:Skipped.Add("$roleName $StripPrivilegeName absent"); Write-Host "  skipped  $StripPrivilegeName already absent" -ForegroundColor Yellow
+            $script:Skipped.Add("$stripRoleName $StripPrivilegeName absent"); Write-Host "  skipped  $StripPrivilegeName already absent" -ForegroundColor Yellow
         } else {
-            $Gaps.Add("$roleName still holds $StripPrivilegeName ($($before[$stripPriv.Id].Depth)) (D-185)")
+            $Gaps.Add("$stripRoleName still holds $StripPrivilegeName ($($before[$stripPriv.Id].Depth)) (D-185)")
             if ($ReadOnly) {
-                $script:Changed.Add("$roleName - $StripPrivilegeName"); Write-Host "  WOULD REMOVE $StripPrivilegeName ($($before[$stripPriv.Id].Depth)) from the root role (RemovePrivilegeRole)" -ForegroundColor Cyan
+                $script:Changed.Add("$stripRoleName - $StripPrivilegeName"); Write-Host "  WOULD REMOVE $StripPrivilegeName ($($before[$stripPriv.Id].Depth)) from the root role (RemovePrivilegeRole)" -ForegroundColor Cyan
             } else {
                 Invoke-Dv -Path "roles($($role.Id))/Microsoft.Dynamics.CRM.RemovePrivilegeRole" -Method POST -Body @{
                     Privilege = @{ '@odata.type' = 'Microsoft.Dynamics.CRM.privilege'; privilegeid = $stripPriv.Id }
                 } | Out-Null
                 $after = Wait-Settled { Get-RolePrivilegeMap $role.Id } { param($m) -not $m.ContainsKey($stripPriv.Id) }
-                if ($after.ContainsKey($stripPriv.Id)) { throw "RemovePrivilegeRole on '$roleName' did not take: $StripPrivilegeName still reads as held." }
+                if ($after.ContainsKey($stripPriv.Id)) { throw "RemovePrivilegeRole on '$stripRoleName' did not take: $StripPrivilegeName still reads as held." }
                 # Exactly one privilege went; nothing else was removed or changed depth.
                 $diff = @($before.Keys | Where-Object { $_ -ne $stripPriv.Id -and (-not $after.ContainsKey($_) -or $after[$_].Depth -ne $before[$_].Depth) })
                 $added = @($after.Keys | Where-Object { -not $before.ContainsKey($_) })
-                if ($diff.Count -or $added.Count) { throw [EscalationException]::new("After the removal, '$roleName' differs beyond $StripPrivilegeName (changed: $($diff.Count), added: $($added.Count)). STOP: investigate before another run.") }
-                $script:Changed.Add("$roleName - $StripPrivilegeName"); Write-Host "  REMOVED  $StripPrivilegeName ($($before[$stripPriv.Id].Depth)); role now holds $($after.Count) privileges (was $($before.Count))" -ForegroundColor Green
+                if ($diff.Count -or $added.Count) { throw [EscalationException]::new("After the removal, '$stripRoleName' differs beyond $StripPrivilegeName (changed: $($diff.Count), added: $($added.Count)). STOP: investigate before another run.") }
+                $script:Changed.Add("$stripRoleName - $StripPrivilegeName"); Write-Host "  REMOVED  $StripPrivilegeName ($($before[$stripPriv.Id].Depth)); role now holds $($after.Count) privileges (was $($before.Count))" -ForegroundColor Green
             }
         }
         if (-not ($ReadOnly -and $before.ContainsKey($stripPriv.Id))) {
@@ -350,7 +350,7 @@ try {
                 $cm = if ($ReadOnly) { & $read } else { Wait-Settled $read { param($m) -not $m.ContainsKey($stripPriv.Id) } 8 4 }
                 if ($cm.ContainsKey($stripPriv.Id)) { $bad += "$cid (business unit $($c._businessunitid_value))" }
             }
-            if ($bad.Count) { $Gaps.Add("$roleName business-unit copies still holding ${StripPrivilegeName}: $($bad -join '; ')"); Write-Host "  WARNING: business-unit copies still holding ${StripPrivilegeName}: $($bad -join '; ')" -ForegroundColor DarkYellow }
+            if ($bad.Count) { $Gaps.Add("$stripRoleName business-unit copies still holding ${StripPrivilegeName}: $($bad -join '; ')"); Write-Host "  WARNING: business-unit copies still holding ${StripPrivilegeName}: $($bad -join '; ')" -ForegroundColor DarkYellow }
             else { Write-Host "  business-unit copies ($($copies.Count)) do not hold $StripPrivilegeName" -ForegroundColor Green }
         }
     }
@@ -358,11 +358,11 @@ try {
     # --- 5. Policy-table privileges of the shared roles (ontology-r1 #2298; never changed here) --------------------------
     Write-Host ""
     Write-Host "5. sprk_Policy / sprk_PolicyVersion on the shared roles (ontology-r1 #2298 owns these; read only)" -ForegroundColor Cyan
-    foreach ($roleName in $PolicyWatchRoles) {
-        $role = Get-RootRole $roleName
-        if (-not $role) { Write-Host "  $roleName : not found"; continue }
+    foreach ($watchRoleName in $PolicyWatchRoles) {
+        $role = Get-RootRole $watchRoleName
+        if (-not $role) { Write-Host "  $watchRoleName : not found"; continue }
         $m = Get-RolePrivilegeMap $role.Id
-        Write-Host ("  {0,-22} sprk_Policy: {1}   sprk_PolicyVersion: {2}" -f $roleName, (Format-Held $m @($privs['sprk_policy'].Values)), (Format-Held $m @($privs['sprk_policyversion'].Values)))
+        Write-Host ("  {0,-22} sprk_Policy: {1}   sprk_PolicyVersion: {2}" -f $watchRoleName, (Format-Held $m @($privs['sprk_policy'].Values)), (Format-Held $m @($privs['sprk_policyversion'].Values)))
     }
 
     # --- 6. Every role holding a privilege on sprk_ruleset -------------------------------------------------------------
