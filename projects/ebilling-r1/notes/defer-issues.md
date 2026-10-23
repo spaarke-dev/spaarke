@@ -1145,3 +1145,39 @@ The BFF routes (`/review`, `/blocked`) are covered by 119.
 
 ---
 
+### DEF-043 — Line Duplicate Signal judged in another firm after a same-core-record line re-point
+
+| Field | Value |
+|---|---|
+| **Status** | Open: known limit accepted by ontology-r1 (F4(b) design); bounded by core record on write and read |
+| **Urgency** | low |
+| **Filed** | 2026-10-23 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2294 |
+
+**Description**: sprk_billingevent.sprk_invoice is not refused to app-only generic writers, because D-96's detach/move/re-attach sequence writes it through generic paths. InvoiceFamilyCoreRecordGuard refuses a cross-core-record re-point, and DuplicatesShownAsync shows nothing when the invoice's core record differs from the Signal's frozen sprk_corerecordid. Residual: a generic re-point within the same core record means the Duplicate is judged in that invoice's submission's firm. Exploiting it also needs a tracking-number match there.
+
+---
+### DEF-044 — Stored file: ETag pin misses a reused staged blob
+
+| Field | Value |
+|---|---|
+| **Status** | Open: known limit (uac-r2 090 round-2 K2); fix before StoredFileReconcileJob is enabled anywhere |
+| **Urgency** | medium |
+| **Filed** | 2026-10-23 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2296 |
+
+**Description**: Staging that reuses an existing blob doesn't write it, so its ETag is unchanged (StoredFileReconcileJob.cs:446-453, StoredFileService.cs:342). If a deterministic-id create is retried more than 24 h after staging, reconcile deletes the orphan, the retry reuses it, and the flip answers BlobMissing: the row stays not servable, with a refusal and an alert. DeleteStagedBlobAsync (null ifMatch) has the same gap. Fix: touch metadata on reuse; carry the ETag in StagedBlob and pin DeleteStagedBlobAsync.
+
+---
+### DEF-045 — Stored file: parent-gone pass doesn't check the blob path's parent
+
+| Field | Value |
+|---|---|
+| **Status** | Open: defence in depth (uac-r2 090 round-2 K3); not reachable after F4 |
+| **Urgency** | low |
+| **Filed** | 2026-10-23 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2297 |
+
+**Description**: StoredFileReconcileJob.cs:283-321 deletes the blob named by pathFile == row.Id without checking that pathParent is one of the gone lookups. Fix: also require row.Parents.Contains(pathParent) or ParentConfirmedGoneAsync(pathParent).
+
+---
