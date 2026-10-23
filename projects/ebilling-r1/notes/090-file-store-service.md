@@ -151,4 +151,27 @@ Two adversarial passes (opus), code-review, adr-check.
 - **The download serves the scan-read version without re-hashing.** The handler streams the blob pinned to the ETag whose verdict the filter read, but does not recompute its SHA-256 against the row (the flip to Servable did). A byte change keeps the ETag only if storage itself is wrong.
 - **`ReadAllAsync` buffers in a `MemoryStream`.** A file near the 2 GiB size limit peaks near 2 GiB (plus the final `ToArray` copy), and a length above `Array.MaxLength` throws. Job reads only; Finance upload limits are far below.
 - **No range support; a 412 mid-stream truncates a started response.** The route serves whole files only (no `Range`). If the blob changes after the first byte, the pinned read fails with 412 and the client gets a truncated 200, not a 409 — headers are already sent.
-- **F4 (the app-only refusal list) is not done here.** It depends on UAC #2253, not yet on master; the main session does it after master is merged in.
+- ~~**F4 (the app-only refusal list) is not done here.**~~ Done in round 2 after the merge brought UAC #2253 in (§12).
+
+## 12. uac-r2 review round 1 re-check (fix round 2)
+
+Branch brought up to date first: merge of `origin/work/ebilling-r1` e371dce6bf (master with UAC #2253, task 081) — 3649883be8. Conflicts: the write-path registry (this task's row is now **I-23**: master I-19, invoice I-20/I-21, 081 Procedures I-22); `FinanceModule` usings (both kept); the route ledger (081 141 → 142, then 090 142 → 143; both credited-form sets kept). 090's tests moved from `FinanceStepZeroCaller` to `StatedCaller` (same API). `RecordCreatorPerson.cs`, the creator-person script and its Pester, and the census merged without conflict (090 had not touched them).
+
+| Item | Change | Commit |
+|---|---|---|
+| F4 (UAC binding shape) | `StoredFileSchema.Entity` in `InheritedAccessPermission.AccessTables` (refused whole to app-only generic writers), with its reason line: `sprk_blobpath` and the parent lookups decide which bytes are served to whom and the reconcile job deletes by them; typed writer `StoredFileService`; no playbook node, output mapping or field-mapping rule writes it. `AccessTableReaderScanTests` scans `Services/Finance/Files` and lists `sprk_procedureversion`, `sprk_billingexport` and `organization` (the OrganizationId check's read) as not access, each with its reader; `AccessTableAppOnlyWriterTests` names the table in the exact set and two writer cases. Seed: without the entry, 24 integration cases and the reader scan fail | 17b377eb20 |
+| Fix-now test gap: production wiring of the OrganizationId check | `Organization_ProductionConstructor_WiresTheCheck` builds `StoredFileBlobs` through its production constructor (dummy MI endpoint, Strict credential, Strict `IGenericEntityService` answering another org id): `StageAsync` → NotConfigured, `EnsureEnvironmentAsync` throws, no token request. Seed: deleting the `_organizationId = …` wiring fails it | 6429fca623 |
+| K1 hardening: marker read and delete not tied to one ETag | Parent-gone pass deletes with `If-Match: properties.ETag`; pass B with the listing's ETag (`BlobListingItem` / `StoredBlobListing` carry it; a listing without one keeps the blob). 412 = changed after it was judged: kept (the parent-gone pass keeps the row too), counted `blobsChangedSinceJudged`, logged; not a unit fault. `BlobGateway.DeleteIfExistsAsync(container, name, ifMatch, ct)` follows `OpenReadAsync`; the session store passes null. Two must-fire tests fail on the old job | 56121a443f |
+| K2 gating condition | Recorded below and as a constraint in `tasks/079-wp3-deploy.poml` | this commit |
+| K4 size-cast scan misses | Recorded below as a known limit | this commit |
+| `IOptionsDriftTests` TenantId text | Now says the value must equal the Dataverse environment's OrganizationId and is validated against the organization row before the first operation (boot checks the shape only) | e068ba36db |
+| UAC answer to 081 Q5 | `sprk_ruleset` and `sprk_procedureassignment` join `RecordCreatorPerson.StampedChildTables` and the script's `$Tables` (SpaarkeMaster home; 080 created both columns unsecured, so they pass the universal empty-before-securing gate). Rule sets are stamped now (RuleSetService upload, ProcedureService create already call `owner.ApplyTo`); **no BFF writer creates a `sprk_procedureassignment` row yet** — the stamp applies when one does. Census lists both as stamped outside the codified Secure Record Owner child set. UAC #2277's Entity.xml `IsSecured` guard is not on this branch, so no allow-list entry was added | 15fc689ca0 |
+
+### K2 — HARD precondition (binding on 079 and every later environment)
+
+**F4 merged is a hard precondition for enabling `StoredFileReconcileJob` in any environment.** The job runs whenever eBilling is enabled and `Finance__FileStore__BlobEndpoint` is set, so "enabling" it is writing the file-store app settings. They are written only on a BFF whose deployed commit refuses `sprk_storedfile` to app-only generic writers (F4, `ParentLineage.cs` `AccessTables` names `StoredFileSchema.Entity`), verified by content before the endpoint is set. Without F4 a field-mapping rule, playbook output or update node could re-point `sprk_blobpath` or a parent lookup, and the job would delete by it.
+
+### K4 — known limit of the size-cast scan
+
+The source scan for an unchecked narrowing of a file length (F3) misses: `(int)len`, `(int)count`, `(int)lengthOfFile` (names it does not treat as lengths), `(int)Math.Min(length, x)`, `(int)(a + length)`, a cast split across lines, and `Convert.ToInt32(length)`. It is a tripwire for the common spelling, not a proof; review still owns the rest.
+
