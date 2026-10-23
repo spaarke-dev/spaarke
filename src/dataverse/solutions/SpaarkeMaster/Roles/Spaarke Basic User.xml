@@ -515,7 +515,6 @@
     <RolePrivilege name="prvReadsprk_playbooknode" level="Global" />
     <RolePrivilege name="prvReadsprk_playbooknoderun" level="Global" />
     <RolePrivilege name="prvReadsprk_playbookrun" level="Global" />
-    <RolePrivilege name="prvReadsprk_Policy" level="Deep" />
     <RolePrivilege name="prvReadsprk_PracticeArea_Ref" level="Global" />
     <RolePrivilege name="prvReadsprk_ProcessingJob" level="Deep" />
     <RolePrivilege name="prvReadsprk_Project" level="Deep" />
