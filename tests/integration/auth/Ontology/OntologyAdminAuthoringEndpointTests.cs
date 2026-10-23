@@ -226,7 +226,7 @@ public partial class OntologyAdminAuthoringEndpointTests : IClassFixture<Ontolog
 
         // Spot checks against the catalog's declared shape, so a test that only mirrors the source cannot hide a broken source.
         var decide = Actions(lanes[0].GetProperty("actions")).ToDictionary(a => a.Code);
-        decide.Keys.Should().Equal("send-budget-inquiry", "revise-budget", "approve-variance", "assign-work");
+        decide.Keys.Should().Equal("send-budget-inquiry", "revise-budget", "approve-variance", "assign-task", "assign-work");
         decide["revise-budget"].Excludes.Should().Equal("approve-variance");
         decide["approve-variance"].Excludes.Should().Equal("revise-budget");
         var doActions = Actions(lanes[1].GetProperty("actions")).ToDictionary(a => a.Code);

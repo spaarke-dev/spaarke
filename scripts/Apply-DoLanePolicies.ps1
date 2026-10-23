@@ -67,7 +67,7 @@ $ApiBase = "$DataverseUrl/api/data/v9.2"
 # refused here first.
 $KindRules = @{
     'do-lane-policies'        = @{ Lane = 'Do'; Codes = @('mark-complete', 'reschedule', 'reassign', 'send-reminder', 'extend-response-date', 'record-the-response') }
-    'know-promotion-policies' = @{ Lane = 'Decide'; Codes = @('send-budget-inquiry', 'revise-budget', 'approve-variance', 'assign-work') }
+    'know-promotion-policies' = @{ Lane = 'Decide'; Codes = @('send-budget-inquiry', 'revise-budget', 'approve-variance', 'assign-work', 'assign-task') }
 }
 $MaxHeadline = 200; $MaxProposedAction = 400; $MaxShortName = 100
 
