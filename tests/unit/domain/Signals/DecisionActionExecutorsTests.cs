@@ -914,6 +914,7 @@ public class DecisionActionExecutorsTests
         return
         [
             new ReviseBudgetExecutor(probe, user, new WriterHarness().Build(), Owner().Object, new FakeTimeProvider(Now), NullLogger<ReviseBudgetExecutor>.Instance),
+            new CreateBudgetExecutor(probe, cores, entities, new FakeTimeProvider(Now)),
             new ApproveVarianceExecutor(),
             new MarkCompleteExecutor(probe, user, cores, new FakeTimeProvider(Now)),
             new RescheduleExecutor(probe, OpenEventUser(), cores),
@@ -994,6 +995,143 @@ public class DecisionActionExecutorsTests
         outcome.Status.Should().Be(DecisionActionStatus.Refused);
         outcome.ReasonCode.Should().Be(DecisionActionReasons.SubjectUnsupported);
         cores.VerifyNoOtherCalls();
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // create-budget (task 161, D-180): a matter with no active budget; the child-records create core, as the caller
+    // ---------------------------------------------------------------------------------------------------------------
+
+    private static Dictionary<string, string?> CreateBudgetParams() =>
+        new() { ["amount"] = "250000.50", ["reason"] = "No budget was ever set; the estimate from counsel" };
+
+    [Fact]
+    public async Task CreateBudget_CreatesOneBudgetUnderTheMatterThroughTheChildRecordsCore_AsTheCaller_AndReturnsItsId()
+    {
+        var created = Guid.Parse("cccccccc-0000-0000-0000-0000000000b1");
+        var cores = Cores();
+        string? table = null;
+        JsonElement? sent = null;
+        cores.Setup(c => c.CreateChildAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, JsonElement, CancellationToken>((_, t, b, _) => { table = t; sent = b; })
+            .ReturnsAsync(Reply(201, body: new { id = created }));
+        var probe = Probe(CanCreate);
+
+        var outcome = await new CreateBudgetExecutor(probe.Object, cores.Object, Entities(), new FakeTimeProvider(Now)).ExecuteAsync(
+            Request(CreateBudgetParams(), null, MatterCore), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Done);
+        outcome.Code.Should().Be("create-budget");
+        outcome.Written.Should().Equal(new DecisionRecordRef("sprk_budget", created));
+        table.Should().Be("sprk_budget");
+        var body = sent!.Value;
+        body.GetProperty("sprk_name").GetString().Should().Be("Budget 2026-10-09");
+        body.GetProperty("sprk_totalbudget").GetDecimal().Should().Be(250000.50m);
+        body.GetProperty("sprk_matter@odata.bind").GetString().Should().Be($"/sprk_matters({MatterId:D})");
+        var names = body.EnumerateObject().Select(p => p.Name).ToList();
+        names.Should().OnlyContain(n => !n.StartsWith("sprk_regarding", StringComparison.Ordinal),
+            "a budget has no regarding lookups: it is filed through sprk_matter");
+        names.Should().NotContain("ownerid@odata.bind").And.NotContain("sprk_createdbyperson",
+            "the create core owns the owner and the creator person; the executor sends neither");
+        probe.Verify(p => p.CallerHoldsPrivilegeAsync(It.IsAny<string?>(), "prvCreatesprk_Budget", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("-1", "a reason")]
+    [InlineData("lots", "a reason")]
+    [InlineData("", "a reason")]
+    [InlineData("1000", "")]
+    [InlineData("1000", null)]
+    public async Task CreateBudget_BadAmountOrNoReason_IsRefusedBeforeAnyWrite(string amount, string? reason)
+    {
+        var cores = Cores();
+
+        var outcome = await new CreateBudgetExecutor(Probe(CanCreate).Object, cores.Object, Entities(), new FakeTimeProvider(Now)).ExecuteAsync(
+            Request(new() { ["amount"] = amount, ["reason"] = reason }, null, MatterCore), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Refused);
+        outcome.ReasonCode.Should().Be(DecisionActionReasons.InvalidParameter);
+        outcome.Written.Should().BeEmpty();
+        cores.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData("sprk_project")]
+    [InlineData("sprk_workassignment")]
+    [InlineData(null)]
+    public async Task CreateBudget_UnderACoreThatIsNotAMatter_IsRefusedBeforeAnyWrite(string? coreEntity)
+    {
+        var cores = Cores();
+        var core = coreEntity is null ? null : new DecisionCoreRecord(coreEntity, Guid.NewGuid(), Guid.NewGuid());
+
+        var outcome = await new CreateBudgetExecutor(Probe(CanCreate).Object, cores.Object, Entities(), new FakeTimeProvider(Now)).ExecuteAsync(
+            Request(CreateBudgetParams(), null, core), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Refused);
+        outcome.ReasonCode.Should().Be(DecisionActionReasons.BudgetNotOnMatter);
+        cores.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task Preflight_CreateBudget_RefusesWithoutTheCreatePrivilege_OrAppendToOnTheMatter_WithZeroWrites()
+    {
+        var noPrivilege = new Spy();
+        await AssertPreflightRefusesWithoutWriting(
+            new CreateBudgetExecutor(Probe(CanCreate, createPrivilege: false).Object, noPrivilege.Cores.Object, Entities(), new FakeTimeProvider(Now)),
+            Request(CreateBudgetParams(), null, MatterCore), noPrivilege, DecisionActionReasons.NotAuthorized);
+
+        var noMatter = new Spy();
+        await AssertPreflightRefusesWithoutWriting(
+            new CreateBudgetExecutor(Probe(CanCreate, bySet: set => set == "sprk_matters" ? ReadOnly : CanCreate).Object, noMatter.Cores.Object, Entities(), new FakeTimeProvider(Now)),
+            Request(CreateBudgetParams(), null, MatterCore), noMatter, DecisionActionReasons.NotAuthorized);
+    }
+
+    [Theory]
+    [InlineData(403, DecisionActionReasons.NotAuthorized)]
+    [InlineData(404, DecisionActionReasons.NotFound)]
+    public async Task CreateBudget_TheCoreRefusesTheCaller_IsRefusedWithNoId(int status, string reason)
+    {
+        var cores = Cores();
+        cores.Setup(c => c.CreateChildAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Reply(status, "child_record.denied", "no"));
+
+        var outcome = await new CreateBudgetExecutor(Probe(CanCreate).Object, cores.Object, Entities(), new FakeTimeProvider(Now)).ExecuteAsync(
+            Request(CreateBudgetParams(), null, MatterCore), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Refused);
+        outcome.ReasonCode.Should().Be(reason);
+        outcome.Written.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CreateBudget_AServerError_IsFailed_NeverSilentlyDone()
+    {
+        var cores = Cores();
+        cores.Setup(c => c.CreateChildAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Reply(503, null, "unavailable"));
+
+        var outcome = await new CreateBudgetExecutor(Probe(CanCreate).Object, cores.Object, Entities(), new FakeTimeProvider(Now)).ExecuteAsync(
+            Request(CreateBudgetParams(), null, MatterCore), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Failed);
+        outcome.ReasonCode.Should().Be(DecisionActionReasons.WriteFailed);
+    }
+
+    [Fact]
+    public async Task CreateBudget_WhenTheMattersEntitySetCannotBeResolved_IsFailed_NothingIsCreated_K3()
+    {
+        var cores = Cores();
+        var entities = new Mock<IGenericEntityService>();
+        entities.Setup(e => e.GetEntitySetNameAsync("sprk_matter", It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("metadata is down"));
+
+        var outcome = await new CreateBudgetExecutor(Probe(CanCreate).Object, cores.Object, entities.Object, new FakeTimeProvider(Now)).ExecuteAsync(
+            Request(CreateBudgetParams(), null, MatterCore), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Failed);
+        outcome.ReasonCode.Should().Be(DecisionActionReasons.WriteFailed);
+        outcome.Detail.Should().Be("The matter could not be resolved; nothing was created.");
+        outcome.Written.Should().BeEmpty();
+        cores.Verify(c => c.CreateChildAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()), Times.Never,
+            "a budget that cannot be filed under its matter is never created");
     }
 
     // ---------------------------------------------------------------------------------------------------------------
@@ -1485,6 +1623,7 @@ public class DecisionActionExecutorsTests
             (new SendEmailExecutor(probe, spy.User, cores), Request(Message("a@b.example"), null, MatterCore)),
             (new AddTodoExecutor(probe, cores, Entities()), Request(new() { ["title"] = "t", ["assignee"] = ContactId.ToString("D"), ["dueDate"] = "2026-10-20" }, null, MatterCore)),
             (new CreateEventExecutor(probe, cores, Entities()), Request(new() { ["title"] = "t", ["date"] = "2026-10-22" }, null, MatterCore)),
+            (new CreateBudgetExecutor(probe, cores, Entities(), new FakeTimeProvider(Now)), Request(CreateBudgetParams(), null, MatterCore)),
         };
 
         foreach (var (executor, request) in cases)
