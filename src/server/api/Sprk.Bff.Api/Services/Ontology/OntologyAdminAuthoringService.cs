@@ -1749,7 +1749,8 @@ public sealed partial class OntologyAdminAuthoringService
             return default;
         }
 
-        // Fix round 4 (uac-r2 E, D-123): the rule row is not a secure-family record and Console User reads sprk_policy at Deep depth, so a
+        // Fix round 4 (uac-r2 E, D-123): the rule row is not a secure-family record and a reader of sprk_policy (Console User held Read at Deep depth
+        // until D-185, task 163; Ontology Administrator still does) sees every Ontology rule, so a
         // limit on a Secure or Restricted matter would show a non-member the matter link and what is watched on it. Refused; an access
         // level the caller's read did not return (a masked sprk_issecure) is refused the same way, never read as ordinary.
         if (flags.IsUnreadable || flags.IsSecure || flags.IsRestricted)
