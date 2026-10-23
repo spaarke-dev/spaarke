@@ -298,3 +298,15 @@ name, description, type ids and assignee. It never sends `sourceEntityType` / `s
 calls `/api/office/quickcreate` with a source. So the #2191 filed-under path (and its mapping) is reachable only
 by a direct API call today; it is covered by `SecureRootCreateRouteTests.OfficeFiling` and the Office contract
 tests. The owner smoke covers the plain Office Project only.
+
+## 2026-10-23 — Owner decision 2d: SystemPrincipal stays refused (option c)
+
+A system-principal create of a project or work assignment filed under a record keeps being refused (403
+`record_creation.system_principal_unsupported`, step 6), as task 013 built it.
+- Every person-initiated create (wizards, Office quick-create, chat, forms) is unaffected: it runs as the caller,
+  whose access is checked.
+- `RecordCreationPrincipal.ForSystem` has no caller on master, so today's refusal blocks no real path.
+- Revisit when the first system creator of a project or work assignment is designed (for example email intake that
+  opens a work assignment under a matter). Then choose between "ordinary parents only" (option a) and an app-only
+  AppendTo check on `RequestedBy` (option b; needs ADR-028 approval and must fail closed on a null `RequestedBy`).
+- 017 carries no SystemPrincipal change.
