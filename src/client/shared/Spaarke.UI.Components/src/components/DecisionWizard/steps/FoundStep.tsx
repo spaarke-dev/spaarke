@@ -64,9 +64,12 @@ export const FoundStep: React.FC = () => {
     if (!openRecord) return;
     // The record opens in a platform modal above the wizard; a dialog that fails to open changes nothing here.
     try {
-      void Promise.resolve(openRecord(coreType, coreId)).catch(() => undefined);
-    } catch {
-      /* the wizard keeps its place */
+      void Promise.resolve(openRecord(coreType, coreId)).catch(err => {
+        console.warn('[DecisionWizard] openRecord failed', err);
+      });
+    } catch (err) {
+      // The wizard keeps its place.
+      console.warn('[DecisionWizard] openRecord failed', err);
     }
   };
   const metaParts: React.ReactNode[] = [

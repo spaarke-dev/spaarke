@@ -86,6 +86,9 @@ export function createWorklistLookup(source: WorklistLookupDataSource): Decision
 const ACTIVE_ONLY = '<condition attribute="statecode" operator="eq" value="0" />';
 const andFilter = (...conditions: string[]) => `<filter type="and">${conditions.join('')}</filter>`;
 
+/** The tables `createWorklistOpenLookup` can open: a Person is `contact`; the catalog's budget and firm lookups. */
+export const WORKLIST_OPEN_LOOKUP_ENTITIES: readonly string[] = ['sprk_budget', 'sprk_organization', 'contact'];
+
 /**
  * The decision wizard's side-pane lookup (`Xrm.Utility.lookupObjects` through `INavigationService.openLookup`), scoped exactly as
  * `createWorklistLookup` scopes the inline search, and no wider:
@@ -95,7 +98,7 @@ const andFilter = (...conditions: string[]) => `<filter type="and">${conditions.
  * Any other entity opens nothing (null), as the inline search returns no candidates for it. Single select; null on cancel.
  */
 export function createWorklistOpenLookup(navigation: Pick<INavigationService, 'openLookup'>): DecisionOpenLookup {
-  return async request => {
+  const openLookup: DecisionOpenLookup = async request => {
     let filters: { entityLogicalName: string; filterXml: string }[] | undefined;
 
     if (request.kind === 'Person') {
@@ -122,6 +125,8 @@ export function createWorklistOpenLookup(navigation: Pick<INavigationService, 'o
     const picked = results[0];
     return picked?.id ? { id: picked.id, name: picked.name } : null;
   };
+  // K2: the tables handled above. The wizard keeps the inline field for any other table instead of a dead pane field.
+  return Object.assign(openLookup, { supportedEntities: WORKLIST_OPEN_LOOKUP_ENTITIES });
 }
 
 /** Opens a record in a platform modal above the wizard. Undefined when the host cannot (never `openForm`, which would leave the wizard). */

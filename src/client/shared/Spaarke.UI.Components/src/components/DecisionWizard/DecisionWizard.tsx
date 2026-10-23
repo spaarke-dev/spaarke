@@ -62,7 +62,8 @@ export interface DecisionWizardProps {
   lookup?: DecisionLookupSearch;
   /**
    * The host's side-pane lookup (`Xrm.Utility.lookupObjects` through `INavigationService.openLookup`, D-182). Present: every
-   * Person / Lookup field opens it. Absent: those fields keep the inline type-ahead over `lookup`.
+   * Person / Lookup field opens it (or, when it lists `supportedEntities`, every field on a listed table; the rest keep the
+   * inline type-ahead). Absent: those fields keep the inline type-ahead over `lookup`.
    */
   openLookup?: DecisionOpenLookup;
   /** The host's open-record-in-a-modal (`INavigationService.openRecordModal`, D-182). Absent: the subject is plain text. */
@@ -386,13 +387,16 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
   const itemOpenLookup = React.useMemo<DecisionOpenLookupForItem | null>(
     () =>
       openLookup && readyItem
-        ? req =>
-            openLookup({
-              ...req,
-              core: readyItem.core
-                ? { recordType: readyItem.core.recordType, recordId: readyItem.core.recordId }
-                : null,
-            })
+        ? Object.assign(
+            (req: Parameters<DecisionOpenLookupForItem>[0]) =>
+              openLookup({
+                ...req,
+                core: readyItem.core
+                  ? { recordType: readyItem.core.recordType, recordId: readyItem.core.recordId }
+                  : null,
+              }),
+            { supportedEntities: openLookup.supportedEntities }
+          )
         : null,
     [openLookup, readyItem]
   );

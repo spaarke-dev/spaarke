@@ -138,6 +138,22 @@ describe('createWorklistOpenLookup (the side-pane lookup, scoped exactly as the 
     });
     expect(out).toBeNull();
   });
+
+  it('K2: declares exactly the tables it handles, so the wizard keeps the inline field for any other', async () => {
+    const open = createWorklistOpenLookup(nav());
+    expect([...(open.supportedEntities ?? [])].sort()).toEqual(['contact', 'sprk_budget', 'sprk_organization']);
+    // Every declared table opens the pane (never the null a dead field would come from).
+    for (const entity of open.supportedEntities ?? []) {
+      const n = nav([{ id: 'x1', name: 'Picked', entityType: entity }]);
+      const out = await createWorklistOpenLookup(n)({
+        kind: entity === 'contact' ? 'Person' : 'Lookup',
+        entity,
+        parameterCode: 'p',
+        core: null,
+      });
+      expect(out).toEqual({ id: 'x1', name: 'Picked' });
+    }
+  });
 });
 
 describe('createWorklistOpenRecord (the subject opens in a modal, never as a page navigation)', () => {

@@ -54,7 +54,7 @@
     <step order="1">Failing tests first: a Person field with openLookup injected calls it with entity contact and fills the value; a budget Lookup passes its filter; without openLookup the inline field renders; a single candidate is pre-selected without calling openLookup; the subject renders as a link that calls openRecord with entity and id, and as text without openRecord.</step>
     <step order="2">Add the two optional callbacks to the wizard's injection point and use them in ParameterFields and FoundStep.</step>
     <step order="3">Wire both hosts to INavigationService (openLookup, openRecordModal).</step>
-    <step order="4">Deploy the Console (auto-deploys from master) and check on dev: Assign to, Budget to revise and Outside firm open the side pane; the matter link opens the matter in a modal above the wizard and closing it returns to the same step with values kept; light and dark.</step>
+    <step order="4">Deploy the Console (auto-deploys from master) and check on dev: Assign to, Budget to revise and Outside firm open the side pane; the matter link opens the matter in a modal above the wizard and closing it returns to the same step with values kept; light and dark. Also check: after the pane closes, the wizard is clickable again and keeps its values; the record modal opens above the wizard and closing it returns to the same step. If this fails, the fallback is to pass nonBlocking plus yieldToSidePane through WizardShell to SprkModal (an owner decision on the wizard's modality).</step>
   </steps>
 
   <acceptance-criteria>

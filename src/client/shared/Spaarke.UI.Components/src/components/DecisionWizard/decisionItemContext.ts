@@ -25,9 +25,12 @@ import type {
 export type DecisionLookup = (request: Omit<DecisionLookupRequest, 'core'>) => Promise<ILookupItem[]>;
 
 /** The side-pane lookup as a step sees it: the item's core record is already filled in. */
-export type DecisionOpenLookupForItem = (
+export type DecisionOpenLookupForItem = ((
   request: Omit<DecisionOpenLookupRequest, 'core'>
-) => Promise<{ id: string; name: string } | null>;
+) => Promise<{ id: string; name: string } | null>) & {
+  /** The host's `supportedEntities` (K2), carried through the item-scoped wrapper. */
+  supportedEntities?: readonly string[];
+};
 
 export interface DecisionItemContextValue {
   item: DecisionWizardItem;

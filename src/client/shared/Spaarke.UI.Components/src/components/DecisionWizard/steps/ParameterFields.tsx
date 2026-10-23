@@ -4,8 +4,9 @@
  *
  * - Text / TextArea / Choice / Money / Date: Fluent inputs. The shown value is what the user typed, else the starting value
  *   (a templated draft, D-53), which is marked "Prefilled from this item" until it is edited.
- * - Person / Lookup: when the host provides `openLookup`, a read-only field that opens the platform's side-pane lookup (single
- *   select, scoped by the host; D-182) and shows the pick. Without it, the shared `LookupField` over the host's `lookup` search.
+ * - Person / Lookup: when the host provides `openLookup` (for a table it lists in `supportedEntities`, if it lists any), a read-only
+ *   field that opens the platform's side-pane lookup (single select, scoped by the host; D-182), shows the pick, and has a Clear
+ *   button once picked. Otherwise, the shared `LookupField` over the host's `lookup` search.
  *   A required Lookup that has exactly one candidate is pre-selected, without opening anything (D-18: a matter with one
  *   budget); with several the user picks.
  *
@@ -25,7 +26,7 @@ import {
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
-import { SearchRegular } from '@fluentui/react-icons';
+import { DismissRegular, SearchRegular } from '@fluentui/react-icons';
 import { LookupField } from '../../LookupField/LookupField';
 import type { ILookupItem } from '../../../types/LookupTypes';
 import { fieldLabel, fieldValue, parameterValid, withLookup, withValue } from '../decisionDraft';
@@ -78,7 +79,10 @@ const LookupParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
 
   // D-182: the side-pane lookup. A Person is a contact; a Lookup needs the catalog's table, and without one the inline field stays.
   const paneEntity = kind === 'Person' ? 'contact' : (parameter.lookupEntity ?? null);
-  const usePane = openLookup != null && paneEntity != null;
+  // K2: a host that lists the tables its pane opens gets the pane for those only; any other table keeps the inline field.
+  const supported = openLookup?.supportedEntities;
+  const usePane =
+    openLookup != null && paneEntity != null && (supported == null || supported.includes(paneEntity));
   // Single flight: a second activation while the pane is open opens nothing.
   const picking = React.useRef(false);
   const [paneOpen, setPaneOpen] = React.useState(false);
@@ -151,13 +155,25 @@ const LookupParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
               }
             }}
             contentAfter={
-              <Button
-                appearance="transparent"
-                size="small"
-                icon={<SearchRegular />}
-                aria-label={`Select ${parameter.label.toLowerCase()}`}
-                onClick={() => void openPane()}
-              />
+              <>
+                {value ? (
+                  // F1: the inline field's clear button (LookupField), so an optional pick can be removed again.
+                  <Button
+                    appearance="subtle"
+                    size="small"
+                    icon={<DismissRegular fontSize={14} />}
+                    onClick={() => update(d => withLookup(d, scope, parameter.code, null))}
+                    aria-label={`Clear ${parameter.label}`}
+                  />
+                ) : null}
+                <Button
+                  appearance="transparent"
+                  size="small"
+                  icon={<SearchRegular />}
+                  aria-label={`Select ${parameter.label.toLowerCase()}`}
+                  onClick={() => void openPane()}
+                />
+              </>
             }
           />
         </Field>

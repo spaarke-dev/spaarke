@@ -341,7 +341,15 @@ export interface DecisionOpenLookupRequest {
  * The host's side-pane lookup (`INavigationService.openLookup`, single select). Resolves to the picked record, or null when the
  * user cancelled or the host could not open the pane. The shared library has no Xrm (ADR-012), so only the host calls it.
  */
-export type DecisionOpenLookup = (request: DecisionOpenLookupRequest) => Promise<{ id: string; name: string } | null>;
+export type DecisionOpenLookup = ((
+  request: DecisionOpenLookupRequest
+) => Promise<{ id: string; name: string } | null>) & {
+  /**
+   * The tables this host's pane can open (K2). The wizard uses the pane only for these and keeps the inline field for the rest,
+   * so a table the host cannot open is never a dead field. Absent: the pane is used for every table (the host handles all).
+   */
+  supportedEntities?: readonly string[];
+};
 
 /** The host's "open this record in a modal above the wizard" (`INavigationService.openRecordModal`). */
 export type DecisionOpenRecord = (entityName: string, entityId: string) => Promise<void> | void;
