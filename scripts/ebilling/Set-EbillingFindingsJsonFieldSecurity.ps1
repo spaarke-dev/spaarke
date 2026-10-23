@@ -3,7 +3,7 @@
 .SYNOPSIS
     eBilling R1 task 122 (#2235, D-176) - field-secures sprk_invoicesubmission.sprk_findingsjson so ONLY the BFF reads and
     writes it: the BFF application user(s) through "Spaarke BFF-Managed Field Writers" (read, create, update), and NO reader
-    profile. -WhatIf is a dry run; a plain run writes; -Verify checks.
+    profile. -WhatIf is a dry run; a plain run writes; -Verify checks; -Revert undoes a run (with -WhatIf: a dry run of it).
 
 .DESCRIPTION
     WHY (#2235, owner decision 2026-10-22). sprk_findingsjson holds a submission's stored findings, Duplicate detail included:
@@ -40,11 +40,23 @@
           column is REVERTED to not secured and published before the script stops; if the revert fails too it prints
           "RECOVERY REQUIRED NOW". Re-running is the resume path: on a column already secured it grants only what is missing;
       (b) the writer profile's permission is read=4 create=4 update=4; the reader profile has NO row on the column;
-      (c) any OTHER profile that can read, create or update the column is FAIL (System Administrator excepted); System
-          Administrator holders are listed;
+      (c) any OTHER profile that can read, create or update the column is FAIL. The one exception is the platform's own
+          "System Administrator" field security profile, matched by its fixed id (572329c1-a042-4e22-be47-367c6374ea45; Dataverse
+          gives it a row on every secured column), never by name. System Administrator role holders are listed;
       (d) publish sprk_invoicesubmission - only when this run wrote something.
 
     A second run reports every item OK and writes nothing (no publish either).
+
+    -Confirm: every write point (secure + writer grant, a resume grant, the publish, and each -Revert write) goes through
+    ShouldProcess, so -Confirm asks before each. The automatic revert after a failed grant is a recovery and is never asked.
+
+    -VERIFY passes only when the column IS secured, the writer profile holds read=4 create=4 update=4, and NO other profile
+    (the reader profile included) grants any access to it, the System Administrator profile above excepted.
+
+    -REVERT (rollback after a successful run, task 122 K2), in this order: (r1) un-secure the column (so no BFF user is ever left
+    masked), (r2) delete the writer profile's permission row on it if one is left, (r3) publish sprk_invoicesubmission. The
+    preconditions are not required. With -WhatIf it only reports what it would do. The SpaarkeMaster source (Entity.xml
+    IsSecured, the FieldSecurityProfiles.xml row) is reverted by a commit, not by this script.
 
 .PARAMETER EnvironmentUrl
     Dataverse environment URL. Defaults to $env:DATAVERSE_URL, else the dev environment.
@@ -58,12 +70,16 @@
     The unmanaged solution the writer profile and sprk_invoicesubmission travel in. Default SpaarkeMaster.
 
 .PARAMETER Verify
-    Read-only check with a pass/fail exit code (1 names each gap). Cannot be combined with -WhatIf.
+    Read-only check with a pass/fail exit code (1 names each gap). Cannot be combined with -WhatIf or -Revert.
+
+.PARAMETER Revert
+    Undo a run: un-secure the column, remove the writer profile's row on it, publish. Combine with -WhatIf for a dry run.
 
 .EXAMPLE
     pwsh scripts/ebilling/Set-EbillingFindingsJsonFieldSecurity.ps1 -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -WhatIf
     pwsh scripts/ebilling/Set-EbillingFindingsJsonFieldSecurity.ps1 -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c
     pwsh scripts/ebilling/Set-EbillingFindingsJsonFieldSecurity.ps1 -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -Verify
+    pwsh scripts/ebilling/Set-EbillingFindingsJsonFieldSecurity.ps1 -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -Revert -WhatIf
 
 .NOTES
     Project: ebilling-r1, task 122 (#2235; closes DEF-029). Shape: scripts/ebilling/Set-EbillingFirmReasonFieldSecurity.ps1
@@ -80,13 +96,15 @@ param(
     [string]$EnvironmentUrl = $(if ($env:DATAVERSE_URL) { $env:DATAVERSE_URL } else { 'https://spaarkedev1.crm.dynamics.com' }),
     [Parameter(Mandatory)][string[]]$BffApplicationIds,
     [string]$SolutionUniqueName = 'SpaarkeMaster',
-    [switch]$Verify
+    [switch]$Verify,
+    [switch]$Revert
 )
 
 $ErrorActionPreference = 'Stop'
 $EnvironmentUrl = $EnvironmentUrl.TrimEnd('/')
 $IsDryRun = [bool]$WhatIfPreference
 if ($IsDryRun -and $Verify) { throw '-WhatIf and -Verify are separate modes.' }
+if ($Revert -and $Verify) { throw '-Revert and -Verify are separate modes; run -Revert, then check IsSecured.' }
 $BffApplicationIds = @($BffApplicationIds | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 if ($BffApplicationIds.Count -eq 0) { throw '-BffApplicationIds: at least one application id is required.' }
 foreach ($id in $BffApplicationIds) { if (-not [Guid]::TryParse($id, [ref][Guid]::Empty)) { throw "-BffApplicationIds: '$id' is not a GUID." } }
@@ -97,6 +115,9 @@ $Api = "$EnvironmentUrl/api/data/v9.2"
 $Table = 'sprk_invoicesubmission'
 $Column = 'sprk_findingsjson'
 $WriterProfileName = 'Spaarke BFF-Managed Field Writers'
+# The platform's own System Administrator field security profile: a fixed id in every environment, and Dataverse gives it a row on
+# every secured column. The one profile besides the writer allowed to grant access; matched by id, never by name.
+$SystemAdministratorProfileId = '572329c1-a042-4e22-be47-367c6374ea45'
 $ReaderProfileName = 'Spaarke BFF-Managed Field Readers'
 
 $token = az account get-access-token --resource $EnvironmentUrl --query accessToken -o tsv 2>$null
@@ -128,11 +149,42 @@ function Report([string]$State, [string]$What) {
 $org = (Invoke-DvGet 'organizations?$select=name').value[0].name
 Write-Host "Environment : $EnvironmentUrl (org '$org')"
 Write-Host "Column      : $Table.$Column (server-only: BFF writer profile, no reader profile)"
-Write-Host ("Mode        : {0}" -f $(if ($Verify) { 'VERIFY (read-only)' } elseif ($IsDryRun) { 'DRY RUN (-WhatIf, no writes)' } else { 'WRITE' }))
+Write-Host ("Mode        : {0}" -f $(if ($Verify) { 'VERIFY (read-only)' } elseif ($Revert -and $IsDryRun) { 'REVERT DRY RUN (-WhatIf, no writes)' } elseif ($Revert) { 'REVERT' } elseif ($IsDryRun) { 'DRY RUN (-WhatIf, no writes)' } else { 'WRITE' }))
+$attrPath = "EntityDefinitions(LogicalName='$Table')/Attributes(LogicalName='$Column')"
+$publishBody = @{ ParameterXml = "<importexportxml><entities><entity>$Table</entity></entities></importexportxml>" }
+
+# ── -REVERT (task 122 K2): un-secure first, then remove the writer row, then publish ─────────────────────────────
+if ($Revert) {
+    Write-Host "`nRevert"
+    $secured = (Invoke-DvGet "$attrPath`?`$select=IsSecured").IsSecured
+    $writerRows = @((Invoke-DvGet ("fieldpermissions?`$select=fieldpermissionid&`$filter=entityname eq '$Table' and attributelogicalname eq '$Column'" +
+        "&`$expand=fieldsecurityprofileid(`$select=name)")).value | Where-Object { $_.fieldsecurityprofileid.name -eq $WriterProfileName })
+    $wrote = $false
+    if (-not $secured) { Write-Host "  OK       $Table.$Column is not field-secured" -ForegroundColor Green }
+    elseif ($IsDryRun) { Write-Host "  WOULD    (r1) un-secure $Table.$Column" -ForegroundColor Cyan }
+    elseif ($PSCmdlet.ShouldProcess("$Table.$Column", 'Revert: un-secure the column')) {
+        $typed = Invoke-DvGet $attrPath; $typed.IsSecured = $false
+        Invoke-DvWrite PUT $attrPath $typed @{ 'MSCRM.MergeLabels' = 'true' } | Out-Null
+        $wrote = $true; Write-Host "  DONE     (r1) un-secured $Table.$Column" -ForegroundColor Green
+    }
+    if ($writerRows.Count -eq 0) { Write-Host "  OK       no $WriterProfileName row on $Table.$Column" -ForegroundColor Green }
+    foreach ($row in $writerRows) {
+        if ($IsDryRun) { Write-Host "  WOULD    (r2) delete $WriterProfileName row $($row.fieldpermissionid) on $Table.$Column" -ForegroundColor Cyan }
+        elseif ($PSCmdlet.ShouldProcess("fieldpermission $($row.fieldpermissionid)", "Revert: delete the $WriterProfileName row on $Table.$Column")) {
+            try { Invoke-DvWrite DELETE "fieldpermissions($($row.fieldpermissionid))" $null | Out-Null; Write-Host "  DONE     (r2) deleted $WriterProfileName row $($row.fieldpermissionid)" -ForegroundColor Green }
+            catch { if ("$($_.Exception.Message)" -notmatch '404') { throw }; Write-Host "  OK       (r2) the row went with the un-secure" -ForegroundColor Green }
+            $wrote = $true
+        }
+    }
+    if ($IsDryRun) { Write-Host "  WOULD    (r3) publish $Table (only if r1 or r2 wrote)" -ForegroundColor Cyan; Write-Host "`nREVERT DRY RUN complete - nothing was written." -ForegroundColor Cyan; exit 0 }
+    if ($wrote -and $PSCmdlet.ShouldProcess($Table, 'Revert: publish')) { Invoke-DvWrite POST 'PublishXml' $publishBody | Out-Null; Write-Host "`nPublished $Table." -ForegroundColor Green }
+    if ((Invoke-DvGet "$attrPath`?`$select=IsSecured").IsSecured) { Write-Host "`nFAIL: $Table.$Column is still field-secured." -ForegroundColor Red; exit 1 }
+    Write-Host "`nREVERTED: $Table.$Column is not field-secured. Revert the SpaarkeMaster source (Entity.xml IsSecured, the FieldSecurityProfiles.xml row) by a commit." -ForegroundColor Green
+    exit 0
+}
 
 # ── PRECONDITIONS ───────────────────────────────────────────────────────────────────────────────────────────
 Write-Host "`nPreconditions"
-$attrPath = "EntityDefinitions(LogicalName='$Table')/Attributes(LogicalName='$Column')"
 $attr = try { Invoke-DvGet "$attrPath`?`$select=MetadataId,IsSecured,CanBeSecuredForCreate,CanBeSecuredForRead,CanBeSecuredForUpdate" } catch { $null }
 if (-not $attr) { Report 'FAIL' "(p0) $Table.$Column does not exist in this environment" }
 elseif (-not ($attr.CanBeSecuredForCreate -and $attr.CanBeSecuredForRead -and $attr.CanBeSecuredForUpdate)) {
@@ -246,7 +298,7 @@ function Set-ColumnSecured([bool]$Value) {
     Invoke-DvWrite PUT $attrPath $typed @{ 'MSCRM.MergeLabels' = 'true' } | Out-Null
 }
 function Grant-MissingWriter {
-    if (-not (Get-Permission $writer.fieldsecurityprofileid)) {
+    if (-not (Get-Permission $writer.fieldsecurityprofileid) -and $PSCmdlet.ShouldProcess("$Table.$Column", "Grant $WriterProfileName read/create/update")) {
         Grant-WriterPermission $writer.fieldsecurityprofileid
         Report 'DONE' "granted $WriterProfileName on $Table.$Column (read=4 create=4 update=4)"
     }
@@ -274,6 +326,7 @@ elseif ($attr.IsSecured) {
 }
 elseif ($Verify) { Report 'MISSING' "$Table.$Column is NOT field-secured - any user with Read on a submission reads its findings, Duplicate detail included" }
 elseif ($IsDryRun) { Report 'WOULD' "secure $Table.$Column, then at once grant $WriterProfileName read/create/update (no reader profile)" }
+elseif (-not $PSCmdlet.ShouldProcess("$Table.$Column", "Field-secure the column, then at once grant $WriterProfileName read/create/update")) { Report 'FAIL' "$Table.$Column was not secured (declined at the confirmation)" }
 else {
     $clock = [System.Diagnostics.Stopwatch]::StartNew()
     Set-ColumnSecured $true
@@ -286,7 +339,7 @@ else {
         Write-Host "           reverting $Table.$Column to NOT field-secured, so the BFF is not left reading null..." -ForegroundColor Yellow
         try {
             Set-ColumnSecured $false
-            Invoke-DvWrite POST 'PublishXml' @{ ParameterXml = "<importexportxml><entities><entity>$Table</entity></entities></importexportxml>" } | Out-Null
+            Invoke-DvWrite POST 'PublishXml' $publishBody | Out-Null
             $back = (Invoke-DvGet "$attrPath`?`$select=IsSecured").IsSecured
             if ($back) { throw "the revert was accepted but $Table.$Column still reads IsSecured=true" }
             Write-Host "  REVERTED $Table.$Column is NOT field-secured again. Fix the cause, then re-run." -ForegroundColor Yellow
@@ -319,10 +372,14 @@ else { Report 'OK' "$ReaderProfileName has no row on $Table.$Column (server-only
 
 # ── (c) every OTHER reader or writer ────────────────────────────────────────────────────────────────────────
 Write-Host "`n(c) Other profiles"
-$others = @((Invoke-DvGet "fieldpermissions?`$select=canread,cancreate,canupdate&`$expand=fieldsecurityprofileid(`$select=name)&`$filter=entityname eq '$Table' and attributelogicalname eq '$Column' and (canread eq 4 or canupdate eq 4 or cancreate eq 4)").value |
-    Where-Object { $_.fieldsecurityprofileid.name -notin $WriterProfileName, $ReaderProfileName, 'System Administrator' })
-foreach ($o in $others) { Report 'FAIL' "profile '$($o.fieldsecurityprofileid.name)' can read or write $Table.$Column (read=$($o.canread) create=$($o.cancreate) update=$($o.canupdate)) - only the BFF writer profile may" }
-if ($others.Count -eq 0) { Report 'OK' "no profile besides '$WriterProfileName' and System Administrator can read or write $Table.$Column" }
+# Any access (read, create or update) by any profile but the writer (by id) and the platform's System Administrator profile (by
+# id). The reader profile is reported in (b) and is left out here, so its row is never counted twice.
+$writerId = if ($writer) { $writer.fieldsecurityprofileid.ToString().ToLowerInvariant() } else { '' }
+$readerId = if ($readerProfile) { $readerProfile.fieldsecurityprofileid.ToString().ToLowerInvariant() } else { '' }
+$others = @((Invoke-DvGet "fieldpermissions?`$select=canread,cancreate,canupdate&`$expand=fieldsecurityprofileid(`$select=fieldsecurityprofileid,name)&`$filter=entityname eq '$Table' and attributelogicalname eq '$Column' and (canread eq 4 or canupdate eq 4 or cancreate eq 4)").value |
+    Where-Object { $_.fieldsecurityprofileid.fieldsecurityprofileid.ToString().ToLowerInvariant() -notin $SystemAdministratorProfileId, $writerId, $readerId })
+foreach ($o in $others) { Report 'FAIL' "profile '$($o.fieldsecurityprofileid.name)' ($($o.fieldsecurityprofileid.fieldsecurityprofileid)) grants access to $Table.$Column (read=$($o.canread) create=$($o.cancreate) update=$($o.canupdate)) - only the BFF writer profile may" }
+if ($others.Count -eq 0) { Report 'OK' "no profile besides '$WriterProfileName' and the System Administrator profile ($SystemAdministratorProfileId) grants any access to $Table.$Column" }
 foreach ($role in @((Invoke-DvGet "roles?`$select=roleid&`$filter=name eq 'System Administrator'").value)) {
     foreach ($u in @((Invoke-DvGet "roles($($role.roleid))/systemuserroles_association?`$select=fullname,applicationid,isdisabled").value | Where-Object { -not $_.isdisabled })) {
         Report 'INFO' ("System Administrator '{0}'{1} (full field access by platform rule)" -f $u.fullname, $(if ($u.applicationid) { ' (application user)' } else { '' }))
@@ -331,8 +388,8 @@ foreach ($role in @((Invoke-DvGet "roles?`$select=roleid&`$filter=name eq 'Syste
 }
 
 # ── (d) PUBLISH ─────────────────────────────────────────────────────────────────────────────────────────────
-if ($IsWrite -and $script:Wrote) {
-    Invoke-DvWrite POST 'PublishXml' @{ ParameterXml = "<importexportxml><entities><entity>$Table</entity></entities></importexportxml>" } | Out-Null
+if ($IsWrite -and $script:Wrote -and $PSCmdlet.ShouldProcess($Table, 'Publish')) {
+    Invoke-DvWrite POST 'PublishXml' $publishBody | Out-Null
     Write-Host "`nPublished $Table." -ForegroundColor Green
 }
 elseif ($IsWrite) { Write-Host "`nNothing written; no publish." -ForegroundColor Green }
@@ -345,7 +402,7 @@ if ($IsDryRun) {
     else { Write-Host "`nDRY RUN complete - nothing was written." -ForegroundColor Cyan }
     exit 0
 }
-if ($gaps.Count -eq 0) { Write-Host "`nPASS: $Table.$Column is field-secured; only the BFF application user(s) (and System Administrator) read or write it." -ForegroundColor Green; exit 0 }
+if ($gaps.Count -eq 0) { Write-Host "`nPASS: $Table.$Column is field-secured, the BFF writer profile holds read/create/update, and no other profile (the System Administrator profile excepted) grants any access." -ForegroundColor Green; exit 0 }
 Write-Host "`nFAIL ($($gaps.Count)):" -ForegroundColor Red
 $gaps | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
 exit 1
