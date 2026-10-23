@@ -107,9 +107,11 @@ public class AccessTableAppOnlyWriterTests
         ["sprk_emailreviewlog"] = ["sprk_communication"],
 
         // ebilling-r1 (master merge): the firm and core record scope the external submission reads.
+        // UAC review F4 (on e371dce6bf): + its invoice and tracking number, which D-176's Duplicate withholding reads.
         ["sprk_invoicesubmission"] =
         [
             "sprk_vendororg", "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment",
+            "sprk_invoice", "sprk_trackingnumber",
         ],
     };
 
@@ -595,9 +597,34 @@ public class AccessTableAppOnlyWriterTests
             .. Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.CoreRecordLookups[
                     Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity]
                 .Select(l => (Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity, l.Column)),
+            (Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity,
+                Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionInvoice),
+            (Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity,
+                Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.TrackingNumberColumn),
         ];
         foreach (var (table, column) in readers)
             Code(table, column).Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, $"{column} on {table}");
+    }
+
+    [Fact]
+    public void TheColumnsTheDuplicateWithholdingReads_AreRefusedOnTheSubmission_InTheFormsItReadsThem()
+    {
+        // UAC review F4 (on e371dce6bf): D-176 resolves (vendor org, tracking number) to a submission and gates a Duplicate's
+        // earlier-invoice detail on that submission's invoice (EarlierInvoiceReadability.ResolveByTrackingNumberAsync). The
+        // reader's own Web API names, so a renamed reader constant drifts here.
+        const string submission = Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity;
+        foreach (var key in new[]
+                 {
+                     Sprk.Bff.Api.Services.Signals.EarlierInvoiceReadability.InvoiceColumn,
+                     Sprk.Bff.Api.Services.Signals.EarlierInvoiceReadability.TrackingNumberColumn,
+                     "sprk_invoice", "sprk_Invoice@odata.bind", " SPRK_TRACKINGNUMBER ",
+                 })
+            Code(submission, key).Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, $"{key} on {submission}");
+
+        // Must not fire: the same columns on the invoice itself, and the submission's ordinary columns.
+        Code("sprk_invoice", "sprk_trackingnumber").Should().BeNull("the invoice's own tracking number decides no access");
+        Code(submission, "sprk_processingstatus").Should().BeNull("an ordinary column");
+        CallerCode(submission, "sprk_invoice").Should().BeNull("the caller's own privileges decide");
     }
 
     [Theory]
@@ -651,11 +678,10 @@ public class AccessTableAppOnlyWriterTests
     [InlineData("sprk_communication", "sprk_triagecategory")]
     [InlineData("sprk_communication", "sprk_TriageCategory@odata.bind")]
     // ebilling-r1 (master merge): a submission's other columns, and its firm and core lookups on the other family tables.
-    [InlineData("sprk_invoicesubmission", "sprk_trackingnumber")]
     [InlineData("sprk_invoicesubmission", "sprk_processingstatus")]
     [InlineData("sprk_invoicesubmission", "sprk_submitter")]
     [InlineData("sprk_invoicesubmission", "sprk_adminattention")]
-    [InlineData("sprk_invoice", "sprk_vendororg")]
+    // sprk_invoice.sprk_vendororg: its treatment is pending (UAC review F4, the vendor-org source of D-176's Duplicate read).
     [InlineData("sprk_invoiceapproval", "sprk_regardingmatter")]
     [InlineData("sprk_externalidentifier", "sprk_regardingproject")]
     public void AnOrdinaryColumn_OrAnAccessColumnOnAnotherTable_IsNotRefused(string table, string key) =>

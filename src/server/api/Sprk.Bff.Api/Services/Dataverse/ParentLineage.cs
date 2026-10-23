@@ -963,7 +963,15 @@ internal static class InheritedAccessPermission
     /// caller can read its core record (<c>ExternalInvoiceSubmissionAuthorizationFilter.DecideReadOneAsync</c>). Re-pointed,
     /// a submission and its tracking number, status and document id would be shown to another firm, or under another
     /// record's partners. Their writer is the intake (<c>InvoiceSubmissionService</c>, <c>TrackingNumberAllocator</c>); no
-    /// generic writer re-files a submission.</item>
+    /// generic writer re-files a submission.
+    /// <para>UAC review F4 (on e371dce6bf): also its invoice <c>sprk_invoice</c>
+    /// (<c>InvoiceSubmissionPersister.SubmissionInvoice</c>) and its tracking number <c>sprk_trackingnumber</c>
+    /// (<c>TrackingNumberAllocator.TrackingNumberColumn</c>). D-176's Duplicate withholding reads them:
+    /// <c>EarlierInvoiceReadability.ResolveByTrackingNumberAsync</c> resolves (vendor org, tracking number) to a submission and
+    /// uses that submission's <c>sprk_invoice</c> to decide whose Read gates a Duplicate's earlier-invoice detail, and
+    /// <c>InvoiceReviewReadService</c> applies the same rule. Re-pointed, a Duplicate would quote an earlier invoice the caller
+    /// cannot read. Their writers are typed: the persister links the invoice (<c>BuildSubmissionUpdate</c>) and the allocator
+    /// assigns the number; no playbook output mapping, Update Record node, field-mapping rule or Repair writes either.</para></item>
     /// </list>
     /// Data, not branching: a table with no entry has no such column.
     /// </summary>
@@ -1049,7 +1057,9 @@ internal static class InheritedAccessPermission
             [Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity] = new HashSet<string>(
                 InvoiceFamilyCoreRecordGuard.CoreRecordLookups[Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity]
                     .Select(l => l.Column)
-                    .Append(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.FirmColumn),
+                    .Append(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.FirmColumn)
+                    .Append(Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionInvoice)
+                    .Append(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.TrackingNumberColumn),
                 StringComparer.OrdinalIgnoreCase),
         };
 

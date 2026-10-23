@@ -53,7 +53,8 @@ public class AccessTableReaderScanTests
             // #2253 fix round 4 (F-1): the proposal's message decides who sees and applies it.
             ["sprk_emailreviewlog"] = "The proposal and decision log: its communication, which decides who sees and applies a proposal, is refused per column (AccessColumns); its target is re-checked against the caller's own rights.",
             // ebilling-r1 (master merge): the external submission routes scope a submission by its firm and core record.
-            ["sprk_invoicesubmission"] = "An invoice submission: its firm (sprk_vendororg) and core-record lookups, which scope the external submission reads, are refused per column (AccessColumns); the rest is ordinary data.",
+            // UAC review F4 (on e371dce6bf): + its invoice and tracking number, which D-176's Duplicate withholding reads.
+            ["sprk_invoicesubmission"] = "An invoice submission: its firm (sprk_vendororg) and core-record lookups, which scope the external submission reads, and its invoice (sprk_invoice) and tracking number (sprk_trackingnumber), which D-176's Duplicate withholding resolves an earlier invoice through (EarlierInvoiceReadability), are refused per column (AccessColumns).",
 
             // Not access, each read in the code:
             ["sprk_analysisskill"] = "A scope row /create associates; the check is the caller's own rights on the analysis, no column of it is read (AnalysisAuthorizationFilter).",
@@ -66,7 +67,14 @@ public class AccessTableReaderScanTests
             ["privilege"] = "Platform-defined and read-only (Dataverse refuses a write); UserPrivilegeChecker reads its names.",
             ["template"] = "Email templates; the filter checks the caller's own Read on the row (CommunicationRecordAuthorizationFilter).",
             // ebilling-r1 (master merge): the invoice family's FR-05 guard reads these tables' filing lookups.
-            ["sprk_billingevent"] = "An invoice line, a child record: its access follows its parents (SecureChildLineage); the FR-05 guard reads its core-record lookups and its invoice to keep it filed with its invoice (InvoiceFamilyCoreRecordGuard, OwnedChildWrite), and no access decision reads its columns.",
+            // UAC review F4 (on e371dce6bf): its invoice IS read by an access decision; its treatment is pending (the vendor-org source).
+            ["sprk_billingevent"] = "An invoice line, a child record: its access follows its parents (SecureChildLineage); the FR-05 guard reads its core-record lookups and its invoice to keep it filed with its invoice (InvoiceFamilyCoreRecordGuard, OwnedChildWrite). Its invoice (sprk_invoice) is also read, as the caller, to reach a billing-event Duplicate's current invoice and that invoice's vendor org in D-176's withholding (SignalReadService.DuplicatesShownAsync); its treatment is pending (UAC review F4, the vendor-org source).",
+            // UAC review F4 (on e371dce6bf): found when the scan took in Services/Signals.
+            ["sprk_policy"] = "A Signal rule, a child of its matter (SecureChildLineage, #2084): its access follows its parents. The Signals code reads its scope, code, severity and work type to choose which rules apply and how a Signal is labelled (PolicyScopeResolver, SignalReadService), never who may see a row.",
+            ["sprk_policyversion"] = "A rule's version (its body), a child of its rule (SecureChildLineage): the Signals code reads it to evaluate and label (DecisionPlanService, SignalReevaluationJob, DecisionRecordWriter); no access decision reads its columns.",
+            ["sprk_ruleset"] = "Billing rule configuration: BillingFactLoader reads the active rule set to evaluate an invoice; no access decision reads its columns.",
+            ["sprk_budget"] = "A budget, a child record (SecureChildLineage): a rule predicate compares its figures (PredicateCompiler) and a decision action revises them (DecisionActionExecutors); no access decision reads its columns.",
+            ["sprk_budgetrevision"] = "A budget revision, a child of its budget and matter (SecureChildLineage): a decision action writes it (DecisionCommitFollowUps, DecisionActionExecutors); no access decision reads its columns.",
             ["sprk_externalidentifier"] = "A party's identifier for an invoice or core record (D-68), a child record: its access follows its parents (SecureChildLineage); the FR-05 guard reads its core-record and invoice lookups (InvoiceFamilyCoreRecordGuard), and nothing in the BFF reads its value to match or show anything.",
         };
 
@@ -79,7 +87,21 @@ public class AccessTableReaderScanTests
         {
             ["contains"] = "The OData function in a thread-name search filter (CommunicationThreadReadService).",
             ["sprk_entitylogicalname"] = "A column (on sprk_userentityassociation) whose constant's name ends in LogicalName.",
-            ["sprk_invoicesubmissions"] = "The entity SET name of sprk_invoicesubmission (FinanceAuthorizationFilter.InvoiceSubmissionEntitySet), a route constant the finance filter authorizes as the caller; the table is listed under its logical name.",
+            ["sprk_vendororg"] = "A column: EarlierInvoiceReadability.VendorOrgLogicalName, the LOGICAL name of sprk_vendororg that a Microsoft.Dynamics.CRM.In filter needs.",
+        };
+
+    /// <summary>
+    /// UAC review F4 (on e371dce6bf), a ratchet baseline: tables found when the scan took in <c>Services/Signals</c> whose rows are
+    /// not access but some of whose columns an access decision DOES read, and which are not yet refused per column
+    /// (<see cref="InheritedAccessPermission.AccessColumns"/>). Each reason names the columns. Reported for a decision; a new table
+    /// of this kind fails the scan like any other. Remove an entry when its columns are refused (it then moves to
+    /// <see cref="NotAccessTables"/>) or judged to decide nothing.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> AccessColumnsNotYetRefused =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sprk_signal"] = "A Signal, a child record (SecureChildLineage). SignalCoreRecordAccess.AuthorizeAsync decides who sees a Signal from its core-record pair (sprk_corerecordtype, sprk_corerecordid: not lineage lookups, so a write of them is no re-file), its lane (sprk_lane: the Do-lane 'mine' rule) and its subject (sprk_regardingrecordid and the subject lookups). None is refused per column.",
+            ["sprk_decisionrecord"] = "A Decision Record, a child record (SecureChildLineage), append-only by convention. GateDecisionRecordSharing shares a gate record Read with its communication's internal sharees, selecting the records by sprk_confirmedby being empty: a generic write that clears it would make a confirmed record shareable. Not refused per column.",
         };
 
     private static readonly string[] ScannedFolders =
@@ -101,6 +123,9 @@ public class AccessTableReaderScanTests
         // #2253 fix round 4 (K-2): the SPE admin endpoints and services, which read the container-type configuration.
         Path.Combine("Api", "SpeAdmin"),
         Path.Combine("Services", "SpeAdmin"),
+        // UAC review F4 (on e371dce6bf): D-176's Duplicate withholding (EarlierInvoiceReadability, SignalReadService) decides
+        // what a reader sees from the submission and billing-event columns it reads.
+        Path.Combine("Services", "Signals"),
     ];
 
     private static readonly Regex TableConstant = new(
@@ -133,13 +158,18 @@ public class AccessTableReaderScanTests
     public void EveryListedTable_IsStillNamed()
     {
         var named = ScanServer().Select(hit => Logical(hit.Table)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var stale = NotAccessTables.Keys.Where(t => !named.Contains(t)).ToList();
+        var stale = NotAccessTables.Keys.Concat(AccessColumnsNotYetRefused.Keys).Where(t => !named.Contains(t)).ToList();
         Assert.True(stale.Count == 0, "Listed but no longer named (remove them): " + string.Join(", ", stale));
     }
 
     [Fact(DisplayName = "#2253 K3: no table is both refused whole and listed as not access")]
-    public void NoTable_IsBothRefusedAndListed() =>
+    public void NoTable_IsBothRefusedAndListed()
+    {
         Assert.Empty(NotAccessTables.Keys.Where(InheritedAccessPermission.AccessTables.Contains));
+        Assert.Empty(AccessColumnsNotYetRefused.Keys.Where(t =>
+            InheritedAccessPermission.AccessTables.Contains(t) || InheritedAccessPermission.AccessColumns.ContainsKey(t)
+            || NotAccessTables.ContainsKey(t)));
+    }
 
     [Fact(DisplayName = "#2253 K3: the detector fires on a new access table and not on a comment, a column or a covered set")]
     public void TheDetector_MustFireAndMustNotFire()
@@ -189,13 +219,14 @@ public class AccessTableReaderScanTests
     /// <summary>Whether <paramref name="table"/> (a logical name or a collection) is refused whole or listed.</summary>
     private static bool IsCovered(string table)
     {
-        var known = InheritedAccessPermission.AccessTables.Concat(NotAccessTables.Keys);
+        var known = InheritedAccessPermission.AccessTables.Concat(NotAccessTables.Keys).Concat(AccessColumnsNotYetRefused.Keys);
         return known.Any(t => SameTable(table, t)) || NotTables.ContainsKey(table);
     }
 
     /// <summary>The listed or refused logical name <paramref name="table"/> names, or itself.</summary>
     private static string Logical(string table) =>
-        InheritedAccessPermission.AccessTables.Concat(NotAccessTables.Keys).FirstOrDefault(t => SameTable(table, t)) ?? table;
+        InheritedAccessPermission.AccessTables.Concat(NotAccessTables.Keys).Concat(AccessColumnsNotYetRefused.Keys)
+            .FirstOrDefault(t => SameTable(table, t)) ?? table;
 
     [Fact(DisplayName = "#2253 fix round 3: every name listed as not a table is still matched by the detector")]
     public void EveryListedNonTable_IsStillMatched()
