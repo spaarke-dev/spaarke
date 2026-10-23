@@ -748,7 +748,7 @@ public sealed class InvoiceReviewReadServiceTests
 
     private static readonly Guid ChangedOrg = Guid.Parse("10000000-0000-4000-8000-0000000000f2");
 
-    [Theory(DisplayName = "119 r4: a legacy number-only Duplicate resolves in the submission's vendor org, not the invoice's (a writer can change the invoice's)")]
+    [Theory(DisplayName = "119 r4: a number-only Duplicate resolves in the submission's vendor org, not the invoice's (a writer can change the invoice's)")]
     [InlineData(false)]
     [InlineData(true)]
     public async Task NumberOnlyPrior_ResolvesInTheSubmissionsOrg(bool readableInSubmissionsOrg)

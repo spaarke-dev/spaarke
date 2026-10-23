@@ -81,6 +81,7 @@ The withheld output should look like the write-time withheld shape above. For `D
   - **Superseded (UAC review F4, option b, agreed with ontology, 2026-10-23):** the firm is the current invoice's SUBMISSION's `sprk_vendororg` (the `sprk_invoicesubmission` rows whose `sprk_invoice` is the current invoice, read as the caller), not the invoice's own, which a writer of the invoice can change. No readable submission, or submissions that disagree on the firm: withhold. `SignalReadService.DuplicatesShownAsync`; `/review` and `/blocked` already used the submission's firm.
   - An unresolvable number, or more than one match, must fail closed: withhold.
 - If a stored id would be simpler for you, ebilling can add an evidence `billing.reference` `duplicateOf.invoiceId` for new Signals. Existing Signals would still need the tracking-number path.
+  - **Correction (uac-r2 re-check F4(c), 2026-10-23):** number-only Duplicates are not only old Signals. `DuplicateHandler` still writes them: every same-invoice repeat (`DuplicateOfEarlierLine`, `DuplicateHandler.cs:185`) carries only the current invoice's own tracking number, and a prior with no invoice carries no `duplicateOf.invoiceId`.
 
 ## 3. Other billing types quoting records outside the invoice's family
 

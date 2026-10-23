@@ -6,7 +6,8 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// <summary>
 /// D-176 (#2118, ontology task 157): whether the CALLER may see what a billing Duplicate finding quotes about an earlier invoice. The
 /// earlier invoice is readable only when the caller's own read of <c>sprk_invoices</c> returns it. A reference names that invoice by
-/// id, or (older Signals, and every same-invoice repeat) by the earlier submission's tracking number within the current invoice's
+/// id, or (a finding written without one, today as before: every same-invoice repeat, <c>duplicate.line_same_invoice</c>, and a prior
+/// with no invoice) by the earlier submission's tracking number within the current invoice's
 /// vendor org, resolved through <c>sprk_invoicesubmissions</c> (alternate key <c>sprk_invoicesubmission_firm_trackingnumber</c> =
 /// vendor org + tracking number) read as the caller.
 /// </summary>

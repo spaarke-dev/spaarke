@@ -990,7 +990,9 @@ internal static class InheritedAccessPermission
     /// <para>Not listed: <c>sprk_billingevent.sprk_invoice</c>. A billing-event Duplicate's current invoice is the event's invoice
     /// (read as the caller), and that invoice's submissions give the vendor org, so the column is read. It is not refused because
     /// the supported detach / move / re-attach sequence (<see cref="InvoiceFamilyCoreRecordGuard.DetachMoveReattachHint"/>, D-96)
-    /// writes it through the playbook update and the output orchestrator (<c>InvoiceFamilyGenericUpdatePathTests</c>). The read is
+    /// writes it through the playbook update and the output orchestrator (<c>InvoiceFamilyGenericUpdatePathTests</c>). A re-point of
+    /// it needs no misconfiguration: D-96's same-core re-attach through an Update Record node or an output mapping, a person's
+    /// run, and a native edit by a user with Write on the line all reach it. The read is
     /// bounded: the line's invoice counts only when it is filed under the Signal's frozen core record (below), and every generic
     /// write of it is held to the line's own core record by <see cref="InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode"/>.
     /// Residual: a re-point within the same core record is judged in that invoice's submission's firm (DEF-043, #2294).</para></item>
