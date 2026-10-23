@@ -35,7 +35,7 @@
 3. **Ontology task 163 (PR #2298, D-185):** K4 is accepted for internal callers. Condition: no app-only policy enrichment for an external or unknown caller, mirrored privately in `SignalReadService` from master's `IsExternalOrUnknownCallerAsync` (do not copy the Filters file). Ontology accepted it and its pass 2 checks it. Ontology will ping before and after the live deploy (BFF, then config, then role) with the #1355 read-back; then run the server-side gate.
 4. **Dev BFF deploy gate (R3):**
    - **0317579272** (ontology 159/161/163): UAC OK, on condition Router and Client lint are green.
-   - **HOLD on cdb149cc2d and every later master SHA** until word-add-in fixes #2304:
+   - **UAC OK for the first master SHA containing #2308** (8c8205c95a, F2/F3 fix, accepted 2026-10-23), once Router and Client lint are green on it. Word-add-in has an open follow-up: answer a `system_failure` 403 as 503. Any SHA with #2304 but without #2308 stays held. Earlier hold:
      - F2: the email identity probe answers an unreadable Message-ID match (403) differently from no match (200 not_saved);
      - F3: no tests for refused access.
 
