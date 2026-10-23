@@ -20,6 +20,8 @@ The twin lookups (`sprk_relatedworkassignment` / `sprk_relatedinvoice` / `sprk_r
 ## Open owner question (not decided here, per the task constraint)
 What is the role of `sprk_related{parent}` on sprk_document? The wizards now set only the parent column `sprk_{parent}`. If `sprk_related{parent}` is meant to be the polymorphic "regarding"/related pointer (as `sprk_relatedevent` and `sprk_relatedtodo` are the ONLY lookups for events and to dos), should a wizard-created document set both? Until decided, a wizard-created document has `sprk_related{parent}` empty.
 
+Reviewer K4 (adversarial review of PR #2286): the BFF already treats the parent columns as the LEGACY side. `src/server/api/Sprk.Bff.Api/Services/Documents/DocumentLinkFieldMap.cs:42-49` (`SupersededBy`) labels `sprk_matter`, `sprk_project`, `sprk_invoice` and `sprk_workassignment` as superseded by `sprk_relatedmatter`, `sprk_relatedproject`, `sprk_relatedinvoice` and `sprk_relatedworkassignment`, pending a deliberate one-time data migration (the map is recorded, never acted on during a copy). This task binds the parent column because that is the column the Work Assignment, Project and Invoice forms' Documents subgrids read today (live check above). If the owner decides `sprk_related*` is the canonical column, the forms' subgrids and these wizards must move together with that migration; binding only one side now would split a parent's documents across the two lists.
+
 ## Change
 - `PolymorphicResolverService.findNavProp`: with several relationships to the entity, an entry whose `columnName` equals the hint (case-insensitive) wins; then the existing substring match; then the existing fallback. A single relationship is returned as before.
 - `workAssignmentService.ts`: `_resolveDocNavProp` removed; the document bind uses `findNavProp(docNavProps, 'sprk_workassignment', 'sprk_workassignment')`. The not-found fallback is now the live nav prop `sprk_WorkAssignment` (it was the bare entity name, which is not a valid nav prop).
@@ -33,7 +35,7 @@ What is the role of `sprk_related{parent}` on sprk_document? The wizards now set
 | `CreateWorkAssignmentWizard/workAssignmentService.ts` document bind | was first match by referenced entity | FIXED |
 | `CreateInvoiceWizard/invoiceService.ts` invoice bind (hint `invoice`) | fragment | FIXED |
 | `CreateInvoiceWizard/invoiceService.ts` host bind (hint `matter`/`project`) | fragment | FIXED (found in step 3; same bug) |
-| `CreateProjectWizard/CreateProjectWizard.tsx:790` | hard-coded `'sprk_Project'` (no discovery) | KEEP: it is the live nav prop of the parent column `sprk_project`; no ordering dependence. Deviation from the POML wording "both orders" for the project wizard: there is no relationship order to test. |
+| `CreateProjectWizard/CreateProjectWizard.tsx:790` | hard-coded `'sprk_Project'` (no discovery) | KEEP, now PINNED: it is the live nav prop of the parent column `sprk_project`; no ordering dependence. `CreateProjectWizard.secureHoldBack.test.tsx` asserts `createDocumentRecords('sprk_projects', PROJECT_ID, 'sprk_Project', …)` (fails if it becomes `sprk_RelatedProject`). There is no relationship order to test. |
 | `CreateMatterWizard/matterService.ts:380` | `_resolveNavProp(map, 'sprk_matter')` exact column | KEEP (the reference) |
 | `solutions/LegalWorkspace/.../CreateMatter/matterService.ts:261` | same exact-column resolution | KEEP |
 | `CreateTodoWizard/todoService.ts:328` | exact column `sprk_relatedtodo`, fallback `sprk_RelatedToDo` | KEEP (todo has only the related column) |
@@ -42,15 +44,16 @@ What is the role of `sprk_related{parent}` on sprk_document? The wizards now set
 | `PolymorphicResolverService.applyResolverFields` (:621) + `workAssignmentService`/`reportCardService`/`eventService`/`invoiceService` create-payload lookups with fragment hints | regarding lookups on the NEW record, not documents | KEEP: none of the checked host entities has two lookups to the same sprk_ parent, and a fragment hint is not any column's full name, so exact-first changes nothing |
 | `workAssignmentService.ts:645` follow-on event → work assignment (`'workassignment'`) | event lookup | KEEP (single lookup) |
 | `PolymorphicResolverService.findHostNavPropForLookup`, `TodoRegardingUpdateBuilder`, `ResolverWriteHandler` | exact column first, then entity+hint | KEEP |
-| `CreateEventWizard/eventService.ts` local `_findNavProp` | event create lookups | KEEP: a third local copy remains (not in the brief's list); candidate for the same retirement later |
+| `CreateEventWizard/eventService.ts` local `_findNavProp` | event create lookups (hints none / `assignedto`) | FIXED in the review round: replaced by the shared `findNavProp`; behaviour unchanged |
 
 ## Findings reported, not fixed (out of scope)
-1. `CreateInvoiceWizard/invoiceService.ts:376` carries an unreachable `else if (uploadedFiles.length > 0 && !this._containerId)` arm (its `if` is `uploadedFiles.length > 0`), which fails `eslint` (`no-dupe-else-if`). Pre-existing since b026daf4891. Task 076 deleted the same arm from the matter and work-assignment services. Fix: delete the arm (and `_containerId` if nothing else reads it).
-2. `DocumentUploadWizard` invoice `relationshipSchemaName` is wrong (above).
-3. A third local `_findNavProp` copy in `CreateEventWizard/eventService.ts`.
+1. (FIXED in the review round) the unreachable `else if` arm at `invoiceService.ts:376`; the `_containerId` constructor parameter is kept.
+2. `DocumentUploadWizard` invoice `relationshipSchemaName` is wrong (above); filed by the main session as an issue, not changed here.
+3. (FIXED in the review round) the third local `_findNavProp` copy in `CreateEventWizard/eventService.ts`.
 
 ## Tests
-- New: `services/__tests__/PolymorphicResolverService.findNavProp.test.ts` (7), `CreateWorkAssignmentWizard/__tests__/workAssignmentService.documentBind.test.ts` (3), `CreateInvoiceWizard/__tests__/invoiceService.documentBind.test.ts` (7).
+- New: `services/__tests__/PolymorphicResolverService.findNavProp.test.ts` (8), `CreateWorkAssignmentWizard/__tests__/workAssignmentService.documentBind.test.ts` (3), `CreateInvoiceWizard/__tests__/invoiceService.documentBind.test.ts` (7); plus one case added to `CreateProjectWizard.secureHoldBack.test.tsx`.
+- What proves what (review round): the callers were the bug (they passed the fragment `workassignment`, which both column names contain). The full hint `sprk_workassignment` is NOT a substring of `sprk_relatedworkassignment`, so the plain parent/related ordering cases in the findNavProp suite pass on the old helper too; the caller-level suites (`*.documentBind.test.ts`) are what fail on the old callers. `findNavProp`'s own exact-first step is pinned by the `sprk_workassignment_x` case and the case-insensitive case: with step 1 removed, 2 of 8 fail.
 - The tests drive `createWorkAssignment` / `createInvoice` and read the nav prop handed to `EntityCreationService.createDocumentRecords` (the upload and the document create are spied; nav-prop discovery runs over a stubbed `fetch` in both relationship orders).
 - Before the change (old source files restored): 7 failed / 10 passed of 17. After: 17 / 17 pass. Full Spaarke.UI.Components jest: 314 suites, 5181 tests, all pass.
 - `tsc --noEmit`: clean. ESLint on changed folders: 0 new problems; the one error is the pre-existing item 1.

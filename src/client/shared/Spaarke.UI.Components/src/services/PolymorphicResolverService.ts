@@ -406,15 +406,18 @@ export function buildRecordUrl(entityLogicalName: string, recordId: string): str
  * Find a navigation property by referenced entity and optional column hint.
  *
  * With several relationships to the same entity, the hint disambiguates in this order:
- *  1. an entry whose `columnName` EQUALS the hint (case-insensitive) — pass the full column logical name
- *     (e.g. `'sprk_workassignment'`) when binding to a specific column;
+ *  1. an entry whose `columnName` EQUALS the hint (case-insensitive);
  *  2. otherwise the first entry whose `columnName` CONTAINS the hint (a fragment such as `'assignedto'`);
  *  3. otherwise the first relationship to the entity.
  *
- * Step 1 exists because Dataverse lists relationships in no stable order and a column name can contain another's:
- * `sprk_document` has both `sprk_workassignment` (the parent column the forms' Documents lists use) and
- * `sprk_relatedworkassignment`, and a fragment match on `'workassignment'` bound whichever came first.
- * A single relationship to the entity is returned as is, whatever the hint.
+ * To bind a specific column, pass its FULL logical name (e.g. `'sprk_workassignment'`), not a fragment. That is what
+ * fixed the document-to-parent binds (task 162): `sprk_document` has both `sprk_workassignment` (the parent column the
+ * forms' Documents lists read) and `sprk_relatedworkassignment`, and the callers passed the fragment `'workassignment'`,
+ * which BOTH names contain, so the bind went to whichever Dataverse listed first.
+ *
+ * Step 1 on its own matters only when ANOTHER column also contains the full hint (e.g. `sprk_workassignment_x` listed
+ * before `sprk_workassignment`), or when the hint's casing differs. A single relationship to the entity is returned as
+ * is, whatever the hint.
  */
 export function findNavProp(
   entries: INavPropEntry[],

@@ -2,9 +2,16 @@
  * findNavProp — exact column first (ontology task 162, UAT round 1 of task 114).
  *
  * `sprk_document` has TWO lookups to each parent (`sprk_workassignment` + `sprk_relatedworkassignment`, and the same
- * for matter, project, invoice). Dataverse lists relationships in no stable order, and the old hint match was a
- * substring (`'workassignment'` is contained in BOTH column names), so a document was bound to whichever came first.
- * A hint equal to a column name must now win, in either order.
+ * for matter, project, invoice). The document-bind bug was in the CALLERS: they passed a fragment (`'workassignment'`)
+ * that both column names contain, or no column at all, so the bind went to whichever relationship Dataverse listed
+ * first. The callers now pass the full column name, and `workAssignmentService.documentBind.test.ts` /
+ * `invoiceService.documentBind.test.ts` prove that end to end.
+ *
+ * What THIS file pins is the helper's own rule: an entry whose column EQUALS the hint wins over an earlier entry whose
+ * column merely CONTAINS it (`sprk_workassignment_x` before `sprk_workassignment`), case-insensitively. Note the full
+ * hint `sprk_workassignment` is NOT a substring of `sprk_relatedworkassignment`, so the plain parent/related ordering
+ * cases below pass on the old substring code too; they document the caller contract, and the `_x` case is the one that
+ * proves exact-first.
  */
 
 import { findNavProp } from '../PolymorphicResolverService';
@@ -27,6 +34,17 @@ describe('findNavProp — exact column hint wins over a substring match', () => 
     ['related column listed first', [RELATED, PARENT]],
   ])('returns the sprk_workassignment nav-prop for the hint "sprk_workassignment" (%s)', (_label, entries) => {
     expect(findNavProp(entries, 'sprk_workassignment', 'sprk_workassignment')).toBe('sprk_WorkAssignment');
+  });
+
+  it('prefers the column that EQUALS the hint over an earlier column that merely contains it', () => {
+    // Fails on the old substring-only rule: `sprk_workassignment_x` contains the hint and is listed first.
+    const lookalike: INavPropEntry = {
+      columnName: 'sprk_workassignment_x',
+      navPropName: 'X',
+      referencedEntity: 'sprk_workassignment',
+    };
+    expect(findNavProp([lookalike, PARENT], 'sprk_workassignment', 'sprk_workassignment')).toBe('sprk_WorkAssignment');
+    expect(findNavProp([PARENT, lookalike], 'sprk_workassignment', 'sprk_workassignment')).toBe('sprk_WorkAssignment');
   });
 
   it('matches the exact column case-insensitively', () => {
