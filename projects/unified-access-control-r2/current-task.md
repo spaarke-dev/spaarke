@@ -23,7 +23,7 @@
 | **Gate tooling** | App Insights `spe-insights-dev-67e2xz` (RG `spe-infrastructure-westus2`), role `spaarke-bff-dev`. Pass `--offset Nd` (default look-back is 1 h). Use `contains`, not `has_any`, for exception names. Script: temp `uacmerge/uacg/uacg_gate.sh`. |
 
 ## Next actions (mine)
-1. **ebilling F4/F3 re-check (work/ebilling-r1 at 91568010c4; review worktree C:/wteb9156):**
+1. **ebilling F4/F3 round: ACCEPTED at 4fa63402de (2026-10-23)**, with review worktree C:/wteb9156 removed. When ebilling merges to master it takes #2301. The history below is kept for reference:
    - Done: both merges are clean (57f22fac9a master, 91568010c4 for 090), and conditions 1–3 hold.
    - ebilling is fixing three items:
      - F1: add `sprk_regardingrecordtype` / `sprk_regardingrecordid` to the sprk_signal AccessColumns;
