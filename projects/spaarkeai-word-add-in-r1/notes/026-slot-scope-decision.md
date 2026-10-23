@@ -138,8 +138,9 @@ the rest of the 200 answer is unchanged (never a 403 or 503 for the whole answer
 the check passes. A document with its own slot keeps it, and its communication is not read. When the communication IS
 filed but the card is left out (no Read, an unmapped type, a failed check), the answer carries the optional
 `relatedRecordWithheld: true` (absent otherwise), which the pane maps to "record unknown" (`relatedRecordKnown: false`):
-it must not read the null card as "not filed" and offer "File to record", which would add a second parent. (A
-communication that cannot be READ at all is still answered without the flag: a known gap.) Applied once, in
+it must not read the null card as "not filed" and offer "File to record", which would add a second parent. A
+communication that cannot be READ at all (it may be filed) is answered with the same flag. The pane never lets such an
+"unknown" answer overwrite a record it already knows for the same document (`applyDocumentIdentityOutcome`). Applied once, in
 `FileAccessEndpoints.BuildIdentityResponseAsync`, which all three identity routes share; the derivation itself is
 `DocumentUrlIdentityResolution.ResolveDerivedRelatedRecordAsync`.
 

@@ -500,8 +500,10 @@ public static class DocumentUrlIdentityResolution
     /// Task 132: the record a document is filed to THROUGH its communication — the first populated regarding of
     /// <see cref="Resolution.RelatedCommunication"/>, in <see cref="CommunicationRegardingAttributes"/> order — for a
     /// document that carries no direct slot of its own (a mailbox-captured or Spaarke-sent archive files the
-    /// communication, not the document). <see langword="null"/> when the document has a direct slot (the communication is
-    /// then not read at all), has no communication, the communication is filed to none of the four, or it cannot be read.
+    /// communication, not the document). <c>Record</c> is <see langword="null"/> when the document has a direct slot (the
+    /// communication is then not read at all), has no communication, the communication is filed to none of the four, or
+    /// it cannot be read. <c>Undetermined</c> is <see langword="true"/> only in the last case: the communication may be
+    /// filed, so the answer must not read as "not filed" (the handler sends <c>RelatedRecordWithheld</c>).
     /// </summary>
     /// <remarks>
     /// <para><b>DERIVED, so not covered by the document's authorization.</b> The record-access ⇔ document-access rule
@@ -512,14 +514,14 @@ public static class DocumentUrlIdentityResolution
     /// <para>Best-effort: the card is optional. A failed read is logged and answered <see langword="null"/>; it never
     /// turns the identity answer into a 503. The read is app-only, like every other read in this type.</para>
     /// </remarks>
-    public static async Task<EntityReference?> ResolveDerivedRelatedRecordAsync(
+    public static async Task<(EntityReference? Record, bool Undetermined)> ResolveDerivedRelatedRecordAsync(
         Resolution identity,
         IGenericEntityService dataverse,
         ILogger logger,
         CancellationToken ct)
     {
         if (identity.RelatedRecord is not null || identity.RelatedCommunication is not { } communication)
-            return null;
+            return (null, false);
 
         Entity row;
         try
@@ -535,14 +537,14 @@ public static class DocumentUrlIdentityResolution
                 "Document identity: could not read sprk_communication {CommunicationId} of sprk_document {DocumentId} " +
                 "for the related-record card; the card is omitted.",
                 communication.Id, identity.DocumentId);
-            return null;
+            return (null, true);
         }
 
         return row is null
-            ? null
-            : CommunicationRegardingAttributes
+            ? (null, true)
+            : (CommunicationRegardingAttributes
                 .Select(row.GetAttributeValue<EntityReference>)
-                .FirstOrDefault(r => r is not null && r.Id != Guid.Empty);
+                .FirstOrDefault(r => r is not null && r.Id != Guid.Empty), false);
     }
 
     /// <summary>

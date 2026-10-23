@@ -170,7 +170,7 @@ public class DocumentEmailIdentityContractTests
     }
 
     [Fact]
-    public async Task ResolveEmail_ForACapturedArchive_WhenTheCommunicationCannotBeRead_Returns200WithoutTheCard()
+    public async Task ResolveEmail_ForACapturedArchive_WhenTheCommunicationCannotBeRead_Returns200WithoutTheCard_Withheld()
     {
         var documentId = Guid.NewGuid();
         var communicationId = Guid.NewGuid();
@@ -184,7 +184,8 @@ public class DocumentEmailIdentityContractTests
         using var factory = Factory(entityService, AccessSource(documentId, AccessRights.Read), probe);
         var response = await AuthenticatedClient(factory).PostAsJsonAsync(Route, new { internetMessageId = MessageId });
 
-        await ShouldBeTheSameAnswerWithoutACard(response, documentId, unexpected: null, withheld: false);
+        // The communication may be filed: "unknown" (withheld), never "not filed" with a filing offer.
+        await ShouldBeTheSameAnswerWithoutACard(response, documentId, unexpected: null, withheld: true);
     }
 
     // ── Review F2: only the CALLER's cancellation propagates ──────────────────────────────────
@@ -203,7 +204,7 @@ public class DocumentEmailIdentityContractTests
         using var factory = Factory(entityService, AccessSource(documentId, AccessRights.Read), Probe());
         var response = await AuthenticatedClient(factory).PostAsJsonAsync(Route, new { internetMessageId = MessageId });
 
-        await ShouldBeTheSameAnswerWithoutACard(response, documentId, unexpected: null, withheld: false);
+        await ShouldBeTheSameAnswerWithoutACard(response, documentId, unexpected: null, withheld: true);
     }
 
     [Fact]

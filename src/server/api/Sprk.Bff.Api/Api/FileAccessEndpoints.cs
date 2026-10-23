@@ -387,7 +387,7 @@ public static class FileAccessEndpoints
             var relatedRecordWithheld = false;
             if (related is null)
             {
-                var derived = await Sprk.Bff.Api.Services.Documents.DocumentUrlIdentityResolution
+                var (derived, undetermined) = await Sprk.Bff.Api.Services.Documents.DocumentUrlIdentityResolution
                     .ResolveDerivedRelatedRecordAsync(identity, dataverse, logger, ct);
                 if (derived is not null)
                 {
@@ -395,6 +395,11 @@ public static class FileAccessEndpoints
                         related = derived;
                     else
                         relatedRecordWithheld = true; // filed, but not shown: the pane must not read a null card as "not filed"
+                }
+                else if (undetermined)
+                {
+                    // The communication could not be read, so it may be filed: the same "unknown", never "not filed".
+                    relatedRecordWithheld = true;
                 }
             }
 

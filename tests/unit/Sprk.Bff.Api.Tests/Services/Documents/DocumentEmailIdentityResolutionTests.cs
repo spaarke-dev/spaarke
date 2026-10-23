@@ -320,15 +320,18 @@ public class DocumentEmailIdentityResolutionTests
     }
 
     [Fact]
-    public async Task Derived_WhenTheCommunicationCannotBeRead_IsNull_Never503()
+    public async Task Derived_WhenTheCommunicationCannotBeRead_IsUndetermined_Never503()
     {
         var communication = Guid.NewGuid();
         _dataverse
             .Setup(d => d.RetrieveAsync("sprk_communication", communication, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new TimeoutException("The request channel timed out while waiting for a reply."));
 
-        (await Derived(new DocumentUrlIdentityResolution.Resolution(
-            DocumentId, "n", "f", null, new EntityReference("sprk_communication", communication)))).Should().BeNull();
+        var (record, undetermined) = await DerivedWithState(new DocumentUrlIdentityResolution.Resolution(
+            DocumentId, "n", "f", null, new EntityReference("sprk_communication", communication)));
+
+        record.Should().BeNull();
+        undetermined.Should().BeTrue("the communication may be filed, so the answer must not read as \"not filed\"");
     }
 
     // ── Answers ───────────────────────────────────────────────────────────────────────────────
@@ -415,7 +418,10 @@ public class DocumentEmailIdentityResolutionTests
         return Resolve(keys);
     }
 
-    private Task<EntityReference?> Derived(DocumentUrlIdentityResolution.Resolution identity)
+    private async Task<EntityReference?> Derived(DocumentUrlIdentityResolution.Resolution identity)
+        => (await DerivedWithState(identity)).Record;
+
+    private Task<(EntityReference? Record, bool Undetermined)> DerivedWithState(DocumentUrlIdentityResolution.Resolution identity)
         => DocumentUrlIdentityResolution.ResolveDerivedRelatedRecordAsync(identity, _dataverse.Object, NullLogger.Instance, default);
 
     private static DateTime At(int day) => new(2026, 10, day, 9, 0, 0, DateTimeKind.Utc);

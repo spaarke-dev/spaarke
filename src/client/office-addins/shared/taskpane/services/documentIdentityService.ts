@@ -523,6 +523,23 @@ export function applyDocumentIdentityOutcome(
     return prev;
   }
 
+  // Task 132: an answer whose record is UNKNOWN (withheld or unreadable) says nothing about the record, so it never
+  // overwrites one this pane already knows for the same document (e.g. just set by "File to record").
+  const keepKnownRecord =
+    outcome.relatedRecordKnown === false &&
+    !outcome.relatedRecord &&
+    !!prev?.relatedRecord &&
+    !!prev.documentId &&
+    prev.documentId.toLowerCase() === outcome.documentId.toLowerCase();
+  if (keepKnownRecord) {
+    return {
+      ...prev,
+      documentId: outcome.documentId,
+      documentName: outcome.documentName,
+      fileName: outcome.fileName,
+    };
+  }
+
   return {
     ...prev,
     documentId: outcome.documentId,
