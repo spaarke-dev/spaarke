@@ -587,5 +587,9 @@ Scripts, snapshots and logs: `C:/Users/RALPHS~1/AppData/Local/Temp/uac191b/` (no
   - ebilling sets `prvReadsprk_ruleset` to None on Spaarke Basic User and Core User.
   - Ontology removes `prvReadsprk_Policy` from Basic and Console User, and `prvReadsprk_PolicyVersion` from Console User, after its task 163.
 - **Constraint for 191.** The External Collaborator role gets **no** privilege on `sprk_ruleset`, `sprk_policy` or `sprk_policyversion`, and T191's role test asserts it.
-- **Not 191's scope.** 191 creates no billing-admin role. Granting explicit Read on those three tables (org depth, O-6) to the billing-admin role or roles belongs to whoever creates them, which is ebilling. Today the billing admins are System Administrators.
+- **Not 191's scope.** 191 creates no billing-admin role. Granting explicit Read on those three tables to the billing-admin role or roles belongs to whoever creates them, which is ebilling. Today the billing admins are System Administrators.
+- **Depth correction (2026-10-23, after ontology's #1911 review K1).** The input above originally said "org depth, O-6" for all three tables. That is right for `sprk_ruleset`, which has no matter lookup, but wrong for `sprk_policy` and `sprk_policyversion`.
+  - Under round 102 item 4 (D-123), a matter-scoped rule and its versions are re-owned into the secure BU when the matter turns Secure, and Global Read always reaches that BU.
+  - UAC's recommendation is therefore Deep on those two tables. It is assigned only to users whose BU is not an ancestor of the secure BU.
+  - ebilling takes this to the owner. Nobody holds the role on dev (read-only check, 2026-10-23).
 - **UAC impact.** No UAC surface reads those tables as the caller. `SecureChildLineage` and `RecordOwnershipResolver` read them app-only.
