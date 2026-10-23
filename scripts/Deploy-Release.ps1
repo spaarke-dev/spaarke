@@ -10,6 +10,12 @@
       Phase 1: Build all client components (calls Build-AllClientComponents.ps1)
       Per-environment loop (sequential):
         Phase 2: BFF API deployment (calls Deploy-BffApi.ps1)
+        Phase 2b: Ontology configuration — applies, then verifies, the worklist grid configuration
+                 (calls Apply-WorklistGridConfiguration.ps1; ontology task 164, D-185). It must land
+                 after the BFF and BEFORE Phase 3: the SpaarkeMaster import carries the role change
+                 that removes policy Read, and without the configuration row every user gets an
+                 empty worklist. If this phase fails for an environment, Phase 3 does not run for
+                 that environment (even without -StopOnFailure).
         Phase 3: SpaarkeMaster import — the CI-published package, typed per environment
                  (config/environments.json solutionPackageType; calls
                  solution-authoring/Import-SpaarkeMasterPackage.ps1; T218f)
@@ -112,7 +118,9 @@ param(
     [ValidatePattern('^v\d+\.\d+\.\d+$')]
     [string]$Version,
 
-    [ValidateSet('Build', 'BffApi', 'Solutions', 'WebResources', 'Validation')]
+    # OntologyConfig = Phase 2b. Skipping it is an explicit operator choice: Phase 3 is then NOT blocked, and may remove
+    # policy Read before the worklist configuration is in place (D-185).
+    [ValidateSet('Build', 'BffApi', 'OntologyConfig', 'Solutions', 'WebResources', 'Validation')]
     [string[]]$SkipPhase = @(),
 
     [switch]$SkipBuild,
@@ -176,6 +184,42 @@ function Get-ElapsedString {
 function Test-PhaseSkipped {
     param([string]$PhaseName)
     return ($SkipPhase -contains $PhaseName)
+}
+
+# Phase 2b (ontology task 164, D-185): apply, then verify, the worklist grid configuration row for one environment.
+# Returns $true when both succeed, $false otherwise (a non-zero exit or an exception from either call). Under -WhatIf only the
+# apply runs, in -WhatIf mode, and the verify is skipped (nothing was written to verify). The sign-in is the operator's own
+# `az` session, as in Phase 3 (NFR-11); no service principal and no client secret.
+function Invoke-OntologyConfigPhase {
+    param(
+        [Parameter(Mandatory)][string]$ApplyScript,
+        [Parameter(Mandatory)][string]$DataverseUrl,
+        [bool]$WhatIfMode
+    )
+    if (-not (Test-Path -LiteralPath $ApplyScript)) {
+        Write-Fail "Worklist configuration script not found: $ApplyScript"
+        return $false
+    }
+    try {
+        $global:LASTEXITCODE = 0   # a stale code from an earlier native call must not decide this phase
+        Write-Step "Apply the worklist grid configuration$(if ($WhatIfMode) { ' (-WhatIf)' })"
+        & $ApplyScript -DataverseUrl $DataverseUrl -WhatIf:$WhatIfMode | Out-Host
+        if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {
+            throw "Apply-WorklistGridConfiguration.ps1 exited with code $LASTEXITCODE"
+        }
+        if (-not $WhatIfMode) {
+            Write-Step "Verify the worklist grid configuration row (-Verify -RequireRow)"
+            $global:LASTEXITCODE = 0
+            & $ApplyScript -DataverseUrl $DataverseUrl -Verify -RequireRow | Out-Host
+            if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {
+                throw "Apply-WorklistGridConfiguration.ps1 -Verify -RequireRow exited with code $LASTEXITCODE"
+            }
+        }
+        return $true
+    } catch {
+        Write-Fail "Worklist grid configuration failed: $_"
+        return $false
+    }
 }
 
 # ─────────────────────────────────────────────────────────────────────
@@ -564,6 +608,7 @@ for ($i = 0; $i -lt $targetEnvironments.Count; $i++) {
     $envStart = Get-Date
     $envNum = $i + 1
     $envFailed = $false
+    $ontologyConfigFailed = $false   # Phase 2b result for THIS environment; gates Phase 3 only
 
     Write-Host ""
     Write-Host "╔═════════════════════════════════════════════════════════════════╗" -ForegroundColor Yellow
@@ -607,9 +652,34 @@ for ($i = 0; $i -lt $targetEnvironments.Count; $i++) {
         }
     }
 
-    # ── Phase 3: Dataverse Solutions ──────────────────────────────
+    # ── Phase 2b: Ontology configuration (task 164, D-185) ─────────
+    # The worklist grid configuration row must be in place before Phase 3: the SpaarkeMaster import carries the role change
+    # that removes policy Read, and without the row the worklist's linked query is refused (an empty worklist for every user).
 
     if ($envFailed -and $StopOnFailure) {
+        Write-Phase "Phase 2b" "Ontology configuration — SKIPPED (previous phase failed)"
+    } elseif (Test-PhaseSkipped 'OntologyConfig') {
+        Write-Phase "Phase 2b" "Ontology configuration — SKIPPED"
+        Write-Warn "-SkipPhase OntologyConfig is an explicit choice: Phase 3 is NOT blocked and may remove policy Read before the worklist configuration is in place (D-185)."
+    } else {
+        Write-Phase "Phase 2b" "Ontology configuration → $($env.DataverseUrl)"
+        $phaseStart = Get-Date
+        $applyScript = Join-Path $ScriptDir 'Apply-WorklistGridConfiguration.ps1'
+        if (Invoke-OntologyConfigPhase -ApplyScript $applyScript -DataverseUrl $env.DataverseUrl -WhatIfMode $WhatIfPreference) {
+            Write-Ok "Ontology configuration phase done in $(Get-ElapsedString $phaseStart)"
+        } else {
+            $ontologyConfigFailed = $true
+            $envFailed = $true
+        }
+    }
+
+    # ── Phase 3: Dataverse Solutions ──────────────────────────────
+
+    if ($ontologyConfigFailed) {
+        # D-185 fail-closed: independent of -StopOnFailure.
+        Write-Phase "Phase 3" "Dataverse Solutions — SKIPPED (ontology configuration failed)"
+        Write-Fail "Phase 3 did not run for $($env.DisplayName): the SpaarkeMaster import carries the D-185 role change and needs the worklist configuration first."
+    } elseif ($envFailed -and $StopOnFailure) {
         Write-Phase "Phase 3" "Dataverse Solutions — SKIPPED (previous phase failed)"
     } elseif (Test-PhaseSkipped 'Solutions') {
         Write-Phase "Phase 3" "Dataverse Solutions — SKIPPED"
