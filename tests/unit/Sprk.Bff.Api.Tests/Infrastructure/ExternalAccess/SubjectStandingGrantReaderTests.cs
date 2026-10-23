@@ -14,6 +14,7 @@
 
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
@@ -335,6 +336,10 @@ public class SubjectStandingGrantReaderTests
         bool TeamProfileRead = false, bool Faults = false);
 
     private static Mock<IDataverseService> DataverseWith(Entity contact, Platform platform, List<QueryExpression> queries)
+        => DataverseWith(contact, () => platform, queries);
+
+    /// <summary>As above, with the platform's answers read at each query (a grant removed later is seen).</summary>
+    private static Mock<IDataverseService> DataverseWith(Entity contact, Func<Platform> current, List<QueryExpression> queries)
     {
         var dataverse = new Mock<IDataverseService>(MockBehavior.Strict);
         dataverse
@@ -345,6 +350,7 @@ public class SubjectStandingGrantReaderTests
             .Returns((QueryExpression q, CancellationToken _) =>
             {
                 queries.Add(q);
+                var platform = current();
                 if (platform.Faults)
                 {
                     throw new InvalidOperationException("simulated metadata fault");
@@ -363,7 +369,10 @@ public class SubjectStandingGrantReaderTests
                         var throughTeam = q.LinkEntities.Single().LinkToEntityName == "teamprofiles";
                         if (throughTeam ? platform.TeamProfileRead : platform.DirectProfileRead)
                         {
-                            rows.Entities.Add(new Entity("fieldpermission", Guid.NewGuid()));
+                            rows.Entities.Add(new Entity("fieldpermission", Guid.NewGuid())
+                            {
+                                ["attributelogicalname"] = "sprk_accesspermissiongrant",
+                            });
                         }
                         break;
                 }
@@ -429,45 +438,66 @@ public class SubjectStandingGrantReaderTests
     }
 
     [Fact]
-    public async Task EmptyBaseline_AfterANonEmptyRead_IsTrustedWithoutAnyProofQuery()
+    public async Task EmptyBaseline_AfterANonEmptyReadOfAnotherContact_IsStillUnreadableWithoutProof()
     {
-        // MUST NOT FIRE: a value read from the column proves the BFF reads it (proof leg 1).
+        // MUST FIRE: a value read on one row proves nothing about another row's empty read (a field share can grant one
+        // record without the column), so the empty read is still decided on only with a proof — here, none.
         var otherContact = Guid.Parse("66666666-6666-6666-6666-666666666666");
         var queries = new List<QueryExpression>();
-        var dataverse = new Mock<IDataverseService>(MockBehavior.Strict);
+        var dataverse = DataverseWith(HeldWithoutBaseline(), new Platform(), queries);
         dataverse
             .Setup(d => d.RetrieveAsync(ContactEntity, otherContact, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Entity(ContactEntity, otherContact)
             {
-                [StandingGrantAttribute] = false,
+                [StandingGrantAttribute] = true,
                 ["sprk_accesspermissiongrant"] = new OptionSetValue(100000000),
             });
-        dataverse
-            .Setup(d => d.RetrieveAsync(ContactEntity, ContactId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(HeldWithoutBaseline());
 
         var sut = CreateSut(dataverse.Object);
-        await sut.ReadForContactAsync(otherContact, CancellationToken.None);
+        (await sut.ReadForContactAsync(otherContact, CancellationToken.None)).BaselineUnreadable.Should().BeFalse();
         var state = await sut.ReadForContactAsync(ContactId, CancellationToken.None);
 
-        state.BaselineUnreadable.Should().BeFalse();
+        state.BaselineUnreadable.Should().BeTrue("only the System Administrator, direct-profile and team-profile legs prove a read");
         state.Rights.Should().Be(AccessRights.None);
-        dataverse.Verify(d => d.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()), Times.Never);
+        queries.Select(q => q.EntityName).Should().Equal("systemuser", "role", "fieldpermission", "fieldpermission");
     }
 
     [Fact]
-    public async Task AProvenRead_IsMadeOnce_ThenHeld()
+    public async Task AProvenRead_IsHeldWithinTheProofLifetime()
     {
+        var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-10-23T10:00:00Z"));
         var queries = new List<QueryExpression>();
         var dataverse = DataverseWith(HeldWithoutBaseline(), new Platform(DirectProfileRead: true), queries);
-        var sut = CreateSut(dataverse.Object);
+        var sut = CreateSut(dataverse.Object, clock);
 
         await sut.ReadForContactAsync(ContactId, CancellationToken.None);
         var proofQueries = queries.Count;
+        clock.Advance(SecuredColumnReadProof.ProofLifetime - TimeSpan.FromSeconds(1));
         var second = await sut.ReadForContactAsync(ContactId, CancellationToken.None);
 
         second.BaselineUnreadable.Should().BeFalse();
-        queries.Should().HaveCount(proofQueries, "the proof is made at first use and held for the life of the reader");
+        queries.Should().HaveCount(proofQueries, "within its lifetime the proof is held, not made again");
+    }
+
+    [Fact]
+    public async Task AfterTheProofLifetime_ANowFailingReproof_IsUnreadable()
+    {
+        // MUST FIRE: the proof expires after ProofLifetime and is made again; a grant removed meanwhile now fails it.
+        var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-10-23T10:00:00Z"));
+        var platform = new Platform(DirectProfileRead: true);
+        var queries = new List<QueryExpression>();
+        var dataverse = DataverseWith(HeldWithoutBaseline(), () => platform, queries);
+        var sut = CreateSut(dataverse.Object, clock);
+
+        (await sut.ReadForContactAsync(ContactId, CancellationToken.None)).BaselineUnreadable.Should().BeFalse();
+        var proofQueries = queries.Count;
+        platform = new Platform();
+        clock.Advance(SecuredColumnReadProof.ProofLifetime);
+        var state = await sut.ReadForContactAsync(ContactId, CancellationToken.None);
+
+        state.BaselineUnreadable.Should().BeTrue("the expired proof was made again, and it no longer holds");
+        state.Rights.Should().Be(AccessRights.None);
+        queries.Count.Should().BeGreaterThan(proofQueries, "an expired proof is made again");
     }
 
     [Fact]
@@ -572,8 +602,8 @@ public class SubjectStandingGrantReaderTests
             .Should().ThrowAsync<OperationCanceledException>();
     }
 
-    private static SubjectStandingGrantReader CreateSut(IDataverseService dataverse)
-        => new(dataverse, NullLogger<SubjectStandingGrantReader>.Instance);
+    private static SubjectStandingGrantReader CreateSut(IDataverseService dataverse, TimeProvider? time = null)
+        => new(dataverse, NullLogger<SubjectStandingGrantReader>.Instance, time);
 
     private static Entity ContactWith(string attribute, bool value)
     {

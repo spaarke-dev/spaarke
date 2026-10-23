@@ -122,19 +122,20 @@ public sealed class SubjectStandingGrantReader : ISubjectStandingGrantReader
     private readonly ILogger<SubjectStandingGrantReader> _logger;
 
     // contact.sprk_accesspermissiongrant is field-secured: an EMPTY read is trusted as "not set" only once the BFF's read of
-    // the column is proven (docs/data-model/access-inheritance.md, "When a record is trusted"). The reader is a singleton, so
-    // the proof is made at first use and then held for the life of the process.
+    // the column is proven (docs/data-model/access-inheritance.md, "When a record is trusted"). The reader is a singleton: the
+    // proof is made at first use, held for SecuredColumnReadProof.ProofLifetime, then made again.
     private readonly SecuredColumnReadProof _contactBaselineReadProof;
 
     public SubjectStandingGrantReader(
         IDataverseService dataverse,
-        ILogger<SubjectStandingGrantReader> logger)
+        ILogger<SubjectStandingGrantReader> logger,
+        TimeProvider? time = null)
     {
         ArgumentNullException.ThrowIfNull(dataverse);
         ArgumentNullException.ThrowIfNull(logger);
         _dataverse = dataverse;
         _logger = logger;
-        _contactBaselineReadProof = new SecuredColumnReadProof(dataverse, ContactEntity, BaselineAttribute, logger);
+        _contactBaselineReadProof = new SecuredColumnReadProof(dataverse, ContactEntity, BaselineAttribute, logger, time);
     }
 
     /// <inheritdoc />
@@ -195,12 +196,9 @@ public sealed class SubjectStandingGrantReader : ISubjectStandingGrantReader
                     entityName, subjectId, StandingGrantAttribute, entityName, StandingGrantAttribute);
             }
 
-            // A value read from the secured baseline column proves the BFF reads it (proof leg 1), whatever the flag says.
+            // A value read on THIS row is not empty, so it needs no proof. It proves nothing about another row's empty read:
+            // a field share can grant one record without the column.
             var baselineRead = entity is not null && entity.Contains(BaselineAttribute) && entity[BaselineAttribute] is not null;
-            if (isFlsSecured && baselineRead)
-            {
-                _contactBaselineReadProof.RecordNonEmptyRead();
-            }
 
             var held = entity?.GetAttributeValue<bool>(StandingGrantAttribute) ?? false;
 
