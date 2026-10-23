@@ -52,15 +52,6 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         int maxRetries,
         CancellationToken ct)
     {
-        // ebilling-r1 DEF-022 (#2056): an invoice or invoice line names exactly one core record, a line regards its invoice's,
-        // and an invoice re-file keeps its lines (D-96). Decided on the stored lookups overlaid with this write, before it.
-        if (await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(entityLogicalName, recordId, fields, _genericEntityService, ct)
-                .ConfigureAwait(false) is { RefusalCode: { } familyCode })
-        {
-            // Code only: the guard read as the app, so its reason can name records the caller has not read.
-            throw InvoiceFamilyCoreRecordGuard.RefusalException(entityLogicalName, familyCode);
-        }
-
         // unified-access-control-r2 task 189 fix round C (K5): this handler writes a playbook's output mapping app-only (the
         // output orchestrator), so it never writes a document's Access Permission or its own-narrowing record; only the
         // document rule's writers do. Refused before anything is read or written. Task 188 round 4e: nor its D7 link columns
@@ -70,6 +61,15 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         if (InheritedAccessPermission.RefuseAppOnlyWrite(entityLogicalName, fields.Keys) is { } documentRefusal)
         {
             throw new RecordOwnerUnresolvedException(entityLogicalName, documentRefusal);
+        }
+
+        // ebilling-r1 DEF-022 (#2056): an invoice or invoice line names exactly one core record, a line regards its invoice's,
+        // and an invoice re-file keeps its lines (D-96). Decided on the stored lookups overlaid with this write, before it.
+        if (await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(entityLogicalName, recordId, fields, _genericEntityService, ct)
+                .ConfigureAwait(false) is { RefusalCode: { } familyCode })
+        {
+            // Code only: the guard read as the app, so its reason can name records the caller has not read.
+            throw InvoiceFamilyCoreRecordGuard.RefusalException(entityLogicalName, familyCode);
         }
 
         // Task 158 (owner round 6): a work assignment or project filed under a secure matter or project is secured. Whether

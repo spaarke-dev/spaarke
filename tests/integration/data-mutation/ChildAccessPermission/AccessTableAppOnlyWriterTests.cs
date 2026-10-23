@@ -806,6 +806,29 @@ public class AccessTableAppOnlyWriterTests
         _writes.Invocations.Should().BeEmpty("the refusal comes before anything is written");
     }
 
+    [Fact]
+    public async Task AnOutputMapping_OfAnInvoicesOwner_IsRefusedBeforeTheInvoiceFamilyGuardReadsAnything()
+    {
+        // UAC review K2 (on e371dce6bf): the app-only refusal is asked before the invoice-family guard, which reads the stored
+        // row app-only for EVERY write of an invoice or line (#2081). The owner is refused on every table (#2247).
+        var reads = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        var world = new StampWorld();
+        var handler = new DataverseUpdateHandler(
+            _writes.Object, reads.Object, world.Restamper, new RecordOwnershipResolverDouble(),
+            SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance,
+            SecureChildReconcilerFixtures.OverEmptyWorld());
+
+        var act = () => handler.UpdateAsync(
+            "sprk_invoice", Row,
+            new Dictionary<string, object?> { ["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("team", Forged) },
+            ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+            .Should().Be(InheritedAccessPermission.AppOnlyOwnerWriteReasonCode);
+        reads.Invocations.Should().BeEmpty("the refusal comes before the invoice-family guard reads the stored row");
+        _writes.Invocations.Should().BeEmpty("nothing is written");
+    }
+
     [Theory]
     [InlineData("sprk_matter", "sprk_performancesummary")]
     [InlineData("sprk_project", "sprk_description")]
