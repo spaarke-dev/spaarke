@@ -4,7 +4,7 @@
     <title>The worklist reads policy columns as the BFF, so users need no direct Read on sprk_policy or sprk_policyversion (D-185, #2285)</title>
     <phase>11 UAT</phase>
     <gate>startable (D-185, owner 2026-10-23)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes a caller-scoped read path in Sprk.Bff.Api (.cs), the worklist configuration and security-role XML; security-tagged.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -116,4 +116,9 @@
       <file>.claude/constraints/testing.md</file>
     </files>
   </knowledge>
+
+  <notes>
+    Implemented on branch task/163-policy-server-read (PR into docs/ontology-platform-design). Full notes, the caller-read inventory, test counts and the publish delta: notes/task-163-notes.md. Live roles and the dev grid configuration are NOT changed; the main session applies them after the BFF deploy (BFF, then config, then roles).
+    rework: none task 163
+  </notes>
 </task>

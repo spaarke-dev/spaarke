@@ -1054,3 +1054,10 @@ the deployed dev Console.
 - **Change** (2026-10-23T00:32:20Z, D-110 standing approval for Core User): `AddPrivilegesRole` on the root Spaarke Core User `75e1b627-2ab6-f111-aaad-0022482913fc`: `prvAppendTosprk_EventType_Ref` at **Global**. Global because the reference rows are owned in the root BU and users sit in child and secure BUs; it matches Service Writer and Basic User's Global AppendTo on `sprk_recordtype_ref`.
 - **Read-back** (`RetrieveRolePrivilegesRole` before and after): 784 → 785, added exactly that privilege at Global; nothing removed and nothing else added. Repo `Roles/Spaarke Core User.xml` is updated in task 159's PR #2289. Other environments need the same grant.
 
+## 19. 2026-10-23 — Read on `sprk_policy` / `sprk_policyversion` dropped from Spaarke Basic User and Spaarke Console User: PREPARED in the repo, NOT applied live (D-185, #2285, task 163)
+
+- **Why**: every internal user could read billing policies directly in Dataverse, bypassing the BFF's Procedure Read gate. The worklist no longer needs the Reads: it takes the policy short name, work type and severity from a BFF read of `sprk_policy` by id (task 163), and its configuration row has no `policy` link.
+- **Repo change** (`Roles/*.xml`): Spaarke Basic User loses `prvReadsprk_Policy` (Deep); Spaarke Console User loses `prvReadsprk_Policy` and `prvReadsprk_PolicyVersion` (Deep). Spaarke Ontology Administrator and Spaarke Ontology Service keep theirs. Nothing else changes in the three files.
+- **Live order, per environment**: (1) deploy the BFF with task 163, (2) apply `config/worklist.gridconfiguration.json`, (3) only then remove the three privileges from the live roles with `RemovePrivilegesRole`, and read back the role privilege counts. Before step 2 the old configuration still links `sprk_policy`, and a caller without Read gets an empty worklist (Dataverse 0x80040220, treated as no read on `sprk_signal`). This supersedes section 12's "Read on `sprk_policy` for Basic User".
+- **Applied**: not yet. The main session records the live change and read-back here.
+
