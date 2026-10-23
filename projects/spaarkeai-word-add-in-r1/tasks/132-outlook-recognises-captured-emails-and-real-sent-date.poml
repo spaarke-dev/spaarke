@@ -3,7 +3,7 @@
   <metadata>
     <title>Outlook pane recognises mailbox-captured emails as saved, and uses the real sent date</title>
     <phase>8 — UAT findings and cross-project fixes</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF identity route (authorization-adjacent: a new related-record source) plus an Outlook add-in client change on the save path.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -52,4 +52,6 @@ B. The pane's "Sent" date is the item's last-modified time: `OutlookAdapter.getS
     <extension>Yes: every change extends an existing method; no new surface.</extension>
     <cost-of-doing-nothing>Every email captured by the mailbox or sent from Spaarke shows as "not yet in Spaarke" in Outlook, inviting a duplicate save; and every pane save stores the wrong date in the record, the .eml and its file name.</cost-of-doing-nothing>
   </justification>
+  <notes>Completed 2026-10-23: PR #2304 merged as cdb149cc2d. A: resolve-email-identity matches an .eml archive through sprk_relatedcommunication → sprk_internetmessageid (one query, outer link in the key OR); the identity routes show the communication's record only on the caller's own Read (CallerRecordAccessProbe), else the optional relatedRecordWithheld → pane "record unknown". B: OutlookAdapter.getSentDate → dateTimeCreated; the save reads Graph sentDateTime for every email save with an item id (light $select when the body is present). Review: one adversarial pass; fix round 1 (withheld flag, caller-only cancellation, Graph sent date always read, URL/by-id tests) and round 2 (unreadable communication is "unknown"; an unknown answer keeps a known record). Size +0.002 MB (192/192). Known limits in PR #2304. Not done (owner): no backfill of dev rows.
+rework: fix-round-2 task 132</notes>
 </task>
