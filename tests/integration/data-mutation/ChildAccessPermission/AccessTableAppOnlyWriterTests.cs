@@ -113,6 +113,9 @@ public class AccessTableAppOnlyWriterTests
             "sprk_vendororg", "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment",
             "sprk_invoice", "sprk_trackingnumber",
         ],
+
+        // UAC review F4 / DEF-043: a Signal's frozen core record and its invoice and invoice-line subjects.
+        ["sprk_signal"] = ["sprk_corerecordtype", "sprk_corerecordid", "sprk_regardinginvoice", "sprk_regardinginvoiceline"],
     };
 
     /// <summary>
@@ -601,9 +604,42 @@ public class AccessTableAppOnlyWriterTests
                 Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionInvoice),
             (Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity,
                 Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.TrackingNumberColumn),
+            (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.CoreRecordTypeColumn),
+            (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.CoreRecordIdColumn),
+            (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, Sprk.Bff.Api.Services.Signals.SignalClosureService.RegardingInvoiceColumn),
+            (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, Sprk.Bff.Api.Services.Signals.SignalClosureService.RegardingInvoiceLineColumn),
         ];
         foreach (var (table, column) in readers)
             Code(table, column).Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, $"{column} on {table}");
+    }
+
+    [Fact]
+    public async Task AGenericAppOnlyWriteOfASignalsCoreRecordOrInvoiceSubject_IsRefused_OnEveryGenericPath()
+    {
+        // UAC review F4 / DEF-043: the frozen core record bounds a line Duplicate's invoice, and the subjects name the current
+        // invoice or line; a playbook or an output mapping must not re-point them (their writer is SignalWriter's own client).
+        foreach (var key in new[]
+                 {
+                     "sprk_corerecordid", "sprk_corerecordtype", "sprk_CoreRecordType@odata.bind", "_sprk_corerecordtype_value",
+                     "sprk_regardinginvoice", "sprk_RegardingInvoice@odata.bind", "sprk_regardinginvoiceline", "_sprk_regardinginvoiceline_value",
+                 })
+        {
+            Code("sprk_signal", key).Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Clear();
+            var act = () => Handler().UpdateAsync(
+                "sprk_signal", Row, new Dictionary<string, object?> { [key] = Forged.ToString("D") },
+                ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+            (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+        }
+
+        // Must not fire: a Signal's ordinary columns, the same columns on other tables, and the caller's own write.
+        Code("sprk_signal", "sprk_name").Should().BeNull();
+        Code("sprk_signal", "sprk_signalstatus").Should().BeNull();
+        Code("sprk_event", "sprk_regardinginvoice").Should().BeNull();
+        Code("sprk_decisionrecord", "sprk_corerecordid").Should().BeNull();
+        CallerCode("sprk_signal", "sprk_regardinginvoice").Should().BeNull("the caller's own privileges decide");
     }
 
     [Fact]

@@ -975,11 +975,22 @@ internal static class InheritedAccessPermission
     /// <para>The vendor org that scopes a number-only Duplicate is the current invoice's SUBMISSION's <c>sprk_vendororg</c>
     /// (above), read as the caller (<c>SignalReadService.DuplicatesShownAsync</c>, F4 option b, agreed with ontology), never the
     /// invoice's own <c>sprk_vendororg</c>: so <c>sprk_invoice.sprk_vendororg</c> decides no access and is not listed.</para></item>
-    /// <para>Not listed, pending a decision: <c>sprk_billingevent.sprk_invoice</c>. A billing-event Duplicate's current invoice
-    /// is the event's invoice (read as the caller), and that invoice's submissions give the vendor org, so the column does decide
-    /// which firm a number-only Duplicate is judged in. But the supported detach / move / re-attach sequence
-    /// (<see cref="InvoiceFamilyCoreRecordGuard.DetachMoveReattachHint"/>, D-96) runs through the playbook update and the output
-    /// orchestrator (<c>InvoiceFamilyGenericUpdatePathTests</c>), which this refusal would stop.</para></item>
+    /// <para>Not listed: <c>sprk_billingevent.sprk_invoice</c>. A billing-event Duplicate's current invoice is the event's invoice
+    /// (read as the caller), and that invoice's submissions give the vendor org, so the column is read. It is not refused because
+    /// the supported detach / move / re-attach sequence (<see cref="InvoiceFamilyCoreRecordGuard.DetachMoveReattachHint"/>, D-96)
+    /// writes it through the playbook update and the output orchestrator (<c>InvoiceFamilyGenericUpdatePathTests</c>). The read is
+    /// bounded: the line's invoice counts only when it is filed under the Signal's frozen core record (below), and every generic
+    /// write of it is held to the line's own core record by <see cref="InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode"/>.
+    /// Residual: a re-point within the same core record is judged in that invoice's submission's firm (DEF-043, #2294).</para></item>
+    /// <item>UAC review F4 / DEF-043. <c>sprk_signal</c>: its frozen core-record pair <c>sprk_corerecordtype</c> /
+    /// <c>sprk_corerecordid</c> (<c>SignalCoreRecordAccess.CoreRecordTypeColumn</c>, <c>CoreRecordIdColumn</c>), by which
+    /// <c>SignalCoreRecordAccess.AuthorizeAsync</c> decides who reads a Signal and <c>SignalReadService.DuplicatesShownAsync</c>
+    /// bounds a line Duplicate's invoice; and its invoice and invoice-line subjects <c>sprk_regardinginvoice</c> /
+    /// <c>sprk_regardinginvoiceline</c> (<c>SignalClosureService.RegardingInvoiceColumn</c>, <c>RegardingInvoiceLineColumn</c>),
+    /// which name the current invoice or line a Duplicate is judged by. Their only writers are typed: the Signal writer
+    /// (<c>SignalWriter</c>, the subject lookup through <c>TodoRegardingBuilder.ApplySubjectLookupAndPairAsync</c>) and the
+    /// closure and commit updates, all through the ontology writer's dedicated client (<c>OntologyWriterDataverseClient</c>),
+    /// never a generic path. Its lane and its other subject columns are not listed yet (<c>AccessTableReaderScanTests</c>).</item>
     /// </list>
     /// Data, not branching: a table with no entry has no such column.
     /// </summary>
@@ -1069,6 +1080,13 @@ internal static class InheritedAccessPermission
                     .Append(Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionInvoice)
                     .Append(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.TrackingNumberColumn),
                 StringComparer.OrdinalIgnoreCase),
+            [Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.CoreRecordTypeColumn,
+                Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.CoreRecordIdColumn,
+                Sprk.Bff.Api.Services.Signals.SignalClosureService.RegardingInvoiceColumn,
+                Sprk.Bff.Api.Services.Signals.SignalClosureService.RegardingInvoiceLineColumn,
+            },
         };
 
     /// <summary>

@@ -1043,13 +1043,14 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
     private const string CurrentSubmissionRead = "sprk_invoicesubmissions?$select=_sprk_invoice_value,_sprk_vendororg_value&";
     private const string TrackingSubmissionRead = "sprk_invoicesubmissions?$select=sprk_trackingnumber,";
     private const string BillingEventRead = "sprk_billingevents?";
+    private const string InvoiceCoreRead = "sprk_invoices?$select=sprk_invoiceid,_sprk_matter_value,";
     private const string SubmissionRead = "sprk_invoicesubmissions?";
 
     /// <summary>D-176 / UAC review F4: a current invoice and its one submission (the firm its priors were read from, and the vendor org
     /// a number-only Duplicate is resolved in). The submission's readers default to the invoice's.</summary>
-    private static Guid CurrentInvoice(World world, Guid[] readers, Guid vendorOrg, Guid[]? submissionReaders = null)
+    private static Guid CurrentInvoice(World world, Guid[] readers, Guid vendorOrg, Guid[]? submissionReaders = null, Guid? matter = null)
     {
-        var invoice = world.Invoice(readers, vendorOrg);
+        var invoice = world.Invoice(readers, vendorOrg, matter);
         world.Submission(submissionReaders ?? readers, vendorOrg, $"CUR-{invoice:N}", invoice);
         return invoice;
     }
@@ -1232,9 +1233,9 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         var world = new World();
         var m = world.Matter(readers: [Alice]);
         // Both current invoices were submitted by VendorOrg's firm, then re-pointed to OtherVendorOrg on the invoice row.
-        var leak = world.Invoice([Alice], OtherVendorOrg);
+        var leak = world.Invoice([Alice], OtherVendorOrg, matter: m);
         world.Submission([Alice], VendorOrg, "CUR-LEAK", leak);
-        var kept = world.Invoice([Alice], OtherVendorOrg);
+        var kept = world.Invoice([Alice], OtherVendorOrg, matter: m);
         world.Submission([Alice], VendorOrg, "CUR-KEPT", kept);
         // N-7: unreadable in the submission's firm, readable in the firm the invoice was re-pointed to.
         world.Submission([Alice], VendorOrg, "N-7", world.Invoice([Bob], VendorOrg));
@@ -1351,6 +1352,79 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         _factory.Logs.Warnings.Should().Contain(w => w.Contains("the caller's read of sprk_invoicesubmission", StringComparison.Ordinal));
     }
 
+    // DEF-043 (#2294): sprk_billingevent.sprk_invoice is not refused (D-96's detach sequence writes it through the generic paths), so a
+    // line Duplicate's invoice counts only when it is filed under the Signal's FROZEN core record (sprk_corerecordtype/sprk_corerecordid).
+
+    [Fact]
+    public async Task D176_DEF043_ALineRePointedToAnInvoiceOfAnotherCoreRecord_IsWithheld_AndASameCoreRecordLineIsShown()
+    {
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        var other = world.Matter(readers: [Alice]);
+        world.Submission([Alice], VendorOrg, "N-1", world.Invoice([Alice], VendorOrg));
+        var onSignalsMatter = CurrentInvoice(world, [Alice], VendorOrg, matter: m);
+        var onOtherMatter = CurrentInvoice(world, [Alice], VendorOrg, matter: other);
+        var noCore = CurrentInvoice(world, [Alice], VendorOrg);
+        var twoCores = CurrentInvoice(world, [Alice], VendorOrg, matter: m);
+        world.Records[twoCores].Columns["_sprk_project_value"] = Guid.NewGuid();
+        var matching = BillingSignal(world, m, (BillingEventType, world.BillingEvent([Alice], onSignalsMatter)), DuplicateEvidence(null, "N-1"));
+        var rePointed = BillingSignal(world, m, (BillingEventType, world.BillingEvent([Alice], onOtherMatter)), DuplicateEvidence(null, "N-1"));
+        var invoiceWithNoCore = BillingSignal(world, m, (BillingEventType, world.BillingEvent([Alice], noCore)), DuplicateEvidence(null, "N-1"));
+        var invoiceWithTwoCores = BillingSignal(world, m, (BillingEventType, world.BillingEvent([Alice], twoCores)), DuplicateEvidence(null, "N-1"));
+        var lineWithNoInvoice = BillingSignal(world, m, (BillingEventType, world.BillingEvent([Alice], null)), DuplicateEvidence(null, "N-1"));
+        var invoiceUnreadable = CurrentInvoice(world, [Bob], VendorOrg, submissionReaders: [Alice], matter: m);
+        var unreadable = BillingSignal(world, m, (BillingEventType, world.BillingEvent([Alice], invoiceUnreadable)), DuplicateEvidence(null, "N-1"));
+
+        var body = await OkAsync(world, Alice);
+        ShouldKeepTheEarlierInvoice(body, matching, storedLines: 4);
+        ShouldWithholdTheEarlierInvoice(body, rePointed, "N-1");
+        ShouldWithholdTheEarlierInvoice(body, invoiceWithNoCore, "N-1");
+        ShouldWithholdTheEarlierInvoice(body, invoiceWithTwoCores, "N-1");
+        ShouldWithholdTheEarlierInvoice(body, lineWithNoInvoice, "N-1");
+        ShouldWithholdTheEarlierInvoice(body, unreadable, "N-1");
+        world.Requests.Count(r => r.StartsWith(InvoiceCoreRead, StringComparison.Ordinal)).Should().Be(1, "one batched core-record read");
+    }
+
+    [Theory]
+    [InlineData(BillingEventRead, "500")]
+    [InlineData(BillingEventRead, "401")]
+    [InlineData(BillingEventRead, "429")]
+    [InlineData(BillingEventRead, "unparseable")]
+    [InlineData(BillingEventRead, "throw")]
+    [InlineData(BillingEventRead, "403")]
+    [InlineData(InvoiceCoreRead, "500")]
+    [InlineData(InvoiceCoreRead, "401")]
+    [InlineData(InvoiceCoreRead, "429")]
+    [InlineData(InvoiceCoreRead, "unparseable")]
+    [InlineData(InvoiceCoreRead, "throw")]
+    [InlineData(InvoiceCoreRead, "403")]
+    [InlineData(CurrentSubmissionRead, "429")]
+    [InlineData(CurrentSubmissionRead, "403")]
+    public async Task D176_DEF043_WhenALineReadFaultsIsThrottledOrIsUnreadable_TheLineDuplicateIsNotShown(string read, string fault)
+    {
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        var earlier = world.Invoice([Alice], VendorOrg);
+        world.Submission([Alice], VendorOrg, "N-1", earlier);
+        var lineInvoice = CurrentInvoice(world, [Alice], VendorOrg, matter: m);
+        var line = BillingSignal(world, m, (BillingEventType, world.BillingEvent([Alice], lineInvoice)), DuplicateEvidence(null, "N-1"));
+        var byId = BillingSignal(world, m, (NotCoreType, CurrentInvoice(world, [Alice], VendorOrg)), DuplicateEvidence(earlier));
+        world.PathFaults[read] = fault;
+
+        var body = await OkAsync(world, Alice);
+        ShouldWithholdTheEarlierInvoice(body, line, "N-1");
+        if (fault == "403")
+        {
+            // No Read on the table is a verdict about those rows, not a fault: a Duplicate that needs no such read keeps its detail.
+            ShouldKeepTheEarlierInvoice(body, byId, storedLines: 5);
+        }
+        else
+        {
+            // A fault shows no Duplicate at all.
+            ShouldWithholdTheEarlierInvoice(body, byId, earlier.ToString("D"));
+        }
+    }
+
     [Theory]
     [InlineData("500")]
     [InlineData("401")]
@@ -1415,6 +1489,7 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         Item(body, plain).GetProperty("sentence").GetString().Should().Be("The budget is over by 10%.");
         world.Requests.Should().NotContain(r => r.StartsWith(EarlierInvoiceRead, StringComparison.Ordinal)
             || r.StartsWith(InvoiceVendorOrgRead, StringComparison.Ordinal)
+            || r.StartsWith(InvoiceCoreRead, StringComparison.Ordinal)
             || r.StartsWith(SubmissionRead, StringComparison.Ordinal)
             || r.StartsWith(BillingEventRead, StringComparison.Ordinal));
     }
@@ -1425,7 +1500,7 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         // DuplicateOfEarlierLine: the tracking number is the line's OWN invoice's, with the earlier line's index and no invoice id.
         var world = new World();
         var m = world.Matter(readers: [Alice]);
-        var current = world.Invoice([Alice], VendorOrg);
+        var current = world.Invoice([Alice], VendorOrg, matter: m);
         world.Submission([Alice], VendorOrg, "INV-90.1", current);
         var readableEvent = world.BillingEvent([Alice], current);
         var unreadableEvent = world.BillingEvent([Bob], current);
@@ -1473,7 +1548,7 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
             world.Submission([Alice], org, $"A-{i}", world.Invoice([Alice], org));
             signals.Add(BillingSignal(world, m, (NotCoreType, currentInOrg), DuplicateEvidence(null, $"A-{i}")));
 
-            var lineInvoice = CurrentInvoice(world, [Alice], VendorOrg);
+            var lineInvoice = CurrentInvoice(world, [Alice], VendorOrg, matter: m);
             world.Submission([Alice], VendorOrg, $"B-{i}", world.Invoice([Alice], VendorOrg));
             signals.Add(BillingSignal(world, m, (BillingEventType, world.BillingEvent([Alice], lineInvoice)), DuplicateEvidence(null, $"B-{i}")));
         }
@@ -1486,6 +1561,7 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
 
         world.Requests.Count(r => r.StartsWith(BillingEventRead, StringComparison.Ordinal)).Should().Be(1);
         world.Requests.Count(r => r.StartsWith(CurrentSubmissionRead, StringComparison.Ordinal)).Should().Be(1);
+        world.Requests.Count(r => r.StartsWith(InvoiceCoreRead, StringComparison.Ordinal)).Should().Be(1, "one core-record read for the line invoices");
         world.Requests.Count(r => r.StartsWith(TrackingSubmissionRead, StringComparison.Ordinal)).Should().Be(1, "two vendor orgs, one submission read");
         world.Requests.Count(r => r.StartsWith(EarlierInvoiceRead, StringComparison.Ordinal)).Should().Be(1);
 
@@ -2003,8 +2079,11 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         }
 
         /// <summary>D-176: an invoice the readers read as themselves, in <paramref name="vendorOrg"/>.</summary>
-        public Guid Invoice(Guid[] readers, Guid vendorOrg) =>
-            Record("sprk_invoice", readers, new() { ["_sprk_vendororg_value"] = vendorOrg, ["sprk_highpriority"] = false });
+        public Guid Invoice(Guid[] readers, Guid vendorOrg, Guid? matter = null) =>
+            Record("sprk_invoice", readers, new()
+            {
+                ["_sprk_vendororg_value"] = vendorOrg, ["sprk_highpriority"] = false, ["_sprk_matter_value"] = matter,
+            });
 
         /// <summary>D-176: a billing event (an invoice line) of <paramref name="invoice"/>.</summary>
         public Guid BillingEvent(Guid[] readers, Guid? invoice) =>
@@ -2252,6 +2331,7 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
                     "500" => DataverseUserResponse.Fail(500, DataverseUserClientErrorCodes.ServiceError, "boom"),
                     "401" => DataverseUserResponse.Fail(401, DataverseUserClientErrorCodes.AccessDenied, "token expired"),
                     "403" => DataverseUserResponse.Fail(403, DataverseUserClientErrorCodes.AccessDenied, "denied"),
+                    "429" => DataverseUserResponse.Fail(429, DataverseUserClientErrorCodes.RateLimited, "throttled"),
                     "unparseable" => DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new { rows = 1 })),
                     "throw" => throw new TimeoutException("read timed out"),
                     _ => throw new ArgumentOutOfRangeException(nameof(path), fault, "unknown fault"),

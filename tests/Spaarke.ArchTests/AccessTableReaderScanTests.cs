@@ -67,8 +67,8 @@ public class AccessTableReaderScanTests
             ["privilege"] = "Platform-defined and read-only (Dataverse refuses a write); UserPrivilegeChecker reads its names.",
             ["template"] = "Email templates; the filter checks the caller's own Read on the row (CommunicationRecordAuthorizationFilter).",
             // ebilling-r1 (master merge): the invoice family's FR-05 guard reads these tables' filing lookups.
-            // UAC review F4 (option b): its invoice IS read by an access decision; refusing it is pending a decision (see the reason).
-            ["sprk_billingevent"] = "An invoice line, a child record: its access follows its parents (SecureChildLineage); the FR-05 guard reads its core-record lookups and its invoice to keep it filed with its invoice (InvoiceFamilyCoreRecordGuard, OwnedChildWrite). Its invoice (sprk_invoice) is also read, as the caller, to reach a billing-event Duplicate's current invoice, whose submissions give the vendor org D-176's withholding resolves in (SignalReadService.DuplicatesShownAsync). It is NOT refused per column yet: the supported detach / move / re-attach sequence (D-96, DetachMoveReattachHint) writes it through the playbook update and the output orchestrator. Pending a decision (UAC review F4).",
+            // UAC review F4 (option b) / DEF-043 (#2294): its invoice is read, bounded, and not refused (see the reason).
+            ["sprk_billingevent"] = "An invoice line, a child record: its access follows its parents (SecureChildLineage); the FR-05 guard reads its core-record lookups and its invoice to keep it filed with its invoice (InvoiceFamilyCoreRecordGuard, OwnedChildWrite). Its invoice (sprk_invoice) is also read, as the caller, to reach a billing-event Duplicate's current invoice, whose submissions give the vendor org D-176's withholding resolves in (SignalReadService.DuplicatesShownAsync). It is NOT refused: the supported D-96 detach / move / re-attach sequence (DetachMoveReattachHint) writes it through the playbook update and the output orchestrator. The read is bounded: the line's invoice counts only when it is filed under the Signal's frozen core record (sprk_signal.sprk_corerecordtype / sprk_corerecordid, refused per column), and every generic write of it is held to the line's own core record (InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode). Residual: a re-point within the same core record is judged in that invoice's submission's firm (DEF-043, #2294).",
             // UAC review F4 (on e371dce6bf): found when the scan took in Services/Signals.
             ["sprk_policy"] = "A Signal rule, a child of its matter (SecureChildLineage, #2084): its access follows its parents. The Signals code reads its scope, code, severity and work type to choose which rules apply and how a Signal is labelled (PolicyScopeResolver, SignalReadService), never who may see a row.",
             ["sprk_policyversion"] = "A rule's version (its body), a child of its rule (SecureChildLineage): the Signals code reads it to evaluate and label (DecisionPlanService, SignalReevaluationJob, DecisionRecordWriter); no access decision reads its columns.",
@@ -100,7 +100,7 @@ public class AccessTableReaderScanTests
     private static readonly IReadOnlyDictionary<string, string> AccessColumnsNotYetRefused =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["sprk_signal"] = "A Signal, a child record (SecureChildLineage). SignalCoreRecordAccess.AuthorizeAsync decides who sees a Signal from its core-record pair (sprk_corerecordtype, sprk_corerecordid: not lineage lookups, so a write of them is no re-file), its lane (sprk_lane: the Do-lane 'mine' rule) and its subject (sprk_regardingrecordid and the subject lookups). None is refused per column.",
+            ["sprk_signal"] = "A Signal, a child record (SecureChildLineage). SignalCoreRecordAccess.AuthorizeAsync decides who sees a Signal from its core-record pair (sprk_corerecordtype, sprk_corerecordid: not lineage lookups, so a write of them is no re-file), its lane (sprk_lane: the Do-lane 'mine' rule) and its subject (sprk_regardingrecordid and the subject lookups). Refused per column (AccessColumns, UAC review F4 / DEF-043): the core-record pair and the invoice and invoice-line subjects sprk_regardinginvoice / sprk_regardinginvoiceline, whose only writer is TodoRegardingBuilder.ApplySubjectLookupAndPairAsync through SignalWriter's dedicated client (OntologyWriterDataverseClient). NOT yet refused: sprk_lane, sprk_regardingrecordid and the other subject lookups.",
             ["sprk_decisionrecord"] = "A Decision Record, a child record (SecureChildLineage), append-only by convention. GateDecisionRecordSharing shares a gate record Read with its communication's internal sharees, selecting the records by sprk_confirmedby being empty: a generic write that clears it would make a confirmed record shareable. Not refused per column.",
         };
 
@@ -166,9 +166,9 @@ public class AccessTableReaderScanTests
     public void NoTable_IsBothRefusedAndListed()
     {
         Assert.Empty(NotAccessTables.Keys.Where(InheritedAccessPermission.AccessTables.Contains));
+        // A table some of whose columns are refused (AccessColumns) may stay in the baseline for the rest (sprk_signal).
         Assert.Empty(AccessColumnsNotYetRefused.Keys.Where(t =>
-            InheritedAccessPermission.AccessTables.Contains(t) || InheritedAccessPermission.AccessColumns.ContainsKey(t)
-            || NotAccessTables.ContainsKey(t)));
+            InheritedAccessPermission.AccessTables.Contains(t) || NotAccessTables.ContainsKey(t)));
     }
 
     [Fact(DisplayName = "#2253 K3: the detector fires on a new access table and not on a comment, a column or a covered set")]
@@ -243,8 +243,10 @@ public class AccessTableReaderScanTests
         {
             Assert.False(InheritedAccessPermission.AccessTables.Contains(table), table + " is refused whole and per column");
 
-            // #2253 fix round 4 (K-3): and listed, so its reason says it is refused per column.
-            Assert.True(NotAccessTables.ContainsKey(table), table + " has access columns but is not listed in NotAccessTables");
+            // #2253 fix round 4 (K-3): and listed, so its reason says it is refused per column (UAC review F4: or, partly refused,
+            // in the baseline, whose reason says which columns are and which are not).
+            Assert.True(NotAccessTables.ContainsKey(table) || AccessColumnsNotYetRefused.ContainsKey(table),
+                table + " has access columns but is not listed in NotAccessTables or AccessColumnsNotYetRefused");
         }
 
         Assert.DoesNotContain("sprk_recordtype_ref", NotAccessTables.Keys);

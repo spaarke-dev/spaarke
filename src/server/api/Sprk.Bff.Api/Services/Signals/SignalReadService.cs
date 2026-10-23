@@ -1403,13 +1403,15 @@ public sealed class SignalReadService
     /// The Duplicate rows whose earlier invoice(s) the caller reads. An id quoted as <c>duplicateOf.invoiceId</c> is judged directly.
     /// A row that quotes only a tracking number is resolved within its CURRENT invoice's vendor org: the current invoice is the subject
     /// when the subject is <c>sprk_invoice</c>, or the subject billing event's invoice (<c>sprk_billingevent</c>, option B after
-    /// escalation 1), and its vendor org is that of the invoice's SUBMISSIONS (<c>sprk_invoicesubmission</c> rows whose
+    /// escalation 1; that invoice counts only when it is filed under the Signal's FROZEN core record, DEF-043), and its vendor org
+    /// is that of the invoice's SUBMISSIONS (<c>sprk_invoicesubmission</c> rows whose
     /// <c>sprk_invoice</c> is it), each read AS THE CALLER. UAC review F4 (option b, agreed with ontology): not the invoice's own
     /// <c>sprk_vendororg</c>, which a writer of the invoice can change; the submission's is the firm the priors were read from
     /// (<c>BillingFactLoader</c>), as <c>InvoiceReviewReadService</c> and the blocked view already resolve it. Withheld: any other
-    /// subject; an event the caller cannot read, or one with no invoice; an invoice with no submission the caller reads; submissions
-    /// that disagree on the vendor org, or one with none (never picked). Reads per request: at most one billing-event read and one read
-    /// of the current invoices' submissions (In lists of at most <see cref="WitnessIdChunk"/> ids), then
+    /// subject; an event the caller cannot read, or one with no invoice; a line's invoice the caller cannot read, with no single core
+    /// record, or on another core record than the Signal's; an invoice with no submission the caller reads; submissions that disagree
+    /// on the vendor org, or one with none (never picked). Reads per request: at most one billing-event read, one read of those
+    /// events' invoices' core records, and one read of the current invoices' submissions (In lists of at most <see cref="WitnessIdChunk"/> ids), then
     /// <see cref="EarlierInvoiceReadability.ShownAsync{TKey}"/>, which owns the combining rule (at least one reference, every one
     /// readable; none shown on a fault). A fault in any read here shows nothing. A Duplicate with no usable reference is not shown.
     /// </summary>
@@ -1462,11 +1464,32 @@ public sealed class SignalReadService
                 return shown;
             }
 
-            foreach (var (signalId, billingEvent) in eventOf)
+            // UAC review F4 / DEF-043 (#2294): the line's invoice counts only when it is filed under the Signal's FROZEN core record
+            // (sprk_corerecordtype + sprk_corerecordid, refused to app-only generic writers). sprk_billingevent.sprk_invoice is not
+            // refused (D-96's detach sequence writes it through the generic paths), so a line re-pointed to an invoice of another
+            // core record would otherwise be judged in that invoice's firm. No invoice, an invoice with no single core record, a
+            // Signal with no core record, or a mismatch: withheld.
+            var lineInvoices = eventOf.Values.Where(invoiceOfEvent.ContainsKey).Select(e => invoiceOfEvent[e]).Distinct().ToList();
+            if (lineInvoices.Count > 0)
             {
-                if (invoiceOfEvent.TryGetValue(billingEvent, out var invoice))
+                var coreOfInvoice = await InvoiceCoreRecordAsync(lineInvoices, ct).ConfigureAwait(false);
+                if (coreOfInvoice is null)
                 {
-                    currentInvoiceOf[signalId] = invoice;
+                    return shown;
+                }
+
+                var rowOf = rows.DistinctBy(r => r.Row.SignalId).ToDictionary(r => r.Row.SignalId, r => r.Row);
+                foreach (var (signalId, billingEvent) in eventOf)
+                {
+                    if (invoiceOfEvent.TryGetValue(billingEvent, out var invoice)
+                        && coreOfInvoice.TryGetValue(invoice, out var core)
+                        && rowOf[signalId] is { CoreTypeId: { } coreType, CoreId: { } coreId }
+                        && catalog.TryGetValue(coreType, out var frozenType)
+                        && string.Equals(frozenType.LogicalName, core.Table, StringComparison.OrdinalIgnoreCase)
+                        && coreId == core.Id)
+                    {
+                        currentInvoiceOf[signalId] = invoice;
+                    }
                 }
             }
         }
@@ -1491,6 +1514,54 @@ public sealed class SignalReadService
 
         return (await _earlierInvoices.ShownAsync(_user, referencesOf, ct).ConfigureAwait(false)).ToHashSet();
     }
+
+    /// <summary>
+    /// UAC review F4 / DEF-043: each invoice's core record (table, id), from the invoice's typed core lookups
+    /// (<see cref="InvoiceFamilyCoreRecordGuard.CoreRecordLookups"/>) as the CALLER's batched read returns them (In lists of at most
+    /// <see cref="WitnessIdChunk"/> ids). An invoice the caller cannot read, or one with no core lookup or more than one (FR-05
+    /// refuses both), is absent. Null on a fault (<see cref="EarlierInvoiceReadability.ReadAsCallerAsync"/>).
+    /// </summary>
+    private async Task<Dictionary<Guid, (string Table, Guid Id)>?> InvoiceCoreRecordAsync(IEnumerable<Guid> invoices, CancellationToken ct)
+    {
+        var lookups = InvoiceFamilyCoreRecordGuard.CoreRecordLookups[InvoiceCoreRecordTable];
+        var select = string.Join(',', lookups.Select(l => $"_{l.Column}_value"));
+        var found = new Dictionary<Guid, (string Table, Guid Id)>();
+        foreach (var chunk in invoices.Distinct().Chunk(WitnessIdChunk))
+        {
+            var rows = await _earlierInvoices.ReadAsCallerAsync(
+                _user,
+                $"{EarlierInvoiceReadability.InvoiceEntitySet}?$select={EarlierInvoiceReadability.InvoiceKey},{select}"
+                + $"&$filter={InFilter(EarlierInvoiceReadability.InvoiceKey, chunk)}",
+                InvoiceCoreRecordTable,
+                ct).ConfigureAwait(false);
+            if (rows is null)
+            {
+                return null;
+            }
+
+            foreach (var row in rows)
+            {
+                if (EarlierInvoiceReadability.ReadGuid(row, EarlierInvoiceReadability.InvoiceKey) is not { } invoice || !chunk.Contains(invoice))
+                {
+                    continue;
+                }
+
+                var cores = lookups
+                    .Select(l => (Table: l.CoreEntity, Id: EarlierInvoiceReadability.ReadGuid(row, $"_{l.Column}_value")))
+                    .Where(c => c.Id is not null)
+                    .ToList();
+                if (cores.Count == 1)
+                {
+                    found[invoice] = (cores[0].Table, cores[0].Id!.Value);
+                }
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>The invoice table whose core lookups <see cref="InvoiceCoreRecordAsync"/> reads.</summary>
+    private const string InvoiceCoreRecordTable = "sprk_invoice";
 
     /// <summary>
     /// UAC review F4: each current invoice's vendor org, from the <c>sprk_invoicesubmission</c> rows the CALLER's batched read returns
