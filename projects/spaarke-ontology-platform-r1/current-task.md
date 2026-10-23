@@ -9,7 +9,7 @@
 
 | Field | Value |
 |---|---|
-| **Task** | Lanes running (owner go 2026-10-22): **158** `C:\wts-158` `task/158-wizard-lookups`; **159** `C:\wts-159` `task/159-assign-task`; **161** `C:\wts-161` `task/161-create-budget`; **162** `C:\wts-162` `task/162-doc-exact-column`. All are implementer agents (sonnet/high) from `origin/docs/ontology-platform-design` `a5ed5042e1`; each stops at its PR (no deploy, no policy apply). **160** starts after 158 merges (it reuses 158's host injection). **163** (D-185, #2285) starts when a lane slot frees (cap 4). |
+| **Task** | Lanes running (owner go 2026-10-22): **158** `C:\wts-158` `task/158-wizard-lookups`; **159** `C:\wts-159` `task/159-assign-task`; **161** `C:\wts-161` `task/161-create-budget`; **163** `C:\wts-163` `task/163-policy-server-read` (security: 2 review passes). Each stops at its PR (no deploy, no policy apply). **162** merged to docs `84636b650a` (dev check after the docs→master sync; owner question sprk_X vs sprk_related*). **159** PR #2289 fix round 1 `4e9e295a30` pushed; Opus review running. **161** PR #2290 Opus review running. **160** starts after 158 merges (it reuses 158's host injection). |
 | **Status** | Waiting on lane reports. Owner is reviewing R2 design §9. |
 | **Next Action** | Per lane report: one Opus adversarial review of the PR diff, a fix round, a Sonnet re-check, then merge into docs. 159 and 161 both edit `DecisionActionCatalog.cs`, `DecisionActionExecutors.cs` and `SignalsModule.cs`: merge one, rebase the other. After 158 merges, launch 160 (opus/high) in `C:\wts-160`. Then a docs→master sync for the Console, R3's BFF deploy, dev checks, and 159's policy v2 apply after the owner OKs `-WhatIf`. |
 
