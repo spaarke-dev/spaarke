@@ -175,3 +175,22 @@ Branch brought up to date first: merge of `origin/work/ebilling-r1` e371dce6bf (
 
 The source scan for an unchecked narrowing of a file length (F3) misses: `(int)len`, `(int)count`, `(int)lengthOfFile`, `(int)Math.Min(length, x)`, `(int)(a + length)`, a cast split across lines, and `Convert.ToInt32(length)`. It is a tripwire for the common spelling, not a proof; review still owns the rest.
 
+
+## 13. uac-r2 review round 2 re-check: ACCEPTED (2026-10-23)
+
+uac-r2 accepted 12329abebe..64e39a9d5f with no fix-now findings. It ran an export of 64e39a9d5f:
+- build 0/0;
+- ArchTests 1522/1522;
+- filtered unit and integration 1333/1333;
+- Pester 5.7.1 43/43;
+- every seed fails as claimed.
+
+Known limits:
+- **K1, a merge obligation.** #2277 is not in this branch or in work/ebilling-r1. Once it is, `CreatorPersonColumnSecuredGuardTests.EveryStampedTableDeclaresTheColumnSecured` needs an entry, either a `SecuredOnlyByDeployScript` entry naming `scripts/Set-ChildRecordCreatorPersonSchema.ps1` or Entity.xml `IsSecured` after an export, for these tables:
+  - `sprk_ruleset` (no `sprk_createdbyperson` in Entity.xml);
+  - `sprk_procedureassignment` (no Entity.xml);
+  - 081's `sprk_procedure`, `sprk_procedureversion`, `sprk_policy` and `sprk_policyversion`.
+
+  This is also recorded in the project CLAUDE.md §6.
+- **K2:** the ETag pin misses a reused staged blob. DEF-044, #2296. Fix it before StoredFileReconcileJob is enabled anywhere.
+- **K3:** the parent-gone pass doesn't check that the blob path's parent is a gone lookup. Defence in depth. DEF-045, #2297.
