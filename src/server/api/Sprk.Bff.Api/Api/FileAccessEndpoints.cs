@@ -233,11 +233,15 @@ public static class FileAccessEndpoints
         // and to which record? The keys travel in the body (they identify a message in the caller's mailbox).
         //
         // Same two-filter shape as resolve-identity, and the order is the design:
-        //   1. DocumentEmailIdentityFilter — keys → the NEWEST saved .eml sprk_document (sprk_isemailarchive = true,
-        //      sprk_emailmessageid = either key; app-only read). None: it returns 200 {resolved:false,
-        //      reason:"not_saved"} itself. Otherwise it writes that id into the route values as `documentId`.
+        //   1. DocumentEmailIdentityFilter — keys → the NEWEST saved .eml sprk_document (sprk_isemailarchive = true, AND
+        //      sprk_emailmessageid = either key OR — task 132 — its sprk_relatedcommunication's sprk_internetmessageid =
+        //      the RFC id, which is how mailbox-captured and Spaarke-sent archives are found; one app-only query). None:
+        //      it returns 200 {resolved:false, reason:"not_saved"} itself. Otherwise it writes that id into the route
+        //      values as `documentId`.
         //   2. DocumentAuthorizationFilter("read") — 403 with no metadata when the caller may not read THAT row. An older
         //      copy the caller could read is not searched (no oracle; one authorization per request).
+        // Task 132: a captured archive carries no direct slot; its record is the communication's regarding. That record is
+        // shown only when the caller may read it (BuildIdentityResponseAsync, shared by all three identity routes).
         // No rate-limit policy, matching the sibling routes: the pane calls this once per open and after a save.
         docs.MapPost("/resolve-email-identity", ResolveEmailIdentity)
             .AddEndpointFilter<DocumentEmailIdentityFilter>()
@@ -265,12 +269,14 @@ public static class FileAccessEndpoints
         /// this method now also resolves: the access model treats record access as equivalent to document access
         /// (see <c>DocumentUrlIdentityResolution.ResolveRelatedRecordDisplayAsync</c> and
         /// <c>notes/026-slot-scope-decision.md</c> §6), so a SECOND authorization check on the related record
-        /// itself would be redundant, not defense-in-depth. <paramref name="request"/> is bound here so the filter
-        /// can read it from the invocation arguments.
+        /// itself would be redundant, not defense-in-depth. The exception is a record DERIVED through the document's
+        /// communication (task 132, §6a), which <c>BuildIdentityResponseAsync</c> checks for the caller before showing it.
+        /// <paramref name="request"/> is bound here so the filter can read it from the invocation arguments.
         /// </summary>
         static async Task<IResult> ResolveIdentity(
             ResolveDocumentIdentityRequest? request,
             IGenericEntityService dataverse,
+            [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe callerAccessProbe,
             ILogger<Program> logger,
             HttpContext context,
             CancellationToken ct)
@@ -283,18 +289,20 @@ public static class FileAccessEndpoints
                     "resolve-identity reached its handler without a filter-resolved identity.");
             }
 
-            return TypedResults.Ok(await BuildIdentityResponseAsync(identity, dataverse, logger, ct));
+            return TypedResults.Ok(await BuildIdentityResponseAsync(identity, dataverse, callerAccessProbe, context, logger, ct));
         }
 
         /// <summary>
         /// POST /api/documents/resolve-email-identity (task 120). Reached only after
         /// <see cref="DocumentEmailIdentityFilter"/> found the email's saved <c>.eml</c> AND
         /// <see cref="DocumentAuthorizationFilter"/> allowed <c>read</c> on it; like <c>ResolveIdentity</c> it performs
-        /// no access check of its own (ADR-008). <paramref name="request"/> is bound so the filter can read it.
+        /// no access check on the DOCUMENT (ADR-008) — only the derived-record check of task 132, in
+        /// <c>BuildIdentityResponseAsync</c>. <paramref name="request"/> is bound so the filter can read it.
         /// </summary>
         static async Task<IResult> ResolveEmailIdentity(
             ResolveEmailIdentityRequest? request,
             IGenericEntityService dataverse,
+            [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe callerAccessProbe,
             ILogger<Program> logger,
             HttpContext context,
             CancellationToken ct)
@@ -307,7 +315,7 @@ public static class FileAccessEndpoints
                     "resolve-email-identity reached its handler without a filter-resolved identity.");
             }
 
-            return TypedResults.Ok(await BuildIdentityResponseAsync(identity, dataverse, logger, ct));
+            return TypedResults.Ok(await BuildIdentityResponseAsync(identity, dataverse, callerAccessProbe, context, logger, ct));
         }
 
         /// <summary>
@@ -319,7 +327,9 @@ public static class FileAccessEndpoints
         static async Task<IResult> GetDocumentIdentity(
             string documentId,
             IGenericEntityService dataverse,
+            [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe callerAccessProbe,
             ILogger<Program> logger,
+            HttpContext context,
             CancellationToken ct)
         {
             if (!Guid.TryParse(documentId, out var docGuid))
@@ -343,22 +353,45 @@ public static class FileAccessEndpoints
                     404);
             }
 
-            return TypedResults.Ok(await BuildIdentityResponseAsync(identity, dataverse, logger, ct));
+            return TypedResults.Ok(await BuildIdentityResponseAsync(identity, dataverse, callerAccessProbe, context, logger, ct));
         }
 
         /// <summary>
-        /// The resolved-identity response both identity routes return — extracted from <c>ResolveIdentity</c> by task
-        /// 112 so the URL and id routes share one body (names, related record, display name and number). Call it only
-        /// after the route's <see cref="DocumentAuthorizationFilter"/> has allowed the caller: this is where document
-        /// metadata enters a response.
+        /// The resolved-identity response all three identity routes return — extracted from <c>ResolveIdentity</c> by
+        /// task 112 so the routes share one body (names, related record, display name and number). Call it only after the
+        /// route's <see cref="DocumentAuthorizationFilter"/> has allowed the caller: this is where document metadata
+        /// enters a response.
         /// </summary>
+        /// <remarks>
+        /// Task 132: a document with no direct slot but a communication (a mailbox-captured or Spaarke-sent archive) shows
+        /// the communication's record — DERIVED, so the document's authorization does not cover it (an external
+        /// participant may read the email without reading the matter; <c>notes/026-slot-scope-decision.md</c> §6a). It is
+        /// shown only when the caller's own rights on it include Read, asked through the same
+        /// <see cref="Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe"/> behind
+        /// <see cref="RecordRouteAccessAuthorizationFilter"/>. Not readable, an unmapped type, or a failed check: no card,
+        /// and the rest of this 200 answer is unchanged — never a 403 or 503 for the whole answer. A document's own slot
+        /// keeps today's behaviour, and its communication is then not read.
+        /// </remarks>
         static async Task<DocumentIdentityResponse> BuildIdentityResponseAsync(
             Sprk.Bff.Api.Services.Documents.DocumentUrlIdentityResolution.Resolution identity,
             IGenericEntityService dataverse,
+            Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe callerAccessProbe,
+            HttpContext context,
             ILogger logger,
             CancellationToken ct)
         {
             var related = identity.RelatedRecord;
+            if (related is null)
+            {
+                var derived = await Sprk.Bff.Api.Services.Documents.DocumentUrlIdentityResolution
+                    .ResolveDerivedRelatedRecordAsync(identity, dataverse, logger, ct);
+                if (derived is not null
+                    && await CallerMayReadDerivedRecordAsync(derived, callerAccessProbe, context, logger, ct))
+                {
+                    related = derived;
+                }
+            }
+
             RelatedRecordIdentity? relatedRecordResponse = null;
             if (related is not null)
             {
@@ -375,6 +408,44 @@ public static class FileAccessEndpoints
                 FileName: identity.FileName,
                 RelatedRecord: relatedRecordResponse,
                 Reason: null);
+        }
+
+        /// <summary>
+        /// Task 132: whether the CALLER holds Read on a record derived through the document's communication. Fail closed:
+        /// a type outside <see cref="EntityAccessFilter"/>'s entity-set table, no rights answer, or a throw is "no". Not an
+        /// authorization gate (nothing is refused; the optional card is only left out), so it asks the plain
+        /// <see cref="Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe.GetCallerRightsAsync"/>.
+        /// </summary>
+        static async Task<bool> CallerMayReadDerivedRecordAsync(
+            Microsoft.Xrm.Sdk.EntityReference record,
+            Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe callerAccessProbe,
+            HttpContext context,
+            ILogger logger,
+            CancellationToken ct)
+        {
+            if (!EntityAccessFilter.TryResolveEntitySet(record.LogicalName, out var entitySet))
+            {
+                logger.LogWarning(
+                    "Document identity: the communication's record type {EntityType} has no entity set in " +
+                    "EntityAccessFilter's table, so the caller's access cannot be checked; the related-record card is omitted.",
+                    record.LogicalName);
+                return false;
+            }
+
+            try
+            {
+                var rights = await callerAccessProbe.GetCallerRightsAsync(
+                    Sprk.Bff.Api.Infrastructure.Auth.TokenHelper.ExtractBearerTokenOrNull(context), entitySet, record.Id, ct);
+                return (rights & AccessRights.Read) == AccessRights.Read;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                logger.LogWarning(ex,
+                    "Document identity: the caller's access to {EntitySet}({RecordId}) could not be checked; the " +
+                    "related-record card is omitted.",
+                    entitySet, record.Id);
+                return false;
+            }
         }
 
         /// <summary>

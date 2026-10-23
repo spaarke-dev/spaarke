@@ -123,6 +123,22 @@ allows the request (ADR-008 — ordered endpoint filters). It is deliberately NO
 a STRICT `IGenericEntityService` mock carrying NO setup for the complementary-field fetch: if the handler ever
 attempted it before authorization denied, the strict mock would throw and fail the test. It does not.
 
+## 6a. A record reached through the communication needs its own check (task 132)
+
+§6 holds for the document's OWN four slots. It does not hold for a record reached through the document's
+`sprk_relatedcommunication` — the case task 132 adds for a mailbox-captured or Spaarke-sent `.eml` archive, which carries
+no direct slot (its filing is on the communication: `sprk_regardingmatter` / `…project` / `…invoice` /
+`…workassignment`, read in the same priority). An external participant may read the email without reading the matter
+it is filed to, so document access does not imply access to that record.
+
+Rule: a derived record is shown only on a positive answer to "does the CALLER hold Read on it?", asked through
+`CallerRecordAccessProbe.GetCallerRightsAsync` (the probe behind `RecordRouteAccessAuthorizationFilter`; entity set from
+`EntityAccessFilter.TryResolveEntitySet`). No Read, a type outside that table, or a failed/throwing check → no card;
+the rest of the 200 answer is unchanged (never a 403 or 503 for the whole answer). Its display fields are read only after
+the check passes. A document with its own slot keeps it, and its communication is not read. Applied once, in
+`FileAccessEndpoints.BuildIdentityResponseAsync`, which all three identity routes share; the derivation itself is
+`DocumentUrlIdentityResolution.ResolveDerivedRelatedRecordAsync`.
+
 ## 7. Excluded-slot test
 
 The POML's ui-test "Excluded slots do not render" (seed a document whose only populated association is an

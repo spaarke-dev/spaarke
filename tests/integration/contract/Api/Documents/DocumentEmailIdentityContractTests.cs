@@ -3,10 +3,13 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Tests.Services.Documents;
 using Xunit;
 
@@ -81,6 +84,133 @@ public class DocumentEmailIdentityContractTests
         body.GetProperty("resolved").GetBoolean().Should().BeTrue();
         body.GetProperty("documentId").GetString().Should().Be(documentId.ToString("D"));
         body.GetProperty("relatedRecord").ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    // ── Task 132: a captured archive's record comes from its communication ────────────────────
+
+    [Fact]
+    public async Task ResolveEmail_ForACapturedArchive_ShowsTheCommunicationsRecord_WhenTheCallerMayReadIt()
+    {
+        var documentId = Guid.NewGuid();
+        var communicationId = Guid.NewGuid();
+        var matterId = Guid.NewGuid();
+        var entityService = SavedCopy(CapturedArchive(documentId, communicationId));
+        CommunicationFiledTo(entityService, communicationId, new EntityReference("sprk_matter", matterId) { Name = "MAT-000042" });
+        entityService
+            .Setup(e => e.RetrieveAsync(
+                "sprk_matter", matterId, It.Is<string[]>(c => c.Length == 1 && c[0] == "sprk_mattername"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_matter", matterId) { ["sprk_mattername"] = "Acme v Globex" });
+        var probe = Probe();
+        probe.Setup(p => p.GetCallerRightsAsync("test-token", "sprk_matters", matterId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AccessRights.Read);
+
+        using var factory = Factory(entityService, AccessSource(documentId, AccessRights.Read), probe);
+        var response = await AuthenticatedClient(factory).PostAsJsonAsync(Route, new { internetMessageId = MessageId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("resolved").GetBoolean().Should().BeTrue();
+        body.GetProperty("documentId").GetString().Should().Be(documentId.ToString("D"));
+        var related = body.GetProperty("relatedRecord");
+        related.GetProperty("entityType").GetString().Should().Be("sprk_matter");
+        related.GetProperty("id").GetString().Should().Be(matterId.ToString("D"));
+        related.GetProperty("displayName").GetString().Should().Be("Acme v Globex");
+        related.GetProperty("number").GetString().Should().Be("MAT-000042");
+        probe.Verify(
+            p => p.GetCallerRightsAsync("test-token", "sprk_matters", matterId, It.IsAny<CancellationToken>()), Times.Once,
+            "the caller's own rights on the derived record are asked, with the caller's token");
+    }
+
+    public static TheoryData<AccessRights> RightsWithoutRead => new()
+    {
+        AccessRights.None,
+        AccessRights.Write | AccessRights.AppendTo,
+    };
+
+    [Theory]
+    [MemberData(nameof(RightsWithoutRead))]
+    public async Task ResolveEmail_ForACapturedArchive_WhenTheCallerMayNotReadTheRecord_Returns200WithoutTheCard(
+        AccessRights rights)
+    {
+        var documentId = Guid.NewGuid();
+        var communicationId = Guid.NewGuid();
+        var matterId = Guid.NewGuid();
+        // STRICT: no setup for the matter's display read — it must never run for a record the caller may not read.
+        var entityService = SavedCopy(CapturedArchive(documentId, communicationId));
+        CommunicationFiledTo(entityService, communicationId, new EntityReference("sprk_matter", matterId) { Name = "MAT-000042" });
+        var probe = Probe();
+        probe.Setup(p => p.GetCallerRightsAsync(It.IsAny<string?>(), "sprk_matters", matterId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(rights);
+
+        using var factory = Factory(entityService, AccessSource(documentId, AccessRights.Read), probe);
+        var response = await AuthenticatedClient(factory).PostAsJsonAsync(Route, new { internetMessageId = MessageId });
+
+        await ShouldBeTheSameAnswerWithoutACard(response, documentId, "MAT-000042");
+    }
+
+    [Fact]
+    public async Task ResolveEmail_ForACapturedArchive_WhenTheAccessCheckThrows_Returns200WithoutTheCard()
+    {
+        var documentId = Guid.NewGuid();
+        var communicationId = Guid.NewGuid();
+        var matterId = Guid.NewGuid();
+        var entityService = SavedCopy(CapturedArchive(documentId, communicationId));
+        CommunicationFiledTo(entityService, communicationId, new EntityReference("sprk_matter", matterId) { Name = "MAT-000042" });
+        var probe = Probe();
+        probe.Setup(p => p.GetCallerRightsAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("Dataverse is unreachable."));
+
+        using var factory = Factory(entityService, AccessSource(documentId, AccessRights.Read), probe);
+        var response = await AuthenticatedClient(factory).PostAsJsonAsync(Route, new { internetMessageId = MessageId });
+
+        await ShouldBeTheSameAnswerWithoutACard(response, documentId, "MAT-000042");
+    }
+
+    [Fact]
+    public async Task ResolveEmail_ForACapturedArchive_WhenTheCommunicationCannotBeRead_Returns200WithoutTheCard()
+    {
+        var documentId = Guid.NewGuid();
+        var communicationId = Guid.NewGuid();
+        var entityService = SavedCopy(CapturedArchive(documentId, communicationId));
+        entityService
+            .Setup(e => e.RetrieveAsync("sprk_communication", communicationId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("The request channel timed out while waiting for a reply."));
+        // STRICT and EMPTY: with no record there is nothing to ask about.
+        var probe = Probe();
+
+        using var factory = Factory(entityService, AccessSource(documentId, AccessRights.Read), probe);
+        var response = await AuthenticatedClient(factory).PostAsJsonAsync(Route, new { internetMessageId = MessageId });
+
+        await ShouldBeTheSameAnswerWithoutACard(response, documentId, unexpected: null);
+    }
+
+    [Fact]
+    public async Task ResolveEmail_ForADocumentWithItsOwnSlot_KeepsIt_NeitherReadsTheCommunicationNorAsksTheProbe()
+    {
+        var documentId = Guid.NewGuid();
+        var matterId = Guid.NewGuid();
+        var row = DocumentEmailIdentityResolutionTests.Row(
+            documentId, ("sprk_matter", new EntityReference("sprk_matter", matterId) { Name = "MAT-000042" }));
+        row["sprk_relatedcommunication"] = new EntityReference("sprk_communication", Guid.NewGuid());
+        // STRICT: no sprk_communication read is set up, and the probe is STRICT and EMPTY.
+        var entityService = SavedCopy(row);
+        entityService
+            .Setup(e => e.RetrieveAsync(
+                "sprk_matter", matterId, It.Is<string[]>(c => c.Length == 1 && c[0] == "sprk_mattername"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_matter", matterId) { ["sprk_mattername"] = "Acme v Globex" });
+        var probe = Probe();
+
+        using var factory = Factory(entityService, AccessSource(documentId, AccessRights.Read), probe);
+        var response = await AuthenticatedClient(factory).PostAsJsonAsync(Route, new { internetMessageId = MessageId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("relatedRecord").GetProperty("id").GetString().Should().Be(matterId.ToString("D"));
+        entityService.Verify(
+            e => e.RetrieveAsync("sprk_communication", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     // ── Not saved ─────────────────────────────────────────────────────────────────────────────
@@ -186,12 +316,54 @@ public class DocumentEmailIdentityContractTests
     // ── helpers ───────────────────────────────────────────────────────────────────────────────
 
     private static DocumentIdentityTestWebAppFactory Factory(
-        Mock<IGenericEntityService> entityService, Mock<IAccessDataSource> accessSource)
+        Mock<IGenericEntityService> entityService,
+        Mock<IAccessDataSource> accessSource,
+        Mock<CallerRecordAccessProbe>? probe = null)
         => new(
             // Placeholder: this route never reaches SharePoint Embedded.
             DocumentUrlIdentityResolutionTests.Spe(DocumentUrlIdentityResolutionTests.ResolvedFor("unused-drive", "unused-item")),
             entityService,
-            accessSource);
+            accessSource,
+            probe);
+
+    /// <summary>Task 132: a STRICT caller-rights probe — any question a test does not set up fails it.</summary>
+    private static Mock<CallerRecordAccessProbe> Probe()
+        => new(
+            MockBehavior.Strict,
+            new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!, null!);
+
+    /// <summary>Task 132: a mailbox-captured archive — no <c>sprk_emailmessageid</c>, no direct slot, linked to its
+    /// communication.</summary>
+    private static Entity CapturedArchive(Guid documentId, Guid communicationId)
+    {
+        var row = DocumentEmailIdentityResolutionTests.Row(documentId);
+        row["sprk_relatedcommunication"] = new EntityReference("sprk_communication", communicationId);
+        return row;
+    }
+
+    /// <summary>Task 132: the communication's regarding read answers <paramref name="regarding"/>.</summary>
+    private static void CommunicationFiledTo(
+        Mock<IGenericEntityService> entityService, Guid communicationId, EntityReference regarding)
+        => entityService
+            .Setup(e => e.RetrieveAsync("sprk_communication", communicationId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_communication", communicationId) { ["sprk_regarding" + regarding.LogicalName[5..]] = regarding });
+
+    /// <summary>Task 132: the same 200 resolved answer, with no related-record card and nothing of the record in it.</summary>
+    private static async Task ShouldBeTheSameAnswerWithoutACard(HttpResponseMessage response, Guid documentId, string? unexpected)
+    {
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "a derived record the caller may not see never fails the answer");
+        var raw = await response.Content.ReadAsStringAsync();
+        if (unexpected is not null)
+            raw.Should().NotContain(unexpected);
+        using var json = JsonDocument.Parse(raw);
+        var body = json.RootElement;
+        body.GetProperty("resolved").GetBoolean().Should().BeTrue();
+        body.GetProperty("documentId").GetString().Should().Be(documentId.ToString("D"));
+        body.GetProperty("documentName").GetString().Should().Be("RE: Discovery schedule");
+        body.GetProperty("fileName").GetString().Should().Be("RE_ Discovery schedule_a1b2.eml");
+        body.GetProperty("reason").ValueKind.Should().Be(JsonValueKind.Null);
+        body.GetProperty("relatedRecord").ValueKind.Should().Be(JsonValueKind.Null);
+    }
 
     private static HttpClient AuthenticatedClient(DocumentIdentityTestWebAppFactory factory)
     {

@@ -247,15 +247,23 @@ internal sealed class DocumentIdentityTestWebAppFactory : CustomWebAppFactory
     private readonly Mock<SpeFileStore> _speFileStoreMock;
     private readonly Mock<IGenericEntityService> _entityServiceMock;
     private readonly Mock<IAccessDataSource> _accessDataSourceMock;
+    private readonly Mock<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>? _callerAccessProbeMock;
 
+    /// <param name="callerAccessProbeMock">
+    /// Task 132: the caller-rights probe the identity handler asks about a record derived through the document's
+    /// communication. Optional: without it the host's own probe runs, which has no OBO configuration here and so
+    /// answers no rights (fail closed).
+    /// </param>
     public DocumentIdentityTestWebAppFactory(
         Mock<SpeFileStore> speFileStoreMock,
         Mock<IGenericEntityService> entityServiceMock,
-        Mock<IAccessDataSource> accessDataSourceMock)
+        Mock<IAccessDataSource> accessDataSourceMock,
+        Mock<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>? callerAccessProbeMock = null)
     {
         _speFileStoreMock = speFileStoreMock;
         _entityServiceMock = entityServiceMock;
         _accessDataSourceMock = accessDataSourceMock;
+        _callerAccessProbeMock = callerAccessProbeMock;
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -272,6 +280,12 @@ internal sealed class DocumentIdentityTestWebAppFactory : CustomWebAppFactory
 
             services.RemoveAll<IAccessDataSource>();
             services.AddSingleton(_accessDataSourceMock.Object);
+
+            if (_callerAccessProbeMock is not null)
+            {
+                services.RemoveAll<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>();
+                services.AddSingleton(_callerAccessProbeMock.Object);
+            }
         });
     }
 }
