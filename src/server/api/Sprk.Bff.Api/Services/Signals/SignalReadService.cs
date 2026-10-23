@@ -164,8 +164,8 @@ public sealed record WorklistItemRow(
 /// catalog query; and, only for returned rows whose evidence carries detail, one caller read per witness table per
 /// <see cref="WitnessIdChunk"/> ids (D-142) and the app-only secure-family placement of those Signals and the witnesses the caller
 /// reads (<see cref="SignalSuppressionService.WitnessDetailShownOnReadAsync"/>: it withholds, never adds); and, only for billing
-/// Duplicate rows (D-176, task 157), at most one billing-event read, one current-invoice read, one submission read per chunk of 200
-/// distinct tracking numbers and one earlier-invoice read per chunk of 200 invoice ids (<see cref="EarlierInvoiceReadability"/>: it withholds, never adds).
+/// Duplicate rows (D-176, task 157), at most one billing-event read, one read of the current invoices' submissions (UAC review F4:
+/// the vendor org comes from the submission, not the invoice), one submission read per chunk of 200 distinct tracking numbers and one earlier-invoice read per chunk of 200 invoice ids (<see cref="EarlierInvoiceReadability"/>: it withholds, never adds).
 /// Nothing is cached across callers.</para>
 /// </remarks>
 public sealed class SignalReadService
@@ -1403,10 +1403,15 @@ public sealed class SignalReadService
     /// The Duplicate rows whose earlier invoice(s) the caller reads. An id quoted as <c>duplicateOf.invoiceId</c> is judged directly.
     /// A row that quotes only a tracking number is resolved within its CURRENT invoice's vendor org: the current invoice is the subject
     /// when the subject is <c>sprk_invoice</c>, or the subject billing event's invoice (<c>sprk_billingevent</c>, option B after
-    /// escalation 1), each read AS THE CALLER; any other subject, an event or invoice the caller cannot read, or one with no invoice or
-    /// vendor org: withheld. Reads per request: at most one billing-event read and one current-invoice read (In lists of at most
-    /// <see cref="WitnessIdChunk"/> ids), then <see cref="EarlierInvoiceReadability.ShownAsync{TKey}"/>, which owns the combining
-    /// rule (at least one reference, every one readable; none shown on a fault). A Duplicate with no usable reference is not shown.
+    /// escalation 1), and its vendor org is that of the invoice's SUBMISSIONS (<c>sprk_invoicesubmission</c> rows whose
+    /// <c>sprk_invoice</c> is it), each read AS THE CALLER. UAC review F4 (option b, agreed with ontology): not the invoice's own
+    /// <c>sprk_vendororg</c>, which a writer of the invoice can change; the submission's is the firm the priors were read from
+    /// (<c>BillingFactLoader</c>), as <c>InvoiceReviewReadService</c> and the blocked view already resolve it. Withheld: any other
+    /// subject; an event the caller cannot read, or one with no invoice; an invoice with no submission the caller reads; submissions
+    /// that disagree on the vendor org, or one with none (never picked). Reads per request: at most one billing-event read and one read
+    /// of the current invoices' submissions (In lists of at most <see cref="WitnessIdChunk"/> ids), then
+    /// <see cref="EarlierInvoiceReadability.ShownAsync{TKey}"/>, which owns the combining rule (at least one reference, every one
+    /// readable; none shown on a fault). A fault in any read here shows nothing. A Duplicate with no usable reference is not shown.
     /// </summary>
     private async Task<HashSet<Guid>> DuplicatesShownAsync(
         List<VisibleRow> rows,
@@ -1468,9 +1473,7 @@ public sealed class SignalReadService
 
         if (currentInvoiceOf.Count > 0)
         {
-            var vendorOrgOf = await CallerLookupAsync(
-                EarlierInvoiceReadability.InvoiceEntitySet, EarlierInvoiceReadability.InvoiceKey, EarlierInvoiceReadability.VendorOrgColumn,
-                currentInvoiceOf.Values, "sprk_invoice", ct).ConfigureAwait(false);
+            var vendorOrgOf = await SubmissionVendorOrgAsync(currentInvoiceOf.Values, ct).ConfigureAwait(false);
             if (vendorOrgOf is null)
             {
                 return shown;
@@ -1487,6 +1490,48 @@ public sealed class SignalReadService
         }
 
         return (await _earlierInvoices.ShownAsync(_user, referencesOf, ct).ConfigureAwait(false)).ToHashSet();
+    }
+
+    /// <summary>
+    /// UAC review F4: each current invoice's vendor org, from the <c>sprk_invoicesubmission</c> rows the CALLER's batched read returns
+    /// whose <c>sprk_invoice</c> is that invoice (In lists of at most <see cref="WitnessIdChunk"/> ids). An invoice is absent (its
+    /// Duplicates withheld) when the caller reads none of its submissions, or when they do not all name the same vendor org (one
+    /// without a vendor org counts as disagreeing): one is never picked. Null on a fault
+    /// (<see cref="EarlierInvoiceReadability.ReadAsCallerAsync"/>).
+    /// </summary>
+    private async Task<Dictionary<Guid, Guid>?> SubmissionVendorOrgAsync(IEnumerable<Guid> invoices, CancellationToken ct)
+    {
+        var orgsOf = new Dictionary<Guid, HashSet<Guid?>>();
+        foreach (var chunk in invoices.Distinct().Chunk(WitnessIdChunk))
+        {
+            var rows = await _earlierInvoices.ReadAsCallerAsync(
+                _user,
+                $"{EarlierInvoiceReadability.SubmissionEntitySet}?$select={EarlierInvoiceReadability.InvoiceColumn},{EarlierInvoiceReadability.VendorOrgColumn}"
+                + $"&$filter={InFilter(EarlierInvoiceReadability.SubmissionInvoiceFilterColumn, chunk)}",
+                "sprk_invoicesubmission",
+                ct).ConfigureAwait(false);
+            if (rows is null)
+            {
+                return null;
+            }
+
+            foreach (var row in rows)
+            {
+                if (EarlierInvoiceReadability.ReadGuid(row, EarlierInvoiceReadability.InvoiceColumn) is { } invoice && chunk.Contains(invoice))
+                {
+                    if (!orgsOf.TryGetValue(invoice, out var orgs))
+                    {
+                        orgsOf[invoice] = orgs = [];
+                    }
+
+                    orgs.Add(EarlierInvoiceReadability.ReadGuid(row, EarlierInvoiceReadability.VendorOrgColumn));
+                }
+            }
+        }
+
+        return orgsOf
+            .Where(entry => entry.Value.Count == 1 && entry.Value.Single() is not null)
+            .ToDictionary(entry => entry.Key, entry => entry.Value.Single()!.Value);
     }
 
     /// <summary>One lookup column of the rows the CALLER's batched read returns (In lists of at most <see cref="WitnessIdChunk"/> ids):

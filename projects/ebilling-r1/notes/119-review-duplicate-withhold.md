@@ -31,7 +31,7 @@ The escalation trigger did not fire. Scope, id-first references, the number fall
 
 The two surfaces differ in three places. None of them is a disagreement on the rule:
 
-- **Current invoice's vendor org.** /review takes it from the app-only read of the current invoice, which the route's own filter has already authorized as the caller. The worklist reads it as the caller. The result is the same.
+- **Current invoice's vendor org.** /review takes it from the app-only read of the current invoice, which the route's own filter has already authorized as the caller. The worklist reads it as the caller. The result is the same. *(Superseded: /review now takes the submission's `sprk_vendororg` (below), and since UAC review F4, option b (2026-10-23), the worklist does too, from the current invoice's submissions read as the caller.)*
 - **When an exception escapes `ShownAsync`.** /review withholds and returns 200, which note 12 requires. The worklist lets the exception propagate. Nothing is disclosed on either surface; only availability differs. This is for the main session to relay to ontology-r1 as an FYI.
 - **Granularity of "numbers ignored".** /review applies it per finding (per prior); the Signal read applies it per Signal. A (policy, subject) group holds at most one Duplicate finding: `DuplicateHandler` emits one per line per policy and one invoice-level finding per policy. So the two give the same result in practice. Where they could ever differ, /review is the stricter.
 

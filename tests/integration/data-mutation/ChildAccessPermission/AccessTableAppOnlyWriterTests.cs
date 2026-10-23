@@ -681,7 +681,8 @@ public class AccessTableAppOnlyWriterTests
     [InlineData("sprk_invoicesubmission", "sprk_processingstatus")]
     [InlineData("sprk_invoicesubmission", "sprk_submitter")]
     [InlineData("sprk_invoicesubmission", "sprk_adminattention")]
-    // sprk_invoice.sprk_vendororg: its treatment is pending (UAC review F4, the vendor-org source of D-176's Duplicate read).
+    // UAC review F4 (option b): D-176 takes the vendor org from the invoice's submission, so the invoice's own decides no access.
+    [InlineData("sprk_invoice", "sprk_vendororg")]
     [InlineData("sprk_invoiceapproval", "sprk_regardingmatter")]
     [InlineData("sprk_externalidentifier", "sprk_regardingproject")]
     public void AnOrdinaryColumn_OrAnAccessColumnOnAnotherTable_IsNotRefused(string table, string key) =>

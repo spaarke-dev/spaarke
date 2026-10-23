@@ -971,7 +971,15 @@ internal static class InheritedAccessPermission
     /// uses that submission's <c>sprk_invoice</c> to decide whose Read gates a Duplicate's earlier-invoice detail, and
     /// <c>InvoiceReviewReadService</c> applies the same rule. Re-pointed, a Duplicate would quote an earlier invoice the caller
     /// cannot read. Their writers are typed: the persister links the invoice (<c>BuildSubmissionUpdate</c>) and the allocator
-    /// assigns the number; no playbook output mapping, Update Record node, field-mapping rule or Repair writes either.</para></item>
+    /// assigns the number; no playbook output mapping, Update Record node, field-mapping rule or Repair writes either.</para>
+    /// <para>The vendor org that scopes a number-only Duplicate is the current invoice's SUBMISSION's <c>sprk_vendororg</c>
+    /// (above), read as the caller (<c>SignalReadService.DuplicatesShownAsync</c>, F4 option b, agreed with ontology), never the
+    /// invoice's own <c>sprk_vendororg</c>: so <c>sprk_invoice.sprk_vendororg</c> decides no access and is not listed.</para></item>
+    /// <para>Not listed, pending a decision: <c>sprk_billingevent.sprk_invoice</c>. A billing-event Duplicate's current invoice
+    /// is the event's invoice (read as the caller), and that invoice's submissions give the vendor org, so the column does decide
+    /// which firm a number-only Duplicate is judged in. But the supported detach / move / re-attach sequence
+    /// (<see cref="InvoiceFamilyCoreRecordGuard.DetachMoveReattachHint"/>, D-96) runs through the playbook update and the output
+    /// orchestrator (<c>InvoiceFamilyGenericUpdatePathTests</c>), which this refusal would stop.</para></item>
     /// </list>
     /// Data, not branching: a table with no entry has no such column.
     /// </summary>

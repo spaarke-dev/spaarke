@@ -78,6 +78,7 @@ The withheld output should look like the write-time withheld shape above. For `D
   - Use `sprk_invoicesubmission.sprk_trackingnumber`. It is unique per firm under the alternate key (`sprk_vendororg`, `sprk_trackingnumber`) (`docs/data-model/schema-additions-alternate-keys.md:47`).
   - Then the submission's invoice. `sprk_invoice.sprk_trackingnumber` (`Services/Finance/InvoiceReviewService.cs:261`) also holds the number, but it is not a key, and pre-eBilling invoices have none.
   - Scope by firm: the prior is always the same firm's, because the loader filters `sprk_vendororg` = the invoice's firm (`Billing/BillingFactLoader.cs:497-498`). So resolve with (the current invoice's `sprk_vendororg`, the tracking number).
+  - **Superseded (UAC review F4, option b, agreed with ontology, 2026-10-23):** the firm is the current invoice's SUBMISSION's `sprk_vendororg` (the `sprk_invoicesubmission` rows whose `sprk_invoice` is the current invoice, read as the caller), not the invoice's own, which a writer of the invoice can change. No readable submission, or submissions that disagree on the firm: withhold. `SignalReadService.DuplicatesShownAsync`; `/review` and `/blocked` already used the submission's firm.
   - An unresolvable number, or more than one match, must fail closed: withhold.
 - If a stored id would be simpler for you, ebilling can add an evidence `billing.reference` `duplicateOf.invoiceId` for new Signals. Existing Signals would still need the tracking-number path.
 

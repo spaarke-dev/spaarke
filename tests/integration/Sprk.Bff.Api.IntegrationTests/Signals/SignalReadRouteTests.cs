@@ -1014,13 +1014,14 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         for (var i = 0; i < 201; i++)
         {
             var org = i % 2 == 0 ? VendorOrg : OtherVendorOrg;
-            var currentInOrg = numbers.Invoice([Alice], org);
+            var currentInOrg = CurrentInvoice(numbers, [Alice], org);
             numbers.Submission([Alice], org, $"C-{i}", numbers.Invoice([Alice], org));
             BillingSignal(numbers, m3, (NotCoreType, currentInOrg), DuplicateEvidence(null, $"C-{i}"));
         }
 
         AllItems(await OkAsync(numbers, Alice)).Should().OnlyContain(i => i.GetProperty("sentence").GetString() == QuotedSentence);
-        numbers.Requests.Count(r => r.StartsWith(SubmissionRead, StringComparison.Ordinal)).Should().Be(2, "201 numbers: chunks of 200 and 1");
+        numbers.Requests.Count(r => r.StartsWith(TrackingSubmissionRead, StringComparison.Ordinal)).Should().Be(2, "201 numbers: chunks of 200 and 1");
+        numbers.Requests.Count(r => r.StartsWith(CurrentSubmissionRead, StringComparison.Ordinal)).Should().Be(2, "201 current invoices: chunks of 200 and 1");
     }
 
     // ---------------------------------------------------------------------------------------------------------------
@@ -1034,12 +1035,24 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
     private const string QuotedSentence = "Invoice INV-90 duplicates INV-77.1.";
     private const string DuplicateTitle = "Duplicate invoice";
 
-    // The four D-176 reads, by path prefix: the earlier-invoice readability read, the current invoice's vendor org, the billing event's
-    // invoice and the submission. The Decide-lane subject read of sprk_invoice (sprk_invoiceid,sprk_highpriority) matches none of them.
+    // The four D-176 reads, by path prefix: the earlier-invoice readability read, the current invoice's submissions (its vendor org,
+    // UAC review F4), the billing event's invoice and the tracking-number submission read (SubmissionRead covers both submission reads).
+    // The Decide-lane subject read of sprk_invoice (sprk_invoiceid,sprk_highpriority) matches none of them.
     private const string EarlierInvoiceRead = "sprk_invoices?$select=sprk_invoiceid&";
-    private const string CurrentInvoiceRead = "sprk_invoices?$select=sprk_invoiceid,_sprk_vendororg_value&";
+    private const string InvoiceVendorOrgRead = "sprk_invoices?$select=sprk_invoiceid,_sprk_vendororg_value&";
+    private const string CurrentSubmissionRead = "sprk_invoicesubmissions?$select=_sprk_invoice_value,_sprk_vendororg_value&";
+    private const string TrackingSubmissionRead = "sprk_invoicesubmissions?$select=sprk_trackingnumber,";
     private const string BillingEventRead = "sprk_billingevents?";
     private const string SubmissionRead = "sprk_invoicesubmissions?";
+
+    /// <summary>D-176 / UAC review F4: a current invoice and its one submission (the firm its priors were read from, and the vendor org
+    /// a number-only Duplicate is resolved in). The submission's readers default to the invoice's.</summary>
+    private static Guid CurrentInvoice(World world, Guid[] readers, Guid vendorOrg, Guid[]? submissionReaders = null)
+    {
+        var invoice = world.Invoice(readers, vendorOrg);
+        world.Submission(submissionReaders ?? readers, vendorOrg, $"CUR-{invoice:N}", invoice);
+        return invoice;
+    }
 
     /// <summary>A visible Duplicate's evidence as ebilling's mapper writes it (BillingFindingSignalMapper, work/ebilling-r1): the reason-set
     /// fingerprint (no detail), the reason with its rendered sentence, the current invoice's number, and the duplicateOf references.</summary>
@@ -1185,7 +1198,7 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
     {
         var world = new World();
         var m = world.Matter(readers: [Alice]);
-        var current = world.Invoice([Alice], VendorOrg);
+        var current = CurrentInvoice(world, [Alice], VendorOrg);
         var readable = world.Invoice([Alice], VendorOrg);
         var unreadable = world.Invoice([Bob], VendorOrg);
         world.Submission([Alice], VendorOrg, "N-1", readable);
@@ -1205,7 +1218,137 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         ShouldWithholdTheEarlierInvoice(body, signal["N-4"], "N-4"); // two submissions: ambiguous
         ShouldWithholdTheEarlierInvoice(body, signal["N-5"], "N-5"); // a submission Alice cannot read
         ShouldWithholdTheEarlierInvoice(body, onMatter, "N-1");
-        world.Requests.Count(r => r.StartsWith(SubmissionRead, StringComparison.Ordinal)).Should().Be(1, "one submission read per vendor org");
+        world.Requests.Count(r => r.StartsWith(TrackingSubmissionRead, StringComparison.Ordinal)).Should().Be(1, "one submission read per vendor org");
+        world.Requests.Count(r => r.StartsWith(CurrentSubmissionRead, StringComparison.Ordinal)).Should().Be(1, "one read of the current invoices' submissions");
+        world.Requests.Should().NotContain(r => r.StartsWith(InvoiceVendorOrgRead, StringComparison.Ordinal), "the invoice's own vendor org is not read");
+    }
+
+    // UAC review F4 (option b, agreed with ontology): the vendor org a number-only Duplicate is resolved in is the current invoice's
+    // SUBMISSION's, read as the caller, never the invoice's own sprk_vendororg (which a writer of the invoice can change).
+
+    [Fact]
+    public async Task D176_F4_RePointingTheCurrentInvoicesVendorOrg_DoesNotChangeTheOutcome()
+    {
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        // Both current invoices were submitted by VendorOrg's firm, then re-pointed to OtherVendorOrg on the invoice row.
+        var leak = world.Invoice([Alice], OtherVendorOrg);
+        world.Submission([Alice], VendorOrg, "CUR-LEAK", leak);
+        var kept = world.Invoice([Alice], OtherVendorOrg);
+        world.Submission([Alice], VendorOrg, "CUR-KEPT", kept);
+        // N-7: unreadable in the submission's firm, readable in the firm the invoice was re-pointed to.
+        world.Submission([Alice], VendorOrg, "N-7", world.Invoice([Bob], VendorOrg));
+        world.Submission([Alice], OtherVendorOrg, "N-7", world.Invoice([Alice], OtherVendorOrg));
+        // N-8: readable in the submission's firm, absent from the other.
+        world.Submission([Alice], VendorOrg, "N-8", world.Invoice([Alice], VendorOrg));
+        var mustNotLeak = BillingSignal(world, m, (NotCoreType, leak), DuplicateEvidence(null, "N-7"));
+        var mustShow = BillingSignal(world, m, (NotCoreType, kept), DuplicateEvidence(null, "N-8"));
+        // The billing-event subject path feeds the same submission read: the event's invoice, then that invoice's submission.
+        var lineOfLeak = BillingSignal(world, m, (BillingEventType, world.BillingEvent([Alice], leak)), DuplicateEvidence(null, "N-7"));
+        var lineOfKept = BillingSignal(world, m, (BillingEventType, world.BillingEvent([Alice], kept)), DuplicateEvidence(null, "N-8"));
+
+        var body = await OkAsync(world, Alice);
+        ShouldWithholdTheEarlierInvoice(body, mustNotLeak, "N-7");
+        ShouldKeepTheEarlierInvoice(body, mustShow, storedLines: 4);
+        ShouldWithholdTheEarlierInvoice(body, lineOfLeak, "N-7");
+        ShouldKeepTheEarlierInvoice(body, lineOfKept, storedLines: 4);
+        world.Requests.Count(r => r.StartsWith(CurrentSubmissionRead, StringComparison.Ordinal)).Should().Be(1);
+        world.Requests.Should().NotContain(r => r.StartsWith(InvoiceVendorOrgRead, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task D176_F4_ACurrentInvoiceWithNoSubmissionTheCallerReads_IsWithheld_EvenWhenTheCallerReadsTheInvoice()
+    {
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        world.Submission([Alice], VendorOrg, "N-1", world.Invoice([Alice], VendorOrg));
+        var noSubmission = world.Invoice([Alice], VendorOrg);
+        // Case 2: Alice reads the invoice but not its submission.
+        var submissionUnreadable = CurrentInvoice(world, [Alice], VendorOrg, submissionReaders: [Bob]);
+        var control = CurrentInvoice(world, [Alice], VendorOrg);
+        var none = BillingSignal(world, m, (NotCoreType, noSubmission), DuplicateEvidence(null, "N-1"));
+        var unreadable = BillingSignal(world, m, (NotCoreType, submissionUnreadable), DuplicateEvidence(null, "N-1"));
+        var shown = BillingSignal(world, m, (NotCoreType, control), DuplicateEvidence(null, "N-1"));
+        _factory.Logs.Warnings.Clear();
+
+        var body = await OkAsync(world, Alice);
+        ShouldWithholdTheEarlierInvoice(body, none, "N-1");
+        ShouldWithholdTheEarlierInvoice(body, unreadable, "N-1");
+        ShouldKeepTheEarlierInvoice(body, shown, storedLines: 4);
+        _factory.Logs.Warnings.Should().NotContain(w => w.Contains("Duplicate earlier-invoice check", StringComparison.Ordinal),
+            "a submission the caller cannot read is a verdict, not a fault");
+    }
+
+    [Fact]
+    public async Task D176_F4_WhenTheCallerHasNoReadOnTheSubmissionTable_ANumberOnlyDuplicateIsWithheld_AndAnIdDuplicateIsUnaffected()
+    {
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        var current = CurrentInvoice(world, [Alice], VendorOrg);
+        var earlier = world.Invoice([Alice], VendorOrg);
+        world.Submission([Alice], VendorOrg, "N-1", earlier);
+        var byNumber = BillingSignal(world, m, (NotCoreType, current), DuplicateEvidence(null, "N-1"));
+        var byId = BillingSignal(world, m, (NotCoreType, current), DuplicateEvidence(earlier));
+        world.TableDenied[Alice] = ["sprk_invoicesubmission"];
+
+        var body = await OkAsync(world, Alice);
+        ShouldWithholdTheEarlierInvoice(body, byNumber, "N-1");
+        ShouldKeepTheEarlierInvoice(body, byId, storedLines: 5);
+    }
+
+    [Fact]
+    public async Task D176_F4_SubmissionsThatDisagreeOnTheVendorOrg_AreWithheld_NeverPicked_AndOnesThatAgreeAreShown()
+    {
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        world.Submission([Alice], VendorOrg, "N-1", world.Invoice([Alice], VendorOrg));
+        world.Submission([Alice], OtherVendorOrg, "N-1", world.Invoice([Alice], OtherVendorOrg));
+        var differing = world.Invoice([Alice], VendorOrg);
+        world.Submission([Alice], VendorOrg, "CUR-D1", differing);
+        world.Submission([Alice], OtherVendorOrg, "CUR-D2", differing);
+        var agreeing = world.Invoice([Alice], VendorOrg);
+        world.Submission([Alice], VendorOrg, "CUR-A1", agreeing);
+        world.Submission([Alice], VendorOrg, "CUR-A2", agreeing);
+        var noOrg = world.Invoice([Alice], VendorOrg);
+        world.Submission([Alice], VendorOrg, "CUR-N1", noOrg);
+        world.Record("sprk_invoicesubmission", [Alice], new()
+        {
+            ["_sprk_vendororg_value"] = null, ["sprk_trackingnumber"] = "CUR-N2", ["_sprk_invoice_value"] = noOrg,
+        });
+        var s1 = BillingSignal(world, m, (NotCoreType, differing), DuplicateEvidence(null, "N-1"));
+        var s2 = BillingSignal(world, m, (NotCoreType, agreeing), DuplicateEvidence(null, "N-1"));
+        var s3 = BillingSignal(world, m, (NotCoreType, noOrg), DuplicateEvidence(null, "N-1"));
+
+        var body = await OkAsync(world, Alice);
+        ShouldWithholdTheEarlierInvoice(body, s1, "N-1");
+        ShouldKeepTheEarlierInvoice(body, s2, storedLines: 4);
+        ShouldWithholdTheEarlierInvoice(body, s3, "N-1");
+    }
+
+    [Theory]
+    [InlineData("500")]
+    [InlineData("401")]
+    [InlineData("unparseable")]
+    [InlineData("throw")]
+    public async Task D176_F4_WhenTheCurrentSubmissionReadFaults_NoDuplicateIsShown_AndNoOtherRowChanges(string fault)
+    {
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        var current = CurrentInvoice(world, [Alice], VendorOrg);
+        var earlier = world.Invoice([Alice], VendorOrg);
+        world.Submission([Alice], VendorOrg, EarlierNumber, earlier);
+        var byNumber = BillingSignal(world, m, (NotCoreType, current), DuplicateEvidence(null));
+        var byId = BillingSignal(world, m, (NotCoreType, current), DuplicateEvidence(earlier));
+        var plain = world.Signal(Decide, core: (MatterType, m), sentence: "The budget is over by 10%.");
+        world.PathFaults[CurrentSubmissionRead] = fault;
+        _factory.Logs.Warnings.Clear();
+
+        var body = await OkAsync(world, Alice);
+        Ids(body).Should().BeEquivalentTo([byNumber, byId, plain]);
+        ShouldWithholdTheEarlierInvoice(body, byNumber, EarlierNumber);
+        ShouldWithholdTheEarlierInvoice(body, byId, earlier.ToString("D"));
+        Item(body, plain).GetProperty("sentence").GetString().Should().Be("The budget is over by 10%.");
+        _factory.Logs.Warnings.Should().Contain(w => w.Contains("the caller's read of sprk_invoicesubmission", StringComparison.Ordinal));
     }
 
     [Theory]
@@ -1271,7 +1414,7 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         EvidenceOf(body, billing).Single(l => RefOf(l) == "duplicate_invoice_number|Flag").TryGetProperty("withheld", out _).Should().BeFalse();
         Item(body, plain).GetProperty("sentence").GetString().Should().Be("The budget is over by 10%.");
         world.Requests.Should().NotContain(r => r.StartsWith(EarlierInvoiceRead, StringComparison.Ordinal)
-            || r.StartsWith(CurrentInvoiceRead, StringComparison.Ordinal)
+            || r.StartsWith(InvoiceVendorOrgRead, StringComparison.Ordinal)
             || r.StartsWith(SubmissionRead, StringComparison.Ordinal)
             || r.StartsWith(BillingEventRead, StringComparison.Ordinal));
     }
@@ -1326,11 +1469,11 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
             signals.Add(BillingSignal(world, m, (NotCoreType, current), DuplicateEvidence(world.Invoice([Alice], VendorOrg))));
 
             var org = i % 2 == 0 ? VendorOrg : OtherVendorOrg;
-            var currentInOrg = world.Invoice([Alice], org);
+            var currentInOrg = CurrentInvoice(world, [Alice], org);
             world.Submission([Alice], org, $"A-{i}", world.Invoice([Alice], org));
             signals.Add(BillingSignal(world, m, (NotCoreType, currentInOrg), DuplicateEvidence(null, $"A-{i}")));
 
-            var lineInvoice = world.Invoice([Alice], VendorOrg);
+            var lineInvoice = CurrentInvoice(world, [Alice], VendorOrg);
             world.Submission([Alice], VendorOrg, $"B-{i}", world.Invoice([Alice], VendorOrg));
             signals.Add(BillingSignal(world, m, (BillingEventType, world.BillingEvent([Alice], lineInvoice)), DuplicateEvidence(null, $"B-{i}")));
         }
@@ -1342,8 +1485,8 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         }
 
         world.Requests.Count(r => r.StartsWith(BillingEventRead, StringComparison.Ordinal)).Should().Be(1);
-        world.Requests.Count(r => r.StartsWith(CurrentInvoiceRead, StringComparison.Ordinal)).Should().Be(1);
-        world.Requests.Count(r => r.StartsWith(SubmissionRead, StringComparison.Ordinal)).Should().Be(1, "two vendor orgs, one submission read");
+        world.Requests.Count(r => r.StartsWith(CurrentSubmissionRead, StringComparison.Ordinal)).Should().Be(1);
+        world.Requests.Count(r => r.StartsWith(TrackingSubmissionRead, StringComparison.Ordinal)).Should().Be(1, "two vendor orgs, one submission read");
         world.Requests.Count(r => r.StartsWith(EarlierInvoiceRead, StringComparison.Ordinal)).Should().Be(1);
 
         // More than 200 earlier invoices: In lists of at most 200 ids.
@@ -2157,6 +2300,19 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
                 // D-176: like Dataverse, evaluate the tracking-number In list (a JSON array, text compared without regard to case) and,
                 // when present, the vendor-org In list. A doubled-quote literal would be a 400 on Dataverse, so it is a 400 here.
                 var odata = Uri.UnescapeDataString(path[(path.IndexOf("$filter=", StringComparison.Ordinal) + 8)..]);
+                var byInvoice = Regex.Match(odata, @"^Microsoft\.Dynamics\.CRM\.In\(PropertyName='sprk_invoice',PropertyValues=\[([^\]]*)\]\)$");
+                if (byInvoice.Success)
+                {
+                    // UAC review F4: a current invoice's submissions, by the LOGICAL name of their invoice lookup.
+                    var invoiceIds = Regex.Matches(byInvoice.Groups[1].Value, "'([0-9a-f-]{36})'").Select(m => Guid.Parse(m.Groups[1].Value)).ToHashSet();
+                    var picked = path[(path.IndexOf("$select=", StringComparison.Ordinal) + 8)..path.IndexOf("&$filter", StringComparison.Ordinal)].Split(',');
+                    var ofInvoices = Records.Where(r => r.Value.Table == table && r.Value.Readers.Contains(me2))
+                        .Where(r => r.Value.Columns.GetValueOrDefault("_sprk_invoice_value") is Guid g && invoiceIds.Contains(g))
+                        .Select(r => picked.ToDictionary(c => c, c => c == $"{table}id" ? r.Key : r.Value.Columns.GetValueOrDefault(c)))
+                        .ToList();
+                    return DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new { value = ofInvoices }));
+                }
+
                 if (odata.Contains("''", StringComparison.Ordinal))
                     return DataverseUserResponse.Fail(400, DataverseUserClientErrorCodes.ServiceError, "Invalid JSON. A comma character ',' was expected in scope 'Array'.");
                 var marker = "In(PropertyName='sprk_trackingnumber',PropertyValues=";
