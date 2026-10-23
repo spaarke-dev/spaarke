@@ -215,6 +215,11 @@ public static class DecisionPlanEndpoints
             }
         }
 
+        // Task 161 (D-180): a matter with no active budget has nothing to revise, so Create budget takes Revise budget's place in the
+        // plan. Read as the caller; the commit route applies the same substitution (SignalCoreRecordAccess), so the two always agree.
+        // A count that cannot be read leaves Revise budget offered and never fails this read.
+        plan = await signalAccess.WithCreateBudgetWhenNoneAsync(plan, decision, ct);
+
         // "How this was determined" (task 026). A body that cannot be described is shown without the description, never
         // as a guess; it does not stop the decision from being taken.
         var described = await describer.DescribeAsync(resolution.RuleBodyJson, ct);

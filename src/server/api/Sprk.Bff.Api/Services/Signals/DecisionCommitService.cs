@@ -953,7 +953,8 @@ public sealed class DecisionCommitService
         }
 
         var finishing = existingRecord is not null && resume is null;
-        var prepared = await PrepareAsync(review, rows, lanes, reviewStart, finishing ? existingRecord!.Id : null, ct).ConfigureAwait(false);
+        var createBudgetLanded = (resume?.Steps ?? []).Any(s => s.Key == $"action:{ResolvedDecisionPlan.CreateBudgetCode}" && s.Status == nameof(DecisionActionStatus.Done));
+        var prepared = await PrepareAsync(review, rows, lanes, reviewStart, finishing ? existingRecord!.Id : null, createBudgetLanded, ct).ConfigureAwait(false);
         if (prepared.Refusal is { } refusal)
             return refusal with { ReviewId = reviewId };
         var p = prepared.Ready!;
@@ -1227,7 +1228,7 @@ public sealed class DecisionCommitService
 
     private async Task<(DecisionCommitResult? Refusal, Prepared? Ready)> PrepareAsync(
         DecisionReview review, IReadOnlyList<SignalRow> rows, IReadOnlyDictionary<Guid, SignalAccessDecision> access,
-        DateTimeOffset reviewStart, Guid? linkedRecord, CancellationToken ct)
+        DateTimeOffset reviewStart, Guid? linkedRecord, bool createBudgetLanded, CancellationToken ct)
     {
         static (DecisionCommitResult?, Prepared?) No(string reason, string detail, string? action = null, DecisionCommitStatus status = DecisionCommitStatus.Refused) =>
             (new DecisionCommitResult { Status = status, ReasonCode = reason, Detail = detail, ActionCode = action }, null);
@@ -1304,6 +1305,18 @@ public sealed class DecisionCommitService
             // the read, the plan it was matched against is the one without Mark complete.
             plan = plan.WithoutMarkComplete();
         }
+
+        // Task 161 (D-180, D-17): a matter with no active budget is offered Create budget in place of Revise budget; the plan route
+        // applies the same substitution (SignalCoreRecordAccess.WithCreateBudgetWhenNoneAsync), recomputed here and never trusted from
+        // the client. A review that names the other action (a budget was created meanwhile) falls into the actions-mismatch refusal
+        // below, so one action is never silently converted into the other. Exception: a review whose Create budget step already
+        // landed (a resume of a failed commit, or finishing a stored record) now sees a budget, which is the step's own effect, so it
+        // keeps the plan it was taken under; nothing is written on either path for that step.
+        plan = (linkedRecord is not null || createBudgetLanded)
+            && given.Any(a => a?.Code == ResolvedDecisionPlan.CreateBudgetCode)
+            && given.All(a => a?.Code != ResolvedDecisionPlan.ReviseBudgetCode)
+                ? plan.WithCreateBudgetInsteadOfRevise()
+                : await _access.WithCreateBudgetWhenNoneAsync(plan, access[primary.Id], ct).ConfigureAwait(false);
 
         // Every offered action exactly once, nothing else. An unknown code is refused, never defaulted (C-3).
         foreach (var action in given)

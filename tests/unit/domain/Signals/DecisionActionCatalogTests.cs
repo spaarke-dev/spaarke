@@ -14,6 +14,7 @@ using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Ontology;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using Sprk.Bff.Api.Telemetry;
@@ -55,7 +56,7 @@ public class DecisionActionCatalogTests
         actions.Select(a => a.Label).Should().Equal("Send budget inquiry", "Revise budget", "Approve variance");
         actions.Should().OnlyContain(a => a.RecordClass == DecisionRecordClass.Judgement);
         actions.Should().OnlyContain(a => a.Parameters.Count > 0 && a.EffectLines.Count > 0);
-        actions.Single(a => a.Code == "approve-variance").Excludes.Should().Equal("revise-budget");
+        actions.Single(a => a.Code == "approve-variance").Excludes.Should().Equal("revise-budget", "create-budget");
         resolution.Plan.NextSteps.Should().BeEmpty();
     }
 
@@ -155,7 +156,7 @@ public class DecisionActionCatalogTests
         DecisionActionCatalog.FirstConflict(["send-budget-inquiry", "revise-budget"]).Should().BeNull();
         DecisionActionCatalog.FirstConflict(["send-budget-inquiry", "approve-variance"]).Should().BeNull();
         plan.Actions.Single(a => a.Code == "revise-budget").Excludes.Should().Equal("approve-variance");
-        plan.Actions.Single(a => a.Code == "approve-variance").Excludes.Should().Equal("revise-budget");
+        plan.Actions.Single(a => a.Code == "approve-variance").Excludes.Should().Equal("revise-budget", "create-budget");
     }
 
     [Fact]
@@ -238,7 +239,7 @@ public class DecisionActionCatalogTests
     public void CatalogCodesAreUnique_AndExactlyTheStatedSet()
     {
         DecisionActionCatalog.All.Select(a => a.Code).Should().BeEquivalentTo(
-            "send-budget-inquiry", "revise-budget", "approve-variance",
+            "send-budget-inquiry", "revise-budget", "create-budget", "approve-variance",
             "mark-complete", "reschedule", "reassign", "send-reminder", "extend-response-date", "record-the-response",
             "add-todo", "create-event", "send-email", "assign-work");
     }
@@ -283,6 +284,10 @@ public class DecisionActionCatalogTests
     [InlineData("""{"actions":["add-todo"]}""", DecisionLane.Decide, DecisionPlanRefusalReason.ActionNotAllowed)]
     [InlineData("""{"actions":["send-budget-inquiry"],"nextSteps":["revise-budget"]}""", DecisionLane.Decide, DecisionPlanRefusalReason.ActionNotAllowed)]
     [InlineData("""{"actions":["revise-budget","revise-budget"]}""", DecisionLane.Decide, DecisionPlanRefusalReason.DuplicateAction)]
+    // Task 161 (D-180): create-budget is never authored; a stored plan naming it, as an action or a Next step, is refused whole.
+    [InlineData("""{"actions":["create-budget"]}""", DecisionLane.Decide, DecisionPlanRefusalReason.ActionNotAllowed)]
+    [InlineData("""{"actions":["send-budget-inquiry","create-budget","approve-variance"]}""", DecisionLane.Decide, DecisionPlanRefusalReason.ActionNotAllowed)]
+    [InlineData("""{"actions":["send-budget-inquiry"],"nextSteps":["create-budget"]}""", DecisionLane.Decide, DecisionPlanRefusalReason.ActionNotAllowed)]
     [InlineData("""{"actions":["assign-work"],"nextSteps":["assign-work"]}""", DecisionLane.Decide, DecisionPlanRefusalReason.DuplicateAction)]
     [InlineData("""{"actions":[]}""", DecisionLane.Decide, DecisionPlanRefusalReason.PlanMissing)]
     [InlineData("", DecisionLane.Decide, DecisionPlanRefusalReason.PlanMissing)]
@@ -672,7 +677,7 @@ public class DecisionActionCatalogTests
         body.Actions.Select(a => a.Code).Should().Equal("send-budget-inquiry", "revise-budget", "approve-variance");
         body.Actions.Select(a => a.IsRecommended).Should().Equal(true, false, false);
         body.Actions.Should().OnlyContain(a => a.RecordClass == "Judgement");
-        body.Actions.Single(a => a.Code == "approve-variance").Excludes.Should().Equal("revise-budget");
+        body.Actions.Single(a => a.Code == "approve-variance").Excludes.Should().Equal("revise-budget", "create-budget");
         body.DismissalReasons.Should().HaveCount(6);
         body.RuleDescription.Should().BeNull("a version with no describable rule body is served without a description, never a guess");
     }
@@ -738,6 +743,157 @@ public class DecisionActionCatalogTests
         var result = await DecisionPlanEndpoints.GetDecisionPlanAsync(SignalId, new DefaultHttpContext(), access, plans, NoRuleDescriber(), CancellationToken.None);
 
         result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(422);
+    }
+
+    // =================================================================================================
+    // Create budget (task 161, D-180): revise-budget on a matter with no active budget
+    // =================================================================================================
+
+    [Fact]
+    public void CreateBudget_IsReviseBudgetsTwin_WithAmountAndReasonOnly_AndExcludesApproveVariance_D180()
+    {
+        DecisionActionCatalog.TryGet("create-budget", out var create).Should().BeTrue();
+        DecisionActionCatalog.TryGet("revise-budget", out var revise).Should().BeTrue();
+
+        create.Label.Should().Be("Create budget");
+        create.PlanLane.Should().Be(revise.PlanLane);
+        create.WorkType.Should().Be(revise.WorkType);
+        create.RecordClass.Should().Be(revise.RecordClass);
+        create.ResolvesSignal.Should().Be(revise.ResolvesSignal);
+        create.Gate.Should().Be(revise.Gate);
+        create.IsNextStep.Should().BeFalse();
+        create.SubstitutionOnly.Should().BeTrue();
+        revise.SubstitutionOnly.Should().BeFalse("must-not-fire: only create-budget is substitution-only");
+        create.Parameters.Select(p => (p.Code, p.Kind, p.Required)).Should().Equal(
+            ("amount", DecisionParameterKind.Money, true), ("reason", DecisionParameterKind.TextArea, true));
+        create.Excludes.Should().Equal("approve-variance");
+        DecisionActionCatalog.FirstConflict(["create-budget", "approve-variance"]).Should().NotBeNull("the exclusion is mutual");
+        DecisionActionCatalog.FirstConflict(["approve-variance", "create-budget"]).Should().NotBeNull();
+        DecisionActionCatalog.All.Where(a => a.SubstitutionOnly).Select(a => a.Code).Should().Equal("create-budget");
+    }
+
+    [Fact]
+    public void TheAuthoringCatalog_NeverListsCreateBudget_NorNamesItAsAnExclusion_D180()
+    {
+        var decide = OntologyAdminAuthoringService.LaneCatalog(DecisionLane.Decide);
+
+        decide.Actions.Select(a => a.Code).Should().NotContain("create-budget");
+        decide.NextSteps.Select(a => a.Code).Should().NotContain("create-budget");
+        decide.Actions.Single(a => a.Code == "approve-variance").Excludes.Should().Equal("revise-budget");
+        decide.Actions.Single(a => a.Code == "revise-budget").Excludes.Should().Equal("approve-variance");
+    }
+
+    [Fact]
+    public void WithCreateBudgetInsteadOfRevise_ReplacesInPlace_KeepingThePositionAndEveryOtherAction_D180()
+    {
+        var plan = DecisionPlanService.Resolve(SeededPlan, DecisionLane.Decide).Plan!;
+
+        var substituted = plan.WithCreateBudgetInsteadOfRevise();
+
+        substituted.Actions.Select(a => a.Code).Should().Equal("send-budget-inquiry", "create-budget", "approve-variance");
+        substituted.NextSteps.Should().BeSameAs(plan.NextSteps);
+        substituted.DismissalReasons.Should().BeSameAs(plan.DismissalReasons);
+        plan.Actions.Select(a => a.Code).Should().Equal("send-budget-inquiry", "revise-budget", "approve-variance"); // the original is not changed
+
+        var first = DecisionPlanService.Resolve("""{"actions":["revise-budget","approve-variance"]}""", DecisionLane.Decide).Plan!;
+        // The recommended action is the first one, so a substituted first action stays the recommendation.
+        first.WithCreateBudgetInsteadOfRevise().Actions.Select(a => a.Code).Should().Equal("create-budget", "approve-variance");
+
+        var without = DecisionPlanService.Resolve("""{"actions":["send-budget-inquiry"]}""", DecisionLane.Decide).Plan!;
+        without.WithCreateBudgetInsteadOfRevise().Should().BeSameAs(without, "a plan with no Revise budget is returned as it is");
+    }
+
+    private const string ReviseThenVariance = """{"actions":["send-budget-inquiry","revise-budget","approve-variance"],"nextSteps":[]}""";
+
+    /// <summary>The caller's reads: the Signal, the matter, and the matter's active budgets (<paramref name="budgets"/>, or a throw).</summary>
+    private static (IDataverseUserClient Users, Mock<IDataverseUserClient> Mock) UsersWithBudgets(
+        DataverseUserResponse? budgets, Exception? budgetsThrow = null)
+    {
+        var users = new Mock<IDataverseUserClient>();
+        users.Setup(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_signals(", StringComparison.Ordinal)), It.IsAny<CancellationToken>())).ReturnsAsync(SignalRow());
+        users.Setup(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_matters(", StringComparison.Ordinal)), It.IsAny<CancellationToken>())).ReturnsAsync(Ok(new { createdon = "x" }));
+        users.Setup(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_projects(", StringComparison.Ordinal)), It.IsAny<CancellationToken>())).ReturnsAsync(Ok(new { createdon = "x" }));
+        var budgetRead = users.Setup(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_budgets?", StringComparison.Ordinal)), It.IsAny<CancellationToken>()));
+        if (budgetsThrow is not null) budgetRead.ThrowsAsync(budgetsThrow);
+        else budgetRead.ReturnsAsync(budgets!);
+        return (users.Object, users);
+    }
+
+    private static DataverseUserResponse Budgets(int count) =>
+        Ok(new { value = Enumerable.Range(0, count).Select(_ => new { sprk_budgetid = Guid.NewGuid() }).ToArray() });
+
+    private static async Task<DecisionPlanResponse> PlanRouteAsync(SignalCoreRecordAccess access, string plan = ReviseThenVariance)
+    {
+        var plans = new DecisionPlanService(EntitiesReturningPlan(plan), NullLogger<DecisionPlanService>.Instance);
+        var result = await DecisionPlanEndpoints.GetDecisionPlanAsync(SignalId, new DefaultHttpContext(), access, plans, NoRuleDescriber(), CancellationToken.None);
+        return result.Should().BeOfType<Ok<DecisionPlanResponse>>().Subject.Value!;
+    }
+
+    private static void BudgetsReadTimes(Mock<IDataverseUserClient> mock, Times times) =>
+        mock.Verify(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_budgets?", StringComparison.Ordinal)), It.IsAny<CancellationToken>()), times);
+
+    [Fact]
+    public async Task ThePlanRoute_OffersCreateBudget_InPlaceOfReviseBudget_WhenTheMatterHasNoActiveBudget_D180()
+    {
+        var (users, mock) = UsersWithBudgets(Budgets(0));
+
+        var body = await PlanRouteAsync(Access(users));
+
+        body.Actions.Select(a => a.Code).Should().Equal("send-budget-inquiry", "create-budget", "approve-variance");
+        body.Actions.Select(a => a.IsRecommended).Should().Equal(true, false, false);
+        var create = body.Actions.Single(a => a.Code == "create-budget");
+        create.Label.Should().Be("Create budget");
+        create.Parameters.Select(p => p.Code).Should().Equal("amount", "reason");
+        create.Excludes.Should().Equal("approve-variance");
+        mock.Verify(u => u.GetAsync(
+            It.Is<string>(p => p.StartsWith("sprk_budgets?", StringComparison.Ordinal)
+                && p.Contains($"_sprk_matter_value eq {CoreId:D}", StringComparison.Ordinal) && p.Contains("statecode eq 0", StringComparison.Ordinal)),
+            It.IsAny<CancellationToken>()), Times.Once, "one read, as the caller, of the ACTIVE budgets of the core matter");
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(3)]
+    public async Task ThePlanRoute_StillOffersReviseBudget_WhenTheMatterHasAnActiveBudget_MustNotFire_D180(int budgets)
+    {
+        var (users, _) = UsersWithBudgets(Budgets(budgets));
+
+        var body = await PlanRouteAsync(Access(users));
+
+        body.Actions.Select(a => a.Code).Should().Equal("send-budget-inquiry", "revise-budget", "approve-variance");
+    }
+
+    [Fact]
+    public async Task ThePlanRoute_OffersReviseBudget_AndDoesNotFail_WhenTheBudgetsCannotBeCounted_D180()
+    {
+        foreach (var (budgets, thrown) in new (DataverseUserResponse?, Exception?)[]
+        {
+            (Fail(500, DataverseUserClientErrorCodes.ServiceError), null),
+            (Fail(403, DataverseUserClientErrorCodes.AccessDenied), null),
+            (Ok(new { createdon = "not a list" }), null),
+            (null, new TimeoutException("no answer")),
+        })
+        {
+            var (users, _) = UsersWithBudgets(budgets, thrown);
+
+            var body = await PlanRouteAsync(Access(users));
+
+            body.Actions.Select(a => a.Code).Should().Equal("send-budget-inquiry", "revise-budget", "approve-variance");
+        }
+    }
+
+    [Fact]
+    public async Task ThePlanRoute_ReadsNoBudgets_ForAPlanWithoutReviseBudget_OrACoreThatIsNotAMatter_D180()
+    {
+        var (withoutRevise, mockA) = UsersWithBudgets(Budgets(0));
+        var body = await PlanRouteAsync(Access(withoutRevise), """{"actions":["send-budget-inquiry","approve-variance"]}""");
+        body.Actions.Select(a => a.Code).Should().Equal("send-budget-inquiry", "approve-variance");
+        BudgetsReadTimes(mockA, Times.Never());
+
+        var (project, mockB) = UsersWithBudgets(Budgets(0));
+        var projectBody = await PlanRouteAsync(Access(project, coreTable: "sprk_project", coreSet: "sprk_projects"));
+        projectBody.Actions.Select(a => a.Code).Should().Equal("send-budget-inquiry", "revise-budget", "approve-variance");
+        BudgetsReadTimes(mockB, Times.Never());
     }
 
     // =================================================================================================

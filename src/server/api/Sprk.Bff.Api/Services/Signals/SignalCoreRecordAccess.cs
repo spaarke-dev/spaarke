@@ -64,9 +64,13 @@ internal enum InquiryOutcomeTodoCheck
 /// To Do exactly as the commit route does (<see cref="SignalCoreRecordAccess.CheckSubjectTodoInquiryAsync"/>, pass 2 F1).</param>
 /// <param name="TodoMatterId">Do lane, To Do subject only, from the same "mine" read: the To Do's matter
 /// (<c>_sprk_regardingmatter_value</c>), for the matter fallback when the notes carry no usable hint.</param>
+/// <param name="CoreTable">The core record's table (<c>sprk_matter</c>, <c>sprk_project</c>, ...), resolved from the catalog row the
+/// Signal's core-record type names; null for a no-core Signal. Carried so the plan and commit routes can ask the context questions
+/// that depend on the core type (task 161: does the matter have a budget) without resolving it again.</param>
 public sealed record SignalAccessDecision(
     SignalAccessOutcome Outcome, DecisionLane? Lane, Guid? PolicyVersionId, Guid? CoreTypeId = null, Guid? CoreId = null,
-    string? SubjectTable = null, Guid? SubjectId = null, Guid? CallerContactId = null, string? TodoNotes = null, Guid? TodoMatterId = null)
+    string? SubjectTable = null, Guid? SubjectId = null, Guid? CallerContactId = null, string? TodoNotes = null, Guid? TodoMatterId = null,
+    string? CoreTable = null)
 {
     public static readonly SignalAccessDecision NotFound = new(SignalAccessOutcome.NotFound, null, null);
     public static readonly SignalAccessDecision CallerUnresolved = new(SignalAccessOutcome.CallerUnresolved, null, null);
@@ -219,7 +223,7 @@ public sealed class SignalCoreRecordAccess
                 return await DeniedAsync(core, "core record", ct).ConfigureAwait(false);
             }
 
-            var allowed = new SignalAccessDecision(SignalAccessOutcome.Allowed, lane, policyVersionId, coreTypeId, coreId);
+            var allowed = new SignalAccessDecision(SignalAccessOutcome.Allowed, lane, policyVersionId, coreTypeId, coreId, CoreTable: logicalName);
             if (lane != DecisionLane.Do)
             {
                 return allowed;
@@ -429,6 +433,43 @@ public sealed class SignalCoreRecordAccess
         {
             _logger.LogError("Signal access: the subject To Do's inquiry check faulted ({ExceptionType}); unavailable.", ex.GetType().Name);
             return InquiryOutcomeTodoCheck.Unavailable;
+        }
+    }
+
+    /// <summary>
+    /// Task 161 (D-180): the ONE substitution both routes apply. A plan that offers Revise budget on a MATTER the caller reads as having
+    /// no ACTIVE budget (<c>sprk_budget</c> with <c>sprk_matter</c> = the core record and <c>statecode</c> 0) offers Create budget in its
+    /// place (<see cref="ResolvedDecisionPlan.WithCreateBudgetInsteadOfRevise"/>). The count is read AS THE CALLER, one request, and
+    /// only when the plan offers Revise budget and the core record is a matter. A count that cannot be read (a fault, a refusal, an
+    /// answer that is not a list) substitutes nothing and never fails the route: the existing Revise budget path stays.
+    /// </summary>
+    internal async Task<ResolvedDecisionPlan> WithCreateBudgetWhenNoneAsync(
+        ResolvedDecisionPlan plan, SignalAccessDecision decision, CancellationToken ct)
+    {
+        if (!plan.Actions.Any(a => a.Code == ResolvedDecisionPlan.ReviseBudgetCode)
+            || !string.Equals(decision.CoreTable, "sprk_matter", StringComparison.OrdinalIgnoreCase)
+            || decision.CoreId is not { } matterId || matterId == Guid.Empty)
+        {
+            return plan;
+        }
+
+        try
+        {
+            var response = await _userClient.GetAsync(
+                $"{DecisionExec.BudgetSet}?$select=sprk_budgetid&$filter=_sprk_matter_value eq {matterId:D} and statecode eq 0&$top=1", ct).ConfigureAwait(false);
+            if (!response.IsSuccess || response.Body is not { ValueKind: JsonValueKind.Object } body
+                || !body.TryGetProperty("value", out var rows) || rows.ValueKind != JsonValueKind.Array)
+            {
+                _logger.LogWarning("Signal access: the matter's active budgets could not be counted ({ErrorCode}); Revise budget is offered as it is.", response.ErrorCode);
+                return plan;
+            }
+
+            return rows.GetArrayLength() == 0 ? plan.WithCreateBudgetInsteadOfRevise() : plan;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Signal access: counting the matter's active budgets faulted ({ExceptionType}); Revise budget is offered as it is.", ex.GetType().Name);
+            return plan;
         }
     }
 
