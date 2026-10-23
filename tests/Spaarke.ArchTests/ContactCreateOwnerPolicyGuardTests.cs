@@ -1,6 +1,8 @@
 using System.Reflection;
-using System.Text;
 using System.Text.RegularExpressions;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Xunit;
 
@@ -23,8 +25,9 @@ namespace Spaarke.ArchTests;
 /// <para>Known limit: the rule matches the member's name, not its behaviour. Reflection by a computed string is not seen;
 /// the constructor of <c>ContactCreateOwner</c> is private and its factory methods are pinned below, so a new way to say "no
 /// owner" has to appear in the one file this guard reads.</para>
-/// <para>Crude by design (<see cref="SourceScan"/>), like every rule built on it: each rule has a must-fire and a
-/// must-not-fire control below. Enforced by: this guard (ArchTests, CI and the Stop hook).</para>
+/// <para>The mention rule above is a text scan (<see cref="SourceScan"/>). The ownerless-create rule below is a Roslyn scan of
+/// the syntax tree. Each rule has a must-fire and a must-not-fire control below. Enforced by: this guard (ArchTests, CI and the
+/// Stop hook).</para>
 /// </remarks>
 public class ContactCreateOwnerPolicyGuardTests
 {
@@ -142,40 +145,22 @@ public class ContactCreateOwnerPolicyGuardTests
         Assert.Matches(Declaration, declaringCode);
     }
 
-    // ── No ownerless contact create anywhere in server code (ISS-005, #1673; UAC re-check K3) ───────────────────
+    // ── No ownerless contact create anywhere in server code (ISS-005, #1673) ────────────────────────────────────
+    //
+    // The create guard parses every server file with Roslyn and reads literal VALUES from tokens (string, verbatim, raw and
+    // interpolated-string text parts), so what a literal contains - a brace, a slash pair, a comment opener - never changes
+    // how the code is divided into members. Members, lambdas and local functions are syntax nodes, not text ranges.
 
     private const string ServerRoot = "src/server/";
     private const string BffRoot = "src/server/api/Sprk.Bff.Api/";
     private const string StoreFile = BffRoot + "Infrastructure/ExternalAccess/ContactIdentityStore.cs";
     private const string InviteFile = BffRoot + "Api/ExternalAccess/ExternalInviteService.cs";
 
-    /// <summary>
-    /// A reference to the contact table in a create call: the entity-set / logical-name LITERAL, a constant named like the
-    /// entity set (<c>*ContactEntitySet</c>), or a string constant anywhere in server code that holds <c>"contact"</c> /
-    /// <c>"contacts"</c> (<paramref name="constantNames"/>, found by <see cref="ContactConstantNames"/>), possibly qualified
-    /// (<c>Type.Name</c>).
-    /// </summary>
-    private static string ContactRef(IEnumerable<string> constantNames)
-    {
-        var names = new[] { @"\w*Contacts?EntitySet" }.Concat(constantNames.Distinct().Select(Regex.Escape));
-        return "(?:" + ContactLiteral + @"|(?:[A-Za-z_]\w*\.)*(?:" + string.Join("|", names) + @")\b)";
-    }
+    /// <summary>Stands in for an interpolation hole (or a non-literal operand) whose value is not known from the syntax.</summary>
+    private const char Hole = '\u0001';
 
-    /// <summary>
-    /// The literal naming the contact table, in the forms a create call uses: <c>"contacts"</c>, an interpolated <c>$"contacts"</c>
-    /// (UAC round 3 K3), and a URL or path ending in it, interpolated or not (<c>$"{GetApiUrl()}/contacts"</c>, the style of
-    /// <c>ExternalDataService</c>; <c>".../api/data/v9.2/contacts"</c>). It must be the whole literal or END in <c>/contact(s)</c>:
-    /// <c>"contacts(" + id</c>, <c>"contacts?$select=..."</c> and <c>"sprk_contacts"</c> are not creates.
-    /// </summary>
-    private const string ContactLiteral = @"(?:\$@?|@\$?)?""(?:[^""\n]*/)?contacts?""";
-
-    /// <summary>A string constant holding the contact table: <c>const string X = "contacts";</c> or <c>static readonly string X = "contact";</c>.</summary>
-    private static readonly Regex ContactConstant = new(
-        @"\b(?:const|static\s+readonly)\s+string\s+(\w+)\s*=\s*""contacts?""\s*;", RegexOptions.Compiled | RegexOptions.CultureInvariant);
-
-    /// <summary>The names of the string constants in one file's code that hold <c>"contact"</c> or <c>"contacts"</c>.</summary>
-    internal static IReadOnlyList<string> ContactConstantNames(string code)
-        => ContactConstant.Matches(code).Select(m => m.Groups[1].Value).ToList();
+    private static readonly Regex ContactSetName = new(@"^\w*Contacts?EntitySet$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex PostMethodName = new(@"^Post\w*Async$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private enum Shape
     {
@@ -183,283 +168,324 @@ public class ContactCreateOwnerPolicyGuardTests
         WebApiCreateAsync,
 
         /// <summary>
-        /// <c>WriteAsync(HttpMethod.Post, "contacts", ...)</c>, a <c>(HttpMethod.Post, "contacts", payload)</c> request tuple or a
-        /// <c>new HttpRequestMessage(HttpMethod.Post, "contacts")</c>; the URL may be interpolated and carry a prefix
-        /// (<c>new HttpRequestMessage(HttpMethod.Post, $"{GetApiUrl()}/contacts")</c>, the style of <c>ExternalDataService</c>).
+        /// <c>HttpMethod.Post</c> next to a contacts path in one argument list or tuple: <c>WriteAsync(HttpMethod.Post, "contacts", ...)</c>,
+        /// <c>new HttpRequestMessage(HttpMethod.Post, $"{GetApiUrl()}/contacts")</c>, a <c>(HttpMethod.Post, "contacts", payload)</c> request tuple.
         /// </summary>
         HttpPost,
 
-        /// <summary>
-        /// <c>x.PostAsync(".../contacts", body)</c>, <c>PostAsJsonAsync</c> and the like: a user-context Web API client
-        /// (<c>IDataverseUserClient.PostAsync</c>) creating a contact as the caller (UAC round 3 K3).
-        /// </summary>
+        /// <summary><c>x.PostAsync(".../contacts", body)</c>, <c>PostAsJsonAsync</c> and the like (a user-context Web API client).</summary>
         UserClientPost,
 
         /// <summary>
-        /// <c>new Entity("contact")</c>, the SDK entity that <c>IGenericEntityService.CreateAsync(Entity)</c> and
-        /// <c>IOrganizationService.Create</c> take (so an <c>IGenericEntityService</c> contact create is seen where its entity is
-        /// built with a literal or a discovered constant).
+        /// <c>new Entity("contact")</c> or <c>new Entity { LogicalName = "contact" }</c>, the SDK entity that
+        /// <c>IGenericEntityService.CreateAsync(Entity)</c> and <c>IOrganizationService.Create</c> take.
         /// </summary>
         SdkEntity,
     }
 
-    /// <summary>Each shape's regex; <c>{0}</c> is the contact reference. Braces are doubled for <see cref="string.Format(string, object)"/>.</summary>
-    private static readonly (Shape Shape, string Pattern)[] ShapePatterns =
-    {
-        (Shape.WebApiCreateAsync, @"\.CreateAsync\s*\(\s*{0}"),
-        (Shape.HttpPost, @"\bHttpMethod\.Post\s*,\s*{0}"),
-        (Shape.UserClientPost, @"\.Post\w*Async\s*(?:<[^()]*>)?\s*\(\s*{0}"),
-        (Shape.SdkEntity, @"\bnew\s+(?:[A-Za-z_]\w*\.)*Entity\s*(?:\(\s*{0}|\{{\s*LogicalName\s*=\s*{0})"),
-    };
-
-    // ── Member bounds (UAC round 3 K3.1): found by BRACE MATCHING, not by an access modifier ─────────────────────
+    // ── Literal values ──────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// A member of the scanned code as the create-guard sees it: its header start (the text after the previous
-    /// <c>;</c> / <c>{</c> / <c>}</c>), its end, the enclosing type's name and the member's own name (either may be null).
+    /// The possible string values of an expression, read from its tokens: a string / verbatim / raw literal, an interpolated string
+    /// (text parts as written; a hole whose own expression has a known value is inlined, any other hole is <see cref="Hole"/>),
+    /// a <c>+</c> concatenation (a non-literal operand is a hole), both branches of <c>?:</c> and <c>??</c>, and a name that
+    /// is a discovered contact constant (<paramref name="constantNames"/>) or ends in <c>ContactEntitySet</c>. Empty when the
+    /// expression is not a string the syntax can read.
     /// </summary>
-    internal readonly record struct MemberSpan(int Start, int End, string? TypeName, string? MemberName);
-
-    /// <summary>A block whose header starts with one of these is control flow or a statement (an object initializer), not a member.</summary>
-    private static readonly Regex ControlHeader = new(
-        @"^\s*(?:if|else|for|foreach|while|do|switch|using|lock|catch|finally|try|fixed|unsafe|checked|unchecked|case|default|return|throw|yield|await|new|var|goto)\b",
-        RegexOptions.Compiled | RegexOptions.CultureInvariant);
-
-    private static readonly Regex TypeHeader = new(
-        @"\b(?:class|struct|record|interface)\s+(?:class\s+|struct\s+)?([A-Za-z_]\w*)", RegexOptions.Compiled | RegexOptions.CultureInvariant);
-
-    /// <summary>An identifier followed by its parameter list: the member's name is the first one that is not a modifier.</summary>
-    private static readonly Regex NameBeforeParameters = new(
-        @"\b([A-Za-z_]\w*)\s*(?:<[^()]*>)?\s*\(", RegexOptions.Compiled | RegexOptions.CultureInvariant);
-
-    private static readonly HashSet<string> NotAMemberName = new(StringComparer.Ordinal)
+    internal static IReadOnlyList<string> Texts(ExpressionSyntax expression, IReadOnlyCollection<string> constantNames)
     {
-        "public", "private", "protected", "internal", "static", "async", "virtual", "override", "sealed", "abstract", "extern",
-        "unsafe", "partial", "new", "readonly", "return", "await", "throw", "yield", "this", "base", "where", "when",
-    };
-
-    /// <summary>
-    /// <paramref name="code"/> with the CONTENT of every string and character literal blanked (newlines kept, length and indexes
-    /// unchanged), so a brace or semicolon inside a literal (<c>"{"</c>, <c>$"/teams({id:D})"</c>) cannot unbalance a brace match.
-    /// A regular literal ends at its line's end (line comments were already stripped by <see cref="SourceScan.CodeText"/>, which
-    /// can leave <c>"https:</c> unterminated). Crude by design: an interpolation hole that itself holds a string literal is not
-    /// followed.
-    /// </summary>
-    internal static string MaskLiterals(string code)
-    {
-        var masked = new StringBuilder(code);
-        void Blank(int from, int to)
+        switch (expression)
         {
-            for (var k = from; k < to && k < masked.Length; k++)
+            case ParenthesizedExpressionSyntax parenthesized:
+                return Texts(parenthesized.Expression, constantNames);
+
+            case LiteralExpressionSyntax literal when literal.IsKind(SyntaxKind.StringLiteralExpression):
+                return new[] { literal.Token.ValueText };
+
+            case InterpolatedStringExpressionSyntax interpolated:
             {
-                if (masked[k] is not ('\n' or '\r'))
+                IReadOnlyList<string> result = new[] { string.Empty };
+                foreach (var part in interpolated.Contents)
                 {
-                    masked[k] = ' ';
+                    IReadOnlyList<string> alternatives = part switch
+                    {
+                        InterpolatedStringTextSyntax text => new[] { text.TextToken.ValueText },
+                        InterpolationSyntax { AlignmentClause: null, FormatClause: null } hole
+                            when Texts(hole.Expression, constantNames) is { Count: > 0 } inner => inner,
+                        _ => new[] { Hole.ToString() },
+                    };
+                    result = Product(result, alternatives);
                 }
+
+                return result;
             }
-        }
 
-        var i = 0;
-        while (i < code.Length)
-        {
-            var c = code[i];
-            if (c == '"')
+            case BinaryExpressionSyntax binary when binary.IsKind(SyntaxKind.AddExpression):
             {
-                var quotes = 0;
-                while (i + quotes < code.Length && code[i + quotes] == '"')
-                {
-                    quotes++;
-                }
+                var left = Texts(binary.Left, constantNames);
+                var right = Texts(binary.Right, constantNames);
+                return left.Count == 0 && right.Count == 0
+                    ? Array.Empty<string>()
+                    : Product(left.Count > 0 ? left : new[] { Hole.ToString() }, right.Count > 0 ? right : new[] { Hole.ToString() });
+            }
 
-                if (quotes >= 3)
-                {
-                    var close = code.IndexOf(new string('"', quotes), i + quotes, StringComparison.Ordinal);
-                    var end = close < 0 ? code.Length : close + quotes;
-                    Blank(i, end);
-                    i = end;
-                    continue;
-                }
+            case BinaryExpressionSyntax coalesce when coalesce.IsKind(SyntaxKind.CoalesceExpression):
+                return Texts(coalesce.Left, constantNames).Concat(Texts(coalesce.Right, constantNames)).ToList();
 
-                var verbatim = i > 0 && (code[i - 1] == '@' || (code[i - 1] == '$' && i > 1 && code[i - 2] == '@'));
-                var j = i + 1;
-                if (verbatim)
-                {
-                    while (j < code.Length)
-                    {
-                        if (code[j] == '"')
-                        {
-                            if (j + 1 < code.Length && code[j + 1] == '"')
-                            {
-                                j += 2;
-                                continue;
-                            }
+            case ConditionalExpressionSyntax conditional:
+                return Texts(conditional.WhenTrue, constantNames).Concat(Texts(conditional.WhenFalse, constantNames)).ToList();
 
-                            break;
-                        }
+            case IdentifierNameSyntax or MemberAccessExpressionSyntax:
+                return RightmostName(expression) is { } name && (constantNames.Contains(name) || ContactSetName.IsMatch(name))
+                    ? new[] { "contacts" }
+                    : Array.Empty<string>();
 
-                        j++;
-                    }
-                }
-                else
-                {
-                    while (j < code.Length && code[j] != '\n')
-                    {
-                        if (code[j] == '\\')
-                        {
-                            j += 2;
-                            continue;
-                        }
+            default:
+                return Array.Empty<string>();
+        }
+    }
 
-                        if (code[j] == '"')
-                        {
-                            break;
-                        }
+    private static IReadOnlyList<string> Product(IReadOnlyList<string> left, IReadOnlyList<string> right)
+        => left.SelectMany(l => right.Select(r => l + r)).ToList();
 
-                        j++;
-                    }
-                }
+    /// <summary>The last identifier of a name, member access or qualified type: <c>A.B.C</c> gives <c>C</c>.</summary>
+    private static string? RightmostName(SyntaxNode? node)
+        => node switch
+        {
+            IdentifierNameSyntax identifier => identifier.Identifier.ValueText,
+            GenericNameSyntax generic => generic.Identifier.ValueText,
+            MemberAccessExpressionSyntax member => member.Name.Identifier.ValueText,
+            MemberBindingExpressionSyntax binding => binding.Name.Identifier.ValueText,
+            QualifiedNameSyntax qualified => RightmostName(qualified.Right),
+            AliasQualifiedNameSyntax alias => RightmostName(alias.Name),
+            _ => null,
+        };
 
-                var stop = Math.Min(j + 1, code.Length);
-                Blank(i, stop);
-                i = stop;
+    private static bool IsContactTable(string text)
+        => text.Equals("contact", StringComparison.OrdinalIgnoreCase) || text.Equals("contacts", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// True when the LAST path segment (before any <c>?query</c>) is <c>contacts</c>: <c>"contacts"</c>, <c>"/api/data/v9.2/contacts"</c>
+    /// and <c>"api/data/v9.2/contacts?$select=contactid"</c> are creates' targets; <c>"contacts(" + id + ")"</c>,
+    /// <c>".../contacts(id)/Microsoft.Dynamics.CRM.X"</c> and <c>"sprk_contacts"</c> are not.
+    /// </summary>
+    private static bool IsContactPath(string text)
+    {
+        var query = text.IndexOf('?', StringComparison.Ordinal);
+        var path = query >= 0 ? text[..query] : text;
+        return path[(path.LastIndexOf('/') + 1)..].TrimStart(Hole).Equals("contacts", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsContactTarget(string text) => IsContactTable(text) || IsContactPath(text);
+
+    /// <summary>
+    /// The names of the string constants in one file that hold a contact table or path: <c>const string X = "contacts";</c> (field or
+    /// local) and <c>static readonly string X = "contact";</c>. Used across all server code: a constant is followed by NAME wherever
+    /// it is referenced.
+    /// </summary>
+    internal static IReadOnlyList<string> ContactConstantNames(string code) => ContactConstantNames(Parse(code).GetRoot());
+
+    internal static IReadOnlyList<string> ContactConstantNames(SyntaxNode root)
+    {
+        var names = new List<string>();
+        foreach (var declarator in root.DescendantNodes().OfType<VariableDeclaratorSyntax>())
+        {
+            if (declarator.Parent is not VariableDeclarationSyntax declaration
+                || !IsStringType(declaration.Type)
+                || declarator.Initializer is not { } initializer)
+            {
                 continue;
             }
 
-            if (c == '\'')
+            var modifiers = declaration.Parent switch
             {
-                var j = i + 1;
-                j += j < code.Length && code[j] == '\\' ? 2 : 1;
-                while (j < code.Length && code[j] != '\'' && code[j] != '\n' && j - i < 10)
+                BaseFieldDeclarationSyntax field => field.Modifiers,
+                LocalDeclarationStatementSyntax local => local.Modifiers,
+                _ => default,
+            };
+            var isConstant = modifiers.Any(SyntaxKind.ConstKeyword)
+                || (modifiers.Any(SyntaxKind.StaticKeyword) && modifiers.Any(SyntaxKind.ReadOnlyKeyword));
+            if (isConstant && Texts(initializer.Value, Array.Empty<string>()).Any(IsContactTarget))
+            {
+                names.Add(declarator.Identifier.ValueText);
+            }
+        }
+
+        return names;
+    }
+
+    private static bool IsStringType(TypeSyntax type)
+        => type is PredefinedTypeSyntax predefined
+            ? predefined.Keyword.IsKind(SyntaxKind.StringKeyword)
+            : RightmostName(type) == "String";
+
+    // ── Create shapes ───────────────────────────────────────────────────────────────────────────────
+
+    private static bool IsHttpPost(ExpressionSyntax expression)
+        => expression is MemberAccessExpressionSyntax member
+            && member.Name.Identifier.ValueText == "Post"
+            && RightmostName(member.Expression) == "HttpMethod";
+
+    private static bool PostsToContacts(IReadOnlyList<ExpressionSyntax> arguments, IReadOnlyCollection<string> names)
+        => arguments.Any(IsHttpPost)
+            && arguments.Any(a => !IsHttpPost(a) && Texts(a, names).Any(IsContactPath));
+
+    private static string? MethodName(ExpressionSyntax expression)
+        => expression switch
+        {
+            IdentifierNameSyntax or GenericNameSyntax or MemberAccessExpressionSyntax or MemberBindingExpressionSyntax => RightmostName(expression),
+            _ => null,
+        };
+
+    /// <summary>The create shape a node is, or null. One node is at most one shape.</summary>
+    private static Shape? CreateShape(SyntaxNode node, IReadOnlyCollection<string> names)
+    {
+        switch (node)
+        {
+            case InvocationExpressionSyntax invocation:
+            {
+                var arguments = invocation.ArgumentList.Arguments.Select(a => a.Expression).ToList();
+                if (PostsToContacts(arguments, names))
                 {
-                    j++;
+                    return Shape.HttpPost;
                 }
 
-                if (j < code.Length && code[j] == '\'')
+                var method = MethodName(invocation.Expression);
+                if (method == "CreateAsync" && arguments.Any(a => Texts(a, names).Any(IsContactTarget)))
                 {
-                    Blank(i, j + 1);
-                    i = j + 1;
-                    continue;
+                    return Shape.WebApiCreateAsync;
+                }
+
+                return method is not null && PostMethodName.IsMatch(method) && arguments.Any(a => Texts(a, names).Any(IsContactPath))
+                    ? Shape.UserClientPost
+                    : null;
+            }
+
+            case BaseObjectCreationExpressionSyntax creation:
+            {
+                var arguments = creation.ArgumentList?.Arguments.Select(a => a.Expression).ToList() ?? new List<ExpressionSyntax>();
+                if (PostsToContacts(arguments, names))
+                {
+                    return Shape.HttpPost;
+                }
+
+                if (creation is ObjectCreationExpressionSyntax sdk && RightmostName(sdk.Type) == "Entity")
+                {
+                    var byConstructor = arguments.Count > 0 && Texts(arguments[0], names).Any(IsContactTable);
+                    var byInitializer = sdk.Initializer?.Expressions.OfType<AssignmentExpressionSyntax>()
+                        .Any(a => RightmostName(a.Left) == "LogicalName" && Texts(a.Right, names).Any(IsContactTable)) ?? false;
+                    return byConstructor || byInitializer ? Shape.SdkEntity : null;
+                }
+
+                return null;
+            }
+
+            case TupleExpressionSyntax tuple:
+                return PostsToContacts(tuple.Arguments.Select(a => a.Expression).ToList(), names) ? Shape.HttpPost : null;
+
+            default:
+                return null;
+        }
+    }
+
+    // ── Enclosing member and owner evidence ─────────────────────────────────────────────────────────
+
+    /// <summary>The unit of code a create is judged against: what it is, and its name (null for a lambda or a top-level statement).</summary>
+    private readonly record struct Unit(SyntaxNode Node, string Kind, string? Name);
+
+    private const string MemberKind = "member";
+    private const string LocalFunctionKind = "local function";
+    private const string LambdaKind = "lambda";
+    private const string StatementKind = "statement";
+
+    private static bool IsNestedUnit(SyntaxNode node) => node is AnonymousFunctionExpressionSyntax or LocalFunctionStatementSyntax;
+
+    /// <summary>
+    /// The unit that encloses a node: the NEAREST of a lambda or anonymous method, a local function, a method / constructor /
+    /// operator, a property or event accessor, a property (expression body or initializer), a field's variable initializer; with
+    /// none of those, the top-level statement.
+    /// </summary>
+    private static Unit EnclosingUnit(SyntaxNode node)
+    {
+        foreach (var ancestor in node.Ancestors())
+        {
+            switch (ancestor)
+            {
+                case AnonymousFunctionExpressionSyntax:
+                    return new Unit(ancestor, LambdaKind, null);
+                case LocalFunctionStatementSyntax local:
+                    return new Unit(ancestor, LocalFunctionKind, local.Identifier.ValueText);
+                case MethodDeclarationSyntax method:
+                    return new Unit(ancestor, MemberKind, method.Identifier.ValueText);
+                case ConstructorDeclarationSyntax constructor:
+                    return new Unit(ancestor, MemberKind, constructor.Identifier.ValueText);
+                case BaseMethodDeclarationSyntax other:
+                    return new Unit(other, MemberKind, null);
+                case AccessorDeclarationSyntax accessor:
+                    return new Unit(ancestor, MemberKind, accessor.Parent?.Parent switch
+                    {
+                        PropertyDeclarationSyntax property => property.Identifier.ValueText,
+                        EventDeclarationSyntax @event => @event.Identifier.ValueText,
+                        _ => null,
+                    });
+                case PropertyDeclarationSyntax property:
+                    return new Unit(ancestor, MemberKind, property.Identifier.ValueText);
+                case IndexerDeclarationSyntax:
+                    return new Unit(ancestor, MemberKind, "this[]");
+                case VariableDeclaratorSyntax { Parent.Parent: BaseFieldDeclarationSyntax } field:
+                    return new Unit(ancestor, MemberKind, field.Identifier.ValueText);
+            }
+        }
+
+        return new Unit(
+            node.AncestorsAndSelf().OfType<GlobalStatementSyntax>().FirstOrDefault() ?? node.SyntaxTree.GetRoot(), StatementKind, null);
+    }
+
+    /// <summary>
+    /// Owner evidence in a unit: a string token (literal, verbatim, raw, interpolated text) containing <c>ownerid@odata.bind</c> or
+    /// equal to <c>ownerid</c>, or the identifier <c>OwnerBindKey</c> / <c>OwnerAttribute</c> (the identity store's key constant and the SDK
+    /// attribute name). Comments are trivia, not tokens, so they are never evidence. The unit's OWN code only: the body of a lambda or
+    /// local function nested in it is a unit of its own and is not evidence for the unit around it.
+    /// </summary>
+    private static bool HasOwnerEvidence(SyntaxNode unit)
+    {
+        foreach (var child in unit.ChildNodesAndTokens())
+        {
+            if (child.AsNode() is { } node)
+            {
+                if (!IsNestedUnit(node) && HasOwnerEvidence(node))
+                {
+                    return true;
                 }
             }
-
-            i++;
+            else if (IsOwnerToken(child.AsToken()))
+            {
+                return true;
+            }
         }
 
-        return masked.ToString();
+        return false;
     }
 
-    /// <summary>The index of the <c>}</c> matching the <c>{</c> at <paramref name="open"/> in masked code (the end when unmatched).</summary>
-    private static int MatchingBrace(string masked, int open)
-    {
-        var depth = 0;
-        for (var i = open; i < masked.Length; i++)
+    private static bool IsOwnerToken(SyntaxToken token)
+        => token.Kind() switch
         {
-            if (masked[i] == '{')
-            {
-                depth++;
-            }
-            else if (masked[i] == '}' && --depth == 0)
-            {
-                return i;
-            }
-        }
+            SyntaxKind.StringLiteralToken or SyntaxKind.SingleLineRawStringLiteralToken or SyntaxKind.MultiLineRawStringLiteralToken
+                or SyntaxKind.InterpolatedStringTextToken
+                => token.ValueText.Contains("ownerid@odata.bind", StringComparison.OrdinalIgnoreCase)
+                    || token.ValueText.Equals("ownerid", StringComparison.OrdinalIgnoreCase),
+            SyntaxKind.IdentifierToken => token.ValueText is "OwnerBindKey" or "OwnerAttribute",
+            _ => false,
+        };
 
-        return masked.Length - 1;
-    }
-
-    /// <summary>The first index after the last <c>;</c>, <c>{</c> or <c>}</c> before <paramref name="index"/>: where a declaration or statement begins.</summary>
-    private static int StatementStart(string masked, int index)
-        => index <= 0 ? 0 : masked.LastIndexOfAny(new[] { ';', '{', '}' }, index - 1) + 1;
-
-    /// <summary>
-    /// The member that contains <paramref name="index"/>: the INNERMOST enclosing brace block that is a method, constructor,
-    /// accessor-less member or local function (a header with a parameter list, not control flow, no <c>=</c> before it), taken
-    /// from its declaration to its matching close brace - so a member with no access modifier, or a local function, is its own
-    /// member. Lambdas and control-flow blocks belong to the member around them. A create that sits in no such block (an
-    /// expression-bodied member, <c>=> (HttpMethod.Post, "contacts", ...);</c>) is bounded by its own statement. Pure.
-    /// </summary>
-    internal static MemberSpan FindMember(string code, string masked, int index)
-    {
-        var stack = new List<int>();
-        for (var i = 0; i < index && i < masked.Length; i++)
-        {
-            if (masked[i] == '{')
-            {
-                stack.Add(i);
-            }
-            else if (masked[i] == '}' && stack.Count > 0)
-            {
-                stack.RemoveAt(stack.Count - 1);
-            }
-        }
-
-        string? typeName = null;
-        for (var k = stack.Count - 1; k >= 0 && typeName is null; k--)
-        {
-            var header = code[StatementStart(masked, stack[k])..stack[k]];
-            if (TypeHeader.Match(header) is { Success: true } type && !ControlHeader.IsMatch(header))
-            {
-                typeName = type.Groups[1].Value;
-            }
-        }
-
-        for (var k = stack.Count - 1; k >= 0; k--)
-        {
-            var open = stack[k];
-            var start = StatementStart(masked, open);
-            var header = code[start..open];
-            var firstParenthesis = header.IndexOf('(', StringComparison.Ordinal);
-            var methodLike = firstParenthesis >= 0
-                && header.TrimEnd().EndsWith(')')
-                && !header[..firstParenthesis].Contains('=', StringComparison.Ordinal)
-                && !ControlHeader.IsMatch(header)
-                && !TypeHeader.IsMatch(header);
-            if (methodLike)
-            {
-                return new MemberSpan(start, MatchingBrace(masked, open) + 1, typeName, MemberNameOf(header));
-            }
-        }
-
-        var statementStart = StatementStart(masked, index);
-        var statementEnd = masked.Length;
-        var nesting = 0;
-        for (var i = index; i < masked.Length; i++)
-        {
-            if (masked[i] == '{')
-            {
-                nesting++;
-            }
-            else if (masked[i] == '}' && --nesting < 0)
-            {
-                statementEnd = i;
-                break;
-            }
-            else if (masked[i] == ';' && nesting == 0)
-            {
-                statementEnd = i + 1;
-                break;
-            }
-        }
-
-        return new MemberSpan(statementStart, statementEnd, typeName, MemberNameOf(code[statementStart..index]));
-    }
-
-    private static string? MemberNameOf(string header)
-        => NameBeforeParameters.Matches(header).Select(m => m.Groups[1].Value).FirstOrDefault(n => !NotAMemberName.Contains(n));
-
-    /// <summary>
-    /// Evidence that a member binds an owner: the Web API bind, the identity store's key constant, or the SDK
-    /// <c>ownerid</c> attribute (the literal or <c>OwnerAttribute</c>).
-    /// </summary>
-    private static readonly Regex OwnerBind = new(
-        @"ownerid@odata\.bind|\bOwnerBindKey\b|""ownerid""|\bOwnerAttribute\b", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    // ── The allow-list and the seams the scan cannot see ────────────────────────────────────────────
 
     /// <summary>A known contact-create seam: where it is, and why it is allowed (or invisible to the scan).</summary>
     internal sealed record ContactCreateSeam(string File, string MemberDeclaration, string Reason);
 
     /// <summary>
-    /// An allow-listed contact create (UAC round 3 K3.5): ONE member of ONE type in ONE file. Matched on the enclosing type's
-    /// name and the member's name as found by <see cref="FindMember"/>, never on text in the member's header.
+    /// An allow-listed contact create: ONE declared member of ONE type in ONE file. Matched on the enclosing type's name and the
+    /// member's name as the syntax gives them, and only for the member itself - a lambda or local function inside it is a unit of its own.
     /// </summary>
     internal sealed record AllowedContactCreate(string File, string TypeName, string MemberName, string Reason);
 
@@ -494,21 +520,29 @@ public class ContactCreateOwnerPolicyGuardTests
             + "it does NOT use ExternalAccess:CustomerBusinessUnitId: it is not an identity-contact create."),
     };
 
-    /// <summary>
-    /// One contact create found in a file: where, which shape, whether its member binds an owner, the enclosing type's name and
-    /// the member's name (null when none was found), and the member's head up to the create.
-    /// </summary>
-    internal readonly record struct ContactCreateHit(
-        int Index, int Line, string Shape, bool Owned, string? TypeName, string? MemberName, string Header);
+    // ── The scan ────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Every contact create in one server file's code (any of the shapes), with whether the enclosing member binds an owner. The
-    /// member is found by brace matching (<see cref="FindMember"/>). The Web API shapes look from the member's declaration to the
-    /// call (the payload is built before it); the SDK shape looks to the end of the member (the owner is set on the entity between
-    /// its construction and the create).
+    /// One contact create found in a file: its line, which shape, whether its unit binds an owner, the enclosing type's name, the
+    /// unit's name (null when it has none), and what kind of unit it is ("member", "local function", "lambda", "statement").
+    /// </summary>
+    internal readonly record struct ContactCreateHit(int Line, string Shape, bool Owned, string? TypeName, string? MemberName, string Unit);
+
+    internal static SyntaxTree Parse(string code) => CSharpSyntaxTree.ParseText(code, new CSharpParseOptions(LanguageVersion.Latest));
+
+    /// <summary>
+    /// Every contact create in one server file (any of the shapes), with whether its unit binds an owner. The unit is the nearest
+    /// enclosing member, accessor, initializer, local function or lambda (<see cref="EnclosingUnit"/>); the owner must be bound in
+    /// THAT unit's own code (<see cref="HasOwnerEvidence"/>). For a create in a lambda the lambda's own body is the evidence scope,
+    /// and the member around it does not stand in for it (the stricter of "the lambda, then the member" and "the lambda alone"): a
+    /// payload built outside a lambda and captured by it is not seen as owned, so bind the owner inside the lambda.
     /// </summary>
     internal static IReadOnlyList<ContactCreateHit> ContactCreates(
         string relativePath, string code, IReadOnlyCollection<string>? constantNames = null)
+        => ContactCreates(relativePath, Parse(code).GetRoot(), constantNames);
+
+    internal static IReadOnlyList<ContactCreateHit> ContactCreates(
+        string relativePath, SyntaxNode root, IReadOnlyCollection<string>? constantNames = null)
     {
         var hits = new List<ContactCreateHit>();
         if (!relativePath.StartsWith(ServerRoot, StringComparison.Ordinal))
@@ -516,52 +550,44 @@ public class ContactCreateOwnerPolicyGuardTests
             return hits;
         }
 
-        var contact = ContactRef(constantNames ?? Array.Empty<string>());
-        var masked = MaskLiterals(code);
-        foreach (var (shape, pattern) in ShapePatterns)
+        var names = constantNames ?? Array.Empty<string>();
+        foreach (var node in root.DescendantNodes())
         {
-            var regex = new Regex(
-                string.Format(System.Globalization.CultureInfo.InvariantCulture, pattern, contact), RegexOptions.CultureInvariant);
-            foreach (Match create in regex.Matches(code))
+            if (CreateShape(node, names) is not { } shape)
             {
-                var member = FindMember(code, masked, create.Index);
-                var evidenceEnd = shape == Shape.SdkEntity ? member.End : create.Index;
-                hits.Add(new ContactCreateHit(
-                    create.Index,
-                    SourceScan.LineOf(code, create.Index),
-                    shape.ToString(),
-                    OwnerBind.IsMatch(code.Substring(member.Start, Math.Max(0, evidenceEnd - member.Start))),
-                    member.TypeName,
-                    member.MemberName,
-                    code.Substring(member.Start, Math.Max(0, create.Index - member.Start))));
+                continue;
             }
+
+            var unit = EnclosingUnit(node);
+            hits.Add(new ContactCreateHit(
+                node.GetLocation().GetLineSpan().StartLinePosition.Line + 1,
+                shape.ToString(),
+                HasOwnerEvidence(unit.Node),
+                node.Ancestors().OfType<BaseTypeDeclarationSyntax>().FirstOrDefault()?.Identifier.ValueText,
+                unit.Name,
+                unit.Kind));
         }
 
-        return hits.OrderBy(h => h.Index).ToList();
+        return hits;
     }
 
-    /// <summary>
-    /// True only for a create inside an allow-listed seam's own declaration: the same file, the same enclosing TYPE name and the
-    /// same MEMBER name (UAC round 3 K3.5; it used to accept any member whose header merely contained
-    /// <c>BuildCreateRequest(</c>, so a same-named member of another type, or a longer name, was excused too).
-    /// </summary>
+    /// <summary>True only for a create inside an allow-listed seam's own declaration: the same file, type name and member name.</summary>
     private static bool IsAllowedSeam(string relativePath, ContactCreateHit hit)
-        => AllowedSeams.Any(a => a.File == relativePath
-            && string.Equals(a.TypeName, hit.TypeName, StringComparison.Ordinal)
-            && string.Equals(a.MemberName, hit.MemberName, StringComparison.Ordinal));
+        => hit.Unit == MemberKind
+            && AllowedSeams.Any(a => a.File == relativePath
+                && string.Equals(a.TypeName, hit.TypeName, StringComparison.Ordinal)
+                && string.Equals(a.MemberName, hit.MemberName, StringComparison.Ordinal));
 
     /// <summary>
-    /// The contact creates in one server file's code that bind no owner and are not an allow-listed seam: "line N (shape)" for
-    /// each. A contact created through the Web API without an owner is owned by the calling application user in the root
-    /// business unit (ISS-005). Known limits (the scan is name-based, <see cref="SourceScan"/>): a payload built in ANOTHER member
-    /// and passed in is flagged too (build it where it is created); a create whose table is a runtime value
-    /// (<c>dataverse.create_record</c>'s <c>tablename</c>, <c>ChildRecordEndpoints</c>), a <c>CreateRequest</c> / <c>ExecuteAsync</c>,
-    /// a table name built by concatenation, or a constant that is not a <c>const</c>/<c>static readonly string</c> holding the
-    /// literal is NOT seen (<see cref="UndetectableSeams"/> names the known ones); an <c>IGenericEntityService.CreateAsync</c> is
-    /// seen only through its entity's <c>new Entity("contact")</c>; owner evidence is by name and does not prove the value is a
-    /// resolved team. The member is found by brace matching (<see cref="FindMember"/>): a method with a <c>where</c> constraint
-    /// (its header does not end in <c>)</c>) or an expression-bodied local function is not seen as a member, so its create is
-    /// judged by the member around it (a local function) or by its own statement (a constraint-headed method).
+    /// The contact creates in one server file that bind no owner and are not an allow-listed seam: "line N (shape)" for each. A
+    /// contact created through the Web API without an owner is owned by the calling application user in the root business unit
+    /// (ISS-005). Known limits (the scan reads syntax, not types): owner evidence is by name in the unit's own code and does not
+    /// prove the value is a resolved team; a payload built in ANOTHER member (or another lambda / local function) and passed in is
+    /// flagged too - build it where it is created; a create whose table is a runtime value (<c>dataverse.create_record</c>'s
+    /// <c>tablename</c>, <c>ChildRecordEndpoints</c>), a <c>CreateRequest</c> / <c>ExecuteAsync</c>, or a table name held in a
+    /// variable that is not a string constant with a literal value is NOT seen (<see cref="UndetectableSeams"/> names the known
+    /// ones); an <c>IGenericEntityService.CreateAsync</c> is seen only through its entity's construction
+    /// (<c>new Entity("contact")</c>, not a target-typed <c>new("contact")</c>); a constant is followed by name, across all server code.
     /// </summary>
     internal static IReadOnlyList<string> OwnerlessContactCreates(
         string relativePath, string code, IReadOnlyCollection<string>? constantNames = null)
@@ -570,29 +596,35 @@ public class ContactCreateOwnerPolicyGuardTests
             .Select(h => $"line {h.Line} ({h.Shape})")
             .ToList();
 
-    /// <summary>Every server source file as (relative path, code text).</summary>
-    private static IReadOnlyList<(string Path, string Code)> ServerCode()
-        => SourceScan.ServerSourceFiles()
-            .Select(f => (SourceScan.Relative(f).Replace('\\', '/'), SourceScan.CodeText(File.ReadAllLines(f))))
+    /// <summary>
+    /// Lines of code the parser skips (an inactive <c>#if</c> branch) that mention a contact: the scan reads only active code, so a
+    /// create there would be invisible. The server tree has none.
+    /// </summary>
+    internal static IReadOnlyList<int> SkippedContactRegions(SyntaxNode root)
+        => root.DescendantTrivia(descendIntoTrivia: true)
+            .Where(t => t.IsKind(SyntaxKind.DisabledTextTrivia) && t.ToString().Contains("contact", StringComparison.OrdinalIgnoreCase))
+            .Select(t => t.GetLocation().GetLineSpan().StartLinePosition.Line + 1)
             .ToList();
 
-    private static IReadOnlyCollection<string> AllContactConstantNames(IEnumerable<(string Path, string Code)> files)
-        => files.SelectMany(f => ContactConstantNames(f.Code)).Distinct().ToList();
+    private sealed record ServerFile(string Path, SyntaxNode Root);
 
-    [Fact(DisplayName = "ISS-005: no contact create in server code is ownerless (CreateAsync, HttpMethod.Post, new Entity)")]
+    private static readonly Lazy<IReadOnlyList<ServerFile>> ServerTree = new(() =>
+        SourceScan.ServerSourceFiles()
+            .Select(f => new ServerFile(SourceScan.Relative(f).Replace('\\', '/'), Parse(File.ReadAllText(f)).GetRoot()))
+            .ToList());
+
+    private static IReadOnlyList<string> AllContactConstantNames(IEnumerable<ServerFile> files)
+        => files.SelectMany(f => ContactConstantNames(f.Root)).Distinct().ToList();
+
+    [Fact(DisplayName = "ISS-005: no contact create in server code is ownerless (CreateAsync, HttpMethod.Post, Post*Async, new Entity)")]
     public void EveryContactCreate_InServerCode_SetsAnOwner_OrIsAnAllowListedSeam()
     {
-        var files = ServerCode();
+        var files = ServerTree.Value;
         var names = AllContactConstantNames(files);
-        var offenders = new List<string>();
-        var seen = 0;
-        foreach (var (path, code) in files)
-        {
-            seen += ContactCreates(path, code, names).Count;
-            offenders.AddRange(OwnerlessContactCreates(path, code, names).Select(v => $"{path}: {v}"));
-        }
+        var hits = files.SelectMany(f => ContactCreates(f.Path, f.Root, names).Select(h => (f.Path, Hit: h))).ToList();
 
-        Assert.True(seen > 0, "the scan saw no contact create at all (the invite create, the store request): the guard is vacuous");
+        Assert.True(hits.Count > 0, "the scan saw no contact create at all (the invite create, the store request): the guard is vacuous");
+        var offenders = hits.Where(h => !h.Hit.Owned && !IsAllowedSeam(h.Path, h.Hit)).Select(h => $"{h.Path}: line {h.Hit.Line} ({h.Hit.Shape})").ToList();
         Assert.True(
             offenders.Count == 0,
             "A contact created with no ownerid is owned by the BFF's application user in the root business unit (ISS-005, #1673). "
@@ -600,22 +632,35 @@ public class ContactCreateOwnerPolicyGuardTests
             + "by construction elsewhere - add an AllowedSeams entry with the reason. Offending creates:\n" + string.Join("\n", offenders));
     }
 
-    [Fact(DisplayName = "ISS-005 guard, non-vacuous: every allow-listed seam is still matched by a real file")]
+    [Fact(DisplayName = "ISS-005 guard: no server file has skipped (#if-disabled) code that mentions a contact")]
+    public void NoServerFile_HasSkippedCode_MentioningAContact()
+    {
+        var offenders = ServerTree.Value
+            .SelectMany(f => SkippedContactRegions(f.Root).Select(line => $"{f.Path}: line {line}"))
+            .ToList();
+
+        Assert.True(
+            offenders.Count == 0,
+            "The create guard reads only active code. A contact create inside an inactive #if branch would not be seen:\n"
+            + string.Join("\n", offenders));
+    }
+
+    [Fact(DisplayName = "ISS-005 guard, non-vacuous: every allow-listed seam is still matched by a real file, and the invite create is owned")]
     public void EveryAllowedSeam_IsStillExercised_ByARealFile()
     {
-        var files = ServerCode();
+        var files = ServerTree.Value;
         var names = AllContactConstantNames(files);
         foreach (var seam in AllowedSeams)
         {
-            var (path, code) = files.Single(f => f.Path == seam.File);
+            var file = files.Single(f => f.Path == seam.File);
             Assert.True(
-                ContactCreates(path, code, names).Any(h => IsAllowedSeam(path, h)),
+                ContactCreates(file.Path, file.Root, names).Any(h => IsAllowedSeam(file.Path, h)),
                 $"allow-listed seam {seam.File} / {seam.TypeName}.{seam.MemberName} no longer matches a contact create: remove or update the entry.");
         }
 
         // The invite create is the other real create, and it is owned (not a seam).
         var invite = files.Single(f => f.Path == InviteFile);
-        Assert.Contains(ContactCreates(invite.Path, invite.Code, names), h => h.Owned && h.Shape == nameof(Shape.WebApiCreateAsync));
+        Assert.Contains(ContactCreates(invite.Path, invite.Root, names), h => h.Owned && h.Shape == nameof(Shape.WebApiCreateAsync));
     }
 
     [Fact(DisplayName = "ISS-005 guard: the seams it cannot detect still exist where the doc comment says")]
@@ -880,8 +925,8 @@ public class ContactCreateOwnerPolicyGuardTests
             }
             """));
 
-    [Fact(DisplayName = "ISS-005 guard, must-fire: a brace inside a string or character literal does not hide the member boundary")]
-    public void Control_ABraceInALiteral_DoesNotHideTheBoundary()
+    [Fact(DisplayName = "ISS-005 guard, must-fire: an expression-bodied ownerless member after an owned member holding a plain \"{\" literal is caught")]
+    public void Control_AnExpressionBodiedOwnerlessMember_AfterABraceLiteral_IsCaught()
         => Assert.Single(OwnerlessContactCreates(BffRoot + "Services/X/Makes.cs", """
             public sealed class Maker
             {
@@ -892,13 +937,212 @@ public class ContactCreateOwnerPolicyGuardTests
                     return await client.CreateAsync("contacts", payload, ct);
                 }
 
-                async Task<Guid> OwnerlessAsync(DataverseWebApiClient client, CancellationToken ct)
+                Task<Guid> OwnerlessAsync(DataverseWebApiClient client, CancellationToken ct)
+                    => client.CreateAsync("contacts", new { lastname = "x" }, ct);
+            }
+            """));
+
+    // ── Literal and comment shapes a text scanner cannot divide into members (P6 to P9) ──────────────
+
+    [Fact(DisplayName = "ISS-005 guard, must-fire: an expression-bodied ownerless member after an owned member holding a URL literal in an initializer line is caught")]
+    public void Control_AnExpressionBodiedOwnerlessMember_AfterAUrlLiteral_IsCaught()
+        => Assert.Single(OwnerlessContactCreates(BffRoot + "Services/X/Makes.cs", """
+            public sealed class Maker
+            {
+                async Task<Guid> OwnedAsync(DataverseWebApiClient client, Guid team, CancellationToken ct)
                 {
-                    var open = '{';
+                    var options = new Options { Origin = new Uri("https://example.com/x") };
+                    var payload = new Dictionary<string, object?> { ["ownerid@odata.bind"] = $"/teams({team:D})", ["o"] = options };
+                    return await client.CreateAsync("contacts", payload, ct);
+                }
+
+                Task<Guid> OwnerlessAsync(DataverseWebApiClient c, CancellationToken ct) => c.CreateAsync("contacts", new { lastname = "x" }, ct);
+            }
+            """));
+
+    [Fact(DisplayName = "ISS-005 guard, must-fire: an ownerless SDK contact entity is caught when a later member binds an owner and an earlier line holds a URL literal")]
+    public void Control_AnOwnerlessSdkEntity_BeforeAnOwnedMember_IsCaught()
+        => Assert.Single(OwnerlessContactCreates(BffRoot + "Services/X/Makes.cs", """
+            public sealed class Maker
+            {
+                Task<Guid> Ownerless(IGenericEntityService entities, CancellationToken ct)
+                {
+                    var options = new Options { Origin = new Uri("https://example.com/x") };
+                    var entity = new Entity("contact");
+                    return entities.CreateAsync(entity, ct);
+                }
+
+                Task<Guid> Owned(IGenericEntityService entities, Guid team, CancellationToken ct)
+                {
+                    var entity = new Entity("contact");
+                    entity["ownerid"] = new EntityReference("team", team);
+                    return entities.CreateAsync(entity, ct);
+                }
+            }
+            """));
+
+    [Fact(DisplayName = "ISS-005 guard, must-fire: an expression-bodied ownerless member after an owned member holding an interpolation-hole literal is caught")]
+    public void Control_AnExpressionBodiedOwnerlessMember_AfterAnInterpolationHoleLiteral_IsCaught()
+        => Assert.Single(OwnerlessContactCreates(BffRoot + "Services/X/Makes.cs", """
+            public sealed class Maker
+            {
+                async Task<Guid> OwnedAsync(DataverseWebApiClient client, Guid team, bool o, CancellationToken ct)
+                {
+                    var note = $"{(o ? "{" : "")}";
+                    var payload = new Dictionary<string, object?> { ["ownerid@odata.bind"] = $"/teams({team:D})", ["n"] = note };
+                    return await client.CreateAsync("contacts", payload, ct);
+                }
+
+                Task<Guid> OwnerlessAsync(DataverseWebApiClient c, CancellationToken ct) => c.CreateAsync("contacts", new { lastname = "x" }, ct);
+            }
+            """));
+
+    [Fact(DisplayName = "ISS-005 guard, must-fire: an expression-bodied ownerless member after an owned member holding a brace inside a block comment is caught")]
+    public void Control_AnExpressionBodiedOwnerlessMember_AfterABlockCommentBrace_IsCaught()
+        => Assert.Single(OwnerlessContactCreates(BffRoot + "Services/X/Makes.cs", """
+            public sealed class Maker
+            {
+                async Task<Guid> OwnedAsync(DataverseWebApiClient client, Guid team, CancellationToken ct)
+                {
+                    /* a note with an opening brace { in it */
+                    var payload = new Dictionary<string, object?> { ["ownerid@odata.bind"] = $"/teams({team:D})" };
+                    return await client.CreateAsync("contacts", payload, ct);
+                }
+
+                Task<Guid> OwnerlessAsync(DataverseWebApiClient c, CancellationToken ct) => c.CreateAsync("contacts", new { lastname = "x" }, ct);
+            }
+            """));
+
+    [Fact(DisplayName = "ISS-005 guard, must-fire: a method with a where constraint, an expression-bodied local function and a comment naming the bind are each their own unit")]
+    public void Control_WhereConstraints_ExpressionBodiedLocalFunctions_AndComments_AreJudgedAlone()
+    {
+        Assert.Single(OwnerlessContactCreates(BffRoot + "Services/X/Makes.cs", """
+            public sealed class Maker
+            {
+                Task<Guid> OwnedAsync<T>(DataverseWebApiClient client, Guid team, CancellationToken ct) where T : class
+                {
+                    var payload = new Dictionary<string, object?> { ["ownerid@odata.bind"] = $"/teams({team:D})" };
+                    return client.CreateAsync("contacts", payload, ct);
+                }
+
+                Task<Guid> OwnerlessAsync<T>(DataverseWebApiClient client, CancellationToken ct) where T : class
+                    => client.CreateAsync("contacts", new { lastname = "x" }, ct);
+            }
+            """));
+
+        var local = Assert.Single(ContactCreates(BffRoot + "Services/X/Makes.cs", """
+            public sealed class Maker
+            {
+                public Task<Guid> RunAsync(DataverseWebApiClient client, Guid team, CancellationToken ct)
+                {
+                    var owner = new Dictionary<string, object?> { ["ownerid@odata.bind"] = $"/teams({team:D})" };
+                    Task<Guid> Ownerless() => client.CreateAsync("contacts", new { lastname = "x" }, ct);
+                    return Ownerless();
+                }
+            }
+            """));
+        Assert.False(local.Owned);
+        Assert.Equal("local function", local.Unit);
+
+        // A comment is trivia, not a token: it is never owner evidence.
+        Assert.Single(OwnerlessContactCreates(BffRoot + "Services/X/Makes.cs", """
+            public sealed class Maker
+            {
+                Task<Guid> OwnerlessAsync(DataverseWebApiClient client, CancellationToken ct)
+                {
+                    // ["ownerid@odata.bind"] = "/teams(x)"
+                    /* "ownerid" */
+                    return client.CreateAsync("contacts", new { lastname = "x" }, ct);
+                }
+            }
+            """));
+    }
+
+    [Fact(DisplayName = "ISS-005 guard, must-fire: a create in a lambda is judged by the lambda's own body, not by the member around it")]
+    public void Control_ALambdaCreate_IsJudgedByTheLambdasOwnBody()
+    {
+        // The enclosing method binds an owner elsewhere (and in another lambda): the lambda that creates binds none.
+        Assert.Single(OwnerlessContactCreates(BffRoot + "Services/X/Makes.cs", """
+            public sealed class Maker
+            {
+                async Task<Guid> RunAsync(DataverseWebApiClient client, Guid team, CancellationToken ct)
+                {
+                    var owned = new Dictionary<string, object?> { ["ownerid@odata.bind"] = $"/teams({team:D})" };
+                    var make = async () => { return await client.CreateAsync("contacts", new { lastname = "x" }, ct); };
+                    var other = () => new Dictionary<string, object?> { ["ownerid@odata.bind"] = $"/teams({team:D})" };
+                    return await make();
+                }
+            }
+            """));
+
+        // An ownerless create in the enclosing method is not excused by an owner bound only inside a lambda.
+        Assert.Single(OwnerlessContactCreates(BffRoot + "Services/X/Makes.cs", """
+            public sealed class Maker
+            {
+                async Task<Guid> RunAsync(DataverseWebApiClient client, Guid team, CancellationToken ct)
+                {
+                    var other = () => new Dictionary<string, object?> { ["ownerid@odata.bind"] = $"/teams({team:D})" };
                     return await client.CreateAsync("contacts", new { lastname = "x" }, ct);
                 }
             }
             """));
+    }
+
+    [Fact(DisplayName = "ISS-005 guard: a property accessor, a property initializer and a field initializer are units of their own")]
+    public void Control_Accessors_AndInitializers_AreUnitsOfTheirOwn()
+    {
+        Assert.Single(OwnerlessContactCreates(BffRoot + "Services/X/Makes.cs", """
+            public sealed class Maker
+            {
+                public Task<Guid> Owner { get => OwnedAsync(); }
+                public Task<Guid> Bad { get { return client.CreateAsync("contacts", new { lastname = "x" }, ct); } }
+            }
+            """));
+        Assert.Single(OwnerlessContactCreates(BffRoot + "Services/X/Makes.cs", """
+            public sealed class Maker
+            {
+                private static readonly Func<Task<Guid>> Make = () => client.CreateAsync("contacts", new { lastname = "x" }, ct);
+                public Task<Guid> Owned => client.CreateAsync("contacts", new Dictionary<string, object?> { ["ownerid@odata.bind"] = "/teams(x)" }, ct);
+            }
+            """));
+        Assert.Empty(OwnerlessContactCreates(BffRoot + "Services/X/Makes.cs", """
+            public sealed class Maker
+            {
+                public Task<Guid> Good { get { return client.CreateAsync("contacts", new Dictionary<string, object?> { ["ownerid@odata.bind"] = "/teams(x)" }, ct); } }
+            }
+            """));
+    }
+
+    [Fact(DisplayName = "ISS-005 guard: skipped (#if-disabled) code that mentions a contact is reported")]
+    public void Control_SkippedCodeMentioningAContact_IsReported()
+    {
+        const string skipped = """
+            public sealed class Maker
+            {
+            #if NEVER_DEFINED
+                Task<Guid> Hidden(DataverseWebApiClient client, CancellationToken ct) => client.CreateAsync("contacts", new { }, ct);
+            #endif
+            }
+            """;
+        Assert.Single(SkippedContactRegions(Parse(skipped).GetRoot()));
+        Assert.Empty(SkippedContactRegions(Parse("public sealed class Maker { }").GetRoot()));
+        Assert.Empty(SkippedContactRegions(Parse("#if NEVER_DEFINED\nint unrelated;\n#endif").GetRoot()));
+    }
+
+    [Fact(DisplayName = "ISS-005 guard, must-fire: raw, concatenated, conditional and constant forms of the contacts name are caught")]
+    public void Control_RawConcatenatedConditionalAndLocalConstantForms_AreCaught()
+    {
+        Assert.Single(OwnerlessContactCreates(BffRoot + "Services/X/Makes.cs", "private Task MakeAsync() { return client.CreateAsync(\"\"\"contacts\"\"\", payload, ct); }"));
+        Assert.Single(OwnerlessContactCreates(BffRoot + "Services/X/Makes.cs", "private Task MakeAsync() { return client.CreateAsync(\"con\" + \"tacts\", payload, ct); }"));
+        Assert.Single(OwnerlessContactCreates(BffRoot + "Services/X/Makes.cs", "private Task MakeAsync() { return client.CreateAsync(flag ? \"accounts\" : \"contacts\", payload, ct); }"));
+        Assert.Single(OwnerlessContactCreates(BffRoot + "Services/X/Makes.cs", "private Task MakeAsync() { return client.PostAsync($\"\"\"{root}/api/data/v9.2/contacts\"\"\", body, ct); }"));
+        Assert.Single(OwnerlessContactCreates(BffRoot + "Services/X/Makes.cs", "private Task MakeAsync() { return client.PostAsync(root + \"/contacts\", body, ct); }"));
+
+        const string withLocalConstant = "private Task MakeAsync() { const string table = \"contacts\"; return client.CreateAsync(table, payload, ct); }";
+        var names = ContactConstantNames(withLocalConstant);
+        Assert.Equal(new[] { "table" }, names);
+        Assert.Single(OwnerlessContactCreates(BffRoot + "Services/X/Makes.cs", withLocalConstant, names));
+    }
 
     [Fact(DisplayName = "ISS-005 guard, must-not-fire: owned members without a modifier, owned local functions and lambdas pass")]
     public void Control_OwnedModifierlessMembers_LocalFunctions_AndLambdas_HaveNoViolation()
@@ -918,8 +1162,11 @@ public class ContactCreateOwnerPolicyGuardTests
 
                 async Task<Guid> AlsoOwnedAsync(DataverseWebApiClient client, Guid team, CancellationToken ct)
                 {
-                    var owned = new Dictionary<string, object?> { ["ownerid@odata.bind"] = $"/teams({team:D})" };
-                    var make = async () => { return await client.CreateAsync("contacts", owned, ct); };
+                    var make = async () =>
+                    {
+                        var owned = new Dictionary<string, object?> { ["ownerid@odata.bind"] = $"/teams({team:D})" };
+                        return await client.CreateAsync("contacts", owned, ct);
+                    };
                     return await make();
                 }
 
@@ -942,20 +1189,6 @@ public class ContactCreateOwnerPolicyGuardTests
                 }
             }
             """));
-
-    [Fact(DisplayName = "ISS-005 guard: literal masking blanks string and character contents, keeps length and newlines")]
-    public void Control_MaskLiterals_BlanksLiteralsOnly()
-    {
-        const string code = "var a = \"{\"; var b = '{'; var c = $\"/teams({id:D})\"; var d = @\"x\"\"{\"; var e = \"https:\nvar f = 1; {}";
-        var masked = MaskLiterals(code);
-
-        Assert.Equal(code.Length, masked.Length);
-        Assert.Equal(code.Count(ch => ch == '\n'), masked.Count(ch => ch == '\n'));
-        // Only the one structural pair on the last line survives: the literal braces (string, char, interpolation, verbatim, unterminated) are blanked.
-        Assert.Equal(1, masked.Count(ch => ch == '{'));
-        Assert.Equal(1, masked.Count(ch => ch == '}'));
-        Assert.Contains("var f = 1; {}", masked, StringComparison.Ordinal);
-    }
 
     // ── UAC round 3 K3.2 to K3.4: the create shapes the guard missed ──────────────────────────────
 
@@ -993,6 +1226,8 @@ public class ContactCreateOwnerPolicyGuardTests
     [InlineData("return await userClient.PostAsync($\"{baseUrl}/contacts\", body, ct);")]
     [InlineData("return await http.PostAsJsonAsync(\"contacts\", payload, ct);")]
     [InlineData("return await userClient.PostAsync<ContactRow>(\"contacts\", payload, ct);")]
+    [InlineData("return await u.PostAsync(\"api/data/v9.2/contacts?$select=contactid\", body, ct);")]
+    [InlineData("return await userClient.PostAsync($\"{baseUrl}/contacts?$select=contactid\", body, ct);")]
     public void Control_AUserContextPostToContacts_IsCaught(string statement)
     {
         var code = "private Task MakeAsync() { " + statement + " }";
@@ -1021,7 +1256,9 @@ public class ContactCreateOwnerPolicyGuardTests
     [InlineData("return new HttpRequestMessage(HttpMethod.Post, $\"{GetApiUrl()}/sprk_contacts\");")]
     [InlineData("return await userClient.PostAsync(\"/api/data/v9.2/accounts\", body, ct);")]
     [InlineData("return await userClient.GetAsync(\"/api/data/v9.2/contacts\", ct);")]
-    [InlineData("return await userClient.PostAsync(\"/api/data/v9.2/contacts?$select=fullname\", body, ct);")]
+    [InlineData("return await userClient.PostAsync(\"/api/data/v9.2/contacts(\" + id + \")?$select=fullname\", body, ct);")]
+    [InlineData("return await userClient.PostAsync(\"/api/data/v9.2/accounts?$select=name\", body, ct);")]
+    [InlineData("return await userClient.PostAsync(\"/api/data/v9.2/contacts/$count\", body, ct);")]
     [InlineData("var e = new Entity($\"account\");")]
     public void Control_OtherTargets_UnderTheNewLiteralForms_HaveNoViolation(string statement)
         => Assert.Empty(ContactCreates(BffRoot + "Services/X/Makes.cs", "private Task MakeAsync() { " + statement + " }"));
