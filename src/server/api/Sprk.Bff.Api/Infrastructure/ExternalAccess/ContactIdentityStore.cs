@@ -754,13 +754,14 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     public static string BuildWhoAmIPath() => "WhoAmI";
 
     /// <summary>
-    /// The readability proof's System Administrator leg: the role, joined to <paramref name="user"/> through
+    /// The readability proof's System Administrator leg: a role of the System Administrator template (by role template id,
+    /// so a business unit's copy counts and a renamed role still does), joined to <paramref name="user"/> through
     /// <c>systemuserroles</c>. The same query as the SDK source (<see cref="SdkColumnReadPermissionSource"/>), as FetchXML.
     /// </summary>
     public static string BuildSystemAdministratorRolePath(Guid user)
         => "roles?fetchXml=" + Uri.EscapeDataString(
             "<fetch top=\"1\"><entity name=\"role\"><attribute name=\"roleid\" />"
-            + $"<filter><condition attribute=\"name\" operator=\"eq\" value=\"{Xml(SecuredColumnReadProof.SystemAdministratorRoleName)}\" /></filter>"
+            + $"<filter><condition attribute=\"roletemplateid\" operator=\"eq\" value=\"{SecuredColumnReadProof.SystemAdministratorRoleTemplateId:D}\" /></filter>"
             + "<link-entity name=\"systemuserroles\" from=\"roleid\" to=\"roleid\" link-type=\"inner\">"
             + $"<filter><condition attribute=\"systemuserid\" operator=\"eq\" value=\"{user:D}\" /></filter>"
             + "</link-entity></entity></fetch>");

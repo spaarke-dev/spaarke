@@ -1216,7 +1216,8 @@ public class DataverseContactIdentityStoreTests
         var path = Uri.UnescapeDataString(DataverseContactIdentityStore.BuildSystemAdministratorRolePath(user));
 
         path.Should().StartWith("roles?fetchXml=<fetch top=\"1\"><entity name=\"role\">");
-        path.Should().Contain("<condition attribute=\"name\" operator=\"eq\" value=\"System Administrator\" />");
+        path.Should().Contain("<condition attribute=\"roletemplateid\" operator=\"eq\" value=\"627090ff-40a3-4053-8790-584edc5be201\" />");
+        path.Should().NotContain("attribute=\"name\"", "a role is matched by its template, never by its display name");
         path.Should().Contain("<link-entity name=\"systemuserroles\" from=\"roleid\" to=\"roleid\" link-type=\"inner\">"
             + $"<filter><condition attribute=\"systemuserid\" operator=\"eq\" value=\"{user:D}\" /></filter>");
     }

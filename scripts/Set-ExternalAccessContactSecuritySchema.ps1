@@ -35,7 +35,7 @@
                         a column travels only when it is added explicitly.
       (f) PUBLISH       contact.
       (g) PROOF READS   -Verify only. The BFF trusts an EMPTY value of a secured column only once it has proven its own
-                        read of the column (SecuredColumnReadProof: the System Administrator role, or a field security
+                        read of the column (SecuredColumnReadProof: the System Administrator role by its template id, or a field security
                         profile granting Read, held directly or through a team). Each -BffApplicationIds application
                         user must be able to READ every platform table that proof reads — systemuser (WhoAmI), role,
                         systemuserroles, fieldpermission, systemuserprofiles, teamprofiles, teammembership — or every
@@ -425,7 +425,7 @@ if ($Verify) {
         $proofReads = @(
             @{ What = 'systemuser (WhoAmI)'; Path = 'WhoAmI' }
             @{ What = 'role + systemuserroles'; Path = 'roles?fetchXml=' + [uri]::EscapeDataString(
-                "<fetch top=`"1`"><entity name=`"role`"><attribute name=`"roleid`" /><filter><condition attribute=`"name`" operator=`"eq`" value=`"System Administrator`" /></filter>" +
+                "<fetch top=`"1`"><entity name=`"role`"><attribute name=`"roleid`" /><filter><condition attribute=`"roletemplateid`" operator=`"eq`" value=`"627090ff-40a3-4053-8790-584edc5be201`" /></filter>" +
                 "<link-entity name=`"systemuserroles`" from=`"roleid`" to=`"roleid`" link-type=`"inner`">$member</link-entity></entity></fetch>") }
             @{ What = 'fieldpermission + systemuserprofiles'; Path = 'fieldpermissions?fetchXml=' + [uri]::EscapeDataString(
                 $fieldPermission + "<link-entity name=`"systemuserprofiles`" from=`"fieldsecurityprofileid`" to=`"fieldsecurityprofileid`" link-type=`"inner`">$member</link-entity></entity></fetch>") }

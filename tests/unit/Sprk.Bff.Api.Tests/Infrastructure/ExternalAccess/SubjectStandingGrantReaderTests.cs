@@ -525,7 +525,7 @@ public class SubjectStandingGrantReaderTests
         queries[0].Criteria.Conditions.Should().ContainSingle(c =>
             c.AttributeName == "systemuserid" && c.Operator == ConditionOperator.EqualUserId);
         queries[1].Criteria.Conditions.Should().ContainSingle(c =>
-            c.AttributeName == "name" && (string)c.Values[0] == "System Administrator");
+            c.AttributeName == "roletemplateid" && (Guid)c.Values[0] == SecuredColumnReadProof.SystemAdministratorRoleTemplateId);
         foreach (var fieldPermission in queries.Where(q => q.EntityName == "fieldpermission"))
         {
             fieldPermission.Criteria.Conditions.Select(c => (c.AttributeName, c.Values[0]))
@@ -534,6 +534,47 @@ public class SubjectStandingGrantReaderTests
                     ("entityname", "contact"), ("attributelogicalname", "sprk_accesspermissiongrant"), ("canread", 4),
                 });
         }
+    }
+
+    [Theory]
+    [InlineData("Platform Administrators", true, false)]  // MUST NOT FIRE: the System Administrator template, renamed, proves
+    [InlineData("System Administrator", false, true)]     // MUST FIRE: the name on a role of another template proves nothing
+    public async Task TheSystemAdministratorLeg_MatchesTheRoleTemplate_NeverTheRoleName(
+        string roleName, bool systemAdministratorTemplate, bool unreadable)
+    {
+        // The BFF's user holds exactly one role; no profile grants Read. The role query is answered by its own conditions,
+        // so it is the query (by template id, or by name) that decides.
+        var heldTemplate = systemAdministratorTemplate ? SecuredColumnReadProof.SystemAdministratorRoleTemplateId : Guid.NewGuid();
+        var dataverse = new Mock<IDataverseService>(MockBehavior.Strict);
+        dataverse
+            .Setup(d => d.RetrieveAsync(ContactEntity, ContactId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(HeldWithoutBaseline());
+        dataverse
+            .Setup(d => d.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Returns((QueryExpression q, CancellationToken _) =>
+            {
+                var rows = new EntityCollection();
+                if (q.EntityName == "systemuser")
+                {
+                    rows.Entities.Add(new Entity("systemuser", BffUserId) { ["systemuserid"] = BffUserId });
+                }
+                else if (q.EntityName == "role" && q.Criteria.Conditions.All(c => c.AttributeName switch
+                         {
+                             "name" => Equals(c.Values[0], roleName),
+                             "roletemplateid" => Equals(c.Values[0], heldTemplate),
+                             _ => false,
+                         }))
+                {
+                    rows.Entities.Add(new Entity("role", Guid.NewGuid()));
+                }
+
+                return Task.FromResult(rows);
+            });
+
+        var state = await CreateSut(dataverse.Object).ReadForContactAsync(ContactId, CancellationToken.None);
+
+        state.BaselineUnreadable.Should().Be(unreadable);
+        state.Rights.Should().Be(AccessRights.None);
     }
 
     [Fact]

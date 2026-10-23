@@ -3,7 +3,7 @@
 // A field-secured column the BFF cannot read comes back EMPTY, exactly like a column that holds no value, so an empty read
 // cannot be trusted on its own. The rule (docs/data-model/access-inheritance.md, "When a record is trusted"): an EMPTY value
 // is decided on only once the BFF's read of the column is proven, by any one of
-//   - the BFF's own user holds the System Administrator role;
+//   - the BFF's own user holds the System Administrator role (matched by its platform role template id, never by name);
 //   - a field security profile the BFF's user belongs to — directly or through a team — grants Read on the column.
 // A non-empty value read from one row is NOT proof: a field share can grant one record without the column. Without proof the
 // value is undetermined, and every caller fails closed. A proof holds for ProofLifetime, then it is made again.
@@ -39,7 +39,10 @@ internal interface IColumnReadPermissionSource
     /// <summary>The BFF's own Dataverse user (the caller of these reads), or null when it cannot be read.</summary>
     Task<Guid?> ReadOwnUserIdAsync(CancellationToken ct);
 
-    /// <summary>Whether <paramref name="user"/> holds the <see cref="SecuredColumnReadProof.SystemAdministratorRoleName"/> role.</summary>
+    /// <summary>
+    /// Whether <paramref name="user"/> holds a role whose template is <see cref="SecuredColumnReadProof.SystemAdministratorRoleTemplateId"/>
+    /// (the System Administrator role, or a business unit's copy of it).
+    /// </summary>
     Task<bool> HoldsSystemAdministratorAsync(Guid user, CancellationToken ct);
 
     /// <summary>
@@ -61,8 +64,12 @@ internal sealed class SecuredColumnReadProof
     /// <summary>How long a proof holds before it is made again. The one lifetime for every proven column.</summary>
     internal static readonly TimeSpan ProofLifetime = TimeSpan.FromMinutes(10);
 
-    /// <summary>The platform role whose holders read every field-secured column.</summary>
-    internal const string SystemAdministratorRoleName = "System Administrator";
+    /// <summary>
+    /// The platform's role template id of the System Administrator role, whose holders read every field-secured column. It is
+    /// the same in every environment and is carried by each business unit's copy of the role. The role is matched by this id,
+    /// never by its display name, which an administrator can change or give to another role.
+    /// </summary>
+    internal static readonly Guid SystemAdministratorRoleTemplateId = Guid.Parse("627090ff-40a3-4053-8790-584edc5be201");
 
     /// <summary>Field-permission value for "allowed".</summary>
     internal const int FieldPermissionAllowed = 4;
@@ -212,7 +219,7 @@ internal sealed class SdkColumnReadPermissionSource : IColumnReadPermissionSourc
     public async Task<bool> HoldsSystemAdministratorAsync(Guid user, CancellationToken ct)
     {
         var query = new QueryExpression("role") { ColumnSet = new ColumnSet("roleid"), TopCount = 1 };
-        query.Criteria.AddCondition("name", ConditionOperator.Equal, SecuredColumnReadProof.SystemAdministratorRoleName);
+        query.Criteria.AddCondition("roletemplateid", ConditionOperator.Equal, SecuredColumnReadProof.SystemAdministratorRoleTemplateId);
         var link = query.AddLink("systemuserroles", "roleid", "roleid", JoinOperator.Inner);
         link.LinkCriteria.AddCondition("systemuserid", ConditionOperator.Equal, user);
         return (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false))?.Entities.Count > 0;
