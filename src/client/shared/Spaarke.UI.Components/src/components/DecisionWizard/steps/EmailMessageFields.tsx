@@ -47,7 +47,7 @@ function toPlainText(body: string, format: EmailComposerState['bodyFormat']): st
   // DOMParser builds an inert document: nothing in the markup runs (an `innerHTML` write on a detached element would run
   // <img onerror>, and the body carries the record name).
   const withBreaks = body.replace(/<\s*br\s*\/?>/gi, '\n').replace(/<\s*\/\s*(p|div|li|h[1-6])\s*>/gi, '\n');
-  const text = new DOMParser().parseFromString(withBreaks, 'text/html').body.textContent ?? '';
+  const text = new DOMParser().parseFromString(withBreaks, 'text/html').body.textContent;
   return text.replace(/\n{3,}/g, '\n\n').trim();
 }
 
@@ -99,7 +99,7 @@ export const EmailMessageFields: React.FC<{ scope: StepScope }> = ({ scope }) =>
   const paneForContacts =
     openLookup != null && (openLookup.supportedEntities == null || openLookup.supportedEntities.includes('contact'));
   const onLookupRecipients = React.useMemo(() => {
-    if (!paneForContacts || !openLookup) return undefined;
+    if (!paneForContacts) return undefined;
     return async (field: 'to' | 'cc' | 'bcc'): Promise<IRecipient[] | null> => {
       setNoAddressFor(null);
       setLookupFailed(false);
@@ -110,7 +110,7 @@ export const EmailMessageFields: React.FC<{ scope: StepScope }> = ({ scope }) =>
         // A contact with no usable address (none on file, or the read failed) cannot receive the inquiry: nothing is added,
         // and the step says so.
         if (!email || !EMAIL_RE.test(email)) {
-          setNoAddressFor(picked.name?.trim() || 'That contact');
+          setNoAddressFor(picked.name.trim() || 'That contact');
           return null;
         }
         return [{ email, displayName: picked.name, resolved: true, sourceId: picked.id, entityType: 'contact' }];
