@@ -31,17 +31,19 @@
 
 import { PublicClientApplication, type Configuration } from '@azure/msal-browser';
 import { MSAL_CLIENT_ID, MSAL_AUTHORITY, isTenantId, isUserImpersonationScope, readOptionalEnv } from '../config';
-
 /**
  * Which Entra authority plane a standalone-MSAL instance targets.
  *   - 'ciam'      → Entra External ID (*.ciamlogin.com); the external SPA's partner plane (A1)
- *   - 'workforce' → workforce Entra (login.microsoftonline.com) pinned to Spaarke's tenant; the
- *                   browser "My organization" plane and the Teams tab (A8 — never multitenant)
+ *   - 'workforce' → workforce Entra (login.microsoftonline.com) pinned to Spaarke's tenant; the Teams tab and the
+ *                   guest-token link (A8 — never multitenant)
+ *   - 'workforceHome' → the MULTITENANT home sign-in client (A9): the browser "company account" sign-in. Its
+ *                   authority is `organizations` (discovery and login only); accepted only for the configured
+ *                   multitenant client id. The BFF token is requested per tenant, on {@link workforceHomeTokenAuthority}.
  */
-export type AuthorityKind = 'ciam' | 'workforce';
+export type AuthorityKind = 'ciam' | 'workforce' | 'workforceHome';
 
 /** Authority kinds this module knows how to resolve — used for fail-safe validation. */
-const KNOWN_AUTHORITY_KINDS: readonly AuthorityKind[] = ['ciam', 'workforce'];
+const KNOWN_AUTHORITY_KINDS: readonly AuthorityKind[] = ['ciam', 'workforce', 'workforceHome'];
 
 /**
  * Well-known workforce authority host. `login.microsoftonline.com` is a DEFAULT MSAL cloud
@@ -100,6 +102,60 @@ function assertTenantPinnedWorkforceAuthority(authority: string): void {
 }
 
 /**
+ * The discovery / login authority of the multitenant home client (A9): `https://login.microsoftonline.com/organizations`.
+ * It is used only to sign the person in to THEIR OWN directory; the BFF token is requested on
+ * {@link workforceHomeTokenAuthority}.
+ */
+export const WORKFORCE_HOME_DISCOVERY_AUTHORITY = `https://${WORKFORCE_AUTHORITY_HOST}/organizations`;
+
+/** The per-tenant authority a home user's BFF token is requested on: `https://login.microsoftonline.com/{tid}`. */
+export function workforceHomeTokenAuthority(tenantId: string): string {
+  if (!isTenantId(tenantId)) {
+    throw new Error(
+      `[CollabAuth] The home token authority must be the signed-in tenant's id (a GUID), not '${tenantId}'.`
+    );
+  }
+  return `https://${WORKFORCE_AUTHORITY_HOST}/${tenantId}`;
+}
+
+/**
+ * Fail-safe check of a multitenant HOME authority (ADR-028 A9). The authority is accepted ONLY for the configured
+ * multitenant client id (`VITE_WORKFORCE_HOME_MSAL_CLIENT_ID`); the single-tenant A8 client id is refused, so the A8
+ * client can never be pointed at `organizations`. The authority itself must be `https://login.microsoftonline.com/`
+ * plus exactly one segment: `organizations` (discovery) or a tenant GUID (the BFF token). Every other alias and shape
+ * is refused.
+ */
+export function assertWorkforceHomeAuthority(authority: string, clientId: string): void {
+  const homeClientId = readOptionalEnv('VITE_WORKFORCE_HOME_MSAL_CLIENT_ID');
+  if (!homeClientId || !clientId || homeClientId.toLowerCase() !== clientId.toLowerCase()) {
+    throw new Error(
+      '[CollabAuth] A multitenant (organizations / tenant-GUID) authority is accepted only for the multitenant ' +
+        'home client (VITE_WORKFORCE_HOME_MSAL_CLIENT_ID); the single-tenant workforce client stays tenant-pinned ' +
+        '(ADR-028 A8 / A9).'
+    );
+  }
+  let url: URL | null = null;
+  try {
+    url = new URL(authority);
+  } catch {
+    url = null;
+  }
+  const segments = url ? url.pathname.split('/').filter(Boolean) : [];
+  const accepted =
+    url !== null &&
+    url.protocol === 'https:' &&
+    url.host === WORKFORCE_AUTHORITY_HOST &&
+    segments.length === 1 &&
+    (segments[0] === 'organizations' || isTenantId(segments[0]));
+  if (!accepted) {
+    throw new Error(
+      `[CollabAuth] Home authority '${authority}' is refused. Expected https://${WORKFORCE_AUTHORITY_HOST}/organizations ` +
+        `or https://${WORKFORCE_AUTHORITY_HOST}/{tenant id} (ADR-028 A9).`
+    );
+  }
+}
+
+/**
  * Config-driven descriptor the module resolves at instantiation time. Choosing a different
  * `kind` selects a different authority WITHOUT forking the module.
  */
@@ -130,6 +186,11 @@ export interface MsalConfigurationOptions {
    * redirect-bridge page.
    */
   redirectUri?: string;
+  /**
+   * Where MSAL keeps its cache. Defaults to `sessionStorage` (per-tab, A1/A2). The guest-token instance used for the
+   * stored link (A9) passes `memoryStorage`: a Spaarke-tenant token never touches browser storage.
+   */
+  cacheLocation?: 'sessionStorage' | 'memoryStorage';
 }
 
 /**
@@ -173,6 +234,17 @@ export function buildMsalConfiguration(
     }
   }
 
+  if (config.kind === 'workforceHome') {
+    assertWorkforceHomeAuthority(config.authority, config.clientId);
+    // The discovery instance asks for no BFF scope: that is requested per tenant, after the tid picks the backend.
+    if (config.bffScope) {
+      throw new Error(
+        '[CollabAuth] The multitenant home instance is for discovery and login only; it carries no BFF scope ' +
+          '(the BFF token is requested per tenant once the signed-in tid is known, ADR-028 A9).'
+      );
+    }
+  }
+
   const knownAuthorities = config.kind === 'ciam' ? [new URL(config.authority).host] : [];
 
   return {
@@ -198,7 +270,7 @@ export function buildMsalConfiguration(
        * Note: msal-browser v5 removed `storeAuthStateInCookie` from CacheOptions (it is now
        * a per-request option and defaults to off), so it is no longer set here.
        */
-      cacheLocation: 'sessionStorage',
+      cacheLocation: options.cacheLocation ?? 'sessionStorage',
     },
   };
 }
@@ -247,6 +319,24 @@ export function workforceAuthorityConfig(params: {
     clientId: params.clientId,
     bffScope: params.bffScope,
     authority: workforceAuthority(params.tenantId),
+  };
+}
+
+/**
+ * The multitenant HOME sign-in descriptor (ADR-028 A9): the "company account" client, no BFF scope. Built only after
+ * `config.ts` `getWorkforceHomeClientConfig()` has validated the client id; {@link buildMsalConfiguration} re-checks it
+ * against the same env value.
+ *
+ * Without `tenantId` (the browser) the authority is `organizations`, for discovery and login. With `tenantId` (the Teams
+ * tab, task 075) it is `https://login.microsoftonline.com/{tid}` - the Teams context tenant, a tenant-specific authority
+ * with no multi-tenant alias at all.
+ */
+export function workforceHomeAuthorityConfig(params: { clientId: string; tenantId?: string }): StandaloneMsalConfig {
+  return {
+    kind: 'workforceHome',
+    clientId: params.clientId,
+    authority: params.tenantId ? workforceHomeTokenAuthority(params.tenantId) : WORKFORCE_HOME_DISCOVERY_AUTHORITY,
+    bffScope: '',
   };
 }
 

@@ -321,7 +321,7 @@ public sealed class DecisionCommitServiceTests
             PlanReads = new DecisionPlanReadStamp(Ledger, Clock, NullLogger<DecisionPlanReadStamp>.Instance);
 
             Probe = new Mock<CallerRecordAccessProbe>(
-                new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!)
+                new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!, null!)
             { CallBase = false };
             Probe.Setup(p => p.GetCallerSystemUserIdAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(() => CallerUnresolved ? null : Caller);
             // FR-51: the caller's rights on the subject and the core record; every record is granted unless a test takes it away.

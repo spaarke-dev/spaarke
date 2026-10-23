@@ -34,6 +34,7 @@
  * What the user sees after a save (text-only form notifications - owner O1 final):
  * - "not enforced ... you do not hold Write on ..." with the records concerned (owner N5);
  * - "access through a team or a role cannot be removed per person ..." (owner N2) - Teams/SPA hides the record;
+ * - "still reachable on ...: the walled user owns these records ..." (#1620) - ownership is access no revoke removes;
  * - "kept: the last person who can open ..." when a removal would leave a secure record with nobody (owner S5);
  * - the server's own message when enforcement could not be completed. The job retries within 5 minutes.
  *
@@ -62,7 +63,7 @@ Spaarke.NoAccessEntry.Config = {
      * AccessibleRecordSetService composes only these). An entry on any other table is stored and enforced nowhere.
      */
     allowedObjectTypes: ["sprk_project", "sprk_matter", "sprk_workassignment"],
-    version: "1.1.1"
+    version: "1.1.2"
 };
 
 /** Xrm save mode of the Deactivate command (getEventArgs().getSaveMode()). */
@@ -897,7 +898,15 @@ Spaarke.NoAccessEntry._summarize = function (report) {
         messages.push("Not enforced: the entry's author is not an enabled person.");
     }
 
-    if ((report.notEnforceable || []).length > 0) {
+    // #1620: the walled user OWNS the record - named, because only reassigning the record removes that access.
+    var notEnforceable = report.notEnforceable || [];
+    var owned = notEnforceable.filter(function (n) { return n.mechanism === "user-ownership"; });
+    if (owned.length > 0) {
+        messages.push("Still reachable on " + Spaarke.NoAccessEntry._recordList(owned) + ": the walled user owns these " +
+            "records, so ownership keeps their access. Reassign them to another owner to wall them.");
+    }
+
+    if (notEnforceable.some(function (n) { return n.mechanism !== "user-ownership"; })) {
         messages.push("Some access comes from a team or a role and cannot be removed per person; Teams and the " +
             "portal hide the record, the model-driven app may still show it.");
     }

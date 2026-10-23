@@ -176,6 +176,7 @@ public class PromoteDurableFkVisibilityTests
             return Task.FromResult(id);
         }
 
+        public Task UpdateIfRowVersionMatchesAsync(string entityLogicalName, Guid id, string rowVersion, Dictionary<string, object> fields, CancellationToken ct = default) => throw new NotSupportedException();
         public Task UpdateAsync(string entityLogicalName, Guid id, Dictionary<string, object> fields, CancellationToken ct = default)
         {
             var row = _rows.FirstOrDefault(r => r.Id == id)

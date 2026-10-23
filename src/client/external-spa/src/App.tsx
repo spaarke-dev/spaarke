@@ -27,6 +27,7 @@ import { ProjectPage } from './pages/ProjectPage';
 import { DocumentUploadPage } from './pages/DocumentUploadPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { TeamsHostProvider } from './components/auth/TeamsHostContext';
+import { WorkforceHomeGate, isHomeGateActive } from './components/auth/WorkforceHomeGate';
 import type { PortalUser } from './types';
 
 const useStyles = makeStyles({
@@ -133,6 +134,9 @@ const AppShell: React.FC<{
   const navigate = useNavigate();
   const location = useLocation();
   const { inProgress } = useMsal();
+  // The workforce home plane holds the workspace back until the contact is registered or linked (A9, task 058); every
+  // other plane is ready at once.
+  const [homeReady, setHomeReady] = React.useState(() => !isHomeGateActive());
 
   return (
     <div className={styles.root}>
@@ -145,26 +149,29 @@ const AppShell: React.FC<{
         // The tall welcome band only reads on the workspace landing.
         showWelcomeBand={location.pathname === '/'}
         // Only for a signed-in user with no MSAL interaction running: the bell reads the BFF as soon as it mounts, which
-        // must neither precede sign-in nor compete with a redirect or token renewal that is still in progress.
-        bell={portalUser && inProgress === InteractionStatus.None ? <NotificationBell /> : null}
+        // must neither precede sign-in nor compete with a redirect or token renewal that is still in progress. On the
+        // workforce home plane it also waits for the registration gate (an unregistered contact is refused by the BFF).
+        bell={portalUser && inProgress === InteractionStatus.None && homeReady ? <NotificationBell /> : null}
       />
 
       <main className={styles.content}>
         <AuthGuard teamsHost={teamsHost}>
           <ErrorBoundary>
-            {/* Opens the record a `?record={type}:{id}` link names, once signed in (task 055, FR-07). */}
-            <RecordDeepLink teamsHost={teamsHost} />
-            <Routes>
-              <Route path="/" element={<WorkspaceHomePage teamsHost={teamsHost} />} />
-              <Route path="/project/:id" element={<ProjectPage />} />
-              <Route path="/upload" element={<DocumentUploadPage teamsHost={teamsHost} />} />
-              <Route
-                path="/settings"
-                element={<SettingsPage isDark={isDark} onToggleDark={onToggleDark} portalUser={portalUser} />}
-              />
-              {/* Unknown paths render an explicit in-app 404 (not a silent redirect home). */}
-              <Route path="*" element={<NotFoundView />} />
-            </Routes>
+            <WorkforceHomeGate onReady={setHomeReady}>
+              {/* Opens the record a `?record={type}:{id}` link names, once signed in (task 055, FR-07). */}
+              <RecordDeepLink teamsHost={teamsHost} />
+              <Routes>
+                <Route path="/" element={<WorkspaceHomePage teamsHost={teamsHost} />} />
+                <Route path="/project/:id" element={<ProjectPage />} />
+                <Route path="/upload" element={<DocumentUploadPage teamsHost={teamsHost} />} />
+                <Route
+                  path="/settings"
+                  element={<SettingsPage isDark={isDark} onToggleDark={onToggleDark} portalUser={portalUser} />}
+                />
+                {/* Unknown paths render an explicit in-app 404 (not a silent redirect home). */}
+                <Route path="*" element={<NotFoundView />} />
+              </Routes>
+            </WorkforceHomeGate>
           </ErrorBoundary>
         </AuthGuard>
       </main>

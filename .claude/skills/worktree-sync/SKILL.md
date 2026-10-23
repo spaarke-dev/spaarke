@@ -11,7 +11,7 @@ last-reviewed: 2026-05-16
 # worktree-sync
 
 > **Category**: Operations
-> **Last Reviewed**: 2026-09-01
+> **Last Reviewed**: 2026-10-15
 > **Reviewed By**: unified-access-control-r2 (#858 closeout — **Step 3 rewritten: the direct-push-to-master
 > strategy could never work on this repo and made Full Sync unusable**; Step 4 main-repo-path resolution
 > corrected (one `dirname`, not two) and given a dirty-tree / mixed-EOL branch)
@@ -250,9 +250,20 @@ MERGE STRATEGY — PULL REQUEST ONLY. Direct pushes to master DO NOT WORK on thi
   #    and `mergeable` still reads MERGEABLE. On 2026-09-01 that combination would have put a
   #    broken solution build on master. `mergeStateStatus: UNSTABLE` means non-required checks
   #    failed — treat UNSTABLE as a STOP, not as a green light. Only CLEAN proceeds.
-  POLL until no check is `pending`:
-    gh pr checks {pr} --json name,bucket
-  fails = checks where bucket == "fail"
+  POLL until no check is `pending`, parsing with gh's built-in `--jq`, never a separate `jq`:
+    #    ⚠️ `jq` is NOT installed in Git Bash on this machine. `gh … | jq` fails with
+    #    "command not found", the loop reads an empty result as "still pending", and it waits
+    #    out the whole window without ever reading a check (it once used up a 30-minute window
+    #    this way). `gh … --jq` uses gh's built-in jq and needs nothing installed.
+    gh pr checks {pr} --json name,bucket --jq '[.[] | select(.bucket=="pending")] | length'   # pending count
+    gh pr checks {pr} --json name,bucket,link --jq '.[] | select(.bucket=="fail" or .bucket=="cancel") | .name + "  " + .link'   # failures
+    #    The pending count ALWAYS prints a number (with --json, a pending PR exits 0, not 8).
+    #    If that command prints nothing or exits non-zero, it is a parse/tool failure: STOP and
+    #    report; do not count it as "still pending" and keep waiting.
+    #    One exception: exit 1 with "no checks reported" in the first ~2 minutes after
+    #    `gh pr create` means CI has not registered yet. Wait and retry, but never read it as green.
+    #    The failures command prints NOTHING when nothing failed. That is the normal green result.
+  fails = checks where bucket == "fail" or bucket == "cancel"
   IF fails is non-empty:
     REPORT the failing job names + log URLs
     STOP — diagnose. Do NOT merge because "only Router is required".

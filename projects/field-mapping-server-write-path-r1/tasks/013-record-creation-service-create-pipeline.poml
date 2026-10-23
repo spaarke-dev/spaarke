@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Unified RecordCreationService Create mode: principals, 12-step pipeline, typed refusals + HTTP map (FR-06, FR-07, FR-12)</title>
+    <phase>2 W2 Unified RecordCreationService</phase>
+    <gate>011+012 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in Sprk.Bff.Api; tags include bff-api, security; adds tests at KEEP paths (TEST-MODIFYING override); FR-06/FR-07 are named security-sensitive in NFR-01.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>New core service that owns the create invariants; principal model and fail-closed refusal design are security judgment, not mechanical porting.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>New core service plus a DI swap in OfficeModule.cs; every later W2 task (014-018) builds on and edits it.</parallel-reason>
+    <deps>011, 012</deps>
+    <tags>bff-api, security, dataverse, architecture, testing</tags>
+    <estimated-effort>12-16 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Create the unified `RecordCreationService` in `Services/RecordCreation/` by porting the create half of `OwnedChildWrite.CreateAsync` (~:302 of `Services/Dataverse/OwnedChildWrite.cs`) behind the 12-step FR-06 pipeline, with a caller principal (WhoAmI, 403 when unresolved) and a system principal. Failures are typed refusals `(Kind, Code, Detail)` mapped to ProblemDetails by ONE shared map. Field mapping (step 3) is only a no-op seam in this task; task 014 wires it. Re-point DI so the unified service replaces the Office registration at `OfficeModule.cs:73` without breaking compile.</prompt>
+  <role>SPAARKE platform developer, .NET 10 BFF, Dataverse write-path security. Follow ADRs strictly; this code decides who may create what.</role>
+  <goal>`RecordCreationService` (sealed, scoped, registered once) runs the 12 FR-06 steps in order for the caller and system principals, makes exactly one app-only create call, returns typed refusals, and a single shared map renders them as ProblemDetails with a stable `errorCode`. A seam test asserts step order and one create call for a root (Matter) and a child (Event).</goal>
+
+  <context>
+    <background>spec.md FR-06, FR-07, FR-12 and the "New Components" table; design.md §4. Two cores exist today: `OwnedChildWrite` (create half, children, strong authorization) and the Office `RecordCreationService` (roots, weaker authorization). Task 011 extracted the caller checks into `CallerWriteAuthorization`; task 012 produced `RecordTableRules`. This task composes them. Steps (spec FR-06): 1 resolve principal; 2 table rules, refuse blocked columns in the caller payload; 3 field mapping (NO-OP seam here); 4 map merged payload; 5 caller checks on merged payload (via CallerWriteAuthorization); 6 secure-root plan; 7 owner (ResolveOwnerAsync in task 015 - here keep the ported owner behaviour behind one method so 015 swaps it); 8 search-index default (task 015, seam); 9 creator person, "for" person, table defaults; 10 I-1 stamp + I-16 derived; 11 one app-only create with alternate-key retry for autonumber tables; 12 post-create steps (number read-back, isolated-root completion, sharee mirror, assigned-access grants, membership event), never throwing.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationRefusal.cs (Kind, Code, Detail; typed refusal record)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationProblemMap.cs (the ONE refusal-kind to ProblemDetails map)</file>
+      <file role="new">tests/integration/seam/Office/RecordCreationServicePipelineSeamTests.cs (grep tests/integration/seam/README.md for the seam folder rule; place under the folder it prescribes)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/OwnedChildWrite.cs (CreateAsync ~:302 is the porting source; stays compiling until 017 removes the create half)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/RecordCreationService.cs (rename class to OfficeRecordCreationService or namespace-qualify; deleted by task 018)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs (field `_recordCreation` ~:77 and ctor ~:107 follow the rename)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/OfficeModule.cs (registration ~:73)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/CallerWriteAuthorization.cs (task 011 output)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordTableRules.cs (task 012 output)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs (ResolveOwnerAsync ~:1016, ForParents ~:346)</file>
+      <file role="canonical-reference">docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="011" status="required">CallerWriteAuthorization exists and is behaviour-identical to the old OwnedChildWrite helpers.</dependency>
+      <dependency task="012" status="required">RecordTableRules registry exists; an arch test requires an entry per create table.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008 (path A, spec ADR Tensions)">Scope: payload-dependent authorization. Checks that depend on the request body (every lookup, the regarding pair, mapped values) live in `CallerWriteAuthorization` and are CALLED by the service; they are NOT written as endpoint filters. Route-level authorization (RequireAuthorization, caller identity, route ledger) stays in filters. Cite path A in the PR description.</constraint>
+    <constraint source="ADR-019">Scope: refusals. Every refusal Kind maps to ProblemDetails with a stable `errorCode` and a correlation id; no raw upstream/Dataverse exception text in the response; detail goes to logs.</constraint>
+    <constraint source="ADR-028">Scope: identity. The create is app-only under the managed identity; the caller identity is resolved by WhoAmI on the CALLER's token (reuse CallerWriteAuthorization's WhoAmI). Unresolved WhoAmI returns 403 and writes nothing. System principal skips as-caller checks (steps 2 and 5) only and records `RequestedBy` when known.</constraint>
+    <constraint source="ADR-010">Scope: DI. One scoped registration of `RecordCreationService` replaces the single registration at OfficeModule.cs ~:73; no interface unless a second implementation is needed (the engine stays static). No new background service.</constraint>
+    <constraint source="NFR-01 (spec)">Scope: every caller check. Fail closed: an exception, timeout or unresolved lookup in any caller check REFUSES the create (uniform 404 for "does not exist" and "cannot see"); it never falls through to a create. Mapping must never become an existence oracle.</constraint>
+    <constraint source="project">Scope: behaviour. This task ports behaviour; do not change the owner rule (task 015), wire mapping (task 014) or touch Repair mode (016). Step 3 is a documented no-op seam; steps 7-8 call the ported owner logic through ONE private method each so 015 can swap them.</constraint>
+    <constraint source="project">Scope: name clash. The Office class is also named `RecordCreationService`. Rename it `OfficeRecordCreationService` (preferred) or namespace-qualify at every use; record the choice in the task notes. Task 018 deletes it.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: BFF publish. State a Placement Justification in the PR (BFF; synchronous write path, spec "Placement" section); measure publish-size delta against a fresh master build per root CLAUDE.md §10.4; run `dotnet list package --vulnerable --include-transitive`; add no package.</constraint>
+    <constraint source="ADR-038">Scope: tests added by this task. Seam test under tests/integration/seam/**; no Mock&lt;HttpMessageHandler&gt;; no DI-registration tests. Cover the stated contract plus the named edge cases only; anything beyond needs a one-line justification in the task notes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse write path; caller vs system principals; ProblemDetails</topic>
+    <files>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Create payload shapes, alternate-key retry.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; read spec FR-06/07/12, design §4, the exemplar's neighbours 011/012 outputs; re-grep `OwnedChildWrite.CreateAsync` callers, `RecordCreationService` usages and `OfficeModule.cs` registration.</step>
+    <step order="1">Run /conflict-check (UAC-r2 PR #2110 also edits OwnedChildWrite.cs, ChildRecordEndpoints.cs and CommunicationService.cs); record the result in the task notes. Stop and escalate if a PR rewrites OwnedChildWrite.CreateAsync.</step>
+    <step order="2">Define the typed refusal (Kind, Code, Detail) with a closed Kind set (for example: BlockedColumn, NotFoundOrDenied, Forbidden, PrincipalUnresolved, OwnerUnresolved, Invalid, Conflict, Upstream) and the single shared `RecordCreationProblemMap` to ProblemDetails + stable `errorCode`. Include a unit test that every Kind has a mapping (reflection over the enum).</step>
+    <step order="3">Rename the Office class (see constraint) and fix its references; build.</step>
+    <step order="4">Implement `RecordCreationService.CreateAsync(RecordCreationRequest, RecordCreationPrincipal, ct)` returning a result that is either the created id + warnings or a refusal. Port from OwnedChildWrite.CreateAsync, reading rules from RecordTableRules and calling CallerWriteAuthorization for steps 2 and 5. Implement caller principal (WhoAmI under caller token, 403 when unresolved) and system principal (skip steps 2 and 5, record RequestedBy).</step>
+    <step order="5">Post-create step 12 must catch and log, never throw; the create result still returns. Use the existing alternate-key retry for autonumber tables (do not retry blindly after an ambiguous failure, NFR-03).</step>
+    <step order="6">Replace the OfficeModule.cs registration so the unified service is registered once (scoped) and the renamed Office class stays registered until 018.</step>
+    <step order="7">Write the seam test: a recording fake for each step asserts the step ORDER and that exactly ONE create call is made, for a Matter (root) and an Event (child); plus caller-principal-unresolved returns 403 with no create; plus system principal skips steps 2 and 5 but runs every other step.</step>
+    <step order="8">Build, run SecureChildOwnershipAiToolTests*, RefileWriterAfterRefileGuardTests, RouteAuthorizationGuardTests and the Office quick-create contract tests unchanged; measure publish size; run the CVE check.</step>
+    <step order="9">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="10">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the 12 FR-06 steps cannot be ordered as written without changing existing OwnedChildWrite behaviour (for example the secure-root plan needs the owner before step 6), STOP and escalate per CLAUDE.md §6 with the two orderings.</trigger>
+    <trigger>If /conflict-check shows UAC-r2 PR #2110 changes OwnedChildWrite.CreateAsync, STOP and ask the human to sequence the work.</trigger>
+    <trigger>If any caller-check path cannot be made to fail closed (it swallows an exception today), escalate as a security finding before porting it.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Grep `class RecordCreationService` and `static .* CreateAsync` in src/server/api/Sprk.Bff.Api: Services/Office/RecordCreationService.cs (roots, 1264 lines) and Services/Dataverse/OwnedChildWrite.cs ~:302 (children); callers: ChildRecordEndpoints.cs ~:258, DataverseCreateRecordHandler.cs ~:341, EmailDraftToolHandler.cs ~:455, BudgetInquiryExecutor.cs ~:242.</existing>
+    <extension>Yes, by merging the two existing cores into one; net one service replaces two creation cores, per the spec section 11 table ("Yes: merges the two existing cores"). A separate refusal type and map file are small value types that the three callers (route, Office, chat) share.</extension>
+    <cost-of-doing-nothing>The same Project filed under the same Matter gets different owners by surface, mapping reaches 2 of about 30 create paths, and chat creates skip the I-1 stamp and I-16 (spec section 11 table).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+    <tool name="skill:conflict-check">Detect overlap with UAC-r2 PR #2110</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationRefusal.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationProblemMap.cs</output>
+    <output type="test">tests/integration/seam/Office/RecordCreationServicePipelineSeamTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`RecordCreationService` is `sealed`, registered exactly once as scoped, and the Office class is renamed (or qualified) with the choice recorded in the task notes.</criterion>
+    <criterion testable="true">A seam test asserts the 12-step order and exactly one create call for a Matter (root) and an Event (child); mapping step 3 is a recorded no-op.</criterion>
+    <criterion testable="true">Caller principal: WhoAmI is resolved under the caller token; an unresolved WhoAmI returns a refusal that maps to HTTP 403 and issues zero create calls.</criterion>
+    <criterion testable="true">System principal: steps 2 and 5 are skipped, RequestedBy is recorded when supplied, and every other step runs; a test shows a system create and a caller create under the same parent get the same stamp and owner path.</criterion>
+    <criterion testable="true">One shared map turns every refusal Kind into ProblemDetails with a stable `errorCode` and correlation id; a test fails if a Kind has no mapping; no response body contains raw upstream exception text.</criterion>
+    <criterion testable="true">Negative: a caller-check exception or an unresolved lookup refuses the create (no create call is issued) and a payload naming a blocked column is refused before any Dataverse write; "does not exist" and "cannot see" return the identical status and body.</criterion>
+    <criterion testable="true">Step 12 post-create failures are logged and do not throw: the create result is still returned.</criterion>
+    <criterion testable="true">BFF build 0 errors; SecureChildOwnershipAiToolTests*, RefileWriterAfterRefileGuardTests, RouteAuthorizationGuardTests and the Office quick-create contract tests pass unchanged; publish-size delta, CVE result and the /conflict-check result recorded in the task notes.</criterion>
+    <criterion testable="true">From UAC-r2's 011 review (K2, 2026-10-20): the OwnedChildWrite / CallerWriteAuthorization mutual `using static` cannot silently rebind. Either qualify every cross-class call (and drop the using-static) or add an ArchTest asserting the two types share no member names, with must-fire and must-not-fire controls.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-06, FR-07, FR-12; NFR-01, NFR-03, NFR-04, NFR-05, NFR-06. Task 014 wires mapping into step 3 and merged-payload authorization; 015 swaps owner and search-index steps; 016 adds Repair mode; 017/018 re-point callers. The adversarial review for the whole W2 diff is task 019 (security: twice).
+From task 012 (2026-10-20), OWNER REVIEW items to put to the owner before or during 013–015:
+(1) Document is flagged search-indexed (FR-10) but no create path fills it today.
+(2) Mapping applies by default to memo, budget, KPI assessment, billing event and communication; confirm.
+(3) The per-path server defaults recorded in the registry; converge or keep.
+(4) #1608: the route refuses the work assignment's container, securitybu and access permission, while the chat create tool allows them; the owner picks one behaviour.
+Registry: Services/RecordCreation/RecordTableRules.cs; the pre-write rule contract is in notes/task-012-notes.md.
+ebilling-r1 review of the 012 recipe (2026-10-20): substance OK. The pre-write rule runner built in 013 must apply corrections (a) EffectiveLookups test/cref, (b) the verbatim NotAvailableToFileUnder text, (c) refusal-object fidelity, from notes/task-012-notes.md. Send 013 to ebilling-r1 before merge.
+Completed 2026-10-21 (merged to the work branch; not yet to master).
+- RecordCreationService create pipeline with typed refusals and a problem map; the Office core renamed OfficeRecordCreationService; K2 name guard.
+- Fix round 1 after the adversarial review:
+  - secure-root and number-retry seam tests;
+  - a caller-set autonumber column is refused with BlockedColumn;
+  - a SystemPrincipal create filed under a record is refused 403 system_principal_unsupported before PlanCreateAsync (fails closed).
+- Second adversarial pass: its F findings are fixed.
+- K1 (census name join; expires at 018) and K2 (post-create calls rely on their own never-throw promise).
+- Verified after the merge:
+  - Spaarke.sln 0/0;
+  - ArchTests 1214;
+  - full Sprk.Bff.Api.Tests 26098/26129: 9 failures under load, all passing in isolation (88/88).
+- OWNER items:
+  - step 10 order (A implemented: stamp and I-16 after the create; recommend amending FR-06 step 10);
+  - #1608 work-assignment server-owned columns refused for chat too;
+  - OWNER/017: chat matter or project number;
+  - OWNER/017-018: an app-only RequestedBy check.
+- Review before master: UAC-r2 and ebilling-r1.
+- Details: notes/task-013-notes.md.
+rework: fix-round-1 task 013</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

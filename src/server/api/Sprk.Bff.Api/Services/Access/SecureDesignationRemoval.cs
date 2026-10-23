@@ -253,8 +253,20 @@ public sealed class SecureRemovalCaller
     {
         ArgumentNullException.ThrowIfNull(probe);
         ArgumentNullException.ThrowIfNull(httpContext);
-        var token = TokenHelper.ExtractBearerTokenOrNull(httpContext);
+        return ForBearerToken(probe, TokenHelper.ExtractBearerTokenOrNull(httpContext));
+    }
 
+    /// <summary>
+    /// <see cref="ForRequest"/> for a writer that holds the caller's bearer token rather than the request (#2143 round 8,
+    /// F1-B: the Office save's reconciled-email filing). Same probe, same fail-closed reading of an unanswered question.
+    /// </summary>
+    /// <remarks>Component Justification (CLAUDE.md §11): (1) Existing — <see cref="ForRequest"/>, whose body this is; (2)
+    /// Extension — <see cref="ForRequest"/> now delegates here, one shape for both; (3) Cost of doing nothing — the Office
+    /// filing has no <see cref="HttpContext"/>, so it passed no caller and every filing that leaves a secure record's thread
+    /// was refused as Unverifiable.</remarks>
+    public static SecureRemovalCaller ForBearerToken(CallerRecordAccessProbe probe, string? token)
+    {
+        ArgumentNullException.ThrowIfNull(probe);
         return new SecureRemovalCaller(
             ct => probe.GetCallerSystemUserIdAsync(token, ct),
             (record, ct) => probe.GetCallerRightsAsync(

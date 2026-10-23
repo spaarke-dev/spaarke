@@ -2,6 +2,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Signals;
@@ -200,12 +201,15 @@ public sealed partial class DecisionRecordWriterTests
     private static readonly Guid BasicColleague = Guid.Parse("c0a1e000-0000-4000-8000-0000000000b2");
 
     /// <summary>Seeds the communication row the writer reads its owner from (the shared sysadmin reader): owned by <paramref name="ownerId"/>
-    /// (a user), or by nobody / a team when given.</summary>
+    /// (a user), or by nobody / a team when given. A user owner comes back with its linked <c>isdisabled</c> = false, as Dataverse returns it
+    /// for an active user (issue #1576: a user owner with no value is treated as disabled).</summary>
     private static void CommunicationOwnedBy(Harness h, EntityReference? owner)
     {
         var row = new Entity("sprk_communication", CommunicationId);
         if (owner is not null)
             row["ownerid"] = owner;
+        if (owner is { LogicalName: "systemuser" })
+            row["owner.isdisabled"] = new AliasedValue("systemuser", "isdisabled", false);
         h.Rows[("sprk_communication", CommunicationId)] = row;
     }
 
@@ -436,7 +440,31 @@ public sealed partial class DecisionRecordWriterTests
         h.Log.Entries.Should().NotContain(e => e.EventId == DecisionRecordEvents.WriteRefused);
         var ownerReads = h.Lookups.Where(q => q.EntityName == "sprk_communication").ToList();
         ownerReads.Should().ContainSingle("isdisabled comes with the owner row: no second request");
-        ownerReads[0].LinkEntities.Should().ContainSingle().Which.Columns.Columns.Should().Contain("isdisabled");
+        // The fixture seeds "owner.isdisabled" whatever the query asks for, so pin the link that produces that key: a renamed
+        // alias or re-pointed link would leave the value missing in production, and every user-owned gate would then skip.
+        var ownerLink = ownerReads[0].LinkEntities.Should().ContainSingle().Which;
+        ownerLink.Columns.Columns.Should().Contain("isdisabled");
+        ownerLink.EntityAlias.Should().Be("owner");
+        ownerLink.LinkFromAttributeName.Should().Be("ownerid");
+        ownerLink.LinkToEntityName.Should().Be("systemuser");
+        ownerLink.LinkToAttributeName.Should().Be("systemuserid");
+        ownerLink.JoinOperator.Should().Be(JoinOperator.LeftOuter);
+    }
+
+    [Fact]
+    public async Task Gate_AnUnfiledCommunicationWhoseUserOwnerCarriesNoIsDisabledValue_IsTreatedAsDisabled_WritesNothing_Issue1576()
+    {
+        // Issue #1576 (fail closed): only an explicit isdisabled = false is an active owner. A user owner whose linked row comes back without
+        // the value is not proof of an active user, so it takes the disabled skip, never an assignment.
+        var directory = Standard().WithRecord("sprk_communication", CommunicationId, ChildBu);
+        var h = new Harness(realResolver: directory.Resolver());
+        CommunicationOwnedBy(h, UserRef(CommunicationOwner));
+        h.Rows[("sprk_communication", CommunicationId)].Attributes.Remove("owner.isdisabled");
+
+        var act = () => h.Writer.WriteGateDecisionAsync(Gate());
+
+        (await act.Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason.Should().Be(DecisionRecordRefusalReason.GateSkippedOwnerDisabled);
+        h.Created.Should().BeEmpty();
     }
 
     [Fact]

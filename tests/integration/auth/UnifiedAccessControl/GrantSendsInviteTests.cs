@@ -55,7 +55,7 @@ public class GrantSendsInviteTests
     private Task<IResult> Grant(Guid contactId, ExternalAccessLevel level = ExternalAccessLevel.Collaborate) =>
         GrantExternalAccessEndpoint.GrantAccessAsync(
             new GrantAccessRequest(contactId, Guid.Empty, level, null, null, "matter", _matter),
-            _h.Grants, _h.Participations, _h.AccessibleRecords, new EverythingProbe(),
+            _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new EverythingProbe(),
             _h.Materializer, _h.Notifier, _h.Invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
 
     private static GrantAccessResponse OkBody(IResult result) =>
@@ -207,6 +207,36 @@ public class GrantSendsInviteTests
         _h.Emails.InviteUrls.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// #2005 F2: every bind consumes the code hash and leaves the marker, so a contact an operator unbinds after a bind holds a
+    /// current marker with no code anyone can use. That is not a pending invite: the grant sends a new code, and the first
+    /// CIAM sign-in with it binds. MUTATION: dropping the hash check from <c>AssessAsync</c> answers AlreadyPending, sends no
+    /// code, and the person is denied <c>contact_not_invited</c> for up to 30 days.
+    /// </summary>
+    [Fact]
+    public async Task Grant_ToAContactWithACurrentMarkerWhoseCodeWasConsumed_InvitesAgain_WithANewCode()
+    {
+        var contact = UnboundContact();
+        var invitedOn = _h.Time.GetUtcNow().AddDays(-2);
+        _h.Identities.Contacts[contact].InvitedOn = invitedOn;
+        _h.Identities.Contacts[contact].InviteCodeHash = null;
+        _h.Ciam.Failure = ObjectConflictOnProxyAddresses();
+
+        var body = OkBody(await Grant(contact));
+
+        body.Invite.Should().Be(new GrantInviteResult(GrantInviteStatus.Sent));
+        var code = TheOneInviteCode();
+        var stored = _h.Identities.Contacts[contact].InviteCodeHash;
+        stored.Should().NotBeNull("a new code's hash is stored");
+        InviteCode.Matches(stored, code, contact).Should().BeTrue("the emailed code is the one whose hash was stored");
+        _h.Identities.Contacts[contact].InvitedOn.Should().NotBe(invitedOn, "the re-invite restarts the marker");
+
+        var oid = Guid.NewGuid();
+        var signIn = await IdentityBindingTestKit.Binder(_h.Identities)
+            .ResolveCiamCallerAsync(oid.ToString(), Email, code, CancellationToken.None);
+        signIn.ContactId.Should().Be(contact, "the new code binds at the first sign-in");
+    }
+
     [Fact]
     public async Task Grant_ToAContactWhoseInviteHasExpired_InvitesAgain_WithANewCode()
     {
@@ -308,7 +338,7 @@ public class GrantSendsInviteTests
 
         var result = await GrantExternalAccessEndpoint.GrantAccessAsync(
             new GrantAccessRequest(contact, Guid.Empty, ExternalAccessLevel.Collaborate, null, null, "matter", _matter),
-            _h.Grants, _h.Participations, _h.AccessibleRecords, new EverythingProbe(),
+            _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new EverythingProbe(),
             _h.Materializer, _h.Notifier, invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
 
         OkBody(result).Invite.Should().Be(
@@ -326,7 +356,7 @@ public class GrantSendsInviteTests
 
         var result = await GrantExternalAccessEndpoint.GrantAccessAsync(
             new GrantAccessRequest(Guid.Empty, Guid.Empty, ExternalAccessLevel.Collaborate, null, organization, "matter", _matter),
-            _h.Grants, _h.Participations, _h.AccessibleRecords, new EverythingProbe(),
+            _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new EverythingProbe(),
             _h.Materializer, _h.Notifier, _h.Invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
 
         OkBody(result).Invite.Should().BeNull();
@@ -343,7 +373,7 @@ public class GrantSendsInviteTests
         var result = await InviteAndGrantExternalUserEndpoint.InviteAndGrantAsync(
             new InviteExternalUserRequest(Email, Guid.Empty, (int)ExternalAccessLevel.Collaborate, "Pat", "Partner", null, null,
                 "matter", _matter),
-            _h.Grants, _h.Participations, _h.AccessibleRecords, new EverythingProbe(),
+            _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new EverythingProbe(),
             _h.Ciam, _h.Emails, IdentityBindingTestKit.Binder(_h.Identities),
             new ConfigurationBuilder()
                 .AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = PortalUrl })

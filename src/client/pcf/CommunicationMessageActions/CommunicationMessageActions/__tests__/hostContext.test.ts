@@ -1,4 +1,9 @@
-import { resolveMessageTarget, COMMUNICATION_TYPE_MESSAGE } from '../hostContext';
+import {
+  resolveMessageTarget,
+  resolveInternalOnlySeed,
+  COMMUNICATION_TYPE_MESSAGE,
+  THREAD_PRIVACY_PRIVATE,
+} from '../hostContext';
 
 describe('resolveMessageTarget', () => {
   it('placed on sprk_communicationthread → mode "thread", threadId = the host record id', () => {
@@ -35,5 +40,48 @@ describe('resolveMessageTarget', () => {
   it('host entity undefined (Xrm frame-walk failed) → mode "unsupported"', () => {
     const result = resolveMessageTarget(undefined, undefined, null, null);
     expect(result.mode).toBe('unsupported');
+  });
+});
+
+describe('resolveInternalOnlySeed (task 068 - "Internal Only" switch seed)', () => {
+  it('thread placement on a Private thread form -> threadIsPrivate (switch on + disabled), not started by source', () => {
+    expect(resolveInternalOnlySeed('thread', false, THREAD_PRIVACY_PRIVATE)).toEqual({
+      threadIsPrivate: true,
+      startInternalOnly: false,
+    });
+  });
+
+  it('thread placement on an Open thread, or a form without the privacy field -> off and unlocked', () => {
+    expect(resolveInternalOnlySeed('thread', false, 100000000)).toEqual({
+      threadIsPrivate: false,
+      startInternalOnly: false,
+    });
+    expect(resolveInternalOnlySeed('thread', false, undefined)).toEqual({
+      threadIsPrivate: false,
+      startInternalOnly: false,
+    });
+  });
+
+  it('respond placement to an internal-only source -> the switch starts on, never locked', () => {
+    expect(resolveInternalOnlySeed('respond', true, undefined)).toEqual({
+      threadIsPrivate: false,
+      startInternalOnly: true,
+    });
+  });
+
+  it('respond placement to a normal source (or one not loaded yet) -> off', () => {
+    expect(resolveInternalOnlySeed('respond', false, undefined).startInternalOnly).toBe(false);
+    expect(resolveInternalOnlySeed('respond', null, undefined).startInternalOnly).toBe(false);
+  });
+
+  it('respond placement ignores a stray privacy value (the thread is not known there)', () => {
+    expect(resolveInternalOnlySeed('respond', false, THREAD_PRIVACY_PRIVATE).threadIsPrivate).toBe(false);
+  });
+
+  it('an unsupported placement seeds nothing', () => {
+    expect(resolveInternalOnlySeed('unsupported', true, THREAD_PRIVACY_PRIVATE)).toEqual({
+      threadIsPrivate: false,
+      startInternalOnly: false,
+    });
   });
 });

@@ -9,7 +9,10 @@
  * RIGHTS (task 054). Upload needs Create and download needs Read on the record. A host that knows better passes
  * `canUpload` / `canDownload`; otherwise download follows `accessLevel` (Collaborate / Full Access), and Upload follows
  * the BFF's `canCreate` on the record's document list (a matter, work assignment or service request) or `accessLevel`
- * (a project). This is only what is SHOWN: the server decides, and a refused upload shows its 403 as an error.
+ * (a project). For a caller whose write access is decided per record (`writeAccessPerRecord`, task 036), download and
+ * version history are offered wherever the list rendered (the list already passed the Read the download routes need), and
+ * a project's Upload follows its list's `canCreate`. This is only what is SHOWN: the server decides, and a refused upload
+ * shows its 403 as an error.
  *
  * DELETE-OWN (task 054, FR-26). With a `caller` identity, a row the caller created (creator stamp = the signed-in
  * principal) shows Delete, which asks first (shared ConfirmModal). 204 removes the row; a 403 / 409 / 503 / 500 shows a
@@ -274,6 +277,91 @@ const RECORD_NOUN: Readonly<Record<DocumentRoot, string>> = {
  */
 function canUploadOrDownload(accessLevel: AccessLevel): boolean {
   return accessLevel === AccessLevel.Collaborate || accessLevel === AccessLevel.FullAccess;
+}
+
+// ---------------------------------------------------------------------------
+// Download (shared with the record detail's document view, R3 task 066)
+// ---------------------------------------------------------------------------
+
+/**
+ * Downloads one document through the content route of the record it is filed to and hands the bytes to the browser under
+ * the document's name. The BFF streams the file itself (application/octet-stream) from the record-scoped route; it
+ * deliberately never returns a signed URL or an SPE pointer, so this reads the bytes and uses an object URL.
+ *
+ * Fixed 2026-09-01: this previously called `/api/v1/external/documents/{id}/download` expecting `{ downloadUrl }`. That
+ * route does not exist (guaranteed 404) and the response shape it assumed is one the server is designed never to produce.
+ *
+ * Throws on any failure (an `ApiError` for a refused or failed read): the caller shows it (`downloadFailureMessage`).
+ */
+export async function downloadDocumentFile(
+  root: DocumentRoot,
+  recordId: string,
+  documentId: string,
+  fileName: string
+): Promise<void> {
+  let objectUrl: string | undefined;
+  try {
+    const blob = await bffApiBlob(documentContentPath(root, recordId, documentId));
+
+    objectUrl = window.URL.createObjectURL(blob);
+
+    // Trigger browser download via a temporary anchor element
+    const anchor = window.document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = fileName;
+    anchor.style.display = 'none';
+    window.document.body.appendChild(anchor);
+    anchor.click();
+    window.document.body.removeChild(anchor);
+  } finally {
+    // Revoke on the next tick - revoking synchronously can cancel the in-flight navigation the anchor click just started.
+    if (objectUrl) {
+      const toRevoke = objectUrl;
+      window.setTimeout(() => window.URL.revokeObjectURL(toRevoke), 0);
+    }
+  }
+}
+
+/**
+ * Downloads a document filed to several records (record detail, task 066): asks each parent's content route in order and
+ * moves to the next ONLY when the server refuses with 403 (that parent is not readable by the caller, or does not hold the
+ * document). Any other failure stops at once (a 5xx on one parent says nothing about the next, and retrying hides it).
+ * When every parent refuses, the last 403 is thrown. An empty list is a programming error: the host offers no Download then.
+ */
+export async function downloadDocumentFromParents(
+  parents: ReadonlyArray<{ root: DocumentRoot; id: string }>,
+  documentId: string,
+  fileName: string
+): Promise<void> {
+  let lastRefusal: unknown = new Error('No parent record to download the document through.');
+  for (const parent of parents) {
+    try {
+      await downloadDocumentFile(parent.root, parent.id, documentId, fileName);
+      return;
+    } catch (err) {
+      if (!(err instanceof ApiError) || err.statusCode !== 403) throw err;
+      lastRefusal = err;
+    }
+  }
+  throw lastRefusal;
+}
+
+/**
+ * What a failed download says. By status, never the server's detail text (it names the record and rule, and a download
+ * refusal must not be usable to tell whether a document exists): 403 access, 404 no file, 5xx try later, else generic.
+ */
+export function downloadFailureMessage(err: unknown): string {
+  const status = err instanceof ApiError ? err.statusCode : undefined;
+  if (status === 403) return 'You do not have access to download this document.';
+  if (status === 404) return "This document's file is not available.";
+  if (status !== undefined && status >= 500)
+    return 'The document could not be downloaded just now. Please try again later.';
+  return 'The document could not be downloaded. Please try again.';
+}
+
+/** What a failed download logs: the status only, never the error body (task 066 review K3). */
+export function downloadFailureLogText(err: unknown): string {
+  return err instanceof ApiError ? `HTTP ${err.statusCode}` : 'no HTTP status (network or client error)';
 }
 
 // AiSummaryCell is now rendered inline using AiSummaryPopover from @spaarke/ui-components.
@@ -597,10 +685,20 @@ export type DocumentLibraryProps = DocumentLibraryTarget & {
    * `accessLevel`. The server enforces Create either way.
    */
   canUpload?: boolean;
-  /** Show Download and Version history. Default: Collaborate / Full Access. The server enforces Read either way. */
+  /**
+   * Show Download and Version history. Default: Collaborate / Full Access, or — for a per-record caller
+   * (`writeAccessPerRecord`) — wherever the list rendered. The server enforces Read either way.
+   */
   canDownload?: boolean;
   /** The signed-in principal. With it, rows the caller created show Delete; without it, no row does (task 054). */
   caller?: CallerIdentity | null;
+  /**
+   * The caller's write access is decided per record (`/me` `writeAccessPerRecord`, task 036 fix round 1): a project's
+   * Upload then follows the BFF's `canCreate` on its document list, like every other record, instead of `accessLevel`;
+   * Download and Version history are offered wherever the list rendered (fix round 2), since the list read already passed
+   * the Read those routes check.
+   */
+  writeAccessPerRecord?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -632,6 +730,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   canUpload,
   canDownload,
   caller,
+  writeAccessPerRecord = false,
 }) => {
   const styles = useStyles();
   // The props type refuses a call with neither; an empty id that still arrives (a caller that casts, or a blank id from
@@ -646,16 +745,25 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   const [documents, setDocuments] = React.useState<ODataDocument[]>([]);
   // Task 105: the BFF said the list was cut short — shown, never presented as the whole list.
   const [truncated, setTruncated] = React.useState<boolean>(false);
-  // The BFF's `canCreate` for this record (null = not said; projects never use it, they follow the access level).
+  // The BFF's raw `canCreate` on this record's document list (null = not said, or not loaded yet). How it is read depends
+  // on `writeAccessPerRecord`, which is applied at render (below), never baked in by the fetch: `/me` may answer after the
+  // list did, and a stored, already-interpreted value would then be stale (task 036 fix round 2).
   const [listCanCreate, setListCanCreate] = React.useState<boolean | null>(null);
   const [loading, setLoading] = React.useState<boolean>(true);
   const [error, setError] = React.useState<string | null>(null);
   const [uploadDialogOpen, setUploadDialogOpen] = React.useState<boolean>(false);
   const [versionHistoryDoc, setVersionHistoryDoc] = React.useState<ODataDocument | null>(null);
   const [downloadingId, setDownloadingId] = React.useState<string | null>(null);
+  // Task 066: why the last download failed (null = none); cleared when the next download starts.
+  const [downloadError, setDownloadError] = React.useState<string | null>(null);
 
-  const showUpload = canUpload ?? listCanCreate ?? canUploadOrDownload(accessLevel);
-  const canActOnDocuments = canDownload ?? canUploadOrDownload(accessLevel);
+  // A project follows the access level unless the caller's write access is per record (task 036 fix round 1); then it
+  // follows `canCreate` like every other record, and a missing one reads as "cannot".
+  const uploadFromList = root === 'projects' ? (writeAccessPerRecord ? (listCanCreate ?? false) : null) : listCanCreate;
+  const showUpload = canUpload ?? uploadFromList ?? canUploadOrDownload(accessLevel);
+  // Download / version history need only Read on the record (the server checks it). A per-record caller's level says only
+  // what they may SEE, and the list rendering at all proves that Read, so they are offered (task 036 fix round 2).
+  const canActOnDocuments = canDownload ?? (writeAccessPerRecord || canUploadOrDownload(accessLevel));
 
   // Delete-own (task 054): the row leaves the list on the server's 204; any refusal keeps it and is shown.
   const del = useDeleteOwn<ODataDocument>({
@@ -686,12 +794,12 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
         const data = await getDocuments(recordId);
         setDocuments(data.items);
         setTruncated(data.truncated);
-        setListCanCreate(null);
+        setListCanCreate(data.canCreate ?? null);
       } else {
         const data = await getRecordDocuments(root, recordId);
         setDocuments(data.items);
         setTruncated(data.truncated);
-        setListCanCreate(data.canCreate);
+        setListCanCreate(data.canCreate ?? null);
       }
     } catch (err) {
       console.error('[DocumentLibrary] Failed to load documents:', err);
@@ -714,38 +822,17 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
       if (!canActOnDocuments) return;
 
       setDownloadingId(doc.sprk_documentid);
+      setDownloadError(null);
 
-      let objectUrl: string | undefined;
       try {
-        // The BFF streams the file itself (application/octet-stream) from the
-        // project-scoped route; it deliberately never returns a signed URL or an
-        // SPE pointer. So read the bytes and hand the browser an object URL.
-        //
-        // Fixed 2026-09-01: this previously called
-        // `/api/v1/external/documents/{id}/download` expecting `{ downloadUrl }`.
-        // That route does not exist (guaranteed 404) and the response shape it
-        // assumed is one the server is designed never to produce.
-        const blob = await bffApiBlob(documentContentPath(root, recordId, doc.sprk_documentid));
-
-        objectUrl = window.URL.createObjectURL(blob);
-
-        // Trigger browser download via a temporary anchor element
-        const anchor = window.document.createElement('a');
-        anchor.href = objectUrl;
-        anchor.download = doc.sprk_name;
-        anchor.style.display = 'none';
-        window.document.body.appendChild(anchor);
-        anchor.click();
-        window.document.body.removeChild(anchor);
+        await downloadDocumentFile(root, recordId, doc.sprk_documentid, doc.sprk_name);
       } catch (err) {
-        console.error(`[DocumentLibrary] Download failed for document ${doc.sprk_documentid}:`, err);
+        console.error(
+          `[DocumentLibrary] Download failed for document ${doc.sprk_documentid}: ${downloadFailureLogText(err)}`
+        );
+        // Task 066: a failed download is shown, not only logged.
+        setDownloadError(downloadFailureMessage(err));
       } finally {
-        // Revoke on the next tick — revoking synchronously can cancel the
-        // in-flight navigation the anchor click just started.
-        if (objectUrl) {
-          const toRevoke = objectUrl;
-          window.setTimeout(() => window.URL.revokeObjectURL(toRevoke), 0);
-        }
         setDownloadingId(null);
       }
     },
@@ -839,7 +926,10 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
               renderHeaderCell: () => '',
               renderCell: item => (
                 <div className={styles.actionButtons}>
-                  {canActOnDocuments && (
+                  {/* R3 ISS-011 (#1886): a document with no file stays listed but offers neither action (both would answer
+                      409 no_file_attached). Only an explicit false hides them: a BFF that does not send hasFile is an old
+                      BFF, and its rows keep today's behaviour. */}
+                  {canActOnDocuments && item.hasFile !== false && (
                     <>
                       <Tooltip content="Download" relationship="label">
                         <Button
@@ -930,6 +1020,13 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
       <div className={styles.root}>
         <TruncatedListNotice truncated={truncated} shown={0} noun="documents" />
         <DeleteFailureNotice del={del} />
+        {/* Same slot as in the list render, so the children below keep their positions (and the delete confirmation its
+            state) when the last document is removed: React matches siblings by index. */}
+        {downloadError && (
+          <MessageBar intent="error" data-testid="document-download-error">
+            <MessageBarBody>{downloadError}</MessageBarBody>
+          </MessageBar>
+        )}
         {/* Toolbar — show upload button even when empty so users can add their first doc */}
         {showUpload && (
           <div className={styles.toolbar}>
@@ -982,6 +1079,11 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
     <div className={styles.root}>
       <TruncatedListNotice truncated={truncated} shown={documents.length} noun="documents" />
       <DeleteFailureNotice del={del} />
+      {downloadError && (
+        <MessageBar intent="error" data-testid="document-download-error">
+          <MessageBarBody>{downloadError}</MessageBarBody>
+        </MessageBar>
+      )}
 
       {/* Toolbar */}
       <div className={styles.toolbar}>

@@ -1,3 +1,6 @@
+using Sprk.Bff.Api.Tests.AccessControl;
+using Sprk.Bff.Api.Tests.Services.Ai.Handlers;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -261,6 +264,104 @@ public class PlaybookRouteAuthorizationContractTests
         unknownBody.Should().Be(Normalize(await denied.Content.ReadAsStringAsync()));
         unknownBody.Should().Be(Normalize(await fault.Content.ReadAsStringAsync()));
         host.VerifyNothingRan();
+    }
+
+    // ── Task 188 round 4b (F1-2): the run's documents go through THE external document narrowing ────────────────
+
+    private const int RestrictedPermission = 100000002;
+
+    /// <summary>Arranges a must-fire case and returns a run document the caller can Read (only the narrowing can deny).</summary>
+    private static Guid ArrangeHiddenRunDocument(PlaybookAuthHost host, string @case)
+    {
+        host.NarrowingMode = NarrowingCallerMode.External;
+        var world = host.World;
+        Guid documentId;
+        switch (@case)
+        {
+            case "own-restricted":
+                documentId = world.Document(Guid.NewGuid(), permission: RestrictedPermission);
+                break;
+            case "internal-only-communication":
+                var communication = Guid.NewGuid();
+                var thread = Guid.NewGuid();
+                world.Thread(thread, 100000000);
+                world.Communication(communication, internalOnly: true, thread);
+                documentId = world.Document(Guid.NewGuid(), communication: communication);
+                break;
+            case "restricted-parent":
+                documentId = world.Document(Guid.NewGuid(), parent: world.Document(Guid.NewGuid(), permission: RestrictedPermission));
+                break;
+            case "narrowing-fault":
+                documentId = world.Document(Guid.NewGuid());
+                world.Faults["sprk_documents"] = HttpStatusCode.ServiceUnavailable;
+                break;
+            case "lookup-fault":
+                host.NarrowingMode = NarrowingCallerMode.LookupFault;
+                documentId = world.Document(Guid.NewGuid(), permission: RestrictedPermission);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(@case), @case, null);
+        }
+
+        host.Access.Grant(Documents, documentId, AccessRights.Read);
+        return documentId;
+    }
+
+    [Theory(DisplayName = "Task 188 r4b F1-2: playbook run — a document the narrowing hides is the run's uniform 403 for a caller who is not an internal systemuser; nothing runs")]
+    [InlineData("own-restricted")]
+    [InlineData("internal-only-communication")]
+    [InlineData("restricted-parent")]
+    [InlineData("narrowing-fault")]
+    [InlineData("lookup-fault")]
+    public async Task Execute_ExternalCaller_HiddenDocument_IsTheUniform403_AndNothingRuns(string @case)
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        var playbookId = host.ReadOnlyPublicPlaybook();
+        var visible = host.World.Document(Guid.NewGuid());
+        host.Access.Grant(Documents, visible, AccessRights.Read);
+        var hidden = ArrangeHiddenRunDocument(host, @case);
+
+        var response = await host.SendAsync(Execute(playbookId, visible, hidden));
+        var unknown = await host.SendAsync(Execute(playbookId, Guid.NewGuid()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        Normalize(await response.Content.ReadAsStringAsync()).Should().Be(Normalize(await unknown.Content.ReadAsStringAsync()),
+            "a hidden document cannot be told from an unreadable one");
+        host.VerifyNothingRan();
+        host.World.Calls.Should().Be(1, "ONE narrowing call over every document of the run");
+    }
+
+    [Fact(DisplayName = "Task 188 r4b F1-2: must not fire — an external caller runs over a VISIBLE document as today")]
+    public async Task Execute_ExternalCaller_VisibleDocument_GetsTheSseStream()
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        host.NarrowingMode = NarrowingCallerMode.External;
+        var playbookId = host.ReadOnlyPublicPlaybook();
+        var documentId = host.World.Document(Guid.NewGuid());
+        host.Access.Grant(Documents, documentId, AccessRights.Read);
+        host.RunSucceeds();
+
+        var response = await host.SendAsync(Execute(playbookId, documentId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.Content.Headers.ContentType!.MediaType.Should().Be("text/event-stream");
+        host.World.Calls.Should().Be(1);
+    }
+
+    [Fact(DisplayName = "Task 188 r4b F1-2: must not fire — an internal caller runs over a Restricted document with no narrowing call and no app-only read")]
+    public async Task Execute_InternalCaller_RestrictedDocument_IsNotNarrowed()
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        var playbookId = host.ReadOnlyPublicPlaybook();
+        var documentId = host.World.Document(Guid.NewGuid(), permission: RestrictedPermission);
+        host.Access.Grant(Documents, documentId, AccessRights.Read);
+        host.RunSucceeds();
+
+        var response = await host.SendAsync(Execute(playbookId, documentId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.World.Calls.Should().Be(0);
+        host.World.AllReads.Should().BeEmpty();
     }
 
     [Fact]
@@ -1001,6 +1102,12 @@ public class PlaybookRouteAuthorizationContractTests
 
         public RecordingAccessDataSource Access { get; } = new();
         public RecordingSystemUserProbe Probe { get; } = new();
+
+        /// <summary>Task 188 round 4b: who the caller is for the narrowing (Internal unless a test says otherwise).</summary>
+        public NarrowingCallerMode NarrowingMode { get; set; } = NarrowingCallerMode.Internal;
+
+        /// <summary>Task 188 round 4b: what the BFF's app-only identity reads (the REAL predicate behind the real seam).</summary>
+        internal AppOnlyDocumentWorld World { get; } = new();
         public Mock<IPlaybookService> Playbooks { get; } = new(MockBehavior.Strict);
         public Mock<IPlaybookLookupService> Lookup { get; } = new(MockBehavior.Strict);
         public Mock<INodeService> Nodes { get; } = new(MockBehavior.Strict);
@@ -1040,6 +1147,10 @@ public class PlaybookRouteAuthorizationContractTests
             builder.Services.AddSingleton<IAccessDataSource>(Access);
             builder.Services.AddScoped<IAuthorizationRule, OperationAccessRule>();
             builder.Services.AddScoped<AuthorizationService>();
+            // Task 188 round 4b: WHO the caller is for THE external document narrowing and what the app-only identity
+            // reads (StatedNarrowingCaller). Internal by default (no narrowing call, no read); the round 4b must-fire
+            // tests state an external caller and seed the world.
+            builder.Services.AddStatedNarrowingCaller(() => NarrowingMode, () => World);
             builder.Services.AddSingleton<CallerRecordAccessProbe>(Probe);
 
             builder.Services.AddSingleton(Playbooks.Object);

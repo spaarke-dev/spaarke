@@ -1,0 +1,247 @@
+# ============================================================================
+# publish-bff-artifact.yml — build the BFF and publish it to provisioning-artifacts for H9
+# ============================================================================
+#
+# customer-provisioning-orchestration-r1 T186 L42. H9 deploys a customer stamp's BFF from the
+# `provisioning-artifacts` store: it reads `latest.json` (BffDeployOptions.ArtifactManifestBlobName), checks the
+# r3 gate results and size the manifest carries (ArtifactManifestVerifier), downloads `artifactBlobName` and
+# zip-deploys it to the stamp's staging slot. This workflow is that artifact's ONLY producer.
+#
+# Why a separate workflow: the producer used to be the Build job of deploy-bff-api.yml (task 116), which also
+# deploys the PLATFORM BFF to dev/production. That workflow is dispatch-only and BFF deploys are operator-driven,
+# so it never ran after the store existed — the first live H9 (T186, 2026-10-16) found no latest.json. Publishing
+# a customer artifact must not require deploying the platform BFF, and vice versa.
+#
+# Steps: build + publish (Release) → r3 gates (same steps and vocabulary as before: R3GateKind / R3GateStatus) →
+# zip → keep zip + manifest as a run artifact. Only a manual run on master with `publish: true` then uploads:
+# the zip (blob metadata `sourcesha`), a versioned manifest `bff-api-{buildId}.json`, a copy of the current
+# latest.json as `latest.previous.json` (the rollback pointer), then the new `latest.json`, read back.
+# A red gate fails the run BEFORE anything is uploaded, so latest.json only ever names a green build.
+# Nothing is ever deleted. Rollback: copy latest.previous.json over latest.json.
+# ============================================================================
+
+name: Publish BFF Artifact (H9)
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Upload to provisioning-artifacts and move latest.json. false = dry run (build + gates + zip + manifest as a run artifact; nothing uploaded).'
+        required: false
+        type: boolean
+        default: false
+  # Dry run only: proves a change to this workflow still builds, gates and writes the manifest.
+  pull_request:
+    paths:
+      - '.github/workflows/publish-bff-artifact.yml'
+
+permissions:
+  contents: read
+  id-token: write  # OIDC login for the publish steps (no stored storage key)
+
+concurrency:
+  group: publish-bff-artifact-${{ github.ref }}
+  cancel-in-progress: false  # never cancel an in-flight publish
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_VERSION: '10.x'
+  API_PROJECT: src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj
+  CONTAINER: provisioning-artifacts
+
+jobs:
+  build-and-publish:
+    name: Build BFF, gate, (publish)
+    runs-on: ubuntu-latest
+    env:
+      PUBLISH: ${{ github.event_name == 'workflow_dispatch' && inputs.publish == true }}
+      # The OIDC subject trusts refs/heads/master only; a publish from another branch is refused up front.
+      ON_MASTER: ${{ github.ref == 'refs/heads/master' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Refuse a publish from a branch other than master
+        if: env.PUBLISH == 'true' && env.ON_MASTER != 'true'
+        shell: bash
+        run: |
+          echo "::error::publish=true runs from master only (the OIDC federated subject trusts refs/heads/master). Merge first, or run with publish=false for a dry run."
+          exit 1
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore dependencies
+        run: dotnet restore ${{ env.API_PROJECT }}
+
+      # r3AnalyzersAsErrors: this build runs with Directory.Build.props' TreatWarningsAsErrors=true; reaching the
+      # next step proves the gate passed (a failed step stops the job).
+      - name: Build
+        run: dotnet build ${{ env.API_PROJECT }} -c Release --no-restore
+
+      - name: Publish
+        run: dotnet publish ${{ env.API_PROJECT }} -c Release -o ./publish --no-build
+
+      - name: Compute build identifiers (buildId + sha)
+        id: build-id
+        shell: bash
+        run: |
+          set -euo pipefail
+          # date + monotonic run number: unique per workflow, human-sortable.
+          build_id="$(date -u +%Y.%m.%d)-${{ github.run_number }}"
+          echo "build_id=${build_id}" >> "$GITHUB_OUTPUT"
+          echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: 'Gate: god-class ratchet (tests/Spaarke.ArchTests/GodClassGuardTests.cs)'
+        id: gate-godclass
+        continue-on-error: true # recorded in the manifest; the "Refuse a red build" step fails the run before upload
+        shell: bash
+        run: |
+          dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj \
+            -c Release \
+            --filter "FullyQualifiedName~GodClassGuardTests" \
+            --logger "trx;LogFileName=godclass.trx" \
+            --results-directory ./gate-results
+
+      - name: 'Gate: tenant-isolation ArchTests I1-I5 (FR-28..FR-32)'
+        id: gate-archtests
+        continue-on-error: true
+        shell: bash
+        run: |
+          dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj \
+            -c Release \
+            --filter "FullyQualifiedName~TenantIsolation" \
+            --logger "trx;LogFileName=tenantisolation.trx" \
+            --results-directory ./gate-results
+
+      - name: 'Gate: naming-conformance (FR-35 / NFR-08)'
+        id: gate-naming
+        continue-on-error: true
+        shell: pwsh
+        run: ./scripts/naming-conformance-check.ps1
+
+      - name: Translate gate outcomes to R3GateStatus values
+        id: gate-status
+        shell: bash
+        run: |
+          set -euo pipefail
+          to_status () { [ "$1" = "success" ] && echo "Passed" || echo "Failed"; }
+          echo "analyzers=Passed" >> "$GITHUB_OUTPUT"
+          echo "godclass=$(to_status '${{ steps.gate-godclass.outcome }}')" >> "$GITHUB_OUTPUT"
+          echo "archtests=$(to_status '${{ steps.gate-archtests.outcome }}')" >> "$GITHUB_OUTPUT"
+          echo "naming=$(to_status '${{ steps.gate-naming.outcome }}')" >> "$GITHUB_OUTPUT"
+
+      - name: Zip (bff-api-{buildId}.zip) and write the manifest
+        id: zip
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          zip_name="bff-api-${{ steps.build-id.outputs.build_id }}.zip"
+          (cd ./publish && zip -qr "../out/${zip_name}" . -x '*.pdb')
+          size_bytes=$(stat -c%s "./out/${zip_name}")
+          echo "zip_name=${zip_name}" >> "$GITHUB_OUTPUT"
+          # graphAppRoleParity is a property of a DEPLOYMENT TARGET (a stamp's UAMI vs GraphAppRoles.cs), not of
+          # this build, so it is always Skipped here; H9 checks it live per environment.
+          cat > ./out/manifest.json <<EOF
+          {
+            "buildId": "${{ steps.build-id.outputs.build_id }}",
+            "sha": "${{ steps.build-id.outputs.sha }}",
+            "sizeBytes": ${size_bytes},
+            "publishedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "artifactBlobName": "${zip_name}",
+            "gates": {
+              "r3AnalyzersAsErrors": "${{ steps.gate-status.outputs.analyzers }}",
+              "godClassRatchet": "${{ steps.gate-status.outputs.godclass }}",
+              "archTests": "${{ steps.gate-status.outputs.archtests }}",
+              "namingConformance": "${{ steps.gate-status.outputs.naming }}",
+              "graphAppRoleParity": "Skipped"
+            }
+          }
+          EOF
+          python3 -c "import json; m = json.load(open('out/manifest.json')); print(m)"
+
+      - name: Keep the zip and manifest as a run artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: bff-api-${{ steps.build-id.outputs.build_id }}
+          path: out/
+          retention-days: 14
+
+      - name: Refuse a red build (nothing is uploaded)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.gate-godclass.outcome }}" = "failure" ] || \
+             [ "${{ steps.gate-archtests.outcome }}" = "failure" ] || \
+             [ "${{ steps.gate-naming.outcome }}" = "failure" ]; then
+            echo "::error::One or more r3 gates failed (gate-godclass / gate-archtests / gate-naming above). latest.json stays on the last green build."
+            exit 1
+          fi
+          echo "All artifact-scoped r3 gates green."
+
+      - name: Azure Login (OIDC)
+        if: env.PUBLISH == 'true'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Publish (zip, versioned manifest, previous pointer, latest)
+        if: env.PUBLISH == 'true'
+        shell: bash
+        env:
+          ACCOUNT: ${{ vars.PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT }}
+          BUILD_ID: ${{ steps.build-id.outputs.build_id }}
+          ZIP_NAME: ${{ steps.zip.outputs.zip_name }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ACCOUNT}" ]; then echo "::error::Repo variable PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT is not set."; exit 1; fi
+          blob() { az storage blob "$@" --account-name "${ACCOUNT}" --container-name "${CONTAINER}" --auth-mode login; }
+
+          # The zip first: latest.json must never name a missing blob.
+          blob upload --name "${ZIP_NAME}" --file "out/${ZIP_NAME}" --overwrite true --metadata "sourcesha=${GITHUB_SHA}"
+          blob upload --name "bff-api-${BUILD_ID}-${GITHUB_RUN_ATTEMPT}.json" --file out/manifest.json --overwrite false
+
+          # Rollback pointer: keep the manifest being replaced.
+          latest_exists=$(blob exists --name latest.json --query exists -o tsv)
+          if [ "${latest_exists}" = "true" ]; then
+            blob download --name latest.json --file out/previous-latest.json --overwrite true
+            blob upload --name latest.previous.json --file out/previous-latest.json --overwrite true
+          fi
+          blob upload --name latest.json --file out/manifest.json --overwrite true
+
+          # Read back what H9 will read.
+          blob download --name latest.json --file out/readback.json --overwrite true
+          python3 - <<'PY'
+          import json, os
+          m = json.load(open('out/readback.json'))
+          assert m['buildId'] == os.environ['BUILD_ID'] and m['artifactBlobName'] == os.environ['ZIP_NAME'], m
+          assert m['sha'] == os.environ['GITHUB_SHA'], m
+          print('latest.json read back:', m)
+          PY
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### BFF artifact for H9"
+            echo "- Build: \`${{ steps.build-id.outputs.build_id }}\` (sha \`${{ github.sha }}\`) — mode: $([ "${PUBLISH}" = "true" ] && echo '**published**' || echo 'dry run (nothing uploaded)')"
+            echo "- Blob: \`${{ steps.zip.outputs.zip_name }}\`; manifest → \`latest.json\` (container \`${CONTAINER}\`)"
+            echo "- Gates: god-class ${{ steps.gate-status.outputs.godclass }}, tenant isolation ${{ steps.gate-status.outputs.archtests }}, naming ${{ steps.gate-status.outputs.naming }}"
+          } >> "$GITHUB_STEP_SUMMARY"

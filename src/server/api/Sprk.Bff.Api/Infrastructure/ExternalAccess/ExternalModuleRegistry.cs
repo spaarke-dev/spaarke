@@ -207,6 +207,50 @@ public sealed class ExternalModuleDescriptor
             ? ExternalMultiRootRule.LiveParentLookupsOf(RecordEntity).Select(l => l.Column)
             : Enumerable.Empty<string>();
 
+    /// <summary>
+    /// Task 188 (D7, #2126): <c>true</c> for a module over <c>sprk_document</c>. DERIVED from <see cref="RecordEntity"/>, never
+    /// configured, so no documents module can leave the document narrowing out: the fetch pipeline applies
+    /// <see cref="ExternalDocumentNarrowing"/> to its rows after <see cref="ScopeRows"/>.
+    /// </summary>
+    public bool NarrowsDocuments =>
+        string.Equals(RecordEntity, ExternalDocumentNarrowing.DocumentTable, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Task 188: for a module that <see cref="NarrowsDocuments"/>, the attributes the narrowing reads (the primary id, the own
+    /// Access Permission, the related communication and the parent document). Projected server-side with the rule
+    /// attributes (the SDK omits a null attribute, so an unprojected one would read as "not set") and stripped from the
+    /// response unless the caller asked for them. Empty for any other module.
+    /// </summary>
+    public IEnumerable<string> NarrowingAttributes =>
+        NarrowsDocuments ? ExternalDocumentNarrowing.FetchAttributes : Enumerable.Empty<string>();
+
+    /// <summary>The response key of the derived file-state flag a documents module row carries (R3 ISS-011, #1886).</summary>
+    internal const string HasFileKey = "hasFile";
+
+    /// <summary>
+    /// R3 ISS-011 (#1886): for a module that <see cref="NarrowsDocuments"/>, the SPE pointer attributes the server projects
+    /// to DERIVE <see cref="HasFileKey"/> (<see cref="HasFileOf"/>). They are never on <see cref="ReadableColumns"/>
+    /// (<see cref="ExternalModuleRegistry.PointerColumns"/> refuses that at registration): they are read server-side, and the
+    /// column strip removes them from the response, which carries only the boolean. Empty for any other module.
+    /// </summary>
+    public IEnumerable<string> FileStateAttributes =>
+        NarrowsDocuments ? FileStatePointerAttributes : Enumerable.Empty<string>();
+
+    private static readonly string[] FileStatePointerAttributes = { "sprk_graphdriveid", "sprk_graphitemid" };
+
+    /// <summary>
+    /// Whether a documents-module row (as read, before the column strip) has a file the download and versions routes can
+    /// serve: the SAME pointer checks as <c>DocumentStorageResolver.GetSpePointersAsync</c>. A pointer Dataverse omitted
+    /// (null) or returned as anything but text is "no file".
+    /// </summary>
+    public static bool HasFileOf(IReadOnlyDictionary<string, object?> row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        string? Text(string attribute) => row.TryGetValue(attribute, out var value) ? value as string : null;
+        return Sprk.Bff.Api.Infrastructure.Dataverse.DocumentStorageResolver.HasUsablePointers(
+            Text(FileStatePointerAttributes[0]), Text(FileStatePointerAttributes[1]));
+    }
+
     /// <summary>Task 187: one module row's parent lookups (<see cref="LiveParentAttributes"/>) as live-parent read input.</summary>
     public LiveParentLookup[] LiveParents(IReadOnlyDictionary<string, object?> row)
     {

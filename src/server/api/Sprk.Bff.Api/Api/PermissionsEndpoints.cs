@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
 using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Errors;
@@ -94,6 +95,11 @@ public static class PermissionsEndpoints
                 TokenHelper.ExtractBearerTokenOrNull(httpContext),
                 ct);
 
+            // Task 188 round 4c (F1): the rights are the root grant only. THE external document narrowing decides
+            // next: a document it hides from a caller who is not an internal systemuser gets the answer a document with
+            // no rights gets (every capability false). Internal systemusers: no narrowing call, no app-only read.
+            snapshot = (await HideNarrowedAsync(httpContext, new[] { snapshot }, logger))[0]!;
+
             var capabilities = MapToDocumentCapabilities(snapshot);
 
             logger.LogDebug(
@@ -166,6 +172,7 @@ public static class PermissionsEndpoints
             userId, request.DocumentIds.Count);
 
         var permissions = new List<DocumentCapabilities>();
+        var permissionSnapshots = new List<AccessSnapshot?>();
         var errors = new List<PermissionError>();
         var successCount = 0;
         var errorCount = 0;
@@ -179,6 +186,7 @@ public static class PermissionsEndpoints
                     userId, documentId, callerToken, ct);
 
                 permissions.Add(MapToDocumentCapabilities(snapshot));
+                permissionSnapshots.Add(snapshot);
                 successCount++;
             }
             catch (Exception ex)
@@ -195,8 +203,19 @@ public static class PermissionsEndpoints
 
                 // Add empty capabilities (fail-closed)
                 permissions.Add(NoCapabilities(documentId, userId, "None (Error)"));
+                permissionSnapshots.Add(null);
 
                 errorCount++;
+            }
+        }
+
+        // Task 188 round 4c (F1): ONE narrowing call over the batch (see the single-document handler).
+        var snapshots = await HideNarrowedAsync(httpContext, permissionSnapshots, logger);
+        for (var i = 0; i < permissions.Count; i++)
+        {
+            if (snapshots[i] is { } snapshot)
+            {
+                permissions[i] = MapToDocumentCapabilities(snapshot);
             }
         }
 
@@ -214,6 +233,42 @@ public static class PermissionsEndpoints
             successCount, errorCount);
 
         return TypedResults.Ok(response);
+    }
+
+    /// <summary>The narrowing's log label for the permissions routes (no ids).</summary>
+    private const string NarrowingSurface = "document-permissions";
+
+    /// <summary>
+    /// Task 188 round 4c (F1): THE external document narrowing over the snapshots that carry any right
+    /// (<see cref="InternalPlaneDocumentNarrowing.ForCallerAsync"/>, ONE call). A snapshot whose document the narrowing
+    /// hides (or every one, on a narrowing fault) is replaced by the same snapshot with <see cref="AccessRights.None"/>,
+    /// so it maps to exactly the answer of a document the caller has no rights on. A snapshot with no rights is never
+    /// sent; a null (a failed rights read) stays null. Internal systemusers: no call, nothing changes.
+    /// </summary>
+    private static async Task<IReadOnlyList<AccessSnapshot?>> HideNarrowedAsync(
+        HttpContext httpContext, IReadOnlyList<AccessSnapshot?> snapshots, ILogger logger)
+    {
+        var withRights = snapshots
+            .Where(s => s is not null && s.AccessRights != AccessRights.None)
+            .Select(s => (string?)s!.ResourceId)
+            .ToList();
+        if (withRights.Count == 0)
+        {
+            return snapshots;
+        }
+
+        var visibility = await InternalPlaneDocumentNarrowing.ForCallerAsync(httpContext, withRights, NarrowingSurface, logger);
+        return snapshots
+            .Select(s => s is null || s.AccessRights == AccessRights.None || visibility.IsShown(s.ResourceId)
+                ? s
+                : new AccessSnapshot
+                {
+                    UserId = s.UserId,
+                    ResourceId = s.ResourceId,
+                    AccessRights = AccessRights.None,
+                    CachedAt = s.CachedAt,
+                })
+            .ToList();
     }
 
     /// <summary>

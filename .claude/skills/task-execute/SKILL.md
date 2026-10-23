@@ -267,6 +267,13 @@ SIZE GUARD (every start, before reading):
       move standing items to project CLAUDE.md, rewrite as current state)
       BEFORE starting the task.
 
+REGISTRATION GUARD (every start; added 2026-10-15, owner direction):
+  IF projects/{project-name}/README.md has no `> **Portfolio**:` pointer block:
+    → The project is not registered on GitHub (Board #2). STOP before the task.
+    → Run project-pipeline Step 4.2 (register: /devops-project-register --epic <#E>,
+      project label, verify), commit the pointer block, then continue the task.
+    → Ask the operator only for the Epic, if design.md/spec.md does not name it.
+
 IF resuming work (not fresh start):
   READ projects/{project-name}/current-task.md
   READ the project CLAUDE.md standing-rule sections (if present): "Standing directives & gotchas",

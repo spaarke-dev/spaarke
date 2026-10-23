@@ -1104,6 +1104,11 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({
       } catch (err) {
         const message =
           describeApiError(err, "Failed to create container.");
+        // #2032: close the dialog so the error is not hidden behind it with Create still enabled. A failed create can
+        // still have made a container (the BFF says so), and a second click would make another. Refresh the list
+        // first (it clears the banner), so a container that was made shows up next to the message.
+        setCreateOpen(false);
+        await loadContainers();
         setActionError(message);
       } finally {
         setCreateSaving(false);

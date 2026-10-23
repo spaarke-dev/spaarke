@@ -873,8 +873,10 @@ public static class FieldMappingEndpoints
     /// relationships (task 166 r1, owner round 21 item 3). <paramref name="targetEntity"/> has passed
     /// <see cref="IsLogicalName"/>, so it cannot break out of the quoted key.
     /// </summary>
+    /// <remarks>#2253 fix round 3 (F1): <see cref="IsLogicalName"/> admits a leading digit or underscore, so the bare
+    /// table-name check is asked here too, where the key is built.</remarks>
     internal static string ParentLookupMetadataPath(string targetEntity)
-        => $"EntityDefinitions(LogicalName='{targetEntity}')/ManyToOneRelationships";
+        => $"EntityDefinitions(LogicalName='{DataverseIdentifier.RequireTableName(targetEntity, nameof(targetEntity))}')/ManyToOneRelationships";
 
     /// <summary>
     /// The columns read from each relationship (filtered in memory, so no metadata $filter support is assumed). The
@@ -1013,6 +1015,27 @@ public static class FieldMappingEndpoints
         var failed = 0;
         var skipped = 0;
 
+        // #2091 round 4: on a reparentable child, a lookup rule writes the column it NAMES or nothing. Its bind is planned by
+        // the referenced table's navigation property, which can be another lookup to the same table — a filing move the rule
+        // never asked for. Refused per rule, like any other unplannable lookup. Keyed by the rule INSTANCE, as the plan is
+        // (round 5): two rules can be equal by value, and the record's value equality would throw on the second.
+        if (lookupBinds is not null && Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsReparentableChild(targetEntity))
+        {
+            var checkedBinds = new Dictionary<FieldMappingRuleDto, LookupBindPlan>(ReferenceEqualityComparer.Instance);
+            foreach (var (rule, plan) in lookupBinds)
+            {
+                checkedBinds[rule] = plan.BindKey is { } bindKey
+                                     && !string.Equals(Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(bindKey),
+                                         rule.TargetField?.Trim(), StringComparison.OrdinalIgnoreCase)
+                    ? LookupBindPlan.Refused(
+                        $"'{rule.TargetField}' on '{targetEntity}' would be written through '{bindKey}', a different lookup; "
+                        + "the lookup was not copied.")
+                    : plan;
+            }
+
+            lookupBinds = checkedBinds;
+        }
+
         foreach (var childRecordId in childRecordIds)
         {
             ct.ThrowIfCancellationRequested();
@@ -1024,6 +1047,29 @@ public static class FieldMappingEndpoints
 
                 foreach (var rule in rules.OrderBy(r => r.Priority))
                 {
+                    // Task 189 (D7 T7a, security pass 2): a document's Access Permission and its own-narrowing record are
+                    // set by Spaarke (max(own, inherited)). A rule targeting either on a document is skipped, and the rest
+                    // of the push applies: one push from a Standard matter would otherwise clear the own narrowing of every
+                    // child document it reaches. Task 188 round 4e: the same for its D7 link columns (sprk_parentdocument,
+                    // sprk_relatedcommunication; InheritedAccessPermission.DocumentLinkColumns), which decide whether partners see it.
+                    // #2247: on every table, the owner and the creator. #2253 fix round 1 (K2): the push runs AS its caller,
+                    // so it asks as WriteIdentity.Caller: these refusals and the table-name check only. Access tables, a
+                    // secure root's columns and other tables' access columns are left to the caller's own Dataverse
+                    // privileges and field security (sprk_accesspermission on a matter stays editable by a Write holder).
+                    if (Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.RefuseAppOnlyWrite(
+                            targetEntity, [rule.TargetField],
+                            Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.WriteIdentity.Caller) is { } setBySpaarke)
+                    {
+                        recordFieldResults.Add(new FieldMappingResultDto
+                        {
+                            SourceField = rule.SourceField,
+                            TargetField = rule.TargetField,
+                            Status = FieldMappingStatus.Skipped,
+                            ErrorMessage = setBySpaarke.Reason,
+                        });
+                        continue;
+                    }
+
                     var fieldResult = ApplyMappingRule(rule, sourceValues, updatePayload, lookupBinds);
                     recordFieldResults.Add(fieldResult);
                 }
@@ -1055,10 +1101,80 @@ public static class FieldMappingEndpoints
                         }
                     }
 
+                    // #2091 round 3: a rule that writes a filing lookup (`{nav}@odata.bind`) onto a reparentable child RE-FILES
+                    // it — its owner is re-derived before the write and the ONE step after a re-file runs after it, as on
+                    // every other re-file writer. A malformed bind, an owner that cannot be decided, or a host that cannot
+                    // re-own refuses THIS child only (per-row, like every other failure here).
+                    // #2110 (ontology K3): with the lineage lookups the push sets that are no ownership parent (a message's
+                    // thread), so the reparent can tell whether it moved one (ParentsUnchanged).
+                    var parentChanges = Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsReparentableChild(targetEntity)
+                        ? Sprk.Bff.Api.Services.Dataverse.RecordReparent.WithLineageLookupsIn(
+                            targetEntity,
+                            Sprk.Bff.Api.Services.Dataverse.RecordReparent.ParentChangesWithClearsIn(targetEntity, updatePayload),
+                            updatePayload)
+                        : new Dictionary<string, Microsoft.Xrm.Sdk.EntityReference?>();
+                    var mayRefile = Sprk.Bff.Api.Services.Dataverse.RecordReparent.MayRefile(targetEntity, parentChanges);
+                    using var refileScope = mayRefile ? scopes?.CreateScope() : null;
+                    var children = refileScope?.ServiceProvider.GetService<Sprk.Bff.Api.Services.Access.SecureChildReconciler>();
+                    var ownership = refileScope?.ServiceProvider.GetService<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>();
+
                     // Task 166: written AS THE CALLER (MSCRMCallerID) — Dataverse applies their Write on the child,
                     // so no app-only child write remains on this route.
-                    await dataverseService.UpdateRecordFieldsAsync(
-                        targetEntity, childRecordId, updatePayload, ct, impersonateSystemUserId: callerSystemUserId);
+                    Task Write(CancellationToken token) => dataverseService.UpdateRecordFieldsAsync(
+                        targetEntity, childRecordId, updatePayload, token, impersonateSystemUserId: callerSystemUserId);
+                    Func<Task<bool>>? wasIsolated = null;
+                    var refiled = false;
+                    Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution? refiledBy = null;
+                    Sprk.Bff.Api.Services.Access.SecureRemovalCaller? secureExitCaller = null;
+                    if (!mayRefile)
+                    {
+                        await Write(ct);
+                    }
+                    else if (children is null || ownership is null)
+                    {
+                        failed++;
+                        errors.Add(new PushFieldMappingsError
+                        {
+                            RecordId = childRecordId,
+                            Error = "Not written: this push moves what the record is filed under, and its owner cannot be re-derived here.",
+                        });
+                        continue;
+                    }
+                    else
+                    {
+                        wasIsolated = await Sprk.Bff.Api.Services.Access.RefileIsolationRead.BeforeWriteAsync(
+                            children, targetEntity.Trim().ToLowerInvariant(), childRecordId, ct);
+
+                        var reparent = await ownership.ReparentAsync(
+                            new Sprk.Bff.Api.Services.Dataverse.RecordReparent
+                            {
+                                EntityLogicalName = targetEntity,
+                                RecordId = childRecordId,
+                                ParentChanges = parentChanges,
+                                CallerSystemUserId = callerSystemUserId,
+                                // A move out of a secure root (owner round 10 item 7) is asked of the person this push acts as.
+                                SecureExitCaller = secureExitCaller = Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForImpersonatedUser(
+                                    callerSystemUserId,
+                                    refileScope!.ServiceProvider.GetService<Sprk.Bff.Api.Services.Access.IDataverseRecordShareService>()),
+                            },
+                            Write,
+                            ct);
+                        if (reparent.IsRefused)
+                        {
+                            failed++;
+                            errors.Add(new PushFieldMappingsError
+                            {
+                                RecordId = childRecordId,
+                                Error = $"Not written: {reparent.Reason} ({reparent.RefusalCode}).",
+                            });
+                            continue;
+                        }
+
+                        // #2091 round 4: a rule that re-binds the parent the child already holds moves nothing — no step.
+                        refiled = !reparent.ParentsUnchanged;
+                        refiledBy = reparent;
+                    }
+
                     updated++;
 
                     // Task 156 (owner round 4 item 5, option b): a mapping rule can write a lookup — including what this
@@ -1072,6 +1188,16 @@ public static class FieldMappingEndpoints
                     if (rootFiling is not null)
                         await rootFiling.SecureAfterWriteAsync(targetEntity, childRecordId, updatePayload.Keys, traceId: null);
 
+                    // #2091, AFTER the re-stamp: the re-filed child's mirror and the pass over everything filed under it.
+                    // Never throws; the child's update stands.
+                    if (refiled && children is not null && wasIsolated is not null)
+                    {
+                        // #2143 round 7 (F1): with the person the re-file's F3 check acted for.
+                        await children.AfterRefileAsync(
+                            targetEntity.Trim().ToLowerInvariant(), childRecordId, wasIsolated,
+                            Sprk.Bff.Api.Services.Access.RefileThreadStep.Reconcile, secureExitCaller, refiledBy, CancellationToken.None);
+                    }
+
                     // Task 142 (L1): a push that wrote a ROOT's "Assigned *" column (a project/matter/work assignment
                     // child of the source) materializes its Assigned-To access now. A non-root target or a non-registry
                     // column is a no-op; after the update committed; never throws, never fails this push.
@@ -1084,6 +1210,23 @@ public static class FieldMappingEndpoints
                 }
 
                 fieldResults.AddRange(recordFieldResults);
+            }
+            catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnsettledException)
+            {
+                // #2143 round 2 (K4): a concurrent writer kept the re-filed child's owner from settling. The response names
+                // the row by id only, in a fixed string — never the exception's message (table, id and ownership detail); the
+                // log names the table and the id. No step after the re-file ran for this row.
+                logger.LogWarning(
+                    "Field-mapping push: the re-filed child's owner could not be settled against concurrent writers. "
+                    + "TargetEntity={TargetEntity}, RecordId={RecordId}",
+                    targetEntity, childRecordId);
+
+                failed++;
+                errors.Add(new PushFieldMappingsError
+                {
+                    RecordId = childRecordId,
+                    Error = "Not settled: the record was changed by someone else while this push re-filed it. Reload it and push again.",
+                });
             }
             catch (Exception ex)
             {

@@ -313,6 +313,12 @@ public sealed class ClassifierRecallLiveHarness
         // the user client is a STRICT mock, so any call would throw and fail the run rather than pass silently.
         services.AddHttpContextAccessor();
         services.AddSingleton(new Moq.Mock<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient>(Moq.MockBehavior.Strict).Object);
+        // Task 188 round 3: the trim's external-caller narrowing dependencies, strict the same way (no caller on this path,
+        // so none of them may be reached).
+        services.AddSingleton(new Moq.Mock<Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver>(Moq.MockBehavior.Strict).Object);
+        services.AddSingleton(new Moq.Mock<Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver>(Moq.MockBehavior.Strict).Object);
+        services.AddSingleton<Sprk.Bff.Api.Infrastructure.ExternalAccess.AppOnlyDocumentNarrowing>(
+            (_, _) => throw new InvalidOperationException("The document narrowing was not expected to run (no caller on this path)."));
         services.AddScoped<IRetrievalAccessTrim, RetrievalAccessTrim>();
         services.AddScoped<ICommunicationClassificationAi, CommunicationClassificationAi>();
         services.AddScoped<ICommunicationTriageAi, CommunicationTriageAi>();

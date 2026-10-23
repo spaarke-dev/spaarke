@@ -94,7 +94,7 @@ public class DecisionActionExecutorsTests
         AccessRights rights, Guid? userId = null, bool createPrivilege = true, Func<string, AccessRights>? bySet = null)
     {
         var probe = new Mock<CallerRecordAccessProbe>(
-            new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!)
+            new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!, null!)
         { CallBase = false };
         probe.Setup(p => p.GetCallerRightsAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .Returns<string?, string, Guid, CancellationToken>((_, set, _, _) => Task.FromResult(bySet is null ? rights : bySet(set)));

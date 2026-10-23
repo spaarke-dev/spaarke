@@ -170,6 +170,34 @@ internal sealed class ExternalGrantRow
 
     /// <summary>Dataverse active state for this table.</summary>
     public bool IsActive => StateCode is null or 0;
+
+    // ── Display-only columns (task 099a, #1010(a)) ──────────────────────────────────────────────────────────────
+    // Read only by the Current Access listing (QueryActiveRowsForRootAsync with forListing: true, for
+    // GET /record-grants); null on every other read. The names are Dataverse's formatted-value annotations, which
+    // DataverseWebApiClient asks for on every request (its Prefer header), so they cost no extra select.
+
+    /// <summary><c>sprk_granteddate</c> (Date Only) — selected by the listing read only.</summary>
+    [JsonPropertyName("sprk_granteddate")]
+    [JsonConverter(typeof(DataverseDateOnlyJsonConverter))]
+    public DateOnly? GrantedDate { get; set; }
+
+    /// <summary>The grantee contact's display name.</summary>
+    [JsonPropertyName("_sprk_contact_value" + FormattedValueSuffix)]
+    public string? ContactName { get; set; }
+
+    /// <summary>The grantee organization's display name.</summary>
+    [JsonPropertyName("_sprk_organization_value" + FormattedValueSuffix)]
+    public string? OrganizationName { get; set; }
+
+    /// <summary>The issuing system user's display name.</summary>
+    [JsonPropertyName("_sprk_grantedby_value" + FormattedValueSuffix)]
+    public string? GrantedBySystemUserName { get; set; }
+
+    /// <summary>The issuing contact's display name.</summary>
+    [JsonPropertyName("_sprk_grantedbycontact_value" + FormattedValueSuffix)]
+    public string? GrantedByContactName { get; set; }
+
+    private const string FormattedValueSuffix = "@OData.Community.Display.V1.FormattedValue";
 }
 
 /// <summary>
@@ -377,6 +405,10 @@ internal static class ExternalGrantLifecycle
         "_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value," +
         "_sprk_grantedby_value,_sprk_grantedbycontact_value," + GrantedByContactIdAttribute;
 
+    // Task 099a: the Current Access listing also shows the grant date. A separate select, so no write-path read gains a
+    // column it does not use (and so a write path never depends on parsing one).
+    private const string ListingSelect = RowSelect + ",sprk_granteddate";
+
     /// <summary>
     /// The <c>@odata.bind</c> navigation property of the contact-typed issuer lookup <c>sprk_grantedbycontact</c>
     /// (task 140). The schema script creates the lookup with SchemaName <c>sprk_GrantedByContact</c>, so — like every
@@ -501,13 +533,19 @@ internal static class ExternalGrantLifecycle
     /// updating every row of a record must refuse rather than silently skip one (task 098). Exceptions
     /// propagate. <paramref name="top"/> bounds the single page <c>QueryAsync</c> reads, so an over-bound
     /// record is detectable instead of silently truncated.</para>
+    /// <para><b>The one display read</b> (task 099a, #1010(a)): <c>GET /record-grants</c> lists these same rows for Manage
+    /// Access's Current Access with <paramref name="forListing"/> = <c>true</c>, which adds <c>sprk_granteddate</c>. It
+    /// decides no access either: it shows every active row, and marks the lapsed ones with the read path's own rule
+    /// (<see cref="ExternalParticipationService.ConfersAccessOn"/>), so a lapsed share is visible to the people who can renew
+    /// or revoke it.</para>
     /// </remarks>
     internal static Task<List<ExternalGrantRow>> QueryActiveRowsForRootAsync(
-        DataverseWebApiClient dataverseClient, ExternalGrantRootType rootType, Guid rootId, int top, CancellationToken ct)
+        DataverseWebApiClient dataverseClient, ExternalGrantRootType rootType, Guid rootId, int top, CancellationToken ct,
+        bool forListing = false)
         => dataverseClient.QueryAsync<ExternalGrantRow>(
             EntitySet,
             filter: ActiveRowsForRootFilter(rootType, rootId),
-            select: RowSelect,
+            select: forListing ? ListingSelect : RowSelect,
             top: top,
             cancellationToken: ct);
 
@@ -648,6 +686,31 @@ internal static class ExternalGrantLifecycle
     /// extending it would override the issuer's own time bound.
     /// </summary>
     internal const string ContactGrantManagedElsewhereReasonCode = "sdap.access.contact_grant.managed_elsewhere";
+
+    // ── Grant-row ownership (unified-access-control-r2 task 099b · D-11, #1010) ──────────────────────
+
+    /// <summary>
+    /// Stable reason code (503): the team that must own a NEW grant row could not be read — a Dataverse fault in
+    /// <c>IRecordOwnershipResolver</c>. Nothing was granted; retryable. The grant routes' sibling of the intake's
+    /// <c>EXT_INTAKE_DATAVERSE_UNAVAILABLE</c> (ExternalIntakeEndpoints step 4).
+    /// </summary>
+    internal const string GrantOwnerUnreadableReasonCode = "sdap.access.grant.owner_unreadable";
+
+    /// <summary>
+    /// Stable reason code (500): no team could be resolved to own a NEW grant row (the record's business unit has no
+    /// single default owner team, the Secure Record owner team is missing, or a flagged-secure record is not isolated).
+    /// Nothing was granted — a grant row is never left owned by the application identity (D-11). The grant routes'
+    /// sibling of the intake's <c>EXT_INTAKE_OWNER_UNRESOLVED</c>.
+    /// </summary>
+    internal const string GrantOwnerUnresolvedReasonCode = "sdap.access.grant.owner_unresolved";
+
+    /// <summary>
+    /// Stable reason code (500; task 099b review round 1): Dataverse refused to CREATE the grant row owned by its resolved
+    /// team on a privilege check — the owner team's security role is missing Read on <c>sprk_externalrecordaccess</c>
+    /// ("Read Privilege Check For Owner failed"). Nothing was granted; an administrator must add the privilege to the role
+    /// (for a secure record, the Secure Record Owner role). Replaces the generic "Failed to create external access record".
+    /// </summary>
+    internal const string GrantOwnerPrivilegeMissingReasonCode = "sdap.access.grant.owner_privilege_missing";
 
     /// <summary>
     /// The lower of the requested level and the ceiling — levels are ordered by their option-set values
@@ -1065,6 +1128,59 @@ internal sealed record GrantPolicyDecision(bool IsAllowed, string? ReasonCode, i
         StatusCodes.Status409Conflict,
         "This person already has access to this record that was granted by someone else; ask them or the record's " +
         "team to change it. Nothing was changed.");
+
+    /// <summary>
+    /// Task 099b (D-11): the team that must own the new grant row could not be READ (a Dataverse fault in the ownership
+    /// resolver). 503, retryable; nothing was written. <see cref="IsOwnerRefusal"/> lets the Assigned-To materializer report
+    /// it as a failure rather than record a skip.
+    /// </summary>
+    public static GrantPolicyDecision OwnerUnreadable { get; } = new(
+        false,
+        ExternalGrantLifecycle.GrantOwnerUnreadableReasonCode,
+        StatusCodes.Status503ServiceUnavailable,
+        "The team that owns this record's access entries could not be looked up, so nothing was granted. Try again in a " +
+        "moment.")
+    {
+        IsOwnerRefusal = true,
+    };
+
+    /// <summary>
+    /// Task 099b (D-11): no team could be resolved to own the new grant row. 500; nothing was written — a grant row is never
+    /// left owned by the application identity. Not retryable until the record's business unit (or the Secure Record owner
+    /// team) is set up.
+    /// </summary>
+    public static GrantPolicyDecision OwnerUnresolved { get; } = new(
+        false,
+        ExternalGrantLifecycle.GrantOwnerUnresolvedReasonCode,
+        StatusCodes.Status500InternalServerError,
+        "Access could not be granted because the team that should own this record's access entries could not be " +
+        "determined. Nothing was granted; contact your administrator.")
+    {
+        IsOwnerRefusal = true,
+    };
+
+    /// <summary>
+    /// Task 099b review round 1: Dataverse refused to create the grant row owned by its resolved team on a privilege check
+    /// (the owner team's role lacks Read on <c>sprk_externalrecordaccess</c>). 500; nothing was written. Not retryable until an
+    /// administrator adds the privilege. An owner refusal, so the materializer reports it as a failure.
+    /// </summary>
+    public static GrantPolicyDecision OwnerPrivilegeMissing { get; } = new(
+        false,
+        ExternalGrantLifecycle.GrantOwnerPrivilegeMissingReasonCode,
+        StatusCodes.Status500InternalServerError,
+        "Access could not be granted because the team that owns this record's access entries is not permitted to own them: " +
+        "its security role is missing Read on External Record Access (for a secure record, the Secure Record Owner role). " +
+        "Nothing was granted; an administrator must add that privilege to the role.")
+    {
+        IsOwnerRefusal = true,
+    };
+
+    /// <summary>
+    /// The refusal is about the new grant row's OWNER (<see cref="OwnerUnreadable"/>, <see cref="OwnerUnresolved"/>,
+    /// <see cref="OwnerPrivilegeMissing"/>), not the record's policy or the grantee. In-process only, like
+    /// <see cref="IsDenyListReadFault"/>.
+    /// </summary>
+    public bool IsOwnerRefusal { get; init; }
 
     /// <summary>
     /// The refusal is the No Access check's read FAULT, not an entry (<see cref="GranteeDenyListUnreadable"/>). In-process

@@ -748,6 +748,11 @@ public class DocumentCheckoutService
     /// (<c>AddDocumentAuthorizationFilter("delete")</c>, finding C2, task 022) — there is no
     /// defence in depth here. Any NEW call-site that reaches this method without that filter is
     /// an unauthenticated destroy path.</para>
+    /// <para><b>File policy</b> (R3 ISS-004, #1650; owner decision 2026-10-22): the internal route uses
+    /// <see cref="DocumentFileDeletePolicy.VerifiedFileFirstKeepRowOnFailure"/>, the same as the external delete-own
+    /// route. If the SPE file cannot be deleted or its pointer verified, the Dataverse row is KEPT and the result is
+    /// <see cref="FileNotDeletedDeleteResult"/> (503 retryable, or 409 for a refused pointer), so a transient Graph
+    /// failure can no longer orphan the file. A file that is already gone counts as deleted, so a retry succeeds.</para>
     /// </remarks>
     // `virtual` per ADR-038 §4 (substitution seam), added by task 022 for the same reason task 009
     // made UpdateTodoAsync virtual: the C2 gate is only meaningfully verifiable if a test can assert
@@ -757,7 +762,7 @@ public class DocumentCheckoutService
         Guid documentId,
         string correlationId,
         CancellationToken ct = default)
-        => DeleteCoreAsync(documentId, correlationId, DocumentFileDeletePolicy.BestEffort, ct);
+        => DeleteCoreAsync(documentId, correlationId, DocumentFileDeletePolicy.VerifiedFileFirstKeepRowOnFailure, ct);
 
     /// <summary>
     /// Delete a document (both SPE file and Dataverse record) under an explicit <see cref="DocumentFileDeletePolicy"/>.
@@ -766,8 +771,10 @@ public class DocumentCheckoutService
     /// <para>The SAME delete as <see cref="DeleteAsync(Guid, string, CancellationToken)"/> (one implementation,
     /// <see cref="DeleteCoreAsync"/>): checkout lock, then the SPE file through <see cref="SpeFileStore"/> (app-only,
     /// <c>SpeContainerOwnershipGuard</c>), then the row. The policy changes only what happens when the FILE cannot be
-    /// deleted. The external delete-own route (spaarke-SPA-external-access-platform-r3 task 032, FR-26) passes
-    /// <see cref="DocumentFileDeletePolicy.VerifiedFileFirstKeepRowOnFailure"/>.</para>
+    /// deleted. Both production routes now pass
+    /// <see cref="DocumentFileDeletePolicy.VerifiedFileFirstKeepRowOnFailure"/>: the external delete-own route
+    /// (spaarke-SPA-external-access-platform-r3 task 032, FR-26) and, through the three-argument overload, the internal
+    /// route (R3 ISS-004). <see cref="DocumentFileDeletePolicy.BestEffort"/> has no remaining production caller.</para>
     /// <para>Like the three-argument overload this performs NO authorization: its caller decides who may delete.</para>
     /// </remarks>
     // `virtual` for the same ADR-038 §4 substitution reason as the three-argument overload.
@@ -817,7 +824,22 @@ public class DocumentCheckoutService
             );
         }
 
-        // 2. Delete file from SPE first
+        // 1b. A document that still has child documents is refused BEFORE anything is deleted (unified-access-control-r2
+        // task 188 slice D, owner round 111 item 3). sprk_document_ParentDocument is Delete = Restrict, so Dataverse would
+        // refuse the row anyway, but only AFTER step 2 had deleted the file. A failed read throws here, before any delete
+        // (fail closed), exactly as the document read above does.
+        var childCount = await CountChildDocumentsAsync(documentId, ct);
+        if (childCount > 0)
+        {
+            _logger.LogInformation(
+                "Delete refused for document {DocumentId}: {ChildCount} child document(s) still name it as parent [{CorrelationId}]",
+                documentId, childCount, correlationId);
+            return new HasChildDocumentsDeleteResult(childCount, correlationId);
+        }
+
+        // 2. Delete file from SPE first. fileGone records whether the row's file is gone after this step (deleted now or
+        // already missing), for the step-3 Restrict refusal below (task 188 slice D).
+        var fileGone = false;
         if (filePolicy == DocumentFileDeletePolicy.VerifiedFileFirstKeepRowOnFailure)
         {
             // Task 032 (FR-26): the file must be gone before the row goes. Any failure here KEEPS the row, so a later
@@ -827,15 +849,18 @@ public class DocumentCheckoutService
             {
                 return fileRefusal;
             }
+
+            fileGone = !string.IsNullOrEmpty(document.DriveId) && !string.IsNullOrEmpty(document.ItemId);
         }
         else
         {
-            // The internal route's behaviour, unchanged: a file that cannot be deleted is logged, and the row goes.
+            // BestEffort (no production caller since R3 ISS-004): a file that cannot be deleted is logged, and the row goes.
             try
             {
                 if (!string.IsNullOrEmpty(document.DriveId) && !string.IsNullOrEmpty(document.ItemId))
                 {
                     var deleted = await _speFileStore.DeleteFileAsync(document.DriveId, document.ItemId, ct);
+                    fileGone = true;
                     if (!deleted)
                     {
                         _logger.LogWarning(
@@ -870,6 +895,23 @@ public class DocumentCheckoutService
                 return DeleteResult.NotFound(correlationId);
             }
 
+            // Task 188 slice D: a child document created after step 1b (the email pipeline writing attachments) makes
+            // Dataverse's Restrict refuse the row. The file step has already run and is not undone (file before row is
+            // deliberate: a row deleted before its file would leave an unreachable file), so the row is kept and the
+            // caller gets the same 409 as the pre-check, not a 500. Matched on the error code, never the message.
+            if (!response.IsSuccessStatusCode
+                && IsCannotDeleteDueToAssociation(
+                    Sprk.Bff.Api.Infrastructure.ExternalAccess.DataverseContactIdentityStore.ErrorCodeOf(
+                        await response.Content.ReadAsStringAsync(ct))))
+            {
+                _logger.LogWarning(
+                    "Dataverse refused the row delete of document {DocumentId} ({ErrorCode} CannotDeleteDueToAssociation): a "
+                    + "child document was created after the child check. The row is kept; file already gone: {FileGone} "
+                    + "[{CorrelationId}]",
+                    documentId, CannotDeleteDueToAssociationCode, fileGone, correlationId);
+                return new HasChildDocumentsDeleteResult(null, correlationId, fileGone);
+            }
+
             response.EnsureSuccessStatusCode();
         }
         catch (Exception ex)
@@ -900,15 +942,20 @@ public class DocumentCheckoutService
     /// other value is the result to return with the row KEPT.
     /// </summary>
     /// <remarks>
-    /// <para><b>The pointer is verified first</b> (<see cref="RecordContainerResolver.EnsureDocumentPointerContainerAsync"/>,
-    /// the check every app-only download runs). A destroy that follows the row's pointer as the application is at least
-    /// as consequential as a download: an item id re-pointed outside the BFF must not make this delete another file.</para>
+    /// <para><b>The pointer is verified first</b> (<see cref="RecordContainerResolver.VerifyDocumentPointerForDeleteAsync"/>:
+    /// the rule every app-only download runs, with a fault told apart from a refusal). A destroy that follows the row's
+    /// pointer as the application is at least as consequential as a download: an item id re-pointed outside the BFF must
+    /// not make this delete another file.</para>
     /// <para><b>A row with no pointer has no file</b> to delete; the row may go.</para>
-    /// <para><b>An item already gone</b> (<see cref="SpeFileStore.DeleteFileAsync"/> returns <see langword="false"/>) is
-    /// not a failure: the file is not there, so the row may go.</para>
-    /// <para><b>Anything else keeps the row</b>: a pointer the check refuses or a refused container (409 with the check's
-    /// code), and a Graph or Dataverse fault (503 <see cref="FileNotDeletedCode"/>). Cancellation by the caller is
-    /// rethrown.</para>
+    /// <para><b>An item already gone is not a failure</b>, so the row may go, in two places. (1) The pointer check refuses
+    /// an item Graph no longer has; when the row's bound item id equals the pointer, the drive is this stamp's and Graph
+    /// answers 404, the verdict is <see cref="DocumentPointerDeleteVerdict.FileAlreadyGone"/> and no file is touched (R3
+    /// ISS-004 review F1: without it a row whose file an earlier attempt, or the task-188 race, had deleted could never
+    /// be deleted). (2) <see cref="SpeFileStore.DeleteFileAsync"/> returns <see langword="false"/>.</para>
+    /// <para><b>Anything else keeps the row</b>: a pointer the check refuses (a mismatched or unbound item id, an unowned
+    /// container; 409 <see cref="RecordContainerResolver.DocumentStorageUnverifiedCode"/>), a refused delete (409, its
+    /// code), and a Graph or Dataverse fault, in the pointer check or the delete (503 <see cref="FileNotDeletedCode"/>,
+    /// retryable). Cancellation by the caller is rethrown.</para>
     /// </remarks>
     private async Task<DeleteResult?> DeleteFileOrRefuseAsync(
         Guid documentId, DocumentRecord document, string correlationId, CancellationToken ct)
@@ -923,8 +970,29 @@ public class DocumentCheckoutService
 
         try
         {
-            await _containerResolver.EnsureDocumentPointerContainerAsync(
-                documentId, document.DriveId, document.ItemId, ct);
+            switch (await _containerResolver.VerifyDocumentPointerForDeleteAsync(
+                        documentId, document.DriveId, document.ItemId, ct))
+            {
+                case DocumentPointerDeleteVerdict.Refused:
+                    _logger.LogWarning(
+                        "SPE file of document {DocumentId} not deleted: its pointer is refused; the row is kept [{CorrelationId}]",
+                        documentId, correlationId);
+                    return new FileNotDeletedDeleteResult(
+                        RecordContainerResolver.DocumentStorageUnverifiedCode, StatusCodes.Status409Conflict, correlationId);
+
+                case DocumentPointerDeleteVerdict.Fault:
+                    // The check could not be made (Graph 429/503, a Dataverse fault): retryable, unlike a refusal.
+                    return new FileNotDeletedDeleteResult(
+                        FileNotDeletedCode, StatusCodes.Status503ServiceUnavailable, correlationId);
+
+                case DocumentPointerDeleteVerdict.FileAlreadyGone:
+                    // The bound pointer's item is provably gone from an owned container (an earlier attempt deleted it, or
+                    // the task-188 race did): there is nothing to delete, and NO file is touched here. The row may go.
+                    _logger.LogInformation(
+                        "SPE file of document {DocumentId} is already gone; deleting the row [{CorrelationId}]",
+                        documentId, correlationId);
+                    return null;
+            }
 
             var deleted = await _speFileStore.DeleteFileAsync(document.DriveId, document.ItemId, ct);
             if (!deleted)
@@ -965,6 +1033,75 @@ public class DocumentCheckoutService
     public const string FileNotDeletedCode = "document_file_not_deleted";
 
     /// <summary>
+    /// The code of a <see cref="HasChildDocumentsDeleteResult"/>: the document is still the <c>sprk_parentdocument</c> of
+    /// other documents (an .eml and its attachments), so it is not deleted (task 188 slice D).
+    /// </summary>
+    public const string HasChildDocumentsCode = "document_has_child_documents";
+
+    /// <summary>
+    /// Dataverse's <c>CannotDeleteDueToAssociation</c> error code ("The object you tried to delete is associated with
+    /// another object and cannot be deleted"), the Restrict cascade's refusal of a delete: the Web API's
+    /// <c>error.code</c> string. Source: Microsoft Learn, "Web service error codes (Microsoft Dataverse)". For
+    /// <c>sprk_document</c> the only Restrict relationship it is the parent of is <c>sprk_document_ParentDocument</c>
+    /// (solution XML), so on a document delete this code means "child documents exist" (task 188 slice D).
+    /// </summary>
+    public const string CannotDeleteDueToAssociationCode = "0x80040227";
+
+    /// <summary><see cref="CannotDeleteDueToAssociationCode"/> as <see cref="Microsoft.Xrm.Sdk.OrganizationServiceFault.ErrorCode"/> exposes it (signed).</summary>
+    private const int CannotDeleteDueToAssociationErrorCode = unchecked((int)0x80040227);
+
+    /// <summary>Is a Web API <c>error.code</c> the Restrict refusal (<see cref="CannotDeleteDueToAssociationCode"/>)?</summary>
+    internal static bool IsCannotDeleteDueToAssociation(string? webApiErrorCode)
+        => string.Equals(webApiErrorCode, CannotDeleteDueToAssociationCode, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Is an SDK exception (or one it wraps) the Restrict refusal: a
+    /// <see cref="System.ServiceModel.FaultException{TDetail}"/> of <see cref="Microsoft.Xrm.Sdk.OrganizationServiceFault"/>
+    /// whose <c>ErrorCode</c> is <c>0x80040227</c>? Typed on the code, never the (localized) message.
+    /// </summary>
+    internal static bool IsCannotDeleteDueToAssociation(Exception ex)
+    {
+        for (var current = ex; current is not null; current = current.InnerException)
+        {
+            if (current is System.ServiceModel.FaultException<Microsoft.Xrm.Sdk.OrganizationServiceFault> fault
+                && fault.Detail?.ErrorCode == CannotDeleteDueToAssociationErrorCode)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>The most child documents <see cref="CountChildDocumentsAsync"/> counts; any count above zero refuses.</summary>
+    private const int ChildDocumentCountCap = 5000;
+
+    /// <summary>
+    /// How many documents name <paramref name="documentId"/> as their <c>sprk_parentdocument</c>, active or not (Delete =
+    /// Restrict refuses on any of them), counted up to <see cref="ChildDocumentCountCap"/>. App-only, ids never returned.
+    /// A failed read throws.
+    /// </summary>
+    private async Task<int> CountChildDocumentsAsync(Guid documentId, CancellationToken ct)
+    {
+        var url = $"{DocumentEntitySet}?$select=sprk_documentid&$filter=_sprk_parentdocument_value eq {documentId}" +
+                  $"&$top={ChildDocumentCountCap}";
+        var response = await _httpClient.GetAsync(url, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogError(
+                "Dataverse returned {StatusCode} for the child documents of document {DocumentId}",
+                response.StatusCode, documentId);
+            throw new HttpRequestException(
+                $"Dataverse error ({response.StatusCode}) reading the child documents of document {documentId}.");
+        }
+
+        var data = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);
+        return data.TryGetProperty("value", out var rows) && rows.ValueKind == JsonValueKind.Array
+            ? rows.GetArrayLength()
+            : throw new HttpRequestException($"Dataverse answered the child documents of document {documentId} without rows.");
+    }
+
+    /// <summary>
     /// Looks up the Dataverse systemuserid for a given Azure AD Object ID.
     /// Dataverse systemuserid != Azure AD oid; they're linked via azureactivedirectoryobjectid.
     /// </summary>
@@ -972,7 +1109,8 @@ public class DocumentCheckoutService
     {
         try
         {
-            var url = $"systemusers?$filter=azureactivedirectoryobjectid eq '{azureAdObjectId}'&$select=systemuserid";
+            // Issue #1576: active users only — a disabled systemuser keeps its oid and must not check out or in.
+            var url = $"systemusers?$filter=azureactivedirectoryobjectid eq '{azureAdObjectId}' and isdisabled eq false&$select=systemuserid";
             var response = await _httpClient.GetAsync(url, ct);
 
             if (!response.IsSuccessStatusCode)
@@ -1588,7 +1726,7 @@ public record FailedDeleteResult(string Message, string CorrelationId)
 
 /// <summary>
 /// The document's SPE file was NOT deleted, so its row was kept (<see cref="DocumentFileDeletePolicy.VerifiedFileFirstKeepRowOnFailure"/>
-/// only; task 032). <paramref name="Code"/> is the pointer check's code (409) or
+/// only; task 032; the internal route too since R3 ISS-004). <paramref name="Code"/> is the pointer check's code (409) or
 /// <see cref="DocumentCheckoutService.FileNotDeletedCode"/> (503).
 /// </summary>
 public record FileNotDeletedDeleteResult(string Code, int FailureStatusCode, string CorrelationId)
@@ -1597,17 +1735,41 @@ public record FileNotDeletedDeleteResult(string Code, int FailureStatusCode, str
     public new int StatusCode => FailureStatusCode;
 }
 
+/// <summary>
+/// The document is still the parent (<c>sprk_parentdocument</c>) of other documents, so its ROW was not deleted (task
+/// 188 slice D; the relationship is Delete = Restrict). Code <see cref="DocumentCheckoutService.HasChildDocumentsCode"/>,
+/// 409.
+/// </summary>
+/// <param name="ChildCount">How many, when the pre-check counted them; <see langword="null"/> when Dataverse's Restrict
+/// refused the row delete instead (a child created after the count), which names no count.</param>
+/// <param name="CorrelationId">The request's correlation id.</param>
+/// <param name="FileGone"><see langword="false"/> when NOTHING was deleted (the pre-check). <see langword="true"/> when
+/// the refusal came at the row, after the file step had removed the file (or found it already gone): the row is kept
+/// without its file. Once the children are gone, a later delete treats the missing file as deleted and removes the row:
+/// the pointer check reports a bound pointer whose item is gone from an owned container as
+/// <see cref="DocumentPointerDeleteVerdict.FileAlreadyGone"/> (R3 ISS-004 review F1; this closes the task 032 known limit
+/// on both routes). A row whose pointer is unbound or mismatched, or whose container is not this stamp's, is still
+/// refused (409), and a fault in the check is a retryable 503.</param>
+public record HasChildDocumentsDeleteResult(int? ChildCount, string CorrelationId, bool FileGone = false)
+    : DeleteResult(false, CorrelationId)
+{
+    public new int StatusCode => 409;
+}
+
 /// <summary>What a document delete does when the SharePoint Embedded file cannot be deleted.</summary>
 public enum DocumentFileDeletePolicy
 {
     /// <summary>
-    /// The internal <c>DELETE /api/documents/{documentId}</c> behaviour (unchanged): a file delete that fails is logged
-    /// and the row is deleted anyway.
+    /// A file delete that fails is logged and the row is deleted anyway. This was the internal
+    /// <c>DELETE /api/documents/{documentId}</c> behaviour until R3 ISS-004 (#1650), which orphaned the file after a
+    /// transient Graph failure; that route now uses <see cref="VerifiedFileFirstKeepRowOnFailure"/>. Retained, with no
+    /// production caller, until its removal is decided.
     /// </summary>
     BestEffort = 0,
 
     /// <summary>
-    /// The external delete-own route (spaarke-SPA-external-access-platform-r3 task 032, FR-26; ADR-007): the row's pointer
+    /// The external delete-own route (spaarke-SPA-external-access-platform-r3 task 032, FR-26; ADR-007) and, since R3
+    /// ISS-004 (#1650), the internal <c>DELETE /api/documents/{documentId}</c>: the row's pointer
     /// is verified, the file is deleted FIRST, and if it cannot be the row is KEPT and the result is
     /// <see cref="FileNotDeletedDeleteResult"/>. A file already gone counts as deleted.
     /// </summary>

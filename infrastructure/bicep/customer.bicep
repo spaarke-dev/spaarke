@@ -570,9 +570,8 @@ module signalr 'modules/signalr.bicep' = if (signalrEnabled) {
 // anti-pattern app-service.bicep's header eliminates) bound to BOTH the
 // production App Service and its staging slot via the SAME
 // `uami.outputs.id`, so a slot-swap does not rotate the effective identity
-// (T5 structural fix). `keyVaultReferenceIdentity` PATCH on both slots is H4's
-// post-deploy job (ArmAppServiceIdentityPatcher, task 125, already shipped) —
-// this Bicep section only binds the UAMI to `identity.userAssignedIdentities`.
+// (T5 structural fix). The modules also set `keyVaultReferenceIdentity` to the UAMI on both slots at creation
+// (T186 L21 — H2a verifies T1 before H4 runs); H4's ArmAppServiceIdentityPatcher re-asserts it idempotently.
 // Per design.md §7.6 Deployment Order steps 9 (plan) / 14 (App Service).
 // ============================================================================
 
@@ -622,8 +621,8 @@ module bffApi 'modules/app-service.bicep' = {
     //     stamp is given one. The module sets a custom subdomain (Entra needs it) and grants
     //     the UAMI Cognitive Services User. H4b emits DocumentIntelligence__Enabled=true
     //     (the BFF's AI master switch) and the endpoint.
-    //   - KV references resolve only after H4 PATCHes keyVaultReferenceIdentity
-    //     to the UAMI on both slots (ArmAppServiceIdentityPatcher, task 125) and
+    //   - KV references resolve with the UAMI set as keyVaultReferenceIdentity on both slots (Bicep, re-asserted
+    //     by H4's ArmAppServiceIdentityPatcher) once
     //     the kvSecrets module has written real values. No ARM dependsOn needed:
     //     KV refs are runtime-resolved strings (and kvSecrets depends on THIS
     //     module for Communication-WebhookUrl — a dependsOn here would cycle).

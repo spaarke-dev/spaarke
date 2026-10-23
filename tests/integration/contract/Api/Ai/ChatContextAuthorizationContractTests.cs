@@ -412,6 +412,259 @@ public class ChatContextAuthorizationContractTests
         host.Files.Verify(f => f.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), "b!readable-drive", itemId, It.IsAny<CancellationToken>()), Times.Once());
     }
 
+    // ── Task 188 round 4b (R4a-1) / 4c: a chat SPE item that is a document's file goes through the document decision ──
+
+    private const string SpeItemId = "01R4BITEMABCDEFGHIJKLMNOPQ";
+
+    /// <summary>
+    /// A session on an item the caller's own SPE read allows. <paramref name="storedItemId"/> is what the session stores;
+    /// SPE answers with <paramref name="canonicalItemId"/> (the id every lookup is keyed on, round 4c).
+    /// </summary>
+    private static string ReadableSpeItemSession(ChatAuthHost host, string storedItemId = SpeItemId, string? canonicalItemId = null)
+    {
+        host.Files.Setup(f => f.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), "b!readable-drive", storedItemId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileHandleDto(canonicalItemId ?? storedItemId, "draft.docx", null, 10, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, null, false, null));
+        return host.SeedSession(documentId: storedItemId, documentDriveId: "b!readable-drive");
+    }
+
+    /// <summary>
+    /// The EXACT relative path of the caller's own read of the documents on an item whose OData literal (quotes doubled,
+    /// then URI-escaped) is <paramref name="escapedLiteral"/>: both item columns, one literal. Stated here, not computed
+    /// from production code (round 4c, F3).
+    /// </summary>
+    private static string DocumentsOnTheItemPath(string escapedLiteral) =>
+        $"sprk_documents?$select=sprk_documentid&$filter=sprk_graphitemid eq '{escapedLiteral}' or sprk_driveitemid eq '{escapedLiteral}'";
+
+    /// <summary>
+    /// The caller's own read of the documents on the item (keyed by the EXACT path, <see cref="DocumentsOnTheItemPath"/>;
+    /// the strict double refuses any other query, and the filter denies on that fault) answers
+    /// <paramref name="documentIds"/> (raw values); each GUID among them is a document the caller may Read.
+    /// </summary>
+    private static void DocumentsOnTheItem(ChatAuthHost host, params string?[] documentIds) =>
+        DocumentsOnTheItemAt(host, SpeItemId, documentIds);
+
+    private static void DocumentsOnTheItemAt(ChatAuthHost host, string escapedLiteral, params string?[] documentIds)
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(new { value = documentIds.Select(id => new { sprk_documentid = id }) });
+        host.UserClient
+            .Setup(u => u.GetAsync(DocumentsOnTheItemPath(escapedLiteral), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Sprk.Bff.Api.Infrastructure.Dataverse.DataverseUserResponse.Ok(200, System.Text.Json.JsonDocument.Parse(json).RootElement.Clone()));
+        foreach (var id in documentIds)
+        {
+            if (Guid.TryParse(id, out var documentId))
+                host.Access.Grant(Documents, documentId, AccessRights.Read);
+        }
+    }
+
+    /// <summary>
+    /// Round 4c: the app-only lookup the Compose gate uses (the <c>sprk_graphitemid</c> alternate key) finds
+    /// <paramref name="documentId"/> on the item <paramref name="canonicalItemId"/>.
+    /// </summary>
+    private static void AppOnlyRowOnTheItem(ChatAuthHost host, string canonicalItemId, Guid documentId) =>
+        host.AnalysisRows
+            .Setup(r => r.RetrieveByAlternateKeyAsync(
+                "sprk_document",
+                It.Is<Microsoft.Xrm.Sdk.KeyAttributeCollection>(k => k.Count == 1 && (string)k["sprk_graphitemid"] == canonicalItemId),
+                It.IsAny<string[]?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("sprk_document", documentId));
+
+    /// <summary>A document hidden from an external caller by <paramref name="case"/> (the five must-fire shapes).</summary>
+    private static Guid HiddenDocument(ChatAuthHost host, string @case)
+    {
+        var world = host.World;
+        switch (@case)
+        {
+            case "own-restricted":
+                return world.Document(Guid.NewGuid(), permission: 100000002);
+            case "internal-only-communication":
+                var communication = Guid.NewGuid();
+                var thread = Guid.NewGuid();
+                world.Thread(thread, 100000000);
+                world.Communication(communication, internalOnly: true, thread);
+                return world.Document(Guid.NewGuid(), communication: communication);
+            case "restricted-parent":
+                return world.Document(Guid.NewGuid(), parent: world.Document(Guid.NewGuid(), permission: 100000002));
+            case "narrowing-fault":
+                world.Faults["sprk_documents"] = HttpStatusCode.ServiceUnavailable;
+                return world.Document(Guid.NewGuid());
+            case "lookup-fault":
+                host.NarrowingMode = Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode.LookupFault;
+                return world.Document(Guid.NewGuid(), permission: 100000002);
+            default:
+                throw new ArgumentOutOfRangeException(nameof(@case), @case, null);
+        }
+    }
+
+    [Theory(DisplayName = "Task 188 r4b/4c: a chat SPE item whose document the narrowing hides is the chat family's 403 for a caller who is not an internal systemuser (the row found by the caller's read, or app-only)")]
+    [InlineData("own-restricted", "caller-read")]
+    [InlineData("internal-only-communication", "caller-read")]
+    [InlineData("restricted-parent", "caller-read")]
+    [InlineData("narrowing-fault", "caller-read")]
+    [InlineData("lookup-fault", "caller-read")]
+    [InlineData("own-restricted", "app-only")]
+    [InlineData("internal-only-communication", "app-only")]
+    [InlineData("restricted-parent", "app-only")]
+    [InlineData("narrowing-fault", "app-only")]
+    [InlineData("lookup-fault", "app-only")]
+    public async Task Messages_ExternalCaller_SpeItemOfAHiddenDocument_Is403(string @case, string source)
+    {
+        await using var host = await ChatAuthHost.StartAsync();
+        host.NarrowingMode = Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode.External;
+        var document = HiddenDocument(host, @case);
+
+        var session = ReadableSpeItemSession(host);
+        if (source == "app-only")
+        {
+            AppOnlyRowOnTheItem(host, SpeItemId, document);
+            host.Access.Grant(Documents, document, AccessRights.Read);
+            DocumentsOnTheItem(host);
+        }
+        else
+        {
+            DocumentsOnTheItem(host, document.ToString("D"));
+        }
+
+        (await host.SendAsync(Message(session))).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        host.VerifyNoTurnRan();
+        host.World.Calls.Should().Be(1, "the caller may Read the document, so the denial is THE narrowing's");
+    }
+
+    [Fact(DisplayName = "Task 188 r4b: a chat SPE item is shown when ANY document row on it is visible; a row with no id cannot be shown")]
+    public async Task Messages_ExternalCaller_SpeItem_OneHiddenOneVisibleRow_IsAllowed_ARowWithNoIdAloneIs403()
+    {
+        await using var host = await ChatAuthHost.StartAsync();
+        host.NarrowingMode = Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode.External;
+        var session = ReadableSpeItemSession(host);
+
+        DocumentsOnTheItem(host, (string?)null);
+        (await host.SendAsync(Message(session))).StatusCode.Should().Be(HttpStatusCode.Forbidden, "a row with no usable id cannot be shown");
+        host.VerifyNoTurnRan();
+
+        DocumentsOnTheItem(host,
+            host.World.Document(Guid.NewGuid(), permission: 100000002).ToString("D"), host.World.Document(Guid.NewGuid()).ToString("D"));
+        (await host.SendAsync(Message(session), HttpCompletionOption.ResponseHeadersRead)).StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact(DisplayName = "Task 188 r4b: must not fire — an SPE item with no document row (neither read finds one) keeps SPE's own check")]
+    public async Task Messages_ExternalCaller_SpeItemWithNoDocumentRow_KeepsSpesOwnCheck()
+    {
+        await using var host = await ChatAuthHost.StartAsync();
+        host.NarrowingMode = Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode.External;
+        var session = ReadableSpeItemSession(host);
+        DocumentsOnTheItem(host);
+
+        (await host.SendAsync(Message(session), HttpCompletionOption.ResponseHeadersRead)).StatusCode.Should().Be(HttpStatusCode.OK);
+        host.World.Calls.Should().Be(0);
+        host.UserClient.Verify(u => u.GetAsync(DocumentsOnTheItemPath(SpeItemId), It.IsAny<CancellationToken>()), Times.Once());
+    }
+
+    [Fact(DisplayName = "Task 188 r4b: a failed read of the item's documents denies (fail closed)")]
+    public async Task Messages_ExternalCaller_SpeItemDocumentReadFails_Is403()
+    {
+        await using var host = await ChatAuthHost.StartAsync();
+        host.NarrowingMode = Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode.External;
+        var session = ReadableSpeItemSession(host);
+        host.UserClient
+            .Setup(u => u.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Sprk.Bff.Api.Infrastructure.Dataverse.DataverseUserResponse.Fail(503, "unavailable", "simulated (test)"));
+
+        (await host.SendAsync(Message(session))).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        host.VerifyNoTurnRan();
+    }
+
+    [Fact(DisplayName = "Task 188 r4b: must not fire — an internal caller's SPE item is decided by SPE alone; no Dataverse read, no narrowing")]
+    public async Task Messages_InternalCaller_SpeItem_IsNotNarrowed()
+    {
+        await using var host = await ChatAuthHost.StartAsync();
+        var session = ReadableSpeItemSession(host);
+        AppOnlyRowOnTheItem(host, SpeItemId, host.World.Document(Guid.NewGuid(), permission: 100000002));
+
+        (await host.SendAsync(Message(session), HttpCompletionOption.ResponseHeadersRead)).StatusCode.Should().Be(HttpStatusCode.OK);
+        host.UserClient.VerifyNoOtherCalls();
+        host.AnalysisRows.Verify(
+            r => r.RetrieveByAlternateKeyAsync(It.IsAny<string>(), It.IsAny<Microsoft.Xrm.Sdk.KeyAttributeCollection>(), It.IsAny<string[]?>(), It.IsAny<CancellationToken>()),
+            Times.Never());
+        host.World.Calls.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "Task 188 r4c (F3): the caller's read is the exact path — both item columns, the item id's quote doubled and escaped")]
+    public async Task Messages_ExternalCaller_SpeItemIdWithAQuote_IsReadOnBothColumnsWithTheEscapedLiteral()
+    {
+        await using var host = await ChatAuthHost.StartAsync();
+        host.NarrowingMode = Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode.External;
+        const string quoted = "01R4C'QUOTE";
+        var session = ReadableSpeItemSession(host, quoted);
+        DocumentsOnTheItemAt(host, "01R4C%27%27QUOTE", host.World.Document(Guid.NewGuid()).ToString("D"));
+
+        (await host.SendAsync(Message(session), HttpCompletionOption.ResponseHeadersRead)).StatusCode.Should().Be(HttpStatusCode.OK);
+        host.UserClient.Verify(u => u.GetAsync(
+            "sprk_documents?$select=sprk_documentid&$filter=sprk_graphitemid eq '01R4C%27%27QUOTE' or sprk_driveitemid eq '01R4C%27%27QUOTE'",
+            It.IsAny<CancellationToken>()), Times.Once());
+        host.World.Calls.Should().Be(1);
+    }
+
+    [Fact(DisplayName = "Task 188 r4c: both lookups are keyed on the CANONICAL item id SPE returned, not the stored string")]
+    public async Task Messages_ExternalCaller_SpeItem_IsLookedUpByTheCanonicalId()
+    {
+        await using var host = await ChatAuthHost.StartAsync();
+        host.NarrowingMode = Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode.External;
+        const string canonical = "01R4CCANONICALITEM";
+        var session = ReadableSpeItemSession(host, storedItemId: "01r4ccanonicalitem", canonicalItemId: canonical);
+        var visible = host.World.Document(Guid.NewGuid());
+        AppOnlyRowOnTheItem(host, canonical, visible);
+        host.Access.Grant(Documents, visible, AccessRights.Read);
+        DocumentsOnTheItemAt(host, canonical);
+
+        (await host.SendAsync(Message(session), HttpCompletionOption.ResponseHeadersRead)).StatusCode.Should().Be(HttpStatusCode.OK,
+            "the caller's read is keyed on the canonical id (the strict double refuses any other)");
+        host.World.Calls.Should().Be(1, "the app-only row was found under the canonical id and decided");
+    }
+
+    [Fact(DisplayName = "Task 188 r4c (hardening): a document row the caller cannot read no longer falls back to SPE's check — the app-only lookup finds it and the caller's Read decides")]
+    public async Task Messages_ExternalCaller_SpeItemWithARowTheCallerCannotRead_Is403()
+    {
+        await using var host = await ChatAuthHost.StartAsync();
+        host.NarrowingMode = Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode.External;
+        var session = ReadableSpeItemSession(host);
+        AppOnlyRowOnTheItem(host, SpeItemId, host.World.Document(Guid.NewGuid()));
+        DocumentsOnTheItem(host); // the caller's own read sees no row
+
+        (await host.SendAsync(Message(session))).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        host.VerifyNoTurnRan();
+        host.World.Calls.Should().Be(0, "an id the caller cannot Read is never sent to the narrowing");
+    }
+
+    [Fact(DisplayName = "Task 188 r4c (hardening): must not fire — an app-only row the caller may Read and the narrowing shows is allowed")]
+    public async Task Messages_ExternalCaller_SpeItemWithAVisibleAppOnlyRow_IsAllowed()
+    {
+        await using var host = await ChatAuthHost.StartAsync();
+        host.NarrowingMode = Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode.External;
+        var session = ReadableSpeItemSession(host);
+        var visible = host.World.Document(Guid.NewGuid());
+        AppOnlyRowOnTheItem(host, SpeItemId, visible);
+        host.Access.Grant(Documents, visible, AccessRights.Read);
+        DocumentsOnTheItem(host);
+
+        (await host.SendAsync(Message(session), HttpCompletionOption.ResponseHeadersRead)).StatusCode.Should().Be(HttpStatusCode.OK);
+        host.World.Calls.Should().Be(1);
+    }
+
+    [Fact(DisplayName = "Task 188 r4c (hardening): an app-only lookup that faults denies (fail closed)")]
+    public async Task Messages_ExternalCaller_SpeItemAppOnlyLookupFaults_Is403()
+    {
+        await using var host = await ChatAuthHost.StartAsync();
+        host.NarrowingMode = Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode.External;
+        var session = ReadableSpeItemSession(host);
+        host.AnalysisRows
+            .Setup(r => r.RetrieveByAlternateKeyAsync("sprk_document", It.IsAny<Microsoft.Xrm.Sdk.KeyAttributeCollection>(), It.IsAny<string[]?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("simulated Dataverse fault (test)"));
+        DocumentsOnTheItem(host);
+
+        (await host.SendAsync(Message(session))).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        host.VerifyNoTurnRan();
+    }
+
     [Fact]
     public async Task Messages_AStoredAnalysisHost_IsReDecidedByItsAnchorsOnEveryTurn()
     {
@@ -772,6 +1025,15 @@ public class ChatContextAuthorizationContractTests
         public RecordingSystemUserProbe Probe { get; } = new();
         public Mock<IPlaybookService> Playbooks { get; } = new(MockBehavior.Loose);
         public Mock<ISpeFileOperations> Files { get; } = new(MockBehavior.Loose);
+
+        /// <summary>Task 188 round 4b: who the caller is for THE external document narrowing (Internal unless stated).</summary>
+        public Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode NarrowingMode { get; set; } = Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode.Internal;
+
+        /// <summary>Task 188 round 4b: what the BFF's app-only identity reads (the REAL predicate behind the real seam).</summary>
+        internal Sprk.Bff.Api.Tests.Services.Ai.Handlers.AppOnlyDocumentWorld World { get; } = new();
+
+        /// <summary>Task 188 round 4b: the caller's OWN Dataverse read (the documents on a chat SPE item).</summary>
+        public Mock<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient> UserClient { get; } = new(MockBehavior.Strict);
         public Mock<IChatDataverseRepository> Repo { get; } = new(MockBehavior.Loose);
         public Mock<IChatContextProvider> ContextProvider { get; } = new(MockBehavior.Loose);
         public Mock<ISessionPersistenceService> Persistence { get; } = new(MockBehavior.Loose);
@@ -814,6 +1076,11 @@ public class ChatContextAuthorizationContractTests
             builder.Services.AddScoped<IAuthorizationRule, OperationAccessRule>();
             builder.Services.AddScoped<AuthorizationService>();
             builder.Services.AddScoped<IAiAuthorizationService, AiAuthorizationService>();
+            // unified-access-control-r2 task 188 round 4a: the caller is a resolved INTERNAL systemuser, so THE external
+            // document narrowing in IAiAuthorizationService makes no call (AiDocumentNarrowingTests states the external caller).
+            Sprk.Bff.Api.Tests.TestInfrastructure.StatedNarrowingCaller.AddStatedNarrowingCaller(builder.Services,
+                () => NarrowingMode, () => World);
+            builder.Services.AddSingleton(UserClient.Object);
             builder.Services.AddSingleton<CallerRecordAccessProbe>(Probe);
             builder.Services.AddSingleton(Files.Object);
             builder.Services.AddSingleton(Playbooks.Object);

@@ -185,6 +185,9 @@ public sealed class ArmWhatIfDriftDetectorTests
         body.RootElement.GetProperty("properties").GetProperty("parameters")
             .GetProperty("controlPlaneUamiPrincipalId").GetProperty("value").GetString()
             .Should().Be("7d1f0c3e-2b6a-4c55-9e1d-3a8b5c6d7e8f", "the what-if must preview exactly what the deploy would send");
+        body.RootElement.TryGetProperty("location", out var location).Should().BeTrue(
+            "ARM refuses a subscription-scope what-if without a location (T186 L20)");
+        location.GetString().Should().Be("westus2");
     }
 
     // ---------- T6 real-call assertion ----------

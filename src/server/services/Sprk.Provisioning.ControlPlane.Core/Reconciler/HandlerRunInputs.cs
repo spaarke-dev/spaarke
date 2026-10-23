@@ -80,7 +80,7 @@ public static class HandlerRunInputs
             [HandlerIds.H0] =
             [
                 Tenant, Subscription,
-                RunInput.Intake("region"),
+                // No "region": it was read only by the removed Compute vCPU probe (T186 L17); the OpenAI probes use openAiLocation.
                 RunInput.Intake(CostEnvelopeIntake.TierParameterKey),                    // T229: required (CostEnvelopeIntake)
                 RunInput.Intake(CostEnvelopeIntake.EstimatedMonthlyUsdParameterKey),
                 RunInput.Intake("openaiPinFreshnessMinDays", required: false),

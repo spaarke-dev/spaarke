@@ -46,6 +46,47 @@ public class SecureRecordOwnerRoleSetParityTests
         Assert.Equal(bff.Tables.Select(t => (t.LogicalName, t.PrivilegeName)).ToArray(), l2Tables);
     }
 
+    /// <summary>
+    /// UAC task 099b review round 5 (K guard): each entry's <c>privilegeName</c> names its own table. The BFF answers "does the
+    /// team hold Read on this table" by mapping each held privilege's name to a table
+    /// (<c>UserPrivilegeChecker.ReadPrivilegeEntity</c>); an entry whose name maps elsewhere would have
+    /// Set-SecureRecordOwnerRolePrivileges.ps1 grant a privilege the BFF never reads as this table's Read.
+    /// </summary>
+    private static string[] PrivilegeNamesNotNamingTheirTable(IEnumerable<SecureRecordOwnerRoleTable> tables) =>
+        tables
+            .Where(t => !string.Equals(
+                Sprk.Bff.Api.Services.Dataverse.Privileges.UserPrivilegeChecker.ReadPrivilegeEntity(t.PrivilegeName),
+                t.LogicalName, StringComparison.OrdinalIgnoreCase))
+            .Select(t => $"{t.LogicalName}: {t.PrivilegeName}")
+            .ToArray();
+
+    private static SecureRecordOwnerRoleSet LiveSet() =>
+        SecureRecordOwnerRoleSet.Parse(File.ReadAllText(Path.Combine(SourceScan.RepoRoot, "config", "secure-record-owner-role.json")));
+
+    [Fact]
+    public void LiveFile_EveryPrivilegeName_NamesItsOwnTable()
+    {
+        Assert.Empty(PrivilegeNamesNotNamingTheirTable(LiveSet().Tables));
+    }
+
+    [Theory]
+    [InlineData("prvReadsprk_Projcet", "a misspelt table")]
+    [InlineData("prvReadsprk_Document", "another table's privilege")]
+    [InlineData("prvWritesprk_Project", "not a Read privilege")]
+    [InlineData("", "no name")]
+    public void AnEntryWhosePrivilegeNameDoesNotNameItsTable_IsCaught(string privilegeName, string because)
+    {
+        // In memory: the live set with ONE entry's name replaced. The guard fires on exactly that entry.
+        var tables = LiveSet().Tables.ToList();
+        var project = tables.FindIndex(t => t.LogicalName == "sprk_project");
+        Assert.True(project >= 0, "the live set lists sprk_project");
+        tables[project] = tables[project] with { PrivilegeName = privilegeName };
+
+        var caught = PrivilegeNamesNotNamingTheirTable(tables);
+
+        Assert.True(caught.Length == 1 && caught[0].StartsWith("sprk_project:", StringComparison.Ordinal), because);
+    }
+
     public static TheoryData<string, string> BadDocuments() => new()
     {
         { "schemaVersion 2", Doc(schemaVersion: "2") },

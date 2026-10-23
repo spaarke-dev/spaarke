@@ -148,7 +148,7 @@ function load(
   };
   inject(SCRIPT);
   const api = win.Spaarke.NoAccessEntry;
-  expect(api.Config.version).toBe('1.1.1'); // the real script ran
+  expect(api.Config.version).toBe('1.1.2'); // the real script ran
   return { api, retrieveRecord, lookupObjects };
 }
 
@@ -514,6 +514,32 @@ describe('registration and the post-save notice', () => {
     expect(text).toContain('Removed 1 direct share(s)');
     expect(text).toContain('Not enforced on Matter aaaaaaaa, Project bbbbbbbb');
     expect(text).not.toContain('cccccccc');
+  });
+
+  it('names each record the walled user OWNS, apart from team or role access (#1620)', () => {
+    const { api } = load();
+
+    const owned: string = api._summarize({
+      removed: [{}],
+      notEnforceable: [
+        { recordType: 'sprk_workassignment', recordId: 'dddddddd-1111-2222-3333-444444444444', mechanism: 'user-ownership' },
+      ],
+    });
+
+    expect(owned).toContain('Still reachable on Work assignment dddddddd');
+    expect(owned).toContain('Reassign them to another owner');
+    expect(owned).not.toContain('team or a role');
+
+    const both: string = api._summarize({
+      notEnforceable: [
+        { recordType: 'sprk_matter', recordId: 'eeeeeeee-1111-2222-3333-444444444444', mechanism: 'user-ownership' },
+        { recordType: 'sprk_matter', recordId: 'ffffffff-1111-2222-3333-444444444444', mechanism: 'team-share' },
+      ],
+    });
+
+    expect(both).toContain('Still reachable on Matter eeeeeeee');
+    expect(both).not.toContain('ffffffff');
+    expect(both).toContain('team or a role');
   });
 });
 

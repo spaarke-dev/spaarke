@@ -461,6 +461,16 @@ public sealed class FakeDataverseTables
             }
 
             var expected = parts[1].Trim('\'');
+
+            // Every real systemuser row carries isdisabled; a seeded row that omits it is an ACTIVE user (issue #1576 —
+            // production filters "isdisabled eq false"). A row seeded with isdisabled = true does not match
+            // (SpeAdminEnvironmentScopeTests.ADisabledCallerInTheRootBusinessUnit_ScopesNothing_AndGetsThe404).
+            if (parts[0] == "isdisabled" && !row.ContainsKey("isdisabled"))
+            {
+                if (!string.Equals(expected, "false", StringComparison.OrdinalIgnoreCase)) return false;
+                continue;
+            }
+
             if (!row.TryGetValue(parts[0], out var actual)
                 || !string.Equals(actual?.ToString(), expected, StringComparison.OrdinalIgnoreCase))
             {

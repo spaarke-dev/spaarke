@@ -1242,7 +1242,7 @@ public sealed class CreateEventExecutor : ChildCreateExecutorBase
 
 /// <summary>
 /// <c>assign-work</c> (task 043; D-21, D-51, D-113): a <c>sprk_workassignment</c> through the ONE work-assignment create, the
-/// child-records create core task 046 proved for the wizard. uac-r2's pair rule (#1616/#1628, <c>OwnedChildWrite.PairTargetAsync</c>):
+/// child-records create core task 046 proved for the wizard. uac-r2's pair rule (#1616/#1628, <c>CallerWriteAuthorization.PairTargetAsync</c>):
 /// on a work assignment a typed pair naming a matter or project counts only when the typed regarding lookup repeats it, so the
 /// shared base binds both (<c>sprk_regardingmatter</c> / <c>sprk_regardingproject</c> and the typed pair). A work assignment has
 /// no typed lookup to a work assignment or a service request, so under any other core record it is refused before anything is

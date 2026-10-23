@@ -104,6 +104,7 @@ export const OWNERSHIP_CHILD_TABLES: ReadonlySet<string> = new Set([
   'sprk_invoice',
   'sprk_kpiassessment',
   'sprk_memo',
+  'sprk_policy',
   'sprk_reportcard',
   'sprk_spendsignal',
   'sprk_spendsnapshot',

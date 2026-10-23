@@ -100,7 +100,8 @@ public static class UnsecureProjectEndpoint
     /// business unit's team, mirrored shares removed). 500 with <c>childrenReowned</c>, <c>childrenRemaining</c> and
     /// <c>childTables</c>. On a record still flagged secure, its own shares are NOT revoked and <c>sprk_issecure</c> is NOT
     /// cleared (the flag keeps meaning "related records may still be isolated"); the ownership move already made stands.
-    /// Calling again completes it.
+    /// Calling again completes it — unless <c>childrenBlockedBy</c> is <c>sdap.access.grant.owner_privilege_missing</c>
+    /// (UAC task 099b review round 4): then an administrator must first add the owner team's privilege.
     /// </summary>
     internal const string ReasonChildrenIncomplete = "sdap.unsecure.children_incomplete";
 
@@ -948,15 +949,25 @@ public static class UnsecureProjectEndpoint
             ("childTables", summary.Tables),
         };
         extensions.AddRange(more);
+        // UAC task 099b review round 4 (round 3's K2, for this endpoint): a grant row the business unit's team may not own is
+        // not completed by a repeat call until an administrator adds the privilege, so the detail does not promise it, and the
+        // cause is named as the same extension provisioning answers (the reason code stays children_incomplete).
+        extensions.AddRange(SecureChildPassSummary.BlockedByExtensions(pass));
 
         return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
             $"The {root.DisplayLabel.ToLowerInvariant()}'s existing related records (documents, events, to-dos, " +
-            $"communications, memos) were not all taken out of isolation: {summary.Reowned} re-owned, {summary.Remaining} " +
-            "remaining" + (perTable.Length > 0 ? $" ({perTable})" : "") + (pass.Detail is null ? "" : $" — {pass.Detail}") +
+            $"communications, memos, access grants) were not all taken out of isolation: {summary.Reowned} re-owned, " +
+            $"{summary.Remaining} remaining" + (perTable.Length > 0 ? $" ({perTable})" : "") +
+            (pass.Detail is null ? "" : $" — {pass.Detail}") +
             (flagStillSet
                 ? ". Its ownership was reassigned, but its shares were NOT revoked and it still reads as secure, so the people " +
-                  "shared on it keep reaching the related records that are still isolated. Calling again completes it."
-                : ". Calling again completes it."),
+                  "shared on it keep reaching the related records that are still isolated."
+                : ".") +
+            (pass.BlockedByGrantOwnerPrivilege
+                ? " Its access grants cannot be taken out of isolation until an administrator gives the security role of the " +
+                  "business unit's team that owns its related records Read on External Record Access; calling again before " +
+                  "that does not complete it, and calling again after that does."
+                : " Calling again completes it."),
             traceId,
             extensions.ToArray());
     }

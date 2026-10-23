@@ -718,7 +718,9 @@ public static class AnalysisEndpoints
             {
                 Conditions =
                 {
-                    new ConditionExpression("azureactivedirectoryobjectid", ConditionOperator.Equal, azureAdOid)
+                    new ConditionExpression("azureactivedirectoryobjectid", ConditionOperator.Equal, azureAdOid),
+                    // Issue #1576: a disabled systemuser keeps its oid and must not resolve.
+                    new ConditionExpression("isdisabled", ConditionOperator.Equal, false)
                 }
             }
         };
@@ -726,7 +728,7 @@ public static class AnalysisEndpoints
         var result = await entityService.RetrieveMultipleAsync(query, CancellationToken.None);
         if (result.Entities.Count == 0)
         {
-            logger.LogWarning("No Dataverse systemuser found for Azure AD OID {AzureAdOid}", azureAdOid);
+            logger.LogWarning("No active Dataverse systemuser found for Azure AD OID {AzureAdOid}", azureAdOid);
             return null;
         }
 
@@ -889,7 +891,16 @@ public static class AnalysisEndpoints
         // Step 4: Build Dataverse field mapping directly from the AI output (the output
         // schema uses sprk_* property names natively — typed Choice coercion for
         // sprk_documenttype + a computed search profile).
-        var fields = BuildDocumentProfileFields(aiOutput, docText.FileName, parentEntity, logger);
+        var fields = BuildDocumentProfileFields(documentId, aiOutput, docText.FileName, parentEntity, logger);
+        if (fields.Count == 0)
+        {
+            // #2239: no profile column mapped (e.g. a misconfigured output schema) is a failed profile, not a success —
+            // the same rule the app-only and Compose consumers apply. Nothing is written and nothing is indexed.
+            logger.LogWarning(
+                "Document {DocumentId} profile — the action produced no mappable profile fields; nothing written", documentId);
+            yield return AnalysisStreamChunk.FromError("AI analysis produced no profile fields.");
+            yield break;
+        }
 
         logger.LogInformation(
             "Document {DocumentId} profile — mapped {FieldCount} fields for update: {Fields}",
@@ -1007,11 +1018,12 @@ public static class AnalysisEndpoints
     /// <see cref="DocumentProfileFieldMapper.BuildSearchProfile"/>.
     /// </summary>
     private static Dictionary<string, object?> BuildDocumentProfileFields(
+        Guid documentId,
         JsonElement root,
         string fileName,
         ParentEntityContext? parentEntity,
         ILogger logger)
-        => DocumentProfileOutputMapper.BuildFields(root, fileName, parentEntity, logger);
+        => DocumentProfileOutputMapper.BuildFields(documentId, root, fileName, parentEntity, logger);
 
     // =========================================================================
     // Shared by promote (the fork endpoint that also used these was deleted by task 162)

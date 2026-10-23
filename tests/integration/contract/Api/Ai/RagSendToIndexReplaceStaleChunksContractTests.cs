@@ -247,6 +247,10 @@ public sealed class RagSendToIndexReplaceStaleChunksFixture : WebApplicationFact
             // this deny-by-default source. See the remarks on the Access property.
             services.RemoveAll<IAccessDataSource>();
             services.AddSingleton<IAccessDataSource>(Access);
+
+            // Task 188 round 4d (#2200): send-to-index now applies THE external document narrowing; it is not under test
+            // here (SendToIndexDocumentNarrowingTests), so the all-visible double (Option A, the full-host convention).
+            Sprk.Bff.Api.Tests.TestInfrastructure.AllVisibleDocumentNarrowing.UseAllVisibleDocumentNarrowing(services);
         });
     }
 

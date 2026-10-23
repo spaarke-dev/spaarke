@@ -751,7 +751,7 @@ public class IncomingAssociationResolverTests
         var resolver = FilingResolverWith(new StubRegardingRung("sprk_regardingmatter", "sprk_matter", matter), new(), threads.Object);
         var decision = await resolver.EvaluateAsync(CreateEnvelope("filing", "clerk@court.gov"), new AssociationContext(), CancellationToken.None);
 
-        (await resolver.ApplyToExistingRecordAsync(TestCommunicationId, decision, matter, CancellationToken.None)).Should().BeTrue();
+        (await resolver.ApplyToExistingRecordAsync(TestCommunicationId, decision, matter, secureExitCaller: null, CancellationToken.None)).Should().BeTrue();
 
         written.Should().ContainSingle("the filing was written");
         threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);

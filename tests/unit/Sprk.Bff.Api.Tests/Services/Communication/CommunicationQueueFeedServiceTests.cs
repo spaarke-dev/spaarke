@@ -64,9 +64,30 @@ public class CommunicationQueueFeedServiceTests
     private static ClaimsPrincipal Caller() =>
         new(new ClaimsIdentity(new[] { new Claim("oid", Guid.NewGuid().ToString()) }, "test"));
 
+    private static readonly Guid OpenThread = Guid.Parse("0a0a0a0a-0000-0000-0000-000000000001");
+    private static readonly Guid PrivateThread = Guid.Parse("0a0a0a0a-0000-0000-0000-000000000002");
+    private static readonly Guid BlankThread = Guid.Parse("0a0a0a0a-0000-0000-0000-000000000003");
+    private const int PrivacyOpen = 100000000;
+    private const int PrivacyPrivate = 100000001;
+    private string _lastCandidateSelect = string.Empty;
+
     private void SetupCandidates(params Dictionary<string, JsonElement>[] rows) =>
         _query.Setup(q => q.QueryAsync(CommunicationSet, It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
+              .Callback<string, string, Guid, CancellationToken>((_, odata, _, _) => _lastCandidateSelect = odata.Split('&')[0])
               .ReturnsAsync(rows);
+
+    /// <summary>Answers the impersonated batched thread-privacy read for the listed threads (a null privacy = no value).</summary>
+    private void SetupThreadPrivacy(params (Guid Id, int? Privacy)[] threads) =>
+        _query.Setup(q => q.QueryAsync("sprk_communicationthreads", It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
+              .ReturnsAsync((string _, string odata, Guid _, CancellationToken _) => threads
+                  .Where(t => odata.Contains(t.Id.ToString()))
+                  .Select(t =>
+                  {
+                      var row = new Dictionary<string, JsonElement> { ["sprk_communicationthreadid"] = El(t.Id.ToString()) };
+                      if (t.Privacy is { } p) row["sprk_privacystate"] = El(p);
+                      return row;
+                  })
+                  .ToList());
 
     private void SetupReviewLog(params Entity[] rows) =>
         _entityService
@@ -219,7 +240,9 @@ public class CommunicationQueueFeedServiceTests
 
         SetupCandidates(
             CandidateRow(hiddenId, "Internal-only email", AssociationStatusCodes.Suggested, priority: 100000000, riConfidence: 0.9, internalOnly: true),
-            CandidateRow(visibleId, "Visible email", AssociationStatusCodes.Suggested, priority: 100000001, riConfidence: 0.5));
+            CandidateRow(visibleId, "Visible email", AssociationStatusCodes.Suggested, priority: 100000001, riConfidence: 0.5,
+                threadId: OpenThread));
+        SetupThreadPrivacy((OpenThread, PrivacyOpen));
         SetupReviewLog(ProposedRow(hiddenId, "sprk_matter", "sprk_closingdate", confidence: 0.9m, suggestionJson: "{}"));
 
         var result = await Sut(isExternalCaller: true).GetQueueFeedAsync(regarding: null, top: null, Caller(), CancellationToken.None);
@@ -227,6 +250,47 @@ public class CommunicationQueueFeedServiceTests
         result.Items.Should().ContainSingle();
         result.Items.Single().CommunicationId.Should().Be(visibleId);
         result.Items.Select(i => i.CommunicationId).Should().NotContain(hiddenId);
+    }
+
+    [Fact]
+    public async Task GetQueueFeedAsync_ExternalCaller_SeesOnlyItemsInAnExplicitlyOpenThread_D7()
+    {
+        // Owner decision D7 (task 065 fix round 5): a non-internal caller sees a row only when its thread reads EXPLICITLY
+        // Open at read time: a Private thread, a thread with no privacy value, an unreadable thread and no thread all hide it.
+        var inOpen = Guid.NewGuid();
+        var inPrivate = Guid.NewGuid();
+        var inBlank = Guid.NewGuid();
+        var inUnreadable = Guid.NewGuid();
+        var noThread = Guid.NewGuid();
+
+        SetupCandidates(
+            CandidateRow(inOpen, "Open", AssociationStatusCodes.Suggested, 100000001, 0.5, threadId: OpenThread),
+            CandidateRow(inPrivate, "Private", AssociationStatusCodes.Suggested, 100000001, 0.5, threadId: PrivateThread),
+            CandidateRow(inBlank, "No value", AssociationStatusCodes.Suggested, 100000001, 0.5, threadId: BlankThread),
+            CandidateRow(inUnreadable, "Unreadable", AssociationStatusCodes.Suggested, 100000001, 0.5, threadId: Guid.NewGuid()),
+            CandidateRow(noThread, "No thread", AssociationStatusCodes.Suggested, 100000001, 0.5));
+        SetupThreadPrivacy((OpenThread, PrivacyOpen), (PrivateThread, PrivacyPrivate), (BlankThread, null));
+        SetupReviewLog();
+
+        var result = await Sut(isExternalCaller: true).GetQueueFeedAsync(regarding: null, top: null, Caller(), CancellationToken.None);
+
+        result.Items.Select(i => i.CommunicationId).Should().Equal(inOpen);
+        // The thread lookup is selected for an external caller only (an internal caller's query is unchanged).
+        _lastCandidateSelect.Should().Contain("_sprk_communicationthread_value");
+    }
+
+    [Fact]
+    public async Task GetQueueFeedAsync_InternalCaller_StillSeesItemsInAPrivateThread_AndReadsNoThread()
+    {
+        var inPrivate = Guid.NewGuid();
+        SetupCandidates(CandidateRow(inPrivate, "Private", AssociationStatusCodes.Suggested, 100000001, 0.5, threadId: PrivateThread));
+        SetupReviewLog();
+
+        var result = await Sut().GetQueueFeedAsync(regarding: null, top: null, Caller(), CancellationToken.None);
+
+        result.Items.Select(i => i.CommunicationId).Should().Equal(inPrivate);
+        _lastCandidateSelect.Should().NotContain("_sprk_communicationthread_value");
+        // _query is strict: any thread read would have thrown.
     }
 
     [Fact]
@@ -346,7 +410,7 @@ public class CommunicationQueueFeedServiceTests
 
     private static Dictionary<string, JsonElement> CandidateRow(
         Guid id, string subject, int? associationStatus, int? priority, double? riConfidence,
-        bool internalOnly = false, int privilege = PrivilegeNone)
+        bool internalOnly = false, int privilege = PrivilegeNone, Guid? threadId = null)
     {
         var row = new Dictionary<string, JsonElement>
         {
@@ -356,6 +420,7 @@ public class CommunicationQueueFeedServiceTests
             ["sprk_privilegeclassification"] = El(privilege),
             ["sprk_subject"] = El(subject),
         };
+        if (threadId is { } thread) row["_sprk_communicationthread_value"] = El(thread.ToString());
         if (associationStatus is not null) row["sprk_associationstatus"] = El(associationStatus.Value);
         if (priority is not null) row["sprk_triagepriority"] = El(priority.Value);
         if (riConfidence is not null) row["sprk_riconfidence"] = El(riConfidence.Value);

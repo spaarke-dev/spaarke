@@ -1,7 +1,11 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
+using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Services.Identity;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
 
@@ -23,7 +27,20 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// <b>User-OBO ONLY (spec MUST rule)</b>: every query executes through
 /// <see cref="IDataverseUserClient"/> under the calling user's Dataverse security roles +
 /// row-level security. Rows the user cannot read are absent from results — enforced by
-/// Dataverse, not by BFF filtering. No app-only client is reachable (task-012 audit).
+/// Dataverse, not by BFF filtering. No app-only client is reachable (task-012 audit), except the one below.
+/// </para>
+/// <para>
+/// <b>The "User-OBO ONLY" rule is AMENDED for ONE dependency — unified-access-control-r2 task 188, main-session decision
+/// 2026-10-20 (CLAUDE.md §6.5 path B; APPROVED, owner round 111, 2026-10-21)</b>: an EXTERNAL caller's <c>sprk_document</c> rows
+/// are decided by THE external document narrowing through <see cref="AppOnlyDocumentNarrowing"/>, which re-reads those
+/// documents BY ID under the BFF's app-only identity (the external plane's reader) and returns ONLY a hide decision: a
+/// link field security masks for the user can never read as "no link". It can only HIDE a row the user's own read returned;
+/// no app-only data reaches the result, and nothing else of the app-only reader is reachable (a delegate). Every query whose
+/// rows reach the model still runs as the user.
+/// Task 188 round 3 slice C: an external caller's <c>sprk_analysis</c> and <c>sprk_analysisoutput</c> rows are hidden when
+/// their source document or an analysis's output file is (or cannot be decided), through the same seam's hide-only overload
+/// (<see cref="AppOnlyDocumentNarrowingExtensions.HiddenDocumentIdsAsync"/>); their source links are read as the user
+/// (<see cref="ExternalCallerCommunicationGuard.ReadSourceDocumentIdsAsync"/>).
 /// </para>
 /// <para>
 /// <b>Grounding (ADR-039)</b>: every returned row carries the table's primary id (added to
@@ -34,6 +51,14 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// <b>ADR-015 / NFR-07</b>: telemetry carries entity + column COUNT + row COUNT + duration —
 /// never querytext (may embed user-authored literals), never row content.
 /// </para>
+/// <para>
+/// <b>ISS-010 quick fix (external-access r3 task 078)</b>: for an EXTERNAL caller (systemuser flagged
+/// <c>sprk_isexternal</c>, or unresolvable — fail closed) a <c>sprk_communication</c> query is ANDed with the task 065
+/// rule (the Open-thread half through the thread navigation property) and re-checked after the read (flag and Open
+/// thread); any other communication-family table (the prefix plus the content tables outside it) is refused before any
+/// Dataverse request; a <c>sprk_document</c> whose related communication fails the rule is dropped after the read. See
+/// <see cref="ExternalCallerCommunicationGuard"/>. Internal callers and other tables are unchanged.
+/// </para>
 /// </remarks>
 public sealed class DataverseReadQueryHandler : IToolHandler
 {
@@ -41,17 +66,37 @@ public sealed class DataverseReadQueryHandler : IToolHandler
 
     private readonly IDataverseUserClient _dataverse;
     private readonly ILogger<DataverseReadQueryHandler> _logger;
+    private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly ICallerSystemUserResolver _callerResolver;
+    private readonly ISystemUserIdentityResolver _identityResolver;
+    /// <summary>Task 188: THE document narrowing, app-only by id (see the remarks: the one amended dependency).</summary>
+    private readonly AppOnlyDocumentNarrowing _narrowDocuments;
 
     public DataverseReadQueryHandler(
         IDataverseUserClient dataverse,
-        ILogger<DataverseReadQueryHandler> logger)
+        ILogger<DataverseReadQueryHandler> logger,
+        IHttpContextAccessor httpContextAccessor,
+        ICallerSystemUserResolver callerResolver,
+        ISystemUserIdentityResolver identityResolver,
+        AppOnlyDocumentNarrowing narrowDocuments)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
+        _callerResolver = callerResolver ?? throw new ArgumentNullException(nameof(callerResolver));
+        _identityResolver = identityResolver ?? throw new ArgumentNullException(nameof(identityResolver));
+        _narrowDocuments = narrowDocuments ?? throw new ArgumentNullException(nameof(narrowDocuments));
     }
 
     /// <inheritdoc />
     public string HandlerId => HandlerIdValue;
+
+    /// <summary>Task 188: a row's primary id (<see cref="Guid.Empty"/> when it is absent or not a GUID: never visible).</summary>
+    private static Guid RecordIdOf(JsonElement record, string primaryIdAttribute) =>
+        record.ValueKind == JsonValueKind.Object && record.TryGetProperty(primaryIdAttribute, out var id) &&
+        id.ValueKind == JsonValueKind.String && Guid.TryParse(id.GetString(), out var parsed)
+            ? parsed
+            : Guid.Empty;
 
     /// <inheritdoc />
     public ToolHandlerMetadata Metadata { get; } = new(
@@ -128,6 +173,42 @@ public sealed class DataverseReadQueryHandler : IToolHandler
 
         try
         {
+            // ISS-010 (task 078): externality is decided ONLY for a communication-family table or sprk_document, so every
+            // other request is byte-identical. An external caller is refused any family table but sprk_communication
+            // BEFORE any Dataverse request (the metadata GET included); sprk_document is row-filtered by its related
+            // communication (review round 1, F1).
+            var guardCommunications = false;
+            var guardDocuments = false;
+            var guardDerived = false;
+            if ((ExternalCallerCommunicationGuard.IsCommunicationFamily(translation.EntityLogicalName) ||
+                 ExternalCallerCommunicationGuard.IsDocumentTable(translation.EntityLogicalName) ||
+                 ExternalCallerCommunicationGuard.IsDocumentDerivedTable(translation.EntityLogicalName)) &&
+                await ExternalCallerCommunicationGuard.IsExternalCallerAsync(
+                    _httpContextAccessor, _callerResolver, _identityResolver, cancellationToken).ConfigureAwait(false))
+            {
+                if (ExternalCallerCommunicationGuard.IsDocumentTable(translation.EntityLogicalName))
+                {
+                    guardDocuments = true;
+                }
+                else if (ExternalCallerCommunicationGuard.IsDocumentDerivedTable(translation.EntityLogicalName))
+                {
+                    // Task 188 round 3 slice C: decided after the read by row id; nothing is injected into the query.
+                    guardDerived = true;
+                }
+                else if (!ExternalCallerCommunicationGuard.IsCommunicationTable(translation.EntityLogicalName))
+                {
+                    _logger.LogInformation(
+                        "[dataverse.read_query] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
+                        translation.EntityLogicalName, "family_table_refused", context.DecisionId);
+                    return Error(tool, ExternalCallerCommunicationGuard.RefusalMessage,
+                        DataverseUserClientErrorCodes.AccessDenied, startedAt);
+                }
+                else
+                {
+                    guardCommunications = true;
+                }
+            }
+
             // Resolve entity-set + primary id from metadata (under the user's token — a table
             // invisible to this user 404s here, which is the correct fail-closed behavior).
             // R5-C (2026-07-07): also fetch attribute types so LOOKUP columns can be rewritten
@@ -159,7 +240,31 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                 .Where(lookupAttributes.Contains)
                 .ToList();
             string odataQuery;
-            if (mappedLookups.Count > 0 ||
+            var threadColumnInjected = false;
+            var internalOnlyColumnInjected = false;
+            if (guardCommunications || guardDocuments)
+            {
+                // ISS-010 (task 078): on sprk_communication the task 065 rule rides in the query: the model's whole
+                // predicate in parentheses, ANDed with flag-false, thread-set and thread-Open (review K1). The thread and
+                // flag columns are selected so both are re-checked after the read (review K4). A sprk_document row is decided
+                // after the read by its id alone (task 188: the predicate re-reads it app-only), so nothing is injected.
+                var guardedColumns = translation.Columns!
+                    .Select(c => lookupAttributes.Contains(c) ? ToValueForm(c) : c)
+                    .ToList();
+                if (guardCommunications)
+                {
+                    threadColumnInjected = AddColumnIfAbsent(guardedColumns, CommunicationOpenThreadGate.MessageThreadLookupValue);
+                    internalOnlyColumnInjected = AddColumnIfAbsent(guardedColumns, CommunicationInternalOnlyFloor.InternalOnlyField);
+                }
+
+                var rewrittenFilter = RewriteLookupReferences(translation.RawFilter, lookupAttributes);
+                odataQuery = DataverseSqlQueryTranslator.AssembleODataQuery(
+                    guardedColumns,
+                    guardCommunications ? ExternalCallerCommunicationGuard.ApplyFilter(rewrittenFilter) : rewrittenFilter,
+                    RewriteLookupReferences(translation.RawOrderBy, lookupAttributes),
+                    translation.Top);
+            }
+            else if (mappedLookups.Count > 0 ||
                 ContainsAnyLookup(translation.RawFilter, lookupAttributes) ||
                 ContainsAnyLookup(translation.RawOrderBy, lookupAttributes))
             {
@@ -190,12 +295,95 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                 return MapClientError(tool, response, startedAt);
             }
 
+            // ISS-010 (task 078): the Open-thread half of the rule, checked after the read (thread privacy lives on another
+            // table). One batched read of the distinct threads; a fault throws into the error result below (no rows).
+            HashSet<Guid>? openThreads = null;
+            if (guardCommunications &&
+                response.Body is { } guardedBody && guardedBody.TryGetProperty("value", out var guardedValue) &&
+                guardedValue.ValueKind == JsonValueKind.Array)
+            {
+                openThreads = await CommunicationOpenThreadGate.ReadOpenThreadIdsAsync(
+                    guardedValue.EnumerateArray().Select(ExternalCallerCommunicationGuard.ThreadIdOf).ToList(),
+                    ExternalCallerCommunicationGuard.ThreadQueryOver(_dataverse),
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            // Task 188 (D7, #2126): THE external document predicate decides each document row (own or ancestor Restricted;
+            // the related communication of the document or, on a bounded parent walk, of its ancestor, under the 065 rule).
+            // The rows are re-read BY ID APP-ONLY (main-session decision 2026-10-20), never decided on the columns the user's
+            // read returned, so a link field security masks for the user cannot read as "no link". Batched reads; a fault
+            // throws into the error result below (no rows). A row without a readable id is hidden.
+            DocumentNarrowingResult? narrowing = null;
+            if (guardDocuments &&
+                response.Body is { } documentBody && documentBody.TryGetProperty("value", out var documentValue) &&
+                documentValue.ValueKind == JsonValueKind.Array)
+            {
+                var documentIds = documentValue.EnumerateArray()
+                    .Select(record => RecordIdOf(record, primaryIdAttribute))
+                    .Where(id => id != Guid.Empty)
+                    .Distinct()
+                    .ToList();
+                narrowing = await _narrowDocuments(documentIds, cancellationToken).ConfigureAwait(false);
+            }
+
+            // Task 188 round 3 slice C: a row that derives from a document (sprk_analysis; sprk_analysisoutput through its
+            // analysis) is hidden when its source document is. The source links are read BY ROW ID as the user (one batched
+            // read per level), then the hide-only overload decides the documents APP-ONLY in ONE call for the page. A row that
+            // has a source the BFF cannot decide is hidden; a row with no source document is unaffected. Faults throw (no rows).
+            IReadOnlyDictionary<Guid, IReadOnlyList<Guid>>? derivedSources = null;
+            IReadOnlySet<Guid>? hiddenSources = null;
+            if (guardDerived &&
+                response.Body is { } derivedBody && derivedBody.TryGetProperty("value", out var derivedValue) &&
+                derivedValue.ValueKind == JsonValueKind.Array)
+            {
+                var rowIds = derivedValue.EnumerateArray()
+                    .Select(record => RecordIdOf(record, primaryIdAttribute))
+                    .Where(id => id != Guid.Empty)
+                    .Distinct()
+                    .ToList();
+                derivedSources = await ExternalCallerCommunicationGuard.ReadSourceDocumentIdsAsync(
+                    _dataverse, translation.EntityLogicalName!, rowIds, cancellationToken).ConfigureAwait(false);
+                hiddenSources = await _narrowDocuments.HiddenDocumentIdsAsync(derivedSources.Values.SelectMany(documents => documents), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
             var rows = new List<Dictionary<string, object?>>();
             var citations = new List<ToolResultCitation>();
+            var hiddenRows = 0;
+            var hiddenDocuments = new List<Guid>();
+            var hiddenDerivedSources = new List<Guid>();
+            // Task 188 round 4a (F1-5): the row cap is measured on the RAW page Dataverse returned, before any row is
+            // hidden — a page that hit TOP stays reported as capped even when the narrowing removed rows from it.
+            var rawPageLength = 0;
             if (response.Body is { } body && body.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.Array)
             {
+                rawPageLength = value.GetArrayLength();
                 foreach (var record in value.EnumerateArray())
                 {
+                    if (guardCommunications &&
+                        (!ExternalCallerCommunicationGuard.IsExplicitlyShareable(record) ||
+                         openThreads is null || !openThreads.Contains(ExternalCallerCommunicationGuard.ThreadIdOf(record))))
+                    {
+                        hiddenRows++;
+                        continue;
+                    }
+
+                    if (guardDocuments &&
+                        RecordIdOf(record, primaryIdAttribute) is var documentId &&
+                        (narrowing is null || !narrowing.IsVisible(documentId)))
+                    {
+                        hiddenDocuments.Add(documentId);
+                        continue;
+                    }
+
+                    if (guardDerived &&
+                        RecordIdOf(record, primaryIdAttribute) is var derivedId &&
+                        ExternalCallerCommunicationGuard.IsDerivedRowHidden(derivedId, derivedSources, hiddenSources, out var source))
+                    {
+                        hiddenDerivedSources.Add(source);
+                        continue;
+                    }
+
                     var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
                     Guid recordId = Guid.Empty;
                     foreach (var property in record.EnumerateObject())
@@ -221,6 +409,16 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                         }
                     }
 
+                    // The model did not ask for these columns; they were selected only for the guard.
+                    if (threadColumnInjected)
+                    {
+                        row.Remove(FromValueForm(CommunicationOpenThreadGate.MessageThreadLookupValue, lookupAttributes));
+                    }
+                    if (internalOnlyColumnInjected)
+                    {
+                        row.Remove(CommunicationInternalOnlyFloor.InternalOnlyField);
+                    }
+
                     if (recordId != Guid.Empty)
                     {
                         row["@citation.path"] = DataverseRecordCitations.RecordPath(translation.EntityLogicalName!, recordId);
@@ -228,6 +426,32 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                     }
                     rows.Add(row);
                 }
+            }
+
+            if (hiddenRows > 0)
+            {
+                // ADR-015: entity + reason code only — never query text or row content.
+                _logger.LogInformation(
+                    "[dataverse.read_query] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
+                    translation.EntityLogicalName, "thread_not_open", context.DecisionId);
+            }
+            if (hiddenDocuments.Count > 0)
+            {
+                // ADR-015: entity + reason codes with counts only — never query text or row content.
+                _logger.LogInformation(
+                    "[dataverse.read_query] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
+                    translation.EntityLogicalName,
+                    narrowing?.HiddenSummary(hiddenDocuments) ?? DocumentNarrowingResult.CodeOf(DocumentNarrowingReason.ReadFailed),
+                    context.DecisionId);
+            }
+            if (hiddenDerivedSources.Count > 0)
+            {
+                // ADR-015: entity + reason codes with counts only — never query text, ids or row content.
+                _logger.LogInformation(
+                    "[dataverse.read_query] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
+                    translation.EntityLogicalName,
+                    ExternalCallerCommunicationGuard.DerivedHiddenSummary(hiddenDerivedSources),
+                    context.DecisionId);
             }
 
             stopwatch.Stop();
@@ -251,7 +475,7 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                     "record's GUID. To map GUIDs to display names, query the referenced table " +
                     "(dataverse.describe shows the related table per lookup column).");
             }
-            if (rows.Count >= translation.Top)
+            if (rawPageLength >= translation.Top)
             {
                 warnings.Add($"Result set reached the row cap ({translation.Top}). Narrow the WHERE clause or raise TOP (max {DataverseSqlQueryTranslator.MaxTop}).");
             }
@@ -326,6 +550,14 @@ public sealed class DataverseReadQueryHandler : IToolHandler
         }
 
         return result;
+    }
+
+    /// <summary>Adds <paramref name="column"/> to the select list when absent; true when it was added (strip it from rows).</summary>
+    private static bool AddColumnIfAbsent(List<string> columns, string column)
+    {
+        if (columns.Contains(column, StringComparer.OrdinalIgnoreCase)) return false;
+        columns.Add(column);
+        return true;
     }
 
     /// <summary>The Web API address form of a lookup column (<c>_{name}_value</c>).</summary>

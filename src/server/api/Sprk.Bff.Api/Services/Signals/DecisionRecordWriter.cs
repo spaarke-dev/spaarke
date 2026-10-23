@@ -1648,7 +1648,10 @@ public sealed class DecisionRecordWriter
             ownerLink.Columns = new ColumnSet("isdisabled");
             var row = (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false))?.Entities?.FirstOrDefault();
             owner = row?.GetAttributeValue<EntityReference>("ownerid");
-            disabled = row?.GetAttributeValue<AliasedValue>($"{OwnerAlias}.isdisabled")?.Value is true;
+            // Issue #1576 (fail closed): only an explicit isdisabled = false is an active owner. A user owner whose linked row carries
+            // no value is not proof of an active user, so it is the disabled skip, never an assignment. (A team owner also has no value;
+            // `disabled` is consulted only for a systemuser owner below.)
+            disabled = row?.GetAttributeValue<AliasedValue>($"{OwnerAlias}.isdisabled")?.Value is not false;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

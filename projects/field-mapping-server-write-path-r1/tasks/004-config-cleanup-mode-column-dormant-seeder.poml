@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Profile mode-column reconcile, dormant columns documented, seeder #1318 fix (FR-05 a/b/c)</title>
+    <phase>1 W1 Canonical engine and configuration</phase>
+    <gate>001 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in Sprk.Bff.Api, Spaarke.Dataverse and the provisioning seeder; tags include bff-api and provisioning; adds or changes tests at KEEP paths.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical reconciliation once the deployed column name is verified; the seeder fix is a one-line filter.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W1-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>001</deps>
+    <tags>bff-api, dataverse, field-mapping, provisioning</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Reconcile the field-mapping profile mode column name (`sprk_capabilitymode` vs `sprk_compatibilitymode`) to the name actually deployed, in code and in the solution; document the four dormant columns as unused; and fix the seeder's rule lookup filter to use `_sprk_fieldmappingprofile_value` (issue #1318). First verify the deployed name with the Dataverse MCP `describe` tool, before editing anything.</prompt>
+  <role>SPAARKE platform developer, .NET 10, Dataverse metadata and provisioning. Follow ADRs strictly.</role>
+  <goal>Code and solution agree on one deployed mode-column name; `sprk_mappingdirection`, `sprk_isrequired`, `sprk_iscascadingsource` and `sprk_compatibilitymode` are documented as unused; the seeder seeds rules against a live environment without 400 responses.</goal>
+
+  <context>
+    <background>spec.md FR-05(a)(b)(c); design.md §4. Code selects `sprk_capabilitymod...` on the PROFILE query (src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs ~:891, ~:954, ~:2142) while the RULE query selects `sprk_compatibilitymode` (~:1041, ~:2135, mapped ~:2375). The solution declares `sprk_capabilitymode` on sprk_FieldMappingProfile and `sprk_compatibilitymode` on sprk_FieldMappingRule. The endpoint helper `MapCompatibilityModeToString` (Api/FieldMappings/FieldMappingEndpoints.cs ~:399) maps the rule column. The seeder's rule existence check (Handlers/AppConfigSeed/DataverseWebApiFieldMappingSeeder.cs ~:487-494) filters `sprk_fieldmappingprofile eq {profileId}`, which is the wrong OData name for a lookup (400); it must use `_sprk_fieldmappingprofile_value`.</background>
+    <relevant-files>
+      <file role="modify">src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs (profile/rule $select lists ~:891, ~:954, ~:1041, ~:2135, ~:2142)</file>
+      <file role="modify">src/server/shared/Spaarke.Dataverse/Models.cs (~:1291 FieldMappingRuleEntity and the profile entity; align property names and comments)</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_FieldMappingProfile/Entity.xml (~:493 sprk_capabilitymode) — only if the deployed name differs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AppConfigSeed/DataverseWebApiFieldMappingSeeder.cs (~:487-494 rule filter)</file>
+      <file role="modify">docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md (dormant-columns section)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/FieldMappings/FieldMappingEndpoints.cs (~:399 MapCompatibilityModeToString; read only unless the rename forces a change)</file>
+      <file role="canonical-reference">tests/unit/Sprk.Bff.Api.Tests/Services/Dataverse (grep for FieldMappingProfile tests; add or extend a test at the KEEP path that covers the select/mapping)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="required">Engine promoted; this task does not touch it but shares the framework doc.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: the deployed name. The deployed Dataverse schema is the source of truth; fix code AND solution XML to it. Never rename a deployed column. Field-mapping table schema is otherwise unchanged (spec Out of Scope).</constraint>
+    <constraint source="ADR-038">Scope: tests added by this task. Unit tests under `tests/unit/Sprk.Bff.Api.Tests/`; no `Mock&lt;HttpMessageHandler&gt;`; no DI-registration tests. The seeder is exercised by its existing test project; extend it rather than add a new harness.</constraint>
+    <constraint source="CLAUDE.md §9">Scope: seeding. The seeder runs against live environments; a verification run is dev-only and read-then-write limited to the seeded config rows. Do not touch Key Vault.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: BFF publish. State Placement Justification in the PR; measure publish-size delta against a fresh master build per root CLAUDE.md §10.4; run `dotnet list package --vulnerable --include-transitive`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Field mapping configuration model; provisioning seeder</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+      <file>docs/guides/FIELD-MAPPING-ADMIN-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="web-api-client" location=".claude/patterns/dataverse/web-api-client.md">OData lookup filter naming (_x_value).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; read spec FR-05(a)(b)(c); re-grep `capabilitymode` and `compatibilitymode` across src/server, src/dataverse and scripts.</step>
+    <step order="1">Use the Dataverse MCP `describe` tool on sprk_fieldmappingprofile and sprk_fieldmappingrule BEFORE editing. Record the deployed mode-column logical name(s) in the task notes. If the profile and rule names differ from what the code selects, fix code and solution XML to the deployed names.</step>
+    <step order="2">Fix the seeder filter at ~:487-494 to `_sprk_fieldmappingprofile_value eq {profileId}` (lookup value form, no quotes for a GUID) and check the sibling profile-by-name query (~:403) is valid.</step>
+    <step order="3">Add or extend a unit test covering the profile and rule $select/mapping so a wrong column name fails; add a seeder test that the rule existence query string contains `_sprk_fieldmappingprofile_value`.</step>
+    <step order="4">Document `sprk_mappingdirection`, `sprk_isrequired`, `sprk_iscascadingsource` and `sprk_compatibilitymode` as unused (read but ignored by the engine) in SPAARKE-FIELD-MAPPING-FRAMEWORK.md, each with the grep evidence that nothing branches on it.</step>
+    <step order="5">Run the seeder against dev (owner-approved environment only) or its test double and record that rules seed without 400s; build + run tests; measure publish size; run the CVE check.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the deployed mode-column name differs between environments (dev vs another), STOP and escalate per CLAUDE.md §6 (schema breaking-change risk) rather than choosing one.</trigger>
+    <trigger>If a dormant column turns out to be read by a live code path (grep shows a branch on it), STOP and escalate instead of documenting it as unused.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+    <tool name="mcp__dataverse__describe">Verify the deployed column names before editing</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AppConfigSeed/DataverseWebApiFieldMappingSeeder.cs</output>
+    <output type="docs">docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md (dormant columns)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The task notes record the Dataverse `describe` result for the deployed mode column(s); code and `Entity.xml` use that exact logical name and no other (grep for the non-deployed spelling returns nothing in src/).</criterion>
+    <criterion testable="true">The seeder's rule existence filter uses `_sprk_fieldmappingprofile_value`; a test asserts it; a dev (or test-double) seed run reports no 400 responses.</criterion>
+    <criterion testable="true">SPAARKE-FIELD-MAPPING-FRAMEWORK.md lists `sprk_mappingdirection`, `sprk_isrequired`, `sprk_iscascadingsource` and `sprk_compatibilitymode` as unused, with evidence.</criterion>
+    <criterion testable="true">Negative: no deployed column is renamed or removed from the Dataverse schema; the solution diff touches only the mode-column name if it differs.</criterion>
+    <criterion testable="true">BFF and seeder projects build with 0 errors; existing tests pass; publish-size delta and CVE result recorded in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-05(a)(b)(c). The sprk_syncmode read and migration are task 005; the pair/protected-target guard is task 002.
+Completed 2026-10-21. The deployed mode columns are sprk_capabilitymode on the profile and sprk_compatibilitymode on the rule: two different columns, not one misspelling, so no rename or schema change. The $select lists are shared in FieldMappingColumns.cs and the seeder filters on _sprk_fieldmappingprofile_value (#1318). Details: notes/task-004-notes.md.
+rework: none task 004</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

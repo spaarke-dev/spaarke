@@ -48,15 +48,28 @@ export function accessFailureOf(err: unknown): BffAccessFailure | null {
 export const DENY_CONTACT_NOT_INVITED = 'sdap.access.deny.contact_not_invited';
 
 /**
- * Task 185 (design §4.1 step 6, owner Q9): the server's `detail` for a 403 `contact_not_invited` ("open the invitation
- * link from your email in this browser ..."), so the denied state tells the invitee what to do. Any other error → null
- * (the page's own denied sentence applies).
+ * The BFF's reason code for a customer's guest in the Spaarke directory, who must sign in with their own organization's
+ * account instead (UAC #2128, owner option 1: the guest auto-create is retired).
+ */
+export const DENY_WORKFORCE_GUEST_USE_HOME_SIGNIN = 'sdap.access.deny.workforce_guest_use_home_signin';
+
+/** The 403 reason codes whose server `detail` tells the caller what to do; every other refusal shows the page's own text. */
+const GUIDED_DENY_REASONS: ReadonlySet<string> = new Set([
+  DENY_CONTACT_NOT_INVITED,
+  DENY_WORKFORCE_GUEST_USE_HOME_SIGNIN,
+]);
+
+/**
+ * The server's `detail` for a 403 that carries guidance (task 185, design §4.1 step 6, owner Q9: `contact_not_invited`,
+ * "open the invitation link from your email in this browser ..."; UAC #2128: `workforce_guest_use_home_signin`, "sign in
+ * with your own organization's work account ..."), so the denied state tells the caller what to do. Any other error →
+ * null (the page's own denied sentence applies).
  */
 export function deniedDetailOf(err: unknown): string | null {
   if (!(err instanceof ApiError) || err.statusCode !== 403) return null;
   try {
     const body = JSON.parse(err.message) as { reasonCode?: unknown; detail?: unknown };
-    if (body.reasonCode !== DENY_CONTACT_NOT_INVITED) return null;
+    if (typeof body.reasonCode !== 'string' || !GUIDED_DENY_REASONS.has(body.reasonCode)) return null;
     return typeof body.detail === 'string' && body.detail.trim() ? body.detail.trim() : null;
   } catch {
     return null;

@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="047" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>BFF registration endpoint POST /api/v1/external/registration (owner team, verified-email bind, refusals, idempotency)</title>
+    <phase>4b A9 workforce home sign-in</phase>
+    <gate>after 046</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags bff-api, auth; new endpoint that creates or binds identities</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Identity create/bind path with security refusals (tags auth, security)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>file-overlap with task 048 (ExternalAccessEndpoints.cs route registration, ContactIdentityStore.cs) and UAC task 185</parallel-reason>
+    <deps>046</deps>
+    <tags>bff-api, api, endpoints, auth, security, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build POST /api/v1/external/registration exactly as notes/a9-bff-design.md §6 and §4 ("Registering to an existing contact") specify, reusing the existing binder decision and store. Two adversarial review passes.</prompt>
+  <role>SPAARKE platform developer. ASP.NET Core Minimal API and Dataverse Web API expert. Follow ADRs strictly.</role>
+  <goal>A home caller who is not resolved can register once: an already-resolved caller gets 200 with no write; a licensed user's email gets 403 licensed_user_link_required; one bindable existing contact is bound only with confirmExistingRecord: true; any ambiguity gets 403 registration_contact_conflict; otherwise one contact is created, owned by the default team of ExternalAccess:CustomerBusinessUnitId, plane WorkforceHome; concurrent or repeated submits create nothing extra.</goal>
+
+  <context>
+    <background>Design note §4/§6; owner decisions §11 items 1 and 2 (no Legal step; the form confirms the email; Dataverse duplicate detection noted). The existing create is ContactIdentityBinder.cs:509-550; ContactIdentityStore.cs:465-478 sets no owner today. Route group: ExternalAccessEndpoints.cs:54-62 (ExternalCollaboration + CallerPrincipalAuthorizationFilter); registration needs its own small group with ExternalCollaboration and WITHOUT CallerPrincipalAuthorizationFilter, and accepts only the WorkforceHome scheme. Builds on UAC #1801; rebase onto UAC task 185 if it has merged; UAC reviews the PR.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalRegistrationEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs (mount the group)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactIdentityBinder.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactBindingDecision.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactIdentityStore.cs</file>
+      <file role="modify">the ExternalAccess options class that will hold CustomerBusinessUnitId (find the existing ExternalAccess:* options binding; do not add a new options class)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/ExternalRegistrationEndpointsTests.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/AuthenticationSchemeCensusTests.cs (only-caller rule)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalIntakeEndpoints.cs</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>ContactIdentityBinder.cs:509-550 creates a contact silently at first sign-in (A8); no route lets a caller supply profile fields or confirm an existing record.</existing>
+    <extension>The route is a thin caller of the existing decision and store with the home plane added; the create path itself is extended (owner, tenant column), not duplicated.</extension>
+    <cost-of-doing-nothing>A9 forbids the silent create and requires a profile form; without this route no workforce contact can register, and contacts with existing records would be duplicated.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="design §6">Body is a closed DTO: firstName (required, ≤50), lastName (required, ≤50), department (optional, ≤100), confirmExistingRecord (bool, optional). Values trimmed; control characters rejected (400). Unknown properties rejected. Email comes only from the token (email claim); a token without email gets 403 registration_email_missing. preferred_username is never used to bind.</constraint>
+    <constraint source="design §6 order">Order is binding: (1) resolution §3 steps 1–3 → resolved caller gets 200 {contactId or systemuser outcome}, no write; (2) token email equals an ENABLED systemuser's internalemailaddress OR domainname (case-insensitive; owner decision 2026-10-15) → 403 licensed_user_link_required (refusal only); (3) exactly one active contact with emailaddress1 = token email, unbound, not linked to a systemuser (E10), not plane External → bind only when confirmExistingRecord is true, else 409 with reason existing_record_found so the form can ask; several matches or a bound/linked/External match → 403 registration_contact_conflict, contact flagged EmailAmbiguous, nothing bound or created; (4) else create.</constraint>
+    <constraint source="design §6 create">Create in one app-only POST: firstname, lastname, department, emailaddress1 (token), sprk_externalobjectid, sprk_externalobjectidkey, sprk_externaltenantid, plane WorkforceHome, ownerid = the default team of ExternalAccess:CustomerBusinessUnitId. Setting absent → 500 registration_owner_unconfigured, nothing created. No parentcustomerid / organization link. Active immediately.</constraint>
+    <constraint source="design §6 idempotency">oid lookup first; a concurrent loser's 412 from the alternate key → re-read → 200 with the same contactId; resubmit creates nothing.</constraint>
+    <constraint source="ADR-028 A9">Only the WorkforceHome scheme reaches this route (Spaarke-tenant and CIAM principals → 403). No OBO. No email is sent.</constraint>
+    <constraint source="ADR-008 / ADR-001">Minimal API endpoint with endpoint-level authorization; ProblemDetails for every refusal with the reason code in extensions.</constraint>
+    <constraint source="CLAUDE.md §10">Placement Justification (in BFF: validates the stamp user token and writes the stamp's Dataverse app-only next to the existing create path), publish-size delta, CVE check, tests.</constraint>
+    <constraint source="project">Audit logs carry the contactId and hashed tid/oid; never the email or names.</constraint>
+    <constraint source="046 review (K, carried)">Before ANY registration create or bind, probe that the binding and A9 columns are readable (ContactIdentityBinder.ProbeBindingReadabilityAsync pattern). The 046 reads cannot tell a field-security-masked column from no match: a masked secured column makes a registered contact look unregistered, so without the probe this route would create a duplicate. If unreadable, deny; never create.</constraint>
+    <constraint source="046 review (K, carried)">Plane 100000002 (WorkforceHome) is matched as a raw value only in ContactBindingDecision.DecideHomeContact. Everywhere else ReadBinding treats it as unreadable: the grant email path (GrantAccessNotifier.cs ~290) would never email a WorkforceHome grantee, and the Spaarke-tenant binder would flag a same-email WorkforceHome contact as unreadable. Since 047 creates the first WorkforceHome contacts, add the IdentityPlaneMarker member and decide (record in notes) how each ReadBinding caller treats the home plane.</constraint>
+    <constraint source="046">Step (1) reuses the 046 resolution and reads (IContactIdentityStore.FindHomeLinkedSystemUsersAsync / FindHomeContactsAsync, DecideHomeLink / DecideHomeContact). Do not add a parallel lookup.</constraint>
+    <constraint source="046 UAC review K1 (carried)">Write sprk_externaltenantid, sprk_externalobjectid (and the systemuser secured pair in 048) as lowercase hyphenated GUID text (Guid.ToString("D")). The 046 reads match only that form; braces, N-format or uppercase would never match, so a registered user would be sent to the form again.</constraint>
+    <constraint source="owner 2026-10-15 (escalation resolved)">Dev data: 9 of 11 enabled users have internalemailaddress = domainname; 2 differ. That is why both fields are compared in step (2).</constraint>
+    <constraint source="owner 2026-10-15 (escalation resolved)">Email is the canonical duplicate check (step 3: emailaddress1 = token email). Dataverse duplicate-detection rules (dev has 3 published OOB contact rules: name, phone, email) do not run on Web API or SDK writes unless the caller opts in (Microsoft Learn: create-entity-web-api "Check for duplicate records"; manage-duplicate-detection-create-update). The registration create and bind must never send MSCRM.SuppressDuplicateDetection: false (or the SDK SuppressDuplicateDetection=false); add a test that pins the create request carries no such header.</constraint>
+    <constraint source="owner 2026-10-15">WorkforceHome contacts receive grant notification emails like other external contacts (owner: "Yes, same as others").</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/notes/a9-bff-design.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge; check UAC task 185 status (rebase if merged); /conflict-check; declare rigor/tier.</step>
+    <step order="1">Read dev's active contact duplicate-detection rules (read-only, command shown to the owner first) and record them in the notes; confirm the Web API create does not opt in to duplicate detection.</step>
+    <step order="2">Write the tests in acceptance criteria; confirm they fail.</step>
+    <step order="3">Implement the route group, DTO validation, ordered decision and the owner/tenant-aware create in the existing binder/store.</step>
+    <step order="4">Add the ArchTest rule: only ExternalRegistrationEndpoints reaches the WorkforceHome create.</step>
+    <step order="5">Seeding proofs: skip the licensed-user check → its test fails; bind without confirmExistingRecord → its test fails. Restore; record.</step>
+    <step order="6">Build, test, publish-size delta, notes/task-047-notes.md; two adversarial passes; fix F-class; status + drift check.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the systemuser email field to compare is ambiguous (internalemailaddress vs domainname/UPN) in this environment's data, STOP and escalate with examples (masked).</trigger>
+    <trigger>If dev has a duplicate-detection rule that would block or alter the create through the Web API, STOP and escalate.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalRegistrationEndpoints.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/ExternalRegistrationEndpointsTests.cs</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r3/notes/task-047-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Unresolved home caller, no matching contact or systemuser, valid body → 201 {contactId}; the created record has the token email, tid, oid, plane WorkforceHome, ownerid = BU default team, no parentcustomerid.</criterion>
+    <criterion testable="true">Already-resolved caller (link or bound contact) → 200, no write.</criterion>
+    <criterion testable="true">Resubmit and a simulated 412 race → 200 with the same contactId; exactly one contact exists.</criterion>
+    <criterion testable="true">Token email matches an enabled systemuser's internalemailaddress, or its domainname (separate cases) → 403 licensed_user_link_required, no write; a disabled systemuser match does not trigger this refusal.</criterion>
+    <criterion testable="true">One bindable contact + confirmExistingRecord true → 200, that contact gains tid/oid/plane, no new contact; without the flag → 409 existing_record_found, no write.</criterion>
+    <criterion testable="true">Two matches, or a match that is bound, linked or plane External → 403 registration_contact_conflict, nothing bound or created; two or more matches are flagged EmailAmbiguous, a single unbindable match is flagged with its cause (BoundToDifferentOid / LinkedToOtherUser / BindingUnreadable) so IdentityLinkReconciliationJob keeps the flag (amended 2026-10-15 after the 047 adversarial passes: an EmailAmbiguous flag on a single match is cleared by the job).</criterion>
+    <criterion testable="true">Token without email → 403 registration_email_missing; body email field → 400 (closed DTO); missing/overlong/control-character names → 400.</criterion>
+    <criterion testable="true">CustomerBusinessUnitId absent → 500 registration_owner_unconfigured, nothing created.</criterion>
+    <criterion testable="true">Spaarke-tenant or CIAM principal → 403; anonymous → 401.</criterion>
+    <criterion testable="true">ArchTest only-caller rule passes; both seeding proofs recorded.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Design note §4/§6/§11. Two adversarial passes. Send the PR to UAC for review (ContactIdentityBinder.cs).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -218,6 +218,28 @@ public sealed class SecureChildOwnershipDocumentRefileTests : IClassFixture<Docu
             .Should().BeNull();
     }
 
+    // ---- #2091: a PUT that moves none of the document's parents (RecordOwnerResolution.ParentsUnchanged) is no re-file ----
+
+    [Fact]
+    public async Task DocumentPut_ReBindingTheMatterItIsFiledUnder_IsWritten_AndRunsNoStepAfterARefile()
+    {
+        var documentId = DocumentRefileOwnershipTestFixture.SecureDocument;
+        var analysis = Guid.Parse("b1460000-0000-4000-8000-0000000000a2");
+        // An ordinary analysis under the isolated document (drift the two-minute net corrects): the step's pass would isolate it.
+        _fixture.ShareWorld.OrdinaryChild("sprk_analysis", analysis, ("sprk_documentid", "sprk_document", documentId));
+        using var client = _fixture.CreateClientWithRights(RefileRights);
+
+        var response = await client.PutAsJsonAsync(
+            $"/api/v1/documents/{documentId}", new { matterLookup = DocumentRefileOwnershipTestFixture.SecureMatter });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.UpdatedDataverseDocumentIds.Should().Contain(documentId.ToString(), "the update is written");
+        _fixture.World.Assignments.Should().BeEmpty("nothing it is filed under moved");
+        _fixture.ShareWorld.OwnerOf("sprk_analysis", analysis).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.GeneralTeam),
+            "the step's pass over what is filed under the document did not run");
+        _fixture.ShareWorld.OwnerWrites.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task DocumentPut_ReFilingANeverIsolatedDocument_KeepsItsOwnShares()
     {
@@ -287,6 +309,11 @@ public sealed class DocumentRefileOwnershipTestFixture : DocumentDestroyAuthoriz
         ShareTable.Seed("sprk_document", CallersSecureDocument, DataversePrincipalRef.User(Sharee), CollaborateMask);
         var shareWorld = ShareWorld;
         World.OnAssign = (entity, id, team) => shareWorld.MoveOwner(entity, id, DataversePrincipalRef.Team(team));
+
+        // #2143: the PUT's update lands on the directory's row — the resolver reads the row after the change.
+        var world = World;
+        OnDocumentUpdated = (id, request) => world.Write("sprk_document", Guid.Parse(id),
+            RecordReparent.ParentChangesOf(request).ToDictionary(change => change.Key, change => (object?)change.Value));
     }
 
     private static Directory NewWorld() => Directory.Standard()

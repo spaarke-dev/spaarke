@@ -4,7 +4,7 @@
     <title>Container archival — archive/restore per container with grid state</title>
     <phase>5 Workstream E — New capabilities</phase>
     <gate>020 complete, 040 complete</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>New capability adding .cs endpoints + Graph calls + .tsx; tags include bff-api and frontend.</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -5,6 +5,7 @@ using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -189,6 +190,36 @@ public class TodoAssigneeOwnerReconciliationJobTests
         _world.OwnerOf("sprk_decisionrecord", record).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
     }
 
+    [Fact(DisplayName = "148 (GitHub #2002): the scan resolving a To Do filed under no core logs no Warning — it writes nothing against the To Do")]
+    public async Task FiledUnderNonCoreRecord_ResolutionIsNotAWarning()
+    {
+        PersonalToDo(modified: BeforeNightly.AddMinutes(-1));
+        LinkAssignee(Eligible(Assignee));
+        _world.Add("sprk_document", Document, ("owningteam", new EntityReference("team", GeneralTeam)));
+        _world.Set("sprk_todo", Todo, "sprk_regardingdocument", new EntityReference("sprk_document", Document));
+        Row("sprk_signal", OtherBuTeam);
+        var log = new CapturingResolverLogger();
+
+        var run = await Job(writes: "true", coreLogger: log).ExecuteAsync(Context(), CancellationToken.None);
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        Result(run).GetProperty("filedNonCore").GetInt32().Should().Be(1, "the To Do was resolved and has no core");
+        log.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning, "the resolver's no-ancestor line is Debug on a read-only scan");
+        log.Entries.Should().Contain(e => e.Level == LogLevel.Debug && e.Message.Contains("carries no core-ancestor stamp"));
+    }
+
+    private sealed class CapturingResolverLogger : ILogger<CoreAncestorResolver>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => Entries.Add((logLevel, formatter(state, exception)));
+    }
+
     [Fact(DisplayName = "148 (uac-r2 F1 reverse): a To Do un-filed since its rows were cored — re-owned; the decision context is never read")]
     public async Task UnfiledSince_RowsComeIn_DecisionContextIgnored()
     {
@@ -276,6 +307,23 @@ public class TodoAssigneeOwnerReconciliationJobTests
         Result(run).GetProperty("status").GetString().Should().Be(TodoAssigneeOwnerReconciliationJob.StatusPartial);
         run.ErrorMessage.Should().Contain("assignee's business-unit team was refused");
         _world.OwnerOf("sprk_signal", signal).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
+        _webApi.ConditionalWrites.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "148 (#2072/#1576): a DISABLED assignee systemuser resolves to no user — its business-unit team refused, not written, run partial")]
+    public async Task DisabledAssigneeSystemUser_IsRefused_NotMoved()
+    {
+        PersonalToDo(modified: BeforeNightly.AddMinutes(-1));
+        LinkAssignee(Eligible(Assignee)); // the link says enabled; the systemuser row itself is disabled
+        _world.Set("systemuser", Assignee, "isdisabled", true);
+        var signal = Row("sprk_signal", GeneralTeam);
+
+        var run = await Job(writes: "true").ExecuteAsync(Context(), CancellationToken.None);
+
+        Result(run).GetProperty("assigneeTeamRefusals").GetInt32().Should().Be(1);
+        Result(run).GetProperty("status").GetString().Should().Be(TodoAssigneeOwnerReconciliationJob.StatusPartial);
+        run.ErrorMessage.Should().Contain("assignee's business-unit team was refused");
+        _world.OwnerOf("sprk_signal", signal).Should().Be(DataversePrincipalRef.Team(GeneralTeam), "a disabled user's BU never owns the To Do's rows");
         _webApi.ConditionalWrites.Should().BeEmpty();
     }
 
@@ -522,7 +570,8 @@ public class TodoAssigneeOwnerReconciliationJobTests
     }
 
     private TodoAssigneeOwnerReconciliationJob Job(
-        string? writes, string? failingProbeOf = null, bool coreReadFindsNoRow = false, int? pageSize = null, int? maxPages = null)
+        string? writes, string? failingProbeOf = null, bool coreReadFindsNoRow = false, int? pageSize = null, int? maxPages = null,
+        ILogger<CoreAncestorResolver>? coreLogger = null)
     {
         var entities = SecureChildShareWorld.EntitiesOver(() => _world);
         entities
@@ -550,7 +599,7 @@ public class TodoAssigneeOwnerReconciliationJobTests
         CoreAncestorResolver.EntityColumnProbe columns = (table, ct) => table == failingProbeOf
             ? throw new InvalidOperationException($"Test: the column metadata of {table} is unavailable.")
             : probe(table, ct);
-        var cores = new CoreAncestorResolver(entities.Object, columns, NullLogger<CoreAncestorResolver>.Instance);
+        var cores = new CoreAncestorResolver(entities.Object, columns, coreLogger ?? NullLogger<CoreAncestorResolver>.Instance);
 
         var services = new ServiceCollection();
         services.AddSingleton(entities.Object);

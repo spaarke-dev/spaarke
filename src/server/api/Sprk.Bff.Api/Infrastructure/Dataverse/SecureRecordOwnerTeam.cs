@@ -72,6 +72,27 @@ public static class SecureRecordOwnerTeam
     internal const int NamedPrincipalLimit = 5;
 
     private const string BusinessUnitEntitySet = "businessunits";
+
+    /// <summary>
+    /// The <c>team</c> table. <c>internal</c> (#2253 fix round 2): <c>InheritedAccessPermission.AccessColumns</c> names the
+    /// team columns the owner-team resolution reads (<see cref="NamedOwnerTeamFilter"/>).
+    /// </summary>
+    internal const string TeamEntity = "team";
+
+    /// <summary><c>team.businessunitid</c> / <c>systemuser.businessunitid</c>: the unit a team or user belongs to. <c>internal</c> (#2253 fix round 2): <c>InheritedAccessPermission.AccessColumns</c> refuses it to app-only generic writers.</summary>
+    internal const string BusinessUnitColumn = "businessunitid";
+
+    /// <summary>
+    /// <c>name</c>: the Secure Record business unit and its owner team are found by name (<see cref="BusinessUnitFilter"/>,
+    /// <see cref="NamedOwnerTeamFilter"/>). <c>internal</c> (#2253 fix round 2): <c>InheritedAccessPermission.AccessColumns</c> refuses it to app-only generic writers.
+    /// </summary>
+    internal const string NameColumn = "name";
+
+    /// <summary><c>team.teamtype</c>: only an owner team is the secure owner team. <c>internal</c> (#2253 fix round 2): <c>InheritedAccessPermission.AccessColumns</c> refuses it to app-only generic writers.</summary>
+    internal const string TeamTypeColumn = "teamtype";
+
+    /// <summary><c>team.isdefault</c>: the default team is never the secure owner team. <c>internal</c> (#2253 fix round 2): <c>InheritedAccessPermission.AccessColumns</c> refuses it to app-only generic writers.</summary>
+    internal const string IsDefaultColumn = "isdefault";
     private const string TeamEntitySet = "teams";
     private const string TeamMembershipEntitySet = "teammemberships";
     private const string SystemUserEntitySet = "systemusers";
@@ -96,7 +117,7 @@ public static class SecureRecordOwnerTeam
 
     /// <summary>The business unit, by name. Queried with <c>$top=2</c> so ambiguity is visible.</summary>
     internal static string BusinessUnitFilter(string businessUnitName) =>
-        $"name eq '{EscapeODataStringLiteral(businessUnitName)}'";
+        $"{NameColumn} eq '{EscapeODataStringLiteral(businessUnitName)}'";
 
     /// <summary>
     /// The named owner team: same BU, the configured name, an OWNER team, and NOT the default team. Every predicate
@@ -104,8 +125,8 @@ public static class SecureRecordOwnerTeam
     /// selected even if someone renamed it to the configured name.
     /// </summary>
     internal static string NamedOwnerTeamFilter(Guid businessUnitId, string ownerTeamName) =>
-        $"_businessunitid_value eq {businessUnitId} and name eq '{EscapeODataStringLiteral(ownerTeamName)}' " +
-        $"and teamtype eq {OwnerTeamType} and isdefault eq false";
+        $"_{BusinessUnitColumn}_value eq {businessUnitId} and {NameColumn} eq '{EscapeODataStringLiteral(ownerTeamName)}' " +
+        $"and {TeamTypeColumn} eq {OwnerTeamType} and {IsDefaultColumn} eq false";
 
     /// <summary>Every membership row of the team, of ANY principal kind (human or application user).</summary>
     internal static string TeamMembershipFilter(Guid teamId) => $"teamid eq {teamId}";

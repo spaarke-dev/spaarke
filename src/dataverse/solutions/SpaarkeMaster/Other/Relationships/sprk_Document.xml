@@ -319,7 +319,7 @@
     <ReferencingEntityName>sprk_Document</ReferencingEntityName>
     <ReferencedEntityName>sprk_Document</ReferencedEntityName>
     <CascadeAssign>NoCascade</CascadeAssign>
-    <CascadeDelete>RemoveLink</CascadeDelete>
+    <CascadeDelete>Restrict</CascadeDelete>
     <CascadeArchive>RemoveLink</CascadeArchive>
     <CascadeReparent>NoCascade</CascadeReparent>
     <CascadeShare>NoCascade</CascadeShare>

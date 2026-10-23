@@ -1854,6 +1854,11 @@ public partial class RouteAuthorizationGuardTests
                 // so the pin follows the new spelling (batch-4 integration, 2026-10-05).
                 return Regex.IsMatch(code, @"if\s*\(\s*present\.Count\s*==\s*0\s*\)\s*\{\s*return\s+await\s+next\s*\(");
 
+            case "AddWorkforceCeilingFilter":
+                // Task 186: the ceiling passes every caller it does not apply to straight through, and never names a record.
+                return Regex.IsMatch(code, @"\|\|\s*!WorkforceRoleCeilingGate\.Applies\s*\(\s*principal\s*\)\s*\)\s*\{[^{}]*?return\s+await\s+next\s*\(")
+                       && !ConsultsAny(code, RecordLevelTokens);
+
             case "AddComposeDocumentAuthorizationFilter":
                 // Task 171: decides (DocumentAuthorizationFilter on the row) when the item has a sprk_document, and passes
                 // through for a row-less item (Compose Path B — the caller's OBO identity, SPE decides).

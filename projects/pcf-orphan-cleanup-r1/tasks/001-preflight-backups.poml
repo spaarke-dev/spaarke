@@ -2,7 +2,7 @@
   <metadata>
     <title>Pre-flight: solution backups + per-control 4-check (spaarkedev1)</title>
     <phase>P1</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2-4 hours</estimated-effort>
     <dependencies>none</dependencies>
     <blocks>003</blocks>

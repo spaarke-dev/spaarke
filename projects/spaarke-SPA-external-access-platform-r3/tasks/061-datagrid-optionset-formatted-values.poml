@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>Shared DataGrid shows option-set labels from @formattedValues (check-2 issue 1: Status shows raw JSON)</title>
+    <phase>5b Owner check-2 fixes</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies shared .tsx used by several surfaces</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-component fix with a located root cause</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>CHK2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>frontend, react, fluent-ui, testing</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make the shared DataGrid render a cell from row['@formattedValues'][column] when that label exists, so option-set, lookup and similar values show their label instead of JSON.</prompt>
+  <role>SPAARKE platform developer. React and the shared Spaarke.UI.Components DataGrid. Follow ADRs strictly.</role>
+  <goal>On the external SPA Service Requests grid the Status column shows the label (e.g. "Draft"), not {"value":1,"extensionData":...}; other DataGrid consumers render as before when no @formattedValues exists.</goal>
+
+  <context>
+    <background>Owner check 2 (2026-10-13). Root cause (code map): the BFF external module data path returns FetchService.ProjectEntity rows with raw SDK OptionSetValue objects plus row["@formattedValues"][column] labels (FetchService.cs:146-176; ExternalModuleDataEndpoints.cs StripToReadableColumns :1018-1072 keeps them). DataGrid.tsx renderCellValue (:634-639) returns v.name or JSON.stringify(value) and never reads @formattedValues. Task 002 notes line 33 flagged this. Fixing it in the BFF would change the shared /api/dataverse/fetch contract for every consumer, so the client fix is chosen.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/__tests__/ (add the test beside the existing DataGrid tests)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Fix in the shared component; no SPA-local fork. Existing consumers' output is unchanged when a row has no @formattedValues entry for the column.</constraint>
+    <constraint source="project">Precedence: @formattedValues[column] (string) → existing v.name → existing primitive rendering → JSON.stringify as today. Custom column renderers are unchanged.</constraint>
+    <constraint source="ADR-021">No styling change.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/notes/task-002-notes.md</file>
+      <file>docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge; declare rigor/tier.</step>
+    <step order="1">Write the tests; confirm they fail. Implement. Run the shared library's tests and the external SPA typecheck/vitest/build (it consumes the library).</step>
+    <step order="2">notes/task-061-notes.md; status + drift check. The fix reaches dev with the next SPA deploy (owner-approved).</step>
+  </steps>
+
+  <ui-tests>
+    <test name="Service Requests status label">
+      <url>https://{swa-host}/</url>
+      <steps><step>Open Service Requests as a signed-in user</step></steps>
+      <expected>Status column shows labels; no JSON text</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Switch to dark theme</step><step>Open the grid</step></steps>
+      <expected>Unchanged styling; Fluent v9 tokens</expected>
+    </test>
+  </ui-tests>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A row whose statuscode is {value:1} with @formattedValues.statuscode = "Draft" renders "Draft".</criterion>
+    <criterion testable="true">A row without @formattedValues renders exactly as before (lookup {name}, primitives, and objects).</criterion>
+    <criterion testable="true">Shared library tests pass; external SPA typecheck, vitest and build pass.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Owner check 2 issue 1. Issue 2 (header "Servicereque…") is grid-config data and belongs to task 002 (labels in grid config 403e5d37's columns map).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

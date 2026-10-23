@@ -11,6 +11,7 @@ using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -80,6 +81,11 @@ public class GrantAccessNotifierExternalTests
     private static ClaimsPrincipal Granter(Guid? oid = null) => new(new ClaimsIdentity(
         new[] { new Claim("oid", (oid ?? GranterOid).ToString()), new Claim("name", "Gina Granter") }, "Test"));
 
+    /// <summary>A caller authenticated by the WorkforceHome scheme: its oid is the CUSTOMER directory's (ADR-028 A9).</summary>
+    private static ClaimsPrincipal HomeGranter(Guid? oid = null) => new(new ClaimsIdentity(
+        new[] { new Claim("oid", (oid ?? GranterOid).ToString()), new Claim("name", "Hanna Home") },
+        AuthSchemes.WorkforceHome));
+
     /// <summary>An active contact the identity store returns; <paramref name="oid"/> = null is a contact never onboarded.</summary>
     private Guid Contact(Guid? oid = null, string? email = "partner@outside.test", int stateCode = 0, int? plane = null)
     {
@@ -93,6 +99,34 @@ public class GrantAccessNotifierExternalTests
 
     private static string Link(Guid record, string type = "matter") =>
         $"{Portal}/?customer={CustomerKey}&record={type}:{record:D}";
+
+    // ── Task 046 guard (d): a WorkforceHome caller's oid is never compared with systemuser.azureactivedirectoryobjectid ──
+
+    [Fact]
+    public async Task AHomeCaller_IsNeverLookedUpByOid_AndNobodyIsExcludedAsTheGranter()
+    {
+        var other = Guid.NewGuid();
+        _dataverse.GranterSystemUserId = other; // would exclude `other` if the oid lookup were (wrongly) made
+
+        var outcome = await Notifier().NotifyUserShareAsync(
+            ExternalGrantRootType.Matter, _matter, other, ExternalAccessLevel.Collaborate, HomeGranter());
+
+        _dataverse.SystemUserQueries.Should().BeEmpty("a home oid is the customer directory's, never compared with the Spaarke-tenant oid");
+        outcome.Should().NotBe(GrantNotificationOutcome.NotApplicable, "nobody is excluded, so the recipient is told");
+    }
+
+    [Fact]
+    public async Task ANonHomeCaller_IsStillLookedUpByOid_AndExcludedAsTheGranter()
+    {
+        var granterSystemUser = Guid.NewGuid();
+        _dataverse.GranterSystemUserId = granterSystemUser;
+
+        var outcome = await Notifier().NotifyUserShareAsync(
+            ExternalGrantRootType.Matter, _matter, granterSystemUser, ExternalAccessLevel.Collaborate, Granter());
+
+        _dataverse.SystemUserQueries.Should().ContainSingle().Which.Should().Contain(GranterOid.ToString());
+        outcome.Should().Be(GrantNotificationOutcome.NotApplicable, "the granter is never told about their own share");
+    }
 
     // ── FR-07: a grant that gave an onboarded external contact access → exactly one email, with the link ──────────────
 
@@ -283,10 +317,12 @@ public class GrantAccessNotifierExternalTests
         _emails.Sent.Should().BeEmpty("a workforce binding is not a CIAM account");
     }
 
-    [Fact]
-    public async Task ContactBoundOnTheExternalPlane_IsEmailed()
+    [Theory]
+    [InlineData(IdentityPlaneMarker.External)]
+    [InlineData(IdentityPlaneMarker.WorkforceHome)] // r3 047: a home-registered contact signs in to the same portal
+    public async Task ContactBoundOnAPortalPlane_IsEmailed(IdentityPlaneMarker plane)
     {
-        var contact = Contact(oid: Guid.NewGuid(), plane: (int)IdentityPlaneMarker.External);
+        var contact = Contact(oid: Guid.NewGuid(), plane: (int)plane);
 
         await Notifier().NotifyContactGrantAsync(
             ExternalGrantRootType.Matter, _matter, contact, ExternalAccessLevel.Collaborate, Granter());
@@ -470,6 +506,29 @@ public class GrantAccessNotifierExternalTests
         }
 
         public Dictionary<Guid, string> Names { get; } = new();
+
+        /// <summary>Every <c>systemusers</c> filter the notifier queried (the granter lookup by oid).</summary>
+        public List<string?> SystemUserQueries { get; } = new();
+
+        /// <summary>The systemuser the oid lookup answers with; null = no systemuser resolves.</summary>
+        public Guid? GranterSystemUserId { get; set; }
+
+        public override Task<List<T>> QueryAsync<T>(
+            string entitySetName, string? filter = null, string? select = null, int? top = null, int? skip = null,
+            CancellationToken cancellationToken = default)
+        {
+            var rows = new List<T>();
+            if (entitySetName == "systemusers")
+            {
+                SystemUserQueries.Add(filter);
+                if (GranterSystemUserId is { } id && typeof(T) == typeof(GrantExternalAccessEndpoint.SystemUserRow))
+                {
+                    rows.Add((T)(object)new GrantExternalAccessEndpoint.SystemUserRow { systemuserid = id });
+                }
+            }
+
+            return Task.FromResult(rows);
+        }
 
         public override Task<T?> RetrieveAsync<T>(
             string entitySetName, Guid id, string? select = null, CancellationToken cancellationToken = default)

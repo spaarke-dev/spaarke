@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="064" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>External document lists fail when a document has a type: read sprk_documenttype as an option set (check-3 item 1)</title>
+    <phase>5b Owner check fixes</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tag bff-api; fixes a defect on the external read path</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Root cause proven from logs; small typed-row change plus an audit of sibling row classes</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>CHK3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bff-api, testing</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make the external document list read sprk_documenttype as the option set it is (number) and return its label, so one typed document no longer fails the whole list; and check every other external row class for the same mismatch.</prompt>
+  <role>SPAARKE platform developer. BFF external data service and Dataverse Web API. Follow ADRs strictly.</role>
+  <goal>GET /api/v1/external/{matters|projects|workassignments|invoices|servicerequests}/{id}/documents returns all documents with sprk_documenttype as the choice label (e.g. "Email") when set and null when unset; no list is flagged truncated because of a type mismatch.</goal>
+
+  <context>
+    <background>Owner check 3 (2026-10-13): a matter's Documents section showed "could not be loaded". Live evidence (App Insights, read-only, owner-approved): four "[EXT-DATA] collection_truncated: page 1 failed" errors, each with InvalidOperationException "The JSON value could not be converted to System.String. Path: $.value[n].sprk_documenttype ... token type 'Number'". sprk_documenttype is a choice column (e.g. CommunicationService.cs:517 writes OptionSetValue(100000006) = Email). DocumentRow (ExternalDataService.cs:142) maps it as string?; ExternalDocumentDto (Api/ExternalAccess/Dtos/ExternalProjectDtos.cs:101-102) and the SPA (web-api-client.ts:78, DocumentLibrary.tsx:779-784) treat it as a display string. GetCollectionPageAsync (ExternalDataService.cs ~:2903) sends Prefer odata.maxpagesize only, no formatted-value annotations. Projects worked only because their documents had no type.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDataService.cs (DocumentRow, the mapping at ~:3088, and the Prefer header if annotations are used)</file>
+      <file role="modify">the existing ExternalDataService document-list unit tests (find with Grep)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">The wire DTO ExternalDocumentDto.sprk_documenttype stays a string (the label) so the SPA needs no change. Get the label from the OData formatted-value annotation (sprk_documenttype@OData.Community.Display.V1.FormattedValue) by adding odata.include-annotations="OData.Community.Display.V1.FormattedValue" to the collection read's Prefer header, and type the raw column as int?. If the annotation is absent, return null (never the number).</constraint>
+    <constraint source="project">Audit every private *Row class in ExternalDataService.cs: any property mapped as string? whose Dataverse column is a choice, boolean or number is fixed the same way in this task; list each one checked and its column type in the task notes (source: the SpaarkeMaster Entity.xml for the column).</constraint>
+    <constraint source="project">Behaviour on a genuine Dataverse failure is unchanged (still empty + truncated + logged).</constraint>
+    <constraint source="CLAUDE.md §10">Publish-size delta; no new package.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge; /conflict-check; declare rigor/tier.</step>
+    <step order="1">Write a failing test: a Dataverse page whose row has sprk_documenttype = 100000006 with the formatted value "Email" → list returns the row with type "Email" and is not truncated.</step>
+    <step order="2">Fix DocumentRow + mapping + Prefer header; audit sibling row classes and fix any mismatch found.</step>
+    <step order="3">Build + filtered tests; publish-size delta; notes/task-064-notes.md; status + drift check. Reaches dev with the next BFF deploy (owner-approved).</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDataService.cs</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r3/notes/task-064-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A row with a numeric sprk_documenttype and its formatted value → returned with the label; the list is not truncated.</criterion>
+    <criterion testable="true">A row with no type → sprk_documenttype null; a row with a number but no annotation → null, never the number.</criterion>
+    <criterion testable="true">A non-2xx Dataverse page still returns empty + truncated (existing test passes).</criterion>
+    <criterion testable="true">Every *Row class property is listed in the notes as checked, with any further mismatch fixed and tested.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Owner check 3 item 1. Not a grant-cache delay (the grant cache was ruled out from source).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

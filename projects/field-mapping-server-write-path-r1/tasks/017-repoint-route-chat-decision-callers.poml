@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="017" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Re-point the child-records route, chat create / email.draft / budget inquiry and decision cores at RecordCreationService (FR-13 part 1)</title>
+    <phase>2 W2 Unified RecordCreationService</phase>
+    <gate>016 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in Sprk.Bff.Api; tags include bff-api, ai-tools, security; removes the create half of a security-critical core (OwnedChildWrite); adds tests at KEEP paths (TEST-MODIFYING override).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Four callers with different principals and different error contracts move onto one service; mistakes silently weaken authorization.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits ChildRecordEndpoints.cs and OwnedChildWrite.cs (hot files, UAC-r2 PR #2110) and ontology-r1-owned decision cores; also sequences the DI swap with 018.</parallel-reason>
+    <deps>016</deps>
+    <tags>bff-api, ai-tools, security, testing</tags>
+    <estimated-effort>10-14 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Re-point these callers at `RecordCreationService` (caller principal): the child-records route create (`Api/ChildRecordEndpoints.cs` ~:258), the chat `dataverse.create_record` handler (`DataverseCreateRecordHandler.cs` ~:341), `email.draft` (`EmailDraftToolHandler.cs` ~:455) and the budget inquiry executor (`BudgetInquiryExecutor.cs` ~:242). The decision route cores reach the service through `DecisionRouteCores.CreateChildAsync` -> `ChildRecordEndpoints.CreateAsync`; verify, with a test, that they inherit the service rather than re-pointing them separately. Remove the create half of `OwnedChildWrite` (keep `RefileAsync` and anything the re-file path or other non-create callers still use). Chat-created children then carry the I-1 stamp, I-16 and sharee mirror at create.</prompt>
+  <role>SPAARKE platform developer, .NET 10 BFF, Dataverse write-path security. Follow ADRs strictly.</role>
+  <goal>The route, chat create, email.draft, budget inquiry and decision follow-on creates all go through `RecordCreationService`; `OwnedChildWrite` no longer has a create path; route-level filters, the route ledger and every caller's response contract are unchanged except for the new warnings; a chat-created child carries its I-1 stamp at create.</goal>
+
+  <context>
+    <background>spec.md FR-13 (part 1), FR-12, NFR-07, NFR-08. Today four callers call `OwnedChildWrite.CreateAsync` (grep result: ChildRecordEndpoints.cs ~:258, DataverseCreateRecordHandler.cs ~:341, EmailDraftToolHandler.cs ~:455, BudgetInquiryExecutor.cs ~:242). The decision follow-ons (`AddTodoExecutor`, `AssignWorkExecutor` in `Services/Signals/Actions/DecisionActionExecutors.cs`, base `ChildCreateExecutorBase` ~:1015) create through `DecisionRouteCores.CreateChildAsync` (`Services/Signals/Actions/DecisionRouteCores.cs` ~:74) which calls `ChildRecordEndpoints.CreateAsync`. ontology-r1 owns the decision cores: change only the call that reaches the create. Route-level authorization (filters, `RequireAuthorization`, the RouteAuthorizationGuardTests ledger) stays as is (ADR-008). The chat tools run as the user (user-OBO) but create app-only, so they use the caller principal.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ChildRecordEndpoints.cs (CreateAsync ~:224-258; CreateTables ~:66 unchanged here, widened in task 020)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/DataverseCreateRecordHandler.cs (~:341; also uses OwnedChildWrite.ForPersonColumns ~:496 and WhoAmI ~:502, which move into the service)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/EmailDraftToolHandler.cs (~:455)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/BudgetInquiryExecutor.cs (~:242)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionRouteCores.cs (CreateChildAsync ~:74; only if it still depends on a removed OwnedChildWrite create symbol)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/OwnedChildWrite.cs (remove create half; keep RefileAsync ~:1497 and symbols still referenced by CommunicationEndpoints.cs, EventEndpoints.cs, DataverseUpdateRecordHandler.cs, GridOverviewHandler.cs, SecureRootInheritance.cs, SignalReadService.cs, SignalSuppressionService.cs)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs (tasks 013-016)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationProblemMap.cs (shared refusal map, task 013)</file>
+      <file role="canonical-reference">tests/integration/data-mutation/RecordOwnership/SecureChildOwnershipAiToolTests.cs (must pass unchanged)</file>
+      <file role="canonical-reference">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs (ledger; must pass)</file>
+      <file role="new">tests/integration/data-mutation/RecordOwnership/ChatCreatedChildStampTests.cs (chat-created child carries I-1 stamp at create; route/chat/decision parity)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="016" status="required">Create and Repair modes complete in the service.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008 (path A, spec ADR Tensions)">Scope: authorization. Route filters and `RequireAuthorization` on the child-records route stay exactly as they are. Payload-dependent checks run only in `CallerWriteAuthorization` via the service; do not copy them into the handlers or the route.</constraint>
+    <constraint source="ADR-019">Scope: error mapping. The route, chat handlers and decision cores use the ONE shared refusal map from task 013; the route's existing status codes and `errorCode` values for existing refusals do not change (NFR-07). Chat handlers keep their existing tool-error shape and take the code and text from the shared map.</constraint>
+    <constraint source="ADR-028">Scope: identity. Callers pass the caller principal (WhoAmI on the caller token inside the service). The handlers must not resolve WhoAmI separately and must not create with the user token. The create stays app-only.</constraint>
+    <constraint source="ADR-010">Scope: DI. Handlers take the already-registered scoped `RecordCreationService`; no new registration; no new interface.</constraint>
+    <constraint source="NFR-01 (spec)">Scope: every re-pointed caller. Fail closed: if the service throws or returns a refusal the caller reports a refusal and creates nothing through any fallback path; no caller may retain a direct-create fallback. Uniform 404 for "does not exist" and "cannot see" must be preserved on the route.</constraint>
+    <constraint source="NFR-08 / CLAUDE.md §8.5">Scope: coordination. UAC-r2 PR #2110 also edits OwnedChildWrite.cs, ChildRecordEndpoints.cs and CommunicationService.cs, and ontology-r1 owns the decision cores. Run /conflict-check FIRST (step 1); rebase on the PR if merged; do not edit CommunicationService.cs in this task.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: BFF publish. Placement Justification in the PR; fresh-master publish-size delta per §10.4; `dotnet list package --vulnerable --include-transitive`; no package.</constraint>
+    <constraint source="ADR-038">Scope: tests added by this task. KEEP paths; no Mock&lt;HttpMessageHandler&gt;; no DI-registration tests. Cover the stated contract plus the named edge cases only. Existing suites change only where a deleted OwnedChildWrite create symbol was referenced, and only by re-pointing, never by weakening an assertion.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Child-records route; chat tool handlers; decision follow-on creates</topic>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/skills/conflict-check/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Create payload shapes.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; read spec FR-13/FR-12/NFR-07; re-grep `OwnedChildWrite.CreateAsync` and every OwnedChildWrite symbol each caller uses.</step>
+    <step order="1">Run /conflict-check (UAC-r2 PR #2110, ontology-r1 PRs). Record the result and the sequencing in the task notes. Escalate if a PR rewrites ChildRecordEndpoints.CreateAsync or the decision cores.</step>
+    <step order="2">Write failing tests first: chat-created child carries the I-1 stamp, I-16 and sharee mirror at create; route, chat and decision-follow-on creates of the same child under the same parent produce the same owner and stamp; each caller maps a refusal through the shared map.</step>
+    <step order="3">Re-point the route create core, then the chat create handler, email.draft and budget inquiry. Move `ForPersonColumns` / "for" person handling into the service path (already registry-driven by task 012); delete the handlers' private WhoAmI and for-person code.</step>
+    <step order="4">Confirm the decision cores: `DecisionRouteCores.CreateChildAsync` -> `ChildRecordEndpoints.CreateAsync` now reaches the service; add the parity test for `AddTodoExecutor` / `AssignWorkExecutor`. Edit the decision cores only if they still reference a removed symbol.</step>
+    <step order="5">Remove the create half of `OwnedChildWrite` (leave `RefileAsync` and every symbol still referenced elsewhere). Compile; run RefileWriterAfterRefileGuardTests, RouteAuthorizationGuardTests (ledger unchanged), RecordOwnerAssignmentCensusTests, SecureChildOwnershipAiToolTests*, all Signals decision tests.</step>
+    <step order="6">Publish-size delta; CVE check.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="8">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a re-pointed caller's response contract (status code or `errorCode`) would change for an existing refusal, STOP and escalate per CLAUDE.md §6 (breaking API contract); do not change the contract to fit the shared map.</trigger>
+    <trigger>If /conflict-check shows UAC-r2 PR #2110 or an ontology-r1 PR edits the same lines of ChildRecordEndpoints.cs, OwnedChildWrite.cs or the decision cores, STOP and ask the human to sequence the work.</trigger>
+    <trigger>If a chat tool must create a table that is not in RecordTableRules, STOP: add the table to the registry through task 012's pattern or escalate; never bypass the service.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Grep `OwnedChildWrite.CreateAsync` in src/server/api/Sprk.Bff.Api: four call sites (ChildRecordEndpoints.cs ~:258, DataverseCreateRecordHandler.cs ~:341, EmailDraftToolHandler.cs ~:455, BudgetInquiryExecutor.cs ~:242). Existing tests for chat creates: tests/integration/data-mutation/RecordOwnership/SecureChildOwnershipAiToolTests*.cs; none asserts the I-1 stamp on a chat-created child.</existing>
+    <extension>Yes for production code: callers are re-pointed at the service from task 013, no new production file. The only new file is a test class because the SecureChildOwnershipAiToolTests* suite must pass unchanged and cannot take new assertions.</extension>
+    <cost-of-doing-nothing>Chat creates keep skipping the I-1 stamp, I-16 and sharee mirror, and the route, chat and decision creates keep two authorization cores whose owner and mapping behaviour drift (spec FR-13, section 11 table).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+    <tool name="skill:conflict-check">Detect overlap with UAC-r2 PR #2110 and ontology-r1</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ChildRecordEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/DataverseCreateRecordHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/EmailDraftToolHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/BudgetInquiryExecutor.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Dataverse/OwnedChildWrite.cs (create half removed)</output>
+    <output type="test">tests/integration/data-mutation/RecordOwnership/ChatCreatedChildStampTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep OwnedChildWrite.CreateAsync` in src/ returns nothing; `OwnedChildWrite` retains `RefileAsync` and no create entry point.</criterion>
+    <criterion testable="true">The child-records route, chat `dataverse.create_record`, `email.draft` and budget inquiry call `RecordCreationService` with the caller principal and no longer resolve WhoAmI themselves.</criterion>
+    <criterion testable="true">A chat-created child carries its I-1 stamp at create (asserted in the create payload / row), plus I-16 and the sharee mirror.</criterion>
+    <criterion testable="true">A parity test shows the route, chat and decision follow-on (`AddTodoExecutor`, `AssignWorkExecutor`) creates under the same parent produce the same owner and stamp.</criterion>
+    <criterion testable="true">The route's existing status codes and `errorCode` values for existing refusals are unchanged; route filters and the RouteAuthorizationGuardTests ledger are unchanged.</criterion>
+    <criterion testable="true">Negative: a caller who cannot AppendTo the parent gets the same uniform 404/403 on the route and the same refusal in chat as before; the service throwing or refusing creates nothing and no caller falls back to a direct create.</criterion>
+    <criterion testable="true">Negative: a chat create of a table that is not in RecordTableRules is refused (no create call).</criterion>
+    <criterion testable="true">BFF build 0 errors; SecureChildOwnershipAiToolTests*, RefileWriterAfterRefileGuardTests, RouteAuthorizationGuardTests, RecordOwnerAssignmentCensusTests and the decision (Signals) tests pass; publish-size delta, CVE result and /conflict-check result recorded in the task notes.</criterion>
+    <criterion testable="true">BLOCKING (ebilling-r1, 2026-10-21): do not re-point the child-record route or the chat create to RecordCreationService while master's OwnedChildWrite.CreateAsync carries the invoice-family guard (ebilling-r1 #1911) and RecordTableRules registers no invoice-family PreWriteRule for sprk_invoice and sprk_billingevent. The reconcile commit registers the rule and adds the 012-recipe test: every CoreRecordLookups key has an entry whose PreWriteRules contain the rule. It also retires the 013 ratchet baseline {sprk_invoice, sprk_billingevent}. It also adds:
+      - F2: an additive PreWriteRefusal kind that maps invoice_family_read_failed and invoice_family_unknown_entity to Undecided 500, with PreWriteRefusal.NotFound() remaining the only path to the uniform 404;
+      - F4: a test that a supersedes refusal keeps Code and Reason;
+      - and it deletes one copy of the verbatim NotAvailableToFileUnder strings.
+    Ask ebilling-r1 to review the reconcile commit.</criterion>
+    <criterion testable="true">UAC-r2 review of 013 (2026-10-21).
+      - Pre-create stamps: do not re-point a writer that stamps I-1/I-16 into the payload before the create (TaskActionCore.cs:229, TodoRegardingBuilder.cs:209, CommunicationService.cs:2532, DecisionRecordWriter.cs:1508) until the owner has decided the FR-06 step-10 amendment and the service implements it: pre-create derivation that refuses on failure, plus a post-create re-derivation; documents stay post-create.
+      - K-4:
+        - an upstream 401 now renders 403: decide and document it;
+        - bodies carry correlationId, not traceId: check the clients;
+        - remove the three existing membership publishes when re-pointing;
+        - resolve the chat matter/project number change (OWNER/017).
+      - SystemPrincipal: optionally narrow the 013 refusal. Let the plan run with an always-refuse callback mapped to 403, so ordinary parents proceed and secure parents are refused. An app-only AppendTo check on RequestedBy needs owner approval (ADR-028) and must fail closed on a null or unresolved RequestedBy.
+      - Documents (whichever of this task and UAC-r2 #2169 lands second):
+        - sprk_document.sprk_accessinheritance is refused for every principal (TableServerOwnedColumns on the document entry, plus the system path);
+        - sprk_document.sprk_accesspermission is allowed for callers and refused for system principals, matching RefuseAppOnlyWrite.
+        - Tests for each. UAC-r2 reviews.
+      - Projects/matters caller-refused columns: owner decision before this task (#1608 related).</criterion>
+    <criterion testable="true">BLOCKING (DI-004 / #2188, 2026-10-21): before any caller is re-pointed, create-time mapping must not copy a source column the caller cannot read under field security. Read the source columns as the caller, or check field-security read per column. A denied column is dropped with a warning, timing-equalised and failing closed. Must-fire test: a field-secured source column the caller cannot read is not copied. Must-not-fire test: a readable column is copied. UAC-r2 reviews.</criterion>
+    <criterion testable="true">From UAC-r2's re-check of 014 (2026-10-21):
+      - R3-1: normalise ServerSetLookupColumns once (trimmed, case-insensitive) where the request is built, and have both the K-2/F-B guards and the existing AppendTo check read that normalised set. Test it.
+      - R3-2: if it falls out naturally, move step 6's AppendTo for server-set root filing lookups (work assignment, project) to before step 3, so a refused create reads no mapping source. This is not a blocker; record the outcome.
+    </criterion>
+    <criterion testable="true">From UAC-r2's task 015 review (2026-10-21), blocking before any route reaches the unified create:
+      - K1: a test where the catalog read in step 7 throws (`RetrieveMultipleAsync` faults) gets 503 `OwnerUnavailableCode` and nothing is written (RecordCreationService step 7, ~:609-630);
+      - K3: a caller payload holding an explicit null under lowercase `sprk_ai_search_index@odata.bind` must not produce two keys that differ only in case after step 8's fill. Normalise the bind key (or drop the null entry before filling); test the duplicate-key case and the canonical-case case.
+      Whichever of 017 or 018 lands first owns this; the other confirms it.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-13 part 1, FR-12, NFR-07, NFR-08. Office quick-create is task 018; widening the route to sprk_matter and sprk_project is task 020. Release note: chat-created children now get the I-1 stamp, I-16 and sharee mirror.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

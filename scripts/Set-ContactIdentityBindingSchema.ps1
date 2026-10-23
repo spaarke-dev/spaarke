@@ -134,6 +134,7 @@ $ReasonOptions = [ordered]@{
     100000009 = 'Guest linked to an unbound contact'
     100000010 = 'Invite matches a workforce contact'
     100000011 = 'Key mirror held by another contact'
+    100000012 = 'Inactive contact email match'
 }
 $SecuredFields = @(
     @{ Entity = 'contact'; Attribute = $BindingColumn },
@@ -318,11 +319,27 @@ function Ensure-GlobalOptionSet([string]$Name, [string]$Display, $Options) {
         Report 'OK' "global choice $Name"
         # A choice created by an earlier run may lack an option added since (e.g. 100000011, B2): add it.
         $present = @($existing.Options | ForEach-Object { [int]$_.Value })
-        foreach ($value in $Options.Keys | Where-Object { $present -notcontains [int]$_ }) {
-            if ($Verify) { Report 'MISSING' "option $value '$($Options[$value])' in $Name"; continue }
-            if ($IsDryRun) { Report 'WOULD' "add option $value '$($Options[$value])' to $Name"; continue }
-            Invoke-DvWrite POST 'InsertOptionValue' @{ OptionSetName = $Name; Value = $value; Label = (New-Label $Options[$value]) } | Out-Null
+        foreach ($option in @($Options.GetEnumerator() | Where-Object { $present -notcontains [int]$_.Key })) {
+            $value = [int]$option.Key
+            if ($Verify) { Report 'MISSING' "option $value '$($option.Value)' in $Name"; continue }
+            if ($IsDryRun) { Report 'WOULD' "add option $value '$($option.Value)' to $Name"; continue }
+            Invoke-DvWrite POST 'InsertOptionValue' @{ OptionSetName = $Name; Value = $value; Label = (New-Label $option.Value) } | Out-Null
             Report 'DONE' "added option $value to $Name"
+        }
+        # T186 L39: earlier runs created every option with an EMPTY label — $Options[$value] on an [ordered] dictionary
+        # with int keys indexes by POSITION, so it returned $null. A managed import of a package carrying an empty
+        # option label fails ("Option Label ... description is null or empty"). Give each such option its label.
+        $labels = @{}; foreach ($e in $Options.GetEnumerator()) { $labels[[int]$e.Key] = $e.Value }
+        $unlabelled = @($existing.Options | Where-Object { $labels.ContainsKey([int]$_.Value) -and -not $_.Label.UserLocalizedLabel.Label })
+        foreach ($o in $unlabelled) {
+            $value = [int]$o.Value
+            if ($Verify) { Report 'FAIL' "option $value in $Name has no label (expected '$($labels[$value])')"; continue }
+            if ($IsDryRun) { Report 'WOULD' "label option $value in $Name '$($labels[$value])'"; continue }
+            Invoke-DvWrite POST 'UpdateOptionValue' @{ OptionSetName = $Name; Value = $value; Label = (New-Label $labels[$value]); MergeLabels = $true } | Out-Null
+            Report 'DONE' "labelled option $value in $Name '$($labels[$value])'"
+        }
+        if ($unlabelled.Count -gt 0 -and -not $Verify -and -not $IsDryRun) {
+            Invoke-DvWrite POST 'PublishXml' @{ ParameterXml = "<importexportxml><optionsets><optionset>$Name</optionset></optionsets></importexportxml>" } | Out-Null
         }
         return
     }
@@ -334,7 +351,7 @@ function Ensure-GlobalOptionSet([string]$Name, [string]$Display, $Options) {
         DisplayName   = (New-Label $Display)
         IsGlobal      = $true
         OptionSetType = 'Picklist'
-        Options       = @($Options.Keys | ForEach-Object { @{ Value = $_; Label = (New-Label $Options[$_]) } })
+        Options       = @($Options.GetEnumerator() | ForEach-Object { @{ Value = [int]$_.Key; Label = (New-Label $_.Value) } })
     } | Out-Null
     Report 'DONE' "created global choice $Name"
 }

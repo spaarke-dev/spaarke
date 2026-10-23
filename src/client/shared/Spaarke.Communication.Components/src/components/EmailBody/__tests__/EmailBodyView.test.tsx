@@ -41,6 +41,19 @@ function renderBody(overrides: Partial<EmailBodyViewProps> = {}, theme = webLigh
   return renderWithProvider(<EmailBodyView selectedId="c1" {...overrides} />, theme);
 }
 
+/** The CSS text of every stylesheet rule whose selector uses one of the element's classes (Griffel emits atomic rules). */
+function cssOf(el: Element): string {
+  const classes = new Set(Array.from(el.classList));
+  const rules: string[] = [];
+  for (const sheet of Array.from(document.styleSheets)) {
+    for (const rule of Array.from(sheet.cssRules)) {
+      const selector = (rule as CSSStyleRule).selectorText ?? '';
+      if (Array.from(selector.matchAll(/\.([\w-]+)/g)).some(m => classes.has(m[1]))) rules.push(rule.cssText);
+    }
+  }
+  return rules.join('\n').replace(/\s+/g, ' ');
+}
+
 /** Minimal `Response`-like object for the `authenticatedFetch` mock. */
 function okHtml(html: string): Partial<Response> {
   return { ok: true, status: 200, text: async () => html };
@@ -148,6 +161,53 @@ describe('EmailBodyView — degradation branch (sprk_body, no archive)', () => {
     expect(w.__xss).toBeUndefined();
     expect(w.__xss2).toBeUndefined();
     expect(w.__xss3).toBeUndefined();
+  });
+
+  it('does not paint over the host or phone home from sprk_body: overlay positioning and remote images are stripped (ISS-003)', () => {
+    const hostile =
+      '<p>safe text</p>' +
+      '<div title="overlay" style="position:fixed;inset:0;z-index:2147483647;background:#fff;color:#333">Sign in again</div>' +
+      '<img src="https://t.example/p.gif" alt="pixel" width="1" height="1">';
+
+    renderBody({ emlDocumentId: undefined, body: hostile });
+
+    const content = screen.getByTestId('email-body-fallback-content');
+    expect(content).toHaveTextContent('safe text');
+    expect(content.querySelector('[title="overlay"]')?.getAttribute('style')).toBe('background:#fff;color:#333');
+    expect(content.querySelector('img')?.hasAttribute('src')).toBe(false);
+    expect(content.innerHTML).not.toContain('t.example');
+  });
+
+  it('drops host classes / ids and paint-overflow CSS from sprk_body, and keeps layout attributes (ISS-003 review)', () => {
+    const hostile =
+      '<p>safe text</p>' +
+      '<div class="r1u3t6p6" id="DialogSurface">Sign in again</div>' +
+      '<div title="paint" style="position:relative;color:red;box-shadow:-3000px -3000px 0 6000px #fff;outline:5000px solid #fff;' +
+      'text-shadow:-800px -400px 0 #000;filter:drop-shadow(0 0 0 red);-webkit-box-reflect:above 0;letter-spacing:-40px">x</div>' +
+      '<table width="600" align="center"><tr><td colspan="2">c</td></tr></table>';
+
+    renderBody({ emlDocumentId: undefined, body: hostile });
+
+    const content = screen.getByTestId('email-body-fallback-content');
+    expect(content.innerHTML).not.toContain('r1u3t6p6');
+    expect(content.innerHTML).not.toMatch(/\b(class|id)\s*=/i);
+    expect(content.querySelector('[title="paint"]')?.getAttribute('style')).toBe('color:red');
+    expect(content.querySelector('table')?.getAttribute('width')).toBe('600');
+    expect(content.querySelector('table')?.getAttribute('align')).toBe('center');
+    expect(content.querySelector('td')?.getAttribute('colspan')).toBe('2');
+  });
+
+  it('the element that renders the sanitized sprk_body carries paint containment, a positioned clipped box and horizontal scroll (ISS-003 review)', () => {
+    renderBody({ emlDocumentId: undefined, body: '<p>safe text</p>' });
+
+    const css = cssOf(screen.getByTestId('email-body-fallback-content'));
+    expect(css).toMatch(/contain:\s*paint/);
+    expect(css).toMatch(/position:\s*relative/);
+    expect(css).toMatch(/overflow-y:\s*hidden/);
+    expect(css).toMatch(/overflow-x:\s*auto/);
+    // The body sits in a height-constrained flex column (the reading pane scrolls): it must not be shrunk to the pane
+    // height and have the end of a long email clipped with no scrollbar.
+    expect(css).toMatch(/flex-shrink:\s*0/);
   });
 
   it('renders the note even when sprk_body is empty', () => {

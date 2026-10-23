@@ -30,12 +30,10 @@ import { TextEncoder, TextDecoder } from 'util';
 /**
  * Custom ReadableStream polyfill that delivers chunks asynchronously.
  *
- * The async delivery is critical for integration tests: React batches state
- * updates, and the SprkChat component has an effect that only propagates
- * streamed content to the message list when `isStreaming` is true. If all
- * SSE events (token + done) are delivered synchronously, React batches
- * `setContent` and `setIsStreaming(false)` together, causing the
- * `isStreaming && streamedContent` guard in the effect to never be true.
+ * The delay between chunks is NOT required for correctness: SprkChat renders
+ * the final content even when it arrives in the same React batch as
+ * `setIsStreaming(false)` (#1906 — covered by the single-read tests at the end
+ * of this file, which bypass this polyfill).
  */
 if (typeof globalThis.ReadableStream === 'undefined') {
   (globalThis as any).ReadableStream = class ReadableStream {
@@ -90,12 +88,8 @@ function createFetchResponse(body: unknown, status = 200): Response {
 
 /**
  * Create an SSE streaming response that delivers events in two chunks:
- * 1. Token events (content-bearing) - allows React to render with isStreaming=true
+ * 1. Token events (content-bearing)
  * 2. Metadata events (citations, suggestions, done) - completes the stream
- *
- * This split ensures at least one React render cycle where isStreaming=true
- * and streamedContent is set, so the SprkChat effect can propagate content
- * to the message list via updateLastMessage.
  */
 function createSseStreamResponse(events: Array<Record<string, unknown>>, status = 200): Response {
   const encoder = new TextEncoder();
@@ -965,5 +959,202 @@ describe('SprkChat - Combined Suggestions and Citations Flow', () => {
 
     // Citation should work
     expect(screen.getByTestId('citation-marker-1').textContent).toContain('[1]');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Single-read delivery (#1906): the final tokens and the terminal event arrive
+// in ONE network read, so React commits the last setContent together with
+// setIsStreaming(false). The reply must still render in full. Do not add delays
+// or flush React between events here — that hides the bug these tests guard.
+// ---------------------------------------------------------------------------
+
+function createSingleReadSseResponse(events: Array<Record<string, unknown>>): Response {
+  const text = events.map(evt => `data: ${JSON.stringify(evt)}\n\n`).join('');
+  const chunk = new TextEncoder().encode(text);
+  let delivered = false;
+  return {
+    ok: true,
+    status: 200,
+    body: {
+      getReader: () => ({
+        read: async () => {
+          if (delivered) return { done: true, value: undefined };
+          delivered = true;
+          return { done: false, value: chunk };
+        },
+        releaseLock: () => {},
+        cancel: async () => {},
+      }),
+    },
+    text: jest.fn().mockResolvedValue(text),
+    headers: new Headers(),
+  } as unknown as Response;
+}
+
+describe('SprkChat - final content delivered in a single read', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    setupFetchRouter();
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  async function sendWithSingleRead(events: Array<Record<string, unknown>>) {
+    const user = userEvent.setup();
+    await act(async () => {
+      renderWithProviders(<SprkChat {...defaultProps} />);
+    });
+    await waitFor(() => {
+      const textarea = screen.getByTestId('chat-input-textarea');
+      expect(textarea.querySelector('textarea') || textarea).not.toBeDisabled();
+    });
+
+    pendingSseResponses.push(createSingleReadSseResponse(events));
+    const textarea = screen.getByTestId('chat-input-textarea');
+    await user.type(textarea.querySelector('textarea') || textarea, 'Question');
+    await user.click(screen.getByTestId('chat-send-button'));
+  }
+
+  it('singleRead_TokensCitationsAndDone_RendersFullTextAndMarker', async () => {
+    await sendWithSingleRead([
+      { type: 'token', content: 'According to ' },
+      { type: 'token', content: '[1], the rule applies.' },
+      {
+        type: 'citations',
+        content: null,
+        data: { citations: [{ id: 1, sourceName: 'Company Rules', page: 10, excerpt: 'Rule 5.', chunkId: 'cr-1' }] },
+      },
+      { type: 'done', content: null },
+    ]);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('citation-marker-1')).toBeInTheDocument();
+    });
+    expect(screen.getByText(/the rule applies\./)).toBeInTheDocument();
+  });
+
+  it('singleRead_StreamClosesWithoutDone_RendersFullText', async () => {
+    await sendWithSingleRead([{ type: 'token', content: 'An answer with no done event.' }]);
+
+    await waitFor(() => {
+      expect(screen.getByText('An answer with no done event.')).toBeInTheDocument();
+    });
+  });
+
+  it('citations_StayOnTheirReplyAfterTheNextTurn', async () => {
+    await sendWithSingleRead([
+      { type: 'token', content: 'Cited answer [1].' },
+      {
+        type: 'citations',
+        content: null,
+        data: { citations: [{ id: 1, sourceName: 'Doc A', page: 1, excerpt: 'A', chunkId: 'a-1' }] },
+      },
+      { type: 'done', content: null },
+    ]);
+    await waitFor(() => expect(screen.getByTestId('citation-marker-1')).toBeInTheDocument());
+
+    // Second turn without citations: the first reply's marker must survive.
+    pendingSseResponses.push(
+      createSingleReadSseResponse([
+        { type: 'token', content: 'Second, uncited answer.' },
+        { type: 'done', content: null },
+      ])
+    );
+    const user = userEvent.setup();
+    const textarea = screen.getByTestId('chat-input-textarea');
+    await waitFor(() => expect(textarea.querySelector('textarea') || textarea).not.toBeDisabled());
+    await user.type(textarea.querySelector('textarea') || textarea, 'Follow-up');
+    await user.click(screen.getByTestId('chat-send-button'));
+
+    await waitFor(() => expect(screen.getByText('Second, uncited answer.')).toBeInTheDocument());
+    expect(screen.getByTestId('citation-marker-1')).toBeInTheDocument();
+  });
+
+  it('singleRead_ErrorAfterPartialContent_KeepsPartialTextAndShowsError', async () => {
+    await sendWithSingleRead([
+      { type: 'token', content: 'Partial answer before failure.' },
+      { type: 'error', content: 'Upstream model failed' },
+    ]);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Upstream model failed/)).toBeInTheDocument();
+    });
+    expect(screen.getByText('Partial answer before failure.')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A host-injected message that arrives while a reply is streaming must not be
+// overwritten by the stream (#1906 review, F2).
+// ---------------------------------------------------------------------------
+
+describe('SprkChat - injection during a streaming reply', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    setupFetchRouter();
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('injectedMessage_DuringStream_IsKeptAndReplyStaysInItsOwnBubble', async () => {
+    // Stream: first token, then wait for `release` before the rest + done.
+    let release: () => void = () => {};
+    const gate = new Promise<void>(r => (release = r));
+    const encoder = new TextEncoder();
+    const sse = (events: Array<Record<string, unknown>>) =>
+      encoder.encode(events.map(e => `data: ${JSON.stringify(e)}\n\n`).join(''));
+    const frames = [
+      sse([{ type: 'token', content: 'Reply part one. ' }]),
+      sse([
+        { type: 'token', content: 'Reply part two.' },
+        { type: 'done', content: null },
+      ]),
+    ];
+    let i = 0;
+    pendingSseResponses.push({
+      ok: true,
+      status: 200,
+      body: {
+        getReader: () => ({
+          read: async () => {
+            if (i === 1) await gate;
+            return i < frames.length ? { done: false, value: frames[i++] } : { done: true, value: undefined };
+          },
+          releaseLock: () => {},
+        }),
+      },
+      headers: new Headers(),
+    } as unknown as Response);
+
+    const user = userEvent.setup();
+    let view: ReturnType<typeof renderWithProviders>;
+    await act(async () => {
+      view = renderWithProviders(<SprkChat {...defaultProps} />);
+    });
+    const textarea = screen.getByTestId('chat-input-textarea');
+    await waitFor(() => expect(textarea.querySelector('textarea') || textarea).not.toBeDisabled());
+    await user.type(textarea.querySelector('textarea') || textarea, 'Summarize');
+    await user.click(screen.getByTestId('chat-send-button'));
+    await waitFor(() => expect(screen.getByText(/Reply part one\./)).toBeInTheDocument());
+
+    const injected = {
+      role: 'Assistant' as const,
+      content: 'Injected status line.',
+      timestamp: '2026-10-15T00:00:00Z',
+    };
+    await act(async () => {
+      view!.rerender(<SprkChat {...defaultProps} injectLocalMessage={injected} />);
+    });
+    await act(async () => {
+      release();
+    });
+
+    await waitFor(() => expect(screen.getByText('Reply part one. Reply part two.')).toBeInTheDocument());
+    expect(screen.getByText('Injected status line.')).toBeInTheDocument();
   });
 });

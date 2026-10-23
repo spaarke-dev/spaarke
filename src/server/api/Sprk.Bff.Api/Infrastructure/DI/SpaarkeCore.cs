@@ -43,22 +43,23 @@ public static class SpaarkeCore
         //   1. Promoting a typed HttpClient to singleton pins one HttpMessageHandler for process
         //      lifetime, defeating the handler rotation and DNS refresh IHttpClientFactory provides.
         //      (On its own this is arguable — PooledConnectionLifetime can address it.)
-        //   2. DECISIVE: DataverseAccessDataSource holds MUTABLE, NON-THREAD-SAFE PER-INSTANCE AUTH
-        //      STATE — the _currentToken field and _httpClient.DefaultRequestHeaders.Authorization,
-        //      both written in EnsureAuthenticatedAsync. A singleton would share one Authorization
-        //      header across all concurrent requests, which is a data race that can BLEED A TOKEN
-        //      BETWEEN USERS. Not a performance tradeoff — a correctness and security defect.
-        //      Do not promote this registration without first removing that per-instance state.
+        //   2. DataverseAccessDataSource used to hold MUTABLE, NON-THREAD-SAFE PER-INSTANCE AUTH STATE
+        //      in _httpClient.DefaultRequestHeaders.Authorization (written by EnsureAuthenticatedAsync
+        //      and by the OBO branch of GetUserAccessAsync). Issue #1576 removed both writes: every
+        //      request now carries its token on its own HttpRequestMessage. What remains per instance
+        //      is the cached app-only _currentToken — one identity (the service principal), read into
+        //      a local before use, so sharing it would not bleed a user's token. The registration
+        //      still STAYS transient: reason 1 stands, and nothing gained from a singleton has been
+        //      measured. Re-review this class for per-instance state before promoting it.
         //
-        // The DI-lifetime hazard the task targets is the credential objects rebuilt per resolution —
-        // fixed inside the class by static (tenant|client|secret-fingerprint) caches for both the OBO
-        // confidential client and the app-only ClientSecretCredential, the same shape
-        // DataverseUserClient (also a transient typed HttpClient) already uses.
-        //
-        // Note on the app-only path: in the MANAGED-IDENTITY branch the credential is the DI-injected
-        // singleton TokenCredential (Program.cs:46) and was never per-request. In the SECRET branch it
-        // was, and is now cached. An earlier version of this comment claimed the app-only path had no
-        // per-request rebuild at all — true of the MI branch only (code-review finding W-3).
+        // The DI-lifetime hazard the task targets was the credential objects rebuilt per resolution.
+        // Auth-v4 task 022 removed it at the source: the class no longer builds any credential inline
+        // (no ClientSecretCredential, no static per-secret caches). In the MANAGED-IDENTITY branch the
+        // app-only credential is the DI-injected singleton TokenCredential; otherwise it is a thin
+        // ConfidentialClientTokenCredential over the singleton IConfidentialClientProvider, which owns
+        // the one confidential-client cache (MSAL caches the app token on that client). The OBO
+        // exchange asks the same provider at the moment of the exchange. So a transient instance
+        // rebuilds no credential, and the registration's lifetime no longer matters for credentials.
         services.AddHttpClient<DataverseAccessDataSource>((sp, client) =>
         {
             var configuration = sp.GetRequiredService<IConfiguration>();

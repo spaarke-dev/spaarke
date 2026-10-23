@@ -89,6 +89,7 @@ describe('Production build workflows (FR-20)', () => {
       'VITE_TEAMS_MSAL_CLIENT_ID',
       'VITE_TEAMS_MSAL_TENANT_ID',
       'VITE_TEAMS_MSAL_BFF_SCOPE',
+      'VITE_WORKFORCE_HOME_MSAL_CLIENT_ID',
     ]) {
       expect(text, `${name} does not set ${key}`).toContain(`${key}: \${{ vars.${key} }}`);
     }
@@ -112,21 +113,52 @@ describe('Production build workflows (FR-20)', () => {
     expect(text).not.toMatch(/\|\|\s*secrets\.AZURE_SWA_TOKEN_EXTERNAL_SPA_\w+/);
   });
 
-  it('deploy-external-spa.yml: fails closed before the build when a required environment variable is missing or malformed', () => {
-    const text = code(workflow('deploy-external-spa.yml'));
-    const preflight = text.indexOf('name: Check required environment variables');
-    const build = text.indexOf('name: Build (Vite production)');
-    expect(preflight).toBeGreaterThan(-1);
-    expect(preflight).toBeLessThan(build);
-    for (const key of [
-      'VITE_MSAL_AUTHORITY',
-      'VITE_MSAL_CLIENT_ID',
-      'VITE_TEAMS_MSAL_TENANT_ID',
-      'VITE_TEAMS_MSAL_BFF_SCOPE',
-    ]) {
-      expect(text.slice(preflight, build)).toContain(key);
+  it.each(WORKFLOWS)(
+    '%s: fails closed before the build when a required environment variable is missing or malformed',
+    name => {
+      const text = code(workflow(name));
+      const preflight = text.indexOf('name: Check required environment variables');
+      const build = text.indexOf('name: Build (Vite production)');
+      expect(preflight).toBeGreaterThan(-1);
+      expect(preflight).toBeLessThan(build);
+      const block = text.slice(preflight, build);
+      for (const key of [
+        'VITE_MSAL_AUTHORITY',
+        'VITE_MSAL_CLIENT_ID',
+        'VITE_TEAMS_MSAL_CLIENT_ID',
+        'VITE_TEAMS_MSAL_TENANT_ID',
+        'VITE_TEAMS_MSAL_BFF_SCOPE',
+        // ADR-028 A9 (tasks 058/076): required, a GUID, and different from the A8 client.
+        'VITE_WORKFORCE_HOME_MSAL_CLIENT_ID',
+      ]) {
+        expect(block, `${name}: ${key} in the preflight`).toContain(`need "$k"`);
+        expect(block, `${name}: ${key} in the preflight`).toContain(key);
+      }
+      expect(block).toContain('match VITE_WORKFORCE_HOME_MSAL_CLIENT_ID "$guid" "GUID"');
+      expect(block).toContain('must differ from VITE_TEAMS_MSAL_CLIENT_ID');
+      // A whole-string match: `grep` matches line by line, so a value with a newline would pass a grep check (task 076 review).
+      expect(block).toContain('! [[ ${!1} =~ $2 ]]');
+      expect(block).not.toMatch(/grep -Eq "\$2"/);
+      expect(block).toContain('exit "$fail"');
     }
-    expect(text.slice(preflight, build)).toContain('exit "$fail"');
+  );
+
+  it('deploy-teams-app.yml: before packaging, the staged manifest must have no webApplicationInfo, https tabs and the SPA domain in validDomains', () => {
+    const text = code(workflow('deploy-teams-app.yml'));
+    const preflight = text.indexOf('name: Check required environment variables');
+    const validate = text.indexOf('name: Validate Teams app manifest');
+    const pack = text.indexOf('name: Package Teams app');
+    expect(preflight).toBeGreaterThan(-1);
+    expect(validate).toBeGreaterThan(preflight);
+    expect(pack).toBeGreaterThan(validate);
+    const checks = text.slice(validate, pack);
+    expect(checks).toContain(`jq -e 'has("webApplicationInfo") | not' manifest.json`);
+    expect(checks).toContain(`jq -e 'all(.staticTabs[].contentUrl; startswith("https://"))' manifest.json`);
+    expect(checks).toContain(
+      `jq -e '[.staticTabs[].contentUrl | sub("^https://"; "") | sub("[/?#:].*$"; "")] - .validDomains | length == 0' manifest.json`
+    );
+    // prod: the package id variable is checked in the preflight too, not only when the manifest is rendered.
+    expect(text.slice(preflight, validate)).toContain('need TEAMS_APP_ID');
   });
 
   it('deploy-external-spa.yml: the built bundle is scanned (npm run check:dist) right after the build and before it is staged', () => {
@@ -242,6 +274,7 @@ describe('Production Teams manifest (A1/A2)', () => {
     expect(env.SPA_BASE_URL).toBe(`https://${PROD_ORIGIN_HOST}`);
     expect(env.TEAMS_APP_ID).toBe(ALL_ZERO_GUID);
     expect(env.AAD_APP_CLIENT_ID).toBe(ALL_ZERO_GUID);
+    expect(env.WORKFORCE_HOME_CLIENT_ID).toBe(ALL_ZERO_GUID);
     expect(JSON.stringify(env)).not.toMatch(/azurewebsites\.net|azurestaticapps\.net/);
   });
 

@@ -29,7 +29,7 @@ The same parallelism exhausted the machine's memory. Bash fork failed with `0xC0
 5. **Limit concurrency.**
    - **Settings:** `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=4`, `CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS=4` and `workflowSizeGuideline: "small"` (aim for fewer than 5 workflow agents). These cap one session.
    - **Across sessions:** run one or two heavy projects (fan-outs, workflow batches, parallel task execution) at a time on one machine, not five. The settings cannot enforce that.
-6. **Compact main sessions earlier.** `autoCompactWindow: 400000` in `.claude/settings.json`; the default is close to the 1M window. Main sessions averaged 438k context per call. Before compaction, checkpoint as root §5 says.
+6. **Compact main sessions earlier.** `autoCompactWindow: 400000` in `.claude/settings.json`; the default is close to the 1M window. Main sessions averaged 438k context per call. Before compaction, checkpoint as root §5 says; `scripts/quality/context-checkpoint.py` prompts it at 85% of this window (340k).
 7. **Read-only research fans out once.** For "map X" research, launch the mappers once with full briefs and collect their reports. Don't keep them alive for follow-up questions (rule 4).
 
 ## Choosing a model and effort

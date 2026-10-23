@@ -5,14 +5,14 @@ techStack: [git, gh-cli]
 appliesTo: ["push to github", "create PR", "commit and push", "ready to merge"]
 alwaysApply: false
 exemplar: none-too-volatile
-last-reviewed: 2026-05-16
+last-reviewed: 2026-10-15
 ---
 
 # Push to GitHub
 
 > **Category**: Operations
-> **Last Reviewed**: 2026-05-16
-> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-B — normalized minimal frontmatter; extracted PR body template to references/)
+> **Last Reviewed**: 2026-10-15
+> **Reviewed By**: procedure / code-quality cleanup (CI tier-file freeze lifted 2026-10-15); earlier ai-procedure-quality-r1 (Phase 2b Wave 2b-B)
 > **Exemplar rationale**: Each push targets ephemeral branch state — no canonical reference holds.
 > **PR body template**: [`references/pr-template.md`](references/pr-template.md)
 
@@ -658,11 +658,9 @@ gh pr create                            # Create PR (if gh installed)
 - Merge on a green **Tier 1**. **Tier 2 is advisory and does not block** — report a red Tier 2, judge
   whether it is real, but do not treat it as a merge blocker (that is the design, per north star
   "CI must not hold up high-frequency pushes")
-- **Do not edit `ci-router.yml` / `ci-tier1-blocking.yml` / `ci-tier2-advisory.yml` while the shadow
-  window is open** — changing the configuration invalidates what was observed and restarts the
-  cutover clock. Check with `pwsh scripts/ci/shadow-window-status.ps1`. Narrow exception, already
-  set by PRs #865/#890: adding a guard whose live count is **zero** is verdict-neutral, since no
-  existing PR's result can change.
+- `ci-router.yml` / `ci-tier1-blocking.yml` / `ci-tier2-advisory.yml` were frozen during the CI shadow
+  window. The window closed and the owner lifted the freeze on 2026-10-15; they are edited like any
+  other workflow (review, Tier 1 stays p95 ≤ 3 min, `Router` must always report).
 - Reference `ci-cd` skill for detailed troubleshooting guidance
 - **After successful push, always remind**: "Branch pushed to origin. When ready to merge this work into master, run `/merge-to-master`." Pushing to origin does NOT merge to master — these are separate operations.
 

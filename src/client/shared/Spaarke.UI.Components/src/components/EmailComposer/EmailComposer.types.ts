@@ -322,6 +322,17 @@ export interface EmailComposerState {
   fromMailbox?: string;
   archiveToSpe: boolean;
   associations: ICommunicationAssociation[];
+  /**
+   * "Internal Only" switch (task 068). Starts `false`; starts `true` for a reply/forward whose source is known
+   * internal-only (`sourceIsInternalOnly`) or when the target thread is known Private (`threadIsPrivate`).
+   * Sent as an explicit boolean, except for an untouched reply/forward whose source flag is unknown (see
+   * `internalOnlyTouched`, `sourceIsInternalOnly`), where it is omitted so the BFF raises it.
+   */
+  isInternalOnly: boolean;
+  /** True once the user has toggled the switch (`SET_INTERNAL_ONLY`); `RESET` clears it. */
+  internalOnlyTouched: boolean;
+  /** The host-supplied `sourceIsInternalOnly`; `undefined` = the host does not know the source's flag. */
+  sourceIsInternalOnly?: boolean;
   isDirty: boolean;
   isSending: boolean;
   isSavingDraft: boolean;
@@ -336,6 +347,7 @@ export type EmailComposerAction =
   | { type: 'SET_RECIPIENTS'; field: 'to' | 'cc' | 'bcc'; value: IRecipient[] }
   | { type: 'SET_SEND_MODE'; value: CommunicationSendMode }
   | { type: 'SET_ARCHIVE_TO_SPE'; value: boolean }
+  | { type: 'SET_INTERNAL_ONLY'; value: boolean }
   | { type: 'SET_MODE'; mode: EmailComposerMode; patch?: Partial<EmailComposerState> }
   | { type: 'ADD_ATTACHMENT'; item: IAttachmentItem }
   | { type: 'REMOVE_ATTACHMENT'; id: string }
@@ -409,6 +421,22 @@ export interface IEmailComposerProps {
   associations?: ICommunicationAssociation[];
   /** Default `true` — renders `associations[]` as read-only Fluent Tags via `AssociationChips`. */
   showAssociations?: boolean;
+
+  // — "Internal Only" (task 068; owner 2026-10-14) — both optional/additive —
+  /**
+   * The source communication of a reply/forward is known to be internal-only (`sprk_isinternalonly`): the
+   * "Internal Only" switch starts on. Ignored for compose/draft/view. Pass `false` when the source is known
+   * NOT internal. Omitted = the host does not know: the switch starts off, and while the user leaves it
+   * untouched the send OMITS `isInternalOnly` so the BFF raises an internal or unreadable source (task 065).
+   * An explicit `false` wins over that raise, which is why the field is omitted rather than sent as `false`.
+   */
+  sourceIsInternalOnly?: boolean;
+  /**
+   * The target thread is KNOWN to be Private: the switch shows on and disabled and the send carries
+   * `isInternalOnly: true`. Hosts pass it only when they already hold the thread's privacy — never read it
+   * from Dataverse just for this; the BFF floor (task 065) covers a Private/unknown thread regardless.
+   */
+  threadIsPrivate?: boolean;
 
   // — Conversation context (R3 task 020, FR-07/FR-19) — all optional/additive —
   /**

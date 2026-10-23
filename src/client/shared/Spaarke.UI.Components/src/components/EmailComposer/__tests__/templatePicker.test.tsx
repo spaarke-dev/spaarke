@@ -124,7 +124,9 @@ describe('EmailComposer — compose template picker (Wave E)', () => {
     await screen.findByText('Apply template?');
     expect(onRenderEmailTemplate).not.toHaveBeenCalled();
 
-    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Cancel' }));
+    // `hidden: true` (FAILURE-MODES G-21): tabster can leave this confirm surface aria-hidden in jsdom.
+    const confirm = await screen.findByRole('alertdialog', { hidden: true });
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Cancel', hidden: true }));
     await waitFor(() => {
       expect(screen.queryByText('Apply template?')).not.toBeInTheDocument();
     });
@@ -143,9 +145,15 @@ describe('EmailComposer — compose template picker (Wave E)', () => {
     fireEvent.click(screen.getByRole('button', { name: /apply template/i }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Welcome Letter' }));
     await screen.findByText('Apply template?');
-    fireEvent.click(
-      within(screen.getByRole('alertdialog', { name: 'Apply template?' })).getByRole('button', { name: 'Apply' })
-    );
+    // `hidden: true` (FAILURE-MODES G-21): tabster can leave this confirm surface aria-hidden in jsdom, and an
+    // aria-hidden root has no computed accessible name, so assert the name contract (`aria-labelledby`) directly.
+    const confirm = await screen.findByRole('alertdialog', { hidden: true });
+    const labelId = confirm.getAttribute('aria-labelledby');
+    expect(labelId).toBeTruthy();
+    const label = document.getElementById(labelId as string);
+    expect(confirm).toContainElement(label as HTMLElement);
+    expect(label).toHaveTextContent(/^Apply template\?$/);
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Apply', hidden: true }));
 
     await waitFor(() => {
       expect(onRenderEmailTemplate).toHaveBeenCalledTimes(1);

@@ -504,6 +504,9 @@ public sealed class PlaybookSchedulerJob : IScheduledJob
                     var request = new PlaybookRunRequest
                     {
                         PlaybookId = playbookId,
+                        // #2257 (owner round 123): a scheduled run has no person in it; it writes app-only, behind the
+                        // deny-lists. The per-user "userId" parameter is the user it targets, never the identity it writes as.
+                        StartedBy = PlaybookRunStartedBy.System,
                         DocumentIds = Array.Empty<Guid>(),
                         UserContext = $"Scheduled notification run for user {userName} (childCorrelationId={childCorrelationId})",
                         Parameters = new Dictionary<string, string>

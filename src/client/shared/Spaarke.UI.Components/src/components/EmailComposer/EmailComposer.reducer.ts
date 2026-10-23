@@ -146,6 +146,18 @@ function initialAttachmentsFor(props: IEmailComposerProps): IAttachmentItem[] {
 }
 
 /**
+ * Where the "Internal Only" switch starts (task 068): ON when the target thread is known Private, or when a
+ * reply/forward's source is known internal-only; otherwise OFF. A new compose, draft or view never starts on
+ * by itself.
+ */
+export function initialInternalOnly(
+  props: Pick<IEmailComposerProps, 'mode' | 'sourceIsInternalOnly' | 'threadIsPrivate'>
+): boolean {
+  if (props.threadIsPrivate === true) return true;
+  return (props.mode === 'reply' || props.mode === 'forward') && props.sourceIsInternalOnly === true;
+}
+
+/**
  * Builds the engine's initial state from props. `compose` seeds from
  * `initial*` props (+ wizard-uploaded attachments); `view`/`reply`/`forward`/
  * `draft` derive from `props.sourceRecord` via the pure derive* helpers below.
@@ -174,6 +186,9 @@ export function initialState(props: IEmailComposerProps): EmailComposerState {
     fromMailbox: props.fromMailbox,
     archiveToSpe: props.archiveToSpe ?? true,
     associations: props.associations ?? [],
+    isInternalOnly: initialInternalOnly(props),
+    internalOnlyTouched: false,
+    sourceIsInternalOnly: props.sourceIsInternalOnly,
     isDirty: false,
     isSending: false,
     isSavingDraft: false,
@@ -363,6 +378,18 @@ export function buildBodyWithAttachmentLinks(
 }
 
 /**
+ * "Internal Only" value for the send request (task 068, fix round 1 F1). `undefined` means OMIT the field.
+ */
+function resolveIsInternalOnly(state: EmailComposerState, threadIsPrivate?: boolean): boolean | undefined {
+  if (threadIsPrivate === true) return true;
+  const isReplyOrForward = (state.mode === 'reply' || state.mode === 'forward') && !!state.communicationId;
+  if (isReplyOrForward && !state.internalOnlyTouched && state.sourceIsInternalOnly === undefined) {
+    return undefined;
+  }
+  return state.isInternalOnly;
+}
+
+/**
  * Map engine state onto the `sendCommunication()` request (task 104 moved this
  * here from EmailComposer.tsx so the payload contract is unit-testable):
  *   - attach-file path → `attachmentDocumentIds` carries the `sprk_document`
@@ -374,7 +401,12 @@ export function buildBodyWithAttachmentLinks(
  * Reuses the existing `SendCommunicationRequest.AttachmentDocumentIds` field —
  * NO new send-contract attachment field is introduced (task 104 / §11).
  */
-export function mapStateToSendRequest(state: EmailComposerState, threadId?: string): SendCommunicationOptions {
+export function mapStateToSendRequest(
+  state: EmailComposerState,
+  threadId?: string,
+  threadIsPrivate?: boolean
+): SendCommunicationOptions {
+  const internalOnly = resolveIsInternalOnly(state, threadIsPrivate);
   return {
     to: state.to.map(r => r.email),
     cc: state.cc.length > 0 ? state.cc.map(r => r.email) : undefined,
@@ -392,6 +424,11 @@ export function mapStateToSendRequest(state: EmailComposerState, threadId?: stri
       .map(a => a.documentId as string),
     archiveToSpe: state.archiveToSpe,
     associations: state.associations,
+    // "Internal Only" (task 068, fix round 1 F1): an explicit boolean, EXCEPT for a reply/forward the user has
+    // not touched whose source flag the host does not know. The BFF treats an explicit `false` as the sender's
+    // choice and honours it, so for that one case the field is omitted and the server raises it to `true` for
+    // an internal or unreadable source. A thread the host knows is Private always sends `true`.
+    ...(internalOnly === undefined ? {} : { isInternalOnly: internalOnly }),
     sendMode: state.sendMode,
     fromMailbox: state.fromMailbox,
     // Reply / Reply All / Forward inherit the parent communication's regarding associations
@@ -532,6 +569,9 @@ export function emailComposerReducer(state: EmailComposerState, action: EmailCom
 
     case 'SET_ARCHIVE_TO_SPE':
       return { ...state, archiveToSpe: action.value, isDirty: true };
+
+    case 'SET_INTERNAL_ONLY':
+      return { ...state, isInternalOnly: action.value, internalOnlyTouched: true, isDirty: true };
 
     case 'SET_MODE':
       return { ...state, mode: action.mode, readOnly: action.mode === 'view', ...action.patch };

@@ -215,7 +215,8 @@ public sealed class NotificationService
     /// </summary>
     /// <param name="azureAdObjectId">The Azure AD oid claim value.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The Dataverse systemuserid, or null if not found.</returns>
+    /// <returns>The ACTIVE Dataverse systemuserid, or null if none (a disabled systemuser does not resolve, issue
+    /// #1576 — this feeds the AI-memory authorizer and content dedup, so a disabled user must be "nobody").</returns>
     public async Task<Guid?> ResolveSystemUserIdAsync(Guid azureAdObjectId, CancellationToken cancellationToken = default)
     {
         try
@@ -227,7 +228,8 @@ public sealed class NotificationService
                 {
                     Conditions =
                     {
-                        new ConditionExpression("azureactivedirectoryobjectid", ConditionOperator.Equal, azureAdObjectId.ToString())
+                        new ConditionExpression("azureactivedirectoryobjectid", ConditionOperator.Equal, azureAdObjectId.ToString()),
+                        new ConditionExpression("isdisabled", ConditionOperator.Equal, false)
                     }
                 },
                 TopCount = 1
@@ -237,7 +239,7 @@ public sealed class NotificationService
 
             if (result.Entities.Count == 0)
             {
-                _logger.LogWarning("No Dataverse user found for Azure AD OID {AzureAdOid}", azureAdObjectId);
+                _logger.LogWarning("No active Dataverse user found for Azure AD OID {AzureAdOid}", azureAdObjectId);
                 return null;
             }
 

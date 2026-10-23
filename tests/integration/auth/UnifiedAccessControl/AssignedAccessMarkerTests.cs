@@ -36,7 +36,12 @@ public class AssignedAccessMarkerTests
     private readonly Harness _h = new();
     private readonly Guid _matter = Guid.NewGuid();
 
-    public AssignedAccessMarkerTests() => _h.Store.Root(Matter, _matter);
+    public AssignedAccessMarkerTests()
+    {
+        _h.Store.Root(Matter, _matter);
+        // #1620: /unshare-user reads the record's owner for the owner-aware revoke; here it is a user no test shares with.
+        _h.Grants.RootOwners[_matter] = Guid.NewGuid();
+    }
 
     private Task<AssignedAccessOutcome> Sync() => _h.SyncAsync(Matter, _matter);
 
@@ -59,7 +64,7 @@ public class AssignedAccessMarkerTests
     private Task<IResult> Grant(Guid contactId) =>
         GrantExternalAccessEndpoint.GrantAccessAsync(
             new GrantAccessRequest(contactId, Guid.Empty, ExternalAccessLevel.Collaborate, null, null, "matter", _matter),
-            _h.Grants, _h.Participations, _h.AccessibleRecords, new WriteProbe(),
+            _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new WriteProbe(),
             _h.Materializer, _h.Notifier, _h.Invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
 
     private Task<IResult> ShareUser(Guid user) =>
@@ -174,6 +179,31 @@ public class AssignedAccessMarkerTests
         Row(contact).State.Should().Be(AssignedAccessState.Declined);
         Row(contact).Reason.Should().Be(AssignedAccessReason.RemovedByOperator);
         _h.Shares.MaskOf("sprk_matter", _matter, DataversePrincipalRef.User(user)).Should().BeNull();
+    }
+
+    /// <summary>
+    /// #1620: an owner that cannot be read refuses (500 read_failed) BEFORE the operator's marker is written — no Declined row
+    /// over a share that was never revoked, and the share stays.
+    /// </summary>
+    [Fact]
+    public async Task UnsharingAnAutoShare_WhenTheRecordsOwnerCannotBeRead_Is500_AndWritesNoMarker()
+    {
+        var (contact, user) = _h.LinkedContact();
+        _h.Grants.Person(user);
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        await Sync();
+        var before = (Row(contact).State, Row(contact).Reason);
+        var ledgerWrites = _h.Store.Writes.Count;
+        _h.Grants.FailRootOwnerQueries = true;
+
+        var result = await UnshareUser(user);
+
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(500);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(InternalShareEndpoints.ReadFailedReasonCode);
+        _h.Store.Writes.Count.Should().Be(ledgerWrites, "the marker is written only ahead of a revoke that is sent");
+        (Row(contact).State, Row(contact).Reason).Should().Be(before);
+        _h.Shares.MaskOf("sprk_matter", _matter, DataversePrincipalRef.User(user)).Should().NotBeNull("nothing was revoked");
     }
 
     // ─────────────────────────────────────────────────────────────────────────────

@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>BFF WorkforceHome JwtBearer scheme on ExternalCollaboration only + scheme census ArchTest + must-reject tests</title>
+    <phase>4b A9 workforce home sign-in</phase>
+    <gate>startable (A9 on master via PR #1810; design approved 2026-10-13)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags bff-api, auth; adds an authentication scheme</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive token acceptance for a new issuer population (tags auth, security)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A9-1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bff-api, auth, security, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add the WorkforceHome JwtBearer scheme exactly as notes/a9-bff-design.md §2 specifies, accept it only through the ExternalCollaboration policy, and pin it with a scheme-census ArchTest and must-reject tests. Two adversarial review passes (auth).</prompt>
+  <role>SPAARKE platform developer. ASP.NET Core authentication and Microsoft.Identity.Web expert. Follow ADRs strictly.</role>
+  <goal>A home token (customer tid in WorkforceIdentity:CustomerTenantIds, v2 issuer for its own tid, stamp BFF audience, user token with user_impersonation, acct = 0) authenticates on /api/v1/external/* routes only; every must-reject case in §2 returns 401; the ArchTest fails if a scheme is added or WorkforceHome appears on any other policy.</goal>
+
+  <context>
+    <background>Design note §2. Today the default scheme is AddMicrosoftIdentityWebApi(AzureAd) with one TenantId (AuthorizationModule.cs:53-55), so a home token fails IDX40001. The Ciam scheme is at :65-82, the audience PostConfigure at :110-178, the CIAM guard at :195-257, and the ExternalCollaboration policy at :445. Resolution of the principal is task 046; this task only authenticates. A principal authenticated by WorkforceHome is the Workforce plane: record the scheme name on the principal so 046 can branch on the authenticating scheme (not on iss).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Authentication/AuthPolicies.cs (scheme name constant only)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/WorkforceIdentityOptions.cs (read CustomerTenantIds only; no behaviour change for the existing branch)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/DI/AuthorizationModuleWorkforceHomeTests.cs</file>
+      <file role="new">tests/Spaarke.ArchTests/AuthenticationSchemeCensusTests.cs</file>
+      <file role="canonical-reference">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/DI/AuthorizationModuleCiamTests.cs</file>
+      <file role="canonical-reference">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>Default scheme (AuthorizationModule.cs:53-55, single Spaarke tenant) and Ciam scheme (:65-82); RouteAuthorizationGuardTests pins policies per route but not the scheme set.</existing>
+    <extension>No: the default scheme is pinned to one tenant and serves OBO routes; widening it to organizations would expose every workforce route to customer directories. A separate scheme named only by ExternalCollaboration keeps the widening to the app-only external plane.</extension>
+    <cost-of-doing-nothing>Every home token is rejected with IDX40001, so no workforce contact can sign in under A9 (ADR-028 A9 MUST).</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="ADR-028 A9">Accept a token on WorkforceHome only if ALL hold: signature via multitenant metadata https://login.microsoftonline.com/organizations/v2.0 with EnableAadSigningKeyIssuerValidation(); iss exactly https://login.microsoftonline.com/{tid}/v2.0 for the token's own tid (v1 sts.windows.net refused); tid in WorkforceIdentity:CustomerTenantIds read via IOptionsMonitor (empty list rejects all); tid != AzureAd:TenantId and != Ciam:TenantId; aud = stamp BFF app id (bare or api://{id}), never the Copilot audience; scp contains user_impersonation and idtyp != app; acct == "0" (missing or 1 refused). Any failure → context.Fail → 401.</constraint>
+    <constraint source="design §9">Do not replace IssuerValidator and do not set ValidIssuers; run the allowlist in OnTokenValidated after Identity Web's issuer chain. Assert in a test that signing-key issuer validation is enabled on the scheme.</constraint>
+    <constraint source="ADR-028 A9 / project hard limit">No OBO on the external plane: WorkforceHome is added to the ExternalCollaboration policy and to NO other policy. The census test pins the exact list of routes carrying ExternalCollaboration (all under /api/v1/external/*, including the three contact-side contact-grants routes the owner allowed on 2026-10-13, see notes), so any added route fails the test until reviewed.</constraint>
+    <constraint source="CLAUDE.md §10">BFF hygiene: Placement Justification line in the task notes, publish-size delta vs a fresh master build, no new HIGH CVE, no new package (Microsoft.Identity.Web and JwtBearer already referenced).</constraint>
+    <constraint source="ADR-010">The new scheme is registered inside AuthorizationModule; no new module or DI extension file.</constraint>
+    <constraint source="ADR-038">Tests are behavioural (real JwtBearer handler with locally signed tokens and stubbed metadata), not reflection on private members.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/notes/a9-bff-design.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge, read the relevant files, declare rigor/tier; run /conflict-check (BFF hot path; UAC-r2 owns adjacent files).</step>
+    <step order="1">Write the must-reject tests first (list in acceptance criteria) and the accept test; confirm they fail.</step>
+    <step order="2">Add the scheme and the OnTokenValidated allowlist in AuthorizationModule; add WorkforceHome to the ExternalCollaboration policy's AuthenticationSchemes.</step>
+    <step order="3">Add AuthenticationSchemeCensusTests: the registered scheme set equals the expected set (read the existing API-key scheme names from code); WorkforceHome appears only in ExternalCollaboration; and the routes carrying ExternalCollaboration equal a pinned list, all under /api/v1/external/*.</step>
+    <step order="4">Seeding proofs (one each): remove the tid-allowlist check → the unlisted-tid test fails; add WorkforceHome to another policy → the census test fails. Restore; record in notes.</step>
+    <step order="5">dotnet build + dotnet test (unit + ArchTests); publish-size delta; record in notes/task-045-notes.md.</step>
+    <step order="6">Two adversarial-reviewer passes; fix every F-class finding. Update TASK-INDEX + POML status; run the drift check.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any route carrying ExternalCollaboration is outside /api/v1/external/*, or is a management route a contact must not reach OTHER than the three contact-side contact-grants routes the owner allowed (notes), STOP and escalate with the route list before changing the policy (root CLAUDE.md §6).</trigger>
+    <trigger>If Identity Web's post-configurator does not enable signing-key issuer validation for a JwtBearer scheme added this way, STOP and escalate; do not hand-roll an IssuerValidator.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/DI/AuthorizationModuleWorkforceHomeTests.cs</output>
+    <output type="test">tests/Spaarke.ArchTests/AuthenticationSchemeCensusTests.cs</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r3/notes/task-045-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A valid home token (listed tid, v2 iss for that tid, stamp aud, scp user_impersonation, user idtyp, acct 0) authenticates on an /api/v1/external/* route.</criterion>
+    <criterion testable="true">Each of these returns 401 on that route: unlisted tid; empty CustomerTenantIds; Spaarke tid; CIAM tid; v1 issuer; iss/tid mismatch; acct = 1; acct missing; app-only token (idtyp app or no scp); scp without user_impersonation; wrong aud; Copilot audience; expired; signed by a key whose issuer differs.</criterion>
+    <criterion testable="true">A valid home token returns 401 on a route outside ExternalCollaboration (one workforce OBO route and /api/v1/membership).</criterion>
+    <criterion testable="true">Existing Spaarke-tenant and CIAM token tests pass unchanged.</criterion>
+    <criterion testable="true">A change to CustomerTenantIds applies without restart (IOptionsMonitor test).</criterion>
+    <criterion testable="true">The census ArchTest passes and both seeding proofs are recorded as failing-then-restored.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Design note §2, §9. Two adversarial passes (auth). UAC reviews PRs touching WorkforceIdentityOptions.cs.
+
+    Escalation resolved 2026-10-13 (owner: "045 - yes" to option A): the contact-side Grant Access routes on the ExternalCollaboration group (POST/GET /api/v1/external/contact-grants, POST /contact-grants/revoke; ContactGrantEndpoints.cs, mounted at ExternalAccessEndpoints.cs:132) stay reachable by a WorkforceHome-authenticated contact, like any contact: ContactGrantorAuthorizationFilter still applies (own organization, at or below the caller's level). The census test does NOT prove them unreachable; instead it pins the exact list of routes carrying ExternalCollaboration (these three included), so any new route on the group fails the test until reviewed. 045 ships to an environment only together with 046 (otherwise a home token reaches WorkforcePrincipalResolver's A8 create path).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

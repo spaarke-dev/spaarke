@@ -672,7 +672,8 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
                 executed = request.FetchXml;
                 return Task.FromResult(new FetchResponseDto(rows, MoreRecords: false, PagingCookie: null));
             },
-            _fixture.Data.NewService().GetNonSecureRootsAsync, NullLogger.Instance, CancellationToken.None);
+            _fixture.Data.NewService().GetNonSecureRootsAsync, _fixture.Data.NewService().NarrowDocumentsAsync,
+            NullLogger.Instance, CancellationToken.None);
 
         executed.Should().Contain("name=\"sprk_relatedproject\"").And.Contain("name=\"sprk_relatedmatter\"")
             .And.Contain("name=\"sprk_relatedworkassignment\"");
@@ -716,7 +717,7 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
             executed.Should().Contain($"name=\"{attribute}\"");
         }
         // ...and gave back none the caller did not.
-        body.Entities.Single().Keys.Should().BeEquivalentTo(new[] { "@logicalName", "sprk_documentname", "sprk_project" });
+        body.Entities.Single().Keys.Should().BeEquivalentTo(new[] { "@logicalName", "sprk_documentname", "sprk_project", "hasFile" }); // hasFile: R3 ISS-011, derived by the server
     }
 
     [Fact]
@@ -843,7 +844,7 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
             caller, fetch, new[] { DocRow("Both readable", project: RecordA, matter: RecordB) });
 
         body.Entities.Single().Keys.Should().BeEquivalentTo(
-            new[] { "@logicalName", "sprk_documentname", "sprk_project", "sprk_matter" });
+            new[] { "@logicalName", "sprk_documentname", "sprk_project", "sprk_matter", "hasFile" }); // hasFile: R3 ISS-011
     }
 
     [Fact]
@@ -890,6 +891,8 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
             },
             // Owner option B: the REAL secure-flag read over FakeDataverse (root-set queries through $select, nulls omitted).
             _fixture.Data.NewService().GetNonSecureRootsAsync,
+            // Task 188: the REAL document narrowing over the same fake.
+            _fixture.Data.NewService().NarrowDocumentsAsync,
             NullLogger.Instance, CancellationToken.None);
         return (result.Should().BeOfType<Ok<FetchResponseDto>>().Subject.Value!, executed);
     }
@@ -1039,7 +1042,8 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
                 return Task.FromResult(new FetchResponseDto(
                     ProjectThroughFetch(request.FetchXml, rows), MoreRecords: false, PagingCookie: null));
             },
-            data.GetNonSecureRootsAsync, NullLogger.Instance, CancellationToken.None, data.GetLiveParentRootsAsync);
+            data.GetNonSecureRootsAsync, data.NarrowDocumentsAsync, NullLogger.Instance, CancellationToken.None,
+            data.GetLiveParentRootsAsync);
         return (result.Should().BeOfType<Ok<FetchResponseDto>>().Subject.Value!, executed);
     }
 

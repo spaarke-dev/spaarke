@@ -2,7 +2,7 @@
   <metadata>
     <title>Cleanup-log finalize + inventory refresh</title>
     <phase>P7</phase>
-    <status>not-started</status>
+    <status>cancelled</status>
     <estimated-effort>1-2 hours</estimated-effort>
     <dependencies>006</dependencies>
     <blocks>none</blocks>

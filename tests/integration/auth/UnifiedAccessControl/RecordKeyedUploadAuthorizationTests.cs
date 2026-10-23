@@ -979,7 +979,8 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
             services.RemoveAll<IGenericEntityService>();
             services.AddSingleton(BuildRows());
 
-            // SCOPED: SpeFileStore's constructor dependencies are scoped (see ShareLinkTestFixture for the trap).
+            // SCOPED: SpeFileStore's constructor dependencies are scoped, so a singleton factory would get the ROOT
+            // provider and throw resolving them — a 500 on the allowed path only, while the denial tests stay green.
             services.RemoveAll<SpeFileStore>();
             services.AddScoped<SpeFileStore>(sp => new RecordingSpeFileStore(sp, Uploads, Conflicts, Deleted));
 

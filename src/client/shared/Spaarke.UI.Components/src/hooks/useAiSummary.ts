@@ -439,8 +439,9 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
               return;
             }
 
-            // Handle streaming text content (type="chunk")
-            if (chunk.type === 'chunk' || chunk.content) {
+            // Handle streaming text content. Only type="chunk" is summary text — "progress"
+            // chunks also carry `content` (a status line such as "Extracting document text…").
+            if (chunk.type === 'chunk') {
               accumulatedSummary += chunk.content || '';
               updateDocument(documentId, { summary: accumulatedSummary });
             }

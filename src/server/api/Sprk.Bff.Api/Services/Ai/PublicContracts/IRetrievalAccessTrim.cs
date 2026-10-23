@@ -11,11 +11,18 @@ namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 /// tools (Document Search, Document Discovery, Knowledge Retrieval), playbook retrieval and Insights search handed the
 /// model and the citations the text of documents on secure, Restricted and No Access records.</para>
 /// <para><b>How it decides.</b> One read of the page's distinct document ids against <c>sprk_documents</c> through
-/// <see cref="Infrastructure.Dataverse.IDataverseUserClient"/> (user OBO, no app-only path), at most
-/// <see cref="RetrievalAccessTrim.MaxIdsPerRead"/> ids per read. Dataverse returns exactly the rows the caller can Read;
+/// <see cref="Infrastructure.Dataverse.IDataverseUserClient"/> (user OBO; the only app-only read is the external narrowing
+/// below), at most <see cref="RetrievalAccessTrim.MaxIdsPerRead"/> ids per read. Dataverse returns exactly the rows the caller can Read;
 /// No Access walls are enforced by revoking shares, so the native read reflects them. One round trip per page replaced
 /// the per-document <c>IAiAuthorizationService</c> loop (about 360 ms per cold document, measured on dev; owner decision
 /// 2026-10-09, option B).</para>
+/// <para><b>External callers</b> (unified-access-control-r2 task 188 round 3, D7 T7). Dataverse Read is not enough for a
+/// caller who is not an internal systemuser: after the Read check, every readable DOCUMENT key (by id, or by drive item
+/// through the document rows the caller's read returned on that item) also passes THE external document narrowing
+/// (<see cref="Infrastructure.ExternalAccess.AppOnlyDocumentNarrowing"/>: own or ancestor Restricted, or an internal-only or
+/// non-Open communication, hides it). The narrowing reads app-only and can only hide what the caller's own read returned.
+/// Parent-record keys are not narrowed. A failed externality lookup applies the narrowing; a failed narrowing withholds
+/// the document keys only.</para>
 /// <para><b>Fail closed.</b> No declared caller, no request principal, or a request principal that is not the declared
 /// caller: no rows (<see cref="RetrievalTrimOutcome.NoVerifiedCaller"/>). A row without a parseable document id is
 /// dropped. A read that fails for any reason (no token, OBO failure, 4xx/5xx, 429, malformed body): no rows
@@ -73,7 +80,7 @@ public sealed record RetrievalRecordKey
         };
 
     private const string DocumentSet = "sprk_documents";
-    private const string DocumentIdField = "sprk_documentid";
+    internal const string DocumentIdField = "sprk_documentid";
     private const string DriveItemIdField = "sprk_driveitemid";
 
     internal RetrievalRecordKey(string entitySetName, string keyField, string value)
@@ -129,6 +136,16 @@ public sealed record RetrievalRecordKey
     internal static bool IsGuidKey(string entitySet, string keyField) =>
         !(string.Equals(entitySet, DocumentSet, StringComparison.Ordinal)
           && string.Equals(keyField, DriveItemIdField, StringComparison.Ordinal));
+
+    /// <summary>A <see cref="Document"/> key: a <c>sprk_document</c> by id (task 188 round 3: narrowed for an external caller).</summary>
+    internal static bool IsDocumentIdKey(string entitySet, string keyField) =>
+        string.Equals(entitySet, DocumentSet, StringComparison.Ordinal)
+        && string.Equals(keyField, DocumentIdField, StringComparison.Ordinal);
+
+    /// <summary>A <see cref="DocumentByDriveItem"/> key (task 188 round 3: narrowed through the document rows on the item).</summary>
+    internal static bool IsDriveItemKey(string entitySet, string keyField) =>
+        string.Equals(entitySet, DocumentSet, StringComparison.Ordinal)
+        && string.Equals(keyField, DriveItemIdField, StringComparison.Ordinal);
 
     /// <summary>The canonical form of a value Dataverse returned for <paramref name="keyField"/>.</summary>
     internal static string? Canonical(string entitySet, string keyField, string? value) =>

@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="059" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>Dev Entra + settings setup for A9 (multitenant SPA client, dev BFF app, Dewey Cheatham consent, BFF settings) — live, owner-gated</title>
+    <phase>4b A9 workforce home sign-in</phase>
+    <gate>after 044; every live step needs the owner's approval of the exact command and its rollback</gate>
+    <status>in-progress</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Live configuration with a written record; no code</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prescriptive configuration steps with commands and rollbacks fixed by the design</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>live, owner-gated</parallel-reason>
+    <deps>044</deps>
+    <tags>deploy, azure, auth, config</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Prepare and, step by step with the owner's approval, apply design note §8 steps 2–4 on dev, recording read-before, command, read-after and rollback for each.</prompt>
+  <role>SPAARKE platform developer. Entra app registration and Azure App Service configuration. Follow ADRs strictly.</role>
+  <goal>notes/task-059-dev-setup-record.md shows, per step, the masked read-before, the approved command, the read-after and the rollback for: the multitenant SPA client; the dev BFF app 1e40baad changes; removeUnverifiedEmailClaim; admin consent in bc3aa7f4; WorkforceIdentity:CustomerTenantIds and ExternalAccess:CustomerBusinessUnitId on spaarke-bff-dev.</goal>
+
+  <context>
+    <background>Design note §8, §9 (removeUnverifiedEmailClaim), §12 (Teams redirect). Owner decision §11 item 4: dev setup approved step by step with commands and rollback shown first. Spaarke tenant a221a95e; Dewey Cheatham home directory bc3aa7f4; dev BFF app 1e40baad; SWA https://green-dune-0c4f1221e.7.azurestaticapps.net/; BU1 cb15f587-baa0-f111-aaac-000d3a99d1d7. Provisioning owns the production equivalents (their A9 mapping note items 5–7).</background>
+    <relevant-files>
+      <file role="new-artifact">projects/spaarke-SPA-external-access-platform-r3/notes/task-059-dev-setup-record.md</file>
+      <file role="canonical-reference">projects/spaarke-SPA-external-access-platform-r3/notes/task-040-spa-dev-deploy-plan.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §9 / project security directives">Read-only commands are shown before they run; every live change is approved by the owner with its rollback first. No client secret or certificate is created on any app. No stamp identity gets User.Invite.All. Secrets and tokens are never printed.</constraint>
+    <constraint source="design §8.2">New app "Spaarke Workforce SPA" in the Spaarke tenant: signInAudience AzureADMultipleOrgs; SPA redirects = the SWA origin, https://green-dune-0c4f1221e.7.azurestaticapps.net/auth-callback.html (the 058 silent retry and the 075 popup land there), http://localhost:{dev port} and its /auth-callback.html, and brk-multihub://green-dune-0c4f1221e.7.azurestaticapps.net (Teams NAA, design §12; task 076); delegated permission api://1e40baad/user_impersonation; authenticationBehaviors.removeUnverifiedEmailClaim = true.</constraint>
+    <constraint source="design §8.2">Dev BFF app 1e40baad: signInAudience AzureADMultipleOrgs; requestedAccessTokenVersion 2 (read first; may already be 2); knownClientApplications += the new client id; removeUnverifiedEmailClaim = true; acct optional claim present (read; add only if missing).</constraint>
+    <constraint source="design §8.3">Admin consent in bc3aa7f4 is done by that directory's admin (the owner); this task only produces the consent URL and verifies the enterprise app afterwards.</constraint>
+    <constraint source="design §8.4">spaarke-bff-dev settings: WorkforceIdentity__CustomerTenantIds includes bc3aa7f4 (read the current value first; append, never replace), ExternalAccess__CustomerBusinessUnitId = BU1. Rollback = the previous values.</constraint>
+    <constraint source="design §9">If removeUnverifiedEmailClaim is only on the Graph beta endpoint, use beta and record it (provisioning asked).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/notes/a9-bff-design.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load knowledge; declare rigor/tier.</step>
+    <step order="1">Write the full plan into the record (every read, change and rollback command, masked) and show it to the owner.</step>
+    <step order="2">Run the read-only reads after approval; record.</step>
+    <step order="3">Create the multitenant SPA client (owner-approved); read back.</step>
+    <step order="4">Change 1e40baad (owner-approved); read back.</step>
+    <step order="5">Give the owner the bc3aa7f4 admin-consent URL; after consent, verify the enterprise app and grant there (read-only, owner's sign-in).</step>
+    <step order="6">Set the two BFF settings (owner-approved); read back; confirm /healthz 200.</step>
+    <step order="7">Give the new client id to the GitHub environment external-spa-dev variable used by 058 (owner-approved).</step>
+    <step order="7b">Set external-spa-dev VITE_BACKENDS (owner-approved; read the current VITE_BFF_API_URL, VITE_MSAL_BFF_SCOPE and VITE_TEAMS_MSAL_BFF_SCOPE first). Without it every A9 company-account sign-in, browser and Teams, shows "not set up": the one-entry VITE_BFF_API_URL fallback carries no homeTenantIds (backend-selection.ts resolveHomeBackendSelection), and neither workflow preflight checks this (task 076 review). Value: one entry {"customerKey":"default","displayName":…,"bffBaseUrl":"https://spaarke-bff-dev.azurewebsites.net","bffAppId":"{the app id in VITE_TEAMS_MSAL_BFF_SCOPE, 1e40baad…}","ciamBffAppId":"{the app id in VITE_MSAL_BFF_SCOPE}","homeTenantIds":["bc3aa7f4-…"]}. customerKey "default" keeps the key the fallback used; ciamBffAppId is required, or the CIAM plane would request the workforce app (AADSTS500207). Rollback: delete VITE_BACKENDS (the fallback returns). Then redeploy the SPA with deploy-external-spa.yml (owner-approved), which 074 needs anyway.</step>
+    <step order="8">Update TASK-INDEX + POML status; drift check.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If changing 1e40baad's signInAudience is refused or would affect another dev surface's sign-in (read its other clients first), STOP and escalate.</trigger>
+    <trigger>If the dev BFF app has a credential type that would make it a confidential multitenant app with secrets, STOP and escalate (no new secret rule).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="az">Entra and App Service reads/changes (owner-approved)</tool>
+    <tool name="gh">GitHub environment variable (owner-approved)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r3/notes/task-059-dev-setup-record.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The record shows every step with read-before, approved command, read-after and rollback, with ids masked to 8 characters and no secret or token value.</criterion>
+    <criterion testable="true">The multitenant client exists with the origin, /auth-callback.html and brk-multihub redirects (plus localhost), the delegated permission and removeUnverifiedEmailClaim true.</criterion>
+    <criterion testable="true">1e40baad reads back AzureADMultipleOrgs, token version 2, knownClientApplications containing the client, removeUnverifiedEmailClaim true, acct optional claim present.</criterion>
+    <criterion testable="true">The enterprise app exists in bc3aa7f4 with admin consent.</criterion>
+    <criterion testable="true">spaarke-bff-dev has both settings with previous CustomerTenantIds entries kept; /healthz returns 200.</criterion>
+    <criterion testable="true">external-spa-dev has VITE_WORKFORCE_HOME_MSAL_CLIENT_ID = the new client and VITE_BACKENDS = one entry with customerKey "default", bffAppId (workforce), ciamBffAppId (CIAM) and homeTenantIds containing bc3aa7f4; a CIAM sign-in still reaches the CIAM app after the change.</criterion>
+    <criterion testable="true">No live change ran without the owner's approval.</criterion>
+  </acceptance-criteria>
+
+  <notes>Design note §8/§11.4/§12. Production: provisioning items 5–7.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

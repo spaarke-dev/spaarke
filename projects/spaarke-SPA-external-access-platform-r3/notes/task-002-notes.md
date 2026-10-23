@@ -355,3 +355,18 @@ Invoke-RestMethod -Method Patch -Headers ($h + @{ 'Content-Type' = 'application/
 
 - Read: the POML, the project and root CLAUDE.md, `docs/data-model/json-field-schemas.md` §12, the six widget files, `GridWidgetBody.tsx`, the six default views, `ExternalAccessModule.cs`, `ExternalModuleColumnAllowListTests.cs`, `ExternalModuleRegistry.cs`, `DataGridConfiguration.ts`, `configResolution.ts`, `DataGrid.tsx` (renderers), `FetchService.cs`, UAC-r2 notes 134 and 157, R2 notes (grid diagnosis, 028), R3 task 050 notes, the dataverse-deploy skill.
 - No Dataverse call of any kind (no MCP, no Web API, no `pac`). No git history or stash command. No file other than this one was created or changed.
+
+## Live capture 2026-10-20 (owner OK'd the read-only read; Dataverse MCP read_query on dev)
+
+The six `sprk_gridconfiguration` records as they are live today. This supersedes the §2 snapshot; it is the rollback baseline for any 002 change.
+
+| Tab | Record (modifiedon) | Visible columns (layoutXml order, width, label/renderer) | Selected in fetchXml but hidden | Order |
+|---|---|---|---|---|
+| Projects | `61711823…` (2026-08-07) | Name 220 · Number 140 · Status 120 (badge) · Last Activity = modifiedon 140 (date) | — | name asc |
+| Matters | `583a2a33…` (2026-08-10) | Name 240 · Number 150 · Status 120 (badge) | — | name asc |
+| Work Assignments | `42f4102c…` (2026-08-06) | Number 160 · Priority 110 (badge) · Response Due 140 (date) · Status 120 (badge) | sprk_regardingproject | response due asc |
+| Documents | `3af4102c…` (2026-08-12) | Name 260 · Type 150 (badge) · Created 140 (date) | sprk_project, sprk_matter, sprk_workassignment | created desc |
+| Invoices | `3ff4102c…` (2026-10-17) | Number 160 · Invoice Date 130 (date) · Status = statuscode 130 (badge) · Total = sprk_totalamount 140 (currency, right) | sprk_project, sprk_matter | invoice date desc |
+| Service Requests | `403e5d37…` (2026-08-12) | Number 150 · Name 280 · Status 120 (badge) · Submitted = createdon 140 (date) | sprk_requestedby | created desc |
+
+All six records: `source.type = inline`; row open = formDialog; command bar shows Refresh and Export to Excel only (no New, Delete, Edit columns or Edit filters); page size 25 (Projects, Matters, WA) or 250 (others). Every visible column is on the server allow-list (Invoices `statuscode` was added 2026-10-17, ebilling D-41).

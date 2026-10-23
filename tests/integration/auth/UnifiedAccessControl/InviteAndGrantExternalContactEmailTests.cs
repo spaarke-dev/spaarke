@@ -69,7 +69,7 @@ public class InviteAndGrantExternalContactEmailTests
     private Task<IResult> InviteAndGrant(ExternalAccessLevel level = ExternalAccessLevel.Collaborate) =>
         InviteAndGrantExternalUserEndpoint.InviteAndGrantAsync(
             new InviteExternalUserRequest(Email, Guid.Empty, (int)level, "Pat", "Partner", null, null, "matter", _matter),
-            _h.Grants, _h.Participations, _h.AccessibleRecords, new EverythingProbe(),
+            _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new EverythingProbe(),
             _ciam, _h.Emails, IdentityBindingTestKit.Binder(_h.Identities),
             new ConfigurationBuilder()
                 .AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = "https://external.test" })

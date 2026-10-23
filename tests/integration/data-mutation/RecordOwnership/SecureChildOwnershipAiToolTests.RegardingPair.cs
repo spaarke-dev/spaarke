@@ -529,6 +529,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _user.UnreadableRows.Add(unreadable);
         _user.NoAppendTo.Add(unappendable);
         var appOnlyReads = new Moq.Mock<IGenericEntityService>(Moq.MockBehavior.Strict); // any app-only read fails the test
+        var (visibility, visibilityAccessor) = new Sprk.Bff.Api.Tests.TestInfrastructure.CommunicationVisibilityFixtures().Build();
         var handler = new EmailDraftToolHandler(
             _user, Moq.Mock.Of<Sprk.Bff.Api.Services.Ai.PublicContracts.IEmailDraftAi>(),
             new Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver(
@@ -536,7 +537,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
                 Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.ProbeReturning(
                     Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.AllRootColumns),
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver>.Instance),
-            CreateLogger<EmailDraftToolHandler>(), _world.Resolver(), _appOnly.Object);
+            CreateLogger<EmailDraftToolHandler>(), _world.Resolver(), _appOnly.Object, visibility, visibilityAccessor);
 
         Task<ToolResult> Draft(Guid invoice) => handler.ExecuteChatAsync(
             BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new
@@ -568,10 +569,11 @@ public sealed partial class SecureChildOwnershipAiToolTests
         // The control: the caller may append to the invoice — its ancestry is derived (here: none) and the draft is created.
         var invoice = Guid.Parse("a2470000-0000-4000-8000-0000000000e4");
         _world.WithRecord("sprk_invoice", invoice, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        var (visibility, visibilityAccessor) = new Sprk.Bff.Api.Tests.TestInfrastructure.CommunicationVisibilityFixtures().Build();
         var handler = new EmailDraftToolHandler(
             _user, Moq.Mock.Of<Sprk.Bff.Api.Services.Ai.PublicContracts.IEmailDraftAi>(),
             Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
-            CreateLogger<EmailDraftToolHandler>(), _world.Resolver(), _appOnly.Object);
+            CreateLogger<EmailDraftToolHandler>(), _world.Resolver(), _appOnly.Object, visibility, visibilityAccessor);
 
         var result = await handler.ExecuteChatAsync(
             BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new

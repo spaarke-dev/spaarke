@@ -33,7 +33,8 @@ import { isApiError, isAuthFailure } from '../../../utils/thrownFetchError';
  */
 function requestFailure(action: string, err: unknown): Error {
   if (isApiError(err)) return new Error(`${action} (${err.status}): ${err.message}`);
-  if (isAuthFailure(err)) return new Error(`${action} (401): ${err instanceof Error ? err.message : 'sign-in required'}`);
+  if (isAuthFailure(err))
+    return new Error(`${action} (401): ${err instanceof Error ? err.message : 'sign-in required'}`);
   return err instanceof Error ? err : new Error(action);
 }
 
@@ -294,6 +295,14 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
   }, []);
 
   /**
+   * Insert a message immediately before the last one (or append to an empty history).
+   * Used for injected messages while a streaming reply occupies the last position.
+   */
+  const insertMessageBeforeLast = useCallback((message: IChatMessage) => {
+    setMessages(prev => (prev.length === 0 ? [message] : [...prev.slice(0, -1), message, prev[prev.length - 1]]));
+  }, []);
+
+  /**
    * Update the metadata of the last message in history (Phase 2F).
    * Used to set plan_preview metadata after a plan_preview SSE event and to update
    * plan step statuses during plan execution streaming.
@@ -361,6 +370,7 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
     deleteSession,
     addMessage,
     updateLastMessage,
+    insertMessageBeforeLast,
     updateLastMessageMetadata,
     updateMessageMetadataAt,
   };

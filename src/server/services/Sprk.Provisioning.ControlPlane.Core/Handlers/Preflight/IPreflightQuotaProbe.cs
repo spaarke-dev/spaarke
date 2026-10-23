@@ -1,14 +1,14 @@
 // -----------------------------------------------------------------------------
 // IPreflightQuotaProbe.cs
 //
-// Abstraction over one of the four H0 preflight quota checks. One probe
+// Abstraction over one of the three H0 preflight quota checks. One probe
 // implementation per underlying data source; H0PreflightHandler injects an
 // IEnumerable<IPreflightQuotaProbe> and orchestrates them in parallel.
 //
 // DESIGN CHOICE (SDK/REST, not shell-out — task 120, Wave G-2):
 //   The concrete production implementations —
 //   <see cref="ArmCognitiveServicesTpmProbe"/>,
-//   <see cref="ArmComputeVCpuProbe"/>, <see cref="ArmOpenAiPinFreshnessProbe"/> and
+//   <see cref="ArmOpenAiPinFreshnessProbe"/> and
 //   <see cref="SpeOwnerCredentialProbe"/> (task 248; replaced KeyVaultCertBootstrapProbe) — are pure .NET SDK/REST calls
 //   under the L2 UAMI (Option D hybrid per DS-1b §1 H0 row); the SPE probe signs in
 //   as the container type's owning app through the UAMI's federated credential. They REPLACE the original shell-out
@@ -25,7 +25,7 @@
 //   escape hatch (ADR-038 path #1: pure C# unit test — no external calls).
 //
 // SEAM JUSTIFICATION (ADR-010):
-//   ≥2 implementations exist from day 1: the four production SDK/REST probes
+//   ≥2 implementations exist from day 1: the three production SDK/REST probes
 //   AND the test-only stub probe defined per-test (see H0PreflightHandlerTests.cs's
 //   FakeProbe). That satisfies the "genuine seam" bar in ADR-010 for keeping
 //   <see cref="IPreflightQuotaProbe"/> as an interface rather than a concrete
@@ -37,7 +37,7 @@ using System.Collections.Generic;
 namespace Sprk.Provisioning.ControlPlane.Handlers.Preflight;
 
 /// <summary>
-/// Executes ONE of the four H0 preflight quota / readiness checks against
+/// Executes ONE of the three H0 preflight quota / readiness checks against
 /// the underlying Azure / PAC / KV data source. Returns a typed
 /// <see cref="PreflightCheckResult"/>; never throws on the domain-check
 /// path — a failed check IS a Pass=false result, not an exception.

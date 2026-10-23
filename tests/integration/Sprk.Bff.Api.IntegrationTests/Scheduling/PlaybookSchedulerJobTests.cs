@@ -425,6 +425,7 @@ internal sealed class FakeGenericEntityService : IGenericEntityService
         return Task.FromResult(ec);
     }
 
+    public Task UpdateIfRowVersionMatchesAsync(string entityLogicalName, Guid id, string rowVersion, Dictionary<string, object> fields, CancellationToken ct = default) => throw new NotSupportedException();
     public Task UpdateAsync(string entityLogicalName, Guid id, Dictionary<string, object> fields, CancellationToken ct = default)
     {
         UpdateCalls.Add(new UpdateCall(entityLogicalName, id, new Dictionary<string, object>(fields)));

@@ -2,7 +2,7 @@
   <metadata>
     <title>Shared lib @types/react peerDep declaration (PR-D1)</title>
     <phase>P4</phase>
-    <status>not-started</status>
+    <status>cancelled</status>
     <estimated-effort>2-4 hours</estimated-effort>
     <dependencies>003</dependencies>
     <blocks>005</blocks>

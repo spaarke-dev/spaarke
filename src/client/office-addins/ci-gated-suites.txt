@@ -149,8 +149,8 @@ shared/taskpane/hooks/__tests__/useFindRecordMatches.test.tsx
 # variant hides nothing. Seeded both ways.
 packaging/__tests__/mergeUnifiedManifest.test.ts
 # --- Send Email via Outlook (task 036, FR-15) - green from creation -----------
-# Pins: the document link is minted only through the existing share-link route
-# (no expiry override), a failed mint opens no compose window, the record link
+# Pins (task 036, superseded by task 096): the document link is the Spaarke record
+# link — no sharing link (the BFF share-link route was retired 2026-10-16, #1350), the record link
 # reuses 027's URL builder, and Word reports the capability absent.
 shared/adapters/__tests__/OutlookAdapter.composeEmail.test.ts
 shared/adapters/__tests__/WordAdapter.composeEmail.test.ts

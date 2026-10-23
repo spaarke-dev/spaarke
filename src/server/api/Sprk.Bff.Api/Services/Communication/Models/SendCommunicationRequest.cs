@@ -117,9 +117,22 @@ public sealed record SendCommunicationRequest
     /// is satisfied by the Dataverse stamp alone — ACS-thread-session reuse (posting into the SAME ACS chat
     /// thread for live delivery) is explicitly out of scope for R1 (deferred to R2). Also honored on Email
     /// sends (R3 FR-19): the outbound resolver pins the email to this thread (<c>AssignExplicitThreadAsync</c>)
-    /// instead of find-or-create — same send path, not a new branch. Optional.
+    /// instead of find-or-create — same send path, not a new branch. When the request carries no association of its own, the
+    /// new row inherits the thread's typed regarding lookup (task 065 fix round 2) so the record's external read sees it. Optional.
     /// </summary>
     public Guid? ThreadId { get; init; }
+
+    /// <summary>
+    /// The sender's "Internal only" choice (spaarke-SPA-external-access-platform-r3 task 065, owner 2026-10-13, fix round 2
+    /// 2026-10-14). The persisted <c>sprk_communication.sprk_isinternalonly</c> is ALWAYS written explicitly, for every
+    /// communication type: this value when present, otherwise <c>false</c> (a filed email or message is partner-visible by
+    /// default). The one exception is a send into a <see cref="ThreadId"/> that is not explicitly Open: a Private or
+    /// unreadable thread is ALWAYS written <c>true</c>, even when this value is <c>false</c>, so no client toggle can
+    /// publish a Private-thread item to partners. An explicitly Open thread keeps this value, else <c>false</c>. The
+    /// external read hides a row whose flag is unset, so an implicit value would hide every message from external
+    /// participants. Optional.
+    /// </summary>
+    public bool? IsInternalOnly { get; init; }
 
     /// <summary>
     /// Task 185 (owner round 98 Q4): the system-mail (secret-bearing) send option, or <c>null</c> for a normal send (the

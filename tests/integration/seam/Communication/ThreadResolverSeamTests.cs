@@ -128,8 +128,12 @@ public class ThreadResolverSeamTests
         var reparent = _ownership.Reparents.Should().ContainSingle().Which;
         reparent.EntityLogicalName.Should().Be("sprk_communication");
         reparent.RecordId.Should().Be(commId);
-        reparent.InheritedParents.Should().ContainSingle()
-            .Which.Should().Be(new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_matter", matterId));
+        // #2143 round 6: the join names the thread it writes; the resolver files the message under the thread's own filing
+        // (RecordThreadFiling), so the join passes no inherited parent of its own.
+        reparent.InheritedParents.Should().BeEmpty();
+        reparent.ParentChanges.Should().ContainKey("sprk_communicationthread")
+            .WhoseValue.Should().Be(new Microsoft.Xrm.Sdk.EntityReference("sprk_communicationthread", recordThreadId));
+        reparent.AttachColumns.Should().Equal("sprk_communicationthread");
         updates.Should().ContainSingle("the assignment is the reparent's change");
     }
 

@@ -9,7 +9,7 @@
 //   external processes).
 //
 // COVERAGE (POML acceptance criteria mapping):
-//   AC-1  Happy path — Success + Cosmos advances to H12c + H12c enqueued
+//   AC-1  Happy path — Success + Cosmos records H12b complete (no H12c dispatch; reconciler chains)
 //   AC-2  HandleAsync uses IAppConfigSeeder registry (contract, not manifest scope filter)
 //   AC-3  Idempotency key = h12b-{customerId}-{manifestHash}; second call is durable no-op
 //   AC-4  Reconciler DAG parallel-fires H12a + H12b — verified by DagAdvancer test (owned by task 058); H12b's own contract is DAG-position independent
@@ -27,7 +27,6 @@
 //   - Manifest not found (the reader's NotFound) → Failure(Resumable, ManifestNotFound)
 //   - Task 253: the idempotency key's manifestHash is the shared ISeedManifestReader's content hash
 //   - Optimistic-concurrency race on success write → Failure(Resumable, ConcurrentWriteConflict)
-//   - Enqueue failure → still returns Success (reconciler re-emits)
 //   - Seeder throws unexpected exception → Failure(Resumable, SeederInfrastructureError)
 //   - Idempotency-key format determinism (customerId → single key given constant manifestHash)
 //   - Deferred seeders roll into Success outcome, NOT Failed
@@ -60,17 +59,16 @@ public sealed class H12bAppConfigSeedHandlerTests
     // ---------- AC-1 Happy path ----------
 
     [Fact]
-    public async Task AC1_HappyPath_ReturnsSuccessAndEnqueuesH12c()
+    public async Task AC1_HappyPath_ReturnsSuccess_RecordsH12bComplete_AndDoesNotChainH12c()
     {
         var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-1");
-        var enqueuer = new FakeEnqueuer();
         var seeders = new IAppConfigSeeder[]
         {
             FakeSeeder.Ok(AppConfigSeedScopes.DataGrid),
             FakeSeeder.Ok(AppConfigSeedScopes.WorkspaceLayout),
         };
-        var handler = NewHandler(repo, enqueuer, seeders);
+        var handler = NewHandler(repo, seeders);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -81,15 +79,10 @@ public sealed class H12bAppConfigSeedHandlerTests
         seeders.OfType<FakeSeeder>().Should().OnlyContain(s => s.CallCount == 1);
 
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Running);
-        repo.LastWrittenRun.CurrentPhase.Should().Be(H12bAppConfigSeedHandler.DownstreamHandlerId);
+        repo.LastWrittenRun.CurrentPhase.Should().Be(H12bAppConfigSeedHandler.HandlerIdentifier,
+            "T186 L19: H12b records itself; the reconciler dispatches H12c once H12a + H12b + H2a are done.");
         repo.LastWrittenRun.CompletedPhases.Should().ContainSingle(cp => cp.Phase == H12bAppConfigSeedHandler.HandlerIdentifier);
         repo.LastWrittenRun.GateStates.Should().ContainKey(AppConfigSeedGates.AppConfigSeeded);
-
-        enqueuer.Sent.Should().ContainSingle();
-        var next = enqueuer.Sent[0];
-        next.HandlerId.Should().Be(H12bAppConfigSeedHandler.DownstreamHandlerId);
-        next.RunId.Should().Be(RunId);
-        next.CustomerId.Should().Be(CustomerId);
     }
 
     // ---------- AC-2 Uses seeder registry (all invoked, sequential) ----------
@@ -99,7 +92,6 @@ public sealed class H12bAppConfigSeedHandlerTests
     {
         var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-1");
-        var enqueuer = new FakeEnqueuer();
         var callOrder = new List<string>();
         var seeders = new IAppConfigSeeder[]
         {
@@ -108,7 +100,7 @@ public sealed class H12bAppConfigSeedHandlerTests
             new FakeSeeder(AppConfigSeedScopes.FieldMapping, () => { callOrder.Add(AppConfigSeedScopes.FieldMapping); return AppConfigSeederResult.Deferred("deferred"); }),
             new FakeSeeder(AppConfigSeedScopes.ChartDefinition, () => { callOrder.Add(AppConfigSeedScopes.ChartDefinition); return AppConfigSeederResult.Deferred("deferred"); }),
         };
-        var handler = NewHandler(repo, enqueuer, seeders);
+        var handler = NewHandler(repo, seeders);
 
         await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -135,9 +127,8 @@ public sealed class H12bAppConfigSeedHandlerTests
             JobId = "prior-job",
         });
         var repo = new FakeRepository(run, etag: "etag-1");
-        var enqueuer = new FakeEnqueuer();
         var seeder = FakeSeeder.Ok(AppConfigSeedScopes.DataGrid);
-        var handler = NewHandler(repo, enqueuer, new IAppConfigSeeder[] { seeder });
+        var handler = NewHandler(repo, new IAppConfigSeeder[] { seeder });
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -145,7 +136,6 @@ public sealed class H12bAppConfigSeedHandlerTests
             .Which.IdempotencyKey.Should().Be(expectedKey);
         seeder.CallCount.Should().Be(0, "durable no-op MUST NOT invoke any seeder.");
         repo.WriteCount.Should().Be(0, "durable no-op MUST NOT rewrite Cosmos.");
-        enqueuer.Sent.Should().BeEmpty("durable no-op MUST NOT re-enqueue H12c.");
     }
 
     [Fact]
@@ -169,7 +159,7 @@ public sealed class H12bAppConfigSeedHandlerTests
             JobId = RunId,
         });
         var seeder = FakeSeeder.Ok(AppConfigSeedScopes.DataGrid);
-        var handler = NewHandlerWithReader(new FakeRepository(run, "etag-edit"), new FakeEnqueuer(), new[] { seeder },
+        var handler = NewHandlerWithReader(new FakeRepository(run, "etag-edit"), new[] { seeder },
             FakeSeedManifestReader.WithHash("aa11" + _expectedManifestHash[4..]));
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
@@ -185,14 +175,13 @@ public sealed class H12bAppConfigSeedHandlerTests
     {
         var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-1");
-        var enqueuer = new FakeEnqueuer();
         var seeders = new IAppConfigSeeder[]
         {
             FakeSeeder.Ok(AppConfigSeedScopes.DataGrid),
             new FakeSeeder(AppConfigSeedScopes.WorkspaceLayout, () =>
                 AppConfigSeederResult.Failed("Deploy-SystemWorkspaceLayouts.ps1 exited 1: az token acquisition failed")),
         };
-        var handler = NewHandler(repo, enqueuer, seeders);
+        var handler = NewHandler(repo, seeders);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -205,7 +194,6 @@ public sealed class H12bAppConfigSeedHandlerTests
             "rolled-up diagnostic MUST carry the seeder's own diagnostic string.");
 
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
-        enqueuer.Sent.Should().BeEmpty("no H12c enqueue on H12b failure.");
     }
 
     // ---------- AC-6 Structural negative: no AI scope in registry ----------
@@ -240,9 +228,8 @@ public sealed class H12bAppConfigSeedHandlerTests
         var run = BuildRun();
         run.Parameters.NonSecret.Remove("tenantId"); // §4D I1 — no fallback allowed.
         var repo = new FakeRepository(run, etag: "etag-1");
-        var enqueuer = new FakeEnqueuer();
         var seeder = FakeSeeder.Ok(AppConfigSeedScopes.DataGrid);
-        var handler = NewHandler(repo, enqueuer, new IAppConfigSeeder[] { seeder });
+        var handler = NewHandler(repo, new IAppConfigSeeder[] { seeder });
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -251,7 +238,6 @@ public sealed class H12bAppConfigSeedHandlerTests
         failure.RejectionCode.Should().Be(AppConfigSeedRejectionCodes.MissingTenantId);
 
         seeder.CallCount.Should().Be(0, "no seeder may fire against a default-tenant fallback (§4D I1).");
-        enqueuer.Sent.Should().BeEmpty();
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
     }
 
@@ -263,9 +249,8 @@ public sealed class H12bAppConfigSeedHandlerTests
         var run = BuildRun();
         run.InterStepState.DataverseEnvUrl = null; // H5's output not recorded on this run.
         var repo = new FakeRepository(run, etag: "etag-1");
-        var enqueuer = new FakeEnqueuer();
         var seeder = FakeSeeder.Ok(AppConfigSeedScopes.DataGrid);
-        var handler = NewHandler(repo, enqueuer, new IAppConfigSeeder[] { seeder });
+        var handler = NewHandler(repo, new IAppConfigSeeder[] { seeder });
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -279,9 +264,8 @@ public sealed class H12bAppConfigSeedHandlerTests
     {
         var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-1");
-        var enqueuer = new FakeEnqueuer();
         var seeder = FakeSeeder.Ok(AppConfigSeedScopes.DataGrid);
-        var handler = NewHandler(repo, enqueuer, new IAppConfigSeeder[] { seeder });
+        var handler = NewHandler(repo, new IAppConfigSeeder[] { seeder });
 
         await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -295,8 +279,7 @@ public sealed class H12bAppConfigSeedHandlerTests
     public async Task RunNotFound_ReturnsFailure_RunNotFound()
     {
         var repo = new FakeRepository(runOrNull: null);
-        var enqueuer = new FakeEnqueuer();
-        var handler = NewHandler(repo, enqueuer, Array.Empty<IAppConfigSeeder>());
+        var handler = NewHandler(repo, Array.Empty<IAppConfigSeeder>());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -311,7 +294,6 @@ public sealed class H12bAppConfigSeedHandlerTests
     {
         var handler = NewHandler(
             new FakeRepository(BuildRun(), "etag-1"),
-            new FakeEnqueuer(),
             Array.Empty<IAppConfigSeeder>());
         var wrongEnvelope = new HandlerEnvelope
         {
@@ -334,8 +316,7 @@ public sealed class H12bAppConfigSeedHandlerTests
     public async Task ManifestNotFound_ReturnsFailure_ManifestNotFound_NoCosmosRead()
     {
         var repo = new FakeRepository(BuildRun(), "etag-1");
-        var enqueuer = new FakeEnqueuer();
-        var handler = NewHandlerWithReader(repo, enqueuer, Array.Empty<IAppConfigSeeder>(),
+        var handler = NewHandlerWithReader(repo, Array.Empty<IAppConfigSeeder>(),
             FakeSeedManifestReader.Missing("embedded resource 'seed manifest'"));
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
@@ -357,33 +338,13 @@ public sealed class H12bAppConfigSeedHandlerTests
         {
             NextReplaceResult = new ReplaceRunResult.Conflict(new ProvisioningRunReadResult(winningRun, "etag-2")),
         };
-        var enqueuer = new FakeEnqueuer();
         var seeders = new IAppConfigSeeder[] { FakeSeeder.Ok(AppConfigSeedScopes.DataGrid) };
-        var handler = NewHandler(repo, enqueuer, seeders);
+        var handler = NewHandler(repo, seeders);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.RejectionCode.Should().Be(AppConfigSeedRejectionCodes.ConcurrentWriteConflict);
-        enqueuer.Sent.Should().BeEmpty("no H12c enqueue when the success write LOST the ETag race.");
-    }
-
-    // ---------- Defensive: Enqueue failure still returns Success ----------
-
-    [Fact]
-    public async Task EnqueueFailure_StillReturnsSuccess_ReconcilerReEmits()
-    {
-        var run = BuildRun();
-        var repo = new FakeRepository(run, etag: "etag-1");
-        var enqueuer = new FakeEnqueuer { ThrowOnNext = new InvalidOperationException("SB broker unreachable") };
-        var seeders = new IAppConfigSeeder[] { FakeSeeder.Ok(AppConfigSeedScopes.DataGrid) };
-        var handler = NewHandler(repo, enqueuer, seeders);
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        result.Should().BeOfType<HandlerResult.Success>(
-            "Cosmos state already records H12b complete; enqueue failure is a Wave-C5 reconciler concern.");
-        repo.LastWrittenRun!.CurrentPhase.Should().Be(H12bAppConfigSeedHandler.DownstreamHandlerId);
     }
 
     // ---------- Defensive: Seeder throws unexpected exception ----------
@@ -393,13 +354,12 @@ public sealed class H12bAppConfigSeedHandlerTests
     {
         var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-1");
-        var enqueuer = new FakeEnqueuer();
         var seeders = new IAppConfigSeeder[]
         {
             new FakeSeeder(AppConfigSeedScopes.DataGrid, () =>
                 throw new InvalidOperationException("pwsh not on PATH")),
         };
-        var handler = NewHandler(repo, enqueuer, seeders);
+        var handler = NewHandler(repo, seeders);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -407,7 +367,6 @@ public sealed class H12bAppConfigSeedHandlerTests
         failure.Class.Should().Be(FailureClass.Resumable);
         failure.RejectionCode.Should().Be(AppConfigSeedRejectionCodes.SeederInfrastructureError);
         failure.Diagnostic.Should().Contain("pwsh not on PATH");
-        enqueuer.Sent.Should().BeEmpty();
     }
 
     // ---------- Deferred-only outcome is Success ----------
@@ -417,18 +376,16 @@ public sealed class H12bAppConfigSeedHandlerTests
     {
         var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-1");
-        var enqueuer = new FakeEnqueuer();
         var seeders = new IAppConfigSeeder[]
         {
             new FakeSeeder(AppConfigSeedScopes.FieldMapping, () => AppConfigSeederResult.Deferred("deferred")),
             new FakeSeeder(AppConfigSeedScopes.ChartDefinition, () => AppConfigSeederResult.Deferred("deferred")),
         };
-        var handler = NewHandler(repo, enqueuer, seeders);
+        var handler = NewHandler(repo, seeders);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         result.Should().BeOfType<HandlerResult.Success>();
-        enqueuer.Sent.Should().ContainSingle().Which.HandlerId.Should().Be(H12bAppConfigSeedHandler.DownstreamHandlerId);
     }
 
     // ---------- Mixed outcome: any Failed wins ----------
@@ -438,14 +395,13 @@ public sealed class H12bAppConfigSeedHandlerTests
     {
         var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-1");
-        var enqueuer = new FakeEnqueuer();
         var seeders = new IAppConfigSeeder[]
         {
             FakeSeeder.Ok(AppConfigSeedScopes.DataGrid),
             new FakeSeeder(AppConfigSeedScopes.WorkspaceLayout, () => AppConfigSeederResult.Failed("script exited 1")),
             new FakeSeeder(AppConfigSeedScopes.FieldMapping, () => AppConfigSeederResult.Deferred("deferred")),
         };
-        var handler = NewHandler(repo, enqueuer, seeders);
+        var handler = NewHandler(repo, seeders);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -460,16 +416,8 @@ public sealed class H12bAppConfigSeedHandlerTests
     {
         var handler = NewHandler(
             new FakeRepository(BuildRun(), "etag-1"),
-            new FakeEnqueuer(),
             Array.Empty<IAppConfigSeeder>());
         handler.HandlerId.Should().Be("H12b", "value MUST match design.md §4.1 handler-catalog verbatim.");
-    }
-
-    [Fact]
-    public void DownstreamHandlerId_IsH12c()
-    {
-        H12bAppConfigSeedHandler.DownstreamHandlerId.Should().Be("H12c",
-            "H12c is the DAG-join point that requires BOTH H12a + H12b complete.");
     }
 
     // -------------------------------------------------------------------------
@@ -478,18 +426,15 @@ public sealed class H12bAppConfigSeedHandlerTests
 
     private static H12bAppConfigSeedHandler NewHandler(
         IProvisioningRunRepository repository,
-        IHandlerEnqueuer enqueuer,
         IReadOnlyList<IAppConfigSeeder> seeders)
-        => NewHandlerWithReader(repository, enqueuer, seeders, FakeSeedManifestReader.WithHash(_expectedManifestHash));
+        => NewHandlerWithReader(repository, seeders, FakeSeedManifestReader.WithHash(_expectedManifestHash));
 
     private static H12bAppConfigSeedHandler NewHandlerWithReader(
         IProvisioningRunRepository repository,
-        IHandlerEnqueuer enqueuer,
         IReadOnlyList<IAppConfigSeeder> seeders,
         ISeedManifestReader manifestReader)
         => new(
             repository,
-            enqueuer,
             seeders,
             manifestReader,
             NullLogger<H12bAppConfigSeedHandler>.Instance);
@@ -576,25 +521,6 @@ public sealed class H12bAppConfigSeedHandlerTests
                 return Task.FromResult(configured);
             }
             return Task.FromResult<ReplaceRunResult>(new ReplaceRunResult.Success(run, "etag-next"));
-        }
-    }
-
-    // --- FakeEnqueuer ---
-    private sealed class FakeEnqueuer : IHandlerEnqueuer
-    {
-        public List<HandlerEnvelope> Sent { get; } = new();
-        public Exception? ThrowOnNext { get; set; }
-
-        public Task EnqueueAsync(HandlerEnvelope envelope, CancellationToken cancellationToken)
-        {
-            if (ThrowOnNext is not null)
-            {
-                var toThrow = ThrowOnNext;
-                ThrowOnNext = null;
-                throw toThrow;
-            }
-            Sent.Add(envelope);
-            return Task.CompletedTask;
         }
     }
 

@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Moq;
@@ -379,6 +380,40 @@ public class CoreAncestorResolverTests
         result.Stamps.Should().BeEmpty();
         result.Error.Should().BeNull();
         result.Succeeded.Should().BeTrue();
+    }
+
+    // GitHub #2002 — "carries no core-ancestor stamp; a record written against it will inherit no access" is a Warning only
+    // when a record is written against the target. A read-only resolution (a reconciliation scan) writes nothing.
+
+    [Theory]
+    [InlineData(CoreAncestorIntent.Write, true)]
+    [InlineData(CoreAncestorIntent.ReadOnly, false)]
+    public async Task NoAncestor_WarnsOnlyWhenARecordIsWritten(CoreAncestorIntent intent, bool warns)
+    {
+        var log = new CapturingLogger();
+        var resolver = new CoreAncestorResolver(
+            EntityServiceReturning(new Entity("sprk_communication")).Object, Probe(CommunicationColumns), log);
+
+        var result = await resolver.ResolveStampsAsync("sprk_communication", CommId, intent: intent);
+
+        result.Status.Should().Be(CoreAncestorStatus.NoAncestor, "the intent never changes the answer");
+        result.Succeeded.Should().BeTrue();
+        log.Entries.Any(e => e.Level == LogLevel.Warning && e.Message.Contains("carries no core-ancestor stamp"))
+            .Should().Be(warns);
+        log.Entries.Any(e => e.Level == LogLevel.Debug && e.Message.Contains("carries no core-ancestor stamp"))
+            .Should().Be(!warns, "the same condition is still recorded, at Debug, on a read-only resolution");
+    }
+
+    [Fact]
+    public async Task NoAncestor_DefaultIntentIsWrite_SoAnUpdatedCallerKeepsTheWarning()
+    {
+        var log = new CapturingLogger();
+        var resolver = new CoreAncestorResolver(
+            EntityServiceReturning(new Entity("sprk_communication")).Object, Probe(CommunicationColumns), log);
+
+        await resolver.ResolveStampsAsync("sprk_communication", CommId);
+
+        log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.Message.Contains("carries no core-ancestor stamp"));
     }
 
     [Fact]
@@ -844,5 +879,17 @@ public class CoreAncestorResolverTests
         body.Should().NotContain("...", $"{constName} must not use a spread (the parser cannot see spread rows)");
         body.Should().NotContain("//", $"{constName} must not contain a comment (explanations go in its JSDoc)");
         body.Should().NotContain("/*", $"{constName} must not contain a comment (explanations go in its JSDoc)");
+    }
+
+    private sealed class CapturingLogger : ILogger<CoreAncestorResolver>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => Entries.Add((logLevel, formatter(state, exception)));
     }
 }

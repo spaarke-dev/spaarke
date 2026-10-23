@@ -158,15 +158,28 @@ public class OfficeEmailEnricher
     /// Enriches attachment metadata by fetching content from Graph API.
     /// Uses OBO authentication to access user's mailbox and extract the specific attachment.
     /// </summary>
-    public async Task<SaveRequest> EnrichAttachmentFromGraphAsync(
+    /// <returns>
+    /// The request (with the attachment's content when it had to be fetched), and — task 130 (#2126) — the PARENT email
+    /// the attachment came from, read from the same Graph message, so the save can capture its communication through the
+    /// same <c>EmailUploadCaptureService</c> an email save uses. <c>ParentEmail</c> is null when there is no
+    /// <see cref="AttachmentMetadata.ParentEmailId"/>, when it is an RFC Message-ID (Graph cannot address a message by
+    /// one — the save then looks the communication up by it instead), or when the parent could not be read.
+    /// </returns>
+    public async Task<(SaveRequest Request, EmailMetadata? ParentEmail)> EnrichAttachmentFromGraphAsync(
         SaveRequest request,
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
-        // Only fetch if content is missing and we have parent email ID
-        if (!string.IsNullOrEmpty(request.Attachment?.ContentBase64) || string.IsNullOrEmpty(request.Attachment?.ParentEmailId))
+        if (request.Attachment is null || string.IsNullOrEmpty(request.Attachment.ParentEmailId))
         {
-            return request; // Content already present or no parent email ID
+            return (request, null); // no parent email ID
+        }
+
+        // Content is fetched only when it is missing (unchanged). Task 130: when the client sent the content, the parent
+        // is still read — headers and body only, no attachments — when the parent id is an item id Graph can address.
+        if (!string.IsNullOrEmpty(request.Attachment.ContentBase64))
+        {
+            return (request, await TryReadParentEmailAsync(request.Attachment.ParentEmailId, httpContext, cancellationToken));
         }
 
         try
@@ -186,12 +199,15 @@ public class OfficeEmailEnricher
                     requestConfig.QueryParameters.Expand = new[] { "attachments" };
                 }, cancellationToken);
 
+            // Task 130: the parent email, from this same fetch (no second Graph call).
+            var parentEmail = message is null ? null : ParentEmailFrom(message, request.Attachment.ParentEmailId);
+
             if (message == null || message.Attachments == null)
             {
                 _logger.LogWarning(
                     "Graph API returned null message or no attachments for {MessageId}",
                     request.Attachment.ParentEmailId);
-                return request;
+                return (request, parentEmail);
             }
 
             // Find the matching attachment by filename (case-insensitive)
@@ -212,7 +228,7 @@ public class OfficeEmailEnricher
                     "Attachment {FileName} not found in message {MessageId} or has no content",
                     request.Attachment.FileName,
                     request.Attachment.ParentEmailId);
-                return request;
+                return (request, parentEmail);
             }
 
             // Convert to base64
@@ -224,14 +240,14 @@ public class OfficeEmailEnricher
                 matchingAttachment.ContentBytes.Length);
 
             // Return updated request with attachment content
-            return request with
+            return (request with
             {
                 Attachment = request.Attachment with
                 {
                     ContentBase64 = contentBase64,
                     Size = request.Attachment.Size ?? matchingAttachment.ContentBytes.Length
                 }
-            };
+            }, parentEmail);
         }
         catch (Exception ex)
         {
@@ -245,6 +261,95 @@ public class OfficeEmailEnricher
             throw new InvalidOperationException(
                 $"Failed to retrieve attachment content: {ex.Message}. Please try again.",
                 ex);
+        }
+    }
+
+    /// <summary>
+    /// Task 130: reads the parent email of an attachment whose content the client already sent — header fields and the
+    /// body, without its attachments. Graph addresses a message by its Exchange item id, so an RFC Message-ID is not
+    /// fetched (task 121). Never throws: an unreadable parent only means the save falls back to the Message-ID lookup.
+    /// </summary>
+    private async Task<EmailMetadata?> TryReadParentEmailAsync(
+        string parentEmailId, HttpContext httpContext, CancellationToken cancellationToken)
+    {
+        if (IsRfcMessageId(parentEmailId))
+            return null;
+
+        try
+        {
+            var graphClient = await _graphClientFactory.ForUserAsync(httpContext, cancellationToken);
+            var message = await graphClient.Me.Messages[parentEmailId]
+                .GetAsync(requestConfig =>
+                {
+                    requestConfig.QueryParameters.Select = new[]
+                    {
+                        "subject", "from", "toRecipients", "ccRecipients", "bccRecipients", "body",
+                        "internetMessageId", "conversationId", "sentDateTime", "receivedDateTime", "hasAttachments"
+                    };
+                    // The attachment list (not its bytes), so a parent first captured here records its attachments as an
+                    // email save would (task 130 pass 2).
+                    requestConfig.QueryParameters.Expand = new[] { "attachments($select=id,name,size,contentType,isInline)" };
+                }, cancellationToken);
+
+            return message is null ? null : ParentEmailFrom(message, parentEmailId);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                ex,
+                "Could not read the parent email of an attachment save (message {MessageId}); its communication is "
+                + "looked up by Message-ID instead (task 130).",
+                parentEmailId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Task 130: the parent email of an attachment save, as the SAME <see cref="EmailMetadata"/> shape an email save
+    /// sends, so <c>EmailUploadCaptureService</c> captures it exactly as it captures a saved email (race-proof on the
+    /// Message-ID: a parent already captured is reconciled to, never duplicated).
+    /// </summary>
+    internal static EmailMetadata ParentEmailFrom(Message message, string exchangeItemId)
+    {
+        var recipients = new List<Sprk.Bff.Api.Models.Office.Recipient>();
+        AddRecipients(recipients, message.ToRecipients, RecipientType.To);
+        AddRecipients(recipients, message.CcRecipients, RecipientType.Cc);
+        AddRecipients(recipients, message.BccRecipients, RecipientType.Bcc);
+
+        return new EmailMetadata
+        {
+            Subject = message.Subject ?? string.Empty,
+            SenderEmail = message.From?.EmailAddress?.Address ?? string.Empty,
+            SenderName = message.From?.EmailAddress?.Name,
+            Recipients = recipients,
+            SentDate = message.SentDateTime,
+            ReceivedDate = message.ReceivedDateTime,
+            ConversationId = message.ConversationId,
+            InternetMessageId = message.InternetMessageId,
+            ExchangeItemId = exchangeItemId,
+            Body = message.Body?.Content,
+            IsBodyHtml = message.Body?.ContentType == BodyType.Html,
+            Attachments = message.Attachments?
+                .Select(a => new AttachmentReference
+                {
+                    AttachmentId = a.Id ?? string.Empty,
+                    FileName = a.Name ?? "attachment",
+                    Size = a.Size,
+                    ContentType = a.ContentType,
+                    IsInline = a.IsInline ?? false,
+                })
+                .ToList(),
+        };
+    }
+
+    private static void AddRecipients(List<Sprk.Bff.Api.Models.Office.Recipient> into, List<Microsoft.Graph.Models.Recipient>? from, RecipientType type)
+    {
+        if (from is null)
+            return;
+
+        foreach (var address in from.Select(r => r.EmailAddress).Where(a => !string.IsNullOrWhiteSpace(a?.Address)))
+        {
+            into.Add(new Sprk.Bff.Api.Models.Office.Recipient { Type = type, Email = address!.Address!, Name = address.Name });
         }
     }
 
@@ -424,7 +529,7 @@ public class OfficeEmailEnricher
     /// has an <c>@</c> (<c>id-left "@" id-right</c>); an Exchange item id is base64 and never does, and the ids of mail
     /// items begin <c>AAMk</c> (or <c>AQMk</c>) — checked as well, defensively.
     /// </summary>
-    private static bool IsRfcMessageId(string? value) =>
+    public static bool IsRfcMessageId(string? value) =>
         !string.IsNullOrWhiteSpace(value)
         && value.Contains('@')
         && !value.StartsWith("AAMk", StringComparison.Ordinal)

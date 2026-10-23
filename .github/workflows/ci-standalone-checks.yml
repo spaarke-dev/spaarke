@@ -2,9 +2,11 @@ name: CI Standalone Checks
 
 # Checks that came out of the retired legacy sdap-ci.yml (task CICD-077, 2026-10-14) and
 # have NO equivalent in the CI Router (ci-router.yml -> Tier 1 blocking / Tier 2 advisory)
-# or a nightly. Owner ruling 2026-10-14: they live here, in ONE standalone workflow, so the
-# tier files stay untouched (standing owner rule: do not edit ci-router.yml,
-# ci-tier1-blocking.yml, ci-tier2-advisory.yml).
+# or a nightly. Owner ruling 2026-10-14: they live here, in ONE standalone workflow. (That
+# ruling kept the tier files untouched while the CI shadow window was open. The window has
+# closed and the no-edit rule was lifted 2026-10-15, so a check that fits a tier belongs in
+# the tier: the .NET test projects now run in Tier 2 `Full Unit Tests`, triggered by the
+# Router's `dotnet_tests` path filter in ci-router.yml.)
 #
 #   Job                     From sdap-ci.yml                      Why it is still needed
 #   dependency-audit        Code Quality > Dependencies audit     Per-push CVE gate. The nightly dep-audit only
@@ -28,11 +30,6 @@ name: CI Standalone Checks
 #                                                                 (sdap-ci's Prettier check is NOT carried over:
 #                                                                 it ran after `prettier --write`, so it could
 #                                                                 never fail. Tier 2 `lint` runs the real check.)
-#   unit-tests-outside-     build-test (`dotnet test`, whole       Tier 2 runs only when the Router `bff` filter
-#   router                  solution)                              matches; ControlPlane/Core/Scheduling/
-#                                                                 IntegrationTests/Spe.Integration.Tests are outside it.
-#   bff-seam-contract-      build-test                             seam/contract/domain/tenant tests compile into
-#   tests                                                          Sprk.Bff.Api.Tests but are outside the filter.
 #   verdict-script-tests    (new)                                  Must-fire controls for master-ci-verdict.ps1.
 #   ontology-script-tests   (new)                                  Pester controls for Apply-DoLanePolicies.ps1 (the
 #                                                                 policy lint and apply order) and
@@ -443,197 +440,6 @@ jobs:
         run: node_modules/.bin/eslint .
 
   # --------------------------------------------------------------------------
-  # unit-tests-outside-router: test projects that lost their only per-PR runner.
-  #
-  # The legacy `build-test` ran `dotnet test` over the whole solution on every PR. Tier 2's
-  # `Full Unit Tests` shards run only when the Router's `bff` path filter matches
-  # (ci-router.yml: src/server/api/Sprk.Bff.Api, src/server/shared, tests/integration/{auth,
-  # regression}, tests/unit/Sprk.Bff.Api.Tests, the two props files). That filter does NOT
-  # cover src/server/services/**, tests/unit/{Spaarke.Core,Spaarke.Scheduling}.Tests or
-  # tests/integration/{Sprk.Bff.Api.IntegrationTests,Spe.Integration.Tests}, so a PR touching only those ran no test at all. This job runs them on every non-docs PR and push.
-  #
-  # Measured locally: ~26 s of test time for ControlPlane.Tests (2,779 tests), seconds for the
-  # others; the rest is restore + build. Cheap, so no path gate (measured on CI in PR #1863).
-  #
-  # CLEANER FIX (needs the owner to release the no-edit rule on ci-router.yml): widen the
-  # Router's `bff` filter with src/server/services/**, tests/unit/** and tests/integration/**.
-  # Then Tier 2 would run these through its `rest` shard and this job could be deleted.
-  #
-  # No Category / LiveIntegration filter: the live seam tests skip themselves when their
-  # environment is absent (LiveIntegrationFixture, "skip-via-return"), exactly as in Tier 2,
-  # which passes no category filter either.
-  # --------------------------------------------------------------------------
-  unit-tests-outside-router:
-    name: Unit tests the Router bff filter misses
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup .NET 10
-        uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: '10.x'
-
-      - name: Cache NuGet packages
-        uses: actions/cache@v6
-        continue-on-error: true  # cache is an optimization, never a gate
-        with:
-          path: ~/.nuget/packages
-          key: ${{ runner.os }}-nuget-standalone-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
-          restore-keys: |
-            ${{ runner.os }}-nuget-standalone-
-            ${{ runner.os }}-nuget-
-
-      # Every project runs even if an earlier one fails, so one red does not hide another.
-      - name: dotnet test
-        shell: bash
-        run: |
-          set -uo pipefail
-          failed=()
-          for proj in \
-            src/server/services/Sprk.Provisioning.ControlPlane.Tests \
-            tests/unit/Spaarke.Core.Tests \
-            tests/unit/Spaarke.Scheduling.Tests             tests/integration/Sprk.Bff.Api.IntegrationTests             tests/integration/Spe.Integration.Tests
-          do
-            echo "::group::dotnet test $proj"
-            dotnet test "$proj" -c Debug --logger "trx;LogFilePrefix=standalone" --results-directory "./TestResults/standalone/$(basename "$proj")" \
-              || failed+=("$proj")
-            echo "::endgroup::"
-          done
-          if [ "${#failed[@]}" -gt 0 ]; then
-            {
-              echo "### ❌ Failing test project(s)"
-              printf -- '- `%s`\n' "${failed[@]}"
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
-          echo "### ✅ ControlPlane, Core, Scheduling, Bff.Api.IntegrationTests and Spe.Integration tests passed" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload test results
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: standalone-unit-test-results
-          path: ./TestResults/standalone/
-          if-no-files-found: warn
-
-  # --------------------------------------------------------------------------
-  # bff-seam-contract-tests: tests compiled INTO Sprk.Bff.Api.Tests from folders the Router's
-  # `bff` filter does not list. tests/integration/{seam,contract}, tests/unit/domain,
-  # tests/integration/tenant and tests/integration/Shared all compile into that assembly
-  # (Sprk.Bff.Api.Tests.csproj), but only tests/integration/{auth,regression} and
-  # tests/unit/Sprk.Bff.Api.Tests trigger Tier 2. A PR touching only seam/contract tests
-  # ran no test.
-  #
-  # The full assembly is ~14,000 tests (tens of minutes), so this job runs only the test
-  # CLASSES declared in the changed files: it reads each changed .cs file's namespace and
-  # class names and filters on FullyQualifiedName~<namespace>.<class>. Namespaces are not
-  # aligned with folders (seam files declare Sprk.Bff.Api.Tests.Api / .Services.Ai / ...), so a
-  # folder-to-namespace filter would be wrong; the changed file is the only reliable key.
-  # Limits, deliberately accepted: a change to a shared helper or fixture runs the build
-  # (and a compile break fails the job) but no test class, because the helper declares none;
-  # a test whose DEPENDENCY changed is not selected. Production-code changes are Tier 2's job.
-  # On workflow_dispatch there is no diff, so the job only builds.
-  # --------------------------------------------------------------------------
-  bff-seam-contract-tests:
-    name: Seam / contract tests (changed test classes)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      pull-requests: read   # dorny/paths-filter lists the PR's files
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          # Push events diff against the previous commit, which needs history (same as the Router).
-          fetch-depth: ${{ github.event_name == 'pull_request' && 1 || 0 }}
-          # `*.docx filter=lfs`: the Compose seam tests parse tests/fixtures/compose-corpus/*.docx;
-          # a pointer file fails ~30 of them (the Tier 2 shards check out with lfs: true for this).
-          lfs: true
-
-      - name: Which test files changed
-        id: filter
-        if: github.event_name != 'workflow_dispatch'
-        uses: dorny/paths-filter@v3
-        with:
-          list-files: shell
-          filters: |
-            tests:
-              - 'tests/integration/seam/**/*.cs'
-              - 'tests/integration/contract/**/*.cs'
-              - 'tests/unit/domain/**/*.cs'
-              - 'tests/integration/tenant/**/*.cs'
-              - 'tests/integration/Shared/**/*.cs'
-
-      - name: Build the test filter
-        id: tests
-        shell: bash
-        env:
-          CHANGED: ${{ steps.filter.outputs.tests_files }}
-        run: |
-          set -euo pipefail
-          terms=()
-          for f in ${CHANGED:-}; do
-            [ -f "$f" ] || continue   # deleted files are listed too
-            ns="$(grep -m1 -E '^namespace[[:space:]]' "$f" | sed -E 's/^namespace[[:space:]]+//; s/[;{[:space:]].*$//' || true)"
-            [ -n "$ns" ] || continue
-            while read -r cls; do
-              [ -n "$cls" ] && terms+=("FullyQualifiedName~${ns}.${cls}")
-            done < <(grep -oE '\bclass[[:space:]]+[A-Za-z0-9_]+' "$f" | awk '{print $2}' | sort -u)
-          done
-          if [ "${#terms[@]}" -eq 0 ]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "No changed test class: nothing to run." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          filter="$(printf '%s|' "${terms[@]}")"; filter="${filter%|}"
-          echo "run=true" >> "$GITHUB_OUTPUT"
-          echo "filter=${filter}" >> "$GITHUB_OUTPUT"
-          { echo "Test classes selected (${#terms[@]}):"; printf -- '- `%s`\n' "${terms[@]}"; } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Setup .NET 10
-        if: steps.tests.outputs.run == 'true' || github.event_name == 'workflow_dispatch'
-        uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: '10.x'
-
-      - name: Cache NuGet packages
-        if: steps.tests.outputs.run == 'true' || github.event_name == 'workflow_dispatch'
-        uses: actions/cache@v6
-        continue-on-error: true  # cache is an optimization, never a gate
-        with:
-          path: ~/.nuget/packages
-          key: ${{ runner.os }}-nuget-standalone-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
-          restore-keys: |
-            ${{ runner.os }}-nuget-standalone-
-            ${{ runner.os }}-nuget-
-
-      # A dispatch has no diff: build the assembly (a compile check) and stop.
-      - name: Build only (workflow_dispatch has no diff)
-        if: github.event_name == 'workflow_dispatch'
-        run: dotnet build tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj -c Debug
-
-      - name: dotnet test (changed classes)
-        if: steps.tests.outputs.run == 'true'
-        env:
-          TEST_FILTER: ${{ steps.tests.outputs.filter }}
-        run: |
-          dotnet test tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj -c Debug \
-            --filter "$TEST_FILTER" \
-            --logger "trx;LogFilePrefix=standalone-seam" --results-directory ./TestResults/standalone-seam
-
-      - name: Upload test results
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: standalone-seam-test-results
-          path: ./TestResults/standalone-seam/
-          if-no-files-found: warn
-
-  # --------------------------------------------------------------------------
   # verdict-script-tests: the Pester must-fire controls for scripts/ci/master-ci-verdict.ps1
   # (the decision logic behind the router-master and tier2 alerts). Fake gh, no network.
   # --------------------------------------------------------------------------
@@ -783,7 +589,7 @@ jobs:
   # --------------------------------------------------------------------------
   summary:
     name: Summary
-    needs: [dependency-audit, release-build, compose-client-gate, client-typecheck, pcf-eslint, unit-tests-outside-router, bff-seam-contract-tests, verdict-script-tests, ontology-script-tests, agent-guard-tests, trivy-fs]
+    needs: [dependency-audit, release-build, compose-client-gate, client-typecheck, pcf-eslint, verdict-script-tests, ontology-script-tests, agent-guard-tests, trivy-fs]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -799,7 +605,7 @@ jobs:
             echo
             echo "| Check | Result |"
             echo "|---|---|"
-            for j in dependency-audit release-build compose-client-gate client-typecheck pcf-eslint unit-tests-outside-router bff-seam-contract-tests verdict-script-tests ontology-script-tests agent-guard-tests trivy-fs; do
+            for j in dependency-audit release-build compose-client-gate client-typecheck pcf-eslint verdict-script-tests ontology-script-tests agent-guard-tests trivy-fs; do
               r="$(jq -r --arg j "$j" '.[$j].result' <<<"$NEEDS_JSON")"
               case "$r" in success) icon="✅" ;; *) icon="❌" ;; esac
               echo "| \`${j}\` | ${icon} ${r} |"
@@ -817,7 +623,7 @@ jobs:
   # --------------------------------------------------------------------------
   alerts:
     name: Alert ${{ matrix.check }}
-    needs: [dependency-audit, release-build, compose-client-gate, client-typecheck, pcf-eslint, unit-tests-outside-router, bff-seam-contract-tests, verdict-script-tests, ontology-script-tests, agent-guard-tests, trivy-fs]
+    needs: [dependency-audit, release-build, compose-client-gate, client-typecheck, pcf-eslint, verdict-script-tests, ontology-script-tests, agent-guard-tests, trivy-fs]
     if: always() && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -844,10 +650,6 @@ jobs:
             job: client-typecheck
           - check: ci-standalone/pcf-eslint
             job: pcf-eslint
-          - check: ci-standalone/unit-tests-outside-router
-            job: unit-tests-outside-router
-          - check: ci-standalone/bff-seam-contract-tests
-            job: bff-seam-contract-tests
           - check: ci-standalone/verdict-script-tests
             job: verdict-script-tests
           - check: ci-standalone/ontology-script-tests

@@ -115,7 +115,7 @@ public sealed class GridOverviewHandler : IToolHandler
         string? errorKind = null;
         try
         {
-            var me = await OwnedChildWrite.WhoAmIAsync(_dataverse, ct).ConfigureAwait(false);
+            var me = await CallerWriteAuthorization.WhoAmIAsync(_dataverse, ct).ConfigureAwait(false);
             if (me.Failure is not null)
             {
                 reason = "caller-unresolved";

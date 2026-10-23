@@ -103,7 +103,7 @@ export interface XrmEmailComposeHandlers {
   /**
    * Resolve the link a linked `sprk_document` carries in the message body: the Spaarke RECORD link
    * (task 098). Always present (offline — needs only the host's org URL); resolves `null` when the org URL
-   * is unavailable. Never a file sharing link, and never calls the BFF share-link route.
+   * is unavailable. Never a file sharing link (the BFF share-link route was retired 2026-10-16, #1350).
    */
   onResolveShareLink: (documentId: string) => Promise<string | null>;
 }
@@ -398,8 +398,8 @@ export function createXrmEmailComposeHandlers(options?: {
   // The link a linked document carries in the message body: the SPAARKE RECORD link — never a file
   // sharing link (spaarkeai-word-add-in-r1 task 098, owner decision 2026-10-05). Every Spaarke document
   // lives in a SharePoint Embedded container, where Graph refuses sharing links, so this handler no longer
-  // calls `POST /api/documents/{id}/share-link` (its retirement is coordinated with unified-access-control-r2,
-  // which owns its authorization and tests — task 098 note). External recipients open the
+  // calls `POST /api/documents/{id}/share-link` — and that route is GONE (retired by unified-access-control-r2
+  // on 2026-10-16, #1350, with its options, DTOs and tests). External recipients open the
   // file through the external access platform, the same way an internal user opens it from Spaarke.
   //
   // Pure + offline (no auth, no BFF): the org URL comes from the host. No org URL → `null`, which the

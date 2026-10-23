@@ -25,7 +25,7 @@
  * scope or token. Every access is wrapped in try/catch: with storage unavailable, selection still works.
  */
 
-import { getWorkforceEnvConfig, readOptionalEnv } from '../config';
+import { MSAL_TENANT_ID, getWorkforceEnvConfig, isTenantId, readOptionalEnv } from '../config';
 import type { Realm } from './realm';
 
 // ---------------------------------------------------------------------------
@@ -49,6 +49,13 @@ export interface Backend {
   bffBaseUrl: string;
   /** The BFF app id: the scope is `api://{bffAppId}/user_impersonation`. */
   bffAppId: string;
+  /**
+   * The home directories (Entra tenant ids, lower-case GUIDs) whose workforce contacts this customer serves (ADR-028
+   * A9). The browser "company account" sign-in picks the backend by the signed-in `tid`: an entry that lists the tid
+   * is the candidate; a tid no entry lists is "not set up" and nothing is sent. Absent on entries that serve no home
+   * sign-in (and on the one-entry `VITE_BFF_API_URL` fallback).
+   */
+  homeTenantIds?: string[];
 }
 
 /** The backend this tab is using, with its derived scope. URL and scope always come from the same record. */
@@ -67,6 +74,11 @@ export interface ActiveBackend {
 export interface BackendDirectory {
   resolveWorkforce(): Promise<Backend[]>;
   resolveByKey(key: string): Promise<Backend | null>;
+  /**
+   * The backends that serve a home directory (ADR-028 A9): optional, because the dev configuration filters its own
+   * list. {@link resolveHomeBackendSelection} re-checks every returned entry against the tid.
+   */
+  resolveByHomeTenant?(tenantId: string): Promise<Backend[]>;
 }
 
 /** The outcome of {@link resolveBackendSelection}. */
@@ -76,6 +88,13 @@ export type BackendSelection =
   | { kind: 'pick'; options: Backend[] }
   /** Nothing usable: fail closed (the caller shows an error; no request is made). */
   | { kind: 'none'; reason: string };
+
+/**
+ * The outcome of {@link resolveHomeBackendSelection}: a {@link BackendSelection} plus `notSetUp` - the signed-in
+ * directory is listed by no customer backend, so the caller shows "your organization is not set up" and makes no
+ * token request and no BFF call.
+ */
+export type HomeBackendSelection = BackendSelection | { kind: 'notSetUp' };
 
 /** Raised when no backend can be resolved, or a value from config / the directory is refused. Fail closed. */
 export class BackendSelectionError extends Error {
@@ -156,12 +175,54 @@ export function validateBackend(raw: unknown): Backend {
     );
   }
   const displayName = typeof b.displayName === 'string' && b.displayName.trim() ? b.displayName.trim() : b.customerKey;
+  const homeTenantIds =
+    b.homeTenantIds === undefined ? undefined : validateHomeTenantIds(b.customerKey, b.homeTenantIds);
   return {
     customerKey: b.customerKey,
     displayName,
     bffBaseUrl: normalizeBffBaseUrl(b.bffBaseUrl),
     bffAppId: b.bffAppId,
+    // Only present when the entry names home directories, so a plain entry keeps its exact shape.
+    ...(homeTenantIds ? { homeTenantIds } : {}),
   };
+}
+
+/** The tenant id Entra reports for personal Microsoft accounts (MSA): never a customer directory. */
+const CONSUMER_ACCOUNT_TENANT_ID = '9188040d-6c67-4c5b-b112-36a304b66dad';
+
+/**
+ * The tenants that are never a customer's HOME directory: Spaarke's own (its employees are licensed users, not workforce
+ * contacts, and the A8 tenant-pinned sign-in serves them), the CIAM tenant (partners) and the Microsoft consumer-account tenant
+ * (personal accounts are not an organization's directory). Lower-case. Spaarke's tenant id
+ * is read when the build configures it (`VITE_TEAMS_MSAL_TENANT_ID`); a build that does not has no Spaarke tenant to compare.
+ */
+function reservedHomeTenantIds(): Set<string> {
+  const reserved = new Set<string>([CONSUMER_ACCOUNT_TENANT_ID]);
+  if (isTenantId(MSAL_TENANT_ID)) reserved.add(MSAL_TENANT_ID.toLowerCase());
+  const spaarke = readOptionalEnv('VITE_TEAMS_MSAL_TENANT_ID');
+  if (isTenantId(spaarke)) reserved.add(spaarke.toLowerCase());
+  return reserved;
+}
+
+/**
+ * `homeTenantIds` must be an array of tenant GUIDs (never an alias such as `organizations`) that are neither Spaarke's
+ * tenant nor the CIAM tenant; stored lower-case. Refused here, at config / directory validation, so a mis-typed entry
+ * cannot make Spaarke's or the CIAM directory resolve to a customer backend.
+ */
+function validateHomeTenantIds(customerKey: string, value: unknown): string[] {
+  if (!Array.isArray(value) || !value.every(isTenantId)) {
+    throw new BackendSelectionError(
+      `[BackendSelection] Backend '${customerKey}' has invalid homeTenantIds: expected an array of tenant GUIDs.`
+    );
+  }
+  const ids = [...new Set((value as string[]).map(v => v.toLowerCase()))];
+  const reserved = reservedHomeTenantIds();
+  if (ids.some(id => reserved.has(id))) {
+    throw new BackendSelectionError(
+      `[BackendSelection] Backend '${customerKey}' has invalid homeTenantIds: Spaarke's tenant and the CIAM tenant are never a customer's home directory.`
+    );
+  }
+  return ids;
 }
 
 /** The app id of an `api://{id}/user_impersonation` scope; throws (naming the env key) for any other scope. */
@@ -459,6 +520,74 @@ export async function resolveBackendSelection(
   if (all.length === 1) return { kind: 'selected', backend: all[0] };
   if (all.length > 1) return { kind: 'pick', options: all };
   return { kind: 'none', reason: 'No customer backend is available for this sign-in.' };
+}
+
+/**
+ * Resolve the backend for a workforce HOME sign-in from the signed-in tenant id (ADR-028 A9; task 058): tid -> the
+ * directory entries that list it (`homeTenantIds`) -> the backend. Candidates come ONLY from the directory / config and
+ * are always re-filtered by the tid, so a directory that returns more than it was asked for cannot widen the match.
+ *   - one entry lists the tid -> `selected`;
+ *   - several -> a stored active key or a `?customer=` key may choose AMONG THEM (a key naming any other entry is
+ *     ignored, and no key can make an unlisted tid "set up"); otherwise `pick`;
+ *   - none (including a non-GUID tid, the Spaarke / CIAM tenants, and the one-entry `VITE_BFF_API_URL` fallback, which
+ *     lists no home directory) -> `notSetUp`: the caller makes no token request and no BFF call;
+ *   - a directory / config failure -> `none` (fail closed, no default host).
+ */
+export async function resolveHomeBackendSelection(
+  tenantId: string,
+  options: ResolveBackendOptions = {}
+): Promise<HomeBackendSelection> {
+  if (!isTenantId(tenantId)) return { kind: 'notSetUp' };
+  const tid = tenantId.toLowerCase();
+  const directory = options.directory ?? createBackendDirectory('workforce');
+
+  let raw: Backend[];
+  try {
+    raw = directory.resolveByHomeTenant ? await directory.resolveByHomeTenant(tid) : await directory.resolveWorkforce();
+  } catch (err) {
+    return { kind: 'none', reason: err instanceof Error ? err.message : 'The backend directory could not be read.' };
+  }
+
+  const candidates = new Map<string, Backend>();
+  for (const entry of raw) {
+    try {
+      const backend = validateBackend(entry);
+      if (backend.homeTenantIds?.includes(tid) && !candidates.has(backend.customerKey)) {
+        candidates.set(backend.customerKey, backend);
+      }
+    } catch (err) {
+      console.warn('[BackendSelection] Ignoring an invalid backend record:', err);
+    }
+  }
+
+  const all = [...candidates.values()];
+  if (all.length === 0) return { kind: 'notSetUp' };
+  const queryKey = readCustomerQueryKey(options.search);
+  if (queryKey && candidates.has(queryKey)) return { kind: 'selected', backend: candidates.get(queryKey) as Backend };
+  const storedKey = getStoredActiveKey();
+  if (storedKey && candidates.has(storedKey)) {
+    return { kind: 'selected', backend: candidates.get(storedKey) as Backend };
+  }
+  if (all.length === 1) return { kind: 'selected', backend: all[0] };
+  return { kind: 'pick', options: all };
+}
+
+/**
+ * The display name of the customer a `?customer={key}` landing link names, for the landing wording ("Work for
+ * Contoso?"), or null. Synchronous and configuration-only: it reads the configured workforce backends, so it is null
+ * behind the T240c directory flag, for an unknown or malformed key, and on any configuration error. Display only - the
+ * key never selects a backend here.
+ */
+export function landingCustomerName(
+  search: string = typeof window !== 'undefined' ? window.location.search : ''
+): string | null {
+  const key = readCustomerQueryKey(search);
+  if (!key || isDirectoryServiceEnabled()) return null;
+  try {
+    return devConfigBackends('workforce').find(b => b.customerKey === key)?.displayName ?? null;
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
