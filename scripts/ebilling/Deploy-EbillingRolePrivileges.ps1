@@ -15,12 +15,17 @@
                       sprk_billingexport: for every privilege the role holds on sprk_invoice (Create, Read, Write, Delete,
                       Append, AppendTo, Assign, Share) the same privilege on the working table at the same depth.
       CONFIG tables   sprk_ebillingsetting, sprk_ratecard, sprk_ratecardrate, sprk_billingcodeset, sprk_billingcode,
-                      sprk_ruleset, sprk_timekeeper: Read at the depth the role holds for Read on sprk_invoice. An
+                      sprk_timekeeper: Read at the depth the role holds for Read on sprk_invoice. An
                       organization-owned table only offers Global depth (the platform refuses Deep), so Read is then added at
                       Global - the only depth such a table has. AppendTo is added on a config table only when a lookup of one
                       of the five working tables targets it (computed from the metadata; none does today). No Create / Write /
                       Delete on config tables: only admin roles write configuration.
       A role that holds no sprk_invoice privilege is left alone (reported).
+
+    NOT sprk_ruleset (owner decision D-185, #2285, task 120): only billing roles read rule sets. The D-90 run of 2026-10-16
+    added Read (Deep) on sprk_ruleset to Core and Basic User; task 120's Deploy-EbillingBillingAdminRole.ps1 removes it and
+    creates the Spaarke Billing Administrator role, the only Spaarke role with a privilege on sprk_ruleset
+    (RuleSetRolePrivilegeGuardTests). This script must never add it back.
 
     NEVER removes or lowers anything: a privilege already held at the target depth or above is skipped; one held at a lower
     depth is raised through AddPrivilegesRole; nothing is passed to ReplacePrivilegesRole or RemovePrivilegeRole. The roles are
@@ -64,7 +69,7 @@ $DryRun = [bool]$WhatIfPreference
 
 $Reference = 'sprk_invoice'
 $WorkingTables = 'sprk_invoiceapproval', 'sprk_invoicesubmission', 'sprk_invoicecorrection', 'sprk_externalidentifier', 'sprk_billingexport'
-$ConfigTables = 'sprk_ebillingsetting', 'sprk_ratecard', 'sprk_ratecardrate', 'sprk_billingcodeset', 'sprk_billingcode', 'sprk_ruleset', 'sprk_timekeeper'
+$ConfigTables = 'sprk_ebillingsetting', 'sprk_ratecard', 'sprk_ratecardrate', 'sprk_billingcodeset', 'sprk_billingcode', 'sprk_timekeeper'   # not sprk_ruleset (D-185)
 $Verbs = 'Create', 'Read', 'Write', 'Delete', 'Append', 'AppendTo', 'Assign', 'Share'
 $Rank = @{ Basic = 0; Local = 1; Deep = 2; Global = 3 }
 

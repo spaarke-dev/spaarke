@@ -18,14 +18,16 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// security-role name, no <c>SystemAdmin</c> app role.</para>
 /// <para><b>The marker is Write on <c>sprk_ruleset</c>.</b> The policy tables are shared with the Ontology platform and its
 /// Administrator role holds every privilege on them, so privileges on <c>sprk_policy</c> / <c>sprk_policyversion</c> alone would make
-/// every Ontology Administrator a billing admin (over-granting). <c>sprk_ruleset</c> is billing's own table: no solution role carries
-/// anything beyond Read on it (Core and Basic User: Read, Deep), so Create / Write on it names exactly the people given billing rule
-/// administration, and every route requires it. A route that writes policy rows ALSO requires the privilege of the table it writes,
-/// so Dataverse's own rights are never bypassed by the application-identity write that follows. Reads of the proposals (clause text,
-/// rule bodies) are admin-only too, so they require the same Write marker, not Read (which every Core User holds).</para>
+/// every Ontology Administrator a billing admin (over-granting). <c>sprk_ruleset</c> is billing's own table: the only solution role
+/// with any privilege on it is "Spaarke Billing Administrator" (task 120; D-185: only billing roles read rule sets, so Core and Basic
+/// User hold nothing on it; pinned by <c>RuleSetRolePrivilegeGuardTests</c>), so Create / Write on it names exactly the people given
+/// billing rule administration, and every route requires it. A route that writes policy rows ALSO requires the privilege of the table
+/// it writes, so Dataverse's own rights are never bypassed by the application-identity write that follows. Reads of the proposals
+/// (clause text, rule bodies) are admin-only too, so they require the same Write marker, not Read.</para>
 /// <para><b>Depth (D-108, owner 2026-10-17).</b> Write at ANY depth counts: there is no Org-depth requirement. The check asks whether the
-/// caller holds the privilege, not at what depth. The role the owner grants carries Org depth in practice, so a Basic-depth Write would
-/// still pass this check; that is accepted.</para>
+/// caller holds the privilege, not at what depth. The "Spaarke Billing Administrator" role (task 120) holds the Create / Write markers
+/// at Basic on purpose (uac-r2): the writes run app-only through <see cref="RuleSetService"/>, so a deeper native Write would only let
+/// a billing admin edit rule sets and policies past its invariants. Read stays Global.</para>
 /// <para>Privilege names are the live ones (spaarkedev1 <c>privilege</c> table, 2026-10-17): <c>sprk_ruleset</c> is lower case;
 /// <c>sprk_Policy</c> and <c>sprk_PolicyVersion</c> are not (as <c>OntologyAdminAuthoringService.AuthoringPrivilegeName</c>).</para>
 /// </remarks>
