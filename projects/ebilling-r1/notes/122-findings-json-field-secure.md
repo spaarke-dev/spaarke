@@ -40,7 +40,7 @@ Not readers: `DuplicateDetailGate.cs`, `StoredSignalSetCheck.cs` and `IInvoiceSu
 
 Tests: `InvoiceSubmissionAfterStepsTests.TheRejectionDecision_StoresTheWithheldSentence_ForADuplicateReason` (3 codes) and `SubmissionOverrideServiceTests.BuildDecision_StoresTheWithheldSentence_ForADuplicateReason` (3 codes × override / return). Each asserts the Duplicate sentence is the template, the non-Duplicate sentence is unchanged, and the serialized facts name neither the earlier tracking number nor its invoice id. Seed: with `p.Sentence` restored in both builders, all 9 fail; restored, all 9 pass.
 
-**Known limit (K2, transition).** The billing record's content hash covers the facts, so a decision whose record an older BFF wrote with a Duplicate plan sentence, retried by this BFF, is refused as "same id, other content" (`DecisionRecordWriter.cs:1339`). Dev has no submissions, so no such record exists; nothing is released.
+**Forward-only (K4 in section 7).** The change applies to records written from now on. Records already written keep their sentence; nothing rewrites them. The billing record's content hash covers the facts, so a decision whose record an older BFF wrote with a Duplicate plan sentence, retried by this BFF, is refused as "same id, other content" (`DecisionRecordWriter.cs:1339`). Dev has no submissions, so no such record exists; nothing is released.
 
 ## 3. The app-only-read guard
 
@@ -55,7 +55,12 @@ Tests: `InvoiceSubmissionAfterStepsTests.TheRejectionDecision_StoresTheWithheldS
 
 ## 4. Schema
 
-`scripts/ebilling/Set-EbillingFindingsJsonFieldSecurity.ps1` (-WhatIf / plain / -Verify), shaped on `Set-EbillingFirmReasonFieldSecurity.ps1` and `Set-DocumentPointerFieldSecurity.ps1`. It reuses "Spaarke BFF-Managed Field Writers" (read, create, update) and grants no reader profile. A Readers row on the column is FAIL. Preconditions (p0)–(p5) must pass for a write run. A failed grant reverts the secure. A second run writes nothing.
+`scripts/ebilling/Set-EbillingFindingsJsonFieldSecurity.ps1` (-WhatIf / plain / -Verify / -Revert), shaped on `Set-EbillingFirmReasonFieldSecurity.ps1` and `Set-DocumentPointerFieldSecurity.ps1`. It reuses "Spaarke BFF-Managed Field Writers" (read, create, update) and grants no reader profile. A Readers row on the column is FAIL. Preconditions (p0)–(p5) must pass for a write run. A failed grant reverts the secure. A second run writes nothing.
+
+After ontology-r1's review (PASS, no fix-now findings), round 2 closed its known limits:
+- **K6:** the script declared `SupportsShouldProcess` but never called `ShouldProcess`, so `-Confirm` did nothing. The sibling `Set-EbillingFirmReasonFieldSecurity.ps1` reads `-WhatIf` the same way, so `SupportsShouldProcess` stays, and every write point now goes through `$PSCmdlet.ShouldProcess`: the secure plus the writer grant, a resume grant, the publish, and each `-Revert` write. The automatic revert after a failed grant is a recovery and is never asked.
+- **-Verify (uac-r2):** passes only when the column IS secured, the writer profile holds read=4 create=4 update=4, and no other profile grants any access. Any row with access counts, the Readers profile included. The one exception is the platform's own System Administrator field security profile. Dataverse gives it a row on every secured column (checked on dev: `sprk_signal.sprk_firmreason` has one), so the script matches it by its fixed id `572329c1-a042-4e22-be47-367c6374ea45`, never by name. Must-fire control: a temporary copy pointed at `sprk_signal.sprk_firmreason` reported FAIL for the Readers row and for "Spaarke Ontology Writer Firm Reason Writers", and did not report the System Administrator row. The copy was deleted. Pre-run `-Verify` on dev: exit 1 (not secured; writer row missing; no other profile).
+- **K2:** a `-Revert` switch rolls back a run, with a `-WhatIf` path (section 6).
 
 Source: `Entity.xml` `IsSecured` 1; the writer row in `Other/FieldSecurityProfiles.xml`; the form control removed; `docs/data-model/sprk_invoicesubmission.md`.
 
@@ -78,13 +83,42 @@ Source: `Entity.xml` `IsSecured` 1; the writer row in `Other/FieldSecurityProfil
 - ArchTests (full): 1551 passed, 0 failed.
 - Test scope: the Decision Record sentence cases, the guard's controls and the seeding proofs, nothing else.
 
-## 6. Live run (step 6, NOT run)
+## 6. Live run (step 6, NOT run): runbook
+
+Prerequisites: ontology-r1 PASS (2026-10-23), the owner's OK, and the before-notices to ontology-r1 and uac-r2. Run from the repository root as an operator signed in with `az login` (System Administrator on spaarkedev1).
 
 ```
+# 1. Take the column off the live main form (K1). Forms step plus a publish of the touched entity only.
+pwsh scripts/ebilling/Deploy-EbillingFormsViews.ps1 -FormsOnly -WhatIf   # expect: only sprk_invoicesubmission 'Information' WOULD be rebuilt
+pwsh scripts/ebilling/Deploy-EbillingFormsViews.ps1 -FormsOnly           # expect: CHANGED main form 'Information' rebuilt; published: entities sprk_invoicesubmission
+
+# 2. Form check (read only, in pwsh): the column is gone from the main form. Prints False after step 1 (True on dev today).
+$t = az account get-access-token --resource https://spaarkedev1.crm.dynamics.com --query accessToken -o tsv
+$f = Invoke-RestMethod -Uri 'https://spaarkedev1.crm.dynamics.com/api/data/v9.2/systemforms(c412f942-875e-45c4-9ea1-cae75a81f1b9)?$select=formxml' -Headers @{ Authorization = "Bearer $t" }
+$f.formxml.Contains('datafieldname="sprk_findingsjson"')
+
+# 3. Field security.
 pwsh scripts/ebilling/Set-EbillingFindingsJsonFieldSecurity.ps1 -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -WhatIf
 pwsh scripts/ebilling/Set-EbillingFindingsJsonFieldSecurity.ps1 -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c
-pwsh scripts/ebilling/Set-EbillingFindingsJsonFieldSecurity.ps1 -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c   # second run: writes nothing
-pwsh scripts/ebilling/Set-EbillingFindingsJsonFieldSecurity.ps1 -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -Verify   # exit 0
+pwsh scripts/ebilling/Set-EbillingFindingsJsonFieldSecurity.ps1 -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c   # second run: "Nothing written; no publish."
+pwsh scripts/ebilling/Set-EbillingFindingsJsonFieldSecurity.ps1 -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -Verify   # exit 0; the (p6) form line no longer appears
 ```
 
-The non-admin check (null through the Web API; /review and /blocked still return findings) needs a submission on dev, and dev has none today. The live form keeps the masked control until a SpaarkeMaster import or a `Deploy-EbillingFormsViews.ps1` run.
+Then send the after-notices.
+
+**Why `-FormsOnly` (K1).** The repository's path for dev forms is `Deploy-EbillingFormsViews.ps1`, the generator of this form (task 029). A SpaarkeMaster import would bring the whole solution from this branch. A full run of the forms script throws on dev today: "Exception calling InsertAfter ... The reference node is not a child of this node", in step 3 (the `sprk_MatterManagement` sitemap). That happens after step 1 has written the form and before step 4 publishes it. The sitemap lists `sprk_invoice` twice (`area_mattermanagement/group_work` and `area_finance/group_c6c6d7dd`), and `sprk_invoicesubmission` sits in `area_finance`. The script places the billing-export entry after the submission entry inside the first invoice group, which does not contain it. This is pre-existing navigation drift, not caused by task 122; it is reported for filing.
+
+`-FormsOnly` (added in task 122) runs step 1 and the entity-scoped publish only. Dev -FormsOnly -WhatIf (2026-10-23): only `sprk_invoicesubmission` 'Information' would change, and the other 13 forms are unchanged. The live form differs from the spec only in the findings control and the section label. No pending forms or views. Exit 0.
+
+**Rollback (K2), after a successful run:**
+```
+pwsh scripts/ebilling/Set-EbillingFindingsJsonFieldSecurity.ps1 -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -Revert -WhatIf; pwsh scripts/ebilling/Set-EbillingFindingsJsonFieldSecurity.ps1 -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -Revert
+```
+It un-secures the column first, so no BFF user is ever left masked, then deletes the writer profile's row on it, then publishes `sprk_invoicesubmission`. It exits 1 if the column still reads secured. The SpaarkeMaster source (Entity.xml `IsSecured`, the FieldSecurityProfiles.xml row) is reverted by a commit. The form is not put back: re-adding the control is a forms-script spec change. Dev `-Revert -WhatIf` today: not secured, no writer row, nothing to do, exit 0.
+
+## 7. Follow-ups
+
+- **K3 (audit history):** `sprk_findingsjson` has `IsAuditEnabled=1`. Once a dev submission exists, open its audit history as a non-admin user with Read on it, and confirm the old and new values of `sprk_findingsjson` are not shown. Dataverse should mask a secured column in audit details for a user without read on it; this needs to be checked live.
+- **Non-admin read check (acceptance):** once a dev submission exists, as a non-admin user with Read on it, `GET sprk_invoicesubmissions(<id>)?$select=sprk_findingsjson` returns null, and `/review` and `/blocked` still return its findings.
+- **K4 (forward-only):** the Decision Record sentence change (section 2) applies to records written from the deploy on. Existing records are not rewritten, and a retry of a decision recorded by an older BFF with a Duplicate sentence is refused as other content. Dev has no such record.
+- **Pre-existing, for filing:** a full `Deploy-EbillingFormsViews.ps1` run throws in step 3 on dev (sitemap drift, section 6), after writing forms and before publishing them.
