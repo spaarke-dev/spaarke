@@ -1437,6 +1437,8 @@ Both consume the **declarative seed manifest** (resolves the `scripts/seed-data`
 
 **H12c** wires runtime references: `sprk_aimodeldeployment` rows point at customer's OpenAI deployment (dedicated per customer — both models). Runs AFTER H12a + H12b + H2a (OpenAI deployed).
 
+**Ordering requirement (D-185, ontology worklist).** H12b does not seed the ontology worklist row (`sprk_gridconfiguration` `00000000-0000-4000-8000-000000005010`), and `Deploy-Release.ps1` does not apply it. On every environment, in this order: (1) deploy the BFF, (2) run `scripts/Apply-WorklistGridConfiguration.ps1` (`-Verify -RequireRow` after), (3) only then import the SpaarkeMaster roles. Roles before the row give every user an empty worklist (HTTP 200, log warning only). An old BFF with the new row loses rule names and severity.
+
 ### 7.9 Phase 9 — Post-Deploy Integrations (H14)
 
 Two sub-steps, in order (H14m is not attempted when H14a fails — its authorization test needs H14a's assignments):

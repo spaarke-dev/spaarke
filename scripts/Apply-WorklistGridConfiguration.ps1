@@ -21,6 +21,14 @@
 
     This script is a dev data change when it writes. Run it with -WhatIf first; -Verify never writes.
 
+    ORDERING REQUIREMENT (D-185, task 163, #2285). Nothing in Deploy-Release.ps1 or the provisioning seeders (H12b seeds only
+    the reconciliation grids) applies this row, so run this script by hand on every environment, in this order:
+      (1) deploy the BFF that carries task 163 (it reads the policy columns as the BFF);
+      (2) apply this definition (it has no `policy` link);
+      (3) only then import the roles (Spaarke Basic User and Console User lose Read on sprk_policy / sprk_policyversion).
+    Roles before step 2 give every user an empty worklist (HTTP 200, one log warning): the old definition still links
+    sprk_policy as the caller. An old BFF with the new definition shows no rule names and ranks everything last.
+
 .PARAMETER DataverseUrl
     Target environment, e.g. https://spaarkedev1.crm.dynamics.com. Defaults to $env:DATAVERSE_URL. Required.
 

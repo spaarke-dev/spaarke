@@ -11,6 +11,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Security.Claims;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
@@ -26,8 +27,10 @@ using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
+using Sprk.Bff.Api.Services.Identity;
 using Sprk.Bff.Api.Services.Signals;
 using Xunit;
 
@@ -1843,6 +1846,95 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
     }
 
     [Fact]
+    public async Task AFaultOnTheSecondPolicyChunk_Is503_NoRowsReturned()
+    {
+        // 150 distinct policies make two sprk_policy reads (100 + 50); only the second one throws.
+        var world = new World { FaultPolicyReadFrom = 2 };
+        var m = world.Matter(readers: [Alice]);
+        for (var i = 0; i < 150; i++)
+        {
+            world.Signal(Decide, core: (MatterType, m));
+        }
+
+        var response = await GetAsync(world, Alice);
+
+        world.PolicyReads.Select(r => r.Length).Should().Equal(SignalReadService.IdChunk, 50);
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        var problem = await Problem(response);
+        problem.GetProperty("reasonCode").GetString().Should().Be("ontology.signal.worklist_unavailable");
+        problem.ToString().Should().NotContain("lanes", "no rows come back with a faulted read");
+    }
+
+    [Fact]
+    public async Task AnExternalCaller_GetsNoPolicyColumns_AndNoPolicyQueryIsIssued()
+    {
+        var world = new World { CallerIsExternal = true };
+        var m = world.Matter(readers: [Alice]);
+        var s = world.Signal(Decide, core: (MatterType, m), severity: Critical, workType: 100000001, shortName: "Budget gap");
+
+        Items(await OkAsync(world, Alice)).Should().Equal(new ItemView(s, null, null));
+        world.PolicyReads.Should().BeEmpty("an external caller triggers no sprk_policy read");
+    }
+
+    [Fact]
+    public async Task AnInternalCaller_IsEnrichedAsBefore_WithOnePolicyQuery()
+    {
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        var s = world.Signal(Decide, core: (MatterType, m), severity: Critical, workType: 100000001, shortName: "Budget gap");
+
+        Items(await OkAsync(world, Alice)).Should().Equal(new ItemView(s, "Budget gap", "approveOrRebudget"));
+        world.PolicyReads.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task AnUnresolvedOrNonGuidCaller_IsNotEnriched()
+    {
+        foreach (var world in new[] { new World { CallerUnresolved = true }, new World { CallerResolvedToNonGuid = true } })
+        {
+            var m = world.Matter(readers: [Alice]);
+            var s = world.Signal(Decide, core: (MatterType, m), severity: Critical, workType: 100000001, shortName: "Budget gap");
+
+            Items(await OkAsync(world, Alice)).Should().Equal(new ItemView(s, null, null));
+            world.PolicyReads.Should().BeEmpty();
+        }
+    }
+
+    [Fact]
+    public async Task AResolverFault_IsNotEnriched_ButTheRowsAreStillReturned()
+    {
+        foreach (var world in new[] { new World { CallerResolverThrows = true }, new World { ExternalFlagReadThrows = true } })
+        {
+            var m = world.Matter(readers: [Alice]);
+            var s = world.Signal(Decide, core: (MatterType, m), severity: Critical, workType: 100000001, shortName: "Budget gap");
+
+            var response = await GetAsync(world, Alice);
+
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+            Items((await response.Content.ReadFromJsonAsync<JsonElement>()).Clone()).Should().Equal(new ItemView(s, null, null));
+            world.PolicyReads.Should().BeEmpty();
+        }
+    }
+
+    [Fact]
+    public async Task TheExternalRule_RethrowsCancellation_AndTreatsAnyOtherFaultAsExternal()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var cancelling = new Mock<ICallerSystemUserResolver>();
+        cancelling.Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>())).ThrowsAsync(new OperationCanceledException(cts.Token));
+        var users = new Mock<ISystemUserIdentityResolver>();
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
+
+        var act = () => SignalReadService.IsExternalOrUnknownCallerAsync(cancelling.Object, users.Object, null, logger, cts.Token);
+        await act.Should().ThrowAsync<OperationCanceledException>();
+
+        // The same exception while the token is NOT cancelled is any other fault: external (fail closed).
+        (await SignalReadService.IsExternalOrUnknownCallerAsync(cancelling.Object, users.Object, null, logger, CancellationToken.None))
+            .Should().BeTrue();
+    }
+
+    [Fact]
     public async Task OneBatchedPolicyReadPerRequest_ChunkedByIdChunk_AndDistinctIdsOnly()
     {
         var world = new World();
@@ -2162,6 +2254,16 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         /// <summary>D-185: the caller has no Read on <c>sprk_policy</c>, so a Signal query that links it is refused by Dataverse.</summary>
         public bool CallerHasNoPolicyRead { get; set; }
 
+        /// <summary>D-185 (uac-r2): how the caller reads for the external-or-unknown rule. Default: a resolved internal systemuser.</summary>
+        public bool CallerIsExternal { get; set; }
+        public bool CallerUnresolved { get; set; }
+        public bool CallerResolvedToNonGuid { get; set; }
+        public bool CallerResolverThrows { get; set; }
+        public bool ExternalFlagReadThrows { get; set; }
+
+        /// <summary>From this sprk_policy app-only read on (1-based; 0: never) the read throws, like a Dataverse timeout.</summary>
+        public int FaultPolicyReadFrom { get; set; }
+
         /// <summary>The worklist row's JSON as the BFF reads it; null: the repo row verbatim.</summary>
         public string? ConfigJson { get; set; }
 
@@ -2236,6 +2338,8 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
                 lock (PolicyReads) PolicyReads.Add(q.Criteria.Conditions.SelectMany(c => c.Values).OfType<Guid>().ToArray());
             }
 
+            if (q.EntityName == "sprk_policy" && FaultPolicyReadFrom > 0 && PolicyReads.Count >= FaultPolicyReadFrom)
+                throw new TimeoutException("app-only read of sprk_policy timed out");
             if (FaultAppOnlyTables.Contains(q.EntityName)) throw new TimeoutException($"app-only read of {q.EntityName} timed out");
             switch (q.EntityName)
             {
@@ -2503,6 +2607,35 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         public Task InvalidateAsync(Guid systemUserId, CancellationToken ct) => Task.CompletedTask;
     }
 
+    private sealed class FakeCallerResolver(WorklistFactory factory) : ICallerSystemUserResolver
+    {
+        public Task<CallerSystemUserResolution> ResolveAsync(ClaimsPrincipal? caller, CancellationToken ct)
+        {
+            var world = factory.World;
+            if (world.CallerResolverThrows) throw new TimeoutException("caller resolution timed out");
+            if (world.CallerUnresolved)
+                return Task.FromResult(new CallerSystemUserResolution { IsResolved = false, UnresolvedReason = "no-matching-systemuser" });
+            return Task.FromResult(new CallerSystemUserResolution
+            {
+                IsResolved = true,
+                SystemUserId = world.CallerResolvedToNonGuid ? "not-a-guid" : (world.ActingAs ?? Guid.Empty).ToString("D"),
+            });
+        }
+    }
+
+    private sealed class FakeSystemUsers(WorklistFactory factory) : ISystemUserIdentityResolver
+    {
+        public Task<string?> ResolveOidAsync(Guid systemUserId, CancellationToken ct = default) => Task.FromResult<string?>(null);
+
+        public Task<Guid?> ResolveSystemUserIdAsync(string oid, CancellationToken ct = default) => Task.FromResult<Guid?>(null);
+
+        public Task<bool> IsExternalAsync(Guid systemUserId, CancellationToken ct = default)
+        {
+            if (factory.World.ExternalFlagReadThrows) throw new TimeoutException("external flag read timed out");
+            return Task.FromResult(factory.World.CallerIsExternal);
+        }
+    }
+
     private sealed class WorldClock(WorklistFactory factory) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => factory.World.Now;
@@ -2582,6 +2715,10 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
                 services.AddScoped<IDataverseUserClient>(_ => new FakeUserClient(this));
                 services.RemoveAll<IIdentityNormalizationService>();
                 services.AddSingleton<IIdentityNormalizationService>(_ => new FakeIdentity(this));
+                services.RemoveAll<ICallerSystemUserResolver>();
+                services.AddScoped<ICallerSystemUserResolver>(_ => new FakeCallerResolver(this));
+                services.RemoveAll<ISystemUserIdentityResolver>();
+                services.AddSingleton<ISystemUserIdentityResolver>(_ => new FakeSystemUsers(this));
                 services.RemoveAll<TimeProvider>();
                 services.AddSingleton<TimeProvider>(new WorldClock(this));
                 // The writer's own identity (WhoAmI on its dedicated connection): the createdby of every genuine Decision Record.
