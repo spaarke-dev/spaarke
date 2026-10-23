@@ -220,12 +220,18 @@ public class InquiryRecordFacts
             // WaitAsync abandons the wait at the deadline even for a read that ignores its token.
             await all.WaitAsync(token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             _logger.LogWarning("Budget inquiry: the record and recipient reads did not finish within {Seconds:0.#} s; the email goes with what was read.",
                 ReadDeadline.TotalSeconds);
             // Whatever finished late must not fault unobserved.
             _ = all.ContinueWith(static t => t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+        }
+        catch (OperationCanceledException)
+        {
+            // The REQUEST was cancelled, not the deadline: no timeout warning; the caller sees the cancellation.
+            _ = all.ContinueWith(static t => t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+            throw;
         }
 
         // A copy: a read that finishes after the deadline must not change what this email was decided on.

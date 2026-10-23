@@ -10,7 +10,7 @@
  * - Starting values are the step's current values (typed, else the defaults: the templated subject and body, D-53, and the plan's
  *   To pre-fill). The composer is mounted with them and is uncontrolled from then on.
  * - The To lookup opens the host's side-pane lookup for contacts (task 158's `openLookup`) and adds the pick by its email address;
- *   a pick with no usable address adds nothing and the step says so (a warning: type one in To). Typed addresses are accepted as the
+ *   a pick with no usable address adds nothing and the step says so (a warning: type one in To); a side pane that fails to open says so the same way. Both warnings clear when the next lookup starts or To changes. Typed addresses are accepted as the
  *   composer accepts them; Next stays disabled while any address in To is not one (`stepValid`).
  * - The body is committed as plain text: a body the user switched to rich text is converted back.
  * - Cc and Bcc are not part of the action: when the user adds any, the step says they will not be sent.
@@ -59,6 +59,8 @@ export const EmailMessageFields: React.FC<{ scope: StepScope }> = ({ scope }) =>
   const [otherRecipients, setOtherRecipients] = React.useState(false);
   // The contact picked in the side pane that gave no usable address: said out loud, never a silent no-op.
   const [noAddressFor, setNoAddressFor] = React.useState<string | null>(null);
+  // The side pane threw (not a cancel): said out loud too, never a silent no-op.
+  const [lookupFailed, setLookupFailed] = React.useState(false);
 
   // The composer is uncontrolled: it starts from the step's values as they are when the step opens.
   const [initial] = React.useState(() => ({
@@ -84,6 +86,11 @@ export const EmailMessageFields: React.FC<{ scope: StepScope }> = ({ scope }) =>
       // Only a real change is written, so mounting the composer over the starting values is not a choice (discard check).
       const changed = Object.keys(next).filter(code => fieldValue(latest.current, scope, code) !== next[code]);
       if (changed.length === 0) return;
+      // The user has now changed To (typed an address, or removed one): "type one in To" no longer applies.
+      if (changed.includes('to')) {
+        setNoAddressFor(null);
+        setLookupFailed(false);
+      }
       update(d => changed.reduce((acc, code) => withValue(acc, scope, code, next[code]), d));
     },
     [scope, update]
@@ -95,6 +102,7 @@ export const EmailMessageFields: React.FC<{ scope: StepScope }> = ({ scope }) =>
     if (!paneForContacts || !openLookup) return undefined;
     return async (field: 'to' | 'cc' | 'bcc'): Promise<IRecipient[] | null> => {
       setNoAddressFor(null);
+      setLookupFailed(false);
       try {
         const picked = await openLookup({ kind: 'Person', entity: 'contact', parameterCode: field });
         if (!picked) return null; // the pane was cancelled
@@ -107,6 +115,7 @@ export const EmailMessageFields: React.FC<{ scope: StepScope }> = ({ scope }) =>
         }
         return [{ email, displayName: picked.name, resolved: true, sourceId: picked.id, entityType: 'contact' }];
       } catch {
+        setLookupFailed(true);
         return null;
       }
     };
@@ -133,6 +142,11 @@ export const EmailMessageFields: React.FC<{ scope: StepScope }> = ({ scope }) =>
       {noAddressFor ? (
         <MessageBar intent="warning" data-testid="no-email">
           <MessageBarBody>{noAddressFor} has no email address that could be read; type one in To.</MessageBarBody>
+        </MessageBar>
+      ) : null}
+      {lookupFailed ? (
+        <MessageBar intent="warning" data-testid="lookup-failed">
+          <MessageBarBody>The contact lookup could not be opened; type the address in To.</MessageBarBody>
         </MessageBar>
       ) : null}
       {otherRecipients ? (

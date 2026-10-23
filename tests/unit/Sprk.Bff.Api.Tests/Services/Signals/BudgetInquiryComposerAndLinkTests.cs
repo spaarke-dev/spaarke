@@ -324,6 +324,23 @@ public sealed class BudgetInquiryComposerAndLinkTests
         extras.LinkLines.Should().ContainSingle().Which.Should().StartWith("Open this matter in the Spaarke portal");
     }
 
+    [Fact]
+    public async Task A_cancelled_request_surfaces_the_cancellation_and_does_not_log_the_deadline_warning()
+    {
+        var log = new Warnings();
+        var facts = Facts(
+            internalAddresses: [], log: log, readDeadline: TimeSpan.FromSeconds(30),
+            classify: _ => new TaskCompletionSource<SystemUserEmailLookup>().Task); // never completes, ignores the token
+        using var request = new CancellationTokenSource();
+        request.CancelAfter(TimeSpan.FromMilliseconds(100));
+
+        var act = () => facts.ResolveAsync("sprk_matter", Matter, ["a@spaarke.example"], request.Token)
+            .WaitAsync(TimeSpan.FromSeconds(20));
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        log.Lines.Should().NotContain(w => w.Contains("did not finish"), "the request was cancelled, the deadline did not pass");
+    }
+
     // =================================================================================================
     // F3a (fix round 1): the send-time wiring of InquiryRecordFacts, through the real InquiryEmailSender.PrepareAsync
     // (SendAsync calls it, then the communication core). The executor tests fake SendAsync and never reach it.

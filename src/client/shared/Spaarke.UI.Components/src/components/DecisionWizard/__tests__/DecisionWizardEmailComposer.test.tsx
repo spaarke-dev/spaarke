@@ -248,6 +248,80 @@ describe('message step in the EmailComposer (task 160)', () => {
     await waitFor(() => expect(button(/^next$/i)).toBeEnabled());
   });
 
+  it('a side pane that throws shows the lookup-failed warning and adds nothing (K-2)', async () => {
+    const openLookup = jest.fn<ReturnType<DecisionOpenLookup>, Parameters<DecisionOpenLookup>>(async () => {
+      throw new Error('side pane unavailable');
+    });
+    setup(planWith(composerInquiry(null)), { openLookup });
+    const step = await toInquiry();
+    expect(within(step).queryByTestId('lookup-failed')).toBeNull();
+
+    click(within(step).getByRole('button', { name: 'Look up To recipients' }));
+
+    expect(await within(step).findByTestId('lookup-failed')).toHaveTextContent(
+      'The contact lookup could not be opened; type the address in To.'
+    );
+    expect(within(step).queryByTestId('no-email')).toBeNull();
+    expect(button(/^next$/i)).toBeDisabled();
+  });
+
+  it('the lookup-failed warning clears when the next lookup starts (K-2)', async () => {
+    const openLookup = jest
+      .fn<ReturnType<DecisionOpenLookup>, Parameters<DecisionOpenLookup>>()
+      .mockRejectedValueOnce(new Error('side pane unavailable'))
+      .mockResolvedValueOnce(null);
+    setup(planWith(composerInquiry(null)), { openLookup });
+    const step = await toInquiry();
+    const lookup = () => click(within(step).getByRole('button', { name: 'Look up To recipients' }));
+
+    lookup();
+    expect(await within(step).findByTestId('lookup-failed')).toBeInTheDocument();
+    lookup();
+    await waitFor(() => expect(within(step).queryByTestId('lookup-failed')).toBeNull());
+  });
+
+  it('typing an address in To clears the no-email and lookup-failed warnings (K-3)', async () => {
+    const openLookup = jest
+      .fn<ReturnType<DecisionOpenLookup>, Parameters<DecisionOpenLookup>>()
+      .mockResolvedValueOnce({ id: 'cccccccc-0000-0000-0000-0000000000cc', name: 'No Mail' })
+      .mockRejectedValueOnce(new Error('side pane unavailable'));
+    setup(planWith(composerInquiry(null)), { openLookup });
+    const step = await toInquiry();
+    const lookup = () => click(within(step).getByRole('button', { name: 'Look up To recipients' }));
+    const typeInTo = (address: string) => {
+      const to = within(step).getByRole('textbox', { name: 'To' });
+      fireEvent.change(to, { target: { value: address } });
+      fireEvent.keyDown(to, { key: 'Enter' });
+    };
+
+    lookup();
+    expect(await within(step).findByTestId('no-email')).toBeInTheDocument();
+    typeInTo('typed@firm.example');
+    await waitFor(() => expect(within(step).queryByTestId('no-email')).toBeNull());
+    await waitFor(() => expect(button(/^next$/i)).toBeEnabled());
+
+    lookup();
+    expect(await within(step).findByTestId('lookup-failed')).toBeInTheDocument();
+    typeInTo('second@firm.example');
+    await waitFor(() => expect(within(step).queryByTestId('lookup-failed')).toBeNull());
+  });
+
+  it('typing in Subject leaves the no-email warning on screen (K-3 must-not-fire)', async () => {
+    const openLookup = jest.fn<ReturnType<DecisionOpenLookup>, Parameters<DecisionOpenLookup>>(async () => ({
+      id: 'cccccccc-0000-0000-0000-0000000000cc',
+      name: 'No Mail',
+    }));
+    setup(planWith(composerInquiry(null)), { openLookup });
+    const step = await toInquiry();
+
+    click(within(step).getByRole('button', { name: 'Look up To recipients' }));
+    expect(await within(step).findByTestId('no-email')).toBeInTheDocument();
+    fireEvent.change(within(step).getByRole('textbox', { name: 'Subject' }), { target: { value: 'Budget question' } });
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    expect(within(step).getByTestId('no-email')).toBeInTheDocument();
+  });
+
   it('Cc and Bcc are not sent: adding a Cc shows the warning (F3b)', async () => {
     setup(planWith(composerInquiry([LEAD])));
     const step = await toInquiry();
