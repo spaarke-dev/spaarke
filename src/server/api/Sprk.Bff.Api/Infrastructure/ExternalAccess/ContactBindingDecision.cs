@@ -275,8 +275,21 @@ public sealed record ContactBindingRow(
     /// <summary>Only <c>statecode = 0</c> resolves or binds (ADR-003).</summary>
     public bool IsActive => StateCode == 0;
 
-    /// <summary>The binding, read by <see cref="ContactBindingDecision.ReadBinding"/>.</summary>
-    public BindingState Binding => ContactBindingDecision.ReadBinding(RawOid, RawPlane);
+    /// <summary>
+    /// <c>true</c> when this row was read while the BFF's read of the field-secured identity columns
+    /// (<see cref="DataverseContactIdentityStore.IdentityColumns"/>: the binding, the plane and the collision flag) was NOT
+    /// proven (<see cref="SecuredColumnReadProof"/>). An empty plane on such a row may be a hidden one, so its binding is
+    /// <see cref="BindingKind.Unreadable"/>: never Unbound (no bind onto it) and never a plane-less legacy binding.
+    /// </summary>
+    public bool IdentityColumnsUnproven { get; init; }
+
+    /// <summary>
+    /// The binding, read by <see cref="ContactBindingDecision.ReadBinding"/>; <see cref="BindingKind.Unreadable"/> when the
+    /// plane read empty and the identity columns' read is not proven (<see cref="IdentityColumnsUnproven"/>).
+    /// </summary>
+    public BindingState Binding => IdentityColumnsUnproven && RawPlane is null
+        ? BindingState.Unreadable
+        : ContactBindingDecision.ReadBinding(RawOid, RawPlane);
 }
 
 /// <summary>How a lookup ended. Anything but <see cref="Read"/> denies.</summary>
@@ -758,9 +771,13 @@ public static class ContactBindingDecision
     /// <para><b>A plane marker with no oid is UNREADABLE, never unbound.</b> Once
     /// <c>sprk_externalobjectid</c> is field-secured, a reader without FLS Read gets it back as null — in a
     /// returned row AND inside a filter, where Dataverse substitutes null. A bound contact would then look
-    /// unbound and be handed to whoever's email matched. <c>sprk_identityplane</c> is not secured, and every
-    /// BFF write sets both columns together, so "marker present, oid absent" is the detectable signature of
-    /// masking (or of an operator who cleared one column and not the other). Either way it denies.</para>
+    /// unbound and be handed to whoever's email matched. Every BFF write sets both columns together, so "marker
+    /// present, oid absent" is the detectable signature of masking (or of an operator who cleared one column and not
+    /// the other). Either way it denies.</para>
+    /// <para><b>An EMPTY plane is trusted only on a proven read.</b> <c>sprk_identityplane</c> is field-secured too, so
+    /// a hidden plane reads empty, like no plane. This parse cannot tell them apart: a row read while the identity
+    /// columns' read is not proven is <see cref="BindingKind.Unreadable"/> whenever its plane is empty
+    /// (<see cref="ContactBindingRow.IdentityColumnsUnproven"/>, set by the store from <see cref="SecuredColumnReadProof"/>).</para>
     /// <para><b>An oid with no marker is a pre-141 CIAM binding.</b> Every writer before this task was the
     /// CIAM path (verified 2026-09-30: 6 of 6), and the schema step backfills them as External. Reading it as
     /// External keeps today's invite idempotency for those rows if the backfill has not run yet.</para>

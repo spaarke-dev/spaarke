@@ -1130,4 +1130,129 @@ public class DataverseContactIdentityStoreTests
         => DataverseContactIdentityStore.BuildBusinessUnitByNamePath("Secure Record").Should().Be(
             "businessunits?$select=businessunitid&$filter=name eq 'Secure Record'&$top=2");
 
+    // ── The identity columns' readability proof ─────────────────────────────────────────────────────────────
+    // The plane and the collision columns are field-secured: an EMPTY read is trusted only while the BFF's read of every
+    // identity column is proven (SecuredColumnReadProof). Unproven: the probe is Masked and an empty-plane row Unreadable.
+
+    [Fact]
+    public void TheIdentityColumns_AreTheBindingThePlaneAndTheFiveCollisionColumns()
+        => DataverseContactIdentityStore.IdentityColumns.Should().BeEquivalentTo(
+            ContactBindingDecision.ExternalObjectIdColumn, ContactBindingDecision.IdentityPlaneColumn,
+            DataverseContactIdentityStore.FlagOnColumn, DataverseContactIdentityStore.FlagOidColumn,
+            DataverseContactIdentityStore.FlagPlaneColumn, DataverseContactIdentityStore.FlagReasonColumn,
+            DataverseContactIdentityStore.FlagPartiesColumn);
+
+    [Fact]
+    public void ClassifyProbe_WithoutProof_IsMasked_EvenWhenNoRowIsMarked()
+    {
+        // MUST FIRE: a hidden plane reads as no plane, so "no marked rows" without proof is not "nothing to protect".
+        DataverseContactIdentityStore.ClassifyProbe(ContactLookup.Of(), ColumnReadProofOutcome.Unproven)
+            .Should().Be(BindingReadability.Masked);
+        DataverseContactIdentityStore.ClassifyProbe(ContactLookup.Failed, ColumnReadProofOutcome.Unproven)
+            .Should().Be(BindingReadability.Masked);
+        DataverseContactIdentityStore.ClassifyProbe(ContactLookup.Of(), ColumnReadProofOutcome.Faulted)
+            .Should().Be(BindingReadability.Failed, "a proof that faulted is retryable, and still denies");
+    }
+
+    [Fact]
+    public void ClassifyProbe_WithProof_IsDecidedByTheRows_AsToday()
+    {
+        // MUST NOT FIRE.
+        DataverseContactIdentityStore.ClassifyProbe(ContactLookup.Of(), ColumnReadProofOutcome.Proven)
+            .Should().Be(BindingReadability.NoMarkedRows);
+        DataverseContactIdentityStore.ClassifyProbe(
+                ContactLookup.Of(new ContactBindingRow(Guid.NewGuid(), 0, Oid.ToString(), 100000001)),
+                ColumnReadProofOutcome.Proven)
+            .Should().Be(BindingReadability.Readable);
+    }
+
+    [Theory]
+    [InlineData(ColumnReadProofOutcome.Unproven)]
+    [InlineData(ColumnReadProofOutcome.Faulted)]
+    public void AnEmptyPlaneRow_ReadWithoutProof_IsUnreadable_NeverUnboundNorALegacyBinding(ColumnReadProofOutcome proof)
+    {
+        // MUST FIRE: no oid and no plane (would be Unbound), and an oid with no plane (would be a plane-less legacy binding).
+        var unbound = new ContactBindingRow(Guid.NewGuid(), 0, null, null);
+        var legacy = new ContactBindingRow(Guid.NewGuid(), 0, Oid.ToString(), null);
+
+        var marked = DataverseContactIdentityStore.WithIdentityColumnsProof(ContactLookup.Of(unbound, legacy), proof);
+
+        marked.Rows.Should().OnlyContain(r => r.IdentityColumnsUnproven);
+        marked.Rows.Select(r => r.Binding.Kind).Should().Equal(BindingKind.Unreadable, BindingKind.Unreadable);
+    }
+
+    [Fact]
+    public void ARowWithAPlane_IsDecidedOnWithoutProof_AndAProvenReadIsUnchanged()
+    {
+        // MUST NOT FIRE: a plane that was read is a value, not an empty read; a proven read is decided as today.
+        var bound = new ContactBindingRow(Guid.NewGuid(), 0, Oid.ToString(), (int)IdentityPlaneMarker.Workforce);
+        var unbound = new ContactBindingRow(Guid.NewGuid(), 0, null, null);
+
+        var unproven = DataverseContactIdentityStore.WithIdentityColumnsProof(ContactLookup.Of(bound), ColumnReadProofOutcome.Unproven);
+        var proven = DataverseContactIdentityStore.WithIdentityColumnsProof(ContactLookup.Of(bound, unbound), ColumnReadProofOutcome.Proven);
+
+        unproven.Rows[0].Binding.Should().Be(new BindingState(BindingKind.Bound, Oid, IdentityPlaneMarker.Workforce));
+        proven.Rows.Should().Equal(bound, unbound);
+        proven.Rows[1].Binding.Kind.Should().Be(BindingKind.Unbound);
+    }
+
+    [Fact]
+    public void ASystemUsersLinkedContact_ReadWithoutProof_IsMarkedToo()
+    {
+        var row = new SystemUserIdentityRow(Guid.NewGuid(), Oid, null, null, null, null,
+            new ContactBindingRow(Guid.NewGuid(), 0, null, null));
+
+        DataverseContactIdentityStore.WithIdentityColumnsProof(row, ColumnReadProofOutcome.Unproven)
+            .LinkedContact!.Binding.Kind.Should().Be(BindingKind.Unreadable);
+        DataverseContactIdentityStore.WithIdentityColumnsProof(row, ColumnReadProofOutcome.Proven)
+            .LinkedContact!.Binding.Kind.Should().Be(BindingKind.Unbound);
+    }
+
+    [Fact]
+    public void TheProofsRoleRead_IsSystemAdministrator_JoinedToTheUserThroughSystemUserRoles()
+    {
+        var user = Guid.Parse("bbbbbbbb-0000-4000-8000-000000000001");
+
+        var path = Uri.UnescapeDataString(DataverseContactIdentityStore.BuildSystemAdministratorRolePath(user));
+
+        path.Should().StartWith("roles?fetchXml=<fetch top=\"1\"><entity name=\"role\">");
+        path.Should().Contain("<condition attribute=\"name\" operator=\"eq\" value=\"System Administrator\" />");
+        path.Should().Contain("<link-entity name=\"systemuserroles\" from=\"roleid\" to=\"roleid\" link-type=\"inner\">"
+            + $"<filter><condition attribute=\"systemuserid\" operator=\"eq\" value=\"{user:D}\" /></filter>");
+    }
+
+    [Theory]
+    [InlineData(false, "<link-entity name=\"systemuserprofiles\" from=\"fieldsecurityprofileid\" to=\"fieldsecurityprofileid\" link-type=\"inner\"><filter>")]
+    [InlineData(true, "<link-entity name=\"teamprofiles\" from=\"fieldsecurityprofileid\" to=\"fieldsecurityprofileid\" link-type=\"inner\"><link-entity name=\"teammembership\" from=\"teamid\" to=\"teamid\" link-type=\"inner\"><filter>")]
+    public void TheProofsProfileRead_AsksForReadOnEveryIdentityColumn_ThroughTheUsersOwnOrTeamProfiles(bool throughTeam, string link)
+    {
+        var user = Guid.Parse("bbbbbbbb-0000-4000-8000-000000000001");
+
+        var path = Uri.UnescapeDataString(DataverseContactIdentityStore.BuildFieldPermissionReadPath(
+            user, DataverseContactIdentityStore.ContactTable, DataverseContactIdentityStore.IdentityColumns, throughTeam));
+
+        path.Should().StartWith("fieldpermissions?fetchXml=<fetch><entity name=\"fieldpermission\"><attribute name=\"attributelogicalname\" />");
+        path.Should().Contain("<condition attribute=\"entityname\" operator=\"eq\" value=\"contact\" />");
+        path.Should().Contain("<condition attribute=\"canread\" operator=\"eq\" value=\"4\" />");
+        foreach (var column in DataverseContactIdentityStore.IdentityColumns)
+        {
+            path.Should().Contain($"<value>{column}</value>");
+        }
+
+        path.Should().Contain(link + $"<condition attribute=\"systemuserid\" operator=\"eq\" value=\"{user:D}\" /></filter>");
+    }
+
+    [Fact]
+    public void TheProof_ReadsOnlyThePlatformTablesTheSchemaScriptVerifies()
+    {
+        var user = Guid.NewGuid();
+        var reads = Uri.UnescapeDataString(DataverseContactIdentityStore.BuildSystemAdministratorRolePath(user)
+            + DataverseContactIdentityStore.BuildFieldPermissionReadPath(user, "contact", new[] { "x" }, throughTeam: false)
+            + DataverseContactIdentityStore.BuildFieldPermissionReadPath(user, "contact", new[] { "x" }, throughTeam: true));
+        var tables = System.Text.RegularExpressions.Regex.Matches(reads, "<(?:entity|link-entity) name=\"([a-z]+)\"")
+            .Select(m => m.Groups[1].Value).Append("systemuser").Distinct();
+
+        tables.Should().BeEquivalentTo(SecuredColumnReadProof.PlatformTablesRead,
+            "the script's -Verify asserts the BFF application user reads exactly these (WhoAmI reads its own systemuser)");
+    }
 }

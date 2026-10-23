@@ -112,7 +112,11 @@ public static class RevokeExternalAccessEndpoint
         // Task 166 r1: "today" for the remaining-grant overlap check (which grants still confer access). Optional so
         // the many direct callers in tests keep compiling; resolved from DI on the route (registered unconditionally
         // by ExternalAccessModule).
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        // The identity binding store for THIS environment (registered by ExternalAccessModule): a contact whose binding
+        // read EMPTY and who has no email has "nothing to clear" only while the binding columns' read is proven. Optional
+        // so direct callers keep compiling; without it that case fails closed.
+        IContactIdentityStore? identityStore = null)
     {
         // ── Validation ───────────────────────────────────────────────────────
         if (request.AccessRecordId == Guid.Empty)
@@ -217,7 +221,7 @@ public static class RevokeExternalAccessEndpoint
 
         // ── Step 2: Remove the revoked grantee's SPE container permission(s) ──
         var (speOutcome, orgCleanup, organizationTooLarge, permissionsAmbiguous) = await RemoveSpeContainerPermissionsAsync(
-            speContainerMembership, dataverseClient, containerResolver, request.AccessRecordId, grantKey,
+            speContainerMembership, dataverseClient, identityStore, containerResolver, request.AccessRecordId, grantKey,
             ExternalGrantLifecycle.TodayUtc(timeProvider ?? TimeProvider.System), logger, ct);
 
         // ── Step 3: Invalidate the grant cache — the ONE routine (task 137) ───
@@ -422,6 +426,7 @@ public static class RevokeExternalAccessEndpoint
         RemoveSpeContainerPermissionsAsync(
             SpeContainerMembershipService speContainerMembership,
             DataverseWebApiClient dataverseClient,
+            IContactIdentityStore? identityStore,
             RecordContainerResolver containerResolver,
             Guid accessRecordId,
             ExternalGrantKey grantKey,
@@ -480,7 +485,7 @@ public static class RevokeExternalAccessEndpoint
             }
 
             return await RemoveOrganizationMembersSpePermissionsAsync(
-                speContainerMembership, dataverseClient, containerId, organizationId, stillEntitled, logger, ct);
+                speContainerMembership, dataverseClient, identityStore, containerId, organizationId, stillEntitled, logger, ct);
         }
 
         // A CONTACT grant: the ROW's contact is the one revoked (pass-1 K3), never request.ContactId — a request naming
@@ -505,7 +510,7 @@ public static class RevokeExternalAccessEndpoint
         }
 
         var (contactOutcome, contactAmbiguous) = await RemoveContactSpePermissionAsync(
-            speContainerMembership, dataverseClient, contactId, containerId, logger, ct);
+            speContainerMembership, dataverseClient, identityStore, contactId, containerId, logger, ct);
         return (contactOutcome, null, false, contactAmbiguous ? 1 : 0);
     }
 
@@ -617,6 +622,7 @@ public static class RevokeExternalAccessEndpoint
     private static async Task<(SpeContainerRevokeOutcome Outcome, bool Ambiguous)> RemoveContactSpePermissionAsync(
         SpeContainerMembershipService speContainerMembership,
         DataverseWebApiClient dataverseClient,
+        IContactIdentityStore? identityStore,
         Guid contactId,
         string containerId,
         ILogger logger,
@@ -625,7 +631,7 @@ public static class RevokeExternalAccessEndpoint
         SpeMembershipKey contactKey;
         try
         {
-            contactKey = await ResolveContactMembershipKeyAsync(dataverseClient, contactId, ct);
+            contactKey = await ResolveContactMembershipKeyAsync(dataverseClient, identityStore, contactId, ct);
         }
         catch (Exception ex)
         {
@@ -716,6 +722,7 @@ public static class RevokeExternalAccessEndpoint
         RemoveOrganizationMembersSpePermissionsAsync(
             SpeContainerMembershipService speContainerMembership,
             DataverseWebApiClient dataverseClient,
+            IContactIdentityStore? identityStore,
             string containerId,
             Guid organizationId,
             IReadOnlySet<Guid>? stillEntitled,
@@ -822,7 +829,7 @@ public static class RevokeExternalAccessEndpoint
             // strictly MORE access in place. Every member gets an outcome, and the failures are counted.
             try
             {
-                var memberKey = await ResolveContactMembershipKeyAsync(dataverseClient, memberContactId, ct);
+                var memberKey = await ResolveContactMembershipKeyAsync(dataverseClient, identityStore, memberContactId, ct);
 
                 if (HasNoContainerMembershipKey(memberKey))
                 {
@@ -1017,9 +1024,14 @@ public static class RevokeExternalAccessEndpoint
     /// email still matches, as it always has. With no email the contact may hold a permission under an oid this read
     /// cannot see, so "nothing to clear" would be a guess: it THROWS, which every caller already reports as a key that
     /// could not be read (Failed / not cleared) — fail closed.</para>
+    /// <para><b>An EMPTY binding is "no object id" only on a proven read.</b> The binding and its plane are both
+    /// field-secured, so a hidden binding reads empty, like no binding. With no email either, "nothing to clear" is
+    /// answered only while <paramref name="identityStore"/>'s masking probe proves the identity columns' read
+    /// (<see cref="DataverseContactIdentityStore.ProbeBindingReadabilityAsync"/>: Readable, or no marked rows); otherwise —
+    /// no store, Masked, or a probe that failed — it THROWS, as above.</para>
     /// </remarks>
     internal static async Task<SpeMembershipKey> ResolveContactMembershipKeyAsync(
-        DataverseWebApiClient dataverseClient, Guid contactId, CancellationToken ct)
+        DataverseWebApiClient dataverseClient, IContactIdentityStore? identityStore, Guid contactId, CancellationToken ct)
     {
         var row = await dataverseClient.RetrieveAsync<ContactEmailRow>(
             "contacts", contactId, ContactMembershipKeySelect, ct);
@@ -1032,6 +1044,20 @@ public static class RevokeExternalAccessEndpoint
             throw new InvalidOperationException(
                 $"Contact {contactId} has no emailaddress1 and an unreadable identity binding (a plane marker without a "
                 + "readable object id), so its container permission cannot be matched or ruled out.");
+        }
+
+        if (binding.Kind == BindingKind.Unbound && key.IsEmpty)
+        {
+            var readability = identityStore is null
+                ? (BindingReadability?)null
+                : await identityStore.ProbeBindingReadabilityAsync(ct).ConfigureAwait(false);
+            if (readability is not (BindingReadability.Readable or BindingReadability.NoMarkedRows))
+            {
+                throw new InvalidOperationException(
+                    $"Contact {contactId} has no emailaddress1 and its identity binding read empty, but the read of the "
+                    + $"identity columns is not proven ({readability?.ToString() ?? "no identity store"}), so its container "
+                    + "permission cannot be ruled out.");
+            }
         }
 
         return key;
@@ -1088,7 +1114,7 @@ public static class RevokeExternalAccessEndpoint
         /// <summary><c>sprk_externalobjectid</c> — the bound Entra object id (field-secured; null when masked).</summary>
         public string? sprk_externalobjectid { get; set; }
 
-        /// <summary><c>sprk_identityplane</c> — which plane wrote the binding.</summary>
+        /// <summary><c>sprk_identityplane</c> — which plane wrote the binding (field-secured; null when masked).</summary>
         public int? sprk_identityplane { get; set; }
     }
 }

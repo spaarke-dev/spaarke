@@ -24,6 +24,12 @@ namespace Sprk.Bff.Api.Tests.AccessControl.IdentityBinding;
 ///   <item><see cref="MaskBindingColumn"/> reproduces field-level-security masking of the BINDING only: the oid
 ///     comes back null in rows AND is treated as null in filters (Dataverse substitutes null — documented). The
 ///     mirror is not secured, so it is never masked and the unique index still applies.</item>
+///   <item><see cref="MaskIdentityColumns"/> reproduces masking of the PLANE and the COLLISION FLAG (field-secured since
+///     the contact security schema step): both come back null in rows, and the plane is null in filters. With
+///     <see cref="IdentityColumnsProof"/> (the outcome of the real <see cref="SecuredColumnReadProof"/>, Proven by default)
+///     every read applies the production marking (<see cref="DataverseContactIdentityStore.WithIdentityColumnsProof(ContactLookup, ColumnReadProofOutcome)"/>)
+///     and the probe the production verdict (<see cref="DataverseContactIdentityStore.ClassifyProbe(ContactLookup, ColumnReadProofOutcome)"/>),
+///     as the Dataverse store does.</item>
 /// </list>
 /// Failures are injected per operation. Every write is recorded in <see cref="Writes"/>, every read in
 /// <see cref="Reads"/>, so a test asserts what the code DID, not only what it returned.
@@ -142,6 +148,12 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
 
     public bool KeyDefined { get; set; } = true;
     public bool MaskBindingColumn { get; set; }
+
+    /// <summary>The plane and the collision flag read null, in rows and (the plane) in filters.</summary>
+    public bool MaskIdentityColumns { get; set; }
+
+    /// <summary>The identity columns' readability proof outcome every read is marked by (the Dataverse store's proof).</summary>
+    internal ColumnReadProofOutcome IdentityColumnsProof { get; set; } = ColumnReadProofOutcome.Proven;
     public LookupStatus OidLookupStatus { get; set; } = LookupStatus.Read;
     public LookupStatus EmailLookupStatus { get; set; } = LookupStatus.Read;
 
@@ -251,6 +263,8 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             CreatePayloads.Clear();
             KeyDefined = true;
             MaskBindingColumn = false;
+            MaskIdentityColumns = false;
+            IdentityColumnsProof = ColumnReadProofOutcome.Proven;
             OidLookupStatus = LookupStatus.Read;
             EmailLookupStatus = LookupStatus.Read;
             HomeLinkLookupStatus = LookupStatus.Read;
@@ -438,8 +452,8 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             Reads.Add("probe");
             AfterRead?.Invoke("probe");
             if (FailProbe) return Task.FromResult(BindingReadability.Failed);
-            var marked = Contacts.Values.Where(c => c.Plane is not null).Take(50).Select(Row).ToArray();
-            return Task.FromResult(DataverseContactIdentityStore.ClassifyProbe(ContactLookup.Of(marked)));
+            var marked = Contacts.Values.Where(c => !MaskIdentityColumns && c.Plane is not null).Take(50).Select(Row).ToArray();
+            return Task.FromResult(DataverseContactIdentityStore.ClassifyProbe(ContactLookup.Of(marked), IdentityColumnsProof));
         }
     }
 
@@ -909,8 +923,12 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
     }
 
     private ContactBindingRow Row(Contact c)
-        => new(c.Id, c.StateCode, MaskBindingColumn ? null : c.Oid, c.Plane, $"W/\"{c.Version}\"", c.Email, c.Flag,
+    {
+        var row = new ContactBindingRow(c.Id, c.StateCode, MaskBindingColumn ? null : c.Oid,
+            MaskIdentityColumns ? null : c.Plane, $"W/\"{c.Version}\"", c.Email, MaskIdentityColumns ? null : c.Flag,
             c.KeyMirror, MaskHomeColumns ? null : c.ExternalTenantId);
+        return DataverseContactIdentityStore.WithIdentityColumnsProof(ContactLookup.Of(row), IdentityColumnsProof).Rows[0];
+    }
 
     private SystemUserIdentityRow UserRow(SystemUser u)
         => new(u.Id, u.Oid, u.Email, u.DomainName, u.PrimaryContactId, $"W/\"{u.Version}\"",

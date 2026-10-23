@@ -357,6 +357,21 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         ContactBindingDecision.KeyMirrorColumn,
         FlagOnColumn, FlagOidColumn, FlagPlaneColumn, FlagReasonColumn, FlagPartiesColumn);
 
+    /// <summary>
+    /// The field-secured identity columns every binding read decides on: the binding, its plane and the five collision-flag
+    /// columns. An EMPTY value of one of them is trusted only while the BFF's read of all of them is proven
+    /// (<see cref="SecuredColumnReadProof"/>); a row read without that proof is marked
+    /// (<see cref="ContactBindingRow.IdentityColumnsUnproven"/>), and the masking probe reads as Masked.
+    /// </summary>
+    public static readonly IReadOnlyList<string> IdentityColumns = new[]
+    {
+        ContactBindingDecision.ExternalObjectIdColumn, ContactBindingDecision.IdentityPlaneColumn,
+        FlagOnColumn, FlagOidColumn, FlagPlaneColumn, FlagReasonColumn, FlagPartiesColumn,
+    };
+
+    /// <summary>The table the identity columns live on.</summary>
+    public const string ContactTable = "contact";
+
     /// <summary>The systemuser columns the link decision selects.</summary>
     public const string SystemUserSelect =
         "systemuserid,firstname,lastname,azureactivedirectoryobjectid,internalemailaddress,domainname,_sprk_primarycontact_value";
@@ -366,18 +381,25 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     private readonly string _apiUrl;
     private readonly ILogger _logger;
 
+    // The proof that this store's identity can READ the identity columns, made over THIS store's environment and token
+    // (a store may target another environment than the BFF's own). Held for SecuredColumnReadProof.ProofLifetime.
+    private readonly SecuredColumnReadProof _identityColumnsProof;
+
     /// <summary>The store for an environment, authenticated by <paramref name="getToken"/>.</summary>
     public DataverseContactIdentityStore(
         IHttpClientFactory httpClientFactory,
         Func<CancellationToken, Task<string>> getToken,
         string dataverseBaseUrl,
-        ILogger logger)
+        ILogger logger,
+        TimeProvider? time = null)
     {
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
         _getToken = getToken ?? throw new ArgumentNullException(nameof(getToken));
         ArgumentException.ThrowIfNullOrWhiteSpace(dataverseBaseUrl);
         _apiUrl = $"{dataverseBaseUrl.TrimEnd('/')}/api/data/v9.2";
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _identityColumnsProof = new SecuredColumnReadProof(
+            new WebApiColumnReadPermissionSource(this), ContactTable, IdentityColumns, logger, time);
     }
 
     /// <summary>
@@ -727,6 +749,75 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     public static string BuildProbePath()
         => $"contacts?$select=contactid,{ContactBindingDecision.ExternalObjectIdColumn},{ContactBindingDecision.IdentityPlaneColumn}"
            + $"&$filter={ContactBindingDecision.IdentityPlaneColumn} ne null&$top=50";
+
+    /// <summary>The readability proof's first read: this store's own Dataverse user.</summary>
+    public static string BuildWhoAmIPath() => "WhoAmI";
+
+    /// <summary>
+    /// The readability proof's System Administrator leg: the role, joined to <paramref name="user"/> through
+    /// <c>systemuserroles</c>. The same query as the SDK source (<see cref="SdkColumnReadPermissionSource"/>), as FetchXML.
+    /// </summary>
+    public static string BuildSystemAdministratorRolePath(Guid user)
+        => "roles?fetchXml=" + Uri.EscapeDataString(
+            "<fetch top=\"1\"><entity name=\"role\"><attribute name=\"roleid\" />"
+            + $"<filter><condition attribute=\"name\" operator=\"eq\" value=\"{Xml(SecuredColumnReadProof.SystemAdministratorRoleName)}\" /></filter>"
+            + "<link-entity name=\"systemuserroles\" from=\"roleid\" to=\"roleid\" link-type=\"inner\">"
+            + $"<filter><condition attribute=\"systemuserid\" operator=\"eq\" value=\"{user:D}\" /></filter>"
+            + "</link-entity></entity></fetch>");
+
+    /// <summary>
+    /// The readability proof's profile legs: the field permissions granting Read on <paramref name="columns"/> of
+    /// <paramref name="table"/> through a profile of <paramref name="user"/> — its own (<c>systemuserprofiles</c>) or, with
+    /// <paramref name="throughTeam"/>, a team's it is a member of (<c>teamprofiles</c> to <c>teammembership</c>).
+    /// </summary>
+    public static string BuildFieldPermissionReadPath(Guid user, string table, IEnumerable<string> columns, bool throughTeam)
+    {
+        ArgumentNullException.ThrowIfNull(columns);
+        var values = string.Concat(columns.Select(c => $"<value>{Xml(c)}</value>"));
+        var member = $"<filter><condition attribute=\"systemuserid\" operator=\"eq\" value=\"{user:D}\" /></filter>";
+        var link = throughTeam
+            ? "<link-entity name=\"teamprofiles\" from=\"fieldsecurityprofileid\" to=\"fieldsecurityprofileid\" link-type=\"inner\">"
+              + "<link-entity name=\"teammembership\" from=\"teamid\" to=\"teamid\" link-type=\"inner\">" + member
+              + "</link-entity></link-entity>"
+            : "<link-entity name=\"systemuserprofiles\" from=\"fieldsecurityprofileid\" to=\"fieldsecurityprofileid\" link-type=\"inner\">"
+              + member + "</link-entity>";
+        return "fieldpermissions?fetchXml=" + Uri.EscapeDataString(
+            "<fetch><entity name=\"fieldpermission\"><attribute name=\"attributelogicalname\" /><filter>"
+            + $"<condition attribute=\"entityname\" operator=\"eq\" value=\"{Xml(table)}\" />"
+            + $"<condition attribute=\"canread\" operator=\"eq\" value=\"{SecuredColumnReadProof.FieldPermissionAllowed}\" />"
+            + $"<condition attribute=\"attributelogicalname\" operator=\"in\">{values}</condition>"
+            + "</filter>" + link + "</entity></fetch>");
+    }
+
+    private static string Xml(string value) => System.Security.SecurityElement.Escape(value) ?? string.Empty;
+
+    /// <summary>
+    /// The masking verdict once the identity columns' readability proof has run. Pure. Without proof every marked row may
+    /// be hidden (a hidden plane reads as no plane, and the probe then finds no marked rows), so an unproven read is
+    /// <see cref="BindingReadability.Masked"/> and a proof that faulted is <see cref="BindingReadability.Failed"/>, whatever
+    /// the probe returned. Only a proven read is classified by its rows (<see cref="ClassifyProbe(ContactLookup)"/>).
+    /// </summary>
+    internal static BindingReadability ClassifyProbe(ContactLookup probe, ColumnReadProofOutcome proof) => proof switch
+    {
+        ColumnReadProofOutcome.Proven => ClassifyProbe(probe),
+        ColumnReadProofOutcome.Unproven => BindingReadability.Masked,
+        _ => BindingReadability.Failed,
+    };
+
+    /// <summary>
+    /// Marks every row of a read lookup as read without proof when <paramref name="proof"/> is not
+    /// <see cref="ColumnReadProofOutcome.Proven"/> (<see cref="ContactBindingRow.IdentityColumnsUnproven"/>). Pure.
+    /// </summary>
+    internal static ContactLookup WithIdentityColumnsProof(ContactLookup lookup, ColumnReadProofOutcome proof)
+        => proof == ColumnReadProofOutcome.Proven || lookup.Status != LookupStatus.Read
+            ? lookup
+            : lookup with { Rows = lookup.Rows.Select(r => r with { IdentityColumnsUnproven = true }).ToList() };
+
+    /// <summary>The systemuser form of the marking above: its linked contact. Pure.</summary>
+    internal static SystemUserIdentityRow WithIdentityColumnsProof(SystemUserIdentityRow row, ColumnReadProofOutcome proof)
+        => proof == ColumnReadProofOutcome.Proven || row.LinkedContact is null
+            ? row
+            : row with { LinkedContact = row.LinkedContact with { IdentityColumnsUnproven = true } };
 
     /// <summary>
     /// The interactive-systemuser scan: enabled, not an application user, and a human access mode —
@@ -1114,7 +1205,7 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
 
         using var doc = TryParseJson(body);
         var row = doc is null ? null : ParseContactRow(doc.RootElement);
-        return row is null ? ContactLookup.Failed : ContactLookup.Of(row);
+        return row is null ? ContactLookup.Failed : await ProvenAsync(ContactLookup.Of(row), ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -1163,14 +1254,23 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
 
         using var doc = TryParseJson(body);
         var row = doc is null ? null : ParseSystemUserRow(doc.RootElement);
-        return row is null ? SystemUserLookup.Failed : new SystemUserLookup(LookupStatus.Read, row);
+        return row is null
+            ? SystemUserLookup.Failed
+            : new SystemUserLookup(LookupStatus.Read, await ProvenAsync(row, ct).ConfigureAwait(false));
     }
 
     /// <inheritdoc />
     public async Task<BindingReadability> ProbeBindingReadabilityAsync(CancellationToken ct)
     {
+        // A hidden plane reads as no plane, so without proof the probe would find "no marked rows": nothing to protect.
+        var proof = await _identityColumnsProof.ProveAsync(ct).ConfigureAwait(false);
+        if (proof != ColumnReadProofOutcome.Proven)
+        {
+            return ClassifyProbe(ContactLookup.Failed, proof);
+        }
+
         var lookup = await ReadContactsAsync(BuildProbePath(), "masking probe", ct).ConfigureAwait(false);
-        return ClassifyProbe(lookup);
+        return ClassifyProbe(lookup, proof);
     }
 
     /// <inheritdoc />
@@ -1255,7 +1355,7 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         }
 
         var rows = Values(doc.RootElement).Select(ParseContactRow).Where(r => r is not null).Select(r => r!).ToList();
-        return new ContactLookup(LookupStatus.Read, rows);
+        return await ProvenAsync(new ContactLookup(LookupStatus.Read, rows), ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -1502,12 +1602,98 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     // ── Scans ──────────────────────────────────────────────────────────────────────────────────────────
 
     /// <inheritdoc />
-    public Task<StorePage<SystemUserIdentityRow>> ScanInteractiveSystemUsersAsync(string? continuation, CancellationToken ct)
-        => ScanAsync(continuation ?? BuildSystemUserScanPath(), ParseSystemUserRow, ct);
+    public async Task<StorePage<SystemUserIdentityRow>> ScanInteractiveSystemUsersAsync(string? continuation, CancellationToken ct)
+    {
+        var page = await ScanAsync(continuation ?? BuildSystemUserScanPath(), ParseSystemUserRow, ct).ConfigureAwait(false);
+        if (page.Status != LookupStatus.Read || page.Rows.All(r => r.LinkedContact is not { RawPlane: null }))
+        {
+            return page;
+        }
+
+        var proof = await _identityColumnsProof.ProveAsync(ct).ConfigureAwait(false);
+        return page with { Rows = page.Rows.Select(r => WithIdentityColumnsProof(r, proof)).ToList() };
+    }
 
     /// <inheritdoc />
-    public Task<StorePage<ContactBindingRow>> ScanFlaggedContactsAsync(string? continuation, CancellationToken ct)
-        => ScanAsync(continuation ?? BuildFlaggedContactScanPath(), ParseContactRow, ct);
+    public async Task<StorePage<ContactBindingRow>> ScanFlaggedContactsAsync(string? continuation, CancellationToken ct)
+    {
+        var page = await ScanAsync(continuation ?? BuildFlaggedContactScanPath(), ParseContactRow, ct).ConfigureAwait(false);
+        if (page.Status != LookupStatus.Read)
+        {
+            return page;
+        }
+
+        var proven = await ProvenAsync(ContactLookup.Of(page.Rows.ToArray()), ct).ConfigureAwait(false);
+        return page with { Rows = proven.Rows };
+    }
+
+    /// <summary>
+    /// Applies the identity columns' readability proof to a read: a row whose plane read empty is marked when the proof
+    /// does not hold. A read with no empty plane needs no proof, so none is made for it.
+    /// </summary>
+    private async Task<ContactLookup> ProvenAsync(ContactLookup lookup, CancellationToken ct)
+    {
+        if (lookup.Status != LookupStatus.Read || lookup.Rows.All(r => r.RawPlane is not null))
+        {
+            return lookup;
+        }
+
+        var proof = await _identityColumnsProof.ProveAsync(ct).ConfigureAwait(false);
+        return WithIdentityColumnsProof(lookup, proof);
+    }
+
+    private async Task<SystemUserIdentityRow> ProvenAsync(SystemUserIdentityRow row, CancellationToken ct)
+    {
+        if (row.LinkedContact is not { RawPlane: null })
+        {
+            return row;
+        }
+
+        var proof = await _identityColumnsProof.ProveAsync(ct).ConfigureAwait(false);
+        return WithIdentityColumnsProof(row, proof);
+    }
+
+    /// <summary>
+    /// The readability proof's reads over this store's Web API channel (its environment, its token). A read that does not
+    /// answer throws, which the proof reports as <see cref="ColumnReadProofOutcome.Faulted"/>.
+    /// </summary>
+    private sealed class WebApiColumnReadPermissionSource(DataverseContactIdentityStore store) : IColumnReadPermissionSource
+    {
+        public async Task<Guid?> ReadOwnUserIdAsync(CancellationToken ct)
+        {
+            using var doc = await store.ReadProofAsync(BuildWhoAmIPath(), ct).ConfigureAwait(false);
+            return GuidOf(doc.RootElement, "UserId");
+        }
+
+        public async Task<bool> HoldsSystemAdministratorAsync(Guid user, CancellationToken ct)
+        {
+            using var doc = await store.ReadProofAsync(BuildSystemAdministratorRolePath(user), ct).ConfigureAwait(false);
+            return Values(doc.RootElement).Any();
+        }
+
+        public async Task<IReadOnlyCollection<string>> ColumnsGrantingReadAsync(
+            Guid user, string table, IReadOnlyCollection<string> columns, bool throughTeam, CancellationToken ct)
+        {
+            using var doc = await store.ReadProofAsync(BuildFieldPermissionReadPath(user, table, columns, throughTeam), ct)
+                .ConfigureAwait(false);
+            return Values(doc.RootElement)
+                .Select(r => StringOf(r, "attributelogicalname"))
+                .Where(c => !string.IsNullOrWhiteSpace(c))
+                .Select(c => c!)
+                .ToArray();
+        }
+    }
+
+    private async Task<JsonDocument> ReadProofAsync(string path, CancellationToken ct)
+    {
+        var (status, code, body, error) = await GetAsync(path, ct).ConfigureAwait(false);
+        if (status != LookupStatus.Read || code == HttpStatusCode.NotFound || body is null)
+        {
+            throw new InvalidOperationException($"A readability-proof read did not answer ({status}, {error ?? code.ToString()}).");
+        }
+
+        return TryParseJson(body) ?? throw new InvalidOperationException("A readability-proof read did not answer JSON.");
+    }
 
     // ── Plumbing ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -1535,7 +1721,7 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         }
 
         var rows = Values(doc.RootElement).Select(ParseContactRow).Where(r => r is not null).Select(r => r!).ToList();
-        return new ContactLookup(LookupStatus.Read, rows);
+        return await ProvenAsync(new ContactLookup(LookupStatus.Read, rows), ct).ConfigureAwait(false);
     }
 
     private async Task<StorePage<T>> ScanAsync<T>(string pathOrNextLink, Func<JsonElement, T?> parse, CancellationToken ct)
