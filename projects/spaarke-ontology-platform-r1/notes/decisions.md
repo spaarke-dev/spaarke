@@ -244,3 +244,8 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
 | task 053 | Gate host + acting | Tasks **058** (decision wizard) + **043** (commit route), per D-17/D-26 | 2026-10-07 |
 | Narrow skip | Skip a To Do under a Secure project with no matter | **D-38** (no skips) | 2026-10-07 |
 | D-174 | The dev rate-card Firm list is confirmed by ebilling's task execution, not the owner; a customer environment's list still goes to the owner | **D-177** (moot: EB-D-148 dropped the rate-card scope column and backfill) | 2026-10-21 |
+
+## D-186 — Release order for D-185 is automated; POL-MATTER-NOBUDGET v2 approved for dev (owner, 2026-10-23)
+
+- **Worklist configuration on customer environments:** automated in `scripts/Deploy-Release.ps1` as a separate task (164): BFF → apply + verify the worklist grid configuration → SpaarkeMaster import (roles). A configuration failure blocks the import for that environment. Until 164 ships, the manual order in the customer deployment guide §7.8 applies.
+- **POL-MATTER-NOBUDGET v2:** the owner approved the dev apply (`Apply-DoLanePolicies.ps1 -DefinitionPath config/know-promotion.policies.json`; `-WhatIf` clean 2026-10-23). It runs only after the BFF that contains task 159 is on dev, because an older BFF does not know `assign-task`.
