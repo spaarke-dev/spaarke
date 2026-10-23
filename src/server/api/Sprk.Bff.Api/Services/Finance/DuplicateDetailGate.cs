@@ -87,7 +87,7 @@ internal static class DuplicateDetailGate
         if (withheld.Count > 0)
         {
             logger.LogInformation(
-                "{Surface}: the earlier-invoice detail of {Count} Duplicate group(s) is withheld (an earlier invoice the caller cannot read, an unresolved number, or a fault; D-176).",
+                "{Surface}: the earlier-invoice detail of {Count} Duplicate group(s) is withheld (an earlier invoice the caller cannot read, a number-only finding, or a fault; D-176).",
                 surface, withheld.Count);
         }
 

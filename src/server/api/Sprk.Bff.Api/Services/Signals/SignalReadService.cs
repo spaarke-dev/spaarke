@@ -1405,7 +1405,7 @@ public sealed class SignalReadService
         if (withheld > 0)
         {
             _logger.LogInformation(
-                "Signal read: the earlier-invoice detail of {Count} Duplicate Signal(s) is withheld (an earlier invoice the caller cannot read, an unresolved number, or a fault; D-176).",
+                "Signal read: the earlier-invoice detail of {Count} Duplicate Signal(s) is withheld (an earlier invoice the caller cannot read, a number-only finding, or a fault; D-176).",
                 withheld);
         }
 

@@ -752,7 +752,7 @@ public class AccessTableAppOnlyWriterTests
     [InlineData("sprk_invoicesubmission", "sprk_processingstatus")]
     [InlineData("sprk_invoicesubmission", "sprk_submitter")]
     [InlineData("sprk_invoicesubmission", "sprk_adminattention")]
-    // UAC review F4 (option b): D-176 takes the vendor org from the invoice's submission, so the invoice's own decides no access.
+    // Since #2294 (0bba46c1ba) no vendor org decides a Duplicate: a number-only finding is always withheld, so the invoice's sprk_vendororg decides no access.
     [InlineData("sprk_invoice", "sprk_vendororg")]
     [InlineData("sprk_invoiceapproval", "sprk_regardingmatter")]
     [InlineData("sprk_externalidentifier", "sprk_regardingproject")]
