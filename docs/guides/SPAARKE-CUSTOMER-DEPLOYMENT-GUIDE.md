@@ -1535,7 +1535,19 @@ Both consume the **declarative seed manifest** (resolves the `scripts/seed-data`
 
 **H12c** wires runtime references: `sprk_aimodeldeployment` rows point at customer's OpenAI deployment (dedicated per customer — both models). Runs AFTER H12a + H12b + H2a (OpenAI deployed).
 
-**Ordering requirement (D-185, ontology worklist).** H12b does not seed the ontology worklist row (`sprk_gridconfiguration` `00000000-0000-4000-8000-000000005010`). (a) **Upgrades** (the environment already has the old row, which links `sprk_policy` as the caller): the order is BFF, then the configuration (`scripts/Apply-WorklistGridConfiguration.ps1`, `-Verify -RequireRow` after), then the roles. `Deploy-Release.ps1` does this automatically once the release-config phase ships (task 164). Until then run `Deploy-Release.ps1 -SkipPhase Solutions`, then the config script, then the Solutions phase. Roles before the row give every user an empty worklist (HTTP 200, log warning only); an old BFF with the new row loses rule names and severity. (b) **Fresh environments** have no old row, so the order does not matter: apply the row after the BFF is provisioned (H9). (c) **On dev**, an unmanaged import does not remove privileges: the role change is `RemovePrivilegesRole` (see `projects/spaarke-ontology-platform-r1/notes/security-roles.md` section 19).
+**Worklist grid configuration (ontology task 164, D-185).** The ontology worklist reads its membership and order from one `sprk_gridconfiguration` row (`00000000-0000-4000-8000-000000005010`, defined in `config/worklist.gridconfiguration.json`). H12b does not seed it. A **release** (`scripts/Deploy-Release.ps1`, Phase 2b) applies it for every target environment and verifies it (`-Verify -RequireRow`) after the BFF (Phase 2) and **before** the SpaarkeMaster import (Phase 3). The order is binding: the SpaarkeMaster import carries the D-185 role change that removes policy Read from Spaarke Basic User and Spaarke Console User, and with the old row that still joins `sprk_policy`, every user gets an empty worklist once policy Read is removed (HTTP 200, with a log warning only). An old BFF with the new row loses rule names and severity, so Phase 2b does not run if the BFF failed (a skipped BFF phase, `-SkipPhase BffApi`, is an explicit operator choice and still runs it). If Phase 2 (the BFF) or Phase 2b fails for an environment, Phase 3 does not run for that environment, even without `-StopOnFailure`. `-SkipPhase OntologyConfig` skips it as an explicit operator choice and does not block Phase 3, so use it only when the row is already in place and in sync. The step uses the operator's `az` sign-in (no service principal, no client secret), like Phase 3.
+
+**Fresh environments** have no old row, so the order does not matter there; Phase 2b still applies the row after the BFF. **On dev** (the authoring environment, which skips Phase 3), an unmanaged import does not remove privileges: the D-185 role change is applied with `RemovePrivilegesRole` (see `projects/spaarke-ontology-platform-r1/notes/security-roles.md` section 19).
+
+For an out-of-band fix (a row that is missing or drifted outside a release), run the same script by hand:
+
+```powershell
+pwsh scripts/Apply-WorklistGridConfiguration.ps1 -DataverseUrl https://<env>.crm.dynamics.com -WhatIf
+pwsh scripts/Apply-WorklistGridConfiguration.ps1 -DataverseUrl https://<env>.crm.dynamics.com
+pwsh scripts/Apply-WorklistGridConfiguration.ps1 -DataverseUrl https://<env>.crm.dynamics.com -Verify -RequireRow
+```
+
+Known gap: the Do-lane and know-promotion policies (`scripts/Apply-DoLanePolicies.ps1`) still reach a customer environment only by hand; no release phase applies them.
 
 ### 7.9 Phase 9 — Post-Deploy Integrations (H14)
 

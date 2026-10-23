@@ -650,7 +650,7 @@ Rationale + verification evidence: [`projects/spaarke-auth-v4-dataverse-MI/notes
 **Parameters:**
 - `-EnvironmentUrl` — One or more Dataverse environment URLs or names from `config/environments.json` (e.g., `dev`, `demo`, `https://spaarkedev1.crm.dynamics.com`)
 - `-Version` — Release version tag in `v{major}.{minor}.{patch}` format; auto-suggests from latest git tag if omitted
-- `-SkipPhase` — Array of phase names to skip: `Build`, `BffApi`, `Solutions`, `WebResources`, `Validation`
+- `-SkipPhase` — Array of phase names to skip: `Build`, `BffApi`, `OntologyConfig`, `Solutions`, `WebResources`, `Validation`. Skipping `OntologyConfig` does not block Phase 3 (an explicit operator choice); a failed Phase 2 or Phase 2b always does
 - `-SkipBuild` — Shortcut for `-SkipPhase Build`
 - `-StopOnFailure` — Stop deploying to remaining environments if a deployment fails (default: `$true`)
 - `-ClientSecret` — ignored since T218f (warns): Phase 3 imports SpaarkeMaster with your own az/pac sign-in
@@ -661,6 +661,7 @@ Rationale + verification evidence: [`projects/spaarke-auth-v4-dataverse-MI/notes
 | 0 | (built-in) | Pre-flight checks: git clean, branch, auth, BFF URL validation |
 | 1 | `Build-AllClientComponents.ps1` | Build all client components in dependency order |
 | 2 | `Deploy-BffApi.ps1` | BFF API deployment (per environment) |
+| 2b | `Apply-WorklistGridConfiguration.ps1` | Ontology configuration (per environment): apply, then `-Verify -RequireRow`, the worklist grid configuration row (task 164, D-185). Runs after Phase 2 and before Phase 3, and does not run if Phase 2 failed (a skipped Phase 2, `-SkipPhase BffApi`, is an explicit operator choice and still runs it); a failure here, or a failed Phase 2, blocks Phase 3 for that environment even with `-StopOnFailure $false` |
 | 3 | `solution-authoring/Import-SpaarkeMasterPackage.ps1` | SpaarkeMaster import — the CI-published package, typed per environment (`solutionPackageType` in `config/environments.json`; `none` skips the authoring environment). T218f retired `Deploy-DataverseSolutions.ps1` |
 | 4 | `Deploy-AllWebResources.ps1` | Web resource deployment (per environment) |
 | 5 | `Validate-DeployedEnvironment.ps1` | Post-deploy validation (per environment) |

@@ -706,7 +706,7 @@ The checks from `sdap-ci.yml` that have no Router or nightly equivalent, run in 
 - `client-typecheck` — `tsc` builds of six shared client libraries in dependency order, then `Spaarke.AI.Widgets` `tsc --noEmit`.
 - `pcf-eslint` — `eslint .` in `src/client/pcf` (Tier 2 `lint` runs it only on SpaarkeAi/BFF changes and `client-lint.yml` does not cover PCF).
 - `verdict-script-tests` — Pester must-fire controls for `scripts/ci/master-ci-verdict.ps1` (fake `gh`, no network).
-- `ontology-script-tests` — Pester controls for `scripts/Apply-DoLanePolicies.ps1` (policy lint, apply order, drift) and `scripts/Invoke-OntologyStampBackfill.ps1`; no Dataverse.
+- `ontology-script-tests` — Pester controls for `scripts/Apply-DoLanePolicies.ps1` (policy lint, apply order, drift) `scripts/Invoke-OntologyStampBackfill.ps1` and the worklist-configuration phase (2b) of `scripts/Deploy-Release.ps1`; no Dataverse.
 - `trivy-fs` — the legacy per-change repository scan: Trivy `fs`, SARIF to the Security tab under the legacy category (`.github/workflows/sdap-ci.yml:security-scan`, so existing code-scanning alerts continue as one series). Reports only; it never fails on findings (the backlog is known), and raises `ci-standalone/trivy-fs` only if the scan itself errors. The upload step warns instead of failing on fork and Dependabot PRs, which cannot write `security-events`.
 
 `Summary` writes one results table to the run's summary. On a push to master, `alerts` raises or clears one quality alert per job (`ci-standalone/<job>`). No job uses `continue-on-error`: a failure must show as a failure, and a `continue-on-error` job reads as `success` to the alerts job.

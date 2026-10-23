@@ -32,8 +32,9 @@ name: CI Standalone Checks
 #                                                                 never fail. Tier 2 `lint` runs the real check.)
 #   verdict-script-tests    (new)                                  Must-fire controls for master-ci-verdict.ps1.
 #   ontology-script-tests   (new)                                  Pester controls for Apply-DoLanePolicies.ps1 (the
-#                                                                 policy lint and apply order) and
-#                                                                 Invoke-OntologyStampBackfill.ps1.
+#                                                                 policy lint and apply order),
+#                                                                 Invoke-OntologyStampBackfill.ps1 and the
+#                                                                 Deploy-Release.ps1 worklist-configuration phase.
 #   agent-guard-tests       (new)                                  Must-fire/must-not-fire controls for the agent
 #                                                                 hooks (scripts/quality/*.py) and
 #                                                                 Remove-WorktreeSafe.ps1. Windows: junctions.
@@ -465,8 +466,9 @@ jobs:
 
   # --------------------------------------------------------------------------
   # ontology-script-tests: the Pester controls for scripts/Apply-DoLanePolicies.ps1 (policy lint, the
-  # order of the apply, what -Verify calls drift) and scripts/Invoke-OntologyStampBackfill.ps1. Neither
-  # file ran in CI before (ontology task 159, K3). The tests read the shipped functions out of the
+  # order of the apply, what -Verify calls drift), scripts/Invoke-OntologyStampBackfill.ps1 and the
+  # Phase 2b gate in scripts/Deploy-Release.ps1 (task 164). The first two did not run in CI before
+  # (ontology task 159, K3). The tests read the shipped functions out of the
   # scripts' own syntax trees and the checked-in config/*.policies.json; nothing talks to Dataverse.
   # Same Pester setup as verdict-script-tests: -MinimumVersion 5.5.0, no pin.
   # --------------------------------------------------------------------------
@@ -488,7 +490,7 @@ jobs:
         run: |
           Install-Module Pester -MinimumVersion 5.5.0 -Scope CurrentUser -Force -SkipPublisherCheck
           Import-Module Pester -MinimumVersion 5.5.0
-          $r = Invoke-Pester -Path tests/scripts/Apply-DoLanePolicies.Tests.ps1, tests/scripts/Invoke-OntologyStampBackfill.Tests.ps1 -Output Detailed -PassThru
+          $r = Invoke-Pester -Path tests/scripts/Apply-DoLanePolicies.Tests.ps1, tests/scripts/Invoke-OntologyStampBackfill.Tests.ps1, tests/scripts/Deploy-Release.OntologyConfig.Tests.ps1 -Output Detailed -PassThru
           if ($r.FailedCount -gt 0 -or $r.TotalCount -eq 0) { exit 1 }
 
   # --------------------------------------------------------------------------

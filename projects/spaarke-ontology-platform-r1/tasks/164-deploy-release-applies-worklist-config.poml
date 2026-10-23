@@ -4,7 +4,7 @@
     <title>Deploy-Release.ps1 applies and verifies the worklist grid configuration between the BFF and the SpaarkeMaster import (D-185 release order)</title>
     <phase>11 UAT</phase>
     <gate>startable (owner decision 2026-10-23: automate in Deploy-Release.ps1 as a separate task)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the production release script (every customer release runs it) and adds a release phase; the ordering protects a security role change (D-185).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -136,4 +136,8 @@
       <file>.claude/constraints/testing.md</file>
     </files>
   </knowledge>
+
+  <completion date="2026-10-23">
+    Deploy-Release.ps1 now has a per-environment Phase 2b (Invoke-OntologyConfigPhase: apply, then -Verify -RequireRow; -WhatIf applies in WhatIf mode and skips the verify) between the BFF and the SpaarkeMaster import. A failure sets $ontologyConfigFailed, the first branch of Phase 3's chain, so Phase 3 is skipped for that environment even without -StopOnFailure, with the D-185 reason printed. 'OntologyConfig' is in the -SkipPhase ValidateSet; skipping warns and does not block Phase 3. Tests: tests/scripts/Deploy-Release.OntologyConfig.Tests.ps1, 19 failed before / 19 passed after (Pester 5.7.1), added to the ontology-script-tests CI job. Docs: .DESCRIPTION, SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md section 7.8, two CI doc lines. Nothing was run against any environment. Detail, deviations and the policies-gap issue text: notes/task-164-notes.md. TASK-INDEX is updated at merge by the main session.
+  </completion>
 </task>

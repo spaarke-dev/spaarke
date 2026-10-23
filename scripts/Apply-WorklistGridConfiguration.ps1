@@ -24,8 +24,8 @@
     ORDERING REQUIREMENT (D-185, task 163, #2285).
       (a) Upgrades (the environment has the old row, which links sprk_policy as the caller): BFF, then this script
           (-Verify -RequireRow after), then the roles (Spaarke Basic User and Console User lose Read on sprk_policy /
-          sprk_policyversion). Deploy-Release.ps1 does this automatically once the release-config phase ships (task 164).
-          Until then run `Deploy-Release.ps1 -SkipPhase Solutions`, then this script, then the Solutions phase.
+          sprk_policyversion). Deploy-Release.ps1 Phase 2b runs this script in that order for every release (task 164);
+          a failed BFF or a failed Phase 2b blocks the SpaarkeMaster import (Phase 3) for that environment.
           Roles before this script give every user an empty worklist (HTTP 200, one log warning); an old BFF with the new
           definition shows no rule names and ranks everything last.
       (b) Fresh environments have no old row, so the order does not matter: apply the row after the BFF is provisioned (H9).
