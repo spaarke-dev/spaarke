@@ -304,8 +304,7 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
         const wasPinned = prior?.pinned === true;
         // The first failure that keeps the id pins the review. After that only a new Failed outcome replaces the failure that
         // decides `retry`; a refusal or an in-progress answer leaves it alone.
-        const pinning =
-          keeps && (!wasPinned || isFailedOutcome(failure)) ? failure : (prior?.pinning ?? null);
+        const pinning = keeps && (!wasPinned || isFailedOutcome(failure)) ? failure : (prior?.pinning ?? null);
         const isNowPinned = keeps || wasPinned;
         attempts.current[id] = {
           key: wasPinned ? prior.key : reviewKey(review),

@@ -324,7 +324,9 @@ describe('side-pane lookup (D-182)', () => {
       const { service } = setup([pathBItem], { openLookup, lookup: makeLookup([BUDGET_A, BUDGET_B]) });
       await toReviseBudget();
       click(screen.getByRole('textbox', { name: /^Budget to revise/ }));
-      await waitFor(() => expect(screen.getByRole('textbox', { name: /^Budget to revise/ })).toHaveValue(BUDGET_B.name));
+      await waitFor(() =>
+        expect(screen.getByRole('textbox', { name: /^Budget to revise/ })).toHaveValue(BUDGET_B.name)
+      );
       expect(lookupObjects).toHaveBeenCalledTimes(1);
       await toConfirm();
       click(button('Record decision'));

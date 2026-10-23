@@ -81,8 +81,7 @@ const LookupParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
   const paneEntity = kind === 'Person' ? 'contact' : (parameter.lookupEntity ?? null);
   // K2: a host that lists the tables its pane opens gets the pane for those only; any other table keeps the inline field.
   const supported = openLookup?.supportedEntities;
-  const usePane =
-    openLookup != null && paneEntity != null && (supported == null || supported.includes(paneEntity));
+  const usePane = openLookup != null && paneEntity != null && (supported == null || supported.includes(paneEntity));
   // Single flight: a second activation while the pane is open opens nothing.
   const picking = React.useRef(false);
   const [paneOpen, setPaneOpen] = React.useState(false);
