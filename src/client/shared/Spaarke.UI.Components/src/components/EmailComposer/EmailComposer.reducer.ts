@@ -102,7 +102,7 @@ export function validateLocalAttachmentFile(file: {
 export const DEFAULT_MAX_RECIPIENTS = 50;
 
 /** Loose RFC 5322-adjacent email check — good enough for UI validation; the BFF is authoritative. */
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // ---------------------------------------------------------------------------
 // initialState

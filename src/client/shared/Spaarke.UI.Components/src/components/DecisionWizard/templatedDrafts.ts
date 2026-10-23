@@ -61,6 +61,10 @@ function defaultsFor(action: DecisionAction, context: TemplateContext): Record<s
     const value = TEMPLATES[parameter.code]?.(context);
     if (value) out[parameter.code] = value;
   }
+  // Task 160 (D-179): the plan's To pre-fill (data from the server, never a template), in the shape `to` is committed in.
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- wire data: a recipient without an address is skipped, never a throw
+  const prefill = (action.prefillTo ?? []).map(r => r.email?.trim()).filter((email): email is string => !!email);
+  if (prefill.length > 0 && action.parameters.some(p => p.code === 'to')) out.to = prefill.join('; ');
   return out;
 }
 

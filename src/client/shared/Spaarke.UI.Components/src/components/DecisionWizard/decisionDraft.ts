@@ -21,6 +21,7 @@ import type {
   DecisionReviewNextStep,
   DecisionValue,
 } from './decisionWizardTypes';
+import { EMAIL_RE } from '../EmailComposer/EmailComposer.reducer';
 
 export type Decision = 'taken' | 'skipped';
 
@@ -245,7 +246,22 @@ export function parameterValid(parameter: DecisionParameter, value: string): boo
 
 /** True when every parameter of the step is acceptable ("Next is disabled until required fields are valid"). */
 export function stepValid(action: DecisionAction, draft: ItemDraft, scope: StepScope): boolean {
-  return action.parameters.every(p => parameterValid(p, fieldValue(draft, scope, p.code)));
+  return (
+    action.parameters.every(p => parameterValid(p, fieldValue(draft, scope, p.code))) &&
+    composerRecipientsValid(action, draft, scope)
+  );
+}
+
+/**
+ * A step the EmailComposer edits commits addresses in `to` (task 160), and the server refuses an address that is not one, so every
+ * address must pass the composer's own check before Next. Other steps keep their free-text `to` (a contact or firm id is allowed).
+ */
+function composerRecipientsValid(action: DecisionAction, draft: ItemDraft, scope: StepScope): boolean {
+  if (action.composer !== 'email' || !action.parameters.some(p => p.code === 'to')) return true;
+  return fieldValue(draft, scope, 'to')
+    .split(/[;,\s]+/)
+    .filter(a => a.trim() !== '')
+    .every(a => EMAIL_RE.test(a.trim()));
 }
 
 /** The values a step sends: only filled fields, Money as a number, everything else as text. */

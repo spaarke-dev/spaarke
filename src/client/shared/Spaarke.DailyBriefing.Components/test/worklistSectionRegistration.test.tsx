@@ -44,11 +44,9 @@ jest.mock('@spaarke/ai-widgets', () => ({
   useOptionalDispatchPaneEvent: () => mockDispatch,
 }));
 // `virtual`: this package does not depend on communication-components by name (the shim resolves it from LegalWorkspace's node_modules).
-jest.mock(
-  '@spaarke/communication-components',
-  () => ({ ReconciliationAggregateCard: jest.fn(() => null) }),
-  { virtual: true }
-);
+jest.mock('@spaarke/communication-components', () => ({ ReconciliationAggregateCard: jest.fn(() => null) }), {
+  virtual: true,
+});
 jest.mock('../../../../solutions/LegalWorkspace/src/services/authInit', () => ({
   authenticatedFetch: jest.fn(),
 }));
@@ -62,10 +60,7 @@ import { createWorklistLookup, createWorklistOpenLookup, createWorklistOpenRecor
 import { worklistRegistration } from '../../../../solutions/LegalWorkspace/src/sections/worklist.registration';
 import { authenticatedFetch } from '../../../../solutions/LegalWorkspace/src/services/authInit';
 
-const SHIM_PATH = path.resolve(
-  __dirname,
-  '../../../../solutions/LegalWorkspace/src/sections/worklist.registration.ts'
-);
+const SHIM_PATH = path.resolve(__dirname, '../../../../solutions/LegalWorkspace/src/sections/worklist.registration.ts');
 
 const widgetMock = WorklistWidget as unknown as jest.Mock;
 const serviceMock = createWorklistService as unknown as jest.Mock;
@@ -151,6 +146,13 @@ describe('worklist section shim (task 156)', () => {
       expect(openRecordFactoryMock).toHaveBeenCalledTimes(1);
       expect(props.openLookup).toBe(mockOpenLookup);
       expect(props.openRecord).toBe(mockOpenRecord);
+    });
+  });
+
+  test('with Xrm: the side-pane lookup also gets Xrm.WebApi, to read a picked contact address (task 160, D-179)', () => {
+    withXrm(retrieve => {
+      mountSection();
+      expect(openLookupFactoryMock.mock.calls[0][1]?.retrieveMultipleRecords).toBe(retrieve);
     });
   });
 

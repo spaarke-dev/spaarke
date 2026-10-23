@@ -519,6 +519,41 @@ public sealed class SignalCoreRecordAccess
             : plan;
     }
 
+    /// <summary>
+    /// Task 160 (D-179): the budget inquiry's To pre-fill, for a plan that offers <c>send-budget-inquiry</c> on an allowed MATTER: the
+    /// matter's outside firm (<c>sprk_assignedlawfirm1</c>) resolved to its primary contact with an email address by the resolver
+    /// <c>send-reminder</c> uses (<see cref="OutsideFirmContactResolver"/>). Every read is AS THE CALLER, so a matter, firm or contact the
+    /// caller cannot read gives no pre-fill. Best effort: a fault gives no pre-fill and never fails the plan read; any other plan or core
+    /// reads nothing.
+    /// </summary>
+    internal async Task<OutsideFirmContact?> ReadInquiryRecipientAsync(
+        ResolvedDecisionPlan plan, SignalAccessDecision decision, CancellationToken ct)
+    {
+        if (!plan.Actions.Any(a => a.Code == BudgetInquiryExecutor.ActionCode)
+            || decision.Outcome != SignalAccessOutcome.Allowed
+            || !string.Equals(decision.CoreTable, "sprk_matter", StringComparison.OrdinalIgnoreCase)
+            || decision.CoreId is not { } matterId || matterId == Guid.Empty)
+        {
+            return null;
+        }
+
+        try
+        {
+            var matter = await _userClient.GetAsync($"sprk_matters({matterId:D})?$select=_sprk_assignedlawfirm1_value", ct).ConfigureAwait(false);
+            if (!matter.IsSuccess || OutsideFirmContactResolver.ReadGuid(matter.Body, "_sprk_assignedlawfirm1_value") is not { } firm)
+            {
+                return null;
+            }
+
+            return await OutsideFirmContactResolver.FirmPrimaryContactAsync(_userClient, firm, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "Decision plan: the budget inquiry's outside-firm contact could not be read; To starts empty.");
+            return null;
+        }
+    }
+
     /// <summary>The one reading of <see cref="InquiryDispositionService.FindOpenInquiryOfTodoAsync"/> for both routes: anything but
     /// an open inquiry or none (a fault) is unavailable.</summary>
     private static InquiryOutcomeTodoCheck ToCheck(InquiryTodoMatchResult match) => match.Match switch

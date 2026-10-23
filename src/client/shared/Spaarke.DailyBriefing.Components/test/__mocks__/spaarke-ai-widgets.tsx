@@ -19,7 +19,7 @@ export interface WorklistLookupDataSource {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const createWorklistLookup: (source: WorklistLookupDataSource) => any = () => async () => [];
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const createWorklistOpenLookup: (navigation: unknown) => any = () => async () => null;
+export const createWorklistOpenLookup: (navigation: unknown, source?: unknown) => any = () => async () => null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const createWorklistOpenRecord: (navigation: unknown) => any = () => undefined;
 export const useOptionalDispatchPaneEvent: () => (channel: string, event: unknown) => void = () => () => undefined;
