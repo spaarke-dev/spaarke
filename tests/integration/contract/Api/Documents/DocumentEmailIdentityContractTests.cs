@@ -3,14 +3,20 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Tests.AccessControl;
+using Sprk.Bff.Api.Tests.Services.Ai.Handlers;
 using Sprk.Bff.Api.Tests.Services.Documents;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.Documents;
@@ -285,10 +291,12 @@ public class DocumentEmailIdentityContractTests
         body.GetProperty("documentId").ValueKind.Should().Be(JsonValueKind.Null);
     }
 
-    // ── Saved, but the caller may not read the newest copy ────────────────────────────────────
+    // ── Saved, but the caller may not read the newest copy: answered EXACTLY like no match ────
+    // (UAC-r2 deploy gate: the keys are caller-supplied and, since task 132, the match covers captured and Spaarke-sent
+    // mail, so a refusal that differs from "not saved" would tell a caller that the thing exists.)
 
     [Fact]
-    public async Task ResolveEmail_WhenCallerLacksReadOnTheNewestCopy_Returns403_LeaksNoMetadata_AndReadsNoMore()
+    public async Task ResolveEmail_WhenCallerLacksReadOnTheNewestCopy_AnswersByteForByteLikeNoMatch_AndReadsNoMore()
     {
         var documentId = Guid.NewGuid();
         // Only the lookup is set up (STRICT): no row read, no related-record read — the handler never runs.
@@ -298,15 +306,124 @@ public class DocumentEmailIdentityContractTests
         using var factory = Factory(entityService, AccessSource(documentId, AccessRights.None));
         var response = await AuthenticatedClient(factory).PostAsJsonAsync(Route, new { internetMessageId = MessageId });
 
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
-        var raw = await response.Content.ReadAsStringAsync();
-        raw.Should().NotContain("Discovery schedule");
-        raw.Should().NotContain("MAT-000042");
-        raw.Should().NotContain(documentId.ToString("D"));
+        var answer = await Answer.OfAsync(response);
+        answer.Should().Be(await NoMatchAnswerAsync());
+        AssertIsTheNotSavedShape(answer);
+        answer.Body.Should().NotContain("Discovery schedule").And.NotContain("MAT-000042")
+            .And.NotContain(documentId.ToString("D")).And.NotContain("sdap.access");
         entityService.Verify(
             e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()), Times.Once,
             "one candidate, one authorization — an older copy is never searched");
+    }
+
+    [Fact]
+    public async Task ResolveEmail_ThroughTheCommunication_WhenCallerLacksRead_AnswersLikeNoMatch_NeitherReadsTheCommunicationNorAsksTheProbe()
+    {
+        var documentId = Guid.NewGuid();
+        var communicationId = Guid.NewGuid();
+        // A mailbox-captured archive: no sprk_emailmessageid, matched through its communication's sprk_internetmessageid.
+        // STRICT: no sprk_communication read is set up, and the probe is STRICT and EMPTY.
+        var entityService = SavedCopy(CapturedArchive(documentId, communicationId));
+        var probe = Probe();
+
+        using var factory = Factory(entityService, AccessSource(documentId, AccessRights.None), probe);
+        var response = await AuthenticatedClient(factory).PostAsJsonAsync(Route, new { internetMessageId = MessageId });
+
+        var answer = await Answer.OfAsync(response);
+        answer.Should().Be(await NoMatchAnswerAsync());
+        AssertIsTheNotSavedShape(answer);
+        answer.Body.Should().NotContain(documentId.ToString("D")).And.NotContain(communicationId.ToString("D"));
+        entityService.Verify(
+            e => e.RetrieveAsync("sprk_communication", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Never, "the communication is never read for a refused match");
+        probe.Verify(
+            p => p.GetCallerRightsAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never, "the caller-rights probe never runs for a refused match");
+    }
+
+    [Fact]
+    public async Task ResolveEmail_ThroughAnInternalOnlyCommunication_ForAFlaggedExternalCaller_AnswersLikeNoMatch()
+    {
+        var documentId = Guid.NewGuid();
+        var communicationId = Guid.NewGuid();
+        var world = InternalOnlyCommunicationWorld(documentId, communicationId);
+        var entityService = SavedCopy(CapturedArchive(documentId, communicationId));
+        var probe = Probe();
+
+        // The root grants ALLOW read; only the external document narrowing hides the document.
+        using var factory = ExternalCaller(
+            Factory(entityService, AccessSource(documentId, AccessRights.Read), probe), NarrowingCallerMode.External, world);
+        var response = await AuthenticatedClient(factory).PostAsJsonAsync(Route, new { internetMessageId = MessageId });
+
+        var answer = await Answer.OfAsync(response);
+        answer.Should().Be(await NoMatchAnswerAsync());
+        AssertIsTheNotSavedShape(answer);
+        answer.Body.Should().NotContain(documentId.ToString("D")).And.NotContain("sdap.access");
+        world.Calls.Should().Be(1, "it was the narrowing that refused");
+        entityService.Verify(
+            e => e.RetrieveAsync("sprk_communication", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Never, "the communication is never read for a refused match");
+        probe.Verify(
+            p => p.GetCallerRightsAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never, "the caller-rights probe never runs for a refused match");
+    }
+
+    [Fact]
+    public async Task ResolveEmail_ThroughAnInternalOnlyCommunication_ForAnInternalCaller_StillResolves()
+    {
+        // Must-not-fire control for the test above: same data, same rights, but the caller is an internal systemuser, so
+        // the narrowing does not apply and the match resolves.
+        var documentId = Guid.NewGuid();
+        var communicationId = Guid.NewGuid();
+        var matterId = Guid.NewGuid();
+        var world = InternalOnlyCommunicationWorld(documentId, communicationId);
+        var row = DocumentEmailIdentityResolutionTests.Row(
+            documentId, ("sprk_matter", new EntityReference("sprk_matter", matterId) { Name = "MAT-000042" }));
+        row["sprk_relatedcommunication"] = new EntityReference("sprk_communication", communicationId);
+        var entityService = SavedCopy(row);
+        entityService
+            .Setup(e => e.RetrieveAsync("sprk_matter", matterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_matter", matterId) { ["sprk_mattername"] = "Acme v Globex" });
+
+        using var factory = ExternalCaller(
+            Factory(entityService, AccessSource(documentId, AccessRights.Read)), NarrowingCallerMode.Internal, world);
+        var response = await AuthenticatedClient(factory).PostAsJsonAsync(Route, new { internetMessageId = MessageId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("resolved").GetBoolean().Should().BeTrue();
+        body.GetProperty("documentId").GetString().Should().Be(documentId.ToString("D"));
+        world.Calls.Should().Be(0, "an internal systemuser makes no narrowing call");
+    }
+
+    // ── Scope pin: the conversion belongs to THIS route's filter, not to DocumentAuthorizationFilter ──
+
+    [Fact]
+    public async Task OtherRoutesCarryingTheReadFilter_StillAnswer403_ForTheSameUnreadableDocument()
+    {
+        var documentId = Guid.NewGuid();
+
+        using var factory = Factory(new Mock<IGenericEntityService>(MockBehavior.Strict), AccessSource(documentId, AccessRights.None));
+        var response = await AuthenticatedClient(factory).GetAsync($"/api/documents/{documentId:D}/identity");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, "GET /{documentId}/identity is unchanged by the email route's fold");
+        response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
+        (await response.Content.ReadAsStringAsync()).Should().Contain("sdap.access.deny");
+    }
+
+    [Fact]
+    public async Task OtherRoutesCarryingTheReadFilter_StillAnswer403_WhenTheNarrowingHidesTheDocument()
+    {
+        var documentId = Guid.NewGuid();
+        var world = InternalOnlyCommunicationWorld(documentId, Guid.NewGuid());
+
+        using var factory = ExternalCaller(
+            Factory(new Mock<IGenericEntityService>(MockBehavior.Strict), AccessSource(documentId, AccessRights.Read)),
+            NarrowingCallerMode.External, world);
+        var response = await AuthenticatedClient(factory).GetAsync($"/api/documents/{documentId:D}/identity");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await response.Content.ReadAsStringAsync()).Should().Contain(InternalPlaneDocumentNarrowingReason);
     }
 
     // ── Bad input, no credentials, outage ─────────────────────────────────────────────────────
@@ -364,6 +481,75 @@ public class DocumentEmailIdentityContractTests
 
     // ── helpers ───────────────────────────────────────────────────────────────────────────────
 
+    private const string InternalPlaneDocumentNarrowingReason = Sprk.Bff.Api.Api.Filters.InternalPlaneDocumentNarrowing.HiddenReasonCode;
+    private const int OpenThread = 100000000;
+
+    /// <summary>
+    /// Everything a caller can observe about an answer: status, content type, the raw body string and the header names
+    /// (the volatile <c>Date</c> excluded). Two answers are indistinguishable exactly when these are equal.
+    /// </summary>
+    private sealed record Answer(HttpStatusCode Status, string? ContentType, string Body, string Headers)
+    {
+        public static async Task<Answer> OfAsync(HttpResponseMessage response)
+        {
+            var names = response.Headers.Select(h => h.Key)
+                .Concat(response.Content.Headers.Select(h => h.Key))
+                .Where(n => !string.Equals(n, "Date", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase);
+            return new Answer(
+                response.StatusCode,
+                response.Content.Headers.ContentType?.ToString(),
+                await response.Content.ReadAsStringAsync(),
+                string.Join(",", names));
+        }
+    }
+
+    /// <summary>The answer for a key that matches nothing — the baseline every converted refusal must equal.</summary>
+    private static async Task<Answer> NoMatchAnswerAsync()
+    {
+        var entityService = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        entityService
+            .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection());
+
+        using var factory = Factory(entityService, new Mock<IAccessDataSource>(MockBehavior.Strict));
+        using var response = await AuthenticatedClient(factory).PostAsJsonAsync(Route, new { internetMessageId = MessageId });
+        return await Answer.OfAsync(response);
+    }
+
+    /// <summary>The answer is the plain "not saved" 200 — no id, no record, no reason code, no problem details.</summary>
+    private static void AssertIsTheNotSavedShape(Answer answer)
+    {
+        answer.Status.Should().Be(HttpStatusCode.OK);
+        answer.ContentType.Should().StartWith("application/json");
+        using var json = JsonDocument.Parse(answer.Body);
+        var body = json.RootElement;
+        body.GetProperty("resolved").GetBoolean().Should().BeFalse();
+        body.GetProperty("reason").GetString().Should().Be("not_saved");
+        body.GetProperty("documentId").ValueKind.Should().Be(JsonValueKind.Null);
+        body.TryGetProperty("reasonCode", out _).Should().BeFalse();
+        body.TryGetProperty("title", out _).Should().BeFalse();
+        IdentityJson.RelatedRecordWithheld(body).Should().BeNull();
+        if (body.TryGetProperty("relatedRecord", out var related))
+            related.ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    /// <summary>An app-only world in which the document's communication is internal-only (the narrowing hides the document).</summary>
+    private static AppOnlyDocumentWorld InternalOnlyCommunicationWorld(Guid documentId, Guid communicationId)
+    {
+        var world = new AppOnlyDocumentWorld();
+        var thread = Guid.NewGuid();
+        world.Thread(thread, OpenThread);
+        world.Communication(communicationId, internalOnly: true, thread);
+        world.Document(documentId, communication: communicationId);
+        return world;
+    }
+
+    /// <summary>The same host with a caller stated as <paramref name="mode"/> for the external document narrowing.</summary>
+    private static WebApplicationFactory<Program> ExternalCaller(
+        DocumentIdentityTestWebAppFactory factory, NarrowingCallerMode mode, AppOnlyDocumentWorld world)
+        => factory.WithWebHostBuilder(b => b.ConfigureTestServices(s => s.AddStatedNarrowingCaller(() => mode, () => world)));
+
     private static DocumentIdentityTestWebAppFactory Factory(
         Mock<IGenericEntityService> entityService,
         Mock<IAccessDataSource> accessSource,
@@ -417,7 +603,7 @@ public class DocumentEmailIdentityContractTests
         IdentityJson.RelatedRecordWithheld(body).Should().Be(withheld ? true : null);
     }
 
-    private static HttpClient AuthenticatedClient(DocumentIdentityTestWebAppFactory factory)
+    private static HttpClient AuthenticatedClient(WebApplicationFactory<Program> factory)
     {
         var client = factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
@@ -448,5 +634,74 @@ public class DocumentEmailIdentityContractTests
                 AccessRights = rights,
             });
         return accessSource;
+    }
+}
+
+/// <summary>
+/// The fold in <see cref="Sprk.Bff.Api.Api.Filters.DocumentEmailIdentityFilter"/>, driven directly with a stand-in for the
+/// authorization step: ONLY a 403 refusal becomes the "not saved" answer; every other status the chain can produce
+/// (including the 500 "Authorization Error", which no live host test can reach because the authorization service fails
+/// closed with a 403 on its own faults) passes through untouched, and the handler is not reached on a refusal.
+/// </summary>
+public class DocumentEmailIdentityFilterFoldTests
+{
+    private static async Task<(object? Result, bool NextRan)> RunAsync(Microsoft.AspNetCore.Http.IResult downstream)
+    {
+        var entityService = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        entityService
+            .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity> { DocumentEmailIdentityResolutionTests.Row(Guid.NewGuid()) }));
+        var services = new ServiceCollection()
+            .AddLogging()
+            .AddSingleton(entityService.Object)
+            .BuildServiceProvider();
+        var http = new Microsoft.AspNetCore.Http.DefaultHttpContext { RequestServices = services };
+        var request = new Sprk.Bff.Api.Models.ResolveEmailIdentityRequest("<abc@mail.example.com>", null);
+        var context = Microsoft.AspNetCore.Http.EndpointFilterInvocationContext.Create(http, request);
+
+        var nextRan = false;
+        var result = await new Sprk.Bff.Api.Api.Filters.DocumentEmailIdentityFilter().InvokeAsync(context, _ =>
+        {
+            nextRan = true;
+            return ValueTask.FromResult<object?>(downstream);
+        });
+        return (result, nextRan);
+    }
+
+    [Theory]
+    [InlineData("sdap.access.deny.insufficient_rights")]
+    [InlineData("sdap.access.error.system_failure")]
+    public async Task A403Refusal_IsFoldedInto_TheSameValueAsNoMatch(string reasonCode)
+    {
+        var (result, _) = await RunAsync(Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.Forbidden(reasonCode));
+
+        var ok = result.Should().BeAssignableTo<Microsoft.AspNetCore.Http.HttpResults.Ok<Sprk.Bff.Api.Models.DocumentIdentityResponse>>().Subject;
+        ok.Value.Should().BeEquivalentTo(
+            Sprk.Bff.Api.Models.DocumentIdentityResponse.NoIdentity(Sprk.Bff.Api.Services.Documents.DocumentUrlIdentityResolution.ReasonNotSaved));
+    }
+
+    [Theory]
+    [InlineData(400)]
+    [InlineData(401)]
+    [InlineData(500)]
+    [InlineData(503)]
+    public async Task Any_OtherRefusal_PassesThroughUnchanged_SoAnOutageNeverReadsAsNotSaved(int status)
+    {
+        var downstream = Microsoft.AspNetCore.Http.Results.Problem(statusCode: status, title: "Authorization Error");
+
+        var (result, _) = await RunAsync(downstream);
+
+        result.Should().BeSameAs(downstream);
+    }
+
+    [Fact]
+    public async Task ASuccessfulDownstreamAnswer_PassesThroughUnchanged()
+    {
+        var downstream = Microsoft.AspNetCore.Http.Results.Ok(new { resolved = true });
+
+        var (result, nextRan) = await RunAsync(downstream);
+
+        nextRan.Should().BeTrue();
+        result.Should().BeSameAs(downstream);
     }
 }

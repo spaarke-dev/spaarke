@@ -16,11 +16,19 @@ namespace Sprk.Bff.Api.Api.Filters;
 /// the key <see cref="DocumentAuthorizationFilter"/> reads — and the unchanged authorization filter, registered next,
 /// decides <c>read</c> on it exactly as on <c>/{documentId}/identity</c>. One decision path for every document route.</para>
 /// <para><b>What a caller can learn.</b> No saved copy → 200 <c>{ resolved: false, reason: "not_saved" }</c>. A saved
-/// copy the caller may not read → 403 with no id, name or record (the handler, the only place metadata enters a
-/// response, never runs). The 403 tells a caller who already holds the email in their mailbox only that it is saved
-/// somewhere in Spaarke. Only the NEWEST copy is authorized — see
+/// copy the caller may not read (no right, or hidden by the external document narrowing) is answered EXACTLY like no
+/// match — the same status and body, no reason code, id or record — because since task 132 the match also covers
+/// captured and Spaarke-sent mail, and the keys are whatever the caller sends: any other answer for a match the caller
+/// cannot read would tell them the thing exists. The handler, the only place metadata enters a response, never runs on
+/// a refusal. Only the NEWEST copy is authorized — see
 /// <see cref="DocumentUrlIdentityResolution.ResolveByEmailMessageIdAsync"/> for why an older readable copy is not
 /// searched.</para>
+/// <para><b>Known limits.</b> (a) Only a 403 is folded into "not saved". A 401/400/500/503 passes through, so an
+/// outage the filter chain reports as a 500 "Authorization Error" (the authorization call itself throwing) or a 503
+/// never reads as "not saved" (task 120), and a caller cannot cause one. Note that <c>AuthorizationService</c> catches
+/// the faults of its own access source and fails closed with a 403, which this filter answers as "not saved" like any
+/// other refusal. (b) The match path does extra reads (the authorization and the narrowing), so the response TIME
+/// differs slightly from a no-match answer; the body and status do not.</para>
 /// </remarks>
 public sealed class DocumentEmailIdentityFilter : IEndpointFilter
 {
@@ -50,12 +58,25 @@ public sealed class DocumentEmailIdentityFilter : IEndpointFilter
             httpContext.RequestAborted);
 
         if (identity is null)
-            return TypedResults.Ok(DocumentIdentityResponse.NoIdentity(DocumentUrlIdentityResolution.ReasonNotSaved));
+            return NotSaved();
 
         // The same item key the URL route uses, so both handlers read the filter-resolved identity one way.
         httpContext.Items[DocumentUrlIdentityFilter.ResolutionItemKey] = identity;
         routeValues["documentId"] = identity.DocumentId.ToString("D");
 
-        return await next(context);
+        var result = await next(context);
+
+        // A match the caller may not read is answered exactly like no match. DocumentAuthorizationFilter refuses with 403
+        // for both "no right" and "hidden by the external narrowing" (it returns before the handler, so no metadata was
+        // produced); passing either 403 through would let a caller tell "saved somewhere I cannot read" from "not saved".
+        // Only a refusal that IS a decision is folded in. 401/400/500/503 are not (see the remarks on the known limit).
+        if (result is IStatusCodeHttpResult { StatusCode: StatusCodes.Status403Forbidden })
+            return NotSaved();
+
+        return result;
     }
+
+    // One value for both the no-match branch and the refused-match branch, so the two cannot drift apart.
+    private static IResult NotSaved()
+        => TypedResults.Ok(DocumentIdentityResponse.NoIdentity(DocumentUrlIdentityResolution.ReasonNotSaved));
 }
