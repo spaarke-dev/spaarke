@@ -661,7 +661,7 @@ Rationale + verification evidence: [`projects/spaarke-auth-v4-dataverse-MI/notes
 | 0 | (built-in) | Pre-flight checks: git clean, branch, auth, BFF URL validation |
 | 1 | `Build-AllClientComponents.ps1` | Build all client components in dependency order |
 | 2 | `Deploy-BffApi.ps1` | BFF API deployment (per environment) |
-| 2b | `Apply-WorklistGridConfiguration.ps1` | Ontology configuration (per environment): apply, then `-Verify -RequireRow`, the worklist grid configuration row (task 164, D-185). Runs only after a successful Phase 2 and before Phase 3; a failure here, or a failed Phase 2, blocks Phase 3 for that environment even with `-StopOnFailure $false` |
+| 2b | `Apply-WorklistGridConfiguration.ps1` | Ontology configuration (per environment): apply, then `-Verify -RequireRow`, the worklist grid configuration row (task 164, D-185). Runs after Phase 2 and before Phase 3, and does not run if Phase 2 failed (a skipped Phase 2, `-SkipPhase BffApi`, is an explicit operator choice and still runs it); a failure here, or a failed Phase 2, blocks Phase 3 for that environment even with `-StopOnFailure $false` |
 | 3 | `solution-authoring/Import-SpaarkeMasterPackage.ps1` | SpaarkeMaster import — the CI-published package, typed per environment (`solutionPackageType` in `config/environments.json`; `none` skips the authoring environment). T218f retired `Deploy-DataverseSolutions.ps1` |
 | 4 | `Deploy-AllWebResources.ps1` | Web resource deployment (per environment) |
 | 5 | `Validate-DeployedEnvironment.ps1` | Post-deploy validation (per environment) |

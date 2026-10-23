@@ -193,7 +193,9 @@ Describe 'the real per-environment loop, run against fake phase scripts (Phases 
         $text = $loop.Extent.Text
         $cut = $text.IndexOf('# ── Phase 4')
         if ($cut -lt 0) { throw 'Phase 4 marker not found in the loop' }
-        $body = $text.Substring(0, $cut) + "`n}"
+        # The cut sits inside the loop body: record $envFailed (the per-environment failure flag the later phases and the
+        # environment status read) at the end of each iteration, so the tests can assert it. Not asserted: only the flag itself.
+        $body = $text.Substring(0, $cut) + "`n    `$script:EnvFailedLog += `$envFailed`n}"
         $wrapper = @"
 function Invoke-LoopUnderTest {
     [CmdletBinding(SupportsShouldProcess)]
@@ -203,7 +205,7 @@ $body
 "@
         . ([scriptblock]::Create($wrapper))
 
-        function New-FakeScripts([string]$Dir, [int]$BffExit = 0, [int]$ApplyExit = 0, [int]$VerifyExit = 0) {
+        function New-FakeScripts([string]$Dir, [int]$BffExit = 0, [int]$ApplyExit = 0, [int]$VerifyExit = 0, [switch]$ApplyThrows) {
             New-Item -ItemType Directory -Path (Join-Path $Dir 'solution-authoring') -Force | Out-Null
             $log = Join-Path $Dir 'calls.log'
             @"
@@ -211,11 +213,13 @@ param(`$Environment, `$ResourceGroupName, `$AppServiceName, `$UseSlotDeploy, `$S
 Add-Content -LiteralPath '$log' -Value 'bff'
 exit $BffExit
 "@ | Set-Content -LiteralPath (Join-Path $Dir 'Deploy-BffApi.ps1') -Encoding utf8
+            $throws = if ($ApplyThrows) { '$true' } else { '$false' }
             @"
 [CmdletBinding(SupportsShouldProcess)]
 param([string]`$DataverseUrl, [switch]`$Verify, [switch]`$RequireRow)
 Add-Content -WhatIf:`$false -LiteralPath '$log' -Value ("apply url={0};verify={1};whatIf={2}" -f `$DataverseUrl, [bool]`$Verify, [bool]`$WhatIfPreference)
 if (`$Verify) { exit $VerifyExit }
+if ($throws) { throw 'apply blew up' }
 exit $ApplyExit
 "@ | Set-Content -LiteralPath (Join-Path $Dir 'Apply-WorklistGridConfiguration.ps1') -Encoding utf8
             @"
@@ -230,6 +234,7 @@ Add-Content -WhatIf:`$false -LiteralPath '$log' -Value ("import url={0};whatIf={
     }
     BeforeEach {
         $script:FailMessages = @()
+        $script:EnvFailedLog = @()
         $script:Dir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $script:Dir | Out-Null
     }
@@ -238,6 +243,7 @@ Add-Content -WhatIf:`$false -LiteralPath '$log' -Value ("import url={0};whatIf={
         New-FakeScripts $script:Dir
         Invoke-LoopUnderTest -targetEnvironments @(New-Env a) -ScriptDir $script:Dir -StopOnFailure $true
         Get-Calls $script:Dir | Should -Be @('bff', 'apply url=https://a.crm.dynamics.com;verify=False;whatIf=False', 'apply url=https://a.crm.dynamics.com;verify=True;whatIf=False', 'import url=https://a.crm.dynamics.com;whatIf=False')
+        $script:EnvFailedLog | Should -Be @($false)
     }
 
     It 'F1: a failed BFF with -StopOnFailure $false runs neither Phase 2b nor Phase 3' {
@@ -245,12 +251,16 @@ Add-Content -WhatIf:`$false -LiteralPath '$log' -Value ("import url={0};whatIf={
         Invoke-LoopUnderTest -targetEnvironments @(New-Env a) -ScriptDir $script:Dir -StopOnFailure $false
         Get-Calls $script:Dir | Should -Be @('bff')
         ($script:FailMessages -join "`n") | Should -Match 'did not run'
+        # K4: the message names the BFF as the reason, not the ontology configuration
+        ($script:FailMessages -join "`n") | Should -Match 'the BFF \(Phase 2\) failed'
+        $script:EnvFailedLog | Should -Be @($true)
     }
 
     It 'F1: a failed BFF with -StopOnFailure $true runs neither Phase 2b nor Phase 3' {
         New-FakeScripts $script:Dir -BffExit 1
         Invoke-LoopUnderTest -targetEnvironments @(New-Env a) -ScriptDir $script:Dir -StopOnFailure $true
         Get-Calls $script:Dir | Should -Be @('bff')
+        $script:EnvFailedLog | Should -Be @($true)
     }
 
     It 'F1: a missing BFF script counts as a BFF failure (no 2b, no 3)' {
@@ -258,36 +268,65 @@ Add-Content -WhatIf:`$false -LiteralPath '$log' -Value ("import url={0};whatIf={
         Remove-Item -LiteralPath (Join-Path $script:Dir 'Deploy-BffApi.ps1')
         Invoke-LoopUnderTest -targetEnvironments @(New-Env a) -ScriptDir $script:Dir -StopOnFailure $false
         Get-Calls $script:Dir | Should -Be @()
+        $script:EnvFailedLog | Should -Be @($true)
     }
 
     It '-SkipPhase BffApi does not set the BFF flag: 2b and 3 run (must-not-fire)' {
         New-FakeScripts $script:Dir -BffExit 1
         Invoke-LoopUnderTest -targetEnvironments @(New-Env a) -ScriptDir $script:Dir -SkipPhase 'BffApi' -StopOnFailure $false
         Get-Calls $script:Dir | Should -Be @('apply url=https://a.crm.dynamics.com;verify=False;whatIf=False', 'apply url=https://a.crm.dynamics.com;verify=True;whatIf=False', 'import url=https://a.crm.dynamics.com;whatIf=False')
+        $script:EnvFailedLog | Should -Be @($false)
     }
 
     It 'a Phase 2 that -WhatIf declines does not set the BFF flag: apply and import both run in WhatIf mode (must-not-fire, and M2)' {
         New-FakeScripts $script:Dir -BffExit 1
         Invoke-LoopUnderTest -targetEnvironments @(New-Env a) -ScriptDir $script:Dir -StopOnFailure $false -WhatIf
         Get-Calls $script:Dir | Should -Be @('apply url=https://a.crm.dynamics.com;verify=False;whatIf=True', 'import url=https://a.crm.dynamics.com;whatIf=True')
+        $script:EnvFailedLog | Should -Be @($false)
     }
 
     It 'a failing apply blocks Phase 3 even with -StopOnFailure $false' {
         New-FakeScripts $script:Dir -ApplyExit 1
         Invoke-LoopUnderTest -targetEnvironments @(New-Env a) -ScriptDir $script:Dir -StopOnFailure $false
         Get-Calls $script:Dir | Should -Be @('bff', 'apply url=https://a.crm.dynamics.com;verify=False;whatIf=False')
+        # K4: a configuration failure keeps the D-185 wording and does not blame the BFF
+        ($script:FailMessages -join "`n") | Should -Match 'needs the worklist configuration first \(gate: config-failed\)'
+        ($script:FailMessages -join "`n") | Should -Not -Match 'the BFF \(Phase 2\) failed'
+        # F3: the environment is recorded as failed, so Phase 6 does not tag the release
+        $script:EnvFailedLog | Should -Be @($true)
+    }
+
+    It 'F3: a failing apply marks the environment failed with -StopOnFailure $true too' {
+        New-FakeScripts $script:Dir -ApplyExit 1
+        Invoke-LoopUnderTest -targetEnvironments @(New-Env a) -ScriptDir $script:Dir -StopOnFailure $true
+        $script:EnvFailedLog | Should -Be @($true)
+    }
+
+    It 'F3: a throwing apply blocks Phase 3 and marks the environment failed (-StopOnFailure $false)' {
+        New-FakeScripts $script:Dir -ApplyThrows
+        Invoke-LoopUnderTest -targetEnvironments @(New-Env a) -ScriptDir $script:Dir -StopOnFailure $false
+        @(Get-Calls $script:Dir | Where-Object { $_ -like 'import*' }).Count | Should -Be 0
+        $script:EnvFailedLog | Should -Be @($true)
     }
 
     It 'a failing verify blocks Phase 3 even with -StopOnFailure $false' {
         New-FakeScripts $script:Dir -VerifyExit 1
         Invoke-LoopUnderTest -targetEnvironments @(New-Env a) -ScriptDir $script:Dir -StopOnFailure $false
         @(Get-Calls $script:Dir | Where-Object { $_ -like 'import*' }).Count | Should -Be 0
+        $script:EnvFailedLog | Should -Be @($true)
+    }
+
+    It 'F3: a failing verify marks the environment failed with -StopOnFailure $true too' {
+        New-FakeScripts $script:Dir -VerifyExit 1
+        Invoke-LoopUnderTest -targetEnvironments @(New-Env a) -ScriptDir $script:Dir -StopOnFailure $true
+        $script:EnvFailedLog | Should -Be @($true)
     }
 
     It '-SkipPhase OntologyConfig skips 2b and does not block Phase 3 (must-not-fire)' {
         New-FakeScripts $script:Dir -ApplyExit 1
         Invoke-LoopUnderTest -targetEnvironments @(New-Env a) -ScriptDir $script:Dir -SkipPhase 'OntologyConfig' -StopOnFailure $false
         Get-Calls $script:Dir | Should -Be @('bff', 'import url=https://a.crm.dynamics.com;whatIf=False')
+        $script:EnvFailedLog | Should -Be @($false)
     }
 
     It 'one environment''s failure does not block the next environment''s Phase 2b or 3 (-StopOnFailure $false)' {
@@ -300,6 +339,7 @@ if (`$AppServiceName -eq 'app-a') { exit 1 } else { exit 0 }
 "@ | Set-Content -LiteralPath (Join-Path $script:Dir 'Deploy-BffApi.ps1') -Encoding utf8
         Invoke-LoopUnderTest -targetEnvironments @((New-Env a), (New-Env b)) -ScriptDir $script:Dir -StopOnFailure $false
         Get-Calls $script:Dir | Should -Be @('bff app-a', 'bff app-b', 'apply url=https://b.crm.dynamics.com;verify=False;whatIf=False', 'apply url=https://b.crm.dynamics.com;verify=True;whatIf=False', 'import url=https://b.crm.dynamics.com;whatIf=False')
+        $script:EnvFailedLog | Should -Be @($true, $false)   # the flag is reset per environment
     }
 }
 

@@ -13,8 +13,9 @@
         Phase 2b: Ontology configuration — applies, then verifies, the worklist grid configuration
                  (calls Apply-WorklistGridConfiguration.ps1; ontology task 164, D-185). It must land
                  after the BFF and BEFORE Phase 3: the SpaarkeMaster import carries the role change
-                 that removes policy Read. It runs only after a successful Phase 2 (the old BFF cannot
-                 read the new configuration). If Phase 2 failed, or this phase fails, for an
+                 that removes policy Read. It does not run if Phase 2 failed (the old BFF cannot read the
+                 new configuration); a skipped Phase 2 (-SkipPhase BffApi) is an explicit operator
+                 choice and still runs it. If Phase 2 failed, or this phase fails, for an
                  environment, Phase 3 does not run for that environment (even without -StopOnFailure).
         Phase 3: SpaarkeMaster import — the CI-published package, typed per environment
                  (config/environments.json solutionPackageType; calls
@@ -708,8 +709,13 @@ for ($i = 0; $i -lt $targetEnvironments.Count; $i++) {
 
     if (-not $gate.Phase3Allowed) {
         # D-185 fail-closed: independent of -StopOnFailure.
-        Write-Phase "Phase 3" "Dataverse Solutions — SKIPPED (ontology configuration $(if ($gate.Reason -eq 'config-failed') { 'failed' } else { 'did not run' }))"
-        Write-Fail "Phase 3 did not run for $($env.DisplayName): the SpaarkeMaster import carries the D-185 role change and needs the worklist configuration first (gate: $($gate.Reason))."
+        if ($gate.Reason -eq 'bff-failed') {
+            Write-Phase "Phase 3" "Dataverse Solutions — SKIPPED (BFF failed)"
+            Write-Fail "Phase 3 did not run for $($env.DisplayName): the BFF (Phase 2) failed, so the worklist configuration was not applied, and the SpaarkeMaster import carries the D-185 role change that needs it first (gate: $($gate.Reason))."
+        } else {
+            Write-Phase "Phase 3" "Dataverse Solutions — SKIPPED (ontology configuration $(if ($gate.Reason -eq 'config-failed') { 'failed' } else { 'did not run' }))"
+            Write-Fail "Phase 3 did not run for $($env.DisplayName): the SpaarkeMaster import carries the D-185 role change and needs the worklist configuration first (gate: $($gate.Reason))."
+        }
     } elseif ($envFailed -and $StopOnFailure) {
         Write-Phase "Phase 3" "Dataverse Solutions — SKIPPED (previous phase failed)"
     } elseif (Test-PhaseSkipped 'Solutions') {
