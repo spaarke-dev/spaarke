@@ -91,3 +91,11 @@ See the PR description and the final report for counts: filtered Signals tests, 
 
 Known limits (K-class): none raised. Code review was done inline against the diff (reuse of the base class, privilege and AppendTo checks as the caller, no app-only write, no `Services/Ai` reference); adr-check clean.
 
+
+## Merge with task 161 (Create budget), 2026-10-22
+
+Merged `origin/docs/ontology-platform-design` (includes PR #2290, `811167613f`) into `task/159-assign-task`. Source files auto-merged; the only conflicts were additive test blocks in `DecisionActionCatalogTests.cs` and `DecisionActionExecutorsTests.cs` (kept both: `assign-task` and `create-budget` tests, and both executors in the shared preflight case list). The exact-set catalog test now lists both codes.
+
+**Interaction 159 x 161.** 161's substitution (`ResolvedDecisionPlan.WithCreateBudgetInsteadOfRevise`, gated by `SignalCoreRecordAccess.CanSubstituteCreateBudget`) fires only when `revise-budget` is in the plan's actions. POL-MATTER-NOBUDGET v2 is `assign-task` plus next steps `add-todo`, `assign-work`, so it is never touched (new test `WithCreateBudgetInsteadOfRevise_LeavesThePolMatterNobudgetV2Plan_...`). The commit route's count read is skipped for v2 as well (`CanSubstituteCreateBudget` is false without `revise-budget`).
+
+**Script list vs. guard.** `create-budget` is `SubstitutionOnly` (never authored; `DecisionPlanService.Resolve` refuses it, the authoring catalog filters it). So `scripts/Apply-DoLanePolicies.ps1` must NOT list it: the script lint should refuse it just as the server does. The script is correct as it stands; the guard test `DecisionActionCatalogScriptListsTests` compared against every Decide-lane catalog code and would have failed, so the TEST was fixed to exclude `SubstitutionOnly` codes. `know-promotion.policies.json` merged without conflict.

@@ -97,6 +97,7 @@ public static class SignalsModule
         // nothing here is feature-gated (bff-extensions.md F.1).
         services.AddScoped<DecisionRouteCores>();
         services.AddScoped<IDecisionActionExecutor, ReviseBudgetExecutor>();
+        services.AddScoped<IDecisionActionExecutor, CreateBudgetExecutor>();
         services.AddScoped<IDecisionActionExecutor, ApproveVarianceExecutor>();
         services.AddScoped<IDecisionActionExecutor, MarkCompleteExecutor>();
         services.AddScoped<IDecisionActionExecutor, RescheduleExecutor>();

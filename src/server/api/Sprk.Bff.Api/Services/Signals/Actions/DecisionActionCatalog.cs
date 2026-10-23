@@ -90,6 +90,12 @@ public sealed record DecisionActionDefinition(
     /// <summary>True for an action that sends a message: the commit route runs those after every Dataverse write and Next step
     /// (D-17, email last), the inquiry last of all.</summary>
     public bool SendsMessage { get; init; }
+
+    /// <summary>True for an action no rule author may name (task 161, D-180): it is offered only when the server swaps it into a
+    /// resolved plan for the item's context (<c>create-budget</c> replaces <c>revise-budget</c> on a matter with no active budget,
+    /// <see cref="ResolvedDecisionPlan.WithCreateBudgetInsteadOfRevise"/>). <see cref="DecisionPlanService.Resolve"/> refuses a stored plan
+    /// that names it and the authoring catalog does not list it, so a published plan can never carry it (D-14).</summary>
+    public bool SubstitutionOnly { get; init; }
 }
 
 /// <summary>One closed dismissal reason. The stored form on a Signal is <c>"code - detail"</c>.</summary>
@@ -165,6 +171,22 @@ public static class DecisionActionCatalog
             Excludes: [],
             DecisionRecordClass.Judgement)
         { Gate = new DecisionGateFactors(GateRiskTier.Tier2b, Reversible: true, RecordOfTruthImpact: true) },
+
+        // Task 161 (D-180, UAT round 1): revise-budget on a matter with NO active budget. Never authored (SubstitutionOnly): the plan and
+        // commit routes swap it in for revise-budget, in place, when the matter has none. Same lane, work type, class, gate and
+        // resolution as revise-budget; no "budget to revise" because there is none. The amount becomes the new budget's total.
+        new("create-budget", "Create budget", DecisionLane.Decide, IsNextStep: false, WorkType: "fund",
+            [
+                new("amount", "Budget amount", DecisionParameterKind.Money, Required: true),
+                new("reason", "Reason for the budget", DecisionParameterKind.TextArea, Required: true),
+            ],
+            [
+                "Creates the matter's first budget",
+                "Records the budget and your reason on the Decision Record",
+            ],
+            Excludes: ["approve-variance"],
+            DecisionRecordClass.Judgement)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier2b, Reversible: true, RecordOfTruthImpact: true), SubstitutionOnly = true },
 
         new("approve-variance", "Approve variance", DecisionLane.Decide, IsNextStep: false, WorkType: "fund",
             [

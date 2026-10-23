@@ -308,7 +308,8 @@ public sealed partial class OntologyAdminAuthoringService
     /// One lane's authoring lists (task 102a, owner option A), each read from its server source:
     /// <list type="bullet">
     /// <item>actions: <see cref="DecisionActionCatalog"/> codes whose plan lane is this one, the same test as
-    /// <see cref="DecisionPlanService.Resolve"/>;</item>
+    /// <see cref="DecisionPlanService.Resolve"/> (which also refuses a substitution-only action, task 161, so none is listed, nor named
+    /// as an exclusion);</item>
     /// <item>next steps: its <c>IsNextStep</c> codes;</item>
     /// <item>dismissal reasons: <see cref="DecisionActionCatalog.DismissalReasons"/>;</item>
     /// <item>severities and work types: the <c>sprk_policy</c> option labels of <see cref="OntologyAdminRulesService"/>, which
@@ -318,13 +319,14 @@ public sealed partial class OntologyAdminAuthoringService
     /// </summary>
     internal static OntologyCatalogLane LaneCatalog(DecisionLane lane)
     {
-        static OntologyCatalogAction ActionOf(DecisionActionDefinition a) => new(a.Code, a.Label, a.Excludes.ToList());
+        static OntologyCatalogAction ActionOf(DecisionActionDefinition a) => new(a.Code, a.Label,
+            a.Excludes.Where(code => !(DecisionActionCatalog.TryGet(code, out var excluded) && excluded.SubstitutionOnly)).ToList());
         static IReadOnlyList<OntologyCatalogOption> OptionsOf(IReadOnlyDictionary<int, string> labels) =>
             labels.OrderBy(kv => kv.Key).Select(kv => new OntologyCatalogOption(kv.Key, kv.Value)).ToList();
 
         return new OntologyCatalogLane(
             lane.ToString(),
-            DecisionActionCatalog.All.Where(a => a.PlanLane == lane).Select(ActionOf).ToList(),
+            DecisionActionCatalog.All.Where(a => a.PlanLane == lane && !a.SubstitutionOnly).Select(ActionOf).ToList(),
             DecisionActionCatalog.All.Where(a => a.IsNextStep).Select(ActionOf).ToList(),
             DecisionActionCatalog.DismissalReasons(lane).Select(r => new OntologyCatalogChoice(r.Code, r.Label)).ToList(),
             OptionsOf(OntologyAdminRulesService.SeverityLabels),

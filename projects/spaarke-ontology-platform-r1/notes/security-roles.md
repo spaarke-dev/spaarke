@@ -1047,3 +1047,10 @@ the deployed dev Console.
 - **03:24Z `-Verify` with `$A5Waiver = $null`** (PR #2050 branch): PASS; no non-platform, non-admin, non-writer role holds Write on `sprk_signal`.
 - **Still held — KEPT by owner decision D-160 (2026-10-17, "not a risk; we can remove later")**: Ontology Administrator keeps `prvDeletesprk_Signal` and `prvAssignsprk_Signal` (Deep). No shipped flow deletes or assigns a Signal as the caller (2026-10-17 search; test cleanups run as the operator or the writer). Console User holds neither. No Spaarke human role holds Write, Delete or Assign on `sprk_decisionrecord`.
 - **Rollback**: §14.
+
+## 18. 2026-10-23 — AppendTo on `sprk_eventtype_ref` for Spaarke Core User (D-110, task 159)
+
+- **Why**: task 159's Assign Task creates a `sprk_event` with `sprk_eventtype_ref` = Task (`124f5fc9-…`) as the caller. Binding a lookup needs AppendTo on its target. `sprk_eventtype_ref` is user-owned, and no user role held `prvAppendTosprk_EventType_Ref`; only Service Writer (Global), Spaarke Office Add In User (Deep), System Administrator and System Customizer did (live read, 2026-10-23). A Core User's Assign Task would therefore be refused.
+- **Change** (2026-10-23T00:32:20Z, D-110 standing approval for Core User): `AddPrivilegesRole` on the root Spaarke Core User `75e1b627-2ab6-f111-aaad-0022482913fc`: `prvAppendTosprk_EventType_Ref` at **Global**. Global because the reference rows are owned in the root BU and users sit in child and secure BUs; it matches Service Writer and Basic User's Global AppendTo on `sprk_recordtype_ref`.
+- **Read-back** (`RetrieveRolePrivilegesRole` before and after): 784 → 785, added exactly that privilege at Global; nothing removed and nothing else added. Repo `Roles/Spaarke Core User.xml` is updated in task 159's PR #2289. Other environments need the same grant.
+

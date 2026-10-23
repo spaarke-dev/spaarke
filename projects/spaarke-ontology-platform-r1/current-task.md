@@ -2,21 +2,22 @@
 
 > **Last Updated**: 2026-10-22 ~17:00Z (main session). State only — history is in git log, task `<completion>` blocks and
 > `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 and §6. Decisions: [`notes/decisions.md`](notes/decisions.md)
-> (D-1..D-184). Deferred work: one self-contained GitHub issue per item, label `ontology-deferred`, plus a DI-nn row in both tables of
-> `notes/defer-issues.md` (next free: **DI-123**). Sub-agents never edit this file.
+> (D-1..D-185). Deferred work: one self-contained GitHub issue per item, label `ontology-deferred`, plus a DI-nn row in both tables of
+> `notes/defer-issues.md` (next free: **DI-124**). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | No lane in flight. UAT round 1 triaged: tasks **158–162** written (TASK-INDEX group K, all 🔲), field-mapping half filed as #2281 (DI-122, fix `b1f287c4c3` by field-mapping, PR pending). R2 project started (D-183): worktree `C:\code_files\spaarke-wt-spaarke-ontology-platform-r2`, branch `work/spaarke-ontology-platform-r2`, `design.md` + research note pushed (`16c171b224`). |
-| **Status** | Waiting on the owner (start lanes 158–162? R2 §9 questions) and peers (R3 dev BFF `f5bf481185` after-notice; ebilling reviews). |
-| **Next Action** | Ask the owner which of 158–162 to launch (158, 159, 161, 162 parallel-safe; 160 after 158). When R3 sends the f5bf481185 after-notice: smoke + deploycheck + deploy-log. |
+| **Task** | Lanes running (owner go 2026-10-22): **158** `C:\wts-158` `task/158-wizard-lookups`; **159** `C:\wts-159` `task/159-assign-task`; **161** `C:\wts-161` `task/161-create-budget`; **163** `C:\wts-163` `task/163-policy-server-read` (security: 2 review passes). Each stops at its PR (no deploy, no policy apply). **162** merged to docs `84636b650a` (dev check after the docs→master sync; owner question sprk_X vs sprk_related*). **159** PR #2289 fix round 1 `4e9e295a30` pushed; Opus review running. **161** PR #2290 Opus review running. **160** starts after 158 merges (it reuses 158's host injection). |
+| **Status** | Waiting on lane reports. Owner is reviewing R2 design §9. |
+| **Next Action** | Per lane report: one Opus adversarial review of the PR diff, a fix round, a Sonnet re-check, then merge into docs. 159 and 161 both edit `DecisionActionCatalog.cs`, `DecisionActionExecutors.cs` and `SignalsModule.cs`: merge one, rebase the other. After 158 merges, launch 160 (opus/high) in `C:\wts-160`. Then a docs→master sync for the Console, R3's BFF deploy, dev checks, and 159's policy v2 apply after the owner OKs `-WhatIf`. |
 
 ## Next, in order
 
 1. **UAT round 1 lanes** (owner go): 158 side-pane lookups + subject link; 159 Assign Task (`sprk_event` type Task; POL-MATTER-NOBUDGET v2 applied to dev only after owner OK on `-WhatIf`); 160 EmailComposer + link by recipient (opus; after 158; R3 reviews the GrantAccessNotifier overload); 161 Create budget (plan substitution); 162 exact document column (closes 114). Each: implementer lane from docs, independent review, fix, re-check.
-2. **R3 dev BFF `f5bf481185`** (our OK given; carries 157): on the after-notice, run `scratchpad/live/smokeA_v2.py` on both matters, set `since` in `deploycheck.py` to the deploy time and run it; deploy-log entry; check tonight's heartbeat.
+2. **Dev BFF is `1fa0cf5cb8`** (R3, 2026-10-23 00:00Z; carries 157 + #2282): smoke and logs PASS (deploy-log). Check tonight's `[SIGNAL-EVALUATOR]` heartbeat (`deploycheck.py`, since=2026-10-23T00:00:00Z).
+2b2. **D-185 role change (owner-authorised, main session):** after 163's BFF is on dev AND ebilling's caller-read inventory (invoice review, Rule Review, SPA) reports no ordinary-user caller read of sprk_policy/policyversion: (1) no billing role exists yet, so there is nothing to grant first (ebilling 2026-10-23; UAC 191 will create the roles with explicit Read), (2) remove `prvReadsprk_Policy` from Basic User and `prvReadsprk_Policy` + `prvReadsprk_PolicyVersion` from Console User, (3) read back before and after, then test the worklist as a non-Console user and as a Console user, (4) write security-roles.md §15 and a deploy-log entry, and tell uac-r2 on #1355.
 2a. **#2281** fixed on master `1fa0cf5cb8` (#2282, reviewed; #2281 closed). Seeder defect it uncovered: #2283 (customer-provisioning). #2285 (ebilling: internal Read on sprk_policy/ruleset): our Basic User policy Read is intended (§12), commented; owner decides on hiding Billing policy rows. Dev check after the BFF candidate after `f5bf481185`: Create Work Assignment on a matter with an attorney copies `sprk_assignedattorney1`, no warning.
 2b. **R2** (D-183): owner answers design.md §9 Q1–Q6, then `/design-to-spec` in the R2 worktree. R2 does not edit R1-owned files while R1 lanes are open.
 3. **ebilling reviews when sent:** the D-184 `SignalReadService` change (vendor org from the submission; security review, 2 passes; must merge with or before Duplicate-raising code); 097 (BillingFactLoader Superseded → null; our path), 116 (drafting re-keyed per Procedure Version), 082 (resolver uses `BillingRuleDefinition.PrecedenceKey`; must remove the `sprk_procedure` null filter, and nothing may set `sprk_ruleset.sprk_procedure` before 082). 081 ✅ re-check PASS (`cac386fa6b`, ArchTest `b160493311`). 088 ✅ on dev (read-back PASS). Owner gets ebilling's questions on retroactive correction and the D-11 clean slate. The 088 F1s are already filed into their POMLs 117, 094/095, 097 (`8d1394a4ed`). Every schema run: final script + `-WhatIf` to us, before/after notices, no run before our PASS; check all core records.

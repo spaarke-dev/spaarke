@@ -52,10 +52,10 @@ public class DecisionActionCatalogScriptListsTests
     [InlineData("know-promotion-policies", DecisionLane.Decide)]
     public void TheScriptsPlanActionCodes_AreExactlyTheCatalogsCodesForThatLane(string kind, DecisionLane lane)
     {
-        var catalog = DecisionActionCatalog.All.Where(a => a.PlanLane == lane).Select(a => a.Code);
+        var catalog = DecisionActionCatalog.All.Where(a => a.PlanLane == lane && !a.SubstitutionOnly).Select(a => a.Code);
 
         LaneCodes(ScriptText(), kind).Should().BeEquivalentTo(catalog,
-            "a code missing from the script makes the lint refuse a valid plan; an extra one lets the lint pass a plan DecisionPlanService refuses at read time");
+            "a code missing from the script makes the lint refuse a valid plan; an extra one lets the lint pass a plan DecisionPlanService refuses at read time"+ " (SubstitutionOnly codes such as create-budget are never authored: DecisionPlanService refuses them, so the script must too)");
     }
 
     [Fact]

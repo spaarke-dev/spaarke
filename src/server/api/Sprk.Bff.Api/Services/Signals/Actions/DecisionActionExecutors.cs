@@ -29,7 +29,7 @@ namespace Sprk.Bff.Api.Services.Signals.Actions;
 //   Existing: the events complete handler, the child-records create/update cores, CommunicationService.SendAsync and the
 //     events due-date/assignee write (DecisionRouteCores), plus OntologyWriterDataverseClient for the one write that has no
 //     route (the budget revision).
-//   Extension: yes, every executor but ReviseBudget is a thin adapter over one of those. Revise budget has no existing path
+//   Extension: yes, every executor but ReviseBudget is a thin adapter over one of those (CreateBudget, task 161, over the child-records create). Revise budget has no existing path
 //     (#26): nothing creates sprk_budgetrevision, and the writer identity is the only one granted Create on it (task 008).
 //   Cost of doing nothing: Path B's own remedy cannot be recorded, the Do lane cannot run inside a decision, and Next steps
 //     stay browser-created after a record that can no longer list them (#23).
@@ -570,6 +570,64 @@ public sealed class ReviseBudgetExecutor : IDecisionActionExecutor
 }
 
 /// <summary>
+/// <c>create-budget</c> (task 161, D-180): the matter has NO active budget, so Revise budget becomes Create budget. One active
+/// <c>sprk_budget</c> is created UNDER THE MATTER as the caller, through the child-records create core (the secure ribbon's
+/// "New Budget" path: Create on the table, AppendTo on the matter, secure parents included, owned by the team the ownership rule
+/// names). No writer identity and no second create path. <c>sprk_totalbudget</c> is the amount; the reason is recorded on the
+/// Decision Record (the budget has no column for it). Budgets are filed through <c>sprk_matter</c> (no <c>sprk_regarding*</c>
+/// lookup), so a core record that is not a matter is refused before anything is written.
+/// </summary>
+public sealed class CreateBudgetExecutor : ChildCreateExecutorBase
+{
+    /// <summary>Create on <c>sprk_budget</c> (schema name <c>sprk_Budget</c>, as <c>prvReadsprk_Budget</c>).</summary>
+    internal const string CreateBudgetPrivilege = "prvCreatesprk_Budget";
+
+    private readonly TimeProvider _clock;
+
+    public CreateBudgetExecutor(CallerRecordAccessProbe probe, DecisionRouteCores cores, IGenericEntityService entities, TimeProvider clock)
+        : base(probe, cores, entities)
+    {
+        _clock = clock ?? throw new ArgumentNullException(nameof(clock));
+    }
+
+    public override string Code => ResolvedDecisionPlan.CreateBudgetCode;
+
+    protected override string Table => "sprk_budget";
+
+    protected override string CreatePrivilege => CreateBudgetPrivilege;
+
+    protected override DecisionActionOutcome? BuildColumns(DecisionActionRequest request, IDictionary<string, object?> payload)
+    {
+        if (request.Core is not { Entity: "sprk_matter" })
+            return DecisionActionOutcome.Refused(Code, DecisionActionReasons.BudgetNotOnMatter, "A budget can only be created under a matter.");
+        if (!decimal.TryParse(request.Param("amount"), NumberStyles.Number, CultureInfo.InvariantCulture, out var amount) || amount < 0)
+            return DecisionActionOutcome.Refused(Code, DecisionActionReasons.InvalidParameter, "The budget must be an amount of zero or more.");
+        if (request.Param("reason") is null)
+            return DecisionActionOutcome.Refused(Code, DecisionActionReasons.InvalidParameter, "Give a reason for the budget.");
+
+        payload["sprk_name"] = $"Budget {_clock.GetUtcNow():yyyy-MM-dd}";
+        payload["sprk_totalbudget"] = amount;
+        return null;
+    }
+
+    protected override async Task<DecisionActionOutcome?> FileUnderAsync(DecisionCoreRecord core, IDictionary<string, object?> payload, CancellationToken ct)
+    {
+        string set;
+        try
+        {
+            set = await Entities.GetEntitySetNameAsync(core.Entity, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return DecisionActionOutcome.Failed(Code, DecisionActionReasons.WriteFailed, "The matter could not be resolved; nothing was created.");
+        }
+
+        payload["sprk_matter@odata.bind"] = $"/{set}({core.Id:D})";
+        return null;
+    }
+}
+
+/// <summary>
 /// <c>approve-variance</c> (D-19): record-only. The Decision Record (outcome Authorized) IS the approval; nothing else is
 /// written. The class takes NO collaborators on purpose: it has nothing it could write with, and nothing it could refuse.
 /// </summary>
@@ -1073,31 +1131,40 @@ public abstract class ChildCreateExecutorBase : DecisionExecutorBase
         return null;
     }
 
+    /// <summary>Files the new row under the Signal's core record: the typed <c>sprk_regarding{type}</c> lookup and the ADR-024 pair,
+    /// as a To Do, event or work assignment carries them. A table whose filing lookup is named differently overrides this (a budget
+    /// is filed through <c>sprk_matter</c>). Returns a failure outcome when the core's entity set cannot be resolved, else null.</summary>
+    protected virtual async Task<DecisionActionOutcome?> FileUnderAsync(DecisionCoreRecord core, IDictionary<string, object?> payload, CancellationToken ct)
+    {
+        // The typed lookup is named sprk_regarding{type}, for every core type, on To Dos and events alike.
+        var suffix = core.Entity.StartsWith("sprk_", StringComparison.Ordinal) ? core.Entity["sprk_".Length..] : core.Entity;
+        string set;
+        try
+        {
+            set = await Entities.GetEntitySetNameAsync(core.Entity, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return DecisionActionOutcome.Failed(Code, DecisionActionReasons.WriteFailed, "The record this is filed under could not be resolved; nothing was created.");
+        }
+
+        payload[$"sprk_regarding{suffix}@odata.bind"] = $"/{set}({core.Id:D})";
+        payload["sprk_regardingrecordid"] = core.Id.ToString("D");
+        if (core.Name is { } name) payload["sprk_regardingrecordname"] = name;
+        if (core.RecordTypeRefId is { } typeRef) payload["sprk_regardingrecordtype@odata.bind"] = $"/sprk_recordtype_refs({typeRef:D})";
+        return null;
+    }
+
+    protected IGenericEntityService Entities => _entities;
+
     protected override async Task<DecisionActionOutcome> WriteAsync(DecisionActionRequest request, CancellationToken ct)
     {
         var payload = new Dictionary<string, object?>(StringComparer.Ordinal);
         if (BuildColumns(request, payload) is { } refusal)
             return refusal;
 
-        if (request.Core is { } core)
-        {
-            // The typed lookup is named sprk_regarding{type}, for every core type, on To Dos and events alike.
-            var suffix = core.Entity.StartsWith("sprk_", StringComparison.Ordinal) ? core.Entity["sprk_".Length..] : core.Entity;
-            string set;
-            try
-            {
-                set = await _entities.GetEntitySetNameAsync(core.Entity, ct).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                return DecisionActionOutcome.Failed(Code, DecisionActionReasons.WriteFailed, "The record this is filed under could not be resolved; nothing was created.");
-            }
-
-            payload[$"sprk_regarding{suffix}@odata.bind"] = $"/{set}({core.Id:D})";
-            payload["sprk_regardingrecordid"] = core.Id.ToString("D");
-            if (core.Name is { } name) payload["sprk_regardingrecordname"] = name;
-            if (core.RecordTypeRefId is { } typeRef) payload["sprk_regardingrecordtype@odata.bind"] = $"/sprk_recordtype_refs({typeRef:D})";
-        }
+        if (request.Core is { } core && await FileUnderAsync(core, payload, ct).ConfigureAwait(false) is { } failed)
+            return failed;
 
         var reply = await _cores.CreateChildAsync(request.Http, Table, DecisionExec.Json(payload), ct).ConfigureAwait(false);
         if (!reply.IsSuccess)
