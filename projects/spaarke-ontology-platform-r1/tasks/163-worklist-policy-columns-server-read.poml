@@ -73,6 +73,12 @@
       - Change nothing else. Ontology Administrator and Ontology Service keep theirs.
       - Before dropping PolicyVersion Read from Console User, grep the Console code (`src/solutions/SpaarkeAi/**`, `Spaarke.UI.Components`, `Spaarke.AI.Widgets`) and the BFF for any caller-run read of sprk_policyversion. List each in the notes; if one exists, STOP and report.
     </constraint>
+    <constraint source="uac-r2 2026-10-23">
+      uac-r2 confirmed that no UAC surface or guard reads sprk_policy, sprk_policyversion or sprk_ruleset as the caller; its references are BFF-side lineage and ownership only.
+      Check every test that names these privileges and update it with the role XML:
+      - tests that assert `prvReadsprk_Policy` or `prvReadsprk_PolicyVersion` (OntologyAdmin*EndpointTests; the RouteAuthorizationGuardTests ledger ~:2008);
+      - any role-XML scan test under tests/ that reads `src/dataverse/solutions/**/Roles/*.xml`. ebilling 081 adds one on work/ebilling-r1. If it is not on this branch, say so in the PR so ebilling can align it.
+    </constraint>
     <constraint source="project">Do NOT change roles on any environment. The main session applies the live role change after the BFF deploy, with the owner's standing authority for this change (D-185).</constraint>
     <constraint source="CLAUDE.md §10">BFF hygiene: publish-size delta against a fresh build of origin/docs/ontology-platform-design, full ArchTests, filtered Signals tests only, no new HIGH CVE.</constraint>
   </constraints>
