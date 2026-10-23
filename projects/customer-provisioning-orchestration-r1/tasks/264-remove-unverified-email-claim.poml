@@ -102,5 +102,6 @@
       idempotency-keyed handler — the H4b clause in T7 already says "a new run if its idempotency key is already recorded";
       no other T7 match. Live follow-up (owner OK): ACME BFF b4882848 has authenticationBehaviors null — one-off PATCH.
       rework: fix-round-2 task 264</note>
+    <note date="2026-10-23">Live (owner OK 2026-10-22): ACME BFF app b4882848 (object 88cfedd1) authenticationBehaviors null → PATCH v1.0 removeUnverifiedEmailClaim=true at 01:53 UTC; read back true. Every known stamp/client now carries it (dev 1e40baad, SPA 5859e812, ACME).</note>
   </notes>
 </task>
