@@ -985,6 +985,35 @@ shares to when `createdby` is the BFF application user. Without the column, ever
 `-Verify` (must exit 0); re-run `-Apply` when a business unit is added. Details:
 `docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md` §7b.
 
+**Dataverse prerequisite — contact access-level and identity bookkeeping columns are field-secured.** Only the BFF and
+Standing Grant Administrators write them; every user keeps reading the ones a person needs to see.
+`scripts/Set-ExternalAccessContactSecuritySchema.ps1` secures `sprk_accesspermissiongrant`, `sprk_identityplane` and the
+five `sprk_identitycollision*` columns, and creates three BFF-only columns secured at creation:
+`sprk_externalinvitedemailhash`, `sprk_externalinvitedtenantid` and `sprk_externalaccessremovedon`.
+
+| Column | Read | Create / update |
+|---|---|---|
+| `sprk_accesspermissiongrant` | every user (BFF-Managed Field Readers) | Standing Grant Administrators (create, update); the BFF (update) |
+| `sprk_identityplane`, `sprk_identitycollision*` | every user (Identity Link Readers) | the BFF (Identity Link Writers) |
+| `sprk_externalaccessremovedon` | every user (BFF-Managed Field Readers) | the BFF (BFF-Managed Field Writers) |
+| `sprk_externalinvitedemailhash`, `sprk_externalinvitedtenantid` | the BFF only | the BFF only |
+
+No other profile (System Administrator excepted) may read, create or update these columns. Run it with the same
+`-BffApplicationIds` as above — dry run, then `-Apply`, then `-Verify`, which checks every column is secured and every
+profile x column pair, and **must exit 0** before a BFF that writes the new columns is deployed. A new stamp receives
+the columns, the field security and the profile permissions through the SpaarkeMaster import (H6); H7b's identity-link
+check (S18) covers the plane and collision columns. The BFF trusts an EMPTY `sprk_accesspermissiongrant` only after it
+has proven it can read the column; until then the standing grant confers no access.
+
+```powershell
+.\scripts\Set-ExternalAccessContactSecuritySchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com `
+  -BffApplicationIds <bff-uami-client-id>[,<bff-app-registration-id>]            # dry run: read-only
+.\scripts\Set-ExternalAccessContactSecuritySchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com `
+  -BffApplicationIds <bff-uami-client-id>[,<bff-app-registration-id>] -Apply
+.\scripts\Set-ExternalAccessContactSecuritySchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com `
+  -BffApplicationIds <bff-uami-client-id>[,<bff-app-registration-id>] -Verify   # must exit 0
+```
+
 #### 6.5.3 Identity collisions — the operator procedure
 
 A **collision** is any of: an email match on a contact bound to a different oid; an oid carried by more than one
@@ -1689,7 +1718,12 @@ no solution import can create. Since T256, **H7b creates it on every run**, afte
   `secure_setup.invite_code_hash_lock_other_access` (QuarantineRequired). While the column is absent that is the expected
   state: H7b does not fail, and records an "absent — ships in a later SpaarkeMaster release" note in the `notes` of gate
   `h7b-secure-record-setup`. Neither check writes a field-security row; auditing and Advanced Find on the hash column are
-  not verified by H7b.
+  not verified by H7b;
+- the identity-link lock check (S18) covers `contact.sprk_identityplane` and the five `sprk_identitycollision*` columns
+  as well as the binding columns: secured, `Identity Link Readers` 4/0/0, `Writers` 4/4/4, nobody else may create or
+  update (`secure_setup.identity_link_*`). The lock on `sprk_accesspermissiongrant`, `sprk_externalaccessremovedon`,
+  `sprk_externalinvitedemailhash` and `sprk_externalinvitedtenantid` is not checked by H7b: its gate is
+  `scripts/Set-ExternalAccessContactSecuritySchema.ps1 -Verify` (exit 0, §6.5.2).
 
 An intake `secureRecordSetupDryRun: true` makes H7b read only. It records its plan in gate `h7b-secure-setup-plan` and
 stops the run.
@@ -2526,6 +2560,7 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 | 2026-10-05 | §6.5.4: only `dev` carries the marker today — Spaarke's production operator environment (`demo`, declared `false`) adds it in the change that stands it up; the registry declaration must be a JSON boolean and the deploy fails on any other type (`[bool]"false"` is true in PowerShell) | `unified-access-control-r2` task 165, round 57 (`task/uac-r2-165-h`) |
 | 2026-10-08 | §5 handler table: **H4b** row added — the BFF app settings are written through the ARM SDK on both slots (merge, never replace), no longer by running the generated Configure script; **H6** row — the org-settings contract is one Dataverse Web API PATCH and H6 installs no application. The L2 Worker runs no shell tool (G38) | `customer-provisioning-orchestration-r1` T253 |
 | 2026-10-20 | §7.4: the document Access Permission schema — `scripts/Set-DocumentAccessPermissionSchema.ps1` (`sprk_document.sprk_accessinheritance`, not field-secured) runs BEFORE a BFF carrying task 189 is deployed; until it has, that BFF only raises a document's Access Permission to what its parents give and never lowers one (documents listed under `tablesWithoutColumn`, raises counted in `raisedOnly`). A raise kept in that window is recorded as the document's own on the first run after the script and is never widened again: the schema must go first, and §7.4 says how to find such documents and widen them by hand | `unified-access-control-r2` task 189 (D7 T7a, #2126; security pass 2) |
+| 2026-10-23 | §6.5.2: contact access-level and identity bookkeeping columns are field-secured — `scripts/Set-ExternalAccessContactSecuritySchema.ps1` (dry run, `-Apply`, `-Verify` exit 0) secures `sprk_accesspermissiongrant`, `sprk_identityplane` and the `sprk_identitycollision*` columns and adds three BFF-only columns; §7.11: H7b S18 covers the plane and collision columns | `spaarke-SPA-external-access-platform-r3` (contact identity hardening, slice A) |
 
 ---
 
