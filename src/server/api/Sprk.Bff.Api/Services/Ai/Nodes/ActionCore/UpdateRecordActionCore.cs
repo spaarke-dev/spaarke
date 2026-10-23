@@ -40,10 +40,15 @@ internal sealed record RenderedLookup(
 
 /// <summary>Session-agnostic input for a record update — all values pre-rendered/typed.</summary>
 /// <remarks>
-/// <paramref name="ImpersonateSystemUserId"/> (task 031): OPTIONAL Dataverse <c>systemuserid</c> to run the PATCH
-/// AS (MSCRMCallerID impersonation). Null = app-only: the executor path and every pre-031 caller leave it null, so
-/// their write is byte-unchanged. <see cref="Guid.Empty"/> is refused with an <see cref="ArgumentException"/> before
-/// the PATCH is sent (task 104, fail closed). Only the Job B apply seam supplies it (the confirming user).
+/// <para><paramref name="ImpersonateSystemUserId"/> (task 031): OPTIONAL Dataverse <c>systemuserid</c> to run the PATCH
+/// AS (MSCRMCallerID impersonation). Null = app-only. <see cref="Guid.Empty"/> is refused with an
+/// <see cref="ArgumentException"/> before the PATCH is sent (task 104, fail closed). Two callers supply it: the Job B
+/// apply seam (<c>ActionSeam</c>, the confirming user) and, since #2257 (owner round 123, "run as the user"), the Update
+/// Record node on a run a person started (the run's user). A system run leaves it null.</para>
+/// <para><paramref name="PayloadSource"/> (#2257 fix round 1): who built the payload. The default,
+/// <see cref="UpdateRecordPayloadSource.Configuration"/>, is fail closed: the payload is asked
+/// <c>InheritedAccessPermission.RefuseAppOnlyWrite</c> whatever identity the write runs as. Only
+/// <see cref="UpdateRecordPayloadSource.ConfirmedProposal"/> with an impersonated user skips it.</para>
 /// </remarks>
 internal sealed record UpdateRecordActionInput(
     string EntityLogicalName,
@@ -51,7 +56,28 @@ internal sealed record UpdateRecordActionInput(
     IReadOnlyList<RenderedFieldMapping>? FieldMappings,
     IReadOnlyDictionary<string, string?>? LegacyFields,
     IReadOnlyList<RenderedLookup>? Lookups,
-    Guid? ImpersonateSystemUserId = null);
+    Guid? ImpersonateSystemUserId = null,
+    UpdateRecordPayloadSource PayloadSource = UpdateRecordPayloadSource.Configuration);
+
+/// <summary>
+/// Who built an <see cref="UpdateRecordActionInput"/>'s payload, which decides whether it is asked the deny-lists of
+/// <c>InheritedAccessPermission.RefuseAppOnlyWrite</c> (#2257 fix round 1, main-session decision).
+/// </summary>
+internal enum UpdateRecordPayloadSource
+{
+    /// <summary>
+    /// A configuration (a playbook author, who may not be the person running it) or a model built the payload: it is asked
+    /// the refusal whatever identity the write runs as, impersonated or app-only. The Update Record node's payload. The
+    /// default, so a new caller is fail closed.
+    /// </summary>
+    Configuration = 0,
+
+    /// <summary>
+    /// The person the write impersonates confirmed this exact payload (the Job B apply through <c>ActionSeam</c>): their own
+    /// edit, decided by their Dataverse privileges and field security. Without an impersonated user it is still refused.
+    /// </summary>
+    ConfirmedProposal = 1,
+}
 
 /// <summary>
 /// Session-agnostic core that coerces already-rendered field values to their Dataverse
@@ -144,15 +170,27 @@ internal sealed class UpdateRecordActionCore
             }
         }
 
-        // unified-access-control-r2 task 189 fix round C (K5): a payload that acts for no person (a playbook node, the action
-        // seam without an impersonated user) never writes a document's Access Permission or its own-narrowing record; only
-        // the document rule's writers do. Refused before anything is written. Task 188 round 4e: nor its D7 link columns
+        // unified-access-control-r2 task 189 fix round C (K5): a payload that is not a confirmed proposal written AS its
+        // confirming user (see #2257 below: the Update Record node's, whoever runs the playbook, and the action seam's without
+        // an impersonated user) never writes a document's Access Permission or its own-narrowing record; only the document
+        // rule's writers do. Refused before anything is written. Task 188 round 4e: nor its D7 link columns
         // (sprk_parentdocument, sprk_relatedcommunication), set, cleared or bound (InheritedAccessPermission.DocumentLinkColumns).
         // #2251: nor any row of a table whose rows are access (grants, membership, ethical walls; AccessTables), nor a secure
-        // root's secure flag, access columns or container (SecureRootColumns). An update that impersonates its user is not
-        // asked: it runs under that user's own Dataverse privileges, which decide it.
-        if (input.ImpersonateSystemUserId is null
-            && InheritedAccessPermission.RefuseAppOnlyWrite(input.EntityLogicalName, updatePayload.Keys) is { } documentRefusal)
+        // root's secure flag, access columns or container (SecureRootColumns); #2253: nor a non-root table's access columns
+        // (AccessColumns), nor a table name that is not a bare identifier.
+        // #2257 fix round 1 (main-session decision): a payload built by configuration or a model — the Update Record node's,
+        // whoever runs the playbook — is asked the refusal even when the write impersonates the person who started the run:
+        // the author of the payload may not be that person. Only a confirmed proposal (ActionSeam's Job B apply, the
+        // confirming user's own edit) written AS that user skips it, and runs under that user's own Dataverse privileges,
+        // which decide it. Fix round 2 (K4): Guid.Empty is no person.
+        // Master merge after #2253: the refusal is asked as WriteIdentity.AppOnly (every set) even when the run writes AS a
+        // person. WriteIdentity.Caller (the pre-#2251 sets only) is the field-mapping push's, which #2253 leaves to its
+        // caller's own privileges; a playbook payload is built by configuration or a model, not by the runner, so the
+        // runner's own rights are not the only lock on it (PlaybookRunIdentityTests).
+        if ((input.PayloadSource != UpdateRecordPayloadSource.ConfirmedProposal
+                || input.ImpersonateSystemUserId is not { } confirmingUser || confirmingUser == Guid.Empty)
+            && InheritedAccessPermission.RefuseAppOnlyWrite(
+                input.EntityLogicalName, updatePayload.Keys, InheritedAccessPermission.WriteIdentity.AppOnly) is { } documentRefusal)
         {
             throw new RecordOwnerUnresolvedException(input.EntityLogicalName, documentRefusal);
         }
@@ -273,8 +311,8 @@ internal sealed class UpdateRecordActionCore
                     CallerSystemUserId = input.ImpersonateSystemUserId,
                     // Task 146 c1-r1, owner round 13 item 8: a move out of a secure root (F3) is asked of the user this
                     // update IMPERSONATES — the person it acts for — with RetrievePrincipalAccess asked as that user. An
-                    // update that impersonates nobody (a playbook node acting for no person) passes no caller and is
-                    // refused such a move.
+                    // update that impersonates nobody (a system run's playbook node) passes no caller and is refused such
+                    // a move.
                     SecureExitCaller = secureExitCaller = input.ImpersonateSystemUserId is { } person
                         ? Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForImpersonatedUser(
                             person, scope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Access.IDataverseRecordShareService>())

@@ -93,6 +93,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
+    [InlineData(GenericPath.OutputOrchestrator)] // master merge (#2257): a person's output mapping writes AS that person
     [InlineData(GenericPath.FieldMappingPush)]
     public async Task TheUpdateOnlyWrite_StillActsAsTheImpersonatedCaller(GenericPath path)
     {
@@ -101,7 +102,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         outcome.Code.Should().BeNull();
         var sent = Sent().Should().ContainSingle().Subject;
         sent.Method.Should().Be(nameof(IFieldMappingDataverseService.UpdateExistingRecordFieldsAsync));
-        sent.As.Should().Be(Caller, "the playbook update (when it acts for a person) and the push write as that caller");
+        sent.As.Should().Be(Caller, "the playbook update and the output mapping (when they act for a person) and the push write as that caller");
     }
 
     [Fact]
@@ -116,11 +117,16 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     // ── Item 2: the existence oracle ──────────────────────────────────────────────────────────────────────────────
 
     [Theory]
-    [InlineData("sprk_invoice", true)]
-    [InlineData("sprk_invoice", false)]
-    [InlineData("sprk_billingevent", true)]
-    [InlineData("sprk_billingevent", false)]
-    public async Task AnImpersonatedPlaybookUpdate_OfARowThatDoesNotExist_AnswersReadFailed_LikeARowItCannotRead(string table, bool answersNull)
+    [InlineData(GenericPath.PlaybookUpdate, "sprk_invoice", true)]
+    [InlineData(GenericPath.PlaybookUpdate, "sprk_invoice", false)]
+    [InlineData(GenericPath.PlaybookUpdate, "sprk_billingevent", true)]
+    [InlineData(GenericPath.PlaybookUpdate, "sprk_billingevent", false)]
+    [InlineData(GenericPath.OutputOrchestrator, "sprk_invoice", true)] // master merge (#2257): a person's output mapping
+    [InlineData(GenericPath.OutputOrchestrator, "sprk_invoice", false)]
+    [InlineData(GenericPath.OutputOrchestrator, "sprk_billingevent", true)]
+    [InlineData(GenericPath.OutputOrchestrator, "sprk_billingevent", false)]
+    public async Task AnImpersonatedPlaybookUpdate_OfARowThatDoesNotExist_AnswersReadFailed_LikeARowItCannotRead(
+        GenericPath path, string table, bool answersNull)
     {
         var missing = new Mock<IGenericEntityService>(MockBehavior.Strict);
         var read = missing.Setup(a => a.RetrieveAsync(table, MissingRow, It.IsAny<string[]>(), It.IsAny<CancellationToken>()));
@@ -129,8 +135,8 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         unreadable.Setup(a => a.RetrieveAsync(table, Invoice, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new TimeoutException("socket 10.0.0.7"));
 
-        var notThere = await RunAsync(GenericPath.PlaybookUpdate, table, MissingRow, NoLookups, RenameOnly, missing.Object, playbookActsAs: Caller);
-        var cannotRead = await RunAsync(GenericPath.PlaybookUpdate, table, Invoice, NoLookups, RenameOnly, unreadable.Object, playbookActsAs: Caller);
+        var notThere = await RunAsync(path, table, MissingRow, NoLookups, RenameOnly, missing.Object, playbookActsAs: Caller);
+        var cannotRead = await RunAsync(path, table, Invoice, NoLookups, RenameOnly, unreadable.Object, playbookActsAs: Caller);
 
         notThere.Should().Be(cannotRead, "the two are indistinguishable: same code, same text");
         notThere.Code.Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode);
@@ -138,14 +144,16 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     }
 
     [Theory]
-    [InlineData("sprk_invoice")]
-    [InlineData("sprk_billingevent")]
-    public async Task AnImpersonatedPlaybookUpdate_WhoseRowIsDeletedBeforeTheWrite_AnswersReadFailed_NotNotFound(string table)
+    [InlineData(GenericPath.PlaybookUpdate, "sprk_invoice")]
+    [InlineData(GenericPath.PlaybookUpdate, "sprk_billingevent")]
+    [InlineData(GenericPath.OutputOrchestrator, "sprk_invoice")] // master merge (#2257): a person's output mapping
+    [InlineData(GenericPath.OutputOrchestrator, "sprk_billingevent")]
+    public async Task AnImpersonatedPlaybookUpdate_WhoseRowIsDeletedBeforeTheWrite_AnswersReadFailed_NotNotFound(GenericPath path, string table)
     {
         TheRowIsDeletedAfterTheGuardRead();
         var id = table == "sprk_invoice" ? Invoice : Line;
 
-        var outcome = await RunAsync(GenericPath.PlaybookUpdate, table, id, NoLookups, RenameOnly, WorldWithLines().Object, playbookActsAs: Caller);
+        var outcome = await RunAsync(path, table, id, NoLookups, RenameOnly, WorldWithLines().Object, playbookActsAs: Caller);
 
         outcome.Code.Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode);
         NothingWasCreated();

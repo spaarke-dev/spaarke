@@ -224,6 +224,33 @@ public sealed class ExternalModuleDescriptor
     public IEnumerable<string> NarrowingAttributes =>
         NarrowsDocuments ? ExternalDocumentNarrowing.FetchAttributes : Enumerable.Empty<string>();
 
+    /// <summary>The response key of the derived file-state flag a documents module row carries (R3 ISS-011, #1886).</summary>
+    internal const string HasFileKey = "hasFile";
+
+    /// <summary>
+    /// R3 ISS-011 (#1886): for a module that <see cref="NarrowsDocuments"/>, the SPE pointer attributes the server projects
+    /// to DERIVE <see cref="HasFileKey"/> (<see cref="HasFileOf"/>). They are never on <see cref="ReadableColumns"/>
+    /// (<see cref="ExternalModuleRegistry.PointerColumns"/> refuses that at registration): they are read server-side, and the
+    /// column strip removes them from the response, which carries only the boolean. Empty for any other module.
+    /// </summary>
+    public IEnumerable<string> FileStateAttributes =>
+        NarrowsDocuments ? FileStatePointerAttributes : Enumerable.Empty<string>();
+
+    private static readonly string[] FileStatePointerAttributes = { "sprk_graphdriveid", "sprk_graphitemid" };
+
+    /// <summary>
+    /// Whether a documents-module row (as read, before the column strip) has a file the download and versions routes can
+    /// serve: the SAME pointer checks as <c>DocumentStorageResolver.GetSpePointersAsync</c>. A pointer Dataverse omitted
+    /// (null) or returned as anything but text is "no file".
+    /// </summary>
+    public static bool HasFileOf(IReadOnlyDictionary<string, object?> row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        string? Text(string attribute) => row.TryGetValue(attribute, out var value) ? value as string : null;
+        return Sprk.Bff.Api.Infrastructure.Dataverse.DocumentStorageResolver.HasUsablePointers(
+            Text(FileStatePointerAttributes[0]), Text(FileStatePointerAttributes[1]));
+    }
+
     /// <summary>Task 187: one module row's parent lookups (<see cref="LiveParentAttributes"/>) as live-parent read input.</summary>
     public LiveParentLookup[] LiveParents(IReadOnlyDictionary<string, object?> row)
     {

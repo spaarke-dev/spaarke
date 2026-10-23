@@ -736,6 +736,9 @@ internal static class InheritedAccessPermission
         /// <summary>
         /// The BFF's application user (a System Administrator), acting for no person: the Update Record node and the action
         /// seam without an impersonated user, a playbook's output mapping, Repair, the profile output mapper. Every refusal.
+        /// Also every playbook write (the Update Record node, a playbook's output mapping) WHATEVER identity the run writes as
+        /// (#2257): a person-started run writes AS that person, but its payload is built by configuration or a model, not by
+        /// the runner, so it is asked every refusal too.
         /// </summary>
         AppOnly,
 
@@ -745,7 +748,8 @@ internal static class InheritedAccessPermission
         /// on every table, the owner and the creator) and the table-name check. Not <see cref="AccessTables"/>,
         /// <see cref="SecureRootColumns"/> or <see cref="AccessColumns"/>: what the person may write there is Dataverse's
         /// call (<c>sprk_accesspermission</c> on a matter stays editable by a Write holder;
-        /// <c>scripts/Set-SecureFlagFieldSecurity.ps1</c>).
+        /// <c>scripts/Set-SecureFlagFieldSecurity.ps1</c>). Only the field-mapping push may pass it (#2257 fix round 3;
+        /// enforced by ArchTest <c>RefuseAppOnlyWriteCallerIdentityGuardTests</c>).
         /// </summary>
         Caller,
     }
@@ -1092,13 +1096,15 @@ internal static class InheritedAccessPermission
     /// <summary>
     /// Task 189 fix round C (K5): an APP-ONLY generic writer never writes a document's <see cref="Column"/> or its
     /// own-narrowing record (<see cref="AccessInheritance.Column"/>), nor its submission marker
-    /// (<see cref="SubmissionMarkerColumn"/>, ebilling-r1 task 088). These writers are the Update Record playbook node and
-    /// the action seam when they act for no person (<c>UpdateRecordActionCore</c>), and an AI output mapping
-    /// (<c>DataverseUpdateHandler</c>). A model or a configuration builds their payload, not a person. Only
+    /// (<see cref="SubmissionMarkerColumn"/>, ebilling-r1 task 088). These writers are the Update Record playbook node
+    /// (<c>UpdateRecordActionCore</c>) and an AI output mapping (<c>DataverseUpdateHandler</c>) WHATEVER identity the run
+    /// writes as (#2257 fix round 1: a person's run writes AS that person, and is still asked), and the action seam when it
+    /// acts for no person. A model or a configuration builds their payload, not the person running it. Only
     /// <see cref="DecideDocument"/>'s writers keep the value at max(own, inherited). A payload that lowered it, or rewrote
     /// the record, would show a user's Restricted document to partners (D7, task 188). This is the same refusal
     /// <c>ChildRecordEndpoints.RootServerOwnedColumns</c> makes for a work assignment. A user's own write is not refused: the
-    /// form, the user-OBO chat tools, and an update impersonating its user all run as that user. The field-mapping push also
+    /// form, the user-OBO chat tools, and the action seam's apply of a proposal its impersonated user confirmed
+    /// (<c>UpdateRecordPayloadSource.ConfirmedProposal</c>) all run as that user. The field-mapping push also
     /// runs as its caller, but its rules are a configuration applied to every child it reaches, so it asks this too and
     /// skips such a rule on a document (the rest of the push applies; security pass 2).
     /// <para>Task 188 round 4e: the same writers never write a document's D7 link columns either
@@ -1120,9 +1126,12 @@ internal static class InheritedAccessPermission
     /// whatever the payload names; nor a secure root's secure flag, access columns or container
     /// (<see cref="SecureRootColumns"/>), refused with <see cref="AppOnlySecureRootWriteReasonCode"/> in the same forms. The
     /// table is matched trimmed and in any case. Out of scope, as for every code above: a write that impersonates its user
-    /// (the action seam's apply, which skips this refusal) runs under that user's own privileges, and the chat create tool
+    /// for a payload that user confirmed (the action seam's apply of a <c>UpdateRecordPayloadSource.ConfirmedProposal</c>,
+    /// which skips this refusal) runs under that user's own privileges, and the chat create tool
     /// checks the caller's own privileges before it writes. The field-mapping push also runs as its caller: it asks per rule
-    /// (above) as <see cref="WriteIdentity.Caller"/>, which does not ask these two (#2253 fix round 1, K2).</para>
+    /// (above) as <see cref="WriteIdentity.Caller"/>, which does not ask these two (#2253 fix round 1, K2). A person-started
+    /// playbook run that writes AS that person is not out of scope: its Update Record node and its output mapping ask as
+    /// <see cref="WriteIdentity.AppOnly"/> (#2257).</para>
     /// <para>#2253 fix round 1: nor, on a table that is not a secure root, a column an access decision reads
     /// (<see cref="AccessColumns"/>: a contact's identity binding and standing grant, an organisation's standing grant, a
     /// user's home link, task-141 link, external flag, business unit, identity and eligibility, a team's owner-team

@@ -166,6 +166,10 @@ public class ExternalDataService
         [JsonPropertyName("createdon")] public string? Createdon { get; set; }
         [JsonPropertyName(CreatedByPersonValueAttribute)] public string? CreatedByPersonValue { get; set; }
         [JsonPropertyName(CreatedByContactValueAttribute)] public string? CreatedByContactValue { get; set; }
+        // R3 ISS-011 (#1886): the SPE pointers, read ONLY to derive the wire DTO's boolean hasFile (MapDocument). The values
+        // themselves are never mapped onto the DTO: no Graph pointer reaches the client (ExternalModuleRegistry.PointerColumns).
+        [JsonPropertyName("sprk_graphdriveid")] public string? SprkGraphdriveid { get; set; }
+        [JsonPropertyName("sprk_graphitemid")] public string? SprkGraphitemid { get; set; }
         // Task 187: every other selected column, among them the row's live-parent lookups (ExternalMultiRootRule.LiveParentSelect),
         // read by name so the select and the rule share ONE list. Never mapped onto the wire DTO.
         [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
@@ -665,6 +669,7 @@ public class ExternalDataService
         var select = "sprk_documentid,sprk_documentname,sprk_documenttype,sprk_filesummary,_sprk_project_value,"
                      + "_sprk_relatedproject_value,_sprk_matter_value,_sprk_relatedmatter_value,"
                      + "_sprk_workassignment_value,_sprk_relatedworkassignment_value,createdon,"
+                     + "sprk_graphdriveid,sprk_graphitemid," // R3 ISS-011 (#1886): read only to derive hasFile; never put on the wire
                      + CreatorStampSelect
                      + LiveParentSelectSuffix(DocumentTable); // task 187: the parents whose live roots the rule takes in
         // Task 188: the columns the document narrowing reads (the two lookups are already lineage parents; the own Access
@@ -3583,6 +3588,9 @@ public class ExternalDataService
         Createdon = r.Createdon,
         SprkCreatedbypersonValue = r.CreatedByPersonValue,
         SprkCreatedbycontactValue = r.CreatedByContactValue,
+        // R3 ISS-011 (#1886): the same truth the download and versions routes use (DocumentStorageResolver.GetSpePointersAsync:
+        // a usable drive id AND item id; sprk_hasfile is a hint that can be stale). Only the boolean leaves the BFF.
+        HasFile = Sprk.Bff.Api.Infrastructure.Dataverse.DocumentStorageResolver.HasUsablePointers(r.SprkGraphdriveid, r.SprkGraphitemid),
     };
 
     private static ExternalTodoDto MapTodo(TodoRow r) => new()

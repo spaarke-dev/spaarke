@@ -188,6 +188,54 @@ public class DocumentDestroyAuthorizationTests
             "the file step ran before the refusal; the detail must not say nothing was deleted");
     }
 
+    // R3 ISS-004 (#1650): a file delete that is not done keeps the row; the internal route answers the same problem body
+    // as the external route (status from the result, reasonCode = the result's code), never a 500 and never a 200.
+
+    [Fact]
+    public async Task DeleteDocument_WhenTheFileDeleteFails_Is503_WithAReasonCodeAndARetryHint_AndTheRowIsKept()
+    {
+        _fixture.FileNotDeletedStatuses[DocumentId] = 503;
+        using var client = _fixture.CreateClientWithRights("ReadAccess,DeleteAccess");
+
+        var response = await client.DeleteAsync($"/api/documents/{DocumentId}");
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, body);
+        using var problem = System.Text.Json.JsonDocument.Parse(body);
+        problem.RootElement.GetProperty("reasonCode").GetString()
+            .Should().Be(Sprk.Bff.Api.Services.DocumentCheckoutService.FileNotDeletedCode);
+        problem.RootElement.GetProperty("detail").GetString()
+            .Should().Contain("Nothing was deleted").And.Contain("Try again");
+        problem.RootElement.TryGetProperty("correlationId", out _).Should().BeTrue();
+        _fixture.DeletedDocumentIds.Should().BeEmpty("the row is kept");
+    }
+
+    [Fact]
+    public async Task DeleteDocument_WhenTheFilePointerIsRefused_Is409_NotA503_AndTheRowIsKept()
+    {
+        _fixture.FileNotDeletedStatuses[DocumentId] = 409;
+        using var client = _fixture.CreateClientWithRights("ReadAccess,DeleteAccess");
+
+        var response = await client.DeleteAsync($"/api/documents/{DocumentId}");
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body);
+        System.Text.Json.JsonDocument.Parse(body).RootElement.GetProperty("detail").GetString()
+            .Should().NotContain("Try again", "a refused pointer is not retryable");
+        _fixture.DeletedDocumentIds.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DeleteDocument_WhenTheFileDeleteSucceeds_StillDeletesTheRow_Is200()
+    {
+        using var client = _fixture.CreateClientWithRights("ReadAccess,DeleteAccess");
+
+        var response = await client.DeleteAsync($"/api/documents/{DocumentId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.DeletedDocumentIds.Should().ContainSingle().Which.Should().Be(DocumentId);
+    }
+
     [Fact]
     public async Task DeleteDataverseDocument_WhenRestrictRefusesTheRow_Is409_WithoutACount_NotA500()
     {

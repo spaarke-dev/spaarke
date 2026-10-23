@@ -3480,6 +3480,104 @@ public class RecordOwnershipResolverTests
         directory.Assignments.Should().Equal(("sprk_document", documentId, ChildTeam));
     }
 
+    /// <summary>
+    /// #2273: a child of a table that the BFF does not stamp, filed under the secure project, whose <c>sprk_createdbyperson</c>
+    /// (if any) is therefore not trusted. Master merge (ebilling-r1): not <c>sprk_procedure</c>, which ebilling task 081 now
+    /// stamps (RecordCreatorPerson.StampedChildTables); <c>sprk_agreement</c> is an ownership-parent child the BFF does not stamp.
+    /// </summary>
+    private const string UnstampedChildTable = "sprk_agreement";
+
+    private static (FakeDirectory Directory, Guid RowId) SecureUnstampedChildWorld(Dictionary<string, object> columns)
+    {
+        RecordCreatorPerson.IsStamped(UnstampedChildTable).Should().BeFalse("this case needs a table the BFF does not stamp");
+        var rowId = Guid.NewGuid();
+        var all = new Dictionary<string, object> { ["sprk_project"] = new EntityReference("sprk_project", SecureProjectId) };
+        foreach (var (column, value) in columns)
+            all[column] = value;
+
+        var directory = Directory()
+            .WithRecord("sprk_project", SecureProjectId, SecureBu, isSecure: true, owningTeam: SecureNamedTeam)
+            .WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam)
+            .WithRecord(UnstampedChildTable, rowId, SecureBu, owningTeam: SecureNamedTeam, extra: all);
+        return (directory, rowId);
+    }
+
+    private static RecordReparent MoveUnstampedChildToOrdinaryMatter(Guid rowId) => MoveToOrdinaryMatter(rowId, CallerHolding(Collaborate))
+        with { EntityLogicalName = UnstampedChildTable };
+
+    [Fact]
+    public async Task Reparent_OutOfASecureRoot_OnATableTheBffDoesNotStamp_AForgedCreatorPerson_IsNotAdmitted()
+    {
+        // #2273 must-fire: the caller, a Write holder, wrote themselves into the unsecured sprk_createdbyperson. It is not
+        // evidence there, so they are neither the creator nor a Full Access holder: refused before anything is written.
+        var (directory, rowId) = SecureUnstampedChildWorld(new()
+        {
+            ["createdby"] = new EntityReference("systemuser", SomeoneElse),
+            ["sprk_createdbyperson"] = new EntityReference("systemuser", CallerUserId),
+        });
+        var applied = false;
+
+        var resolution = await Build(directory).ReparentAsync(
+            MoveUnstampedChildToOrdinaryMatter(rowId), _ => { applied = true; return Task.CompletedTask; }, CancellationToken.None);
+
+        resolution.IsRefused.Should().BeTrue("a forged creator person on an unstamped table admits nobody");
+        resolution.RefusalCode.Should().Be(Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.NotPermittedReasonCode);
+        resolution.SecureRemovalRefusal!.Basis.Should().Be(Sprk.Bff.Api.Services.Access.SecureRemovalBasis.NotFullAccessOrCreator);
+        applied.Should().BeFalse();
+        directory.Assignments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Reparent_OutOfASecureRoot_OnATableTheBffDoesNotStamp_ItsCreatedByCreator_IsStillAdmitted()
+    {
+        // #2273 control: "not recorded" falls back to createdby, which Dataverse itself sets — that creator is admitted.
+        var (directory, rowId) = SecureUnstampedChildWorld(new()
+        {
+            ["createdby"] = new EntityReference("systemuser", CallerUserId),
+            ["sprk_createdbyperson"] = new EntityReference("systemuser", SomeoneElse),
+        });
+        var request = MoveUnstampedChildToOrdinaryMatter(rowId);
+
+        var resolution = await Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
+
+        resolution.IsRefused.Should().BeFalse(resolution.Reason);
+        directory.Assignments.Should().Equal((UnstampedChildTable, rowId, ChildTeam));
+    }
+
+    [Fact]
+    public async Task Reparent_OutOfIsolation_OnATableTheBffDoesNotStamp_WithNoNamedSecureRoot_AForgedCreatorPerson_IsNotAdmitted()
+    {
+        // #2273 must-fire, the "unidentified" branch: held in the Secure Record unit with no secure root among its own
+        // parents, only the creator may take it out — and a forged creator person is not the creator.
+        var rowId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam)
+            .WithRecord(UnstampedChildTable, rowId, SecureBu, owningTeam: SecureNamedTeam, extra: new Dictionary<string, object>
+            {
+                ["createdby"] = new EntityReference("systemuser", SomeoneElse),
+                ["sprk_createdbyperson"] = new EntityReference("systemuser", CallerUserId),
+            });
+        var request = new RecordReparent
+        {
+            EntityLogicalName = UnstampedChildTable,
+            RecordId = rowId,
+            ParentChanges = new Dictionary<string, EntityReference?> { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) },
+            SecureExitCaller = CallerHolding(FullAccess),
+        };
+        var applied = false;
+
+        var resolution = await Build(directory).ReparentAsync(
+            request, _ => { applied = true; return Task.CompletedTask; }, CancellationToken.None);
+
+        resolution.IsRefused.Should().BeTrue("only the creator may take an unidentified secure row out, and the caller is not it");
+        // Exactly the unidentified refusal: a forged value read as the creator would have admitted (no refusal at all), and a
+        // value read as "column absent" would name a different basis.
+        resolution.RefusalCode.Should().Be(Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.PermissionUnverifiableReasonCode);
+        resolution.SecureRemovalRefusal!.Basis.Should().Be(Sprk.Bff.Api.Services.Access.SecureRemovalBasis.SecureRecordUnidentified);
+        applied.Should().BeFalse();
+        directory.Assignments.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task Reparent_OutOfASecureRoot_ByAWriteOnlyHolder_IsRefusedNotPermitted_BeforeAnyWrite()
     {

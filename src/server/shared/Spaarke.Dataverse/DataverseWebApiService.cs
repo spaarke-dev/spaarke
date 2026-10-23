@@ -2519,10 +2519,13 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
                 ? Guid.Parse(pid.GetString()!) : Guid.Empty,
             SourceField = data.TryGetValue("sprk_sourcefield", out var sf) && sf.ValueKind != JsonValueKind.Null
                 ? sf.GetString()! : string.Empty,
-            SourceFieldType = data.TryGetValue("sprk_sourcefieldtype", out var sft) && sft.ValueKind != JsonValueKind.Null ? sft.GetInt32() : 0,
+            SourceFieldType = data.TryGetValue("sprk_sourcefieldtype", out var sft) && sft.ValueKind != JsonValueKind.Null
+                ? FieldMappingColumns.NormalizeFieldType(sft.GetInt32()) : 0,
             TargetField = data.TryGetValue("sprk_targetfield", out var tf) && tf.ValueKind != JsonValueKind.Null
                 ? tf.GetString()! : string.Empty,
-            TargetFieldType = data.TryGetValue("sprk_targetfieldtype", out var tft) && tft.ValueKind != JsonValueKind.Null ? tft.GetInt32() : 0,
+            // #2281: both option encodings (bare n and 100000000 + n) read as the same type.
+            TargetFieldType = data.TryGetValue("sprk_targetfieldtype", out var tft) && tft.ValueKind != JsonValueKind.Null
+                ? FieldMappingColumns.NormalizeFieldType(tft.GetInt32()) : 0,
             MappingType = data.TryGetValue("sprk_mapping_type", out var mt) && mt.ValueKind != JsonValueKind.Null ? mt.GetInt32() : 0,
             CompatibilityMode = data.TryGetValue("sprk_compatibilitymode", out var cm) && cm.ValueKind != JsonValueKind.Null ? cm.GetInt32() : 0,
             IsRequired = data.TryGetValue("sprk_isrequired", out var req) && req.ValueKind != JsonValueKind.Null && req.GetBoolean(),

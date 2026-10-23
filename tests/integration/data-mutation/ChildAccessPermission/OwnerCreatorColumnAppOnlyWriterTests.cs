@@ -224,7 +224,7 @@ public class OwnerCreatorColumnAppOnlyWriterTests
             new UpdateRecordActionInput(
                 "sprk_event", Row, FieldMappings: null,
                 LegacyFields: new Dictionary<string, string?> { ["ownerid@odata.bind"] = $"/systemusers({user:D})" },
-                Lookups: null, ImpersonateSystemUserId: user),
+                Lookups: null, ImpersonateSystemUserId: user, PayloadSource: UpdateRecordPayloadSource.ConfirmedProposal),
             CancellationToken.None);
 
         _writes.Verify(w => w.UpdateRecordFieldsAsync(

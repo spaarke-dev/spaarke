@@ -2248,7 +2248,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// too. Asked whatever the reconcile then decides (a private thread keeps the message): the safe side.</para>
     /// <para><b>Who may.</b> <see cref="Sprk.Bff.Api.Services.Access.SecureDesignationRemoval"/> — the unsecure endpoint's
     /// F3 check — with Full Access asked on EVERY secure root left and the creator counted on the ROW
-    /// (<c>sprk_createdbyperson</c>, else <c>createdby</c>). A writer that acts for no person
+    /// (<c>sprk_createdbyperson</c> on a table the BFF stamps, else <c>createdby</c>; #2273). A writer that acts for no person
     /// (<see cref="RecordReparent.SecureExitCaller"/> null) is refused: there is nobody whose rights could be checked.</para>
     /// <para><b>Fail closed.</b> A row held in the Secure Record business unit that would leave its isolation although no
     /// secure root above it can be named (its secure parent is not one of its own columns — a message secured by the
@@ -2348,6 +2348,11 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             return (null, false, null); // no secure root is left, and the row is not taken out of secure isolation
         }
 
+        // #2273: sprk_createdbyperson is evidence of who created the row ONLY on a table the BFF stamps — there it is
+        // field-secured, written by the BFF alone (the schema scripts' -Verify gates the deploy). A table that merely carries
+        // the column (created unsecured, or not yet stamped) lets any Write holder name themselves, so its value is "not
+        // recorded": no value, no separate read, and only createdby or Full Access can admit (fail closed).
+        var creatorPersonIsTrusted = RecordCreatorPerson.IsStamped(request.EntityLogicalName);
         var decision = await Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.DecideAsync(
             new Sprk.Bff.Api.Services.Access.SecureRemovalQuestion
             {
@@ -2357,13 +2362,15 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                     .ToArray(),
                 IncludesUnidentifiedSecureRecord = unidentified,
                 CreatedBy = current.GetAttributeValue<EntityReference>(CreatedByColumn)?.Id,
-                CreatedByPerson = current.GetAttributeValue<EntityReference>(RecordCreatorPerson.Column)?.Id,
+                CreatedByPerson = creatorPersonIsTrusted
+                    ? current.GetAttributeValue<EntityReference>(RecordCreatorPerson.Column)?.Id
+                    : null,
                 // c1-r1 (owner round 13 item 9): a child table now carries the person too. The every-column read cannot
                 // tell "nobody recorded" from "this environment lacks the column", so when the row came back without it,
                 // the column is read on its own — an absent column is "could not tell" (unverifiable), never "allowed"
                 // (main-session condition 2, now for children as for roots). Asked only when nothing else admitted.
                 ReadCreatedByPersonAsync =
-                    RecordCreatorPerson.IsStamped(request.EntityLogicalName)
+                    creatorPersonIsTrusted
                     && !current.Attributes.ContainsKey(RecordCreatorPerson.Column)
                         ? token => ReadCreatorPersonAsync(request, token)
                         : null,

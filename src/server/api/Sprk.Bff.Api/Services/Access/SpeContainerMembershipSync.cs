@@ -80,9 +80,11 @@ public class SpeContainerMembershipSync
         IReadOnlyList<string> Problems);
 
     /// <summary>What one just-in-time removal pass did.</summary>
+    /// <param name="Unresolvable">Secure containers whose id Graph does not resolve in this tenant (#1830): skipped and
+    /// named in <paramref name="Problems"/>, not counted in <paramref name="Failed"/>.</param>
     public sealed record JitResult(
-        int SecureContainers, int GrantsSeen, int Removed, int MarkersCleared, int Kept, int Unknown, int Failed, bool Truncated,
-        IReadOnlyList<string> Problems);
+        int SecureContainers, int GrantsSeen, int Removed, int MarkersCleared, int Kept, int Unknown, int Failed,
+        int Unresolvable, bool Truncated, IReadOnlyList<string> Problems);
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
     // Pass 1 — standing writers (round 70)
@@ -285,7 +287,7 @@ public class SpeContainerMembershipSync
     {
         var securable = await _securableEntities.GetSecurableEntitiesAsync(ct).ConfigureAwait(false);
 
-        int containers = 0, seen = 0, removed = 0, cleared = 0, kept = 0, unknown = 0, failed = 0;
+        int containers = 0, seen = 0, removed = 0, cleared = 0, kept = 0, unknown = 0, failed = 0, unresolvable = 0;
         var problems = new List<string>();
         var truncated = false;
 
@@ -323,9 +325,13 @@ public class SpeContainerMembershipSync
                     continue;
                 containers++;
 
+                // Set once the first read answers: from then on the id is proven to resolve, so a later 400 invalidRequest
+                // (the permission collection or one of its nextLink pages) is a fault, not an unresolvable container.
+                var resolved = false;
                 try
                 {
                     var markers = await _membership.ReadMarkersAsync(container, ct).ConfigureAwait(false);
+                    resolved = true;
                     var jit = markers is null
                         ? new Dictionary<Guid, string>()
                         : ParseMarkers(markers, SpeContainerMembershipService.JitWriterMarkerPrefix);
@@ -367,6 +373,22 @@ public class SpeContainerMembershipSync
                         + "this stamp's containers; skipped.", entity, record.Id, container);
                     problems.Add($"{entity} {record.Id}: container {container} is not one of this stamp's containers; skipped");
                 }
+                catch (Exception ex) when (!resolved && SpeContainerMembershipService.IsUnresolvableContainer(ex))
+                {
+                    // The FIRST read says Graph cannot resolve the id in this tenancy (400 invalidRequest — "Invalid hostname
+                    // for this tenancy" once the container's SharePoint site is gone; #1830, task 192). Retrying will not
+                    // change the answer and no one reaches files through it, so it is reported and counted unresolvable, not
+                    // failed — the same outcome as the guard's refusal above, which is what an id NOT on the stamp's
+                    // configured list gets for the same 400. Fail closed all the same: nothing is read, removed or cleared
+                    // there, and the next run reports it again. The record's container pointer (or the stamp's configured
+                    // id) is a data fault an operator must fix.
+                    unresolvable++;
+                    _logger.LogWarning(
+                        "[SPE-MEMBERSHIP-SYNC] Secure {Entity} {RecordId} points at container {ContainerId}, which does not "
+                        + "resolve in this tenant (Graph 400 invalidRequest); its JIT grants cannot be checked — skipped.",
+                        entity, record.Id, container);
+                    problems.Add($"{entity} {record.Id}: container {container} does not resolve in this tenant; skipped");
+                }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex,
@@ -381,7 +403,7 @@ public class SpeContainerMembershipSync
                 break;
         }
 
-        return new JitResult(containers, seen, removed, cleared, kept, unknown, failed, truncated, problems);
+        return new JitResult(containers, seen, removed, cleared, kept, unknown, failed, unresolvable, truncated, problems);
     }
 
     /// <summary>

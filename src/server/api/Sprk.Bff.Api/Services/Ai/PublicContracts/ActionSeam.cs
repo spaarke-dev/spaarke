@@ -146,7 +146,11 @@ public sealed class ActionSeam : IActionSeam
                     renderedMappings,
                     request.LegacyFields,
                     renderedLookups,
-                    request.ImpersonateSystemUserId),
+                    request.ImpersonateSystemUserId,
+                    // #2257 fix round 1: every caller of this seam applies a proposal the impersonated user confirmed (the
+                    // Job B apply), so it keeps its behaviour: written AS that user, it is not asked the app-only refusal;
+                    // with no user it still is.
+                    UpdateRecordPayloadSource.ConfirmedProposal),
                 cancellationToken);
 
             return new UpdateRecordResult(true, fieldsUpdated.ToArray(), null);
