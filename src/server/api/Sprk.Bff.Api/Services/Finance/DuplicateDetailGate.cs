@@ -12,9 +12,10 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// their priors are referenced, how findings are grouped, or what a fault does.
 /// </summary>
 /// <remarks>
-/// <para><b>The rule</b> is <see cref="EarlierInvoiceReadability.ShownAsync{TKey}"/> (ontology task 157, shared with the worklist's
-/// <see cref="SignalReadService"/>): a group is shown only when it has at least one reference and the caller's own read returns every one.
-/// This helper only builds the references and the group keys, makes the one call per response with the caller's client, and fails closed.</para>
+/// <para><b>The rule</b> is <see cref="EarlierInvoiceReadability.ReferencesOf"/> (what a finding is judged by, #2294 / DEF-043) and
+/// <see cref="EarlierInvoiceReadability.ShownAsync{TKey}"/> (ontology task 157), both shared with the worklist's <see cref="SignalReadService"/>:
+/// a group is shown only when it has at least one reference and the caller's own read returns every one. This helper only builds the
+/// references and the group keys, makes the one call per response with the caller's client, and fails closed.</para>
 /// <para><b>Component justification (CLAUDE.md section 11).</b> Existing: <see cref="EarlierInvoiceReadability"/> owns the readability rule
 /// and the reads; this adds none. Extension: that class is ontology-owned and speaks Signals and references, not the stored findings JSON's
 /// (policy, subject, line) groups. Cost of doing nothing: the blocked view keeps returning the earlier tracking number and invoice id to a
@@ -43,7 +44,9 @@ internal static class DuplicateDetailGate
     /// <param name="findings">The stored findings of the response.</param>
     /// <param name="groupOf">A finding's (policy, subject, line) group.</param>
     /// <param name="valuesOf">A finding's values read, as (name, value).</param>
-    /// <param name="vendorOrg">The current invoice's (or submission's) vendor org: a number-only prior is resolved within it.</param>
+    /// <param name="reasonCodeOf">A finding's reason code: a same-invoice repeat is judged by <paramref name="currentInvoiceId"/>.</param>
+    /// <param name="currentInvoiceId">The invoice the route reads (the review's invoice, the blocked submission's invoice): a same-invoice
+    /// repeat's earlier invoice. No tracking number is ever looked up.</param>
     /// <param name="readability">The shared rule.</param>
     /// <param name="caller">The CALLER's Dataverse client.</param>
     /// <param name="logger">The calling service's logger.</param>
@@ -53,14 +56,15 @@ internal static class DuplicateDetailGate
         IEnumerable<TFinding> findings,
         Func<TFinding, FindingGroup> groupOf,
         Func<TFinding, IEnumerable<(string? Name, string? Value)>> valuesOf,
-        Guid? vendorOrg,
+        Func<TFinding, string?> reasonCodeOf,
+        Guid? currentInvoiceId,
         EarlierInvoiceReadability readability,
         IDataverseUserClient caller,
         ILogger logger,
         string surface,
         CancellationToken ct)
     {
-        var referencesOf = References(findings, groupOf, valuesOf, vendorOrg);
+        var referencesOf = References(findings, groupOf, valuesOf, reasonCodeOf, currentInvoiceId);
         if (referencesOf.Count == 0)
         {
             return NoGroups;
@@ -93,23 +97,23 @@ internal static class DuplicateDetailGate
     /// <summary>
     /// The references (priors) of every group that holds a Duplicate: a finding whose values read name <c>duplicateOf.invoiceId</c> or
     /// <c>duplicateOf.trackingNumber</c> (names compared without regard to case, as the Signal read does). ONLY such groups are keyed: a group
-    /// with no reference is withheld by the rule. One reference per prior: its id when <c>duplicateOf.invoiceId</c> is a non-empty GUID (the
-    /// number is then ignored), else its tracking number within <paramref name="vendorOrg"/> (the prior is always the same firm's). A
-    /// Duplicate naming neither adds a reference that identifies nothing, so its group is withheld. A finding withheld at write time carries no
-    /// <c>duplicateOf.*</c> value and is not keyed: it is returned as stored.
+    /// with no reference is withheld by the rule. Each finding's references are <see cref="EarlierInvoiceReadability.ReferencesOf"/>'s: its
+    /// <c>duplicateOf.invoiceId</c> ids (the number is then ignored); else, for a same-invoice repeat, <paramref name="currentInvoiceId"/>;
+    /// else (#2294: identified only by a tracking number, or by nothing) a reference that identifies nothing, so its group is withheld with
+    /// the generic sentence. A finding withheld at write time carries no <c>duplicateOf.*</c> value and is not keyed: it is returned as stored.
     /// </summary>
     internal static Dictionary<FindingGroup, IReadOnlyCollection<EarlierInvoiceReadability.Reference>> References<TFinding>(
         IEnumerable<TFinding> findings,
         Func<TFinding, FindingGroup> groupOf,
         Func<TFinding, IEnumerable<(string? Name, string? Value)>> valuesOf,
-        Guid? vendorOrg)
+        Func<TFinding, string?> reasonCodeOf,
+        Guid? currentInvoiceId)
     {
         var groups = new Dictionary<FindingGroup, List<EarlierInvoiceReadability.Reference>>();
         foreach (var finding in findings)
         {
             var duplicate = false;
             var ids = new List<Guid>();
-            var numbers = new List<string>();
             foreach (var (name, value) in valuesOf(finding))
             {
                 if (string.Equals(name, DuplicateOfInvoiceIdValue, StringComparison.OrdinalIgnoreCase))
@@ -123,10 +127,6 @@ internal static class DuplicateDetailGate
                 else if (string.Equals(name, DuplicateOfTrackingNumberValue, StringComparison.OrdinalIgnoreCase))
                 {
                     duplicate = true;
-                    if (!string.IsNullOrWhiteSpace(value))
-                    {
-                        numbers.Add(value);
-                    }
                 }
             }
 
@@ -141,18 +141,8 @@ internal static class DuplicateDetailGate
                 groups[group] = references = [];
             }
 
-            if (ids.Count > 0)
-            {
-                references.AddRange(ids.Distinct().Select(id => new EarlierInvoiceReadability.Reference(id, null, null)));
-            }
-            else if (numbers.Count > 0)
-            {
-                references.AddRange(numbers.Distinct(StringComparer.Ordinal).Select(n => new EarlierInvoiceReadability.Reference(null, vendorOrg, n)));
-            }
-            else
-            {
-                references.Add(new EarlierInvoiceReadability.Reference(null, null, null));
-            }
+            references.AddRange(EarlierInvoiceReadability.ReferencesOf(
+                ids, EarlierInvoiceReadability.IsSameInvoiceRepeat(reasonCodeOf(finding)), currentInvoiceId));
         }
 
         return groups.ToDictionary(g => g.Key, g => (IReadOnlyCollection<EarlierInvoiceReadability.Reference>)g.Value);

@@ -308,8 +308,8 @@ internal sealed record LineExtraction(
 /// linked submission (1), the Decision Records of the invoice and its lines (1, one OR filter), the roster entries of the matched timekeepers
 /// (1, none when no line has one) and the caller's Write check (a rights lookup, not an entity read). At most four entity reads after the header
 /// and lines; each is paged (5,000 rows a page), so 150 lines is one page. When the stored findings hold a Duplicate that quotes an earlier
-/// invoice, the caller's earlier-invoice check adds one <c>sprk_invoices</c> read and, when a Duplicate quotes only a tracking number, one
-/// <c>sprk_invoicesubmissions</c> read (each per 200 values), whatever the number of Duplicates.</para>
+/// invoice, the caller's earlier-invoice check adds one <c>sprk_invoices</c> read (per 200 ids), whatever the number of Duplicates; #2294: a
+/// Duplicate that quotes only a tracking number adds no read (it is withheld).</para>
 /// <para><b>Component justification (CLAUDE.md section 11).</b> Existing: <see cref="InvoiceContextService"/> (task 106) assembles the context panel
 /// and reads none of the lines, findings or history. Extension: the panel's sections are other invoices and rollups, a different shape and
 /// different failure semantics (it degrades per section; this is the page's own data). Cost of doing nothing: the review page has no data (FR-31).</para>
@@ -355,7 +355,7 @@ public sealed class InvoiceReviewReadService
     private static readonly string[] SubmissionColumns =
     [
         InvoiceSubmissionPersister.SubmissionStatus, InvoiceSubmissionPersister.SubmissionReasonCode,
-        InvoiceSubmissionPersister.SubmissionFindingsJson, "sprk_trackingnumber", "createdon", TrackingNumberAllocator.FirmColumn,
+        InvoiceSubmissionPersister.SubmissionFindingsJson, "sprk_trackingnumber", "createdon",
     ];
 
     private static readonly string[] DecisionRecordColumns =
@@ -423,8 +423,7 @@ public sealed class InvoiceReviewReadService
         var overridden = history.Any(h => string.Equals(h.ActionCode, "override-submission", StringComparison.Ordinal));
 
         var parsed = submission?.Findings;
-        var withheld = await DuplicateGroupsWithheldAsync(
-            parsed, submission?.VendorOrg, ct).ConfigureAwait(false);
+        var withheld = await DuplicateGroupsWithheldAsync(parsed, invoiceId, ct).ConfigureAwait(false);
         var bySequence = lineRows.ToDictionary(l => l.Id, l => l.GetAttributeValue<int?>(InvoiceSubmissionPersister.LineSequence) ?? 0);
         var lines = new List<ReviewLineDto>(lineRows.Count);
         foreach (var row in lineRows.OrderBy(l => bySequence[l.Id]).ThenBy(l => l.Id))
@@ -483,7 +482,7 @@ public sealed class InvoiceReviewReadService
         return query;
     }
 
-    private sealed record SubmissionRead(ReviewSubmissionDto Dto, bool Held, ParsedFindings? Findings, Guid? VendorOrg);
+    private sealed record SubmissionRead(ReviewSubmissionDto Dto, bool Held, ParsedFindings? Findings);
 
     private async Task<SubmissionRead?> ReadSubmissionAsync(Guid invoiceId, CancellationToken ct)
     {
@@ -509,8 +508,7 @@ public sealed class InvoiceReviewReadService
         return new SubmissionRead(
             new ReviewSubmissionDto(row.Id, row.GetAttributeValue<string>("sprk_trackingnumber"), parsed?.Kind, parsed?.ReasonCode ?? reason, parsed?.Decision, parsed?.Pipeline ?? []),
             held,
-            parsed,
-            row.GetAttributeValue<EntityReference>(TrackingNumberAllocator.FirmColumn)?.Id);
+            parsed);
     }
 
     private async Task<IReadOnlyList<ReviewDecisionRecordDto>> ReadHistoryAsync(Guid invoiceId, IReadOnlyList<Guid> lineIds, CancellationToken ct)
@@ -747,12 +745,13 @@ public sealed class InvoiceReviewReadService
 
     /// <summary>
     /// D-176: the groups holding a Duplicate whose earlier invoice the caller may not see. The rule, the references, the group key and the
-    /// fail-closed wrap are <see cref="DuplicateDetailGate"/>'s, shared with the blocked-submission view so the two routes cannot diverge;
-    /// a number-only prior is resolved within the SUBMISSION's <c>sprk_vendororg</c> (the firm the priors were read from, as the blocked view does), not the invoice's, which a writer can change.
+    /// fail-closed wrap are <see cref="DuplicateDetailGate"/>'s, shared with the blocked-submission view so the two routes cannot diverge.
+    /// #2294 / DEF-043: a number-only Duplicate is withheld (no number is looked up); a same-invoice repeat is judged by the caller's Read of
+    /// THIS invoice (the route's own, whose submission holds the findings).
     /// </summary>
-    private Task<IReadOnlySet<FindingGroup>> DuplicateGroupsWithheldAsync(ParsedFindings? parsed, Guid? vendorOrg, CancellationToken ct) =>
+    private Task<IReadOnlySet<FindingGroup>> DuplicateGroupsWithheldAsync(ParsedFindings? parsed, Guid invoiceId, CancellationToken ct) =>
         DuplicateDetailGate.WithheldGroupsAsync(
-            parsed?.Findings ?? [], GroupOf, f => f.Values.Select(v => ((string?)v.Name, v.Value)), vendorOrg,
+            parsed?.Findings ?? [], GroupOf, f => f.Values.Select(v => ((string?)v.Name, v.Value)), f => f.ReasonCode, invoiceId,
             _earlierInvoices, _user, _logger, "Invoice review", ct);
 
     private static FindingGroup GroupOf(StoredFinding finding) => new(finding.PolicyCode, finding.Subject, finding.Line);

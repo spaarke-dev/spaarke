@@ -269,7 +269,7 @@ public sealed class SubmissionOverrideService
         ChannelColumn, InvoiceSubmissionPersister.SubmissionStatus, InvoiceSubmissionPersister.SubmissionReasonCode,
         InvoiceSubmissionPersister.SubmissionInvoice, InvoiceSubmissionPersister.SubmissionFindingsJson,
         TrackingNumberAllocator.TrackingNumberColumn, TrackingNumberAllocator.FirmInvoiceNumberColumn, RowVersionColumn,
-        StoredSignalSetCheck.ProcessingStartColumn, TrackingNumberAllocator.FirmColumn,
+        StoredSignalSetCheck.ProcessingStartColumn,
     ];
 
     private readonly IGenericEntityService _entities;
@@ -406,8 +406,9 @@ public sealed class SubmissionOverrideService
     /// <para><b>D-176 (#2118, task 119 round 2).</b> A stored Duplicate finding quotes an earlier submission (<c>duplicateOf.invoiceId</c>,
     /// <c>duplicateOf.trackingNumber</c>, <c>duplicateOf.lineIndex</c>) and the duplicated line's values. They are returned only when the
     /// caller's own read returns that earlier invoice: <see cref="DuplicateDetailGate"/> (the helper the Invoice Review read model uses, over
-    /// <see cref="EarlierInvoiceReadability"/>), one check per response with the caller's <see cref="IDataverseUserClient"/>, a number-only
-    /// prior resolved within the submission's own <c>sprk_vendororg</c> (the firm the Duplicate's priors were read from). Otherwise every
+    /// <see cref="EarlierInvoiceReadability"/>), one check per response with the caller's <see cref="IDataverseUserClient"/>. #2294 / DEF-043:
+    /// a number-only Duplicate is withheld (no number is looked up); a same-invoice repeat is judged by the caller's Read of the submission's
+    /// own invoice (<c>sprk_invoice</c>, refused to app-only generic writers). Otherwise every
     /// finding of the (policy, subject, line) group is returned with <c>detailWithheld</c> and no values read. A fault withholds every
     /// Duplicate group; the view still loads. This view carries no sentence, so there is none to replace.</para>
     /// </summary>
@@ -477,8 +478,7 @@ public sealed class SubmissionOverrideService
         var overridden = overrideStamp is not null;
         var findings = ReadFindings(root, overridden);
         var withheld = await DuplicateDetailGate.WithheldGroupsAsync(
-            findings, GroupOf, f => f.ValuesRead.Select(v => (v.Name, v.Value)),
-            row.GetAttributeValue<EntityReference>(TrackingNumberAllocator.FirmColumn)?.Id,
+            findings, GroupOf, f => f.ValuesRead.Select(v => (v.Name, v.Value)), f => f.ReasonCode, invoiceId,
             _earlierInvoices, _user, _logger, "Blocked submission", ct).ConfigureAwait(false);
         return new BlockedSubmissionView
         {

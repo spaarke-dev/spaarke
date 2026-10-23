@@ -164,8 +164,9 @@ public sealed record WorklistItemRow(
 /// catalog query; and, only for returned rows whose evidence carries detail, one caller read per witness table per
 /// <see cref="WitnessIdChunk"/> ids (D-142) and the app-only secure-family placement of those Signals and the witnesses the caller
 /// reads (<see cref="SignalSuppressionService.WitnessDetailShownOnReadAsync"/>: it withholds, never adds); and, only for billing
-/// Duplicate rows (D-176, task 157), at most one billing-event read, one read of the current invoices' submissions (UAC review F4:
-/// the vendor org comes from the submission, not the invoice), one submission read per chunk of 200 distinct tracking numbers and one earlier-invoice read per chunk of 200 invoice ids (<see cref="EarlierInvoiceReadability"/>: it withholds, never adds).
+/// Duplicate rows (D-176, task 157), at most one billing-event read and one read of those events' invoices' core records (same-invoice
+/// repeats, DEF-043) and one earlier-invoice read per chunk of 200 invoice ids (<see cref="EarlierInvoiceReadability"/>: it withholds,
+/// never adds; #2294: no submission is read and no tracking number is looked up).
 /// Nothing is cached across callers.</para>
 /// </remarks>
 public sealed class SignalReadService
@@ -1287,6 +1288,9 @@ public sealed class SignalReadService
     /// <summary>Evidence kind of a billing reference value (ebilling's <c>BillingFindingSignalMapper.ReferenceEvidenceKind</c>).</summary>
     internal const string BillingReferenceKind = "billing.reference";
 
+    /// <summary>The prefix of every Duplicate reason code (ebilling's <c>BillingReasonCodes</c>: <c>duplicate.invoice_number</c>, ...).</summary>
+    private const string DuplicateReasonPrefix = "duplicate.";
+
     /// <summary>The ref prefix of every evidence line that quotes the earlier submission (ebilling's <c>DuplicateHandler</c>).</summary>
     internal const string DuplicateOfPrefix = "duplicateOf.";
 
@@ -1296,9 +1300,13 @@ public sealed class SignalReadService
     /// <summary><c>sprk_billingevent</c>'s entity set (live on spaarkedev1, 2026-10-21): a line-level Duplicate's subject.</summary>
     internal const string BillingEventEntitySet = "sprk_billingevents";
 
-    /// <summary>What a stored Duplicate quotes about its earlier invoice: the <c>duplicateOf.invoiceId</c> values that are GUIDs and the
-    /// non-blank <c>duplicateOf.trackingNumber</c> values.</summary>
-    private sealed record DuplicateQuote(IReadOnlyList<Guid> InvoiceIds, IReadOnlyList<string> TrackingNumbers);
+    /// <summary>Evidence kind of a merged reason (ebilling's <c>BillingFindingSignalMapper.ReasonEvidenceKind</c>): <c>Ref</c> is its reason code.</summary>
+    internal const string BillingReasonKind = "billing.reason";
+
+    /// <summary>What a stored Duplicate quotes about its earlier invoice: the <c>duplicateOf.invoiceId</c> values that are GUIDs, and
+    /// whether it is a same-invoice repeat (#2294): a <c>billing.reason</c> line names <c>duplicate.line_same_invoice</c> and no other
+    /// <c>duplicate.*</c> reason does (<see cref="EarlierInvoiceReadability.IsSameInvoiceRepeat"/>).</summary>
+    private sealed record DuplicateQuote(IReadOnlyList<Guid> InvoiceIds, bool SameInvoiceRepeat);
 
     /// <summary>
     /// D-176: the rows whose STORED evidence has a <c>billing.reference</c> line (kind and ref matched case-insensitively) with ref
@@ -1317,9 +1325,16 @@ public sealed class SignalReadService
 
             var duplicate = false;
             var ids = new List<Guid>();
-            var numbers = new List<string>();
+            var reasons = new List<string>();
             foreach (var line in lines.OfType<JsonObject>())
             {
+                if (string.Equals(StringOf(line["kind"]), BillingReasonKind, StringComparison.OrdinalIgnoreCase)
+                    && StringOf(line["ref"]) is { } reason)
+                {
+                    reasons.Add(reason);
+                    continue;
+                }
+
                 if (!string.Equals(StringOf(line["kind"]), BillingReferenceKind, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
@@ -1338,16 +1353,14 @@ public sealed class SignalReadService
                 else if (string.Equals(reference, DuplicateOfTrackingNumberRef, StringComparison.OrdinalIgnoreCase))
                 {
                     duplicate = true;
-                    if (!string.IsNullOrWhiteSpace(text))
-                    {
-                        numbers.Add(text);
-                    }
                 }
             }
 
             if (duplicate)
             {
-                quotes[row.Row.SignalId] = new DuplicateQuote([.. ids.Distinct()], [.. numbers.Distinct(StringComparer.Ordinal)]);
+                var sameInvoice = reasons.Any(EarlierInvoiceReadability.IsSameInvoiceRepeat)
+                    && reasons.Where(r => r.StartsWith(DuplicateReasonPrefix, StringComparison.Ordinal)).All(EarlierInvoiceReadability.IsSameInvoiceRepeat);
+                quotes[row.Row.SignalId] = new DuplicateQuote([.. ids.Distinct()], sameInvoice);
             }
         }
 
@@ -1400,20 +1413,16 @@ public sealed class SignalReadService
     }
 
     /// <summary>
-    /// The Duplicate rows whose earlier invoice(s) the caller reads. An id quoted as <c>duplicateOf.invoiceId</c> is judged directly.
-    /// A row that quotes only a tracking number is resolved within its CURRENT invoice's vendor org: the current invoice is the subject
-    /// when the subject is <c>sprk_invoice</c>, or the subject billing event's invoice (<c>sprk_billingevent</c>, option B after
-    /// escalation 1; that invoice counts only when it is filed under the Signal's FROZEN core record, DEF-043), and its vendor org
-    /// is that of the invoice's SUBMISSIONS (<c>sprk_invoicesubmission</c> rows whose
-    /// <c>sprk_invoice</c> is it), each read AS THE CALLER. UAC review F4 (option b, agreed with ontology): not the invoice's own
-    /// <c>sprk_vendororg</c>, which a writer of the invoice can change; the submission's is the firm the priors were read from
-    /// (<c>BillingFactLoader</c>), as <c>InvoiceReviewReadService</c> and the blocked view already resolve it. Withheld: any other
-    /// subject; an event the caller cannot read, or one with no invoice; a line's invoice the caller cannot read, with no single core
-    /// record, or on another core record than the Signal's; an invoice with no submission the caller reads; submissions that disagree
-    /// on the vendor org, or one with none (never picked). Reads per request: at most one billing-event read, one read of those
-    /// events' invoices' core records, and one read of the current invoices' submissions (In lists of at most <see cref="WitnessIdChunk"/> ids), then
-    /// <see cref="EarlierInvoiceReadability.ShownAsync{TKey}"/>, which owns the combining rule (at least one reference, every one
-    /// readable; none shown on a fault). A fault in any read here shows nothing. A Duplicate with no usable reference is not shown.
+    /// The Duplicate rows whose earlier invoice(s) the caller reads, by the ONE rule (<see cref="EarlierInvoiceReadability.ReferencesOf"/>,
+    /// #2294 / DEF-043). An id quoted as <c>duplicateOf.invoiceId</c> is judged directly (unchanged). A same-invoice repeat
+    /// (<c>duplicate.line_same_invoice</c>) is judged by its line's OWN current invoice: the subject billing event's invoice, read as the
+    /// caller, which counts only when it is filed under the Signal's FROZEN core record (DEF-043); no number is looked up. Any other
+    /// Duplicate (identified only by a tracking number, an invoice subject among them) is withheld with the generic sentence, whatever
+    /// the number would resolve to. Withheld also: a same-invoice repeat whose subject is not a billing event, whose event the caller
+    /// cannot read or has no invoice, or whose invoice the caller cannot read, has no single core record, or is on another core record
+    /// than the Signal's. Reads per request: at most one billing-event read and one read of those events' invoices' core records (In
+    /// lists of at most <see cref="WitnessIdChunk"/> ids), then <see cref="EarlierInvoiceReadability.ShownAsync{TKey}"/>, which owns the
+    /// combining rule (at least one reference, every one readable; none shown on a fault). A fault in any read here shows nothing.
     /// </summary>
     private async Task<HashSet<Guid>> DuplicatesShownAsync(
         List<VisibleRow> rows,
@@ -1423,7 +1432,6 @@ public sealed class SignalReadService
     {
         var shown = new HashSet<Guid>();
         var referencesOf = new Dictionary<Guid, IReadOnlyCollection<EarlierInvoiceReadability.Reference>>();
-        var currentInvoiceOf = new Dictionary<Guid, Guid>();
         var eventOf = new Dictionary<Guid, Guid>();
         foreach (var row in rows)
         {
@@ -1432,32 +1440,19 @@ public sealed class SignalReadService
                 continue;
             }
 
-            // Every Duplicate gets an entry. One with no reference found below is not shown (EarlierInvoiceReadability.ShownAsync).
-            referencesOf[row.Row.SignalId] = [];
-            if (quote.InvoiceIds.Count > 0)
+            // Every Duplicate gets an entry: withheld unless its references are all readable (EarlierInvoiceReadability.ShownAsync).
+            referencesOf[row.Row.SignalId] = EarlierInvoiceReadability.ReferencesOf(quote.InvoiceIds, quote.SameInvoiceRepeat, currentInvoiceId: null);
+            if (quote.InvoiceIds.Count == 0 && quote.SameInvoiceRepeat && row.Row.SubjectId is { } subject
+                && SubjectTable(row.Row, catalog) == BillingEventTable)
             {
-                referencesOf[row.Row.SignalId] = [.. quote.InvoiceIds.Select(id => new EarlierInvoiceReadability.Reference(id, null, null))];
+                eventOf[row.Row.SignalId] = subject;
             }
-            else if (quote.TrackingNumbers.Count > 0 && row.Row.SubjectId is { } subject)
-            {
-                switch (SubjectTable(row.Row, catalog))
-                {
-                    case "sprk_invoice":
-                        currentInvoiceOf[row.Row.SignalId] = subject;
-                        break;
-                    case "sprk_billingevent":
-                        eventOf[row.Row.SignalId] = subject;
-                        break;
-                }
-            }
-
-            // Otherwise nothing identifies the earlier invoice: no reference, so withheld.
         }
 
         if (eventOf.Count > 0)
         {
             var invoiceOfEvent = await CallerLookupAsync(
-                BillingEventEntitySet, "sprk_billingeventid", EarlierInvoiceReadability.InvoiceColumn, eventOf.Values, "sprk_billingevent", ct)
+                BillingEventEntitySet, "sprk_billingeventid", EarlierInvoiceReadability.InvoiceColumn, eventOf.Values, BillingEventTable, ct)
                 .ConfigureAwait(false);
             if (invoiceOfEvent is null)
             {
@@ -1468,8 +1463,9 @@ public sealed class SignalReadService
             // (sprk_corerecordtype + sprk_corerecordid, refused to app-only generic writers). sprk_billingevent.sprk_invoice is not
             // refused (D-96's detach sequence writes it through the generic paths; a same-core re-attach through an Update Record
             // node or an output mapping, a person's run, or a native edit by a user with Write re-points it, no misconfiguration
-            // needed), so a line re-pointed to an invoice of another core record would otherwise be judged in that invoice's firm.
-            // No invoice, an invoice with no single core record, a Signal with no core record, or a mismatch: withheld.
+            // needed), so a line re-pointed to an invoice of another core record would otherwise be judged by that invoice. No
+            // invoice, an invoice the caller cannot read or with no single core record, a Signal with no core record, or a
+            // mismatch: withheld.
             var lineInvoices = eventOf.Values.Where(invoiceOfEvent.ContainsKey).Select(e => invoiceOfEvent[e]).Distinct().ToList();
             if (lineInvoices.Count > 0)
             {
@@ -1489,32 +1485,17 @@ public sealed class SignalReadService
                         && string.Equals(frozenType.LogicalName, core.Table, StringComparison.OrdinalIgnoreCase)
                         && coreId == core.Id)
                     {
-                        currentInvoiceOf[signalId] = invoice;
+                        referencesOf[signalId] = EarlierInvoiceReadability.ReferencesOf([], sameInvoiceRepeat: true, invoice);
                     }
-                }
-            }
-        }
-
-        if (currentInvoiceOf.Count > 0)
-        {
-            var vendorOrgOf = await SubmissionVendorOrgAsync(currentInvoiceOf.Values, ct).ConfigureAwait(false);
-            if (vendorOrgOf is null)
-            {
-                return shown;
-            }
-
-            foreach (var (signalId, invoice) in currentInvoiceOf)
-            {
-                if (vendorOrgOf.TryGetValue(invoice, out var vendorOrg))
-                {
-                    referencesOf[signalId] =
-                        [.. duplicates[signalId].TrackingNumbers.Select(n => new EarlierInvoiceReadability.Reference(null, vendorOrg, n))];
                 }
             }
         }
 
         return (await _earlierInvoices.ShownAsync(_user, referencesOf, ct).ConfigureAwait(false)).ToHashSet();
     }
+
+    /// <summary>The table of a line-level Duplicate's subject (a same-invoice repeat is always about a line).</summary>
+    private const string BillingEventTable = "sprk_billingevent";
 
     /// <summary>
     /// UAC review F4 / DEF-043: each invoice's core record (table, id), from the invoice's typed core lookups
@@ -1563,48 +1544,6 @@ public sealed class SignalReadService
 
     /// <summary>The invoice table whose core lookups <see cref="InvoiceCoreRecordAsync"/> reads.</summary>
     private const string InvoiceCoreRecordTable = "sprk_invoice";
-
-    /// <summary>
-    /// UAC review F4: each current invoice's vendor org, from the <c>sprk_invoicesubmission</c> rows the CALLER's batched read returns
-    /// whose <c>sprk_invoice</c> is that invoice (In lists of at most <see cref="WitnessIdChunk"/> ids). An invoice is absent (its
-    /// Duplicates withheld) when the caller reads none of its submissions, or when they do not all name the same vendor org (one
-    /// without a vendor org counts as disagreeing): one is never picked. Null on a fault
-    /// (<see cref="EarlierInvoiceReadability.ReadAsCallerAsync"/>).
-    /// </summary>
-    private async Task<Dictionary<Guid, Guid>?> SubmissionVendorOrgAsync(IEnumerable<Guid> invoices, CancellationToken ct)
-    {
-        var orgsOf = new Dictionary<Guid, HashSet<Guid?>>();
-        foreach (var chunk in invoices.Distinct().Chunk(WitnessIdChunk))
-        {
-            var rows = await _earlierInvoices.ReadAsCallerAsync(
-                _user,
-                $"{EarlierInvoiceReadability.SubmissionEntitySet}?$select={EarlierInvoiceReadability.InvoiceColumn},{EarlierInvoiceReadability.VendorOrgColumn}"
-                + $"&$filter={InFilter(EarlierInvoiceReadability.SubmissionInvoiceFilterColumn, chunk)}",
-                "sprk_invoicesubmission",
-                ct).ConfigureAwait(false);
-            if (rows is null)
-            {
-                return null;
-            }
-
-            foreach (var row in rows)
-            {
-                if (EarlierInvoiceReadability.ReadGuid(row, EarlierInvoiceReadability.InvoiceColumn) is { } invoice && chunk.Contains(invoice))
-                {
-                    if (!orgsOf.TryGetValue(invoice, out var orgs))
-                    {
-                        orgsOf[invoice] = orgs = [];
-                    }
-
-                    orgs.Add(EarlierInvoiceReadability.ReadGuid(row, EarlierInvoiceReadability.VendorOrgColumn));
-                }
-            }
-        }
-
-        return orgsOf
-            .Where(entry => entry.Value.Count == 1 && entry.Value.Single() is not null)
-            .ToDictionary(entry => entry.Key, entry => entry.Value.Single()!.Value);
-    }
 
     /// <summary>One lookup column of the rows the CALLER's batched read returns (In lists of at most <see cref="WitnessIdChunk"/> ids):
     /// id → the lookup's value; a row without it is absent. Null on a fault (<see cref="EarlierInvoiceReadability.ReadAsCallerAsync"/>).</summary>

@@ -680,14 +680,14 @@ public class AccessTableAppOnlyWriterTests
     [Fact]
     public void TheColumnsTheDuplicateWithholdingReads_AreRefusedOnTheSubmission_InTheFormsItReadsThem()
     {
-        // UAC review F4 (on e371dce6bf): D-176 resolves (vendor org, tracking number) to a submission and gates a Duplicate's
-        // earlier-invoice detail on that submission's invoice (EarlierInvoiceReadability.ResolveByTrackingNumberAsync). The
-        // reader's own Web API names, so a renamed reader constant drifts here.
+        // UAC review F4 (on e371dce6bf): the submission's invoice names the invoice its stored findings belong to; the blocked view
+        // judges a same-invoice repeat Duplicate by the caller's Read of it (#2294). The tracking number is no longer looked up
+        // (#2294) and stays refused (typed writer only). The Web API names, so a renamed constant drifts here.
         const string submission = Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity;
         foreach (var key in new[]
                  {
                      Sprk.Bff.Api.Services.Signals.EarlierInvoiceReadability.InvoiceColumn,
-                     Sprk.Bff.Api.Services.Signals.EarlierInvoiceReadability.TrackingNumberColumn,
+                     Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.TrackingNumberColumn,
                      "sprk_invoice", "sprk_Invoice@odata.bind", " SPRK_TRACKINGNUMBER ",
                  })
             Code(submission, key).Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, $"{key} on {submission}");

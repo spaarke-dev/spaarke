@@ -978,24 +978,26 @@ internal static class InheritedAccessPermission
     /// generic writer re-files a submission.
     /// <para>UAC review F4 (on e371dce6bf): also its invoice <c>sprk_invoice</c>
     /// (<c>InvoiceSubmissionPersister.SubmissionInvoice</c>) and its tracking number <c>sprk_trackingnumber</c>
-    /// (<c>TrackingNumberAllocator.TrackingNumberColumn</c>). D-176's Duplicate withholding reads them:
-    /// <c>EarlierInvoiceReadability.ResolveByTrackingNumberAsync</c> resolves (vendor org, tracking number) to a submission and
-    /// uses that submission's <c>sprk_invoice</c> to decide whose Read gates a Duplicate's earlier-invoice detail, and
-    /// <c>InvoiceReviewReadService</c> applies the same rule. Re-pointed, a Duplicate would quote an earlier invoice the caller
-    /// cannot read. Their writers are typed: the persister links the invoice (<c>BuildSubmissionUpdate</c>) and the allocator
-    /// assigns the number; no playbook output mapping, Update Record node, field-mapping rule or Repair writes either.</para>
-    /// <para>The vendor org that scopes a number-only Duplicate is the current invoice's SUBMISSION's <c>sprk_vendororg</c>
-    /// (above), read as the caller (<c>SignalReadService.DuplicatesShownAsync</c>, F4 option b, agreed with ontology), never the
-    /// invoice's own <c>sprk_vendororg</c>: so <c>sprk_invoice.sprk_vendororg</c> decides no access and is not listed.</para></item>
-    /// <para>Not listed: <c>sprk_billingevent.sprk_invoice</c>. A billing-event Duplicate's current invoice is the event's invoice
-    /// (read as the caller), and that invoice's submissions give the vendor org, so the column is read. It is not refused because
+    /// (<c>TrackingNumberAllocator.TrackingNumberColumn</c>). The submission's <c>sprk_invoice</c> decides which invoice a stored
+    /// finding belongs to: the Invoice Review read finds the submission by it (<c>InvoiceReviewReadService</c>), and the blocked
+    /// view judges a same-invoice repeat Duplicate by the caller's Read of it (<c>SubmissionOverrideService.GetAsync</c>,
+    /// #2294 / DEF-043). Since #2294 no tracking number is looked up (a number-only Duplicate is withheld,
+    /// <c>EarlierInvoiceReadability.ReferencesOf</c>), so the number decides no access today; it stays refused, as its only
+    /// writer is typed. Their writers are typed: the persister links the invoice (<c>BuildSubmissionUpdate</c>) and the
+    /// allocator assigns the number; no playbook output mapping, Update Record node, field-mapping rule or Repair writes either.</para>
+    /// <para>No vendor org scopes a Duplicate any more (#2294 removed the number lookup), so neither
+    /// <c>sprk_invoice.sprk_vendororg</c> nor the submission's decides a Duplicate's detail; <c>sprk_invoice.sprk_vendororg</c> is
+    /// not listed.</para></item>
+    /// <para>Not listed: <c>sprk_billingevent.sprk_invoice</c>. A same-invoice repeat Duplicate about a line is judged by the
+    /// line's current invoice, the event's invoice (read as the caller), so the column is read. It is not refused because
     /// the supported detach / move / re-attach sequence (<see cref="InvoiceFamilyCoreRecordGuard.DetachMoveReattachHint"/>, D-96)
     /// writes it through the playbook update and the output orchestrator (<c>InvoiceFamilyGenericUpdatePathTests</c>). A re-point of
     /// it needs no misconfiguration: D-96's same-core re-attach through an Update Record node or an output mapping, a person's
     /// run, and a native edit by a user with Write on the line all reach it. The read is
     /// bounded: the line's invoice counts only when it is filed under the Signal's frozen core record (below), and every generic
     /// write of it is held to the line's own core record by <see cref="InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode"/>.
-    /// Residual: a re-point within the same core record is judged in that invoice's submission's firm (DEF-043, #2294).</para></item>
+    /// Residual (DEF-043, #2294): a same-invoice repeat on a line re-pointed within the same core record is judged by the
+    /// caller's Read of the invoice it now names; a number-only Duplicate is withheld whatever the line names.</para></item>
     /// <item>UAC review F4 / DEF-043. <c>sprk_signal</c>: its frozen core-record pair <c>sprk_corerecordtype</c> /
     /// <c>sprk_corerecordid</c> (<c>SignalCoreRecordAccess.CoreRecordTypeColumn</c>, <c>CoreRecordIdColumn</c>), by which
     /// <c>SignalCoreRecordAccess.AuthorizeAsync</c> decides who reads a Signal and <c>SignalReadService.DuplicatesShownAsync</c>

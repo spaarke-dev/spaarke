@@ -12,22 +12,18 @@ namespace Sprk.Bff.Api.Tests.Services.Signals;
 /// <summary>
 /// Ontology task 157 (D-176, #2118): <see cref="EarlierInvoiceReadability"/>, the earlier-invoice check the worklist read and ebilling
 /// task 119's invoice review share. The caller's Dataverse is an EVALUATING double: the invoice read returns the In-listed ids the
-/// caller reads, and the submission read evaluates the vendor org and the tracking-number In list (text compared without regard to
-/// case, as Dataverse does), so a read that asks the wrong question gets the wrong rows.
+/// caller reads, so a read that asks the wrong question gets the wrong rows. #2294 / DEF-043: no tracking number is ever looked up
+/// (<see cref="EarlierInvoiceReadability.ReferencesOf"/>); any other read fails the test.
 /// </summary>
 public sealed class EarlierInvoiceReadabilityTests
 {
-    private static readonly Guid Org = Guid.Parse("0f0f0f0f-0000-0000-0000-000000000001");
-    private static readonly Guid OtherOrg = Guid.Parse("0f0f0f0f-0000-0000-0000-000000000002");
-
     private readonly HashSet<Guid> _readableInvoices = [];
-    private readonly List<(Guid Org, string Number, Guid? Invoice)> _submissions = [];
     private readonly Dictionary<string, string> _faults = new(StringComparer.Ordinal);
     private readonly List<string> _paths = [];
 
-    private static EarlierInvoiceReadability.Reference ById(Guid id) => new(id, null, null);
+    private static EarlierInvoiceReadability.Reference ById(Guid id) => new(id);
 
-    private static EarlierInvoiceReadability.Reference ByNumber(string number, Guid? org = null) => new(null, org ?? Org, number);
+    private static readonly EarlierInvoiceReadability.Reference Unusable = new(null);
 
     private Guid Invoice(bool readable)
     {
@@ -67,9 +63,7 @@ public sealed class EarlierInvoiceReadabilityTests
             // A truncated page: the rows it holds are right, but more follow.
             return Task.FromResult(DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new Dictionary<string, object>
             {
-                ["value"] = set == "sprk_invoices"
-                    ? _readableInvoices.Select(id => new Dictionary<string, object?> { ["sprk_invoiceid"] = id }).ToList()
-                    : Submissions(filter),
+                ["value"] = _readableInvoices.Select(id => new Dictionary<string, object?> { ["sprk_invoiceid"] = id }).ToList(),
                 ["@odata.nextLink"] = $"https://example.crm.dynamics.com/api/data/v9.2/{set}?$skiptoken=2",
             })));
         }
@@ -80,45 +74,10 @@ public sealed class EarlierInvoiceReadabilityTests
                 .Where(_readableInvoices.Contains)
                 .Select(id => new Dictionary<string, object?> { ["sprk_invoiceid"] = id })
                 .ToList(),
-            "sprk_invoicesubmissions" => Submissions(filter),
             _ => throw new InvalidOperationException($"unexpected read {path}"),
         };
         return Task.FromResult(DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new { value = rows })));
     }
-
-    private List<Dictionary<string, object?>> Submissions(string filter)
-    {
-        // Like Dataverse: the number list is a JSON array (matched without regard to case); the vendor org list, when present, restricts the orgs.
-        var numbers = InList(filter, "sprk_trackingnumber").ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var orgs = filter.Contains("PropertyName='sprk_vendororg'", StringComparison.Ordinal)
-            ? InList(filter, "sprk_vendororg").Select(Guid.Parse).ToHashSet()
-            : null;
-        return _submissions.Where(s => (orgs is null || orgs.Contains(s.Org)) && numbers.Contains(s.Number))
-            .Select(s => new Dictionary<string, object?>
-            {
-                ["sprk_trackingnumber"] = s.Number,
-                ["_sprk_vendororg_value"] = s.Org,
-                ["_sprk_invoice_value"] = s.Invoice,
-            })
-            .ToList();
-    }
-
-    /// <summary>The values of <c>In(PropertyName='{property}',PropertyValues=[...])</c>: single-quoted GUIDs, or JSON strings.</summary>
-    private static List<string> InList(string filter, string property)
-    {
-        var marker = $"In(PropertyName='{property}',PropertyValues=";
-        var array = filter[(filter.IndexOf(marker, StringComparison.Ordinal) + marker.Length)..];
-        if (array.Length > 1 && array[1] == '\'')
-        {
-            return Regex.Matches(array[..array.IndexOf(']', StringComparison.Ordinal)], "'([^']*)'").Select(m => m.Groups[1].Value).ToList();
-        }
-
-        var reader = new Utf8JsonReader(System.Text.Encoding.UTF8.GetBytes(array));
-        using var doc = JsonDocument.ParseValue(ref reader);
-        return doc.RootElement.EnumerateArray().Select(e => e.GetString()!).ToList();
-    }
-
-    private string SubmissionPath() => _paths.Single(p => p.StartsWith("sprk_invoicesubmissions?", StringComparison.Ordinal));
 
     private int Reads(string set) => _paths.Count(p => p.StartsWith(set + "?", StringComparison.Ordinal));
 
@@ -130,49 +89,13 @@ public sealed class EarlierInvoiceReadabilityTests
 
         (await ReadableAsync(readable, unreadable)).Should().BeEquivalentTo([readable]);
         Reads("sprk_invoices").Should().Be(1);
-        Reads("sprk_invoicesubmissions").Should().Be(0, "an id needs only the invoice read");
+        _paths.Should().OnlyContain(p => p.StartsWith("sprk_invoices?", StringComparison.Ordinal), "an id needs only the invoice read");
     }
 
     [Fact]
-    public async Task ATrackingNumber_IsResolvedThroughTheOneSubmissionOfItsVendorOrg()
+    public async Task AReferenceWithNoInvoiceId_IsNeverReadable_AndReadsNothing()
     {
-        var readableInvoice = Invoice(readable: true);
-        _submissions.Add((Org, "N-1", readableInvoice));
-        _submissions.Add((Org, "N-2", Invoice(readable: false)));
-        _submissions.Add((Org, "N-4", readableInvoice));
-        _submissions.Add((Org, "n-4", readableInvoice)); // the same number to Dataverse: ambiguous
-        _submissions.Add((Org, "N-5", null));
-        _submissions.Add((OtherOrg, "N-6", readableInvoice));
-        var kept = ByNumber("N-1");
-
-        var readable = await ReadableAsync(kept, ByNumber("N-2"), ByNumber("N-3"), ByNumber("N-4"), ByNumber("N-5"), ByNumber("N-6"));
-        readable.Should().BeEquivalentTo([kept], "an unreadable invoice, no submission, two, one without an invoice, or another firm's: never readable");
-        Reads("sprk_invoicesubmissions").Should().Be(1);
-    }
-
-    [Fact]
-    public async Task ATrackingNumberIsSentAsAJsonStringInTheInList_NotAnODataDoubledQuote()
-    {
-        // The number is firm-supplied text. The In list is parsed as a JSON array: a doubled quote (O''Brien) is a 400 on Dataverse, a
-        // JSON string ("O'Brien") matches the row (both proven live on spaarkedev1, task 157 round 2). A quote or backslash is escaped.
-        const string number = "O'Brien&Co #1.1";
-        const string awkward = "say \"hi\"\\";
-        _submissions.Add((Org, number, Invoice(readable: true)));
-        _submissions.Add((Org, awkward, Invoice(readable: true)));
-
-        (await ReadableAsync(ByNumber(number), ByNumber(awkward))).Should().HaveCount(2);
-
-        var sent = _paths.Single(p => p.StartsWith("sprk_invoicesubmissions?", StringComparison.Ordinal));
-        sent.Should().NotContain("O'Brien").And.NotContain("&Co", "the URL carries the escaped filter");
-        var filter = Uri.UnescapeDataString(sent);
-        filter.Should().Contain("\"O'Brien&Co #1.1\"").And.Contain("\"say \\\"hi\\\"\\\\\"").And.NotContain("''");
-    }
-
-    [Fact]
-    public async Task AReferenceWithNeitherAnIdNorAVendorOrgAndNumber_IsNeverReadable_AndReadsNothing()
-    {
-        (await ReadableAsync(new EarlierInvoiceReadability.Reference(null, null, "N-1"), new EarlierInvoiceReadability.Reference(null, Org, " ")))
-            .Should().BeEmpty();
+        (await ReadableAsync(Unusable, ById(Guid.Empty))).Should().BeEmpty();
         _paths.Should().BeEmpty();
     }
 
@@ -181,29 +104,12 @@ public sealed class EarlierInvoiceReadabilityTests
     [InlineData("sprk_invoices", "401")]
     [InlineData("sprk_invoices", "unparseable")]
     [InlineData("sprk_invoices", "throw")]
-    [InlineData("sprk_invoicesubmissions", "500")]
-    [InlineData("sprk_invoicesubmissions", "401")]
-    [InlineData("sprk_invoicesubmissions", "unparseable")]
-    [InlineData("sprk_invoicesubmissions", "throw")]
     [InlineData("sprk_invoices", "nextLink")]
-    [InlineData("sprk_invoicesubmissions", "nextLink")]
-    public async Task AFaultInEitherRead_MakesNothingReadable(string set, string fault)
+    public async Task AFaultInTheInvoiceRead_MakesNothingReadable(string set, string fault)
     {
-        var invoice = Invoice(readable: true);
-        _submissions.Add((Org, "N-1", invoice));
         _faults[set] = fault;
 
-        (await ReadableAsync(ById(invoice), ByNumber("N-1"))).Should().BeEmpty();
-    }
-
-    [Fact]
-    public async Task A403OnTheSubmissionTable_LeavesNumbersUnresolved_ButStillJudgesIds()
-    {
-        var invoice = Invoice(readable: true);
-        _submissions.Add((Org, "N-1", invoice));
-        _faults["sprk_invoicesubmissions"] = "403";
-
-        (await ReadableAsync(ById(invoice), ByNumber("N-1"))).Should().BeEquivalentTo([ById(invoice)]);
+        (await ReadableAsync(ById(Invoice(readable: true)), ById(Invoice(readable: true)))).Should().BeEmpty();
     }
 
     [Fact]
@@ -215,60 +121,56 @@ public sealed class EarlierInvoiceReadabilityTests
     }
 
     [Fact]
-    public async Task Reads_AreOneSubmissionReadPerChunkOf200Numbers_AcrossVendorOrgs_AndOneInvoiceRead()
+    public async Task Reads_AreOneInvoiceReadPerChunkOf200Ids()
     {
-        _submissions.Add((Org, "A", Invoice(readable: true)));
-        _submissions.Add((Org, "B", Invoice(readable: true)));
-        _submissions.Add((OtherOrg, "C", Invoice(readable: true)));
-        (await ReadableAsync(ByNumber("A"), ByNumber("B"), ByNumber("C", OtherOrg), ById(Invoice(readable: true)))).Should().HaveCount(4);
-        Reads("sprk_invoicesubmissions").Should().Be(1, "two vendor orgs, one read");
-        Reads("sprk_invoices").Should().Be(1);
-
-        // The same number in two orgs is ONE value in the list; the exact (org, number) pair is matched after the read.
-        _paths.Clear();
-        _submissions.Add((Org, "S", Invoice(readable: true)));
-        _submissions.Add((OtherOrg, "S", Invoice(readable: false)));
-        (await ReadableAsync(ByNumber("S"), ByNumber("S", OtherOrg))).Should().BeEquivalentTo([ByNumber("S")]);
-        Reads("sprk_invoicesubmissions").Should().Be(1);
-
-        _paths.Clear();
         var many = Enumerable.Range(0, 201).Select(_ => ById(Invoice(readable: true))).ToArray();
         (await ReadableAsync(many)).Should().HaveCount(201);
         _paths.Select(p => Regex.Matches(p, "'[0-9a-f-]{36}'").Count).Should().BeEquivalentTo([200, 1]);
+    }
 
-        _paths.Clear();
-        var numbers = Enumerable.Range(0, 201).Select(i => $"N-{i}").ToList();
-        foreach (var n in numbers) _submissions.Add((Org, n, Invoice(readable: true)));
-        (await ReadableAsync(numbers.Select(n => ByNumber(n)).ToArray())).Should().HaveCount(201);
-        Reads("sprk_invoicesubmissions").Should().Be(2, "201 numbers: chunks of 200 and 1");
+    // ---- ReferencesOf: what ONE stored Duplicate finding is judged by (#2294 / DEF-043) ----
+
+    [Fact]
+    public void ReferencesOf_AFindingQuotingInvoiceIds_IsJudgedByEachDistinctId_Unchanged()
+    {
+        var a = Guid.NewGuid();
+        var b = Guid.NewGuid();
+
+        EarlierInvoiceReadability.ReferencesOf([a, b, a, Guid.Empty], sameInvoiceRepeat: false, currentInvoiceId: null)
+            .Should().Equal(ById(a), ById(b));
+        EarlierInvoiceReadability.ReferencesOf([a], sameInvoiceRepeat: true, currentInvoiceId: Guid.NewGuid())
+            .Should().Equal([ById(a)], "an id wins even on a same-invoice repeat");
     }
 
     [Fact]
-    public async Task AChunkNamingMoreThan20Orgs_IsReadInGroupsOf20Orgs_EachFilteredOnItsOrgs_AndThePairIsStillMatchedExactly()
+    public void ReferencesOf_ANumberOnlyFinding_IdentifiesNothing_WhateverTheCurrentInvoice()
     {
-        var orgs = Enumerable.Range(0, EarlierInvoiceReadability.OrgsPerRead + 1).Select(_ => Guid.NewGuid()).ToList();
-        foreach (var org in orgs) _submissions.Add((org, "SAME", Invoice(readable: true)));
-        _submissions.Add((OtherOrg, "SAME", Invoice(readable: true))); // a firm nobody asked about
-        _submissions.Add((orgs[^1], "ONLY-IN-LAST", Invoice(readable: true)));
-
-        var readable = await ReadableAsync([.. orgs.Select(o => ByNumber("SAME", o)), ByNumber("ONLY-IN-LAST", orgs[^1])]);
-
-        readable.Should().HaveCount(orgs.Count + 1);
-        var reads = _paths.Where(p => p.StartsWith("sprk_invoicesubmissions?", StringComparison.Ordinal)).Select(Uri.UnescapeDataString).ToList();
-        reads.Should().HaveCount(2, "21 orgs: groups of 20 and 1");
-        reads.Should().AllSatisfy(r => r.Should().Contain("PropertyName='sprk_vendororg'", "every read names its orgs, so a page cannot truncate"));
-        reads.Select(r => InList(r, "sprk_vendororg").Count).Should().BeEquivalentTo([20, 1]);
-        reads.Single(r => InList(r, "sprk_vendororg").Count == 1).Should().Contain("ONLY-IN-LAST");
-        reads.Single(r => InList(r, "sprk_vendororg").Count == 20).Should().NotContain("ONLY-IN-LAST", "a group asks only its own orgs' numbers");
+        // Must fire: a cross-invoice Duplicate identified only by its tracking number is withheld; no number is ever looked up.
+        EarlierInvoiceReadability.ReferencesOf([], sameInvoiceRepeat: false, currentInvoiceId: Guid.NewGuid())
+            .Should().Equal([Unusable]);
+        EarlierInvoiceReadability.ReferencesOf([], sameInvoiceRepeat: false, currentInvoiceId: null).Should().Equal([Unusable]);
     }
 
     [Fact]
-    public async Task TheVendorOrgFilterNamesTheOrgsOfTheChunk_WhenThereAreAtMost20()
+    public void ReferencesOf_ASameInvoiceRepeat_IsJudgedByItsOwnCurrentInvoice_AndWithheldWithoutOne()
     {
-        _submissions.Add((Org, "A", Invoice(readable: true)));
+        var current = Guid.NewGuid();
 
-        (await ReadableAsync(ByNumber("A"))).Should().HaveCount(1);
-        Uri.UnescapeDataString(SubmissionPath()).Should().Contain($"PropertyName='sprk_vendororg',PropertyValues=['{Org:D}']");
+        EarlierInvoiceReadability.ReferencesOf([], sameInvoiceRepeat: true, currentInvoiceId: current).Should().Equal([ById(current)]);
+        EarlierInvoiceReadability.ReferencesOf([], sameInvoiceRepeat: true, currentInvoiceId: null).Should().Equal([Unusable]);
+        EarlierInvoiceReadability.ReferencesOf([], sameInvoiceRepeat: true, currentInvoiceId: Guid.Empty).Should().Equal([Unusable]);
+    }
+
+    [Theory]
+    [InlineData("duplicate.line_same_invoice", true)]
+    [InlineData("duplicate.line_prior_submission", false)]
+    [InlineData("duplicate.invoice_number", false)]
+    [InlineData("DUPLICATE.LINE_SAME_INVOICE", false)]
+    [InlineData(null, false)]
+    public void IsSameInvoiceRepeat_IsExactlyEbillingsSameInvoiceReasonCode(string? reason, bool expected)
+    {
+        EarlierInvoiceReadability.IsSameInvoiceRepeat(reason).Should().Be(expected);
+        Sprk.Bff.Api.Services.Signals.Billing.BillingReasonCodes.DuplicateOfEarlierLine.Should().Be("duplicate.line_same_invoice");
     }
 
     // ---- ShownAsync: the ONE combining rule (an item is shown only with at least one reference, every one readable) ----
@@ -294,10 +196,7 @@ public sealed class EarlierInvoiceReadabilityTests
     [Fact]
     public async Task ShownAsync_AnItemWhoseReferencesAreAllReadable_IsShown()
     {
-        var invoice = Invoice(readable: true);
-        _submissions.Add((Org, "N-1", Invoice(readable: true)));
-
-        var shown = await ShownAsync(new() { ["both"] = [ById(invoice), ByNumber("N-1")], ["one"] = [ById(Invoice(readable: true))] });
+        var shown = await ShownAsync(new() { ["both"] = [ById(Invoice(readable: true)), ById(Invoice(readable: true))], ["one"] = [ById(Invoice(readable: true))] });
 
         shown.Should().BeEquivalentTo(["both", "one"]);
     }
@@ -317,7 +216,7 @@ public sealed class EarlierInvoiceReadabilityTests
     [Fact]
     public async Task ShownAsync_AnItemWithAnUnusableReference_IsNotShown_AndCausesNoRead()
     {
-        var shown = await ShownAsync(new() { ["bad"] = [ById(Invoice(readable: true)), new EarlierInvoiceReadability.Reference(null, null, "N-1")] });
+        var shown = await ShownAsync(new() { ["bad"] = [ById(Invoice(readable: true)), Unusable] });
 
         shown.Should().BeEmpty();
         _paths.Should().BeEmpty("an item that cannot be shown needs no read");
@@ -328,14 +227,11 @@ public sealed class EarlierInvoiceReadabilityTests
     [InlineData("sprk_invoices", "401")]
     [InlineData("sprk_invoices", "unparseable")]
     [InlineData("sprk_invoices", "throw")]
-    [InlineData("sprk_invoicesubmissions", "500")]
-    [InlineData("sprk_invoicesubmissions", "throw")]
     public async Task ShownAsync_OnAFault_NothingIsShown(string set, string fault)
     {
-        _submissions.Add((Org, "N-1", Invoice(readable: true)));
         _faults[set] = fault;
 
-        var shown = await ShownAsync(new() { ["byId"] = [ById(Invoice(readable: true))], ["byNumber"] = [ByNumber("N-1")] });
+        var shown = await ShownAsync(new() { ["a"] = [ById(Invoice(readable: true))], ["b"] = [ById(Invoice(readable: true))] });
 
         shown.Should().BeEmpty();
     }

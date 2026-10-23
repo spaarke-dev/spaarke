@@ -64,9 +64,8 @@ public sealed class InvoiceReviewReadServiceTests
         public readonly Mock<IGenericEntityService> Entities = new(MockBehavior.Strict);
 
         // D-176 (task 119): the CALLER's Dataverse, an evaluating double like ontology 157's. The invoice read returns the In-listed ids the
-        // caller reads; the submission read evaluates the vendor org and the tracking-number In lists. Every path the caller is asked is kept.
+        // caller reads; any other read fails the test (#2294: no tracking number is looked up). Every path the caller is asked is kept.
         public readonly HashSet<Guid> ReadableInvoices = [];
-        public readonly List<(Guid Org, string Number, Guid? Invoice)> CallerSubmissions = [];
         public readonly List<string> CallerPaths = [];
         public Func<string, Task<DataverseUserResponse>>? CallerFault;
         public readonly Mock<ILogger<InvoiceReviewReadService>> Logger = new();
@@ -159,39 +158,9 @@ public sealed class InvoiceReviewReadServiceTests
                     .Where(ReadableInvoices.Contains)
                     .Select(id => new Dictionary<string, object?> { ["sprk_invoiceid"] = id })
                     .ToList(),
-                "sprk_invoicesubmissions" => SubmissionsAsCaller(filter),
                 _ => throw new InvalidOperationException($"unexpected caller read {path}"),
             };
             return Task.FromResult(DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new { value = rows })));
-        }
-
-        private List<Dictionary<string, object?>> SubmissionsAsCaller(string filter)
-        {
-            var numbers = InList(filter, "sprk_trackingnumber").ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var orgs = InList(filter, "sprk_vendororg").Select(Guid.Parse).ToHashSet();
-            return CallerSubmissions.Where(s => orgs.Contains(s.Org) && numbers.Contains(s.Number))
-                .Select(s => new Dictionary<string, object?>
-                {
-                    ["sprk_trackingnumber"] = s.Number,
-                    ["_sprk_vendororg_value"] = s.Org,
-                    ["_sprk_invoice_value"] = s.Invoice,
-                })
-                .ToList();
-        }
-
-        /// <summary>The values of <c>In(PropertyName='{property}',PropertyValues=[...])</c>: single-quoted GUIDs, or JSON strings.</summary>
-        private static List<string> InList(string filter, string property)
-        {
-            var marker = $"In(PropertyName='{property}',PropertyValues=";
-            var array = filter[(filter.IndexOf(marker, StringComparison.Ordinal) + marker.Length)..];
-            if (array.Length > 1 && array[1] == '\'')
-            {
-                return Regex.Matches(array[..array.IndexOf(']', StringComparison.Ordinal)], "'([^']*)'").Select(m => m.Groups[1].Value).ToList();
-            }
-
-            var reader = new Utf8JsonReader(System.Text.Encoding.UTF8.GetBytes(array));
-            using var doc = JsonDocument.ParseValue(ref reader);
-            return doc.RootElement.EnumerateArray().Select(e => e.GetString()!).ToList();
         }
 
         public Entity AddLine(int sequence, InvoiceLineStatus status, decimal amount = 100m, string? extraction = null, Guid? timekeeper = null)
@@ -643,14 +612,11 @@ public sealed class InvoiceReviewReadServiceTests
         ShouldBeShown(review.InvoiceFindings.Single(), "Too many timekeepers.");
     }
 
-    [Theory(DisplayName = "119: a Duplicate whose earlier invoice the caller reads (by id, or by the tracking-number fallback) is returned unchanged, read as the caller")]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task ReadableEarlierInvoice_IsUnchanged(bool byId)
+    [Fact(DisplayName = "119: a Duplicate whose earlier invoice (duplicateOf.invoiceId) the caller reads is returned unchanged, read as the caller")]
+    public async Task ReadableEarlierInvoice_IsUnchanged()
     {
-        var w = DuplicateWorld(EarlierNumber, byId ? EarlierInvoice : null);
+        var w = DuplicateWorld(EarlierNumber, EarlierInvoice);
         w.ReadableInvoices.Add(EarlierInvoice);
-        w.CallerSubmissions.Add((FirmId, EarlierNumber, EarlierInvoice));
 
         var review = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!;
 
@@ -659,14 +625,29 @@ public sealed class InvoiceReviewReadServiceTests
         duplicate.ValuesRead.Should().Contain(v => v.Name == "duplicateOf.trackingNumber" && v.Value == EarlierNumber);
         OthersUntouched(review);
         w.CallerReads("sprk_invoices").Should().Be(1, "the earlier invoice is read as the caller");
-        w.CallerReads("sprk_invoicesubmissions").Should().Be(byId ? 0 : 1, "an id needs no submission read; a number is resolved through it");
-        if (!byId)
-        {
-            Uri.UnescapeDataString(w.CallerPaths.Single(p => p.StartsWith("sprk_invoicesubmissions?", StringComparison.Ordinal)))
-                .Should().Contain(FirmId.ToString("D"), "the number is resolved within the submission's vendor org");
-        }
-
+        w.CallerPaths.Should().ContainSingle("an id needs only the invoice read");
         w.Reads("sprk_invoice").Should().Be(1, "no app-only read of the earlier invoice: only the current invoice is read app-only");
+    }
+
+    // ── #2294 / DEF-043: a Duplicate identified only by a tracking number shows the generic withheld sentence ──
+
+    [Theory(DisplayName = "#2294: a cross-invoice Duplicate identified only by its tracking number is withheld with the generic sentence, even when the number would resolve to an invoice the caller reads; no number is looked up")]
+    [InlineData("DuplicateOfPriorSubmissionLine")]
+    [InlineData("duplicate.line_prior_submission")]
+    public async Task NumberOnlyDuplicate_IsWithheld_WhateverTheNumberWouldResolveTo(string reason)
+    {
+        var w = DuplicateWorld(EarlierNumber, null, reason);
+        // Everything is readable: the current invoice, and the earlier invoice the number names.
+        w.ReadableInvoices.UnionWith([EarlierInvoice, InvoiceId]);
+
+        var review = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!;
+
+        var duplicate = review.Lines.Single().Findings.Single(f => f.PolicyCode == "BILL-DUP");
+        ShouldBeWithheld(duplicate);
+        duplicate.Message.Should().Be(BillingRuleCatalogue.WithheldDuplicateTemplate);
+        OthersUntouched(review);
+        ShouldNotLeak(review, EarlierNumber, EarlierInvoice);
+        w.CallerPaths.Should().BeEmpty("a number-only Duplicate is judged by nothing: no read, no lookup");
     }
 
     [Theory(DisplayName = "119: an earlier invoice the caller cannot read withholds the whole Duplicate group (sentence, values, suggestion); other groups are untouched")]
@@ -675,7 +656,6 @@ public sealed class InvoiceReviewReadServiceTests
     public async Task UnreadableEarlierInvoice_IsWithheld(bool byId)
     {
         var w = DuplicateWorld(EarlierNumber, byId ? EarlierInvoice : null);
-        w.CallerSubmissions.Add((FirmId, EarlierNumber, EarlierInvoice));
 
         var review = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!;
 
@@ -688,10 +668,10 @@ public sealed class InvoiceReviewReadServiceTests
 
     // ── 119 round 5 (F4-1, ontology-r1): a Duplicate whose stored values give NO usable reference to the earlier invoice ──
 
-    [Theory(DisplayName = "119 r5: a Duplicate whose stored values give no usable reference to the earlier invoice (a non-GUID id, duplicateOf.* values that are blank, a number with no vendor org) is withheld, and the caller is asked nothing")]
+    [Theory(DisplayName = "119 r5: a Duplicate whose stored values give no usable reference to the earlier invoice (a non-GUID id, duplicateOf.* values that are blank, a number only) is withheld, and the caller is asked nothing")]
     [InlineData("not-a-guid")]
     [InlineData("blank-values")]
-    [InlineData("number-without-org")]
+    [InlineData("number-only")]
     public async Task UnusableReference_IsWithheld_AndAsksTheCallerNothing(string shape)
     {
         var duplicate = Finding(0, "BILL-DUP", "DuplicateOfPriorSubmissionLine", 0);
@@ -707,7 +687,7 @@ public sealed class InvoiceReviewReadServiceTests
                 values.Add(Value("duplicateOf.invoiceId", ""));
                 values.Add(Value("duplicateOf.trackingNumber", "  "));
                 break;
-            case "number-without-org":
+            case "number-only":
                 values.Add(Value("duplicateOf.trackingNumber", EarlierNumber));
                 break;
         }
@@ -725,14 +705,8 @@ public sealed class InvoiceReviewReadServiceTests
                 Plan("BILL-RATE", LineId(1), "The rate is above the agreed card.", "rate.above_card"),
                 Plan("BILL-STAFF", InvoiceId, "Too many timekeepers.", "staffing.too_many"),
             ]));
-        if (shape == "number-without-org")
-        {
-            w.Submission.Attributes.Remove("sprk_vendororg");
-        }
-
         // Everything the caller could read is readable: only the missing reference withholds.
-        w.ReadableInvoices.Add(EarlierInvoice);
-        w.CallerSubmissions.Add((FirmId, EarlierNumber, EarlierInvoice));
+        w.ReadableInvoices.UnionWith([EarlierInvoice, InvoiceId]);
 
         var review = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!;
 
@@ -742,38 +716,6 @@ public sealed class InvoiceReviewReadServiceTests
         ShouldNotLeak(review, EarlierNumber, EarlierInvoice);
         JsonSerializer.Serialize(review).Should().NotContain("not-a-guid");
         w.CallerPaths.Should().BeEmpty("no usable reference: no caller read is made for the earlier-invoice check");
-    }
-
-    // ── 119 round 4 (uac-r2): a number-only prior resolves within the SUBMISSION's vendor org, as /blocked does ──
-
-    private static readonly Guid ChangedOrg = Guid.Parse("10000000-0000-4000-8000-0000000000f2");
-
-    [Theory(DisplayName = "119 r4: a number-only Duplicate resolves in the submission's vendor org, not the invoice's (a writer can change the invoice's)")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task NumberOnlyPrior_ResolvesInTheSubmissionsOrg(bool readableInSubmissionsOrg)
-    {
-        var w = DuplicateWorld(EarlierNumber, null);
-        // The invoice was moved to another firm after the submission was read; the earlier invoice with that number is readable only there.
-        w.Invoice!["sprk_vendororg"] = new EntityReference("sprk_organization", ChangedOrg) { Name = "Other LLP" };
-        w.ReadableInvoices.Add(EarlierInvoice);
-        w.CallerSubmissions.Add((readableInSubmissionsOrg ? FirmId : ChangedOrg, EarlierNumber, EarlierInvoice));
-
-        var review = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!;
-
-        var duplicate = review.Lines.Single().Findings.Single(f => f.PolicyCode == "BILL-DUP");
-        if (readableInSubmissionsOrg)
-        {
-            ShouldBeShown(duplicate, DuplicateSentence);
-        }
-        else
-        {
-            ShouldBeWithheld(duplicate);
-            ShouldNotLeak(review, EarlierNumber, EarlierInvoice);
-        }
-
-        var lookup = Uri.UnescapeDataString(w.CallerPaths.Single(p => p.StartsWith("sprk_invoicesubmissions?", StringComparison.Ordinal)));
-        lookup.Should().Contain(FirmId.ToString("D")).And.NotContain(ChangedOrg.ToString("D"));
     }
 
     [Fact(DisplayName = "119: the whole (policy, subject) group is scrubbed and its sentence replaced even when the Duplicate is not the primary reason")]
@@ -793,22 +735,15 @@ public sealed class InvoiceReviewReadServiceTests
         ShouldNotLeak(review, EarlierNumber, EarlierInvoice);
     }
 
-    [Theory(DisplayName = "119: the fallback not found, more than one submission, or a fault in the caller's read withholds; the page still loads")]
-    [InlineData("not-found")]
-    [InlineData("more-than-one")]
+    [Theory(DisplayName = "119: a fault in the caller's invoice read withholds; the page still loads")]
     [InlineData("500")]
     [InlineData("throw")]
-    public async Task FallbackFailures_Withhold(string failure)
+    public async Task ReadFaults_Withhold(string failure)
     {
-        var w = DuplicateWorld(EarlierNumber, null);
+        var w = DuplicateWorld(EarlierNumber, EarlierInvoice);
         w.ReadableInvoices.Add(EarlierInvoice);
-        w.ReadableInvoices.Add(OtherEarlierInvoice);
         switch (failure)
         {
-            case "more-than-one":
-                w.CallerSubmissions.Add((FirmId, EarlierNumber, EarlierInvoice));
-                w.CallerSubmissions.Add((FirmId, EarlierNumber.ToLowerInvariant(), OtherEarlierInvoice));
-                break;
             case "500":
                 w.CallerFault = _ => Task.FromResult(DataverseUserResponse.Fail(500, DataverseUserClientErrorCodes.ServiceError, "boom"));
                 break;
@@ -840,22 +775,22 @@ public sealed class InvoiceReviewReadServiceTests
         w.CallerPaths.Should().BeEmpty("no Duplicate quoting an earlier invoice: nothing to judge");
     }
 
-    [Theory(DisplayName = "119: DuplicateOfEarlierLine is shown when the invoice's own submission is readable and withheld otherwise (the rule of 157)")]
+    [Theory(DisplayName = "#2294: a same-invoice repeat (duplicate.line_same_invoice) keeps its detail when the caller reads its own invoice, and is withheld when not; no number is looked up")]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task DuplicateOfEarlierLine_FollowsTheSameRule(bool ownSubmissionReadable)
+    public async Task SameInvoiceRepeat_IsJudgedByTheCallersReadOfItsOwnInvoice(bool ownInvoiceReadable)
     {
-        var w = DuplicateWorld("TRK-1", null, reason: "DuplicateOfEarlierLine");
-        w.ReadableInvoices.Add(InvoiceId);
-        if (ownSubmissionReadable)
+        var w = DuplicateWorld("TRK-1", null, reason: "duplicate.line_same_invoice");
+        w.ReadableInvoices.Add(EarlierInvoice);
+        if (ownInvoiceReadable)
         {
-            w.CallerSubmissions.Add((FirmId, "TRK-1", InvoiceId));
+            w.ReadableInvoices.Add(InvoiceId);
         }
 
         var review = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!;
 
         var duplicate = review.Lines.Single().Findings.Single(f => f.PolicyCode == "BILL-DUP");
-        if (ownSubmissionReadable)
+        if (ownInvoiceReadable)
         {
             ShouldBeShown(duplicate, DuplicateSentence);
         }
@@ -865,6 +800,8 @@ public sealed class InvoiceReviewReadServiceTests
         }
 
         OthersUntouched(review);
+        Uri.UnescapeDataString(w.CallerPaths.Single()).Should().StartWith("sprk_invoices?").And.Contain(InvoiceId.ToString("D"),
+            "the earlier invoice of a same-invoice repeat is the review's own invoice, read as the caller");
     }
 
     [Fact(DisplayName = "119 r2: two Duplicate groups, one readable and one not: only the unreadable one is withheld")]
@@ -925,7 +862,7 @@ public sealed class InvoiceReviewReadServiceTests
         JsonSerializer.Serialize(review).Should().NotContain(DuplicateSentence);
     }
 
-    [Fact(DisplayName = "119: one check per response: one caller invoice read and one submission read whatever the number of Duplicates")]
+    [Fact(DisplayName = "119: one check per response: one caller invoice read whatever the number of Duplicates")]
     public async Task OneCheckPerResponse()
     {
         var w = new World();
@@ -937,26 +874,23 @@ public sealed class InvoiceReviewReadServiceTests
         w.Submission = SubmissionRow(Stored(
             [
                 Finding(0, "BILL-DUP", "DuplicateOfPriorSubmissionLine", 0, EarlierNumber, EarlierInvoice),
-                Finding(1, "BILL-DUP", "DuplicateOfPriorSubmissionLine", 1, EarlierNumber),
-                Finding(2, "BILL-DUP", "DuplicateOfPriorSubmissionLine", 2, "F-080.1"),
+                Finding(1, "BILL-DUP", "duplicate.line_same_invoice", 1, "TRK-1"),
+                Finding(2, "BILL-DUP", "DuplicateOfPriorSubmissionLine", 2, "F-080.1", OtherEarlierInvoice),
                 Finding(3, "BILL-DUPINV", "DuplicateInvoiceNumber", null, "F-080.1", OtherEarlierInvoice),
             ],
             [
                 Plan("BILL-DUP", LineId(1), DuplicateSentence, "DuplicateOfPriorSubmissionLine"),
-                Plan("BILL-DUP", LineId(2), DuplicateSentence, "DuplicateOfPriorSubmissionLine"),
+                Plan("BILL-DUP", LineId(2), DuplicateSentence, "duplicate.line_same_invoice"),
                 Plan("BILL-DUP", LineId(3), DuplicateSentence, "DuplicateOfPriorSubmissionLine"),
                 Plan("BILL-DUPINV", InvoiceId, "Invoice F-100 duplicates F-080.1.", "DuplicateInvoiceNumber"),
             ]));
-        w.ReadableInvoices.UnionWith([EarlierInvoice, OtherEarlierInvoice]);
-        w.CallerSubmissions.Add((FirmId, EarlierNumber, EarlierInvoice));
-        w.CallerSubmissions.Add((FirmId, "F-080.1", OtherEarlierInvoice));
+        w.ReadableInvoices.UnionWith([EarlierInvoice, OtherEarlierInvoice, InvoiceId]);
 
         var review = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!;
 
         review.Lines.SelectMany(l => l.Findings).Concat(review.InvoiceFindings).Should().OnlyContain(f => !f.DetailWithheld);
         w.CallerReads("sprk_invoices").Should().Be(1);
-        w.CallerReads("sprk_invoicesubmissions").Should().Be(1);
-        w.CallerPaths.Should().HaveCount(2);
+        w.CallerPaths.Should().ContainSingle("ids and the own invoice of a same-invoice repeat share one read");
     }
 
     [Fact(DisplayName = "119: an exception escaping the check withholds every Duplicate group and the page still loads (never a 5xx)")]
