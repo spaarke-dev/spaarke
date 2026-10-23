@@ -33,7 +33,11 @@ namespace Sprk.Bff.Api.Api.Filters;
 /// route's 503 <c>identity_resolution_unavailable</c> (the answer Dataverse failing gives) and never as "not saved". A
 /// caller cannot cause an outage, so the per-key signal during one is accepted (as with the 500 pass-through). The one
 /// fault that still folds into "not saved" is a fault of the external-narrowing call: it is refused with the same
-/// reason code as "hidden", so it cannot be told from a hidden match (by design — no code distinguishes them). (b) The match path does extra reads (the authorization and the narrowing), so the response TIME
+/// reason code as "hidden", so it cannot be told from a hidden match (by design — no code distinguishes them). The 503
+/// assumes a fault is an outage: if the access evaluation of one particular matched record throws every time (broken
+/// lineage or data on that row), its Message-ID answers 503 on every probe while no match answers "not saved". That
+/// per-record signal needs a pre-existing broken row and reveals only that such a row exists; it is accepted (UAC-r2).
+/// (b) The match path does extra reads (the authorization and the narrowing), so the response TIME
 /// differs slightly from a no-match answer; the body and status do not.</para>
 /// </remarks>
 public sealed class DocumentEmailIdentityFilter : IEndpointFilter
