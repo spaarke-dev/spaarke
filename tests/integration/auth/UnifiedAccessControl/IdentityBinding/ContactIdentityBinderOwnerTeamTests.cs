@@ -435,6 +435,23 @@ public class ContactIdentityBinderOwnerTeamTests
     }
 
     [Fact]
+    public async Task TheLicensedUserLinkCreate_RefusedForItsOwnersPrivilege_LogsTheSameCodeItReturns()
+    {
+        GivenOneDefaultTeam();
+        GivenDataverseRefusesTheOwner();
+        var userId = GivenALicensedUserWithNoContact(out _);
+        var log = new BindingLogCapture<ContactIdentityBinder>();
+
+        var result = await OwnedBinder(CustomerBu, log: log).EnsureSystemUserLinkAsync(userId, applyWrites: true, CancellationToken.None);
+
+        result.DenyCode.Should().Be(ContactBindingDecision.DenyOwnerPrivilegeMissing);
+        var entry = log.Entries.Should().ContainSingle(e => e.Message.Contains("Read Privilege Check For Owner")).Subject;
+        entry.Level.Should().Be(LogLevel.Error);
+        entry.Message.Should().Contain($"({ContactBindingDecision.DenyOwnerPrivilegeMissing})")
+            .And.NotContain(ContactBindingDecision.DenyOwnerUnconfigured);
+    }
+
+    [Fact]
     public async Task Registration_RefusedForItsOwnersPrivilege_IsTheOwnerUnconfiguredOutcome()
     {
         GivenOneDefaultTeam();
