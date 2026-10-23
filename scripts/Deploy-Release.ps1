@@ -13,9 +13,9 @@
         Phase 2b: Ontology configuration — applies, then verifies, the worklist grid configuration
                  (calls Apply-WorklistGridConfiguration.ps1; ontology task 164, D-185). It must land
                  after the BFF and BEFORE Phase 3: the SpaarkeMaster import carries the role change
-                 that removes policy Read, and without the configuration row every user gets an
-                 empty worklist. If this phase fails for an environment, Phase 3 does not run for
-                 that environment (even without -StopOnFailure).
+                 that removes policy Read. It runs only after a successful Phase 2 (the old BFF cannot
+                 read the new configuration). If Phase 2 failed, or this phase fails, for an
+                 environment, Phase 3 does not run for that environment (even without -StopOnFailure).
         Phase 3: SpaarkeMaster import — the CI-published package, typed per environment
                  (config/environments.json solutionPackageType; calls
                  solution-authoring/Import-SpaarkeMasterPackage.ps1; T218f)
@@ -64,7 +64,9 @@
     If omitted, auto-suggests based on the latest git tag.
 
 .PARAMETER SkipPhase
-    Array of phase names to skip. Valid values: Build, BffApi, Solutions, WebResources, Validation.
+    Array of phase names to skip. Valid values: Build, BffApi, OntologyConfig, Solutions, WebResources, Validation.
+    OntologyConfig is Phase 2b (the worklist grid configuration); skipping it does NOT block Phase 3, so it may run
+    without the configuration in place (D-185). A FAILED BFF or a failed Phase 2b blocks Phase 3 regardless.
 
 .PARAMETER SkipBuild
     Shortcut for -SkipPhase Build. Skips the client component build phase.
@@ -220,6 +222,27 @@ function Invoke-OntologyConfigPhase {
         Write-Fail "Worklist grid configuration failed: $_"
         return $false
     }
+}
+
+# Pure gate for Phase 2b / Phase 3 of ONE environment (ontology task 164, D-185). The loop decides from this result alone.
+#   RunConfig     - Phase 2b runs: the BFF did not fail and the operator did not skip the phase.
+#   Phase3Allowed - the SpaarkeMaster import may run: never after a failed BFF (the old BFF cannot read the new configuration),
+#                   never when the configuration did not run or failed; an explicit -SkipPhase OntologyConfig does not block it.
+#   Reason        - bff-failed | skipped | config-not-run | config-failed | ok
+function Get-OntologyGate {
+    param(
+        [Parameter(Mandatory)][bool]$BffFailed,
+        [Parameter(Mandatory)][bool]$SkipConfig,
+        [bool]$ConfigRan = $false,
+        [bool]$ConfigOk = $false
+    )
+    $runConfig = (-not $BffFailed) -and (-not $SkipConfig)
+    if ($BffFailed) { $reason = 'bff-failed'; $p3 = $false }
+    elseif ($SkipConfig) { $reason = 'skipped'; $p3 = $true }
+    elseif (-not $ConfigRan) { $reason = 'config-not-run'; $p3 = $false }
+    elseif (-not $ConfigOk) { $reason = 'config-failed'; $p3 = $false }
+    else { $reason = 'ok'; $p3 = $true }
+    return [pscustomobject]@{ RunConfig = $runConfig; Phase3Allowed = $p3; Reason = $reason }
 }
 
 # ─────────────────────────────────────────────────────────────────────
@@ -608,7 +631,9 @@ for ($i = 0; $i -lt $targetEnvironments.Count; $i++) {
     $envStart = Get-Date
     $envNum = $i + 1
     $envFailed = $false
-    $ontologyConfigFailed = $false   # Phase 2b result for THIS environment; gates Phase 3 only
+    $bffFailed = $false              # Phase 2 FAILED for THIS environment (not skipped, not declined by -WhatIf)
+    $configRan = $false              # Phase 2b ran for THIS environment
+    $configOk = $false               # ... and succeeded
 
     Write-Host ""
     Write-Host "╔═════════════════════════════════════════════════════════════════╗" -ForegroundColor Yellow
@@ -628,6 +653,7 @@ for ($i = 0; $i -lt $targetEnvironments.Count; $i++) {
         if (-not (Test-Path $bffScript)) {
             Write-Fail "BFF deploy script not found: $bffScript"
             $envFailed = $true
+            $bffFailed = $true
         } else {
             $bffParams = @{
                 Environment       = "production"
@@ -647,38 +673,43 @@ for ($i = 0; $i -lt $targetEnvironments.Count; $i++) {
                 } catch {
                     Write-Fail "BFF API deployment failed: $_"
                     $envFailed = $true
+                    $bffFailed = $true
                 }
             }
         }
     }
 
     # ── Phase 2b: Ontology configuration (task 164, D-185) ─────────
-    # The worklist grid configuration row must be in place before Phase 3: the SpaarkeMaster import carries the role change
-    # that removes policy Read, and without the row the worklist's linked query is refused (an empty worklist for every user).
+    # The worklist grid configuration row must be in place before Phase 3 (the SpaarkeMaster import carries the role change
+    # that removes policy Read), and it must follow a SUCCESSFUL BFF: the old BFF cannot read the new configuration (it loses rule
+    # names and severity). Get-OntologyGate alone decides both; the loop consults nothing else.
 
-    if ($envFailed -and $StopOnFailure) {
-        Write-Phase "Phase 2b" "Ontology configuration — SKIPPED (previous phase failed)"
-    } elseif (Test-PhaseSkipped 'OntologyConfig') {
-        Write-Phase "Phase 2b" "Ontology configuration — SKIPPED"
-        Write-Warn "-SkipPhase OntologyConfig is an explicit choice: Phase 3 is NOT blocked and may remove policy Read before the worklist configuration is in place (D-185)."
-    } else {
+    $gate = Get-OntologyGate -BffFailed $bffFailed -SkipConfig (Test-PhaseSkipped 'OntologyConfig')
+    if ($gate.RunConfig) {
         Write-Phase "Phase 2b" "Ontology configuration → $($env.DataverseUrl)"
         $phaseStart = Get-Date
         $applyScript = Join-Path $ScriptDir 'Apply-WorklistGridConfiguration.ps1'
-        if (Invoke-OntologyConfigPhase -ApplyScript $applyScript -DataverseUrl $env.DataverseUrl -WhatIfMode $WhatIfPreference) {
+        $configRan = $true
+        $configOk = [bool](Invoke-OntologyConfigPhase -ApplyScript $applyScript -DataverseUrl $env.DataverseUrl -WhatIfMode $WhatIfPreference)
+        if ($configOk) {
             Write-Ok "Ontology configuration phase done in $(Get-ElapsedString $phaseStart)"
         } else {
-            $ontologyConfigFailed = $true
             $envFailed = $true
         }
+    } elseif ($gate.Reason -eq 'bff-failed') {
+        Write-Phase "Phase 2b" "Ontology configuration — SKIPPED (BFF failed)"
+    } else {
+        Write-Phase "Phase 2b" "Ontology configuration — SKIPPED"
+        Write-Warn "-SkipPhase OntologyConfig is an explicit choice: Phase 3 is NOT blocked and may remove policy Read before the worklist configuration is in place (D-185)."
     }
+    $gate = Get-OntologyGate -BffFailed $bffFailed -SkipConfig (Test-PhaseSkipped 'OntologyConfig') -ConfigRan $configRan -ConfigOk $configOk
 
     # ── Phase 3: Dataverse Solutions ──────────────────────────────
 
-    if ($ontologyConfigFailed) {
+    if (-not $gate.Phase3Allowed) {
         # D-185 fail-closed: independent of -StopOnFailure.
-        Write-Phase "Phase 3" "Dataverse Solutions — SKIPPED (ontology configuration failed)"
-        Write-Fail "Phase 3 did not run for $($env.DisplayName): the SpaarkeMaster import carries the D-185 role change and needs the worklist configuration first."
+        Write-Phase "Phase 3" "Dataverse Solutions — SKIPPED (ontology configuration $(if ($gate.Reason -eq 'config-failed') { 'failed' } else { 'did not run' }))"
+        Write-Fail "Phase 3 did not run for $($env.DisplayName): the SpaarkeMaster import carries the D-185 role change and needs the worklist configuration first (gate: $($gate.Reason))."
     } elseif ($envFailed -and $StopOnFailure) {
         Write-Phase "Phase 3" "Dataverse Solutions — SKIPPED (previous phase failed)"
     } elseif (Test-PhaseSkipped 'Solutions') {

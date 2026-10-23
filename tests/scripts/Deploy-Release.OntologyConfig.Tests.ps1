@@ -1,12 +1,14 @@
 # Pester 5. Run: Invoke-Pester tests/scripts/Deploy-Release.OntologyConfig.Tests.ps1
 # Ontology task 164 (D-185, #2285): scripts/Deploy-Release.ps1 applies and verifies the worklist grid configuration
 # (scripts/Apply-WorklistGridConfiguration.ps1) after Phase 2 (BFF) and before Phase 3 (SpaarkeMaster import), because the
-# SpaarkeMaster import carries the role change that removes policy Read. If roles land before the configuration, every user
-# gets an empty worklist. A configuration failure for an environment therefore blocks Phase 3 for that environment, even
-# without -StopOnFailure; an explicit -SkipPhase OntologyConfig does not.
+# SpaarkeMaster import carries the role change that removes policy Read. A configuration failure for an environment
+# therefore blocks Phase 3 for that environment, even without -StopOnFailure; an explicit -SkipPhase OntologyConfig does
+# not. A FAILED BFF (Phase 2) blocks Phase 2b and Phase 3 too (the old BFF cannot read the new configuration), whatever
+# -StopOnFailure says (fix round 1, F1).
 #
-# Deploy-Release.ps1 deploys on load, so it is never run here. The phase function is read out of the script's own AST and
-# run against a fake Apply script (no Dataverse, no az). The phase order and the Phase 3 gate are checked on the AST.
+# Deploy-Release.ps1 deploys on load, so it is never run here. Its functions are read out of the script's own AST, and the
+# real per-environment loop (Phases 2 to 3) is cut out of the script and run against fake phase scripts that log their calls
+# (no Dataverse, no az, no Azure). The gate is a pure function (Get-OntologyGate) tested as a full truth table.
 
 BeforeAll {
     $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..' '..')).Path
@@ -16,15 +18,25 @@ BeforeAll {
     $script:Ast = [System.Management.Automation.Language.Parser]::ParseFile($script:ScriptPath, [ref]$null, [ref]$errors)
     if ($errors.Count -gt 0) { throw "The script does not parse: $($errors[0].Message)" }
 
-    # The output helpers the phase function uses (the real ones only write to the host).
+    # The output helpers the script's functions use (the real ones only write to the host).
     function Write-Step { param([string]$Message) }
     function Write-Ok { param([string]$Message) }
     function Write-Warn { param([string]$Message) }
     function Write-Fail { param([string]$Message) $script:FailMessages += $Message }
+    function Write-Phase { param($a, $b) }
+    function Write-Host { param([Parameter(ValueFromRemainingArguments)]$Rest) }   # the loop prints a banner
+    function Get-ElapsedString { param($s) '0s' }
 
-    $fn = $script:Ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Invoke-OntologyConfigPhase' }, $true)
+    function Get-ScriptFunction([string]$Name) {
+        $script:Ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $Name }, $true)
+    }
+    $fn = Get-ScriptFunction 'Invoke-OntologyConfigPhase'
     if ($fn) { . ([scriptblock]::Create($fn.Extent.Text)) }
     $script:PhaseFunction = $fn
+    $gateFn = Get-ScriptFunction 'Get-OntologyGate'
+    if ($gateFn) { . ([scriptblock]::Create($gateFn.Extent.Text)) }
+    $script:GateFunction = $gateFn
+    . ([scriptblock]::Create((Get-ScriptFunction 'Test-PhaseSkipped').Extent.Text))
 
     # A stand-in for Apply-WorklistGridConfiguration.ps1: records how it was called; exits as the test says.
     function New-FakeApply([string]$Dir, [int]$ApplyExit = 0, [int]$VerifyExit = 0, [switch]$ApplyThrows) {
@@ -48,8 +60,9 @@ exit $ApplyExit
 }
 
 Describe 'Deploy-Release.ps1 declares the phase' {
-    It 'defines Invoke-OntologyConfigPhase' {
+    It 'defines Invoke-OntologyConfigPhase and Get-OntologyGate' {
         $script:PhaseFunction | Should -Not -BeNullOrEmpty
+        $script:GateFunction | Should -Not -BeNullOrEmpty
     }
 
     It 'OntologyConfig is in the -SkipPhase ValidateSet' {
@@ -61,85 +74,232 @@ Describe 'Deploy-Release.ps1 declares the phase' {
         $values | Should -Contain 'BffApi'
         $values | Should -Contain 'Solutions'
     }
-}
 
-Describe 'the phase sits between Phase 2 and Phase 3 in the per-environment loop' {
-    BeforeAll {
-        $script:Loop = $script:Ast.Find({ param($n) $n -is [System.Management.Automation.Language.ForStatementAst] -and $n.Extent.Text -match 'targetEnvironments\.Count' -and $n.Extent.Text -match 'Phase 3' }, $true)
-        $script:Call = if ($script:Loop) {
-            $script:Loop.Find({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Invoke-OntologyConfigPhase' }, $true)
-        }
-    }
-
-    It 'calls Invoke-OntologyConfigPhase inside the per-environment loop' {
-        $script:Loop | Should -Not -BeNullOrEmpty
-        $script:Call | Should -Not -BeNullOrEmpty
-    }
-
-    It 'runs after the Phase 2 (BFF) block and before the Phase 3 (SpaarkeMaster) block' {
-        $bff = $script:ScriptText.IndexOf('Write-Phase "Phase 2" "BFF API')
-        $call = $script:Call.Extent.StartOffset
-        $solutions = $script:ScriptText.IndexOf('Write-Phase "Phase 3" "SpaarkeMaster (')
-        $bff | Should -BeGreaterThan 0
-        $call | Should -BeGreaterThan $bff
-        $solutions | Should -BeGreaterThan $call
-    }
-
-    It 'passes the environment''s DataverseUrl and the common -WhatIf preference' {
-        $text = $script:Call.Extent.Text
-        $text | Should -Match 'env\.DataverseUrl'
-        $text | Should -Match '\$WhatIfPreference'
-    }
-
-    It 'resets the failure flag at the top of each environment (one environment''s failure never blocks the next)' {
-        $reset = $script:Loop.Find({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and "$($n.Left)" -eq '$ontologyConfigFailed' -and "$($n.Right)" -match 'false' }, $true)
-        $reset | Should -Not -BeNullOrEmpty
-        $reset.Extent.StartOffset | Should -BeLessThan $script:Call.Extent.StartOffset
-    }
-
-    It 'is named Phase 2b' {
-        $script:ScriptText | Should -Match 'Phase 2b'
+    It 'the -SkipPhase help lists OntologyConfig' {
+        $script:ScriptText | Should -Match 'Valid values: Build, BffApi, OntologyConfig, Solutions'
     }
 }
 
-Describe 'Phase 3 is gated on the configuration phase (D-185 fail-closed)' {
+Describe 'Get-OntologyGate: the full truth table (pure function)' {
+    # BffFailed SkipConfig ConfigRan ConfigOk -> RunConfig Phase3Allowed Reason
+    It 'BffFailed=<Bff> SkipConfig=<Skip> ConfigRan=<Ran> ConfigOk=<Ok> -> RunConfig=<Run> Phase3Allowed=<P3> (<Reason>)' -ForEach @(
+        # a failed BFF dominates everything: no Phase 2b, no Phase 3 (F1)
+        @{ Bff = $true; Skip = $false; Ran = $false; Ok = $false; Run = $false; P3 = $false; Reason = 'bff-failed' }
+        @{ Bff = $true; Skip = $false; Ran = $true; Ok = $true; Run = $false; P3 = $false; Reason = 'bff-failed' }
+        @{ Bff = $true; Skip = $true; Ran = $false; Ok = $false; Run = $false; P3 = $false; Reason = 'bff-failed' }
+        @{ Bff = $true; Skip = $true; Ran = $true; Ok = $true; Run = $false; P3 = $false; Reason = 'bff-failed' }
+        # an explicit -SkipPhase OntologyConfig (BFF fine) neither runs the phase nor blocks Phase 3 (must-not-fire)
+        @{ Bff = $false; Skip = $true; Ran = $false; Ok = $false; Run = $false; P3 = $true; Reason = 'skipped' }
+        @{ Bff = $false; Skip = $true; Ran = $true; Ok = $true; Run = $false; P3 = $true; Reason = 'skipped' }
+        # the phase is due but has not run: Phase 3 is closed (fail closed)
+        @{ Bff = $false; Skip = $false; Ran = $false; Ok = $false; Run = $true; P3 = $false; Reason = 'config-not-run' }
+        @{ Bff = $false; Skip = $false; Ran = $false; Ok = $true; Run = $true; P3 = $false; Reason = 'config-not-run' }
+        # ran and failed: Phase 3 closed
+        @{ Bff = $false; Skip = $false; Ran = $true; Ok = $false; Run = $true; P3 = $false; Reason = 'config-failed' }
+        # ran and succeeded: the only open path besides an explicit skip
+        @{ Bff = $false; Skip = $false; Ran = $true; Ok = $true; Run = $true; P3 = $true; Reason = 'ok' }
+    ) {
+        $g = Get-OntologyGate -BffFailed $Bff -SkipConfig $Skip -ConfigRan $Ran -ConfigOk $Ok
+        $g.RunConfig | Should -Be $Run
+        $g.Phase3Allowed | Should -Be $P3
+        $g.Reason | Should -Be $Reason
+    }
+
+    It 'defaults ConfigRan and ConfigOk to false (the stage-1 call)' {
+        $g = Get-OntologyGate -BffFailed $false -SkipConfig $false
+        $g.RunConfig | Should -BeTrue
+        $g.Phase3Allowed | Should -BeFalse
+    }
+}
+
+Describe 'the per-environment loop uses the gate (minimal AST checks)' {
     BeforeAll {
         $script:Loop = $script:Ast.Find({ param($n) $n -is [System.Management.Automation.Language.ForStatementAst] -and $n.Extent.Text -match 'targetEnvironments\.Count' -and $n.Extent.Text -match 'Phase 3' }, $true)
-        # The outermost if / elseif chain that holds the Phase 3 import.
+        $script:GateCalls = @($script:Loop.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Get-OntologyGate' }, $true))
+        $script:Call = $script:Loop.Find({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Invoke-OntologyConfigPhase' }, $true)
+        # the outermost if / elseif chain that holds the Phase 3 import
         $script:Phase3 = @($script:Loop.FindAll({ param($n) $n -is [System.Management.Automation.Language.IfStatementAst] -and $n.Extent.Text -match 'Import-SpaarkeMasterPackage' }, $true)) |
             Sort-Object { $_.Extent.Text.Length } -Descending | Select-Object -First 1
-        $script:Call = $script:Loop.Find({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Invoke-OntologyConfigPhase' }, $true)
     }
 
-    It 'the first branch of the Phase 3 chain tests the failure flag, with no -StopOnFailure term' {
+    It 'calls Get-OntologyGate twice (before Phase 2b, and after it) and Invoke-OntologyConfigPhase once, all before the Phase 3 chain' {
+        $script:Loop | Should -Not -BeNullOrEmpty
+        $script:GateCalls.Count | Should -Be 2
+        $script:Call | Should -Not -BeNullOrEmpty
         $script:Phase3 | Should -Not -BeNullOrEmpty
+        $script:GateCalls[0].Extent.StartOffset | Should -BeLessThan $script:Call.Extent.StartOffset
+        $script:GateCalls[1].Extent.StartOffset | Should -BeGreaterThan $script:Call.Extent.StartOffset
+        $script:GateCalls[1].Extent.StartOffset | Should -BeLessThan $script:Phase3.Extent.StartOffset
+    }
+
+    It 'the first branch of the Phase 3 chain tests only the gate''s Phase3Allowed' {
         $first = $script:Phase3.Clauses[0].Item1.Extent.Text
-        $first | Should -Match '\$ontologyConfigFailed'
-        $first | Should -Not -Match 'StopOnFailure'
+        $first | Should -Match '\$gate\.Phase3Allowed'
+        $first | Should -Not -Match 'StopOnFailure|envFailed'
     }
 
-    It 'the gate says why: the import carries the D-185 role change and needs the worklist configuration first' {
-        $body = $script:Phase3.Clauses[0].Item2.Extent.Text
-        $body | Should -Match 'SpaarkeMaster import carries the D-185 role change and needs the worklist configuration first'
+    It 'no assignment sits between the final gate call and Phase 3 (nothing can override the decision)' {
+        $gate2 = $script:GateCalls[1].Extent.EndOffset
+        $p3 = $script:Phase3.Extent.StartOffset
+        $between = @($script:Loop.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Extent.StartOffset -ge $gate2 -and $n.Extent.EndOffset -le $p3 }, $true))
+        $between.Count | Should -Be 0
     }
 
-    It 'a failure of the configuration phase sets the flag before Phase 3 (must-fire)' {
-        $set = $script:Loop.Find({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and "$($n.Left)" -eq '$ontologyConfigFailed' -and "$($n.Right)" -match 'true' }, $true)
-        $set | Should -Not -BeNullOrEmpty
-        $set.Extent.StartOffset | Should -BeGreaterThan $script:Call.Extent.StartOffset
-        $set.Extent.StartOffset | Should -BeLessThan $script:Phase3.Extent.StartOffset
+    It 'the only assignments to $gate are Get-OntologyGate results' {
+        $assigns = @($script:Loop.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and "$($n.Left)" -eq '$gate' }, $true))
+        $assigns.Count | Should -Be 2
+        foreach ($a in $assigns) { $a.Right.Extent.Text | Should -Match '^Get-OntologyGate ' }
     }
 
-    It 'the explicit -SkipPhase OntologyConfig branch warns about Phase 3 and does NOT set the flag (must-not-fire)' {
-        # The skip test is an elseif clause of the Phase 2b chain: find the clause, not a statement.
-        $chain = $script:Loop.Find({ param($n) $n -is [System.Management.Automation.Language.IfStatementAst] -and ($n.Clauses | Where-Object { $_.Item1.Extent.Text -match "Test-PhaseSkipped 'OntologyConfig'" }) }, $true)
-        $chain | Should -Not -BeNullOrEmpty
-        $clause = $chain.Clauses | Where-Object { $_.Item1.Extent.Text -match "Test-PhaseSkipped 'OntologyConfig'" } | Select-Object -First 1
-        $body = $clause.Item2.Extent.Text
-        $body | Should -Match 'Write-Warn'
-        $body | Should -Match 'Phase 3'
-        $body | Should -Not -Match 'ontologyConfigFailed'
-        $body | Should -Not -Match 'envFailed'
+    It 'the final gate call passes the bare flags (and the stage-1 call passes $bffFailed)' {
+        $t = $script:GateCalls[1].Extent.Text
+        $t | Should -Match '-BffFailed \$bffFailed\b'
+        $t | Should -Match '-ConfigRan \$configRan\b'
+        $t | Should -Match '-ConfigOk \$configOk\b'
+        $script:GateCalls[0].Extent.Text | Should -Match '-BffFailed \$bffFailed\b'
+    }
+
+    It '-WhatIfMode receives the bare $WhatIfPreference variable, and DataverseUrl comes from the environment' {
+        $arg = $script:Call.CommandElements
+        $idx = 0..($arg.Count - 1) | Where-Object { $arg[$_] -is [System.Management.Automation.Language.CommandParameterAst] -and $arg[$_].ParameterName -eq 'WhatIfMode' }
+        $value = $arg[$idx + 1]
+        $value | Should -BeOfType [System.Management.Automation.Language.VariableExpressionAst]
+        $value.VariablePath.UserPath | Should -Be 'WhatIfPreference'
+        $script:Call.Extent.Text | Should -Match 'env\.DataverseUrl'
+    }
+
+    It '$bffFailed is reset per environment and set only inside the Phase 2 block' {
+        $loopStart = $script:Loop.Extent.StartOffset
+        $loopText = $script:Loop.Extent.Text
+        $phase2 = $loopText.IndexOf('Write-Phase "Phase 2" "BFF API')
+        $phase2b = $loopText.IndexOf('Phase 2b: Ontology configuration')
+        $sets = @($script:Loop.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and "$($n.Left)" -eq '$bffFailed' }, $true))
+        $sets.Count | Should -Be 3     # the reset + the two Phase 2 failure branches
+        $sets[0].Right.Extent.Text | Should -Be '$false'
+        foreach ($set in $sets[1..2]) {
+            $set.Right.Extent.Text | Should -Be '$true'
+            ($set.Extent.StartOffset - $loopStart) | Should -BeGreaterThan $phase2
+            ($set.Extent.StartOffset - $loopStart) | Should -BeLessThan $phase2b
+        }
+    }
+}
+
+Describe 'the real per-environment loop, run against fake phase scripts (Phases 2 to 3)' {
+    # The loop text is cut out of Deploy-Release.ps1 itself (from the top of the loop to the Phase 4 comment), wrapped in a
+    # function that supports -WhatIf, and run with fake Deploy-BffApi / Apply-WorklistGridConfiguration /
+    # Import-SpaarkeMasterPackage scripts that log their calls. This tests behaviour, not the loop's shape.
+    BeforeAll {
+        $loop = $script:Ast.Find({ param($n) $n -is [System.Management.Automation.Language.ForStatementAst] -and $n.Extent.Text -match 'targetEnvironments\.Count' -and $n.Extent.Text -match 'Phase 3' }, $true)
+        $text = $loop.Extent.Text
+        $cut = $text.IndexOf('# ── Phase 4')
+        if ($cut -lt 0) { throw 'Phase 4 marker not found in the loop' }
+        $body = $text.Substring(0, $cut) + "`n}"
+        $wrapper = @"
+function Invoke-LoopUnderTest {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(`$targetEnvironments, `$ScriptDir, [string[]]`$SkipPhase = @(), [bool]`$StopOnFailure = `$true)
+$body
+}
+"@
+        . ([scriptblock]::Create($wrapper))
+
+        function New-FakeScripts([string]$Dir, [int]$BffExit = 0, [int]$ApplyExit = 0, [int]$VerifyExit = 0) {
+            New-Item -ItemType Directory -Path (Join-Path $Dir 'solution-authoring') -Force | Out-Null
+            $log = Join-Path $Dir 'calls.log'
+            @"
+param(`$Environment, `$ResourceGroupName, `$AppServiceName, `$UseSlotDeploy, `$SkipBuild)
+Add-Content -LiteralPath '$log' -Value 'bff'
+exit $BffExit
+"@ | Set-Content -LiteralPath (Join-Path $Dir 'Deploy-BffApi.ps1') -Encoding utf8
+            @"
+[CmdletBinding(SupportsShouldProcess)]
+param([string]`$DataverseUrl, [switch]`$Verify, [switch]`$RequireRow)
+Add-Content -WhatIf:`$false -LiteralPath '$log' -Value ("apply url={0};verify={1};whatIf={2}" -f `$DataverseUrl, [bool]`$Verify, [bool]`$WhatIfPreference)
+if (`$Verify) { exit $VerifyExit }
+exit $ApplyExit
+"@ | Set-Content -LiteralPath (Join-Path $Dir 'Apply-WorklistGridConfiguration.ps1') -Encoding utf8
+            @"
+[CmdletBinding(SupportsShouldProcess)]
+param([string]`$EnvironmentUrl, [string]`$PackageType)
+Add-Content -WhatIf:`$false -LiteralPath '$log' -Value ("import url={0};whatIf={1}" -f `$EnvironmentUrl, [bool]`$WhatIfPreference)
+"@ | Set-Content -LiteralPath (Join-Path $Dir 'solution-authoring/Import-SpaarkeMasterPackage.ps1') -Encoding utf8
+        }
+        function New-Env([string]$Name) {
+            [pscustomobject]@{ Name = $Name; DisplayName = $Name; DataverseUrl = "https://$Name.crm.dynamics.com"; AppServiceName = "app-$Name"; ResourceGroup = "rg-$Name"; AppServiceSlot = 'staging'; SolutionPackageType = 'managed' }
+        }
+    }
+    BeforeEach {
+        $script:FailMessages = @()
+        $script:Dir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $script:Dir | Out-Null
+    }
+
+    It 'happy path: bff, apply, verify, import, in that order' {
+        New-FakeScripts $script:Dir
+        Invoke-LoopUnderTest -targetEnvironments @(New-Env a) -ScriptDir $script:Dir -StopOnFailure $true
+        Get-Calls $script:Dir | Should -Be @('bff', 'apply url=https://a.crm.dynamics.com;verify=False;whatIf=False', 'apply url=https://a.crm.dynamics.com;verify=True;whatIf=False', 'import url=https://a.crm.dynamics.com;whatIf=False')
+    }
+
+    It 'F1: a failed BFF with -StopOnFailure $false runs neither Phase 2b nor Phase 3' {
+        New-FakeScripts $script:Dir -BffExit 1
+        Invoke-LoopUnderTest -targetEnvironments @(New-Env a) -ScriptDir $script:Dir -StopOnFailure $false
+        Get-Calls $script:Dir | Should -Be @('bff')
+        ($script:FailMessages -join "`n") | Should -Match 'did not run'
+    }
+
+    It 'F1: a failed BFF with -StopOnFailure $true runs neither Phase 2b nor Phase 3' {
+        New-FakeScripts $script:Dir -BffExit 1
+        Invoke-LoopUnderTest -targetEnvironments @(New-Env a) -ScriptDir $script:Dir -StopOnFailure $true
+        Get-Calls $script:Dir | Should -Be @('bff')
+    }
+
+    It 'F1: a missing BFF script counts as a BFF failure (no 2b, no 3)' {
+        New-FakeScripts $script:Dir
+        Remove-Item -LiteralPath (Join-Path $script:Dir 'Deploy-BffApi.ps1')
+        Invoke-LoopUnderTest -targetEnvironments @(New-Env a) -ScriptDir $script:Dir -StopOnFailure $false
+        Get-Calls $script:Dir | Should -Be @()
+    }
+
+    It '-SkipPhase BffApi does not set the BFF flag: 2b and 3 run (must-not-fire)' {
+        New-FakeScripts $script:Dir -BffExit 1
+        Invoke-LoopUnderTest -targetEnvironments @(New-Env a) -ScriptDir $script:Dir -SkipPhase 'BffApi' -StopOnFailure $false
+        Get-Calls $script:Dir | Should -Be @('apply url=https://a.crm.dynamics.com;verify=False;whatIf=False', 'apply url=https://a.crm.dynamics.com;verify=True;whatIf=False', 'import url=https://a.crm.dynamics.com;whatIf=False')
+    }
+
+    It 'a Phase 2 that -WhatIf declines does not set the BFF flag: apply and import both run in WhatIf mode (must-not-fire, and M2)' {
+        New-FakeScripts $script:Dir -BffExit 1
+        Invoke-LoopUnderTest -targetEnvironments @(New-Env a) -ScriptDir $script:Dir -StopOnFailure $false -WhatIf
+        Get-Calls $script:Dir | Should -Be @('apply url=https://a.crm.dynamics.com;verify=False;whatIf=True', 'import url=https://a.crm.dynamics.com;whatIf=True')
+    }
+
+    It 'a failing apply blocks Phase 3 even with -StopOnFailure $false' {
+        New-FakeScripts $script:Dir -ApplyExit 1
+        Invoke-LoopUnderTest -targetEnvironments @(New-Env a) -ScriptDir $script:Dir -StopOnFailure $false
+        Get-Calls $script:Dir | Should -Be @('bff', 'apply url=https://a.crm.dynamics.com;verify=False;whatIf=False')
+    }
+
+    It 'a failing verify blocks Phase 3 even with -StopOnFailure $false' {
+        New-FakeScripts $script:Dir -VerifyExit 1
+        Invoke-LoopUnderTest -targetEnvironments @(New-Env a) -ScriptDir $script:Dir -StopOnFailure $false
+        @(Get-Calls $script:Dir | Where-Object { $_ -like 'import*' }).Count | Should -Be 0
+    }
+
+    It '-SkipPhase OntologyConfig skips 2b and does not block Phase 3 (must-not-fire)' {
+        New-FakeScripts $script:Dir -ApplyExit 1
+        Invoke-LoopUnderTest -targetEnvironments @(New-Env a) -ScriptDir $script:Dir -SkipPhase 'OntologyConfig' -StopOnFailure $false
+        Get-Calls $script:Dir | Should -Be @('bff', 'import url=https://a.crm.dynamics.com;whatIf=False')
+    }
+
+    It 'one environment''s failure does not block the next environment''s Phase 2b or 3 (-StopOnFailure $false)' {
+        New-FakeScripts $script:Dir
+        # the BFF fails for the first environment only
+        @"
+param(`$Environment, `$ResourceGroupName, `$AppServiceName, `$UseSlotDeploy, `$SkipBuild)
+Add-Content -LiteralPath '$(Join-Path $script:Dir 'calls.log')' -Value "bff `$AppServiceName"
+if (`$AppServiceName -eq 'app-a') { exit 1 } else { exit 0 }
+"@ | Set-Content -LiteralPath (Join-Path $script:Dir 'Deploy-BffApi.ps1') -Encoding utf8
+        Invoke-LoopUnderTest -targetEnvironments @((New-Env a), (New-Env b)) -ScriptDir $script:Dir -StopOnFailure $false
+        Get-Calls $script:Dir | Should -Be @('bff app-a', 'bff app-b', 'apply url=https://b.crm.dynamics.com;verify=False;whatIf=False', 'apply url=https://b.crm.dynamics.com;verify=True;whatIf=False', 'import url=https://b.crm.dynamics.com;whatIf=False')
     }
 }
 
