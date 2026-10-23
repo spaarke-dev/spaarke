@@ -479,7 +479,62 @@ public class DocumentEmailIdentityContractTests
         (await response.Content.ReadAsStringAsync()).Should().NotContain(MessageId);
     }
 
+    [Fact]
+    public async Task ResolveEmail_WhenTheAccessSourceFaultsForAMatchedCopy_Returns503_ByteEqualToTheDataverseOutage_NeverNotSaved()
+    {
+        var documentId = Guid.NewGuid();
+        // The REAL AuthorizationService catches the access source's fault and fails closed with a 403 system_failure;
+        // the email filter must answer that as the route's own 503, not fold it into "not saved" (task 120).
+        var accessSource = new Mock<IAccessDataSource>();
+        accessSource
+            .Setup(a => a.GetUserAccessAsync(
+                It.IsAny<string>(), documentId.ToString("D"), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("Dataverse is unreachable."));
+        var entityService = SavedCopy(DocumentEmailIdentityResolutionTests.Row(documentId));
+
+        using var factory = Factory(entityService, accessSource);
+        var response = await AuthenticatedClient(factory).PostAsJsonAsync(Route, new { internetMessageId = MessageId });
+
+        var answer = await Answer.OfAsync(response);
+        answer.Status.Should().Be(HttpStatusCode.ServiceUnavailable);
+        answer.Body.Should().NotContain("not_saved").And.NotContain(documentId.ToString("D")).And.NotContain("sdap.access");
+
+        var outage = await DataverseOutageAnswerAsync();
+        outage.Status.Should().Be(HttpStatusCode.ServiceUnavailable);
+        outage.ContentType.Should().Be("application/problem+json");
+        answer.ContentType.Should().Be(outage.ContentType);
+        // Byte for byte, except the per-request trace id (and anything else request-scoped the problem body carries).
+        WithoutRequestScopedFields(answer.Body).Should().Be(WithoutRequestScopedFields(outage.Body));
+        answer.Body.Should().Contain("identity_resolution_unavailable");
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>The route's existing 503 for "Dataverse cannot answer the lookup" — the baseline for the access-fault 503.</summary>
+    private static async Task<Answer> DataverseOutageAnswerAsync()
+    {
+        var entityService = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        entityService
+            .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("The request channel timed out while waiting for a reply."));
+
+        using var factory = Factory(entityService, new Mock<IAccessDataSource>(MockBehavior.Strict));
+        using var response = await AuthenticatedClient(factory).PostAsJsonAsync(Route, new { internetMessageId = MessageId });
+        return await Answer.OfAsync(response);
+    }
+
+    /// <summary>
+    /// Removes the per-request correlation ids (<c>correlationId</c> at the top level and inside <c>extensions</c>, plus
+    /// <c>traceId</c> if present) before comparing — the only fields that differ between two otherwise identical answers.
+    /// </summary>
+    private static string WithoutRequestScopedFields(string body)
+    {
+        var node = System.Text.Json.Nodes.JsonNode.Parse(body)!.AsObject();
+        node.Remove("traceId");
+        node.Remove("correlationId");
+        node["extensions"]?.AsObject().Remove("correlationId");
+        return node.ToJsonString();
+    }
 
     private const string InternalPlaneDocumentNarrowingReason = Sprk.Bff.Api.Api.Filters.InternalPlaneDocumentNarrowing.HiddenReasonCode;
     private const int OpenThread = 100000000;
@@ -670,14 +725,62 @@ public class DocumentEmailIdentityFilterFoldTests
 
     [Theory]
     [InlineData("sdap.access.deny.insufficient_rights")]
-    [InlineData("sdap.access.error.system_failure")]
-    public async Task A403Refusal_IsFoldedInto_TheSameValueAsNoMatch(string reasonCode)
+    [InlineData("sdap.access.deny.no_rule")]
+    [InlineData("sdap.access.deny.no_caller_token")]
+    [InlineData("sdap.access.error.some_other_error")]
+    public async Task A403DecisionRefusal_IsFoldedInto_TheSameValueAsNoMatch(string reasonCode)
+    {
+        await AssertFoldedAsync(reasonCode);
+    }
+
+    [Fact]
+    public async Task TheNarrowingsHiddenRefusal_IsFoldedInto_TheSameValueAsNoMatch()
+    {
+        await AssertFoldedAsync(Sprk.Bff.Api.Api.Filters.InternalPlaneDocumentNarrowing.HiddenReasonCode);
+    }
+
+    private static async Task AssertFoldedAsync(string reasonCode)
     {
         var (result, _) = await RunAsync(Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.Forbidden(reasonCode));
 
         var ok = result.Should().BeAssignableTo<Microsoft.AspNetCore.Http.HttpResults.Ok<Sprk.Bff.Api.Models.DocumentIdentityResponse>>().Subject;
         ok.Value.Should().BeEquivalentTo(
             Sprk.Bff.Api.Models.DocumentIdentityResponse.NoIdentity(Sprk.Bff.Api.Services.Documents.DocumentUrlIdentityResolution.ReasonNotSaved));
+    }
+
+    [Fact]
+    public async Task A403SystemFailure_IsAnsweredAsTheRoutes503_NeverFoldedIntoNotSaved()
+    {
+        Func<Task> act = () => RunAsync(
+            Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.Forbidden(Spaarke.Core.Auth.AuthorizationResult.SystemFailureReasonCode));
+
+        var thrown = (await act.Should().ThrowAsync<Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException>()).Which;
+        thrown.Code.Should().Be("identity_resolution_unavailable");
+        thrown.Title.Should().Be("Document Identity Unavailable");
+        thrown.StatusCode.Should().Be(503);
+    }
+
+    [Fact]
+    public async Task A403SystemFailure_CarriedByAnyTypedValueResult_IsAlsoAnsweredAs503()
+    {
+        // Not a ProblemHttpResult: the check reads the reason code from ANY IValueHttpResult<ProblemDetails>.
+        var problem = new Microsoft.AspNetCore.Mvc.ProblemDetails { Status = 403 };
+        problem.Extensions["reasonCode"] = Spaarke.Core.Auth.AuthorizationResult.SystemFailureReasonCode;
+
+        Func<Task> act = () => RunAsync(new ValueProblemResult(problem));
+
+        (await act.Should().ThrowAsync<Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException>())
+            .Which.Code.Should().Be("identity_resolution_unavailable");
+    }
+
+    private sealed class ValueProblemResult(Microsoft.AspNetCore.Mvc.ProblemDetails problem)
+        : Microsoft.AspNetCore.Http.IResult,
+          Microsoft.AspNetCore.Http.IStatusCodeHttpResult,
+          Microsoft.AspNetCore.Http.IValueHttpResult<Microsoft.AspNetCore.Mvc.ProblemDetails>
+    {
+        public int? StatusCode => 403;
+        public Microsoft.AspNetCore.Mvc.ProblemDetails? Value => problem;
+        public Task ExecuteAsync(Microsoft.AspNetCore.Http.HttpContext httpContext) => Task.CompletedTask;
     }
 
     [Theory]
