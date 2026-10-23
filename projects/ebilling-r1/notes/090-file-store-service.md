@@ -155,7 +155,7 @@ Two adversarial passes (opus), code-review, adr-check.
 
 ## 12. uac-r2 review round 1 re-check (fix round 2)
 
-Branch brought up to date first: merge of `origin/work/ebilling-r1` e371dce6bf (master with UAC #2253, task 081) — 3649883be8. Conflicts: the write-path registry (this task's row is now **I-23**: master I-19, invoice I-20/I-21, 081 Procedures I-22); `FinanceModule` usings (both kept); the route ledger (081 141 → 142, then 090 142 → 143; both credited-form sets kept). 090's tests moved from `FinanceStepZeroCaller` to `StatedCaller` (same API). `RecordCreatorPerson.cs`, the creator-person script and its Pester, and the census merged without conflict (090 had not touched them).
+Branch brought up to date first: merge of `origin/work/ebilling-r1` e371dce6bf (master with UAC #2253, task 081) — 3649883be8. Conflicts: the write-path registry (this task's row is now **I-23**: master I-19, invoice I-20/I-21, 081 Procedures I-22); `FinanceModule` usings (both kept); the route ledger (081 141 → 142, then 090 142 → 143; both credited-form sets kept). 090's tests moved from `FinanceStepZeroCaller` to `StatedCaller` (same API). `RecordCreatorPerson.cs`, the creator-person script and its Pester, and the census merged without conflict (090 had not touched them). One test break came with the merge: master's #2253 guard `EveryGenericUpdateWriter_AsksTheAppOnlyRefusal` flagged `StoredFileService.FlipToServableAsync` (`UpdateIfRowVersionMatchesAsync`); it is listed in `GenericWritersThatUpdateNoDocument` (writes only `sprk_filestatus` on `sprk_storedfile`; it cannot ask the refusal, since F4 refuses the table whole and this is its typed writer).
 
 | Item | Change | Commit |
 |---|---|---|
@@ -173,5 +173,5 @@ Branch brought up to date first: merge of `origin/work/ebilling-r1` e371dce6bf (
 
 ### K4 — known limit of the size-cast scan
 
-The source scan for an unchecked narrowing of a file length (F3) misses: `(int)len`, `(int)count`, `(int)lengthOfFile` (names it does not treat as lengths), `(int)Math.Min(length, x)`, `(int)(a + length)`, a cast split across lines, and `Convert.ToInt32(length)`. It is a tripwire for the common spelling, not a proof; review still owns the rest.
+The source scan for an unchecked narrowing of a file length (F3) misses: `(int)len`, `(int)count`, `(int)lengthOfFile`, `(int)Math.Min(length, x)`, `(int)(a + length)`, a cast split across lines, and `Convert.ToInt32(length)`. It is a tripwire for the common spelling, not a proof; review still owns the rest.
 
