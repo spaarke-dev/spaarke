@@ -3,15 +3,15 @@
 > **Last Updated**: 2026-10-23 ~03:30Z (main session, context-handoff). State only — history is in git log, task `<completion>` blocks and
 > `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 and §6. Decisions: [`notes/decisions.md`](notes/decisions.md)
 > (D-1..D-187). Deferred work: one self-contained GitHub issue per item, label `ontology-deferred`, plus a DI-nn row in both tables of
-> `notes/defer-issues.md` (next free: **DI-125**). Sub-agents never edit this file.
+> `notes/defer-issues.md` (next free: **DI-126**). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | UAT round 1 lanes. **Merged to docs:** 158 `539ab22ce9`, 159 `9b485535ce`, 161 `811167613f`, 162 `84636b650a`. **docs updated from master** `0a6e8820fd` (owner ask 2026-10-23). **Running (4 agents, cap):** 163 fix round 2 (`C:\wts-163`, PR #2298); 164 fix round 1 (`C:\wts-164`, PR #2299); 160 lane (`C:\wts-160`, opus, owner decisions D-187); ebilling F4(b) review pass 1 (read-only, commits `5f3bdbb201` `d600410d2b`). |
-| **Status** | Waiting on agent reports. |
-| **Next Action** | Per report: 163 → scoped Sonnet re-check of the fix-2 diff → merge. 164 → scoped re-check → main session applies the `.claude/skills/deploy-new-release/SKILL.md` text the lane returns (sub-agents can't write `.claude/`) → merge. Whichever of 163/164 merges second reconciles guide §7.8 (keep 164's paragraph, drop 163's "Deploy-Release does not apply it", keep 163's "old BFF + new row loses names and severity"). 160 → Opus review; send the EmailComposer hunk to the email project and the GrantAccessNotifier hunk to R3. ebilling → send pass-1 findings, then pass 2 after their fix. |
+| **Task** | UAT round 1 lanes. **Merged to docs:** 158 `539ab22ce9`, 159 `9b485535ce`, 161 `811167613f`, 162 `84636b650a`. **docs updated from master** `0a6e8820fd`. **Running:** scoped Sonnet re-check of 163 fix round 2 (`952477e0d0..c26909dfd5`, PR #2298); scoped Sonnet re-check of 164 fix round 1 plus my SKILL.md commit (`e45414a360..8492519d9c`, PR #2299); 160 lane (`C:\wts-160`, opus, D-187). ebilling is running its own F4(b) fix round; pass 2 follows when they send SHAs. |
+| **Status** | Waiting on the two re-checks and the 160 lane. 163's K2 is filed as DI-125 (#2302). |
+| **Next Action** | Clean re-check → merge that PR. Whichever of 163/164 merges second reconciles guide §7.8: keep 164's paragraph, drop 163's "Deploy-Release does not apply it" and the `-SkipPhase Solutions` workaround, keep 163's "old BFF + new row loses names and severity". 160 → Opus review; send the EmailComposer hunk to the email project and the GrantAccessNotifier hunk to R3. |
 
 ## Next, in order
 
