@@ -1237,3 +1237,25 @@ text is also the reason the file's own header block argues that stale review met
 control.
 
 Detail: `notes/063-send-to-index-authz.md` §3b.
+
+## ISS-023 — Outlook email identity: the newest-copy rule can hide the caller's own readable saved copy
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-23 (UAC-r2 deploy-gate review of #2304, their K1) |
+| **GitHub Issue** | [#2306](https://github.com/spaarke-dev/spaarke/issues/2306) |
+
+Only the newest saved copy is authorized (`ResolveByEmailMessageIdAsync`, `TopCount = 1`). Since task 132 that includes mailbox-captured and Spaarke-sent archives, so a newer copy under a record the caller can't read hides their own older readable copy, and the pane shows the save form. Nothing leaks. Fix: check candidates newest first and answer with the first readable one, else "not saved" (safe once 132b answers an unreadable match like no match).
+
+## ISS-024 — Outlook email identity: a communication filed to an unsupported record type reads as unfiled
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-23 (UAC-r2 deploy-gate review of #2304, their K3) |
+| **GitHub Issue** | [#2307](https://github.com/spaarke-dev/spaarke/issues/2307) |
+
+A communication filed only to a type outside matter/project/invoice/work assignment (an event, a service request) gives the archive no derived record, so the pane offers "File to record". Harmless. Fix: treat a filled regarding outside the four as withheld (`ResolveDerivedRelatedRecordAsync`).
