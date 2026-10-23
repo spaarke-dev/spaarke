@@ -15,6 +15,7 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -144,6 +145,11 @@ public class SubjectStandingGrantReaderTests
         dataverse.Verify(
             d => d.RetrieveAsync(ContactEntity, ContactId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
             Times.Once);
+        // The flag is held and the secured baseline reads empty, so the reader asks whether the BFF can read that column:
+        // READS of its own identity, role and field permissions (none configured here, so the proof fails closed).
+        dataverse.Verify(
+            d => d.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()),
+            Times.AtMost(4));
         dataverse.VerifyNoOtherCalls();
     }
 
@@ -314,6 +320,257 @@ public class SubjectStandingGrantReaderTests
             .Awaiting(() => CreateSut(new Mock<IDataverseService>().Object)
                 .ReadForOrganizationAsync(Guid.Empty, CancellationToken.None))
             .Should().ThrowAsync<ArgumentException>();
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // contact.sprk_accesspermissiongrant is field-secured: an EMPTY baseline is trusted as "not set" only once the BFF's
+    // read of the column is proven (docs/data-model/access-inheritance.md, "When a record is trusted"). Unproven = no
+    // baseline, BaselineUnreadable, and never a default level.
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    private static readonly Guid BffUserId = Guid.Parse("55555555-5555-5555-5555-555555555555");
+
+    /// <summary>What the BFF's own-identity queries answer.</summary>
+    private sealed record Platform(
+        bool OwnUserReadable = true, bool SystemAdministrator = false, bool DirectProfileRead = false,
+        bool TeamProfileRead = false, bool Faults = false);
+
+    private static Mock<IDataverseService> DataverseWith(Entity contact, Platform platform, List<QueryExpression> queries)
+    {
+        var dataverse = new Mock<IDataverseService>(MockBehavior.Strict);
+        dataverse
+            .Setup(d => d.RetrieveAsync(ContactEntity, It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(contact);
+        dataverse
+            .Setup(d => d.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Returns((QueryExpression q, CancellationToken _) =>
+            {
+                queries.Add(q);
+                if (platform.Faults)
+                {
+                    throw new InvalidOperationException("simulated metadata fault");
+                }
+
+                var rows = new EntityCollection();
+                switch (q.EntityName)
+                {
+                    case "systemuser" when platform.OwnUserReadable:
+                        rows.Entities.Add(new Entity("systemuser", BffUserId) { ["systemuserid"] = BffUserId });
+                        break;
+                    case "role" when platform.SystemAdministrator:
+                        rows.Entities.Add(new Entity("role", Guid.NewGuid()));
+                        break;
+                    case "fieldpermission":
+                        var throughTeam = q.LinkEntities.Single().LinkToEntityName == "teamprofiles";
+                        if (throughTeam ? platform.TeamProfileRead : platform.DirectProfileRead)
+                        {
+                            rows.Entities.Add(new Entity("fieldpermission", Guid.NewGuid()));
+                        }
+                        break;
+                }
+
+                return Task.FromResult(rows);
+            });
+        return dataverse;
+    }
+
+    private static Entity HeldWithoutBaseline(Guid? id = null) =>
+        new(ContactEntity, id ?? ContactId) { [StandingGrantAttribute] = true };
+
+    [Fact]
+    public async Task EmptyBaseline_WhenTheBffsReadIsNotProven_IsUnreadable_AndConfersNothing()
+    {
+        // MUST FIRE: the BFF's user is found, is not a System Administrator, and no profile (direct or team) grants Read.
+        var queries = new List<QueryExpression>();
+        var dataverse = DataverseWith(HeldWithoutBaseline(), new Platform(), queries);
+
+        var state = await CreateSut(dataverse.Object).ReadForContactAsync(ContactId, CancellationToken.None);
+
+        state.Held.Should().BeTrue();
+        state.Baseline.Should().BeNull("an unproven empty read is no baseline");
+        state.BaselineUnreadable.Should().BeTrue("an empty read the BFF cannot vouch for may hide a real level");
+        state.Rights.Should().Be(AccessRights.None, "an unreadable level is never replaced by a default");
+        queries.Select(q => q.EntityName).Should().Equal("systemuser", "role", "fieldpermission", "fieldpermission");
+    }
+
+    [Theory]
+    [InlineData(false, false)]  // the BFF's own user cannot be read
+    [InlineData(true, true)]    // every proof query faults
+    public async Task EmptyBaseline_WhenTheProofCannotBeMade_FailsClosed(bool ownUserReadable, bool faults)
+    {
+        // MUST FIRE: a fault, or no own-user answer, is "not proven" — never "readable".
+        var dataverse = DataverseWith(HeldWithoutBaseline(),
+            new Platform(OwnUserReadable: ownUserReadable, SystemAdministrator: true, DirectProfileRead: true, Faults: faults),
+            new List<QueryExpression>());
+
+        var state = await CreateSut(dataverse.Object).ReadForContactAsync(ContactId, CancellationToken.None);
+
+        state.BaselineUnreadable.Should().BeTrue();
+        state.Baseline.Should().BeNull();
+        state.Rights.Should().Be(AccessRights.None);
+    }
+
+    [Theory]
+    [InlineData(true, false, false)]   // System Administrator
+    [InlineData(false, true, false)]   // a profile the BFF's user is a direct member of grants Read
+    [InlineData(false, false, true)]   // a profile of a team the BFF's user belongs to grants Read
+    public async Task EmptyBaseline_WhenTheBffsReadIsProven_IsNotSet_NotUnreadable(bool admin, bool direct, bool team)
+    {
+        // MUST NOT FIRE: a proven read makes the empty value "not set" (the owner's option B: it confers nothing).
+        var dataverse = DataverseWith(HeldWithoutBaseline(),
+            new Platform(SystemAdministrator: admin, DirectProfileRead: direct, TeamProfileRead: team),
+            new List<QueryExpression>());
+
+        var state = await CreateSut(dataverse.Object).ReadForContactAsync(ContactId, CancellationToken.None);
+
+        state.Held.Should().BeTrue();
+        state.Baseline.Should().BeNull();
+        state.BaselineUnreadable.Should().BeFalse("the BFF's read of the column is proven, so empty means not set");
+        state.Rights.Should().Be(AccessRights.None);
+    }
+
+    [Fact]
+    public async Task EmptyBaseline_AfterANonEmptyRead_IsTrustedWithoutAnyProofQuery()
+    {
+        // MUST NOT FIRE: a value read from the column proves the BFF reads it (proof leg 1).
+        var otherContact = Guid.Parse("66666666-6666-6666-6666-666666666666");
+        var queries = new List<QueryExpression>();
+        var dataverse = new Mock<IDataverseService>(MockBehavior.Strict);
+        dataverse
+            .Setup(d => d.RetrieveAsync(ContactEntity, otherContact, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity(ContactEntity, otherContact)
+            {
+                [StandingGrantAttribute] = false,
+                ["sprk_accesspermissiongrant"] = new OptionSetValue(100000000),
+            });
+        dataverse
+            .Setup(d => d.RetrieveAsync(ContactEntity, ContactId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(HeldWithoutBaseline());
+
+        var sut = CreateSut(dataverse.Object);
+        await sut.ReadForContactAsync(otherContact, CancellationToken.None);
+        var state = await sut.ReadForContactAsync(ContactId, CancellationToken.None);
+
+        state.BaselineUnreadable.Should().BeFalse();
+        state.Rights.Should().Be(AccessRights.None);
+        dataverse.Verify(d => d.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AProvenRead_IsMadeOnce_ThenHeld()
+    {
+        var queries = new List<QueryExpression>();
+        var dataverse = DataverseWith(HeldWithoutBaseline(), new Platform(DirectProfileRead: true), queries);
+        var sut = CreateSut(dataverse.Object);
+
+        await sut.ReadForContactAsync(ContactId, CancellationToken.None);
+        var proofQueries = queries.Count;
+        var second = await sut.ReadForContactAsync(ContactId, CancellationToken.None);
+
+        second.BaselineUnreadable.Should().BeFalse();
+        queries.Should().HaveCount(proofQueries, "the proof is made at first use and held for the life of the reader");
+    }
+
+    [Fact]
+    public async Task AnUnprovenRead_IsAttemptedAgain_AtTheNextUse()
+    {
+        var queries = new List<QueryExpression>();
+        var dataverse = DataverseWith(HeldWithoutBaseline(), new Platform(), queries);
+        var sut = CreateSut(dataverse.Object);
+
+        (await sut.ReadForContactAsync(ContactId, CancellationToken.None)).BaselineUnreadable.Should().BeTrue();
+        var first = queries.Count;
+        (await sut.ReadForContactAsync(ContactId, CancellationToken.None)).BaselineUnreadable.Should().BeTrue();
+
+        queries.Count.Should().Be(first * 2, "a failed proof is not remembered, so a later grant is picked up");
+    }
+
+    [Fact]
+    public async Task TheProofQueries_AskForReadOnTheContactBaselineColumn_ForTheBffsOwnUser()
+    {
+        var queries = new List<QueryExpression>();
+        var dataverse = DataverseWith(HeldWithoutBaseline(), new Platform(), queries);
+
+        await CreateSut(dataverse.Object).ReadForContactAsync(ContactId, CancellationToken.None);
+
+        queries[0].Criteria.Conditions.Should().ContainSingle(c =>
+            c.AttributeName == "systemuserid" && c.Operator == ConditionOperator.EqualUserId);
+        queries[1].Criteria.Conditions.Should().ContainSingle(c =>
+            c.AttributeName == "name" && (string)c.Values[0] == "System Administrator");
+        foreach (var fieldPermission in queries.Where(q => q.EntityName == "fieldpermission"))
+        {
+            fieldPermission.Criteria.Conditions.Select(c => (c.AttributeName, c.Values[0]))
+                .Should().BeEquivalentTo(new (string, object)[]
+                {
+                    ("entityname", "contact"), ("attributelogicalname", "sprk_accesspermissiongrant"), ("canread", 4),
+                });
+        }
+    }
+
+    [Fact]
+    public async Task UnrecognisedBaselineValue_IsARead_NotUnreadable()
+    {
+        // MUST NOT FIRE: a value came back, so the column is readable; the value is simply not a level.
+        var queries = new List<QueryExpression>();
+        var dataverse = DataverseWith(ContactWithBaseline(true, 999999999), new Platform(), queries);
+
+        var state = await CreateSut(dataverse.Object).ReadForContactAsync(ContactId, CancellationToken.None);
+
+        state.BaselineUnreadable.Should().BeFalse();
+        state.Rights.Should().Be(AccessRights.None);
+        queries.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task FlagNotHeld_NeverAsksForTheProof()
+    {
+        var queries = new List<QueryExpression>();
+        var dataverse = DataverseWith(ContactWith(StandingGrantAttribute, false), new Platform(), queries);
+
+        var state = await CreateSut(dataverse.Object).ReadForContactAsync(ContactId, CancellationToken.None);
+
+        state.Should().Be(StandingGrantState.NotHeld);
+        queries.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task OrganizationBaseline_IsNotFieldSecured_SoAnEmptyReadIsNotSet()
+    {
+        // The organization column is not field-secured: an empty read there is "not set" and needs no proof.
+        var orgId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+        var dataverse = new Mock<IDataverseService>(MockBehavior.Strict);
+        dataverse
+            .Setup(d => d.RetrieveAsync("sprk_organization", orgId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_organization", orgId) { [StandingGrantAttribute] = true });
+
+        var state = await CreateSut(dataverse.Object).ReadForOrganizationAsync(orgId, CancellationToken.None);
+
+        state.Held.Should().BeTrue();
+        state.BaselineUnreadable.Should().BeFalse();
+        state.Rights.Should().Be(AccessRights.None);
+        dataverse.Verify(d => d.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CancellationDuringTheProof_Propagates()
+    {
+        using var cts = new CancellationTokenSource();
+        var dataverse = new Mock<IDataverseService>(MockBehavior.Strict);
+        dataverse
+            .Setup(d => d.RetrieveAsync(ContactEntity, ContactId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(HeldWithoutBaseline());
+        dataverse
+            .Setup(d => d.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Returns((QueryExpression _, CancellationToken token) =>
+            {
+                cts.Cancel();
+                token.ThrowIfCancellationRequested();
+                return Task.FromResult(new EntityCollection());
+            });
+
+        await FluentActions
+            .Awaiting(() => CreateSut(dataverse.Object).ReadForContactAsync(ContactId, cts.Token))
+            .Should().ThrowAsync<OperationCanceledException>();
+    }
 
     private static SubjectStandingGrantReader CreateSut(IDataverseService dataverse)
         => new(dataverse, NullLogger<SubjectStandingGrantReader>.Instance);
