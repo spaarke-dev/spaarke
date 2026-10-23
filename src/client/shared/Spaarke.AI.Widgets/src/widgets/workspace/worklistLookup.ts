@@ -8,10 +8,18 @@
  *   - `sprk_organization`     -> firms, by name (the shared organization search)
  * Any other entity returns no candidates rather than guessing a table: the wizard shows "no matches" and the user can still
  * decide without the field if it is optional.
+ *
+ * `createWorklistOpenLookup` / `createWorklistOpenRecord` are the side-pane and record-modal counterparts (D-182): the same scope,
+ * opened through the host's `INavigationService` instead of typed into the field.
  */
 
 import { searchContactsAsLookup, searchOrganizationsAsLookup } from '@spaarke/ui-components';
-import type { DecisionLookupSearch } from '@spaarke/ui-components';
+import type {
+  DecisionLookupSearch,
+  DecisionOpenLookup,
+  DecisionOpenRecord,
+  INavigationService,
+} from '@spaarke/ui-components';
 
 /** The one Dataverse call the lookup needs; `Xrm.WebApi` satisfies it. */
 export interface WorklistLookupDataSource {
@@ -69,4 +77,63 @@ export function createWorklistLookup(source: WorklistLookupDataSource): Decision
         return [];
     }
   };
+}
+
+// ---------------------------------------------------------------------------
+// The side-pane lookup and the record modal (D-182, task 158)
+// ---------------------------------------------------------------------------
+
+const ACTIVE_ONLY = '<condition attribute="statecode" operator="eq" value="0" />';
+const andFilter = (...conditions: string[]) => `<filter type="and">${conditions.join('')}</filter>`;
+
+/** The tables `createWorklistOpenLookup` can open: a Person is `contact`; the catalog's budget and firm lookups. */
+export const WORKLIST_OPEN_LOOKUP_ENTITIES: readonly string[] = ['sprk_budget', 'sprk_organization', 'contact'];
+
+/**
+ * The decision wizard's side-pane lookup (`Xrm.Utility.lookupObjects` through `INavigationService.openLookup`), scoped exactly as
+ * `createWorklistLookup` scopes the inline search, and no wider:
+ *   - Person                  -> active contacts
+ *   - `sprk_organization`     -> firms
+ *   - `sprk_budget`           -> active budgets of the item's own matter or project (with no core, active budgets only)
+ * Any other entity opens nothing (null), as the inline search returns no candidates for it. Single select; null on cancel.
+ */
+export function createWorklistOpenLookup(navigation: Pick<INavigationService, 'openLookup'>): DecisionOpenLookup {
+  const openLookup: DecisionOpenLookup = async request => {
+    let filters: { entityLogicalName: string; filterXml: string }[] | undefined;
+
+    if (request.kind === 'Person') {
+      filters = [{ entityLogicalName: 'contact', filterXml: andFilter(ACTIVE_ONLY) }];
+    } else if (request.entity === 'sprk_budget') {
+      const conditions = [ACTIVE_ONLY];
+      // The core record type is the budget's lookup column (`sprk_matter`, `sprk_project`).
+      if (request.core && CORE_BUDGET_FIELD[request.core.recordType]) {
+        const id = request.core.recordId.replace(/[{}]/g, '');
+        if (!GUID.test(id)) return null;
+        conditions.push(`<condition attribute="${request.core.recordType}" operator="eq" value="${id}" />`);
+      }
+      filters = [{ entityLogicalName: 'sprk_budget', filterXml: andFilter(...conditions) }];
+    } else if (request.entity !== 'sprk_organization') {
+      return null;
+    }
+
+    const results = await navigation.openLookup({
+      entityType: request.entity,
+      entityTypes: [request.entity],
+      allowMultiSelect: false,
+      ...(filters ? { filters } : {}),
+    });
+    // An empty result (cancel) is possible at runtime even though the array type says otherwise.
+    const picked = results.length > 0 ? results[0] : undefined;
+    return picked?.id ? { id: picked.id, name: picked.name } : null;
+  };
+  // K2: the tables handled above. The wizard keeps the inline field for any other table instead of a dead pane field.
+  return Object.assign(openLookup, { supportedEntities: WORKLIST_OPEN_LOOKUP_ENTITIES });
+}
+
+/** Opens a record in a platform modal above the wizard. Undefined when the host cannot (never `openForm`, which would leave the wizard). */
+export function createWorklistOpenRecord(
+  navigation: Partial<Pick<INavigationService, 'openRecordModal'>>
+): DecisionOpenRecord | undefined {
+  const open = navigation.openRecordModal;
+  return open ? (entityName, entityId) => open.call(navigation, entityName, entityId) : undefined;
 }

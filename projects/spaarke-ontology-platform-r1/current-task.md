@@ -1,53 +1,84 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-22 ~02:35Z (main session; 157 merged). State only — history is in git log, task `<completion>` blocks and
-> `notes/handoff-history/2026-10.md` (the previous 25 KB checkpoint is archived there verbatim). Standing rules: [`CLAUDE.md`](CLAUDE.md)
-> §3 and §6. Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-177). Deferred work: one self-contained GitHub issue per item,
-> label `ontology-deferred`, plus a DI-nn row in both tables of `notes/defer-issues.md` (next free: **DI-122**). Sub-agents never edit this file.
+> **Last Updated**: 2026-10-23 ~03:30Z (main session, context-handoff). State only — history is in git log, task `<completion>` blocks and
+> `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 and §6. Decisions: [`notes/decisions.md`](notes/decisions.md)
+> (D-1..D-187). Deferred work: one self-contained GitHub issue per item, label `ontology-deferred`, plus a DI-nn row in both tables of
+> `notes/defer-issues.md` (next free: **DI-126**). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | No lane in flight. **157 ✅** merged to docs via PR #2231 (`2a020e05ff`, 2026-10-22; ebilling PASS through round 3). Rides the next docs→master sync. |
-| **Status** | Waiting on peers (ebilling reviews) and the owner (UAT items). |
-| **Next Action** | Pick up whichever ebilling review arrives first (119 is now unblocked); then the next docs→master sync. Nightly heartbeat on `a7b956fb55` confirmed 02:30:29Z. |
+| **Task** | UAT round 1 lanes. **Merged to docs:** 158 `539ab22ce9`, 159 `9b485535ce`, 161 `811167613f`, 162 `84636b650a`, 163 `5952a9c801`, 164 `9f53c53198`. **Running:** 160 lane (`C:\wts-160`, opus, D-187). ebilling is running its own F4(b) fix round; pass 2 follows when they send SHAs. |
+| **Status** | Opening the docs→master PR (carries 158/159/161/162/163/164). The Console redeploys from master (158 only; safe on the current dev BFF), so peers get before/after notices. |
+| **Next Action** | docs→master PR → CI → notices → merge → ask R3 for the dev BFF deploy with the exact master SHA (must contain `283466d40`). Then "Next, in order" step 2. |
 
 ## Next, in order
 
-1. **Next docs→master sync** (157 + #2174): main session runs the full ArchTests first; notify R3/uac-r2/word-add-in before and after.
-2. **ebilling reviews when sent:** 088 (Stored File schema; sprk_document submission marker; invoice Superseded + resubmission-of link), 097 (per-invoice Superseded close wrapper over `SignalWriter.CloseAsync`), 116 (drafting re-keyed per Procedure Version), 119 (must call `EarlierInvoiceReadability.ShownAsync` and use its `WithheldSentence`; no `DuplicateOfEarlierLine` exemption), 082 (resolver must use `BillingRuleDefinition.PrecedenceKey`, condition in their POML), 081 (creator-person zero-non-null assert). Every schema run: final script + `-WhatIf` to us, before/after notices, no run before our PASS; check all core records, not matter alone.
-3. **105 UAT** with the owner: 102 wizard browser tests + keyboard/screen-reader; 064 §6.1 non-admin checks and UI tests (D-164); the 055 Next step To Do.
-4. Re-run `SignalReadRouteLiveTests` as a non-Console user (DI-83 #1882), then close #1882.
-5. **111 row 4** (owner): `/upload?entityType=sprk_project&entityId=<GUID>` with the GUID from `/project/<GUID>`; then close 111 → 114; then 090 wrap-up.
+1. **After 163 merges:** docs→master PR. Then ask R3 (`spaarke-wt-spa-external-access-platform-08`) for a dev BFF deploy, giving the **exact candidate SHA**. R3 gets the owner's own approval in its session (a relayed approval does not count), collects the peers' OKs and runs its 30-minute gate. The candidate must contain R3 077 (`283466d40`). Send before/after notices to word-add-in, R3 and uac-r2. The Console auto-deploys from master.
+2. **After that BFF is on dev, in order:**
+   - (a) Apply the worklist config: `Apply-WorklistGridConfiguration.ps1 -WhatIf`, then apply, then `-Verify -RequireRow`. That config is a dev data change, and we have not yet asked the owner about it; ask first.
+   - (b) POL-MATTER-NOBUDGET v2: `Apply-DoLanePolicies.ps1 -DefinitionPath config/know-promotion.policies.json` (owner approved, D-186). The `-WhatIf` run was clean on 2026-10-23: it creates v2 (`assign-task`, next steps add-todo and assign-work), ends v1 at 2026-10-22T00:00Z and moves the pointer. Then `-Verify`.
+   - (c) D-185 role change (owner-authorised, main session). Use `RemovePrivilegesRole`: Basic User loses `prvReadsprk_Policy`; Console User loses `prvReadsprk_Policy` and `prvReadsprk_PolicyVersion`. Read back before and after. Test the worklist as a non-Console user and as a Console user. Write a security-roles.md §19 "applied" entry and a deploy-log entry. Tell uac-r2 (#1355, read-back reference) and ebilling, before and after. Nobody exports roles from dev between the XML change and this step.
+   - (d) Dev checks:
+     - 158: side pane above the wizard; the record modal returns to the same step; light and dark.
+     - 159: Assign Task creates a Task event.
+     - 161: Create budget on a matter with no budget.
+     - 162: upload a file to a work assignment, an invoice and a project (zz- rows) and confirm it shows on the parent's Documents list.
+     - Then close 114. #2281 was verified by the owner on 1fa0cf5cb8.
+3. **R2** (D-183): the owner answers design.md §9 Q1–Q6, then run `/design-to-spec` in the R2 worktree.
+4. **105 UAT** with the owner (`notes/uat-v4-log.md`). Open: C2 (keyboard and screen reader), C4, and the rest of R1–R24.
+5. Re-run `SignalReadRouteLiveTests` as a non-Console user (DI-83, #1882), then close #1882. 111 row 4 (owner upload URL test), then close 111. Then the 090 wrap-up.
+6. Check tonight's `[SIGNAL-EVALUATOR]` heartbeat with `deploycheck.py`.
+
+## Lane facts to carry
+
+- **163 (#2298), security, two passes done:**
+  - Pass 2 found F2: a resolver fault was silently degrading internal worklists. Fix round 2 makes it a 503 for "lookup-failed" or an exception; external, no-match and non-GUID stay 200 with no enrichment. This is a deliberate deviation from master's rule (d).
+  - The fix round also covers F1 (docs), K1 (the comment), K3 (ledger line references) and K2 (issue text for the three copies of the externality rule; file it as DI-125 when the lane reports).
+  - The external/unknown guard is a private mirror in `SignalReadService`, as uac-r2 required; do not call Api/Filters.
+- **164 (#2299):** Phase 2b in `Deploy-Release.ps1`. Fix round 1 covers:
+  - F1: a failed BFF skips 2b and blocks Phase 3;
+  - F3: extract a gate function and test it as a truth table, with mutants M1/M2/M3/M5 plus a BFF mutant;
+  - F4: help text and `scripts/README.md`, plus the SKILL.md text the main session applies.
+- **160:** composeOnly prop with split commits (D-187). An enabled systemuser gets the app link, including flagged-external. The client commits addresses (the inquiry executor does not resolve ids). The absolute app link uses `DataverseOptions.EnvironmentUrl`. `EntityName` is "{core name} ({number})" with no prefix, because it also writes `sprk_regardingrecordname`.
+- **ebilling F4(b):**
+  - The adopted design is the line's invoice plus the frozen-core bound. No SignalWriter change.
+  - AccessColumns on sprk_signal: corerecordtype, corerecordid, regardinginvoice, regardinginvoiceline.
+  - Pass 1 checks that no ontology core-stamp writer goes through the generic path.
+  - The residual is DEF-043 / #2294.
 
 ## Blocked follow-ups (ours)
 
-- `OntologyAdminClassificationService.cs:658/685/705` labels an in-force billing version Draft — blocked until `sprk_publishstate` is in code on master.
-- 5 stale `DecisionRecordWriter.cs` comments (:556 :1547 :1660 :2164 :2326) + `DecisionRecordContextImmutabilityTests.CreateEntryPoints` check — after ebilling 074 reaches master.
-- Close **#2212** when ebilling's fix (`f0884a175f`) reaches master.
-- When ebilling 015 reaches master: update `notes/102a-authoring-contract.md` residual row and D-161 to name `statuscode`.
-- After 157 and ebilling's billing code are both on master: equality guard that `EarlierInvoiceReadability.WithheldSentence` equals ebilling's withheld template (ontology owns the const).
+- `OntologyAdminClassificationService.cs:658/685/705` labels an in-force billing version Draft. Blocked until `sprk_publishstate` is in code on master.
+- Five stale `DecisionRecordWriter.cs` comments (:556 :1547 :1660 :2164 :2326) and the `DecisionRecordContextImmutabilityTests.CreateEntryPoints` check. Do these after ebilling 074 reaches master.
+- Close **#2212** when ebilling's `f0884a175f` reaches master. When ebilling 015 reaches master, update the `notes/102a-authoring-contract.md` residual row and D-161.
+- The advisory ADR Compliance CI job times out; left to the ci-cd owners (#2009).
 
 ## Open owner / peer items
 
-1. **POL-MATTER-NOBUDGET** is on (D-163): the owner bulk-closes the dev Signals after the next evaluation.
-2. **Dev spend figure:** seeded 25,000 on REAL-2026-123456.01 becomes 0 at the next rollup (all dev invoices In Review; D-166). Offer an Approved invoice seed only if the owner asks.
-3. **CORS** on `/api/v1/external/notifications` (R3 owns): if it recurs, get the UTC time and the OPTIONS status. Never dispatch `deploy-external-spa.yml` from master while R3's SPA work is off master.
-4. **uac-r2 #2091 follow-up** (`SecureChildReconciler`/`RefileStepsAsync`): review when sent — gate-DR step still runs on thread join/reply re-file; same-parent skip hides no real parent change; gate-DR failure logs 50317 and never fails the re-file.
-5. **field-mapping 033** (SignalWriter + DecisionRecordWriter onto RecordCreationService): our owner review + uac-r2 review of their design note when sent (invariants already sent 2026-10-20).
-6. Next docs→master sync: re-check master's `GateDecisionRecordSharing.IsFiled` keeps `ParentsOf(communication.Attributes, CommunicationTable)`; #2174 (docs-only ArchTest/comment lane) rides it.
+1. Owner question: the long-term document parent column, `sprk_X` or `sprk_related*` (DocumentLinkFieldMap.cs:42-49 marks `sprk_X` as legacy).
+2. ebilling reviews when sent:
+   - their D-185 role-XML PR (`prvReadsprk_ruleset` None on Basic and Core; it overlaps 163's Basic User XML on different lines);
+   - 097, 116, 082 (082 must remove the `sprk_procedure` null filter).
+   - Every ebilling schema run: the final script and `-WhatIf` come to us first, with before and after notices.
+3. uac-r2 #2091 follow-up and field-mapping 033 design note: review when sent.
+4. CORS on `/api/v1/external/notifications` is R3's. Never dispatch `deploy-external-spa.yml` from master while R3's SPA work is off master.
+5. POL-MATTER-NOBUDGET is on (D-163): the owner bulk-closes the dev Signals after the next evaluation.
 
 ## Dev state (spaarkedev1 / spaarke-bff-dev)
 
-- Dev BFF `a7b956fb55` live (R3, 2026-10-22 02:18:52Z; adds field-mapping #2223/#2228 and UAC #2221, no ontology files); ontology smoke PASS (Secure 5d46df87 → `scope_matter_secured`; Standard REAL-2026-123456.01 → valid). Every dev BFF candidate must contain R3 077 (`283466d40`). R3 owns the dev BFF line; we never deploy it.
-- Console auto-deploys from master; landing tab = Worklist (D-164; revert `Set-DefaultWorkspaceLayout.ps1 -To 'Daily Briefing'`).
-- ebilling on dev: 080 Procedure schema run + idempotent second run (our independent read-back matches, see `notes/deploy-log.md`); 115 rule-type options 100000015 AddedFee / 100000016 Discount (100000014 SubmissionIntegrity not yet on dev).
-- Policies: six on, including POL-MATTER-NOBUDGET; none has a matter. Roles: Ontology Service 58; Ontology Administrator 38; Console User 21; Secure Record Owner 40.
-- Worktrees: none (all removed 2026-10-21/22 with Remove-WorktreeSafe, `C:\wts-157` last). Non-worktree folders left alone: `C:\wb126-pub`, `C:\wts-126-pub`, `C:\wts-103-seed`, `C:\wts-132-out`, `C:\wts-132m-out`, `C:\wts-r1609`, `C:\wts-r1609c`, `C:\wts-rc046b`, `C:\wts-rc1653`.
+- Dev BFF is `1fa0cf5cb8` (R3, 2026-10-23 ~00:00Z; carries 157 and #2282). Smoke and logs PASS. It does NOT yet carry 159, 161 or 163.
+- Core User has AppendTo on `sprk_eventtype_ref` (Global), granted on 2026-10-23 for task 159; the repo XML now matches.
+- The Console auto-deploys from master. The landing tab is the Worklist (D-164).
+- Worktrees:
+  - `C:\wts-160`, `C:\wts-163` and `C:\wts-164` are lane worktrees.
+  - R2: `C:\code_files\spaarke-wt-spaarke-ontology-platform-r2`.
+  - Remove a worktree only with `scripts/worktree/Remove-WorktreeSafe.ps1`.
+- Pester 5.7.1 for local runs is at `C:\Users\RALPHS~1\AppData\Local\Temp\p571\Pester\5.7.1`. Pester 6 fails on this machine only; CI is fine.
 
 ## Peers (current session names)
 
-ebilling `spaarke-wt-ebilling-r1-5b` · R3 `spaarke-wt-spa-external-access-platform-05` · uac-r2 `spaarke-wt-unified-access-control-r2-ac` ·
-word-add-in `spaarke-wt-spaarkeai-word-add-in-r1-c4` · field-mapping `spaarke-wt-field-mapping-server-write-pa-b5`. Before/after notices to
+ebilling `spaarke-wt-ebilling-r1-5b` · R3 `spaarke-wt-spa-external-access-platform-08` · uac-r2 `spaarke-wt-unified-access-control-r2-ac` ·
+word-add-in `spaarke-wt-spaarkeai-word-add-in-r1-c4` · field-mapping `spaarke-wt-field-mapping-server-write-pa-be`. Send before and after notices to
 word-add-in, R3 and uac-r2 for any dev BFF, Console or landing change.

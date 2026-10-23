@@ -11,9 +11,15 @@
       policy.currentversion    -> PATCH to the definition's current version when it differs
       policy descriptive fields (name, short name, lane, subject type, work type, severity, priority, counts-toward-suppression)
                                -> PATCH when they differ
-      version row present      -> NEVER written. A published version is immutable (FR-49): a body, plan, template or headline
-                                  that differs from the definition is reported as DRIFT and fails the script; the fix is a new
-                                  version entry in the definition, not an edit.
+      version row present      -> NEVER written, with ONE exception below. A published version is immutable (FR-49): a body, plan,
+                                  template or headline that differs from the definition is reported as DRIFT and fails the script;
+                                  the fix is a new version entry in the definition, not an edit.
+      superseded version       -> when the definition's current version is newer, each older version's sprk_inforceto is stamped with
+                                  the NEXT version's inForceFrom, only when it is empty (task 159). This mirrors the product's publish
+                                  order (OntologyAdminAuthoringService, task 033): create the new version, END the old one, then move
+                                  sprk_currentversion. sprk_inforceto is the only column of an existing version row the script writes.
+                                  The current version must have no sprk_inforceto; an end that differs from the expected one, or an
+                                  end on the current version, is DRIFT (never rewritten).
       sprk_enabled             -> set to No on CREATE only. The script never changes it on an existing row: turning a policy on is
                                   the owner's review decision.
     After a write the rows are read back and compared; any difference fails the script.
@@ -63,11 +69,13 @@ $DataverseUrl = $DataverseUrl.TrimEnd('/')
 $ApiBase = "$DataverseUrl/api/data/v9.2"
 
 # Per definition kind: the lane the policies must be in and the plan codes of the closed action catalog for that lane
-# (DecisionActionCatalog.cs, PlanLane). A plan naming anything else is refused by DecisionPlanService at read time, so it is
-# refused here first.
+# (DecisionActionCatalog.cs, PlanLane), and the Next-step codes (IsNextStep; the same set for every lane). A plan naming anything
+# else is refused by DecisionPlanService at read time, so it is refused here first. These lists are hardcoded; the C# guard
+# DecisionActionCatalogScriptListsTests fails when they and the catalog diverge.
+$NextStepCodes = @('add-todo', 'create-event', 'send-email', 'assign-work')
 $KindRules = @{
-    'do-lane-policies'        = @{ Lane = 'Do'; Codes = @('mark-complete', 'reschedule', 'reassign', 'send-reminder', 'extend-response-date', 'record-the-response') }
-    'know-promotion-policies' = @{ Lane = 'Decide'; Codes = @('send-budget-inquiry', 'revise-budget', 'approve-variance', 'assign-work') }
+    'do-lane-policies'        = @{ Lane = 'Do'; NextSteps = $NextStepCodes; Codes = @('mark-complete', 'reschedule', 'reassign', 'send-reminder', 'extend-response-date', 'record-the-response') }
+    'know-promotion-policies' = @{ Lane = 'Decide'; NextSteps = $NextStepCodes; Codes = @('send-budget-inquiry', 'revise-budget', 'approve-variance', 'assign-work', 'assign-task') }
 }
 $MaxHeadline = 200; $MaxProposedAction = 400; $MaxShortName = 100
 
@@ -112,6 +120,36 @@ function Get-Instant($value) {
     if ($value -is [datetime]) { $value.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'") } else { [string]$value }
 }
 
+# The version after $v in the definition, when $v has been superseded (its number is below the policy's current version); else $null.
+function Get-NextVersion($p, $v) {
+    if ([int]$v.versionNumber -ge [int]$p.currentVersion) { return $null }
+    $p.versions | Where-Object { [int]$_.versionNumber -gt [int]$v.versionNumber } | Sort-Object { [int]$_.versionNumber } | Select-Object -First 1
+}
+
+# Where a version must end: the next version's inForceFrom (ISO UTC) for a superseded one, $null (no end) for the current one.
+function Get-ExpectedInForceTo($p, $v) {
+    $next = Get-NextVersion $p $v
+    if ($null -eq $next) { return $null }
+    Get-Instant $next.inForceFrom
+}
+
+# What the live version row's sprk_inforceto needs: 'None' (as expected), 'Stamp' (superseded and still open: the one allowed write)
+# or 'Drift' (any other difference, including an end on the current version; never rewritten).
+function Get-VersionEndAction($p, $v, $row) {
+    $expected = Get-ExpectedInForceTo $p $v
+    $live = if ($null -ne $row.sprk_inforceto) { Get-Instant $row.sprk_inforceto } else { $null }
+    if ($null -eq $live -and $null -eq $expected) { return 'None' }
+    if ($null -eq $live) { return 'Stamp' }
+    if ($live -ceq $expected) { return 'None' }
+    'Drift'
+}
+
+function Get-InForceToDiff($p, $v, $row) {
+    if ((Get-VersionEndAction $p $v $row) -eq 'None') { return $null }
+    $live = if ($null -ne $row.sprk_inforceto) { Get-Instant $row.sprk_inforceto } else { '' }
+    "sprk_inforceto live='$live' expected='$(Get-ExpectedInForceTo $p $v)'"
+}
+
 # ---- lint ---------------------------------------------------------------------------------------------------------
 function Test-Definition($def) {
     $problems = [System.Collections.Generic.List[string]]::new()
@@ -130,6 +168,12 @@ function Test-Definition($def) {
         $numbers = @($p.versions | ForEach-Object { $_.versionNumber })
         if ($numbers.Count -eq 0 -or ($numbers | Select-Object -Unique).Count -ne $numbers.Count) { $problems.Add("${at}: version numbers must be present and unique") }
         if ($numbers -notcontains $p.currentVersion) { $problems.Add("${at}: currentVersion $($p.currentVersion) is not one of the versions") }
+        elseif ([int]$p.currentVersion -ne [int](($numbers | Measure-Object -Maximum).Maximum)) { $problems.Add("${at}: currentVersion must be the highest version number (the script advances to the newest version and ends the ones before it)") }
+        $byNumber = @($p.versions | Sort-Object { [int]$_.versionNumber })
+        for ($i = 1; $i -lt $byNumber.Count; $i++) {
+            # Strictly increasing: an equal pair is refused too (the superseded version would end at the instant it began).
+            if ((Get-Instant $byNumber[$i].inForceFrom) -le (Get-Instant $byNumber[$i - 1].inForceFrom)) { $problems.Add("${at}: v$($byNumber[$i].versionNumber) inForceFrom must be after v$($byNumber[$i - 1].versionNumber) inForceFrom") }
+        }
         foreach ($v in $p.versions) {
             $va = "$at v$($v.versionNumber)"
             if ($v.versionId -notmatch '^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$') { $problems.Add("${va}: versionId is not a GUID") }
@@ -142,6 +186,7 @@ function Test-Definition($def) {
             if ($v.messageTemplate -match '\{\{') { $problems.Add("${va}: messageTemplate must be literal (no tokens)") }
             if ((Get-Instant $v.inForceFrom) -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$') { $problems.Add("${va}: inForceFrom must be an ISO UTC instant") }
             foreach ($code in @($v.decisionPlan.actions)) { if ($rules.Codes -notcontains $code) { $problems.Add("${va}: decision plan names '$code', not a $($rules.Lane)-lane catalog code") } }
+            foreach ($code in @($v.decisionPlan.nextSteps)) { if ($rules.NextSteps -notcontains $code) { $problems.Add("${va}: decision plan Next step '$code' is not a catalog Next-step code") } }
             if (@($v.decisionPlan.actions).Count -eq 0) { $problems.Add("${va}: decision plan has no actions") }
         }
     }
@@ -193,7 +238,7 @@ function Get-PolicyDiffs($p, $row) {
     $diffs
 }
 
-# A version is immutable: every comparison is a DRIFT, never a write.
+# A version is immutable: every comparison is a DRIFT, never a write (sprk_inforceto of a superseded version is the one write, see the apply).
 function Get-VersionDiffs($p, $v, $row) {
     $diffs = [System.Collections.Generic.List[string]]::new()
     if ($row._sprk_policy_value -ne $p.policyId) { $diffs.Add('sprk_policy') }
@@ -204,9 +249,10 @@ function Get-VersionDiffs($p, $v, $row) {
     if ($row.sprk_messagetemplate -cne $v.messageTemplate) { $diffs.Add('sprk_messagetemplate') }
     if ($row.sprk_shortheadline -cne $v.shortHeadline) { $diffs.Add('sprk_shortheadline') }
     if ($row.sprk_proposedaction -cne $v.proposedAction) { $diffs.Add('sprk_proposedaction') }
-    # A version the nightly job refuses (deactivated, or ended in force) is not in sync even if its text matches.
+    # A version the nightly job refuses (deactivated, or ended in force) is not in sync even if its text matches. The current version
+    # has no end; a superseded one ends at the next version's inForceFrom (task 159).
     if ($row.statecode -ne 0) { $diffs.Add('statecode') }
-    if ($null -ne $row.sprk_inforceto) { $diffs.Add('sprk_inforceto') }
+    if (Get-InForceToDiff $p $v $row) { $diffs.Add((Get-InForceToDiff $p $v $row)) }
     $diffs
 }
 
@@ -312,10 +358,37 @@ foreach ($p in $definition.policies) {
             else { Write-Host "  would write sprk_rulebody = $(ConvertTo-CompactJson $v.ruleBody)"; Write-Host "  would write sprk_decisionplan = $(ConvertTo-CompactJson $v.decisionPlan)" }
         }
         else {
-            $d = @(Get-VersionDiffs $p $v $vr)
+            # sprk_inforceto is judged in the end pass below (stamped when it is the allowed write, DRIFT otherwise); the rest is immutable.
+            $d = @(Get-VersionDiffs $p $v $vr | Where-Object { $_ -notlike 'sprk_inforceto*' })
             if ($d.Count -gt 0) { throw "$($p.code) v$($v.versionNumber): the live version differs from the definition ($($d -join ', ')). A published version is immutable (FR-49): add a NEW version entry instead of editing this one." }
             Write-Host "UNCHANGED version $($p.code) v$($v.versionNumber)"
         }
+    }
+
+    # (b) End the superseded versions, after the new version exists and before the pointer moves (the product's publish order,
+    # OntologyAdminAuthoringService): sprk_inforceto = the next version's inForceFrom, only where it is still empty. This is the only
+    # write the script ever makes to an existing version row; a different end is DRIFT and fails the script.
+    foreach ($v in $p.versions) {
+        $next = Get-NextVersion $p $v
+        if ($null -eq $next) { continue }
+        $expectedEnd = Get-ExpectedInForceTo $p $v
+        $vr = Get-VersionRow $v.versionId
+        $nextRow = Get-VersionRow $next.versionId
+        if ($null -eq $vr -or $null -eq $nextRow) {
+            Write-Host "  would end $($p.code) v$($v.versionNumber) at $expectedEnd (sprk_inforceto) once v$($v.versionNumber) and v$($next.versionNumber) exist"
+            continue
+        }
+        $action = Get-VersionEndAction $p $v $vr
+        if ($action -eq 'Stamp') {
+            if ($PSCmdlet.ShouldProcess("$DataverseUrl sprk_policyversion $($v.versionId)", "END $($p.code) v$($v.versionNumber): sprk_inforceto = $expectedEnd")) {
+                Invoke-Dv PATCH "$ApiBase/sprk_policyversions($($v.versionId))" @{ sprk_inforceto = $expectedEnd } | Out-Null
+                Write-Host "ENDED version $($p.code) v$($v.versionNumber) at $expectedEnd"
+            }
+        }
+        elseif ($action -eq 'Drift') {
+            throw "$($p.code) v$($v.versionNumber): its sprk_inforceto differs from the expected end ($(Get-InForceToDiff $p $v $vr)). A version row is never rewritten: fix it by hand in Dataverse or with the product's publish route."
+        }
+        else { Write-Host "UNCHANGED end of version $($p.code) v$($v.versionNumber)" }
     }
 
     # The pointer moves only once the version exists.
