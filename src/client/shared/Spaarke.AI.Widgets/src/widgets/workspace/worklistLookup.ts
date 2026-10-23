@@ -122,7 +122,8 @@ export function createWorklistOpenLookup(navigation: Pick<INavigationService, 'o
       allowMultiSelect: false,
       ...(filters ? { filters } : {}),
     });
-    const picked = results[0];
+    // An empty result (cancel) is possible at runtime even though the array type says otherwise.
+    const picked = results.length > 0 ? results[0] : undefined;
     return picked?.id ? { id: picked.id, name: picked.name } : null;
   };
   // K2: the tables handled above. The wizard keeps the inline field for any other table instead of a dead pane field.

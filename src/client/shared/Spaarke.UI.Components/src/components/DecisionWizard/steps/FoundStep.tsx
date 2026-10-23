@@ -56,8 +56,8 @@ export const FoundStep: React.FC = () => {
   const clauses = plan.ruleDescription?.clauses ?? [];
   const coreName = item.core?.name?.trim() || null;
   const coreLabel = item.core?.typeLabel?.trim() || 'record';
-  const coreType = item.core?.recordType?.trim() || '';
-  const coreId = item.core?.recordId?.trim() || '';
+  const coreType = item.core?.recordType.trim() || '';
+  const coreId = item.core?.recordId.trim() || '';
   // D-182: the subject is a link only when the host can open it and the subject has an entity and an id.
   const canOpenSubject = openRecord != null && coreName != null && coreType !== '' && coreId !== '';
   const openSubject = () => {
@@ -69,6 +69,7 @@ export const FoundStep: React.FC = () => {
       });
     } catch (err) {
       // The wizard keeps its place.
+      // eslint-disable-next-line no-restricted-syntax -- opening the record is a convenience link; the wizard keeps its step and values, and the failure is logged
       console.warn('[DecisionWizard] openRecord failed', err);
     }
   };

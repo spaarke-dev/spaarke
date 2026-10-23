@@ -100,6 +100,7 @@ const LookupParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
       const picked = await openLookup({ kind, entity: paneEntity, parameterCode: parameter.code });
       // Cancelling (null) changes nothing; the pick fills the field exactly as the inline pick does.
       if (picked?.id) update(d => withLookup(d, scope, parameter.code, { id: picked.id, name: picked.name }));
+      // eslint-disable-next-line no-restricted-syntax -- a failed pane is a cancel: the field is unchanged and can be retried; the navigation adapter logs the failure
     } catch {
       // A pane that failed is treated as a cancel: the field is unchanged and can be tried again.
     } finally {
