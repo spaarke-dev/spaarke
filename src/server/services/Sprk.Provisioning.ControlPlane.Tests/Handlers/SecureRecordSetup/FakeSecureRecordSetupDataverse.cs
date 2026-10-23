@@ -145,6 +145,15 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
             new SecureSetupFieldPermission(dv.StandingGrantProfileId, SecureRecordSetupProcedure.StandingGrantTable, 4, 4, 4));
         dv.SecuredColumns[ColumnKey(SecureRecordSetupProcedure.StandingGrantTable, SecureRecordSetupProcedure.StandingGrantColumn)] = true;
 
+        // #2317: the access level as SpaarkeMaster ships it with the standing-grant lock (secured; Standing Grant Administrators
+        // 4/4/4, Readers 4/0/0, Writers 4/0/4, plus the platform's System Administrator profile).
+        var levelPermissions = dv.ColumnPermissions(SecureRecordSetupProcedure.AccessLevelColumn);
+        levelPermissions.Add(new SecureSetupFieldPermission(dv.StandingGrantProfileId, SecureRecordSetupProcedure.StandingGrantTable, 4, 4, 4));
+        levelPermissions.Add(new SecureSetupFieldPermission(dv.ReaderProfileId, SecureRecordSetupProcedure.StandingGrantTable, 4, 0, 0));
+        levelPermissions.Add(new SecureSetupFieldPermission(dv.WriterProfileId, SecureRecordSetupProcedure.StandingGrantTable, 4, 0, 4));
+        levelPermissions.Add(new SecureSetupFieldPermission(dv.SystemAdministratorProfileId, SecureRecordSetupProcedure.StandingGrantTable, 4, 4, 4));
+        dv.SecuredColumns[ColumnKey(SecureRecordSetupProcedure.StandingGrantTable, SecureRecordSetupProcedure.AccessLevelColumn)] = true;
+
         // ISS-025: contact.sprk_externalinvitedon as SpaarkeMaster 1.2.2.0 ships it (secured; Readers 4/0/0, Writers 4/4/4, plus
         // the platform's System Administrator profile). sprk_externalinvitecodehash is NOT there yet (UAC task 185 ships later):
         // see AddInviteCodeHash.
@@ -183,6 +192,28 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
         permissions.Add(new SecureSetupFieldPermission(WriterProfileId, SecureRecordSetupProcedure.InviteTable, 4, 4, 4));
         permissions.Add(new SecureSetupFieldPermission(SystemAdministratorProfileId, SecureRecordSetupProcedure.InviteTable, 4, 4, 4));
         SecuredColumns[ColumnKey(SecureRecordSetupProcedure.InviteTable, SecureRecordSetupProcedure.InviteCodeHashColumn)] = true;
+    }
+
+    /// <summary>
+    /// #2317: a later SpaarkeMaster release has landed the BFF-only columns and the removed-on marker as
+    /// scripts/Set-ExternalAccessContactSecuritySchema.ps1 leaves them: secured; the BFF-only columns Writers 4/4/4 and NO
+    /// Readers row; the removed-on marker Readers 4/0/0 and Writers 4/4/4; the platform's System Administrator profile on each.
+    /// </summary>
+    internal void AddBffOnlyColumns()
+    {
+        foreach (var column in SecureRecordSetupProcedure.BffOnlyColumns)
+        {
+            var permissions = ColumnPermissions(column);
+            permissions.Add(new SecureSetupFieldPermission(WriterProfileId, SecureRecordSetupProcedure.InviteTable, 4, 4, 4));
+            permissions.Add(new SecureSetupFieldPermission(SystemAdministratorProfileId, SecureRecordSetupProcedure.InviteTable, 4, 4, 4));
+            SecuredColumns[ColumnKey(SecureRecordSetupProcedure.InviteTable, column)] = true;
+        }
+
+        var removed = ColumnPermissions(SecureRecordSetupProcedure.AccessRemovedOnColumn);
+        removed.Add(new SecureSetupFieldPermission(ReaderProfileId, SecureRecordSetupProcedure.InviteTable, 4, 0, 0));
+        removed.Add(new SecureSetupFieldPermission(WriterProfileId, SecureRecordSetupProcedure.InviteTable, 4, 4, 4));
+        removed.Add(new SecureSetupFieldPermission(SystemAdministratorProfileId, SecureRecordSetupProcedure.InviteTable, 4, 4, 4));
+        SecuredColumns[ColumnKey(SecureRecordSetupProcedure.InviteTable, SecureRecordSetupProcedure.AccessRemovedOnColumn)] = true;
     }
 
     internal Guid AddTeam(Guid unitId, string name, bool isDefault)

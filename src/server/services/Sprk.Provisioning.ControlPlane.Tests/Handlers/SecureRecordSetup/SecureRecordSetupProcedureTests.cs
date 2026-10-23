@@ -717,8 +717,99 @@ public sealed class SecureRecordSetupProcedureTests
                         .Add(new SecureSetupFieldPermission(dv.AddProfile("Contact Admins"), "contact", 4, 0, 0));
                 },
                 SecureRecordSetupRejectionCodes.InviteCodeHashLockOtherAccess, FailureClass.QuarantineRequired },
+
+            // ---- S19 (#2317): the access level's lock ----
+            { "contact.sprk_accesspermissiongrant not secured", dv =>
+                    dv.SecuredColumns[LevelKey] = false,
+                SecureRecordSetupRejectionCodes.AccessLevelLockIncomplete, FailureClass.Resumable },
+            { "contact.sprk_accesspermissiongrant absent", dv => dv.SecuredColumns.Remove(LevelKey),
+                SecureRecordSetupRejectionCodes.AccessLevelLockIncomplete, FailureClass.Resumable },
+            { "Standing Grant Administrators cannot create the access level", dv =>
+                    Replace(dv, Level, dv.StandingGrantProfileId, 4, 0, 4),
+                SecureRecordSetupRejectionCodes.AccessLevelLockIncomplete, FailureClass.Resumable },
+            { "Readers cannot read the access level", dv =>
+                    dv.ColumnPermissions(Level).RemoveAll(p => p.ProfileId == dv.ReaderProfileId),
+                SecureRecordSetupRejectionCodes.AccessLevelLockIncomplete, FailureClass.Resumable },
+            { "Writers cannot update the access level", dv => Replace(dv, Level, dv.WriterProfileId, 4, 0, 0),
+                SecureRecordSetupRejectionCodes.AccessLevelLockIncomplete, FailureClass.Resumable },
+            { "Readers may update the access level (4/0/4)", dv => Replace(dv, Level, dv.ReaderProfileId, 4, 0, 4),
+                SecureRecordSetupRejectionCodes.AccessLevelLockOtherWriter, FailureClass.QuarantineRequired },
+            { "another profile may create the access level", dv =>
+                    dv.ColumnPermissions(Level).Add(new SecureSetupFieldPermission(
+                        dv.AddProfile("Contact Admins"), SecureRecordSetupProcedure.StandingGrantTable, 4, 4, 0)),
+                SecureRecordSetupRejectionCodes.AccessLevelLockOtherWriter, FailureClass.QuarantineRequired },
+
+            // ---- S22 (#2317): the BFF-only columns and the removed-on marker, once they ship ----
+            { "contact.sprk_externalinvitedemailhash present but not secured", dv =>
+                {
+                    dv.AddBffOnlyColumns();
+                    dv.SecuredColumns[InviteKey(SecureRecordSetupProcedure.InvitedEmailHashColumn)] = false;
+                },
+                SecureRecordSetupRejectionCodes.BffOnlyColumnLockIncomplete, FailureClass.Resumable },
+            { "Writers cannot update contact.sprk_externalinvitedtenantid", dv =>
+                {
+                    dv.AddBffOnlyColumns();
+                    Replace(dv, SecureRecordSetupProcedure.InvitedTenantIdColumn, dv.WriterProfileId, 4, 4, 0);
+                },
+                SecureRecordSetupRejectionCodes.BffOnlyColumnLockIncomplete, FailureClass.Resumable },
+            { "Readers can READ contact.sprk_externalinvitedemailhash", dv =>
+                {
+                    dv.AddBffOnlyColumns();
+                    dv.ColumnPermissions(SecureRecordSetupProcedure.InvitedEmailHashColumn).Add(new SecureSetupFieldPermission(
+                        dv.ReaderProfileId, SecureRecordSetupProcedure.InviteTable, 4, 0, 0));
+                },
+                SecureRecordSetupRejectionCodes.BffOnlyColumnLockOtherAccess, FailureClass.QuarantineRequired },
+            { "another profile can read contact.sprk_externalinvitedtenantid", dv =>
+                {
+                    dv.AddBffOnlyColumns();
+                    dv.ColumnPermissions(SecureRecordSetupProcedure.InvitedTenantIdColumn).Add(new SecureSetupFieldPermission(
+                        dv.AddProfile("Contact Admins"), SecureRecordSetupProcedure.InviteTable, 4, 0, 0));
+                },
+                SecureRecordSetupRejectionCodes.BffOnlyColumnLockOtherAccess, FailureClass.QuarantineRequired },
+            { "contact.sprk_externalaccessremovedon present but not secured", dv =>
+                {
+                    dv.AddBffOnlyColumns();
+                    dv.SecuredColumns[InviteKey(SecureRecordSetupProcedure.AccessRemovedOnColumn)] = false;
+                },
+                SecureRecordSetupRejectionCodes.AccessRemovedOnLockIncomplete, FailureClass.Resumable },
+            { "Readers cannot read contact.sprk_externalaccessremovedon", dv =>
+                {
+                    dv.AddBffOnlyColumns();
+                    dv.ColumnPermissions(SecureRecordSetupProcedure.AccessRemovedOnColumn).RemoveAll(p => p.ProfileId == dv.ReaderProfileId);
+                },
+                SecureRecordSetupRejectionCodes.AccessRemovedOnLockIncomplete, FailureClass.Resumable },
+            { "Readers may update contact.sprk_externalaccessremovedon", dv =>
+                {
+                    dv.AddBffOnlyColumns();
+                    Replace(dv, SecureRecordSetupProcedure.AccessRemovedOnColumn, dv.ReaderProfileId, 4, 0, 4);
+                },
+                SecureRecordSetupRejectionCodes.AccessRemovedOnLockOtherWriter, FailureClass.QuarantineRequired },
+            { "another profile may create contact.sprk_externalaccessremovedon", dv =>
+                {
+                    dv.AddBffOnlyColumns();
+                    dv.ColumnPermissions(SecureRecordSetupProcedure.AccessRemovedOnColumn).Add(new SecureSetupFieldPermission(
+                        dv.AddProfile("Contact Admins"), SecureRecordSetupProcedure.InviteTable, 4, 4, 0));
+                },
+                SecureRecordSetupRejectionCodes.AccessRemovedOnLockOtherWriter, FailureClass.QuarantineRequired },
         };
         return data;
+    }
+
+    // #2317 helpers.
+    private const string Level = SecureRecordSetupProcedure.AccessLevelColumn;
+
+    private static readonly string LevelKey =
+        FakeSecureRecordSetupDataverse.ColumnKey(SecureRecordSetupProcedure.StandingGrantTable, Level);
+
+    private static string InviteKey(string column) => FakeSecureRecordSetupDataverse.ColumnKey(SecureRecordSetupProcedure.InviteTable, column);
+
+    /// <summary>Replaces the row of <paramref name="profileId"/> on <paramref name="column"/> with read/create/update as given.</summary>
+    private static void Replace(FakeSecureRecordSetupDataverse dv, string column, Guid profileId, int read, int create, int update)
+    {
+        var permissions = dv.ColumnPermissions(column);
+        var table = permissions.First(p => p.ProfileId == profileId).EntityName;
+        permissions.RemoveAll(p => p.ProfileId == profileId);
+        permissions.Add(new SecureSetupFieldPermission(profileId, table, read, create, update));
     }
 
     [Theory]
@@ -793,8 +884,62 @@ public sealed class SecureRecordSetupProcedureTests
 
         var applied = (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>().Subject;
 
-        applied.State.Notes.Should().ContainSingle().Which.Should().Contain("present, secured");
-        applied.State.Notes.Should().NotContain(n => n.Contains("absent", StringComparison.Ordinal));
+        var codeHashNotes = applied.State.Notes!
+            .Where(n => n.Contains(SecureRecordSetupProcedure.InviteCodeHashColumn, StringComparison.Ordinal)).ToArray();
+        codeHashNotes.Should().ContainSingle().Which.Should().Contain("present, secured");
+        codeHashNotes.Should().NotContain(n => n.Contains("absent", StringComparison.Ordinal));
+    }
+
+    // ------------------------------------------------------------ S19/S22 (#2317): access level, BFF-only columns, removed-on
+
+    [Fact]
+    public async Task AccessLevel_AsShipped_Passes_TheReadersProfileMayRead_AndSystemAdministratorIsExempt()
+    {
+        var dv = NewEnv();   // Standing Grant Administrators 4/4/4, Readers 4/0/0, Writers 4/0/4, System Administrator 4/4/4
+
+        (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>();
+        dv.Writes.Should().NotContain(w => w.Contains(Level, StringComparison.OrdinalIgnoreCase), "S19 verifies the lock, never writes it");
+    }
+
+    [Fact]
+    public async Task BffOnlyColumnsAndRemovedOn_Absent_Pass_AndRecordTheAbsentOutcome()
+    {
+        var dv = NewEnv();   // the release that carries them has not landed
+
+        var applied = (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>().Subject;
+
+        foreach (var column in SecureRecordSetupProcedure.BffOnlyColumns.Append(SecureRecordSetupProcedure.AccessRemovedOnColumn))
+        {
+            applied.State.Notes.Should().ContainSingle(n => n.Contains(column, StringComparison.Ordinal)
+                                                           && n.Contains(CodeHashAbsentNote, StringComparison.Ordinal));
+        }
+        dv.Writes.Should().NotContain(w => w.Contains("external", StringComparison.OrdinalIgnoreCase), "S22 verifies, never writes");
+    }
+
+    [Fact]
+    public async Task BffOnlyColumnsAndRemovedOn_AsShipped_Pass_WithPresentNotes()
+    {
+        var dv = NewEnv();
+        dv.AddBffOnlyColumns();
+
+        var applied = (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>().Subject;
+
+        foreach (var column in SecureRecordSetupProcedure.BffOnlyColumns.Append(SecureRecordSetupProcedure.AccessRemovedOnColumn))
+        {
+            applied.State.Notes.Should().ContainSingle(n => n.Contains(column, StringComparison.Ordinal)
+                                                           && n.Contains("present, secured", StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public async Task BffOnlyColumn_WithAZeroZeroZeroReadersRow_Passes()
+    {
+        var dv = NewEnv();
+        dv.AddBffOnlyColumns();
+        dv.ColumnPermissions(SecureRecordSetupProcedure.InvitedEmailHashColumn).Add(new SecureSetupFieldPermission(
+            dv.ReaderProfileId, SecureRecordSetupProcedure.InviteTable, 0, 0, 0));
+
+        (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>("0/0/0 grants nothing, the same as no row");
     }
 
     [Fact]

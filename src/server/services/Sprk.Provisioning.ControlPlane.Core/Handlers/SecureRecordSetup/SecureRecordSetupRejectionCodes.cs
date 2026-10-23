@@ -140,6 +140,19 @@ public static class SecureRecordSetupRejectionCodes
     public const string StandingGrantLockIncomplete = "secure_setup.standing_grant_lock_incomplete";
 
     /// <summary>
+    /// S19 (#2317): <c>contact.sprk_accesspermissiongrant</c> is absent or not secured, or its lock is not the shipped one —
+    /// Standing Grant Administrators 4/4/4, Readers read 4, Writers read and update 4 (Resumable: import SpaarkeMaster, H6).
+    /// </summary>
+    public const string AccessLevelLockIncomplete = "secure_setup.access_level_lock_incomplete";
+
+    /// <summary>
+    /// S19 (#2317): a profile other than Standing Grant Administrators and "Spaarke BFF-Managed Field Writers" (and System
+    /// Administrator) may create or update <c>contact.sprk_accesspermissiongrant</c> — the Readers profile included: every
+    /// default team is its member (QuarantineRequired).
+    /// </summary>
+    public const string AccessLevelLockOtherWriter = "secure_setup.access_level_lock_other_writer";
+
+    /// <summary>
     /// S21 (ISS-020 / #1565): the task-154 role split is not in place — the Access Administrator or Core User role is missing
     /// from the root unit, the former lacks Read on <c>sprk_noaccessentry</c> at Global, or the latter holds it (Resumable:
     /// re-import SpaarkeMaster or run scripts/Set-NoAccessEntryRolePrivileges.ps1).
@@ -175,6 +188,32 @@ public static class SecureRecordSetupRejectionCodes
     /// (QuarantineRequired: who is granted access is an operator decision; nothing is removed here).
     /// </summary>
     public const string InviteCodeHashLockOtherAccess = "secure_setup.invite_code_hash_lock_other_access";
+
+    /// <summary>
+    /// S22 (#2317): a BFF-only column (<c>contact.sprk_externalinvitedemailhash</c>, <c>contact.sprk_externalinvitedtenantid</c>)
+    /// exists (ABSENT is the expected state until the SpaarkeMaster release that carries it) but is not secured, or the
+    /// Writers profile does not hold 4/4/4 (Resumable: import SpaarkeMaster, H6).
+    /// </summary>
+    public const string BffOnlyColumnLockIncomplete = "secure_setup.bff_only_column_lock_incomplete";
+
+    /// <summary>
+    /// S22 (#2317): a profile other than "Spaarke BFF-Managed Field Writers" (and System Administrator) can read, create or
+    /// update a BFF-only column — the Readers profile included, which must hold no row or a 0/0/0 row (QuarantineRequired).
+    /// </summary>
+    public const string BffOnlyColumnLockOtherAccess = "secure_setup.bff_only_column_lock_other_access";
+
+    /// <summary>
+    /// S22 (#2317): <c>contact.sprk_externalaccessremovedon</c> exists (ABSENT is expected until the SpaarkeMaster release that
+    /// carries it) but is not secured, the Readers profile does not hold Read on it, or the Writers profile does not hold
+    /// 4/4/4 (Resumable: import SpaarkeMaster, H6).
+    /// </summary>
+    public const string AccessRemovedOnLockIncomplete = "secure_setup.access_removed_on_lock_incomplete";
+
+    /// <summary>
+    /// S22 (#2317): a profile other than "Spaarke BFF-Managed Field Writers" (and System Administrator) may create or update
+    /// <c>contact.sprk_externalaccessremovedon</c> — the Readers profile included (QuarantineRequired).
+    /// </summary>
+    public const string AccessRemovedOnLockOtherWriter = "secure_setup.access_removed_on_lock_other_writer";
 
     /// <summary>
     /// Dry run finished: the plan is in the <see cref="H7bSecureRecordSetupHandler.PlanGateId"/> gate evidence and nothing
