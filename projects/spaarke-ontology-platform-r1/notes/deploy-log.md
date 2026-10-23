@@ -347,6 +347,24 @@ Criterion 89 (blank the writer client id, expect the writer-failure alert to fir
 - **Smoke:** PASS. Validate on Secure PAT-908068 (`5d46df87`) returns `valid:false` / `scope_matter_secured`; on Standard REAL-2026-123456.01 (`2444af6d`) it returns `valid:true`.
 - **Nightly sweep:** `[SIGNAL-EVALUATOR] heartbeat outcome=succeeded` at 02:30:29Z with policies=6 hits=142 written=0 closed=0, the same as 2026-10-21. Since 21:45:37Z the only 503xx trace is the heartbeat, with 0 Signals/Ontology/Gate exceptions.
 
+## 2026-10-23 — dev BFF `58ffc37da3` (R3) + D-185 live order on spaarkedev1 (worklist config, POL-MATTER-NOBUDGET v2, Console User)
+
+- **BFF:** R3 deployed master `58ffc37da3` at 11:18:12Z (owner approved in R3's session). Ontology read-back at about 11:20Z: `Sprk.Bff.Api.dll` ProductVersion `1.0.0+58ffc37da303a6b169b9b6b3d4d1ad6539dfc94b`, `/healthz` 200. It carries 158, 159, 161, 162, 163, 164 (#2303), 160 + #2314 (#2313) and R3 077.
+- **(1) Worklist config** (owner approved in this session): `Apply-WorklistGridConfiguration.ps1`.
+  - `-WhatIf`: one UPDATE of row `…5010`.
+  - Apply at 11:20:10Z: UPDATED, READ-BACK OK.
+  - `-Verify -RequireRow`: IN SYNC. Lane counts: decide 56, do 84, closedToday 4, suppressed 0, closedEarlier 8.
+- **(2) POL-MATTER-NOBUDGET v2** (D-186): `Apply-DoLanePolicies.ps1 -DefinitionPath config/know-promotion.policies.json`, run 11:20:38Z.
+  - Created v2 `…6312` (plan `assign-task`; next steps `add-todo`, `assign-work`).
+  - Ended v1 `sprk_inforceto` 2026-10-22T00:00:00Z.
+  - Current version now points at v2. The enabled flag is unchanged (True).
+  - `-Verify -RequireRows`: all IN SYNC.
+- **(3) D-185 role change**: `RemovePrivilegeRole` on root-BU Spaarke Console User `51c924e2-bdbe-f111-a05b-3833c5e9614d`.
+  - Removed `prvReadsprk_Policy` (`eda1df58-…`, HTTP 204, 11:21:51Z) and `prvReadsprk_PolicyVersion` (`22640ee9-…`, HTTP 204, 11:21:53Z).
+  - Read-back: 21 → 19 privileges. Neither Read is left; `prvReadsprk_Signal` is kept.
+  - A first attempt at 11:21:18Z used the wrong payload (`PrivilegeId`). It was rejected with 0x80048d19, and the read-back confirmed nothing had changed. The working payload is `{"Privilege":{"@odata.type":"Microsoft.Dynamics.CRM.privilege","privilegeid":…}}`, as in `Remove-ConsoleSignalWriteAndDecisionRecordCreate.ps1:307`.
+  - Spaarke Basic User was not changed (see security-roles §19).
+
 ## 2026-10-23 — Spaarke Core User: AppendTo on `sprk_eventtype_ref` (D-110, task 159), spaarkedev1
 
 - 00:32:20Z, root role `75e1b627-…`: `prvAppendTosprk_EventType_Ref` at Global. Read-back 784 → 785, exact. Details in security-roles.md §18. uac-r2 told on #1355.
