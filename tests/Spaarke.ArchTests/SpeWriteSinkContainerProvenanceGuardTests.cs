@@ -755,7 +755,7 @@ public class SpeWriteSinkContainerProvenanceGuardTests
         new SinkSite("Services/DocumentCheckoutService.cs", "DeleteFileAsync", 2,
             Provenance.ServerDerivedRecord, "",
             "document.DriveId / document.ItemId off the authorized sprk_document row, verified by "
-            + "RecordContainerResolver.EnsureDocumentPointerContainerAsync before the delete",
+            + "RecordContainerResolver.VerifyDocumentPointerForDeleteAsync before the delete",
             "spaarke-SPA-external-access-platform-r3 task 032 (FR-26): the same delete as occurrence #1 under the "
             + "VerifiedFileFirstKeepRowOnFailure policy (DeleteFileOrRefuseAsync), used by the external delete-own "
             + "route. The pointer is read off the row the caller was authorized against (creator stamp + Read on "

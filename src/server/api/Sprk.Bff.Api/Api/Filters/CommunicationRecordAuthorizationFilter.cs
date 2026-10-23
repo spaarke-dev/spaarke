@@ -147,6 +147,13 @@ public sealed class CommunicationRecordAuthorizationFilter : IEndpointFilter
     /// <summary>The proposal table's LOGICAL name — read app-only, as the queue feed does; its row is never returned.</summary>
     public const string EmailReviewLogEntity = "sprk_emailreviewlog";
 
+    /// <summary>
+    /// The proposal's communication: a caller sees or applies a proposal only when they can see this message
+    /// (<c>CanSeeCommunicationAsync</c>), so an app-only generic writer never writes it (#2253 fix round 4,
+    /// <c>InheritedAccessPermission.AccessColumns</c>).
+    /// </summary>
+    internal const string ProposalCommunicationColumn = "sprk_communication";
+
     /// <summary>Create on <c>sprk_event</c>. Schema name <c>sprk_Event</c>, so the privilege is not all lower case.</summary>
     public const string CreateEventPrivilege = "prvCreatesprk_Event";
 
@@ -835,10 +842,10 @@ public sealed class CommunicationRecordAuthorizationFilter : IEndpointFilter
                 var row = await Required<IGenericEntityService>().RetrieveAsync(
                     EmailReviewLogEntity,
                     reviewLogId,
-                    new[] { "sprk_communication", "sprk_targetentity", "sprk_targetrecordid" },
+                    new[] { ProposalCommunicationColumn, "sprk_targetentity", "sprk_targetrecordid" },
                     Ct);
 
-                var communication = row.GetAttributeValue<EntityReference>("sprk_communication");
+                var communication = row.GetAttributeValue<EntityReference>(ProposalCommunicationColumn);
                 if (communication is null || communication.Id == Guid.Empty)
                     return false;
 

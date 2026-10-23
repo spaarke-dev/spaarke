@@ -53,3 +53,13 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | Triage pending (UAC-r2). The code path is live through Office matter quick-create; it is not reachable on dev (0 rules target those columns, 2026-10-21) and needs an admin-authored rule |
 | **Owner task** | UAC-r2 triage. The Repair half is fixed in 016 (its own never-map set). If accepted, the fix is the matter's `MappingProtectedColumns` in `RecordTableRules`, which changes live Office behaviour to skip-and-warn and needs condition (b) |
 | **Failure** | `ProtectedFromMapping` protects `sprk_issecure` / `sprk_accessinheritance` only for project and work assignment. The matter's registry set lacks `sprk_issecure`, `sprk_accesspermission`, `sprk_accessinheritance` and `sprk_securitybu`, so a mapping rule decides them, not the BFF (task 150) |
+
+## DI-006 — Step-9 server binds are not de-duplicated case-insensitively for system-principal items
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-10-22, UAC-r2 condition (b) review of task 018a (K-c; existed before 018a) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2238 |
+| **Class** | K: no caller sends a case variant today |
+| **Owner task** | 018b (optional; criterion added), else a follow-up |
+| **Failure** | Step 2 is skipped for system-principal items, so a case-variant `ownerid@odata.bind`, creator-person bind or `sprk_issecure` would sit beside the server's own key. The fix is the K3 approach |

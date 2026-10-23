@@ -151,3 +151,108 @@ seam tests (re-checked 27bac15a42: no objection, 2026-10-21).
 - **Rejected:** option 2 (matching security profiles); it adds a comparison and gains nothing. Option 3 (Repair never
   maps) is the fallback if 033 slips past 052's need date.
 - **Safety until 033:** nothing calls Repair (`RecordRepairReachabilityTests`); 052 is hard-blocked on 033.
+
+## 2026-10-21 — Task 018 split, and the Office fill-only and fixture rulings
+
+The 018 implementer stopped before writing code (the budget, plus live changes beyond the brief). The main session decided:
+
+1. **Office mapping becomes fill-only (option a).** The spec covers this: Q6 (fill-only, caller wins; FR-02), with Q10 putting Office in scope. NFR-07 holds Office's **error codes** fixed, not its mapping semantics.
+   - Four Office contract assertions pin the legacy overwrite and its warnings: `Post_Matter_WhenMappingBlanksTheName_KeepsTheRequestedName`, the Project equivalent, `…WritesANonMatterTypeValue_KeepsTheRequestedType`, and `…AndNoTypeWasRequested_RemovesIt`. They are rewritten to the fill-only outcome. Each change is listed in the 018 notes.
+   - Release note: a mapping rule no longer replaces a value the user entered in Office quick-create.
+   - Option b (a legacy overwrite mode) is rejected: it would mean two mapping semantics, contrary to FR-02.
+2. **The contract fixtures follow the new write.** The service writes one Web API dictionary through `IFieldMappingDataverseService.UpdateRecordFieldsAsync` and retries on 412. The Office contract tests may capture that write and read their assertions from it; a fixture helper may view the dictionary as typed values. What each test asserts (the values written, the codes, the responses) stays the same. Assertions about the mechanism (`CreateAsync` `Times.Once`, `SetupSequence` duplicate-key retries) are re-expressed against the new write, and each is listed in the notes.
+3. **Further live changes go to UAC-r2 for condition (b)** before 018b:
+   - the Assigned To contact named in a request now gets an AppendTo check;
+   - a Matter create with no bearer token now gets 500 `caller_rights_unverifiable`;
+   - the matter/project post-create order gains the I-1 re-stamp and I-16, and the membership event moves from `OfficeEndpoints.cs:1858` into the service.
+4. **018 runs in three phases (three PRs), with one POML:**
+   - **018a:** service prerequisites, no live change (K1, K3, the K-3 reference drop-with-warning path, the K-7 post-mapping default hook).
+   - **018b:** the Matter/Project adapter, after item 3.
+   - **018c:** delete the Office core and re-point or retire the nine test files.
+   - The Invoice leg waits for ebilling-r1; it uses nothing from `OfficeRecordCreationService`.
+
+## 2026-10-21 — The Office Invoice quick-create leg is not moved (ebilling-r1, owner decision L)
+
+ebilling-r1 says the owner decided (decision L, model §4/§9) that invoices are created only by submission (FR-17, FR-20).
+- ebilling task 096 deletes the Office Invoice quick-create leg (`QuickCreateRequest.cs:180`) and the Invoice save target (`OfficeDocumentPersistence.cs:47`). It ships one release after word-add-in-r1's add-in release, because cached add-in clients can still call those legs.
+- Task 018 therefore moves only Matter and Project. It leaves the Invoice leg exactly as it is, apart from a marker comment, and adds no `RecordCreationService` path for `sprk_invoice` from Office.
+- The 018 Invoice criterion is withdrawn.
+- The #1911 reconcile still adds the invoice-family `PreWriteRule` for `sprk_invoice` / `sprk_billingevent`, for the submission path.
+
+## 2026-10-21 — UAC-r2 condition (b) answers for 018b
+
+1. **Assigned To contact: refuse** when the caller lacks AppendTo on it, checked as the caller. Naming the contact grants it an uncapped Collaborate (ADR-034 A4). Dropping it with a warning would silently under-grant (NFR-03). The refusal names `assignedTo` and never reads as "matter not found". It is tested with an unreadable contact and a readable one.
+2. **No bearer token:** accept the 500 `caller_rights_unverifiable` refusal (fail closed).
+3. **Post-create order: OK, on three conditions, each tested:**
+   - (i) the membership event fires exactly once, and the endpoint publish is removed;
+   - (ii) a Project under a secure matter is owned by the Secure Record Owners team and is itself secure, with Access Permission as a floor and the search index following the owner;
+   - (iii) a table-driven refusal map keeps Office's status for every service code; OwnerUnresolved stays 403, and an unmapped new code fails the test.
+
+These are in the 018 POML.
+
+## 2026-10-22 — 018a: an optional reference whose check cannot complete is dropped, not refused
+
+When a request names an optional reference lookup (`ReferenceLookupColumns`: the registry-listed matter type, practice area and project type) and the caller check for it cannot complete, the value is **dropped with `record_creation.reference_value_dropped`**, and the create proceeds without it. This deviates from NFR-01's wording ("every caller check refuses on error"). It is accepted because:
+- the value is never written, and step 5 re-checks everything that remains;
+- it matches live Office behaviour (`OfficeRecordCreationService.cs:1346-1353`, which creates without the reference and warns);
+- it applies only to caller-owned optional references, never to a filing lookup, the for-person column, a protected column, or an access-conferring column (018a fix round F4-1: these are rejected by the registry allow-list).
+
+Raised by the 018a adversarial review (K-5). Cite this in the 018 PR and in UAC-r2's condition (b) review.
+
+## 2026-10-22 — 018b-1 inventory: answers to G1–G7 (main session)
+
+The 018b-1 inventory (`notes/task-018-notes.md`, "018b-1") left seven items open. The answers:
+
+- **G1, "No matter type was supplied":** keep the warning. The service adds `RecordCreationOutcome.WrittenColumns`, the column names of the step-11 item. The adapter warns when `sprk_mattertype` is not among them and no `reference_value_dropped` already names it.
+  - §11: it overlaps with no existing outcome member (`Warnings` names only drops). Reading back costs an extra app-only read and a race. Without it, the four pinned contract tests and the user's prompt to set the type are lost.
+- **G2, no token vs no Dataverse user:** the service sets the WhoAmI failure as `ClientFailure` on the `PrincipalUnresolved` refusal. It adds no type and changes no code.
+  - Office maps `UserContextRequired`, `OboNotConfigured` and `OboExchangeFailed` to 500 `caller_rights_unverifiable`, and `AccessDenied` to 403 `owner_unresolved`. An absent or unknown failure fails closed to 500 `caller_rights_unverifiable`.
+- **G3:** keep the endpoint-resolved systemuser id as the adapter's input precondition (403 `owner_unresolved`). It is an input the maker's-contact default needs, not an authorization check. The service's WhoAmI stays the identity check.
+- **G4, `secure_source_filing_mismatch`:** with a secure source, only the derived pair is written; this holds by construction. A profile rule aimed at the pair is skipped with `mapping_rule_skipped`, and the project is filed under the derived pair, into isolation. One test pins this.
+  - The 403 becomes a 201 in a misconfigured-profile case. Because this changes a refusal code on a live path, **it is sent to UAC-r2 under condition (b)**. The swap may build on it, but the 018b PR does not merge without UAC-r2's concurrence.
+- **G5:** the service names the refusing lookup on a `NotFoundOrDenied` step-5 refusal (`RefusedColumn`), so Office can map the pair's record to `caller_cannot_file_under_parent` and the Assigned To contact to its own `assignedTo` code (pass 2). This is done with G1 and G2 in pass 018b-1s, before the swap. Never parse `Detail`.
+- **G6, reference-drop wording:** sign off. NFR-07 pins error codes and response shape, not warning text. The assertions take 018a's K-3 text. Release note: Office warning texts follow the service.
+- **G7, an unavailable mapping source:** sign off. FR-04 says a source the caller can't read gives no mapping and a warning, so Default rules no longer apply in that case. This happens only on a read fault, because `QuickCreateSourceAccessFilter` already refuses an unreadable source. Release note.
+
+## 2026-10-22 — G4: UAC-r2 concurs with option (a), on three conditions (condition (b))
+
+UAC-r2 accepts that with a secure source, only the derived pair is written, held by construction. The old 403 existed so a mapped pair could never file a secure-sourced record under a different parent. Fill-only mapping cannot write a pair, so that outcome is impossible. Isolation is unchanged: the Secure team owner and `sprk_issecure` through the step-6 plan, and the empty or unreadable flag is still refused with `record_owner_parent_undetermined`.
+
+Conditions, each tested in 018b and checked in UAC-r2's condition (b) review:
+
+1. **The derived pair also wins over the client.** Under a secure source, a regarding pair in the Office request body that differs from the derived pair is **refused with 403 `secure_source_filing_mismatch`**, and nothing is written. A client pair equal to the derived pair gives 201.
+2. **The skipped rule is visible.** The pair rule's `mapping_rule_skipped` reaches the Office response warnings, naming the rule or its columns.
+3. **Must-not-fire controls:**
+   - a secure source with no pair rule gives 201, secure, and no warning;
+   - a non-secure source with a pair rule keeps the non-secure behaviour (skipped with the same warning under fill-only), and the test states it.
+
+There is also the base test: a secure source with a pair rule gives 201, under the derived pair, secure, with the warning. Cite this entry in the 018b PR body.
+
+## 2026-10-22 — G4 condition 1 is satisfied by the contract's shape (no regarding member), and pinned (UAC-r2)
+
+`QuickCreateRequest` has no regarding member, and System.Text.Json drops unknown properties. A client therefore cannot send a regarding pair to Office quick-create, and the adapter only ever writes the derived pair. The condition-1 403 (`secure_source_filing_mismatch` for a differing client pair) is unreachable. UAC-r2 agreed: add no fields just to refuse them, and add no 400 for unknown members.
+
+It is pinned by three tests:
+- a body carrying extra regarding properties under a secure source gets 201, under the derived pair, and is secure;
+- the same body under a non-secure source gets 201, under the derived pair;
+- a reflection test over `QuickCreateRequest`'s public properties and JSON names fails on any member containing "regarding" (case-insensitive), with the message "a regarding member reintroduces G4 condition 1: refuse a differing pair under a secure source with 403 secure_source_filing_mismatch".
+
+## 2026-10-22 — 018b-2: undetermined-flag wording; #2124 on the Repair path
+
+- **The undetermined secure flag keeps its code, and the guidance changes.** An Office Project from a matter whose `sprk_issecure` is empty, or cannot be read, is refused with 403 `record_owner_parent_undetermined`, and nothing is written. The refusal's detail is now the step-6 plan's: it names the cause (no flag value, or the read failed). It no longer adds the old core's "Try again" or "Ask an administrator" guidance.
+  - Accepted under NFR-07, which pins codes, not text, and consistent with G6.
+  - Release note: Office refusal texts follow the service.
+- **#2124 is fixed on the create path and still open on Repair.**
+  - Create-time mapping passes the table's Money attributes, so a Default rule into a Money column writes a `Money`.
+  - Repair (SDK, system principal) passes none and would write a decimal. It is dormant: Repair has no live caller until 052, and 052 is blocked on 033, which carries the app-only metadata reader the fix needs.
+  - The 052 POML now has this as an acceptance criterion, and the full analysis is a comment on #2124.
+
+## 2026-10-22 — UAC-r2 #2253: create-time mapping asks the refusal as `WriteIdentity.AppOnly`
+
+UAC-r2 PR #2253 (#2251) adds an explicit write identity to `InheritedAccessPermission.RefuseAppOnlyWrite`, with the values `AppOnly` and `Caller`.
+
+**Create-time mapping takes `WriteIdentity.AppOnly`.** This covers `RecordCreationService.Mapping.cs`, `DropAppOnlyRefusedRules`, and applies even when the create's principal is a caller. UAC-r2 agreed.
+- The mapped values are written by the service's single app-only create (step 11), so no Dataverse privilege or field security stands behind them.
+- Create-time mapping therefore also drops the sets #2253 adds: access tables, secure-root columns, and access-deciding columns on contact, organisation, systemuser and business unit. That matches #2220's create-side refusal.
+- The `sprk_document` + `sprk_accesspermission` create exemption stays.
+- Whichever of #2253 and 018b merges second adds the parameter, plus a must-fire test: an access-deciding contact column is dropped at create.

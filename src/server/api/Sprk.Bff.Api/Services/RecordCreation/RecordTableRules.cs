@@ -66,8 +66,10 @@ internal static class RecordTableRules
     /// The secure flag and the access columns of a secure root (matter, project): the BFF's own, written only through the
     /// secure endpoints and the Secure Record setup, never by a field-mapping rule (#2220). Compile-time constants only, so
     /// declaring them here cannot create a static-initialisation cycle. Declared before <see cref="All"/>.
+    /// <c>internal</c> (#2251): the update side reads the same set (<c>InheritedAccessPermission.SecureRootColumns</c>,
+    /// refused to the app-only generic writers on every root), so create and update cannot drift.
     /// </summary>
-    private static readonly string[] SecureRootAccessColumns =
+    internal static readonly IReadOnlyList<string> SecureRootAccessColumns =
     [
         SecurableEntityRegistry.SecureFlagAttribute,
         InheritedAccessPermission.Column,
@@ -104,6 +106,9 @@ internal static class RecordTableRules
             ],
             // Office RecordCreationService.ApplyBusinessUnitDefaultsAsync fills sprk_searchindexname / sprk_ai_search_index.
             SearchIndexed = true,
+            // Task 018a (F4-1): Office RecordCreationService.ApplyReferenceAsync — the matter type and practice area are
+            // dropped with a warning when they cannot be used, never refused.
+            OptionalReferenceLookups = Columns("sprk_mattertype", "sprk_practicearea"),
         },
         new RecordTableRule
         {
@@ -128,6 +133,9 @@ internal static class RecordTableRules
                 ChatCallerIsTheForPerson("sprk_assignedtointernal"),
             ],
             SearchIndexed = true,
+            // Task 018a (F4-1): Office RecordCreationService.ApplyReferenceAsync — the project type (live column name
+            // sprk_projecttype_ref, the lookup carries the table's name).
+            OptionalReferenceLookups = Columns("sprk_projecttype_ref"),
         },
         new RecordTableRule
         {
@@ -401,6 +409,16 @@ internal sealed record RecordTableRule
 
     /// <summary>Whether the owning business unit's search-index default is filled on create (FR-10, I-5).</summary>
     public bool SearchIndexed { get; init; }
+
+    /// <summary>
+    /// Task 018a (F4-1): the lookups a create request may mark as optional REFERENCES
+    /// (<see cref="RecordCreationRequest.ReferenceLookupColumns"/>) — dropped with a warning when the caller may not use
+    /// them, never refused. Exactly what the Office quick-create drops today (matter type, practice area, project type).
+    /// Never the "for" person, a column field mapping may not write, the regarding pair, a filing lookup, or an
+    /// access-conferring or Assigned* column (<see cref="RecordCreationService.IsNeverAReference"/>; asserted by the
+    /// registry tests). Empty when the table has none.
+    /// </summary>
+    public IReadOnlySet<string> OptionalReferenceLookups { get; init; } = NoColumns;
 
     /// <summary>Why field mapping is NOT applied to this table; <c>null</c> when it is.</summary>
     public NamedRule? MappingExclusion { get; init; }

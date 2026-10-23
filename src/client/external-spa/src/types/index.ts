@@ -88,6 +88,8 @@ export interface Document {
   createdon?: string;
   /** Creator display name */
   createdByName?: string;
+  /** False when the document has no file (R3 ISS-011, #1886): Download and Versions are hidden. Absent = true. */
+  hasFile?: boolean;
 }
 
 /** API error with status code and message */

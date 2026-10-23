@@ -822,6 +822,23 @@ public sealed class RecordRepairModeTests
             .Should().Be(InheritedAccessPermission.AppOnlyDocumentLinkWriteReasonCode);
     }
 
+    [Fact]
+    public async Task ADocumentsAccessPermission_IsStillRefusedByRepair_TheCreateTimeFillOnlyExemptionDoesNotLeak()
+    {
+        // 018b-K2 (UAC-r2 condition 2): create-time mapping fills a document's Access Permission (D7: no own narrowing to
+        // lower on a create). Repair runs on an EXISTING document, where a fill could lower its narrowing: refused through
+        // DocumentServerOwnedRefusal (must not fire for the create exemption).
+        _world.MatterLinksTo();
+        _world.Map("sprk_matter", "sprk_document", RepairWorld.DefaultText("sprk_accesspermission", "100000001", 1));
+        var id = _world.DocumentUnderTheMatter(indexName: "kept-index", index: RepairWorld.ChildIndex);
+
+        var outcome = await _world.RepairAsync("sprk_document", id);
+
+        _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain("sprk_accesspermission");
+        Field(outcome, RecordRepairPart.Mapping, "sprk_accesspermission").ReasonCode
+            .Should().Be(InheritedAccessPermission.AppOnlyDocumentWriteReasonCode);
+    }
+
     [Theory]
     [InlineData("sprk_event")]
     [InlineData("sprk_todo")]
@@ -851,6 +868,42 @@ public sealed class RecordRepairModeTests
     }
 
     // =====================================================================================
+    // #2247: Repair decides the owner itself; a mapping rule never writes the owner or the creator
+    // =====================================================================================
+
+    [Fact]
+    public async Task AMappingRuleTargetingTheOwnerOrTheCreator_IsSkipped_WhileRepairsOwnOwnerDecisionIsWritten()
+    {
+        // A user-owned event under the ordinary matter: Repair's owner step re-owns it to the matter's team (its OWN decision,
+        // which the write does not ask the app-only refusal over). The profile also targets the owner and the creator: the
+        // per-rule app-only refusal skips each of those rules, so none reaches the write.
+        var matter = _world.Directory.Row("sprk_matter", RepairWorld.Matter);
+        matter["sprk_createdbyperson"] = new EntityReference("systemuser", RepairWorld.AppUser);
+        matter["sprk_createdbycontact"] = new EntityReference("contact", Guid.Parse("22470000-0000-0000-0000-0000000c0c01"));
+        _world.Map("sprk_matter", "sprk_event",
+            RepairWorld.Expression(CreateTimeFieldMapping.MappingTypeTemplate, "{sprk_clientname}", "sprk_clientname", 1),
+            RepairWorld.CopyLookup("ownerid", "ownerid", 2),
+            RepairWorld.CopyLookup("sprk_createdbyperson", "sprk_createdbyperson", 3),
+            RepairWorld.CopyLookup("sprk_createdbycontact", "sprk_createdbycontact", 4));
+        var id = _world.EventUnderTheMatter(clientName: null, practiceArea: "Tax", priority: "Urgent");
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        outcome.Status.Should().Be(RecordRepairStatus.Repaired);
+        var write = _world.Writes.Should().ContainSingle().Subject;
+        write.Fields["ownerid"].Should().Be(new EntityReference("team", Directory.ChildTeam), "Repair's own owner decision is written");
+        write.Fields["sprk_clientname"].Should().Be(RepairWorld.MatterClient, "the other rules still map");
+        write.Fields.Keys.Should().NotContain(["sprk_createdbyperson", "sprk_createdbycontact"]);
+        Field(outcome, RecordRepairPart.Owner, "ownerid").State.Should().Be(RecordRepairFieldState.Repaired);
+        Field(outcome, RecordRepairPart.Mapping, "ownerid").ReasonCode
+            .Should().Be(InheritedAccessPermission.AppOnlyOwnerWriteReasonCode, "the per-rule app-only refusal skips it");
+        Field(outcome, RecordRepairPart.Mapping, "sprk_createdbyperson").ReasonCode
+            .Should().Be(InheritedAccessPermission.AppOnlyCreatorWriteReasonCode);
+        Field(outcome, RecordRepairPart.Mapping, "sprk_createdbycontact").ReasonCode
+            .Should().Be(InheritedAccessPermission.AppOnlyCreatorWriteReasonCode);
+    }
+
+    // =====================================================================================
     // UAC-r2 condition (b) F1-1: columns that decide access or filing are never mapped, on any table
     // =====================================================================================
 
@@ -864,7 +917,10 @@ public sealed class RecordRepairModeTests
 
         _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain("sprk_issecure",
             "a blank flag reads as secure; a mapped false would expose the matter's children");
-        Field(outcome, RecordRepairPart.Mapping, "sprk_issecure").ReasonCode.Should().Be(RecordRepairReason.MappedValueConfersAccess);
+        // #2251: a secure root's secure flag is refused to every app-only generic writer, so the per-rule app-only refusal
+        // skips it first and its code is the reason reported (Repair's own MappedValueConfersAccess still holds the rest).
+        Field(outcome, RecordRepairPart.Mapping, "sprk_issecure").ReasonCode
+            .Should().Be(InheritedAccessPermission.AppOnlySecureRootWriteReasonCode);
         _world.Directory.Row("sprk_matter", id).Attributes.Should().NotContainKey("sprk_issecure");
     }
 

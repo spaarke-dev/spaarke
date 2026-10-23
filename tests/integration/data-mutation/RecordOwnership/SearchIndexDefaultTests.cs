@@ -119,6 +119,24 @@ public sealed class SearchIndexDefaultTests
     }
 
     // =====================================================================================
+    // An explicit null bind → unset, filled under ONE key (UAC-r2's review of 015, K3; task 018a)
+    // =====================================================================================
+
+    [Theory]
+    [InlineData("sprk_ai_search_index@odata.bind", "a lower-case spelling of the bind key")]
+    [InlineData(LookupBind, "the canonical spelling of the bind key")]
+    public async Task AnExplicitNullBind_IsUnset_AndIsFilledUnderTheCanonicalKeyOnly(string nullKey, string because)
+    {
+        var fields = await CreatedFieldsAsync(CreateWorld.Mapped("sprk_matter",
+            new Dictionary<string, object?> { ["sprk_mattername"] = "Acme v. Widget", [nullKey] = null }));
+
+        fields.Keys.Where(k => string.Equals(k, LookupBind, StringComparison.OrdinalIgnoreCase))
+            .Should().ContainSingle($"{because}: the body never carries two keys that differ only in case")
+            .Which.Should().Be(LookupBind, "the default is written under the canonical key");
+        Text(fields, LookupBind).Should().Be($"/sprk_aisearchindexes({GeneralIndex:D})", "an explicit null is unset (fill-only)");
+    }
+
+    // =====================================================================================
     // Not search-indexed → untouched; unreadable → nothing filled, said so, created
     // =====================================================================================
 

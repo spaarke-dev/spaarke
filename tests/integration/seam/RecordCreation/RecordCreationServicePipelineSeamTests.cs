@@ -187,6 +187,33 @@ public sealed partial class RecordCreationServicePipelineSeamTests
         _publisher.Published.Should().ContainSingle().Which.EntityRecordId.Should().Be(id);
     }
 
+    /// <summary>
+    /// Task 076 (word-add-in-r1 code review W3), re-pointed from the deleted Office core by field mapping task 018c: the row
+    /// exists once the create commits, so a number read-back cut short by a cancelled request must not turn the committed
+    /// create into an error — and, having read nothing, it says nothing about the number.
+    /// </summary>
+    [Fact]
+    public async Task CreateAsync_AMatter_WhenTheRequestIsCancelledAfterTheCreateCommits_StillSucceeds_WithoutANumberWarning()
+    {
+        using var cts = new CancellationTokenSource();
+        _readBack
+            .Setup(e => e.RetrieveAsync("sprk_matter", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Callback(() =>
+            {
+                _journal.Add("readback");
+                cts.Cancel(); // the client goes away just after the row is written
+            })
+            .ThrowsAsync(new OperationCanceledException(cts.Token));
+
+        var outcome = await Service().CreateAsync(
+            await MappedRequest("sprk_matter", new { sprk_mattername = "Cancelled late" }), AsCaller(), cts.Token);
+
+        outcome.Succeeded.Should().BeTrue("the row exists; a cancelled confirmation read must not hide it behind an error");
+        outcome.CreatedId.Should().Be(_creates.Should().ContainSingle().Subject.Id);
+        outcome.Warnings.Should().NotContain(w => w.Contains("without a number"),
+            "a read that did not complete says nothing about the number");
+    }
+
     // =====================================================================================
     // Principals (FR-07)
     // =====================================================================================

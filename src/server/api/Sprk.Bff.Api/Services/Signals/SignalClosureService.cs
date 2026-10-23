@@ -277,6 +277,7 @@ public sealed class SignalClosureService
     /// deleted). One read serves both deleted-policy steps of a run, the close and the redaction (fix round 4).</summary>
     internal async Task<ExistingPolicyCodes> ExistingPolicyCodesAsync(CancellationToken ct)
     {
+        // Keep this query UNFILTERED by domain: billing (ebilling-r1) depends on it seeing every policy code, and ebilling pins that in a test.
         var query = new QueryExpression("sprk_policy")
         {
             ColumnSet = new ColumnSet("sprk_policycode", "createdon"),

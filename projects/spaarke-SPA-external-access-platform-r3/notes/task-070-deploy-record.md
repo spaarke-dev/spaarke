@@ -26,3 +26,12 @@ Owner direction 2026-10-20: "070-071-072 - yes proceed".
 | Open a record (detail modal) | pending | pending |
 | Submit one wizard | pending | pending |
 | Send one message; the bell shows it | pending | pending |
+
+## SPA redeploy 2026-10-21 (#2166 fix + UAC #2078/#2122 SPA)
+
+- Owner: "yes approved--2 reviews and SPA deploy" (2026-10-21). UAC agreed its #2078/#2122 SPA changes go live with it (dev BFF 4f5f22694 already enforces them, `writeAccessPerRecord: true`).
+- Fix: PR #2175 (merge `3531ed65e`, 02:58:58Z). Two top-tier adversarial reviews: no defect on a real path; follow-ups applied (deploy-workflow guard: `VITE_MSAL_TENANT_ID` must be the authority's tenant). SPA suite: every file passes run alone; the 4 failures in one full parallel run pass alone (known load flakiness). tsc clean.
+- Deploy: `deploy-external-spa.yml` run `39536100531`, ref master `3531ed65e`, environment dev, success 03:02:16Z. Live: `/` 200, `/auth-callback.html` 200, `/assets/app.js` contains `accountFilter` and `writeAccessPerRecord`.
+- Rollback: tag `external-spa-dev-rollback-28274e04e` → `gh workflow run deploy-external-spa.yml --ref external-spa-dev-rollback-28274e04e -f environment=dev`.
+- Owner smoke (pending): partner sign-in (normal window); the old failing path (company account → "not set up" → "choose a different sign-in" → Partner); Ralph Dewey workspace; UAC: on a ViewOnly project (the admin has 22; any but `b12496d1…`) upload / new to-do / new event hidden or disabled and no 403 in the network panel; on FullAccess `b12496d1…` they show; no new `useAccessLevel` console errors.
+

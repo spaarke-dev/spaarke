@@ -84,6 +84,11 @@ export interface ODataDocument extends CreatorStamps {
   createdon?: string | null;
   /** Display name of the record creator */
   'createdby@OData.Community.Display.V1.FormattedValue'?: string | null;
+  /**
+   * Whether the document has a file Download and Versions can serve (R3 ISS-011, #1886). `false` = a listed document
+   * with no file: those actions are hidden. Absent (an older BFF) is treated as `true`.
+   */
+  hasFile?: boolean;
 }
 
 /**

@@ -604,7 +604,7 @@ For an external caller, refuse a configuration whose target entity is in the `sp
 
 | Field | Value |
 |---|---|
-| **Status** | Open — owner decision needed |
+| **Status** | Open — D7 accepted by the owner (2026-10-20); fix = uac-r2 task 188 (T7 predicate) + word-add-in task 130 (T8 writer gaps); deploy via R3 |
 | **Urgency** | next-round |
 | **Filed** | 2026-10-20 |
 | **Source** | Task 078 review pass 1 (F1) plus a code map; not reproduced live |
@@ -705,7 +705,7 @@ A customer employee whose Entra user has no Email gets a token with no `email` c
 
 | Field | Value |
 |---|---|
-| **Status** | Open (fix in R3, auth-tagged) |
+| **Status** | Fixed: PR #2175 (`3531ed65e`), dev SPA run 39536100531 (2026-10-21); owner smoke pending |
 | **Urgency** | before 072 |
 | **Filed** | 2026-10-20 |
 | **Source** | Owner live check on dev SPA `28274e04e` (ralph.schroeder@spaarke.com) |
@@ -720,6 +720,28 @@ MSAL's account list is shared across clients in the tab. The CIAM plane has no a
 **Estimated effort**: under 1 day.
 **Blockers**: none. Workaround: new InPrivate window.
 **Related**: task 058, task 074, task 070.
+
+### ISS-019 — A licensed user's first sign-in shows a profile form before the account link
+
+| Field | Value |
+|---|---|
+| **Status** | Open (R4 backlog) |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-21 |
+| **Source** | Owner live check on dev (Ralph Dewey, licensed user, Dewey Cheatham home account) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2192 |
+
+**Description**
+
+1. In a fresh browser the silent link fails (AADSTS50058, no Spaarke session), so the profile form shows.
+2. Continue answers 403 `licensed_user_link_required`, and only then does "Link your Spaarke account" appear.
+3. The first link popup failed on an Entra page ("not in the Spaarke tenant"); the second worked. The cause is not captured.
+
+**Suggested fix**: tell the gate before the form that the token email belongs to a licensed user (registration already discloses it to the same caller), so the form is skipped. Review the 60 s popup timeout for first-time guest sign-ins. uac-r2 / auth review.
+
+**Estimated effort**: 1 day.
+**Blockers**: none.
+**Related**: task 074, ISS-017 (#2155).
 
 ---
 

@@ -10,14 +10,14 @@ namespace Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 /// <summary>
 /// The pure half of create-time Field Mapping Framework application: given a profile's rules and the source record
 /// already read, write each rule's value onto the new record's payload. No I/O — the calling creation service
-/// (today <see cref="Sprk.Bff.Api.Services.Office.OfficeRecordCreationService"/>) owns the one profile read and the one
+/// (<see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationService"/>, step 3) owns the one profile read and the one
 /// source read.
 /// </summary>
 /// <remarks>
-/// <para>Extracted from <see cref="Sprk.Bff.Api.Services.Office.OfficeRecordCreationService"/> (task 030 Step 9.5 review, CLAUDE.md §11.5): the rule
-/// engine changes when the Field Mapping Framework changes, the creation service changes when an entity's creation
-/// rules change — two reasons to change, so two files. Internal static, not a DI registration (ADR-010), and reusable
-/// as-is by task 031 (Project).</para>
+/// <para>Extracted from the Office creation core (task 030 Step 9.5 review, CLAUDE.md §11.5; that core was deleted by
+/// field mapping task 018c): the rule engine changes when the Field Mapping Framework changes, the creation service
+/// changes when an entity's creation rules change — two reasons to change, so two files. Internal static, not a DI
+/// registration (ADR-010).</para>
 ///
 /// <para><b>Semantics</b> mirror the client engine <c>FieldMappingService.applyFieldMappings</c>: rules in
 /// <c>ExecutionOrder</c>; Copy (scalar + lookup), Default (literal), Concat / Template (one <c>{field}</c> resolver);
@@ -27,12 +27,11 @@ namespace Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 /// Yes/No, dates ISO-8601 — the push path's <c>TransformValue</c> conventions); a null source value is skipped rather
 /// than copied as null (on a create that is the same outcome).</para>
 ///
-/// <para><b>Two entry points.</b> <see cref="Apply"/> overwrites and is the Office quick-create contract, unchanged
-/// (it still writes a mapped regarding pair, which Project-under-Matter creation relies on).
-/// <see cref="ApplyFillOnly"/> is the FR-02 path: a column the caller supplied is never overwritten (see
-/// <see cref="ApplyFillOnly"/> for the exact "not supplied" test), and a rule that targets the ADR-024 regarding pair or
-/// a resolver field is refused (FR-05(e), <see cref="RegardingPairAndResolverColumns"/>). Both write a typed value
-/// — never a string — into a non-text target (DI-001 / #2124).</para>
+/// <para><b>One entry point.</b> <see cref="ApplyFillOnly"/> is the FR-02 path: a column the caller supplied is never
+/// overwritten (see <see cref="ApplyFillOnly"/> for the exact "not supplied" test), and a rule that targets the ADR-024
+/// regarding pair or a resolver field is refused (FR-05(e), <see cref="RegardingPairAndResolverColumns"/>). It writes a
+/// typed value — never a string — into a non-text target (DI-001 / #2124). The overwrite entry point (<c>Apply</c>, the
+/// Office creation core's) went with that core (field mapping task 018c).</para>
 /// </remarks>
 internal static class CreateTimeFieldMapping
 {
@@ -97,29 +96,11 @@ internal static class CreateTimeFieldMapping
     }
 
     /// <summary>
-    /// Applies every rule, in <c>ExecutionOrder</c>, onto <paramref name="target"/>, overwriting whatever the target
-    /// already holds in a mapped column (the Office quick-create contract, which also still writes a mapped regarding pair).
-    /// A rule targeting one of <paramref name="protectedAttributes"/> is skipped with a warning. Never throws.
-    /// </summary>
-    /// <param name="source">The source record, or null when it could not be read (Copy/Concat/Template then skip
-    /// silently — the caller already recorded the single read-failure warning).</param>
-    /// <param name="moneyAttributes">Target columns the caller knows are currency columns, or null. The rule's
-    /// "Number" type cannot say Money (whole number, decimal and money are one type), and the SDK rejects a decimal in a
-    /// money column, so a Default / Concat / Template into a Number target listed here is written as a
-    /// <see cref="Money"/>.</param>
-    internal static void Apply(
-        IEnumerable<FieldMappingRuleEntity> rules,
-        Entity target,
-        Entity? source,
-        IReadOnlySet<string> protectedAttributes,
-        List<string> warnings,
-        ILogger logger,
-        IReadOnlySet<string>? moneyAttributes = null)
-        => ApplyAll(rules, target, source, protectedAttributes, warnings, logger, moneyAttributes, callerSupplied: null, written: null);
-
-    /// <summary>
-    /// The FR-02 fill-only entry point: like <see cref="Apply"/>, but a mapped value is written only to a column the
-    /// caller did not supply. <paramref name="target"/> is the caller's payload; what it holds when this method is
+    /// The FR-02 fill-only entry point: applies every rule, in <c>ExecutionOrder</c>, onto <paramref name="target"/>, but a
+    /// mapped value is written only to a column the caller did not supply. A faulting rule never escapes (it becomes a
+    /// warning); the supplied-column snapshot taken first is not guarded, which holds because every caller passes a plain
+    /// set. <paramref name="target"/> is the
+    /// caller's payload; what it holds when this method is
     /// entered is "supplied" (snapshotted once, so one rule's output never blocks another rule, and rules aimed at the
     /// same column keep their last-rule-wins order). "Not supplied" means exactly:
     /// <list type="bullet">
@@ -130,8 +111,14 @@ internal static class CreateTimeFieldMapping
     /// </list>
     /// A supplied column is skipped silently (an expected outcome, never a warning). The target-type test uses the
     /// rule's <c>TargetFieldType</c>. A rule targeting the regarding pair or a resolver field is refused with one warning
-    /// (FR-05(e)); protected targets are refused exactly as in <see cref="Apply"/>.
+    /// (FR-05(e)); a rule targeting one of <paramref name="protectedAttributes"/> is skipped with a warning.
     /// </summary>
+    /// <param name="source">The source record, or null when it could not be read (Copy/Concat/Template then skip
+    /// silently — the caller already recorded the single read-failure warning).</param>
+    /// <param name="moneyAttributes">Target columns the caller knows are currency columns, or null. The rule's
+    /// "Number" type cannot say Money (whole number, decimal and money are one type), and the SDK rejects a decimal in a
+    /// money column, so a Default / Concat / Template into a Number target listed here is written as a
+    /// <see cref="Money"/>.</param>
     /// <param name="mappedColumns">When given, every target column a rule WROTE is added to it (the rule's trimmed target
     /// field) — the explicit origin set the unified create carries from step 3 to its caller checks (task 014, FR-08): a
     /// column in it is "mapped", every other column of <paramref name="target"/> is the caller's. A supplied, guarded or
@@ -159,7 +146,7 @@ internal static class CreateTimeFieldMapping
         List<string> warnings,
         ILogger logger,
         IReadOnlySet<string>? moneyAttributes,
-        IReadOnlySet<string>? callerSupplied,
+        IReadOnlySet<string> callerSupplied,
         ISet<string>? written)
     {
         foreach (var rule in rules.OrderBy(r => r.ExecutionOrder))
@@ -239,7 +226,7 @@ internal static class CreateTimeFieldMapping
         IReadOnlySet<string> protectedAttributes,
         List<string> warnings,
         IReadOnlySet<string>? moneyAttributes,
-        IReadOnlySet<string>? callerSupplied,
+        IReadOnlySet<string> callerSupplied,
         ISet<string>? written)
     {
         // Rule fields come off the Dataverse wire through a mapper, so `required` is not a runtime guarantee here.
@@ -250,10 +237,8 @@ internal static class CreateTimeFieldMapping
             return;
         }
 
-        // Fill-only path only. The legacy overwrite path (Office quick-create) keeps writing a mapped pair: a Project filed
-        // under a Matter gets its ADR-024 pair from the Matter->Project profile (RecordCreationService, task 158), and the
-        // secure-root filing plan reads it. The unified service (task 014) takes the pair from the caller instead.
-        if (callerSupplied is not null && RegardingPairAndResolverColumns.Contains(targetField))
+        // The unified service (task 014) takes the pair from the caller; the Office adapter derives it before the create.
+        if (RegardingPairAndResolverColumns.Contains(targetField))
         {
             // FR-05(e) / ADR-024: the regarding pair and resolver fields are the caller's to set and the write path's to
             // check. One warning per refused rule, naming the rule and the target; refused even if the caller supplied it.
@@ -274,7 +259,7 @@ internal static class CreateTimeFieldMapping
             return;
         }
 
-        if (callerSupplied is not null && callerSupplied.Contains(targetField))
+        if (callerSupplied.Contains(targetField))
         {
             return; // fill-only: the caller's value wins — an expected outcome, no warning
         }

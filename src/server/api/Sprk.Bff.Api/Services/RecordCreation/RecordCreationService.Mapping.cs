@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse.FieldMapping;
@@ -59,13 +60,14 @@ internal sealed partial class RecordCreationService
     private const string DateBehaviourUnknown = "how the column stores a date could not be read";
     private const string CouldNotBeChecked = "it could not be checked";
     private const string NotPermitted = "you do not have permission to set it";
+    private const string NotUsable = "it was not found, or you do not have permission to use it";
 
     private static readonly IReadOnlyDictionary<string, JsonElement> NoMappedValues = new Dictionary<string, JsonElement>();
 
     private static readonly IReadOnlyDictionary<string, TargetAttribute> NoAttributes =
         new Dictionary<string, TargetAttribute>(StringComparer.OrdinalIgnoreCase);
 
-    private static readonly Regex LogicalNamePattern = new("^[a-z][a-z0-9_]*$", RegexOptions.CultureInvariant);
+    private static readonly Regex LogicalNamePattern = new(@"^[a-z][a-z0-9_]*\z", RegexOptions.CultureInvariant);
 
     /// <summary>
     /// What step 3 (or step 5) produced: the item the next steps read, and each mapped column's value as the create's item
@@ -175,7 +177,9 @@ internal sealed partial class RecordCreationService
     /// (step 2: the common server-owned columns, the table's own, its autonumber and the creator person), the registry's
     /// mapping-protected columns (<see cref="RecordTableRule.MappingProtectedColumns"/>), the access record and secure flag
     /// a work assignment or project create is refused for (<see cref="SecureRootFilingGate.PlanCreateAsync"/>), and the
-    /// lookups the server set (K-2: never filled by a mapped value the AppendTo check would then skip).
+    /// lookups the server set (K-2: never filled by a mapped value the AppendTo check would then skip), and the contact-plane
+    /// creator and requester (<c>sprk_createdbycontact</c>, <c>sprk_requestedby</c>, task 018b-K2). What an app-only write is
+    /// refused is dropped separately, by <see cref="DropAppOnlyRefusedRules"/>.
     /// <c>internal</c> (was private) so the secure-root parity test (#2220) reads the very set the service applies.
     /// </summary>
     internal static IReadOnlySet<string> ProtectedFromMapping(
@@ -187,6 +191,11 @@ internal sealed partial class RecordCreationService
         if (rule.AutonumberColumn is { } number)
             columns.Add(number);
         columns.Add(RecordCreatorPerson.Column);
+        // Task 018b-K2 (UAC-r2 condition (b)): the owner and the creator columns (#2247: the creator person, the contact-plane
+        // creator and the requester) are the server's alone. A rule that filled the contact ones app-only would give that
+        // contact creator or requester rights on the external plane. The sets are the app-only refusal's own, so they never drift.
+        columns.UnionWith(InheritedAccessPermission.OwnerColumns);
+        columns.UnionWith(InheritedAccessPermission.CreatorColumns);
         if (SecureRootInheritance.Inherits(table))
         {
             columns.Add(AccessInheritance.Column);
@@ -196,6 +205,48 @@ internal sealed partial class RecordCreationService
         if (serverSetLookupColumns is not null)
             columns.UnionWith(serverSetLookupColumns.Select(c => c.Trim()));
         return columns;
+    }
+
+    /// <summary>
+    /// Task 018b-K2: the one target <see cref="InheritedAccessPermission.RefuseAppOnlyWrite"/> refuses that create-time mapping
+    /// still fills: a document's Access Permission (<see cref="InheritedAccessPermission.Column"/>). UAC-r2 D7 decided it stays
+    /// fill-only at create (<c>RecordTableRules.cs</c>, the <c>sprk_document</c> entry, lines 195-201): on a CREATE a document has
+    /// no own narrowing for a mapped value to lower, so a fill is safe. The refusal guards UPDATE writers, which could lower an
+    /// existing narrowing.
+    /// </summary>
+    private static bool IsFillOnlyAtCreateExemption(string table, string target) =>
+        string.Equals(table.Trim(), ExternalDocumentNarrowing.DocumentTable, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(target.Trim(), InheritedAccessPermission.Column, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Task 018b-K2: drops each rule whose target <see cref="InheritedAccessPermission.RefuseAppOnlyWrite"/> refuses for
+    /// <paramref name="table"/> (mapping writes app-only, as the create's origin set, so it may write nothing that refusal
+    /// guards), with a <see cref="RecordCreationWarning.MappingRuleSkippedCode"/> warning that names the column and the
+    /// refusal code and no value. Keeps the refusal and this list from drifting apart. Never refuses the create (FR-08).
+    /// </summary>
+    private static List<FieldMappingRuleEntity> DropAppOnlyRefusedRules(
+        string table, List<FieldMappingRuleEntity> rules, List<RecordCreationWarning> warnings)
+    {
+        var kept = new List<FieldMappingRuleEntity>(rules.Count);
+        foreach (var rule in rules)
+        {
+            var target = rule.TargetField;
+            if (!string.IsNullOrWhiteSpace(target)
+                && !IsFillOnlyAtCreateExemption(table, target)
+                && InheritedAccessPermission.RefuseAppOnlyWrite(
+                    table, [target], InheritedAccessPermission.WriteIdentity.AppOnly) is { } refused)
+            {
+                var code = refused.RefusalCode ?? InheritedAccessPermission.AppOnlyDocumentWriteReasonCode;
+                warnings.Add(new RecordCreationWarning(RecordCreationWarning.MappingRuleSkippedCode, target,
+                    $"Field-mapping rule targeting \"{target}\" was skipped: that field is managed by the server and cannot be " +
+                    $"set by a field-mapping rule ({code})."));
+                continue;
+            }
+
+            kept.Add(rule);
+        }
+
+        return kept;
     }
 
     /// <summary>
@@ -252,6 +303,12 @@ internal sealed partial class RecordCreationService
                 $"Field-mapping profile \"{profile.Name}\" has no rules; nothing was applied."));
             return unmapped;
         }
+
+        // Task 018b-K2: a rule aimed at a column an app-only write is refused (InheritedAccessPermission.RefuseAppOnlyWrite) is
+        // dropped with a warning that names the column and the refusal code. Mapping never refuses (FR-08).
+        rules = DropAppOnlyRefusedRules(table, rules, warnings);
+        if (rules.Count == 0)
+            return unmapped;
 
         // FR-04: Read as the caller FIRST. Missing, denied, unmapped type, a failed probe or read: ONE outcome — nothing
         // mapped (not even a Default rule), one warning that names nothing.
@@ -353,7 +410,8 @@ internal sealed partial class RecordCreationService
     /// </summary>
     private static async Task<MappingStep> MapMergedAsync(
         IDataverseUserClient user, string table, DataverseWriteItemMapper.MappedItem caller,
-        IReadOnlyDictionary<string, JsonElement> values, List<RecordCreationWarning> warnings, CancellationToken ct)
+        IReadOnlyDictionary<string, JsonElement> values, List<RecordCreationWarning> warnings, CancellationToken ct,
+        IReadOnlySet<string>? defaultColumns = null)
     {
         var whole = await DataverseWriteItemMapper.MapAsync(user, table, MergedItem(caller, values.Keys, values), ct)
             .ConfigureAwait(false);
@@ -368,7 +426,7 @@ internal sealed partial class RecordCreationService
                 .ConfigureAwait(false);
             if (one.Item is null)
             {
-                warnings.Add(Dropped(column, one.ClientFailure is null ? CannotTakeValue : CouldNotBeChecked));
+                warnings.Add(Dropped(column, one.ClientFailure is null ? CannotTakeValue : CouldNotBeChecked, defaultColumns));
                 continue;
             }
 
@@ -385,7 +443,7 @@ internal sealed partial class RecordCreationService
 
         // Each mapped on its own but not together: none is written (which one cannot be told).
         foreach (var column in kept.Keys)
-            warnings.Add(Dropped(column, remapped.ClientFailure is null ? CannotTakeValue : CouldNotBeChecked));
+            warnings.Add(Dropped(column, remapped.ClientFailure is null ? CannotTakeValue : CouldNotBeChecked, defaultColumns));
         return MappingStep.Unmapped(caller);
     }
 
@@ -415,7 +473,8 @@ internal sealed partial class RecordCreationService
     private async Task<MappingStep> CheckMergedPayloadAsync(
         string table, IDataverseUserClient user, Guid me, DataverseWriteItemMapper.MappedItem callerItem,
         DataverseWriteItemMapper.MappedItem merged, IReadOnlyDictionary<string, JsonElement> mappedValues,
-        IReadOnlySet<string>? serverSetLookupColumns, string noun, List<RecordCreationWarning> warnings, CancellationToken ct)
+        IReadOnlySet<string>? serverSetLookupColumns, string noun, List<RecordCreationWarning> warnings, CancellationToken ct,
+        IReadOnlySet<string>? defaultColumns = null)
     {
         // The caller's own values first, exactly task 013's one check: a failure refuses unchanged and a fault propagates
         // (NFR-01). Fix round 1 (review K-3): asked whole first, a mapped lookup could complete a caller's untyped pair that
@@ -502,7 +561,7 @@ internal sealed partial class RecordCreationService
             if (notWritten is null)
                 kept[column] = value;
             else
-                warnings.Add(Dropped(column, notWritten));
+                warnings.Add(Dropped(column, notWritten, defaultColumns));
         }
 
         // The row as it will be written, asked whole once more: a failure now is no single value's, so it refuses.
@@ -517,9 +576,262 @@ internal sealed partial class RecordCreationService
         return finalCheck.Succeeded ? final : MappingStep.Refused(CallerCheckRefused(finalCheck, noun));
     }
 
-    /// <summary>A dropped mapped value's warning: the column, why, and nothing of the value or its source (ADR-019).</summary>
-    private static RecordCreationWarning Dropped(string column, string why) => new(
-        RecordCreationWarning.MappedValueDroppedCode, column, $"The mapped value for '{column}' was not written: {why}.");
+    /// <summary>
+    /// A dropped mapped value's warning: the column, why, and nothing of the value or its source (ADR-019). A column in
+    /// <paramref name="defaultColumns"/> is a post-mapping default (task 018a, K-7), named as one.
+    /// </summary>
+    private static RecordCreationWarning Dropped(string column, string why, IReadOnlySet<string>? defaultColumns = null) =>
+        defaultColumns?.Contains(column) == true
+            ? new(RecordCreationWarning.DefaultValueDroppedCode, column, $"The default value for '{column}' was not written: {why}.")
+            : new(RecordCreationWarning.MappedValueDroppedCode, column, $"The mapped value for '{column}' was not written: {why}.");
+
+    // ── Task 018a: references (K-3) and post-mapping defaults (K-7) ───────────────────────────────────────────────────────
+
+    private static readonly IReadOnlySet<string> NoDefaultColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+    private static readonly IReadOnlyDictionary<string, PostMappingDefault> NoDefaults = new Dictionary<string, PostMappingDefault>();
+
+    /// <summary>
+    /// Task 018a fix round (F4-1): the columns that confer access on a row — never an optional reference, whatever a table
+    /// declares (the secure flag, the access record, the security business unit, the SPE container).
+    /// </summary>
+    private static readonly IReadOnlySet<string> AccessConferringColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        AccessFollowsParent.SecureFlagColumn, SecurableEntityRegistry.SecureFlagAttribute, InheritedAccessPermission.Column,
+        AccessInheritance.Column, SecurableEntityRegistry.SecurityBusinessUnitAttribute, "sprk_containerid",
+    };
+
+    /// <summary>A post-mapping default: the SDK value the adapter gave (its type is its FR-02 kind) and its item form.</summary>
+    private sealed record PostMappingDefault(object Value, JsonElement ItemValue);
+
+    /// <summary>
+    /// Task 018a fix round (F4-1): whether <paramref name="column"/> of <paramref name="table"/> may NEVER be an optional
+    /// reference — the "for" person (<see cref="RecordTableRule.ForPerson"/>), a column field mapping never writes
+    /// (<see cref="ProtectedFromMapping"/>), the regarding pair and its resolver columns, a filing lookup
+    /// (<see cref="IsFilingLookup(string, string)"/>), an access-conferring column, or any Assigned* column. Such a lookup is
+    /// the caller's own: one they may not use is refused, never dropped. Asked of every registry entry
+    /// (<see cref="RecordTableRule.OptionalReferenceLookups"/>) by the registry tests and of every request by
+    /// <see cref="ValidateReferenceLookupColumns"/>.
+    /// </summary>
+    internal static bool IsNeverAReference(string table, RecordTableRule rule, string column)
+    {
+        var name = column.Trim();
+        return string.Equals(rule.ForPerson?.Column, name, StringComparison.OrdinalIgnoreCase)
+            || ProtectedFromMapping(table, rule, serverSetLookupColumns: null).Contains(name)
+            || CreateTimeFieldMapping.RegardingPairAndResolverColumns.Contains(name)
+            || IsFilingLookup(table, name.ToLowerInvariant())
+            || AccessConferringColumns.Contains(name)
+            || name.StartsWith("sprk_assigned", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Task 018a fix round (F4-1): a request may mark as references only the lookups its table declares
+    /// (<see cref="RecordTableRule.OptionalReferenceLookups"/>) and never one <see cref="IsNeverAReference"/> names. Any
+    /// other is the adapter's defect: an <see cref="ArgumentException"/>, thrown before anything is read.
+    /// </summary>
+    private static void ValidateReferenceLookupColumns(string table, RecordTableRule rule, RecordCreationRequest request)
+    {
+        if (request.ReferenceLookupColumns is not { Count: > 0 } references)
+            return;
+
+        foreach (var reference in references)
+        {
+            var column = reference?.Trim() ?? string.Empty;
+            if (!rule.OptionalReferenceLookups.Contains(column) || IsNeverAReference(table, rule, column))
+            {
+                throw new ArgumentException(
+                    $"'{reference}' is not an optional reference of a {NounOf(table)}: only " +
+                    (rule.OptionalReferenceLookups.Count == 0 ? "none" : string.Join(", ", rule.OptionalReferenceLookups.Order(StringComparer.Ordinal))) +
+                    " may be dropped with a warning.", nameof(request));
+            }
+        }
+    }
+
+    /// <summary>
+    /// The request's post-mapping defaults (<see cref="RecordCreationRequest.PostMappingDefaults"/>), keyed by logical name
+    /// (trimmed, lower-case). Each is the adapter's defect, an <see cref="ArgumentException"/> thrown before anything is
+    /// read, when: its table maps nothing (<see cref="RecordTableRule.MappingExclusion"/>, as field mapping); two keys name
+    /// the same column; it is aimed at a column field mapping may never write (<see cref="ProtectedFromMapping"/>, the
+    /// regarding pair and its resolver columns); or its value is in a form a mapping rule could not write either (no Web API
+    /// form; a date, whose storage behaviour a default cannot state).
+    /// </summary>
+    private static IReadOnlyDictionary<string, PostMappingDefault> PostMappingDefaultValues(
+        string table, RecordTableRule rule, RecordCreationRequest request)
+    {
+        if (request.PostMappingDefaults is not { Count: > 0 } supplied)
+            return NoDefaults;
+
+        if (rule.MappingExclusion is { } exclusion)
+        {
+            throw new ArgumentException(
+                $"A {NounOf(table)} takes no post-mapping default: field mapping does not apply to it ({exclusion.Name}).", nameof(request));
+        }
+
+        var protectedColumns = ProtectedFromMapping(table, rule, request.ServerSetLookupColumns);
+        var values = new Dictionary<string, PostMappingDefault>(StringComparer.Ordinal);
+        foreach (var (key, value) in supplied)
+        {
+            var column = key?.Trim().ToLowerInvariant();
+            if (string.IsNullOrEmpty(column) || !LogicalNamePattern.IsMatch(column))
+                throw new ArgumentException($"A post-mapping default names '{key}', which is not a column's logical name.", nameof(request));
+
+            if (values.ContainsKey(column))
+                throw new ArgumentException($"Two post-mapping defaults name '{column}'.", nameof(request));
+
+            if (protectedColumns.Contains(column) || CreateTimeFieldMapping.RegardingPairAndResolverColumns.Contains(column))
+            {
+                throw new ArgumentException(
+                    $"A post-mapping default may not set '{column}' of a {NounOf(table)}: field mapping never writes it.", nameof(request));
+            }
+
+            if (value is null or DateTime || ToItemValue(value, dateBehaviour: null) is not { } itemValue)
+            {
+                throw new ArgumentException(
+                    $"The post-mapping default for '{column}' is not a value a mapping rule writes.", nameof(request));
+            }
+
+            values[column] = new PostMappingDefault(value, itemValue);
+        }
+
+        return values;
+    }
+
+    /// <summary>
+    /// The defaults the row still lacks after step 3 — FR-02's "not supplied", as <see cref="CreateTimeFieldMapping.ApplyFillOnly"/>
+    /// tests it: a flag or a choice (single or multi-select) is supplied whenever its key is present, an explicit null
+    /// included; any other column is supplied unless absent, null, blank text, or a lookup with no id. A caller's value or a
+    /// mapped one always wins.
+    /// </summary>
+    private static Dictionary<string, PostMappingDefault> DefaultsToFill(
+        string table, DataverseWriteItemMapper.MappedItem item, IReadOnlyDictionary<string, PostMappingDefault> defaults)
+    {
+        var row = CallerEntity(table, item);
+        var unfilled = new Dictionary<string, PostMappingDefault>(StringComparer.Ordinal);
+        foreach (var (column, value) in defaults)
+        {
+            var present = row.Attributes.TryGetValue(column, out var held);
+            var supplied = value.Value is bool or OptionSetValue or OptionSetValueCollection
+                ? present
+                : present && held switch
+                {
+                    null => false,
+                    string text => !string.IsNullOrWhiteSpace(text),
+                    EntityReference reference => reference.Id != Guid.Empty,
+                    _ => true,
+                };
+            if (!supplied)
+                unfilled[column] = value;
+        }
+
+        return unfilled;
+    }
+
+    /// <summary>
+    /// Task 018a fix round (F4-3): the unfilled defaults the table can take, judged by field mapping's own checks on the
+    /// target columns read as the caller (<see cref="TargetAttributesAsync"/>, <see cref="Fits"/>): a column that does not
+    /// exist or takes no value on create, or a value of the wrong kind, is dropped with
+    /// <see cref="RecordCreationWarning.DefaultValueDroppedCode"/> — never a fault that fails the create. Metadata that
+    /// cannot be read drops every default ("it could not be checked").
+    /// </summary>
+    private async Task<Dictionary<string, JsonElement>> FittingDefaultsAsync(
+        IDataverseUserClient user, string table, IReadOnlyDictionary<string, PostMappingDefault> unfilled,
+        IReadOnlySet<string> defaultColumns, List<RecordCreationWarning> warnings, CancellationToken ct)
+    {
+        IReadOnlyDictionary<string, TargetAttribute>? attributes;
+        try
+        {
+            attributes = await TargetAttributesAsync(user, table, unfilled.Keys.ToArray(), ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[RECORD-CREATE] the {Table} columns of the post-mapping defaults could not be read; none is written",
+                table);
+            attributes = null;
+        }
+
+        var fitting = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        foreach (var (column, value) in unfilled.OrderBy(kv => kv.Key, StringComparer.Ordinal))
+        {
+            var notWritten = attributes is null ? CouldNotBeChecked
+                : !attributes.TryGetValue(column, out var attribute) || !attribute.ValidForCreate ? NoSuchColumn
+                : !Fits(attribute.Type, value.Value) ? CannotTakeValue
+                : null;
+            if (notWritten is null)
+                fitting[column] = value.ItemValue;
+            else
+                warnings.Add(Dropped(column, notWritten, defaultColumns));
+        }
+
+        return fitting;
+    }
+
+    /// <summary>
+    /// Task 018a (K-3): each lookup of <paramref name="item"/> that <paramref name="references"/> names, asked ALONE as the
+    /// caller (the check a mapped value gets, <see cref="CallerWriteAuthorization.CheckCallerMayCreateAsync"/>). One the caller
+    /// may not use, or whose check faulted or could not be answered, is dropped with a warning naming the column — the same
+    /// words for "not permitted" and "does not exist", so a dropped reference tells nothing about the record. A FILING lookup
+    /// (<see cref="IsFilingLookup(string, DataverseWriteItemMapper.MappedLookup)"/>) and a server-set lookup are never
+    /// references: they are left for step 5 (and step 6) to judge as the caller's own. What is left is mapped again as the
+    /// caller; a mapping Dataverse refuses then is that refusal.
+    /// </summary>
+    private async Task<MappingStep> DropUnusableReferencesAsync(
+        string table, IDataverseUserClient user, Guid me, DataverseWriteItemMapper.MappedItem item, IReadOnlySet<string> references,
+        IReadOnlySet<string>? serverSetLookupColumns, string noun, List<RecordCreationWarning> warnings, CancellationToken ct)
+    {
+        var named = references.Select(c => c.Trim()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var serverSet = (serverSetLookupColumns ?? NoDefaultColumns).Select(c => c.Trim()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var dropped = new List<string>();
+        foreach (var lookup in item.Lookups)
+        {
+            if (!named.Contains(lookup.Column) || serverSet.Contains(lookup.Column) || IsFilingLookup(table, lookup))
+                continue;
+
+            var alone = new DataverseWriteItemMapper.MappedItem("{}", [lookup.Column]) { Lookups = [lookup] };
+            string? notWritten;
+            try
+            {
+                var answer = await CallerWriteAuthorization.CheckCallerMayCreateAsync(user, me, table, alone, serverSetLookupColumns, ct)
+                    .ConfigureAwait(false);
+                notWritten = answer.Succeeded ? null
+                    : answer.ClientFailure is not null ? CouldNotBeChecked
+                    : NotUsable;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[RECORD-CREATE] the check of the reference {Table}.{Column} faulted; the value is dropped",
+                    table, lookup.Column);
+                notWritten = CouldNotBeChecked;
+            }
+
+            if (notWritten is null)
+                continue;
+
+            dropped.Add(lookup.Column);
+            warnings.Add(new RecordCreationWarning(RecordCreationWarning.ReferenceValueDroppedCode, lookup.Column,
+                $"The value you chose for '{lookup.Column}' was not written: {notWritten}; the {noun} was created without it."));
+        }
+
+        if (dropped.Count == 0)
+            return new MappingStep(item, NoMappedValues, null);
+
+        var remapped = await DataverseWriteItemMapper.MapAsync(user, table, MergedItem(item, dropped, NoMappedValues), ct)
+            .ConfigureAwait(false);
+        return remapped switch
+        {
+            { Item: { } kept } => new MappingStep(kept, NoMappedValues, null),
+            { ClientFailure: { } failure } => MappingStep.Refused(Upstream(failure, noun)),
+            _ => MappingStep.Refused(new RecordCreationRefusal(RecordCreationRefusalKind.Invalid,
+                RecordCreationRefusal.InvalidPayloadCode, remapped.ValidationError ?? $"The {noun} could not be mapped.")),
+        };
+    }
 
     /// <summary>
     /// The caller's item as SDK attributes — lookups as <see cref="EntityReference"/>, the pair id as text, clears as

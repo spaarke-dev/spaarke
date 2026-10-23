@@ -49,9 +49,9 @@ namespace Sprk.Bff.Api.Services.RecordCreation;
 /// <see cref="CallerWriteAuthorization"/> and are called here, not written as endpoint filters. <b>ADR-010:</b> one
 /// concrete scoped registration, no interface.</para>
 /// <para><b>Component justification (CLAUDE.md §11).</b> Existing — two create cores, <see cref="OwnedChildWrite.CreateAsync"/>
-/// (children, strong authorization) and the Office <c>OfficeRecordCreationService</c> (roots, weaker authorization).
-/// Extension — this merges them (spec §11 "Yes: merges the two existing cores"); both stay until 017/018 re-point their
-/// callers. Cost of doing nothing — the same row filed under the same parent gets a different owner, stamp and checks by
+/// (children, strong authorization) and the Office creation core (roots, weaker authorization).
+/// Extension — this merges them (spec §11 "Yes: merges the two existing cores"); tasks 017/018 re-pointed their callers,
+/// and 018c deleted the Office core. Cost of doing nothing — the same row filed under the same parent gets a different owner, stamp and checks by
 /// surface, and field mapping reaches 2 of about 30 create paths (spec §11).</para>
 /// </remarks>
 internal sealed partial class RecordCreationService
@@ -149,6 +149,15 @@ internal sealed partial class RecordCreationService
                 nameof(request));
         }
 
+        // Task 018a: references and post-mapping defaults are judged as the caller (step 2's reference pass, step 5).
+        if (principal is RecordCreationPrincipal.SystemPrincipal
+            && (request.ReferenceLookupColumns is { Count: > 0 } || request.PostMappingDefaults is { Count: > 0 }))
+        {
+            throw new ArgumentException(
+                "References and post-mapping defaults are a caller's create only: each is checked as the caller.",
+                nameof(request));
+        }
+
         var table = request.Table.Trim().ToLowerInvariant();
         var correlationId = string.IsNullOrWhiteSpace(request.CorrelationId) ? Guid.NewGuid().ToString("N") : request.CorrelationId;
         var trace = new StepTrace(table, correlationId, _logger);
@@ -161,10 +170,13 @@ internal sealed partial class RecordCreationService
                 RecordCreationRefusal.TableUnsupportedCode, $"'{request.Table}' records are not created here."));
         }
 
+        ValidateReferenceLookupColumns(table, rule, request);
+        var defaults = PostMappingDefaultValues(table, rule, request);
+
         Decision decision;
         try
         {
-            decision = await DecideAsync(table, rule, request, principal, noun, trace, ct).ConfigureAwait(false);
+            decision = await DecideAsync(table, rule, request, principal, defaults, noun, trace, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -187,6 +199,8 @@ internal sealed partial class RecordCreationService
         // ── Step 11: ONE app-only create (alternate-key retry on an autonumber table only) ─────────────────────────────
         trace.Begin(RecordCreationStep.Create);
         var id = Guid.NewGuid();
+        // Task 018b-1s (G1): the keys of the body this create sends, exactly as sent (a copy: the create may keep the instance).
+        var writtenColumns = decision.Fields!.Keys.ToArray();
         // Only the platform's own number is retried: a row that names its number (a server writer's mapped item; a caller's
         // is refused at step 2) collides on THAT number, which no retry changes.
         var retriesTheNumber = rule.AutonumberColumn is not null && !decision.Item!.Columns.Any(c => IsNumberColumn(rule, c));
@@ -245,7 +259,8 @@ internal sealed partial class RecordCreationService
             correlationId);
         // The mapping step's warnings first (step 3 ran before the create), then step 8's, then the post-create ones.
         return trace.Created(id, decision.OwningTeamId, decision.IsolatedFor is not null,
-            [.. decision.MappingWarnings.Select(w => w.Detail), .. decision.DefaultWarnings, .. warnings], decision.MappingWarnings);
+            [.. decision.MappingWarnings.Select(w => w.Detail), .. decision.DefaultWarnings, .. warnings], decision.MappingWarnings,
+            writtenColumns);
     }
 
     /// <summary>What steps 1 to 10 decided: a refusal, or the fields to create and the facts step 12 needs.</summary>
@@ -272,8 +287,8 @@ internal sealed partial class RecordCreationService
 
     /// <summary>Steps 1 to 10. Any exception propagates to <see cref="CreateAsync"/>, which refuses (fail closed).</summary>
     private async Task<Decision> DecideAsync(
-        string table, RecordTableRule rule, RecordCreationRequest request, RecordCreationPrincipal principal, string noun,
-        StepTrace trace, CancellationToken ct)
+        string table, RecordTableRule rule, RecordCreationRequest request, RecordCreationPrincipal principal,
+        IReadOnlyDictionary<string, PostMappingDefault> defaults, string noun, StepTrace trace, CancellationToken ct)
     {
         // ── Step 1: the principal ─────────────────────────────────────────────────────────────────────────────────────
         trace.Begin(RecordCreationStep.Principal);
@@ -297,7 +312,11 @@ internal sealed partial class RecordCreationService
                             table, whoFailure.ErrorCode);
                         return Decision.Refuse(new RecordCreationRefusal(RecordCreationRefusalKind.PrincipalUnresolved,
                             Sprk.Bff.Api.Api.ChildRecordEndpoints.CallerUnresolvedReasonCode,
-                            $"You could not be identified in Dataverse, so the {noun} was not created."));
+                            $"You could not be identified in Dataverse, so the {noun} was not created.")
+                        {
+                            // Task 018b-1s (G2): which of the four WhoAmI failures it was (no token vs no Dataverse user).
+                            ClientFailure = whoFailure,
+                        });
                     }
 
                     return Decision.Refuse(Upstream(whoFailure, noun));
@@ -328,6 +347,7 @@ internal sealed partial class RecordCreationService
         // ── Step 2: the table's rules — refuse a server-owned column in the CALLER's payload ────────────────────────────
         trace.Begin(RecordCreationStep.TableRules);
         DataverseWriteItemMapper.MappedItem item;
+        var referenceWarnings = new List<RecordCreationWarning>();
         if (user is null)
         {
             item = ((RecordCreationPayload.Mapped)request.Payload).Item;
@@ -372,7 +392,26 @@ internal sealed partial class RecordCreationService
                     $"Column '{serverColumn}' is set by the server on a record the application creates for you — omit it."));
             }
 
-            trace.Record(RecordCreationStep.TableRules, RecordCreationStepState.Ran, "no server-owned column in the caller's payload");
+            // Task 018a (K-3): the references the request names — optional values the caller chose — are asked alone, as the
+            // caller; one the caller may not use is dropped with a warning (FR-08's mapped-value path), never refused. Before
+            // step 3, so a mapping rule may still fill a dropped reference (and is then checked as a mapped value).
+            var droppedReferences = 0;
+            if (request.ReferenceLookupColumns is { Count: > 0 } references)
+            {
+                var checkedReferences = await DropUnusableReferencesAsync(
+                        table, user, callerSystemUserId!.Value, item, references, request.ServerSetLookupColumns, noun, referenceWarnings, ct)
+                    .ConfigureAwait(false);
+                if (checkedReferences.Refusal is { } referenceRefusal)
+                    return Decision.Refuse(referenceRefusal);
+
+                droppedReferences = referenceWarnings.Count;
+                item = checkedReferences.Item!;
+            }
+
+            trace.Record(RecordCreationStep.TableRules, RecordCreationStepState.Ran,
+                droppedReferences == 0
+                    ? "no server-owned column in the caller's payload"
+                    : $"no server-owned column in the caller's payload; {droppedReferences} reference value(s) dropped");
         }
 
         // UAC-r2's review of 013 (K-2), a step-5 rule asked before step 3 reads anything (task 014 fix round 3, review
@@ -427,9 +466,68 @@ internal sealed partial class RecordCreationService
                 $"{mappedValues.Count} column(s) mapped (fill-only), {mappingWarnings.Count} warning(s)");
         }
 
+        // ── Step 3½ (task 018a, K-7): the adapter's post-mapping defaults, fill-only over what the caller and the mapping
+        // supplied, merged with the mapped values so step 5 checks them the same way ─────────────────────────────────────
+        IReadOnlySet<string> defaultColumns = NoDefaultColumns;
+        if (defaults.Count > 0 && user is not null)
+        {
+            var unfilled = DefaultsToFill(table, item, defaults);
+            if (unfilled.Count > 0)
+            {
+                defaultColumns = unfilled.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                // Fix round (F4-3): only what the table can take, by field mapping's own checks; the rest dropped, named.
+                var fitting = await FittingDefaultsAsync(user, table, unfilled, defaultColumns, mappingWarnings, ct)
+                    .ConfigureAwait(false);
+
+                // Fix round (K-4): mapped over the step-3 item, so a default that does not map costs only itself — the
+                // step-3 item and its mapped values stand whatever the defaults come to.
+                if (fitting.Count > 0)
+                {
+                    MappingStep withDefaults;
+                    var warningsBeforeMerge = mappingWarnings.Count;
+                    try
+                    {
+                        withDefaults = await MapMergedAsync(user, table, item, fitting, mappingWarnings, ct, defaultColumns)
+                            .ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        // A fault costs the defaults only: none is written, each named; the step-3 row goes on (as a
+                        // mapping fault maps nothing, NFR-01 — a value that could not be checked is never written).
+                        _logger.LogWarning(ex, "[RECORD-CREATE] the post-mapping defaults of a {Table} could not be mapped; none is written",
+                            table);
+
+                        // Re-check K-2: what the faulted merge had already said about single defaults no longer applies —
+                        // each default is named once.
+                        mappingWarnings.RemoveRange(warningsBeforeMerge, mappingWarnings.Count - warningsBeforeMerge);
+                        foreach (var column in fitting.Keys)
+                            mappingWarnings.Add(Dropped(column, CouldNotBeChecked, defaultColumns));
+                        withDefaults = MappingStep.Unmapped(item);
+                    }
+
+                    if (withDefaults is { Item: { } merged, Values.Count: > 0 })
+                    {
+                        var combined = new Dictionary<string, JsonElement>(mappedValues, StringComparer.Ordinal);
+                        foreach (var (column, value) in withDefaults.Values)
+                            combined[column] = value;
+
+                        item = merged;
+                        mappedValues = combined;
+                    }
+                }
+            }
+        }
+
         // ── Step 4: the merged payload, mapped (the caller's or the server's item, with the mapped values merged in) ────
+        var defaulted = mappedValues.Keys.Count(defaultColumns.Contains);
         trace.Record(RecordCreationStep.MapPayload, RecordCreationStepState.Ran,
-            $"{item.Columns.Count} column(s) ({mappedValues.Count} mapped), {item.Lookups.Count} lookup(s)");
+            $"{item.Columns.Count} column(s) ({mappedValues.Count - defaulted} mapped), {item.Lookups.Count} lookup(s)" +
+            (defaulted == 0 ? string.Empty : $"; {defaulted} default(s) filled"));
 
         // ── Step 5: the caller checks on the merged payload (CallerWriteAuthorization, ADR-008 path A) ──────────────────
         trace.Begin(RecordCreationStep.CallerChecks);
@@ -454,7 +552,7 @@ internal sealed partial class RecordCreationService
             {
                 var checkedMerge = await CheckMergedPayloadAsync(
                     table, user, callerSystemUserId!.Value, callerItem, item, mappedValues, request.ServerSetLookupColumns, noun,
-                    mappingWarnings, ct).ConfigureAwait(false);
+                    mappingWarnings, ct, defaultColumns).ConfigureAwait(false);
                 if (checkedMerge.Refusal is { } mergedRefusal)
                     return Decision.Refuse(mergedRefusal);
 
@@ -565,7 +663,13 @@ internal sealed partial class RecordCreationService
             ? OwnedCreateFields(owner, table, item)
             : IsolatedCreateFields(table, item, isolatedTeam!.Value, creatorPerson);
         foreach (var (column, value) in searchIndex.Fields)
-            fields[column] = value; // only columns the row did not already carry a value for (fill-only)
+        {
+            // Only columns the row did not already carry a value for (fill-only). UAC-r2's review of 015 (K3): the row may still
+            // carry an EMPTY value under another spelling of the same key (a caller's explicit null under the lower-case
+            // "sprk_ai_search_index@odata.bind"); the body's keys are case-sensitive, so it is removed rather than sent beside
+            // the canonical key Dataverse would then see twice.
+            PutServerValue(fields, column, value);
+        }
         trace.Record(RecordCreationStep.CreatorAndDefaults, RecordCreationStepState.Ran,
             RecordCreatorPerson.IsStamped(table)
                 ? "creator person stamped when the requester resolved; \"for\" person and table defaults stay with the adapters"
@@ -582,7 +686,7 @@ internal sealed partial class RecordCreationService
             OwningTeamId = owningTeam,
             IsolatedFor = isolatedTeam is null ? null : creatorPerson,
             GrantorOid = grantorOid,
-            MappingWarnings = mappingWarnings,
+            MappingWarnings = referenceWarnings.Count == 0 ? mappingWarnings : [.. referenceWarnings, .. mappingWarnings],
             DefaultWarnings = searchIndex.Warning is { } searchIndexWarning ? [searchIndexWarning] : [],
         };
     }
@@ -1085,8 +1189,12 @@ internal sealed partial class RecordCreationService
         RecordOwnerResolution owner, string table, DataverseWriteItemMapper.MappedItem item)
     {
         var fields = OwnedChildWrite.BodyFields(item.JsonBody);
+        RemoveOtherSpellings(fields, "ownerid@odata.bind");
         fields["ownerid@odata.bind"] = $"/teams({owner.OwningTeamId!.Value})";
-        owner.StampCreatorOn(fields, table);
+        var creator = new Dictionary<string, object?>(StringComparer.Ordinal);
+        owner.StampCreatorOn(creator, table);
+        foreach (var (key, value) in creator)
+            PutServerValue(fields, key, value);
         return fields;
     }
 
@@ -1099,11 +1207,45 @@ internal sealed partial class RecordCreationService
         string table, DataverseWriteItemMapper.MappedItem item, Guid secureTeam, Guid creatorPerson)
     {
         var fields = OwnedChildWrite.BodyFields(item.JsonBody);
+        RemoveOtherSpellings(fields, "ownerid@odata.bind");
         fields["ownerid@odata.bind"] = $"/teams({secureTeam})";
-        fields["sprk_issecure"] = true;
+        PutServerValue(fields, "sprk_issecure", true);
         if (RecordCreatorPerson.IsStamped(table))
-            RecordCreatorPerson.Bind(fields, creatorPerson);
+        {
+            var creator = new Dictionary<string, object?>(StringComparer.Ordinal);
+            RecordCreatorPerson.Bind(creator, creatorPerson);
+            foreach (var (key, value) in creator)
+                PutServerValue(fields, key, value);
+        }
+
         return fields;
+    }
+
+    /// <summary>
+    /// Writes a server-owned value under its canonical <paramref name="key"/>, first removing any other spelling of that key
+    /// the row's body already carries. The body's keys are case-sensitive and a system principal's item is not checked by
+    /// step 2, so without this the body could hold two keys that differ only in case (UAC-r2's review of 015, K3, for the
+    /// search-index bind; #2238 / its review of 018a, K-c, for the owner, the creator person and the secure flag).
+    /// </summary>
+    private static void PutServerValue(Dictionary<string, object?> fields, string key, object? value)
+    {
+        RemoveOtherSpellings(fields, key);
+        fields[key] = value;
+    }
+
+    /// <summary>
+    /// <see cref="PutServerValue"/>'s first half, for the owner bind: its assignment stays a literal
+    /// <c>fields["ownerid@odata.bind"] = …</c> where the owner is decided, which the owner-write census
+    /// (<c>RecordOwnerAssignmentCensusTests</c>) reads.
+    /// </summary>
+    private static void RemoveOtherSpellings(Dictionary<string, object?> fields, string key)
+    {
+        foreach (var spelled in fields.Keys
+                     .Where(k => string.Equals(k, key, StringComparison.OrdinalIgnoreCase) && !string.Equals(k, key, StringComparison.Ordinal))
+                     .ToArray())
+        {
+            fields.Remove(spelled);
+        }
     }
 
     /// <summary>
@@ -1139,7 +1281,7 @@ internal sealed partial class RecordCreationService
         { ClientFailure: { } failure } => Upstream(failure, noun),
         { Invalid: { } invalid } => new(RecordCreationRefusalKind.Invalid, RecordCreationRefusal.InvalidPayloadCode, invalid),
         { ParentUnavailable: true } => new(RecordCreationRefusalKind.NotFoundOrDenied, RecordCreationRefusal.NotFoundCode,
-            check.Denied ?? NotAvailableToFileUnder),
+            check.Denied ?? NotAvailableToFileUnder) { RefusedColumn = check.RefusedColumn },
         { Denied: { } denied } => new(RecordCreationRefusalKind.Forbidden, RecordCreationRefusal.DeniedCode, denied),
         _ => new(RecordCreationRefusalKind.Undecided, RecordCreationRefusal.NoDecisionCode, $"The {noun} was not created."),
     };
@@ -1408,9 +1550,10 @@ internal sealed partial class RecordCreationService
 
         public RecordCreationOutcome Created(
             Guid id, Guid? owningTeamId, bool isolated, IReadOnlyList<string> warnings,
-            IReadOnlyList<RecordCreationWarning> mappingWarnings) => new()
+            IReadOnlyList<RecordCreationWarning> mappingWarnings, IReadOnlyCollection<string> writtenColumns) => new()
         {
             CreatedId = id,
+            WrittenColumns = writtenColumns,
             OwningTeamId = owningTeamId,
             Isolated = isolated,
             Warnings = warnings,
@@ -1435,6 +1578,34 @@ internal sealed record RecordCreationRequest(string Table, RecordCreationPayload
     /// asks nothing. A caller's create only (a system principal with one is refused as an argument error).
     /// </summary>
     public RecordCreationMapping? Mapping { get; init; }
+
+    /// <summary>
+    /// Task 018a (UAC-r2 review of 013, K-3): lookups of the CALLER's payload that are optional REFERENCES (a matter type, a
+    /// practice area, a project type), not values the create depends on. Each one bound is asked alone, as the caller, right
+    /// after step 2: one the caller may not use (AppendTo, Append, field security), or whose check could not be made, is
+    /// dropped with a <see cref="RecordCreationWarning.ReferenceValueDroppedCode"/> warning naming the column, and the create
+    /// proceeds — the FR-08 path for a mapped value, not the refusal a caller's own lookup gets. Only the lookups the table
+    /// declares (<see cref="RecordTableRule.OptionalReferenceLookups"/>) may be named; any other — the "for" person, an
+    /// Assigned* or access column, a filing lookup, the regarding pair — is an argument error (task 018a fix round, F4-1).
+    /// <c>null</c> (the default): every lookup is the caller's own, exactly as before. A caller's create only.
+    /// </summary>
+    public IReadOnlySet<string>? ReferenceLookupColumns { get; init; }
+
+    /// <summary>
+    /// Task 018a (task 014 review K-7): values an adapter supplies for columns the row may still lack AFTER field mapping —
+    /// the last link of an order such as Office's "the contact the request names, else a mapped value, else the maker's
+    /// contact". Each is written only when neither the caller nor a mapping rule supplied the column (fill-only, the FR-02
+    /// test: a flag or choice whose key is present, an explicit null included, is supplied), in the form a mapping rule
+    /// writes (a lookup as an <see cref="Microsoft.Xrm.Sdk.EntityReference"/>, a choice as an
+    /// <see cref="Microsoft.Xrm.Sdk.OptionSetValue"/>, text, a number, a flag). A column the table does not have or that takes
+    /// no value on create, or a value of the wrong kind, is dropped with a
+    /// <see cref="RecordCreationWarning.DefaultValueDroppedCode"/> warning (field mapping's own checks); what is left is
+    /// CHECKED at step 5 with the mapped values: one the caller may not set is dropped with that warning, a filing lookup the
+    /// caller may not file under refuses. <c>null</c> (the default): nothing is defaulted. A caller's create only; a column
+    /// field mapping may never write (<see cref="RecordCreationService.ProtectedFromMapping"/>, the regarding pair), two keys
+    /// naming one column, a null or date value, or a table field mapping does not apply to, is an argument error.
+    /// </summary>
+    public IReadOnlyDictionary<string, object?>? PostMappingDefaults { get; init; }
 }
 
 /// <summary>
@@ -1489,6 +1660,14 @@ internal sealed record RecordCreationWarning(string Code, string? Column, string
 
     /// <summary>A mapped value was not written (FR-08): the caller may not set it, it could not be checked, or the column cannot take it.</summary>
     internal const string MappedValueDroppedCode = "record_creation.mapped_value_dropped";
+
+    /// <summary>Task 018a (K-3): a reference the caller chose (<see cref="RecordCreationRequest.ReferenceLookupColumns"/>) was not
+    /// written: the caller may not use it, or it could not be checked.</summary>
+    internal const string ReferenceValueDroppedCode = "record_creation.reference_value_dropped";
+
+    /// <summary>Task 018a (K-7): a post-mapping default (<see cref="RecordCreationRequest.PostMappingDefaults"/>) was not written:
+    /// the caller may not set it, it could not be checked, or the column cannot take it.</summary>
+    internal const string DefaultValueDroppedCode = "record_creation.default_value_dropped";
 }
 
 /// <summary>The payload of a create: a caller's Dataverse Web API body, or an item already mapped (a chat tool, a server writer).</summary>
@@ -1614,6 +1793,16 @@ internal sealed record RecordCreationOutcome
     public IReadOnlyList<RecordCreationWarning> MappingWarnings { get; init; } = [];
 
     public IReadOnlyList<RecordCreationStepRecord> Steps { get; init; } = [];
+
+    /// <summary>
+    /// Task 018b-1s (G1): the keys of the one app-only create's body (step 11), exactly as sent — a plain column by its
+    /// logical name (<c>sprk_mattername</c>) and a lookup by its bind key (<c>sprk_MatterType@odata.bind</c>, the metadata's
+    /// own navigation-property spelling; never expanded or rewritten). It is the final row, so it holds what the server added
+    /// (the owner bind, the creator person, a search-index default) and leaves out a mapped value that was dropped. An
+    /// adapter asks whether a column was written by comparing case-insensitively with and without the bind suffix. Empty
+    /// for every refusal, including one after the create (an isolated root removed again) — the row no longer exists.
+    /// </summary>
+    public IReadOnlyCollection<string> WrittenColumns { get; init; } = [];
 
     /// <summary>The team the create bound as owner.</summary>
     public Guid? OwningTeamId { get; init; }

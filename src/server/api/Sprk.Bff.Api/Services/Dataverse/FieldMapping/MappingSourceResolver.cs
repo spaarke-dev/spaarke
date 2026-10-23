@@ -57,7 +57,7 @@ internal static class MappingSourceResolver
     internal const string SourceUndeterminedWarning =
         "The record to copy fields from could not be determined, so no fields were copied.";
 
-    private static readonly Regex LogicalName = new("^[a-z][a-z0-9_]*$", RegexOptions.CultureInvariant);
+    private static readonly Regex LogicalName = new(@"^[a-z][a-z0-9_]*\z", RegexOptions.CultureInvariant);
 
     private static readonly MappingSourceResolution NoSource = new(null, MappingSourceOrigin.None, null);
 

@@ -306,17 +306,8 @@ public class CreateTimeFieldMappingFillOnlyTests
         target[TargetColumn].Should().Be("second");
     }
 
-    [Fact]
-    public void Apply_TheOverwriteEntryPoint_StillReplacesAnExistingValue()
-    {
-        var target = new Entity("sprk_matter") { [TargetColumn] = "typed by the user" };
-
-        CreateTimeFieldMapping.Apply(
-            new[] { CopyRule(Text) }, target, SourceWith(SourceColumn, "from the source"),
-            NoProtectedColumns, new List<string>(), NullLogger.Instance);
-
-        target[TargetColumn].Should().Be("from the source");
-    }
+    // Apply_TheOverwriteEntryPoint_StillReplacesAnExistingValue is gone (field mapping task 018c): the overwrite entry point
+    // was the Office creation core's, deleted with it. Fill-only keeping the caller's value is pinned above.
 
     // ───────────────────────────── target guard (FR-05(e), ADR-024) ─────────────────────────────
 
@@ -338,27 +329,16 @@ public class CreateTimeFieldMappingFillOnlyTests
         var target = new Entity("sprk_event");
         var warnings = new List<string>();
 
-        Run(fillOnly: true, new[] { rule }, target, null, NoProtectedColumns, warnings);
+        CreateTimeFieldMapping.ApplyFillOnly(new[] { rule }, target, null, NoProtectedColumns, warnings, NullLogger.Instance);
 
         target.Contains(guardedColumn).Should().BeFalse();
         var warning = warnings.Should().ContainSingle().Subject;
         warning.Should().Contain("Matter to Event: regarding").And.Contain(guardedColumn);
     }
 
-    // The legacy overwrite entry point is the Office quick-create contract: a Project filed under a Matter gets its
-    // ADR-024 pair from the mapping profile, and the secure-root filing plan reads it. Pinned so a change is deliberate;
-    // the unified service (task 014) uses ApplyFillOnly and takes the pair from the caller.
-    [Fact]
-    public void Apply_TheLegacyOverwriteEntryPoint_StillWritesAMappedPair_BecauseOfficeProjectFilingReliesOnIt()
-    {
-        var target = new Entity("sprk_project");
-        var warnings = new List<string>();
-
-        Run(fillOnly: false, new[] { DefaultRule(Text, "matter-guid", "sprk_regardingrecordid") }, target, null, NoProtectedColumns, warnings);
-
-        target["sprk_regardingrecordid"].Should().Be("matter-guid");
-        warnings.Should().BeEmpty();
-    }
+    // Apply_TheLegacyOverwriteEntryPoint_StillWritesAMappedPair_BecauseOfficeProjectFilingReliesOnIt is gone (field mapping
+    // task 018c), changed on purpose: the Office quick-create derives the pair before the create (task 018b, G4) and no
+    // mapping rule writes it any more — the refusal is pinned by the pair-target tests here.
 
     [Theory]
     [InlineData(Copy)]
@@ -486,26 +466,8 @@ public class CreateTimeFieldMappingFillOnlyTests
     private static List<string> FillOnly(IEnumerable<FieldMappingRuleEntity> rules, Entity target, Entity? source)
     {
         var warnings = new List<string>();
-        Run(fillOnly: true, rules, target, source, NoProtectedColumns, warnings);
+        CreateTimeFieldMapping.ApplyFillOnly(rules, target, source, NoProtectedColumns, warnings, NullLogger.Instance);
         return warnings;
-    }
-
-    private static void Run(
-        bool fillOnly,
-        IEnumerable<FieldMappingRuleEntity> rules,
-        Entity target,
-        Entity? source,
-        IReadOnlySet<string> protectedColumns,
-        List<string> warnings)
-    {
-        if (fillOnly)
-        {
-            CreateTimeFieldMapping.ApplyFillOnly(rules, target, source, protectedColumns, warnings, NullLogger.Instance);
-        }
-        else
-        {
-            CreateTimeFieldMapping.Apply(rules, target, source, protectedColumns, warnings, NullLogger.Instance);
-        }
     }
 
     private static Entity SourceWith(string column, object value) => new("sprk_matter") { [column] = value };

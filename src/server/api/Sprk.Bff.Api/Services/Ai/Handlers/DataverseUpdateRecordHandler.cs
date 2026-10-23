@@ -87,7 +87,7 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
 {
     private const string HandlerIdValue = nameof(DataverseUpdateRecordHandler);
 
-    [GeneratedRegex(@"^[a-z][a-z0-9_]*$")]
+    [GeneratedRegex(@"^[a-z][a-z0-9_]*\z")]
     private static partial Regex LogicalNameRegex();
 
     private readonly IDataverseUserClient _dataverse;

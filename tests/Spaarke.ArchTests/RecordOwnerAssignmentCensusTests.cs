@@ -547,20 +547,15 @@ public class RecordOwnerAssignmentCensusTests
             "or the team is in the Secure Record business unit, or the row is user-owned. The write is a conditional Web API PATCH " +
             "(If-Match on the guard read's versionnumber; a 412 is Conflict, a 404 NotFound) that shares the pass's evict and " +
             "read-back (WriteOwnerAndReadBackAsync). No identity gains Write on a Decision Record."),
-        new OwnerWriteEntry("OfficeRecordCreationService.cs", "CreateMatterAsync", 1, OwnerWriteKind.Root,
-            "Office quick-create of a MATTER (a root) — owned by the resolver's team for the acting user (task 080)."),
-        new OwnerWriteEntry("OfficeRecordCreationService.cs", "CreateProjectAsync", 1, OwnerWriteKind.Root,
-            "Office quick-create of a PROJECT (a root) — owned by the resolver's team for the acting user (task 080)."),
-        new OwnerWriteEntry("OfficeRecordCreationService.cs", "IsolateProjectCreate", 1, OwnerWriteKind.Root,
-            "Task 158 r1 (owner round 31 item 2): a PROJECT (a root) filed under a secure record is created INTO isolation, " +
-            "owned by the named Secure Record Owners team provisioning's topology names (SecureRootInheritance.PlanCreateAsync)."),
+        // The Office quick-create of a MATTER or PROJECT (a root) writes its owner through the unified create below
+        // (RecordCreationService.cs: OwnedCreateFields, IsolatedCreateFields) since field mapping task 018; task 018c deleted
+        // the Office creation core and its three owner writes (CreateMatterAsync, CreateProjectAsync, IsolateProjectCreate).
         new OwnerWriteEntry("OwnedChildWrite.cs", "CreateIntoIsolationAsync", 1, OwnerWriteKind.Root,
             "Task 158 r1 (owner round 31 item 2): a chat-created work assignment / project (a root) filed under a secure record " +
             "is created INTO isolation, owned by the named team provisioning's topology names (SecureRootInheritance.PlanCreateAsync)."),
         // field-mapping-server-write-path-r1 task 013: the unified create (Services/RecordCreation/RecordCreationService.cs)
-        // ports OwnedChildWrite's two owner writes unchanged; existing callers still call OwnedChildWrite until tasks 017/018
-        // re-point them. The Office create above is Services/Office/OfficeRecordCreationService.cs (renamed in fix round 2,
-        // UAC-r2 F-3: ServerFiles() keys files by NAME, so the two shared one name and one satisfied the other's checks).
+        // ports OwnedChildWrite's two owner writes unchanged; tasks 017/018 re-pointed the callers. (UAC-r2 F-3: ServerFiles()
+        // keys files by NAME — why the Office core was renamed away from this file's name before 018c deleted it.)
         new OwnerWriteEntry("RecordCreationService.cs", "OwnedCreateFields", 1, OwnerWriteKind.Routed,
             "Task 013: the unified create of an OWNED row — the resolver's team (DecideOwnerAsync), after the as-the-caller checks."),
         // field-mapping-server-write-path-r1 task 016: Repair mode (FR-14) re-owns an EXISTING systemuser-owned row.
@@ -2363,6 +2358,7 @@ public class RecordOwnerAssignmentCensusTests
         new PersonBearingWriter("InvoiceReviewService.cs", "CreateInvoiceRecordAsync", "the reviewer confirming the invoice"),
         new PersonBearingWriter("FinanceEndpoints.cs", "ConfirmInvoiceReview", "hands the HTTP caller to the invoice create"),
         new PersonBearingWriter("UpdateRecordActionCore.cs", "UpdateAsync", "the impersonated user, for F3 (owner round 13 item 8)"),
+        new PersonBearingWriter("DataverseUpdateHandler.cs", "UpdateAsync", "the impersonated user, for F3 (#2257)"),
         new PersonBearingWriter("DecisionActionExecutors.cs", "PlanAsync", "the caller whose decision commit revises the budget (ontology task 147, #1777)"),
         new PersonBearingWriter("DecisionRecordWriter.cs", "OwnershipContextOf", "the deciding user (ConfirmedByUserId) of the Decision Record (ontology task 142, #1783); none for a communications-gate decision (task 042: Guid.Empty, no person) or a condition-cleared closure (task 153: the nightly job asks for nobody)"),
         new PersonBearingWriter("SignalWriter.cs", "OwnershipContextOf", "the person who asked for the Signal (SignalWriteRequest.RequestedBy; null for every job-raised Signal) (ontology task 143, #1783)"),
@@ -2396,7 +2392,6 @@ public class RecordOwnerAssignmentCensusTests
         ["DataverseObservationMirror.cs"] = "insight observation mirror: system work",
         ["AppOnlyAnalysisService.cs"] = "background document profile: system work",
         ["DirectThreadAccessService.cs"] = "Direct thread (E2): owned by the caller themselves, never filed under a record",
-        ["DataverseUpdateHandler.cs"] = "playbook output mapping re-files (no create); acts for no person, so F3 refuses a move out",
         ["SignalReevaluationJob.cs"] = "job-raised Signals (the nightly pass and the event triggers, through the same evaluate-plan-write path): "
             + "nobody asked, so SignalWriteRequest.RequestedBy is null (ontology task 143)",
     };

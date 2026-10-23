@@ -980,6 +980,16 @@ shares to when `createdby` is the BFF application user. Without the column, ever
 `-Verify` (must exit 0); re-run `-Apply` when a business unit is added. Details:
 `docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md` §7b.
 
+**Dataverse prerequisite — the child tables: `scripts/Set-ChildRecordCreatorPersonSchema.ps1 -Verify` must exit 0
+BEFORE deploying a BFF that stamps a NEW table** (one added to `RecordCreatorPerson.StampedTables` or
+`StampedChildTables`). Since #2273 the BFF trusts `sprk_createdbyperson` as "who created this row" ONLY on those
+tables — the secure-exit creator check and people-targeting both read it — and that trust holds only while the
+column there is field-secured so that only the BFF can write it. On an unsecured column any user with Write can
+name themselves as creator and move the row out of secure isolation. Run it with the same `-BffApplicationIds` and
+the stamp's `-OntologyWriterApplicationId` — dry run, then `-Apply`, then `-Verify` (must exit 0). In source, the
+ArchTest `CreatorPersonColumnSecuredGuardTests` fails a build where a stamped table's `Entity.xml` does not declare
+the column `<IsSecured>1</IsSecured>`; it cannot see the environment, so the `-Verify` run is the deploy gate.
+
 #### 6.5.3 Identity collisions — the operator procedure
 
 A **collision** is any of: an email match on a contact bound to a different oid; an oid carried by more than one
@@ -1524,6 +1534,20 @@ internal-only message.
 Both consume the **declarative seed manifest** (resolves the `scripts/seed-data` MVP vs `infra/dataverse` R7 drift per INVENTORY §9).
 
 **H12c** wires runtime references: `sprk_aimodeldeployment` rows point at customer's OpenAI deployment (dedicated per customer — both models). Runs AFTER H12a + H12b + H2a (OpenAI deployed).
+
+**Worklist grid configuration (ontology task 164, D-185).** The ontology worklist reads its membership and order from one `sprk_gridconfiguration` row (`00000000-0000-4000-8000-000000005010`, defined in `config/worklist.gridconfiguration.json`). H12b does not seed it. A **release** (`scripts/Deploy-Release.ps1`, Phase 2b) applies it for every target environment and verifies it (`-Verify -RequireRow`) after the BFF (Phase 2) and **before** the SpaarkeMaster import (Phase 3). The order is binding: the SpaarkeMaster import carries the D-185 role change that removes policy Read from Spaarke Basic User and Spaarke Console User, and with the old row that still joins `sprk_policy`, every user gets an empty worklist once policy Read is removed (HTTP 200, with a log warning only). An old BFF with the new row loses rule names and severity, so Phase 2b does not run if the BFF failed (a skipped BFF phase, `-SkipPhase BffApi`, is an explicit operator choice and still runs it). If Phase 2 (the BFF) or Phase 2b fails for an environment, Phase 3 does not run for that environment, even without `-StopOnFailure`. `-SkipPhase OntologyConfig` skips it as an explicit operator choice and does not block Phase 3, so use it only when the row is already in place and in sync. The step uses the operator's `az` sign-in (no service principal, no client secret), like Phase 3.
+
+**Fresh environments** have no old row, so the order does not matter there; Phase 2b still applies the row after the BFF. **On dev** (the authoring environment, which skips Phase 3), an unmanaged import does not remove privileges: the D-185 role change is applied with `RemovePrivilegesRole` (see `projects/spaarke-ontology-platform-r1/notes/security-roles.md` section 19).
+
+For an out-of-band fix (a row that is missing or drifted outside a release), run the same script by hand:
+
+```powershell
+pwsh scripts/Apply-WorklistGridConfiguration.ps1 -DataverseUrl https://<env>.crm.dynamics.com -WhatIf
+pwsh scripts/Apply-WorklistGridConfiguration.ps1 -DataverseUrl https://<env>.crm.dynamics.com
+pwsh scripts/Apply-WorklistGridConfiguration.ps1 -DataverseUrl https://<env>.crm.dynamics.com -Verify -RequireRow
+```
+
+Known gap: the Do-lane and know-promotion policies (`scripts/Apply-DoLanePolicies.ps1`) still reach a customer environment only by hand; no release phase applies them.
 
 ### 7.9 Phase 9 — Post-Deploy Integrations (H14)
 
@@ -2469,6 +2493,7 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 | 2026-10-05 | §6.5.4: only `dev` carries the marker today — Spaarke's production operator environment (`demo`, declared `false`) adds it in the change that stands it up; the registry declaration must be a JSON boolean and the deploy fails on any other type (`[bool]"false"` is true in PowerShell) | `unified-access-control-r2` task 165, round 57 (`task/uac-r2-165-h`) |
 | 2026-10-08 | §5 handler table: **H4b** row added — the BFF app settings are written through the ARM SDK on both slots (merge, never replace), no longer by running the generated Configure script; **H6** row — the org-settings contract is one Dataverse Web API PATCH and H6 installs no application. The L2 Worker runs no shell tool (G38) | `customer-provisioning-orchestration-r1` T253 |
 | 2026-10-20 | §7.4: the document Access Permission schema — `scripts/Set-DocumentAccessPermissionSchema.ps1` (`sprk_document.sprk_accessinheritance`, not field-secured) runs BEFORE a BFF carrying task 189 is deployed; until it has, that BFF only raises a document's Access Permission to what its parents give and never lowers one (documents listed under `tablesWithoutColumn`, raises counted in `raisedOnly`). A raise kept in that window is recorded as the document's own on the first run after the script and is never widened again: the schema must go first, and §7.4 says how to find such documents and widen them by hand | `unified-access-control-r2` task 189 (D7 T7a, #2126; security pass 2) |
+| 2026-10-22 | §6.5.2: `scripts/Set-ChildRecordCreatorPersonSchema.ps1 -Verify` must exit 0 before deploying a BFF that stamps a new table — the BFF trusts `sprk_createdbyperson` only on stamped tables, and only a field-secured column makes that safe; source guard `CreatorPersonColumnSecuredGuardTests` | #2273 fix round 1 (PR #2277) |
 
 ---
 

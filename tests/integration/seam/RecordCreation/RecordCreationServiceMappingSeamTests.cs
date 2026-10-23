@@ -1270,6 +1270,9 @@ public sealed partial class RecordCreationServiceMappingSeamTests
 
         public Func<string, Exception?>? ThrowOn { get; set; }
 
+        /// <summary>Task 018a (F3): a read answered with this NON-throwing failure (a 429/503) instead of its data.</summary>
+        public Func<string, DataverseUserResponse?>? FailOn { get; set; }
+
         /// <summary>Every path read, unescaped, in order.</summary>
         public List<string> Paths { get; } = [];
 
@@ -1286,6 +1289,8 @@ public sealed partial class RecordCreationServiceMappingSeamTests
             Paths.Add(path);
             if (ThrowOn?.Invoke(path) is { } fault)
                 throw fault;
+            if (FailOn?.Invoke(path) is { } failure)
+                return Task.FromResult(failure);
 
             if (path.Contains("AttributeType", StringComparison.Ordinal) || path.Contains("DateTimeAttributeMetadata", StringComparison.Ordinal))
             {

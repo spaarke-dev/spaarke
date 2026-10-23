@@ -41,8 +41,10 @@ namespace Spaarke.ArchTests;
 /// compile, and a control that does not parse as a file is parsed as a script (statements and members at the top level).</para>
 /// <para><b>Known limits</b> (accepted): the mask call's arguments are not checked. Fail-closed false positive:
 /// <c>nameof(CreateTimeFieldMapping.Apply)</c> is flagged (a method group). A call made through REFLECTION
-/// (<c>GetMethod("Apply").Invoke</c>) is not seen by any syntax scan; <see cref="TheEngine_OffersNoOtherPathThatTakesASourceEntity"/>
-/// keeps the engine's own surface to the two guarded entry points, which is what makes a reflective call the only way round.</para>
+/// (<c>GetMethod("ApplyFillOnly").Invoke</c>) is not seen by any syntax scan; <see cref="TheEngine_OffersNoOtherPathThatTakesASourceEntity"/>
+/// keeps the engine's own surface to the one guarded entry point, which is what makes a reflective call the only way round.
+/// <c>Apply</c> (the overwrite entry point the Office creation core called) was deleted with that core by field mapping task
+/// 018c; the scan still treats the name as an engine call, so restoring it is guarded by the same rule.</para>
 ///
 /// <para>Paired with must-fire controls (a bypass in each shape fails) and must-not-fire controls (the masked Office shape, a
 /// literal null, a call in a comment or a string pass), all fed through the same <see cref="Scan"/> as the real tree.</para>
@@ -56,8 +58,8 @@ public class MappingSourceCallerMaskGuardTests
     internal static readonly IReadOnlyDictionary<string, string> Allowlist = new Dictionary<string, string>
     {
         ["src/server/api/Sprk.Bff.Api/Services/Dataverse/FieldMapping/CreateTimeFieldMapping.cs"] =
-            "The engine itself: Apply and ApplyFillOnly are the guarded entry points, and they hand the source they were given " +
-            "to the private ApplyAll — that is not a call site that reads a source.",
+            "The engine itself: ApplyFillOnly is the guarded entry point, and it hands the source it was given to the private " +
+            "ApplyAll — that is not a call site that reads a source.",
     };
 
     /// <summary>
@@ -80,16 +82,20 @@ public class MappingSourceCallerMaskGuardTests
                 "(RecordRepairReachabilityTests)."),
         };
 
-    /// <summary>The engine's simple type name, and its two guarded entry points.</summary>
+    /// <summary>
+    /// The engine's simple type name, and the method names the scan treats as engine calls: its guarded entry point
+    /// (<c>ApplyFillOnly</c>), and <c>Apply</c> — deleted with the Office creation core (task 018c), still scanned so a
+    /// restored overwrite entry point cannot take an unmasked source unseen.
+    /// </summary>
     private const string EngineType = "CreateTimeFieldMapping";
 
     private static readonly string[] EngineMethods = ["Apply", "ApplyFillOnly"];
 
     /// <summary>
-    /// The engine call sites in the tree today (the Office quick-create's mapping step, the unified record-creation
-    /// service's step 3 and its Repair mode); the scan must see at least these.
+    /// The engine call sites in the tree today (the unified record-creation service's step 3 and its Repair mode; the Office
+    /// quick-create's own mapping step was deleted with the Office creation core, task 018c); the scan must see at least these.
     /// </summary>
-    private const int KnownCallSites = 3;
+    private const int KnownCallSites = 2;
 
     [Fact(DisplayName = "#2188: every source handed to the field-mapping engine was masked to the caller's view first")]
     public void EverySourceHandedToTheMappingEngine_PassedThroughTheCallerMask()
@@ -316,14 +322,14 @@ public class MappingSourceCallerMaskGuardTests
     }
 
     /// <summary>
-    /// The scan guards the two entry points, so they must be the only way in: no OTHER non-private method of the engine takes
+    /// The scan guards the entry point, so it must be the only way in: no OTHER non-private method of the engine takes
     /// anything that could carry a source — a parameter that is, or is assignable to or from, an
     /// <see cref="Microsoft.Xrm.Sdk.Entity"/>, an <see cref="Microsoft.Xrm.Sdk.AttributeCollection"/>, an <c>IEnumerable</c> of either,
     /// or an <c>IReadOnlyDictionary&lt;string, object&gt;</c> (which also catches <c>object</c> and an open generic). A third entry
     /// point would take a source the scan never looks at. Reflection, not text, so a rename or a formatting trick cannot hide it.
     /// Not covered: properties and fields holding a source, a method's return type, nested types, and calls made by reflection.
     /// </summary>
-    [Fact(DisplayName = "#2188: CreateTimeFieldMapping's only non-private methods that can take a source are Apply and ApplyFillOnly")]
+    [Fact(DisplayName = "#2188: CreateTimeFieldMapping's only non-private method that can take a source is ApplyFillOnly")]
     public void TheEngine_OffersNoOtherPathThatTakesASourceEntity()
     {
         var engine = typeof(Program).Assembly.GetType("Sprk.Bff.Api.Services.Dataverse.FieldMapping.CreateTimeFieldMapping");
@@ -343,11 +349,11 @@ public class MappingSourceCallerMaskGuardTests
             .Where(m => !m.IsPrivate)
             .ToArray();
 
-        Assert.Contains(nonPrivate, m => m.Name == "Apply");
         Assert.Contains(nonPrivate, m => m.Name == "ApplyFillOnly");
 
+        // Task 018c: Apply (the overwrite entry point) is gone; were it restored, it is one more way in and is reported here.
         var others = nonPrivate
-            .Where(m => m.Name is not ("Apply" or "ApplyFillOnly"))
+            .Where(m => m.Name is not "ApplyFillOnly")
             .Where(m => m.GetParameters().Any(p =>
                 p.ParameterType.IsGenericParameter
                 || carriers.Any(c => c.IsAssignableFrom(p.ParameterType) || p.ParameterType.IsAssignableFrom(c))))
@@ -357,7 +363,7 @@ public class MappingSourceCallerMaskGuardTests
             .ToArray();
 
         Assert.True(others.Length == 0,
-            "CreateTimeFieldMapping offers a way in besides Apply and ApplyFillOnly that can take a source: " + string.Join(", ", others));
+            "CreateTimeFieldMapping offers a way in besides ApplyFillOnly that can take a source: " + string.Join(", ", others));
     }
 
     // ── controls ──────────────────────────────────────────────────────────────────────────────────────────────────

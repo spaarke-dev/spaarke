@@ -240,6 +240,75 @@ public sealed class ExternalDocumentNarrowingRouteTests : IClassFixture<External
             "a column projected only for the narrowing is not returned");
     }
 
+    // ── R3 ISS-011 (#1886): the documents module says whether a row has a file; the pointers never leave ───────────
+
+    private const string UsableDriveId = "b!OWdlYTJhZGUtYWFkZC00NDkxLWE1NjctMTIzNDU2Nzg5MGFi";
+    private const string UsableItemId = "01LBYCMX76QPLGITR47BB355T4G2CVDL2B";
+
+    private async Task<(FetchResponseDto Body, string? Executed)> FetchDocuments(params IReadOnlyDictionary<string, object?>[] rows)
+    {
+        string? executed = null;
+        var data = _fixture.NewService();
+
+        var result = await ExternalModuleDataEndpoints.ExecuteScopedFetchCoreAsync(
+            new FetchRequestDto("sprk_document", GridFetch, PagingCookie: null),
+            Reader(P), Registry(), new FetchXmlEntityExtractor(),
+            (request, _) =>
+            {
+                executed = request.FetchXml;
+                return Task.FromResult(new FetchResponseDto(ProjectThroughFetch(request.FetchXml, rows), MoreRecords: false, PagingCookie: null));
+            },
+            data.GetNonSecureRootsAsync, data.NarrowDocumentsAsync, NullLogger.Instance, CancellationToken.None,
+            data.GetLiveParentRootsAsync);
+
+        return (result.Should().BeOfType<Ok<FetchResponseDto>>().Subject.Value!, executed);
+    }
+
+    [Fact]
+    public async Task DocumentsModuleFetch_HasFile_IsTrueWithPointers_AndFalseWithoutThem_ForRowsTheGridDidNotAskPointersFor()
+    {
+        var (body, executed) = await FetchDocuments(
+            ModuleRow("with file", driveId: UsableDriveId, itemId: UsableItemId),
+            ModuleRow("no pointers"),
+            ModuleRow("drive only", driveId: UsableDriveId),
+            ModuleRow("blank item", driveId: UsableDriveId, itemId: " "));
+
+        executed.Should().Contain("name=\"sprk_graphdriveid\"").And.Contain("name=\"sprk_graphitemid\"",
+            "the server projects the pointers itself: the grid FetchXML never names them");
+        body.Entities.ToDictionary(r => (string)r["sprk_documentname"]!, r => r["hasFile"])
+            .Should().Equal(new Dictionary<string, object?>
+            {
+                ["with file"] = true, ["no pointers"] = false, ["drive only"] = false, ["blank item"] = false,
+            });
+        body.Entities.Should().HaveCount(4, "a file-less document is still listed");
+    }
+
+    [Fact]
+    public async Task DocumentsModuleFetch_TheResponseCarriesOnlyTheBoolean_NoPointerAndNoGraph()
+    {
+        var (body, _) = await FetchDocuments(ModuleRow("with file", driveId: UsableDriveId, itemId: UsableItemId));
+
+        body.Entities.Should().ContainSingle().Which.Keys
+            .Should().NotContain(k => k.Contains("graph", StringComparison.OrdinalIgnoreCase))
+            .And.Contain("hasFile");
+        var json = System.Text.Json.JsonSerializer.Serialize(body);
+        json.Should().Contain("\"hasFile\":true");
+        json.Should().NotContainEquivalentOf("graph").And.NotContain(UsableDriveId).And.NotContain(UsableItemId);
+    }
+
+    [Fact]
+    public void FileState_IsDerivedForTheDocumentsModuleOnly_AndNoPointerIsReadable()
+    {
+        var registry = Registry();
+        var documents = registry.FindByEntity("sprk_document")!;
+
+        documents.FileStateAttributes.Should().BeEquivalentTo("sprk_graphdriveid", "sprk_graphitemid");
+        documents.ReadableColumns.Should().NotIntersectWith(ExternalModuleRegistry.PointerColumns);
+        documents.ReadableColumns.Should().NotContain(c => c.Equals("hasFile", StringComparison.OrdinalIgnoreCase));
+        registry.Modules.Where(m => !m.NarrowsDocuments)
+            .Should().OnlyContain(m => !m.FileStateAttributes.Any(), "no other module reads a pointer");
+    }
+
     [Fact]
     public async Task DocumentsModuleFetch_WhenTheNarrowingReadFails_HidesTheRows_AndSaysTruncated()
     {
@@ -561,8 +630,11 @@ public sealed class ExternalDocumentNarrowingRouteTests : IClassFixture<External
 
     /// <summary>A documents-module row filed to <see cref="P"/>, as the SDK returns it (lookups as references, the choice as an option).</summary>
     private static IReadOnlyDictionary<string, object?> ModuleRow(
-        string name, int? permission = null, Guid? parent = null, Guid? communication = null) => new Dictionary<string, object?>
+        string name, int? permission = null, Guid? parent = null, Guid? communication = null,
+        string? driveId = null, string? itemId = null) => new Dictionary<string, object?>
     {
+        ["sprk_graphdriveid"] = driveId,
+        ["sprk_graphitemid"] = itemId,
         ["@logicalName"] = "sprk_document",
         ["sprk_documentid"] = Guid.NewGuid(),
         ["sprk_documentname"] = name,

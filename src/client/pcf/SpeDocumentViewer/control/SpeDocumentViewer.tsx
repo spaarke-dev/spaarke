@@ -25,7 +25,7 @@ import { useCheckoutFlow } from './hooks/useCheckoutFlow';
 import { Toolbar } from './components/Toolbar';
 import { CheckInDialog } from './components/CheckInDialog';
 import { DiscardConfirmDialog } from './components/DiscardConfirmDialog';
-import { BffClient } from './BffClient';
+import { BffClient, describeDeleteFailure } from './BffClient';
 import './css/SpeDocumentViewer.css';
 
 // Control version — keep in sync with ControlManifest.Input.xml (per /pcf-deploy skill)
@@ -55,6 +55,8 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
   const [isCheckInDialogOpen, setIsCheckInDialogOpen] = useState(false);
   const [isDiscardDialogOpen, setIsDiscardDialogOpen] = useState(false);
   const [isDeleteLoading, setIsDeleteLoading] = useState(false);
+  // Why the last delete failed (the BFF's own detail), shown in a banner until dismissed, refreshed or retried.
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isOpenInWebLoading, setIsOpenInWebLoading] = useState(false);
 
   // Use the preview hook for state management
@@ -157,6 +159,7 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
    */
   const handleRefresh = useCallback(() => {
     clearError();
+    setDeleteError(null);
     refresh();
     onRefresh?.();
   }, [refresh, onRefresh, clearError]);
@@ -320,6 +323,7 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
     if (!documentId) return;
 
     setIsDeleteLoading(true);
+    setDeleteError(null);
     console.log('[SpeDocumentViewer] Delete confirmed');
 
     try {
@@ -330,6 +334,9 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
       onDeleted?.();
     } catch (err) {
       console.error('[SpeDocumentViewer] Delete failed:', err);
+      // R3 ISS-004 (#1650): a delete can now be refused while the document is KEPT (503 try again, 409 pointer refused or
+      // child documents). The user must be told, not left looking at an unchanged viewer.
+      setDeleteError(describeDeleteFailure(err));
     } finally {
       setIsDeleteLoading(false);
     }
@@ -444,6 +451,23 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
               <MessageBarActions>
                 <Button appearance="transparent" icon={<ArrowClockwise24Regular />} onClick={handleRefresh}>
                   Refresh
+                </Button>
+              </MessageBarActions>
+            </MessageBar>
+          </div>
+        )}
+
+        {/* Delete failure banner: the document was kept; says why (the BFF's detail) */}
+        {deleteError && (
+          <div className="spe-document-viewer-banner">
+            <MessageBar intent="error" style={{ margin: '8px' }}>
+              <MessageBarBody>
+                <MessageBarTitle>Document not deleted</MessageBarTitle>
+                {deleteError}
+              </MessageBarBody>
+              <MessageBarActions>
+                <Button appearance="transparent" onClick={() => setDeleteError(null)}>
+                  Dismiss
                 </Button>
               </MessageBarActions>
             </MessageBar>

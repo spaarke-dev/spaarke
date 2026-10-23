@@ -567,7 +567,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         JsonElement aiOutput = await _actionRunner!.RunAsync(action, documentText, runContext, cancellationToken);
 
         // Shared mapper — identical to the wizard + Compose paths (one source of truth, no drift).
-        var fields = DocumentProfileOutputMapper.BuildFields(aiOutput, fileName, parentEntity: null, _logger);
+        var fields = DocumentProfileOutputMapper.BuildFields(documentId, aiOutput, fileName, parentEntity: null, _logger);
         if (fields.Count == 0)
         {
             _logger.LogWarning(
@@ -889,6 +889,9 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         var runRequest = new PlaybookRunRequest
         {
             PlaybookId = playbookId,
+            // #2257 (owner round 123): a Service Bus job (profile on upload, email analysis) runs a playbook the routing
+            // table chose, with no person in the run; it writes app-only, behind the deny-lists.
+            StartedBy = PlaybookRunStartedBy.System,
             DocumentIds = [documentId],
             UserContext = null,
             Document = documentContext

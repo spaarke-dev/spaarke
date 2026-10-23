@@ -16,7 +16,10 @@ namespace Sprk.Bff.Api.Tests.TestInfrastructure;
 /// <see cref="AggregateException"/>, and the token handler reports THAT as the validation failure (an expired token reads
 /// as invalid), in whichever later test validates a token. Which test that is depends on test order, so it shows only in
 /// some runs. Identity Web leaves a logger that is already set in place, so pinning it here first removes the coupling
-/// between hosts. Pinned by <see cref="IdentityModelLoggerIsolationTests"/>. No test asserts IdentityModel's own log
+/// between hosts (verified against Microsoft.Identity.Web 4.14.2: <c>MicrosoftIdentityBaseAuthenticationBuilder.SetIdentityModelLogger</c>
+/// returns unless <c>LogHelper.Logger</c> is still <c>NullIdentityModelLogger.Instance</c>). Pinned by
+/// <see cref="IdentityModelLoggerIsolationTests"/> and, through a WorkforceHome host (ISS-012 / #1930), by
+/// <c>AuthorizationModuleWorkforceHomeTests.ExpiredToken_ReportsExpired_EvenAfterAnotherHostWasDisposed</c>. No test asserts IdentityModel's own log
 /// lines (they reached only the first host's logger before, so none could rely on them).
 /// </remarks>
 internal static class IdentityModelLoggerIsolation

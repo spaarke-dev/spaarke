@@ -1133,6 +1133,40 @@ public class ExternalDocumentNarrowingGuardTests
             "the BFF's own typed link writer: sets a NULL sprk_relatedcommunication to the exactly-one communication whose " +
             "internet message id ordinal-equals the document's recorded key; never clears or re-points; conditional on row " +
             "version (uac-r2 task 190)",
+        // #2237: IDocumentDataverseService.UpdateDocumentFieldsAsync is scanned. The AI document-profile writers write
+        // DocumentProfileOutputMapper.BuildFields's output, which asks the refusal per key and drops every refused one
+        // (DocumentProfileWriters below holds each to that: it must reach BuildFields).
+        ["Sprk.Bff.Api.Api.Ai.AnalysisEndpoints::ExecuteDocumentProfilePipelineAsync"] =
+            "Writes DocumentProfileOutputMapper.BuildFields's output (via BuildDocumentProfileFields), which drops every key " +
+            "the refusal refuses (#2237).",
+        ["Sprk.Bff.Api.Services.Ai.AppOnlyAnalysisService::ProfileViaLinearActionAsync"] =
+            "Writes DocumentProfileOutputMapper.BuildFields's output, which drops every key the refusal refuses (#2237).",
+        ["Sprk.Bff.Api.Services.Ai.PublicContracts.DocumentProfileAi::ProfileDocumentAsUserAsync"] =
+            "Writes DocumentProfileOutputMapper.BuildFields's output, which drops every key the refusal refuses (#2237).",
+        // #2237: typed UpdateDocumentFieldsAsync writers whose keys are fixed literals, none an access or D7 link column.
+        ["Sprk.Bff.Api.Services.Ai.AnalysisResultPersistence::StoreDocumentProfileOutputsAsync"] =
+            "Writes DocumentProfileFieldMapper.CreateFieldMapping: only the fixed GetFieldName targets (sprk_filetldr, " +
+            "sprk_filesummary, sprk_filekeywords, sprk_documenttype, sprk_entities, sprk_searchprofile); unknown outputs map to none.",
+        ["Sprk.Bff.Api.Services.Jobs.Handlers.AttachmentClassificationJobHandler::WriteClassificationToDataverseAsync"] =
+            "Writes literal keys only: sprk_classification, sprk_classificationconfidence, sprk_invoicehintsjson, " +
+            "sprk_mattersuggestionjson, sprk_mattersuggestedref, sprk_invoicereviewstatus.",
+        ["Sprk.Bff.Api.Services.Jobs.Handlers.InvoiceExtractionJobHandler::UpdateInvoiceExtractionStatusAsync"] =
+            "Writes the literal key sprk_extractionstatus only.",
+    };
+
+    /// <summary>
+    /// #2237: the listed members whose reason is "writes DocumentProfileOutputMapper.BuildFields's output", each with the
+    /// member that calls BuildFields for it (itself, or the private wrapper it calls — #2239: the writer must be seen
+    /// calling that wrapper; <see cref="DocumentProfileWriterProblems"/>).
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> DocumentProfileWriters = new Dictionary<string, string>
+    {
+        ["Sprk.Bff.Api.Api.Ai.AnalysisEndpoints::ExecuteDocumentProfilePipelineAsync"] =
+            "Sprk.Bff.Api.Api.Ai.AnalysisEndpoints::BuildDocumentProfileFields",
+        ["Sprk.Bff.Api.Services.Ai.AppOnlyAnalysisService::ProfileViaLinearActionAsync"] =
+            "Sprk.Bff.Api.Services.Ai.AppOnlyAnalysisService::ProfileViaLinearActionAsync",
+        ["Sprk.Bff.Api.Services.Ai.PublicContracts.DocumentProfileAi::ProfileDocumentAsUserAsync"] =
+            "Sprk.Bff.Api.Services.Ai.PublicContracts.DocumentProfileAi::ProfileDocumentAsUserAsync",
     };
 
     [Fact(DisplayName = "Task 188 r4e: every app-only generic update writer asks InheritedAccessPermission.RefuseAppOnlyWrite (or is listed)")]
@@ -1164,10 +1198,18 @@ public class ExternalDocumentNarrowingGuardTests
         Assert.True(scan.TryGetValue("Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver::SettleOwnerAsync", out var settle)
                     && settle.Writes, "UpdateIfRowVersionMatchesAsync should be seen in RecordOwnershipResolver.SettleOwnerAsync.");
 
+        // #2237: the profile mapper asks the refusal, and each writer listed for writing its output still reaches it (the
+        // wizard through its private wrapper, which it must itself call — #2239 — and which reaches nothing else that writes).
+        Assert.True(scan.TryGetValue("Sprk.Bff.Api.Services.Ai.DocumentProfileOutputMapper::BuildFields", out var mapper)
+                    && mapper.Refuses, "DocumentProfileOutputMapper.BuildFields should be seen calling RefuseAppOnlyWrite.");
+        var profileWriterProblems = DocumentProfileWriterProblems(BffTypes.Value, scan, DocumentProfileWriters);
+        Assert.True(profileWriterProblems.Count == 0, string.Join("\n", profileWriterProblems));
+
         var problems = GenericWriterProblems(scan, GenericWritersThatUpdateNoDocument);
         Assert.True(problems.Count == 0,
             "A member that calls a generic update (IFieldMappingDataverseService.UpdateRecordFieldsAsync, UpdateExistingRecordFieldsAsync " +
-            "or UpdateRecordFieldsIfUnchangedAsync; IGenericEntityService.UpdateIfRowVersionMatchesAsync) writes a payload it may " +
+            "or UpdateRecordFieldsIfUnchangedAsync; IGenericEntityService.UpdateIfRowVersionMatchesAsync; " +
+            "IDocumentDataverseService.UpdateDocumentFieldsAsync, #2237) writes a payload it may " +
             "not have built. It must ask InheritedAccessPermission.RefuseAppOnlyWrite ITSELF before the write, so a document's D7 " +
             "link columns (sprk_parentdocument, sprk_relatedcommunication) and its Access Permission are never written by it " +
             "(task 188 round 4e, task 189 K5, #2170), or be listed as Type::Member in GenericWritersThatUpdateNoDocument with the " +
@@ -1188,7 +1230,7 @@ public class ExternalDocumentNarrowingGuardTests
         Assert.Equal(new[] { $"{handler.FullName}::WriteAsync" }, ReferencersOf("UpdateWithOptimisticConcurrencyAsync"));
     }
 
-    [Fact(DisplayName = "Task 188 r4e / #2170: negative control — per member: a write beside a refusing member, a mention only and the concrete service are found; a refusal in a lambda, a listed member and a typed update are not; stale member entries are reported")]
+    [Fact(DisplayName = "Task 188 r4e / #2170 / #2237: negative control — per member: a write beside a refusing member, a mention only, the concrete service and an unasked document field update are found; a refusal in a lambda, a listed member, a typed update and an asked document field update are not; stale member entries are reported")]
     public void GenericWriterDetector_MustFireAndMustNotFire()
     {
         var fixtures = new[]
@@ -1196,7 +1238,8 @@ public class ExternalDocumentNarrowingGuardTests
             typeof(GenericWriterControlMentionOnly), typeof(GenericWriterControlThroughTheConcreteService),
             typeof(GenericWriterControlRefusesInALambda), typeof(GenericWriterControlListed),
             typeof(GenericWriterControlTypedUpdate), typeof(GenericWriterControlListedButRefuses),
-            typeof(GenericWriterControlTwoMembers),
+            typeof(GenericWriterControlTwoMembers), typeof(GenericWriterControlDocumentFieldsUnasked),
+            typeof(GenericWriterControlDocumentFieldsThroughTheComposite), typeof(GenericWriterControlDocumentFieldsAsked),
         };
         static string Member(Type type, string member) => $"{type.FullName}::{member}";
         var listed = new Dictionary<string, string>
@@ -1213,6 +1256,8 @@ public class ExternalDocumentNarrowingGuardTests
         Assert.Equal(
             new[]
             {
+                $"NEW generic update writer without the refusal: {Member(typeof(GenericWriterControlDocumentFieldsThroughTheComposite), "WriteAsync")}",
+                $"NEW generic update writer without the refusal: {Member(typeof(GenericWriterControlDocumentFieldsUnasked), "WriteAsync")}",
                 $"NEW generic update writer without the refusal: {Member(typeof(GenericWriterControlMentionOnly), "WriteAsync")}",
                 $"NEW generic update writer without the refusal: {Member(typeof(GenericWriterControlThroughTheConcreteService), "WriteAsync")}",
                 $"NEW generic update writer without the refusal: {Member(typeof(GenericWriterControlTwoMembers), "WritesWithoutRefusingAsync")}",
@@ -1225,7 +1270,67 @@ public class ExternalDocumentNarrowingGuardTests
         // Must not fire: the two-member fixture's refusing member (the lambda's refusal counts for the member it is in).
         Assert.True(scan[Member(typeof(GenericWriterControlTwoMembers), "RefusesThenWritesAsync")] is { Writes: true, Refuses: true });
         Assert.True(scan[Member(typeof(GenericWriterControlRefusesInALambda), "WriteAsync")] is { Writes: true, Refuses: true });
+        // #2237 must not fire: a sprk_document field update that asks the refusal first.
+        Assert.True(scan[Member(typeof(GenericWriterControlDocumentFieldsAsked), "WriteAsync")] is { Writes: true, Refuses: true });
     }
+
+    [Fact(DisplayName = "#2239: negative control — a listed profile writer that does not call its BuildFields wrapper is found; one that writes its wrapper's output is not")]
+    public void DocumentProfileWriterCheck_MustFireAndMustNotFire()
+    {
+        static string Member(Type type, string member) => $"{type.FullName}::{member}";
+        var orphaned = typeof(DocumentProfileWriterControlOrphanedWrapper);
+        var through = typeof(DocumentProfileWriterControlThroughItsWrapper);
+        var types = new[] { orphaned, through }.SelectMany(IlCallScan.WithNested).ToList();
+        var writers = new Dictionary<string, string>
+        {
+            [Member(orphaned, "WriteAsync")] = Member(orphaned, "BuildPayload"),
+            [Member(through, "WriteAsync")] = Member(through, "BuildPayload"),
+        };
+
+        var problems = DocumentProfileWriterProblems(types, GenericWriterScan(types), writers);
+
+        Assert.Equal(new[] { WrapperNotCalled(Member(orphaned, "WriteAsync"), Member(orphaned, "BuildPayload")) }, problems);
+    }
+
+    /// <summary>
+    /// #2237 / #2239: each <see cref="DocumentProfileWriters"/> entry still holds — the writer calls UpdateDocumentFieldsAsync,
+    /// its mapper caller calls <c>DocumentProfileOutputMapper.BuildFields</c>, and, when that caller is a wrapper, the writer
+    /// calls the wrapper (a writer that built its own dictionary and orphaned the wrapper would otherwise keep the exemption).
+    /// </summary>
+    private static List<string> DocumentProfileWriterProblems(
+        IEnumerable<Type> types, IReadOnlyDictionary<string, GenericWriterUse> scan, IReadOnlyDictionary<string, string> writers)
+    {
+        var references = IlCallScan.MethodReferences(types).ToList();
+        var buildFieldsCallers = references
+            .Where(r => r.Target.DeclaringType == typeof(Sprk.Bff.Api.Services.Ai.DocumentProfileOutputMapper)
+                        && r.Target.Name == nameof(Sprk.Bff.Api.Services.Ai.DocumentProfileOutputMapper.BuildFields))
+            .Select(r => SourceKey(r.Caller, r.CallerMethod))
+            .ToHashSet(StringComparer.Ordinal);
+        // Caller member -> called member, both as "{outermost type}::{member}".
+        var calls = references
+            .Where(r => r.Target.DeclaringType is not null)
+            .Select(r => (From: SourceKey(r.Caller, r.CallerMethod),
+                          To: $"{IlCallScan.Outermost(r.Target.DeclaringType!).FullName}::{r.Target.Name}"))
+            .ToHashSet();
+
+        var problems = new List<string>();
+        foreach (var (writer, mapperCaller) in writers.OrderBy(w => w.Key, StringComparer.Ordinal))
+        {
+            if (!scan.TryGetValue(writer, out var use) || !use.Writes)
+                problems.Add($"{writer} should be seen calling UpdateDocumentFieldsAsync — the scan lost its signal (or remove its entry).");
+            if (!buildFieldsCallers.Contains(mapperCaller))
+                problems.Add($"{writer} is listed for writing DocumentProfileOutputMapper.BuildFields's output, but {mapperCaller} " +
+                             "does not call BuildFields: the reason no longer holds (#2237).");
+            if (writer != mapperCaller && !calls.Contains((writer, mapperCaller)))
+                problems.Add(WrapperNotCalled(writer, mapperCaller));
+        }
+
+        return problems;
+    }
+
+    private static string WrapperNotCalled(string writer, string wrapper) =>
+        $"{writer} is listed for writing DocumentProfileOutputMapper.BuildFields's output through {wrapper}, but it does not " +
+        $"call {wrapper}: what it writes may be a payload it built itself, so the reason no longer holds (#2239).";
 
     private sealed class GenericWriterUse
     {
@@ -1260,13 +1365,16 @@ public class ExternalDocumentNarrowingGuardTests
 
     // The generic app-only updates of an existing row (re-check K2), each with the service it is matched on: each writes
     // whatever payload its caller built. #2170 option (c) adds IGenericEntityService.UpdateIfRowVersionMatchesAsync; its
-    // UpdateAsync is NOT scanned (typed fixed-key writers, #2213).
+    // UpdateAsync is NOT scanned (typed fixed-key writers, #2213). #2237 adds IDocumentDataverseService.UpdateDocumentFieldsAsync
+    // (it writes any key it is given on sprk_document, app-only).
     private static readonly IReadOnlyDictionary<string, Type> GenericUpdateNames = new Dictionary<string, Type>(StringComparer.Ordinal)
     {
         [nameof(Spaarke.Dataverse.IFieldMappingDataverseService.UpdateRecordFieldsAsync)] = typeof(Spaarke.Dataverse.IFieldMappingDataverseService),
         [nameof(Spaarke.Dataverse.IFieldMappingDataverseService.UpdateExistingRecordFieldsAsync)] = typeof(Spaarke.Dataverse.IFieldMappingDataverseService),
         [nameof(Spaarke.Dataverse.IFieldMappingDataverseService.UpdateRecordFieldsIfUnchangedAsync)] = typeof(Spaarke.Dataverse.IFieldMappingDataverseService),
         [nameof(Spaarke.Dataverse.IGenericEntityService.UpdateIfRowVersionMatchesAsync)] = typeof(Spaarke.Dataverse.IGenericEntityService),
+        // #2237: the sprk_document field update; the AI document-profile mapper's output is written through it.
+        [nameof(Spaarke.Dataverse.IDocumentDataverseService.UpdateDocumentFieldsAsync)] = typeof(Spaarke.Dataverse.IDocumentDataverseService),
     };
 
     private static bool IsGenericUpdate(MethodBase method) =>
@@ -1692,9 +1800,60 @@ internal sealed class GenericWriterControlListedButRefuses(Spaarke.Dataverse.IFi
             : Task.CompletedTask;
 }
 
+/// <summary>MUST FIRE (#2237): writes a payload it did not build to sprk_document through UpdateDocumentFieldsAsync.</summary>
+internal sealed class GenericWriterControlDocumentFieldsUnasked(Spaarke.Dataverse.IDocumentDataverseService documents)
+{
+    internal Task WriteAsync(Guid id, Dictionary<string, object?> payload) =>
+        documents.UpdateDocumentFieldsAsync(id.ToString(), payload, CancellationToken.None);
+}
+
+/// <summary>MUST FIRE (#2237): the same write through the composite IDataverseService.</summary>
+internal sealed class GenericWriterControlDocumentFieldsThroughTheComposite(Spaarke.Dataverse.IDataverseService dataverse)
+{
+    internal Task WriteAsync(Guid id, Dictionary<string, object?> payload) =>
+        dataverse.UpdateDocumentFieldsAsync(id.ToString(), payload, CancellationToken.None);
+}
+
+/// <summary>MUST NOT FIRE (#2237): asks the refusal for sprk_document before UpdateDocumentFieldsAsync.</summary>
+internal sealed class GenericWriterControlDocumentFieldsAsked(Spaarke.Dataverse.IDocumentDataverseService documents)
+{
+    internal Task WriteAsync(Guid id, Dictionary<string, object?> payload) =>
+        Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.RefuseAppOnlyWrite("sprk_document", payload.Keys) is null
+            ? documents.UpdateDocumentFieldsAsync(id.ToString(), payload, CancellationToken.None)
+            : Task.CompletedTask;
+}
+
 /// <summary>MUST NOT FIRE (r4e): a typed update with literal keys, not the generic update.</summary>
 internal sealed class GenericWriterControlTypedUpdate(Spaarke.Dataverse.IGenericEntityService entities)
 {
     internal Task WriteAsync(Guid id) =>
         entities.UpdateAsync("sprk_document", id, new Dictionary<string, object> { ["sprk_documentdescription"] = "x" }, CancellationToken.None);
+}
+
+// ── #2239: compiled control fixtures for DocumentProfileWriterCheck_MustFireAndMustNotFire (never run; IL only) ──
+
+/// <summary>
+/// MUST FIRE (#2239): listed as writing BuildFields's output through BuildPayload, but WriteAsync builds its own dictionary
+/// and never calls BuildPayload (which still calls BuildFields).
+/// </summary>
+internal sealed class DocumentProfileWriterControlOrphanedWrapper(Spaarke.Dataverse.IDocumentDataverseService documents)
+{
+    internal Task WriteAsync(Guid id, System.Text.Json.JsonElement output) =>
+        documents.UpdateDocumentFieldsAsync(
+            id.ToString(), new Dictionary<string, object?> { ["sprk_filesummary"] = output.GetRawText() }, CancellationToken.None);
+
+    internal static Dictionary<string, object?> BuildPayload(Guid id, System.Text.Json.JsonElement output) =>
+        Sprk.Bff.Api.Services.Ai.DocumentProfileOutputMapper.BuildFields(
+            id, output, "control.pdf", null, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+}
+
+/// <summary>MUST NOT FIRE (#2239): WriteAsync writes what its wrapper BuildPayload returns (BuildPayload calls BuildFields).</summary>
+internal sealed class DocumentProfileWriterControlThroughItsWrapper(Spaarke.Dataverse.IDocumentDataverseService documents)
+{
+    internal Task WriteAsync(Guid id, System.Text.Json.JsonElement output) =>
+        documents.UpdateDocumentFieldsAsync(id.ToString(), BuildPayload(id, output), CancellationToken.None);
+
+    internal static Dictionary<string, object?> BuildPayload(Guid id, System.Text.Json.JsonElement output) =>
+        Sprk.Bff.Api.Services.Ai.DocumentProfileOutputMapper.BuildFields(
+            id, output, "control.pdf", null, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
 }

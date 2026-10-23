@@ -67,7 +67,7 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
     /// <summary>Result cap sent to the Dataverse Search API (ADR-016 quota posture).</summary>
     internal const int SearchTop = 25;
 
-    [GeneratedRegex(@"^[a-z][a-z0-9_]*$")]
+    [GeneratedRegex(@"^[a-z][a-z0-9_]*\z")]
     private static partial Regex LogicalNameRegex();
 
     private readonly IDataverseUserClient _dataverse;

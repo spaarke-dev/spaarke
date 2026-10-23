@@ -809,10 +809,12 @@ public class CreateTimeFieldMappingTests
         IReadOnlySet<string>? protectedColumns = null,
         IReadOnlySet<string>? moneyAttributes = null)
     {
+        // Field mapping task 018c: the overwrite entry point (Apply) is deleted with the Office creation core; the engine's
+        // one entry point is fill-only, and over an EMPTY target (nothing supplied) it writes exactly what Apply wrote.
         var target = new Entity("sprk_matter");
         var warnings = new List<string>();
 
-        CreateTimeFieldMapping.Apply(
+        CreateTimeFieldMapping.ApplyFillOnly(
             rules, target, source, protectedColumns ?? NoProtectedColumns, warnings, NullLogger.Instance, moneyAttributes);
 
         return (target, warnings);
@@ -851,11 +853,18 @@ public class CreateTimeFieldMappingTests
         return rule;
     }
 
-    /// <summary>A protected-column set whose lookup throws for one column — the only seam to make a single rule fail.</summary>
+    /// <summary>
+    /// A protected-column set whose lookup throws for one column — the only seam to make a single rule fail. The FIRST
+    /// lookup of that column answers <c>false</c>: under fill-only (the engine's one entry point since task 018c) that is the
+    /// supplied-column snapshot, which reads the set before any rule runs; the rule's own lookup then throws, inside the
+    /// per-rule guard this test pins.
+    /// </summary>
     private sealed class ThrowingSet(string throwOn) : IReadOnlySet<string>
     {
+        private int _lookups;
+
         public bool Contains(string item) =>
-            item == throwOn ? throw new InvalidOperationException("simulated engine failure") : false;
+            item == throwOn && ++_lookups > 1 ? throw new InvalidOperationException("simulated engine failure") : false;
 
         public int Count => 0;
         public IEnumerator<string> GetEnumerator() => Enumerable.Empty<string>().GetEnumerator();

@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="163" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>The worklist reads policy columns as the BFF, so users need no direct Read on sprk_policy or sprk_policyversion (D-185, #2285)</title>
+    <phase>11 UAT</phase>
+    <gate>startable (D-185, owner 2026-10-23)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes a caller-scoped read path in Sprk.Bff.Api (.cs), the worklist configuration and security-role XML; security-tagged.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One read path, one config file and two role XMLs. The reference implementation is DecisionPlanService (configuration read as the BFF).</model-tier-reason>
+    <effort>high</effort>
+    <deps>none (the live role change follows the dev deploy)</deps>
+    <tags>bff,api,dataverse,security,testing</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+    <parallel-group>K</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Issue #2285 (raised by uac-r2 in ebilling 081) found that every internal user can read billing rule sets and billing policies directly in Dataverse, bypassing the BFF's Procedure Read gate. The reason is that Spaarke Basic User holds Read on `sprk_policy` at Deep, and Spaarke Console User holds Read on `sprk_policy` and `sprk_policyversion` at Deep.
+
+    The owner (2026-10-23, D-185) wants only certain roles to read billing rules. Ontology and billing policies share `sprk_policy`, so table Read cannot be removed while the worklist needs it. The worklist FetchXML in `config/worklist.gridconfiguration.json` outer-links `sprk_policy` (alias `policy`, columns sprk_shortname, sprk_worktype and sprk_severity). It runs as the caller, and Dataverse refuses the whole query (0x80040220) when the caller lacks table Read on a linked table. That is why Basic User got the grant on 2026-10-14 (notes/security-roles.md §12).
+  </prompt>
+  <role>SPAARKE BFF engineer (Signals read path).</role>
+  <goal>The worklist gets each Signal's policy short name, work type and severity from a BFF read of `sprk_policy` by id, not from a caller-run join. With no Read on sprk_policy and sprk_policyversion for Basic User and Console User, the worklist returns the same items, order and fields as today. The repo role XML for both roles drops those Reads.</goal>
+
+  <context>
+    <background>
+      - **Reference implementation:** `DecisionPlanService.GetAsync` (Actions/DecisionPlanService.cs:70-79). It reads the policy version as the BFF, with the comment "configuration, not matter data, so the read is the BFF's own".
+      - **What the worklist gets from the join:** `SignalReadService` reads the joined columns through `Aliased(raw, "sprk_shortname" / "sprk_worktype" / "sprk_severity")` (~:1846-1860). The FetchXML already selects `sprk_policy` on the Signal.
+      - **No filter or order uses policy columns.** The lanes order by core record type, core record id, first detected and signal id. Severity ranking happens in code.
+      - **Configuration source:** the worklist FetchXML comes from the `sprk_gridconfiguration` row `00000000-0000-4000-8000-000000005010`. It is read by `ReadFetchesAsync` as the BFF, and its source of truth is `config/worklist.gridconfiguration.json`, with five fetches: lanes decide/do and secondary closedToday/suppressed/closedEarlier.
+      - **Other caller reads of sprk_policy are admin routes** (`OntologyAdminAuthoringService`), and they run under the Ontology Administrator role, which keeps Read.
+      - **Background evaluator, closure and suppression reads use `_entities`** (the BFF).
+      - **Decision Records** carry their own copies, so no Read on policy is needed to view them.
+      - **Role XML** is in `src/dataverse/solutions/SpaarkeMaster/Roles/Spaarke Basic User.xml` and `Spaarke Console User.xml`.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/SignalReadService.cs (row parse ~:1820-1860 Aliased; fetch execution ~:625-640; ReadFetchesAsync :487)</file>
+      <file>config/worklist.gridconfiguration.json (five fetchXml strings with the `policy` link-entity)</file>
+      <file>the script that applies the grid configuration (find it: grep for worklist.gridconfiguration.json under scripts/)</file>
+      <file>src/dataverse/solutions/SpaarkeMaster/Roles/Spaarke Basic User.xml and Spaarke Console User.xml</file>
+      <file>REFERENCE TO COPY: src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionPlanService.cs:70-79</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>SignalReadService already reads configuration (the grid configuration row) as the BFF, and DecisionPlanService reads policy versions as the BFF.</existing>
+    <extension>The existing read path gains one batched BFF read of sprk_policy by id. There is no new service, endpoint or DI registration.</extension>
+    <cost-of-doing-nothing>Every internal user keeps direct Read on billing policies, against the owner's requirement (#2285). Removing the Read without this change empties the worklist.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="D-185">
+      Read the three columns as the BFF in one batched query per request: `sprk_policyid In (distinct ids from the visible rows)`, chunked like the other In reads.
+      - Only rows the caller can already see are enriched. The caller's Signal read stays caller-scoped and is unchanged.
+      - The policy read reveals nothing beyond the three columns the worklist already shows.
+    </constraint>
+    <constraint source="D-185">
+      Remove the `policy` link-entity from all five fetches in config/worklist.gridconfiguration.json, and keep selecting `sprk_policy` on the Signal.
+      - The parse must accept rows without the alias.
+      - Deploy order: until the BFF is deployed, the old config must keep working. Either ship the config change only after the BFF that no longer needs it, or make the BFF read the policy columns whether or not the alias is present. Choose the second, so either order works.
+    </constraint>
+    <constraint source="fail-closed">
+      - If the BFF policy read faults, the worklist returns the same "unavailable" result it returns for other configuration faults. It never returns rows with silently blank severity, because severity drives ranking (R1).
+      - A row whose policy no longer exists keeps today's behaviour for a missing alias. Record what that is.
+    </constraint>
+    <constraint source="D-185">
+      Role XML:
+      - Spaarke Basic User loses `prvReadsprk_Policy`.
+      - Spaarke Console User loses `prvReadsprk_Policy` and `prvReadsprk_PolicyVersion`.
+      - Change nothing else. Ontology Administrator and Ontology Service keep theirs.
+      - Before dropping PolicyVersion Read from Console User, grep the Console code (`src/solutions/SpaarkeAi/**`, `Spaarke.UI.Components`, `Spaarke.AI.Widgets`) and the BFF for any caller-run read of sprk_policyversion. List each in the notes; if one exists, STOP and report.
+    </constraint>
+    <constraint source="uac-r2 2026-10-23">
+      uac-r2 confirmed that no UAC surface or guard reads sprk_policy, sprk_policyversion or sprk_ruleset as the caller; its references are BFF-side lineage and ownership only.
+      Check every test that names these privileges and update it with the role XML:
+      - tests that assert `prvReadsprk_Policy` or `prvReadsprk_PolicyVersion` (OntologyAdmin*EndpointTests; the RouteAuthorizationGuardTests ledger ~:2008);
+      - any role-XML scan test under tests/ that reads `src/dataverse/solutions/**/Roles/*.xml`. ebilling 081 adds one on work/ebilling-r1. If it is not on this branch, say so in the PR so ebilling can align it.
+    </constraint>
+    <constraint source="project">Do NOT change roles on any environment. The main session applies the live role change after the BFF deploy, with the owner's standing authority for this change (D-185).</constraint>
+    <constraint source="CLAUDE.md §10">BFF hygiene: publish-size delta against a fresh build of origin/docs/ontology-platform-design, full ArchTests, filtered Signals tests only, no new HIGH CVE.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files.</step>
+    <step order="1">Failing tests first:
+      - rows parsed without the alias get short name, work type and severity from the BFF read;
+      - rows with the alias (old config) give identical results (must-not-fire);
+      - a policy read fault → unavailable;
+      - one BFF read per request, chunked;
+      - ranking unchanged on a fixture mixing severities.</step>
+    <step order="2">Implement. Update the config JSON. Update the two role XMLs.</step>
+    <step order="3">Run SignalReadService seam/unit tests filtered, the full ArchTests and the publish delta. Open the PR into docs/ontology-platform-design.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the new config (no policy link), the worklist returns the same items, order, short names, work types and severities as the old config does for the same data.</criterion>
+    <criterion testable="true">Given the old config (with the link), results are unchanged (must-not-fire).</criterion>
+    <criterion testable="true">Given a fault on the BFF policy read, the read returns unavailable; no partial ranking.</criterion>
+    <criterion testable="true">The role XMLs drop exactly the three privileges named, and nothing else changes in them.</criterion>
+    <criterion testable="true">The notes list every caller-run read of sprk_policy and sprk_policyversion found, each marked admin-only or removed.</criterion>
+    <criterion testable="true">Test scope: the cases above. Anything beyond needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If any non-admin surface reads sprk_policy or sprk_policyversion as the caller, other than the worklist join, STOP and report.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/security-roles.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <notes>
+    Implemented on branch task/163-policy-server-read (PR into docs/ontology-platform-design). Full notes, the caller-read inventory, test counts and the publish delta: notes/task-163-notes.md. Live roles and the dev grid configuration are NOT changed; the main session applies them after the BFF deploy (BFF, then config, then roles).
+    rework: none task 163
+  </notes>
+</task>

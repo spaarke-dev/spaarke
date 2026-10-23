@@ -73,7 +73,7 @@ namespace Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 /// </remarks>
 internal static partial class MappingSourceCallerMask
 {
-    [GeneratedRegex(@"^[a-z][a-z0-9_]*$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^[a-z][a-z0-9_]*\z", RegexOptions.CultureInvariant)]
     private static partial Regex LogicalNameRegex();
 
     /// <summary>

@@ -114,6 +114,7 @@
     <criterion testable="true">The on-demand trigger declares the admin policy on the route, rejects unauthenticated (401) and non-admin (403) callers, rejects an unregistered table or unbounded window (400), and is present in the RouteAuthorizationGuardTests ledger with a ProvenByTest.</criterion>
     <criterion testable="true">Counters scanned / repaired / no-op / failed are emitted per table with a correlation id; no hand-rolled timer BackgroundService and no new package is introduced.</criterion>
     <criterion testable="true">Adversarial security review completed with no open F-class finding; BFF build 0 errors; all tests green; publish-size delta and CVE result recorded in the task notes.</criterion>
+    <criterion testable="true">#2124 (018b-2, 2026-10-22): Repair passes `moneyAttributes` to `ApplyFillOnly` (today `RecordCreationService.Repair.cs` ~:333 passes null, so a Default rule into a Money column writes a decimal Dataverse rejects). Read the table's Money attributes app-only (the app-only metadata reader from 033). Test: a Default rule into a Money column writes `Microsoft.Xrm.Sdk.Money`. The job does not ship without it. Then close #2124.</criterion>
   </acceptance-criteria>
 
   <notes>Spec FR-25, NFR-01/03/04. Forward-only is binding: no historic backfill (out of scope). Task 053 live-verifies the 10-minute target on dev.</notes>

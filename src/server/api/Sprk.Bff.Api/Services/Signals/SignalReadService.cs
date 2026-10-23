@@ -1,5 +1,6 @@
 using System.Collections.Frozen;
 using System.Globalization;
+using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Xml.Linq;
@@ -8,8 +9,10 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Access;
+using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Identity;
 using Sprk.Bff.Api.Services.Signals.Actions;
 
 namespace Sprk.Bff.Api.Services.Signals;
@@ -95,12 +98,15 @@ public sealed record WorklistCoreRecord(string RecordType, Guid RecordId, string
 /// <param name="EvidenceRefs">The stored witness lines (a JSON array, as <see cref="SignalWriter"/> writes them) after the read-time
 /// witness rules (D-123, D-142): a line whose witness the caller cannot read, or whose witness is not in the Signal's own known secure
 /// family, has no <c>text</c> or <c>source</c> and carries <c>"withheld": true</c>, so the UI can say the detail is withheld rather
-/// than absent. Null when nothing is stored or the
+/// than absent. A billing Duplicate whose earlier invoice the caller cannot read (D-176, task 157) also loses every
+/// <c>duplicateOf.*</c> line, and every other line is withheld. Null when nothing is stored or the
 /// stored value is not a JSON array.</param>
 /// <param name="Sentence">The Signal's stored rule sentence (<c>sprk_sentence</c>), returned as stored. FR-48/D-23 bind what it may
 /// assert when it is written: the rule's literal text, with its tokens filled from the subject's own tested fields
 /// (<c>SignalWriter.RenderSentence</c>), never a witness value. It adds nothing beyond the caller's own read of the Signal row (the
-/// column is not field-secured); a non-core subject the caller cannot read is DI-89 (#1913). Null when empty. Task 154 (#1959 item 1).</param>
+/// column is not field-secured); a non-core subject the caller cannot read is DI-89 (#1913). Null when empty. Task 154 (#1959 item 1).
+/// Exception (D-176, task 157): a billing Duplicate whose earlier invoice the caller cannot read carries
+/// <see cref="EarlierInvoiceReadability.WithheldSentence"/> instead.</param>
 /// <param name="SubjectRecordType">Do lane only (task 154, #1958): the subject's table (logical name), the table whose caller-scoped
 /// "mine" read returned it (<see cref="SignalReadService.DoLaneMineRules"/>), so the caller has already been proven to read it. Null on
 /// a Decide-lane row.</param>
@@ -160,7 +166,9 @@ public sealed record WorklistItemRow(
 /// <see cref="IdChunk"/> ids, one per Do-subject table per chunk, one per Decide-subject table per chunk, plus one
 /// catalog query; and, only for returned rows whose evidence carries detail, one caller read per witness table per
 /// <see cref="WitnessIdChunk"/> ids (D-142) and the app-only secure-family placement of those Signals and the witnesses the caller
-/// reads (<see cref="SignalSuppressionService.WitnessDetailShownOnReadAsync"/>: it withholds, never adds).
+/// reads (<see cref="SignalSuppressionService.WitnessDetailShownOnReadAsync"/>: it withholds, never adds); and, only for billing
+/// Duplicate rows (D-176, task 157), at most one billing-event read, one current-invoice read, one submission read per chunk of 200
+/// distinct tracking numbers and one earlier-invoice read per chunk of 200 invoice ids (<see cref="EarlierInvoiceReadability"/>: it withholds, never adds).
 /// Nothing is cached across callers.</para>
 /// </remarks>
 public sealed class SignalReadService
@@ -195,6 +203,7 @@ public sealed class SignalReadService
     internal const string TodoMatterColumn = "_sprk_regardingmatter_value";
     private const string RecordTypeRefEntity = "sprk_recordtype_ref";
     private const string ConfigurationEntity = "sprk_gridconfiguration";
+    private const string PolicyEntity = "sprk_policy";
 
     /// <summary>A Do-lane subject table's "mine" rule. Each part is OR-ed, each compared with the caller.</summary>
     /// <param name="Table">The subject table.</param>
@@ -266,6 +275,9 @@ public sealed class SignalReadService
     private readonly ILogger<SignalReadService> _logger;
     private readonly SignalSuppressionService _families;
     private readonly DecisionRecordWriter _records;
+    private readonly EarlierInvoiceReadability _earlierInvoices;
+    private readonly ICallerSystemUserResolver _callerResolver;
+    private readonly ISystemUserIdentityResolver _systemUsers;
 
     public SignalReadService(
         IDataverseUserClient user,
@@ -273,10 +285,16 @@ public sealed class SignalReadService
         IIdentityNormalizationService identity,
         SignalSuppressionService families,
         DecisionRecordWriter records,
+        EarlierInvoiceReadability earlierInvoices,
+        ICallerSystemUserResolver callerResolver,
+        ISystemUserIdentityResolver systemUsers,
         TimeProvider clock,
         ILogger<SignalReadService> logger)
     {
         _records = records ?? throw new ArgumentNullException(nameof(records));
+        _earlierInvoices = earlierInvoices ?? throw new ArgumentNullException(nameof(earlierInvoices));
+        _callerResolver = callerResolver ?? throw new ArgumentNullException(nameof(callerResolver));
+        _systemUsers = systemUsers ?? throw new ArgumentNullException(nameof(systemUsers));
         _user = user ?? throw new ArgumentNullException(nameof(user));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _identity = identity ?? throw new ArgumentNullException(nameof(identity));
@@ -286,7 +304,7 @@ public sealed class SignalReadService
     }
 
     /// <summary>The caller's visible Signals in <paramref name="set"/>, grouped and ordered.</summary>
-    public async Task<SignalReadResult> ReadAsync(WorklistSet set, CancellationToken ct)
+    public async Task<SignalReadResult> ReadAsync(WorklistSet set, ClaimsPrincipal? user, CancellationToken ct)
     {
         // (1) + (2) Who the caller is and their linked contact: the inputs of the Do-lane "mine" rule.
         var caller = await ResolveMineCallerAsync(_user, _identity, _logger, ct).ConfigureAwait(false);
@@ -404,7 +422,17 @@ public sealed class SignalReadService
 
             // (9) The witness rules at read time (D-123; task 145 review F1, option B; D-142, task 151): a stored line keeps its subject
             // and sender only when the caller's own read returns its witness AND the witness is in the Signal's own known secure family.
+            // D-176 (task 157): a billing Duplicate's earlier-invoice references are taken from the STORED evidence first, because (9)
+            // removes the text of every line whose ref is not a witness, which is every billing line.
+            var duplicates = DuplicateQuotesOf(visible);
             visible = await ApplyWitnessRuleAsync(visible, ct).ConfigureAwait(false);
+
+            // (9b) D-176 (task 157): a Duplicate keeps its earlier-invoice detail only when the caller's own read returns that invoice;
+            // otherwise it is shaped as ebilling withholds it at write time. Runs after (9); both rules must keep.
+            if (duplicates.Count > 0)
+            {
+                visible = await ApplyDuplicateRuleAsync(visible, duplicates, catalog, ct).ConfigureAwait(false);
+            }
 
             // (10) Task 045 (#1959 item 2, D-47): the Decision Record of each closed item, read AS THE CALLER. A record the caller
             // cannot read is omitted; in the Decided set an item without a readable record is not listed at all.
@@ -430,6 +458,10 @@ public sealed class SignalReadService
                     visible = [.. visible.Where(v => decisions.ContainsKey(v.Row.SignalId))];
                 }
             }
+
+            // (11) D-185 (task 163, #2285): the policy short name, work type and severity of the rows that are returned, read as the
+            // BFF. A read fault is caught below as "fault" (503): severity ranks the list, so rows are never returned without it.
+            visible = await ApplyPolicyColumnsAsync(visible, user, ct).ConfigureAwait(false);
 
             _logger.LogInformation(
                 "Signal read: set {Set}, {Read} Signals read as the caller, {Visible} returned.", set, rows.Count, visible.Count);
@@ -699,6 +731,97 @@ public sealed class SignalReadService
             return null;
         }
     }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // (11) policy columns, as the BFF (D-185)
+    // ---------------------------------------------------------------------------------------------------------------
+
+    /// <summary>The three <c>sprk_policy</c> columns the worklist shows and ranks by.</summary>
+    private sealed record PolicyColumns(string? ShortName, int? WorkType, int? Severity);
+
+    /// <summary>
+    /// D-185 (task 163, #2285): the rule short name, work type and severity come from ONE batched BFF read of <c>sprk_policy</c> by id
+    /// (<see cref="IdChunk"/> ids per query), not from a caller-run join, so a user needs no Read on <c>sprk_policy</c>. This is
+    /// configuration, not matter data, so the read is the BFF's own (as <c>DecisionPlanService</c>). Only the rows that are already
+    /// visible to the caller are enriched, and the read reveals nothing beyond the three columns the worklist already shows. It runs
+    /// whether or not the configuration still carries the old <c>policy</c> link, so the new BFF works with either configuration. The
+    /// reverse does not hold: an old BFF with the new configuration (no <c>policy</c> link) loses names and severity. Deploy order is
+    /// BFF, then configuration, then roles last (roles first empties the worklist while the old link is still configured).
+    /// A row with no policy id, or whose policy no longer exists, keeps what its Signal row carried (today's missing-alias behaviour:
+    /// no short name or work type, severity unknown, ranked last). A faulted read, or a fault resolving the caller, throws to the caller's catch (unavailable).
+    /// A caller who is external or unknown (<see cref="IsExternalOrUnknownCallerAsync"/>) gets no BFF enrichment and no query: they get only
+    /// what their own read returned (the same blanks as the caller-run link gave), so the BFF read never shows them more than their own read did.
+    /// </summary>
+    private async Task<List<VisibleRow>> ApplyPolicyColumnsAsync(List<VisibleRow> visible, ClaimsPrincipal? user, CancellationToken ct)
+    {
+        var ids = visible.Select(v => v.Row.PolicyId).Where(id => id is { } g && g != Guid.Empty).Select(id => id!.Value).Distinct().ToArray();
+        if (ids.Length == 0)
+        {
+            return visible;
+        }
+
+        // D-185 (uac-r2 condition): a caller who is external or unknown gets no enrichment and no sprk_policy query. Their rows keep what
+        // the caller-run read carried (blank name and work type, severity unknown, ranked last), as when the link was caller-run.
+        if (await IsExternalOrUnknownCallerAsync(_callerResolver, _systemUsers, user, _logger, ct).ConfigureAwait(false))
+        {
+            return visible;
+        }
+
+        var found = new Dictionary<Guid, PolicyColumns>();
+        foreach (var chunk in ids.Chunk(IdChunk))
+        {
+            var query = new QueryExpression(PolicyEntity) { ColumnSet = new ColumnSet("sprk_shortname", "sprk_worktype", "sprk_severity") };
+            query.Criteria.AddCondition("sprk_policyid", ConditionOperator.In, chunk.Cast<object>().ToArray());
+            var result = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            foreach (var policy in result.Entities.Where(e => chunk.Contains(e.Id)))
+            {
+                found[policy.Id] = new PolicyColumns(
+                    policy.GetAttributeValue<string>("sprk_shortname"),
+                    policy.GetAttributeValue<OptionSetValue>("sprk_worktype")?.Value,
+                    policy.GetAttributeValue<OptionSetValue>("sprk_severity")?.Value);
+            }
+        }
+
+        return [.. visible.Select(v => v.Row.PolicyId is { } id && found.TryGetValue(id, out var p)
+            ? v with { Row = v.Row with { RuleShortName = p.ShortName, WorkType = p.WorkType, Severity = p.Severity } }
+            : v)];
+    }
+
+    /// <summary>
+    /// True when the caller is external or unknown: <c>ISystemUserIdentityResolver.IsExternalAsync</c> is true, the resolver cannot match
+    /// the caller (<c>no-claims-principal</c>, <c>no-oid-claim</c>, <c>no-matching-systemuser</c>, <c>resolver-not-registered</c>), or the
+    /// resolved id is not a GUID. Those are answers, not faults: the rows are returned without enrichment.
+    /// A Dataverse fault is NOT an answer: the resolver's <c>lookup-failed</c>, or any exception from either resolver, is thrown to
+    /// <c>ReadAsync</c>'s catch (503 worklist unavailable), because severity ranks every row and an internal user must never get a
+    /// 200 whose rule names, work types and severities are silently blank. Cancellation propagates unchanged.
+    /// </summary>
+    // Deliberate deviation from InternalPlaneDocumentNarrowing.IsExternalOrUnknownCallerAsync (master): there a fault only narrows
+    // documents (fail closed); here it would re-rank every row. The externality test itself is kept in step with it.
+    internal static async Task<bool> IsExternalOrUnknownCallerAsync(
+        ICallerSystemUserResolver callerResolver, ISystemUserIdentityResolver systemUsers, ClaimsPrincipal? user, ILogger logger, CancellationToken ct)
+    {
+        var resolution = await callerResolver.ResolveAsync(user, ct).ConfigureAwait(false);
+        if (!resolution.IsResolved)
+        {
+            if (string.Equals(resolution.UnresolvedReason, CallerLookupFailedReason, StringComparison.Ordinal))
+            {
+                logger.LogWarning("Signal read: the caller could not be resolved ({Reason}); unavailable.", CallerLookupFailedReason);
+                throw new InvalidOperationException("The caller's systemuser lookup failed.");
+            }
+
+            return true;
+        }
+
+        if (!Guid.TryParse(resolution.SystemUserId, out var systemUserId))
+        {
+            return true;
+        }
+
+        return await systemUsers.IsExternalAsync(systemUserId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary><see cref="CallerSystemUserResolution.UnresolvedReason"/> of a Dataverse fault in <c>CallerSystemUserResolver</c>.</summary>
+    internal const string CallerLookupFailedReason = "lookup-failed";
 
     // ---------------------------------------------------------------------------------------------------------------
     // (5) catalog
@@ -1262,6 +1385,277 @@ public sealed class SignalReadService
         return readable;
     }
 
+    // ---------------------------------------------------------------------------------------------------------------
+    // (9b) a billing Duplicate's earlier invoice (D-176, task 157)
+    // ---------------------------------------------------------------------------------------------------------------
+
+    /// <summary>Evidence kind of a billing reference value (ebilling's <c>BillingFindingSignalMapper.ReferenceEvidenceKind</c>).</summary>
+    internal const string BillingReferenceKind = "billing.reference";
+
+    /// <summary>The ref prefix of every evidence line that quotes the earlier submission (ebilling's <c>DuplicateHandler</c>).</summary>
+    internal const string DuplicateOfPrefix = "duplicateOf.";
+
+    internal const string DuplicateOfInvoiceIdRef = "duplicateOf.invoiceId";
+    internal const string DuplicateOfTrackingNumberRef = "duplicateOf.trackingNumber";
+
+    /// <summary><c>sprk_billingevent</c>'s entity set (live on spaarkedev1, 2026-10-21): a line-level Duplicate's subject.</summary>
+    internal const string BillingEventEntitySet = "sprk_billingevents";
+
+    /// <summary>What a stored Duplicate quotes about its earlier invoice: the <c>duplicateOf.invoiceId</c> values that are GUIDs and the
+    /// non-blank <c>duplicateOf.trackingNumber</c> values.</summary>
+    private sealed record DuplicateQuote(IReadOnlyList<Guid> InvoiceIds, IReadOnlyList<string> TrackingNumbers);
+
+    /// <summary>
+    /// D-176: the rows whose STORED evidence has a <c>billing.reference</c> line (kind and ref matched case-insensitively) with ref
+    /// <c>duplicateOf.invoiceId</c> or <c>duplicateOf.trackingNumber</c>, with what those lines quote. No other row is a Duplicate.
+    /// Evidence that is not a JSON array cannot be judged and is returned as null by (9) anyway.
+    /// </summary>
+    private static Dictionary<Guid, DuplicateQuote> DuplicateQuotesOf(IEnumerable<VisibleRow> rows)
+    {
+        var quotes = new Dictionary<Guid, DuplicateQuote>();
+        foreach (var row in rows)
+        {
+            if (string.IsNullOrWhiteSpace(row.Row.EvidenceRefs) || ParseEvidence(row.Row.EvidenceRefs) is not { } lines)
+            {
+                continue;
+            }
+
+            var duplicate = false;
+            var ids = new List<Guid>();
+            var numbers = new List<string>();
+            foreach (var line in lines.OfType<JsonObject>())
+            {
+                if (!string.Equals(StringOf(line["kind"]), BillingReferenceKind, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var reference = StringOf(line["ref"]);
+                var text = StringOf(line["text"]);
+                if (string.Equals(reference, DuplicateOfInvoiceIdRef, StringComparison.OrdinalIgnoreCase))
+                {
+                    duplicate = true;
+                    if (Guid.TryParse(text, out var id) && id != Guid.Empty)
+                    {
+                        ids.Add(id);
+                    }
+                }
+                else if (string.Equals(reference, DuplicateOfTrackingNumberRef, StringComparison.OrdinalIgnoreCase))
+                {
+                    duplicate = true;
+                    if (!string.IsNullOrWhiteSpace(text))
+                    {
+                        numbers.Add(text);
+                    }
+                }
+            }
+
+            if (duplicate)
+            {
+                quotes[row.Row.SignalId] = new DuplicateQuote([.. ids.Distinct()], [.. numbers.Distinct(StringComparer.Ordinal)]);
+            }
+        }
+
+        return quotes;
+    }
+
+    /// <summary>
+    /// D-176: each Duplicate row keeps its earlier-invoice detail only when the caller's own read returns every earlier invoice it
+    /// quotes (<see cref="EarlierInvoiceReadability"/>). Otherwise the row takes ebilling's write-time withheld shape: no
+    /// <c>duplicateOf.*</c> line, every other line without <c>text</c> or <c>source</c> and marked <c>"withheld": true</c>, and the
+    /// sentence <see cref="EarlierInvoiceReadability.WithheldSentence"/>. The title is unchanged (ebilling's headlines are static
+    /// text). A fault in any read withholds every Duplicate row on the page; no other row is touched and the list is unchanged.
+    /// </summary>
+    private async Task<List<VisibleRow>> ApplyDuplicateRuleAsync(
+        List<VisibleRow> rows,
+        IReadOnlyDictionary<Guid, DuplicateQuote> duplicates,
+        IReadOnlyDictionary<Guid, CatalogRow> catalog,
+        CancellationToken ct)
+    {
+        var shown = await DuplicatesShownAsync(rows, duplicates, catalog, ct).ConfigureAwait(false);
+        var withheld = 0;
+        var result = new List<VisibleRow>(rows.Count);
+        foreach (var row in rows)
+        {
+            if (!duplicates.ContainsKey(row.Row.SignalId) || shown.Contains(row.Row.SignalId))
+            {
+                result.Add(row);
+                continue;
+            }
+
+            result.Add(row with
+            {
+                Row = row.Row with
+                {
+                    EvidenceRefs = WithheldDuplicateEvidence(row.Row.EvidenceRefs),
+                    Sentence = EarlierInvoiceReadability.WithheldSentence,
+                },
+            });
+            withheld++;
+        }
+
+        if (withheld > 0)
+        {
+            _logger.LogInformation(
+                "Signal read: the earlier-invoice detail of {Count} Duplicate Signal(s) is withheld (an earlier invoice the caller cannot read, an unresolved number, or a fault; D-176).",
+                withheld);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// The Duplicate rows whose earlier invoice(s) the caller reads. An id quoted as <c>duplicateOf.invoiceId</c> is judged directly.
+    /// A row that quotes only a tracking number is resolved within its CURRENT invoice's vendor org: the current invoice is the subject
+    /// when the subject is <c>sprk_invoice</c>, or the subject billing event's invoice (<c>sprk_billingevent</c>, option B after
+    /// escalation 1), each read AS THE CALLER; any other subject, an event or invoice the caller cannot read, or one with no invoice or
+    /// vendor org: withheld. Reads per request: at most one billing-event read and one current-invoice read (In lists of at most
+    /// <see cref="WitnessIdChunk"/> ids), then <see cref="EarlierInvoiceReadability.ShownAsync{TKey}"/>, which owns the combining
+    /// rule (at least one reference, every one readable; none shown on a fault). A Duplicate with no usable reference is not shown.
+    /// </summary>
+    private async Task<HashSet<Guid>> DuplicatesShownAsync(
+        List<VisibleRow> rows,
+        IReadOnlyDictionary<Guid, DuplicateQuote> duplicates,
+        IReadOnlyDictionary<Guid, CatalogRow> catalog,
+        CancellationToken ct)
+    {
+        var shown = new HashSet<Guid>();
+        var referencesOf = new Dictionary<Guid, IReadOnlyCollection<EarlierInvoiceReadability.Reference>>();
+        var currentInvoiceOf = new Dictionary<Guid, Guid>();
+        var eventOf = new Dictionary<Guid, Guid>();
+        foreach (var row in rows)
+        {
+            if (!duplicates.TryGetValue(row.Row.SignalId, out var quote))
+            {
+                continue;
+            }
+
+            // Every Duplicate gets an entry. One with no reference found below is not shown (EarlierInvoiceReadability.ShownAsync).
+            referencesOf[row.Row.SignalId] = [];
+            if (quote.InvoiceIds.Count > 0)
+            {
+                referencesOf[row.Row.SignalId] = [.. quote.InvoiceIds.Select(id => new EarlierInvoiceReadability.Reference(id, null, null))];
+            }
+            else if (quote.TrackingNumbers.Count > 0 && row.Row.SubjectId is { } subject)
+            {
+                switch (SubjectTable(row.Row, catalog))
+                {
+                    case "sprk_invoice":
+                        currentInvoiceOf[row.Row.SignalId] = subject;
+                        break;
+                    case "sprk_billingevent":
+                        eventOf[row.Row.SignalId] = subject;
+                        break;
+                }
+            }
+
+            // Otherwise nothing identifies the earlier invoice: no reference, so withheld.
+        }
+
+        if (eventOf.Count > 0)
+        {
+            var invoiceOfEvent = await CallerLookupAsync(
+                BillingEventEntitySet, "sprk_billingeventid", EarlierInvoiceReadability.InvoiceColumn, eventOf.Values, "sprk_billingevent", ct)
+                .ConfigureAwait(false);
+            if (invoiceOfEvent is null)
+            {
+                return shown;
+            }
+
+            foreach (var (signalId, billingEvent) in eventOf)
+            {
+                if (invoiceOfEvent.TryGetValue(billingEvent, out var invoice))
+                {
+                    currentInvoiceOf[signalId] = invoice;
+                }
+            }
+        }
+
+        if (currentInvoiceOf.Count > 0)
+        {
+            var vendorOrgOf = await CallerLookupAsync(
+                EarlierInvoiceReadability.InvoiceEntitySet, EarlierInvoiceReadability.InvoiceKey, EarlierInvoiceReadability.VendorOrgColumn,
+                currentInvoiceOf.Values, "sprk_invoice", ct).ConfigureAwait(false);
+            if (vendorOrgOf is null)
+            {
+                return shown;
+            }
+
+            foreach (var (signalId, invoice) in currentInvoiceOf)
+            {
+                if (vendorOrgOf.TryGetValue(invoice, out var vendorOrg))
+                {
+                    referencesOf[signalId] =
+                        [.. duplicates[signalId].TrackingNumbers.Select(n => new EarlierInvoiceReadability.Reference(null, vendorOrg, n))];
+                }
+            }
+        }
+
+        return (await _earlierInvoices.ShownAsync(_user, referencesOf, ct).ConfigureAwait(false)).ToHashSet();
+    }
+
+    /// <summary>One lookup column of the rows the CALLER's batched read returns (In lists of at most <see cref="WitnessIdChunk"/> ids):
+    /// id → the lookup's value; a row without it is absent. Null on a fault (<see cref="EarlierInvoiceReadability.ReadAsCallerAsync"/>).</summary>
+    private async Task<Dictionary<Guid, Guid>?> CallerLookupAsync(
+        string entitySet, string key, string lookup, IEnumerable<Guid> ids, string table, CancellationToken ct)
+    {
+        var found = new Dictionary<Guid, Guid>();
+        foreach (var chunk in ids.Distinct().Chunk(WitnessIdChunk))
+        {
+            var rows = await _earlierInvoices.ReadAsCallerAsync(
+                _user, $"{entitySet}?$select={key},{lookup}&$filter={InFilter(key, chunk)}", table, ct).ConfigureAwait(false);
+            if (rows is null)
+            {
+                return null;
+            }
+
+            foreach (var row in rows)
+            {
+                if (EarlierInvoiceReadability.ReadGuid(row, key) is { } id && chunk.Contains(id)
+                    && EarlierInvoiceReadability.ReadGuid(row, lookup) is { } value)
+                {
+                    found[id] = value;
+                }
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>ebilling's write-time withheld shape for a Duplicate's evidence, applied to the lines (9) returned: every
+    /// <c>duplicateOf.*</c> line removed; every other line without <c>text</c> or <c>source</c> and marked <c>"withheld": true</c>.
+    /// Null stays null; evidence that cannot be parsed is returned as null.</summary>
+    private static string? WithheldDuplicateEvidence(string? evidence)
+    {
+        if (string.IsNullOrWhiteSpace(evidence))
+        {
+            return evidence;
+        }
+
+        if (ParseEvidence(evidence) is not { } lines)
+        {
+            return null;
+        }
+
+        for (var i = lines.Count - 1; i >= 0; i--)
+        {
+            var line = (JsonObject)lines[i]!;
+            if (StringOf(line["ref"]) is { } reference && reference.StartsWith(DuplicateOfPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                lines.RemoveAt(i);
+                continue;
+            }
+
+            line.Remove("text");
+            line.Remove("source");
+            line["withheld"] = true;
+        }
+
+        return lines.ToJsonString();
+    }
+
+    private static string? StringOf(JsonNode? node) => node is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
+
     /// <summary>The stored evidence as a JSON array of lines, or null when it is not one (never judged, never shown).</summary>
     /// <remarks>Property names are matched case-insensitively (a <c>Text</c> or <c>SOURCE</c> is detail too). A line whose names
     /// collide under that rule (<c>text</c> and <c>Text</c>) cannot be judged, so the Signal's whole evidence is withheld (null).</remarks>
@@ -1512,6 +1906,7 @@ public sealed class SignalReadService
         Guid? CoreId,
         bool HasNoCore,
         Guid? PolicyVersionId,
+        Guid? PolicyId,
         string? EvidenceRefs,
         string? RuleShortName,
         int? WorkType,
@@ -1551,6 +1946,7 @@ public sealed class SignalReadService
                 hasType && hasCoreId ? coreId : null,
                 noCore,
                 TryReadGuid(raw, "_sprk_policyversion_value", out var version) ? version : null,
+                TryReadGuid(raw, "_sprk_policy_value", out var policyId) ? policyId : null,
                 ReadString(raw, "sprk_evidencerefs"),
                 AsString(Aliased(raw, "sprk_shortname")),
                 Int(Aliased(raw, "sprk_worktype")),
@@ -1565,8 +1961,9 @@ public sealed class SignalReadService
             return true;
         }
 
-        /// <summary>The <c>policy</c> link-entity column: the Web API names it <c>policy.{column}</c> (verified live on spaarkedev1,
-        /// 2026-10-14); the OData-escaped <c>policy_x002e_{column}</c> is accepted too.</summary>
+        /// <summary>The <c>policy</c> link-entity column, present only under the pre-D-185 configuration: the Web API names it
+        /// <c>policy.{column}</c> (verified live on spaarkedev1, 2026-10-14); the OData-escaped <c>policy_x002e_{column}</c> is accepted
+        /// too. Since D-185 the BFF reads these columns itself (<c>ApplyPolicyColumnsAsync</c>) and the configuration has no link.</summary>
         private static JsonElement? Aliased(JsonElement raw, string column) =>
             raw.TryGetProperty($"policy.{column}", out var v) || raw.TryGetProperty($"policy_x002e_{column}", out v) ? v : null;
 

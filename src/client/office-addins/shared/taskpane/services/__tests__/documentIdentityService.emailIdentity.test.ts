@@ -8,7 +8,7 @@
  *   by-id read); a failed read keeps the record UNKNOWN.
  */
 
-import { identityOfSavedDocument, resolveEmailIdentity } from '../documentIdentityService';
+import { identityOfSavedDocument, resolveDocumentIdentity, resolveEmailIdentity } from '../documentIdentityService';
 import { apiClient, ApiClientError } from '@shared/services';
 
 jest.mock('@shared/services', () => {
@@ -115,6 +115,79 @@ describe('resolveEmailIdentity (task 120)', () => {
       expect(mockPost).not.toHaveBeenCalled();
     }
   );
+});
+
+describe('a record the server withheld (task 132, review F1)', () => {
+  // The document IS filed (through its communication) but this caller may not see the record: `relatedRecord` is null
+  // and `relatedRecordWithheld` is true. Reading that null as "filed to nothing" would show "Not filed to a record yet."
+  // and offer "File to record", which would add a second parent.
+  const withheldResponse = { ...resolvedResponse, relatedRecord: null, relatedRecordWithheld: true };
+
+  beforeEach(() => {
+    mockPost.mockReset();
+    mockGet.mockReset();
+  });
+
+  it('the email route maps it to the record-UNKNOWN state, not known-unfiled', async () => {
+    mockPost.mockResolvedValue(withheldResponse);
+
+    const outcome = await resolveEmailIdentity({ internetMessageId: MESSAGE_ID, exchangeItemId: null });
+
+    expect(outcome).toEqual({
+      kind: 'resolved',
+      documentId: DOC_ID,
+      documentName: 'RE: Discovery schedule',
+      fileName: 'RE_ Discovery schedule_a1b2.eml',
+      relatedRecord: null,
+      relatedRecordKnown: false,
+    });
+  });
+
+  it('the URL route (Word) maps it the same way', async () => {
+    mockPost.mockResolvedValue(withheldResponse);
+
+    const outcome = await resolveDocumentIdentity('https://contoso.sharepoint.com/sites/x/Doc.docx');
+
+    expect(outcome).toMatchObject({
+      kind: 'resolved',
+      documentId: DOC_ID,
+      relatedRecord: null,
+      relatedRecordKnown: false,
+    });
+  });
+
+  it('the by-id read maps it the same way', async () => {
+    mockGet.mockResolvedValue(withheldResponse);
+
+    const outcome = await identityOfSavedDocument(DOC_ID);
+
+    expect(outcome).toMatchObject({
+      kind: 'resolved',
+      documentId: DOC_ID,
+      relatedRecord: null,
+      relatedRecordKnown: false,
+    });
+  });
+
+  it.each([[null], [undefined], [false]])(
+    'an absent or non-true flag (%p) with no record is still KNOWN unfiled',
+    async flag => {
+      mockPost.mockResolvedValue({ ...resolvedResponse, relatedRecord: null, relatedRecordWithheld: flag });
+
+      const outcome = await resolveEmailIdentity({ internetMessageId: MESSAGE_ID, exchangeItemId: null });
+
+      expect(outcome && outcome.kind === 'resolved' && outcome.relatedRecordKnown).toBeUndefined();
+    }
+  );
+
+  it('a record that came back wins over the flag', async () => {
+    mockPost.mockResolvedValue({ ...resolvedResponse, relatedRecordWithheld: true });
+
+    const outcome = await resolveEmailIdentity({ internetMessageId: MESSAGE_ID, exchangeItemId: null });
+
+    expect(outcome).toMatchObject({ kind: 'resolved', relatedRecord: { id: MATTER_ID } });
+    expect(outcome && outcome.kind === 'resolved' && outcome.relatedRecordKnown).toBeUndefined();
+  });
 });
 
 describe('identityOfSavedDocument (task 120)', () => {

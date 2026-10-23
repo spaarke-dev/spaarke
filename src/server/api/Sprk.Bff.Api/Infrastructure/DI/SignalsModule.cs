@@ -87,6 +87,9 @@ public static class SignalsModule
         // Signal read route (task 038, FR-54): the worklist's only Signal reader. Scoped (every read is the request caller's
         // through the caller-identity client); unconditional, like the route that uses it (bff-extensions.md F.1).
         services.AddScoped<SignalReadService>();
+        // D-176 (task 157): the earlier-invoice readability check of a billing Duplicate, as the caller (the caller's client is passed
+        // in). Shared with ebilling task 119's invoice-review read; scoped like SignalReadService, which takes it.
+        services.AddScoped<EarlierInvoiceReadability>();
 
         // Decision action executors (task 044, FR-52): one per catalog action the commit route (task 043) calls, except the
         // inquiry (070) and Assign Work (046). Internal services, not routes; scoped because every write is the request
@@ -94,6 +97,7 @@ public static class SignalsModule
         // nothing here is feature-gated (bff-extensions.md F.1).
         services.AddScoped<DecisionRouteCores>();
         services.AddScoped<IDecisionActionExecutor, ReviseBudgetExecutor>();
+        services.AddScoped<IDecisionActionExecutor, CreateBudgetExecutor>();
         services.AddScoped<IDecisionActionExecutor, ApproveVarianceExecutor>();
         services.AddScoped<IDecisionActionExecutor, MarkCompleteExecutor>();
         services.AddScoped<IDecisionActionExecutor, RescheduleExecutor>();
@@ -106,6 +110,8 @@ public static class SignalsModule
         services.AddScoped<IDecisionActionExecutor, SendEmailExecutor>();
         // Task 043: the last two catalog actions (Assign Work through the 046 create; the inquiry adapting 070).
         services.AddScoped<IDecisionActionExecutor, AssignWorkExecutor>();
+        // Task 159 (D-178): Assign Task, the no-budget decision's action (a sprk_event of type Task) through the same child-records create.
+        services.AddScoped<IDecisionActionExecutor, AssignTaskExecutor>();
         services.AddScoped<IDecisionActionExecutor, BudgetInquiryActionExecutor>();
         services.AddScoped<DecisionActionExecutors>();
         // Task 043: the decision commit route's service and its after-record step (032 trigger, 034 suppression).

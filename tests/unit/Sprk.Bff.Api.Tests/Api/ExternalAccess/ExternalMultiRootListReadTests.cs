@@ -717,7 +717,7 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
             executed.Should().Contain($"name=\"{attribute}\"");
         }
         // ...and gave back none the caller did not.
-        body.Entities.Single().Keys.Should().BeEquivalentTo(new[] { "@logicalName", "sprk_documentname", "sprk_project" });
+        body.Entities.Single().Keys.Should().BeEquivalentTo(new[] { "@logicalName", "sprk_documentname", "sprk_project", "hasFile" }); // hasFile: R3 ISS-011, derived by the server
     }
 
     [Fact]
@@ -844,7 +844,7 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
             caller, fetch, new[] { DocRow("Both readable", project: RecordA, matter: RecordB) });
 
         body.Entities.Single().Keys.Should().BeEquivalentTo(
-            new[] { "@logicalName", "sprk_documentname", "sprk_project", "sprk_matter" });
+            new[] { "@logicalName", "sprk_documentname", "sprk_project", "sprk_matter", "hasFile" }); // hasFile: R3 ISS-011
     }
 
     [Fact]

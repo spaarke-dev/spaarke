@@ -1386,7 +1386,7 @@ public static class OfficeEndpoints
         group.MapPost("/quickcreate/{entityType}", QuickCreateAsync)
             .WithName("OfficeQuickCreate")
             .WithSummary("Create a new entity with minimal fields")
-            .WithDescription("Creates a new Matter, Project, or Invoice with minimal required fields, for inline creation from the Office add-in. Matter and Project are created server-side (spaarkeai-word-add-in-r1 FR-13) with a load-bearing owner — the caller's business-unit default owner team (an unresolved caller or team is refused with 403 and no row is written), business-unit defaults, the Field Mapping Framework applied from the optional record context, and for Matter the matter-type lookup when supplied. The matter and project numbers (sprk_matternumber, sprk_projectnumber — each entity's primary name attribute) are assigned by Dataverse's platform autonumber on create (MAT-###### / PRJ-######; interim until a numbering function, task 076); the request never carries one. A create the number's alternate key refuses is retried with the next number; after 3 refusals it is refused with 409 record_number_unavailable and no row is written. A record that comes back without a number is still returned, with a warning. Task 100 adds the create form's fields: practiceAreaId (Matter) and projectTypeId (Project) are set when they resolve and dropped with a warning when they do not (never a rejection, like matterTypeId); assignedToContactId names the Assigned To contact (sprk_assignedtointernal on a Matter or Project, sprk_assignedto1 on an Invoice) and requires the caller to hold Read on that contact — otherwise 403 OFFICE_009 assignee_inaccessible, with one body for an unreadable and a nonexistent contact, and no row written. Without it a Matter or Project is assigned to the maker's linked contact and an Invoice is left unassigned. Invoice is written on the minimal path: name, description and Assigned To. Every record created here is owned by the caller's business-unit default owner team (task 080); when no team resolves the create is refused with 403 OFFICE_022 and no row is written.")
+            .WithDescription("Creates a new Matter, Project, or Invoice with minimal required fields, for inline creation from the Office add-in. Matter and Project are created server-side (spaarkeai-word-add-in-r1 FR-13) with a load-bearing owner — an owner the record's place decides (see below; an unresolved caller or team is refused with 403 and no row is written), business-unit defaults, the Field Mapping Framework applied from the optional record context, and for Matter the matter-type lookup when supplied. The matter and project numbers (sprk_matternumber, sprk_projectnumber — each entity's primary name attribute) are assigned by Dataverse's platform autonumber on create (MAT-###### / PRJ-######; interim until a numbering function, task 076); the request never carries one. A create the number's alternate key refuses is retried with the next number; after 3 refusals it is refused with 409 record_number_unavailable and no row is written. A record that comes back without a number is still returned, with a warning. Task 100 adds the create form's fields: practiceAreaId (Matter) and projectTypeId (Project) are set when they resolve and dropped with a warning when they do not (never a rejection, like matterTypeId); assignedToContactId names the Assigned To contact (sprk_assignedtointernal on a Matter or Project, sprk_assignedto1 on an Invoice) and requires the caller to hold Read and Append To on that contact — otherwise 403 OFFICE_009 reasonCode assignee_inaccessible (title Forbidden), with one body whether the contact is unreadable, nonexistent, or readable but not appendable, and no row written. Without it a Matter or Project is assigned to the maker's linked contact and an Invoice is left unassigned. Invoice is written on the minimal path: name, description and Assigned To. Ownership is record-first: an unfiled Matter or Invoice is owned by the caller's business-unit default owner team (task 080); a Project filed under a matter is owned by that matter's business-unit team, or by the Secure Record Owners team under a secure matter; when no team resolves the create is refused with 403 OFFICE_022 and no row is written.")
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.QuickCreate)
             .AddIdempotencyFilter() // Task 030 - Idempotency support per spec.md
             .AddOfficeAuthFilter()  // Task 073 - baseline Office-caller authentication
@@ -1400,16 +1400,16 @@ public static class OfficeEndpoints
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
         // GET /office/quickcreate/defaults - What the "+ New" form prefills (task 100, owner decision B)
-        // The caller's OWN linked contact for Assigned To — the same contact RecordCreationService assigns a Matter or
-        // Project when the request names none, so the prefill and the server's default are one answer
-        // (RecordCreationService.ResolveDefaultAssigneeAsync). Takes no id: there is no resource to authorize beyond
-        // the caller themself (waived Permanent in RouteAuthorizationGuardTests).
+        // The caller's OWN linked contact for Assigned To — the same contact the Office quick-create adapter passes the
+        // unified create as its Assigned To default when the request names none, so the prefill and the server's default
+        // are one answer (OfficeService.ResolveDefaultAssigneeAsync, over the adapter's own ResolveMakerContactIdAsync).
+        // Takes no id: there is no resource to authorize beyond the caller themself (waived Permanent in RouteAuthorizationGuardTests).
         // Authorization: OfficeAuthFilter validates user authentication
         // Rate Limit: Search category (30/minute/user) — a read loaded once per pane, not a create
         group.MapGet("/quickcreate/defaults", GetQuickCreateDefaultsAsync)
             .WithName("OfficeQuickCreateDefaults")
             .WithSummary("Defaults for the quick-create form")
-            .WithDescription("Returns what the pane's \"+ New\" form prefills: assignedTo = the caller's own linked contact (task 141's user-contact link, never an email match), or null when the caller has none, cannot be resolved, or it could not be read. For a Matter or Project it is the contact the create assigns when the request names none (spaarkeai-word-add-in-r1 task 100).")
+            .WithDescription("Returns what the pane's \"+ New\" form prefills: assignedTo = the caller's own linked contact (task 141's user-contact link, never an email match), or null when the caller has none, cannot be resolved, it could not be read, or the caller holds no AppendTo on it (checked as the caller; a check that cannot complete offers none). For a Matter or Project it is the contact the create assigns when the request names none (spaarkeai-word-add-in-r1 task 100).")
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.Search)
             .AddOfficeAuthFilter()
             .Produces<QuickCreateDefaultsResponse>(StatusCodes.Status200OK)
@@ -1449,8 +1449,10 @@ public static class OfficeEndpoints
     /// form simply has no prefill, and the create itself refuses such a caller with its own message.
     /// </summary>
     private static async Task<IResult> GetQuickCreateDefaultsAsync(
-        OfficeRecordCreationService recordCreation,
+        IOfficeService officeService,
         Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver callerResolver,
+        Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient callerDataverse,
+        ILogger<Program> logger,
         HttpContext context,
         CancellationToken cancellationToken)
     {
@@ -1462,8 +1464,61 @@ public static class OfficeEndpoints
             return TypedResults.Ok(new QuickCreateDefaultsResponse());
         }
 
-        var assignedTo = await recordCreation.ResolveDefaultAssigneeAsync(callerSystemUserId, cancellationToken);
+        var assignedTo = await officeService.ResolveDefaultAssigneeAsync(callerSystemUserId, cancellationToken);
+
+        // 018b fix round 2 (K1): the pane sends this contact back as assignedToContactId, and a REQUESTED assignee the caller
+        // cannot AppendTo is refused (403 assignee_inaccessible) — whereas the maker default the create falls back on is
+        // dropped with a warning. A default the caller cannot use is therefore not offered: no prefill, so the create takes
+        // the maker-default path. The check is the service's own (AppendTo, as the caller); one that cannot complete offers none.
+        if (assignedTo is not null
+            && !await CallerMayAppendToAsync(callerDataverse, "contact", assignedTo.Id, logger, cancellationToken))
+        {
+            assignedTo = null;
+        }
+
         return TypedResults.Ok(new QuickCreateDefaultsResponse { AssignedTo = assignedTo });
+    }
+
+    /// <summary>
+    /// AS THE CALLER, whether they hold AppendTo on one record - the check the unified create makes on a named Assigned To
+    /// (<c>CallerWriteAuthorization.CheckCallerMayAppendToRecordAsync</c>). Fail closed: a WhoAmI or rights read that
+    /// cannot complete, or that throws, is "no" (a cancelled request still propagates).
+    /// </summary>
+    private static async Task<bool> CallerMayAppendToAsync(
+        Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient callerDataverse, string table, Guid recordId,
+        ILogger logger, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var me = await Sprk.Bff.Api.Services.Dataverse.CallerWriteAuthorization
+                .WhoAmIAsync(callerDataverse, cancellationToken);
+            if (me.Failure is not null)
+            {
+                logger.LogWarning("[QUICKCREATE-DEFAULTS] The caller could not be identified; no default assignee offered.");
+                return false;
+            }
+
+            var outcome = await Sprk.Bff.Api.Services.Dataverse.CallerWriteAuthorization
+                .CheckCallerMayAppendToRecordAsync(callerDataverse, me.SystemUserId, table, recordId, cancellationToken);
+            if (!outcome.Succeeded)
+            {
+                logger.LogInformation(
+                    "[QUICKCREATE-DEFAULTS] The caller holds no AppendTo on their default assignee {Table} {RecordId}; no default offered.",
+                    table, recordId);
+            }
+
+            return outcome.Succeeded;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "[QUICKCREATE-DEFAULTS] The caller's AppendTo on their default assignee could not be checked; no default offered.");
+            return false;
+        }
     }
 
     /// <summary>
@@ -1720,23 +1775,16 @@ public static class OfficeEndpoints
     /// Creates a new entity with minimal required fields for inline creation from the Office add-in.
     /// </summary>
     /// <remarks>
-    /// R3 task 081 (2026-06-22): On successful Matter creation, fires a
-    /// <see cref="MembershipChangedEvent"/> via
-    /// <see cref="IMembershipEventPublisher"/> for the implicit
-    /// <c>ownerid</c> Lookup (matter cluster — only BFF-side mutation site
-    /// for sprk_matter per event-source-inventory §3A). Fire-and-forget
-    /// per FR-2P2.6 + Q2: publisher never throws; mutation succeeds even
-    /// if publish fails (nightly recon job task 085 is the backstop).
-    /// Internal (not private) so the test assembly (InternalsVisibleTo) runs the real handler and observes the owner
-    /// event it publishes (UAC-r2 task 152 verifier round 1, item 7).
+    /// Field mapping task 018b (UAC-r2 condition (b) item i): the matter's owner membership event is published ONCE, by the
+    /// unified create's post-create step (<c>RecordCreationService</c> step 12, with the owner team it wrote). This handler
+    /// no longer publishes it (R3 task 081 / UAC-r2 task 152 did, reading the owner back).
+    /// Internal (not private) so the test assembly (InternalsVisibleTo) runs the real handler.
     /// </remarks>
     internal static async Task<IResult> QuickCreateAsync(
         string entityType,
         QuickCreateRequest request,
         IOfficeService officeService,
-        IMembershipEventPublisher membershipEventPublisher,
         Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver callerResolver,
-        Spaarke.Dataverse.IGenericEntityService genericEntityService,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken cancellationToken)
@@ -1847,29 +1895,6 @@ public static class OfficeEndpoints
                 response.Name,
                 traceId);
 
-            // R3 task 081 — FR-2P2.6 + Q2 fire-and-forget membership event.
-            // Per event-source-inventory.md §3A + §6.3, the QuickCreate
-            // matter endpoint is the ONLY BFF-side write path for sprk_matter.
-            // UAC-r2 task 152 (ADR-034 A3): the event describes the row's REAL owner — the business-unit default
-            // owner TEAM RecordCreationService wrote (read back here; the service does not return it) — as
-            // PersonIdType=Team, PersonId=teamid: the key MembershipReconciliationJob builds for the same row. Before
-            // task 152 it carried the caller's AAD oid as a User under a comment claiming the junction updater
-            // resolves oid → systemuserid; it never did (it writes PersonId verbatim). When disabled (default
-            // Membership:EventPublisher:Enabled=false), the Null peer logs + returns (ADR-032 P2). Discarded Task =
-            // fire-and-forget; the 201 never waits on Service Bus.
-            if (parsedEntityType == QuickCreateEntityType.Matter)
-            {
-                _ = MembershipOwnerEvents.PublishOwnerAddedAsync(
-                    membershipEventPublisher,
-                    genericEntityService,
-                    "sprk_matter",
-                    response.Id,
-                    knownOwner: null,
-                    traceId,
-                    logger,
-                    cancellationToken);
-            }
-
             // Return 201 Created with location header
             return Results.Created(response.Url ?? $"/office/quickcreate/{entityType}/{response.Id}", response);
         }
@@ -1881,6 +1906,17 @@ public static class OfficeEndpoints
             logger.LogWarning(
                 "Quick create refused for {EntityType}: {Code} ({Status}), CorrelationId={CorrelationId}",
                 entityType, problem.Code, problem.StatusCode, traceId);
+
+            // The service's Assigned To refusal (a contact the caller can read but not append to) is the route filter's refusal for
+            // an unreadable one: ONE body, built by the filter's own builder — OFFICE_009, reasonCode assignee_inaccessible,
+            // title "Forbidden", 403.
+            if (problem.Code == OfficeErrorCodes.AccessDenied
+                && problem.Extensions?.TryGetValue(OfficeService.AssigneeReasonCodeExtension, out var assigneeReason) == true
+                && assigneeReason is string assigneeReasonCode)
+            {
+                return QuickCreateSourceAccessFilter.Deny(
+                    context, assigneeReasonCode, problem.Detail ?? QuickCreateSourceAccessFilter.AssigneeDeniedDetail);
+            }
 
             return Results.Problem(
                 type: $"https://spaarke.com/errors/office/{problem.Code}",

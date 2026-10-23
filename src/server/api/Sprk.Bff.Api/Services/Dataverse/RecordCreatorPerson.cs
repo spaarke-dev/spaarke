@@ -10,7 +10,8 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// </summary>
 /// <remarks>
 /// <para><b>Why the column exists.</b> <c>createdby</c> is the identity that sent the create. For a row the BFF creates
-/// APP-ONLY — Office quick-create (<c>Services/Office/OfficeRecordCreationService</c>), and before task 166 deleted it,
+/// APP-ONLY — Office quick-create (the unified <c>RecordCreationService</c>, step 9, since field mapping task 018), and
+/// before task 166 deleted it,
 /// <c>POST /api/v1/work-assignments</c> — that is the BFF application user, not the person who asked for the record,
 /// and <c>createdonbehalfby</c> is empty (verified live 2026-10-01). Secure provisioning's RESUME shares a stranded
 /// secure record to the person who created it; for those rows it had nobody to share to and could only refuse.

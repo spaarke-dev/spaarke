@@ -132,6 +132,15 @@ public sealed class ExternalDocumentDto
     /// <see cref="SprkCreatedbypersonValue"/>.</summary>
     [JsonPropertyName("_sprk_createdbycontact_value")]
     public string? SprkCreatedbycontactValue { get; init; }
+
+    /// <summary>
+    /// <c>true</c> when the document has a file the download and versions routes can serve; <c>false</c> when it has none
+    /// (no usable SPE pointers), so the SPA lists the row without Download or Versions (R3 ISS-011, #1886, owner decision
+    /// 2026-10-14). Always written. A boolean only: the pointers themselves never leave the BFF. The routes still refuse
+    /// a no-file request on their own (409 <c>no_file_attached</c>).
+    /// </summary>
+    [JsonPropertyName("hasFile")]
+    public bool HasFile { get; init; }
 }
 
 // ---------------------------------------------------------------------------

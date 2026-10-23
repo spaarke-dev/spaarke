@@ -289,6 +289,8 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     /// </remarks>
     public async Task<string> GetEntitySetNameAsync(string entityLogicalName, CancellationToken ct = default)
     {
+        // #2253 fix round 1 (F1-a): the name is pasted into the URL, so only a bare identifier is asked about.
+        DataverseIdentifier.RequireTableName(entityLogicalName, nameof(entityLogicalName));
         if (_entitySetNameCache.TryGetValue(entityLogicalName, out var cached))
             return cached;
 
@@ -690,7 +692,8 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
                 nameof(request));
 
         // (i) the target's own typed lookup
-        payload[$"{navigation}@odata.bind"] = $"/{request.RegardingEntitySetName}({targetId:D})";
+        payload[$"{navigation}@odata.bind"] =
+            $"/{DataverseIdentifier.RequireTableName(request.RegardingEntitySetName, nameof(request))}({targetId:D})";
 
         // (ii) the record type, as a lookup to the environment's sprk_recordtype_ref row
         if (request.RegardingRecordTypeRefId is { } refId && refId != Guid.Empty)
@@ -713,7 +716,8 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             if (string.IsNullOrWhiteSpace(stamp.EntitySetName) || stamp.RecordId == Guid.Empty)
                 throw new ArgumentException($"Core stamp '{stamp.LookupAttribute}' has no entity set or id.", nameof(request));
 
-            payload[$"{stampNavigation}@odata.bind"] = $"/{stamp.EntitySetName}({stamp.RecordId:D})";
+            payload[$"{stampNavigation}@odata.bind"] =
+                $"/{DataverseIdentifier.RequireTableName(stamp.EntitySetName, nameof(request))}({stamp.RecordId:D})";
         }
 
         // (v) unified-access-control-r2 task 173 (owner round 81): the Access Permission inherited from the parents.
@@ -1069,8 +1073,8 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     {
 
         var entitySetName = await GetEntitySetNameAsync(entityLogicalName, ct);
-        var selectFields = string.Join(",", fields);
-        var url = $"{entitySetName}({recordId})?$select={selectFields}";
+        var selectFields = string.Join(",", fields.Select(f => DataverseIdentifier.RequireColumnName(f, nameof(fields))));
+        var url = $"{DataverseIdentifier.RequireTableName(entitySetName, nameof(entitySetName))}({recordId})?$select={selectFields}";
 
         _logger.LogDebug("Retrieving record fields: {Entity}({Id})", entityLogicalName, recordId);
 
@@ -1124,7 +1128,8 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
 
         var entitySetName = await GetEntitySetNameAsync(childEntityLogicalName, ct);
         var primaryKey = $"{childEntityLogicalName}id";
-        var url = $"{entitySetName}?$filter=_{parentLookupField}_value eq {parentRecordId}&$select={primaryKey}";
+        DataverseIdentifier.RequireColumnName(parentLookupField, nameof(parentLookupField));
+        var url = $"{DataverseIdentifier.RequireTableName(entitySetName, nameof(entitySetName))}?$filter=_{parentLookupField}_value eq {parentRecordId}&$select={primaryKey}";
 
         _logger.LogDebug("Querying child records: {Entity} by {LookupField} = {ParentId}", childEntityLogicalName, parentLookupField, parentRecordId);
 
@@ -1230,6 +1235,8 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         Guid? impersonateSystemUserId,
         CancellationToken ct)
     {
+        // #2253 fix round 3 (F1): a bare set, or one table's metadata collection (the field-mapping push reads both).
+        DataverseIdentifier.RequireCollectionPath(entitySetName, nameof(entitySetName));
         var url = string.IsNullOrWhiteSpace(odataQuery)
             ? entitySetName
             : $"{entitySetName}?{odataQuery}";
@@ -1271,6 +1278,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     /// </summary>
     public async Task<int> GetEntityObjectTypeCodeAsync(string entityLogicalName, CancellationToken ct = default)
     {
+        DataverseIdentifier.RequireTableName(entityLogicalName, nameof(entityLogicalName));
         if (_objectTypeCodeCache.TryGetValue(entityLogicalName, out var cached))
             return cached;
 
@@ -1353,7 +1361,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         {
             ["Target"] = new Dictionary<string, object>
             {
-                ["@odata.id"] = $"{entitySetName}({recordId})",
+                ["@odata.id"] = $"{DataverseIdentifier.RequireTableName(entitySetName, nameof(entitySetName))}({recordId})",
             },
             ["PrincipalAccess"] = new Dictionary<string, object>
             {
@@ -1440,7 +1448,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         {
             ["Target"] = new Dictionary<string, object>
             {
-                ["@odata.id"] = $"{entitySetName}({recordId})",
+                ["@odata.id"] = $"{DataverseIdentifier.RequireTableName(entitySetName, nameof(entitySetName))}({recordId})",
             },
             ["Revokee"] = new Dictionary<string, object>
             {
@@ -1633,6 +1641,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         if (principalSystemUserId == Guid.Empty)
             throw new ArgumentException("A principal systemuserid is required.", nameof(principalSystemUserId));
 
+        DataverseIdentifier.RequireTableName(entitySetName, nameof(entitySetName));
         var target = Uri.EscapeDataString($"{{\"@odata.id\":\"{entitySetName}({recordId:D})\"}}");
         return SendGetAsync(
             $"systemusers({principalSystemUserId:D})/Microsoft.Dynamics.CRM.RetrievePrincipalAccess(Target=@p1)?@p1={target}",
@@ -1939,7 +1948,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
 
     /// <summary>The batched read's query: every POA row of the named records of one table.</summary>
     private static string PrincipalAccessBatchQuery(IReadOnlyCollection<Guid> recordIds, string entityLogicalName)
-        => $"principalobjectaccessset?$filter=objecttypecode eq '{entityLogicalName}' and ("
+        => $"principalobjectaccessset?$filter=objecttypecode eq '{DataverseIdentifier.RequireTableName(entityLogicalName, nameof(entityLogicalName))}' and ("
             + string.Join(" or ", recordIds.Select(id => $"objectid eq {id}"))
             + ")&$select=objectid,principalid,principaltypecode,accessrightsmask,changedon";
 
@@ -1965,7 +1974,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     /// an empty answer.</para>
     /// </remarks>
     private static string PrincipalAccessQuery(Guid recordId, string entityLogicalName)
-        => $"principalobjectaccessset?$filter=objectid eq {recordId} and objecttypecode eq '{entityLogicalName}'"
+        => $"principalobjectaccessset?$filter=objectid eq {recordId} and objecttypecode eq '{DataverseIdentifier.RequireTableName(entityLogicalName, nameof(entityLogicalName))}'"
             + "&$select=principalid,principaltypecode,accessrightsmask,changedon";
 
     /// <summary>
@@ -2095,7 +2104,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             entityLogicalName, recordId, fields.Count,
             impersonateSystemUserId is { } imp && imp != Guid.Empty ? $" (impersonating {imp})" : string.Empty);
 
-        var response = await SendPatchAsJsonAsync($"{entitySetName}({recordId})", fields, ct, impersonateSystemUserId);
+        var response = await SendPatchAsJsonAsync($"{DataverseIdentifier.RequireTableName(entitySetName, nameof(entitySetName))}({recordId})", fields, ct, impersonateSystemUserId);
 
         if (!response.IsSuccessStatusCode)
         {
@@ -2141,7 +2150,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             "Updating EXISTING record fields (If-Match: *, no create): {Entity}({Id}), {FieldCount} fields",
             entityLogicalName, recordId, fields.Count);
 
-        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Patch, $"{entitySetName}({recordId})", ct);
+        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Patch, $"{DataverseIdentifier.RequireTableName(entitySetName, nameof(entitySetName))}({recordId})", ct);
 
         // "Prevent create in upsert": If-Match: * makes the PATCH apply only to a row that already exists.
         // Without it the Web API creates a row with this id (the behaviour UpdateRecordFieldsAsync keeps).
@@ -2192,7 +2201,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             "Updating record fields only if unchanged (If-Match version {Version}): {Entity}({Id}), {FieldCount} fields",
             expectedVersion, entityLogicalName, recordId, fields.Count);
 
-        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Patch, $"{entitySetName}({recordId})", ct);
+        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Patch, $"{DataverseIdentifier.RequireTableName(entitySetName, nameof(entitySetName))}({recordId})", ct);
 
         // A Dataverse row's ETag is W/"<versionnumber>" (verified live, spaarkedev1 2026-10-01). A specific ETag
         // also prevents create: a row that does not exist cannot match it.
@@ -2498,10 +2507,13 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
                 ? Guid.Parse(pid.GetString()!) : Guid.Empty,
             SourceField = data.TryGetValue("sprk_sourcefield", out var sf) && sf.ValueKind != JsonValueKind.Null
                 ? sf.GetString()! : string.Empty,
-            SourceFieldType = data.TryGetValue("sprk_sourcefieldtype", out var sft) && sft.ValueKind != JsonValueKind.Null ? sft.GetInt32() : 0,
+            SourceFieldType = data.TryGetValue("sprk_sourcefieldtype", out var sft) && sft.ValueKind != JsonValueKind.Null
+                ? FieldMappingColumns.NormalizeFieldType(sft.GetInt32()) : 0,
             TargetField = data.TryGetValue("sprk_targetfield", out var tf) && tf.ValueKind != JsonValueKind.Null
                 ? tf.GetString()! : string.Empty,
-            TargetFieldType = data.TryGetValue("sprk_targetfieldtype", out var tft) && tft.ValueKind != JsonValueKind.Null ? tft.GetInt32() : 0,
+            // #2281: both option encodings (bare n and 100000000 + n) read as the same type.
+            TargetFieldType = data.TryGetValue("sprk_targetfieldtype", out var tft) && tft.ValueKind != JsonValueKind.Null
+                ? FieldMappingColumns.NormalizeFieldType(tft.GetInt32()) : 0,
             MappingType = data.TryGetValue("sprk_mapping_type", out var mt) && mt.ValueKind != JsonValueKind.Null ? mt.GetInt32() : 0,
             CompatibilityMode = data.TryGetValue("sprk_compatibilitymode", out var cm) && cm.ValueKind != JsonValueKind.Null ? cm.GetInt32() : 0,
             IsRequired = data.TryGetValue("sprk_isrequired", out var req) && req.ValueKind != JsonValueKind.Null && req.GetBoolean(),

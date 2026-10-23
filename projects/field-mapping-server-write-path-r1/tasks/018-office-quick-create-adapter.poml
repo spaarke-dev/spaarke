@@ -4,7 +4,7 @@
     <title>Office quick-create (Matter, Project, Invoice) becomes a thin adapter over the service; delete the Office RecordCreationService (FR-13 part 2, FR-12)</title>
     <phase>2 W2 Unified RecordCreationService</phase>
     <gate>016 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in Sprk.Bff.Api; tags include bff-api, office; deletes a 1264-line creation core with security behaviour; adds tests at KEEP paths (TEST-MODIFYING and deletion override).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -115,7 +115,7 @@
     <criterion testable="true">Office quick-create for Matter, Project and Invoice each call `RecordCreationService` (caller principal); `OfficeService` has no direct `_genericEntityService.CreateAsync` for Invoice.</criterion>
     <criterion testable="true">OfficeQuickCreateContractTests, OfficeQuickCreateProjectContractTests and OfficeQuickCreateFieldsContractTests pass with unchanged assertions and unchanged Office error codes.</criterion>
     <criterion testable="true">The quick-create defaults endpoint still returns the caller's linked contact prefill (same response), with `ResolveDefaultAssigneeAsync` moved intact.</criterion>
-    <criterion testable="true">An Invoice created by Office quick-create is team-owned by the record-first owner of its Matter (not user- or app-owned) and carries the I-1 stamp.</criterion>
+    <criterion testable="true">WITHDRAWN 2026-10-21 (ebilling-r1; owner decision L: invoices are created only by submission, FR-17/FR-20): the Office Invoice leg does NOT move onto RecordCreationService. Leave it exactly as it is, apart from a marker comment "removed by ebilling-r1 task 096". Task 096 deletes the leg (QuickCreateRequest.cs:180, OfficeDocumentPersistence.cs:47) one release after the word-add-in-r1 add-in release. Negative: no RecordCreationService call is added for sprk_invoice from Office.</criterion>
     <criterion testable="true">The task notes contain the itemized behaviour inventory of the deleted core with the landing place of each check, default and error code.</criterion>
     <criterion testable="true">Negative: a service refusal or exception produces the existing Office failure response (existing code), never a 200 and never a created row; an unmapped refusal Kind fails closed to the existing generic Office failure code.</criterion>
     <criterion testable="true">BFF build 0 errors; Office contract tests, OfficeRecordOwnershipTests, SecureChildOwnershipAiToolTests*, RouteAuthorizationGuardTests and RecordOwnerAssignmentCensusTests pass; publish-size delta, CVE result and /conflict-check result recorded in the task notes.</criterion>
@@ -137,6 +137,17 @@
       - K1: a test where the catalog read in step 7 throws (`RetrieveMultipleAsync` faults) gets 503 `OwnerUnavailableCode` and nothing is written (RecordCreationService step 7, ~:609-630);
       - K3: a caller payload holding an explicit null under lowercase `sprk_ai_search_index@odata.bind` must not produce two keys that differ only in case after step 8's fill. Normalise the bind key (or drop the null entry before filling); test the duplicate-key case and the canonical-case case.
       Whichever of 017 or 018 lands first owns this; the other confirms it.
+    </criterion>
+    <criterion testable="true">UAC-r2 condition (b) for 018b (2026-10-21):
+      - Assigned To contact named in the request: REFUSE when the caller lacks AppendTo on the contact, checked as the caller, the same way Create does it (it materialises an uncapped Collaborate grant, ADR-034 A4). The refusal names the field: its ProblemDetails code identifies `assignedTo`, and it never reads as "matter not found". If Office already has a fitting code, reuse it; otherwise this one code is the single allowed addition under NFR-07, recorded in the notes. Test with an unreadable contact (refused) and a readable one (created).
+      - A Matter create with no bearer token is refused with 500 `caller_rights_unverifiable` (fail closed).
+      - (i) The matter membership event fires exactly once per Office create: assert the single publish, and that the endpoint publish (OfficeEndpoints.cs ~:1858) is gone.
+      - (ii) A Project filed under a SECURE matter is owned by the Secure Record Owners team (D-11 / round 6), not the matter's BU default team. It is itself secure (round 6), inherits Access Permission as a floor (round 87), and its search index follows that owner. Test it.
+      - (iii) The adapter map keeps Office's existing status for EVERY refusal code the service can return, including OwnerUnresolved (stays 403) and the Assigned To refusal. A table-driven test lists the full map, enumerated from the service's codes, so an unmapped new code fails the test.
+    </criterion>
+    <criterion testable="true">UAC-r2 018a review (2026-10-22), for 018b:
+      - The maker's-contact Assigned To default is dropped, not refused, when the caller cannot AppendTo it. The adapter shows `record_creation.default_value_dropped` to the user, and nothing writes Assigned To app-only after a drop. Test both conditions.
+      - #2238 (K-c): de-duplicate the step-9 server binds (`ownerid@odata.bind`, the creator-person bind, `sprk_issecure`) case-insensitively for system-principal items, the K3 way, with tests. Optional; record the outcome either way.
     </criterion>
     <criterion testable="true">On merge of the Office move onto the unified create: close #1614 and #1617 (their unified-service half merged in #2214, cf0886360a; the Office half closes here). Cite the merge SHA.</criterion>
   </acceptance-criteria>
