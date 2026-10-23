@@ -2,7 +2,7 @@
 
 > **Last updated**: 2026-10-22 (task 018 complete; #2281 fixed (1fa0cf5cb8); project blocked on 017)
 > **Phase**: Wave 2. Done (14/43): 001–006, 010–016, 018 on master (018a 36403e1f4b, 018b ef8a91a157 #2261, 018c **ab7cf4fc94** #2266).
-> **Live on dev: 1fa0cf5cb8** (R3, 2026-10-23 00:00Z; carries 018b LIVE, 018c, #2282). Waiting on the owner's 3 Office quick-creates + the Work Assignment attorney-copy check, then this session verifies read-only. **Active: none (blocked on 017).**
+> **Live on dev: 58ffc37da3** (R3, 2026-10-23 11:18Z; field-mapping no-objection given; carries 018b, 018c, #2282 and later non-field-mapping work). Office smoke done. Waiting on the owner's wizard re-runs against the new dev mapping rules. **Active: none (blocked on 017).**
 
 ## Quick Recovery
 
