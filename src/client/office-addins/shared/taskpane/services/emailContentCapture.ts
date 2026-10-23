@@ -7,7 +7,8 @@
  * Spaarke's tenant cannot reach, so a guest's save stored an `.eml` with headers only and no attachment documents
  * (owner UAT 2026-10-08). Every Model 1 customer's staff are such guests. Office.js reads the open item in any tenant,
  * so the content is read here and sent with the save. The server already prefers content the client sent: it fetches
- * from Graph only when the request carries no body (`OfficeEmailEnricher.EnrichEmailFromGraphAsync`), builds the
+ * the body and attachments from Graph only when the request carries no body (`OfficeEmailEnricher.EnrichEmailFromGraphAsync`;
+ * a request with a body still gets one light read of `sentDateTime` there, task 132), builds the
  * `.eml` from `email.body` + `email.attachments[].contentBase64`, and creates the attachment documents from that
  * `.eml`, filtered by `email.selectedAttachmentFileNames`.
  *

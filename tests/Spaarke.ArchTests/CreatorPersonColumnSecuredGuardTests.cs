@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Sprk.Bff.Api.Services.Dataverse;
 using Xunit;
@@ -18,7 +19,7 @@ namespace Spaarke.ArchTests;
 /// schema, and this guard checks the promise against the solution source.</para>
 /// <para><b>A column that exists only through a deploy script.</b> A stamped table with no Entity.xml declaration fails, unless it is
 /// in <see cref="SecuredOnlyByDeployScript"/> with a reason and the script that secures it (the script must exist and name the
-/// table). ebilling task 013's tables (<c>sprk_invoicesubmission</c>, <c>sprk_invoiceapproval</c>, <c>sprk_invoicecorrection</c>,
+/// table as a whole quoted token, <see cref="NamesTable"/>). ebilling task 013's tables (<c>sprk_invoicesubmission</c>, <c>sprk_invoiceapproval</c>, <c>sprk_invoicecorrection</c>,
 /// <c>sprk_externalidentifier</c>) are expected to land here when they join the stamped set; that is intended.</para>
 /// <para><b>Deploy gate.</b> Source is not the environment: <c>scripts/Set-RecordCreatorPersonSchema.ps1 -Verify</c> (roots) and
 /// <c>scripts/Set-ChildRecordCreatorPersonSchema.ps1 -Verify</c> (children) must exit 0 before a BFF that stamps a new table deploys
@@ -132,7 +133,14 @@ public class CreatorPersonColumnSecuredGuardTests
     {
         string[] stamped = ["sprk_synthetic_scripted"];
         var none = new Dictionary<string, IReadOnlyList<Declaration>>(StringComparer.OrdinalIgnoreCase);
-        static string? Script(string path) => path == "scripts/Good.ps1" ? "$tables = @('sprk_synthetic_scripted')" : path == "scripts/Other.ps1" ? "sprk_x" : null;
+        static string? Script(string path) => path switch
+        {
+            "scripts/Good.ps1" => "$tables = @('sprk_synthetic_scripted')",
+            "scripts/Other.ps1" => "sprk_x",
+            "scripts/Longer.ps1" => "$tables = @('sprk_synthetic_scriptedversion', 'sprk_synthetic_scripted_child')",
+            "scripts/Unquoted.ps1" => "# sprk_synthetic_scripted is secured elsewhere",
+            _ => null,
+        };
 
         // Must-not-fire: a complete entry.
         Assert.Empty(Violations(stamped, none, [new("sprk_synthetic_scripted", "ebilling 013 adds it by script", "scripts/Good.ps1")], Script));
@@ -141,6 +149,11 @@ public class CreatorPersonColumnSecuredGuardTests
         Assert.Single(Violations(stamped, none, [new("sprk_synthetic_scripted", " ", "scripts/Good.ps1")], Script));
         Assert.Single(Violations(stamped, none, [new("sprk_synthetic_scripted", "reason", "scripts/Missing.ps1")], Script));
         Assert.Single(Violations(stamped, none, [new("sprk_synthetic_scripted", "reason", "scripts/Other.ps1")], Script));
+
+        // Must-fire: a script that names only LONGER tables starting with this one (sprk_procedure vs 'sprk_procedureversion'),
+        // or names it only unquoted in a comment, does not name it.
+        Assert.Single(Violations(stamped, none, [new("sprk_synthetic_scripted", "reason", "scripts/Longer.ps1")], Script));
+        Assert.Single(Violations(stamped, none, [new("sprk_synthetic_scripted", "reason", "scripts/Unquoted.ps1")], Script));
 
         // Must-fire: an allow-listed table that is declared UNSECURED in an Entity.xml is not excused by the entry.
         var unsecured = new Dictionary<string, IReadOnlyList<Declaration>>(StringComparer.OrdinalIgnoreCase)
@@ -224,7 +237,7 @@ public class CreatorPersonColumnSecuredGuardTests
                 violations.Add($"{table}: the SecuredOnlyByDeployScript entry gives no reason.");
             else if (readScript(entry.Script) is not { } script)
                 violations.Add($"{table}: the SecuredOnlyByDeployScript entry names '{entry.Script}', which does not exist.");
-            else if (!script.Contains(table, StringComparison.OrdinalIgnoreCase))
+            else if (!NamesTable(script, table))
                 violations.Add($"{table}: '{entry.Script}' does not name the table, so it cannot be what secures its {Column}.");
         }
 
@@ -233,6 +246,14 @@ public class CreatorPersonColumnSecuredGuardTests
 
         return violations;
     }
+
+    /// <summary>
+    /// True when <paramref name="script"/> names <paramref name="table"/> as a whole quoted token (<c>'sprk_x'</c> or <c>"sprk_x"</c>),
+    /// the form the creator-person scripts' <c>$Tables</c> lists use. A substring match would let <c>'sprk_procedureversion'</c>
+    /// satisfy <c>sprk_procedure</c> and <c>'sprk_policyversion'</c> satisfy <c>sprk_policy</c> (ebilling F4/F3 re-check, F2).
+    /// </summary>
+    internal static bool NamesTable(string script, string table) =>
+        Regex.IsMatch(script, $"""(['"]){Regex.Escape(table)}\1""", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     private static string? ScriptText(string repoRelativePath)
     {
