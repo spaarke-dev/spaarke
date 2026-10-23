@@ -241,6 +241,7 @@ Contract: `git show origin/work/unified-access-control-r2:projects/unified-acces
 | 🔲 160 | [Budget inquiry: EmailComposer compose-only, To from outside firm, link by recipient, footer names the record (D-179, D-181)](160-budget-inquiry-email-composer-and-record-link.poml) | FULL | **opus**/high | 105, 158 | K | UAT round 1 findings 5, 7. R3 reviews the GrantAccessNotifier overload |
 | 🔲 161 | [Revise budget on a matter with no budget becomes "Create budget" (D-180)](161-create-budget-when-matter-has-none.poml) | FULL | sonnet/high | 105 | K | UAT round 1 finding 6. Plan substitution like WithoutMarkComplete, in both routes |
 | 🔲 162 | [Wizards bind an uploaded document through the exact parent column (114 UAT)](162-wizard-document-lookup-exact-column.poml) | FULL | sonnet/high | 114 | K | `sprk_X` vs `sprk_relatedX`; blocks closing 114. Field-mapping half is #2281 (DI-122, field-mapping project) |
+| 🔲 163 | [Worklist reads policy columns as the BFF; drop direct policy Read from Basic and Console User (D-185, #2285)](163-worklist-policy-columns-server-read.poml) | FULL | sonnet/high | — | K | security-tagged (2 review passes). Live role change by the main session after the BFF deploy (owner authority D-185) |
 
 ### Phase 5 — The worklist surface
 
