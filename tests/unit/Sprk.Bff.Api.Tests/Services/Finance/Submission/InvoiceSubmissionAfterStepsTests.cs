@@ -862,6 +862,44 @@ public class InvoiceSubmissionAfterStepsTests
         decision.Facts.Should().ContainKeys("reasons", "decidingReasonCodes", "reliabilityThreshold", "trackingNumber");
     }
 
+    [Theory(DisplayName = "122 (#2235): the rejection record stores the withheld sentence for a Duplicate reason, never the earlier invoice; a non-Duplicate sentence is unchanged")]
+    [InlineData(BillingReasonCodes.DuplicateInvoiceNumber)]
+    [InlineData(BillingReasonCodes.DuplicateOfPriorSubmissionLine)]
+    [InlineData(BillingReasonCodes.DuplicateOfEarlierLine)]
+    public async Task TheRejectionDecision_StoresTheWithheldSentence_ForADuplicateReason(string duplicateCode)
+    {
+        const string earlierNumber = "F-090.1";
+        var earlierInvoice = new Guid("9f0e2c51-7a3b-4c8e-b1d2-0a9e8f7c6b5d");
+        const string otherSentence = "Line 2 bills 0.3 hours, not a multiple of 0.1.";
+        var parsed = InvoiceSubmissionAfterSteps.StoredFindings.Parse(InvoiceSubmissionPersister.BuildFindingsJson(await AutoRejected(), InvoiceId))!;
+        parsed.Plan.Should().NotBeEmpty("the fixture's rejection has a Signal plan to copy the entry shape from");
+        var basis = parsed.Plan[0];
+        var stored = new InvoiceSubmissionAfterSteps.StoredFindings
+        {
+            Kind = parsed.Kind,
+            ReasonCode = parsed.ReasonCode,
+            InvoiceId = parsed.InvoiceId,
+            TrackingNumber = parsed.TrackingNumber,
+            ReliabilityThreshold = parsed.ReliabilityThreshold,
+            DecidingIndexes = parsed.DecidingIndexes,
+            Findings = parsed.Findings,
+            Plan =
+            [
+                basis with { ReasonCodes = [duplicateCode], Sentence = $"Invoice INV-100 duplicates {earlierNumber} ({earlierInvoice:D})." },
+                basis with { ReasonCodes = ["time.increment"], Sentence = otherSentence },
+            ],
+        };
+
+        var decision = InvoiceSubmissionAfterSteps.BuildRejectionDecision(stored, Submission, InvoiceId)!;
+
+        var reasons = decision.Facts["reasons"].Should().BeAssignableTo<IEnumerable<Dictionary<string, object?>>>().Subject.ToList();
+        reasons.Should().HaveCount(2);
+        reasons[0]["sentence"].Should().Be(BillingRuleCatalogue.WithheldDuplicateTemplate);
+        reasons[1]["sentence"].Should().Be(otherSentence);
+        var snapshot = JsonSerializer.Serialize(decision.Facts);
+        snapshot.Should().NotContain(earlierNumber).And.NotContain(earlierInvoice.ToString("D"));
+    }
+
     [Fact(DisplayName = "049 D: PreflightRejection runs the recorder's I/O-free checks on the same decision RunAsync records; nothing for other kinds")]
     public async Task PreflightRejection_ChecksTheSameDecision()
     {
