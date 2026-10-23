@@ -213,7 +213,7 @@ DEPLOYMENT PLAN
   Phases:
     Phase 1: Build all client components
     Phase 2: Deploy BFF API (per environment)
-    Phase 2b: Apply and verify the worklist grid configuration (per environment; only after a successful Phase 2; blocks Phase 3 if it fails)
+    Phase 2b: Apply and verify the worklist grid configuration (per environment; does not run if Phase 2 failed; blocks Phase 3 if it fails)
     Phase 3: Import SpaarkeMaster — the CI-published package, typed per environment (none on dev)
     Phase 4: Deploy web resources (per environment)
     Phase 5: Validate deployment (per environment)
