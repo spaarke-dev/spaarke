@@ -9,9 +9,9 @@
 
 | Field | Value |
 |---|---|
-| **Task** | UAT round 1 lanes. **Merged to docs:** 158 `539ab22ce9`, 159 `9b485535ce`, 161 `811167613f`, 162 `84636b650a`, 163 `5952a9c801`, 164 `9f53c53198`. **Running:** 160 lane (`C:\wts-160`, opus, D-187). ebilling is running its own F4(b) fix round; pass 2 follows when they send SHAs. |
-| **Status** | Opening the docs→master PR (carries 158/159/161/162/163/164). The Console redeploys from master (158 only; safe on the current dev BFF), so peers get before/after notices. |
-| **Next Action** | docs→master PR → CI → notices → merge → ask R3 for the dev BFF deploy with the exact master SHA (must contain `283466d40`). Then "Next, in order" step 2. |
+| **Task** | UAT round 1. **On master** `0317579272` (PR #2303): 158, 159, 161, 162, 163, 164. **160** in fix round 1 (PR #2305, `C:\wts-160`): Opus review found F1 stored XSS (`EmailMessageFields.tsx:46` innerHTML), F2 silent no-email pick, F3 send-wiring + Cc/warning tests, pre-existing bad-address orphan; plus K1/K3 and R3's two suggestions (token drift guard, portal-link wording). R3 reviewed GrantAccessNotifier: no F. |
+| **Status** | Dev BFF deploy requested from R3 at `0317579272` (contains `283466d40`; live `1fa0cf5cb8` is an ancestor). The owner approves in R3's session. Console auto-deploy run 39899451640 in progress → send after-notices to word-add-in, R3, uac-r2. |
+| **Next Action** | (1) Console deploy done → after-notices. (2) 160 fix round reports → scoped Sonnet re-check (XSS fix is security) → merge to docs. (3) R3 deploys → ask the owner before the worklist config apply (step 2a below). **Live Basic User already lacks `prvReadsprk_Policy` and `prvReadsprk_ruleset`**: not ontology, ebilling, R3 or uac-r2, no import, role `modifiedon` 2026-10-23 00:01Z by the owner's account; asked the owner. So step 2c changes only Console User. |
 
 ## Next, in order
 
