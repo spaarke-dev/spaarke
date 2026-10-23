@@ -99,6 +99,9 @@ public static class InviteExternalUserEndpoint
         if (string.IsNullOrWhiteSpace(request.Email))
             return ProblemDetailsHelper.ValidationError("Email is required.");
 
+        if (ValidateInvitedTenant(request.InvitedTenantId) is { } tenantProblem)
+            return tenantProblem;
+
         // Note (task 070): /invite only onboards (resolve-or-create Contact + CIAM account); it writes NO grant.
         // The grant is created separately by /grant or /invite-and-grant.
         //
@@ -165,6 +168,19 @@ public static class InviteExternalUserEndpoint
     // =========================================================================
     // Reusable core (shared with the invite-and-grant orchestration, task 029)
     // =========================================================================
+
+    /// <summary>
+    /// The optional <see cref="InviteExternalUserRequest.InvitedTenantId"/>: null when absent or blank, else a 400 in the
+    /// route's validation shape unless it is a non-empty GUID. Pure. Shared by <c>/invite</c> and <c>/invite-and-grant</c>.
+    /// </summary>
+    internal static IResult? ValidateInvitedTenant(string? raw)
+        => string.IsNullOrWhiteSpace(raw) || InvitedTenantOf(raw) is not null
+            ? null
+            : ProblemDetailsHelper.ValidationError("InvitedTenantId must be a GUID (the Entra tenant id), or omitted.");
+
+    /// <summary>The invited tenant as a non-empty GUID, or null when absent, blank or not one (validated first). Pure.</summary>
+    internal static Guid? InvitedTenantOf(string? raw)
+        => Guid.TryParse(raw?.Trim(), out var tenant) && tenant != Guid.Empty ? tenant : null;
 
     /// <summary>A refused invite: HTTP 409 with a stable reason code and a human message.</summary>
     internal sealed record InviteRefusal(string ReasonCode, string Message);

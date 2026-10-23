@@ -23,6 +23,12 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// <paramref name="ProjectId"/> is ignored for the grant. Unused by <c>/invite</c> (which only onboards).
 /// </param>
 /// <param name="RecordId">The GUID of the root record identified by <paramref name="RecordType"/>.</param>
+/// <param name="InvitedTenantId">
+/// Optional: the Entra tenant id (a GUID) of the person's work organization. Recorded with the invite. A person who signs in
+/// with a work account binds to this contact only when their token's tenant is this one, unless their token says the
+/// email's domain is verified by its owning tenant. Anything but a non-empty GUID is refused (400). Used by <c>/invite</c>
+/// and <c>/invite-and-grant</c>.
+/// </param>
 public record InviteExternalUserRequest(
     string Email,
     Guid ProjectId,
@@ -32,4 +38,5 @@ public record InviteExternalUserRequest(
     DateOnly? ExpiryDate,
     Guid? OrganizationId,
     string? RecordType = null,
-    Guid? RecordId = null);
+    Guid? RecordId = null,
+    string? InvitedTenantId = null);

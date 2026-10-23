@@ -94,6 +94,9 @@ public static class InviteAndGrantExternalUserEndpoint
         if (string.IsNullOrWhiteSpace(request.Email))
             return ProblemDetailsHelper.ValidationError("Email is required.");
 
+        if (InviteExternalUserEndpoint.ValidateInvitedTenant(request.InvitedTenantId) is { } tenantProblem)
+            return tenantProblem;
+
         if (!Enum.IsDefined(typeof(ExternalAccessLevel), request.AccessLevel))
             return ProblemDetailsHelper.ValidationError(
                 $"AccessLevel must be one of: {string.Join(", ", Enum.GetNames<ExternalAccessLevel>())}.");
