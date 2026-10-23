@@ -16,6 +16,7 @@
 
 - **Task 264 ✅ (2026-10-22)** — H3 sets / H13 T7 verifies `removeUnverifiedEmailClaim` (#2001 closed; NOT this project's ISS-013 #1500, which stays open). ACME BFF app set to `true` 2026-10-23 01:53 UTC (owner OK), read back `true`.
 - **Task 265 ✅ (2026-10-22)** — H13 T7 reads back `ExternalAccess__CustomerBusinessUnitId` on both slots (#2265; write in `faf36207d`). #2265 closes with the branch merge.
+- **R3 `fix/r3-iss-005-combined` (1b0d9cdf36) edits H7b**: S18 `IdentityLinkColumns` + 6 contact identity-plane/collision locks. OK'd 2026-10-23 on condition: the published SpaarkeMaster (`dataverse-solutions-latest.json`) carries the locks before/with the control-plane redeploy that ships it (else every run stalls at H7b `identity_link_lock_incomplete`; 1.2.3.1 lacks them). Asked R3 to extend S19 (`sprk_accesspermissiongrant`) and S22 (3 new BFF-only columns, verify-only) in their PR; I review the H7b part when they send the PR number. **Gate our next control-plane redeploy on that SpaarkeMaster publish if their PR merges first.**
 - Merge PR body must also reference #2001, `Closes #2265` and `Closes #2283` (field-mapping target type, fixed on the branch in `5916a0599`, still `= 1` on master).
 
 ## Live state
