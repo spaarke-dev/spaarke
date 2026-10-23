@@ -16,7 +16,7 @@ BeforeAll {
     $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:ScriptPath, [ref]$null, [ref]$errors)
     if ($errors.Count -gt 0) { throw "The script does not parse: $($errors[0].Message)" }
 
-    foreach ($variable in 'KindRules', 'MaxHeadline', 'MaxProposedAction', 'MaxShortName') {
+    foreach ($variable in 'NextStepCodes', 'KindRules', 'MaxHeadline', 'MaxProposedAction', 'MaxShortName') {
         $assign = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and "$($n.Left)" -eq "`$$variable" }, $false)
         if (-not $assign) { throw "The script no longer defines `$$variable" }
         . ([scriptblock]::Create($assign.Extent.Text))
@@ -125,7 +125,35 @@ Describe 'Test-Definition (lint)' {
     It 'must fire: a version that starts before the one it supersedes is refused' {
         $def = Read-Definition 'know-promotion.policies.json'
         ($def.policies[0].versions | Where-Object versionNumber -eq 2).inForceFrom = '2026-10-01T00:00:00Z'
-        (@(Test-Definition $def) -join '|') | Should -Match 'v2 inForceFrom is before v1 inForceFrom'
+        (@(Test-Definition $def) -join '|') | Should -Match 'v2 inForceFrom must be after v1 inForceFrom'
+    }
+
+    It 'must fire: two versions with the same inForceFrom are refused (strictly increasing)' {
+        $def = Read-Definition 'know-promotion.policies.json'
+        $v1 = $def.policies[0].versions | Where-Object versionNumber -eq 1
+        ($def.policies[0].versions | Where-Object versionNumber -eq 2).inForceFrom = $v1.inForceFrom
+        (@(Test-Definition $def) -join '|') | Should -Match 'v2 inForceFrom must be after v1 inForceFrom'
+    }
+
+    It 'must not fire: a later inForceFrom is accepted (the shipped v1 < v2)' {
+        @(Test-Definition (Read-Definition 'know-promotion.policies.json')) | Should -BeNullOrEmpty
+    }
+
+    It 'must fire: a Next step that is not a catalog Next-step code is refused' {
+        $def = Read-Definition 'know-promotion.policies.json'
+        ($def.policies[0].versions | Where-Object versionNumber -eq 2).decisionPlan.nextSteps = @('mark-complete', 'bogus')
+        $text = @(Test-Definition $def) -join '|'
+        $text | Should -Match "Next step 'bogus' is not a catalog Next-step code"
+        $text | Should -Match "Next step 'mark-complete' is not a catalog Next-step code"
+    }
+
+    It 'must not fire: the catalog Next-step codes are accepted, in either lane''s definition' {
+        $def = Read-Definition 'know-promotion.policies.json'
+        ($def.policies[0].versions | Where-Object versionNumber -eq 2).decisionPlan.nextSteps = @('add-todo', 'create-event', 'send-email', 'assign-work')
+        @(Test-Definition $def) | Should -BeNullOrEmpty
+        $do = Read-Definition 'do-lane.policies.json'
+        $do.policies[0].versions[0].decisionPlan.nextSteps = @('add-todo')
+        @(Test-Definition $do) | Should -BeNullOrEmpty
     }
 
     It 'the Decide-lane lint accepts assign-task (the v2 plan), and still refuses a Do-lane code in a Decide plan' {

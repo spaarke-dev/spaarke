@@ -1242,6 +1242,11 @@ public sealed class AssignTaskExecutor : ChildCreateExecutorBase
 
     public override string Code => "assign-task";
 
+    /// <summary>The MaxLength of <c>sprk_event.sprk_description</c> (SpaarkeMaster <c>Entities/sprk_Event/Entity.xml</c>). Longer text
+    /// makes the app-only create throw, which the route reports as an uncertain write although nothing was written, so it is refused
+    /// here first.</summary>
+    internal const int DescriptionMaxLength = 2000;
+
     protected override string Table => "sprk_event";
 
     protected override string CreatePrivilege => CommunicationRecordAuthorizationFilter.CreateEventPrivilege;
@@ -1269,6 +1274,8 @@ public sealed class AssignTaskExecutor : ChildCreateExecutorBase
             return DecisionActionOutcome.Refused(Code, DecisionActionReasons.InvalidParameter, "Pick who the task is for.");
         if (request.Param("description") is not { } description)
             return DecisionActionOutcome.Refused(Code, DecisionActionReasons.InvalidParameter, "Say what is to be done.");
+        if (description.Length > DescriptionMaxLength)
+            return DecisionActionOutcome.Refused(Code, DecisionActionReasons.InvalidParameter, "Keep 'What to do' under 2,000 characters.");
 
         // The due date is optional; one that is given must be a date.
         DateOnly? due = null;

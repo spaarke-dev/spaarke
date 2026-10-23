@@ -1072,6 +1072,41 @@ public class DecisionActionExecutorsTests
         sent.Value.GetProperty("sprk_description").GetString().Should().HaveLength(300);
     }
 
+    [Fact]
+    public async Task AssignTask_ADescriptionOverTheColumnMaximum_IsRefusedBeforeTheCore_WithAnAccurateMessage()
+    {
+        var cores = Cores();
+
+        var outcome = await new AssignTaskExecutor(Probe(CanCreate).Object, cores.Object, Entities()).ExecuteAsync(
+            Request(new() { ["assignee"] = ContactId.ToString("D"), ["description"] = new string('x', 2001) }, null, MatterCore), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Refused);
+        outcome.ReasonCode.Should().Be(DecisionActionReasons.InvalidParameter);
+        outcome.Detail.Should().Be("Keep 'What to do' under 2,000 characters.");
+        cores.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public void AssignTask_TheDescriptionLimit_EqualsTheMaxLengthOfSprkEventSprkDescription()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "src", "server", "api", "Sprk.Bff.Api", "Program.cs"))) dir = dir.Parent;
+        var xml = System.Xml.Linq.XDocument.Load(Path.Combine(dir!.FullName, "src", "dataverse", "solutions", "SpaarkeMaster", "Entities", "sprk_Event", "Entity.xml"));
+        var attribute = xml.Descendants("attribute").Single(a => (string?)a.Element("LogicalName") == "sprk_description");
+
+        ((int)attribute.Element("MaxLength")!).Should().Be(AssignTaskExecutor.DescriptionMaxLength);
+    }
+
+    [Fact]
+    public async Task AssignTask_ADescriptionOfExactlyTheColumnMaximum_IsAccepted()
+    {
+        var (outcome, _, sent, _) = await RunAssignTaskAsync(
+            new() { ["assignee"] = ContactId.ToString("D"), ["description"] = new string('x', 2000) }, Guid.NewGuid());
+
+        outcome.Status.Should().Be(DecisionActionStatus.Done);
+        sent!.Value.GetProperty("sprk_description").GetString().Should().HaveLength(2000);
+    }
+
     [Theory]
     [InlineData(null, "Set up the budget", "2026-10-30")]
     [InlineData("not-a-guid", "Set up the budget", "2026-10-30")]

@@ -69,11 +69,13 @@ $DataverseUrl = $DataverseUrl.TrimEnd('/')
 $ApiBase = "$DataverseUrl/api/data/v9.2"
 
 # Per definition kind: the lane the policies must be in and the plan codes of the closed action catalog for that lane
-# (DecisionActionCatalog.cs, PlanLane). A plan naming anything else is refused by DecisionPlanService at read time, so it is
-# refused here first.
+# (DecisionActionCatalog.cs, PlanLane), and the Next-step codes (IsNextStep; the same set for every lane). A plan naming anything
+# else is refused by DecisionPlanService at read time, so it is refused here first. These lists are hardcoded; the C# guard
+# DecisionActionCatalogScriptListsTests fails when they and the catalog diverge.
+$NextStepCodes = @('add-todo', 'create-event', 'send-email', 'assign-work')
 $KindRules = @{
-    'do-lane-policies'        = @{ Lane = 'Do'; Codes = @('mark-complete', 'reschedule', 'reassign', 'send-reminder', 'extend-response-date', 'record-the-response') }
-    'know-promotion-policies' = @{ Lane = 'Decide'; Codes = @('send-budget-inquiry', 'revise-budget', 'approve-variance', 'assign-work', 'assign-task') }
+    'do-lane-policies'        = @{ Lane = 'Do'; NextSteps = $NextStepCodes; Codes = @('mark-complete', 'reschedule', 'reassign', 'send-reminder', 'extend-response-date', 'record-the-response') }
+    'know-promotion-policies' = @{ Lane = 'Decide'; NextSteps = $NextStepCodes; Codes = @('send-budget-inquiry', 'revise-budget', 'approve-variance', 'assign-work', 'assign-task') }
 }
 $MaxHeadline = 200; $MaxProposedAction = 400; $MaxShortName = 100
 
@@ -169,7 +171,8 @@ function Test-Definition($def) {
         elseif ([int]$p.currentVersion -ne [int](($numbers | Measure-Object -Maximum).Maximum)) { $problems.Add("${at}: currentVersion must be the highest version number (the script advances to the newest version and ends the ones before it)") }
         $byNumber = @($p.versions | Sort-Object { [int]$_.versionNumber })
         for ($i = 1; $i -lt $byNumber.Count; $i++) {
-            if ((Get-Instant $byNumber[$i].inForceFrom) -lt (Get-Instant $byNumber[$i - 1].inForceFrom)) { $problems.Add("${at}: v$($byNumber[$i].versionNumber) inForceFrom is before v$($byNumber[$i - 1].versionNumber) inForceFrom") }
+            # Strictly increasing: an equal pair is refused too (the superseded version would end at the instant it began).
+            if ((Get-Instant $byNumber[$i].inForceFrom) -le (Get-Instant $byNumber[$i - 1].inForceFrom)) { $problems.Add("${at}: v$($byNumber[$i].versionNumber) inForceFrom must be after v$($byNumber[$i - 1].versionNumber) inForceFrom") }
         }
         foreach ($v in $p.versions) {
             $va = "$at v$($v.versionNumber)"
@@ -183,6 +186,7 @@ function Test-Definition($def) {
             if ($v.messageTemplate -match '\{\{') { $problems.Add("${va}: messageTemplate must be literal (no tokens)") }
             if ((Get-Instant $v.inForceFrom) -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$') { $problems.Add("${va}: inForceFrom must be an ISO UTC instant") }
             foreach ($code in @($v.decisionPlan.actions)) { if ($rules.Codes -notcontains $code) { $problems.Add("${va}: decision plan names '$code', not a $($rules.Lane)-lane catalog code") } }
+            foreach ($code in @($v.decisionPlan.nextSteps)) { if ($rules.NextSteps -notcontains $code) { $problems.Add("${va}: decision plan Next step '$code' is not a catalog Next-step code") } }
             if (@($v.decisionPlan.actions).Count -eq 0) { $problems.Add("${va}: decision plan has no actions") }
         }
     }
