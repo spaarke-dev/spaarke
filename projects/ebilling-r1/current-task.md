@@ -1,6 +1,12 @@
 # Current Task State
 
-> **Last Updated**: 2026-10-22, evening (checkpoint: master merged, 081 merged, 090 round 2 running)
+> **Last Updated**: 2026-10-23 00:xx (checkpoint: two agents running; D-185 decided; this file edited while a work-branch agent may be mid-merge, so commit it with the next commit)
+
+## LATEST (supersedes the table below where they differ)
+- **Running agent A (work/ebilling-r1, this worktree, opus/high):** Part A = uac merge-review fixes on e371dce6bf: F4 (sprk_invoicesubmission AccessColumns + sprk_invoice/sprk_trackingnumber; Services/Signals in ScannedFolders; corrected reasons; drop AccessTableAppOnlyWriterTests:658 pin), F3 (delete sprk_invoicesubmissions false-match), K1 (WriteRollupAsync private/pinned), K2 (refusal above invoice guard in DataverseUpdateHandler), K3 (comment FinanceAuthorizationFilter:518-521); PLUS F4 vendor-org option (b) agreed by ontology+uac: SignalReadService.DuplicatesShownAsync takes vendor org from the invoice's submission(s) read AS CALLER (zero/differing -> withheld; fault -> nothing), sprk_billingevent.sprk_invoice refused; separate commit for ontology's 2 adversarial passes. Part B = merge origin/master with uac's #2257 DataverseUpdateHandler checklist; #2277 CreatorPersonColumnSecuredGuardTests entries (Entity.xml IsSecured preferred; SecuredOnlyByDeployScript only for tables in Set-ChildRecordCreatorPersonSchema.ps1 $Tables; none for unstamped tables). Agent commits, does NOT push. Then: verify broad filter + Arch, push, send uac-r2 the F4/F3 diff + merge SHA, and ontology the (b) commit SHA.
+- **Running agent B (090 worktree):** round 2 as briefed below.
+- **D-185 (owner decided #2285 via ontology; CONFIRM DIRECTLY with the owner before any live role change):** only billing roles read rule sets/rules in Dataverse. ebilling: set prvReadsprk_ruleset to None on Spaarke Basic User + Spaarke Core User (solution role XML + dev role change with owner OK + notices). Inventory: no caller-scoped BFF/client read of sprk_ruleset; all billing reads app-only; only effect = sprk_ruleset views/forms in Spaarke Administration MDA app. Ontology: Ontology Administrator does NOT get prvReadsprk_ruleset (keep change minimal: System Administrators now, 191's billing roles later); send ontology the role-XML PR when ready. Ontology removes policy Reads after their task 163. Told uac: 191's billing roles must grant Read on sprk_ruleset/sprk_policy/sprk_policyversion. No billing role exists yet (billing admins = System Administrators). Needs a new ebilling task (task-create).
+- **Dev BFF** is live at master 1fa0cf5cb8 (R3, 2026-10-23 00:00Z); still lacks e0df773395 (015).
 > **Format**: CURRENT state only. Rewrite each checkpoint; target ≤ 10 KB.
 
 ---
