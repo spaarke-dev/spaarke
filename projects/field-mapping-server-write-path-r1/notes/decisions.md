@@ -256,3 +256,45 @@ UAC-r2 PR #2253 (#2251) adds an explicit write identity to `InheritedAccessPermi
 - Create-time mapping therefore also drops the sets #2253 adds: access tables, secure-root columns, and access-deciding columns on contact, organisation, systemuser and business unit. That matches #2220's create-side refusal.
 - The `sprk_document` + `sprk_accesspermission` create exemption stays.
 - Whichever of #2253 and 018b merges second adds the parameter, plus a must-fire test: an access-deciding contact column is dropped at create.
+
+## 2026-10-22 — Owner decisions for 017 (2a–2c); dev mapping config created
+
+**2a. FR-06 step 10: option (a).** The service derives the filing stamp (I-1, plus I-16 for To Do, Event and
+Communication) into the payload BEFORE the create and refuses when the derivation fails, then re-derives after the
+create. Documents stay post-create (#2169). This unblocks re-pointing the five pre-create stamp writers (Office To Do,
+Workspace To Do, `TaskActionCore`, `CommunicationService`, `DecisionRecordWriter`) onto the service.
+
+**2b. #1608: option (a).** The service refuses a caller-supplied server-owned column (`sprk_containerid`,
+`sprk_securitybu`, `sprk_accesspermission`, and the table's other protected columns) on every path, chat included.
+The same set applies to projects and matters. Closes #1608 when 017 lands.
+
+**2c. Matter/project number from chat: option (a).** A payload naming `sprk_matternumber` / `sprk_projectnumber` is
+refused (403 `record_creation.blocked_column`), and the chat tool description stops offering the field in the same
+change.
+- Owner note: the Dataverse autonumber is a quick interim fix; a numbering-service component may replace it.
+- That does not change the decision. The rule is "the number is owned server-side, never supplied by the caller",
+  whoever generates it. If the numbering service later accepts a user-chosen number (for example a client-matter
+  number), that becomes an explicit, validated input of the numbering service, not a free column in the create
+  payload.
+
+**2d. SystemPrincipal: still open.** Examples sent to the owner. Finding while preparing them: the refusal applies
+only to a system create of a project or work assignment filed under a record (step 6), or of a table with pre-write
+rules (step 5½; none on master yet). None of the FR-21 system creators creates a project or work assignment, so
+today's refusal blocks no real path. Revised recommendation: keep refusing (option c) and decide the narrower option
+when the first system creator of a project or work assignment is designed (§11: no caller, no cost of doing nothing).
+
+**Dev mapping config (owner-approved 2026-10-22, live write on spaarkedev1).**
+- New profile "Matter to Project (Attorney Matrix)" `69e55b30-92ce-f111-a05d-3833c5e9614d` (Matter → Project record
+  types), with 8 Copy rules: attorney 1/2, paralegal 1/2, law firm 1/2, assigned-to internal/external.
+- 7 Copy rules added to "Matter to Work Assignment (Attorney Matrix)" `7b147316-…`: everything except attorney 1,
+  which already existed.
+- Every rule: source type 1 (Lookup, local set), target type 100000001 (Lookup, global set), Parent to Child, sync
+  mode One-time (as the Event rules; 005 `-Apply` migrates them with the rest), active, execution order 1–8.
+- Lookup targets checked live: people → `contact`, law firms → `sprk_organization`, the same on matter, project
+  and work assignment. Read back: 16 rules active.
+
+**1a finding: the add-in cannot create a Project under a matter.** `SaveFlow.createRelatedRecord` posts only
+name, description, type ids and assignee. It never sends `sourceEntityType` / `sourceRecordId`, and no other client
+calls `/api/office/quickcreate` with a source. So the #2191 filed-under path (and its mapping) is reachable only
+by a direct API call today; it is covered by `SecureRootCreateRouteTests.OfficeFiling` and the Office contract
+tests. The owner smoke covers the plain Office Project only.
