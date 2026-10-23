@@ -67,7 +67,14 @@ public record DocumentIdentityResponse(
     /// (<c>resolve-email-identity</c>, same response) answers <c>not_saved</c> when no saved <c>.eml</c> carries
     /// the email's keys.
     /// </summary>
-    string? Reason
+    string? Reason,
+    /// <summary>
+    /// Task 132 (review F1): <c>true</c> only when the document is filed to a record THROUGH its communication but this
+    /// caller may not see it (not readable, or the check could not be made), so <see cref="RelatedRecord"/> is null
+    /// although the document is not unfiled. The pane then treats the record as unknown — never "not filed", never a
+    /// filing offer. Null (not <c>false</c>) in every other case; older clients ignore it.
+    /// </summary>
+    bool? RelatedRecordWithheld = null
 )
 {
     public static DocumentIdentityResponse NoIdentity(string reason) => new(false, null, null, null, null, reason);
