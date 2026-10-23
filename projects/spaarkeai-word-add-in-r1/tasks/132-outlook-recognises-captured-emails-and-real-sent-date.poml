@@ -32,7 +32,7 @@ B. The pane's "Sent" date is the item's last-modified time: `OutlookAdapter.getS
   <goal>An email already in Spaarke by any path (Office save, mailbox capture, Spaarke send) shows as already saved in the Outlook pane, with the record it is filed to when the caller may read that record; and a saved email's date is when it was sent.</goal>
   <constraints>
     <constraint>Do not modify IncomingCommunicationProcessor or CommunicationService (other projects' writers). No Dataverse data write, no backfill (owner: dev test data stays as it is). No schema change.</constraint>
-    <constraint>Response contract unchanged (DocumentIdentityResponse shape as is). No new endpoint, service or DI registration; no new package.</constraint>
+    <constraint>Response contract: additive only. Amended 2026-10-23 after review finding F1: ONE optional field on DocumentIdentityResponse saying a derived record exists but is withheld, so the pane does not claim "not filed" and offer filing; older clients ignore it. No new endpoint, service or DI registration; no new package.</constraint>
     <constraint>Fail closed: a derived record is shown only on a positive access answer. The document's own direct-slot behaviour is unchanged.</constraint>
     <constraint>Message ids are never logged (existing rule in this file).</constraint>
     <constraint>BFF §10: publish-size delta vs a fresh master build (same zip tool, file counts match); `dotnet list package --vulnerable --include-transitive` shows no new HIGH; tests updated. Run /conflict-check (hot path).</constraint>
