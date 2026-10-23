@@ -22,11 +22,22 @@
 import * as React from 'react';
 import { makeStyles, tokens } from '@fluentui/react-components';
 import { ReconciliationAggregateCard } from '@spaarke/communication-components';
-import { WorklistWidget, XrmDataverseClient, createWorklistService, getXrm } from '@spaarke/ui-components';
+import {
+  WorklistWidget,
+  XrmDataverseClient,
+  createWorklistService,
+  createXrmNavigationService,
+  getXrm,
+} from '@spaarke/ui-components';
 import { useOptionalDispatchPaneEvent } from '../../events/useDispatchPaneEvent';
 import { useAiSession } from '../../providers/useAiSession';
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
-import { createWorklistLookup, type WorklistLookupDataSource } from './worklistLookup';
+import {
+  createWorklistLookup,
+  createWorklistOpenLookup,
+  createWorklistOpenRecord,
+  type WorklistLookupDataSource,
+} from './worklistLookup';
 
 /** The registered type string of the Email Review (reconciliation) tab this widget's aggregate card opens. */
 export const RECONCILIATION_WIDGET_TYPE = 'communications-reconciliation';
@@ -60,6 +71,11 @@ export const WorklistWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () => {
   const webApi = React.useMemo(() => getXrm()?.WebApi as WorklistLookupDataSource | undefined, []);
   const lookup = React.useMemo(() => (webApi ? createWorklistLookup(webApi) : undefined), [webApi]);
   const dataverseClient = React.useMemo(() => (webApi ? new XrmDataverseClient() : undefined), [webApi]);
+  // D-182: the wizard's Person / Lookup fields open the platform side-pane lookup, and its subject opens in a modal. Without Xrm
+  // neither exists, and the wizard keeps its inline type-ahead and shows the subject as text.
+  const navigation = React.useMemo(() => (webApi ? createXrmNavigationService() : undefined), [webApi]);
+  const openLookup = React.useMemo(() => (navigation ? createWorklistOpenLookup(navigation) : undefined), [navigation]);
+  const openRecord = React.useMemo(() => (navigation ? createWorklistOpenRecord(navigation) : undefined), [navigation]);
 
   const openEmailReview = React.useCallback(() => {
     dispatch('workspace', { type: 'widget_load', widgetType: RECONCILIATION_WIDGET_TYPE });
@@ -72,7 +88,13 @@ export const WorklistWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () => {
 
   return (
     <div className={styles.host} data-testid="worklist-workspace-widget">
-      <WorklistWidget service={service} lookup={lookup} aggregateRow={aggregateRow} />
+      <WorklistWidget
+        service={service}
+        lookup={lookup}
+        openLookup={openLookup}
+        openRecord={openRecord}
+        aggregateRow={aggregateRow}
+      />
     </div>
   );
 };

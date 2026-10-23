@@ -15,7 +15,12 @@ import { DecisionWizard } from './DecisionWizard';
 import { registerDecisionWizardHost } from './decisionWizardLauncher';
 import type { DecisionWizardLaunchRequest, DecisionWizardLaunchResult } from './decisionWizardLauncher';
 import { createDecisionWizardService } from './decisionWizardService';
-import type { DecisionItemLoader, DecisionLookupSearch } from './decisionWizardTypes';
+import type {
+  DecisionItemLoader,
+  DecisionLookupSearch,
+  DecisionOpenLookup,
+  DecisionOpenRecord,
+} from './decisionWizardTypes';
 
 export interface DecisionWizardHostProps {
   /** `@spaarke/auth` authenticated fetch (ADR-028: a function, never a token). */
@@ -28,6 +33,10 @@ export interface DecisionWizardHostProps {
   loadItem?: DecisionItemLoader;
   /** Default search for Lookup / Person fields; a launch may bring its own. */
   lookup?: DecisionLookupSearch;
+  /** Default side-pane lookup for Person / Lookup fields (D-182); a launch may bring its own. */
+  openLookup?: DecisionOpenLookup;
+  /** Default open-record-in-a-modal for the subject link (D-182); a launch may bring its own. */
+  openRecord?: DecisionOpenRecord;
 }
 
 interface ActiveLaunch {
@@ -45,6 +54,8 @@ export const DecisionWizardHost: React.FC<DecisionWizardHostProps> = ({
   uiScale,
   loadItem,
   lookup,
+  openLookup,
+  openRecord,
 }) => {
   const [active, setActive] = React.useState<ActiveLaunch | null>(null);
   const activeRef = React.useRef<ActiveLaunch | null>(null);
@@ -92,6 +103,8 @@ export const DecisionWizardHost: React.FC<DecisionWizardHostProps> = ({
       service={service}
       loadItem={request.loadItem ?? loadItem ?? NO_LOADER}
       lookup={request.lookup ?? lookup}
+      openLookup={request.openLookup ?? openLookup}
+      openRecord={request.openRecord ?? openRecord}
       onClose={close}
       onRecorded={event => request.onRecorded?.({ signalId: event.signalId, alsoResolved: event.alsoResolved })}
       uiScale={uiScale}
