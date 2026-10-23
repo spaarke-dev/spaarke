@@ -161,10 +161,11 @@ $Column = 'sprk_createdbyperson'
 $ColumnSchemaName = 'sprk_CreatedByPerson'
 $NavigationProperty = 'sprk_CreatedByPerson'
 $TargetEntity = 'systemuser'
-$Tables = @('sprk_document', 'sprk_todo', 'sprk_event', 'sprk_eventlog', 'sprk_communication', 'sprk_communicationthread', 'sprk_communicationattachment', 'sprk_communicationparticipant', 'sprk_emailreviewlog', 'sprk_analysis', 'sprk_analysisoutput', 'sprk_emailartifact', 'sprk_attachmentartifact', 'sprk_fileversion', 'sprk_invoice', 'sprk_spendsignal', 'sprk_spendsnapshot', 'sprk_memo', 'sprk_reportcard', 'sprk_budget', 'sprk_kpiassessment', 'sprk_billingevent', 'sprk_budgetrevision', 'sprk_decisionrecord', 'sprk_signal', 'sprk_invoicesubmission', 'sprk_invoiceapproval', 'sprk_externalidentifier', 'sprk_invoicecorrection', 'sprk_procedure', 'sprk_procedureversion', 'sprk_policy', 'sprk_policyversion')
+$Tables = @('sprk_document', 'sprk_todo', 'sprk_event', 'sprk_eventlog', 'sprk_communication', 'sprk_communicationthread', 'sprk_communicationattachment', 'sprk_communicationparticipant', 'sprk_emailreviewlog', 'sprk_analysis', 'sprk_analysisoutput', 'sprk_emailartifact', 'sprk_attachmentartifact', 'sprk_fileversion', 'sprk_invoice', 'sprk_spendsignal', 'sprk_spendsnapshot', 'sprk_memo', 'sprk_reportcard', 'sprk_budget', 'sprk_kpiassessment', 'sprk_billingevent', 'sprk_budgetrevision', 'sprk_decisionrecord', 'sprk_signal', 'sprk_invoicesubmission', 'sprk_invoiceapproval', 'sprk_externalidentifier', 'sprk_invoicecorrection', 'sprk_procedure', 'sprk_procedureversion', 'sprk_policy', 'sprk_policyversion', 'sprk_ruleset', 'sprk_procedureassignment')
 # ebilling-r1 task 081 (procedure model 13, O-23; ontology F4-1 / D-173; UAC #2276): before this script secures ANY unsecured column, on any
 # table, it asserts the column holds no value yet (Test-ColumnEmptyBeforeSecuring, section (c)). 080 created the four Procedure/policy
-# columns unsecured; the owner created sprk_budgetrevision's, sprk_decisionrecord's and sprk_signal's by hand.
+# columns unsecured; the owner created sprk_budgetrevision's, sprk_decisionrecord's and sprk_signal's by hand. ebilling-r1 task 090 (UAC
+# answer to 081 Q5): 080 also created sprk_ruleset's and sprk_procedureassignment's unsecured; they pass the same gate.
 $ReaderProfileName = 'Spaarke BFF-Managed Field Readers'
 $WriterProfileName = 'Spaarke BFF-Managed Field Writers'
 # D-136 (owner 2026-10-13): the ontology writer's narrow profile. Fixed id so the live profile and SpaarkeMaster's source
@@ -211,6 +212,10 @@ $SolutionHomes = @{
     # ebilling-r1 task 081: 080 added the column on the policy tables in SpaarkeMaster (and left sprk_policy unpublished for this script).
     sprk_policy             = @('SpaarkeMaster')
     sprk_policyversion      = @('SpaarkeMaster')
+    # ebilling-r1 task 090 (UAC answer to 081 Q5): 080 added the column on sprk_ruleset and created sprk_procedureassignment with it,
+    # both in SpaarkeMaster; this script secures the column and checks it, never creates it.
+    sprk_ruleset              = @('SpaarkeMaster')
+    sprk_procedureassignment  = @('SpaarkeMaster')
 }
 
 # ── Auth + helpers ──────────────────────────────────────────────────────────────────────────────────────────
