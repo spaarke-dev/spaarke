@@ -5,7 +5,7 @@
     <phase>11 UAT</phase>
     <gate>startable (D-179, D-181, owner 2026-10-22)</gate>
     <status>in-progress</status>
-    <status-note>Steps 1-3 done on task/160-budget-inquiry-composer (PR open). Step 4 (merge, dev BFF + Console deploy, dev check of the three recipient cases) PENDING, main session.</status-note>
+    <status-note>Steps 1-3 done on task/160-budget-inquiry-composer (PR #2305 merged to docs `f2fa840474`). Step 4 (merge, dev BFF + Console deploy, dev check of the three recipient cases) PENDING, main session.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Shared UI component + wizard (.tsx) and BFF send path (.cs); touches an R3-owned file (GrantAccessNotifier).</rigor-reason>
     <model-tier>opus</model-tier>
