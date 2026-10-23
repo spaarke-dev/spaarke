@@ -23,17 +23,19 @@
 | **Gate tooling** | App Insights `spe-insights-dev-67e2xz` (RG `spe-infrastructure-westus2`), role `spaarke-bff-dev`. Pass `--offset Nd` (default look-back is 1 h). Use `contains`, not `has_any`, for exception names. Script: temp `uacmerge/uacg/uacg_gate.sh`. |
 
 ## Next actions (mine)
-1. **Census extension (UAC fix, in progress).** An Opus implementer is on worktree C:/wt-uaccensus, branch `fix/uac-r2-census-child-tables`.
-   - `SecureBuRoleDepthAssertion.GuardedPrivileges` covers only the three roots. Extend it to every table in `config/secure-record-owner-role.json`.
-   - When it reports: review it, open the PR, merge when Router and Client lint are green, deploy via R3, gate.
-   - Tell ebilling and ontology when it lands; it may flag existing child-table grants.
+1. **Census extension: #2318 MERGED as 7479ce22a9.** Clause 1 now guards Read on every codified child table, as one aggregated finding per grant shape, with case-insensitive lookup.
+   - Deploy requested from R3; it needs the owner's go in R3's session. Then run the server gate from app start. New "SECURE CHILD RECORDS ARE NOT ISOLATED" warnings are expected.
+   - Provisioning is informed (no action on their side).
+   - Owner question open: should AI Analysis Admin (Global Read on analysis and analysis output) see secure analyses? Until answered, it stays flagged.
 2. **ebilling #1911 role slice: UAC's position sent; the owner decides through ebilling.**
    - **K1:** Billing Administrator Read on policy and policy version goes to Deep; ruleset stays Global. Assign only to users whose BU is not an ancestor of the secure BU. Nobody holds the role on dev.
    - **K2:** UAC prefers path (ii): the submission decide gate becomes Read on the submission plus Write on its parent invoice (resolved app-only, fail closed). Core User gets Read and AppendTo only on approval, correction, externalidentifier, billingexport and submission. The gate code deploys before the role change. Fallback (i): keep Write on submission only, and file a known limit.
    - The four secure-record-owner Reads are confirmed.
    - Review the resulting code and role diff.
-3. **R3 GHSA-hq7m design (owner round 126).** The answers went to R3 privately; never put the mechanism in public text.
-   - Wait for the implementer brief and diff. Run two security passes before any merge. ISS-005 (guard accepted at c05d1b2788) merges with or after it.
+3. **R3 GHSA-hq7m fix (owner round 126; the owner also confirmed in R3's session), branch fix/r3-iss-005-combined.** Private: never put the mechanism in public text.
+   - Brief reviewed and answered: admin authority = Standing Grant Administrators membership; reuse DenyContactNotInvited, with operator-only reasons.
+   - Slice A (1b0d9cdf36..f4e334f954) reviewed. F1: fail-open secured columns need the read proof. F2: give the proof a TTL. K: drop proof leg 1. These go first in slice B; re-check that range.
+   - Two security passes on the combined diff before merge. ISS-005 (c05d1b2788) merges with or after it.
 4. **ebilling:** when it merges to master it takes #2301 and keeps its six entries passing. Task 122 FLS runs after the owner's OK.
 5. **#2292** (membership junction never populated): filed; fix it when there is capacity.
 6. **Closed this checkpoint:**
