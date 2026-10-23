@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="122" project="ebilling-r1">
+  <metadata>
+    <title>#2235 fix: field-secure sprk_invoicesubmission.sprk_findingsjson (BFF-only), take it off the form; Decision Records store the generic Duplicate sentence</title>
+    <phase>4 Review (WP4) — D-176 follow-up</phase>
+    <gate>startable for the source change. The schema run (field security on dev) needs:
+- ontology-r1 review of the script and its -WhatIf;
+- notices to ontology-r1 and uac-r2 before and after;
+- the owner's OK for the dev run. The owner decided to fix #2235 on 2026-10-22; the run itself still needs its own OK.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes BFF code (.cs), Dataverse field security and an access-disclosure surface (D-176).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Access-disclosure fix across a schema change and three Decision Record writers. A caller-scoped reader missed would break /review silently (field security returns null).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P4-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>119</deps>
+    <tags>bff-api, dataverse, fields, auth, testing</tags>
+    <estimated-effort>1–1.5 days</estimated-effort>
+  </metadata>
+
+  <prompt>Close #2235 as the owner decided on 2026-10-22, in three parts:
+1. Field-secure sprk_invoicesubmission.sprk_findingsjson so only the BFF reads and writes it, and remove it from the submission main form. This also closes DEF-029, the planted junk findings.
+2. The reject, override and return Decision Records store the generic sentence for Duplicate findings, never the earlier tracking number.
+3. The full detail stays behind the D-176 gate on /review and /blocked.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse field security profiles, the invoice submission pipeline and Decision Record snapshots.</role>
+
+  <goal>A user with Read on an invoice submission sees neither the findings JSON (form or Web API) nor a Duplicate's earlier-invoice detail in any Decision Record snapshot. Every BFF reader and writer of the column still works.</goal>
+
+  <context>
+    <background>#2235 (issue body and comments) lists the three native surfaces:
+- the form binding at src/dataverse/solutions/SpaarkeMaster/Entities/sprk_invoicesubmission/FormXml/main/{c412f942-...}.xml:190;
+- InvoiceSubmissionAfterSteps.cs:1429 (reject DR, reasons[].sentence into sprk_factsnapshot);
+- SubmissionOverrideService.cs:1056 (override and return DRs).
+
+The generic sentence already exists: BillingRuleCatalogue.WithheldDuplicateTemplate (Services/Signals/Billing/BillingRuleCatalogue.cs:188). Reuse it; don't add new text.
+
+BFF readers and writers of the column (grep sprk_findingsjson / SubmissionFindingsJson, 2026-10-23): InvoiceSubmissionPersister (:872 write), InvoiceSubmissionAfterSteps (:87, :300 read; :673, :825, :1108 write), SubmissionOverrideService (:270, :443, :684 read; :790, :871 write), AdminAttentionText (:241), InvoiceReviewReadService (:358, :505). Field security makes a read return null for a caller without the profile. Every one of these must therefore run app-only (or as an identity in the profile), or it will see null.</background>
+    <relevant-files>
+      <file role="new">scripts/ebilling/Set-EbillingFindingsJsonFieldSecurity.ps1 (-WhatIf / plain / -Verify)</file>
+      <file role="reference">scripts/ebilling/Set-EbillingFirmReasonFieldSecurity.ps1 (copy its shape: preconditions, fixed profile id, solution component, -Verify)</file>
+      <file role="reference">scripts/Set-DocumentPointerFieldSecurity.ps1 and the "Spaarke BFF-Managed Field Writers" profile (the BFF app user's existing writer profile)</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_invoicesubmission/Entity.xml (IsSecured on sprk_findingsjson) and FormXml/main/{c412f942-...}.xml (control removed)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/InvoiceSubmissionAfterSteps.cs (~:1429)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/SubmissionOverrideService.cs (~:1056)</file>
+      <file role="modify">the matching unit tests under tests/unit/Sprk.Bff.Api.Tests/Services/Finance/</file>
+      <file role="new">tests/Spaarke.ArchTests/FindingsJsonAppOnlyReadGuardTests.cs (only if no existing scan can carry the rule; see constraints)</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>The column-security scripts Set-EbillingFirmReasonFieldSecurity.ps1 and Set-DocumentPointerFieldSecurity.ps1; the profiles Spaarke BFF-Managed Field Readers and Writers.</existing>
+    <extension>The script is new because the existing ones are per-column and hold no generic entry point. The profile is reused: the column joins Spaarke BFF-Managed Field Writers (the BFF app user) with read, create and update. It must NOT join the Readers profile, which sits on every default team and would leave it readable to all.</extension>
+    <cost-of-doing-nothing>Any user with Read on a submission reads an earlier invoice's tracking number, id and line values from the form or the Web API, which breaks D-176. DEF-029's junk findings keep breaking Override and Return.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="#2235">sprk_findingsjson: read, create and update for the BFF app user's writer profile only. Not in Spaarke BFF-Managed Field Readers or any profile on a default team.</constraint>
+    <constraint source="#2235">Every Decision Record written by the reject, override and return paths stores BillingRuleCatalogue.WithheldDuplicateTemplate as reasons[].sentence for a Duplicate reason, whatever the reader may see. Non-Duplicate sentences are unchanged.</constraint>
+    <constraint source="ADR-028">Every BFF read of sprk_findingsjson listed in context runs app-only (or as an identity the writer profile covers). For each, cite file:line and its identity in the notes. Enforce the rule in this order: a type or the existing IlCallScan/source-scan guard if one fits; otherwise a new ArchTest with must-fire and must-not-fire tests (CLAUDE.md §16 enforcement ladder).</constraint>
+    <constraint source="project">The schema script follows the notices rule: ontology-r1 reviews the script and its -WhatIf before any live run; notices to ontology-r1 and uac-r2 before and after.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/ebilling-r1/notes/119-review-duplicate-withhold.md</file>
+      <file>projects/ebilling-r1/notes/2118-duplicate-signal-stored-fields.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Inventory every reader and writer of sprk_findingsjson in src/ (BFF, code pages, PCF, SPA, playbooks, output mappings, field-mapping rules), with its identity. Write it to notes/122-findings-json-field-secure.md.</step>
+    <step order="2">Decision Records: switch the reject, override and return writers to WithheldDuplicateTemplate for Duplicate reasons. Add tests: Duplicate gives the generic sentence; a non-Duplicate is unchanged.</step>
+    <step order="3">Add the app-only-read guard per the ADR-028 constraint.</step>
+    <step order="4">Write the field-security script. Update the Entity.xml and the form. Run -WhatIf on dev (read-only) and send it with the script to ontology-r1 for review.</step>
+    <step order="5">Build; run the unit filters FullyQualifiedName~Finance|FullyQualifiedName~Submission|FullyQualifiedName~Override and ArchTests. Commit (no push).</step>
+    <step order="6">LIVE (dev), after ontology-r1 PASS and the owner's OK:
+1. send the notices;
+2. plain run;
+3. -Verify exits 0;
+4. send the after-notices.
+
+Then close #2235 and DEF-029 with the evidence.</step>
+    <step order="7">Update TASK-INDEX.md and the POML status; run scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any reader of sprk_findingsjson runs as the caller (OBO or impersonation) and needs the value, STOP and escalate before securing the column. Securing it would make that reader see null.</trigger>
+    <trigger>If the BFF app user is not the member of Spaarke BFF-Managed Field Writers on dev, or that profile is on a default team, STOP and report.</trigger>
+    <trigger>If uac-r2 decides the #2294 (DEF-043) generic-sentence fix for legacy number-only Duplicates, it is added to this task by a POML edit before execution. Do not add it unasked.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">scripts/ebilling/Set-EbillingFindingsJsonFieldSecurity.ps1</output>
+    <output type="docs">projects/ebilling-r1/notes/122-findings-json-field-secure.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a Duplicate reason on reject, override or return, the Decision Record's sprk_factsnapshot reasons[].sentence equals WithheldDuplicateTemplate and contains no tracking number or invoice id. A non-Duplicate reason's sentence is unchanged.</criterion>
+    <criterion testable="true">The app-only-read guard fails when a reader of sprk_findingsjson is changed to a caller-identity read (seeding proof), and passes on the real code.</criterion>
+    <criterion testable="true">The form XML no longer binds sprk_findingsjson; Entity.xml declares it secured.</criterion>
+    <criterion testable="true">On dev after the live run, -Verify exits 0, and a second plain run writes nothing.</criterion>
+    <criterion testable="true">On dev after the live run, a non-admin user with Read on a submission gets null for sprk_findingsjson through the Web API. /review and /blocked still return findings for that user's invoices (the BFF reads app-only).</criterion>
+    <criterion testable="true">The unit filters FullyQualifiedName~Finance|FullyQualifiedName~Submission|FullyQualifiedName~Override, and ArchTests, pass.</criterion>
+    <criterion testable="true">Test scope: the Decision Record sentence cases, the guard's must-fire and must-not-fire, and the seeding proof. Anything else needs a one-line justification in the notes.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load every file in knowledge/files before starting. Follow task-execute.</protocol>
+  </execution>
+</task>
