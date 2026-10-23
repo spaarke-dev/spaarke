@@ -838,7 +838,9 @@ public class ContactCreateOwnerPolicyGuardTests
     /// <c>new HttpMethod("POST")</c> or <c>new HttpRequestMessage { Method = ... }</c> (initializer style); a <c>$batch</c> body;
     /// <c>nameof</c>; a property-backed constant; a target-typed <c>new("contact")</c> that is not a variable's initializer or a
     /// local's assignment (inside an object initializer such as <c>new CreateRequest { Target = new("contact") }</c>, an argument,
-    /// a return). Within a cycle of assignments, the first value computed for an assignment is reused.</item>
+    /// a return). Past <see cref="MaxAlternatives"/> alternatives a prefix that only becomes a contacts path after a later <c>+</c>
+    /// can be dropped (a 520-arm <c>?:</c> ending in <c>"api/"</c>, then <c>PostAsync(p + "contacts")</c>). A create reached only
+    /// through a cycle between locals can be missed, depending on operand order.</item>
     /// <item>K2: owner evidence is matched by NAME in the unit's own code and does not prove the value is a resolved team. An
     /// ownerless create passes when the same unit names <c>ownerid</c> in a ColumnSet, an array or a log string, or uses
     /// <c>Attributes.Remove(OwnerAttribute)</c> or <c>["ownerid@odata.bind"] = null</c>. A payload built in ANOTHER member (or
@@ -1585,7 +1587,6 @@ public class ContactCreateOwnerPolicyGuardTests
     [InlineData("Fill(out var url); url = $\"{GetApiUrl()}/contacts\"; return http.PostAsync(url, body, ct);", "UserClientPost")]
     [InlineData("if (value is string url) { url = $\"{GetApiUrl()}/contacts\"; return http.PostAsync(url, body, ct); }", "UserClientPost")]
     [InlineData("var (url, other) = Pair(); url = $\"{GetApiUrl()}/contacts\"; return http.PostAsync(url, body, ct);", "UserClientPost")]
-    [InlineData("foreach (var url in urls) { url = $\"{GetApiUrl()}/contacts\"; return http.PostAsync(url, body, ct); }", "UserClientPost")]
     [InlineData("var m = HttpMethod.Post; return WriteAsync(m, \"contacts\", payload, null, ct);", "HttpPost")]
     [InlineData("var m = isNew ? HttpMethod.Post : HttpMethod.Patch; return WriteAsync(m, \"contacts\", payload, null, ct);", "HttpPost")]
     [InlineData("var m = isNew ? HttpMethod.Patch : (flag ? HttpMethod.Post : HttpMethod.Delete); return new HttpRequestMessage(m, $\"{GetApiUrl()}/contacts\");", "HttpPost")]
@@ -1602,6 +1603,7 @@ public class ContactCreateOwnerPolicyGuardTests
     [InlineData("Fill(out var url); url = $\"{GetApiUrl()}/accounts\"; return http.PostAsync(url, body, ct);")]
     [InlineData("if (value is string url) { return http.PostAsync(url, body, ct); }")]
     [InlineData("var (url, other) = Pair(); return http.PostAsync(url, body, ct);")]
+    [InlineData("foreach (var url in urls) { return http.PostAsync(url, body, ct); }")]
     [InlineData("var m = isNew ? HttpMethod.Patch : HttpMethod.Delete; return WriteAsync(m, \"contacts\", payload, null, ct);")]
     [InlineData("var m = HttpMethod.Get; return new HttpRequestMessage(m, $\"{GetApiUrl()}/contacts\");")]
     [InlineData("var m = HttpMethod.Post; return WriteAsync(m, \"accounts\", payload, null, ct);")]
@@ -1621,6 +1623,43 @@ public class ContactCreateOwnerPolicyGuardTests
         clock.Stop();
 
         Assert.True(clock.Elapsed < TimeSpan.FromSeconds(5), $"resolving 60 assignments took {clock.Elapsed}: the local following is not bounded");
+    }
+
+    // ── UAC round 6: the resolution's depth, cap and null-coalescing arms ─────────────────────────────
+
+    [Fact(DisplayName = "ISS-005 guard, must-fire: a source reached at two depths is resolved at each (memo keyed by source AND depth)")]
+    public void Control_ASourceReachedAtTwoDepths_IsResolvedAtEach()
+    {
+        // {a} reaches the "/contacts" local at the depth limit (unreadable there); {d} reaches the same local one hop in.
+        var hit = Assert.Single(ContactCreates(BffRoot + "Services/X/Makes.cs", """
+            private Task MakeAsync()
+            {
+                var e = "/contacts"; var d = e; var c = d; var b = c; var a = b;
+                return http.PostAsync($"{a}{d}", body, ct);
+            }
+            """));
+        Assert.Equal(nameof(Shape.UserClientPost), hit.Shape);
+    }
+
+    [Fact(DisplayName = "ISS-005 guard, must-fire: a contacts target past the alternatives cap is kept (contact targets first)")]
+    public void Control_AContactsArm_PastTheAlternativesCap_IsKept()
+    {
+        var arms = Enumerable.Range(0, MaxAlternatives + 8).Select(i => $"c{i} ? \"a{i}\" : ");
+        var code = "private Task MakeAsync() { var p = " + string.Concat(arms) + "\"contacts\"; return client.CreateAsync(p, payload, ct); }";
+
+        var hit = Assert.Single(ContactCreates(BffRoot + "Services/X/Makes.cs", code));
+        Assert.Equal(nameof(Shape.WebApiCreateAsync), hit.Shape);
+    }
+
+    [Fact(DisplayName = "ISS-005 guard, must-fire: HttpMethod.Post on the right of ?? is a create; on neither side it is not")]
+    public void Control_APostOnTheRightOfACoalesce_IsCaught()
+    {
+        Assert.Single(ContactCreates(BffRoot + "Services/X/Makes.cs",
+            "private Task MakeAsync() { return WriteAsync(verb ?? HttpMethod.Post, \"contacts\", payload, null, ct); }"));
+        Assert.Single(ContactCreates(BffRoot + "Services/X/Makes.cs",
+            "private Task MakeAsync() { return WriteAsync(HttpMethod.Post ?? verb, \"contacts\", payload, null, ct); }"));
+        Assert.Empty(ContactCreates(BffRoot + "Services/X/Makes.cs",
+            "private Task MakeAsync() { return WriteAsync(verb ?? HttpMethod.Get, \"contacts\", payload, null, ct); }"));
     }
 
     // ── The type's shape: there is no other way to say "no owner" ────────────────────────────────────
