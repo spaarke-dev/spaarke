@@ -107,7 +107,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 117 | 🔲 [open] | Core-record delete and Procedures: retire sweep for unlinked record-scoped rule sets; delete lists agreed with uac-r2 | FULL | opus / high | P3-D (p-safe false) | 089 |
 | 118 | 🔲 [open] | Submit Invoice in the email UI: toolbar button (replaces Link Invoice), flagged attachments, Email Review Invoice tab | FULL | sonnet / high | P3-F | 094 |
 | 119 | ✅ [done] | Read-time Duplicate withholding on /review: hide an earlier invoice the reader cannot read (D-176, #2118) | FULL | opus / high | P4-A | 100 |
-| 120 | 🔲 [open] | Spaarke Billing Administrator role; D-185: Basic/Core User lose prvReadsprk_ruleset; guard test | FULL | opus / high | P3-R (p-safe false) | 081 |
+| 120 | ✅ [done] | Spaarke Billing Administrator role; D-185: Basic/Core User lose prvReadsprk_ruleset; guard test | FULL | opus / high | P3-R (p-safe false) | 081 |
 | 121 | 🔲 [open] | Procedure-table role grants after uac-r2 191: O-6 org Read, Billing Administrator Create/Write on sprk_procedure; flip UntilTask191 | FULL | opus / high | P3-R (p-safe false) | 120 |
 | 122 | 🔲 [open] | #2235 fix: field-secure sprk_findingsjson (BFF-only), off the form; Decision Records store the generic Duplicate sentence | FULL | opus / high | P4-A | 119 |
 

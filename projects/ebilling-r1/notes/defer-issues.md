@@ -1145,10 +1145,24 @@ The BFF routes (`/review`, `/blocked`) are covered by 119.
 
 ---
 
-### DEF-043 — Line Duplicate Signal judged in another firm after a same-core-record line re-point
+### DEF-043 — Duplicate detail after a line or subject re-point (fixed: number-only Duplicates show the generic sentence)
 
 | Field | Value |
 |---|---|
+| **Status** | Fixed on work/ebilling-r1 (0bba46c1ba, b2f9c28e61), pending uac-r2 / ontology re-check; K1 below accepted as a fail-closed known limit |
+| **Urgency** | low |
+| **Filed** | 2026-10-23 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2294 |
+
+**Description**: sprk_billingevent.sprk_invoice stays writable by generic paths (D-96's same-core re-attach). A line can also be moved within its core record by a person's run, or by a native edit from a user with Write. The fix, under uac-r2's decision:
+- A Duplicate identified only by tracking number always shows the generic withheld sentence, on the worklist, /review and /blocked. The tracking-number lookup was removed.
+- `duplicate.line_same_invoice` is judged by the caller's Read of the line's own invoice, inside the Signal's frozen core-record bound.
+- Findings carrying the earlier invoice id keep the readability check.
+- sprk_signal's regarding pair, its subject lookups and its core pair are refused to app-only generic writers.
+
+K1 (ontology): a D-96 re-file across core records withholds line Duplicates permanently. It fails closed.
+
+---|---|
 | **Status** | Open: known limit accepted by ontology-r1 (F4(b) design); bounded by core record on write and read |
 | **Urgency** | low |
 | **Filed** | 2026-10-23 |

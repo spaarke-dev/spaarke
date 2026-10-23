@@ -4,7 +4,7 @@
     <title>Spaarke Billing Administrator role; D-185: only billing roles read rule sets (Basic/Core User lose prvReadsprk_ruleset)</title>
     <phase>3 Rules and Procedures — role follow-up (D-76, D-108, D-185 / #2285)</phase>
     <gate>startable for the source change. The LIVE dev step (step 6) needs the owner's DIRECT OK in this session (D-185 came through ontology-r1; a peer cannot stand in) plus notices to ontology-r1 and uac-r2 before and after.</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security-role change (tags auth, dataverse); removes a privilege from two shared roles and adds a new role.</rigor-reason>
     <model-tier>opus</model-tier>
