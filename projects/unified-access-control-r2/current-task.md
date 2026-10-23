@@ -23,10 +23,14 @@
 | **Gate tooling** | App Insights `spe-insights-dev-67e2xz` (RG `spe-infrastructure-westus2`), role `spaarke-bff-dev`. Pass `--offset Nd` (default look-back is 1 h). Use `contains`, not `has_any`, for exception names. Script: temp `uacmerge/uacg/uacg_gate.sh`. |
 
 ## Next actions (mine)
-1. **Waiting on ebilling: the F4/F3 fix diff plus the master-merge SHA.** Re-check:
-   - the five conditions for option (b): DuplicatesShownAsync fails closed with tests; the Signal's frozen `sprk_corerecordid` is refused to app-only writers; the mismatch code applies on every generic write path, including the field-mapping push; the sprk_signal regarding-invoice and regarding-invoice-line AccessColumns are present; #2294 states the residual honestly;
-   - the #2257 merge checklist (PatchAsync threads `impersonateSystemUserId`, OutputMappingRunIdentityTests is re-pointed, ReferencersOf("PatchAsync") is exact);
-   - the #2277 guard entries (K1 below).
+1. **ebilling F4/F3 re-check (work/ebilling-r1 at 91568010c4; review worktree C:/wteb9156):**
+   - Done: both merges are clean (57f22fac9a master, 91568010c4 for 090), and conditions 1–3 hold.
+   - ebilling is fixing three items:
+     - F1: add `sprk_regardingrecordtype` / `sprk_regardingrecordid` to the sprk_signal AccessColumns;
+     - F4: three false statements;
+     - #2294: number-only Duplicates show the generic sentence; `line_same_invoice` is judged by its own invoice inside the bound, on SignalReadService and InvoiceReviewReadService.
+   - Re-check the range when it arrives, then remove C:/wteb9156.
+   - F2 (UAC's own #2277 matcher used a substring match) is fixed by **#2301, merged 39306ac044** (quoted-token match). It is test-only; ebilling takes it in its next master merge.
 2. **R3 ISS-005: the guard is ACCEPTED at c05d1b2788 (round 6).** It stays unmerged until the owner signs off the dedicated contact owner team design. R3 will then send the design-change diff for UAC review. The pre-existing finding is tracked privately as GHSA-hq7m-w2pf-v8j7. The defer list carries the reference only; never add the mechanism.
 3. **Ontology task 163 (PR #2298, D-185):** K4 is accepted for internal callers. Condition: no app-only policy enrichment for an external or unknown caller, mirrored privately in `SignalReadService` from master's `IsExternalOrUnknownCallerAsync` (do not copy the Filters file). Ontology accepted it and its pass 2 checks it. Ontology will ping before and after the live deploy (BFF, then config, then role) with the #1355 read-back; then run the server-side gate.
 4. **#2292 (membership junction never populated: an alternate-key miss throws instead of creating).** Filed; not an access input. Fix it when there is capacity, or leave it filed.
