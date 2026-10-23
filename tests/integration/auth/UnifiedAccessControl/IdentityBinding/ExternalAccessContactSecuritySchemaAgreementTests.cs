@@ -136,6 +136,26 @@ public class ExternalAccessContactSecuritySchemaAgreementTests
         text.Should().Contain("IsSecured              = $Secured", "a new column is secured in its create request");
     }
 
+    [Fact]
+    public void TheScriptsVerify_ReadsEveryTableOfTheReadabilityProof_AsTheBffApplicationUser()
+    {
+        // The BFF trusts an EMPTY secured value only after proving its read (SecuredColumnReadProof); if its application
+        // user cannot read the proof's tables, every such read is refused. -Verify runs the proof's reads as that user.
+        var text = File.ReadAllText(ScriptPath());
+        var listed = System.Text.RegularExpressions.Regex.Match(text, @"\$ProofTables = @\(([^)]*)\)");
+
+        listed.Success.Should().BeTrue("the script lists the proof's tables");
+        listed.Groups[1].Value.Split(',').Select(t => t.Trim().Trim('\'')).Should()
+            .BeEquivalentTo(SecuredColumnReadProof.PlatformTablesRead, "the script verifies exactly the tables the proof reads");
+        foreach (var table in SecuredColumnReadProof.PlatformTablesRead.Where(t => t != "systemuser"))
+        {
+            text.Should().Contain($"name=`\"{table}`\"", $"a proof read joins {table}");
+        }
+
+        text.Should().Contain("$h['MSCRMCallerID'] = $SystemUserId", "the reads are made as the BFF application user");
+        text.Should().Contain("Path = 'WhoAmI'", "the proof's first read is the user's own systemuser");
+    }
+
     // ── The guard bites: the script parser on a seeded script ─────────────────────────────────────────
 
     private const string Seed = """

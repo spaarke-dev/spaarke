@@ -34,6 +34,13 @@
                         SpaarkeCore AND SpaarkeMaster). contact sits in SpaarkeMaster with rootcomponentbehavior = 1, so
                         a column travels only when it is added explicitly.
       (f) PUBLISH       contact.
+      (g) PROOF READS   -Verify only. The BFF trusts an EMPTY value of a secured column only once it has proven its own
+                        read of the column (SecuredColumnReadProof: the System Administrator role, or a field security
+                        profile granting Read, held directly or through a team). Each -BffApplicationIds application
+                        user must be able to READ every platform table that proof reads — systemuser (WhoAmI), role,
+                        systemuserroles, fieldpermission, systemuserprofiles, teamprofiles, teammembership — or every
+                        such empty read is refused (fail closed). The proof's own queries are run AS that user
+                        (MSCRMCallerID); the operator running -Verify needs the act-on-behalf-of privilege for it.
 
     WHO READS WHAT (the BFF application user must keep reading every column):
       sprk_accesspermissiongrant      every user (BFF-Managed Field Readers, 4/0/0); the BFF reads through the
@@ -400,6 +407,48 @@ foreach ($solutionName in $SolutionUniqueNames) {
     }
 }
 
+# ── (g) PROOF READS (verify only) ───────────────────────────────────────────────────────────────────────────
+# The BFF's readability proof (SecuredColumnReadProof) reads these platform tables as the BFF application user. Each of its
+# queries is run here AS that user (MSCRMCallerID), read-only; a refused read is FAIL.
+$ProofTables = @('systemuser', 'role', 'systemuserroles', 'fieldpermission', 'systemuserprofiles', 'teamprofiles', 'teammembership')
+function Invoke-DvGetAs([string]$Path, [string]$SystemUserId) {
+    $h = $headers.Clone(); $h['MSCRMCallerID'] = $SystemUserId
+    Invoke-RestMethod -Uri "$Api/$Path" -Headers $h -Method Get
+}
+if ($Verify) {
+    Write-Host "`n(g) Proof reads, as each BFF application user ($($ProofTables -join ', '))"
+    foreach ($u in $bffUsers) {
+        $sid = $u.systemuserid.ToString().ToLowerInvariant()
+        $member = "<filter><condition attribute=`"systemuserid`" operator=`"eq`" value=`"$sid`" /></filter>"
+        $fieldPermission = "<fetch top=`"1`"><entity name=`"fieldpermission`"><attribute name=`"attributelogicalname`" />" +
+            "<filter><condition attribute=`"entityname`" operator=`"eq`" value=`"$Table`" /><condition attribute=`"canread`" operator=`"eq`" value=`"4`" /></filter>"
+        $proofReads = @(
+            @{ What = 'systemuser (WhoAmI)'; Path = 'WhoAmI' }
+            @{ What = 'role + systemuserroles'; Path = 'roles?fetchXml=' + [uri]::EscapeDataString(
+                "<fetch top=`"1`"><entity name=`"role`"><attribute name=`"roleid`" /><filter><condition attribute=`"name`" operator=`"eq`" value=`"System Administrator`" /></filter>" +
+                "<link-entity name=`"systemuserroles`" from=`"roleid`" to=`"roleid`" link-type=`"inner`">$member</link-entity></entity></fetch>") }
+            @{ What = 'fieldpermission + systemuserprofiles'; Path = 'fieldpermissions?fetchXml=' + [uri]::EscapeDataString(
+                $fieldPermission + "<link-entity name=`"systemuserprofiles`" from=`"fieldsecurityprofileid`" to=`"fieldsecurityprofileid`" link-type=`"inner`">$member</link-entity></entity></fetch>") }
+            @{ What = 'fieldpermission + teamprofiles + teammembership'; Path = 'fieldpermissions?fetchXml=' + [uri]::EscapeDataString(
+                $fieldPermission + "<link-entity name=`"teamprofiles`" from=`"fieldsecurityprofileid`" to=`"fieldsecurityprofileid`" link-type=`"inner`">" +
+                "<link-entity name=`"teammembership`" from=`"teamid`" to=`"teamid`" link-type=`"inner`">$member</link-entity></link-entity></entity></fetch>") }
+        )
+        foreach ($r in $proofReads) {
+            try {
+                $answer = Invoke-DvGetAs $r.Path $sid
+                if ($r.Path -eq 'WhoAmI' -and "$($answer.UserId)".ToLowerInvariant() -ne $sid) {
+                    Report 'FAIL' "$($u.fullname): WhoAmI as this user answered $($answer.UserId), not $sid — the reads below were not made as it"
+                    continue
+                }
+                Report 'OK' "$($u.fullname) reads $($r.What)"
+            }
+            catch {
+                Report 'FAIL' "$($u.fullname) cannot read $($r.What) ($($_.Exception.Message)) — every empty read of a secured column it must prove would be refused. Grant its security role Read on these tables (or run -Verify as a user who may act on behalf of another user)."
+            }
+        }
+    }
+}
+
 # ── (f) PUBLISH ─────────────────────────────────────────────────────────────────────────────────────────────
 if ($Apply) {
     Invoke-DvWrite POST 'PublishXml' @{ ParameterXml = "<importexportxml><entities><entity>$Table</entity></entities></importexportxml>" } | Out-Null
@@ -408,7 +457,7 @@ if ($Apply) {
 }
 
 if ($Verify) {
-    if ($gaps.Count -eq 0) { Write-Host "`nVERIFY PASS: every column is in place, field-secured, granted exactly as listed, in every listed solution, and only the listed profiles can access it." -ForegroundColor Green; exit 0 }
+    if ($gaps.Count -eq 0) { Write-Host "`nVERIFY PASS: every column is in place, field-secured, granted exactly as listed, in every listed solution, only the listed profiles can access it, and every BFF application user reads the tables its readability proof reads." -ForegroundColor Green; exit 0 }
     Write-Host "`nVERIFY FAIL ($($gaps.Count)):" -ForegroundColor Red
     $gaps | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
     exit 1
