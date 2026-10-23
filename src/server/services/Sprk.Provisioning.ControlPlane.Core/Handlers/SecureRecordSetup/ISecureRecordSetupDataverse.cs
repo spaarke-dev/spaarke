@@ -25,8 +25,11 @@ public sealed record SecureSetupBusinessUnit(Guid Id, string Name, Guid? ParentI
 /// <summary>A team.</summary>
 public sealed record SecureSetupTeam(Guid Id, string Name, Guid BusinessUnitId, bool IsDefault);
 
-/// <summary>A security role. <paramref name="ParentRootRoleId"/> ≠ <paramref name="Id"/> means a replica of an ancestor unit's role.</summary>
-public sealed record SecureSetupRole(Guid Id, string Name, Guid BusinessUnitId, Guid? ParentRootRoleId);
+/// <summary>
+/// A security role. <paramref name="ParentRootRoleId"/> ≠ <paramref name="Id"/> means a replica of an ancestor unit's role.
+/// <paramref name="RoleTemplateId"/> is the platform role template the role was made from (null for a custom role).
+/// </summary>
+public sealed record SecureSetupRole(Guid Id, string Name, Guid BusinessUnitId, Guid? ParentRootRoleId, Guid? RoleTemplateId);
 
 /// <summary>A privilege from entity metadata.</summary>
 public sealed record SecureSetupPrivilege(Guid Id, string Name);

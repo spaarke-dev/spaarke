@@ -39,6 +39,9 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     internal bool AddPrivilegesIsIgnored { get; set; }
     internal bool SetColumnFalseIsIgnored { get; set; }
 
+    /// <summary>Team-role disassociations are accepted but do not stick (verify-phase tests).</summary>
+    internal bool TeamRoleDisassociationsIgnored { get; set; }
+
     /// <summary>Profiles whose user/team associations are accepted but do not stick (verify-phase tests).</summary>
     internal HashSet<Guid> ProfileAssociationsIgnored { get; } = [];
 
@@ -249,18 +252,20 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
         return id;
     }
 
-    internal Guid AddRole(Guid unitId, string name, Guid? parentRootRoleId = null)
+    internal Guid AddRole(Guid unitId, string name, Guid? parentRootRoleId = null, Guid? roleTemplateId = null)
     {
         var id = Guid.NewGuid();
-        Roles.Add(new SecureSetupRole(id, name, unitId, parentRootRoleId ?? id));
+        Roles.Add(new SecureSetupRole(id, name, unitId, parentRootRoleId ?? id, roleTemplateId));
         RolePrivileges[id] = [];
         return id;
     }
 
     internal Guid SystemAdministratorRoleIn(Guid unitId)
     {
-        var existing = Roles.FirstOrDefault(r => r.BusinessUnitId == unitId && r.Name == SystemAdministrator);
-        return existing?.Id ?? AddRole(unitId, SystemAdministrator);
+        var existing = Roles.FirstOrDefault(r => r.BusinessUnitId == unitId
+                                                 && r.RoleTemplateId == SecureRecordSetupProcedure.SystemAdministratorRoleTemplateId);
+        return existing?.Id ?? AddRole(unitId, SystemAdministrator,
+            roleTemplateId: SecureRecordSetupProcedure.SystemAdministratorRoleTemplateId);
     }
 
     internal SecureSetupBusinessUnit? Unit(string name) => Units.SingleOrDefault(u => u.Name == name);
@@ -513,7 +518,10 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     public Task DisassociateTeamRoleAsync(SecureRecordSetupTarget target, Guid teamId, Guid roleId, CancellationToken cancellationToken)
     {
         Write($"DisassociateTeamRole {teamId} {roleId}");
-        TeamRoles[teamId].Remove(roleId);
+        if (!TeamRoleDisassociationsIgnored)
+        {
+            TeamRoles[teamId].Remove(roleId);
+        }
         return Task.CompletedTask;
     }
 

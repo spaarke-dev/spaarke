@@ -95,8 +95,15 @@ public sealed class SecureRecordSetupProcedure
     /// <summary>The named, non-default, memberless owner team (owner decision F9) — the BFF's <c>SecureRecordOwnerTeam.DefaultOwnerTeamName</c>.</summary>
     public const string OwnerTeamName = "Secure Record Owners";
 
-    /// <summary>The platform role S8 removes from both teams of the unit.</summary>
+    /// <summary>The platform role S8 removes from both teams of the unit — its display name, used in messages only.</summary>
     public const string SystemAdministratorRoleName = "System Administrator";
+
+    /// <summary>
+    /// The platform's role template id of the System Administrator role: the same in every environment and carried by each
+    /// business unit's copy of the role. S8 and S9 match the role by this id, never by its display name, which an
+    /// administrator can change or give to another role.
+    /// </summary>
+    public static readonly Guid SystemAdministratorRoleTemplateId = Guid.Parse("627090ff-40a3-4053-8790-584edc5be201");
 
     /// <summary>S10/S11: Read on the columns only the BFF writes; every business unit's default team is a member.</summary>
     public const string ReaderProfileName = "Spaarke BFF-Managed Field Readers";
@@ -997,7 +1004,7 @@ public sealed class SecureRecordSetupProcedure
             defaultTeamId = defaultTeams[0].Id;
             foreach (var teamRole in await dv.ListTeamRolesAsync(t, defaultTeamId.Value, ct).ConfigureAwait(false))
             {
-                if (teamRole.Id == roleId || Same(teamRole.Name, SystemAdministratorRoleName))
+                if (teamRole.Id == roleId || IsSystemAdministrator(teamRole))
                 {
                     var defaultTeam = defaultTeamId.Value;
                     await Write($"remove '{teamRole.Name}' from the unit's default team",
@@ -1008,7 +1015,7 @@ public sealed class SecureRecordSetupProcedure
             {
                 foreach (var teamRole in await dv.ListTeamRolesAsync(t, namedTeamForAdmin, ct).ConfigureAwait(false))
                 {
-                    if (Same(teamRole.Name, SystemAdministratorRoleName))
+                    if (IsSystemAdministrator(teamRole))
                     {
                         await Write($"remove '{teamRole.Name}' from '{OwnerTeamName}'",
                             () => dv.DisassociateTeamRoleAsync(t, namedTeamForAdmin, teamRole.Id, ct)).ConfigureAwait(false);
@@ -1179,7 +1186,7 @@ public sealed class SecureRecordSetupProcedure
         foreach (var (teamLabel, id) in new[] { ("the unit's default team", defaultTeamId), ($"'{OwnerTeamName}'", teamId) })
         {
             var admin = (await dv.ListTeamRolesAsync(t, id, ct).ConfigureAwait(false))
-                .Where(r => Same(r.Name, SystemAdministratorRoleName)).ToArray();
+                .Where(IsSystemAdministrator).ToArray();
             if (admin.Length > 0)
             {
                 problems.Add($"{teamLabel} still holds '{SystemAdministratorRoleName}'");
@@ -1243,6 +1250,8 @@ public sealed class SecureRecordSetupProcedure
     }
 
     private static bool IsDeepOrGlobal(string depth) => Same(depth, "Deep") || Same(depth, "Global");
+
+    private static bool IsSystemAdministrator(SecureSetupRole role) => role.RoleTemplateId == SystemAdministratorRoleTemplateId;
 
     private static bool Same(string? a, string? b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 

@@ -209,6 +209,56 @@ public sealed class SecureRecordSetupProcedureTests
         dv.TeamRoles[named].Should().Equal(role.Id);
     }
 
+    [Fact]
+    public async Task Contain_MatchesSystemAdministratorByRoleTemplateId_WhateverItIsNamed()
+    {
+        var dv = await ConfiguredEnvAsync();
+        var unit = dv.Unit(Set.BusinessUnitName)!;
+        var defaultTeam = dv.DefaultTeamOf(unit.Id).Id;
+        var named = dv.Team(unit.Id, SecureRecordSetupProcedure.OwnerTeamName, false)!.Id;
+        var renamedAdmin = dv.AddRole(unit.Id, "Platform Administrator",
+            roleTemplateId: SecureRecordSetupProcedure.SystemAdministratorRoleTemplateId);
+        dv.TeamRoles[defaultTeam].Add(renamedAdmin);
+        dv.TeamRoles[named].Add(renamedAdmin);
+
+        (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>();
+
+        dv.TeamRoles[defaultTeam].Should().NotContain(renamedAdmin, "the role is System Administrator by its template id");
+        dv.TeamRoles[named].Should().NotContain(renamedAdmin);
+    }
+
+    [Fact]
+    public async Task Contain_LeavesACustomRoleNamedSystemAdministrator()
+    {
+        var dv = await ConfiguredEnvAsync();
+        var unit = dv.Unit(Set.BusinessUnitName)!;
+        var defaultTeam = dv.DefaultTeamOf(unit.Id).Id;
+        var lookalike = dv.AddRole(unit.Id, SecureRecordSetupProcedure.SystemAdministratorRoleName);   // no template id
+        dv.TeamRoles[defaultTeam].Add(lookalike);
+
+        (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>(
+            "a custom role that only carries the name is not the platform role, so S9 does not report it either");
+
+        dv.TeamRoles[defaultTeam].Should().Contain(lookalike);
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Verify_RefusesWhenSystemAdministratorRemovalDidNotStick_MatchedByTemplateId()
+    {
+        var dv = await ConfiguredEnvAsync();
+        var unit = dv.Unit(Set.BusinessUnitName)!;
+        var defaultTeam = dv.DefaultTeamOf(unit.Id).Id;
+        var renamedAdmin = dv.AddRole(unit.Id, "Platform Administrator",
+            roleTemplateId: SecureRecordSetupProcedure.SystemAdministratorRoleTemplateId);
+        dv.TeamRoles[defaultTeam].Add(renamedAdmin);
+        dv.TeamRoleDisassociationsIgnored = true;
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.VerifyFailed, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain($"still holds '{SecureRecordSetupProcedure.SystemAdministratorRoleName}'");
+    }
+
     // ------------------------------------------------------------ S11 / S12 / S13
 
     [Fact]
