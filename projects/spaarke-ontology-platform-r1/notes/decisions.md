@@ -249,3 +249,8 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
 
 - **Worklist configuration on customer environments:** automated in `scripts/Deploy-Release.ps1` as a separate task (164): BFF → apply + verify the worklist grid configuration → SpaarkeMaster import (roles). A configuration failure blocks the import for that environment. Until 164 ships, the manual order in the customer deployment guide §7.8 applies.
 - **POL-MATTER-NOBUDGET v2:** the owner approved the dev apply (`Apply-DoLanePolicies.ps1 -DefinitionPath config/know-promotion.policies.json`; `-WhatIf` clean 2026-10-23). It runs only after the BFF that contains task 159 is on dev, because an older BFF does not know `assign-task`.
+
+## D-187 — Task 160 composer and link rules (owner, 2026-10-23)
+
+- **Composer:** add an opt-in `composeOnly` prop to the shared EmailComposer (hides Send, From and the Internal-only tags; `send()`/`saveDraft()` refuse). Existing callers are unchanged; `hostOwnsChrome` keeps its meaning. Server and client halves go in separate commits so the email project and R3 can review the shared-component diff on its own.
+- **Link by recipient:** an enabled systemuser gets the app link, including one flagged `sprk_isexternal`; anyone else gets the portal link.
