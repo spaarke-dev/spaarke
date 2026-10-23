@@ -147,15 +147,48 @@ public class KnowPromotionPolicyDefinitionTests
         template.Should().NotContain("{{");
     }
 
+    private static JsonObject VersionNumbered(int number) =>
+        Policy()["versions"]!.AsArray().Select(v => v!.AsObject()).Single(v => (int)v["versionNumber"]! == number);
+
     [Fact]
-    public void TheDecisionPlan_OffersAssignWork_AsADecideLaneAction()
+    public void TheDecisionPlan_OffersAssignTask_AsTheDecideLaneAction_WithAddTodoAndAssignWorkAsNextSteps()
     {
-        // D-51: the Know-promotion rule offers Assign Work.
+        // D-178 (changes D-51's action): the no-budget decision creates a Task; Add To Do and Assign Work are offered as Next steps.
         var resolution = DecisionPlanService.Resolve(Compact(Version()["decisionPlan"]!), DecisionLane.Decide);
 
         resolution.IsRefused.Should().BeFalse(resolution.RefusalReason);
-        resolution.Plan!.Actions.Select(a => a.Code).Should().Equal("assign-work");
-        resolution.Plan.NextSteps.Should().BeEmpty();
+        resolution.Plan!.Actions.Select(a => a.Code).Should().Equal("assign-task");
+        resolution.Plan.NextSteps.Select(a => a.Code).Should().Equal("add-todo", "assign-work");
+    }
+
+    [Fact]
+    public void TheVersions_AreV1Unchanged_AndANewV2_WhichIsCurrent_FR49()
+    {
+        Policy()["versions"]!.AsArray().Select(v => (int)v!["versionNumber"]!).Should().Equal(1, 2);
+        ((int)Policy()["currentVersion"]!).Should().Be(2);
+
+        // Version 1 is published and immutable (FR-49 / D-14): pinned verbatim, so an edit to it fails here.
+        var v1 = VersionNumbered(1);
+        v1["versionId"]!.GetValue<string>().Should().Be("00000000-0000-4000-8000-000000006311");
+        v1["inForceFrom"]!.GetValue<string>().Should().Be("2026-10-16T00:00:00Z");
+        v1["proposedAction"]!.GetValue<string>().Should().Be("assign-work: assign someone to set up this matter's budget.");
+        Compact(v1["decisionPlan"]!).Should().Be("""{"actions":["assign-work"],"nextSteps":[]}""");
+
+        // Version 2 is its own entry with its own id; only the proposed action and the plan change.
+        var v2 = VersionNumbered(2);
+        v2["versionId"]!.GetValue<string>().Should().NotBe(v1["versionId"]!.GetValue<string>());
+        v2["versionId"]!.GetValue<string>().Should().Be("00000000-0000-4000-8000-000000006312");
+        v2["proposedAction"]!.GetValue<string>().Should().Be("assign-task: assign someone to set up this matter's budget.");
+        Compact(v2["decisionPlan"]!).Should().Be("""{"actions":["assign-task"],"nextSteps":["add-todo","assign-work"]}""");
+        foreach (var same in new[] { "ruleType", "ruleBody", "shortHeadline", "messageTemplate" })
+            Compact(v2[same]!).Should().Be(Compact(v1[same]!), $"D-178 changes the action, not the rule ({same})");
+    }
+
+    [Fact]
+    public void BothVersionPlans_ResolveForDecide_SoTheSupersededV1StillReadsBack()
+    {
+        foreach (var number in new[] { 1, 2 })
+            DecisionPlanService.Resolve(Compact(VersionNumbered(number)["decisionPlan"]!), DecisionLane.Decide).IsRefused.Should().BeFalse($"v{number}");
     }
 
     [Fact]

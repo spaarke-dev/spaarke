@@ -110,6 +110,8 @@ public static class SignalsModule
         services.AddScoped<IDecisionActionExecutor, SendEmailExecutor>();
         // Task 043: the last two catalog actions (Assign Work through the 046 create; the inquiry adapting 070).
         services.AddScoped<IDecisionActionExecutor, AssignWorkExecutor>();
+        // Task 159 (D-178): Assign Task, the no-budget decision's action (a sprk_event of type Task) through the same child-records create.
+        services.AddScoped<IDecisionActionExecutor, AssignTaskExecutor>();
         services.AddScoped<IDecisionActionExecutor, BudgetInquiryActionExecutor>();
         services.AddScoped<DecisionActionExecutors>();
         // Task 043: the decision commit route's service and its after-record step (032 trigger, 034 suppression).

@@ -926,6 +926,7 @@ public class DecisionActionExecutorsTests
             new CreateEventExecutor(probe, cores, entities),
             new SendEmailExecutor(probe, user, cores),
             new AssignWorkExecutor(probe, cores, entities),
+            new AssignTaskExecutor(probe, cores, entities),
             new BudgetInquiryActionExecutor(Inquiry()),
         ];
     }
@@ -995,6 +996,160 @@ public class DecisionActionExecutorsTests
         outcome.Status.Should().Be(DecisionActionStatus.Refused);
         outcome.ReasonCode.Should().Be(DecisionActionReasons.SubjectUnsupported);
         cores.VerifyNoOtherCalls();
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // assign-task (task 159; D-178): a sprk_event of type Task, assigned to a contact
+    // ---------------------------------------------------------------------------------------------------------------
+
+    /// <summary>The Task row of <c>sprk_eventtype_ref</c> (spaarkedev1, read 2026-10-22). Written out here on purpose: the executor's
+    /// own constant must equal the live id, so the test does not borrow it.</summary>
+    private const string LiveTaskEventTypeId = "124f5fc9-98ff-f011-8406-7c1e525abd8b";
+
+    private static async Task<(DecisionActionOutcome Outcome, string? Table, JsonElement? Sent, Mock<CallerRecordAccessProbe> Probe)> RunAssignTaskAsync(
+        Dictionary<string, string?> parameters, Guid created)
+    {
+        var cores = Cores();
+        string? table = null;
+        JsonElement? sent = null;
+        cores.Setup(c => c.CreateChildAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, JsonElement, CancellationToken>((_, t, b, _) => { table = t; sent = b; })
+            .ReturnsAsync(Reply(201, body: new { id = created }));
+        var probe = Probe(CanCreate);
+
+        var outcome = await new AssignTaskExecutor(probe.Object, cores.Object, Entities())
+            .ExecuteAsync(Request(parameters, null, MatterCore), CancellationToken.None);
+        return (outcome, table, sent, probe);
+    }
+
+    [Fact]
+    public async Task AssignTask_CreatesAnOpenTaskEvent_AssignedToTheContact_FiledUnderTheCore_AndReturnsTheId()
+    {
+        var created = Guid.Parse("cccccccc-0000-0000-0000-0000000000b1");
+
+        var (outcome, table, sent, probe) = await RunAssignTaskAsync(new()
+        {
+            ["assignee"] = ContactId.ToString("D"),
+            ["description"] = "Set up the budget for this matter\nuse the standard rate card",
+            ["dueDate"] = "2026-10-30",
+        }, created);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Done);
+        outcome.Written.Should().Equal(new DecisionRecordRef("sprk_event", created)); // its id is in the step's written list
+        table.Should().Be("sprk_event", "a Task is a sprk_event, not a sprk_todo and not a sprk_workassignment");
+        var body = sent!.Value;
+        body.GetProperty("sprk_eventname").GetString().Should().Be("Set up the budget for this matter");
+        body.GetProperty("sprk_description").GetString().Should().Be("Set up the budget for this matter\nuse the standard rate card");
+        body.GetProperty("sprk_duedate").GetString().Should().Be("2026-10-30");
+        body.GetProperty("statuscode").GetInt32().Should().Be(659490001, "Open");
+        body.GetProperty("sprk_eventtype_ref@odata.bind").GetString().Should().Be($"/sprk_eventtype_refs({LiveTaskEventTypeId})");
+        body.GetProperty("sprk_assignedto@odata.bind").GetString().Should().Be($"/contacts({ContactId:D})");
+        body.GetProperty("sprk_regardingmatter@odata.bind").GetString().Should().Be($"/sprk_matters({MatterId:D})");
+        body.GetProperty("sprk_regardingrecordid").GetString().Should().Be(MatterId.ToString("D"));
+        body.GetProperty("sprk_regardingrecordname").GetString().Should().Be("Acme v. Roe");
+        body.GetProperty("sprk_regardingrecordtype@odata.bind").GetString().Should().Be($"/sprk_recordtype_refs({MatterCore.RecordTypeRefId:D})");
+        body.TryGetProperty("sprk_assignedtointernal@odata.bind", out _).Should().BeFalse("that is the work assignment's assignee column, not the event's");
+        probe.Verify(p => p.CallerHoldsPrivilegeAsync(It.IsAny<string?>(), Sprk.Bff.Api.Api.Filters.CommunicationRecordAuthorizationFilter.CreateEventPrivilege, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task AssignTask_WithoutADueDate_WritesNoDueDateColumn()
+    {
+        var (outcome, _, sent, _) = await RunAssignTaskAsync(
+            new() { ["assignee"] = ContactId.ToString("D"), ["description"] = "Set up the budget" }, Guid.NewGuid());
+
+        outcome.Status.Should().Be(DecisionActionStatus.Done);
+        sent!.Value.TryGetProperty("sprk_duedate", out _).Should().BeFalse("the due date is optional; none is invented");
+        sent.Value.GetProperty("sprk_eventname").GetString().Should().Be("Set up the budget");
+    }
+
+    [Fact]
+    public async Task AssignTask_ALongFirstLine_IsTruncatedToTheNameColumn()
+    {
+        var (_, _, sent, _) = await RunAssignTaskAsync(
+            new() { ["assignee"] = ContactId.ToString("D"), ["description"] = new string('x', 300) }, Guid.NewGuid());
+
+        sent!.Value.GetProperty("sprk_eventname").GetString().Should().HaveLength(200).And.EndWith("...");
+        sent.Value.GetProperty("sprk_description").GetString().Should().HaveLength(300);
+    }
+
+    [Fact]
+    public async Task AssignTask_ADescriptionOverTheColumnMaximum_IsRefusedBeforeTheCore_WithAnAccurateMessage()
+    {
+        var cores = Cores();
+
+        var outcome = await new AssignTaskExecutor(Probe(CanCreate).Object, cores.Object, Entities()).ExecuteAsync(
+            Request(new() { ["assignee"] = ContactId.ToString("D"), ["description"] = new string('x', 2001) }, null, MatterCore), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Refused);
+        outcome.ReasonCode.Should().Be(DecisionActionReasons.InvalidParameter);
+        outcome.Detail.Should().Be("Keep 'What to do' under 2,000 characters.");
+        cores.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public void AssignTask_TheDescriptionLimit_EqualsTheMaxLengthOfSprkEventSprkDescription()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "src", "server", "api", "Sprk.Bff.Api", "Program.cs"))) dir = dir.Parent;
+        var xml = System.Xml.Linq.XDocument.Load(Path.Combine(dir!.FullName, "src", "dataverse", "solutions", "SpaarkeMaster", "Entities", "sprk_Event", "Entity.xml"));
+        var attribute = xml.Descendants("attribute").Single(a => (string?)a.Element("LogicalName") == "sprk_description");
+
+        ((int)attribute.Element("MaxLength")!).Should().Be(AssignTaskExecutor.DescriptionMaxLength);
+    }
+
+    [Fact]
+    public async Task AssignTask_ADescriptionOfExactlyTheColumnMaximum_IsAccepted()
+    {
+        var (outcome, _, sent, _) = await RunAssignTaskAsync(
+            new() { ["assignee"] = ContactId.ToString("D"), ["description"] = new string('x', 2000) }, Guid.NewGuid());
+
+        outcome.Status.Should().Be(DecisionActionStatus.Done);
+        sent!.Value.GetProperty("sprk_description").GetString().Should().HaveLength(2000);
+    }
+
+    [Theory]
+    [InlineData(null, "Set up the budget", "2026-10-30")]
+    [InlineData("not-a-guid", "Set up the budget", "2026-10-30")]
+    [InlineData("66666666-0000-0000-0000-000000000001", null, "2026-10-30")]
+    [InlineData("66666666-0000-0000-0000-000000000001", "Set up the budget", "soon")]
+    public async Task AssignTask_BadInput_IsRefusedBeforeTheCore(string? assignee, string? description, string? dueDate)
+    {
+        var cores = Cores();
+
+        var outcome = await new AssignTaskExecutor(Probe(CanCreate).Object, cores.Object, Entities()).ExecuteAsync(
+            Request(new() { ["assignee"] = assignee, ["description"] = description, ["dueDate"] = dueDate }, null, MatterCore), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Refused);
+        outcome.ReasonCode.Should().Be(DecisionActionReasons.InvalidParameter);
+        cores.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task Preflight_AssignTask_RefusesWithoutTheCreatePrivilege_OrAppendToOnTheCoreTheAssigneeOrTheTaskType_AndWritesNothing()
+    {
+        var parameters = new Dictionary<string, string?> { ["assignee"] = ContactId.ToString("D"), ["description"] = "t" };
+
+        var noPrivilege = new Spy();
+        await AssertPreflightRefusesWithoutWriting(
+            new AssignTaskExecutor(Probe(CanCreate, createPrivilege: false).Object, noPrivilege.Cores.Object, Entities()),
+            Request(parameters, null, MatterCore), noPrivilege, DecisionActionReasons.NotAuthorized);
+
+        var noCore = new Spy();
+        await AssertPreflightRefusesWithoutWriting(
+            new AssignTaskExecutor(Probe(CanCreate, bySet: set => set == "sprk_matters" ? ReadOnly : CanCreate).Object, noCore.Cores.Object, Entities()),
+            Request(parameters, null, MatterCore), noCore, DecisionActionReasons.NotAuthorized);
+
+        var noAssignee = new Spy();
+        await AssertPreflightRefusesWithoutWriting(
+            new AssignTaskExecutor(Probe(CanCreate, bySet: set => set == "contacts" ? ReadOnly : CanCreate).Object, noAssignee.Cores.Object, Entities()),
+            Request(parameters, null, MatterCore), noAssignee, DecisionActionReasons.NotAuthorized);
+
+        // The core also asks AppendTo on the Task type row it binds; a caller whose role lacks it is refused up front.
+        var noTaskType = new Spy();
+        await AssertPreflightRefusesWithoutWriting(
+            new AssignTaskExecutor(Probe(CanCreate, bySet: set => set == "sprk_eventtype_refs" ? ReadOnly : CanCreate).Object, noTaskType.Cores.Object, Entities()),
+            Request(parameters, null, MatterCore), noTaskType, DecisionActionReasons.NotAuthorized);
     }
 
     // ---------------------------------------------------------------------------------------------------------------
@@ -1623,6 +1778,7 @@ public class DecisionActionExecutorsTests
             (new SendEmailExecutor(probe, spy.User, cores), Request(Message("a@b.example"), null, MatterCore)),
             (new AddTodoExecutor(probe, cores, Entities()), Request(new() { ["title"] = "t", ["assignee"] = ContactId.ToString("D"), ["dueDate"] = "2026-10-20" }, null, MatterCore)),
             (new CreateEventExecutor(probe, cores, Entities()), Request(new() { ["title"] = "t", ["date"] = "2026-10-22" }, null, MatterCore)),
+            (new AssignTaskExecutor(probe, cores, Entities()), Request(new() { ["assignee"] = ContactId.ToString("D"), ["description"] = "t" }, null, MatterCore)),
             (new CreateBudgetExecutor(probe, cores, Entities(), new FakeTimeProvider(Now)), Request(CreateBudgetParams(), null, MatterCore)),
         };
 

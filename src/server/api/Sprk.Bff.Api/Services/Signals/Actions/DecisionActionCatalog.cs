@@ -198,6 +198,19 @@ public static class DecisionActionCatalog
             DecisionRecordClass.Judgement)
         { Gate = new DecisionGateFactors(GateRiskTier.Tier2b, Reversible: true, RecordOfTruthImpact: true) },
 
+        // D-178 (task 159): the no-budget decision creates a Task (a sprk_event of type Task), not a Work Assignment. A Decide-lane plan
+        // action only: Add To Do and Assign Work are what the plan offers as its Next steps.
+        new("assign-task", "Assign Task", DecisionLane.Decide, IsNextStep: false, WorkType: null,
+            [
+                new("assignee", "Assign to", DecisionParameterKind.Person, Required: true),
+                new("description", "What to do", DecisionParameterKind.TextArea, Required: true),
+                new("dueDate", "Due", DecisionParameterKind.Date, Required: false),
+            ],
+            ["Creates a task (an event of type Task) linked to the record, assigned to the person above, when the decision is recorded"],
+            Excludes: [],
+            DecisionRecordClass.Judgement)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier3, Reversible: true, RecordOfTruthImpact: true) },
+
         // ---- Do lane --------------------------------------------------------------------------------------
         new("mark-complete", "Mark complete", DecisionLane.Do, IsNextStep: false, WorkType: null,
             [new("note", "Completion note", DecisionParameterKind.TextArea, Required: false)],

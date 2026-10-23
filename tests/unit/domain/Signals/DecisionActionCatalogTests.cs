@@ -12,6 +12,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Signals;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Membership;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Ontology;
@@ -239,7 +240,7 @@ public class DecisionActionCatalogTests
     public void CatalogCodesAreUnique_AndExactlyTheStatedSet()
     {
         DecisionActionCatalog.All.Select(a => a.Code).Should().BeEquivalentTo(
-            "send-budget-inquiry", "revise-budget", "create-budget", "approve-variance",
+            "send-budget-inquiry", "revise-budget", "create-budget", "approve-variance", "assign-task",
             "mark-complete", "reschedule", "reassign", "send-reminder", "extend-response-date", "record-the-response",
             "add-todo", "create-event", "send-email", "assign-work");
     }
@@ -253,6 +254,36 @@ public class DecisionActionCatalogTests
         asAction.IsRefused.Should().BeFalse();
         asAction.Plan!.Actions.Single().RecordClass.Should().Be(DecisionRecordClass.Judgement);
         asNextStep.Plan!.NextSteps.Single().Code.Should().Be("assign-work");
+    }
+
+    [Fact]
+    public void AssignTask_IsADecideLaneActionNotANextStep_WithTheD178Shape()
+    {
+        DecisionActionCatalog.TryGet("assign-task", out var action).Should().BeTrue();
+
+        action.Label.Should().Be("Assign Task");
+        action.PlanLane.Should().Be(DecisionLane.Decide);
+        action.IsNextStep.Should().BeFalse("a Task is the decision itself here; Add To Do and Assign Work are its Next steps (D-178)");
+        action.RecordClass.Should().Be(DecisionRecordClass.Judgement);
+        action.ResolvesSignal.Should().BeTrue();
+        action.SendsMessage.Should().BeFalse();
+        action.Excludes.Should().BeEmpty();
+        DecisionGateTier.Resolve(action.Gate!).Should().Be(GateRiskTier.Tier3);
+        action.Parameters.Select(p => (p.Code, p.Kind, p.Required)).Should().Equal(
+            ("assignee", DecisionParameterKind.Person, true),
+            ("description", DecisionParameterKind.TextArea, true),
+            ("dueDate", DecisionParameterKind.Date, false));
+        action.EffectLines.Should().Equal("Creates a task (an event of type Task) linked to the record, assigned to the person above, when the decision is recorded");
+    }
+
+    [Fact]
+    public void TheNoBudgetV2Plan_ResolvesForDecide_AssignTaskAsTheAction_AndAddTodoAndAssignWorkAsNextSteps()
+    {
+        var resolution = DecisionPlanService.Resolve("""{"actions":["assign-task"],"nextSteps":["add-todo","assign-work"]}""", DecisionLane.Decide);
+
+        resolution.IsRefused.Should().BeFalse(resolution.RefusalReason);
+        resolution.Plan!.Actions.Select(a => a.Code).Should().Equal("assign-task");
+        resolution.Plan.NextSteps.Select(a => a.Code).Should().Equal("add-todo", "assign-work");
     }
 
     [Fact]
@@ -281,6 +312,8 @@ public class DecisionActionCatalogTests
     [InlineData("""{"actions":["Send-Budget-Inquiry"]}""", DecisionLane.Decide, DecisionPlanRefusalReason.UnknownAction)]
     [InlineData("""{"actions":["mark-complete"]}""", DecisionLane.Decide, DecisionPlanRefusalReason.ActionNotAllowed)]
     [InlineData("""{"actions":["assign-work"]}""", DecisionLane.Do, DecisionPlanRefusalReason.ActionNotAllowed)]
+    [InlineData("""{"actions":["assign-task"]}""", DecisionLane.Do, DecisionPlanRefusalReason.ActionNotAllowed)]
+    [InlineData("""{"actions":["send-budget-inquiry"],"nextSteps":["assign-task"]}""", DecisionLane.Decide, DecisionPlanRefusalReason.ActionNotAllowed)]
     [InlineData("""{"actions":["add-todo"]}""", DecisionLane.Decide, DecisionPlanRefusalReason.ActionNotAllowed)]
     [InlineData("""{"actions":["send-budget-inquiry"],"nextSteps":["revise-budget"]}""", DecisionLane.Decide, DecisionPlanRefusalReason.ActionNotAllowed)]
     [InlineData("""{"actions":["revise-budget","revise-budget"]}""", DecisionLane.Decide, DecisionPlanRefusalReason.DuplicateAction)]
@@ -801,6 +834,17 @@ public class DecisionActionCatalogTests
 
         var without = DecisionPlanService.Resolve("""{"actions":["send-budget-inquiry"]}""", DecisionLane.Decide).Plan!;
         without.WithCreateBudgetInsteadOfRevise().Should().BeSameAs(without, "a plan with no Revise budget is returned as it is");
+    }
+
+    [Fact]
+    public void WithCreateBudgetInsteadOfRevise_LeavesThePolMatterNobudgetV2Plan_AssignTaskPlusNextSteps_Untouched_D178_D180()
+    {
+        // 159 x 161: the v2 plan of POL-MATTER-NOBUDGET offers assign-task, not revise-budget, so the no-budget substitution never applies.
+        var v2 = DecisionPlanService.Resolve("""{"actions":["assign-task"],"nextSteps":["add-todo","assign-work"]}""", DecisionLane.Decide).Plan!;
+
+        v2.WithCreateBudgetInsteadOfRevise().Should().BeSameAs(v2);
+        v2.Actions.Select(a => a.Code).Should().Equal("assign-task");
+        v2.NextSteps.Select(a => a.Code).Should().Equal("add-todo", "assign-work");
     }
 
     private const string ReviseThenVariance = """{"actions":["send-budget-inquiry","revise-budget","approve-variance"],"nextSteps":[]}""";

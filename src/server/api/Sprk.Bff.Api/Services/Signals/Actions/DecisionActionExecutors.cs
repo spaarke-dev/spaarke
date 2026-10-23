@@ -196,6 +196,22 @@ internal static class DecisionExec
     internal const string TodoSet = "sprk_todos";
     internal const string WorkAssignmentSet = "sprk_workassignments";
     internal const string ContactSet = "contacts";
+    internal const string EventTypeRefSet = "sprk_eventtype_refs";
+
+    /// <summary>The Task row of <c>sprk_eventtype_ref</c> (task 159, D-178): reference data shared across environments, verified on
+    /// spaarkedev1 2026-10-22. The ONE copy inside Signals (the AI nodes and the workspace carry their own private ones).</summary>
+    internal const string TaskEventTypeId = "124f5fc9-98ff-f011-8406-7c1e525abd8b";
+
+    /// <summary>The longest name a row takes from the first line of a free-text description (<c>sprk_name</c> / <c>sprk_eventname</c>).</summary>
+    private const int NameMaxLength = 200;
+
+    /// <summary>The first line of a description, trimmed, as a row name: at most <see cref="NameMaxLength"/> characters, the
+    /// last three <c>...</c> when it was cut.</summary>
+    internal static string NameFromDescription(string description)
+    {
+        var firstLine = description.Split('\n', 2)[0].Trim();
+        return firstLine.Length > NameMaxLength ? firstLine[..(NameMaxLength - 3)] + "..." : firstLine;
+    }
 
     /// <summary>Create on <c>sprk_todo</c> (live privilege name; the event one is <c>CommunicationRecordAuthorizationFilter.CreateEventPrivilege</c>).</summary>
     internal const string CreateTodoPrivilege = "prvCreatesprk_Todo";
@@ -1239,8 +1255,6 @@ public sealed class AssignWorkExecutor : ChildCreateExecutorBase
     /// <summary>Create on <c>sprk_workassignment</c> (live privilege name, spaarkedev1 2026-10-11).</summary>
     internal const string CreateWorkAssignmentPrivilege = "prvCreatesprk_WorkAssignment";
 
-    private const int NameMaxLength = 200;
-
     public AssignWorkExecutor(CallerRecordAccessProbe probe, DecisionRouteCores cores, IGenericEntityService entities)
         : base(probe, cores, entities)
     {
@@ -1265,10 +1279,86 @@ public sealed class AssignWorkExecutor : ChildCreateExecutorBase
         if (request.Param("description") is not { } description)
             return DecisionActionOutcome.Refused(Code, DecisionActionReasons.InvalidParameter, "Say what is to be done.");
 
-        var firstLine = description.Split('\n', 2)[0].Trim();
-        payload["sprk_name"] = firstLine.Length > NameMaxLength ? firstLine[..(NameMaxLength - 3)] + "..." : firstLine;
+        payload["sprk_name"] = DecisionExec.NameFromDescription(description);
         payload["sprk_description"] = description;
         payload["sprk_assignedtointernal@odata.bind"] = $"/contacts({assignee:D})";
+        return null;
+    }
+}
+
+/// <summary>
+/// <c>assign-task</c> (task 159; D-178): a Task, which is a <c>sprk_event</c> whose <c>sprk_eventtype_ref</c> is the Task row, NOT a
+/// <c>sprk_todo</c> and NOT a <c>sprk_workassignment</c> (a work assignment is for creating a matter or a project). The owner's
+/// no-budget decision creates one, assigned to the chosen contact (<c>sprk_assignedto</c>, a contact lookup on spaarkedev1,
+/// 2026-10-22), Open, filed under the core record, through the same child-records create core as the other record-creating actions
+/// (as the caller; no app-only write). The create privilege is the event one <see cref="CreateEventExecutor"/> checks.
+/// </summary>
+/// <remarks>Component justification (CLAUDE.md section 11). Existing: <see cref="CreateEventExecutor"/> (a Next step with no
+/// assignee or type) and <c>TaskActionCore</c> (AI-pipeline internal, which the Signals path must not call). Extension: one more
+/// <see cref="ChildCreateExecutorBase"/> subclass. Cost of doing nothing: the no-budget decision keeps creating a Work Assignment,
+/// which the owner rejected as the wrong record type.</remarks>
+public sealed class AssignTaskExecutor : ChildCreateExecutorBase
+{
+    private readonly CallerRecordAccessProbe _probe;
+
+    public AssignTaskExecutor(CallerRecordAccessProbe probe, DecisionRouteCores cores, IGenericEntityService entities)
+        : base(probe, cores, entities)
+    {
+        _probe = probe;
+    }
+
+    public override string Code => "assign-task";
+
+    /// <summary>The MaxLength of <c>sprk_event.sprk_description</c> (SpaarkeMaster <c>Entities/sprk_Event/Entity.xml</c>). Longer text
+    /// makes the app-only create throw, which the route reports as an uncertain write although nothing was written, so it is refused
+    /// here first.</summary>
+    internal const int DescriptionMaxLength = 2000;
+
+    protected override string Table => "sprk_event";
+
+    protected override string CreatePrivilege => CommunicationRecordAuthorizationFilter.CreateEventPrivilege;
+
+    protected override Guid? AssigneeContact(DecisionActionRequest request) =>
+        DecisionExec.TryGuid(request.Param("assignee"), out var id) ? id : null;
+
+    /// <remarks>The child-records core asks AppendTo, AS THE CALLER, on every record the row binds, and the Task type row is one
+    /// (<c>sprk_eventtype_ref</c> is user-owned on spaarkedev1). Asked here too so a caller who lacks it is refused before anything
+    /// is written, not by the core after an earlier action of the decision has landed.</remarks>
+    public override async Task<DecisionActionOutcome?> PreflightAsync(DecisionActionRequest request, CancellationToken ct)
+    {
+        if (await base.PreflightAsync(request, ct).ConfigureAwait(false) is { } refused)
+            return refused;
+
+        return await DecisionExec.CallerHoldsAsync(
+                _probe, request.Http, DecisionExec.EventTypeRefSet, new Guid(DecisionExec.TaskEventTypeId), DecisionExec.AppendToOperation, ct).ConfigureAwait(false)
+            ? null
+            : Refuse(DecisionActionReasons.NotAuthorized, "You do not have permission to create a task.");
+    }
+
+    protected override DecisionActionOutcome? BuildColumns(DecisionActionRequest request, IDictionary<string, object?> payload)
+    {
+        if (!DecisionExec.TryGuid(request.Param("assignee"), out var assignee))
+            return DecisionActionOutcome.Refused(Code, DecisionActionReasons.InvalidParameter, "Pick who the task is for.");
+        if (request.Param("description") is not { } description)
+            return DecisionActionOutcome.Refused(Code, DecisionActionReasons.InvalidParameter, "Say what is to be done.");
+        if (description.Length > DescriptionMaxLength)
+            return DecisionActionOutcome.Refused(Code, DecisionActionReasons.InvalidParameter, "Keep 'What to do' under 2,000 characters.");
+
+        // The due date is optional; one that is given must be a date.
+        DateOnly? due = null;
+        if (request.Param("dueDate") is { } dueText)
+        {
+            if (!DecisionExec.TryDate(dueText, out var parsed))
+                return DecisionActionOutcome.Refused(Code, DecisionActionReasons.InvalidParameter, "Give the due date as yyyy-MM-dd.");
+            due = parsed;
+        }
+
+        payload["sprk_eventname"] = DecisionExec.NameFromDescription(description);
+        payload["sprk_description"] = description;
+        if (due is { } date) payload["sprk_duedate"] = DecisionExec.IsoDate(date);
+        payload["statuscode"] = EventStatusCode.Open;
+        payload["sprk_eventtype_ref@odata.bind"] = $"/sprk_eventtype_refs({DecisionExec.TaskEventTypeId})";
+        payload["sprk_assignedto@odata.bind"] = $"/contacts({assignee:D})";
         return null;
     }
 }
