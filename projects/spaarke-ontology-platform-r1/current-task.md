@@ -3,7 +3,7 @@
 > **Last Updated**: 2026-10-23 ~03:30Z (main session, context-handoff). State only — history is in git log, task `<completion>` blocks and
 > `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 and §6. Decisions: [`notes/decisions.md`](notes/decisions.md)
 > (D-1..D-187). Deferred work: one self-contained GitHub issue per item, label `ontology-deferred`, plus a DI-nn row in both tables of
-> `notes/defer-issues.md` (next free: **DI-126**). Sub-agents never edit this file.
+> `notes/defer-issues.md` (next free: **DI-127**). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
