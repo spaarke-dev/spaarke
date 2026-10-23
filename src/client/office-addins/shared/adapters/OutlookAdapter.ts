@@ -1004,6 +1004,12 @@ export class OutlookAdapter implements IHostAdapter {
   /**
    * Get the sent date of the email.
    *
+   * Office.js has no sent-time property for a read item, so this returns `dateTimeCreated` — the same value
+   * Quick Save sends. It was `dateTimeModified` until task 132 (owner UAT 2026-10-22), but that changes whenever the
+   * item is read, moved or flagged, so a saved email was dated by its last touch (sent 2026-09-03, stored 2026-10-03).
+   * The value becomes `sprk_emaildate`, the .eml Date header and the file-name date prefix; when the server reads the
+   * message from Graph it uses Graph's `sentDateTime` instead.
+   *
    * @returns The sent date or undefined
    */
   getSentDate(): Date | undefined {
@@ -1013,7 +1019,7 @@ export class OutlookAdapter implements IHostAdapter {
 
     try {
       const item = this.getReadItem();
-      return item.dateTimeModified ?? undefined;
+      return item.dateTimeCreated ?? undefined;
     } catch {
       return undefined;
     }

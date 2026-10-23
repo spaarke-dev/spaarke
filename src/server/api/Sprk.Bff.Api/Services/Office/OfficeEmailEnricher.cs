@@ -27,6 +27,13 @@ public class OfficeEmailEnricher
     /// Enriches email metadata by fetching body and attachments from Graph API when missing.
     /// Uses OBO authentication to access user's mailbox via Microsoft Graph.
     /// </summary>
+    /// <remarks>
+    /// Task 132: when Graph is read, its <c>sentDateTime</c> replaces the request's <see cref="EmailMetadata.SentDate"/>
+    /// (also when the body and attachments did not change). This runs at the top of <c>OfficeService.SaveAsync</c>, before
+    /// the capture, the .eml build, the file names, the document row and the finalization payload, so
+    /// <c>sprk_emaildate</c>, the .eml Date header and the file-name date prefix all read the enriched value on both the
+    /// sync and the worker path. When Graph is not read (the client sent the body) the request's value is kept.
+    /// </remarks>
     public async Task<SaveRequest> EnrichEmailFromGraphAsync(
         SaveRequest request,
         HttpContext httpContext,
@@ -124,9 +131,15 @@ public class OfficeEmailEnricher
                     graphMessageKey);
             }
 
+            // Task 132 (owner UAT 2026-10-22): the mailbox's own sent time wins over the client's. Office.js has no
+            // sent-time property for a read item, so the pane sends an approximation (it sent dateTimeModified before
+            // task 132, which moves whenever the item is read, moved or flagged — "sent 09-03" stored as 10-03). The
+            // request's value is kept only when Graph does not report one.
+            var sentDate = message.SentDateTime ?? request.Email.SentDate;
+
             // Create updated email metadata with Graph API content
             // EmailMetadata is a record with init-only properties, so we need to create a new instance
-            if (bodyContent != null || attachmentReferences != null)
+            if (bodyContent != null || attachmentReferences != null || sentDate != request.Email.SentDate)
             {
                 return request with
                 {
@@ -134,7 +147,8 @@ public class OfficeEmailEnricher
                     {
                         Body = bodyContent ?? request.Email.Body,
                         IsBodyHtml = bodyContent != null ? isBodyHtml : request.Email.IsBodyHtml,
-                        Attachments = attachmentReferences ?? request.Email.Attachments
+                        Attachments = attachmentReferences ?? request.Email.Attachments,
+                        SentDate = sentDate
                     }
                 };
             }
