@@ -997,12 +997,19 @@ internal static class InheritedAccessPermission
     /// <item>UAC review F4 / DEF-043. <c>sprk_signal</c>: its frozen core-record pair <c>sprk_corerecordtype</c> /
     /// <c>sprk_corerecordid</c> (<c>SignalCoreRecordAccess.CoreRecordTypeColumn</c>, <c>CoreRecordIdColumn</c>), by which
     /// <c>SignalCoreRecordAccess.AuthorizeAsync</c> decides who reads a Signal and <c>SignalReadService.DuplicatesShownAsync</c>
-    /// bounds a line Duplicate's invoice; and its invoice and invoice-line subjects <c>sprk_regardinginvoice</c> /
-    /// <c>sprk_regardinginvoiceline</c> (<c>SignalClosureService.RegardingInvoiceColumn</c>, <c>RegardingInvoiceLineColumn</c>),
-    /// which name the current invoice or line a Duplicate is judged by. Their only writers are typed: the Signal writer
-    /// (<c>SignalWriter</c>, the subject lookup through <c>TodoRegardingBuilder.ApplySubjectLookupAndPairAsync</c>) and the
-    /// closure and commit updates, all through the ontology writer's dedicated client (<c>OntologyWriterDataverseClient</c>),
-    /// never a generic path. Its lane and its other subject columns are not listed yet (<c>AccessTableReaderScanTests</c>).</item>
+    /// bounds a line Duplicate's invoice; its regarding pair <c>sprk_regardingrecordtype</c> / <c>sprk_regardingrecordid</c>
+    /// (<see cref="CoreAncestorResolver.RegardingRecordTypeColumn"/>, <see cref="CoreAncestorResolver.RegardingRecordIdColumn"/>),
+    /// which names the Signal's subject: <c>SignalReadService</c> reads a Duplicate's subject (an invoice or an invoice line)
+    /// from it, and <c>SignalCoreRecordAccess</c> a Do-lane subject; and its invoice and invoice-line subject lookups
+    /// <c>sprk_regardinginvoice</c> / <c>sprk_regardinginvoiceline</c> (<c>SignalClosureService.RegardingInvoiceColumn</c>,
+    /// <c>RegardingInvoiceLineColumn</c>), which the closure reads. Re-pointed by an app-only Update Record node or output
+    /// mapping, a Duplicate would be judged against another invoice. All six are the Signal's typed-writer-only columns: they are
+    /// written once, at create, by the Signal writer (<c>SignalWriter.WriteAsync</c>; the subject lookup and the pair through
+    /// <c>TodoRegardingBuilder.ApplySubjectLookupAndPairAsync</c>) through the ontology writer's dedicated client
+    /// (<c>OntologyWriterDataverseClient</c>), and never updated; the closure and commit updates write neither, the core-ancestor
+    /// restamper moves only the stamp lookups, and no generic path writes a Signal (it is never mapped:
+    /// <c>RecordTableRules</c>, <c>OntologyContentIsNotMapped</c>). Its lane and its other subject lookups are not listed yet
+    /// (<c>AccessTableReaderScanTests</c>).</item>
     /// </list>
     /// Data, not branching: a table with no entry has no such column.
     /// </summary>
@@ -1098,6 +1105,8 @@ internal static class InheritedAccessPermission
                 Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.CoreRecordIdColumn,
                 Sprk.Bff.Api.Services.Signals.SignalClosureService.RegardingInvoiceColumn,
                 Sprk.Bff.Api.Services.Signals.SignalClosureService.RegardingInvoiceLineColumn,
+                CoreAncestorResolver.RegardingRecordTypeColumn,
+                CoreAncestorResolver.RegardingRecordIdColumn,
             },
         };
 

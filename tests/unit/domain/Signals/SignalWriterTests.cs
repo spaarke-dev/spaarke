@@ -1299,6 +1299,9 @@ public partial class SignalWriterTests
         row.GetAttributeValue<string>("sprk_corerecordid").Should().Be(Lower(MatterId));
         row.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(MatterId);
         row.GetAttributeValue<EntityReference>("sprk_regardinginvoice").Id.Should().Be(InvoiceId);
+        // uac-r2 re-check F1: the regarding pair (refused to app-only generic writers) is still written by this typed writer.
+        row.GetAttributeValue<EntityReference>("sprk_regardingrecordtype").Id.Should().Be(RecordTypeCatalogStub.SpaarkeDev1["sprk_invoice"]);
+        row.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(Lower(InvoiceId));
     }
 
     [Fact]

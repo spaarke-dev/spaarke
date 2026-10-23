@@ -118,7 +118,12 @@ public class AccessTableAppOnlyWriterTests
         ],
 
         // UAC review F4 / DEF-043: a Signal's frozen core record and its invoice and invoice-line subjects.
-        ["sprk_signal"] = ["sprk_corerecordtype", "sprk_corerecordid", "sprk_regardinginvoice", "sprk_regardinginvoiceline"],
+        // uac-r2 re-check F1: + its regarding pair, which names the subject a Duplicate is judged by.
+        ["sprk_signal"] =
+        [
+            "sprk_corerecordtype", "sprk_corerecordid", "sprk_regardinginvoice", "sprk_regardinginvoiceline",
+            "sprk_regardingrecordtype", "sprk_regardingrecordid",
+        ],
     };
 
     /// <summary>
@@ -614,31 +619,55 @@ public class AccessTableAppOnlyWriterTests
             (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.CoreRecordIdColumn),
             (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, Sprk.Bff.Api.Services.Signals.SignalClosureService.RegardingInvoiceColumn),
             (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, Sprk.Bff.Api.Services.Signals.SignalClosureService.RegardingInvoiceLineColumn),
+            (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, CoreAncestorResolver.RegardingRecordTypeColumn),
+            (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, CoreAncestorResolver.RegardingRecordIdColumn),
         ];
         foreach (var (table, column) in readers)
             Code(table, column).Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, $"{column} on {table}");
     }
 
     [Fact]
-    public async Task AGenericAppOnlyWriteOfASignalsCoreRecordOrInvoiceSubject_IsRefused_OnEveryGenericPath()
+    public async Task AnAppOnlyWriteOfASignalsCoreRecordRegardingPairOrInvoiceSubject_IsRefused_ByTheOutputMappingAndTheUpdateRecordNode()
     {
-        // UAC review F4 / DEF-043: the frozen core record bounds a line Duplicate's invoice, and the subjects name the current
-        // invoice or line; a playbook or an output mapping must not re-point them (their writer is SignalWriter's own client).
+        // UAC review F4 / DEF-043: the frozen core record bounds a line Duplicate's invoice; uac-r2 re-check F1: the regarding pair
+        // names the subject a Duplicate is judged by (SignalReadService). A playbook's Update Record node or output mapping must
+        // not re-point any of them (their writer is SignalWriter's own client, at create). Both app-only generic writers are
+        // driven here; the field-mapping push runs as its caller and is not asked (APushRule_OntoAColumnTheCallersPrivilegesDecide_IsSentAsTheCaller),
+        // and every other app-only writer calls the same InheritedAccessPermission.RefuseAppOnlyWrite pinned by
+        // AnAccessColumn_InAnyForm_IsRefusedOnItsTable.
         foreach (var key in new[]
                  {
                      "sprk_corerecordid", "sprk_corerecordtype", "sprk_CoreRecordType@odata.bind", "_sprk_corerecordtype_value",
                      "sprk_regardinginvoice", "sprk_RegardingInvoice@odata.bind", "sprk_regardinginvoiceline", "_sprk_regardinginvoiceline_value",
+                     "sprk_regardingrecordid", " SPRK_RegardingRecordId ", "sprk_regardingrecordtype", "sprk_RegardingRecordType@odata.bind",
+                     "_sprk_regardingrecordtype_value",
                  })
         {
             Code("sprk_signal", key).Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+
             _writes.Invocations.Clear();
-            var act = () => Handler().UpdateAsync(
+            var mapping = () => Handler().UpdateAsync(
                 "sprk_signal", Row, new Dictionary<string, object?> { [key] = Forged.ToString("D") },
                 ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
-            (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+            (await mapping.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+
+            var node = () => Core().UpdateAsync(
+                new UpdateRecordActionInput(
+                    "sprk_signal", Row, FieldMappings: null,
+                    LegacyFields: new Dictionary<string, string?> { [key] = Forged.ToString("D") }, Lookups: null),
+                CancellationToken.None);
+            (await node.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
                 .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
             _writes.Invocations.Should().BeEmpty(key);
         }
+
+        // Must not fire: the regarding pair on a table that is not a Signal (a To Do, an event, a Decision Record).
+        Code("sprk_todo", "sprk_regardingrecordid").Should().BeNull();
+        Code("sprk_event", "sprk_regardingrecordtype").Should().BeNull();
+        Code("sprk_decisionrecord", "sprk_regardingrecordid").Should().BeNull();
+        CallerCode("sprk_signal", "sprk_regardingrecordid").Should().BeNull("the caller's own privileges decide");
 
         // Must not fire: a Signal's ordinary columns, the same columns on other tables, and the caller's own write.
         Code("sprk_signal", "sprk_name").Should().BeNull();
