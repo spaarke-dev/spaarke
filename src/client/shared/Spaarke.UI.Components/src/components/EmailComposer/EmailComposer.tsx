@@ -1582,7 +1582,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         isSending={state.isSending}
         isSavingDraft={state.isSavingDraft}
         isDraftRecord={props.isDraftRecord}
-        canSaveDraft={draftSaveAvailable}
+        canSaveDraft={draftSaveAvailable && !props.composeOnly}
         onSaveDraft={() => {
           // A failed Save Draft ALWAYS tells the user — `sendFailureDisplay` governs send only, and there is
           // no draft onError a host could show it from (callers awaiting composerRef.current.saveDraft()

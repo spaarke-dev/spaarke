@@ -76,6 +76,19 @@ describe('EmailComposer composeOnly (task 160)', () => {
     expect(onSaveDraftRequest).not.toHaveBeenCalled();
   });
 
+  it('K1: a dialog mount with composeOnly and a draft handler shows no Save Draft button', () => {
+    renderComposer({ composeOnly: true, mount: 'dialog', onCancel: jest.fn(), onSaveDraftRequest: jest.fn() });
+
+    expect(screen.getByRole('region', { name: 'Composer actions' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save Draft' })).toBeNull();
+  });
+
+  it('K1 must-not-fire: without composeOnly the same dialog mount still shows Save Draft', () => {
+    renderComposer({ mount: 'dialog', onCancel: jest.fn(), onSaveDraftRequest: jest.fn() });
+
+    expect(screen.getByRole('button', { name: 'Save Draft' })).toBeInTheDocument();
+  });
+
   it('must-not-fire: a default mount keeps Send, the From row and the tags', () => {
     renderComposer({ mount: 'dialog', onCancel: jest.fn() });
 

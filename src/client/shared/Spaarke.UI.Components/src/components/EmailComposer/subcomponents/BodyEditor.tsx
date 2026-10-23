@@ -40,9 +40,10 @@ function htmlToPlainText(html: string): string {
     .replace(/<\s*br\s*\/?>/gi, '\n')
     .replace(/<\s*\/\s*(p|div|li|h[1-6])\s*>/gi, '\n')
     .replace(/<\s*li[^>]*>/gi, '• ');
-  const el = document.createElement('div');
-  el.innerHTML = withBreaks;
-  return (el.textContent || '')
+  // DOMParser builds an inert document: nothing in the markup runs. (An `innerHTML` write on a detached element would run
+  // <img onerror>, and the body can carry a record name.)
+  const text = new DOMParser().parseFromString(withBreaks, 'text/html').body.textContent || '';
+  return text
     .replace(/\n{3,}/g, '\n\n')
     .replace(/[ \t]+\n/g, '\n')
     .trim();
