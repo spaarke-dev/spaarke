@@ -70,6 +70,8 @@ Publish size (Release, framework-dependent linux-x64, `Compress-Archive -Compres
 - Tests (`SignalReadRouteTests`): must-fire `AnExternalCaller_GetsNoPolicyColumns_AndNoPolicyQueryIsIssued`; must-not-fire `AnInternalCaller_IsEnrichedAsBefore_WithOnePolicyQuery`; `AnUnresolvedOrNonGuidCaller_IsNotEnriched`; `AResolverFault_IsNotEnriched_ButTheRowsAreStillReturned` (caller resolver throws, and external-flag read throws: 200, no policy read); `TheExternalRule_RethrowsCancellation_AndTreatsAnyOtherFaultAsExternal`. With the guard disabled (`if (ids.Length < 0)`), 3 of the 4 route tests FAILED (external, unresolved/non-GUID, resolver fault); the internal caller test passed as it must. Restored: all pass.
 
 
+**Publish size re-measured after fix round 1** (same method; `C:\w163b` = origin/docs/ontology-platform-design `f949b7267c`, `C:\w163n` = this branch `08a45136c8` merged with it, merge clean, both removed with `Remove-WorktreeSafe.ps1`): 39,161,521 -> 39,165,793 bytes, delta +4,272 bytes (+0.004 MB), 192 files each. No new package. Final test counts: SignalRead integration 97 passed / 2 skipped (live) / 0 failed; unit filtered 124 passed; `Spaarke.ArchTests` 1093 passed / 0 failed; BFF build 0 warnings, 0 errors.
+
 ## Next (main session)
 
 1. Review and merge, deploy the BFF to dev.
