@@ -41,7 +41,7 @@
 
      Re-check their fix PR, then re-OK. K1–K3 are to be filed by word-add-in.
    - #2309 (db840611a3, plus the comment-only eeba1ae650) is accepted too. The OK covers master up to #2308 and #2309.
-   - **HOLD on any SHA containing ontology #2313 (task 160)**, for F1: the inquiry footer carries a Restricted matter's name and number to external recipients (InquiryRecordFacts.cs:248, BudgetInquiryExecutor.cs:117). The fix must gate on Standard plus all-internal recipients, with `sprk_isexternal` checked (K1 is folded into it). K2: Sent Items shows whether an address is a Spaarke user. Re-check ontology's fix PR.
+   - **#2313 plus its fix #2314 (0a3c7a450d) are ACCEPTED.** The OK extends to the first master SHA containing both. A SHA with #2313 but without #2314 stays held. The original F1: the inquiry footer carries a Restricted matter's name and number to external recipients (InquiryRecordFacts.cs:248, BudgetInquiryExecutor.cs:117). The fix must gate on Standard plus all-internal recipients, with `sprk_isexternal` checked (K1 is folded into it). K2: Sent Items shows whether an address is a Spaarke user. Re-check ontology's fix PR.
    - Run the server gate after whichever SHA deploys.
 5. **Basic User (11f93c04) lost `prvReadsprk_Policy` and `prvReadsprk_ruleset`** at 2026-10-23 00:01:07Z (MCP times are local EDT). modifiedby is the owner's account; there was no import.
    - Ruled out: UAC, R3, ebilling, ontology, word-add-in and the BFF.
