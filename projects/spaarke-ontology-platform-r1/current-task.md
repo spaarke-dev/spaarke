@@ -9,9 +9,9 @@
 
 | Field | Value |
 |---|---|
-| **Task** | UAT round 1 lanes. **Merged to docs:** 158 `539ab22ce9`, 159 `9b485535ce`, 161 `811167613f`, 162 `84636b650a`. **docs updated from master** `0a6e8820fd`. **Running:** scoped Sonnet re-check of 163 fix round 2 (`952477e0d0..c26909dfd5`, PR #2298); scoped Sonnet re-check of 164 fix round 1 plus my SKILL.md commit (`e45414a360..8492519d9c`, PR #2299); 160 lane (`C:\wts-160`, opus, D-187). ebilling is running its own F4(b) fix round; pass 2 follows when they send SHAs. |
-| **Status** | Waiting on the two re-checks and the 160 lane. 163's K2 is filed as DI-125 (#2302). |
-| **Next Action** | Clean re-check → merge that PR. Whichever of 163/164 merges second reconciles guide §7.8: keep 164's paragraph, drop 163's "Deploy-Release does not apply it" and the `-SkipPhase Solutions` workaround, keep 163's "old BFF + new row loses names and severity". 160 → Opus review; send the EmailComposer hunk to the email project and the GrantAccessNotifier hunk to R3. |
+| **Task** | UAT round 1 lanes. **Merged to docs:** 158 `539ab22ce9`, 159 `9b485535ce`, 161 `811167613f`, 162 `84636b650a`, 163 `5952a9c801`, 164 `9f53c53198`. **Running:** 160 lane (`C:\wts-160`, opus, D-187). ebilling is running its own F4(b) fix round; pass 2 follows when they send SHAs. |
+| **Status** | Opening the docs→master PR (carries 158/159/161/162/163/164). The Console redeploys from master (158 only; safe on the current dev BFF), so peers get before/after notices. |
+| **Next Action** | docs→master PR → CI → notices → merge → ask R3 for the dev BFF deploy with the exact master SHA (must contain `283466d40`). Then "Next, in order" step 2. |
 
 ## Next, in order
 
