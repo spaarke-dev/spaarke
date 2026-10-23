@@ -14,6 +14,7 @@ using Sprk.Bff.Api.Api.Signals;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Identity;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using Xunit;
@@ -37,6 +38,12 @@ public sealed class BudgetInquiryComposerAndLinkTests
     private static readonly Guid Contact1 = Guid.Parse("66666666-6666-6666-6666-666666666661");
     private static readonly Guid Contact2 = Guid.Parse("66666666-6666-6666-6666-666666666662");
     private static readonly Guid UserId = Guid.Parse("77777777-7777-7777-7777-777777777777");
+    private static readonly Guid FlaggedUserId = Guid.Parse("77777777-7777-7777-7777-777777777778");
+
+    // sprk_accesspermission option values (ExternalParticipationService / InheritedAccessPermission).
+    private const int Standard = 100000000;
+    private const int Limited = 100000001;
+    private const int Restricted = 100000002;
 
     // =================================================================================================
     // Composer hint (D-179)
@@ -306,7 +313,7 @@ public sealed class BudgetInquiryComposerAndLinkTests
         extras.LinkLines.Should().HaveCount(2, "the checked user is internal (app link), the hung one is external (portal link)");
         extras.LinkLines[0].Should().StartWith("Spaarke users, open this matter in Spaarke: ");
         extras.LinkLines[1].Should().StartWith("External recipients, open this matter in the Spaarke portal");
-        extras.RecordLabel.Should().Be("Acme v. Roe (MAT-000123)", "the label read finished before the deadline");
+        extras.RecordLabel.Should().BeNull("one recipient is not confirmed internal, so the footer does not name the matter");
         log.Lines.Should().Contain(w => w.Contains("1 of 2 recipient(s)"));
         log.Lines.Should().OnlyContain(w => !w.Contains('@'), "a warning carries counts only, never an address");
     }
@@ -381,7 +388,7 @@ public sealed class BudgetInquiryComposerAndLinkTests
             "Please explain.\n\n" +
             $"Spaarke users, open this matter in Spaarke: {Env}/main.aspx?etn=sprk_matter&id={Matter:D}&pagetype=entityrecord\n" +
             $"External recipients, open this matter in the Spaarke portal (if you have portal access): {Portal}/?customer={Key}&record=matter:{Matter:D}");
-        send.Associations![0].EntityName.Should().Be("Acme v. Roe (MAT-000123)");
+        send.Associations![0].EntityName.Should().Be("Budget inquiry: Acme", "an external recipient is on the To line, so the footer names the inquiry");
     }
 
     [Fact]
@@ -406,9 +413,9 @@ public sealed class BudgetInquiryComposerAndLinkTests
     [InlineData(null, "MAT-000123", "MAT-000123")]
     public async Task The_record_label_is_the_core_name_and_number(string? name, string? number, string expected)
     {
-        var facts = Facts(internalAddresses: [], matterName: name, matterNumber: number);
+        var facts = Facts(internalAddresses: ["a@spaarke.example"], matterName: name, matterNumber: number);
 
-        (await facts.ResolveAsync("sprk_matter", Matter, ["counsel@firm.example"], CancellationToken.None)).RecordLabel.Should().Be(expected);
+        (await facts.ResolveAsync("sprk_matter", Matter, ["a@spaarke.example"], CancellationToken.None)).RecordLabel.Should().Be(expected);
     }
 
     [Fact]
@@ -451,6 +458,127 @@ public sealed class BudgetInquiryComposerAndLinkTests
     }
 
     // =================================================================================================
+    // The footer's label is internal-only (uac-r2 review F1): a Standard matter AND every recipient an internal systemuser
+    // =================================================================================================
+
+    [Fact]
+    public async Task A_restricted_matter_with_an_external_recipient_has_no_label_and_the_executor_names_the_inquiry_by_its_subject()
+    {
+        var sender = new InquiryEmailSender(null!, new HttpContextAccessor(), Facts(internalAddresses: [], accessPermission: Restricted));
+
+        var send = await sender.PrepareAsync(Request(), Guid.NewGuid(), CancellationToken.None);
+
+        send.Associations![0].EntityName.Should().Be("Budget inquiry: Acme");
+        send.Associations![0].EntityName.Should().NotContain("Acme v. Roe").And.NotContain("MAT-000123");
+        (await Facts(internalAddresses: [], accessPermission: Restricted)
+            .ResolveAsync("sprk_matter", Matter, ["counsel@firm.example"], CancellationToken.None)).RecordLabel.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task A_standard_matter_whose_recipients_are_all_enabled_unflagged_systemusers_is_named_in_the_footer()
+    {
+        var facts = Facts(internalAddresses: ["a@spaarke.example", "b@spaarke.example"]);
+
+        var extras = await facts.ResolveAsync("sprk_matter", Matter, ["a@spaarke.example", "b@spaarke.example"], CancellationToken.None);
+
+        extras.RecordLabel.Should().Be("Acme v. Roe (MAT-000123)");
+    }
+
+    [Fact]
+    public async Task A_flagged_external_systemuser_gets_no_label_on_the_To_line_but_still_gets_the_app_link()
+    {
+        var facts = Facts(internalAddresses: ["a@spaarke.example", "flagged@spaarke.example"], flaggedExternal: ["flagged@spaarke.example"]);
+
+        var mixed = await facts.ResolveAsync("sprk_matter", Matter, ["a@spaarke.example", "flagged@spaarke.example"], CancellationToken.None);
+        var alone = await facts.ResolveAsync("sprk_matter", Matter, ["flagged@spaarke.example"], CancellationToken.None);
+
+        mixed.RecordLabel.Should().BeNull();
+        alone.RecordLabel.Should().BeNull();
+        // D-187: an enabled systemuser gets the app link even when flagged sprk_isexternal. Only the label uses the stricter test.
+        alone.LinkLines.Should().Equal($"Open this matter in Spaarke: {Env}/main.aspx?etn=sprk_matter&id={Matter:D}&pagetype=entityrecord");
+        mixed.LinkLines.Should().Equal($"Open this matter in Spaarke: {Env}/main.aspx?etn=sprk_matter&id={Matter:D}&pagetype=entityrecord");
+    }
+
+    [Fact]
+    public async Task A_failed_externality_check_gives_no_label_and_leaves_the_link_and_the_send_alone()
+    {
+        var log = new Warnings();
+        var facts = Facts(
+            internalAddresses: ["a@spaarke.example"], log: log,
+            externality: _ => Task.FromException<bool>(new InvalidOperationException("dataverse down")));
+
+        var extras = await facts.ResolveAsync("sprk_matter", Matter, ["a@spaarke.example"], CancellationToken.None);
+
+        extras.RecordLabel.Should().BeNull();
+        extras.LinkLines.Should().ContainSingle().Which.Should().StartWith("Open this matter in Spaarke: ");
+        log.Lines.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task An_externality_check_that_never_returns_gives_no_label_at_the_one_deadline_and_keeps_the_app_link()
+    {
+        var facts = Facts(
+            internalAddresses: ["a@spaarke.example"], readDeadline: TimeSpan.FromMilliseconds(150),
+            externality: _ => new TaskCompletionSource<bool>().Task); // never completes, ignores the token
+        var clock = Stopwatch.StartNew();
+
+        var extras = await facts.ResolveAsync("sprk_matter", Matter, ["a@spaarke.example"], CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(20));
+
+        clock.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(10), "the send does not wait on a hung check");
+        extras.RecordLabel.Should().BeNull();
+        extras.LinkLines.Should().ContainSingle().Which.Should().StartWith("Open this matter in Spaarke: ");
+    }
+
+    [Fact]
+    public async Task A_limited_matter_with_all_internal_recipients_has_no_label()
+    {
+        var facts = Facts(internalAddresses: ["a@spaarke.example"], accessPermission: Limited);
+
+        (await facts.ResolveAsync("sprk_matter", Matter, ["a@spaarke.example"], CancellationToken.None)).RecordLabel.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task A_matter_whose_access_permission_is_blank_or_unknown_has_no_label_fail_closed()
+    {
+        foreach (var value in new int?[] { null, 100000099 })
+        {
+            var facts = Facts(internalAddresses: ["a@spaarke.example"], accessPermission: value);
+
+            (await facts.ResolveAsync("sprk_matter", Matter, ["a@spaarke.example"], CancellationToken.None)).RecordLabel
+                .Should().BeNull($"a value of {(value?.ToString() ?? "null")} is not positively Standard");
+        }
+    }
+
+    [Fact]
+    public async Task The_access_permission_is_read_with_the_name_and_number_in_one_call()
+    {
+        var requested = new List<string[]>();
+        var facts = Facts(internalAddresses: ["a@spaarke.example"], onMatterRead: requested.Add);
+
+        await facts.ResolveAsync("sprk_matter", Matter, ["a@spaarke.example"], CancellationToken.None);
+
+        requested.Should().ContainSingle().Which.Should().BeEquivalentTo("sprk_mattername", "sprk_matternumber", "sprk_accesspermission");
+    }
+
+    [Fact]
+    public async Task No_recipients_gives_no_label()
+    {
+        var facts = Facts(internalAddresses: []);
+
+        (await facts.ResolveAsync("sprk_matter", Matter, [], CancellationToken.None)).RecordLabel.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task A_standard_matter_with_a_mix_of_internal_and_external_recipients_has_no_label()
+    {
+        var facts = Facts(internalAddresses: ["a@spaarke.example"]);
+
+        (await facts.ResolveAsync("sprk_matter", Matter, ["a@spaarke.example", "counsel@firm.example"], CancellationToken.None)).RecordLabel
+            .Should().BeNull();
+    }
+
+    // =================================================================================================
     // Rig
     // =================================================================================================
 
@@ -472,14 +600,26 @@ public sealed class BudgetInquiryComposerAndLinkTests
     private static InquiryRecordFacts Facts(
         string[] internalAddresses, bool disabled = false, bool readFails = false, string? portalUrl = Portal, string? customerKey = Key,
         string environmentUrl = Env, string? matterName = "Acme v. Roe", string? matterNumber = "MAT-000123", bool matterReadThrows = false,
-        Warnings? log = null, Func<string, Task<SystemUserEmailLookup>>? classify = null, TimeSpan? readDeadline = null)
+        Warnings? log = null, Func<string, Task<SystemUserEmailLookup>>? classify = null, TimeSpan? readDeadline = null,
+        int? accessPermission = Standard, string[]? flaggedExternal = null, Func<Guid, Task<bool>>? externality = null,
+        Action<string[]>? onMatterRead = null)
     {
         var appOnly = new Mock<IFieldMappingDataverseService>();
         var read = appOnly.Setup(a => a.RetrieveRecordFieldsAsync("sprk_matter", Matter, It.IsAny<string[]>(), It.IsAny<CancellationToken>()));
         if (matterReadThrows)
             read.ThrowsAsync(new InvalidOperationException("dataverse down"));
         else
-            read.ReturnsAsync(new Dictionary<string, object?> { ["sprk_mattername"] = matterName, ["sprk_matternumber"] = matterNumber });
+            read.Returns((string _, Guid _, string[] fields, CancellationToken _) =>
+            {
+                onMatterRead?.Invoke(fields);
+                // As the real service answers: a key per requested field, the picklist as a long.
+                return Task.FromResult(new Dictionary<string, object?>
+                {
+                    ["sprk_mattername"] = matterName,
+                    ["sprk_matternumber"] = matterNumber,
+                    ["sprk_accesspermission"] = accessPermission is { } i ? (long)i : null,
+                });
+            });
 
         var identities = new Mock<IContactIdentityStore>();
         identities.Setup(i => i.FindEnabledSystemUsersByEmailAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -489,11 +629,17 @@ public sealed class BudgetInquiryComposerAndLinkTests
                     readFails
                         ? SystemUserEmailLookup.Failed
                         : internalAddresses.Contains(email, StringComparer.OrdinalIgnoreCase)
-                            ? SystemUserEmailLookup.Of(new SystemUserEmailRow(UserId, disabled, email, null))
+                            ? SystemUserEmailLookup.Of(new SystemUserEmailRow(
+                                flaggedExternal?.Contains(email, StringComparer.OrdinalIgnoreCase) == true ? FlaggedUserId : UserId, disabled, email, null))
                             : SystemUserEmailLookup.Of()));
 
+        // IsExternalAsync: true for a flagged systemuser, false otherwise, unless the test supplies its own answer (or fault).
+        var resolver = new Mock<ISystemUserIdentityResolver>();
+        resolver.Setup(r => r.IsExternalAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns((Guid id, CancellationToken _) => externality is not null ? externality(id) : Task.FromResult(id == FlaggedUserId));
+
         var (config, customer) = Settings(portalUrl, customerKey);
-        return new InquiryRecordFacts(appOnly.Object, identities.Object, customer, config,
+        return new InquiryRecordFacts(appOnly.Object, identities.Object, resolver.Object, customer, config,
             Options.Create(new DataverseOptions { EnvironmentUrl = environmentUrl }), (ILogger<InquiryRecordFacts>?)log ?? NullLogger<InquiryRecordFacts>.Instance)
         {
             ReadDeadline = readDeadline ?? TimeSpan.FromSeconds(10),
@@ -515,7 +661,7 @@ public sealed class BudgetInquiryComposerAndLinkTests
     {
         var (config, customer) = Settings(Portal, Key);
         var facts = new Mock<InquiryRecordFacts>(
-            Mock.Of<IFieldMappingDataverseService>(), Mock.Of<IContactIdentityStore>(), customer, config,
+            Mock.Of<IFieldMappingDataverseService>(), Mock.Of<IContactIdentityStore>(), Mock.Of<ISystemUserIdentityResolver>(), customer, config,
             Options.Create(new DataverseOptions { EnvironmentUrl = Env }), NullLogger<InquiryRecordFacts>.Instance);
         facts.Setup(f => f.ResolveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(extras);

@@ -5,12 +5,15 @@ using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Text;
+using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Identity;
 
 namespace Sprk.Bff.Api.Services.Signals.Actions;
 
 /// <summary>What the inquiry email says about its core record, decided at send time (task 160).</summary>
-/// <param name="RecordLabel">"{name} ({number})" of the core record, or null when it could not be read. Becomes the service-request
-/// association's <c>EntityName</c>: the footer's record reference and <c>sprk_communication.sprk_regardingrecordname</c>.</param>
+/// <param name="RecordLabel">"{name} ({number})" of the core record, or null when it could not be read OR may not be shown to these
+/// recipients (see <see cref="InquiryRecordFacts"/>). Becomes the service-request association's <c>EntityName</c>: the footer's record
+/// reference and <c>sprk_communication.sprk_regardingrecordname</c>.</param>
 /// <param name="LinkLines">The record link line(s) appended to the body, one per audience the recipients include.</param>
 public sealed record InquiryEmailExtras(string? RecordLabel, IReadOnlyList<string> LinkLines);
 
@@ -24,6 +27,13 @@ public sealed record InquiryEmailExtras(string? RecordLabel, IReadOnlyList<strin
 /// address) gets the portal link. A contact and a systemuser that share an address are therefore internal. The read is the A9 licensed-user
 /// read (<see cref="IContactIdentityStore.FindEnabledSystemUsersByEmailAsync"/>, decided by
 /// <see cref="ContactBindingDecision.DecideLicensedUserEmail"/>); a recipient it cannot answer for is treated as external (Warning).</para>
+/// <para><b>Who may see the record's name (uac-r2 review F1).</b> The footer names the record to EVERY recipient, so the label is
+/// internal-only: it is returned only when the record is positively Standard (<c>sprk_accesspermission</c> is exactly Standard; a
+/// Restricted, Limited, blank or unreadable value gets no label) AND every recipient is internal. For the label a recipient is internal
+/// only when an enabled systemuser matches the address and is not flagged <c>sprk_isexternal</c>
+/// (<see cref="ISystemUserIdentityResolver.IsExternalAsync"/>); a contact, an unknown address, a flagged systemuser, no recipients, or a
+/// check that failed or ran past the deadline means no label, and the caller-approved subject names the inquiry instead. This test is
+/// stricter than the link choice above, which is unchanged.</para>
 /// <para><b>Links.</b> Built ONLY from configured base URLs (<c>Dataverse:EnvironmentUrl</c>, <c>ExternalAccess:PortalUrl</c>), this
 /// stamp's customer key, a type token and a GUID; never from a recipient or any user text. The portal link is
 /// <see cref="GrantAccessNotifier.BuildPortalLink(string?, string?, string, Guid)"/>; a core type the portal does not parse, no customer key
@@ -62,6 +72,7 @@ public class InquiryRecordFacts
 
     private readonly IFieldMappingDataverseService _appOnly;
     private readonly IContactIdentityStore _identities;
+    private readonly ISystemUserIdentityResolver _externality;
     private readonly CustomerIdentity _customer;
     private readonly IConfiguration _configuration;
     private readonly string? _environmentUrl;
@@ -70,6 +81,7 @@ public class InquiryRecordFacts
     public InquiryRecordFacts(
         IFieldMappingDataverseService appOnly,
         IContactIdentityStore identities,
+        ISystemUserIdentityResolver externality,
         CustomerIdentity customer,
         IConfiguration configuration,
         IOptions<DataverseOptions> dataverse,
@@ -77,6 +89,7 @@ public class InquiryRecordFacts
     {
         _appOnly = appOnly ?? throw new ArgumentNullException(nameof(appOnly));
         _identities = identities ?? throw new ArgumentNullException(nameof(identities));
+        _externality = externality ?? throw new ArgumentNullException(nameof(externality));
         _customer = customer ?? throw new ArgumentNullException(nameof(customer));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _environmentUrl = dataverse?.Value.EnvironmentUrl;
@@ -177,7 +190,8 @@ public class InquiryRecordFacts
     /// The record label and every recipient's classification, read CONCURRENTLY (at most <see cref="MaxConcurrentChecks"/> in flight)
     /// under ONE deadline (<see cref="ReadDeadline"/>), so a slow read never holds the send for a recipient-count of timeouts. A
     /// recipient not classified by the deadline stays <see cref="LicensedUserEmailOutcome.Unknown"/> (external, the portal link), as
-    /// a failed read already does; the label stays null.
+    /// a failed read already does; the label stays null. The label is also null unless EVERY recipient was positively found internal
+    /// (an enabled systemuser, not flagged external) within the same gate and deadline; see the class remarks.
     /// </summary>
     private async Task<(string? Label, LicensedUserEmailOutcome[] Outcomes)> ReadAsync(
         string coreLogicalName, Guid coreId, string[] addresses, CancellationToken ct)
@@ -188,6 +202,7 @@ public class InquiryRecordFacts
 
         var outcomes = new LicensedUserEmailOutcome[addresses.Length];
         Array.Fill(outcomes, LicensedUserEmailOutcome.Unknown);
+        var internalOnly = new bool[addresses.Length]; // false until the recipient is positively internal (the label's test)
         string? label = null;
         var gate = new SemaphoreSlim(MaxConcurrentChecks);
 
@@ -206,7 +221,10 @@ public class InquiryRecordFacts
 
             try
             {
-                outcomes[index] = await ClassifyAsync(addresses[index], token).ConfigureAwait(false);
+                var (outcome, matched) = await ClassifyAsync(addresses[index], token).ConfigureAwait(false);
+                // The link outcome is final here: the externality check below only ever decides the label.
+                outcomes[index] = outcome;
+                internalOnly[index] = await AllInternalAsync(matched, token).ConfigureAwait(false);
             }
             finally
             {
@@ -234,8 +252,16 @@ public class InquiryRecordFacts
             throw;
         }
 
-        // A copy: a read that finishes after the deadline must not change what this email was decided on.
-        return (label, outcomes.ToArray());
+        // Copies: a read that finishes after the deadline must not change what this email was decided on.
+        var decided = outcomes.ToArray();
+        var allInternal = addresses.Length > 0 && internalOnly.ToArray().All(i => i);
+        var shown = allInternal ? label : null;
+        if (label is not null && shown is null)
+        {
+            _logger.LogInformation("Budget inquiry: the record's name is left out of the footer (a recipient is not confirmed internal).");
+        }
+
+        return (shown, decided);
     }
 
     private async Task<string?> ReadLabelAsync(string coreLogicalName, Guid coreId, CancellationToken ct)
@@ -245,7 +271,15 @@ public class InquiryRecordFacts
 
         try
         {
-            var row = await _appOnly.RetrieveRecordFieldsAsync(coreLogicalName, coreId, [columns.Name, columns.Number], ct).ConfigureAwait(false);
+            // The access permission is read in the same call as the name, so the name is never read without it.
+            var row = await _appOnly.RetrieveRecordFieldsAsync(
+                coreLogicalName, coreId, [columns.Name, columns.Number, InheritedAccessPermission.Column], ct).ConfigureAwait(false);
+            if (!IsStandard(row.GetValueOrDefault(InheritedAccessPermission.Column)))
+            {
+                // Fail closed: only a positively Standard record is named in the footer.
+                return null;
+            }
+
             return RecordLabel(row.GetValueOrDefault(columns.Name) as string, row.GetValueOrDefault(columns.Number) as string);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -260,22 +294,64 @@ public class InquiryRecordFacts
         }
     }
 
-    private async Task<LicensedUserEmailOutcome> ClassifyAsync(string address, CancellationToken ct)
+    /// <summary>True only for exactly Standard. A null, blank, Limited, Restricted or unrecognised value is not (the record-access
+    /// rules elsewhere read a null as Standard; the footer's label does not).</summary>
+    private static bool IsStandard(object? value) => value switch
+    {
+        int i => i == InheritedAccessPermission.Standard,
+        long l => l == InheritedAccessPermission.Standard,
+        _ => false,
+    };
+
+    /// <summary>The link outcome, and the ids of the enabled systemusers the address matches (for the label's externality test).</summary>
+    private async Task<(LicensedUserEmailOutcome Outcome, IReadOnlyList<Guid> Matched)> ClassifyAsync(string address, CancellationToken ct)
     {
         try
         {
             var lookup = await _identities.FindEnabledSystemUsersByEmailAsync(address, ct).ConfigureAwait(false);
-            return ContactBindingDecision.DecideLicensedUserEmail(lookup, address);
+            var outcome = ContactBindingDecision.DecideLicensedUserEmail(lookup, address);
+            return (outcome, ContactBindingDecision.MatchingEnabledSystemUserIds(lookup, address));
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             // The deadline: ReadAsync logs it once, with counts.
-            return LicensedUserEmailOutcome.Unknown;
+            return (LicensedUserEmailOutcome.Unknown, []);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Budget inquiry: a recipient could not be checked against the enabled users.");
-            return LicensedUserEmailOutcome.Unknown;
+            return (LicensedUserEmailOutcome.Unknown, []);
+        }
+    }
+
+    /// <summary>
+    /// True only when the address matched at least one enabled systemuser and NONE of them is flagged <c>sprk_isexternal</c>.
+    /// <see cref="ISystemUserIdentityResolver.IsExternalAsync"/> answers true for a flagged user, an empty id or a missing row, and
+    /// throws when its read fails; a throw (or the deadline) is "not internal", never an exception.
+    /// </summary>
+    private async Task<bool> AllInternalAsync(IReadOnlyList<Guid> matched, CancellationToken ct)
+    {
+        if (matched.Count == 0)
+            return false;
+
+        try
+        {
+            foreach (var id in matched)
+            {
+                if (await _externality.IsExternalAsync(id, ct).ConfigureAwait(false))
+                    return false;
+            }
+
+            return true;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Budget inquiry: a recipient's externality could not be checked; the footer leaves the record's name out.");
+            return false;
         }
     }
 }
