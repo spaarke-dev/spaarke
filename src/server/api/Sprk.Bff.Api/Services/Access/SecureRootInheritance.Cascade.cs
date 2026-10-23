@@ -967,9 +967,8 @@ public sealed partial class SecureRootInheritance
         }
 
         // F1: an EMPTY record is read as "not written yet" only once the BFF's read of the column is proven — PER TABLE (fix
-        // round 3, F-a): a non-empty record read proves its own table only.
-        foreach (var table in listed.Where(r => !string.IsNullOrEmpty(r.Marker)).Select(r => r.Table).Distinct())
-            MarkReadable(table);
+        // round 3, F-a), and only by the platform's answer. A non-empty record is trusted for its own value but proves nothing
+        // about the others (UAC 2026-10-23: a record-level field share must not prove a column).
         var readable = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
         foreach (var table in listed.Where(r => string.IsNullOrEmpty(r.Marker)).Select(r => r.Table).Distinct())
             readable[table] = await AccessRecordReadableAsync(table, ct).ConfigureAwait(false);
@@ -1451,23 +1450,15 @@ public sealed partial class SecureRootInheritance
 
     private bool? _accessRecordColumnSecured;
 
-    // F-a (fix round 3): readability is proven PER TABLE. Proven: a non-empty record read on it, or the platform's answer.
-    // Hidden: a record written there read back empty — sticky for this scope, whatever was proven before.
-    private readonly HashSet<string> _readableTables = new(StringComparer.OrdinalIgnoreCase);
+    // F-a (fix round 3): readability is proven PER TABLE, and only by the platform's answer (System Administrator, or a field
+    // security profile granting Read). A non-empty record read on a table is NOT a proof: Dataverse can grant a secured field on
+    // one record (a record-level field share), so one readable record says nothing about the empty ones (UAC 2026-10-23: a
+    // record-level field share must not prove a column).
+    // Hidden: a record written there read back empty — sticky for this scope, whatever the platform said.
     private readonly HashSet<string> _hiddenTables = new(StringComparer.OrdinalIgnoreCase);
     private HashSet<string>? _platformReadableTables;
 
-    private void MarkReadable(string table)
-    {
-        if (!_hiddenTables.Contains(table))
-            _readableTables.Add(table);
-    }
-
-    private void MarkHidden(string table)
-    {
-        _hiddenTables.Add(table);
-        _readableTables.Remove(table);
-    }
+    private void MarkHidden(string table) => _hiddenTables.Add(table);
 
     /// <summary>Why no access record (or this EMPTY one, on <paramref name="table"/>) can be trusted, or null when it can.</summary>
     private async Task<(string Code, string Detail)?> AccessRecordDistrustAsync(string table, string? marker, CancellationToken ct)
@@ -1484,8 +1475,6 @@ public sealed partial class SecureRootInheritance
     {
         if (_hiddenTables.Contains(table))
             return false;
-        if (_readableTables.Contains(table))
-            return true;
         _platformReadableTables ??= await PlatformReadableTablesAsync(ct).ConfigureAwait(false);
         return _platformReadableTables.Contains(table);
     }
@@ -1634,10 +1623,10 @@ public sealed partial class SecureRootInheritance
         var row = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
         if (row is null)
             return null;
-        var marker = row.GetAttributeValue<string>(AccessInheritance.Column);
-        if (!string.IsNullOrEmpty(marker))
-            MarkReadable(logical); // a non-empty record read proves the BFF reads the column on THIS table (F1, F-a)
-        return new OwnAccess(row.GetAttributeValue<bool?>(IsSecureColumn), PermissionOfRow(row), marker);
+        // A non-empty record is trusted for its own value only; it proves nothing about other records on the table (UAC
+        // 2026-10-23: a record-level field share must not prove a column) — see AccessRecordReadableAsync.
+        return new OwnAccess(row.GetAttributeValue<bool?>(IsSecureColumn), PermissionOfRow(row),
+            row.GetAttributeValue<string>(AccessInheritance.Column));
     }
 
     private static int? PermissionOfRow(Entity row) =>
