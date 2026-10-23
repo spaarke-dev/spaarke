@@ -124,7 +124,9 @@ public sealed class SecureRecordSetupProcedure
     /// S18: the field-secured binding columns, as (table, column). The uniqueness mirrors
     /// <c>contact.sprk_externalobjectidkey</c>, <c>systemuser.sprk_hometenantidkey</c> and
     /// <c>systemuser.sprk_homeobjectidkey</c> are deliberately NOT secured (Dataverse cannot key a secured column).
-    /// The last three entries are the ADR-028 A9 home-identity columns (spaarke-SPA-external-access-platform-r3 task 044).
+    /// Entries three to five are the ADR-028 A9 home-identity columns (spaarke-SPA-external-access-platform-r3 task 044);
+    /// the last six are the identity plane and identity collision bookkeeping columns, which only the BFF writes
+    /// (scripts/Set-ExternalAccessContactSecuritySchema.ps1).
     /// </summary>
     public static readonly IReadOnlyList<(string Table, string Column)> IdentityLinkColumns =
     [
@@ -133,6 +135,12 @@ public sealed class SecureRecordSetupProcedure
         ("contact", "sprk_externaltenantid"),
         ("systemuser", "sprk_hometenantid"),
         ("systemuser", "sprk_homeobjectid"),
+        ("contact", "sprk_identityplane"),
+        ("contact", "sprk_identitycollisionon"),
+        ("contact", "sprk_identitycollisionoid"),
+        ("contact", "sprk_identitycollisionplane"),
+        ("contact", "sprk_identitycollisionreason"),
+        ("contact", "sprk_identitycollisionparties"),
     ];
 
     /// <summary>

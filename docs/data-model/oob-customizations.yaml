@@ -50,6 +50,9 @@ oob_entities:
       - sprk_identitycollisionreason # identity binding (option set sprk_identitycollisionreason)
       - sprk_identityplane # identity binding (option set sprk_identityplane)
       - sprk_externaltenantid # TEXT(36), field-secured; A9 WorkforceHome tenant id (SPA-external-access-r3 task 044)
+      - sprk_externalinvitedemailhash # invite email hash, NVARCHAR(100), field-secured BFF-only read+write, not audited
+      - sprk_externalinvitedtenantid # TEXT(36), field-secured BFF-only read+write; tenant the invite named (optional)
+      - sprk_externalaccessremovedon # DATETIME (UTC), field-secured; every user reads, only the BFF writes
     alternate_keys:
       # T255: an OOB-table KEY is not a column — the package rule includes unmanaged sprk_ keys on OOB tables since
       # T255 (SpaarkePackageScope.psm1). The BFF creates contacts by contacts(sprk_externalobjectidkey='<oid>').

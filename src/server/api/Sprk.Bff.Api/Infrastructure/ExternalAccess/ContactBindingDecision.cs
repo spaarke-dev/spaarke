@@ -1494,6 +1494,27 @@ public static class ContactBindingDecision
     /// </summary>
     public const string ExternalInviteCodeHashColumn = "sprk_externalinvitecodehash";
 
+    /// <summary>
+    /// <c>contact.sprk_externalinvitedemailhash</c> — the salted hash of the email address the latest invite was sent to
+    /// (never the address). FIELD-SECURED: only the BFF reads or writes it, no reader profile
+    /// (<c>scripts/Set-ExternalAccessContactSecuritySchema.ps1</c>). Created by the schema step; no BFF read or write yet.
+    /// </summary>
+    public const string ExternalInvitedEmailHashColumn = "sprk_externalinvitedemailhash";
+
+    /// <summary>
+    /// <c>contact.sprk_externalinvitedtenantid</c> — the Entra tenant id (GUID text) the latest invite named, when it named
+    /// one. FIELD-SECURED: only the BFF reads or writes it, no reader profile
+    /// (<c>scripts/Set-ExternalAccessContactSecuritySchema.ps1</c>). Created by the schema step; no BFF read or write yet.
+    /// </summary>
+    public const string ExternalInvitedTenantIdColumn = "sprk_externalinvitedtenantid";
+
+    /// <summary>
+    /// <c>contact.sprk_externalaccessremovedon</c> — when an administrator removed all external access for the person (UTC).
+    /// FIELD-SECURED: every user reads it, only the BFF writes it
+    /// (<c>scripts/Set-ExternalAccessContactSecuritySchema.ps1</c>). Created by the schema step; no BFF read or write yet.
+    /// </summary>
+    public const string ExternalAccessRemovedOnColumn = "sprk_externalaccessremovedon";
+
     // ── ADR-028 A9 — home principals (r3 task 046; design notes/a9-bff-design.md §3, §4, §5) ────────────────────
 
     /// <summary>
