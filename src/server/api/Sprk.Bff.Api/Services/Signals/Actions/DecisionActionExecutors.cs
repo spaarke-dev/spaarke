@@ -893,7 +893,7 @@ public sealed class RecordTheResponseExecutor : DoLaneExecutor
 /// </summary>
 public abstract class MessageExecutorBase : IDecisionActionExecutor
 {
-    private static readonly Regex Address = new(@"^[^@\s]+@[^@\s]+\.[^@\s]+$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex Address = OutsideFirmContactResolver.Address;
 
     private readonly CallerRecordAccessProbe _probe;
     private readonly IDataverseUserClient _dataverse;
@@ -1014,36 +1014,63 @@ public abstract class MessageExecutorBase : IDecisionActionExecutor
     }
 
     /// <summary>An email address for a contact id, or for a law firm id (its primary contacts, in order); null when neither has one.</summary>
-    private async Task<string?> ResolveAddressAsync(Guid id, CancellationToken ct)
-    {
-        if (await ContactAddressAsync(id, ct).ConfigureAwait(false) is { } direct)
-            return direct;
+    private async Task<string?> ResolveAddressAsync(Guid id, CancellationToken ct) =>
+        (await OutsideFirmContactResolver.ContactAsync(_dataverse, id, ct).ConfigureAwait(false)
+         ?? await OutsideFirmContactResolver.FirmPrimaryContactAsync(_dataverse, id, ct).ConfigureAwait(false))?.Email;
 
-        var firm = await _dataverse.GetAsync(
-            $"sprk_organizations({id:D})?$select=_sprk_primarycontact1_value,_sprk_primarycontact2_value", ct).ConfigureAwait(false);
+    private static Guid? ReadGuid(JsonElement? body, string property) =>
+        body is { ValueKind: JsonValueKind.Object } o && o.TryGetProperty(property, out var v) && v.ValueKind == JsonValueKind.String
+        && Guid.TryParse(v.GetString(), out var id) && id != Guid.Empty
+            ? id
+            : null;
+}
+
+/// <summary>An outside firm's contact as the caller reads it: the contact, its name and an email address.</summary>
+public sealed record OutsideFirmContact(Guid ContactId, string? Name, string Email);
+
+/// <summary>
+/// The outside-firm contact resolver <c>send-reminder</c> uses (a firm's primary contact 1, then 2, with an email address), shared with
+/// the plan route's budget-inquiry To pre-fill (task 160, D-179) so both name the same person. Every read is AS THE CALLER, so a firm or
+/// contact the caller cannot read resolves to nothing.
+/// </summary>
+internal static class OutsideFirmContactResolver
+{
+    /// <summary>The address shape the message executors accept.</summary>
+    internal static readonly Regex Address = new(@"^[^@\s]+@[^@\s]+\.[^@\s]+$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    /// <summary>The firm's primary contacts, in order, the first with an email address; null when neither has one or the firm is unreadable.</summary>
+    internal static async Task<OutsideFirmContact?> FirmPrimaryContactAsync(IDataverseUserClient user, Guid firmId, CancellationToken ct)
+    {
+        var firm = await user.GetAsync(
+            $"sprk_organizations({firmId:D})?$select=_sprk_primarycontact1_value,_sprk_primarycontact2_value", ct).ConfigureAwait(false);
         if (!firm.IsSuccess)
             return null;
 
         foreach (var column in new[] { "_sprk_primarycontact1_value", "_sprk_primarycontact2_value" })
         {
-            if (ReadGuid(firm.Body, column) is { } contact && await ContactAddressAsync(contact, ct).ConfigureAwait(false) is { } address)
-                return address;
+            if (ReadGuid(firm.Body, column) is { } contact && await ContactAsync(user, contact, ct).ConfigureAwait(false) is { } found)
+                return found;
         }
 
         return null;
     }
 
-    private async Task<string?> ContactAddressAsync(Guid contactId, CancellationToken ct)
+    /// <summary>The contact with its email address; null when it has none or cannot be read.</summary>
+    internal static async Task<OutsideFirmContact?> ContactAsync(IDataverseUserClient user, Guid contactId, CancellationToken ct)
     {
-        var contact = await _dataverse.GetAsync($"contacts({contactId:D})?$select=emailaddress1", ct).ConfigureAwait(false);
+        var contact = await user.GetAsync($"contacts({contactId:D})?$select=emailaddress1,fullname", ct).ConfigureAwait(false);
         if (contact.IsSuccess && contact.Body is { ValueKind: JsonValueKind.Object } row
             && row.TryGetProperty("emailaddress1", out var email) && email.ValueKind == JsonValueKind.String
             && email.GetString() is { } text && Address.IsMatch(text.Trim()))
-            return text.Trim();
+        {
+            var name = row.TryGetProperty("fullname", out var n) && n.ValueKind == JsonValueKind.String ? n.GetString()?.Trim() : null;
+            return new OutsideFirmContact(contactId, string.IsNullOrEmpty(name) ? null : name, text.Trim());
+        }
+
         return null;
     }
 
-    private static Guid? ReadGuid(JsonElement? body, string property) =>
+    internal static Guid? ReadGuid(JsonElement? body, string property) =>
         body is { ValueKind: JsonValueKind.Object } o && o.TryGetProperty(property, out var v) && v.ValueKind == JsonValueKind.String
         && Guid.TryParse(v.GetString(), out var id) && id != Guid.Empty
             ? id

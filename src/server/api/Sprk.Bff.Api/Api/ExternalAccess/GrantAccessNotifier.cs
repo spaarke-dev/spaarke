@@ -413,10 +413,7 @@ public sealed class GrantAccessNotifier
     /// </summary>
     internal static string? BuildPortalLink(string? portalUrl, string? customerKey, ExternalGrantRootType rootType, Guid rootId)
     {
-        if (string.IsNullOrWhiteSpace(customerKey) || rootId == Guid.Empty
-            || !Uri.TryCreate(portalUrl?.Trim(), UriKind.Absolute, out var portal)
-            || !string.IsNullOrEmpty(portal.UserInfo)
-            || !(portal.Scheme == Uri.UriSchemeHttps || (portal.Scheme == Uri.UriSchemeHttp && portal.IsLoopback)))
+        if (PortalBase(portalUrl, customerKey, rootId) is not { } baseUrl)
         {
             return null;
         }
@@ -429,10 +426,43 @@ public sealed class GrantAccessNotifier
             _ => throw new ArgumentOutOfRangeException(nameof(rootType), rootType, "Unknown external grant root type."),
         };
 
-        var baseUrl = portal.GetLeftPart(UriPartial.Path).TrimEnd('/');
-        return $"{baseUrl}/?customer={Uri.EscapeDataString(customerKey.Trim())}" +
-               $"&record={Uri.EscapeDataString(token)}:{Uri.EscapeDataString(rootId.ToString("D"))}";
+        return ComposePortalLink(baseUrl, customerKey!, token, rootId);
     }
+
+    /// <summary>
+    /// The portal's own <c>?record={type}</c> tokens: exactly <c>RECORD_LINK_TOKENS</c> in the external SPA's
+    /// <c>src/components/detail/record-targets.ts</c> (r3 task 055), whose parser is the authority. Any other token opens nothing there.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> PortalRecordTokens =
+        new HashSet<string>(StringComparer.Ordinal) { "project", "matter", "workassignment", "document", "invoice", "servicerequest" };
+
+    /// <summary>
+    /// The same link as the enum overload for a record the portal names by its type token (ontology task 160, D-181: the budget
+    /// inquiry's portal link). The same portal URL and key rules apply; a token outside <see cref="PortalRecordTokens"/> (the
+    /// portal would ignore it) gives <c>null</c>, never a link that opens nothing.
+    /// </summary>
+    internal static string? BuildPortalLink(string? portalUrl, string? customerKey, string recordToken, Guid rootId) =>
+        recordToken is not null && PortalRecordTokens.Contains(recordToken) && PortalBase(portalUrl, customerKey, rootId) is { } baseUrl
+            ? ComposePortalLink(baseUrl, customerKey!, recordToken, rootId)
+            : null;
+
+    /// <summary>The portal URL's origin and path when it, the key and the id are usable (the rules above); otherwise <c>null</c>.</summary>
+    private static string? PortalBase(string? portalUrl, string? customerKey, Guid rootId)
+    {
+        if (string.IsNullOrWhiteSpace(customerKey) || rootId == Guid.Empty
+            || !Uri.TryCreate(portalUrl?.Trim(), UriKind.Absolute, out var portal)
+            || !string.IsNullOrEmpty(portal.UserInfo)
+            || !(portal.Scheme == Uri.UriSchemeHttps || (portal.Scheme == Uri.UriSchemeHttp && portal.IsLoopback)))
+        {
+            return null;
+        }
+
+        return portal.GetLeftPart(UriPartial.Path).TrimEnd('/');
+    }
+
+    private static string ComposePortalLink(string baseUrl, string customerKey, string token, Guid rootId) =>
+        $"{baseUrl}/?customer={Uri.EscapeDataString(customerKey.Trim())}" +
+        $"&record={Uri.EscapeDataString(token)}:{Uri.EscapeDataString(rootId.ToString("D"))}";
 
     // =========================================================================
     // Task 185 slice E (§12 I-4, owner round 98b): a contact-side grant whose colleague needs an INTERNAL invite

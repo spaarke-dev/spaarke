@@ -96,6 +96,11 @@ public sealed record DecisionActionDefinition(
     /// <see cref="ResolvedDecisionPlan.WithCreateBudgetInsteadOfRevise"/>). <see cref="DecisionPlanService.Resolve"/> refuses a stored plan
     /// that names it and the authoring catalog does not list it, so a published plan can never carry it (D-14).</summary>
     public bool SubstitutionOnly { get; init; }
+
+    /// <summary>How the wizard renders the step's message fields (task 160, D-179): <see cref="DecisionActionCatalog.EmailComposer"/> for the
+    /// actions whose <c>to</c>, <c>subject</c> and <c>body</c> the shared EmailComposer edits (compose-only: it never sends; the commit route
+    /// does). <c>null</c>: one field per parameter. A presentation hint only; the parameters and what is committed are unchanged.</summary>
+    public string? Composer { get; init; }
 }
 
 /// <summary>One closed dismissal reason. The stored form on a Signal is <c>"code - detail"</c>.</summary>
@@ -127,6 +132,9 @@ public sealed record DecisionDismissalReason(
 /// </remarks>
 public static class DecisionActionCatalog
 {
+    /// <summary>The <see cref="DecisionActionDefinition.Composer"/> value for the shared EmailComposer (task 160, D-179).</summary>
+    public const string EmailComposer = "email";
+
     private const string ApproveVarianceEffect = "The Decision Record is the approval; nothing else is written";
 
     private static readonly DecisionActionParameter[] MessageParameters =
@@ -154,7 +162,7 @@ public static class DecisionActionCatalog
             ],
             Excludes: [],
             DecisionRecordClass.Judgement)
-        { Gate = new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, ExternallyVisible: true), ResolvesSignal = false, SendsMessage = true },
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, ExternallyVisible: true), ResolvesSignal = false, SendsMessage = true, Composer = EmailComposer },
 
         new("revise-budget", "Revise budget", DecisionLane.Decide, IsNextStep: false, WorkType: "fund",
             [
@@ -244,7 +252,7 @@ public static class DecisionActionCatalog
             ["Sends the message above to the recipient", "The response date is unchanged", "The item stays open until the work is done or its due date moves"],
             Excludes: [],
             DecisionRecordClass.Judgement)
-        { Gate = new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, ExternallyVisible: true), ResolvesSignal = false, SendsMessage = true },
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, ExternallyVisible: true), ResolvesSignal = false, SendsMessage = true, Composer = EmailComposer },
 
         new("extend-response-date", "Extend response date", DecisionLane.Do, IsNextStep: false, WorkType: null,
             [
@@ -300,7 +308,7 @@ public static class DecisionActionCatalog
             ["Sends the message above when the decision is recorded"],
             Excludes: [],
             DecisionRecordClass.Judgement)
-        { Gate = new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, ExternallyVisible: true), SendsMessage = true },
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, ExternallyVisible: true), SendsMessage = true, Composer = EmailComposer },
 
         // assign-work is both: a Next step on any plan, and a Decide-lane plan action the Know-promotion rule offers (D-51).
         new("assign-work", "Assign Work", DecisionLane.Decide, IsNextStep: true, WorkType: null,
