@@ -33,7 +33,8 @@
   - Secured: externalobjectid, externaltenantid, standinggrant, invitedon, invitecodehash.
   - Securable and still open: accesspermissiongrant, identityplane, the collision columns, externalobjectidkey (kept open: alternate key), emailaddress1 (owner: editable). statecode can't be secured.
   - 11 contacts hold active grants: 9 bound, 2 unbound and never invited. Those 2 need a re-invite naming their tenant once slice B is live, unless xms_edov is configured.
-- **Live steps for later, each needing owner approval with a rollback:** schema apply (`scripts/Set-ExternalAccessContactSecuritySchema.ps1 -Apply` then `-Verify`); the xms_edov optional claim on the app registration; the BFF deploy; the re-invites.
+- **Live steps for later, each needing owner approval with a rollback:** schema apply (`scripts/Set-ExternalAccessContactSecuritySchema.ps1 -Apply` then `-Verify`); SpaarkeMaster 1.2.4.0 set in dev + `-Verify` + re-export (source bumped in 47e9bf6a71 only); the xms_edov + email optional claims on the API app registration, then a token probe (another-tenant user, B2B guest, MSA) to settle access-token presence and JSON type (research 2026-10-23: documented for JWT, not for access tokens specifically; absent likely = omitted); `removeUnverifiedEmailClaim=true`; the BFF deploy; the re-invites.
+- **Branch progress (`fix/r3-iss-005-combined`, pushed to c2e5da998d):** slice A + UAC round 1 (F1/F2/K) + round 2 (F3/K1/K3/K4a/K4b, accepted) + #2317 H7b S19/S22 + provisioning review items 1–3 (re-check sent). Item 4 (team members of SGA) on hold for provisioning's owner. Slice B implementer running.
 - **ISS-005 merges with or after slices A–C.**
 
 ## Dev state
