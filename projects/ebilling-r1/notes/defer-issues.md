@@ -1195,3 +1195,15 @@ K1 (ontology): a D-96 re-file across core records withholds line Duplicates perm
 **Description**: StoredFileReconcileJob.cs:283-321 deletes the blob named by pathFile == row.Id without checking that pathParent is one of the gone lookups. Fix: also require row.Parents.Contains(pathParent) or ParentConfirmedGoneAsync(pathParent).
 
 ---
+### DEF-046 — Deploy-EbillingFormsViews.ps1 navigation step crashes on dev
+
+| Field | Value |
+|---|---|
+| **Status** | Open; worked around by task 122's -FormsOnly |
+| **Urgency** | medium |
+| **Filed** | 2026-10-23 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2312 |
+
+**Description**: A full run fails in step 3 (Navigation) with InsertAfter "The reference node is not a child of this node". The live sprk_MatterManagement sitemap has sprk_invoice in two areas. It fails after the forms/views steps and before publish. Fix: a deterministic anchor or an early refusal, and/or correct the sitemap (check first who added the second entry).
+
+---
