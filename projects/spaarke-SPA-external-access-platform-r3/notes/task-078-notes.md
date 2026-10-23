@@ -480,3 +480,16 @@ Run as the owner's delegated az login.
 - `gh workflow run deploy-external-spa.yml --ref external-spa-dev-1fa0cf5cb8 -f environment=dev`: run 39878122856, success.
 - Verified: `/` 200, `auth-callback.html` 200. `assets/app.js` contains `hasFile` (ISS-011), `allowRemoteImages` and `contain:"paint` (ISS-003).
 - **Rollback:** `gh workflow run deploy-external-spa.yml --ref external-spa-dev-rollback-3531ed65e -f environment=dev`.
+
+## Dev BFF deploy of master 58ffc37da3 (2026-10-23 11:18Z; owner: "ok to deploy build 58ffc37da3")
+
+Contents beyond the previous live build 1fa0cf5cb8: ontology 159/161/163 (#2303, 0317579272), word-add-in 132 (#2304) with fixes #2308 and #2309, and ontology 160 (#2313) with fix #2314. R3's `ContactBindingDecision.cs` change in #2314 is a pure extraction (`MatchingEnabledSystemUserIds`); `DecideLicensedUserEmail` keeps its guards and its result.
+
+| Step | Result |
+|---|---|
+| Gates | Router and Client lint green on 58ffc37da3. OKs: UAC (after its reviews of #2304/#2308/#2309 and #2313/#2314), ontology, word-add-in, field-mapping, ebilling; provisioning standing OK. SPE admin session not running. |
+| A, live read and snapshot | Live ProductVersion `1.0.0+1fa0cf5cb8…`, healthz 200. Snapshot `deploy/rollback/wwwroot-20261023T111635Z` (222 files, 148.07 MB). |
+| D, deploy | `Deploy-BffApi.ps1 -Environment dev` from detached worktree `C:\wtbffe-58f`. 4 file hashes, health and CORS verified. OneDeploy ended 11:18:12Z. Read-back 11:19:20Z: ProductVersion `1.0.0+58ffc37da3…`, healthz 200, healthz/dataverse 200, anonymous /api/me 401. |
+| E, server gate | UAC runs its gate from app start; R3's 30-minute read uses scratchpad `gate58.ps1`. |
+
+**Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261023T111635Z` (restores 1fa0cf5cb8).
