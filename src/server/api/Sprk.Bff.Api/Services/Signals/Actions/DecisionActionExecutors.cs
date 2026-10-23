@@ -1442,6 +1442,11 @@ public sealed class BudgetInquiryActionExecutor : IDecisionActionExecutor
             .ToList();
         if (to.Count == 0)
             return (null, DecisionActionOutcome.Refused(code, DecisionActionReasons.RecipientUnresolved, "There is no recipient to send the inquiry to."));
+        // The composer commits ADDRESSES. A token that is not one (`lead@firm`) is refused here, before the preflight and before the
+        // service request is written: Graph would reject it after the row exists and leave an orphan (fix round 1).
+        if (to.Any(address => !OutsideFirmContactResolver.Address.IsMatch(address)))
+            return (null, DecisionActionOutcome.Refused(code, DecisionActionReasons.RecipientUnresolved,
+                "A recipient is not a valid email address. Check the To field."));
         if (request.Param("subject") is not { } subject)
             return (null, DecisionActionOutcome.Refused(code, DecisionActionReasons.InvalidParameter, "Give the inquiry a subject."));
         if (request.Param("body") is not { } body)

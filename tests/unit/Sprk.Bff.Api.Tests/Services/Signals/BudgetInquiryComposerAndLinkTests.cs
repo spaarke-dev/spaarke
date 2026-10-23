@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
@@ -189,7 +190,8 @@ public sealed class BudgetInquiryComposerAndLinkTests
 
         var extras = await facts.ResolveAsync("sprk_matter", Matter, ["counsel@firm.example"], CancellationToken.None);
 
-        extras.LinkLines.Should().Equal($"Open this matter in the Spaarke portal: {Portal}/?customer={Key}&record=matter:{Matter:D}");
+        extras.LinkLines.Should().Equal(
+            $"Open this matter in the Spaarke portal (if you have portal access): {Portal}/?customer={Key}&record=matter:{Matter:D}");
     }
 
     [Fact]
@@ -201,7 +203,7 @@ public sealed class BudgetInquiryComposerAndLinkTests
 
         extras.LinkLines.Should().Equal(
             $"Spaarke users, open this matter in Spaarke: {Env}/main.aspx?etn=sprk_matter&id={Matter:D}&pagetype=entityrecord",
-            $"External recipients, open this matter in the Spaarke portal: {Portal}/?customer={Key}&record=matter:{Matter:D}");
+            $"External recipients, open this matter in the Spaarke portal (if you have portal access): {Portal}/?customer={Key}&record=matter:{Matter:D}");
     }
 
     [Fact]
@@ -211,7 +213,7 @@ public sealed class BudgetInquiryComposerAndLinkTests
 
         var extras = await facts.ResolveAsync("sprk_matter", Matter, ["a@spaarke.example"], CancellationToken.None);
 
-        extras.LinkLines.Should().ContainSingle().Which.Should().StartWith("Open this matter in the Spaarke portal: ");
+        extras.LinkLines.Should().ContainSingle().Which.Should().StartWith("Open this matter in the Spaarke portal (if you have portal access): ");
     }
 
     [Fact]
@@ -222,7 +224,7 @@ public sealed class BudgetInquiryComposerAndLinkTests
 
         var extras = await facts.ResolveAsync("sprk_matter", Matter, ["a@spaarke.example"], CancellationToken.None);
 
-        extras.LinkLines.Should().ContainSingle().Which.Should().StartWith("Open this matter in the Spaarke portal: ");
+        extras.LinkLines.Should().ContainSingle().Which.Should().StartWith("Open this matter in the Spaarke portal (if you have portal access): ");
         log.Lines.Should().NotBeEmpty();
     }
 
@@ -259,6 +261,121 @@ public sealed class BudgetInquiryComposerAndLinkTests
         var extras = await facts.ResolveAsync("sprk_matter", Matter, ["x@evil.example?record=matter:00000000-0000-0000-0000-000000000000"], CancellationToken.None);
 
         extras.LinkLines.Should().ContainSingle().Which.Should().NotContain("evil");
+    }
+
+    // =================================================================================================
+    // K3 (fix round 1): the recipient reads run concurrently, capped, under ONE deadline
+    // =================================================================================================
+
+    [Fact]
+    public async Task Recipients_are_checked_concurrently_and_at_most_ten_at_a_time()
+    {
+        var inFlight = 0;
+        var max = 0;
+        var addresses = Enumerable.Range(0, 12).Select(i => $"u{i}@spaarke.example").ToArray();
+        var facts = Facts(internalAddresses: [], classify: async email =>
+        {
+            var now = Interlocked.Increment(ref inFlight);
+            lock (addresses) max = Math.Max(max, now);
+            await Task.Delay(40);
+            Interlocked.Decrement(ref inFlight);
+            return SystemUserEmailLookup.Of(new SystemUserEmailRow(UserId, false, email, null));
+        });
+
+        var extras = await facts.ResolveAsync("sprk_matter", Matter, addresses, CancellationToken.None);
+
+        max.Should().Be(10, "twelve recipients are checked ten at a time, not one after another");
+        extras.LinkLines.Should().ContainSingle().Which.Should().StartWith("Open this matter in Spaarke: ", "all twelve were classified");
+    }
+
+    [Fact]
+    public async Task A_recipient_check_that_never_returns_is_external_after_the_one_deadline_and_the_rest_are_kept()
+    {
+        var log = new Warnings();
+        var facts = Facts(
+            internalAddresses: [], log: log, readDeadline: TimeSpan.FromMilliseconds(150),
+            classify: email => email.StartsWith("slow@", StringComparison.Ordinal)
+                ? new TaskCompletionSource<SystemUserEmailLookup>().Task // never completes, ignores the token
+                : Task.FromResult(SystemUserEmailLookup.Of(new SystemUserEmailRow(UserId, false, email, null))));
+        var clock = Stopwatch.StartNew();
+
+        var extras = await facts.ResolveAsync("sprk_matter", Matter, ["a@spaarke.example", "slow@firm.example"], CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(20));
+
+        clock.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(10), "the send does not wait on a hung read");
+        extras.LinkLines.Should().HaveCount(2, "the checked user is internal (app link), the hung one is external (portal link)");
+        extras.LinkLines[0].Should().StartWith("Spaarke users, open this matter in Spaarke: ");
+        extras.LinkLines[1].Should().StartWith("External recipients, open this matter in the Spaarke portal");
+        extras.RecordLabel.Should().Be("Acme v. Roe (MAT-000123)", "the label read finished before the deadline");
+        log.Lines.Should().Contain(w => w.Contains("1 of 2 recipient(s)"));
+        log.Lines.Should().OnlyContain(w => !w.Contains('@'), "a warning carries counts only, never an address");
+    }
+
+    [Fact]
+    public async Task When_every_read_hangs_the_email_still_resolves_with_the_portal_link_and_no_label()
+    {
+        var facts = Facts(
+            internalAddresses: [], readDeadline: TimeSpan.FromMilliseconds(100),
+            classify: _ => new TaskCompletionSource<SystemUserEmailLookup>().Task);
+
+        var extras = await facts.ResolveAsync("sprk_matter", Matter, ["a@spaarke.example", "b@firm.example"], CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(20));
+
+        extras.LinkLines.Should().ContainSingle().Which.Should().StartWith("Open this matter in the Spaarke portal");
+    }
+
+    // =================================================================================================
+    // F3a (fix round 1): the send-time wiring of InquiryRecordFacts, through the real InquiryEmailSender.PrepareAsync
+    // (SendAsync calls it, then the communication core). The executor tests fake SendAsync and never reach it.
+    // =================================================================================================
+
+    [Fact]
+    public async Task PrepareAsync_asks_the_facts_about_the_matter_and_the_recipients_and_puts_the_result_in_the_send()
+    {
+        var link = $"{Env}/main.aspx?etn=sprk_matter&id={Matter:D}&pagetype=entityrecord";
+        var facts = StubFacts(new InquiryEmailExtras("Acme v. Roe (MAT-000123)", [$"Open this matter in Spaarke: {link}"]));
+        var sender = new InquiryEmailSender(null!, new HttpContextAccessor(), facts.Object);
+        var request = new BudgetInquiryRequest(Matter, ["counsel@firm.example", "second@firm.example"], "Budget inquiry: Acme", "Please explain.", true, Firm);
+        var serviceRequest = Guid.NewGuid();
+
+        var send = await sender.PrepareAsync(request, serviceRequest, CancellationToken.None);
+
+        facts.Verify(f => f.ResolveAsync(
+            "sprk_matter", Matter, It.Is<IReadOnlyList<string>>(r => r.SequenceEqual(new[] { "counsel@firm.example", "second@firm.example" })),
+            It.IsAny<CancellationToken>()), Times.Once);
+        send.To.Should().Equal("counsel@firm.example", "second@firm.example");
+        send.Body.Should().Be($"Please explain.\n\nOpen this matter in Spaarke: {link}");
+        send.Associations![0].EntityType.Should().Be("sprk_servicerequest");
+        send.Associations![0].EntityId.Should().Be(serviceRequest);
+        send.Associations![0].EntityName.Should().Be("Acme v. Roe (MAT-000123)");
+        send.Associations![1].EntityType.Should().Be("sprk_matter");
+        send.Associations![1].EntityId.Should().Be(Matter);
+    }
+
+    [Fact]
+    public async Task PrepareAsync_with_the_real_facts_links_each_audience_and_names_the_matter()
+    {
+        var sender = new InquiryEmailSender(null!, new HttpContextAccessor(), Facts(internalAddresses: ["a@spaarke.example"]));
+        var request = new BudgetInquiryRequest(Matter, ["a@spaarke.example", "counsel@firm.example"], "Budget inquiry: Acme", "Please explain.", true);
+
+        var send = await sender.PrepareAsync(request, Guid.NewGuid(), CancellationToken.None);
+
+        send.Body.Should().Be(
+            "Please explain.\n\n" +
+            $"Spaarke users, open this matter in Spaarke: {Env}/main.aspx?etn=sprk_matter&id={Matter:D}&pagetype=entityrecord\n" +
+            $"External recipients, open this matter in the Spaarke portal (if you have portal access): {Portal}/?customer={Key}&record=matter:{Matter:D}");
+        send.Associations![0].EntityName.Should().Be("Acme v. Roe (MAT-000123)");
+    }
+
+    [Fact]
+    public async Task PrepareAsync_without_facts_sends_the_body_unchanged_and_names_the_inquiry_by_its_subject()
+    {
+        var sender = new InquiryEmailSender(null!, new HttpContextAccessor());
+
+        var send = await sender.PrepareAsync(Request(), Guid.NewGuid(), CancellationToken.None);
+
+        send.Body.Should().Be("Please explain.");
+        send.Associations![0].EntityName.Should().Be("Budget inquiry: Acme");
     }
 
     // =================================================================================================
@@ -338,7 +455,7 @@ public sealed class BudgetInquiryComposerAndLinkTests
     private static InquiryRecordFacts Facts(
         string[] internalAddresses, bool disabled = false, bool readFails = false, string? portalUrl = Portal, string? customerKey = Key,
         string environmentUrl = Env, string? matterName = "Acme v. Roe", string? matterNumber = "MAT-000123", bool matterReadThrows = false,
-        Warnings? log = null)
+        Warnings? log = null, Func<string, Task<SystemUserEmailLookup>>? classify = null, TimeSpan? readDeadline = null)
     {
         var appOnly = new Mock<IFieldMappingDataverseService>();
         var read = appOnly.Setup(a => a.RetrieveRecordFieldsAsync("sprk_matter", Matter, It.IsAny<string[]>(), It.IsAny<CancellationToken>()));
@@ -349,21 +466,43 @@ public sealed class BudgetInquiryComposerAndLinkTests
 
         var identities = new Mock<IContactIdentityStore>();
         identities.Setup(i => i.FindEnabledSystemUsersByEmailAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string email, CancellationToken _) =>
-                readFails
-                    ? SystemUserEmailLookup.Failed
-                    : internalAddresses.Contains(email, StringComparer.OrdinalIgnoreCase)
-                        ? SystemUserEmailLookup.Of(new SystemUserEmailRow(UserId, disabled, email, null))
-                        : SystemUserEmailLookup.Of());
+            .Returns((string email, CancellationToken _) => classify is not null
+                ? classify(email)
+                : Task.FromResult(
+                    readFails
+                        ? SystemUserEmailLookup.Failed
+                        : internalAddresses.Contains(email, StringComparer.OrdinalIgnoreCase)
+                            ? SystemUserEmailLookup.Of(new SystemUserEmailRow(UserId, disabled, email, null))
+                            : SystemUserEmailLookup.Of()));
 
+        var (config, customer) = Settings(portalUrl, customerKey);
+        return new InquiryRecordFacts(appOnly.Object, identities.Object, customer, config,
+            Options.Create(new DataverseOptions { EnvironmentUrl = environmentUrl }), (ILogger<InquiryRecordFacts>?)log ?? NullLogger<InquiryRecordFacts>.Instance)
+        {
+            ReadDeadline = readDeadline ?? TimeSpan.FromSeconds(10),
+        };
+    }
+
+    private static (IConfiguration Config, CustomerIdentity Customer) Settings(string? portalUrl, string? customerKey)
+    {
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = portalUrl })
             .Build();
         var customer = new CustomerIdentity(
             Options.Create(new CustomerOptions { Id = customerKey ?? string.Empty }), config, NullLogger<CustomerIdentity>.Instance);
+        return (config, customer);
+    }
 
-        return new InquiryRecordFacts(appOnly.Object, identities.Object, customer, config,
-            Options.Create(new DataverseOptions { EnvironmentUrl = environmentUrl }), (ILogger<InquiryRecordFacts>?)log ?? NullLogger<InquiryRecordFacts>.Instance);
+    /// <summary>A facts double: <c>ResolveAsync</c> (virtual) answers <paramref name="extras"/> and records its arguments.</summary>
+    private static Mock<InquiryRecordFacts> StubFacts(InquiryEmailExtras extras)
+    {
+        var (config, customer) = Settings(Portal, Key);
+        var facts = new Mock<InquiryRecordFacts>(
+            Mock.Of<IFieldMappingDataverseService>(), Mock.Of<IContactIdentityStore>(), customer, config,
+            Options.Create(new DataverseOptions { EnvironmentUrl = Env }), NullLogger<InquiryRecordFacts>.Instance);
+        facts.Setup(f => f.ResolveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(extras);
+        return facts;
     }
 
     private sealed class Warnings : ILogger<InquiryRecordFacts>

@@ -63,12 +63,22 @@ public class InquiryEmailSender(CommunicationService communication, IHttpContext
         var context = http.HttpContext
             ?? throw new InvalidOperationException("The inquiry email is sent as the signed-in user and needs an HTTP request.");
 
+        var send = await PrepareAsync(request, serviceRequestId, ct).ConfigureAwait(false);
+        var response = await communication.SendAsync(send, context, ct).ConfigureAwait(false);
+        return response.CommunicationId;
+    }
+
+    /// <summary>
+    /// The send request as <see cref="SendAsync"/> hands it to the communication core: the record facts (label and link lines, read
+    /// at send time) folded into <see cref="Build"/>. Its own method so the test reaches the real wiring without a Graph send.
+    /// </summary>
+    internal async Task<SendCommunicationRequest> PrepareAsync(BudgetInquiryRequest request, Guid serviceRequestId, CancellationToken ct)
+    {
         // The commit route sets MatterId only for a matter core, so the inquiry's core record is always that matter.
         var extras = facts is null
             ? null
             : await facts.ResolveAsync(BudgetInquiryExecutor.MatterTable, request.MatterId, request.To ?? [], ct).ConfigureAwait(false);
-        var response = await communication.SendAsync(Build(request, serviceRequestId, extras), context, ct).ConfigureAwait(false);
-        return response.CommunicationId;
+        return Build(request, serviceRequestId, extras);
     }
 
     /// <summary>

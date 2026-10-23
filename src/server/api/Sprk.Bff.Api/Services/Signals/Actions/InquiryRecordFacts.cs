@@ -35,6 +35,12 @@ public class InquiryRecordFacts
     /// <summary><c>sprk_communication.sprk_regardingrecordname</c> holds 100 characters (CommunicationService truncates to it).</summary>
     internal const int RecordLabelMax = 100;
 
+    /// <summary>At most this many recipient checks run at once.</summary>
+    internal const int MaxConcurrentChecks = 10;
+
+    /// <summary>One deadline for the whole read (the label and every recipient). Settable by the tests only.</summary>
+    internal TimeSpan ReadDeadline { get; init; } = TimeSpan.FromSeconds(10);
+
     private static readonly Regex LogicalName = new("^[a-z][a-z0-9_]*$", RegexOptions.CultureInvariant);
 
     /// <summary>The portal token and the noun for each core type the link can name. A type not listed gets no portal link.</summary>
@@ -82,32 +88,19 @@ public class InquiryRecordFacts
     public virtual async Task<InquiryEmailExtras> ResolveAsync(
         string coreLogicalName, Guid coreId, IReadOnlyList<string> recipients, CancellationToken ct)
     {
-        var label = await ReadLabelAsync(coreLogicalName, coreId, ct).ConfigureAwait(false);
+        var addresses = recipients.Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => a.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var (label, outcomes) = await ReadAsync(coreLogicalName, coreId, addresses, ct).ConfigureAwait(false);
 
-        var anyInternal = false;
-        var anyExternal = false;
-        var unknown = 0;
-        foreach (var address in recipients.Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => a.Trim()).Distinct(StringComparer.OrdinalIgnoreCase))
-        {
-            switch (await ClassifyAsync(address, ct).ConfigureAwait(false))
-            {
-                case LicensedUserEmailOutcome.LicensedUser:
-                    anyInternal = true;
-                    break;
-                case LicensedUserEmailOutcome.Unknown:
-                    unknown++;
-                    anyExternal = true;
-                    break;
-                default:
-                    anyExternal = true;
-                    break;
-            }
-        }
+        var anyInternal = outcomes.Contains(LicensedUserEmailOutcome.LicensedUser);
+        var unknown = outcomes.Count(o => o == LicensedUserEmailOutcome.Unknown);
+        var anyExternal = outcomes.Any(o => o != LicensedUserEmailOutcome.LicensedUser);
 
         if (unknown > 0)
         {
             _logger.LogWarning(
-                "Budget inquiry: {Count} recipient(s) could not be checked against the enabled users and are given the portal link.", unknown);
+                "Budget inquiry: {Count} of {Total} recipient(s) could not be checked against the enabled users (read failed or timed out) " +
+                "and are given the portal link.", unknown, addresses.Length);
         }
 
         var known = CoreTypes.TryGetValue(coreLogicalName, out var type);
@@ -143,8 +136,8 @@ public class InquiryRecordFacts
             lines.Add(mixed ? $"Spaarke users, open this {noun} in Spaarke: {appLink}" : $"Open this {noun} in Spaarke: {appLink}");
         if (portalLink is not null)
             lines.Add(mixed
-                ? $"External recipients, open this {noun} in the Spaarke portal: {portalLink}"
-                : $"Open this {noun} in the Spaarke portal: {portalLink}");
+                ? $"External recipients, open this {noun} in the Spaarke portal (if you have portal access): {portalLink}"
+                : $"Open this {noun} in the Spaarke portal (if you have portal access): {portalLink}");
         return lines;
     }
 
@@ -180,6 +173,65 @@ public class InquiryRecordFacts
         return label is null ? null : TextTruncation.TruncateSurrogateSafe(label, RecordLabelMax - 1);
     }
 
+    /// <summary>
+    /// The record label and every recipient's classification, read CONCURRENTLY (at most <see cref="MaxConcurrentChecks"/> in flight)
+    /// under ONE deadline (<see cref="ReadDeadline"/>), so a slow read never holds the send for a recipient-count of timeouts. A
+    /// recipient not classified by the deadline stays <see cref="LicensedUserEmailOutcome.Unknown"/> (external, the portal link), as
+    /// a failed read already does; the label stays null.
+    /// </summary>
+    private async Task<(string? Label, LicensedUserEmailOutcome[] Outcomes)> ReadAsync(
+        string coreLogicalName, Guid coreId, string[] addresses, CancellationToken ct)
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(ReadDeadline);
+        var token = deadline.Token;
+
+        var outcomes = new LicensedUserEmailOutcome[addresses.Length];
+        Array.Fill(outcomes, LicensedUserEmailOutcome.Unknown);
+        string? label = null;
+        var gate = new SemaphoreSlim(MaxConcurrentChecks);
+
+        async Task LabelAsync() => label = await ReadLabelAsync(coreLogicalName, coreId, token).ConfigureAwait(false);
+
+        async Task CheckAsync(int index)
+        {
+            try
+            {
+                await gate.WaitAsync(token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            try
+            {
+                outcomes[index] = await ClassifyAsync(addresses[index], token).ConfigureAwait(false);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }
+
+        var all = Task.WhenAll(addresses.Select((_, i) => CheckAsync(i)).Append(LabelAsync()));
+        try
+        {
+            // WaitAsync abandons the wait at the deadline even for a read that ignores its token.
+            await all.WaitAsync(token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("Budget inquiry: the record and recipient reads did not finish within {Seconds:0.#} s; the email goes with what was read.",
+                ReadDeadline.TotalSeconds);
+            // Whatever finished late must not fault unobserved.
+            _ = all.ContinueWith(static t => t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+        }
+
+        // A copy: a read that finishes after the deadline must not change what this email was decided on.
+        return (label, outcomes.ToArray());
+    }
+
     private async Task<string?> ReadLabelAsync(string coreLogicalName, Guid coreId, CancellationToken ct)
     {
         if (!LabelColumns.TryGetValue(coreLogicalName, out var columns))
@@ -189,6 +241,10 @@ public class InquiryRecordFacts
         {
             var row = await _appOnly.RetrieveRecordFieldsAsync(coreLogicalName, coreId, [columns.Name, columns.Number], ct).ConfigureAwait(false);
             return RecordLabel(row.GetValueOrDefault(columns.Name) as string, row.GetValueOrDefault(columns.Number) as string);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return null;
         }
         catch (Exception ex)
         {
@@ -204,6 +260,11 @@ public class InquiryRecordFacts
         {
             var lookup = await _identities.FindEnabledSystemUsersByEmailAsync(address, ct).ConfigureAwait(false);
             return ContactBindingDecision.DecideLicensedUserEmail(lookup, address);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // The deadline: ReadAsync logs it once, with counts.
+            return LicensedUserEmailOutcome.Unknown;
         }
         catch (Exception ex)
         {

@@ -1386,6 +1386,54 @@ public class DecisionActionExecutorsTests
         refusal!.Status.Should().Be(DecisionActionStatus.Refused);
     }
 
+    [Theory]
+    [InlineData("lead@firm")]
+    [InlineData("lead")]
+    [InlineData("@firm.example")]
+    [InlineData("good@firm.example; lead@firm")]
+    public async Task InquiryAdapter_RefusesAnAddressThatIsNotOne_BeforeAnyReadOrWrite(string to)
+    {
+        // Fix round 1 (F1 pre-existing): `lead@firm` passed Next, the service request was written, then Graph refused the address and
+        // left an orphan row. Every token must be an address, and the refusal comes before the preflight reads anything.
+        var user = new FakeUserClient();
+        var appOnly = new Mock<IFieldMappingDataverseService>(MockBehavior.Strict);
+        var inquiry = new BudgetInquiryExecutor(
+            user, Owner().Object, appOnly.Object, new InquiryEmailSender(null!, new HttpContextAccessor()), new HttpContextAccessor(),
+            NullLogger<BudgetInquiryExecutor>.Instance);
+        var executor = new BudgetInquiryActionExecutor(inquiry);
+        var request = Request(new() { ["to"] = to, ["subject"] = "s", ["body"] = "b", ["outsideFirm"] = FirmId.ToString("D") });
+
+        var (mapped, refusal) = BudgetInquiryActionExecutor.Map(request);
+        mapped.Should().BeNull();
+        refusal!.Status.Should().Be(DecisionActionStatus.Refused);
+        refusal.ReasonCode.Should().Be(DecisionActionReasons.RecipientUnresolved);
+
+        var preflight = await executor.PreflightAsync(request, CancellationToken.None);
+        preflight!.ReasonCode.Should().Be(DecisionActionReasons.RecipientUnresolved);
+        var executed = await executor.ExecuteAsync(request, CancellationToken.None);
+        executed.Status.Should().Be(DecisionActionStatus.Refused);
+        executed.ReasonCode.Should().Be(DecisionActionReasons.RecipientUnresolved);
+        executed.Written.Should().BeNullOrEmpty("no service request is written for a bad address");
+
+        user.Gets.Should().BeEmpty("nothing is read as the caller before the refusal");
+        user.Patches.Should().BeEmpty();
+        appOnly.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public void InquiryAdapter_AcceptsOrdinaryAddresses_IncludingPlusTagsAndSubdomains()
+    {
+        var (request, refusal) = BudgetInquiryActionExecutor.Map(Request(new()
+        {
+            ["to"] = "Lead.Name+tag@mail.firm.example, second@firm.example",
+            ["subject"] = "s",
+            ["body"] = "b",
+        }));
+
+        refusal.Should().BeNull();
+        request!.To.Should().Equal("Lead.Name+tag@mail.firm.example", "second@firm.example");
+    }
+
     [Fact]
     public void InquiryAdapter_WithoutAMatter_IsRefused()
     {

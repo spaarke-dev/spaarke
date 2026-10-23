@@ -25,7 +25,7 @@ D-181 said the footer reads "Budget inquiry: {core name} ({core number})". `Enti
 ## Known limits
 - **Cc / Bcc** are not part of the action (the executor has `to` only). The composer still shows them; when the user adds any, the step shows a warning that they are not sent. Hiding them would need another composer prop (not decided).
 - send-reminder and send-email also render the composer (POML constraint). Their server send is unchanged; their `to` is now addresses from the composer (the executors accept addresses already). send-reminder's empty-To law-firm fallback is unreachable from the composer because `to` is required (it was already required).
-- A side-pane pick of a contact with no email address adds nothing, silently (RecipientField's behaviour for an empty result).
+- A side-pane pick of a contact with no usable email address adds nothing and the step now says so (fix round 1, F2).
 - The prefill shows the address only (the composer's `initialTo` is addresses); the name is in the DTO for a later use.
 
 ## Verification
@@ -42,3 +42,15 @@ D-181 said the footer reads "Budget inquiry: {core name} ({core number})". `Enti
 - `InquiryRecordFacts` - Existing: GrantAccessNotifier builds both link shapes; the A9 read classifies addresses; InquiryEmailSender sends. Extension: it composes those (the token overload, the A9 read) for the inquiry; putting six collaborators on InquiryEmailSender would break its test seams. Cost of doing nothing: D-181 fails, no record link and a GUID footer.
 - `OutsideFirmContactResolver` - extracted, not new behaviour: the POML requires the prefill to use the resolver send-reminder uses.
 - `composeOnly` - Existing: hostOwnsChrome (chrome only). Extension: hostOwnsChrome cannot change meaning for SendEmailDialog. Cost of doing nothing: the wizard would show a live Send.
+
+## Fix round 1 (Opus review of PR #2305)
+- **F1 (stored XSS)**: `EmailMessageFields.toPlainText` and the composer's own `BodyEditor.htmlToPlainText` assigned the body to a detached element's `innerHTML` (a live sink: `<img onerror>` runs). Both now parse with `DOMParser` (inert). The wizard test renders a matter named `Acme <img src=x onerror="window.__xss=1">`, switches to rich text and asserts no draft reaches `innerHTML` and `window.__xss` stays unset (jsdom never loads an img, so the sink write is what fails on the old code). No other `innerHTML` / `outerHTML` / `insertAdjacentHTML` / `dangerouslySetInnerHTML` in DecisionWizard, Worklist, or this PR's files.
+- **F2**: a side-pane pick with no usable address (none, unreadable, or not an address) shows `no-email`: "{name} has no email address that could be read; type one in To."
+- **F3a**: `InquiryEmailSender.PrepareAsync` (resolve the facts, then `Build`); `SendAsync` calls it. Tests drive it with a stub and with the real facts.
+- **F3b**: tests for `cc-not-sent` and for "mounting the composer is not a choice" (mutant: write every field on mount fails it).
+- **F1 pre-existing**: `BudgetInquiryActionExecutor.Map` refuses any recipient token that fails `OutsideFirmContactResolver.Address` with `RecipientUnresolved`, before the preflight (no read, no write). The wizard's `stepValid` also holds Next while any To address fails the composer's `EMAIL_RE` (now exported from the reducer) for a `composer: "email"` action.
+- **K1**: `canSaveDraft={draftSaveAvailable && !props.composeOnly}`.
+- **K3**: `InquiryRecordFacts.ResolveAsync` reads the label and every recipient concurrently (at most 10 in flight) under one 10 s deadline; what is unresolved at the deadline is external (portal link); one Warning with counts only.
+- **R3-a**: `PortalRecordTokensAgreementTests` reads the SPA's `RECORD_LINK_TOKENS` and compares the key set with `GrantAccessNotifier.PortalRecordTokens`, with must-fire and must-not-fire controls.
+- **R3-b**: the portal line reads "Open this matter in the Spaarke portal (if you have portal access): {link}".
+- Not changed: `SendAsync` itself (the Graph call) is still reached only through `PrepareAsync`'s result, not under test.
