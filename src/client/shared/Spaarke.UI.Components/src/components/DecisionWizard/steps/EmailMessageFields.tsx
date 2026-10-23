@@ -10,7 +10,8 @@
  * - Starting values are the step's current values (typed, else the defaults: the templated subject and body, D-53, and the plan's
  *   To pre-fill). The composer is mounted with them and is uncontrolled from then on.
  * - The To lookup opens the host's side-pane lookup for contacts (task 158's `openLookup`) and adds the pick by its email address;
- *   a pick with no address adds nothing. Typed addresses are accepted as the composer accepts them.
+ *   a pick with no usable address adds nothing and the step says so (a warning: type one in To). Typed addresses are accepted as the
+ *   composer accepts them; Next stays disabled while any address in To is not one (`stepValid`).
  * - The body is committed as plain text: a body the user switched to rich text is converted back.
  * - Cc and Bcc are not part of the action: when the user adds any, the step says they will not be sent.
  *
@@ -20,6 +21,7 @@
 import * as React from 'react';
 import { MessageBar, MessageBarBody, makeStyles, tokens } from '@fluentui/react-components';
 import { EmailComposer } from '../../EmailComposer/EmailComposer';
+import { EMAIL_RE } from '../../EmailComposer/EmailComposer.reducer';
 import type { EmailComposerState, IRecipient } from '../../EmailComposer/EmailComposer.types';
 import type { AuthenticatedFetchFn } from '../../../services/EntityCreationService';
 import { fieldValue, withValue } from '../decisionDraft';
@@ -42,9 +44,11 @@ const refuseFetch = (() =>
 /** Plain text of a body the user switched to rich text: block ends become line breaks, tags are dropped. */
 function toPlainText(body: string, format: EmailComposerState['bodyFormat']): string {
   if (format !== 'HTML' || !/[<&]/.test(body)) return body;
-  const element = document.createElement('div');
-  element.innerHTML = body.replace(/<\s*br\s*\/?>/gi, '\n').replace(/<\s*\/\s*(p|div|li|h[1-6])\s*>/gi, '\n');
-  return (element.textContent ?? '').replace(/\n{3,}/g, '\n\n').trim();
+  // DOMParser builds an inert document: nothing in the markup runs (an `innerHTML` write on a detached element would run
+  // <img onerror>, and the body carries the record name).
+  const withBreaks = body.replace(/<\s*br\s*\/?>/gi, '\n').replace(/<\s*\/\s*(p|div|li|h[1-6])\s*>/gi, '\n');
+  const text = new DOMParser().parseFromString(withBreaks, 'text/html').body.textContent ?? '';
+  return text.replace(/\n{3,}/g, '\n\n').trim();
 }
 
 export const EmailMessageFields: React.FC<{ scope: StepScope }> = ({ scope }) => {
@@ -53,6 +57,8 @@ export const EmailMessageFields: React.FC<{ scope: StepScope }> = ({ scope }) =>
   const latest = React.useRef(draft);
   latest.current = draft;
   const [otherRecipients, setOtherRecipients] = React.useState(false);
+  // The contact picked in the side pane that gave no usable address: said out loud, never a silent no-op.
+  const [noAddressFor, setNoAddressFor] = React.useState<string | null>(null);
 
   // The composer is uncontrolled: it starts from the step's values as they are when the step opens.
   const [initial] = React.useState(() => ({
@@ -88,13 +94,18 @@ export const EmailMessageFields: React.FC<{ scope: StepScope }> = ({ scope }) =>
   const onLookupRecipients = React.useMemo(() => {
     if (!paneForContacts || !openLookup) return undefined;
     return async (field: 'to' | 'cc' | 'bcc'): Promise<IRecipient[] | null> => {
+      setNoAddressFor(null);
       try {
         const picked = await openLookup({ kind: 'Person', entity: 'contact', parameterCode: field });
-        const email = picked?.email?.trim();
-        // A contact with no email address cannot receive the inquiry: nothing is added.
-        return picked && email
-          ? [{ email, displayName: picked.name, resolved: true, sourceId: picked.id, entityType: 'contact' }]
-          : null;
+        if (!picked) return null; // the pane was cancelled
+        const email = picked.email?.trim();
+        // A contact with no usable address (none on file, or the read failed) cannot receive the inquiry: nothing is added,
+        // and the step says so.
+        if (!email || !EMAIL_RE.test(email)) {
+          setNoAddressFor(picked.name?.trim() || 'That contact');
+          return null;
+        }
+        return [{ email, displayName: picked.name, resolved: true, sourceId: picked.id, entityType: 'contact' }];
       } catch {
         return null;
       }
@@ -119,6 +130,11 @@ export const EmailMessageFields: React.FC<{ scope: StepScope }> = ({ scope }) =>
         onStateChange={onStateChange}
         onLookupRecipients={onLookupRecipients}
       />
+      {noAddressFor ? (
+        <MessageBar intent="warning" data-testid="no-email">
+          <MessageBarBody>{noAddressFor} has no email address that could be read; type one in To.</MessageBarBody>
+        </MessageBar>
+      ) : null}
       {otherRecipients ? (
         <MessageBar intent="warning" data-testid="cc-not-sent">
           <MessageBarBody>Cc and Bcc are not sent with this step. Add every recipient to To.</MessageBarBody>

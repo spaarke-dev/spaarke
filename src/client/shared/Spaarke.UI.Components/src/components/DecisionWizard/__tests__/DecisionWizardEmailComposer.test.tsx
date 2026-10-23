@@ -13,7 +13,13 @@
 import '@testing-library/jest-dom';
 import * as React from 'react';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
-import type { DecisionAction, DecisionOpenLookup, DecisionPlan, DecisionReview } from '../decisionWizardTypes';
+import type {
+  DecisionAction,
+  DecisionOpenLookup,
+  DecisionPlan,
+  DecisionReview,
+  DecisionWizardItem,
+} from '../decisionWizardTypes';
 import { DecisionWizard } from '../DecisionWizard';
 import { PATH_B_ID, matterCore, pathBItem, pathBPlan, sendInquiry } from '../__fixtures__/decisionWizardFixtures';
 import { makeLoader, makeService, renderWizard } from './decisionTestKit';
@@ -33,11 +39,15 @@ const composerInquiry = (prefillTo: DecisionAction['prefillTo'] = null): Decisio
   prefillTo,
 });
 
-function setup(plan: DecisionPlan, overrides: Partial<React.ComponentProps<typeof DecisionWizard>> = {}) {
+function setup(
+  plan: DecisionPlan,
+  overrides: Partial<React.ComponentProps<typeof DecisionWizard>> = {},
+  item: DecisionWizardItem = pathBItem
+) {
   const service = makeService({ plans: { [PATH_B_ID]: plan } });
   const view = renderWizard({
     service,
-    loadItem: makeLoader([pathBItem]),
+    loadItem: makeLoader([item]),
     itemIds: [PATH_B_ID],
     startItemId: PATH_B_ID,
     ...overrides,
@@ -180,6 +190,134 @@ describe('message step in the EmailComposer (task 160)', () => {
     const step = await toInquiry();
 
     expect(within(step).queryByRole('button', { name: 'Look up To recipients' })).toBeNull();
+  });
+
+  it('a side-pane pick with no email address says so and tells the user to type one in To (F2)', async () => {
+    const openLookup = jest.fn<ReturnType<DecisionOpenLookup>, Parameters<DecisionOpenLookup>>(async () => ({
+      id: 'cccccccc-0000-0000-0000-0000000000cc',
+      name: 'No Mail',
+    }));
+    setup(planWith(composerInquiry(null)), { openLookup });
+    const step = await toInquiry();
+    expect(within(step).queryByTestId('no-email')).toBeNull();
+
+    click(within(step).getByRole('button', { name: 'Look up To recipients' }));
+
+    const warning = await within(step).findByTestId('no-email');
+    expect(warning).toHaveTextContent('No Mail has no email address');
+    expect(warning).toHaveTextContent('type one in To');
+  });
+
+  it('a pick whose address is not a usable address is treated as having none (F2)', async () => {
+    const openLookup = jest.fn<ReturnType<DecisionOpenLookup>, Parameters<DecisionOpenLookup>>(async () => ({
+      id: 'cccccccc-0000-0000-0000-0000000000dd',
+      name: 'Odd Mail',
+      email: 'lead@firm',
+    }));
+    setup(planWith(composerInquiry(null)), { openLookup });
+    const step = await toInquiry();
+
+    click(within(step).getByRole('button', { name: 'Look up To recipients' }));
+
+    expect(await within(step).findByTestId('no-email')).toHaveTextContent('Odd Mail has no email address');
+    expect(button(/^next$/i)).toBeDisabled();
+  });
+
+  it('the no-address warning clears on a later pick with an address; a cancelled pane warns of nothing (F2 must-not-fire)', async () => {
+    const answers: Array<{ id: string; name: string; email?: string } | null> = [
+      null,
+      { id: 'cccccccc-0000-0000-0000-0000000000cc', name: 'No Mail' },
+      { id: 'cccccccc-0000-0000-0000-0000000000bb', name: 'Dana Whitfield', email: 'dana@firm.example' },
+    ];
+    const openLookup = jest.fn<ReturnType<DecisionOpenLookup>, Parameters<DecisionOpenLookup>>(
+      async () => answers.shift() ?? null
+    );
+    setup(planWith(composerInquiry(null)), { openLookup });
+    const step = await toInquiry();
+    const lookup = () => click(within(step).getByRole('button', { name: 'Look up To recipients' }));
+
+    lookup();
+    await waitFor(() => expect(openLookup).toHaveBeenCalledTimes(1));
+    expect(within(step).queryByTestId('no-email')).toBeNull();
+
+    lookup();
+    expect(await within(step).findByTestId('no-email')).toBeInTheDocument();
+
+    lookup();
+    await waitFor(() => expect(within(step).queryByTestId('no-email')).toBeNull());
+    await waitFor(() => expect(button(/^next$/i)).toBeEnabled());
+  });
+
+  it('Cc and Bcc are not sent: adding a Cc shows the warning (F3b)', async () => {
+    setup(planWith(composerInquiry([LEAD])));
+    const step = await toInquiry();
+    expect(within(step).queryByTestId('cc-not-sent')).toBeNull();
+
+    const cc = within(step).getByRole('textbox', { name: 'Cc' });
+    fireEvent.change(cc, { target: { value: 'copy@firm.example' } });
+    fireEvent.keyDown(cc, { key: 'Enter' });
+
+    expect(await within(step).findByTestId('cc-not-sent')).toHaveTextContent('Cc and Bcc are not sent');
+  });
+
+  it('mounting the composer is not a choice: opening and leaving the step asks nothing (F3b)', async () => {
+    const { onClose } = setup(planWith(composerInquiry([LEAD])));
+    await toInquiry();
+
+    click(button(/^close$/i));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText('Discard unrecorded choices?')).toBeNull();
+  });
+
+  it('typing in the composer is a choice: leaving the step asks (F3b must-not-fire)', async () => {
+    const { onClose } = setup(planWith(composerInquiry([LEAD])));
+    const step = await toInquiry();
+
+    fireEvent.change(within(step).getByRole('textbox', { name: 'Subject' }), { target: { value: 'Budget question' } });
+    click(button(/^close$/i));
+
+    expect(await screen.findByText('Discard unrecorded choices?')).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('a pre-fill that is not a usable address blocks Next (the server refuses it too)', async () => {
+    setup(planWith(composerInquiry([{ ...LEAD, email: 'lead@firm' }])));
+    const step = await toInquiry();
+
+    expect(within(step).getByText('lead@firm')).toBeInTheDocument();
+    expect(button(/^next$/i)).toBeDisabled();
+  });
+
+  it('a matter name that is markup never runs when the body is switched to rich text (F1, stored XSS)', async () => {
+    const payload = 'Acme <img src=x onerror="window.__xss=1">';
+    const writes: string[] = [];
+    const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML')!;
+    Object.defineProperty(Element.prototype, 'innerHTML', {
+      ...descriptor,
+      set(this: Element, value: string) {
+        writes.push(String(value));
+        descriptor.set!.call(this, value);
+      },
+    });
+    try {
+      setup(planWith(composerInquiry([LEAD])), {}, { ...pathBItem, core: { ...matterCore, name: payload } });
+      const step = await toInquiry();
+      expect((within(step).getByRole('textbox', { name: 'Message body' }) as HTMLTextAreaElement).value).toContain(
+        'onerror'
+      );
+
+      click(within(step).getByRole('button', { name: 'Switch to rich text' }));
+      await waitFor(() => expect(within(step).queryByRole('textbox', { name: 'Message body' })).toBeNull());
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect((window as unknown as { __xss?: number }).__xss).toBeUndefined();
+      // jsdom never loads an <img>, so a live <img onerror> cannot fire here; the sink itself is what is pinned:
+      // nothing the wizard does hands a draft to `innerHTML`.
+      expect(writes.filter(w => /onerror/i.test(w))).toEqual([]);
+    } finally {
+      Object.defineProperty(Element.prototype, 'innerHTML', descriptor);
+    }
   });
 
   it('must-not-fire: an action without a composer keeps one field per parameter', async () => {
