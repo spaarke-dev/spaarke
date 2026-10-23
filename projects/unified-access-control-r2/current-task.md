@@ -2,67 +2,67 @@
 
 > **Format:** this file holds the CURRENT state only. Rewrite it at each checkpoint (never prepend), and keep it at or under 10 KB.
 > - **Standing rules:** the project `CLAUDE.md`.
-> - **Decisions:** `notes/session27-owner-decisions-and-research.md`, now at **round 122 (2026-10-22)**.
+> - **Decisions:** `notes/session27-owner-decisions-and-research.md` (round 125 is the latest owner action: #1830 container removed, 65a3fab2 re-provisioned).
 > - **Defer list:** `notes/defer-issues.md`.
 > - **Delete design:** `notes/core-record-delete-design.md` (§12 = ebilling D-146, §13 = slice D Restrict, §14 = ebilling EB-D-148 Procedures).
-> - **Task 191 design + T191a results:** `notes/2179-flagged-external-dataverse-design.md` (last sections: carried-in answer, spend decision, T191a read-only and live spike F1–F5).
-> - **Task 190 / round 122:** `notes/task-190-legacy-backfill.md`, `notes/task-190-round122-linked-eml-access.md`.
-> - **Previous copy:** `notes/handoff-history/current-task-2026-10-22-cp59.md`.
+> - **Task 191 design:** `notes/2179-flagged-external-dataverse-design.md` (last section: D-185 input).
+> - **Last deploy + gate:** `notes/deploy-gate-2026-10-23-1fa0cf5cb8.md`.
+> - **Previous copy:** `notes/handoff-history/current-task-2026-10-22-cp60.md`.
 
-> **Last Updated**: 2026-10-22 (checkpoint #60).
+> **Last Updated**: 2026-10-23 (checkpoint #61).
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
 | **Mode** | Final push, round-90 wrap-up rules. Merge only when BOTH required checks (Router + "Client lint (type-aware ratchet)") are green. One background merge job at a time. Merge with `--squash --match-head-commit`, no `--delete-branch`, after `git merge-tree`. Deploy via R3. A task closes on merge + deploy + a server-side gate. |
-| **Fix bar** | The most technically correct fix; no complexity without value. Every defect found is fixed or filed. |
+| **Fix bar** | The most technically correct fix; no complexity without value. Every defect found is fixed or filed. Public repo: no live exploit mechanism in issues, PRs, commits or committed notes. |
 | **Agents** | Opus for executors and verifiers, with every model stated. Helper scripts get a unique prefix in a private folder. Cap 4 concurrent. |
-| **Dev live** | BFF `1.0.0+a7b956fb55` since **02:18:52Z 2026-10-22** (R3, owner go): #2221 (task 190) + #2223 + fm-016. Rollback snapshot: R3 `deploy/rollback/wwwroot-20261022T021635Z`. Master is now **230302c307** (#2234, round 122); the only src/ change since live is #2234. |
-| **Peers** | R3 `spaarke-wt-spa-external-access-platform-05`, ebilling `spaarke-wt-ebilling-r1-5b`, word-add-in **`spaarke-wt-spaarkeai-word-add-in-r1-c4`** (the -a1 name is gone), field-mapping `spaarke-wt-field-mapping-server-write-pa-be`, provisioning `spaarke-wt-customer-provisioning-orchest-ff`, ontology `spaarke-wt-spaarke-ontology-platform-r1-79`. |
+| **Dev live** | BFF `1.0.0+1fa0cf5cb8` since **2026-10-23 00:00Z** (R3, owner go). Gate PASS. Rollback: R3 `deploy/rollback/wwwroot-20261022T235642Z`. UAC content: #2253, #2268, #2258, #2277. |
+| **Peers** | R3 **`spaarke-wt-spa-external-access-platform-08`** (renamed after a restart), ebilling `spaarke-wt-ebilling-r1-5b`, word-add-in `spaarke-wt-spaarkeai-word-add-in-r1-c4`, field-mapping `spaarke-wt-field-mapping-server-write-pa-be`, provisioning `spaarke-wt-customer-provisioning-orchest-ff`, ontology `spaarke-wt-spaarke-ontology-platform-r1-79`. |
+| **Gate tooling** | App Insights `spe-insights-dev-67e2xz` (RG `spe-infrastructure-westus2`), role `spaarke-bff-dev`. Pass `--offset Nd` (default look-back is 1 h). Use `contains`, not `has_any`, for exception names. Script: temp `uacmerge/uacg/uacg_gate.sh`. |
 
 ## Next actions (mine)
-1. **Round 122 (#2234, merged 230302c307): needs deploy + gate.** Batch it with the #2237 fix into one R3 deploy (owner go in R3's session; ancestry check against a7b956fb55). Dev already has the precondition (`Set-DocumentNarrowingFieldSecurity.ps1`). Gate: the `secure-child-reconciliation` report shows `releaseRefusedLinkColumnsNotSecured = 0`, with no new exception class. Then record it in note §5 and remove C:/wt122 (check junctions first).
-2. **#2237 (DocumentProfileOutputMapper writes AI-output keys app-only, bypassing RefuseAppOnlyWrite and the link refusals).**
-   - An implementer agent is running in worktree C:/wt2237, branch `fix/uac-2237-profile-mapper-refusal`.
-   - Then: one adversarial pass (two if it counts as security), merge, and add it to the round 122 deploy.
-3. **Task 191: blocked on two owner decisions, asked in text (the owner asked for explanations, and those were given).**
-   - **F1:** a flagged user can lower `sprk_accesspermission` on a row shared with them for Write. Recommended: field security on that column, with writers = the 2 BFF app users plus a profile on the internal business units' default teams. The alternative is read-only mirror shares.
-   - **S4:** recommended: view/download only for flagged users. The other options are a BFF SSH-console invite test, or defer.
-   - **Other T191a findings:** F2 (RevokeAccess leaves principal-object-access rows at mask 0; recheck the count), F3 (search latency for team shares; recheck after 24 h), F4 (a business-unit move does not move owned rows), F5 (WhoAmI ignores impersonation).
-   - **Spike scripts:** in temp `uac191a/` and `uac191b/`. Undo has been run.
-4. **Task 190 owner items:**
-   - **Apply** (`EmailArchiveLinkSweep:Apply`; restarts the BFF). Before it, run the migration report-only to `passComplete`. After it, run the migration again and save the ResultJson.
-   - **The owner's Restricted call** on the 91 unmatched archives plus their 20 children.
-5. **CI:** the Tier 1 Arch Tests job has a 5-minute timeout that intermittently cancels it (evidence on #2224). Re-run the job after the run completes.
+1. **Waiting on ebilling: the F4/F3 fix diff plus the master-merge SHA.** Re-check:
+   - the five conditions for option (b): DuplicatesShownAsync fails closed with tests; the Signal's frozen `sprk_corerecordid` is refused to app-only writers; the mismatch code applies on every generic write path, including the field-mapping push; the sprk_signal regarding-invoice and regarding-invoice-line AccessColumns are present; #2294 states the residual honestly;
+   - the #2257 merge checklist (PatchAsync threads `impersonateSystemUserId`, OutputMappingRunIdentityTests is re-pointed, ReferencersOf("PatchAsync") is exact);
+   - the #2277 guard entries (K1 below).
+2. **Waiting on R3 (ISS-005): the F3-a / F3-b diff.** Re-check F3-a (local-variable URL following plus a `new Uri` unwrap), F3-b (the NoneForForeignEnvironment guard moved to Roslyn) and the doc fixes. The owner's decisions on the dedicated contact owner team, and on private tracking of the pre-existing finding, go through R3. UAC records only the reference once decided, with no mechanism in public text.
+3. **#2292 (membership junction never populated: an alternate-key miss throws instead of creating).** Filed; not an access input. Fix it when there is capacity, or leave it filed.
 
 ## Peer reviews owed (UAC is the gate)
-- **field-mapping 018a:** a condition-(b) adversarial reviewer is running. Then reply ACCEPT, or send F items, and concur on the maker's-contact default with two conditions: the adapter surfaces `default_value_dropped`, and it never writes Assigned To app-only after the drop. Also owed: 017 and 018b.
 - **ebilling:**
-  - 088 is fully accepted (pre-flight 83aec94fc0 ACCEPT; profile reuse conditions met).
-  - 119 was accepted at 8986bc5292.
-  - 095: the submission Restricted is non-provisional (test a4695317e4). #2236 was closed as a duplicate of #2237.
-  - Gates owed: 081, 086 (2 passes), 089, 090, 094, 095, 098 (2 passes), 117.
+  - **090 round 2: ACCEPTED** (12329abebe..64e39a9d5f, sent 2026-10-23). Known limits:
+    - K1, a merge obligation: when #2277 is merged in, add `SecuredOnlyByDeployScript` entries, or set Entity.xml `IsSecured=1`, for sprk_ruleset, sprk_procedureassignment and 081's four tables;
+    - K2, to be filed: a reused blob keeps its ETag;
+    - K3, to be filed: the parent-gone pass does not check `pathParent`.
+  - 081 accepted (round 3). The 188 rewrite was accepted. The merge e371dce6bf was reviewed.
+  - Still owed: 086 (2 passes), 089, 094, 095, 098 (2 passes), 117.
   - 091 still owes the what-if, `Test-EbillingFileStoreRole.ps1` run live, and the tag-write proof output.
-  - Standing rule: no role privilege on the Procedure tables before 191 without UAC review.
-- **word-add-in task 130:** two security passes when the PR arrives. They were told about the #2234 merge.
+  - Standing rule: no role privilege on the Procedure tables without UAC review. D-185: the External Collaborator role gets none on rule set, policy or policy version.
+- **field-mapping:** 017 is blocked; 018b is owed.
+- **word-add-in task 130:** two security passes when the PR arrives.
 
 ## Owner items outstanding
-1. F1 and S4 (above) block T191b onward.
-2. Task 190 Apply, and the Restricted call on the unmatched archives.
-3. **Optional live checks:** partner document read (D7 matters `b68299c6…` → 0 documents, `86335ce3…` → 3); #2177 Outlook (2 .eml saves); #2161 re-file; T191 MDA/Copilot/grid checks.
-4. **Carried:**
+1. **Task 191:** F1 and S4 block T191b onward. F1 is the flagged user lowering `sprk_accesspermission`; S4 is view/download only.
+2. **Task 190:** Apply, and the Restricted call on the 91 unmatched archives plus their 20 children.
+3. **Decisions:**
+   - #2245 (field-secure `sprk_driveitemid`, or bind the trim to the bound id);
+   - #2250 (refuse `sprk_assigned*` on the app-only playbook writers);
+   - #2260;
+   - K5 / #2270 (via R3);
+   - #2262 (the other writing nodes run as the person).
+4. **Optional live checks:** partner document read (D7); #2177 Outlook; #2161 re-file; T191 MDA/Copilot/grid checks.
+5. **Carried:**
    - #2163 environment-change go.
    - 186: Tracy intake checks 3/5b/6 and the Workforce role export.
    - 036 gates (ii)–(vi).
    - #2153 sign-off (#2152, C:/wt2152, draft).
 
-## Done 2026-10-22 (since checkpoint #59)
-- **Task 190:** closed. #2221 was deployed in a7b956fb55; server gate PASS (the sweep dry run equals the census); R3's 30-minute reading was clean.
-- **#2230** merged (fixes #2229, SPE suite fixture drift).
-- **Round 122:** designed, reviewed (word-add-in plus 2 adversarial passes, 2 fix rounds) and merged as **230302c307** (#2234).
-- **Task 191:** the carried-in question is answered (no new gate). The owner kept spend visible to flagged users. T191a S1–S3 ran live and were undone; S4 is blocked on a credential.
-- **Peers:**
-  - ebilling 119 and 088 ACCEPTED.
-  - field-mapping 018 questions answered: (1)(a) refuse with a field-naming code; (2) accept; (3) OK with conditions.
-- **Filed:** #2237. **Housekeeping:** merged worktrees removed, including wt2103 and wt036 (their junctions were unlinked first).
+## Done since checkpoint #60
+- **Round 122 (#2234), #2237, #2240, #2246, #2247:** deployed in 1283c41817 (2026-10-22 12:50Z); gate PASS.
+- **#2251 (#2253), #1830 / task 192 (#2268), #2257 (#2258), #2273 (#2277):** merged and deployed in 1fa0cf5cb8; gate PASS; task 192 closed.
+- **#1830, owner round 125:** dead container removed from the stamp config; 65a3fab2 re-provisioned (new container held by 1 project).
+- **Filed:** #2292. **Recorded:** D-185 input for task 191.
+- **Housekeeping:** removed worktrees C:/wt2257, C:/wt2273 and C:/wt2246 (their junctions were unlinked first).
+- **Next PCF CommunicationActions version:** 1.3.22.
