@@ -122,8 +122,8 @@ public sealed class EarlierInvoiceReadabilityTests
 
     private int Reads(string set) => _paths.Count(p => p.StartsWith(set + "?", StringComparison.Ordinal));
 
-    /// <summary>The wording users see in place of a withheld Duplicate's sentence. ebilling's write-time withheld template aliases this
-    /// const, so a change here changes stored text too: change it only on purpose, with ebilling.</summary>
+    /// <summary>The wording users see in place of a withheld Duplicate's sentence. ebilling's write-time withheld template
+    /// (`BillingRuleCatalogue.WithheldDuplicateTemplate`, on `work/ebilling-r1` until it merges) aliases this const, so a change here changes stored text too: change it only on purpose, with ebilling.</summary>
     [Fact]
     public void TheWithheldSentence_IsPinned() =>
         EarlierInvoiceReadability.WithheldSentence.Should().Be("This matches an earlier submission.");
