@@ -518,7 +518,9 @@ public class FinanceAuthorizationFilter : IEndpointFilter
                 // Task 188 round 4b (F1-2): the caller's own rights on the document, then THE external document
                 // narrowing (InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync). A document it hides from a caller who
                 // is not an internal systemuser denies with the reason an unreadable one gets; an internal caller (the
-                // ebilling confirm and reject writes) makes no narrowing call.
+                // ebilling confirm and reject writes) makes no narrowing call. On an /api/finance route the external branch is
+                // unreachable (step 0 has already refused every caller who is not an internal systemuser); it stays as defence in
+                // depth, for a route that runs this filter without step 0.
                 var result = await InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync(
                     httpContext, _authorizationService, userId, new[] { check.RecordId }, check.Operation, callerToken,
                     "finance-document-check", logger, ct);
