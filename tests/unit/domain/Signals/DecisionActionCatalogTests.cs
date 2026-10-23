@@ -805,22 +805,43 @@ public class DecisionActionCatalogTests
 
     private const string ReviseThenVariance = """{"actions":["send-budget-inquiry","revise-budget","approve-variance"],"nextSteps":[]}""";
 
-    /// <summary>The caller's reads: the Signal, the matter, and the matter's active budgets (<paramref name="budgets"/>, or a throw).</summary>
+    /// <summary>The caller's reads: the Signal, the matter (readable or not), and the caller's OWN read of <c>sprk_budgets</c>
+    /// (<paramref name="callerBudgets"/>, which a Deep Read can leave blind to a parent-BU budget; the routes must not decide on it).</summary>
     private static (IDataverseUserClient Users, Mock<IDataverseUserClient> Mock) UsersWithBudgets(
-        DataverseUserResponse? budgets, Exception? budgetsThrow = null)
+        DataverseUserResponse? callerBudgets = null, bool matterReadable = true)
     {
         var users = new Mock<IDataverseUserClient>();
         users.Setup(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_signals(", StringComparison.Ordinal)), It.IsAny<CancellationToken>())).ReturnsAsync(SignalRow());
-        users.Setup(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_matters(", StringComparison.Ordinal)), It.IsAny<CancellationToken>())).ReturnsAsync(Ok(new { createdon = "x" }));
+        users.Setup(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_matters(", StringComparison.Ordinal)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(matterReadable ? Ok(new { createdon = "x" }) : Fail(404, DataverseUserClientErrorCodes.NotFound));
         users.Setup(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_projects(", StringComparison.Ordinal)), It.IsAny<CancellationToken>())).ReturnsAsync(Ok(new { createdon = "x" }));
-        var budgetRead = users.Setup(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_budgets?", StringComparison.Ordinal)), It.IsAny<CancellationToken>()));
-        if (budgetsThrow is not null) budgetRead.ThrowsAsync(budgetsThrow);
-        else budgetRead.ReturnsAsync(budgets!);
+        users.Setup(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_budgets?", StringComparison.Ordinal)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(callerBudgets ?? Budgets(0));
         return (users.Object, users);
     }
 
     private static DataverseUserResponse Budgets(int count) =>
         Ok(new { value = Enumerable.Range(0, count).Select(_ => new { sprk_budgetid = Guid.NewGuid() }).ToArray() });
+
+    /// <summary>Task 161 fix round 1 (F1-a): the BFF's OWN (app-only) read of the matter's active budgets, which sees every budget.
+    /// <paramref name="count"/> rows, or a throw.</summary>
+    private sealed class AppBudgets
+    {
+        public AppBudgets(int count = 0, Exception? throws = null)
+        {
+            Mock.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+                .Returns((QueryExpression q, CancellationToken _) =>
+                {
+                    Queries.Add(q);
+                    if (throws is not null) throw throws;
+                    return Task.FromResult(new EntityCollection(Enumerable.Range(0, count).Select(_ => new Entity("sprk_budget", Guid.NewGuid())).ToList()));
+                });
+        }
+
+        public Mock<IGenericEntityService> Mock { get; } = new();
+
+        public List<QueryExpression> Queries { get; } = new();
+    }
 
     private static async Task<DecisionPlanResponse> PlanRouteAsync(SignalCoreRecordAccess access, string plan = ReviseThenVariance)
     {
@@ -829,15 +850,16 @@ public class DecisionActionCatalogTests
         return result.Should().BeOfType<Ok<DecisionPlanResponse>>().Subject.Value!;
     }
 
-    private static void BudgetsReadTimes(Mock<IDataverseUserClient> mock, Times times) =>
+    private static void CallerBudgetsReadTimes(Mock<IDataverseUserClient> mock, Times times) =>
         mock.Verify(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_budgets?", StringComparison.Ordinal)), It.IsAny<CancellationToken>()), times);
 
     [Fact]
     public async Task ThePlanRoute_OffersCreateBudget_InPlaceOfReviseBudget_WhenTheMatterHasNoActiveBudget_D180()
     {
-        var (users, mock) = UsersWithBudgets(Budgets(0));
+        var (users, mock) = UsersWithBudgets();
+        var app = new AppBudgets(0);
 
-        var body = await PlanRouteAsync(Access(users));
+        var body = await PlanRouteAsync(Access(users, budgets: app));
 
         body.Actions.Select(a => a.Code).Should().Equal("send-budget-inquiry", "create-budget", "approve-variance");
         body.Actions.Select(a => a.IsRecommended).Should().Equal(true, false, false);
@@ -845,10 +867,12 @@ public class DecisionActionCatalogTests
         create.Label.Should().Be("Create budget");
         create.Parameters.Select(p => p.Code).Should().Equal("amount", "reason");
         create.Excludes.Should().Equal("approve-variance");
-        mock.Verify(u => u.GetAsync(
-            It.Is<string>(p => p.StartsWith("sprk_budgets?", StringComparison.Ordinal)
-                && p.Contains($"_sprk_matter_value eq {CoreId:D}", StringComparison.Ordinal) && p.Contains("statecode eq 0", StringComparison.Ordinal)),
-            It.IsAny<CancellationToken>()), Times.Once, "one read, as the caller, of the ACTIVE budgets of the core matter");
+        var query = app.Queries.Should().ContainSingle("one read, the BFF's own (F1-a), of the ACTIVE budgets of the core matter").Subject;
+        query.EntityName.Should().Be("sprk_budget");
+        query.TopCount.Should().Be(1);
+        query.Criteria.Conditions.Select(c => (c.AttributeName, c.Values.Single())).Should()
+            .BeEquivalentTo(new[] { ("sprk_matter", (object)CoreId), ("statecode", (object)0) });
+        CallerBudgetsReadTimes(mock, Times.Never());
     }
 
     [Theory]
@@ -856,27 +880,33 @@ public class DecisionActionCatalogTests
     [InlineData(3)]
     public async Task ThePlanRoute_StillOffersReviseBudget_WhenTheMatterHasAnActiveBudget_MustNotFire_D180(int budgets)
     {
-        var (users, _) = UsersWithBudgets(Budgets(budgets));
+        var (users, _) = UsersWithBudgets();
 
-        var body = await PlanRouteAsync(Access(users));
+        var body = await PlanRouteAsync(Access(users, budgets: new AppBudgets(budgets)));
 
         body.Actions.Select(a => a.Code).Should().Equal("send-budget-inquiry", "revise-budget", "approve-variance");
     }
 
     [Fact]
+    public async Task ThePlanRoute_StillOffersReviseBudget_WhenOnlyTheBffCanSeeTheBudget_TheCallersOwnReadSeesNone_F1a()
+    {
+        // A Core User whose Read on sprk_budget is Deep cannot see a budget owned in a parent business unit: their own read says 0.
+        var (users, mock) = UsersWithBudgets(callerBudgets: Budgets(0));
+
+        var body = await PlanRouteAsync(Access(users, budgets: new AppBudgets(1)));
+
+        body.Actions.Select(a => a.Code).Should().Equal("send-budget-inquiry", "revise-budget", "approve-variance");
+        CallerBudgetsReadTimes(mock, Times.Never());
+    }
+
+    [Fact]
     public async Task ThePlanRoute_OffersReviseBudget_AndDoesNotFail_WhenTheBudgetsCannotBeCounted_D180()
     {
-        foreach (var (budgets, thrown) in new (DataverseUserResponse?, Exception?)[]
+        foreach (var thrown in new Exception[] { new TimeoutException("no answer"), new InvalidOperationException("Dataverse 503") })
         {
-            (Fail(500, DataverseUserClientErrorCodes.ServiceError), null),
-            (Fail(403, DataverseUserClientErrorCodes.AccessDenied), null),
-            (Ok(new { createdon = "not a list" }), null),
-            (null, new TimeoutException("no answer")),
-        })
-        {
-            var (users, _) = UsersWithBudgets(budgets, thrown);
+            var (users, _) = UsersWithBudgets();
 
-            var body = await PlanRouteAsync(Access(users));
+            var body = await PlanRouteAsync(Access(users, budgets: new AppBudgets(throws: thrown)));
 
             body.Actions.Select(a => a.Code).Should().Equal("send-budget-inquiry", "revise-budget", "approve-variance");
         }
@@ -885,15 +915,49 @@ public class DecisionActionCatalogTests
     [Fact]
     public async Task ThePlanRoute_ReadsNoBudgets_ForAPlanWithoutReviseBudget_OrACoreThatIsNotAMatter_D180()
     {
-        var (withoutRevise, mockA) = UsersWithBudgets(Budgets(0));
-        var body = await PlanRouteAsync(Access(withoutRevise), """{"actions":["send-budget-inquiry","approve-variance"]}""");
+        var (withoutRevise, mockA) = UsersWithBudgets();
+        var appA = new AppBudgets(0);
+        var body = await PlanRouteAsync(Access(withoutRevise, budgets: appA), """{"actions":["send-budget-inquiry","approve-variance"]}""");
         body.Actions.Select(a => a.Code).Should().Equal("send-budget-inquiry", "approve-variance");
-        BudgetsReadTimes(mockA, Times.Never());
+        appA.Queries.Should().BeEmpty();
+        CallerBudgetsReadTimes(mockA, Times.Never());
 
-        var (project, mockB) = UsersWithBudgets(Budgets(0));
-        var projectBody = await PlanRouteAsync(Access(project, coreTable: "sprk_project", coreSet: "sprk_projects"));
+        var (project, mockB) = UsersWithBudgets();
+        var appB = new AppBudgets(0);
+        var projectBody = await PlanRouteAsync(Access(project, coreTable: "sprk_project", coreSet: "sprk_projects", budgets: appB));
         projectBody.Actions.Select(a => a.Code).Should().Equal("send-budget-inquiry", "revise-budget", "approve-variance");
-        BudgetsReadTimes(mockB, Times.Never());
+        appB.Queries.Should().BeEmpty();
+        CallerBudgetsReadTimes(mockB, Times.Never());
+    }
+
+    [Fact]
+    public async Task ThePlanRoute_NeverReadsBudgetsApp_Only_ForACallerWhoCannotReadTheMatter_F1a()
+    {
+        var (users, _) = UsersWithBudgets(matterReadable: false);
+        var app = new AppBudgets(0);
+        var plans = new DecisionPlanService(EntitiesReturningPlan(ReviseThenVariance), NullLogger<DecisionPlanService>.Instance);
+
+        var result = await DecisionPlanEndpoints.GetDecisionPlanAsync(
+            SignalId, new DefaultHttpContext(), Access(users, budgets: app), plans, NoRuleDescriber(), CancellationToken.None);
+
+        result.Should().NotBeOfType<Ok<DecisionPlanResponse>>("the matter is not readable: the uniform 404");
+        app.Queries.Should().BeEmpty("never an app-only read for a matter the caller could not read");
+    }
+
+    [Fact]
+    public async Task TheBudgetCount_IsNone_Some_OrUnknown_AndIsNotCheckedWithoutAnAllowedMatterDecision_F1b()
+    {
+        var (users, _) = UsersWithBudgets();
+        var allowed = await Access(users).AuthorizeAsync(SignalId, CancellationToken.None);
+        allowed.Outcome.Should().Be(SignalAccessOutcome.Allowed);
+
+        (await Access(users, budgets: new AppBudgets(0)).CountMatterBudgetsAsync(allowed, CancellationToken.None)).Should().Be(MatterBudgetCount.None);
+        (await Access(users, budgets: new AppBudgets(1)).CountMatterBudgetsAsync(allowed, CancellationToken.None)).Should().Be(MatterBudgetCount.Some);
+        (await Access(users, budgets: new AppBudgets(throws: new TimeoutException())).CountMatterBudgetsAsync(allowed, CancellationToken.None)).Should().Be(MatterBudgetCount.Unknown);
+
+        var app = new AppBudgets(0);
+        (await Access(users, budgets: app).CountMatterBudgetsAsync(SignalAccessDecision.NotFound, CancellationToken.None)).Should().Be(MatterBudgetCount.Unknown);
+        app.Queries.Should().BeEmpty();
     }
 
     // =================================================================================================
@@ -901,9 +965,9 @@ public class DecisionActionCatalogTests
     // =================================================================================================
 
     private static SignalCoreRecordAccess Access(
-        IDataverseUserClient users, string? coreTable = "sprk_matter", string coreSet = "sprk_matters")
+        IDataverseUserClient users, string? coreTable = "sprk_matter", string coreSet = "sprk_matters", AppBudgets? budgets = null)
     {
-        var entitiesMock = new Mock<IGenericEntityService>();
+        var entitiesMock = budgets?.Mock ?? new Mock<IGenericEntityService>();
         var entities = entitiesMock.Object;
         var typeRow = new Entity("sprk_recordtype_ref", CoreTypeId);
         if (coreTable is not null)

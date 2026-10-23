@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Membership;
@@ -31,6 +32,17 @@ public enum SignalAccessOutcome
     /// the uniform denial.
     /// </summary>
     Unavailable,
+}
+
+/// <summary>What <see cref="SignalCoreRecordAccess.CountMatterBudgetsAsync"/> found (task 161 fix round 1, F1-b).</summary>
+internal enum MatterBudgetCount
+{
+    /// <summary>The matter has no active budget.</summary>
+    None,
+    /// <summary>The matter has an active budget.</summary>
+    Some,
+    /// <summary>The count could not be read (a fault, or no allowed matter): never treated as either of the others.</summary>
+    Unknown,
 }
 
 /// <summary>What <see cref="SignalCoreRecordAccess.CheckInquiryOutcomeTodoAsync"/> found (task 154, D-111).</summary>
@@ -437,40 +449,74 @@ public sealed class SignalCoreRecordAccess
     }
 
     /// <summary>
-    /// Task 161 (D-180): the ONE substitution both routes apply. A plan that offers Revise budget on a MATTER the caller reads as having
-    /// no ACTIVE budget (<c>sprk_budget</c> with <c>sprk_matter</c> = the core record and <c>statecode</c> 0) offers Create budget in its
-    /// place (<see cref="ResolvedDecisionPlan.WithCreateBudgetInsteadOfRevise"/>). The count is read AS THE CALLER, one request, and
-    /// only when the plan offers Revise budget and the core record is a matter. A count that cannot be read (a fault, a refusal, an
-    /// answer that is not a list) substitutes nothing and never fails the route: the existing Revise budget path stays.
+    /// Task 161 (D-180): whether the plan is one the Create budget substitution can apply to at all: it offers Revise budget, and the
+    /// core record is a MATTER the caller was allowed to read (<see cref="SignalAccessOutcome.Allowed"/>, so the caller-scoped Signal
+    /// and core-record reads came first). The commit route asks this before it counts.
     /// </summary>
-    internal async Task<ResolvedDecisionPlan> WithCreateBudgetWhenNoneAsync(
-        ResolvedDecisionPlan plan, SignalAccessDecision decision, CancellationToken ct)
+    internal static bool CanSubstituteCreateBudget(ResolvedDecisionPlan plan, SignalAccessDecision decision) =>
+        plan.Actions.Any(a => a.Code == ResolvedDecisionPlan.ReviseBudgetCode)
+        && decision.Outcome == SignalAccessOutcome.Allowed
+        && string.Equals(decision.CoreTable, "sprk_matter", StringComparison.OrdinalIgnoreCase)
+        && decision.CoreId is { } matterId && matterId != Guid.Empty;
+
+    /// <summary>
+    /// Task 161 fix round 1 (F1-a, F1-b): whether the matter has an ACTIVE budget (<c>sprk_budget</c> with <c>sprk_matter</c> = the core
+    /// record and <c>statecode</c> 0), as <see cref="MatterBudgetCount"/>: one request, <c>$top 1</c>. A read that cannot be answered
+    /// (a fault, a throw), or a decision that does not name an allowed matter, is <see cref="MatterBudgetCount.Unknown"/>, never a guess.
+    /// <para>This read is the BFF's own (<see cref="IGenericEntityService"/>, the same app-only read the Know-promotion rule
+    /// POL-MATTER-NOBUDGET's evaluator makes through <see cref="PredicateCompiler.VerifiedJoins"/> <c>(sprk_matter, sprk_budget)</c>),
+    /// not the caller's: a budget created by a user in a parent business unit (<c>sprk_Matter_Budget_1n</c> is NoCascade share) is
+    /// invisible to a Core User whose Read on <c>sprk_budget</c> is Deep, and "this matter has no budget" is a fact about the matter,
+    /// not about what this caller can see. A second active budget would be double-counted by
+    /// <see cref="Sprk.Bff.Api.Services.Finance.FinanceBaseValues"/>.</para>
+    /// <para>It reveals nothing beyond what the caller can already read: the answer is only has / has-not, the same fact as
+    /// <c>sprk_matter.sprk_totalbudget</c> on a matter the caller has already read. It never runs for a matter the caller could not
+    /// read: both routes have established that (caller-scoped <see cref="AuthorizeAsync"/>) before they ask, and a decision that is not
+    /// <see cref="SignalAccessOutcome.Allowed"/> is Unknown here without a request.</para>
+    /// </summary>
+    internal async Task<MatterBudgetCount> CountMatterBudgetsAsync(SignalAccessDecision decision, CancellationToken ct)
     {
-        if (!plan.Actions.Any(a => a.Code == ResolvedDecisionPlan.ReviseBudgetCode)
+        if (decision.Outcome != SignalAccessOutcome.Allowed
             || !string.Equals(decision.CoreTable, "sprk_matter", StringComparison.OrdinalIgnoreCase)
             || decision.CoreId is not { } matterId || matterId == Guid.Empty)
         {
-            return plan;
+            return MatterBudgetCount.Unknown;
         }
 
         try
         {
-            var response = await _userClient.GetAsync(
-                $"{DecisionExec.BudgetSet}?$select=sprk_budgetid&$filter=_sprk_matter_value eq {matterId:D} and statecode eq 0&$top=1", ct).ConfigureAwait(false);
-            if (!response.IsSuccess || response.Body is not { ValueKind: JsonValueKind.Object } body
-                || !body.TryGetProperty("value", out var rows) || rows.ValueKind != JsonValueKind.Array)
-            {
-                _logger.LogWarning("Signal access: the matter's active budgets could not be counted ({ErrorCode}); Revise budget is offered as it is.", response.ErrorCode);
-                return plan;
-            }
-
-            return rows.GetArrayLength() == 0 ? plan.WithCreateBudgetInsteadOfRevise() : plan;
+            var query = new QueryExpression("sprk_budget") { ColumnSet = new ColumnSet("sprk_budgetid"), TopCount = 1 };
+            query.Criteria.AddCondition("sprk_matter", ConditionOperator.Equal, matterId);
+            query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
+            var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            return rows.Entities.Count == 0 ? MatterBudgetCount.None : MatterBudgetCount.Some;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            _logger.LogWarning("Signal access: counting the matter's active budgets faulted ({ExceptionType}); Revise budget is offered as it is.", ex.GetType().Name);
+            _logger.LogWarning("Signal access: counting the matter's active budgets faulted ({ExceptionType}); the count is unknown.", ex.GetType().Name);
+            return MatterBudgetCount.Unknown;
+        }
+    }
+
+    /// <summary>
+    /// Task 161 (D-180): the substitution the plan route applies. A plan that offers Revise budget on a MATTER the caller may read, whose
+    /// matter has no ACTIVE budget (<see cref="CountMatterBudgetsAsync"/>), offers Create budget in its place
+    /// (<see cref="ResolvedDecisionPlan.WithCreateBudgetInsteadOfRevise"/>). Only a count of <see cref="MatterBudgetCount.None"/>
+    /// substitutes: a budget that exists, and a count that cannot be read (never fails the route), leave the plan as it is. The commit
+    /// route recomputes the same decision itself (<see cref="CanSubstituteCreateBudget"/>, <see cref="CountMatterBudgetsAsync"/>)
+    /// because it must tell a count that changed from a count that could not be read.
+    /// </summary>
+    internal async Task<ResolvedDecisionPlan> WithCreateBudgetWhenNoneAsync(
+        ResolvedDecisionPlan plan, SignalAccessDecision decision, CancellationToken ct)
+    {
+        if (!CanSubstituteCreateBudget(plan, decision))
+        {
             return plan;
         }
+
+        return await CountMatterBudgetsAsync(decision, ct).ConfigureAwait(false) == MatterBudgetCount.None
+            ? plan.WithCreateBudgetInsteadOfRevise()
+            : plan;
     }
 
     /// <summary>The one reading of <see cref="InquiryDispositionService.FindOpenInquiryOfTodoAsync"/> for both routes: anything but

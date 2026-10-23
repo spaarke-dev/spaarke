@@ -10,7 +10,7 @@ Rigor FULL, model tier sonnet, effort high, steps mode directional.
 |---|---|---|
 | Catalog | `Services/Signals/Actions/DecisionActionCatalog.cs` | `create-budget` next to `revise-budget`: label "Create budget", Decide lane, WorkType fund, Judgement, Tier2b gate, `ResolvesSignal` default true, params `amount` (Money) and `reason` (TextArea), excludes `approve-variance` (made mutual by `Mutualize`). New `SubstitutionOnly` init property on the definition. |
 | Plan reduction | `Services/Signals/Actions/DecisionPlanService.cs` | `ResolvedDecisionPlan.WithCreateBudgetInsteadOfRevise()` (same pattern as `WithoutMarkComplete`); `Resolve` refuses a stored plan that names a `SubstitutionOnly` action (`action_not_allowed`), which the authoring validator reuses. |
-| The one shared function | `Services/Signals/SignalCoreRecordAccess.cs` | `WithCreateBudgetWhenNoneAsync(plan, decision, ct)`: one caller-identity read, `sprk_budgets?$filter=_sprk_matter_value eq {core} and statecode eq 0&$top=1`; only when the plan has revise-budget and the core table is `sprk_matter`; unreadable (non-success, non-list body, throw) means no substitution and no failure. `SignalAccessDecision` gained `CoreTable` (set from the catalog row `AuthorizeAsync` already resolved) so neither route resolves the table again. |
+| The one shared function | `Services/Signals/SignalCoreRecordAccess.cs` | `WithCreateBudgetWhenNoneAsync(plan, decision, ct)` (plan route) over `CanSubstituteCreateBudget` and `CountMatterBudgetsAsync` (commit route): one app-only read of the matter's active budgets (fix round 1, F1-a; originally a caller-identity read); only when the plan has revise-budget and the core table is `sprk_matter`; unreadable means `Unknown`: no substitution and no failure. `SignalAccessDecision` gained `CoreTable` (set from the catalog row `AuthorizeAsync` already resolved) so neither route resolves the table again. |
 | Plan route | `Api/Signals/DecisionPlanEndpoints.cs` | Calls the function after the Mark-complete reduction. |
 | Commit route | `Services/Signals/DecisionCommitService.cs` | `PrepareAsync` recomputes the substitution through the same function, before the existing "every offered action exactly once" check, so a mismatch is the existing `ActionsDoNotMatchPlan` refusal. |
 | Executor | `Services/Signals/Actions/DecisionActionExecutors.cs`, `Infrastructure/DI/SignalsModule.cs` | `CreateBudgetExecutor : ChildCreateExecutorBase` (table `sprk_budget`, `prvCreatesprk_Budget`), registered beside `ReviseBudgetExecutor`. Writes `sprk_name`, `sprk_totalbudget`, `sprk_matter@odata.bind` through `DecisionRouteCores.CreateChildAsync` (the secure ribbon's "New Budget" path), as the caller. |
@@ -30,8 +30,8 @@ Escalation trigger checked: the child-record route core does create `sprk_budget
 
 ## Known limits (K class, one line each)
 
-- K2: a caller who can read no budget of a secure matter reads zero and is offered Create budget, though they could not revise one either; the create core's own checks still decide whether they may create.
-- K2: two different reviews committed at the same moment on a matter with no budget can each create one (the review ledger guards a single review id only). Same exposure as the ribbon's New Budget.
+- K2 (closed in fix round 1, F1-a): the count was the caller's own read; it is now the BFF's app-only read.
+- K2 (closed in fix round 1, K2a): two different reviews committed at the same moment on a matter with no budget could each create one. A `decision-budget:{tenant}:{matterId}` lease now serializes them.
 - K4: no re-evaluation trigger is queued after create-budget (revise-budget queues one for its revision); the Signal closes Acted at commit and the no-budget condition clears on the next evaluation.
 
 ## Tests
@@ -58,4 +58,45 @@ New tests: catalog (create-budget twin, authoring catalog, in-place replacement,
 
 adr-check: compliant with ADR-001, 002, 008, 010, 013 (not touched), 038 (tests under the KEEP paths); no violation. code-review: no F-class finding; the K-class items above. Not done (main session): POML step 3 (merge, deploy dev BFF) and step 4 (dev check on a zz- matter, `notes/deploy-log.md`).
 
-rework: none task 161
+## Fix round 1 (PR #2290, independent Opus review)
+
+| Finding | Fix | Files |
+|---|---|---|
+| F1-a "has no budget" read as the caller | `SignalCoreRecordAccess.CountMatterBudgetsAsync` reads `sprk_budget` (`sprk_matter` = core, `statecode` 0, `$top 1`) through the BFF's `IGenericEntityService` (app-only), the read the POL-MATTER-NOBUDGET evaluator makes through `PredicateCompiler.VerifiedJoins (sprk_matter, sprk_budget)`. Runs only for an `Allowed` decision whose core table is `sprk_matter` (both routes establish the caller's read of the Signal and matter first); any other decision is `Unknown` with no request. Comment explains why the read is the BFF's. | `SignalCoreRecordAccess.cs` |
+| F1-b count fault shows the wrong message | `MatterBudgetCount { None, Some, Unknown }`. Plan route substitutes only on `None`. Commit: `None` substitutes; `Some` or `Unknown` with a review naming create-budget (taken or skipped) is refused: `Some` = `ActionsDoNotMatchPlan` "The matter's budgets changed while you were deciding; reopen the item."; `Unknown` = `Unavailable` (503, reason `signal_unreadable`, the shape of the other transient read faults in `PrepareAsync`) "Whether the matter has a budget could not be checked; nothing was done. Try again." | `SignalCoreRecordAccess.cs`, `DecisionCommitService.cs` |
+| K2a duplicate budgets from two commits | `BudgetLeaseId(tenant, matterId)` = `decision-budget:{tenant}:{matterId}` is added to `lockIds` (after the review and Signal leases, same order for everyone) only when the review TAKES create-budget on a matter core. The second commit then recounts and refuses. | `DecisionCommitService.cs` |
+| K2b resume stuck after Create budget skipped | `PrepareAsync` also keeps the original plan, without a read, when `resume is not null` and create-budget was not taken. | `DecisionCommitService.cs` |
+| K3 untested `FileUnderAsync` fault branch | Test for the entity-set fault in `CreateBudgetExecutor`. | `DecisionActionExecutorsTests.cs` |
+
+Test-rig note: `TheRecordLookup_IsByThisCallerAndThisReviewIdInSprkSteps` captured the LAST `RetrieveMultiple`; the budget count is now an app-only `RetrieveMultiple`, so it filters on `sprk_decisionrecord` and answers the budget query with one row (its assertions are unchanged).
+
+### Before / after proof
+
+Before = the new and changed tests run against the unfixed source (`dotnet test --filter "F1a|F1b|K2a|K2b|K3|D180|D17"`): 33 selected, 13 failed. After the fix: 34 selected (adds the count-state test), 34 passed.
+
+| Test | Before | After |
+|---|---|---|
+| `TheCallerSeesNoBudget_ButTheBffSeesOne_NothingIsSubstituted_AndCreateBudgetIsRefused_F1a` (commit) | Recorded (a second active budget written) | Refused, specific detail, nothing written |
+| `TheBffSeesNoBudget_ButTheCallerSeesOne_StillSubstitutes_MustNotFire_F1a` | Refused (caller read decided) | Recorded (substitution as today) |
+| `TheAppOnlyBudgetRead_IsTheActiveBudgetsOfTheCoreMatter_AndNeverRunsForACallerWhoCannotReadTheMatter_F1a` | no app read at all | one app read with the right criteria; 0 app reads when the caller cannot read the matter (404) |
+| `ThePlanRoute_StillOffersReviseBudget_WhenOnlyTheBffCanSeeTheBudget_..._F1a`, `..._OffersCreateBudget_..._D180`, `..._StillOffersReviseBudget_..._MustNotFire_D180` (1, 3), `..._DoesNotFail_WhenTheBudgetsCannotBeCounted_D180` (plan route) | Create budget offered on the caller's 0 / no app read | app read decides; caller read never made |
+| `ThePlanRoute_NeverReadsBudgetsApp_Only_ForACallerWhoCannotReadTheMatter_F1a`, `TheBudgetCount_IsNone_Some_OrUnknown_...F1b` | passes / new API | passes (the count-state test needs the new enum, so it has no "before") |
+| `TheBudgetsCannotBeCounted_ReviseBudgetStays_AndACreateBudgetReviewIsUnavailable_NothingWritten_F1b` | Refused 422 "must list every action" | Unavailable 503 "Whether the matter has a budget could not be checked..." (taken and skipped create-budget; Revise review still Recorded) |
+| `CreateBudget_ReviewedOnZeroBudgets_ButTheMatterNowHasOne_..._D17` | generic mismatch detail | "The matter's budgets changed while you were deciding; reopen the item." |
+| `TakingCreateBudget_HoldsTheMatterBudgetLease_...K2a` | Recorded (no lease) | InProgress while the lease is held; Recorded after release; lease released after a commit |
+| `TheMatterBudgetLease_IsNotTaken_WhenCreateBudgetIsSkipped_OrNotInThePlan_MustNotFire_K2a` | passes | passes (held lease ignored when create-budget is skipped or absent) |
+| `ARetryOfAFailedReview_ThatSkippedCreateBudget_KeepsThePlan_..._K2b` | Refused (actions mismatch) | Recorded |
+| `CreateBudget_WhenTheMattersEntitySetCannotBeResolved_IsFailed_..._K3` | passes (branch already correct, untested) | passes; with the branch's `catch` replaced by `throw;` it fails (mutation check), then restored |
+
+### Fix round 1 verification
+
+| Command | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/` | 0 warnings, 0 errors |
+| `dotnet test tests/unit/Sprk.Bff.Api.Tests --filter "FullyQualifiedName~Signals\|FullyQualifiedName~Decision\|FullyQualifiedName~Ontology\|FullyQualifiedName~ChildRecord"` | 3107 total: 3105 passed, 2 skipped, 0 failed |
+| `dotnet test tests/Spaarke.ArchTests` (full) | 1093 passed, 0 failed |
+| `dotnet format whitespace --verify-no-changes` on the two changed BFF files | clean |
+
+No package, DI registration, route, or Dataverse change. PR #2289 (task 159) edits the same executor / catalog / module files; not rebased, the main session sequences the merges.
+
+rework: fix round 1 task 161

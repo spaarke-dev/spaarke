@@ -1116,6 +1116,24 @@ public class DecisionActionExecutorsTests
         outcome.ReasonCode.Should().Be(DecisionActionReasons.WriteFailed);
     }
 
+    [Fact]
+    public async Task CreateBudget_WhenTheMattersEntitySetCannotBeResolved_IsFailed_NothingIsCreated_K3()
+    {
+        var cores = Cores();
+        var entities = new Mock<IGenericEntityService>();
+        entities.Setup(e => e.GetEntitySetNameAsync("sprk_matter", It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("metadata is down"));
+
+        var outcome = await new CreateBudgetExecutor(Probe(CanCreate).Object, cores.Object, entities.Object, new FakeTimeProvider(Now)).ExecuteAsync(
+            Request(CreateBudgetParams(), null, MatterCore), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Failed);
+        outcome.ReasonCode.Should().Be(DecisionActionReasons.WriteFailed);
+        outcome.Detail.Should().Be("The matter could not be resolved; nothing was created.");
+        outcome.Written.Should().BeEmpty();
+        cores.Verify(c => c.CreateChildAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()), Times.Never,
+            "a budget that cannot be filed under its matter is never created");
+    }
+
     // ---------------------------------------------------------------------------------------------------------------
     // send-budget-inquiry adapter (task 043 over 070; the #1512/#1515 mapping)
     // ---------------------------------------------------------------------------------------------------------------
