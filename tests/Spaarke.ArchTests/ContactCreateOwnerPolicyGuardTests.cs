@@ -18,16 +18,17 @@ namespace Spaarke.ArchTests;
 /// app-owned contacts in root again.
 /// </summary>
 /// <remarks>
-/// <para><b>What counts as a mention.</b> The name itself, in code: a call, a method group, a <c>nameof</c>. Comments (line,
-/// doc) are not code and are skipped. The factory class is located by name in <c>ContactIdentityBinder.cs</c> and its body by
-/// brace matching, so a use in the binder class, or anywhere else in that file, still fails. Test code is out of scope: tests
-/// that do not exercise ownership build their binder with a named test-kit policy.</para>
+/// <para><b>What counts as a mention.</b> The identifier token <c>NoneForForeignEnvironment</c> or <c>ForeignEnvironment</c>
+/// in the syntax tree of a server file: a call, a method group, a <c>nameof</c>. Comments and literals are not identifier
+/// tokens and are skipped. A mention is allowed only where its nearest enclosing class is <c>ContactIdentityBinderFactory</c>
+/// (in <c>ContactIdentityBinder.cs</c>), or where it is the member's own declaration (in <c>ContactCreateOwner.cs</c>), so a
+/// use in the binder class, or anywhere else in either file, still fails. Test code is out of scope: tests that do not
+/// exercise ownership build their binder with a named test-kit policy.</para>
 /// <para>Known limit: the rule matches the member's name, not its behaviour. Reflection by a computed string is not seen;
 /// the constructor of <c>ContactCreateOwner</c> is private and its factory methods are pinned below, so a new way to say "no
 /// owner" has to appear in the one file this guard reads.</para>
-/// <para>The mention rule above is a text scan (<see cref="SourceScan"/>). The ownerless-create rule below is a Roslyn scan of
-/// the syntax tree. Each rule has a must-fire and a must-not-fire control below. Enforced by: this guard (ArchTests, CI and the
-/// Stop hook).</para>
+/// <para>Both rules read the Roslyn syntax tree of every server file (parsed once). Each rule has a must-fire and a
+/// must-not-fire control below. Enforced by: this guard (ArchTests, CI and the Stop hook).</para>
 /// </remarks>
 public class ContactCreateOwnerPolicyGuardTests
 {
@@ -37,91 +38,48 @@ public class ContactCreateOwnerPolicyGuardTests
 
     // UAC review F3: also the bare variant name. ContactCreateOwner once had a nested ForeignEnvironment class with an internal
     // constructor, which `new ContactCreateOwner.ForeignEnvironment("x")` could use without naming the factory method.
-    private static readonly Regex Mention = new(
-        @"\b(?:NoneFor)?ForeignEnvironment\b", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly string[] MentionNames = { "NoneForForeignEnvironment", "ForeignEnvironment" };
 
-    /// <summary>The member's declaration; group 1 is the name, so a mention can be tied to it by position.</summary>
-    private static readonly Regex Declaration = new(
-        @"\bstatic\s+ContactCreateOwner\s+(NoneForForeignEnvironment)\s*\(", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    /// <summary>The mentions in one file's syntax tree that the rule does not allow: "line N" for each.</summary>
+    internal static IReadOnlyList<string> Violations(string relativePath, string code) => Violations(relativePath, Parse(code).GetRoot());
 
-    /// <summary>The mentions in one file's code text that the rule does not allow: "line N" for each.</summary>
-    internal static IReadOnlyList<string> Violations(string relativePath, string code)
+    internal static IReadOnlyList<string> Violations(string relativePath, SyntaxNode root)
     {
-        var allowed = new List<(int Start, int End)>();
-        if (relativePath == FactoryFile)
+        if (relativePath == FactoryFile && !root.DescendantNodes().OfType<ClassDeclarationSyntax>().Any(c => c.Identifier.ValueText == FactoryClass))
         {
-            var span = ClassBody(code, FactoryClass);
-            if (span is null)
-            {
-                return new[] { $"class {FactoryClass} was not found (the guard would be vacuous)" };
-            }
-
-            allowed.Add(span.Value);
+            return new[] { $"class {FactoryClass} was not found (the guard would be vacuous)" };
         }
 
-        var declarations = relativePath == DeclaringFile
-            ? Declaration.Matches(code).Select(d => d.Groups[1].Index).ToHashSet()
-            : new HashSet<int>();
-        var violations = new List<string>();
-        foreach (Match m in Mention.Matches(code))
-        {
-            var inFactory = allowed.Any(a => m.Index >= a.Start && m.Index < a.End);
-            var isDeclaration = declarations.Contains(m.Index);
-            if (!inFactory && !isDeclaration)
-            {
-                violations.Add($"line {SourceScan.LineOf(code, m.Index)}");
-            }
-        }
-
-        return violations;
+        return Mentions(root)
+            .Where(token => !IsAllowedMention(relativePath, token))
+            .Select(token => $"line {token.GetLocation().GetLineSpan().StartLinePosition.Line + 1}")
+            .ToList();
     }
 
-    /// <summary>[start, end) of the body of the first class with this name: from its opening brace to the matching one.</summary>
-    private static (int Start, int End)? ClassBody(string code, string className)
-    {
-        var declaration = Regex.Match(code, @"\bclass\s+" + Regex.Escape(className) + @"\b");
-        if (!declaration.Success)
-        {
-            return null;
-        }
+    /// <summary>The identifier tokens that name the member (or its bare variant): code only, never a comment or a literal.</summary>
+    private static IEnumerable<SyntaxToken> Mentions(SyntaxNode root)
+        => root.DescendantTokens().Where(t => t.IsKind(SyntaxKind.IdentifierToken) && MentionNames.Contains(t.ValueText, StringComparer.Ordinal));
 
-        var open = code.IndexOf('{', declaration.Index);
-        if (open < 0)
-        {
-            return null;
-        }
+    /// <summary>The nearest enclosing class of a token is the factory in the factory file, or the token is the member's own declaration in the declaring file.</summary>
+    private static bool IsAllowedMention(string relativePath, SyntaxToken token)
+        => (relativePath == FactoryFile && IsInFactoryClass(token)) || (relativePath == DeclaringFile && IsTheDeclaration(token));
 
-        var depth = 0;
-        for (var i = open; i < code.Length; i++)
-        {
-            if (code[i] == '{')
-            {
-                depth++;
-            }
-            else if (code[i] == '}' && --depth == 0)
-            {
-                return (open, i + 1);
-            }
-        }
+    private static bool IsInFactoryClass(SyntaxToken token)
+        => token.Parent?.Ancestors().OfType<ClassDeclarationSyntax>().FirstOrDefault()?.Identifier.ValueText == FactoryClass;
 
-        return null;
-    }
+    private static bool IsTheDeclaration(SyntaxToken token)
+        => token.ValueText == "NoneForForeignEnvironment"
+            && token.Parent is MethodDeclarationSyntax method
+            && method.Identifier == token
+            && method.Modifiers.Any(SyntaxKind.StaticKeyword)
+            && RightmostName(method.ReturnType) == "ContactCreateOwner";
 
     [Fact(DisplayName = "ISS-005: NoneForForeignEnvironment is mentioned in server code only in ContactIdentityBinderFactory")]
     public void NoneForForeignEnvironment_IsUsedOnlyByTheFactory()
     {
-        var offenders = new List<string>();
-        foreach (var file in SourceScan.ServerSourceFiles())
-        {
-            var path = SourceScan.Relative(file).Replace('\\', '/');
-            var code = SourceScan.CodeText(File.ReadAllLines(file));
-            if (!Mention.IsMatch(code))
-            {
-                continue;
-            }
-
-            offenders.AddRange(Violations(path, code).Select(v => $"{path}: {v}"));
-        }
+        var offenders = ServerTree.Value
+            .SelectMany(f => Violations(f.Path, f.Root).Select(v => $"{f.Path}: {v}"))
+            .ToList();
 
         Assert.True(
             offenders.Count == 0,
@@ -134,15 +92,12 @@ public class ContactCreateOwnerPolicyGuardTests
     [Fact(DisplayName = "ISS-005 guard, non-vacuous: the factory does use it, and the declaration exists")]
     public void TheGuard_SeesTheFactorysUse_AndTheDeclaration()
     {
-        var factoryCode = SourceScan.CodeText(File.ReadAllLines(Path.Combine(SourceScan.RepoRoot, FactoryFile)));
-        var body = ClassBody(factoryCode, FactoryClass);
-        Assert.NotNull(body);
-        Assert.True(
-            Mention.Matches(factoryCode).Any(m => m.Index >= body!.Value.Start && m.Index < body.Value.End),
-            "ContactIdentityBinderFactory no longer uses NoneForForeignEnvironment: update this guard with the change.");
+        var files = ServerTree.Value;
+        var factory = files.Single(f => f.Path == FactoryFile);
+        Assert.Contains(Mentions(factory.Root), IsInFactoryClass);
 
-        var declaringCode = SourceScan.CodeText(File.ReadAllLines(Path.Combine(SourceScan.RepoRoot, DeclaringFile)));
-        Assert.Matches(Declaration, declaringCode);
+        var declaring = files.Single(f => f.Path == DeclaringFile);
+        Assert.Contains(Mentions(declaring.Root), IsTheDeclaration);
     }
 
     // ── No ownerless contact create anywhere in server code (ISS-005, #1673) ────────────────────────────────────
@@ -185,19 +140,32 @@ public class ContactCreateOwnerPolicyGuardTests
 
     // ── Literal values ──────────────────────────────────────────────────────────────────────────────
 
+    /// <summary>How many local-variable hops <see cref="Texts(ExpressionSyntax, IReadOnlyCollection{string})"/> follows from one expression.</summary>
+    private const int MaxLocalDepth = 4;
+
+    /// <summary>Upper bound on the alternatives kept for one expression, so a chain of conditionals cannot grow without limit.</summary>
+    private const int MaxAlternatives = 512;
+
     /// <summary>
     /// The possible string values of an expression, read from its tokens: a string / verbatim / raw literal, an interpolated string
     /// (text parts as written; a hole whose own expression has a known value is inlined, any other hole is <see cref="Hole"/>),
-    /// a <c>+</c> concatenation (a non-literal operand is a hole), both branches of <c>?:</c> and <c>??</c>, and a name that
-    /// is a discovered contact constant (<paramref name="constantNames"/>) or ends in <c>ContactEntitySet</c>. Empty when the
-    /// expression is not a string the syntax can read.
+    /// a <c>+</c> concatenation (a non-literal operand is a hole), both branches of <c>?:</c> and <c>??</c>, <c>new Uri(x)</c> and
+    /// <c>new Uri(base, x)</c> (the values of the last argument), a name that is a discovered contact constant
+    /// (<paramref name="constantNames"/>) or ends in <c>ContactEntitySet</c>, and a LOCAL variable: the values of its initializer
+    /// and of every <c>name = expr</c> in the same unit (or, for a captured variable, the unit around it), to a depth of
+    /// <see cref="MaxLocalDepth"/> with a cycle guard. Empty when the expression is not a string the syntax can read.
     /// </summary>
     internal static IReadOnlyList<string> Texts(ExpressionSyntax expression, IReadOnlyCollection<string> constantNames)
+        => Texts(expression, constantNames, 0, new HashSet<SyntaxNode>());
+
+    private static IReadOnlyList<string> Texts(ExpressionSyntax expression, IReadOnlyCollection<string> constantNames, int depth, HashSet<SyntaxNode> active)
     {
+        IReadOnlyList<string> Inner(ExpressionSyntax e) => Texts(e, constantNames, depth, active);
+
         switch (expression)
         {
             case ParenthesizedExpressionSyntax parenthesized:
-                return Texts(parenthesized.Expression, constantNames);
+                return Inner(parenthesized.Expression);
 
             case LiteralExpressionSyntax literal when literal.IsKind(SyntaxKind.StringLiteralExpression):
                 return new[] { literal.Token.ValueText };
@@ -211,7 +179,7 @@ public class ContactCreateOwnerPolicyGuardTests
                     {
                         InterpolatedStringTextSyntax text => new[] { text.TextToken.ValueText },
                         InterpolationSyntax { AlignmentClause: null, FormatClause: null } hole
-                            when Texts(hole.Expression, constantNames) is { Count: > 0 } inner => inner,
+                            when Inner(hole.Expression) is { Count: > 0 } inner => inner,
                         _ => new[] { Hole.ToString() },
                     };
                     result = Product(result, alternatives);
@@ -222,31 +190,152 @@ public class ContactCreateOwnerPolicyGuardTests
 
             case BinaryExpressionSyntax binary when binary.IsKind(SyntaxKind.AddExpression):
             {
-                var left = Texts(binary.Left, constantNames);
-                var right = Texts(binary.Right, constantNames);
+                var left = Inner(binary.Left);
+                var right = Inner(binary.Right);
                 return left.Count == 0 && right.Count == 0
                     ? Array.Empty<string>()
                     : Product(left.Count > 0 ? left : new[] { Hole.ToString() }, right.Count > 0 ? right : new[] { Hole.ToString() });
             }
 
             case BinaryExpressionSyntax coalesce when coalesce.IsKind(SyntaxKind.CoalesceExpression):
-                return Texts(coalesce.Left, constantNames).Concat(Texts(coalesce.Right, constantNames)).ToList();
+                return Inner(coalesce.Left).Concat(Inner(coalesce.Right)).ToList();
 
             case ConditionalExpressionSyntax conditional:
-                return Texts(conditional.WhenTrue, constantNames).Concat(Texts(conditional.WhenFalse, constantNames)).ToList();
+                return Inner(conditional.WhenTrue).Concat(Inner(conditional.WhenFalse)).ToList();
+
+            case ObjectCreationExpressionSyntax { ArgumentList: { } uriArguments } uri when RightmostName(uri.Type) == "Uri":
+            {
+                // new Uri(x), new Uri(base, x), new Uri(x, UriKind.Relative): the path is the last argument that is not a UriKind.
+                var path = uriArguments.Arguments.Select(a => a.Expression)
+                    .LastOrDefault(a => !(a is MemberAccessExpressionSyntax m && RightmostName(m.Expression) == "UriKind"));
+                return path is null ? Array.Empty<string>() : Inner(path);
+            }
 
             case IdentifierNameSyntax or MemberAccessExpressionSyntax:
-                return RightmostName(expression) is { } name && (constantNames.Contains(name) || ContactSetName.IsMatch(name))
-                    ? new[] { "contacts" }
-                    : Array.Empty<string>();
+            {
+                var values = new List<string>();
+                if (RightmostName(expression) is { } name && (constantNames.Contains(name) || ContactSetName.IsMatch(name)))
+                {
+                    values.Add("contacts");
+                }
+
+                if (expression is IdentifierNameSyntax local && depth < MaxLocalDepth)
+                {
+                    foreach (var source in LocalValueSources(local))
+                    {
+                        if (active.Add(source))
+                        {
+                            values.AddRange(Texts(source, constantNames, depth + 1, active));
+                            active.Remove(source);
+                        }
+                    }
+                }
+
+                return values.Distinct().Take(MaxAlternatives).ToList();
+            }
 
             default:
                 return Array.Empty<string>();
         }
     }
 
+    /// <summary>
+    /// The expressions assigned to a local variable by name: its declaration's initializer and every plain <c>name = expr</c>,
+    /// searched in the unit that holds the use and then in the units around it (a lambda or local function captures its
+    /// enclosing member's locals). The first unit that declares the name decides; a name no unit declares has no sources.
+    /// </summary>
+    private static IReadOnlyList<ExpressionSyntax> LocalValueSources(IdentifierNameSyntax use)
+    {
+        var name = use.Identifier.ValueText;
+        foreach (var scope in EnclosingScopes(use))
+        {
+            var declared = false;
+            var sources = new List<ExpressionSyntax>();
+            foreach (var node in OwnNodes(scope))
+            {
+                switch (node)
+                {
+                    case VariableDeclaratorSyntax { Parent: VariableDeclarationSyntax { Parent: not BaseFieldDeclarationSyntax } } declarator
+                        when declarator.Identifier.ValueText == name:
+                        declared = true;
+                        if (declarator.Initializer is { } initializer)
+                        {
+                            sources.Add(initializer.Value);
+                        }
+
+                        break;
+                    case AssignmentExpressionSyntax { Left: IdentifierNameSyntax left } assignment
+                        when assignment.IsKind(SyntaxKind.SimpleAssignmentExpression) && left.Identifier.ValueText == name:
+                        sources.Add(assignment.Right);
+                        break;
+                }
+            }
+
+            if (declared)
+            {
+                return sources;
+            }
+        }
+
+        return Array.Empty<ExpressionSyntax>();
+    }
+
+    /// <summary>The declared type of a local variable (<c>Entity e;</c> or <c>Entity e = ...;</c>), or null when no unit around the use declares it with a type.</summary>
+    private static TypeSyntax? LocalDeclaredType(IdentifierNameSyntax use)
+    {
+        var name = use.Identifier.ValueText;
+        foreach (var scope in EnclosingScopes(use))
+        {
+            foreach (var node in OwnNodes(scope))
+            {
+                if (node is VariableDeclaratorSyntax { Parent: VariableDeclarationSyntax declaration } declarator
+                    && declarator.Identifier.ValueText == name)
+                {
+                    return declaration.Type.IsVar ? null : declaration.Type;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>The unit that holds a node, then (for a lambda or local function) each unit around it up to the enclosing member.</summary>
+    private static IEnumerable<SyntaxNode> EnclosingScopes(SyntaxNode node)
+    {
+        var current = node;
+        while (true)
+        {
+            var unit = EnclosingUnit(current);
+            yield return unit.Node;
+            if (unit.Kind is not (LambdaKind or LocalFunctionKind))
+            {
+                yield break;
+            }
+
+            current = unit.Node;
+        }
+    }
+
+    /// <summary>The nodes of a unit's OWN code: everything below it except the inside of a lambda or local function nested in it.</summary>
+    private static IEnumerable<SyntaxNode> OwnNodes(SyntaxNode scope)
+    {
+        var pending = new Stack<SyntaxNode>(scope.ChildNodes());
+        while (pending.Count > 0)
+        {
+            var node = pending.Pop();
+            yield return node;
+            if (!IsNestedUnit(node))
+            {
+                foreach (var child in node.ChildNodes())
+                {
+                    pending.Push(child);
+                }
+            }
+        }
+    }
+
     private static IReadOnlyList<string> Product(IReadOnlyList<string> left, IReadOnlyList<string> right)
-        => left.SelectMany(l => right.Select(r => l + r)).ToList();
+        => left.SelectMany(l => right.Select(r => l + r)).Distinct().Take(MaxAlternatives).ToList();
 
     /// <summary>The last identifier of a name, member access or qualified type: <c>A.B.C</c> gives <c>C</c>.</summary>
     private static string? RightmostName(SyntaxNode? node)
@@ -258,6 +347,7 @@ public class ContactCreateOwnerPolicyGuardTests
             MemberBindingExpressionSyntax binding => binding.Name.Identifier.ValueText,
             QualifiedNameSyntax qualified => RightmostName(qualified.Right),
             AliasQualifiedNameSyntax alias => RightmostName(alias.Name),
+            NullableTypeSyntax nullable => RightmostName(nullable.ElementType),
             _ => null,
         };
 
@@ -337,6 +427,25 @@ public class ContactCreateOwnerPolicyGuardTests
             _ => null,
         };
 
+    /// <summary>
+    /// <c>new Entity(...)</c>, or a target-typed <c>new(...)</c> whose declared type is <c>Entity</c>: the initializer of
+    /// <c>Entity e = new("contact")</c> or the right side of <c>e = new("contact")</c> where <c>e</c> is a local of that type.
+    /// </summary>
+    private static bool IsSdkEntityCreation(BaseObjectCreationExpressionSyntax creation)
+        => creation switch
+        {
+            ObjectCreationExpressionSyntax explicitType => RightmostName(explicitType.Type) == "Entity",
+            ImplicitObjectCreationExpressionSyntax implicitType => implicitType.Parent switch
+            {
+                EqualsValueClauseSyntax { Parent: VariableDeclaratorSyntax { Parent: VariableDeclarationSyntax declaration } }
+                    => RightmostName(declaration.Type) == "Entity",
+                AssignmentExpressionSyntax { Left: IdentifierNameSyntax target } assignment when assignment.Right == implicitType
+                    => LocalDeclaredType(target) is { } type && RightmostName(type) == "Entity",
+                _ => false,
+            },
+            _ => false,
+        };
+
     /// <summary>The create shape a node is, or null. One node is at most one shape.</summary>
     private static Shape? CreateShape(SyntaxNode node, IReadOnlyCollection<string> names)
     {
@@ -369,10 +478,10 @@ public class ContactCreateOwnerPolicyGuardTests
                     return Shape.HttpPost;
                 }
 
-                if (creation is ObjectCreationExpressionSyntax sdk && RightmostName(sdk.Type) == "Entity")
+                if (IsSdkEntityCreation(creation))
                 {
                     var byConstructor = arguments.Count > 0 && Texts(arguments[0], names).Any(IsContactTable);
-                    var byInitializer = sdk.Initializer?.Expressions.OfType<AssignmentExpressionSyntax>()
+                    var byInitializer = creation.Initializer?.Expressions.OfType<AssignmentExpressionSyntax>()
                         .Any(a => RightmostName(a.Left) == "LogicalName" && Texts(a.Right, names).Any(IsContactTable)) ?? false;
                     return byConstructor || byInitializer ? Shape.SdkEntity : null;
                 }
@@ -581,13 +690,29 @@ public class ContactCreateOwnerPolicyGuardTests
     /// <summary>
     /// The contact creates in one server file that bind no owner and are not an allow-listed seam: "line N (shape)" for each. A
     /// contact created through the Web API without an owner is owned by the calling application user in the root business unit
-    /// (ISS-005). Known limits (the scan reads syntax, not types): owner evidence is by name in the unit's own code and does not
-    /// prove the value is a resolved team; a payload built in ANOTHER member (or another lambda / local function) and passed in is
-    /// flagged too - build it where it is created; a create whose table is a runtime value (<c>dataverse.create_record</c>'s
-    /// <c>tablename</c>, <c>ChildRecordEndpoints</c>), a <c>CreateRequest</c> / <c>ExecuteAsync</c>, or a table name held in a
-    /// variable that is not a string constant with a literal value is NOT seen (<see cref="UndetectableSeams"/> names the known
-    /// ones); an <c>IGenericEntityService.CreateAsync</c> is seen only through its entity's construction
-    /// (<c>new Entity("contact")</c>, not a target-typed <c>new("contact")</c>); a constant is followed by name, across all server code.
+    /// (ISS-005). The scan reads syntax, not types; what it sees and what it does not:
+    /// <list type="bullet">
+    /// <item>Seen: <c>CreateAsync</c>, <c>HttpMethod.Post</c> next to a contacts path, <c>Post*Async</c> to a contacts path, and
+    /// <c>new Entity("contact")</c> (also target-typed, <c>Entity e = new("contact")</c>) - which is how
+    /// <c>IGenericEntityService.CreateAsync(Entity)</c>, <c>IOrganizationService.Create</c> and
+    /// <c>new CreateRequest { Target = new Entity("contact") }</c> are seen. The table or path may be a literal, an interpolated or
+    /// concatenated string, a constant (followed by name), or a local variable (its initializer and its plain assignments in the
+    /// unit, to a depth of <see cref="MaxLocalDepth"/>, through <c>new Uri(...)</c>).</item>
+    /// <item>Not seen: a table name that is a runtime value (<c>dataverse.create_record</c>'s <c>tablename</c>,
+    /// <c>ChildRecordEndpoints</c>; <see cref="UndetectableSeams"/> names the known ones).</item>
+    /// <item>K1 residue (shapes not read): <c>string.Concat</c> / <c>string.Format</c> paths, <c>$batch</c> bodies,
+    /// <c>new HttpRequestMessage { Method = ... }</c> (initializer style), <c>new HttpMethod("POST")</c>, <c>nameof</c>,
+    /// property-backed constants, a target-typed <c>new("contact")</c> whose declared type is not a local, field or variable
+    /// initializer of type <c>Entity</c> (an argument, a return).</item>
+    /// <item>K2: owner evidence is matched by NAME in the unit's own code and does not prove the value is a resolved team. An
+    /// ownerless create passes when the same unit names <c>ownerid</c> in a ColumnSet, an array or a log string, or uses
+    /// <c>Attributes.Remove(OwnerAttribute)</c> or <c>["ownerid@odata.bind"] = null</c>. A payload built in ANOTHER member (or
+    /// another lambda / local function) and passed in is flagged: build it where it is created. A retry-lambda wrapper
+    /// (<c>Retry(() =&gt; client.CreateAsync(...))</c> with the owner bound outside the lambda) is a false positive under the
+    /// nested-unit rule: bind the owner inside the lambda.</item>
+    /// <item>K3: constants are followed by NAME across all server code, so an unrelated constant of the same name can only add
+    /// false positives, never hide a create.</item>
+    /// </list>
     /// </summary>
     internal static IReadOnlyList<string> OwnerlessContactCreates(
         string relativePath, string code, IReadOnlyCollection<string>? constantNames = null)
@@ -1263,6 +1388,62 @@ public class ContactCreateOwnerPolicyGuardTests
     public void Control_OtherTargets_UnderTheNewLiteralForms_HaveNoViolation(string statement)
         => Assert.Empty(ContactCreates(BffRoot + "Services/X/Makes.cs", "private Task MakeAsync() { " + statement + " }"));
 
+    // ── UAC round 5 F3-a: the table or path held in a local variable ─────────────────────────────────
+
+    [Theory(DisplayName = "ISS-005 guard, must-fire: a contacts path or table held in a local variable is followed into the create")]
+    [InlineData("var url = $\"{GetApiUrl()}/contacts\"; using var request = new HttpRequestMessage(HttpMethod.Post, url);", "HttpPost")]
+    [InlineData("var uri = new Uri($\"{GetApiUrl()}/contacts\"); return http.SendAsync(new HttpRequestMessage(HttpMethod.Post, uri), ct);", "HttpPost")]
+    [InlineData("var url = $\"{GetApiUrl()}/contacts\"; return http.PostAsync(url, body, ct);", "UserClientPost")]
+    [InlineData("var set = \"contacts\"; return client.CreateAsync(set, payload, ct);", "WebApiCreateAsync")]
+    [InlineData("var table = \"contact\"; var e = new Entity(table);", "SdkEntity")]
+    [InlineData("return new HttpRequestMessage(HttpMethod.Post, new Uri(baseUri, \"contacts\"));", "HttpPost")]
+    [InlineData("return new HttpRequestMessage(HttpMethod.Post, new Uri(\"contacts\", UriKind.Relative));", "HttpPost")]
+    [InlineData("var a = \"contacts\"; var b = a; var c = b; return client.CreateAsync(c, payload, ct);", "WebApiCreateAsync")]
+    [InlineData("var url = $\"{GetApiUrl()}/accounts\"; url = $\"{GetApiUrl()}/contacts\"; return http.PostAsync(url, body, ct);", "UserClientPost")]
+    [InlineData("var path = flag ? \"accounts\" : \"contacts\"; var url = $\"{root}/{path}\"; return http.PostAsync(url, body, ct);", "UserClientPost")]
+    [InlineData("var make = () => { var set = \"contacts\"; return client.CreateAsync(set, payload, ct); }; return make();", "WebApiCreateAsync")]
+    [InlineData("var set = \"contacts\"; var make = () => client.CreateAsync(set, payload, ct); return make();", "WebApiCreateAsync")]
+    [InlineData("Entity e = new(\"contact\");", "SdkEntity")]
+    [InlineData("Entity e = new() { LogicalName = \"contact\" };", "SdkEntity")]
+    [InlineData("Entity e; e = new(\"contact\");", "SdkEntity")]
+    [InlineData("Microsoft.Xrm.Sdk.Entity? e = new(\"contact\");", "SdkEntity")]
+    [InlineData("var request = new CreateRequest { Target = new Entity(\"contact\") }; return org.ExecuteAsync(request);", "SdkEntity")]
+    [InlineData("return org.Create(new Entity(\"contact\"));", "SdkEntity")]
+    public void Control_ALocalHoldingTheContactsTarget_IsFollowed(string statement, string shape)
+    {
+        var hit = Assert.Single(ContactCreates(BffRoot + "Services/X/Makes.cs", "private Task MakeAsync() { " + statement + " }"));
+        Assert.Equal(shape, hit.Shape);
+        Assert.False(hit.Owned);
+    }
+
+    [Theory(DisplayName = "ISS-005 guard, must-not-fire: a local holding another table, a record URL or a GET passes; so do cycles and unknown targets")]
+    [InlineData("var url = $\"{GetApiUrl()}/accounts\"; return http.PostAsync(url, body, ct);")]
+    [InlineData("var url = $\"{GetApiUrl()}/accounts\"; using var request = new HttpRequestMessage(HttpMethod.Post, url);")]
+    [InlineData("var url = $\"{GetApiUrl()}/accounts\"; url = $\"{GetApiUrl()}/contacts({id})\"; return new HttpRequestMessage(HttpMethod.Post, url);")]
+    [InlineData("var url = $\"{GetApiUrl()}/contacts\"; return new HttpRequestMessage(HttpMethod.Get, url);")]
+    [InlineData("var url = $\"{GetApiUrl()}/contacts\"; return http.GetAsync(url, ct);")]
+    [InlineData("var set = \"accounts\"; return client.CreateAsync(set, payload, ct);")]
+    [InlineData("var a = b + \"x\"; var b = a + \"y\"; return client.CreateAsync(a, payload, ct);")]
+    [InlineData("return client.CreateAsync(unknownLocal, payload, ct);")]
+    [InlineData("Entity e = new(\"account\"); return org.Create(e);")]
+    [InlineData("Other e = new(\"contact\");")]
+    public void Control_ALocalHoldingAnotherTarget_IsNotFlagged(string statement)
+        => Assert.Empty(ContactCreates(BffRoot + "Services/X/Makes.cs", "private Task MakeAsync() { " + statement + " }"));
+
+    [Fact(DisplayName = "ISS-005 guard: a local is not followed past the depth limit, and a local of ANOTHER member is not followed")]
+    public void Control_LocalFollowing_IsBounded_AndPerUnit()
+    {
+        Assert.Empty(ContactCreates(BffRoot + "Services/X/Makes.cs",
+            "private Task MakeAsync() { var a = \"contacts\"; var b = a; var c = b; var d = c; var e = d; var f = e; return client.CreateAsync(f, payload, ct); }"));
+        Assert.Empty(ContactCreates(BffRoot + "Services/X/Makes.cs", """
+            public sealed class Maker
+            {
+                private Task A() { var url = "contacts"; return Task.CompletedTask; }
+                private Task B(string url) { return http.PostAsync(url, body, ct); }
+            }
+            """));
+    }
+
     // ── The type's shape: there is no other way to say "no owner" ────────────────────────────────────
 
     /// <summary>
@@ -1394,12 +1575,13 @@ public class ContactCreateOwnerPolicyGuardTests
     [Fact(DisplayName = "ISS-005 guard, must-not-fire: the other policy, and comments naming the member, pass anywhere")]
     public void Control_TheOtherPolicy_AndComments_HaveNoViolation()
     {
-        var code = SourceScan.CodeText(new[]
-        {
-            "var owner = ContactCreateOwner.FromCustomerBusinessUnit(options, configuration);",
-            "// ContactCreateOwner.NoneForForeignEnvironment(\"x\") is for the factory only",
-            "/// <see cref=\"ContactCreateOwner.NoneForForeignEnvironment\"/>",
-        });
+        // Comments are trivia and a literal is not an identifier: the raw text, comments included, has no violation.
+        const string code = """
+            var owner = ContactCreateOwner.FromCustomerBusinessUnit(options, configuration);
+            // ContactCreateOwner.NoneForForeignEnvironment("x") is for the factory only
+            /// <see cref="ContactCreateOwner.NoneForForeignEnvironment"/>
+            var text = "ContactCreateOwner.NoneForForeignEnvironment";
+            """;
 
         Assert.Empty(Violations(OtherFile, code));
     }
@@ -1431,6 +1613,34 @@ public class ContactCreateOwnerPolicyGuardTests
             {
                 public static ContactCreateOwner NoneForForeignEnvironment(string reason) => new(null, null, reason);
                 public static ContactCreateOwner Default() => NoneForForeignEnvironment("default");
+            }
+            """));
+
+    [Fact(DisplayName = "ISS-005 guard, must-fire: a use after a URL literal (a slash pair inside a string) is caught")]
+    public void Control_AUseAfterAUrlLiteral_IsCaught()
+        => Assert.Single(Violations(OtherFile,
+            "var binder = new ContactIdentityBinder(http, new Uri(\"https://x\"), ContactCreateOwner.NoneForForeignEnvironment(\"own\"));"));
+
+    [Fact(DisplayName = "ISS-005 guard, must-fire: a brace inside a literal in the factory does not widen the allowed region")]
+    public void Control_ABraceLiteralInTheFactory_DoesNotWidenTheAllowedRegion()
+    {
+        var code = BinderFileShape.Replace(
+                "public ContactIdentityBinder CreateBinder",
+                "private static readonly string Open = \"{\";\n    public ContactIdentityBinder CreateBinder",
+                StringComparison.Ordinal)
+            + "\npublic class LaterClass\n{\n    public object Make() => ContactCreateOwner.NoneForForeignEnvironment(\"later\");\n}\n";
+
+        Assert.Contains("\"{\"", code, StringComparison.Ordinal);
+        // The factory's own use passes; the use in the class after it is the only violation.
+        Assert.Single(Violations(FactoryFile, code));
+    }
+
+    [Fact(DisplayName = "ISS-005 guard, must-not-fire: a use in a lambda inside the factory class passes")]
+    public void Control_AUseInALambdaInTheFactory_HasNoViolation()
+        => Assert.Empty(Violations(FactoryFile, """
+            public class ContactIdentityBinderFactory
+            {
+                public Func<string, ContactCreateOwner> Make() => reason => ContactCreateOwner.NoneForForeignEnvironment(reason);
             }
             """));
 
