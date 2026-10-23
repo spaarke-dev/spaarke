@@ -3,7 +3,7 @@
   <metadata>
     <title>SPE JIT-grant revocation sweep: Graph "Invalid hostname for this tenancy" every run on dev (#1830 / R3 ISS-006)</title>
     <phase>Session 28: UAC (R3 hand-off, 2026-10-22)</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security: a sweep that fails on every run may leave revoked external users with SPE container membership (file access). Modifies .cs.</rigor-reason>
     <model-tier>opus</model-tier>
