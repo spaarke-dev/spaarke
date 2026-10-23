@@ -34,7 +34,6 @@ import {
   toNavPropMap,
   cleanGuid,
 } from '../../services/PolymorphicResolverService';
-import type { INavPropEntry } from '../../services/PolymorphicResolverService';
 import { applyFieldMappings } from '../../services/FieldMappingService';
 import { getXrmUserId } from '../../utils/xrmUserId';
 
@@ -70,20 +69,6 @@ function _getCurrentUserId(): string {
   // The shared helper: the nearest frame with a NON-EMPTY user id; a frame answering
   // with an empty id is skipped, as the pre-081 per-frame loop did (task 081 round 6).
   return getXrmUserId() ?? '';
-}
-
-/**
- * Resolve navigation property name for a document lookup by referenced entity.
- * Used when creating sprk_document records linked to a parent entity.
- */
-function _resolveDocNavProp(entries: INavPropEntry[], referencedEntity: string): string {
-  const match = entries.find(e => e.referencedEntity === referencedEntity);
-  if (match) {
-    console.info(`[WorkAssignmentService] Resolved doc nav-prop: ${match.navPropName} for ${referencedEntity}`);
-    return match.navPropName;
-  }
-  console.warn(`[WorkAssignmentService] No nav-prop found on sprk_document for ${referencedEntity}`);
-  return referencedEntity;
 }
 
 // ---------------------------------------------------------------------------
@@ -548,12 +533,17 @@ export class WorkAssignmentService {
         // Discover nav-prop for sprk_document -> sprk_workassignment lookup
         try {
           const docNavProps = await discoverNavProps('sprk_document');
-          const waNavProp = _resolveDocNavProp(docNavProps, 'sprk_workassignment');
+          // The parent column `sprk_workassignment`, by exact column: sprk_document also has
+          // `sprk_relatedworkassignment`, and the Work Assignment form's Documents list reads the parent column.
+          const waNavProp = findNavProp(docNavProps, 'sprk_workassignment', 'sprk_workassignment');
+          if (!waNavProp) {
+            console.warn('[WorkAssignmentService] No nav-prop found on sprk_document for sprk_workassignment');
+          }
 
           const createResult = await this._entityService.createDocumentRecords(
             'sprk_workassignments',
             workAssignmentId,
-            waNavProp,
+            waNavProp ?? 'sprk_WorkAssignment',
             uploadResult.uploadedFiles,
             {
               // No `containerId` — `sprk_graphdriveid` comes from the server's upload response.

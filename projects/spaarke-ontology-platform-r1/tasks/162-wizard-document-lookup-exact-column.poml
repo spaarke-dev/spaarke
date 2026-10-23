@@ -4,7 +4,7 @@
     <title>Wizards bind an uploaded document to the parent through the exact lookup column, never the first of two (114 UAT round 1)</title>
     <phase>5b Modal system</phase>
     <gate>startable (owner UAT 2026-10-22; blocks closing 114)</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies shared client code (.ts) used by several wizards.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -73,4 +73,7 @@
       <file>projects/spaarke-ontology-platform-r1/notes/uat-v4-log.md</file>
     </files>
   </knowledge>
+  <notes>
+    Code complete on branch task/162-doc-exact-column; steps 1-3 done (see notes/task-162-notes.md: keep/fix list, open owner question on the role of sprk_related{parent}, form/subgrid finding: all three Documents subgrids use sprk_{parent}, escalation did not fire). Step 4 (build hosts, deploy, dev check) is pending in the main session; status stays in-progress until the dev check is recorded in notes/deploy-log.md.
+  </notes>
 </task>
