@@ -10,9 +10,11 @@ namespace Spaarke.ArchTests;
 /// <list type="bullet">
 /// <item>No Spaarke role other than "Spaarke Billing Administrator" holds any privilege on <c>sprk_ruleset</c> (Core and Basic User lost
 /// Read in task 120; Console, Ontology Administrator, Ontology Service and every other role hold none).</item>
-/// <item>"Spaarke Billing Administrator" holds exactly Create, Read, Write, Append and AppendTo on <c>sprk_ruleset</c>, <c>sprk_Policy</c>
-/// and <c>sprk_PolicyVersion</c> at Global, and nothing else beyond the platform defaults every Spaarke role export carries. No
-/// Delete, Assign or Share; nothing on the Procedure tables (task 121 adds those after uac-r2 task 191).</item>
+/// <item>"Spaarke Billing Administrator" holds exactly Read at Global and Create, Write, Append and AppendTo at Basic on
+/// <c>sprk_ruleset</c>, <c>sprk_Policy</c> and <c>sprk_PolicyVersion</c>, and nothing else beyond the platform defaults every Spaarke role
+/// export carries. No Delete, Assign or Share; nothing on the Procedure tables (task 121 adds those after uac-r2 task 191). Basic, not
+/// Global (uac-r2 review of task 120): the BFF asks for Create / Write only as markers at any depth (D-108) and writes these tables
+/// app-only (D-173); at Global a billing admin could create or edit any rule set or policy natively, past RuleSetService (ADR-002).</item>
 /// </list>
 /// </summary>
 /// <remarks>
@@ -27,13 +29,17 @@ public class RuleSetRolePrivilegeGuardTests
     private static readonly Regex AnyOnRuleSet = new(
         "^prv(Create|Read|Write|Delete|Append|AppendTo|Assign|Share)sprk_ruleset$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-    /// <summary>D-76 / D-108: the billing-admin set, in the live privilege-name casing (as <c>BillingAdminAuthorization</c>).</summary>
-    private static readonly string[] BillingAdminSet =
+    /// <summary>
+    /// D-76 / D-108 with uac-r2's depths: name (live privilege-name casing, as <c>BillingAdminAuthorization</c>) -> level. Read is Global;
+    /// the markers are Basic.
+    /// </summary>
+    private static readonly Dictionary<string, string> BillingAdminSet = new(StringComparer.Ordinal)
     {
-        "prvCreatesprk_ruleset", "prvReadsprk_ruleset", "prvWritesprk_ruleset", "prvAppendsprk_ruleset", "prvAppendTosprk_ruleset",
-        "prvCreatesprk_Policy", "prvReadsprk_Policy", "prvWritesprk_Policy", "prvAppendsprk_Policy", "prvAppendTosprk_Policy",
-        "prvCreatesprk_PolicyVersion", "prvReadsprk_PolicyVersion", "prvWritesprk_PolicyVersion", "prvAppendsprk_PolicyVersion",
-        "prvAppendTosprk_PolicyVersion",
+        ["prvReadsprk_ruleset"] = "Global", ["prvReadsprk_Policy"] = "Global", ["prvReadsprk_PolicyVersion"] = "Global",
+        ["prvCreatesprk_ruleset"] = "Basic", ["prvWritesprk_ruleset"] = "Basic", ["prvAppendsprk_ruleset"] = "Basic", ["prvAppendTosprk_ruleset"] = "Basic",
+        ["prvCreatesprk_Policy"] = "Basic", ["prvWritesprk_Policy"] = "Basic", ["prvAppendsprk_Policy"] = "Basic", ["prvAppendTosprk_Policy"] = "Basic",
+        ["prvCreatesprk_PolicyVersion"] = "Basic", ["prvWritesprk_PolicyVersion"] = "Basic", ["prvAppendsprk_PolicyVersion"] = "Basic",
+        ["prvAppendTosprk_PolicyVersion"] = "Basic",
     };
 
     /// <summary>
@@ -61,22 +67,26 @@ public class RuleSetRolePrivilegeGuardTests
             + "to the owner:\n  " + string.Join("\n  ", violations));
     }
 
-    [Fact(DisplayName = "120 / D-76 / D-108: Spaarke Billing Administrator holds exactly the billing-admin set at Global")]
-    public void BillingAdministratorHoldsExactlyTheBillingAdminSetAtGlobal()
+    [Fact(DisplayName = "120 / D-76 / D-108: Spaarke Billing Administrator holds exactly the billing-admin set (Read Global, markers Basic)")]
+    public void BillingAdministratorHoldsExactlyTheBillingAdminSetAtItsDepths()
     {
         var role = Assert.Single(SourceRoles(), r => r.Name == BillingAdministrator);
         var held = Privileges(role.Xml);
 
-        var missing = BillingAdminSet.Where(p => !held.Any(h => h.Name == p && h.Level == "Global")).ToList();
+        var missing = BillingAdminSet
+            .Where(p => !held.Any(h => h.Name == p.Key && h.Level == p.Value))
+            .Select(p => $"{p.Key} at {p.Value}{string.Concat(held.Where(h => h.Name == p.Key).Select(h => $" (held at {h.Level})"))}")
+            .ToList();
         var extra = held
-            .Where(h => !BillingAdminSet.Contains(h.Name, StringComparer.Ordinal) && !PlatformDefaults.Contains(h.Name, StringComparer.Ordinal))
+            .Where(h => !BillingAdminSet.ContainsKey(h.Name) && !PlatformDefaults.Contains(h.Name, StringComparer.Ordinal))
             .Select(h => $"{h.Name} ({h.Level})")
             .ToList();
 
         Assert.True(missing.Count == 0 && extra.Count == 0,
-            $"{role.RelativePath} must hold exactly Create, Read, Write, Append and AppendTo on sprk_ruleset, sprk_Policy and "
-            + "sprk_PolicyVersion at Global (live name casing), plus only the platform defaults; no Delete, Assign or Share, and nothing on the "
-            + "Procedure tables until task 121.\n  missing or not Global: " + string.Join(", ", missing)
+            $"{role.RelativePath} must hold exactly Read at Global and Create, Write, Append and AppendTo at Basic on sprk_ruleset, sprk_Policy "
+            + "and sprk_PolicyVersion (live name casing; uac-r2: Global markers would let a billing admin write past RuleSetService), plus only "
+            + "the platform defaults; no Delete, Assign or Share, and nothing on the Procedure tables until task 121.\n  missing or at another "
+            + "depth: " + string.Join(", ", missing)
             + "\n  not allowed: " + string.Join(", ", extra));
     }
 

@@ -57,9 +57,11 @@
 
   <constraints>
     <constraint source="D-185">After this task, exactly one Spaarke role in src/dataverse/solutions/**/Roles holds any privilege on sprk_ruleset: Spaarke Billing Administrator. Basic, Core, Console, Ontology Administrator, Ontology Service and every other role hold none.</constraint>
-    <constraint source="D-76/D-108">Billing Administrator holds, at Global (Organization) depth:
-- on sprk_ruleset: Create, Read, Write, Append, AppendTo;
-- on sprk_Policy and sprk_PolicyVersion: Create, Read, Write, Append, AppendTo.
+    <constraint source="D-76/D-108, uac-r2 review 2026-10-22">Billing Administrator holds, on sprk_ruleset, sprk_Policy and sprk_PolicyVersion:
+- Read at Global (Organization) depth;
+- Create, Write, Append, AppendTo at Basic (User) depth.
+
+Why Basic (uac-r2, review of the task 120 pre-notice): BillingAdminAuthorization uses Create / Write only as markers, at any depth (D-108; EbillingOverridePrivilege.cs:17), and RuleSetService writes these tables app-only (D-173). At Global a billing admin could create or edit any rule set or policy natively, including Secure-matter record-scoped children, bypassing RuleSetService's invariants (ADR-002).
 
 No Delete or Assign, and no Share. Use the live privilege-name casing (sprk_ruleset lower case; sprk_Policy and sprk_PolicyVersion mixed case, as in BillingAdminAuthorization.cs).</constraint>
     <constraint source="uac-r2 (081 guard)">Billing Administrator holds NO privilege on sprk_procedure, sprk_procedureversion or sprk_procedureassignment. ProcedureRolePrivilegeGuardTests must still pass unchanged; UntilTask191 stays true (task 121 flips it).</constraint>
@@ -121,7 +123,7 @@ Record the outputs in the notes file.</step>
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">Given the repo role XML, the guard finds Billing Administrator as the only role with a prv*sprk_ruleset privilege, holding exactly the constraint's set at Global.</criterion>
+    <criterion testable="true">Given the repo role XML, the guard finds Billing Administrator as the only role with a prv*sprk_ruleset privilege, holding exactly the constraint's set at the constraint's depths (Read Global; Create, Write, Append, AppendTo Basic).</criterion>
     <criterion testable="true">Given Core User with prvReadsprk_ruleset re-added (seeding proof), the guard fails naming Core User.</criterion>
     <criterion testable="true">ProcedureRolePrivilegeGuardTests passes unchanged; Billing Administrator holds nothing on the three Procedure tables.</criterion>
     <criterion testable="true">Deploy-EbillingRolePrivileges.ps1 -WhatIf on dev proposes no privilege on sprk_ruleset for any role.</criterion>
