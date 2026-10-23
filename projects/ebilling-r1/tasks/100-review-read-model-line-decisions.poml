@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="100" project="ebilling-r1">
+  <metadata>
+    <title>Review read model and line decision endpoints</title>
+    <phase>4 Review and approval (WP4) — wave W4-1</phase>
+    <gate>startable</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New authorized read and write routes over invoice lines; a missed check exposes another core record's invoice, a wrong write breaks I-1 totals or NFR-09 attribution.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Endpoint and service work on the existing Finance route and filter pattern; totals, lifecycle and Decision Record contracts come from 016, 014 and 074.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P4-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>014, 016, 049</deps>
+    <tags>bff, api, auth, write-path</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+  </metadata>
+
+  <prompt>Add the Invoice Review read model (header, totals, lines with status, findings with rule / version / clause, suggested adjustment, extraction page and box, Decision Record history) and the line decision routes (Accept; Reduce with approved amount and reason; Disallow with reason; one action on selected lines; Accept all Clean), recomputing totals through 016 and recording decisions through 074 — authorized on the invoice and only while it is In Review.</prompt>
+
+  <role>SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs, ADR-008 endpoint filters, Dataverse conditional writes and read-model assembly.</role>
+
+  <goal>InvoiceLineReviewEndpoints.cs with a read service and a line-decision service; correct 401 / 403 / disabled / 409 behaviour; decisions update line status, approved amount, reason, reviewer and totals per request and write the Decision Record(s) agreed in 074; the core-record access guard has a seeding proof.</goal>
+
+  <context>
+    <background>Spec FR-31 (reason mandatory for Reduce / Disallow), FR-07 and I-1 (client write of approved total refused), NFR-02 (3 s p90 at 150 lines), NFR-09, D-64 (bulk acceptance recorded as Accepted in bulk, never a label). Prototype: line decisions in the pane, one action on ticked rows with one reason, Accept all clean lines, Pending shown as Processing (README owner decisions, F-1). Columns: 010 (sprk_linestatus, sprk_approvedamount, sprk_adjustmentreason, sprk_reviewedby / on, sprk_extractionconfidence JSON with page and box), 012 (totals; statuscode numbers in its notes), 027 (sprk_invoicecorrection). Findings are sprk_signal rows on the invoice or line (026, 072 mapper). Routes: Api/Finance/FinanceEndpoints.cs:28-98 (group /api/finance, per-route AddFinanceAuthorizationFilter); Api/Filters/FinanceAuthorizationFilter.cs (FromRoute :192, InvoiceEntitySet :234); policy keys server/shared/Spaarke.Core/Auth/OperationAccessPolicy.cs:165-209 ("finance.read" = Read). Invoice access inherits from its core record via 013 stamping (ADR-034). Conditional writes: InvoiceReviewService.MarkDocumentConfirmedAsync (Services/Finance/InvoiceReviewService.cs:1171; MaxConditionalWriteAttempts :320). The /api/finance/invoice-review/* routes are the classification gate — do not extend them.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Finance/InvoiceLineReviewEndpoints.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceReviewReadService.cs (read model and DTOs)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceLineDecisionService.cs</file>
+      <file role="modify">src/server/shared/Spaarke.Core/Auth/OperationAccessPolicy.cs (one key "ebilling.invoice.decide" = Write; reused by 101–104)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs (shared append point)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs:376-377 (Finance mapping call site — shared append point)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/InvoiceLineDecisionServiceTests.cs</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/InvoiceReviewReadServiceTests.cs</file>
+      <file role="new">tests/integration/contract/Api/Finance/InvoiceLineReviewEndpointsAuthorizationContractTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="014" status="pending">Lifecycle service (In Review state)</dependency>
+      <dependency task="016" status="pending">Totals calculator and persistence hook</dependency>
+      <dependency task="049" status="pending">Invoices, lines, approval portion, Signals exist; 074's recorder and F-9 answer are upstream of it</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="074 ontology-r1 review K1/K3 (2026-10-17)">Recording billing Decision Records through BillingDecisionRecorder (074) brings two caller obligations.
+- (1) Exactly-once. The writer is exactly-once only for retries made one after another; two concurrent calls with one decision id can both write, and a duplicate in an append-only ledger is permanent. So:
+  - this task names its serialisation mechanism as an acceptance criterion. Examples: the job claims IIdempotencyService keyed by the decision id; an endpoint does a RowVersion-conditional status update and records only after it succeeds;
+  - it adds a test for the concurrent same-id case.
+- (2) Decider identity:
+  - derive the deciding user from the authenticated principal, never from request input;
+  - check invoice access through the UAC filter before recording;
+  - pass no contact id. The recorder looks the contact up itself, as DecisionCommitService does; 074's fix round removes that parameter.</constraint>
+    <constraint source="D-90 / task 029 notes section 11 (2026-10-16)">Spaarke Core User and Basic User hold only Read on sprk_billingevent, and no AppendTo on sprk_billingcode / sprk_timekeeper. If any line-decision write runs as the caller (OBO), it would be refused: either write lines server-side through the owning service (the default, consistent with I-1 and the write-path rules), or raise the needed privileges (Write and Append on sprk_billingevent, AppendTo on sprk_billingcode and sprk_timekeeper) as an owner decision first. Do not widen roles inside this task without that decision.</constraint>
+    <constraint source="ADR-001, ADR-008, ADR-019">Own endpoints file; each route has its own AddFinanceAuthorizationFilter and RequireEbillingEnabled() (040, 503 ebilling.disabled); ProblemDetails with stable codes (e.g. ebilling.invoice.not_in_review, ebilling.line.reason_required).</constraint>
+    <constraint source="FR-31, root CLAUDE.md section 6">Reads: "finance.read" on sprk_invoices(route invoiceId). Writes: "ebilling.invoice.decide" (Write) on the same id. Every line id in a body must belong to that invoice (uniform 404 otherwise), checked before any write.</constraint>
+    <constraint source="ADR-002, I-1">Only the server computes totals (016); no request field sets a total or a status. Writes only while statuscode is In Review (409 otherwise).</constraint>
+    <constraint source="project">Reduce: approved amount at least 0 and less than billed, reason required. Disallow: reason required, approved 0. Accept: approved = billed. A Pending line cannot be decided (409). A multi-line request is all or nothing.</constraint>
+    <constraint source="D-64">Accept all Clean and multi-line Accept write sprk_invoicecorrection rows (outcome Accepted in bulk, islabel false) per AI-sourced field of each affected line; single-line Accept writes none (101 owns the label outcomes).</constraint>
+    <constraint source="FR-30">Decision Records only through 074's recorder, at 074's F-9 granularity, idempotent by decision id.</constraint>
+    <constraint source="NFR-02">Read model built with a bounded number of Dataverse calls (none per line); record the count in notes.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">Placement BFF (B1 caller identity, B4 live request); publish-size delta; no new HIGH CVE; no package.</constraint>
+    <constraint source="074 fix-round adversarial pass (2026-10-18), caller obligations of BillingDecisionRecorder">Callers that record billing decisions through BillingDecisionRecorder must:
+- Derive the resolved Signal ids and the policy version id server-side, from the decision's own invoice and lines. Never take them from the request. The writer accepts any existing Signal or policy version (074 review K-2).
+- Record before mutating, or run the recorder's reads first. Its refusals that depend on Dataverse reads (unknown policy version, missing Signal, undetermined subject, contact read fault) happen after Preflight, so a caller that changes invoice status first can be left with a changed status and no Decision Record (K-3).
+- Serialise decisions per invoice (one at a time per invoice). The recorder's "already recorded" check and its create are not atomic (K-4).
+- Build Values the same way on every attempt (same types, same decimal scale), so that an honest retry hashes to the same content (K-5, unless 074's follow-up normalises decimals).</constraint>
+    <constraint source="ontology-r1 (2026-10-18), Signal evidence read rule (D-123)">SignalReadService strips text and source from every evidence line that is not a {table}:{guid} witness (fail-closed by design; ontology-r1 will not exempt billing lines). A merged billing Signal therefore reaches a reader with its 2nd and later reasons as bare codes marked withheld. The review page renders each reason's text from its reason code and the catalogue template, using the Signal's own invoice and line facts that the reader may see. It never relies on stored per-reason text. sprk_sentence (the primary sentence) stays readable. A withheld Duplicate reason renders only the withheld template. If stored per-reason text has to be readable as-is, send ontology-r1 a design that makes those lines access-checkable (a witness ref to the invoice or line) before building it.</constraint>
+    <constraint source="owner D-128 / D-129 / D-130 (2026-10-19); ontology-r1 D-130 review">Line decisions drive spend:
+- Counted spend sums the approved total (D-130 (2)). Today nothing recalculates sprk_approvedtotal after submission; IInvoiceTotalsService.RecalculateAsync's only caller is the 049 persister.
+- So every line decision that changes an approved amount (Reduce, Disallow, Accept after a Reduce, bulk and accept-clean) calls RecalculateAsync in the same request, and a test shows sprk_approvedtotal changes.
+- Credit lines: Disallow is allowed (D-128). Reduce is allowed to an amount between the billed credit and 0 (D-129 (3)). Never refuse a line for being negative.
+- The matter and project stored rollup is refreshed by the rollup (FinanceRollupService), not here. Say in the notes when it runs after a decision.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/spec.md (FR-07, FR-30, FR-31, I-1, I-2, NFR-02, NFR-09)</file>
+      <file>projects/ebilling-r1/notes/review-screen-prototype-brief.md (sections 4, 5)</file>
+      <file>c:\code_files\spaarke-prototype\projects\ebilling.r1\README.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Authorization contract test" location="tests/integration/contract/Api/Finance/FinanceEndpointsAuthorizationContractTests.cs">Every route denied before any service runs.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Read 074's notes (F-9 answer, recorder API), 016's calculator API, 010 / 012 option values, 049's notes (how findings and provenance are stored).</step>
+    <step order="1">GET /api/finance/invoices/{invoiceId}/review: header (firm, firm invoice and tracking number, core record type / id / name, period, invoice date, status), totals, lines (type, date, timekeeper as billed and matched, hours, rate, amount, narrative, codes with confidence and as billed, status, approved amount, reason, reviewer), per-line and invoice-level findings (policy, version, clause quote and location, values read, severity, suggested adjustment, overridden marker), per-field page / box / confidence, Decision Record history, flags canRead / canDecide.</step>
+    <step order="2">POST .../lines/{lineId}/decision; POST .../lines/decisions (selected lines, one action and reason, per-line amount for Reduce — the "apply suggestion to n lines" path); POST .../lines/accept-clean. Conditional line writes, totals through 016, Decision Records through 074.</step>
+    <step order="3">Add the policy key; keep OperationAccessPolicyCompletenessTests green.</step>
+    <step order="4">Tests: each outcome, reason and amount rules, Pending and not-In-Review refused, all-or-nothing, Accept all Clean touches only Clean lines, retry writes no second Decision Record, totals follow I-1; contract tests 401 / 403 / disabled / foreign line 404.</step>
+    <step order="5">Seeding proof: caller without core-record access gets 403 on read and decide; remove the route filter, show the test fails, restore; record in notes.</step>
+    <step order="6">dotnet build and dotnet test green; publish-size delta and vulnerable-package check recorded.</step>
+    <step order="7">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="8">Record deviations (routes, DTO names, Dataverse call count) in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Per D-75 each line decision writes its own Decision Record (subject the line) through 074's recorder; if 074 has not landed that shape, STOP before the decision routes.</trigger>
+    <trigger>If invoice access does not inherit from the core record in dev (013 stamping absent), STOP: the authorization would be wrong.</trigger>
+    <trigger>Owner decided D-77: any internal user with Write access to the invoice may decide lines (not restricted to eligible approvers).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Spec section 11 row "Review / approval / export / rule endpoints" (overlap /api/finance/invoice-review/*); InvoiceReviewService.cs:248 only confirms a document as an invoice; grep finds no line read model or line decision code.</existing>
+    <extension>Same Finance module and route group; a new endpoints file because nothing is shared with the classification gate. One policy key because no existing key names Write on an invoice.</extension>
+    <cost-of-doing-nothing>The review page has no data and no line decision path, so FR-31 fails and I-2 can never be satisfied for approval (FR-35).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Api/Finance/InvoiceLineReviewEndpoints.cs; Services/Finance/InvoiceReviewReadService.cs; Services/Finance/InvoiceLineDecisionService.cs</output>
+    <output type="test">InvoiceLineDecisionServiceTests.cs; InvoiceReviewReadServiceTests.cs; InvoiceLineReviewEndpointsAuthorizationContractTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every route returns 401 unauthenticated, 403 without access to the invoice's core record, 503 ebilling.disabled when the flag is off, and (writes) 409 when the invoice is not In Review.</criterion>
+    <criterion testable="true">Seeding proof recorded: removing the route filter makes the core-record access test fail.</criterion>
+    <criterion testable="true">Reduce without reason or with an amount outside 0 to billed is 400; Disallow without reason is 400; a Pending line is 409; a line of another invoice is 404 and nothing is written.</criterion>
+    <criterion testable="true">After a decision the line carries status, approved amount, reason, reviewer and time, and invoice totals equal I-1 as computed by 016.</criterion>
+    <criterion testable="true">Accept all Clean changes only Clean lines and writes Accepted in bulk rows with islabel false; a multi-line request with one invalid line writes nothing.</criterion>
+    <criterion testable="true">Decision Records follow 074's granularity; repeating a request with the same decision id writes no second record.</criterion>
+    <criterion testable="true">The read model returns findings with policy, version and clause, suggested adjustment, and per-field page and box; its Dataverse call count does not grow with line count.</criterion>
+    <criterion testable="true">dotnet build 0 errors; all tests green, including OperationAccessPolicyCompletenessTests.</criterion>
+    <criterion testable="true">Publish-size delta measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Shared append points: FinanceModule.cs, EndpointMappingExtensions.cs (re-read before editing, add only this task's lines). In WP4 only 100 (W4-1) and 105 (W4-2) edit OperationAccessPolicy.cs; 101–104 reuse "ebilling.invoice.decide", 106 / 107 use "finance.read". No value-correction path here (101). Adjustment lines appear as lines of type Adjustment (102). Eligible approvers and canApprove come from 103's own route, so no P4-B task edits these files.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

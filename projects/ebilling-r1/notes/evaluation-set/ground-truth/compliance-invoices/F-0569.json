@@ -1,0 +1,27 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0569",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0569","generator_id":"gen_eval_set.py@1 F-0569","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0569.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Holloway and Whitcombe LLP","firm_invoice_number":"INV-2026-21369","invoice_date":"2025-10-04","billing_period_start":"2025-09-01","billing_period_end":"2025-09-30","firm_matter_reference":"45401-0035","po_number":"PO-4544731","fees_total":3691.5,"expenses_total":271.32,"adjustments_total":0.0,"total_due":3962.82,"currency":"USD"},
+ "timekeepers":[{"name":"Aisha Carmichael","title":"Paralegal","rate":150.0,"billed_as":"Carmichael, A."},{"name":"Cyrus Hargrove","title":"Senior Associate","rate":395.0,"billed_as":"Hargrove, C."},{"name":"Dmitri Ashdown","title":"Associate","rate":270.0,"billed_as":"Ashdown, D."},{"name":"Gideon Ashdown","title":"Paralegal","rate":120.0,"billed_as":"Ashdown, G."}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-09-03","timekeeper":"Ashdown, D.","timekeeper_name":"Dmitri Ashdown","timekeeper_title":"Associate","title":"Associate","hours":2.7,"rate":270.0,"amount":729.0,"narrative":"Review and revise answer and affirmative defenses based on client comments","codes":["L210","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-09-09","timekeeper":"Carmichael, A.","timekeeper_name":"Aisha Carmichael","timekeeper_title":"Paralegal","title":"Paralegal","hours":2.7,"rate":150.0,"amount":405.0,"narrative":"Attend case management conference in the lease dispute","codes":["L230","A109"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-09-09","timekeeper":"Hargrove, C.","timekeeper_name":"Cyrus Hargrove","timekeeper_title":"Senior Associate","title":"Senior Associate","hours":1.5,"rate":395.0,"amount":592.5,"narrative":"Analyze exposure and damages model for the insurance coverage issue","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-09-11","timekeeper":"Ashdown, G.","timekeeper_name":"Gideon Ashdown","timekeeper_title":"Paralegal","title":"Paralegal","hours":1.5,"rate":120.0,"amount":180.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-09-15","timekeeper":"Ashdown, D.","timekeeper_name":"Dmitri Ashdown","timekeeper_title":"Associate","title":"Associate","hours":1.1,"rate":270.0,"amount":297.0,"narrative":"Conference with client regarding budget variance for the vendor agreement","codes":["L150","A106"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-09-18","timekeeper":"Carmichael, A.","timekeeper_name":"Aisha Carmichael","timekeeper_title":"Paralegal","title":"Paralegal","hours":2.4,"rate":150.0,"amount":360.0,"narrative":"Prepare updated litigation budget for the construction contract","codes":["L150","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-09-19","timekeeper":"Carmichael, A.","timekeeper_name":"Aisha Carmichael","timekeeper_title":"Paralegal","title":"Paralegal","hours":0.5,"rate":150.0,"amount":75.0,"narrative":"Telephone conference with opposing counsel regarding settlement terms","codes":["L160","A107"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-09-22","timekeeper":"Ashdown, D.","timekeeper_name":"Dmitri Ashdown","timekeeper_title":"Associate","title":"Associate","hours":1.9,"rate":270.0,"amount":513.0,"narrative":"Review and organize incoming production from Quarry Lane Partners for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-09-29","timekeeper":"Ashdown, G.","timekeeper_name":"Gideon Ashdown","timekeeper_title":"Paralegal","title":"Paralegal","hours":2.0,"rate":120.0,"amount":240.0,"narrative":"Draft motion for preliminary injunction in the lease dispute","codes":["L220","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-09-30","timekeeper":"Carmichael, A.","timekeeper_name":"Aisha Carmichael","timekeeper_title":"Paralegal","title":"Paralegal","hours":2.0,"rate":150.0,"amount":300.0,"narrative":"Review and analyze client documents concerning the warranty claim to identify key facts","codes":["L110","A104"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-09-30","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":271.32,"amount":271.32,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["25 Federal Plaza","Minneapolis","Tax ID 55-5937211"],"template":"T06","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2024-10-31","matter_close":"2025-12-29","matter_budget":40851.0,"approved_timekeepers":["Dmitri Ashdown","Victor Kowalczyk","Gideon Ashdown","Cyrus Hargrove","Aisha Carmichael","Anders Blackwood"],"invoice_received_date":"2025-10-20"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

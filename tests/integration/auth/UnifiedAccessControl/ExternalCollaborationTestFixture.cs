@@ -95,11 +95,12 @@ internal sealed class WorkforceCeilingDouble : IDataversePrivilegeChecker
     public static IReadOnlyDictionary<string, AccessRights> OwnerPrerequisite { get; } = new Dictionary<string, AccessRights>
     {
         ["sprk_servicerequest"] = AccessRights.Create | AccessRights.Read | AccessRights.AppendTo | AccessRights.Delete,
-        ["sprk_document"] = AccessRights.Create | AccessRights.Read | AccessRights.Delete,
+        ["sprk_document"] = AccessRights.Create | AccessRights.Read | AccessRights.AppendTo | AccessRights.Delete,
         ["sprk_project"] = AccessRights.Read | AccessRights.AppendTo,
         ["sprk_matter"] = AccessRights.Read | AccessRights.AppendTo,
         ["sprk_workassignment"] = AccessRights.Read | AccessRights.AppendTo,
         ["sprk_invoice"] = AccessRights.Read | AccessRights.AppendTo,
+        ["sprk_invoicesubmission"] = AccessRights.Create | AccessRights.Read,
         ["sprk_todo"] = AccessRights.Create | AccessRights.Read | AccessRights.Write | AccessRights.Delete,
         ["sprk_event"] = AccessRights.Create | AccessRights.Read | AccessRights.Delete,
         ["contact"] = AccessRights.Read,

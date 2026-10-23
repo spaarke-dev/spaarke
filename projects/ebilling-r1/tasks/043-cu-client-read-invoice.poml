@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="ebilling-r1">
+  <metadata>
+    <title>Content Understanding client and ReadInvoiceAsync</title>
+    <phase>2 Submission and extraction (WP2)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds the project's only new NuGet package (NFR-12), a new external AI dependency with managed-identity auth, and the typed extraction contract every later step reads.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>New SDK integration whose result mapping (confidence, page, bounding box, large documents) shapes evaluation, review and rejection decisions.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P2-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>041, 005</deps>
+    <tags>bff, ai, content-understanding, package</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Add IInvoiceAi.ReadInvoiceAsync backed by an internal Content Understanding client (REST over IHttpClientFactory, preview API 2026-06-01-preview primary with a GA 2025-11-01 fallback analyzer per D-81, managed identity) that calls the custom analyzer sprk_invoice_vN once and maps header, fee lines, expense lines and timekeeper summary — every field with confidence, page and bounding box — to a typed result, with stable reason codes for unreadable documents. If task 005 was no-go, STOP before coding (see escalation).</prompt>
+
+  <role>SPAARKE platform developer. Expert in Azure AI SDKs, managed identity in the BFF, and the PublicContracts AI facades. Follow ADRs strictly.</role>
+
+  <goal>IInvoiceAi.ReadInvoiceAsync returns a typed extracted invoice or throws a typed exception with reason code; the client lives internal under Services/Ai; options bind the ContentUnderstanding section from task 003; a health check reports a missing analyzer with a stable code; the package's publish-size delta is recorded.</goal>
+
+  <context>
+    <background>Spec Processing Pipeline step 1 and FR-21: one analyze call to the custom analyzer (D-49); fields with confidence and page / bounding box feed the line's extraction-confidence JSON (FR-04). Spike results and the go / no-go are in projects/ebilling-r1/notes/extraction-spike.md (task 005); the analyzer JSON is task 004's (infrastructure/content-understanding/sprk-invoice-v1.json); the config section ContentUnderstanding (Endpoint, ApiVersion, AnalyzerId) is added to appsettings.template.json by task 003. Research: projects/ebilling-r1/notes/research/content-understanding-vs-docintel.md (bundled PDFs: contentCategories / enableSegment routing, page-number questions at :436). Fallback if no-go: DI prebuilt-layout via Services/Ai/DocumentIntelligenceService.cs:147 ParseDocumentLayoutAsync plus an extraction Action, behind the same method.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj (one PackageReference with Version — central package management is off; see Azure.AI.DocumentIntelligence at :117)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInvoiceAi.cs, InvoiceAi.cs, NullInvoiceAi.cs, InvoiceAiContracts.cs (ReadInvoiceAsync + extracted-invoice DTOs)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Ai/ContentUnderstanding/ (internal client, result mapper, health check)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Configuration/ContentUnderstandingOptions.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs (InvoiceAi registered at :1402, NullInvoiceAi at :588 — register the client beside them)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/TextExtractorService.cs:103-128 (CreateDocIntelClient: endpoint + DI TokenCredential)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs:116-136 (DI TokenCredential use)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/SignalsModule.cs:123-139 and Services/Signals/SignalEvaluatorHealthCheck.cs (health-check registration)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ContentUnderstanding/ (mapper and failure tests from scrubbed JSON fixtures)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="041" status="required">Reshaped IInvoiceAi and InvoiceAiContracts.cs.</dependency>
+      <dependency task="005" status="required">Go / no-go, chosen arm and API version, measured package delta, field names actually returned.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="D-81 (owner, 2026-10-15)">Path-A exception: the analyzer built on `2026-06-01-preview` is primary; a GA fallback analyzer on `2025-11-01` with the same field schema is kept in step and selected by configuration only (`ContentUnderstanding:ApiVersion`, `ContentUnderstanding:AnalyzerId`; no code change to switch). Preview and GA analyzers do not interoperate, so each is deployed on its own API version by scripts/content-understanding/Deploy-Analyzers.ps1 (extend it to accept the preview API version and a preview definition file under infrastructure/content-understanding/, keeping its idempotent create / no-change / refuse-without--Replace behaviour; the 004 "no preview string" criterion is superseded by D-81). The GA SDK Azure.AI.ContentUnderstanding 1.1.0 does not cover the preview API: implement the client as a thin REST client over IHttpClientFactory with a managed-identity token (DefaultAzureCredential, scope https://cognitiveservices.azure.com/.default), serving both API versions; do not add a prerelease SDK. Add the 1.1.0 package only if a concrete need appears, and then report it as an escalation (BFF hygiene, NFR-12). Carry the spike conditions: deterministic completion step (hh:mm hours, missing rates), analyzer v2 wording for hours and non-US dates, page-range analysis of very long PDFs, and field names as actually returned (notes/extraction-spike.md). Cite the D-81 path-A exception in the PR.</constraint>
+    <constraint source="CLAUDE.md §10">Every change under src/server/api/Sprk.Bff.Api follows .claude/constraints/bff-extensions.md; this task's package must be justified in the PR with its measured delta.</constraint>
+    <constraint source="NFR-12 / D-50">Exactly one new package: Azure.AI.ContentUnderstanding 1.1.0. No other NuGet or npm package; no raw REST client written instead of the SDK unless 005 recorded that the SDK cannot do a required call (then escalate).</constraint>
+    <constraint source="FR-47 / ADR-028">Managed identity only (the DI TokenCredential); no key option, no key in config. Endpoint, API version and analyzer id come from ContentUnderstandingOptions using exactly task 003's key names.</constraint>
+    <constraint source="ADR-013">The SDK client is internal to Services/Ai and reachable only through IInvoiceAi.ReadInvoiceAsync; Finance code never references Azure.AI.ContentUnderstanding types. The extracted-invoice DTOs live in PublicContracts.</constraint>
+    <constraint source="FR-21">A document the analyzer cannot read raises a typed exception with a stable reason code: invoice.read.unreadable (encrypted / corrupt), invoice.read.page_limit (over the configured page limit), invoice.read.no_invoice (no invoice found), invoice.read.service_failed (transient / service error, retryable). Never return a partial result as success. Non-USD currency is returned as read — the finding is the evaluator's, not a failure here.</constraint>
+    <constraint source="ADR-015 / NFR-11">Logs carry document id, page count, timings and reason codes only — never field values or narratives.</constraint>
+    <constraint source="ADR-032">NullInvoiceAi.ReadInvoiceAsync throws FeatureDisabledException ai.invoice.disabled like its other methods.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Content Understanding and AI facades</topic>
+    <files>
+      <file>projects/ebilling-r1/notes/research/content-understanding-vs-docintel.md</file>
+      <file>.claude/patterns/ai/public-contracts-facade.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/config.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+    <patterns>
+      <pattern name="Azure AI client with DI credential" location="src/server/api/Sprk.Bff.Api/Services/Ai/TextExtractorService.cs">Build the client from endpoint + injected TokenCredential; drop the key branch.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context and rigor">Declare rigor FULL. Read notes/extraction-spike.md. If the decision is no-go or the file is missing, STOP (escalation). Record the chosen arm and API version.</step>
+    <step order="1">Use the researcher agent (root CLAUDE.md §15) to confirm the 1.1.0 SDK surface for analyze, result fields, confidence, source / bounding box and the long-running operation; record findings in notes.</step>
+    <step order="2">Define the extracted-invoice DTOs in InvoiceAiContracts.cs: header fields per FR-21; lines (date, timekeeper as billed, title as billed, hours, rate, amount, narrative, codes as billed, line type Fee / Expense); timekeeper summary rows; each field value carries confidence (0-1), page (1-based, original-file numbering) and bounding box {page, x, y, w, h} normalised 0-1, so 049 can write FR-04's extraction-confidence JSON directly.</step>
+    <step order="3">Add ContentUnderstandingOptions (section ContentUnderstanding, keys from 003, MaxPages default 300) with ValidateOnStart that requires a well-formed Endpoint only when one is set.</step>
+    <step order="4">Implement the internal client and mapper; one analyze call per document; never enable input truncation (a document over MaxPages is refused with invoice.read.page_limit, not silently cut); map analyzer failures and empty results to the reason codes; add ReadInvoiceAsync to IInvoiceAi / InvoiceAi / NullInvoiceAi.</step>
+    <step order="5">Add a health check: endpoint configured and analyzer missing or unreachable reports Unhealthy with description code content_understanding.analyzer_missing; endpoint not configured reports Healthy with a description saying the reader is not configured.</step>
+    <step order="6">Unit tests from scrubbed analyzer-result JSON fixtures (from the spike, no PII): full mapping, missing optional fields, multi-page bounding boxes, each reason code, Null peer. Add one live test that reports Skipped when the endpoint env var is absent (see the Skipped convention in tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj:26).</step>
+    <step order="7">Build, test; measure the publish-size delta against a fresh master build and compare with 005's figure.</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+    <step order="9">Record deviations (DTO choices 049 depends on, measured delta) in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If notes/extraction-spike.md records no-go for Content Understanding, or has no decision, STOP and present the fallback (DI prebuilt-layout via DocumentIntelligenceService plus an extraction Action, same ReadInvoiceAsync contract) for owner confirmation before writing code.</trigger>
+    <trigger>If the measured publish-size delta of the package is 5 MB or more, STOP and present it (root CLAUDE.md §10 threshold) before merging.</trigger>
+    <trigger>If the SDK cannot authenticate with the DI TokenCredential or lacks a call the spike relied on, STOP — do not add a key or a hand-written REST client without owner approval.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>DocumentIntelligenceService.ParseDocumentLayoutAsync (:147) returns layout text without invoice semantics; InvoiceAnalysisService.ExtractInvoiceFactsAsync uses text + LLM. Nothing references Content Understanding today (grep -i ContentUnderstanding in src finds nothing).</existing>
+    <extension>DocumentIntelligenceService wraps a different SDK and API (prebuilt-layout); the analyzer result model (fields with confidence and source) has no equivalent there. The method extends IInvoiceAi instead of adding a facade; ContentUnderstandingOptions is new because DocumentIntelligenceOptions is the OpenAI / DI config and its key-based DocIntel settings must not apply here.</extension>
+    <cost-of-doing-nothing>FR-21 and NFR-04 fail: no per-field confidence or page / bounding box, so the rejection rule (FR-26) cannot tell reliable from unreliable reads and reviewers cannot see where a value came from.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">dotnet build src/server/api/Sprk.Bff.Api/ ; dotnet test ; dotnet publish (size measurement)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Sprk.Bff.Api.csproj, Services/Ai/ContentUnderstanding/*, Configuration/ContentUnderstandingOptions.cs, PublicContracts IInvoiceAi / InvoiceAi / NullInvoiceAi / InvoiceAiContracts.cs, AnalysisServicesModule.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ContentUnderstanding/*</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Per D-81, switching ContentUnderstanding:ApiVersion / AnalyzerId between the preview primary and the GA fallback needs no code change: a test runs ReadInvoiceAsync against each configuration (seam test with recorded responses), and both analyzers are deployed in dev by Deploy-Analyzers.ps1 with a second run reporting no change.</criterion>
+    <criterion testable="true">No prerelease package is referenced; if Azure.AI.ContentUnderstanding is not needed, the publish-size delta for the client is reported as code-only.</criterion>
+    <criterion testable="true">Given a scrubbed analyzer result fixture, ReadInvoiceAsync maps every FR-21 header field and every fee, expense and timekeeper-summary row, each with confidence, page and normalised bounding box.</criterion>
+    <criterion testable="true">Negative: fixtures or stubs for encrypted, over-page-limit, no-invoice and service-error results raise the typed exception with invoice.read.unreadable, invoice.read.page_limit, invoice.read.no_invoice and invoice.read.service_failed respectively; none returns a partial result.</criterion>
+    <criterion testable="true">A non-USD currency value maps through unchanged and does not throw.</criterion>
+    <criterion testable="true">NullInvoiceAi.ReadInvoiceAsync throws FeatureDisabledException with ErrorCode ai.invoice.disabled.</criterion>
+    <criterion testable="true">The client is constructed with the DI TokenCredential; ContentUnderstandingOptions has no key property; grep finds no Azure.AI.ContentUnderstanding using outside Services/Ai.</criterion>
+    <criterion testable="true">The health check reports Unhealthy with content_understanding.analyzer_missing when the analyzer lookup fails, and Healthy with a not-configured description when Endpoint is empty; the host starts in both cases.</criterion>
+    <criterion testable="true">Sprk.Bff.Api.csproj gains exactly one PackageReference (Azure.AI.ContentUnderstanding 1.1.0); no other package changes.</criterion>
+    <criterion testable="true">The live test reports Skipped (not Passed) when no endpoint is configured.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+    <criterion testable="true">Publish-size delta of Sprk.Bff.Api measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-21, FR-47, NFR-11, NFR-12, D-49, D-50, D-53. The brief calls this the only new package. Bundled PDFs: follow the routing approach 005 chose (research note §"classify, segment, and analyze"); if 005 left that open, take the single-call routed form and record it. Shared append point: appsettings*.json (only if this task must add MaxPages beside 003's keys).
+
+    COMPLETED 2026-10-15 (FULL rigor). As built: projects/ebilling-r1/notes/043-cu-client.md.
+    - D-81 (path-A exception, spec.md ADR Tensions): preview 2026-06-01-preview + sprk_invoice_v2p primary, GA 2025-11-01 + sprk_invoice_v2 fallback, switched by ContentUnderstanding:ApiVersion + AnalyzerId only; seam tests run both; ArchTest keeps the two analyzer files in step.
+    - Supersedes the "exactly one PackageReference" criterion: NO package added (thin REST client over IHttpClientFactory + DI TokenCredential; no prerelease SDK). The csproj is unchanged; the publish-size delta is code-only (notes, BFF hygiene).
+    - Bundles: no router (spike section 7). Long documents: page ranges of PageRangeSize (default 20). Completion ports the spike complete() plus a day/month post-check.
+    - Both analyzers deployed on dev by Deploy-Analyzers.ps1; second run NO CHANGE. Spike-only analyzers deleted.
+    - Tests at KEEP paths (seam / domain / contract / ArchTests), not the POML's Services/Ai path. Code-review, adr-check and one adversarial pass done; all seven adversarial findings resolved (notes, Review findings).
+    - Not done here: setting ContentUnderstanding__Endpoint on spaarke-bff-dev (deploy work); TASK-INDEX (main session).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load every file in knowledge/files before Step 1. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>

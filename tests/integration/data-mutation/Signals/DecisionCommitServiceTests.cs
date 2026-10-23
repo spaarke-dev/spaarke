@@ -1292,6 +1292,29 @@ public sealed class DecisionCommitServiceTests
     }
 
     [Theory]
+    [InlineData("approve-invoice")]
+    [InlineData("reject-invoice")]
+    [InlineData("return-to-firm")]
+    [InlineData("override-submission")]
+    [InlineData("accept-line")]
+    public async Task ABillingCode_IsRefusedByTheCommitRoute_NothingWritten_Ebilling074(string code)
+    {
+        // ebilling-r1 task 074: billing decisions are recorded by the eBilling endpoints. The commit route does not know their codes, so
+        // a review naming one is refused before anything runs, and no executor exists to run it.
+        DecisionActionCatalog.TryGetBilling(code, out _).Should().BeTrue();
+        var rig = new Rig();
+        rig.Executors.Should().NotContainKey(code);
+        var review = PathBReview();
+        review = review with { Actions = [.. review.Actions!, Take(code)] };
+
+        var result = await rig.CommitAsync(review);
+
+        result.Status.Should().Be(DecisionCommitStatus.Refused);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.UnresolvedAction);
+        rig.Writes.Should().BeEmpty();
+    }
+
+    [Theory]
     [InlineData("missing")]
     [InlineData("duplicate")]
     [InlineData("notInPlan")]

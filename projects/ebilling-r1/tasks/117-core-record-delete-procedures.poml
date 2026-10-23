@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="117" project="ebilling-r1">
+  <metadata>
+    <title>Core-record delete and Procedures: retire sweep for unlinked record-scoped rule sets; delete lists agreed with uac-r2</title>
+    <phase>3 Rules (WP3) — Procedure model (EB-D-148), wave W3-D</phase>
+    <gate>089 merged (record-scoped sets and assignment rows are secure children); 080 live on dev (assignment record lookups Cascade, rule-set record lookups RemoveLink); uac-r2 reviews the job and agrees the delete lists before merge (uac-r2 owns the core-record delete path); no live writes</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New scheduled job writing status on Secure-owned rule sets and policies; a wrong match switches a live record's changed rule off (fail-open on that record); coordination with uac-r2's delete design.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Tenant-isolation-adjacent write on secure child rows and a cross-project contract (uac-r2 core-record-delete-design.md) that must stay consistent with model 5.2.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-D</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>uac-r2 owns the core-record delete path and must review; edits RuleSetService.cs (116's and 081's) and FinanceModule.cs. Run after 116 merges, or rebase on it.</parallel-reason>
+    <deps>089</deps>
+    <tags>bff-api, rules, job, security, tenant-isolation, coordination, testing</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Implement model 5.2 / O-17 / D-146 (amended, notes/procedure-and-file-model.md section 12): deleting a core record deletes its assignment rows and retires its record-scoped rule set and record rules; reusable Procedures, rule sets and rate cards are untouched. Assignment rows go by 080's Cascade and uac-r2's planner; this task adds the no-plugin sweep that retires record-scoped rule sets whose record lookups were cleared by the delete, and agrees the planner's lists with uac-r2.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Spaarke.Scheduling (ADR-036), RuleSetService, the uac-r2 secure child model and its core-record delete design.</role>
+
+  <goal>A record-scoped rule set left with no record (Record or Firm record scope, every record lookup null) is Retired and its record-rule policies are Off within one sweep; no other rule set, policy, Procedure, Procedure Version, Stored File or rate card is written; uac-r2 has the three delete lists of model 5.2 in writing and has reviewed the job.</goal>
+
+  <context>
+    <background>Model 5.2 (delete contract: Hard-deny sprk_procedure, sprk_procedureversion, sprk_storedfile; Delete sprk_procedureassignment; Unlink-only record-scoped sprk_ruleset and its sprk_policy / sprk_policyversion, "retired by the sweep"; a scope with no lookup applies to nothing), 5.1 (record-scoped sets are secure children), 12 (D-146 amended, D-170), 3.1 I-P5 (retire switches policies Off; D-170 closes their Signals). Today's delete path: no BFF core-record delete exists on any branch; uac-r2's notes/core-record-delete-design.md (origin/work/unified-access-control-r2, 2026-10-18) is design only. Its §1.3 hard-deny list already holds sprk_ruleset and sprk_policyversion; its §12 (old D-146) keeps and unlinks R's own rule set and rate card, says "the delete job writes no Retire" and leaves a retire path to ebilling's lifecycle writer; its walk reaches secure children through SecureChildLineage (089 adds both tables). A delete through the MDA today runs the platform cascades: 080 makes the assignment's record lookups Cascade and the rule set's RemoveLink. Code: RuleSetService status constants (Services/Finance/RuleSetService.cs:237-239, Retired = 2) and scope enum (:21-25; Record 100000002 and Firm record 100000003 come from 080); the D-170 close of Off policies runs in SignalReevaluationJob.ClosePoliciesNotInForceAsync (Services/Signals/SignalReevaluationJob.cs:449). Job pattern: CommunicationThreadFilingSweepJob (Services/Communication/, registered CommunicationModule.cs:622).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/RuleSetService.cs (one method: RetireUnlinkedRecordSetsAsync)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/Procedures/RecordRuleSetRetireJob.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs; appsettings.template.json (cron and apply keys)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Procedures/RecordRuleSetRetireJobTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/RuleSetServiceTests.cs</file>
+      <file role="new">projects/ebilling-r1/notes/117-core-record-delete-procedures.md (the hand-off to uac-r2)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="model 5.2, O-17">The sweep selects sprk_ruleset rows with sprk_scope Record (100000002) or Firm record (100000003), statuscode not Retired, and EVERY record lookup null. The record lookup columns come from the same core-record list 089 uses for record-scoped sets (one per FilingCores entry); no table or column name is hand-typed.</constraint>
+    <constraint source="model 12 (D-146 amended), 3.1 I-P5, D-170">For each selected set, through RuleSetService.RetireUnlinkedRecordSetsAsync: every sprk_policy of the set gets sprk_enabled = No, then the set gets statecode Inactive and statuscode Retired (2). Policy versions are not written. Signals are not closed here: SignalReevaluationJob's D-170 sweep closes Off policies' Signals as today.</constraint>
+    <constraint source="model 5.2 (cleanup only), uac-r2 design §12">The sweep only updates: it never deletes, never re-owns (owner and creator person stay) and never writes a lookup. It never touches a set with sprk_procedure set, a set with scope All records / Firm (ClientDefault 100000000, Firm 100000001), a set with any record lookup, sprk_procedure, sprk_procedureversion, sprk_procedureassignment, sprk_storedfile or sprk_ratecard.</constraint>
+    <constraint source="ADR-036 A1, ADR-052, model 4.2">RecordRuleSetRetireJob is one IScheduledJob registered with AddScheduledJob in AddFinanceModule (no BackgroundService); a scope per run; one heartbeat log per run with counts (selected, retired, faulted). A fault on one set skips that set and the run continues; the next run retries it. A policy update that fails leaves the set un-retired. Paged reads; the page cap is config. An Apply key (default false) makes it report-only until 079 switches it on, as CommunicationThreadFilingSweepJob does.</constraint>
+    <constraint source="model 5.2 delete contract, 14">Hand-off to uac-r2 (task notes, sent before the PR): (1) Hard-deny adds sprk_procedure, sprk_procedureversion, sprk_storedfile; (2) Delete: sprk_procedureassignment (reached through SecureChildLineage, or the platform Cascade); (3) Unlink-only: record-scoped sprk_ruleset, its sprk_policy and sprk_policyversion untouched by the delete and Retired by this sweep, replacing its §12 "kept" wording; (4) its §12 rate-card row is moot (085: cards carry no core lookup); (5) a core record's invoices still Block the delete. uac-r2 edits its own design and planner; this task edits no uac-r2 file.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">Placement BFF (ADR-052: ebilling's rule-set lifecycle writer); no package; publish-size delta; no new HIGH CVE.</constraint>
+    <constraint source="project">Not in this task: the planner, executor or delete routes (uac-r2); 080's cascades; 082's loader rule that a record scope with no lookup applies to nothing; live writes (079 switches Apply on after the owner's OK).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (sections 3.1 I-P5, 5.1, 5.2, 12)</file>
+      <file>projects/ebilling-r1/tasks/089-assignment-override-service.poml</file>
+      <file>origin/work/unified-access-control-r2:projects/unified-access-control-r2/notes/core-record-delete-design.md (§1.3, §11.1, §12)</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>.claude/patterns/api/scheduled-jobs.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Report-only sweep with an Apply key" location="src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadFilingSweepJob.cs, Infrastructure/DI/CommunicationModule.cs:622">Cron, apply key, per-unit fault handling.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare FULL. Confirm 089 is an ancestor of HEAD; read 089's notes for the record-lookup list; read uac-r2's design §1.3, §11.1, §12 at its current tip.</step>
+    <step order="1">Send the hand-off to uac-r2 (constraint list) and record it.</step>
+    <step order="2">RuleSetService.RetireUnlinkedRecordSetsAsync; tests.</step>
+    <step order="3">RecordRuleSetRetireJob and registration; tests.</step>
+    <step order="4">Seeding proof: drop the "every lookup null" condition; the "set with a lookup is untouched" test must fail. Restore and re-run.</step>
+    <step order="5">dotnet build and test; full ArchTests; publish-size delta; /conflict-check; code-review, adr-check, two adversarial passes (tenant isolation); uac-r2 review recorded.</step>
+    <step order="6">Update TASK-INDEX.md: this task's status cell to "✅ [done]". Notes in projects/ebilling-r1/notes/117-core-record-delete-procedures.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If uac-r2 does not accept the three lists, or wants its delete executor to retire the set itself, STOP and raise 🔔 Human Input Required; do not build a second retire writer.</trigger>
+    <trigger>If 089 left no single list of the record-scoped set's lookups, STOP and ask the main session; do not hand-type columns.</trigger>
+    <trigger>If a live read shows a rule set with Record or Firm record scope and no lookup that is not the result of a delete (a 089 write defect), STOP and report it instead of retiring it.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>SignalReevaluationJob (ontology-owned) closes Signals of Off policies but never finds unlinked sets; SecureChildReconciliationJob (uac-r2) re-owns secure children and writes no status; uac-r2's planned delete job "writes no Retire" (design §12); RuleSetService has no retire writer for rule sets today (only status checks, :609, :671, :1536).</existing>
+    <extension>The retire write extends RuleSetService (the single lifecycle writer); only the trigger is new, because no existing scheduled job in Finance reads rule sets and the ontology and uac-r2 jobs belong to other owners.</extension>
+    <cost-of-doing-nothing>A deleted record's record rules stay enabled and its set stays Active forever, contradicting D-146 (amended); the Rule Review lists show orphan sets as live, and a future loader defect would make them apply firm-wide.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+    <tool name="git">read uac-r2's design at origin/work/unified-access-control-r2</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">RuleSetService.cs, RecordRuleSetRetireJob.cs, FinanceModule.cs, appsettings.template.json</output>
+    <output type="test">RecordRuleSetRetireJobTests.cs, RuleSetServiceTests.cs</output>
+    <output type="docs">projects/ebilling-r1/notes/117-core-record-delete-procedures.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Must fire: a Record set and a Firm record set with every record lookup null are Retired and each of their policies is Off after one run with Apply on; owner, creator person and policy versions are unchanged.</criterion>
+    <criterion testable="true">Must not fire: a record-scoped set with one lookup set; a Procedure rule set (sprk_procedure set); an All records or Firm scoped set; an already Retired set; and, with Apply off, every set (report-only counts logged).</criterion>
+    <criterion testable="true">The job issues no Delete, no Assign and no lookup write (asserted on the recorded requests), and no request against sprk_procedure, sprk_procedureversion, sprk_procedureassignment, sprk_storedfile or sprk_ratecard.</criterion>
+    <criterion testable="true">A fault on one set's policy update leaves that set Active, logs it and continues; the next run retires it; a second run over the same state writes nothing.</criterion>
+    <criterion testable="true">Registered through AddScheduledJob; no BackgroundService; seeding proof recorded.</criterion>
+    <criterion testable="true">The uac-r2 hand-off (five points) and uac-r2's review result are recorded in the task notes.</criterion>
+    <criterion testable="true">dotnet build exits 0; filtered tests and full ArchTests pass; publish-size delta recorded; no package; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>079 sets the cron and switches Apply on with the owner's OK, then checks on dev with throwaway rows: delete a test matter that has an assignment and a changed rule; its assignment rows are gone, its set is unlinked and, after one run, Retired with its record rules Off; the Procedure, its rule set and any rate card are unchanged.Delete-list gate CLEARED 2026-10-21: uac-r2 accepted the six dispositions and recorded them in core-record-delete design §14 and §1.3 (work/unified-access-control-r2 4138f5ec81), with must-fire (assignment rows deleted) and must-not-fire (no Delete of rule sets, policies, policy versions, procedures or procedure versions; no rule-set status written by the plan) tests. The O-17 sweep is the only rule-set retire writer.  ontology-r1 080 review 2026-10-21 (K4): confirm with a live dev matter delete by a non-admin user who holds no privilege on sprk_procedureassignment that the platform cascade (Delete = Cascade) deletes the assignment rows and the delete succeeds. 080 PARENTAL LIMIT (2026-10-21, uac-r2 ACCEPT): Dataverse allows one parental (Delete = Cascade) relationship per table, so sprk_procedureassignment's three core lookups are RemoveLink and sprk_excludedpolicy is its only Cascade. The core-record delete planner deletes the record's sprk_procedureassignment rows in the same operation and counts them in the preview. The O-17 sweep also removes assignment rows with no core record. Tests: must-fire, an orphan is removed; must-not-fire, a row with one live core lookup is kept. ontology-r1 088 gate 2026-10-22, F1 for this task: the sprk_storedfile lookups sprk_sourcedocument and sprk_sourcecommunication are Restrict, so after a refile (D-146/#2132) they can block a core-record delete. Scenario: an invoice PDF sourced from an .eml; the email is refiled to matter N, which has no invoices; deleting N runs uac-r2's executor (188d section 4: documents, then communications); the Restrict refuses and the delete ends Partial. D-177(10) and model section 5.2 ('a record with invoices cannot be deleted anyway') miss refiles. Resolution (uac-r2, 2026-10-22): this task needs no executor change and relies on uac-r2 delete design section 15 (projects/unified-access-control-r2/notes/core-record-delete-design.md, 53569f3581). The planner keeps any row a Restrict relationship references from outside the plan (willKeep, reason referenced:sprk_storedfile, 'kept: source of an invoice file'). The record lookups are RemoveLink, so the platform clears them. RemoveLink plus a copy rule was rejected. This task's sweep retires record-scoped rule sets only; it never deletes or writes a document, communication or Stored File (goal), and must keep it that way. Known limit (uac-r2): a kept source row can be left with no core record; it keeps its stored access.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

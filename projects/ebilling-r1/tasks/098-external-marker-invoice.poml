@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="098" project="ebilling-r1">
+  <metadata>
+    <title>(a′) on sprk_invoice: hide invoices with an isolated Submit Invoice source, and derived rows, from external callers</title>
+    <phase>3 Rules (WP3) — Procedures and files (EB-D-148), wave W3-C</phase>
+    <gate>088 merged (sprk_storedfile.sprk_sourcedocument, sprk_document.sprk_restrictedbysubmission); uac-r2 task 188 merged to master and into this branch (ExternalDocumentNarrowing, AppOnlyDocumentNarrowingExtensions.HiddenDocumentIdsAsync, ExternalDocumentNarrowingGuardTests); 090 merged for the file-route part; uac-r2 reviews before merge</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tenant-isolation predicate on every external surface that returns invoices or rows derived from them; fails closed; touches shared external-access and AI tool code.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security and tenant isolation across several external read surfaces and the AI tools, composed over uac-r2's document narrowing (comparable to uac-r2 task 188).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-C</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits Infrastructure/ExternalAccess/** and Api/ExternalAccess/** shared with uac-r2 and SPA-r3 (project CLAUDE.md §4); run /conflict-check before the PR. No file shared with 092 or 089.</parallel-reason>
+    <deps>088, 090</deps>
+    <tags>bff-api, security, tenant-isolation, external-access, testing</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the read-time (a′) rule of notes/procedure-and-file-model.md section 9.1 ("Derived rows: (a′)") and section 5.2 (sprk_invoice row): an invoice is hidden from every caller who is not an internal systemuser while any Submit Invoice source of it fails D7 rules 2-4 or any of the source's roots is Restricted; rule 1 is not used; a Restricted narrowing on an .eml that carries the submission marker is skipped. The rule closes over the invoice's derived rows and is applied now, before uac-r2 task 191, on the surfaces listed below. Nothing is stored.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the external access plane (CallerPrincipal, ExternalMultiRootRule, module data, message threads), uac-r2's document narrowing (task 188) and the AI Dataverse tools' external-caller guards.</role>
+
+  <goal>One predicate, ExternalInvoiceVisibility, decides for a batch of invoice ids which are hidden from the current caller; every surface below applies it (single reads answer the uniform 404, lists omit the row); a guard fails the build when an external surface reading the invoice family does not reach it; every criterion below passes.</goal>
+
+  <context>
+    <background>Model 9.1 ("The .eml is own-Restricted", "Derived rows: (a′)", "Sources (owner K)", "Remaining races"), 5.2 (census: sprk_invoice → the (a′) predicate; sprk_storedfile follows the invoice), 9.3 ((a′) at invoice level); reviews sections 9 (F4-3) and 14-15. The Submit Invoice source of an invoice is every non-null sprk_storedfile.sprk_sourcedocument on its Stored Files (088; 094 and 095 write it). The marker is sprk_document.sprk_restrictedbysubmission (088). uac-r2 188 (origin/uac/188-d7-document-narrowing until merged): ExternalDocumentNarrowing.ReadAndDecideAsync / DecideOrFailClosedAsync and the hide-only overload HiddenDocumentIdsAsync implement rules 2-4 with the 3-hop parent chain, fail closed. Derived-row edges in SecureChildLineage.cs: sprk_billingevent (:74-77), sprk_invoicesubmission, sprk_invoiceapproval, sprk_externalidentifier, sprk_invoicecorrection (:142-165), sprk_decisionrecord (:104-112) and sprk_signal (:187-195) through their invoice and invoice-line lookups; sprk_storedfile through sprk_invoice (086 adds its lineage). Internal = a resolvable systemuser whose sprk_isexternal is false or blank (model 5.3; ExternalCallerCommunicationGuard.IsExternalCallerAsync); CIAM contacts and flagged or unresolvable users are external.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalInvoiceVisibility.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDocumentNarrowing.cs (only to add the marker-aware rule-2 option; uac-r2 file)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalModuleDataEndpoints.cs (the "invoices" module, ExternalAccessModule.cs:443-466: list, record, fetch)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalMessageEndpoints.cs (invoice root :82, gate IsRootRecordReadableAsync: thread read and notification feed)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalInvoiceSubmissionEndpoints.cs / ExternalInvoiceSubmissionAuthorizationFilter.cs (GET /invoice-submissions/{id} :63 and list :74: a submission of a hidden invoice)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/DataverseSearchDataHandler.cs, DataverseReadQueryHandler.cs, DataverseDescribeHandler.cs (external caller: invoice-family rows)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/ExternalInvoiceVisibilityTests.cs; tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/ExternalInvoiceVisibilityRouteTests.cs</file>
+      <file role="new">tests/Spaarke.ArchTests/ExternalInvoiceVisibilityGuardTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="model 9.1 (a′), O-32">Hidden when the caller is not internal AND, for any source document S of the invoice: rule 2, S's own sprk_accesspermission is Restricted, except when S is an .eml (sprk_isemailarchive true) with sprk_restrictedbysubmission = true; rule 3, a Restricted ancestor in S's parent chain; rule 4, the 065 communication rule on S or its chain (internal-only, or a non-Open thread); or any root S is filed under is effectively Restricted. Rule 1 (root grants) is never applied, so a refile never hides the invoice from its firm. An invoice with no source is not hidden by this rule.</constraint>
+    <constraint source="model 9.1, uac-r2 condition 1">Fail closed: an unreadable source row, flag, chain, marker or root state hides the invoice (single read → uniform 404; list → row omitted). Nothing is stored or stamped; no cache unless evicted on the same events 188 names (an own Access Permission change and CommunicationInternalOnlyFloor.LowerWhenSafeAsync); state which in the notes.</constraint>
+    <constraint source="ADR-013, root §11">Compose over 188's methods; never copy rules 2-4. A change to ExternalDocumentNarrowing is limited to an opt-in marker-aware rule-2 option whose default leaves every 188 test green. Reads are app-only and batched per page (one read per level); state the measured worst case in the notes.</constraint>
+    <constraint source="model 9.1 taint closure">A row of sprk_billingevent, sprk_invoiceapproval, sprk_invoicesubmission, sprk_invoicecorrection, sprk_externalidentifier, sprk_storedfile, sprk_signal or sprk_decisionrecord whose invoice (directly or through its invoice line) is hidden is hidden on the same surface.</constraint>
+    <constraint source="model 9.1 surfaces, closed list">Apply on: (a) the external "invoices" module list, record and fetch; (b) the external message thread and notification feed for an invoice root; (c) GET /api/v1/external/invoice-submissions/{id} (uniform 404) and the list (omitted); (d) the three AI Dataverse tools for an external caller (invoice-family rows dropped, as 188 slice C drops derived rows). Not here: the firm file route (093 calls this predicate), the firm findings DTO (130) and external invoice-index retrieval (152) — not on the branch; the guard names them so they fail until they reach it. Any other external surface that returns invoice-family rows: classify in the notes (in scope and applied, or SAFE with reason).</constraint>
+    <constraint source="model 4.3, 5.3 (uac-r2 F1-3, F1-e)">The internal file route's and the upload entry's flagged-external refusals are 090's; this task adds both to the guard's list and verifies their tests; it does not reimplement them.</constraint>
+    <constraint source="guard rule (root §16)">ExternalInvoiceVisibilityGuardTests: every external-plane method that reads sprk_invoice or a taint-closure table reaches ExternalInvoiceVisibility or is listed with a reason; must-fire and must-not-fire controls; a ratchet baseline only for violations that exist at HEAD and are listed with an owning task.</constraint>
+    <constraint source="project">No schema change, no live writes, no deploy; ExternalModuleRegistry gains no table (uac-r2 Q1). Logs carry ids and counts only.</constraint>
+      <constraint source="uac-r2 2026-10-21 (re-plan ack)">Invoice message threads and the notification feed (ExternalMessageEndpoints.cs:82): a message or notice reaches an external caller only if its communication passes the document rule's communication gate (sprk_isinternalonly exactly false AND the thread's sprk_privacystate Open; CommunicationOpenThreadGate) AND the invoice it is about passes (a′). Fail closed on any read fault.</constraint>
+    <constraint source="uac-r2 2026-10-21 (re-plan ack)">GET /invoice-submissions (ExternalInvoiceSubmissionEndpoints.cs:63, :74): return only the caller's own firm's submissions, and drop any whose invoice (a′) hides; any count uses the same filter, computed as the caller.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (5.2, 9.1, 9.3)</file>
+      <file>projects/ebilling-r1/notes/procedure-model-reviews.md (sections 9, 14, 15)</file>
+      <file>projects/unified-access-control-r2/tasks/188-d7-t7-external-document-narrowing-predicate.poml and its notes (on the uac-r2 branch)</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Document narrowing and its guard" location="ExternalDocumentNarrowing.cs, tests/Spaarke.ArchTests/ExternalDocumentNarrowingGuardTests.cs (188)">Batch decision, hide-only overload, surface-scan guard with controls.</pattern>
+      <pattern name="External caller filter in AI tools" location="src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/DataverseSearchDataHandler.cs:179-191, :297-368">Drop hits for an external caller, log event, no data on a fault.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare FULL. Confirm 188 and 088 are ancestors of HEAD (STOP if 188 is not). Read 188's notes (surface table, query cost, cache). Confirm each surface (a)-(d) against code and record file:line.</step>
+    <step order="1">ExternalInvoiceVisibility over 188's methods, with the marker-aware rule 2 and the roots' Restricted term; unit tests per rule leg.</step>
+    <step order="2">Apply on (a)-(d) with the taint closure; route and tool tests.</step>
+    <step order="3">ExternalInvoiceVisibilityGuardTests with controls; add 090's two refusals and the 093 / 130 / 152 entries.</step>
+    <step order="4">Seeding proofs; build; full ArchTests; publish-size delta; /conflict-check; notes in projects/ebilling-r1/notes/098-external-marker-invoice.md (surface table, query cost, cache statement, mutation table).</step>
+    <step order="5">code-review, adr-check, two adversarial passes (tenant isolation), uac-r2 review; then TASK-INDEX.md status cell `✅ [done]`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If uac-r2 188 is not merged, STOP: do not copy its rules.</trigger>
+    <trigger>If uac-r2 191's ExternalMarker / ExternalVisibility lands on the branch during the task, STOP and ask whether the predicate is declared on it instead.</trigger>
+    <trigger>If a surface can apply the predicate only by editing a reader 188 fenced off (the shared collection-page reader in ExternalDataService, CollectionPrefer), STOP and ask uac-r2.</trigger>
+    <trigger>If 088's marker or source column differs from the background, STOP.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>ExternalDocumentNarrowing (188) decides documents; ExternalMultiRootRule decides roots; nothing decides an invoice by its source (grep "ExternalMarker", "ExternalVisibility": none on master, the branch or uac-r2's branch).</existing>
+    <extension>188's predicate is keyed on document rows and cannot answer for an invoice without the source lookup, the marker exception and the roots' Restricted term, so a thin composition calls it instead of copying it; one opt-in option is added to it.</extension>
+    <cost-of-doing-nothing>An invoice extracted from an internal-only or Restricted email is shown to the firm and its partners with its lines, approval, submission, Signals and findings through the SPA list, threads, submission status and AI tools.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">ExternalInvoiceVisibility.cs, ExternalDocumentNarrowing.cs (option), ExternalModuleDataEndpoints.cs, ExternalMessageEndpoints.cs, ExternalInvoiceSubmissionEndpoints.cs or its filter, the three AI tool handlers</output>
+    <output type="test">the tests in relevant-files</output>
+    <output type="docs">projects/ebilling-r1/notes/098-external-marker-invoice.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Must fire (hidden) for a CIAM contact and for a flagged-external systemuser, each: source own Restricted (not an .eml); .eml own Restricted without the marker; Restricted ancestor; internal-only communication; non-Open thread; a Restricted root of the source; unreadable source, flag, marker or root state; an unresolvable caller.</criterion>
+    <criterion testable="true">Must not fire (visible): an .eml own Restricted with the marker and otherwise clean; an invoice with no source (SPA upload); a source refiled to another root (rule 1 unused); a source lowered after hiding (visible again on the next read); an internal systemuser (flag false; flag blank) is never hidden by this rule.</criterion>
+    <criterion testable="true">Surfaces (a)-(d) each: a hidden invoice is absent from lists and gets a single-read answer byte-identical to a non-existent id's; a visible invoice is unchanged.</criterion>
+    <criterion testable="true">Taint closure: a line, approval, submission, correction, external identifier, Stored File, Signal and Decision Record of a hidden invoice are hidden on every surface that returns them; the same rows of a visible invoice are returned.</criterion>
+    <criterion testable="true">Guard: fails on a control surface that reads sprk_invoice without the predicate; passes on one that reaches it directly or through a helper; lists 090's internal file route and upload refusals and the 093, 130 and 152 entries.</criterion>
+    <criterion testable="true">Seeding proofs, one per guard, in the notes: removing the predicate call on each surface (a)-(d) fails its test; removing the marker exception fails the marked-.eml test; removing the roots term fails the Restricted-root test; removing the guard's reach check fails its control.</criterion>
+    <criterion testable="true">All 188 tests pass unchanged with the option at its default.</criterion>
+    <criterion testable="true">dotnet build exits 0; filtered tests pass; full ArchTests green; publish-size delta recorded; no package; /conflict-check run.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Owner-accepted effect (uac-r2 round 116): while a source is internal-only or Restricted, the invoice and everything derived from it are hidden from external callers, the firm included; it reappears when the source is lowered. 093 applies this predicate at invoice level on the firm file route; 130 and 152 must reach it. (a′) does not follow the resubmission link (097). ontology-r1 2026-10-22 (088 on dev): sprk_storedfile.sprk_sourcedocument and sprk_sourcecommunication are Restrict, so deleting a Document or Communication that a Stored File points at is refused. Any delete or cleanup path this task adds must expect and handle that refusal (uac-r2 delete design section 15 covers core-record deletes).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>

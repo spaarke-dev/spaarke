@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="ebilling-r1">
+  <metadata>
+    <title>Invoice totals calculator (I-1)</title>
+    <phase>1 Data model (WP1)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New BFF service with unit tests; a pure calculation plus one persistence method (brief-assigned STANDARD; code-review still runs at Step 9.5).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Formula fully defined by I-1 / D-42 / FR-07; single component.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>010, 012</deps>
+    <tags>bff, finance</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build the single server-side owner of invoice totals (FR-07, I-1, D-42): a pure calculator that computes fees, expenses, line-adjustment, invoice-adjustment and approved totals from an invoice's lines, and a persistence method that recalculates and writes them — refusing any result with a negative approved total. Later tasks (049, 100, 101, 102) call it after every line or adjustment change.</prompt>
+
+  <role>SPAARKE platform developer. Expert in C# money arithmetic, pure-function design and Dataverse writes.</role>
+
+  <goal>InvoiceTotalsCalculator (pure, static or stateless) and IInvoiceTotalsService.RecalculateAsync(invoiceId) in Services/Finance, registered in AddFinanceModule; unit tests prove I-1, the percent-on-fees-after-line-adjustments rule (expenses excluded) and the negative-total refusal.</goal>
+
+  <context>
+    <background>I-1: approved total = billed total − Σ line adjustments − Σ invoice-level adjustments, computed server-side only. Billed total is sprk_invoice.sprk_totalamount (FR-07). D-42: a percent invoice-level adjustment applies to fees only, after line adjustments; a fixed amount is also allowed; an adjustment that would make the approved total negative is refused (FR-32). Line columns (task 010): sprk_costtype Fee / Expense / Adjustment, sprk_amount, sprk_approvedamount, sprk_linestatus (Pending, Clean, Flagged, Accepted, Reduced, Disallowed), sprk_adjustmentmethod Percent / Fixed, sprk_adjustmentvalue. Invoice totals columns (task 012): sprk_feestotal, sprk_expensestotal, sprk_lineadjustmentstotal, sprk_invoiceadjustmentstotal, sprk_approvedtotal. Option values: 010 / 012 task notes and docs/data-model.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceTotalsCalculator.cs (pure calculator + result type)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceTotalsService.cs (interface + RecalculateAsync)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/InvoiceTotalsCalculatorTests.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs (one registration — shared append point)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Finance/FinanceBaseValues.cs (pure-definition style to mirror; ontology-owned — read only)</file>
+      <file role="read">src/server/shared/Spaarke.Dataverse/IGenericEntityService.cs</file>
+      <file role="read">docs/data-model/sprk_billingevent.md, docs/data-model/sprk_invoice.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">Line columns and option values</dependency>
+      <dependency task="012" status="pending">Invoice totals columns</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="I-1 / D-42">Definitions (exact): fees total = Σ sprk_amount of Fee lines; expenses total = Σ sprk_amount of Expense lines; a Fee or Expense line's adjustment = sprk_amount − sprk_approvedamount when its status is Reduced, sprk_amount when Disallowed, 0 otherwise; line-adjustments total = Σ of those; a Percent Adjustment line's amount = value% × (fees total − Σ adjustments of Fee lines) — expenses never in the base; a Fixed Adjustment line's amount = its value; invoice-adjustments total = Σ Adjustment-line amounts; approved total = sprk_totalamount − line-adjustments total − invoice-adjustments total.</constraint>
+    <constraint source="FR-32">If the approved total would be negative, the calculator returns a refusal with a stable reason code and RecalculateAsync writes nothing.</constraint>
+    <constraint source="project">Money arithmetic in decimal; round each computed adjustment and each total to 2 decimals with MidpointRounding.AwayFromZero (record this choice in docs/data-model/sprk_invoice.md). USD only in R1; the calculator does not convert currency.</constraint>
+    <constraint source="FR-07">The service exposes no way to set approved total (or any total) from a caller value: RecalculateAsync takes only the invoice id. It writes the five totals and each Adjustment line's computed amount (sprk_amount), conditionally on the invoice version read (copy InvoiceReviewService's UpdateRecordFieldsIfUnchangedAsync retry pattern).</constraint>
+    <constraint source="ADR-010 / bff-extensions.md">Registrations inside AddFinanceModule, unconditional; re-read FinanceModule.cs immediately before editing. Measure publish-size delta against a fresh master build; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Write calculator tests first: fees + expenses, no decisions (approved = billed); Reduced and Disallowed lines; percent adjustment with fees and expenses (expenses excluded from the base, after fee line adjustments); fixed adjustment; mixed; negative approved total refused; rounding at a .005 boundary.</step>
+    <step order="2">Implement the pure calculator.</step>
+    <step order="3">Implement RecalculateAsync (read invoice + lines, calculate, conditional write) and register it.</step>
+    <step order="4">dotnet build and dotnet test; measure publish-size delta.</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status cell to ✅ [done].</step>
+    <step order="6">If any deviations from plan, document in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If billed total (sprk_totalamount) and fees + expenses disagree on test data in a way that makes I-1 ambiguous (e.g. firm-side discounts not represented as lines), STOP and ask which base the owner intends rather than choosing one.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Grep of Services/** finds no invoice totals computation: FinanceBaseValues defines rollup spend from sprk_totalamount, SpendSnapshotService aggregates billing events for snapshots; InvoiceReviewService only copies a caller's TotalAmount onto create (line 867).</existing>
+    <extension>No — FinanceBaseValues is the ontology-owned rollup definition (matter / project level) and SpendSnapshotService is period aggregation; per-invoice I-1 totals are a different calculation with a different owner.</extension>
+    <cost-of-doing-nothing>FR-07 fails (approved total not recalculated on change; client-supplied totals possible) and each of 049 / 100 / 101 / 102 would compute totals itself, breaking ADR-002's one owner per invariant.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceTotalsCalculator.cs, InvoiceTotalsService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/InvoiceTotalsCalculatorTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given fees 1000, expenses 200, billed 1200 and no decisions, the approved total is 1200 and both adjustment totals are 0.</criterion>
+    <criterion testable="true">Given a Fee line of 500 Reduced to 300 and another Disallowed (200), the line-adjustments total is 400.</criterion>
+    <criterion testable="true">Given fees 1000 (one Fee line reduced by 100), expenses 500 and a 10% Percent adjustment, the adjustment amount is 90 (expenses excluded, after line adjustments).</criterion>
+    <criterion testable="true">Given adjustments that would make the approved total negative, the calculator returns the refusal reason code and RecalculateAsync performs no write.</criterion>
+    <criterion testable="true">RecalculateAsync has no parameter carrying a total; it writes the five totals and Adjustment-line amounts conditionally on the version read.</criterion>
+    <criterion testable="true">Publish-size delta measured against a fresh master build and recorded in task notes; no new HIGH CVE; dotnet test passes.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Shared append point: FinanceModule.cs. FR-07's "client attempt to write approved total directly is refused" is met for every BFF path here; refusing a direct Dataverse / model-driven edit needs the totals columns read-only on forms (029) and, if required, a field security profile — not built here; raise it with the main session (recorded as a brief gap). Callers: 049, 100, 101, 102.
+
+    COMPLETED 2026-10-15 (parallel mode: TASK-INDEX.md and current-task.md left to the main session). Full notes: projects/ebilling-r1/notes/016-invoice-totals-calculator.md.
+    - BFF: InvoiceTotalsCalculator (pure) + IInvoiceTotalsService/InvoiceTotalsService.RecalculateAsync(invoiceId) in Services/Finance, one unconditional registration in AddFinanceModule. Writes changed Adjustment-line sprk_amount, then the five totals with If-Match on the invoice version (3 attempts); a refusal writes nothing. Refusal codes (stable): approved-total-negative, billed-total-missing, line-cost-type-unknown, line-amount-negative, line-approved-amount-invalid, adjustment-invalid.
+    - Rounding: decimal, 2 dp, MidpointRounding.AwayFromZero (recorded in docs/data-model/sprk_invoice.md).
+    - Tests: 38 new (calculator + service), mutation-checked (expenses in base, base before line adjustments, banker's rounding, write on refusal, wrong version, culture-sensitive money read all fail them). ArchTests 1045 passed; ADR-010 1:1 ceiling raised 160 -> 161 (+1, seam justification in the test file; merge with other branches that raise it: sum the additions).
+    - Publish size (fresh short-path worktrees, parent commit 290ffd704 vs this): 37.128 -> 37.135 MB, +0.008 MB; framework-dependent linux-x64, Release, PDBs included, Compress-Archive Optimal, 192 files each. No new package; no vulnerable package.
+    - Review: one adversarial pass; F2 (culture-sensitive money read), F3, K2 x2, K3 fixed; K4 items documented. Open for the main session: a billed total that differs from fees + expenses is logged, not blocked (owner question: expected?); the caller of a refusal (100-102) must undo the adjustment line that caused it; direct Dataverse edits of the totals are not blocked (029 / field-security profile).
+    - Section 11 answers: notes/016-invoice-totals-calculator.md section 5.
+
+    rework: fix-round-1 task 016
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

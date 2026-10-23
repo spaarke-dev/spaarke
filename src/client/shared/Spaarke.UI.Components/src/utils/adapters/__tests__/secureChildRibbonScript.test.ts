@@ -38,7 +38,12 @@ interface IHarness {
   posts: Array<{ url: string; body: Record<string, unknown> }>;
 }
 
-function harness(options: { flag?: boolean | null | 'throw'; bffStatus?: number; bffBody?: unknown }): IHarness {
+function harness(options: {
+  flag?: boolean | null | 'throw';
+  bffStatus?: number;
+  bffBody?: unknown;
+  invoiceRow?: Record<string, unknown>;
+}): IHarness {
   const h: IHarness = {
     ribbon: undefined as unknown as IRibbon,
     reads: [],
@@ -59,6 +64,7 @@ function harness(options: { flag?: boolean | null | 'throw'; bffStatus?: number;
       WebApi: {
         retrieveRecord: (entity: string, id: string, query: string) => {
           h.reads.push(`${entity}(${id})${query}`);
+          if (query.includes('_sprk_matter_value')) return Promise.resolve(options.invoiceRow ?? {});
           if (flag === 'throw') return Promise.reject(new Error('no read'));
           return Promise.resolve({ sprk_issecure: flag });
         },
@@ -91,12 +97,25 @@ function harness(options: { flag?: boolean | null | 'throw'; bffStatus?: number;
                   ReferencingEntityNavigationPropertyName: 'sprk_Matter',
                   ReferencedEntity: 'sprk_matter',
                 },
+                {
+                  ReferencingAttribute: 'sprk_project',
+                  ReferencingEntityNavigationPropertyName: 'sprk_Project',
+                  ReferencedEntity: 'sprk_project',
+                },
+                {
+                  ReferencingAttribute: 'sprk_invoice',
+                  ReferencingEntityNavigationPropertyName: 'sprk_Invoice',
+                  ReferencedEntity: 'sprk_invoice',
+                },
               ],
             }),
         });
       }
       if (url.includes("EntityDefinitions(LogicalName='sprk_matter')")) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ EntitySetName: 'sprk_matters' }) });
+      }
+      if (url.includes("EntityDefinitions(LogicalName='sprk_invoice')")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ EntitySetName: 'sprk_invoices' }) });
       }
       if (url.includes('EntityDefinitions(LogicalName=')) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ PrimaryNameAttribute: 'sprk_name' }) });
@@ -217,6 +236,36 @@ describe('sprk_secure_child_ribbon.js — the BFF-backed "New <thing>"', () => {
       expect(h.forms).toEqual([{ entityName: table, entityId: NEW_ID }]);
     }
   );
+
+  // ebilling-r1 ISS-010 (FR-05): the server refuses a billing event that names no core record of its own (D-75), so the
+  // invoice form's "New Billing Event" binds the invoice's one core record too.
+  const MATTER_ID = 'c1470000-0000-4000-8000-000000000003';
+  const PROJECT_ID = 'c1470000-0000-4000-8000-000000000004';
+
+  it('a billing event on an invoice also binds the one core record the invoice is filed under', async () => {
+    const h = harness({ flag: true, invoiceRow: { _sprk_matter_value: MATTER_ID, _sprk_project_value: null } });
+    h.ribbon.newChild(formOf('sprk_invoice'), { getRelationship: () => ({ attributeName: 'sprk_invoice' }) }, 'sprk_billingevent');
+    for (let i = 0; i < 10 && h.forms.length === 0; i++) await flush();
+
+    expect(h.posts).toHaveLength(1);
+    expect(h.posts[0].body['sprk_Invoice@odata.bind']).toBe(`/sprk_invoices(${HOST_ID})`);
+    expect(h.posts[0].body['sprk_Matter@odata.bind']).toBe(`/sprk_matters(${MATTER_ID})`);
+    expect(h.forms).toEqual([{ entityName: 'sprk_billingevent', entityId: NEW_ID }]);
+  });
+
+  it.each([
+    ['no core record', {}],
+    ['two core records', { _sprk_matter_value: MATTER_ID, _sprk_project_value: PROJECT_ID }],
+  ])('a billing event on an invoice with %s is refused before anything is sent', async (_label, row) => {
+    const h = harness({ flag: true, invoiceRow: row });
+    h.ribbon.newChild(formOf('sprk_invoice'), { getRelationship: () => ({ attributeName: 'sprk_invoice' }) }, 'sprk_billingevent');
+    for (let i = 0; i < 10 && h.alerts.length === 0; i++) await flush();
+
+    expect(h.posts).toEqual([]);
+    expect(h.alerts).toHaveLength(1);
+    expect(h.alerts[0].text).toContain('Nothing was created.');
+    expect(h.forms).toEqual([]);
+  });
 
   it('a BFF refusal shows the server message and opens nothing', async () => {
     const h = harness({

@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="091" project="ebilling-r1">
+  <metadata>
+    <title>File store provisioning: blob containers, container-scoped role, malware-scan setting, customer-provisioning hand-off</title>
+    <phase>3 Rules (WP3) — Procedures and files (EB-D-148), wave P3-A</phase>
+    <gate>Startable for steps 1-4 (read-only inventory, module, what-if). Every live Azure change (step 6) needs the owner's OK first.</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security-sensitive RBAC (who may read and write invoice and Procedure bytes) and a live Azure change on shared dev; azure-deployment constraints apply.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive role design with known open points in the model (shared account, account-scope grant, scan-tag permission) that need judgment, not a fixed recipe.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>azure, bicep, infrastructure, security, deploy, coordination</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Provision the file store's blob storage for dev (model section 4.2): the containers procedures, invoice-files and billing-exports, the BFF identity's Storage Blob Data role at container scope, the malware-scanning setting, no network change (K-3), and no Key Vault change. Write it as a bicep module, apply it to dev after a what-if and the owner's OK, and hand the customer-environment wiring to customer-provisioning-orchestration-r1.</prompt>
+
+  <role>SPAARKE platform engineer. Expert in Azure Storage RBAC, Defender for Storage malware scanning, bicep and az what-if deployments.</role>
+
+  <goal>A new module infrastructure/bicep/modules/ebilling-file-store.bicep builds clean; dev has the three containers (no public access) and the BFF identity's role at each container's scope, with the scan setting the owner chose; the inventory, what-if, owner OK and result are in notes/091-storage-provisioning.md; a hand-off issue exists for customer-provisioning-orchestration-r1.</goal>
+
+  <context>
+    <background>Model: projects/ebilling-r1/notes/procedure-and-file-model.md section 4.2 (containers, path {tenantId}/{parent table}/{parent id}/{file id}, write-once, scan tag read on demand, a missing tag refuses, "Scanning not enabled" is an explicit per-environment setting, no WORM, soft delete on, managed identity only, provisioning paragraph with uac-r2 Q5 and K-3) and section 5 (K-3 accepted by the owner, round 117). Today: modules/storage-account.bicep sets networkAcls defaultAction Allow when no subnet is given (:54-66) and assigns Storage Blob Data Contributor at ACCOUNT scope (:156-180); customer.bicep passes the stamp UAMI to it (:315). No module in infrastructure/ configures Defender for Storage. The service that writes and reads these containers is task 090 (it defines the BFF config keys); 079 sets those keys on dev. Dev environment: rg-spaarke-dev, App Service spaarke-bff-dev.</background>
+    <relevant-files>
+      <file role="new">infrastructure/bicep/modules/ebilling-file-store.bicep</file>
+      <file role="new">projects/ebilling-r1/notes/091-storage-provisioning.md</file>
+      <file role="read">infrastructure/bicep/modules/storage-account.bicep</file>
+      <file role="read">infrastructure/bicep/customer.bicep (:300-320)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionFileBlobStore.cs (managed-identity-only endpoint rule, :165-230)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="model 4.2, root CLAUDE.md section 9, .claude/constraints/provisioning.md">No Key Vault change of any kind; no account key, connection string, SAS or shared-key use; the module outputs no secret. The BFF's managed identity is the only data-plane principal it grants.</constraint>
+    <constraint source="model 4.2 (uac-r2 K-3)">Role assignments at container scope only (one per container, name guid(container id, principal, role)). Do not change the account's network rules (Deny is at prod hardening, accepted by the owner). Do not modify storage-account.bicep or customer.bicep; customer wiring is the hand-off.</constraint>
+    <constraint source="model 4.2">Containers procedures, invoice-files, billing-exports with publicAccess None. No WORM / immutability policy. Do not change the account's soft-delete setting; record its current value.</constraint>
+    <constraint source="model 4.2 (uac-r2 Q5)">Malware scanning: the module takes enableMalwareScanning (bool) and, when true, configures Defender for Storage on-upload malware scanning on the account (Microsoft.Security/defenderForStorageSettings) with a monthly cap parameter. Whether dev scans, or runs with the explicit "Scanning not enabled" setting, is the owner's choice in step 5.</constraint>
+    <constraint source="project CLAUDE.md section 5, .claude/constraints/azure-deployment.md">Dev only. Read-only az commands first; what-if before apply; the owner's OK before any live change; never print or store an app setting's value or any credential in the notes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (section 4.2)</file>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/ebilling-r1/tasks/028-ebilling-containers.poml (step 5: the hand-off issue pattern)</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Read-only inventory with az, recorded in the notes: the identity spaarke-bff-dev uses for storage (type and principal id); the storage account(s) in rg-spaarke-dev and which one the BFF identity holds a role on (az role assignment list --assignee, all scopes); whether that account serves other workloads (its existing containers); its network rules, soft-delete setting and whether the three container names exist; Defender for Storage plan status on the subscription and the account.</step>
+    <step order="2">Run az role definition list --name "Storage Blob Data Contributor" and record whether its dataActions include Microsoft.Storage/storageAccounts/blobServices/containers/blobs/tags/read (needed to read the scan tag).</step>
+    <step order="3">Write ebilling-file-store.bicep: params storageAccountName, principalId, containerNames (default the three), roleDefinitionId (default Storage Blob Data Contributor), enableMalwareScanning, malwareScanningCapGBPerMonth; existing account and blobService 'default'; the containers; the container-scope role assignments; the conditional defenderForStorageSettings; outputs: container names and the blob endpoint only. az bicep build must be clean.</step>
+    <step order="4">az deployment group what-if against rg-spaarke-dev with the step 1 values; save the output in the notes.</step>
+    <step order="5">Show the owner the inventory, the what-if and the scanning choice (scan on dev, with cost cap, or the explicit "Scanning not enabled" setting); record the OK and the choice.</step>
+    <step order="6">Apply with az deployment group create; verify by read: the three containers exist with public access off; one role assignment per container at container scope for the BFF principal; the Defender setting matches the owner's choice.</step>
+    <step order="7">File the hand-off issue for customer-provisioning-orchestration-r1 through /project-defer-issue-tracking (notes/defer-issues.md plus a GitHub issue): wire the module into customer.bicep for the stamp UAMI; the per-environment scanning setting; the BFF config keys 090 defines; network Deny at prod hardening (K-3); the step 1-2 findings.</step>
+    <step order="8">Update TASK-INDEX.md: this task's status cell to "✅ [done]"; record deviations in the notes.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If step 1 shows the BFF identity already holds a data role at ACCOUNT scope on the account it would use, STOP after step 4 and raise 🔔 Human Input Required: a container-scope grant to the same principal narrows nothing (K-3's mitigation would not hold). Options to present: accept and record it; move the file store to an account where the BFF has no account-scope role; or remove the account-scope grant (another workload's change, not this task's).</trigger>
+    <trigger>If step 2 shows the role cannot read blob index tags, STOP and escalate (security): do not grant Storage Blob Data Owner or a custom role without the owner's and uac-r2's agreement.</trigger>
+    <trigger>If the dev account is shared with other projects' workloads, or creating the containers needs any change to the account itself, STOP and ask the owner before step 6.</trigger>
+    <trigger>If any step would need a Key Vault secret, an account key, a SAS or a network-rule change, STOP; it is out of scope.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>modules/storage-account.bicep creates an account with its containers and account-scope roles; customer.bicep's storageContainers (:72) lists temp-files, document-processing and ai-chunks; SessionFileBlobStore uses its own container. Grep of infrastructure/ finds no container-scope role and no Defender for Storage resource.</existing>
+    <extension>Adding the three names to storage-account.bicep's containers would grant only the account-scope role it already assigns and would redeploy the account resource; K-3 asks for container scope. A module over an existing account adds containers, container-scope roles and the scan setting without touching the account.</extension>
+    <cost-of-doing-nothing>090's file store has no container to write to and no granted identity, so every Procedure, invoice and export file upload fails; and without the scan setting every download refuses (a missing tag refuses, model 4.2).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="az">Read-only inventory, bicep build, what-if, deployment</tool>
+    <tool name="gh">Hand-off issue</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">infrastructure/bicep/modules/ebilling-file-store.bicep</output>
+    <output type="docs">projects/ebilling-r1/notes/091-storage-provisioning.md; notes/defer-issues.md entry and the hand-off issue</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">az bicep build of the module exits 0; the module has no output, parameter default or resource property holding a key, connection string or SAS.</criterion>
+    <criterion testable="true">The notes record the step 1 inventory, the step 2 tag-permission finding, the what-if output, and the owner's OK and scanning choice with its date, before step 6.</criterion>
+    <criterion testable="true">On dev, procedures, invoice-files and billing-exports exist with public access off; the BFF principal has exactly one role assignment at each container's scope from this task.</criterion>
+    <criterion testable="true">Negative: no role assignment at account, resource-group or subscription scope was created; the account's network rules, soft-delete setting and Key Vault are unchanged (before/after reads in the notes).</criterion>
+    <criterion testable="true">Defender for Storage on the account matches the owner's choice (configured with the cap, or recorded as the explicit "Scanning not enabled" setting for dev).</criterion>
+    <criterion testable="true">The hand-off issue exists, links this task, and is listed in notes/defer-issues.md.</criterion>
+  </acceptance-criteria>
+
+  <notes>The model leaves "dev uses the existing account" unverified (4.2); step 1 settles it. customer.bicep passes the UAMI to the storage module at :315 (the model cites :313). OWNER 2026-10-21 (re-plan Q5): remove the account-scope Storage Blob Data Contributor assignment for the stamp identity. Dev/test is not a current risk, so the dev removal is low priority (still needs the owner's OK when run); the priority is that the provisioned customer environments get the correct settings: container-scoped assignments only, in the bicep that customer provisioning uses (storage-account.bicep / customer.bicep), with container-scoped grants for any non-ebilling container the identity needs. SCAN-TAG ROLE (2026-10-21): Storage Blob Data Contributor lacks blobs/tags/read; every built-in role with it also has tags/write. uac-r2 ACCEPTS option A (custom role), pending the owner's pick, on conditions: (1) the role is exactly Contributor's actions and data actions listed explicitly plus .../containers/blobs/tags/read; no wildcard, no tags/write, empty NotDataActions; assignableScopes as narrow as provisioning allows (the stamp's resource group); a -Verify step or test diffs it against built-in Contributor + tags/read, must-fire on tags/write or any '*', must-not-fire on the exact set. (2) Live proof on dev: under the role, Set Blob Tags and Put Blob with x-ms-tags are both 403. (4) Per-container assignments only (procedures, invoice-files, billing-exports); creating the role definition and the assignments are live changes under the owner's 2026-10-21 OK for 091's dev storage change. B rejected (self-tagging); C rejected (event pipeline and state store not needed). customer-provisioning-orchestration-r1 2026-10-21 reviewed 97bb759493: OK to merge. (a) customer.json conflicts with whichever branch merges second; recompile it from the merged customer.bicep, never hand-merge. (b) Correction: H13's ArmStampKeylessVerifier is ARM-only (no blob call); the data-plane probe is the BFF's AiKeylessProbe on SessionFileStore:ContainerName, which a container grant covers. (c) Stamps get no SessionFileStore settings today; customer-provisioning adds the H2a blob-endpoint output and manifest entries (container 'ai-chunks'). (d) Never remove the account grant on ACME or any customer stamp from this project: customer-provisioning takes it to its owner when our change reaches a stamp. (e) The control-plane Worker can create the custom role at stamp-RG scope; send them the final §6 hand-off to fit into H2a and H13.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

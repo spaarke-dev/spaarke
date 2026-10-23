@@ -246,6 +246,38 @@
       "addedBy": "spaarke-ontology-platform-r1 task 039"
     },
     {
+      "logicalName": "sprk_invoicesubmission",
+      "privilegeName": "prvReadsprk_invoicesubmission",
+      "kind": "child",
+      "reason": "ebilling-r1 spec FR-05 / task 013: an invoice submission names exactly one matter, project or work assignment and is a child of it; its BFF writer (e-billing intake, a later ebilling-r1 task) creates it owned by the core record's team (RecordOwnershipResolver, record-first, I-6), which for a secure core record is the Secure Record Owners team, and SecureChildReconciler re-owns it there.",
+      "evidence": "ebilling-r1 task 013 negative control (spaarkedev1, 2026-10-15T20:37:09Z): POST sprk_invoicesubmissions owned by team Secure Record Owners 6eabc7f9-13be-f111-a05b-0022482913fc, before this privilege was added, returned HTTP 403, verbatim: 'Read Privilege Check For Owner failed with exception: Principal team (Id=6eabc7f9-13be-f111-a05b-0022482913fc, type=9, teamType=0, privilegeCount=29, MetadataCachePrivilegesCount=7432, businessUnitId=d9ec0b6f-80a0-f111-aaac-000d3a99d1d7), is missing prvReadsprk_invoicesubmission privilege (Id=1a2c034f-e948-4312-87f1-d9819261e26a) on OTC=11016 for entity 'sprk_invoicesubmission' (LocalizedName='Invoice Submission').' privilegeCount=29 matched the role's 29 Read privileges, so the reading was current. Applied via scripts/Set-SecureRecordOwnerRolePrivileges.ps1 at Basic, then the section 5.4 strip removed the SharePoint four the platform re-injected (Verify: 33 of 33, nothing outside the file). Positive control at 20:54:52Z, 20:55:19Z and 20:55:44Z: HTTP 201 on 3 of 3 polls, every probe deleted; the control create on sprk_billingexport (not in this file) stayed refused with privilegeCount=33. Record: projects/ebilling-r1/notes/013-core-ancestor-invoice-family.md.",
+      "addedBy": "ebilling-r1 task 013"
+    },
+    {
+      "logicalName": "sprk_invoiceapproval",
+      "privilegeName": "prvReadsprk_invoiceapproval",
+      "kind": "child",
+      "reason": "ebilling-r1 spec FR-05 / task 013: an invoice approval names exactly one matter, project or work assignment and is a child of it; its BFF writer (the approval decision, a later ebilling-r1 task) creates it owned by the core record's team (RecordOwnershipResolver, record-first, I-6), which for a secure core record is the Secure Record Owners team, and SecureChildReconciler re-owns it there.",
+      "evidence": "ebilling-r1 task 013 negative control (spaarkedev1, 2026-10-15T20:37:10Z): POST sprk_invoiceapprovals owned by team Secure Record Owners 6eabc7f9-13be-f111-a05b-0022482913fc, before this privilege was added, returned HTTP 403, verbatim: 'Read Privilege Check For Owner failed with exception: Principal team (Id=6eabc7f9-13be-f111-a05b-0022482913fc, type=9, teamType=0, privilegeCount=29, MetadataCachePrivilegesCount=7432, businessUnitId=d9ec0b6f-80a0-f111-aaac-000d3a99d1d7), is missing prvReadsprk_invoiceapproval privilege (Id=6e8096f0-dcbf-4939-8edd-66bfd8d258d7) on OTC=11017 for entity 'sprk_invoiceapproval' (LocalizedName='Invoice Approval').' Applied via scripts/Set-SecureRecordOwnerRolePrivileges.ps1 at Basic, then the section 5.4 strip removed the SharePoint four the platform re-injected (Verify: 33 of 33, nothing outside the file). Positive control at 20:54:52Z, 20:55:19Z and 20:55:44Z: HTTP 201 on 3 of 3 polls, every probe deleted; the control create on sprk_billingexport (not in this file) stayed refused with privilegeCount=33. Record: projects/ebilling-r1/notes/013-core-ancestor-invoice-family.md.",
+      "addedBy": "ebilling-r1 task 013"
+    },
+    {
+      "logicalName": "sprk_externalidentifier",
+      "privilegeName": "prvReadsprk_externalidentifier",
+      "kind": "child",
+      "reason": "ebilling-r1 spec FR-05 / task 013: an external identifier names one matter, project or work assignment, or (D-68) only the invoice it identifies, and is a child of it; its BFF writer (a later ebilling-r1 task) creates it owned by that record's team (RecordOwnershipResolver, record-first, I-6), which under a secure core record is the Secure Record Owners team, and SecureChildReconciler re-owns it there.",
+      "evidence": "ebilling-r1 task 013 negative control (spaarkedev1, 2026-10-15T20:37:10Z): POST sprk_externalidentifiers owned by team Secure Record Owners 6eabc7f9-13be-f111-a05b-0022482913fc, before this privilege was added, returned HTTP 403, verbatim: 'Read Privilege Check For Owner failed with exception: Principal team (Id=6eabc7f9-13be-f111-a05b-0022482913fc, type=9, teamType=0, privilegeCount=29, MetadataCachePrivilegesCount=7432, businessUnitId=d9ec0b6f-80a0-f111-aaac-000d3a99d1d7), is missing prvReadsprk_externalidentifier privilege (Id=d9ba18fc-4b16-463d-96ce-040ba4512522) on OTC=11019 for entity 'sprk_externalidentifier' (LocalizedName='External Identifier').' Applied via scripts/Set-SecureRecordOwnerRolePrivileges.ps1 at Basic, then the section 5.4 strip removed the SharePoint four the platform re-injected (Verify: 33 of 33, nothing outside the file). Positive control at 20:54:52Z, 20:55:19Z and 20:55:44Z: HTTP 201 on 3 of 3 polls, every probe deleted; the control create on sprk_billingexport (not in this file) stayed refused with privilegeCount=33. Record: projects/ebilling-r1/notes/013-core-ancestor-invoice-family.md.",
+      "addedBy": "ebilling-r1 task 013"
+    },
+    {
+      "logicalName": "sprk_invoicecorrection",
+      "privilegeName": "prvReadsprk_invoicecorrection",
+      "kind": "child",
+      "reason": "ebilling-r1 spec FR-05 / task 013 (D-82): an invoice correction names exactly one matter, project or work assignment, holds values copied from its invoice and line, and is a child of them; its BFF writer (a later ebilling-r1 task) creates it owned by the core record's team (RecordOwnershipResolver, record-first, I-6), which for a secure core record is the Secure Record Owners team, and SecureChildReconciler re-owns it there.",
+      "evidence": "ebilling-r1 task 013 negative control (spaarkedev1, 2026-10-15T20:37:10Z): POST sprk_invoicecorrections owned by team Secure Record Owners 6eabc7f9-13be-f111-a05b-0022482913fc, before this privilege was added, returned HTTP 403, verbatim: 'Read Privilege Check For Owner failed with exception: Principal team (Id=6eabc7f9-13be-f111-a05b-0022482913fc, type=9, teamType=0, privilegeCount=29, MetadataCachePrivilegesCount=7432, businessUnitId=d9ec0b6f-80a0-f111-aaac-000d3a99d1d7), is missing prvReadsprk_invoicecorrection privilege (Id=1dd41f65-55e9-4988-a072-2c55cc4f174d) on OTC=11021 for entity 'sprk_invoicecorrection' (LocalizedName='').' Applied via scripts/Set-SecureRecordOwnerRolePrivileges.ps1 at Basic, then the section 5.4 strip removed the SharePoint four the platform re-injected (Verify: 33 of 33, nothing outside the file). Positive control at 20:54:52Z, 20:55:19Z and 20:55:44Z: HTTP 201 on 3 of 3 polls, every probe deleted; the control create on sprk_billingexport (not in this file) stayed refused with privilegeCount=33. Record: projects/ebilling-r1/notes/013-core-ancestor-invoice-family.md.",
+      "addedBy": "ebilling-r1 task 013"
+    },
+    {
       "logicalName": "sprk_policy",
       "privilegeName": "prvReadsprk_Policy",
       "kind": "child",

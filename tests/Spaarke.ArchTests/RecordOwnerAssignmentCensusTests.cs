@@ -41,7 +41,9 @@ public class RecordOwnerAssignmentCensusTests
     /// </summary>
     /// <remarks>Task 182 (ontology child-record contract C7, audit F4): the ontology's three secure children —
     /// <c>sprk_signal</c>, <c>sprk_decisionrecord</c>, <c>sprk_budgetrevision</c> — joined the list. Internal so
-    /// <see cref="SecureFamilyConsistencyTests"/> can tie it to the lineage and the codified role set.</remarks>
+    /// <see cref="SecureFamilyConsistencyTests"/> can tie it to the lineage and the codified role set.
+    /// ebilling-r1 task 011: the retired invoice-line-item table left the list (D-18: <c>sprk_billingevent</c>,
+    /// already listed, is the Invoice Line). Nothing in src ever created it, so no census entry changed.</remarks>
     internal static readonly string[] ChildTables =
     {
         "sprk_agreement", "sprk_analysis", "sprk_billingevent", "sprk_budget", "sprk_communication",
@@ -49,8 +51,10 @@ public class RecordOwnerAssignmentCensusTests
         "sprk_reportcard", "sprk_spendsignal", "sprk_spendsnapshot", "sprk_todo", "sprk_workassignment",
         "sprk_servicerequest", "sprk_analysisoutput", "sprk_communicationattachment", "sprk_communicationparticipant",
         "sprk_emailreviewlog", "sprk_communicationchannelref", "sprk_fileversion", "sprk_emailartifact",
-        "sprk_attachmentartifact", "sprk_eventlog", "sprk_invoicelineitem", "sprk_budgetbucket", "sprk_processingjob",
+        "sprk_attachmentartifact", "sprk_eventlog", "sprk_budgetbucket", "sprk_processingjob",
         "sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision",
+        // ebilling-r1 task 013: the invoice family's new secure children (no server create exists yet).
+        "sprk_invoicesubmission", "sprk_invoiceapproval", "sprk_externalidentifier", "sprk_invoicecorrection",
         // #2084 (owner round 102 item 4): a matter-scoped rule and its versions joined the secure family.
         "sprk_policy", "sprk_policyversion",
     };
@@ -119,6 +123,32 @@ public class RecordOwnerAssignmentCensusTests
     //      Behaviour tests (SecureChildOwnership*Tests, InvoiceReviewWritePathTests, TodoGenerationAssignedToTests) pin
     //      each EXISTING writer's owner; these limits bite only on new code.
     // =============================================================================================
+    /// <summary>The one waiver text for RuleSetService's sprk_policy and sprk_policyversion creates (ebilling-r1).</summary>
+    private const string RuleSetServicePolicyWaiver =
+        "ebilling-r1 RuleSetService (Billing-domain rules; the first version at CreateDraftRuleAsync and the edit-path version at EditAsync "
+        + "included). Billing rules have no matter scope YET; the rule-set scope model is under owner review (2026-10-20, ontology-r1 "
+        + "leads). This waiver ends when that review decides a scope level; the creates must then be routed. Open owner decision: "
+        + "scope model under owner review 2026-10-20 (#2129). "
+        + "When a billing rule gains a matter/project/work-assignment scope, this waiver ends: the policy and policy-version creates must be "
+        + "routed (owner via IRecordOwnershipResolver WITH the scope parent), and SecureChildLineage / FilingParentOf must gain any new "
+        + "filing lookups on sprk_policy (today only sprk_matter). Otherwise a rule scoped under a Secure record lands outside isolation. "
+        + "Today a billing rule hangs off sprk_ruleset and RuleSetService never writes "
+        + "sprk_policy.sprk_matter, so it cannot be filed under a Secure matter; its owner is resolved through "
+        + "IRecordOwnershipResolver.ResolveOwnerAsync with NO parents (the caller's team) and a refusal writes nothing. "
+        + "Condition (1): RuleSetService never writes sprk_matter on sprk_policy, on create or update (RuleSetServiceNoMatterScopeGuardTests "
+        + "and RuleSetServiceOwnerTests.NoWrittenPolicyOrVersionRowCarriesAMatter_OnCreateOrUpdate fail the build otherwise); if a billing rule ever gains a "
+        + "matter scope, this waiver ends and the creates must be routed. "
+        + "Condition (2): both creates, the first version and the edit-path version, resolve the owner the same way "
+        + "(RuleSetServiceOwnerTests pins the identical no-parent context and the ApplyTo). "
+        + "ebilling-r1 task 081 adds a third sprk_policyversion create, the Procedure copy-forward (PlanCopyForwardAsync): it applies the "
+        + "owner ProcedureService resolved with the same no-parent context and the caller as RequestedBy (ProcedureServiceTests pins it), "
+        + "so the waiver covers it on the same conditions. "
+        + "Condition (3): it covers only Billing-domain rows written by RuleSetService; Ontology-domain policies stay under the authoring "
+        + "entries. "
+        + "Known limit: a matter set on a Billing policy outside the BFF (form edit) is not seen here; the next edit-path version is "
+        + "re-owned by SecureChildReconciliationJob. "
+        + "Agreed as Pending: ontology-r1 2026-10-20; uac-r2 re-checked 2026-10-20.";
+
     private static readonly IReadOnlyList<CensusEntry> Census = new[]
     {
         // ── Seams: shared persistence methods that refuse a row with no resolved owner team ─────────────────────
@@ -207,14 +237,19 @@ public class RecordOwnerAssignmentCensusTests
             "Generated to-dos are owned from their source event (ownershipSource); a refusal counts the rule failed."),
 
         // ── Task 146 b2 (verifier AC10): create-by-upsert sites the scanner now sees (a PATCH of a fresh id) ─────────
-        new CensusEntry("InvoiceReviewService.cs", "sprk_invoice", 1, Disposition.Routed,
-            "Invoice confirm (G5): a fresh-id PATCH whose field map BuildInvoiceCreateFields binds the matter's team "
-            + "(task 130, ResolveOwningTeamAsync record-first from the matter); an unresolved team refuses before any write."),
+        // ebilling-r1 050a (D-134): the invoice confirm no longer creates sprk_invoice (its create-by-upsert entry is gone); the
+        // submission job creates it (UnscannedWriter InvoiceSubmissionPersister.cs below). No confirm path creates an invoice; other
+        // sprk_invoice creators remain on purpose (task 013: ChildRecordEndpoints CreateTables via OwnedChildWrite, the chat create_record
+        // tool, the decision route).
+        new CensusEntry("InvoiceSubmissionService.cs", "sprk_invoicesubmission", 1, Disposition.Routed,
+            "ebilling-r1 task 044 (FR-17): the submission row is built here and created by TrackingNumberAllocator with its number "
+            + "(D-87). Its owner is ResolveOwnerAsync ForParents over the one core record it is filed against (secure-if-any) and "
+            + "applied with RecordOwnerResolution.ApplyTo; an unresolved owner refuses (409) before the upload or any write."),
         new CensusEntry("SignalEvaluationService.cs", "sprk_spendsignal", 1, Disposition.Routed,
             "Spend signals: a deterministic-id PATCH (idempotent upsert) whose field map binds the matter's team, "
             + "resolved by the caller of UpsertSignalAsync; a refusal skips the evaluation."),
 
-        // ── Waived ─────────────────────────────────────────────────────────────────────────────────────────────
+        // ── Waived─────────────────────────────────────────────────────────────────────────────────────────────
         new CensusEntry("MessagingIngestor.cs", "sprk_communication", 1, Disposition.Waived,
             "An inbound chat message names no parent at create, so it keeps its creator: task 146 escalation E1, ACCEPTED "
             + "by owner round 10 item 8 (2026-10-03) — unfiled communications (inbound, chat, outbound naming no record) "
@@ -234,6 +269,12 @@ public class RecordOwnerAssignmentCensusTests
             "An Office job-tracking row (status and progress), authorized by its sprk_initiatedby creator lookup and "
             + "read app-only; not a child of any root in live metadata.",
             WaiverKind.Permanent),
+        // ebilling-r1 (waiver agreed with spaarke-ontology-platform-r1 2026-10-20; PENDING the owner's rule-set scope model review,
+        // because matter/project/work-assignment-level billing rules are planned): the billing rule's policy and its versions. The census
+        // keys on (file, table), so the one waiver is two entries with one text: sprk_policy (1 site: CreateDraftRuleAsync's policy) and
+        // sprk_policyversion (2 sites: CreateDraftRuleAsync's first version and EditAsync's edit-path version, created with the caller-chosen id VersionIdFor).
+        new CensusEntry("RuleSetService.cs", "sprk_policy", 1, Disposition.Waived, RuleSetServicePolicyWaiver, WaiverKind.Pending),
+        new CensusEntry("RuleSetService.cs", "sprk_policyversion", 3, Disposition.Waived, RuleSetServicePolicyWaiver, WaiverKind.Pending),
         // WorkAssignmentEndpoints.cs's sprk_workassignment create is gone: task 166 deleted the caller-less route (S-76,
         // owner round 10 item 1), so its Pending waiver went with it (batch-4 integration).
 
@@ -275,8 +316,17 @@ public class RecordOwnerAssignmentCensusTests
 
     private static readonly IReadOnlyList<UnscannedWriter> UnscannedWriters = new[]
     {
-        new UnscannedWriter("InvoiceReviewService.cs", "document re-file under the new invoice",
-            "Linking the document is a reparent (task 146); the invoice's own create-by-upsert is a census site (b2)."),
+        new UnscannedWriter("InvoiceDocumentRefile.cs", "re-file of a confirmed document under the invoice the submission job created",
+            "ebilling-r1 050a (D-134, moved from InvoiceReviewService with its calls): a reparent (task 146) with the invoice as the "
+            + "inherited parent, after the persister's transaction linked the document; a refusal writes nothing."),
+        new UnscannedWriter("InvoiceSubmissionPersister.cs",
+            "transaction CreateRequests of sprk_invoice (via 014's BuildCreateRequest), sprk_billingevent and sprk_invoiceapproval rows built with deterministic ids",
+            "ebilling-r1 task 049 part C: ResolveOwnerAsync ForParents over the submission's one core record (secure-if-any), applied with "
+            + "RecordOwnerResolution.ApplyTo to every row; an unresolved owner refuses before the transaction, so nothing is created."),
+        new UnscannedWriter("InvoiceLineDecisionService.cs",
+            "transaction UpsertRequests of sprk_invoicecorrection rows built with deterministic ids (the Accepted-in-bulk rows)",
+            "ebilling-r1 task 100: ResolveOwnerAsync ForParents over the invoice's one core record (secure-if-any), applied with "
+            + "RecordOwnerResolution.ApplyTo to every row; an unresolved owner refuses before the first write, so nothing is created."),
         new UnscannedWriter("SpendSnapshotService.cs", "keyed UpsertRequest (sprk_spendsnapshot)",
             "Owned by the parent matter/project's team; a refusal skips the snapshot."),
         new UnscannedWriter("ExternalProjectDataEndpoints.cs", "Web API POST to a computed URL (document, event, to-do)",
@@ -498,8 +548,6 @@ public class RecordOwnerAssignmentCensusTests
             "Owned by the matter's team."),
         new OwnerWriteEntry("DataverseObservationMirror.cs", "MirrorAsync", 1, OwnerWriteKind.Routed,
             "ForChild over the mirrored analysis row."),
-        new OwnerWriteEntry("InvoiceReviewService.cs", "BuildInvoiceCreateFields", 1, OwnerWriteKind.Routed,
-            "The invoice owned by the matter's team (task 130 / G5), resolved by the caller of the builder."),
         new OwnerWriteEntry("GrantExternalAccessEndpoint.cs", "BuildGrantPayload", 1, OwnerWriteKind.Routed,
             "UAC task 099b (D-11, #1010): a new sprk_externalrecordaccess row owned record-first from its grant root, resolved by "
             + "CreateGrantAsync (ResolveGrantOwnerAsync) — the one grant core every grant route and the Assigned-To rule call; the "
@@ -750,6 +798,9 @@ public class RecordOwnerAssignmentCensusTests
         new AssignCaller("GateDecisionRecordSharing.cs", "ReownAsync", 1,
             "Ontology 042b (D-169): the gate Decision Record re-own, only after IRecordOwnershipResolver answered an ordinary team for the "
             + "communication and the record's stamps; the owner is read back before any share is revoked."),
+        new AssignCaller("RuleSetEndpoints.cs", "AssignRuleSet", 1,
+            "ebilling-r1: RuleSetService.AssignAsync assigns a billing rule set to a scope (ClientDefault or a firm). It writes rule-set "
+            + "columns, not an owner, and builds no AssignRequest; listed because the call regex matches any .AssignAsync."),
     };
 
     // 042b round 4: a member access on AssignAsync with any spacing (a call, a method group, `this.`, `?.`, a line break after the dot or
@@ -1368,8 +1419,8 @@ public class RecordOwnerAssignmentCensusTests
     /// the member itself always did, so any parameter passed — proven by the verifier with
     /// <c>anchor!.RecordId</c> and <c>ParseKey(keyId)</c> in <c>ThreadResolver.FindOrCreateDefaultThreadAsync</c>.
     /// Calls from OTHER files are not followed: a builder whose owner rests on its parameters must be private to the
-    /// file in practice (the two today: <c>InvoiceReviewService.BuildInvoiceCreateFields</c>,
-    /// <c>SignalEvaluationService.UpsertSignalAsync</c>).
+    /// file in practice (the one today: <c>SignalEvaluationService.UpsertSignalAsync</c>; <c>InvoiceReviewService.BuildInvoiceCreateFields</c>
+    /// went with ebilling-r1 050a).
     /// </summary>
     private static IReadOnlySet<string> ParametersFedByResolution(string code, string member)
     {
@@ -2151,6 +2202,30 @@ public class RecordOwnerAssignmentCensusTests
         Assert.DoesNotContain(problems, p => p.Contains("Seeded.cs:12", StringComparison.Ordinal));
     }
 
+    [Fact(DisplayName = "uac-r2 F3: negative control — a row given a computed (call) id and handed to a create is a create; an update is not")]
+    public void Detector_NegativeControl_ComputedIdCreates()
+    {
+        // RuleSetService's edit-path version: `new Entity(VersionEntity, VersionIdFor(policyId, number))` handed to CreateAsync.
+        // The id was matched as an identifier only, so a call id was not counted although census item 4 says it is.
+        var code = SourceScan.CodeText(new[]
+        {
+            "internal sealed class Computed",
+            "{",
+            "    private const string VersionEntity = \"sprk_policyversion\";",
+            "    private async Task A(Guid policyId, int number) { var row = new Entity(VersionEntity, IdFor(policyId, number)); row[\"sprk_name\"] = \"x\"; await _s.CreateAsync(row, ct); }",
+            "    private async Task B(Guid policyId, int number) { await _s.CreateAsync(new Entity(VersionEntity, IdFor(policyId, number)), ct); }",
+            "    private async Task C(Guid policyId, int number) { var row = new Entity(VersionEntity, IdFor(policyId, number)); await _s.UpdateAsync(row, ct); }",
+            "    private async Task D(Guid policyId, int number) { var row = new Entity(VersionEntity, IdFor(policyId, number)); Log(row); }",
+            "}",
+        });
+        var files = new Dictionary<string, string> { ["Computed.cs"] = code };
+
+        var sites = ScanSites(files);
+
+        // A (through a variable) and B (inline) are creates; the update C and the row that is only logged (D) are not.
+        Assert.Equal(new[] { 4, 5 }, sites[("Computed.cs", "sprk_policyversion")].OrderBy(l => l));
+    }
+
     [Fact(DisplayName = "Task 146 b2: negative control — Add(...) and initializer owner writes are found; a list of column names is not")]
     public void OwnerWriteDetector_NegativeControl_AddAndInitializerForms()
     {
@@ -2319,6 +2394,10 @@ public class RecordOwnerAssignmentCensusTests
         new PersonBearingWriter("OwnedChildWrite.cs", "CreateAsync", "the chat caller (WhoAmI) — dataverse.create_record, email.draft"),
         new PersonBearingWriter("RecordCreationService.cs", "DecideOwnerAsync", "task 013: the caller (WhoAmI) or the system principal's RequestedBy"),
         new PersonBearingWriter("DataverseDocumentsEndpoints.cs", "CreateDocumentAsync", "POST /api/v1/documents caller (oid)"),
+        new PersonBearingWriter("InvoiceSubmissionService.cs", "DecideAsync",
+            "the submitter of an invoice (ebilling-r1 task 044; the one decision both SubmitAsync and 050a's SubmitExistingDocumentAsync "
+            + "call): the internal caller (oid) or a workforce SPA caller (systemuser); a CIAM contact is recorded as sprk_submitter and "
+            + "the document's sprk_createdbycontact"),
         new PersonBearingWriter("EventEndpoints.cs", "OwnershipContextFor", "POST /api/v1/events caller (oid)"),
         new PersonBearingWriter("EventEndpoints.cs", "CreateEventInDataverseAsync", "the event and its creation log row"),
         new PersonBearingWriter("EventEndpoints.cs", "ResolveEventLogOwnerAsync", "the caller whose change a log row records"),
@@ -2355,8 +2434,9 @@ public class RecordOwnerAssignmentCensusTests
         new PersonBearingWriter("UploadFinalizationWorker.cs", "CreateEmailArtifactAsync", "the carried saving user"),
         new PersonBearingWriter("UploadFinalizationWorker.cs", "CreateAttachmentArtifactAsync", "the carried saving user"),
         new PersonBearingWriter("UploadFinalizationWorker.cs", "ProcessSingleAttachmentAsync", "the carried saving user"),
-        new PersonBearingWriter("InvoiceReviewService.cs", "CreateInvoiceRecordAsync", "the reviewer confirming the invoice"),
-        new PersonBearingWriter("FinanceEndpoints.cs", "ConfirmInvoiceReview", "hands the HTTP caller to the invoice create"),
+        new PersonBearingWriter("FinanceEndpoints.cs", "ConfirmInvoiceReview",
+            "hands the HTTP caller to the confirm's submission (ebilling-r1 050a: InvoiceReviewService passes its oid to the intake)"),
+        new PersonBearingWriter("InvoiceSubmissionPersister.cs", "PersistAsync", "the submitter the submission recorded at intake, stamped on the invoice, lines and approval (ebilling-r1 D-130 3)"),
         new PersonBearingWriter("UpdateRecordActionCore.cs", "UpdateAsync", "the impersonated user, for F3 (owner round 13 item 8)"),
         new PersonBearingWriter("DataverseUpdateHandler.cs", "UpdateAsync", "the impersonated user, for F3 (#2257)"),
         new PersonBearingWriter("DecisionActionExecutors.cs", "PlanAsync", "the caller whose decision commit revises the budget (ontology task 147, #1777)"),
@@ -2373,7 +2453,49 @@ public class RecordOwnerAssignmentCensusTests
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateAttachmentArtifactAsync", "seam: maps CreatedByPersonId"),
         new PersonBearingWriter("DataverseWebApiService.cs", "BuildCreateEventPayload", "seam: binds CreatedByPersonId"),
         new PersonBearingWriter("DataverseWebApiService.cs", "CreateEventLogAsync", "seam: binds createdByPersonId"),
+        // ebilling-r1 task 081 (procedure model 13, O-23): the calling admin creates Procedures, their versions and the copied policy
+        // versions; ProcedureService's one owner decision names them (RequestedBy), which ApplyTo stamps on sprk_procedure(version).
+        new PersonBearingWriter("ProcedureService.cs", "OwnerContext", "the calling admin (oid) of a Procedure, version or copy-forward create"),
     };
+
+    /// <summary>
+    /// Stamped tables that are deliberately NOT in the codified Secure Record Owner child set: they record their creator person but are not
+    /// a secure record's children, so task 146's role set does not govern them. Each entry names why. Anything else in
+    /// <c>StampedChildTables</c> must be a codified child.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> StampedOutsideCodifiedChildren =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sprk_procedure"] = "ebilling-r1 task 081: a Procedure is a billing document filed under no record (model 5.1: owned by the "
+                + "admin's business-unit team, no parents); it records the admin who created it (model 13, O-23)",
+            ["sprk_procedureversion"] = "ebilling-r1 task 081: a version of a Procedure, owned and recorded as the Procedure is",
+            ["sprk_ruleset"] = "ebilling-r1 task 090 (UAC answer to 081 Q5): a rule set is created app-only for the calling billing admin "
+                + "(RuleSetService's upload, ProcedureService's Procedure create), so it records that person; it is not in the codified "
+                + "Secure Record Owner child set",
+            ["sprk_procedureassignment"] = "ebilling-r1 task 090 (UAC answer to 081 Q5): a Procedure assignment will be created app-only for "
+                + "the calling admin and records that person (080 created the column; no BFF writer creates one yet); it is not in the "
+                + "codified Secure Record Owner child set",
+        };
+
+    private static List<string> StampedOutsideCodified(
+        IEnumerable<string> stamped, IReadOnlySet<string> codifiedChildren, IReadOnlyDictionary<string, string> exempt) =>
+        stamped.Where(t => !codifiedChildren.Contains(t) && !exempt.ContainsKey(t)).OrderBy(t => t, StringComparer.Ordinal).ToList();
+
+    [Fact(DisplayName = "Task 081: controls — a stamped table outside the codified set is reported unless it is a listed exemption")]
+    public void StampedOutsideCodified_Controls()
+    {
+        var codified = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_todo" };
+        var exempt = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["sprk_procedure"] = "reason" };
+
+        // Must fire: a stamped table that is neither codified nor exempt.
+        Assert.Equal(new[] { "sprk_newtable" }, StampedOutsideCodified(new[] { "sprk_todo", "sprk_procedure", "sprk_newtable" }, codified, exempt));
+
+        // Must not fire: codified or exempt tables only.
+        Assert.Empty(StampedOutsideCodified(new[] { "sprk_todo", "sprk_procedure" }, codified, exempt));
+
+        // Every exemption names a reason and is actually stamped (a stale entry is reported by the test below too).
+        Assert.All(StampedOutsideCodifiedChildren, e => Assert.False(string.IsNullOrWhiteSpace(e.Value)));
+    }
 
     /// <summary>
     /// The census writers that act for NOBODY, and so record no person — reviewed, not assumed (each reason names why no
@@ -2449,10 +2571,14 @@ public class RecordOwnerAssignmentCensusTests
             .Where(t => t.GetProperty("kind").GetString() == "child")
             .Select(t => t.GetProperty("logicalName").GetString()!)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var outside = stamped.Where(t => !codifiedChildren.Contains(t)).OrderBy(t => t, StringComparer.Ordinal).ToList();
+        var outside = StampedOutsideCodified(stamped, codifiedChildren, StampedOutsideCodifiedChildren);
         Assert.True(outside.Count == 0,
             "Stamped child tables outside the codified Secure Record Owner child set (the tables task 146 governs): "
             + string.Join(", ", outside));
+
+        // An exemption for a table that is no longer stamped, or that has since been codified, is stale.
+        var stale = StampedOutsideCodifiedChildren.Keys.Where(t => !stamped.Contains(t) || codifiedChildren.Contains(t)).ToList();
+        Assert.True(stale.Count == 0, "Stale StampedOutsideCodifiedChildren entries: " + string.Join(", ", stale));
     }
 
     [Fact(DisplayName = "Task 146 c1-r1: every app-create writer that acts for a person names that person")]
@@ -2932,9 +3058,10 @@ public class RecordOwnerAssignmentCensusTests
 
     /// <summary>A two-argument construction — a create (or upsert target) when the id is fresh, or when the row is handed
     /// to a create. b2-r2: the id may be a member access (<c>request.RecordId</c>, <c>anchor!.Id</c>), so such a row
-    /// handed to a create is seen too.</summary>
+    /// handed to a create is seen too. F3 (uac-r2 review): the id may also be a call (<c>VersionIdFor(policyId, number)</c>, one level
+    /// of parentheses), so a row with a computed id handed to a create is counted.</summary>
     private static readonly Regex FreshEntityCreate = new(
-        @"new\s+(?:Microsoft\.Xrm\.Sdk\.)?(?:DataverseEntity|Entity)\s*\(\s*(?:""(?<lit>[a-z_]+)""|(?<id>[A-Za-z_][\w\.]*))\s*,\s*(?<rid>Guid\.NewGuid\(\)|[A-Za-z_][\w\.!]*)\s*\)",
+        @"new\s+(?:Microsoft\.Xrm\.Sdk\.)?(?:DataverseEntity|Entity)\s*\(\s*(?:""(?<lit>[a-z_]+)""|(?<id>[A-Za-z_][\w\.]*))\s*,\s*(?<rid>Guid\.NewGuid\(\)|[A-Za-z_][\w\.!]*(?:\([^()]*\))?)\s*\)",
         RegexOptions.Compiled);
 
     /// <summary>True when <paramref name="id"/> is <c>Guid.NewGuid()</c>, or a variable the same member assigns from

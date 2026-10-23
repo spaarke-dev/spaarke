@@ -1,0 +1,30 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0073",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0073","generator_id":"gen_eval_set.py@1 F-0073","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0073.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Holloway and Forsythe LLP","firm_invoice_number":"INV-2025-94621","invoice_date":"2025-05-03","billing_period_start":"2025-04-01","billing_period_end":"2025-04-30","firm_matter_reference":"46367-0008","po_number":null,"fees_total":4465.5,"expenses_total":1708.7,"adjustments_total":0.0,"total_due":6174.2,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Eriksen","title":"Paralegal","rate":220.0,"billed_as":"AE"},{"name":"Clara Oyelaran","title":"Partner","rate":735.0,"billed_as":"CO"},{"name":"Dmitri Lockhart","title":"Legal Assistant","rate":175.0,"billed_as":"DL"},{"name":"Hannah Delacroix","title":"Associate","rate":385.0,"billed_as":"HD"},{"name":"Katya Oyelaran","title":"Paralegal","rate":220.0,"billed_as":"KO"},{"name":"Leila Okafor","title":"Senior Associate","rate":515.0,"billed_as":"LO"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-04-01","timekeeper":"DL","timekeeper_name":"Dmitri Lockhart","timekeeper_title":"Legal Assistant","title":"LA","hours":2.2,"rate":175.0,"amount":385.0,"narrative":"Meet and confer with counsel for Orchard Row Brands regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-04-03","timekeeper":"HD","timekeeper_name":"Hannah Delacroix","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":385.0,"amount":616.0,"narrative":"Analyze key documents for deposition preparation","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"expense","date":"2025-04-04","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":229.1,"amount":229.1,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-04-11","timekeeper":"LO","timekeeper_name":"Leila Okafor","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.8,"rate":515.0,"amount":1442.0,"narrative":"Prepare outline for deposition of Northwind Logistics witness","codes":["L330","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-04-11","timekeeper":"KO","timekeeper_name":"Katya Oyelaran","timekeeper_title":"Paralegal","title":"Para","hours":1.6,"rate":220.0,"amount":352.0,"narrative":"Prepare monthly status report to client regarding the vendor agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-04-17","timekeeper":"LO","timekeeper_name":"Leila Okafor","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.7,"rate":515.0,"amount":360.5,"narrative":"Review and summarize deposition transcript of Quarry Lane Partners witness","codes":["L330","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-04-17","timekeeper":"AE","timekeeper_name":"Anders Eriksen","timekeeper_title":"Paralegal","title":"Para","hours":1.8,"rate":220.0,"amount":396.0,"narrative":"Attend deposition of Tidewater Retail corporate representative","codes":["L330","A109"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2025-04-17","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1081.14,"amount":1081.14,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-04-18","timekeeper":"HD","timekeeper_name":"Hannah Delacroix","timekeeper_title":"Associate","title":"Assoc","hours":0.2,"rate":385.0,"amount":77.0,"narrative":"Prepare case assessment memorandum regarding the regulatory inquiry and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-04-21","timekeeper":"AE","timekeeper_name":"Anders Eriksen","timekeeper_title":"Paralegal","title":"Para","hours":1.8,"rate":220.0,"amount":396.0,"narrative":"Research authority for protective order","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-04-25","timekeeper":"CO","timekeeper_name":"Clara Oyelaran","timekeeper_title":"Partner","title":"Ptr","hours":0.6,"rate":735.0,"amount":441.0,"narrative":"Draft complaint to Summit Ridge Homes","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-04-30","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":398.46,"amount":398.46,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["533 Lakeshore Drive","Boston","Tax ID 35-5312088"],"template":"T09","pages":1},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-09-10","matter_close":"2025-07-29","matter_budget":49696.0,"approved_timekeepers":["Katya Oyelaran","Anders Eriksen","Leila Okafor","Clara Oyelaran","Hannah Delacroix","Dmitri Lockhart"],"invoice_received_date":"2025-05-15"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R08","rule_type":"RequiredData","scope":"invoice","line_refs":[],"consequence":"Reject"}
+ ],
+ "seeded_violations":1
+}

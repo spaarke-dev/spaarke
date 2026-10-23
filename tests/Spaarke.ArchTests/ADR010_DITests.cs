@@ -329,7 +329,77 @@ public class ADR010_DITests
         // the security negatives are proven through it. They are: the dry run evaluates a policy built from the CALLER's read,
         // never the request's lane; a non-Ontology or unreadable policy is never evaluated; publish re-evaluates once, after the
         // pointer moved. Same category as IAppOnlyCommunicationQuery.
-        const int knownOneToOneCeiling = 160;
+        // ───────── Ceiling raised 159 → 160, 2026-10-15 (ebilling-r1 task 025) ─────────
+        // IEbillingSettingsReader -> EbillingSettingsReader. SEAM JUSTIFICATION: it is the Dataverse boundary of the eBilling
+        // business settings (FR-48, D-59) and the module boundary every eBilling consumer fakes: the rejection gate (task 046),
+        // coding chunking and the default code set (047), approver resolution (103), the AP export mapping (150) and the firm-notice
+        // AI toggle (131) are each proven by feeding them an EbillingSettings value through a Moq double, not by standing up a
+        // FetchXml-reading singleton with a scoped IGenericEntityService behind it. The reader is a singleton that takes a scope per
+        // cache-miss load (like IAllowedIndexesProvider above, which is the accepted precedent); a concrete registration would put
+        // that Dataverse plumbing into every consumer test. Verified as the only addition on this branch (master measured 159).
+        // ───────── Ceiling raised 160 → 161, 2026-10-15 (ebilling-r1 task 016) ─────────
+        // IInvoiceTotalsService -> InvoiceTotalsService. SEAM JUSTIFICATION: it is the one server-side owner of invoice totals (FR-07,
+        // I-1; ADR-002 one owner per invariant) and the module boundary its four named callers fake: the submission job (049) and the
+        // line-decision, adjustment and approval operations (100-102) are each proven by a Moq double that returns a calculation or a
+        // refusal (FR-32), not by standing up the Dataverse read-compute-conditional-write behind it. Same category as
+        // IEbillingSettingsReader above. Falsifiable: if no caller fakes it by 102, register the concrete and drop this back to 160.
+        // ───────── Ceiling raised 161 → 162, 2026-10-15 (ebilling-r1 task 014) ─────────
+        // IInvoiceLifecycleService -> InvoiceLifecycleService. SEAM JUSTIFICATION: it is the single server-side owner of invoice status
+        // (FR-06, ADR-002) and the module boundary of four later write-path callers: approve (103), reject / return (104), send to AP (150)
+        // and mark paid (151). Each of their tests must prove what the caller does with every outcome (Transitioned, AlreadyInTarget,
+        // Refused with a reason) by feeding it that InvoiceTransitionResult through a Moq double; without the interface each caller's test
+        // would stand up the Dataverse conditional-write plumbing (versionnumber reads, If-Match, retry) behind a concrete. The service has
+        // exactly one implementation, so it is a 1:1 mapping, accepted on the same grounds as IEbillingSettingsReader above.
+        // ───────── Ceiling raised 162 → 163, 2026-10-16 (ebilling-r1 task 046) ─────────
+        // IInvoiceResolutionService -> InvoiceResolutionService. SEAM JUSTIFICATION: it is Processing Pipeline step 2 (FR-23, D-47) and the
+        // module boundary the pipeline orchestration (049) is proven against: 049's tests must drive every branch of what it does with a
+        // resolution (matched / unmatched timekeepers, a missing or ambiguous rate, a failed arithmetic check, a confidence on either
+        // side of the reliability threshold) by feeding it an InvoiceResolutionResult through a Moq double, not by standing up the roster
+        // and rate-card Dataverse reads plus the embedding call behind it. One implementation, so a 1:1 mapping, accepted on the same
+        // grounds as IInvoiceTotalsService above. Its collaborators (TimekeeperMatcher, the static calculators and resolvers) are
+        // concrete. Falsifiable: if 049 does not fake it, register the concrete and drop this back to 162.
+        // ───────── Ceiling raised 163 → 165, 2026-10-16 (ebilling-r1 task 047; +2 interfaces) ─────────
+        // (1) ILineCodingService -> LineCodingService. SEAM JUSTIFICATION: it is the module boundary of two named callers that each
+        // fake it: the invoice submission job (049) is proven by feeding it an InvoiceCodingResult (coded, refused-code, NotReturned and
+        // firm-code-mismatch lines, per-line code-set source) through a Moq double, not by standing up the code-set reads, the chunked
+        // IInvoiceAi calls and the server-side guard behind it; the code-set suggestion flow (048) calls it the same way. One
+        // implementation, so a 1:1 mapping, accepted on the same grounds as IInvoiceTotalsService above. Falsifiable: if neither 048 nor
+        // 049 fakes it, register the concrete and drop this back.
+        // (2) ICodeSetSuggestionProvider -> NoCodeSetSuggestionProvider. SEAM JUSTIFICATION: FR-22 step 4 is produced by a different
+        // Action in a later task (048). The seam lets 048 supply the AI provider by replacing one DI registration instead of editing
+        // CodeSetResolver, and lets the resolver's tests fake the proposal. It has one implementation today (the Null-Object default,
+        // ADR-032) and gains the second in 048; if 048 does not, collapse it into the resolver and drop this back.
+        // Measured: master + the earlier eBilling tasks = 163 (after 046), this task adds exactly these two.
+        // ───────── Ceiling raised 165 → 166, 2026-10-16 (ebilling-r1 task 045) ─────────
+        // ITrackingNumberAllocator -> TrackingNumberAllocator. SEAM JUSTIFICATION: it is the single server-side owner of a submission's
+        // {firm invoice number}.{n} (FR-10, D-37, D-87, ADR-002) and the only creator of sprk_invoicesubmission rows: the module boundary of the
+        // submission operation (044, which creates every submission through it, D-87; a resubmission is a new submission through the same
+        // route). Its tests must prove what the caller does with every outcome (Created, AlreadyCreated, Refused with ebilling.tracking.unavailable)
+        // by feeding it that TrackingNumberResult through a Moq double; without the interface each would stand up the Dataverse
+        // highest-sequence read, the alternate-key retry and its faults behind a concrete. One implementation, so a 1:1 mapping, accepted on
+        // the same grounds as IInvoiceLifecycleService above. Falsifiable: if 044's tests do not fake it by 044's completion, register the
+        // concrete and drop this back to 165.
+        // ───────── Ceiling LOWERED 166 → 165, 2026-10-16 (ebilling-r1 task 048; +0 interfaces, -1 mapping) ─────────
+        // ICodeSetSuggestionProvider now has two implementations (NoCodeSetSuggestionProvider and CodeSetProposalService, the AI provider that
+        // 048 registers in its place), so it is a genuine seam and no longer a 1:1 mapping; this is the "gains the second in 048" the task 047
+        // entry above promised. 048 adds no interface (CodeSetProposalService is registered concrete, ADR-010). Measured with the ceiling at 0:
+        // 165 mappings, ICodeSetSuggestionProvider not among them.
+        // ───────── Integration 2026-10-17 (ebilling-r1 merge of origin/master 1df4ee12d) ─────────
+        // Both sides raised from 159: master +1 (ontology-r1 task 101, 160) and ebilling-r1 net +6 (165). Combined 166.
+        // ───────── Ceiling RAISED 166 → 167, 2026-10-19 (ebilling-r1 task 049 part A; +1 interface) ─────────
+        // IEbillingNotificationSink -> NoOpEbillingNotificationSink. Seam justification: task 132 replaces the no-op with a job-enqueuing sink
+        // (recipients, email, SPA feed, approver in-app), and 049's processor tests fake the seam. Falsifiable: if 132 is dropped, register the
+        // concrete and lower this back to 166. The 049 processor (part B) may add its own entry; sum the raises at merge.
+        // ───────── Ceiling RAISED 167 → 168, 2026-10-19 (ebilling-r1 task 049 part C; +1 interface) ─────────
+        // IInvoiceSubmissionPersister -> InvoiceSubmissionPersister. Seam justification: part E's handler tests fake persistence (the commit,
+        // retry, re-evaluate and resume branches) the same way they fake IInvoiceSubmissionProcessor, without a Dataverse transaction double.
+        // Falsifiable: if the handler tests drive the real persister over a fake IGenericEntityService, register the concrete and lower to 167.
+        // ───────── Ceiling RAISED 168 → 169, 2026-10-19 (ebilling-r1 task 049 part D; +1 interface) ─────────
+        // IInvoiceSubmissionAfterSteps -> InvoiceSubmissionAfterSteps. Seam justification: part E's handler tests fake the after-commit
+        // steps (Completed / Retry / Refused / SubmissionMissing branches and the preflight refusal) as they fake the processor and the
+        // persister; the real component needs the concrete SignalWriter, recorder and job queue. Falsifiable: if part E's handler tests
+        // drive the real after-steps, register the concrete and lower to 168.
+        const int knownOneToOneCeiling = 169;
 
         Assert.True(
             oneToOneInterfaces.Count <= knownOneToOneCeiling,

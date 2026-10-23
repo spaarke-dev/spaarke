@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="ebilling-r1">
+  <metadata>
+    <title>SPA submission UI (shared wizard component)</title>
+    <phase>2 Submission and extraction (WP2)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Frontend flow over existing shared components and 044's routes; no auth decisions on the client (the server decides).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>UI composition with a direct reference page (DocumentUploadPage.tsx) and existing shared Wizard / FileUpload components.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P2-D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>044</deps>
+    <tags>frontend, external-spa, fluent-ui</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Build a shared InvoiceSubmission wizard component in @spaarke/ui-components (props-injected data callbacks so the SPA and 052's internal wizard both use it) and an SPA submission page reached from the Invoices widget: choose an accessible core record, upload one PDF, optional firm invoice number and PO, show Processing from job status, then a result screen (Accepted with tracking number, or Rejected with an on-screen report placeholder until 134). Hide submission when the server says eBilling is disabled (FR-18, FR-19, FR-45).</prompt>
+
+  <role>SPAARKE frontend developer. Expert in Fluent UI v9, the shared Wizard and FileUpload components and the external SPA. Follow ADRs strictly.</role>
+
+  <goal>components/InvoiceSubmission/ exists in the shared library and is exported from the barrel; the SPA has route /invoices/submit and an entry point from the Invoices widget; the flow calls 044's external routes, survives leaving and returning (result reloaded from the server), works at phone width and in dark mode, and is hidden when the routes answer 503 ebilling.disabled.</goal>
+
+  <context>
+    <background>Spec FR-18 (acceptance: leaving the page and returning shows the same result; Fluent v9; phone width), FR-19 (shared wizard via @spaarke/ui-components), FR-45 (SPA hides submission when the flag is off). 044 routes: POST /api/v1/external/{matters|projects|workassignments}/{id}/invoice-submissions (multipart: file, firmId, firmInvoiceNumber, poNumber) → 202 {submissionId, jobId, trackingNumber or null, statusUrl}; GET /api/v1/external/invoice-submissions/{id}; GET /api/v1/external/invoice-submissions (own list — used for resume and as the flag probe: 503 ebilling.disabled means hide). The SPA does not read /api/config feature flags today, so the 503 probe is the flag signal. External SPA consumes the shared library by source alias (src/client/external-spa/vite.config.ts:128); SPA tests run on vitest (src/client/external-spa/tests/), the shared library on jest. Coordinate with SPA-r3 on the Invoices widget (src/client/external-spa/src/widgets/InvoicesWidget.tsx is a grid binding; registry entry src/client/external-spa/src/registry/widgetRegistry.ts:242-252).</background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/InvoiceSubmission/ (InvoiceSubmissionWizard.tsx, types.ts, index.ts, __tests__/)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/index.ts (barrel export)</file>
+      <file role="new">src/client/external-spa/src/pages/InvoiceSubmitPage.tsx</file>
+      <file role="modify">src/client/external-spa/src/App.tsx (one Route beside :158-166)</file>
+      <file role="modify">src/client/external-spa/src/widgets/InvoicesWidget.tsx (a "Submit invoice" action, hidden when disabled)</file>
+      <file role="modify">src/client/external-spa/src/api/web-api-client.ts (submission calls via the existing BFF client)</file>
+      <file role="canonical-reference">src/client/external-spa/src/pages/DocumentUploadPage.tsx (WizardShell + FileUploadZone + bffApiCall from auth/bff-client)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/Wizard/, FileUpload/, StatusBadge/, AiProgressStepper/</file>
+      <file role="new">src/client/external-spa/tests/InvoiceSubmitPage.test.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="044" status="required">External routes and response contract (read 044's notes for the final shape).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="owner D-106, refined by D-110 (2026-10-17)">Linked = the record's assigned law firms (sprk_assignedlawfirm1/2) only, and the rule is enforced in the submission service, so it holds on every channel, internal included. The chosen firm must be linked to the chosen core record (matter, project or work assignment). The server refuses otherwise, failing closed, and the picker lists only records linked to the chosen firm.</constraint>
+    <constraint source="D-91 (owner, 2026-10-16)">The Details step requires the firm invoice number (cannot continue while blank); PO stays optional.</constraint>
+    <constraint source="ADR-021">Fluent UI v9 only, tokens for every colour and spacing, no hard-coded colours; dark mode via the existing theme provider (style a wrapper div, not the FluentProvider — project gotcha F-10).</constraint>
+    <constraint source="ADR-012">Compose existing shared components (WizardShell, FileUploadZone, UploadedFileList, StatusBadge, AiProgressStepper); the new shared component takes data callbacks as props and never imports SPA auth or Xrm.</constraint>
+    <constraint source="ADR-002 / FR-17">The client never creates sprk_invoice or sprk_invoicesubmission directly and never decides authorization; it shows the server's 400 / 403 / 413 / 503 ProblemDetails messages by error code.</constraint>
+    <constraint source="NFR-12">No new npm package. Install with npm install --legacy-peer-deps --no-audit --no-fund.</constraint>
+    <constraint source="client validation">One file; PDF type and the size limit checked client-side only as a convenience (server is authoritative).</constraint>
+    <constraint source="coordination">src/client/external-spa/** is shared with SPA-r3: keep InvoicesWidget edits minimal and record them for SPA-r3.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Fluent v9 and the external SPA</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>docs/architecture/external-access-spa-architecture.md</file>
+      <file>docs/guides/EXTERNAL-ACCESS-SPA-GUIDE.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="SPA wizard page" location="src/client/external-spa/src/pages/DocumentUploadPage.tsx">Copy the page structure, parent picker and BFF call style.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context and rigor">Declare rigor STANDARD. Read 044's notes (final routes and codes) and DocumentUploadPage.tsx.</step>
+    <step order="1">Shared component: steps Record (picker fed by a callback), File (one PDF), Details (firm invoice number, PO), Processing (polls a status callback; shows "Processing"), Result (Accepted: tracking number; Rejected: reason code text and a report slot rendered by the host — placeholder until 134; Failed: retry guidance). Unit tests (jest).</step>
+    <step order="2">SPA page /invoices/submit wiring the callbacks to 044's routes; on load, if a submissionId is in the URL, fetch it and show its current step (resume, FR-18).</step>
+    <step order="3">Invoices widget: "Submit invoice" action opening the page; hidden when the list probe answers 503 ebilling.disabled.</step>
+    <step order="4">Vitest tests: happy path; 403 / 400 / 413 messages; 503 hides the entry; resume shows the stored result.</step>
+    <step order="5">Build both packages; run ui-tests below.</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+    <step order="7">Record deviations and the InvoicesWidget change for SPA-r3 in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If SPA-r3 has changed or is changing the Invoices widget so that adding the entry point conflicts, STOP and agree placement with SPA-r3 before editing.</trigger>
+    <trigger>If the 503 probe cannot distinguish "disabled" from an outage reliably (for example the list route is unavailable for other reasons), STOP and propose a server flag signal instead of guessing.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>CreateInvoiceWizard (shared) creates invoices client-side and is internal-only; DocumentUploadPage uploads documents without submission semantics; no shared submission component exists.</existing>
+    <extension>CreateInvoiceWizard is built around client-side createRecord (violates FR-17) and is rewired onto this component by 052 rather than extended; DocumentUploadPage is copied for structure.</extension>
+    <cost-of-doing-nothing>FR-18 fails: firms cannot submit invoices from the SPA, and 052 has no shared component to reuse (FR-19).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Happy path">
+      <steps><step>Sign in as a CIAM firm user (dev after 053, or a local BFF)</step><step>Invoices widget, Submit invoice</step><step>Choose an accessible matter, upload a sample PDF, enter a firm invoice number</step></steps>
+      <expected>Processing is shown, then Accepted with the tracking number; no console errors.</expected>
+    </test>
+    <test name="Resume">
+      <steps><step>Start a submission and leave the page while Processing</step><step>Return through the widget or the page URL</step></steps>
+      <expected>The same submission's current status and result are shown.</expected>
+    </test>
+    <test name="Errors and flag">
+      <steps><step>Upload a non-PDF</step><step>Upload a file above the size limit</step><step>With Ebilling:Enabled false, open the Invoices widget</step></steps>
+      <expected>The server's 400 and 413 messages are shown and the flow does not advance; with the flag off the Submit entry is hidden.</expected>
+    </test>
+    <test name="Phone width">
+      <steps><step>Set the viewport to 375 px wide and run the happy path</step></steps>
+      <expected>Every step is usable with no horizontal scroll.</expected>
+    </test>
+    <test name="Dark mode (ADR-021)">
+      <steps><step>Switch the SPA to dark mode in Settings</step><step>Walk every step, the result screen and the error states</step></steps>
+      <expected>All surfaces use theme tokens with readable contrast; no hard-coded colours.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">npm install --legacy-peer-deps --no-audit --no-fund ; npm test (both packages) ; npm run build (external-spa)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">components/InvoiceSubmission/*, components/index.ts, pages/InvoiceSubmitPage.tsx, App.tsx, widgets/InvoicesWidget.tsx, api/web-api-client.ts</output>
+    <output type="test">InvoiceSubmission __tests__ (jest), tests/InvoiceSubmitPage.test.tsx (vitest)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A firm user can choose an accessible core record, upload one PDF with a required firm invoice number (D-91) and optional PO, see Processing, and see Accepted with tracking number or Rejected with the reason and a report placeholder.</criterion>
+    <criterion testable="true">Leaving and returning shows the same result, read from the server (FR-18).</criterion>
+    <criterion testable="true">Negative: server 400 / 403 / 413 responses show their message by error code and the flow does not advance; a 503 ebilling.disabled hides the Submit entry (FR-45).</criterion>
+    <criterion testable="true">The shared component has no SPA-auth, Xrm or BFF URL import (props-injected callbacks only) and is exported from components/index.ts.</criterion>
+    <criterion testable="true">No new npm package in either package.json.</criterion>
+    <criterion testable="true">Every ui-test above passes, including phone width and dark mode.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+    <criterion testable="true">Both packages build and their test suites exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-18, FR-19, FR-45. The on-screen report and PDF download are completed by 134. external-spa and the shared library have no CLAUDE.md of their own. 052 consumes the shared component.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load every file in knowledge/files before Step 1. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>

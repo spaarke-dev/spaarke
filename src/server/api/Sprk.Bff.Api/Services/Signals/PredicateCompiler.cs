@@ -411,13 +411,17 @@ public sealed partial class PredicateCompiler
         return CompileParsed(doc.RootElement, subjectId, ruleType);
     }
 
-    /// <summary>Only Existence and Threshold compile (Switch is deferred, D-16). Refused with the compiler's own
-    /// exception type so a caller never sees the schema validator's <see cref="NotSupportedException"/>.</summary>
+    /// <summary>Only Existence and Threshold compile (Switch is deferred, D-16; every Billing type is evaluated only through
+    /// <see cref="PolicyVersionValidator.TryPrepareBillingRule"/>, ebilling-r1 task 070, FR-24). An allowlist, so a type
+    /// added later is refused until it is named here. Refused with the compiler's own exception type so a caller never sees
+    /// the schema validator's <see cref="NotSupportedException"/>.</summary>
     private static void RequireCompilable(RuleType ruleType)
     {
         if (ruleType is not (RuleType.Existence or RuleType.Threshold))
         {
-            throw new PredicateCompilationException($"Rule type '{ruleType}' has no compiler (Switch is deferred, D-16).");
+            throw new PredicateCompilationException(
+                $"Rule type '{ruleType}' has no compiler: only Existence and Threshold compile (Switch is deferred, D-16; " +
+                "a Billing type is never compiled to FetchXML).");
         }
     }
 

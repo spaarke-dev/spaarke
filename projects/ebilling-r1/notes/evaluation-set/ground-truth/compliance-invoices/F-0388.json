@@ -1,0 +1,26 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0388",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0388","generator_id":"gen_eval_set.py@1 F-0388","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0388.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Ostrander & Ellison LLP","firm_invoice_number":"INV-2026-44443","invoice_date":"2026-07-01","billing_period_start":"2026-06-01","billing_period_end":"2026-06-30","firm_matter_reference":"96646-0035","po_number":"PO-4574207","fees_total":3401.25,"expenses_total":70.02,"adjustments_total":0.0,"total_due":3471.27,"currency":"USD"},
+ "timekeepers":[{"name":"Cyrus Yilmaz","title":"Paralegal","rate":200.0,"billed_as":"CY"},{"name":"Hannah Marchetti","title":"Partner","rate":595.0,"billed_as":"HM"},{"name":"Imani Carmichael","title":"Associate","rate":290.0,"billed_as":"IC"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-06-03","timekeeper":"IC","timekeeper_name":"Imani Carmichael","timekeeper_title":"Associate","title":"Assoc","hours":1.25,"rate":290.0,"amount":362.5,"narrative":"Research pleading standards applicable to the licensing dispute","codes":["L210","A102"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-06-03","timekeeper":"HM","timekeeper_name":"Hannah Marchetti","timekeeper_title":"Partner","title":"Ptr","hours":0.75,"rate":595.0,"amount":446.25,"narrative":"Conference with client regarding settlement authority for the data incident","codes":["L160","A106"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-06-08","timekeeper":"CY","timekeeper_name":"Cyrus Yilmaz","timekeeper_title":"Paralegal","title":"Para","hours":1.0,"rate":200.0,"amount":200.0,"narrative":"Prepare monthly status report to client regarding the employment claim","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-06-08","timekeeper":"IC","timekeeper_name":"Imani Carmichael","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":290.0,"amount":290.0,"narrative":"Prepare updated litigation budget for the construction contract","codes":["L150","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-06-10","timekeeper":"IC","timekeeper_name":"Imani Carmichael","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":290.0,"amount":725.0,"narrative":"Telephone conference with client representative regarding factual background of the data incident","codes":["L110","A106"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-06-10","timekeeper":"IC","timekeeper_name":"Imani Carmichael","timekeeper_title":"Associate","title":"Assoc","hours":1.25,"rate":290.0,"amount":362.5,"narrative":"Telephone conference with client representative regarding factual background of the employment claim","codes":["L110","A106"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-06-15","timekeeper":"IC","timekeeper_name":"Imani Carmichael","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":290.0,"amount":145.0,"narrative":"Review and organize incoming production from Caldera Energy for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-06-18","timekeeper":"IC","timekeeper_name":"Imani Carmichael","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":290.0,"amount":145.0,"narrative":"Conference with client regarding budget variance for the vendor agreement","codes":["L150","A106"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-06-25","timekeeper":"IC","timekeeper_name":"Imani Carmichael","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":290.0,"amount":725.0,"narrative":"Draft motion for preliminary injunction in the employment claim","codes":["L220","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-06-09","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":778.0,"rate":0.09,"amount":70.02,"narrative":"Photocopies - 778 pages","codes":["E101"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["309 Elm Court","Houston","Tax ID 15-8272722"],"template":"T01","pages":1},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2025-06-13","matter_close":"2026-09-28","matter_budget":38885.0,"approved_timekeepers":["Ivan Quillen","Hannah Marchetti","Cyrus Yilmaz","Helena Esposito","Imani Carmichael"],"invoice_received_date":"2026-07-05"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

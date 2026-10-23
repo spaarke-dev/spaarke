@@ -3481,10 +3481,11 @@ public class RecordOwnershipResolverTests
     }
 
     /// <summary>
-    /// #2273: a child of a table that carries <c>sprk_createdbyperson</c> but that the BFF does not stamp (ebilling task 080
-    /// created the column UNSECURED on its procedure tables), filed under the secure project.
+    /// #2273: a child of a table that the BFF does not stamp, filed under the secure project, whose <c>sprk_createdbyperson</c>
+    /// (if any) is therefore not trusted. Master merge (ebilling-r1): not <c>sprk_procedure</c>, which ebilling task 081 now
+    /// stamps (RecordCreatorPerson.StampedChildTables); <c>sprk_agreement</c> is an ownership-parent child the BFF does not stamp.
     /// </summary>
-    private const string UnstampedChildTable = "sprk_procedure";
+    private const string UnstampedChildTable = "sprk_agreement";
 
     private static (FakeDirectory Directory, Guid RowId) SecureUnstampedChildWorld(Dictionary<string, object> columns)
     {

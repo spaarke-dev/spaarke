@@ -1696,6 +1696,17 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
             VerifyPointers = false;
         }
 
+        /// <summary>
+        /// Places <paramref name="bytes"/> in SPE as item <paramref name="itemId"/> of <paramref name="drive"/>, as if the BFF had
+        /// uploaded it there — so a pointer to it passes the item-exists half of the pointer check and only the container rule
+        /// can refuse it.
+        /// </summary>
+        public void StoreItem(string drive, string itemId, byte[] bytes)
+        {
+            _spe[itemId] = bytes;
+            _itemDrives[itemId] = drive;
+        }
+
         /// <summary>The served request's <c>RequestAborted</c> token, or null when no request is in flight on this flow.</summary>
         private CancellationToken? RequestAbortedToken() =>
             Services.GetRequiredService<IHttpContextAccessor>().HttpContext?.RequestAborted;

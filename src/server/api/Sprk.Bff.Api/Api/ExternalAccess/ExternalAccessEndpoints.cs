@@ -79,7 +79,7 @@ public static class ExternalAccessEndpoints
             .AddWorkforceCeilingFilter();
 
         // GET /api/v1/external/me — Returns the caller's project access context (either plane)
-        externalGroup.MapGet("/me", ExternalUserContextEndpoint.Handle)
+        externalGroup.MapGet("/me", ExternalUserContextEndpoint.HandleAsync)
             .WithName("GetExternalUserContext")
             .ExemptFromWorkforceCeiling("Identity: the caller's own access context, read to start the SPA; no table operation.")
             .WithSummary("Get the authenticated collaboration caller's project access context")
@@ -136,6 +136,7 @@ public static class ExternalAccessEndpoints
         // (the one ModuleEntitlementResolver check /me/entitlements reports), and creates the request app-only with the
         // caller's contact as sprk_requestedby.
         externalGroup.MapExternalIntakeEndpoints();
+        externalGroup.MapExternalInvoiceSubmissionEndpoints(); // ebilling-r1 task 044 (FR-17 SPA channel; firm + core-record filter)
 
         // GET /api/v1/external/notifications · POST /api/v1/external/notifications/seen — the derived in-portal feed (r3 task
         // 037, FR-08). Inherits this group's policy + CallerPrincipalAuthorizationFilter; grants are re-checked against the

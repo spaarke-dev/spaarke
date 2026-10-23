@@ -1,0 +1,20 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"B-0029",
+ "set":"B",
+ "meta":{"title":"Synthetic invoice B-0029","generator_id":"gen_eval_set.py@1 B-0029","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/B-0029.pdf"},"spike":false,"label_method":"generator","profile":{"quality_mix":"mixed","hour_increment":0.25,"code_mode_requested":"none"}},
+ "header":{"firm":"Hartwell & Beckett LLP","firm_invoice_number":"INV-2025-48359","invoice_date":"2025-11-03","billing_period_start":"2025-10-01","billing_period_end":"2025-10-31","firm_matter_reference":"56826-0030","po_number":null,"fees_total":1352.5,"expenses_total":0.0,"adjustments_total":-135.25,"total_due":1217.25,"currency":"USD"},
+ "timekeepers":[{"name":"Helena Mbeki","title":"Paralegal","rate":140.0,"billed_as":"HM"},{"name":"Ivan Abernathy","title":"Associate","rate":250.0,"billed_as":"IA"},{"name":"Louis Dunleavy","title":"Paralegal","rate":140.0,"billed_as":"LD"},{"name":"Nadia Ashdown","title":"Associate","rate":250.0,"billed_as":"NA"},{"name":"Victor Nakamura","title":"Associate","rate":230.0,"billed_as":"VN"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-10-09","timekeeper":"VN","timekeeper_name":"Victor Nakamura","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":230.0,"amount":230.0,"narrative":"Prepare monthly status report to client regarding the supply agreement","codes":[],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-10-13","timekeeper":"LD","timekeeper_name":"Louis Dunleavy","timekeeper_title":"Paralegal","title":"Para","hours":3.0,"rate":140.0,"amount":420.0,"narrative":"Draft protective order in the supply agreement","codes":[],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-10-20","timekeeper":"LD","timekeeper_name":"Louis Dunleavy","timekeeper_title":"Paralegal","title":"Para","hours":0.5,"rate":140.0,"amount":70.0,"narrative":"Telephone calls.","codes":[],"page":1,"narrative_style":"vague"},
+  {"n":4,"line_type":"fee","date":"2025-10-21","timekeeper":"NA","timekeeper_name":"Nadia Ashdown","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":250.0,"amount":500.0,"narrative":"Review privilege log entries before service","codes":[],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-10-30","timekeeper":"HM","timekeeper_name":"Helena Mbeki","timekeeper_title":"Paralegal","title":"Para","hours":0.5,"rate":140.0,"amount":70.0,"narrative":"Prepare for hearing.","codes":[],"page":1,"narrative_style":"vague"},
+  {"n":6,"line_type":"fee","date":"2025-10-31","timekeeper":"IA","timekeeper_name":"Ivan Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":0.25,"rate":250.0,"amount":62.5,"narrative":"Docketed deadlines in case management system","codes":[],"page":1,"narrative_style":"clerical"},
+  {"n":7,"line_type":"adjustment","date":null,"timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":null,"rate":null,"amount":-135.25,"narrative":"Courtesy discount","codes":[],"page":1,"narrative_style":"clear"}
+ ],
+ "intended_codes":{"1":["L190","A111"],"2":["L250","A103"],"3":["L310","A111"],"4":["L140","A104"],"5":["L140","A111"],"6":["L330","A110"],"7":[]},
+ "document":{"letterhead":["145 Harbor Road","Boston","Tax ID 77-1389639"],"template":"T05","scan_noise":false,"scan":null,"bundled":false,"bundle":null,"timekeeper_source":"column","rate_source":"legend","title_source":"legend","codes_printed":"full","grouping":"date","hours_format":"dec2","expenses_layout":"separate","page_total_rows":false,"summary_first":false,"orientation":"P","features":["adjustment_line","no_po"],"pages":2,"bundle_parts":[{"part":"invoice","pages":2}],"invoice_first_page":1,"invoice_pages":2}
+}

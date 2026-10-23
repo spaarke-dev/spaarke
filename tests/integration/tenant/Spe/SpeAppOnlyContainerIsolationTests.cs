@@ -882,6 +882,57 @@ public class SpeAppOnlyContainerIsolationTests
             .Should().BeEquivalentTo("b!default", "b!a;b!b", "b!old1", "b!old2", "b!old3");
     }
 
+    // ebilling-r1 task 028 (owner D-67): the Procedure Library and E-Billing Output Files containers are stamp containers,
+    // so app-only eBilling writers (exports, reports, rule drafts) reach them — and nothing else is admitted with them.
+
+    private const string ProcedureLibrary = "b!procedure-library";
+    private const string EbillingOutput = "b!ebilling-output-files";
+
+    [Theory]
+    [InlineData(ProcedureLibrary)]
+    [InlineData(EbillingOutput)]
+    public async Task EbillingContainers_WhenConfigured_AreOwned_WithoutAGraphCall_AndAnUnlistedContainerIsStillRefused(string container)
+    {
+        var graph = new RoutedGraph().Container(ForeignContainer, marker: OtherCustomer);
+        var guard = GuardFromConfiguration(graph, new Dictionary<string, string?>
+        {
+            ["Finance:ProcedureLibraryContainerId"] = ProcedureLibrary,
+            ["Finance:EbillingOutputContainerId"] = EbillingOutput,
+        });
+
+        (await guard.ForOwnedContainerAsync(container)).Should().NotBeNull();
+        graph.Requests.Should().BeEmpty("a configured stamp container is owned by definition");
+
+        var refusal = await Refusal(() => guard.ForOwnedContainerAsync(ForeignContainer));
+        refusal.Code.Should().Be(SpeContainerOwnershipGuard.NotOwnedErrorCode);
+        refusal.StatusCode.Should().Be(StatusCodes.Status404NotFound);
+    }
+
+    [Theory]
+    [InlineData(ProcedureLibrary)]
+    [InlineData(EbillingOutput)]
+    public async Task EbillingContainers_WhenNotConfigured_AreNotOwned(string container)
+    {
+        // Seeding proof: without the setting the same id is an ordinary container — its marker decides, and it has none.
+        var graph = new RoutedGraph().Container(container, marker: null);
+        var guard = GuardFromConfiguration(graph, new Dictionary<string, string?>
+        {
+            ["Finance:ProcedureLibraryContainerId"] = "",
+            ["Finance:EbillingOutputContainerId"] = "",
+        });
+
+        var refusal = await Refusal(() => guard.ForOwnedContainerAsync(container));
+        refusal.Code.Should().Be(SpeContainerOwnershipGuard.NotOwnedErrorCode);
+    }
+
+    /// <summary>A real guard whose stamp containers come through <c>GraphModule.StampContainerIds</c>, as in production DI.</summary>
+    private static SpeContainerOwnershipGuard GuardFromConfiguration(RoutedGraph graph, Dictionary<string, string?> settings)
+        => new(
+            new StubFactory(graph.Client),
+            Sprk.Bff.Api.Infrastructure.DI.GraphModule.StampContainerIds(TestSpeOwnership.Configuration(settings)),
+            TestSpeOwnership.Customer(Customer),
+            NullLogger<SpeContainerOwnershipGuard>.Instance);
+
     [Fact]
     public async Task SpeAdmin_BulkJob_ForeignContainer_IsTheSameItemErrorAsOutOfScope_NoContentCall()
     {

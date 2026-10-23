@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="ebilling-r1">
+  <metadata>
+    <title>Content Understanding analyzer definition v1 and deploy script</title>
+    <phase>0 Baseline and AI foundations (WP0)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Creates two new repo files (analyzer JSON, deploy script) and runs the script against dev; no BFF code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Field list and script contract are fully specified (spec FR-21 / FR-47, research note §3.2); sibling script to copy exists.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P0-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>003</deps>
+    <tags>ai, azure-deployment, deploy, content-understanding</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author the versioned Content Understanding analyzer definition sprk-invoice-v1 (the extraction "prompt", D-49) and an idempotent deploy script that creates it per environment on the pinned GA API 2025-11-01 (FR-47, D-53); run the script against dev twice to prove idempotency.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Azure AI Content Understanding analyzers, REST and PowerShell automation.</role>
+
+  <goal>infrastructure/content-understanding/sprk-invoice-v1.json and scripts/content-understanding/Deploy-Analyzers.ps1 exist; running the script against spaarke-docintel-invoices-dev creates analyzer sprk-invoice-v1; a second run reports "no change" and makes no write; one analyze call on a sample invoice returns header, TimeEntries, Expenses and TimekeeperSummary with per-field confidence and source.</goal>
+
+  <context>
+    <background>The analyzer replaces the legacy extraction prompt and C# schema (D-52). Microsoft's guidance is to copy prebuilt-invoice's definition (GET analyzers/prebuilt-invoice) and PUT it as your own analyzer rather than depend on the prebuilt (research note §1.2); custom analyzers sit on one of the prebuilt-document / image / audio / video bases. The research note's §3.2 schema sketch is the starting field list; spec FR-21 is the binding list of header and line fields. Field descriptions carry the label aliases "Professional Services", "Fees", "Time Detail", "Disbursements", "Costs" (spec Processing Pipeline). Model defaults on the resource are set by 003.</background>
+    <relevant-files>
+      <file role="new">infrastructure/content-understanding/sprk-invoice-v1.json</file>
+      <file role="new">scripts/content-understanding/Deploy-Analyzers.ps1</file>
+      <file role="read">infrastructure/ai-search/spaarke-invoices-index.json (sibling: definition-as-JSON convention)</file>
+      <file role="read">scripts/ai-search/Deploy-AllIndexes.ps1 (sibling: deploy-from-JSON script to copy the shape of)</file>
+      <file role="read">projects/ebilling-r1/notes/research/content-understanding-vs-docintel.md (§1.2–§1.7, §3.2, §9.4, §9.8)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="003" status="pending">gpt-5.2 deployment and contentunderstanding/defaults on spaarke-docintel-invoices-dev</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="D-53">Every REST call in the script and every value in the JSON uses api-version 2025-11-01 (GA). No preview API anywhere in these two files; preview is only arm c-prime of task 005, outside the repo's scripts.</constraint>
+    <constraint source="ADR-028 / root CLAUDE.md §9">The script authenticates with an Entra token (az account get-access-token for the cognitiveservices scope, or managed identity in the pipeline); it never reads or accepts an account key.</constraint>
+    <constraint source="spec FR-47">The script is non-interactive and parameterised (endpoint, analyzer file(s), api version default 2025-11-01, -WhatIf) so the deployment pipeline can run it. Idempotent: if the deployed analyzer equals the file (after normalising server-added properties), it writes nothing and says so.</constraint>
+    <constraint source="project">A changed definition is a new version (sprk-invoice-v2.json); the script refuses to replace an existing analyzer whose definition differs unless -Replace is passed, and logs which fields differ.</constraint>
+    <constraint source="spec FR-21">The schema includes at least: header (firm, firm invoice number, invoice date, billing period start / end, firm matter reference, PO as quoted, fees / expenses / adjustments / total due, currency); TimeEntries (date, timekeeper as billed, title / classification as billed, hours, rate, amount, narrative, task and activity codes as billed); Expenses (date, description, quantity, unit cost, amount, expense code as billed); TimekeeperSummary (name, title, hours, rate, amount). extract fields need the analyzer's source-and-confidence estimation turned on — confirm the exact config property name in the 2025-11-01 REST reference (the research note spells it two ways).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Glob infrastructure/ and scripts/ to confirm no content-understanding folder exists and that the ai-search siblings are the closest convention; record in task notes.</step>
+    <step order="2">GET analyzers/prebuilt-invoice (api-version 2025-11-01) from spaarke-docintel-invoices-dev and save it to task notes as the reference.</step>
+    <step order="3">Write sprk-invoice-v1.json: copy the prebuilt's base and config, set the analyzer description, replace / extend the field schema per the FR-21 constraint (arrays of objects, depth ≤ 3), add alias-bearing descriptions, set the model mapping to the defaults from 003.</step>
+    <step order="4">Write Deploy-Analyzers.ps1 modelled on scripts/ai-search/Deploy-AllIndexes.ps1: parameters, token acquisition, GET existing, compare, PUT (create or, with -Replace, replace), poll the operation to completion, exit codes 0 / non-zero, -WhatIf.</step>
+    <step order="5">Run with -WhatIf against dev, then for real; record output. Run again; record the "no change" output.</step>
+    <step order="6">Analyze one synthetic sample invoice (no real PII) with sprk-invoice-v1; record which fields came back with confidence and source, latency, and any warnings.</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status cell to ✅ [done].</step>
+    <step order="8">If any deviations from plan, document in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the 2025-11-01 API cannot express a field FR-21 requires (e.g. no per-field source for a table subfield), STOP and record the gap for 005 rather than switching to the preview API (D-53 makes preview adoption an owner decision).</trigger>
+    <trigger>If an analyzer cannot be replaced in place and replacement means delete-then-create, do not delete in dev without stating it in task notes; never delete an analyzer this task did not create.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Closest neighbours are infrastructure/ai-search/*.json + scripts/ai-search/Deploy-AllIndexes.ps1 (index-as-code) and Action rows in Dataverse; Glob of infrastructure/ and scripts/ shows no Content Understanding definition or script (spec §11 row "Analyzer definition JSON + deploy script").</existing>
+    <extension>No — the analyzer lives in the Content Understanding resource, not in Dataverse or AI Search, so neither the Action seeders nor the index deployer can create it; the new script copies the index deployer's shape.</extension>
+    <cost-of-doing-nothing>The analyzer would be configured by hand in Studio per environment and unversioned: FR-47's "idempotent, runnable in the pipeline" acceptance fails, and the extraction prompt cannot be reviewed or rolled back.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="pwsh">Run the deploy script</tool>
+    <tool name="az">Token acquisition and REST reads</tool>
+  </tools>
+
+  <outputs>
+    <output type="infra">infrastructure/content-understanding/sprk-invoice-v1.json</output>
+    <output type="script">scripts/content-understanding/Deploy-Analyzers.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">sprk-invoice-v1.json is valid JSON containing every field named in the FR-21 constraint, with source-and-confidence estimation enabled and alias descriptions for the fee and expense tables.</criterion>
+    <criterion testable="true">First run against dev creates sprk-invoice-v1 (GET returns it); second run exits 0, reports no change, and performs no PUT (shown in output).</criterion>
+    <criterion testable="true">Given a deployed analyzer that differs from the file, when the script runs without -Replace, then it exits non-zero, writes nothing and lists the differing properties.</criterion>
+    <criterion testable="true">grep finds no "preview" api-version string and no key parameter or key header in either file.</criterion>
+    <criterion testable="true">One analyze call on a synthetic sample returns header, TimeEntries, Expenses and TimekeeperSummary values each with confidence and source; result summary (field names, confidence range, latency — no document text) recorded in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>COMPLETED 2026-10-15 (dev only, GA 2025-11-01). Full record: projects/ebilling-r1/notes/004-cu-analyzer.md. KEY DEVIATION: the service rejects hyphens in analyzer ids (InvalidAnalyzerId), so the deployed analyzer is sprk_invoice_v1 (file name unchanged: sprk-invoice-v1.json); appsettings.template.json ContentUnderstanding:AnalyzerId, spec/README/plan/CLAUDE.md and tasks 005, 027, 043, 101, 162 still say sprk-invoice-v1 and need the underscore form. Created and deleted two probe analyzers of this task's own (sprk_probe_004, sprk_probe_004b). Escalation triggers did not fire. Step 7 (TASK-INDEX) left to the main session by instruction. rework: none task 004
+
+005 uses this analyzer as arm c and a copy of it on the preview API as arm c-prime (outside the repo). 043's ReadInvoiceAsync maps these field names, so keep them stable after 005; a rename after 005 is a v2. The activity-code classify experiment is 005's, not part of v1 unless 005 adopts it.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

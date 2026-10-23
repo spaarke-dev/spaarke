@@ -674,16 +674,34 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         { "sprk_gridconfiguration", "sprk_name" },
     };
 
-    /// <summary>The live FetchXML of each outside-counsel grid (sprk_gridconfiguration.sprk_configjson, 2026-09-30).</summary>
+    /// <summary>
+    /// The retired invoice-status column, spelled ONCE in this file (ebilling-r1 task 015, D-41 / D-97). TRANSITION WINDOW: until
+    /// 015 deletes the column from dev, the live outside-counsel invoices grid (3ff4102c) still names it, so the BFF's invoices
+    /// allow-list admits it next to <c>statuscode</c>. When the column is deleted from dev, this constant and its uses go with
+    /// the production entry in ExternalAccessModule (a follow-up commit); the InvoiceStatusRetirementGuardTests exemption names
+    /// exactly this line and the module's entry, so a leftover fails the guard.
+    /// </summary>
+    private const string TransitionalInvoiceStatusColumn = "sprk_invoicestatus"; // transitional (015/D-97): remove after the dev column delete
+
+    /// <summary>The live FetchXML of each outside-counsel grid (sprk_gridconfiguration.sprk_configjson, 2026-09-30). The invoices row is
+    /// the CURRENT live shape: grid 3ff4102c still names the retired status column until 015's <c>-GridConfig</c> step moves it
+    /// (see <see cref="TargetInvoicesGridFetchXml"/> for the shape after the move).</summary>
     public static TheoryData<string, string> LiveGridFetchXml => new()
     {
         { "sprk_project", "<fetch><entity name='sprk_project'><attribute name='sprk_projectid'/><attribute name='sprk_projectname'/><attribute name='sprk_projectnumber'/><attribute name='statuscode'/><attribute name='modifiedon'/><order attribute='sprk_projectname' descending='false'/></entity></fetch>" },
         { "sprk_document", LiveDocumentsGridFetchXml },
-        { "sprk_invoice", "<fetch><entity name='sprk_invoice'><attribute name='sprk_invoiceid'/><attribute name='sprk_invoicenumber'/><attribute name='sprk_invoicedate'/><attribute name='sprk_invoicestatus'/><attribute name='sprk_totalamount'/><attribute name='sprk_project'/><attribute name='sprk_matter'/><order attribute='sprk_invoicedate' descending='true'/></entity></fetch>" },
+        // ebilling-r1 task 015 (D-41): CURRENT live shape of grid 3ff4102c, which still names the retired status column during the
+        // transition window (read 2026-10-17: fetch, layout and column settings). It stays admitted until 015 moves the grid.
+        { "sprk_invoice", $"<fetch><entity name='sprk_invoice'><attribute name='sprk_invoiceid'/><attribute name='sprk_invoicenumber'/><attribute name='sprk_invoicedate'/><attribute name='{TransitionalInvoiceStatusColumn}'/><attribute name='sprk_totalamount'/><attribute name='sprk_project'/><attribute name='sprk_matter'/><order attribute='sprk_invoicedate' descending='true'/></entity></fetch>" },
         { "sprk_workassignment", "<fetch><entity name='sprk_workassignment'><attribute name='sprk_workassignmentid'/><attribute name='sprk_workassignmentnumber'/><attribute name='sprk_priority'/><attribute name='sprk_responseduedate'/><attribute name='statuscode'/><attribute name='sprk_regardingproject'/><order attribute='sprk_responseduedate' descending='false'/></entity></fetch>" },
         { "sprk_matter", "<fetch><entity name='sprk_matter'><attribute name='sprk_matterid'/><attribute name='sprk_mattername'/><attribute name='sprk_matternumber'/><attribute name='statuscode'/><order attribute='sprk_mattername' descending='false'/></entity></fetch>" },
         { "sprk_servicerequest", "<fetch><entity name='sprk_servicerequest'><attribute name='sprk_servicerequestid'/><attribute name='sprk_servicerequestnumber'/><attribute name='sprk_name'/><attribute name='statuscode'/><attribute name='createdon'/><attribute name='sprk_requestedby'/><order attribute='createdon' descending='true'/></entity></fetch>" },
     };
+
+    /// <summary>The invoices grid fetch AFTER 015's <c>-GridConfig</c> step: the status column is <c>statuscode</c>. This is the
+    /// TARGET shape, not what is live today (the live row is in <see cref="LiveGridFetchXml"/>).</summary>
+    private const string TargetInvoicesGridFetchXml =
+        "<fetch><entity name='sprk_invoice'><attribute name='sprk_invoiceid'/><attribute name='sprk_invoicenumber'/><attribute name='sprk_invoicedate'/><attribute name='statuscode'/><attribute name='sprk_totalamount'/><attribute name='sprk_project'/><attribute name='sprk_matter'/><order attribute='sprk_invoicedate' descending='true'/></entity></fetch>";
 
     private ExternalModuleRegistry ProductionRegistry() =>
         _fixture.Services.GetRequiredService<ExternalModuleRegistry>();
@@ -721,6 +739,45 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
 
         result.Verdict.Should().Be(Verdict.Allowed,
             $"the live {entity} grid must render unchanged after task 134 (violation: {result.ColumnViolation})");
+    }
+
+    // ebilling-r1 task 015 transition window (D-41 / D-97): the status column moves from the retired choice column to statuscode
+    // while the live grid still names the old one. Both shapes must render until the column is deleted from dev.
+
+    [Fact]
+    public void ProductionModule_InvoicesGrid_TheCurrentLiveFetchNamingTheRetiredColumn_IsAdmittedDuringTheTransition()
+    {
+        var module = ProductionRegistry().FindByEntity("sprk_invoice")!;
+        var currentLive = LiveGridFetchXmlFor("sprk_invoice");
+        currentLive.Should().Contain(TransitionalInvoiceStatusColumn, "this row is the grid as it is live today, before -GridConfig moves it");
+
+        var result = ExternalModuleDataEndpoints.EvaluateFetchXmlGuard(
+            currentLive, module.RecordEntity, module.ReadableColumns, new FetchXmlEntityExtractor());
+
+        result.Verdict.Should().Be(Verdict.Allowed, $"the live invoices grid must keep rendering until it is moved (violation: {result.ColumnViolation})");
+    }
+
+    [Fact]
+    public void ProductionModule_InvoicesGrid_TheTargetFetchOnStatuscode_IsAdmitted_AndNamesNoRetiredColumn()
+    {
+        var module = ProductionRegistry().FindByEntity("sprk_invoice")!;
+        TargetInvoicesGridFetchXml.Should().NotContain(TransitionalInvoiceStatusColumn).And.Contain("'statuscode'");
+
+        var result = ExternalModuleDataEndpoints.EvaluateFetchXmlGuard(
+            TargetInvoicesGridFetchXml, module.RecordEntity, module.ReadableColumns, new FetchXmlEntityExtractor());
+
+        result.Verdict.Should().Be(Verdict.Allowed, $"the invoices grid after the move must render (violation: {result.ColumnViolation})");
+    }
+
+    [Fact]
+    public void ProductionModule_TheRetiredInvoiceColumn_IsAdmittedOnTheInvoicesModuleOnly()
+    {
+        ProductionRegistry().FindByEntity("sprk_invoice")!.ReadableColumns
+            .Should().Contain(new[] { "statuscode", TransitionalInvoiceStatusColumn });
+        foreach (var other in ProductionRegistry().Modules.Where(m => !string.Equals(m.RecordEntity, "sprk_invoice", StringComparison.OrdinalIgnoreCase)))
+        {
+            other.ReadableColumns.Should().NotContain(TransitionalInvoiceStatusColumn, $"the transition covers the invoices module only, not '{other.RecordEntity}'");
+        }
     }
 
     [Fact]
@@ -761,12 +818,11 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         },
         ["sprk_invoice"] = new[]
         {
-            "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate", "sprk_invoicestatus",
+            // ebilling-r1 task 015 (D-41): the status is statuscode; the retired status column stays admitted until it is deleted
+            // from dev because the live grid 3ff4102c still names it (transition window, D-97).
+            "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate", "statuscode",
             "sprk_totalamount", "sprk_project", "sprk_matter",
-            // spaarke-SPA-external-access-platform-r3 (owner Partner UAT 2026-10-17, ebilling-r1 task 015): NOT grid-derived.
-            // The SPA record detail reads the invoice status from statuscode. Appears on both sides of the task 134 shrink
-            // comparison, so it drops nothing.
-            "statuscode",
+            TransitionalInvoiceStatusColumn,
         },
         ["sprk_workassignment"] = new[]
         {
@@ -801,11 +857,14 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         // Task 134's document list was the task-157 derivation (no rule-(b) column); task 032's two creator stamps are a
         // later, deliberate addition, so they appear on both sides of the shrink comparison and drop nothing.
         ["sprk_document"] = LiveDerivedAllowLists["sprk_document"],
+        // ebilling-r1 task 015 (D-41) changed the status column on BOTH sides of this comparison (statuscode added; the retired
+        // status column stays during the transition window), as task 032's later addition to the document list appears on both
+        // sides: the change drops and adds nothing the shrink is about.
         ["sprk_invoice"] = new[]
         {
-            "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate", "sprk_invoicestatus",
+            "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate", "statuscode",
             "sprk_totalamount", "sprk_project", "sprk_matter", "sprk_visibilitystate", "modifiedon", "statecode",
-            "statuscode", // the 2026-10-17 addition above; on both sides, so the shrink comparison is unchanged
+            TransitionalInvoiceStatusColumn,
         },
         ["sprk_workassignment"] = new[]
         {

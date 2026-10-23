@@ -930,6 +930,10 @@ export interface IIntermediateRootColumn {
  * - `sprk_communication`, `sprk_event`, `sprk_todo`, `sprk_analysis` — the four
  *   `sprk_regarding{core}` columns (the server's `StandardRootColumns()`).
  * - `sprk_invoice`, `sprk_budget` — typed `sprk_project` / `sprk_matter` lookups.
+ * - `sprk_billingevent` (the Invoice Line, ebilling-r1 task 026, D-94) — the
+ *   line's OWN core lookups only (typed `sprk_project` / `sprk_matter` and
+ *   `sprk_regardingworkassignment`), never its `sprk_invoice` (D-75). The server
+ *   refuses a line that names more than one; this preview derives what it names.
  * - `sprk_document` — the project / matter / work assignment links of the
  *   canonical document link vocabulary (`Spaarke.Dataverse.DocumentLinkFields`):
  *   the typed column and its `sprk_related*` twin. `sprk_relatedservicerequest`
@@ -972,6 +976,10 @@ export const INTERMEDIATE_ROOT_COLUMNS: ReadonlyArray<IIntermediateRootColumn> =
   { intermediate: 'sprk_memo', column: 'sprk_regardingservicerequest', rootEntity: 'sprk_servicerequest' },
   { intermediate: 'sprk_invoice', column: 'sprk_project', rootEntity: 'sprk_project' },
   { intermediate: 'sprk_invoice', column: 'sprk_matter', rootEntity: 'sprk_matter' },
+  { intermediate: 'sprk_invoice', column: 'sprk_regardingworkassignment', rootEntity: 'sprk_workassignment' },
+  { intermediate: 'sprk_billingevent', column: 'sprk_project', rootEntity: 'sprk_project' },
+  { intermediate: 'sprk_billingevent', column: 'sprk_matter', rootEntity: 'sprk_matter' },
+  { intermediate: 'sprk_billingevent', column: 'sprk_regardingworkassignment', rootEntity: 'sprk_workassignment' },
   { intermediate: 'sprk_document', column: 'sprk_matter', rootEntity: 'sprk_matter' },
   { intermediate: 'sprk_document', column: 'sprk_relatedmatter', rootEntity: 'sprk_matter' },
   { intermediate: 'sprk_document', column: 'sprk_project', rootEntity: 'sprk_project' },

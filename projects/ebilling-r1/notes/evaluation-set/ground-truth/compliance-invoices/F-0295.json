@@ -1,0 +1,31 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0295",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0295","generator_id":"gen_eval_set.py@1 F-0295","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0295.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Pryce Whitcombe PC","firm_invoice_number":"INV-2025-95863","invoice_date":"2025-10-04","billing_period_start":"2025-09-01","billing_period_end":"2025-09-30","firm_matter_reference":"90131-0029","po_number":"PO-4512007","fees_total":4165.0,"expenses_total":1324.75,"adjustments_total":0.0,"total_due":5489.75,"currency":"USD"},
+ "timekeepers":[{"name":"Hannah Quillen","title":"Senior Associate","rate":490.0,"billed_as":"HQ"},{"name":"Ingrid Abernathy","title":"Associate","rate":390.0,"billed_as":"IA"},{"name":"Ingrid Hargrove","title":"Associate","rate":375.0,"billed_as":"IH"},{"name":"Ivan Mbeki","title":"Associate","rate":395.0,"billed_as":"IM"},{"name":"Katya Santoro","title":"Partner","rate":660.0,"billed_as":"KS"},{"name":"Sofia Halloran","title":"Paralegal","rate":215.0,"billed_as":"SH"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-09-05","timekeeper":"IM","timekeeper_name":"Ivan Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":395.0,"amount":474.0,"narrative":"Attend deposition of Northwind Logistics corporate representative","codes":["L330","A109"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-09-09","timekeeper":"IA","timekeeper_name":"Ingrid Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":0.15,"rate":390.0,"amount":58.5,"narrative":"Prepare outline for deposition of Harbor Point Capital witness","codes":["L330","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-09-11","timekeeper":"IA","timekeeper_name":"Ingrid Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":390.0,"amount":351.0,"narrative":"Review court docket and calendar of pending deadlines for the vendor agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-09-12","timekeeper":"IM","timekeeper_name":"Ivan Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":395.0,"amount":355.5,"narrative":"Update document review protocol and coding panel for the data incident","codes":["L140","A110"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-09-18","timekeeper":"IM","timekeeper_name":"Ivan Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":395.0,"amount":355.5,"narrative":"Legal research.","codes":["L250","A102"],"page":1,"narrative_style":"vague"},
+  {"n":6,"line_type":"fee","date":"2025-09-22","timekeeper":"KS","timekeeper_name":"Katya Santoro","timekeeper_title":"Partner","title":"Ptr","hours":2.6,"rate":660.0,"amount":1716.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-09-24","timekeeper":"HQ","timekeeper_name":"Hannah Quillen","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.0,"rate":490.0,"amount":490.0,"narrative":"Prepare monthly status report to client regarding the customs audit","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-09-30","timekeeper":"IH","timekeeper_name":"Ingrid Hargrove","timekeeper_title":"Associate","title":"Assoc","hours":0.8,"rate":375.0,"amount":300.0,"narrative":"Prepare production set and cover correspondence for service on Larkspur Medical","codes":["L320","A110"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-09-30","timekeeper":"SH","timekeeper_name":"Sofia Halloran","timekeeper_title":"Paralegal","title":"Para","hours":0.3,"rate":215.0,"amount":64.5,"narrative":"Review expert report served by Tidewater Retail","codes":["L340","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-09-03","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":23.0,"rate":0.63,"amount":14.49,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-09-04","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":565.87,"amount":565.87,"narrative":"Airfare to Dallas for deposition","codes":["E110"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-09-18","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":744.39,"amount":744.39,"narrative":"Airfare to Portland for deposition","codes":["E110"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["510 Harbor Road","Portland","Tax ID 15-1329757"],"template":"T11","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-10-20","matter_close":"2025-12-29","matter_budget":46959.0,"approved_timekeepers":["Ingrid Abernathy","Yusuf Zielinski","Katya Santoro","Oliver Oyelaran","Ivan Mbeki","Hannah Quillen","Ingrid Quillen","Sofia Halloran","Ingrid Hargrove"],"invoice_received_date":"2025-10-14"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R01","rule_type":"TimeIncrement","scope":"line","line_refs":[2],"consequence":"Reduce"},
+  {"rule_id":"RS-01-R02","rule_type":"AiObservation","scope":"line","line_refs":[5],"consequence":"Flag"}
+ ],
+ "seeded_violations":2
+}

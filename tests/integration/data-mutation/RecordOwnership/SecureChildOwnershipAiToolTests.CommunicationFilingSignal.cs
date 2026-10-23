@@ -402,7 +402,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
             Event, Payload(FileUnderOrdinaryMatter()), _user, _world.Resolver(), Restamper(), Children(),
             HttpContextWithSignalServices(entities.Object, trigger.Object), NullLogger<Program>.Instance, CancellationToken.None);
         var childResult = await ChildRecordEndpoints.RefileAsync(
-            "sprk_todo", Todo, Payload(FileUnderOrdinaryMatter()), _user, _world.Resolver(), Restamper(), Children(),
+            "sprk_todo", Todo, Payload(FileUnderOrdinaryMatter()), _user, _world.Resolver(), Restamper(), Children(), AppEntities(),
             HttpContextWithSignalServices(entities.Object, trigger.Object), NullLogger<Program>.Instance, CancellationToken.None);
 
         Status(eventResult).Should().Be(StatusCodes.Status204NoContent, Detail(eventResult));

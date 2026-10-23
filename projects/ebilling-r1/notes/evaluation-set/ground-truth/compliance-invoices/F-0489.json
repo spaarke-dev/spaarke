@@ -1,0 +1,29 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0489",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0489","generator_id":"gen_eval_set.py@1 F-0489","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0489.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Ravenscroft & Forsythe LLP","firm_invoice_number":"INV-2025-44920","invoice_date":"2026-02-02","billing_period_start":"2026-01-01","billing_period_end":"2026-01-31","firm_matter_reference":"64495-0026","po_number":"PO-4522420","fees_total":3407.5,"expenses_total":3384.91,"adjustments_total":0.0,"total_due":6792.41,"currency":"USD"},
+ "timekeepers":[{"name":"Beatrix Carmichael","title":"Paralegal","rate":110.0,"billed_as":"BC"},{"name":"Cyrus Okafor","title":"Associate","rate":270.0,"billed_as":"CO"},{"name":"Elena Mbeki","title":"Partner","rate":395.0,"billed_as":"EM"},{"name":"Gideon Wickham","title":"Senior Associate","rate":355.0,"billed_as":"GW"},{"name":"Hector Blackwood","title":"Partner","rate":485.0,"billed_as":"HB"},{"name":"Jordan Marchetti","title":"Associate","rate":215.0,"billed_as":"JM"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-01-01","timekeeper":"HB","timekeeper_name":"Hector Blackwood","timekeeper_title":"Partner","title":"Ptr","hours":0.3,"rate":485.0,"amount":145.5,"narrative":"Revise reply brief after review by lead counsel","codes":["L430","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-01-06","timekeeper":"EM","timekeeper_name":"Elena Mbeki","timekeeper_title":"Partner","title":"Ptr","hours":2.3,"rate":395.0,"amount":908.5,"narrative":"Review court docket and calendar of pending deadlines for the insurance coverage issue","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-01-07","timekeeper":"BC","timekeeper_name":"Beatrix Carmichael","timekeeper_title":"Paralegal","title":"Para","hours":2.6,"rate":110.0,"amount":286.0,"narrative":"Review draft expert disclosure for the customs audit","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-01-08","timekeeper":"GW","timekeeper_name":"Gideon Wickham","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.3,"rate":355.0,"amount":461.5,"narrative":"Prepare case assessment memorandum regarding the vendor agreement and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-01-08","timekeeper":"CO","timekeeper_name":"Cyrus Okafor","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":270.0,"amount":297.0,"narrative":"Attend trial day in the regulatory inquiry","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-01-08","timekeeper":"JM","timekeeper_name":"Jordan Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":215.0,"amount":193.5,"narrative":"Prepare trial notebook and demonstrative exhibits for the insurance coverage issue","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-01-22","timekeeper":"GW","timekeeper_name":"Gideon Wickham","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.3,"rate":355.0,"amount":106.5,"narrative":"Prepare monthly status report to client regarding the insurance coverage issue","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-01-22","timekeeper":"HB","timekeeper_name":"Hector Blackwood","timekeeper_title":"Partner","title":"Ptr","hours":1.5,"rate":485.0,"amount":727.5,"narrative":"Prepare expert witness for testimony in the employment claim","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-01-22","timekeeper":"BC","timekeeper_name":"Beatrix Carmichael","timekeeper_title":"Paralegal","title":"Para","hours":0.3,"rate":110.0,"amount":33.0,"narrative":"Prepare expert witness for testimony in the employment claim","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-01-23","timekeeper":"GW","timekeeper_name":"Gideon Wickham","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.7,"rate":355.0,"amount":248.5,"narrative":"Prepare trial notebook and demonstrative exhibits for the customs audit","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-01-13","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":195.0,"rate":0.08,"amount":15.6,"narrative":"Photocopies - 195 pages","codes":["E101"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2026-01-15","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":3244.18,"amount":3244.18,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2026-01-29","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":125.13,"amount":125.13,"narrative":"Court filing fee","codes":["E112"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["810 Pine Street","Dallas","Tax ID 45-9241970"],"template":"T15","pages":2},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2024-12-07","matter_close":"2026-05-01","matter_budget":52169.0,"approved_timekeepers":["Peter Nakamura","Cyrus Okafor","Jordan Lindqvist","Hector Blackwood","Imani Voss","Beatrix Carmichael","Jordan Marchetti","Elena Mbeki","Gideon Wickham"],"invoice_received_date":"2026-02-03"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

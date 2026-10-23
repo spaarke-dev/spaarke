@@ -1,7 +1,9 @@
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
@@ -37,7 +39,9 @@ public class FileIndexingServiceTests
     /// <summary>A real sprk_document id: the app-only path verifies the pointer of the row it names (task 166 r1).</summary>
     private static readonly string TestDocumentId = Guid.Parse("0d0d0d0d-0000-4000-8000-000000000166").ToString("D");
 
-    private FileIndexingService CreateService(RecordContainerResolver? containerResolver = null)
+    private FileIndexingService CreateService(
+        RecordContainerResolver? containerResolver = null,
+        string ebillingOutputContainerId = "")
     {
         return new FileIndexingService(
             _speFileOperationsMock.Object,
@@ -45,7 +49,8 @@ public class FileIndexingServiceTests
             _chunkingServiceMock.Object,
             _ragServiceMock.Object,
             _loggerMock.Object,
-            containerResolver ?? TestRecordContainerResolver.ForBusinessUnitContainers(TestDriveId));
+            containerResolver ?? TestRecordContainerResolver.ForBusinessUnitContainers(TestDriveId),
+            Options.Create(new FinanceOptions { EbillingOutputContainerId = ebillingOutputContainerId }));
     }
 
     private static FileIndexRequest CreateFileIndexRequest() => new()
@@ -407,6 +412,88 @@ public class FileIndexingServiceTests
         // Assert
         result.Success.Should().BeFalse();
         result.ErrorMessage.Should().Contain("not found");
+    }
+
+    #endregion
+
+    #region E-Billing Output Files container is never indexed (ebilling-r1 task 028, FR-16, D-55)
+
+    private const string OutputContainerId = "b!ebilling-output-files";
+
+    [Theory]
+    [InlineData(true, true)]    // app-only entry, document named (RAG job, bulk job, Office worker)
+    [InlineData(true, false)]   // app-only entry, server-built pointer (orphan upload)
+    [InlineData(false, true)]   // OBO entry naming a document (index-file, send-to-index, upload enqueuer) -> app-only
+    [InlineData(false, false)]  // OBO entry, drive item only
+    public async Task FileInTheEbillingOutputContainer_IsSkipped_NothingDownloadedOrWritten(bool appOnlyEntry, bool namesDocument)
+    {
+        // The file pointer's container check would refuse this pointer — the skip must come first and not depend on it.
+        var service = CreateService(ebillingOutputContainerId: OutputContainerId);
+        var request = CreateFileIndexRequest() with
+        {
+            DriveId = OutputContainerId,
+            DocumentId = namesDocument ? TestDocumentId : null,
+        };
+
+        var result = appOnlyEntry
+            ? await service.IndexFileAppOnlyAsync(request)
+            : await service.IndexFileAsync(request, new DefaultHttpContext());
+
+        result.Skipped.Should().BeTrue();
+        result.SkipReason.Should().Be(FileIndexingService.NonIndexedContainerReason);
+        result.Success.Should().BeTrue("a skip is not a failure: background jobs must not retry or dead-letter it");
+        result.ChunksIndexed.Should().Be(0);
+        _speFileOperationsMock.VerifyNoOtherCalls();
+        _ragServiceMock.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task FileInAnotherContainer_WithTheOutputContainerConfigured_IsIndexed()
+    {
+        var service = CreateService(ebillingOutputContainerId: OutputContainerId);
+        var request = CreateFileIndexRequest();
+        SetUpOneChunkPipeline(request);
+
+        var result = await service.IndexFileAppOnlyAsync(request);
+
+        result.Skipped.Should().BeFalse();
+        result.Success.Should().BeTrue();
+        result.ChunksIndexed.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task OutputContainerNotConfigured_NoFileIsSkipped()
+    {
+        // Empty key (the default on a stamp that has not been given the container): nothing is excluded, so a blank
+        // drive id can never be mistaken for the output container.
+        var service = CreateService(ebillingOutputContainerId: "");
+        var request = CreateFileIndexRequest();
+        SetUpOneChunkPipeline(request);
+
+        var result = await service.IndexFileAppOnlyAsync(request);
+
+        result.Skipped.Should().BeFalse();
+        result.ChunksIndexed.Should().Be(1);
+    }
+
+    private void SetUpOneChunkPipeline(FileIndexRequest request)
+    {
+        const string extractedText = "Extracted text from the document.";
+        _speFileOperationsMock
+            .Setup(x => x.DownloadFileAsync(request.DriveId, request.ItemId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MemoryStream("Test file content"u8.ToArray()));
+        _textExtractorMock
+            .Setup(x => x.ExtractAsync(It.IsAny<Stream>(), request.FileName, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(TextExtractionResult.Succeeded(extractedText, TextExtractionMethod.DocumentIntelligence));
+        _chunkingServiceMock
+            .Setup(x => x.ChunkTextAsync(extractedText, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<TextChunk>
+            {
+                new() { Content = extractedText, Index = 0, StartPosition = 0, EndPosition = extractedText.Length }
+            });
+        _ragServiceMock
+            .Setup(x => x.IndexDocumentsBatchAsync(It.IsAny<IEnumerable<KnowledgeDocument>>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<IndexResult> { IndexResult.Success("chunk-id-0") });
     }
 
     #endregion

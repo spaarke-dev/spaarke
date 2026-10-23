@@ -107,6 +107,14 @@
         <CanReadUnmasked>0</CanReadUnmasked>
       </FieldPermission>
       <FieldPermission>
+        <EntityName>sprk_invoicecorrection</EntityName>
+        <AttributeName>sprk_createdbyperson</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>0</CanUpdate>
+        <CanCreate>0</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
         <EntityName>sprk_budgetrevision</EntityName>
         <AttributeName>sprk_createdbyperson</AttributeName>
         <CanRead>4</CanRead>
@@ -251,6 +259,22 @@
         <CanReadUnmasked>0</CanReadUnmasked>
       </FieldPermission>
       <FieldPermission>
+        <EntityName>sprk_signal</EntityName>
+        <AttributeName>sprk_firmreason</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>0</CanUpdate>
+        <CanCreate>0</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>sprk_externalidentifier</EntityName>
+        <AttributeName>sprk_createdbyperson</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>0</CanUpdate>
+        <CanCreate>0</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
         <EntityName>sprk_decisionrecord</EntityName>
         <AttributeName>sprk_createdbyperson</AttributeName>
         <CanRead>4</CanRead>
@@ -333,6 +357,22 @@
       <FieldPermission>
         <EntityName>sprk_event</EntityName>
         <AttributeName>sprk_createdbycontact</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>0</CanUpdate>
+        <CanCreate>0</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>sprk_invoicesubmission</EntityName>
+        <AttributeName>sprk_createdbyperson</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>0</CanUpdate>
+        <CanCreate>0</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>sprk_invoiceapproval</EntityName>
+        <AttributeName>sprk_createdbyperson</AttributeName>
         <CanRead>4</CanRead>
         <CanUpdate>0</CanUpdate>
         <CanCreate>0</CanCreate>
@@ -505,6 +545,22 @@
       <FieldPermission>
         <EntityName>contact</EntityName>
         <AttributeName>sprk_externalinvitedon</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>sprk_externalidentifier</EntityName>
+        <AttributeName>sprk_createdbyperson</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>sprk_invoicecorrection</EntityName>
+        <AttributeName>sprk_createdbyperson</AttributeName>
         <CanRead>4</CanRead>
         <CanUpdate>4</CanUpdate>
         <CanCreate>4</CanCreate>
@@ -791,6 +847,22 @@
         <CanReadUnmasked>0</CanReadUnmasked>
       </FieldPermission>
       <FieldPermission>
+        <EntityName>sprk_invoicesubmission</EntityName>
+        <AttributeName>sprk_createdbyperson</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>sprk_invoiceapproval</EntityName>
+        <AttributeName>sprk_createdbyperson</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
         <EntityName>sprk_externalrecordaccess</EntityName>
         <AttributeName>sprk_grantedbycontact</AttributeName>
         <CanRead>4</CanRead>
@@ -931,7 +1003,7 @@
         <CanReadUnmasked>0</CanReadUnmasked>
       </FieldPermission>
       <FieldPermission>
-        <EntityName>sprk_decisionrecord</EntityName>
+        <EntityName>sprk_signal</EntityName>
         <AttributeName>sprk_createdbyperson</AttributeName>
         <CanRead>4</CanRead>
         <CanUpdate>4</CanUpdate>
@@ -939,8 +1011,20 @@
         <CanReadUnmasked>0</CanReadUnmasked>
       </FieldPermission>
       <FieldPermission>
-        <EntityName>sprk_signal</EntityName>
+        <EntityName>sprk_decisionrecord</EntityName>
         <AttributeName>sprk_createdbyperson</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+    </FieldPermissions>
+  </FieldSecurityProfile>
+  <FieldSecurityProfile name="Spaarke Ontology Writer Firm Reason Writers" description="Read/Create/Update on sprk_signal.sprk_firmreason ONLY (the reason text a firm sees). Members: the Ontology Service writer application user ONLY. ebilling-r1 task 026, owner decision D-95(2)." fieldsecurityprofileid="{ec323a05-f95c-4308-aac5-6d899032691e}">
+    <FieldPermissions>
+      <FieldPermission>
+        <EntityName>sprk_signal</EntityName>
+        <AttributeName>sprk_firmreason</AttributeName>
         <CanRead>4</CanRead>
         <CanUpdate>4</CanUpdate>
         <CanCreate>4</CanCreate>

@@ -1,0 +1,24 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0440",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0440","generator_id":"gen_eval_set.py@1 F-0440","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0440.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Aldridge and Beckett LLP","firm_invoice_number":"INV-2025-80015","invoice_date":"2026-08-01","billing_period_start":"2026-07-01","billing_period_end":"2026-07-31","firm_matter_reference":"79850-0007","po_number":"PO-4516564","fees_total":4045.5,"expenses_total":811.09,"adjustments_total":0.0,"total_due":4856.59,"currency":"USD"},
+ "timekeepers":[{"name":"Clara Okafor","title":"Partner","rate":490.0,"billed_as":"CO"},{"name":"Hector Ramanathan","title":"Associate","rate":335.0,"billed_as":"HR"},{"name":"Jordan Dunleavy","title":"Senior Associate","rate":420.0,"billed_as":"JD"},{"name":"Oliver Zielinski","title":"Associate","rate":340.0,"billed_as":"OZ"},{"name":"Rafael Galbraith","title":"Legal Assistant","rate":135.0,"billed_as":"RG"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-07-02","timekeeper":"HR","timekeeper_name":"Hector Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":0.7,"rate":335.0,"amount":234.5,"narrative":"Telephone conference with witness regarding the supply agreement","codes":["L410","A106"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-07-07","timekeeper":"OZ","timekeeper_name":"Oliver Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":1.7,"rate":340.0,"amount":578.0,"narrative":"Prepare monthly status report to client regarding the distribution agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-07-09","timekeeper":"JD","timekeeper_name":"Jordan Dunleavy","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.1,"rate":420.0,"amount":882.0,"narrative":"Prepare expert witness for testimony in the data incident","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-07-10","timekeeper":"CO","timekeeper_name":"Clara Okafor","timekeeper_title":"Partner","title":"Ptr","hours":2.1,"rate":490.0,"amount":1029.0,"narrative":"Revise complaint after review by lead counsel","codes":["L430","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-07-13","timekeeper":"OZ","timekeeper_name":"Oliver Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":2.9,"rate":340.0,"amount":986.0,"narrative":"Review draft expert disclosure for the distribution agreement","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-07-27","timekeeper":"RG","timekeeper_name":"Rafael Galbraith","timekeeper_title":"Legal Assistant","title":"LA","hours":1.0,"rate":135.0,"amount":135.0,"narrative":"Research standard for new trial in the vendor agreement","codes":["L460","A102"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-07-30","timekeeper":"HR","timekeeper_name":"Hector Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":0.6,"rate":335.0,"amount":201.0,"narrative":"Revise mediation statement after review by lead counsel","codes":["L430","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2026-07-02","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":811.09,"amount":811.09,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["710 Commerce Avenue","Seattle","Tax ID 99-2468927"],"template":"T15","pages":2},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2025-04-03","matter_close":"2026-10-29","matter_budget":44426.0,"approved_timekeepers":["Hector Ramanathan","Rafael Galbraith","Clara Okafor","Oliver Zielinski","Louis Quillen","Jordan Dunleavy"],"invoice_received_date":"2026-08-14"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

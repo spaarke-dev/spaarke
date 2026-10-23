@@ -1,0 +1,33 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0189",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0189","generator_id":"gen_eval_set.py@1 F-0189","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0189.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Montclair & Beckett LLP","firm_invoice_number":"A-39403/2026","invoice_date":"2025-09-01","billing_period_start":"2025-08-01","billing_period_end":"2025-08-31","firm_matter_reference":"14474-0008","po_number":null,"fees_total":5070.25,"expenses_total":9.45,"adjustments_total":0.0,"total_due":5079.7,"currency":"USD"},
+ "timekeepers":[{"name":"Aisha Lindqvist","title":"Partner","rate":430.0,"billed_as":"AL"},{"name":"Clara Abernathy","title":"Associate","rate":220.0,"billed_as":"CA"},{"name":"Clara Pemberton","title":"Paralegal","rate":140.0,"billed_as":"CP"},{"name":"Hannah Zielinski","title":"Senior Associate","rate":325.0,"billed_as":"HZ"},{"name":"Hector Marchetti","title":"Associate","rate":215.0,"billed_as":"HM"},{"name":"Katya Lindqvist","title":"Legal Assistant","rate":95.0,"billed_as":"KL"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-08-01","timekeeper":"CA","timekeeper_name":"Clara Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":2.2,"rate":220.0,"amount":484.0,"narrative":"Draft exhibit list for trial in the licensing dispute","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-08-04","timekeeper":"HZ","timekeeper_name":"Hannah Zielinski","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.7,"rate":325.0,"amount":877.5,"narrative":"Attend trial day in the regulatory inquiry","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-08-06","timekeeper":"AL","timekeeper_name":"Aisha Lindqvist","timekeeper_title":"Partner","title":"Ptr","hours":2.8,"rate":430.0,"amount":1204.0,"narrative":"Attend hearing on discovery plan in the lease dispute","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-08-07","timekeeper":"CA","timekeeper_name":"Clara Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":2.3,"rate":220.0,"amount":506.0,"narrative":"Prepare expert witness for testimony in the distribution agreement","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-08-12","timekeeper":"HM","timekeeper_name":"Hector Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":1.7,"rate":215.0,"amount":365.5,"narrative":"Attend hearing on pretrial brief in the regulatory inquiry","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-08-12","timekeeper":"CA","timekeeper_name":"Clara Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":220.0,"amount":550.0,"narrative":"Telephone conference with witness regarding the distribution agreement","codes":["L410","A106"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-08-15","timekeeper":"CP","timekeeper_name":"Clara Pemberton","timekeeper_title":"Paralegal","title":"Para","hours":0.9,"rate":140.0,"amount":126.0,"narrative":"Attend trial day in the supply agreement","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-08-19","timekeeper":"HM","timekeeper_name":"Hector Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":215.0,"amount":193.5,"narrative":"Prepare fact witness for testimony regarding the warranty claim","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-08-19","timekeeper":"KL","timekeeper_name":"Katya Lindqvist","timekeeper_title":"Legal Assistant","title":"LA","hours":2.3,"rate":95.0,"amount":218.5,"narrative":"Attend hearing on notice of deposition in the construction contract","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-08-22","timekeeper":"HZ","timekeeper_name":"Hannah Zielinski","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.2,"rate":325.0,"amount":390.0,"narrative":"Attend hearing on witness list in the regulatory inquiry","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-08-25","timekeeper":"HZ","timekeeper_name":"Hannah Zielinski","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.15,"rate":325.0,"amount":48.75,"narrative":"Prepare trial notebook and demonstrative exhibits for the employment claim","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-08-25","timekeeper":"CP","timekeeper_name":"Clara Pemberton","timekeeper_title":"Paralegal","title":"Para","hours":0.3,"rate":140.0,"amount":42.0,"narrative":"Analyze exposure and damages model for the customs audit","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2025-08-25","timekeeper":"HM","timekeeper_name":"Hector Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":215.0,"amount":64.5,"narrative":"Prepare fact witness for testimony regarding the lease dispute","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2025-08-22","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":15.0,"rate":0.63,"amount":9.45,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["473 Harbor Road","Atlanta","Tax ID 20-9736684"],"template":"T07","pages":2},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2024-07-09","matter_close":"2025-11-29","matter_budget":45318.0,"approved_timekeepers":["Katya Lindqvist","Clara Pemberton","Mei Fairweather","Hannah Zielinski","Gregory Whitfield","Hector Marchetti","Aisha Lindqvist","Clara Abernathy"],"invoice_received_date":"2025-09-04"},
+ "expected_findings":[
+  {"rule_id":"RS-03-R02","rule_type":"TimeIncrement","scope":"line","line_refs":[11],"consequence":"Reduce"},
+  {"rule_id":"RS-03-R08","rule_type":"RequiredData","scope":"invoice","line_refs":[],"consequence":"Reject"}
+ ],
+ "seeded_violations":2
+}

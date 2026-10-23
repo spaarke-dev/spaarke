@@ -1,0 +1,38 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0160",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0160","generator_id":"gen_eval_set.py@1 F-0160","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0160.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Rutherford Cranmer PC","firm_invoice_number":"INV-2025-71893","invoice_date":"2026-01-04","billing_period_start":"2025-09-01","billing_period_end":"2025-09-30","firm_matter_reference":"81504-0031","po_number":"PO-4544478","fees_total":5859.0,"expenses_total":124.55,"adjustments_total":0.0,"total_due":5983.55,"currency":"USD"},
+ "timekeepers":[{"name":"Ivan Halloran","title":"Paralegal","rate":180.0,"billed_as":"IH"},{"name":"Peter Ashdown","title":"Senior Associate","rate":470.0,"billed_as":"PA"},{"name":"Rafael Mbeki","title":"Associate","rate":340.0,"billed_as":"RM"},{"name":"Sofia Okafor","title":"Associate","rate":375.0,"billed_as":"SO"},{"name":"Yusuf Voss","title":"Associate","rate":385.0,"billed_as":"YV"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-09-01","timekeeper":"SO","timekeeper_name":"Sofia Okafor","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":375.0,"amount":562.5,"narrative":"Prepare case assessment memorandum regarding the regulatory inquiry and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-09-02","timekeeper":"YV","timekeeper_name":"Yusuf Voss","timekeeper_title":"Associate","title":"Assoc","hours":1.25,"rate":385.0,"amount":481.25,"narrative":"Draft pretrial brief in the data incident","codes":["L250","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-09-08","timekeeper":"RM","timekeeper_name":"Rafael Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":0.25,"rate":340.0,"amount":85.0,"narrative":"Research authority for motion for summary judgment","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-09-11","timekeeper":"RM","timekeeper_name":"Rafael Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":3.0,"rate":340.0,"amount":1020.0,"narrative":"Prepare monthly status report to client regarding the regulatory inquiry","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-09-12","timekeeper":"SO","timekeeper_name":"Sofia Okafor","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":375.0,"amount":187.5,"narrative":"Organized and indexed file materials","codes":["L190","A110"],"page":1,"narrative_style":"clerical"},
+  {"n":6,"line_type":"fee","date":"2025-09-17","timekeeper":"RM","timekeeper_name":"Rafael Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":2.75,"rate":340.0,"amount":935.0,"narrative":"Update document review protocol and coding panel for the data incident","codes":["L140","A110"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-09-18","timekeeper":"PA","timekeeper_name":"Peter Ashdown","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.25,"rate":470.0,"amount":117.5,"narrative":"Review court docket and calendar of pending deadlines for the employment claim","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-09-24","timekeeper":"IH","timekeeper_name":"Ivan Halloran","timekeeper_title":"Paralegal","title":"Para","hours":1.65,"rate":180.0,"amount":297.0,"narrative":"Research case law supporting motion to dismiss","codes":["L240","A102"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-09-24","timekeeper":"IH","timekeeper_name":"Ivan Halloran","timekeeper_title":"Paralegal","title":"Para","hours":0.65,"rate":180.0,"amount":117.0,"narrative":"Prepare case assessment memorandum regarding the customs audit and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-09-25","timekeeper":"SO","timekeeper_name":"Sofia Okafor","timekeeper_title":"Associate","title":"Assoc","hours":2.75,"rate":375.0,"amount":1031.25,"narrative":"Meet and confer with counsel for Alder & Finch Ltd regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-09-25","timekeeper":"RM","timekeeper_name":"Rafael Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":0.25,"rate":340.0,"amount":85.0,"narrative":"Update document review protocol and coding panel for the vendor agreement","codes":["L140","A110"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-09-25","timekeeper":"PA","timekeeper_name":"Peter Ashdown","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.75,"rate":470.0,"amount":352.5,"narrative":"Analyze key documents for deposition preparation","codes":["L320","A104"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2025-09-30","timekeeper":"PA","timekeeper_name":"Peter Ashdown","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.25,"rate":470.0,"amount":587.5,"narrative":"Plan strategy for upcoming phase of the vendor agreement with team","codes":["L120","A101"],"page":2,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2025-09-02","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":58.0,"rate":0.65,"amount":37.7,"narrative":"Mileage to courthouse","codes":["E109"],"page":2,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2025-09-04","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":810.0,"rate":0.1,"amount":81.0,"narrative":"Photocopies - 810 pages","codes":["E101"],"page":2,"narrative_style":"clear"},
+  {"n":16,"line_type":"expense","date":"2025-09-11","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":5.0,"rate":1.17,"amount":5.85,"narrative":"Facsimile charges","codes":["E104"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["482 Market Street","Portland","Tax ID 61-1042220"],"template":"T15","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2024-10-28","matter_close":"2025-12-29","matter_budget":48934.0,"approved_timekeepers":["Beatrix Marchetti","Farah Wickham","Sofia Okafor","Yusuf Voss","Samuel Rosenthal","Ivan Halloran","Rafael Mbeki","Peter Ashdown"],"invoice_received_date":"2026-01-05"},
+ "expected_findings":[
+  {"rule_id":"RS-04-R03","rule_type":"TimeIncrement","scope":"line","line_refs":[8],"consequence":"Reduce"},
+  {"rule_id":"RS-04-R03","rule_type":"TimeIncrement","scope":"line","line_refs":[9],"consequence":"Reduce"},
+  {"rule_id":"RS-04-R05","rule_type":"InvoiceAge","scope":"invoice","line_refs":[],"consequence":"Flag"},
+  {"rule_id":"RS-04-R07","rule_type":"ExpenseRule","scope":"line","line_refs":[16],"consequence":"Disallow"},
+  {"rule_id":"RS-04-R08","rule_type":"NonBillableActivity","scope":"line","line_refs":[5],"consequence":"Disallow"}
+ ],
+ "seeded_violations":5
+}

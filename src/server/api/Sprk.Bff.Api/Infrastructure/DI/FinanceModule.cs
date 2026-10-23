@@ -3,6 +3,12 @@ using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Tools;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Resolution;
+using Sprk.Bff.Api.Services.Finance.Coding;
+using Sprk.Bff.Api.Services.Finance.Files;
+using Sprk.Bff.Api.Services.Finance.Procedures;
+using Spaarke.Scheduling;
+using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Finance.Tools;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
@@ -20,20 +26,183 @@ public static class FinanceModule
         // Bind FinanceOptions from "Finance" configuration section
         // Provides: ClassificationConfidenceThreshold, BudgetWarningPercentage,
         //           VelocitySpikePct, FinanceSummaryCacheTtlMinutes,
-        //           ClassificationDeploymentName, ExtractionDeploymentName
-        // task 061 fail-fast sweep: canonical AddOptions chain with ValidateOnStart. Behavior-neutral —
-        // FinanceOptions carries NO DataAnnotations (all members have safe defaults; InvoiceExtractionPlaybookId
-        // is intentionally empty in lower envs, so it is NOT marked [Required]).
+        //           ExtractionDeploymentName
+        // task 061 fail-fast sweep: canonical AddOptions chain with ValidateOnStart. No member is required (all have
+        // safe defaults; InvoiceExtractionPlaybookId is intentionally empty in lower envs, so it is NOT [Required]).
+        // ebilling-r1 task 028: the two eBilling container ids are format-checked only ([RegularExpression], b!…) —
+        // empty passes, so no stamp fails to boot and IOptionsDriftTests demands no key.
+        // The two container ids must also be distinct from each other and from the email/archive containers
+        // (FinanceOptionsValidator; fails start-up naming both keys).
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<FinanceOptions>, FinanceOptionsValidator>();
         services.AddOptions<FinanceOptions>()
             .Bind(configuration.GetSection(FinanceOptions.SectionName))
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
         // ============================================================================
+        // eBilling flag (ebilling-r1 task 040, FR-45, ADR-018 rule 2, ADR-032)
+        // ============================================================================
+        // ONE flag for the whole capability: Ebilling:Enabled (default false). No per-service flags.
+        // FLAG-OFF REGISTRATION RULE (every later eBilling task follows this):
+        //   * eBilling services register UNCONDITIONALLY - no `if (ebillingEnabled)` registration gates.
+        //   * The kill switch is the endpoint filter (chain RequireEbillingEnabled() AFTER each eBilling
+        //     route's authorization filter; it returns 503 `ebilling.disabled`) plus the job-handler check
+        //     (an eBilling IJobHandler reads EbillingOptions.Enabled itself - ADR-018 "same flag in
+        //     endpoints and async handlers").
+        //   * A Null-Object peer (ADR-032) is needed ONLY where an eBilling service depends on something
+        //     that is itself conditionally registered - e.g. the AI facade IInvoiceAi, which already has
+        //     NullInvoiceAi. Do not add a Null peer for a service just because eBilling is off.
+        //   * The flag never bypasses or replaces authorization.
+        services.AddOptions<EbillingOptions>()
+            .Bind(configuration.GetSection(EbillingOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        // eBilling settings (ebilling-r1 task 025, FR-48, D-59): the one audited sprk_ebillingsetting row, read with a
+        // 30 s IMemoryCache copy (ADR-009 exception documented on the class). Singleton: it takes a scope per load for the
+        // scoped IGenericEntityService, so background jobs and requests share one cache. Unconditional (see the flag rule above).
+        services.AddSingleton<IEbillingSettingsReader, EbillingSettingsReader>();
+
+        // Invoice totals (ebilling-r1 task 016, FR-07, I-1, D-42): the one server-side owner of an invoice's five totals and its
+        // Adjustment-line amounts. Scoped: stateless, holds only the (singleton) Dataverse clients. Unconditional (flag rule above).
+        services.AddScoped<IInvoiceTotalsService, InvoiceTotalsService>();
+
+        // Invoice resolution (ebilling-r1 task 046, FR-23, D-47, D-69): Processing Pipeline step 2 - arithmetic checks, timekeeper
+        // match against the firm roster (exact, normalized, AI-assisted through IInvoiceAi.GenerateEmbeddingAsync only), rate
+        // lookup in the Published rate card, and the combined confidence per field. Scoped: IInvoiceAi and IGenericEntityService
+        // are scoped, and TimekeeperMatcher keeps its embedding memo per call, not per instance. Unconditional (flag rule above):
+        // IInvoiceAi already has its Null peer, so the AI-assisted name step degrades to "unmatched" when AI is off.
+        // Caller: task 049 (pipeline orchestration). IInvoiceResolutionService is the seam 049's tests fake.
+        services.AddScoped<TimekeeperMatcher>();
+        services.AddScoped<IInvoiceResolutionService, InvoiceResolutionService>();
+
+        // Billing compliance evaluation (ebilling-r1 task 072, FR-25, D-23 in-memory strategy): BillingFactLoader reads the published
+        // billing rules for the client default and the firm, the core record, the firm's priors and their secure roots (D-112) once
+        // per submission; InvoiceComplianceEvaluator selects the versions in force per line (firm over client default, D-39), gates
+        // them (FR-24) and runs the 071 handlers. Writes nothing. Concrete (ADR-010: no interface, one implementation each). Scoped:
+        // the loader holds the scoped SecureChildShareSynchronizer (ExternalAccessModule, unconditional); the gate PolicyVersionValidator
+        // is a singleton (SignalsModule). Unconditional (flag rule above). Caller: task 049 (pipeline orchestration).
+        services.AddScoped<Sprk.Bff.Api.Services.Signals.Billing.BillingFactLoader>();
+        services.AddScoped<Sprk.Bff.Api.Services.Signals.Billing.InvoiceComplianceEvaluator>();
+
+        // Submission rejection rule (ebilling-r1 task 073, FR-26, I-5, NFR-06; Processing Pipeline step 5): decides Accepted / Rejected from
+        // the evaluator's findings (consequence Reject, every read field at or above the threshold, reject-eligible type). Concrete (ADR-010:
+        // no interface, one implementation). Singleton: its only dependency is the singleton settings reader and it holds no state; the
+        // threshold is read on every decision, so a change applies at once. Unconditional (flag rule above). Caller: task 049.
+        services.AddSingleton<SubmissionRejectionRule>();
+
+        // Invoice lifecycle (ebilling-r1 task 014, FR-06, I-6, ADR-002): the single server-side owner of sprk_invoice
+        // statecode / statuscode. Scoped, unconditional (write-path owner; see the flag rule above). Callers: 103, 104, 150, 151.
+        services.AddScoped<IInvoiceLifecycleService, InvoiceLifecycleService>();
+
+        // Notification seam of the submission pipeline (ebilling-r1 task 049 part A, Processing Pipeline step 9): the processor reports every
+        // Accepted / Rejected submission here after its decision commits. The no-op is the default; task 132 replaces THIS registration with its
+        // job-enqueuing sink, so the interface is a real seam (a second implementation is planned), not a 1:1 convenience (ADR-010).
+        // Scoped like its callers (the pipeline's scoped processor). Unconditional (flag rule above): the processor always calls it.
+        services.AddScoped<IEbillingNotificationSink, NoOpEbillingNotificationSink>();
+
+        // Rate card and timekeeper import / publish (ebilling-r1 task 078, FR-29 / FR-08): template, all-or-nothing import into a Draft card,
+        // overlap re-check and publish. Concrete (ADR-010: no interface, no second implementation). Scoped: holds the scoped Dataverse
+        // clients and the SPE facade. Unconditional (flag rule above); the routes carry the kill switch.
+        services.AddScoped<RateCardImportService>();
+        // Billing rule sets (ebilling-r1 task 076, FR-28): create from a source document, review proposals, edit / accept / reject, publish
+        // (PolicyVersionValidator, all or nothing, immutable versions), assign, visibility, and the one firm-facing clause-visibility decision.
+        // Concrete (ADR-010: no interface, no second implementation). Scoped: holds the scoped SPE facade and ownership resolver; it uses the
+        // singleton PolicyVersionValidator and RuleBodyDescriber (SignalsModule). Unconditional (flag rule above); the routes carry the kill switch.
+        services.AddScoped<RuleSetService>();
+        // Procedures and Procedure Versions (ebilling-r1 task 081, EB-D-148): create, version (copy-forward), publish in one transaction,
+        // retire, and the caller-scoped retire preview. Concrete (ADR-010: no interface, no second implementation). Scoped: it holds the
+        // scoped RuleSetService and ownership resolver; it uses the singleton SignalClosureService (SignalsModule) for the one selection and
+        // close. AffectedInvoiceCounter is the one caller-scoped "open invoices you can see" count (081 and 089 share it); scoped over the
+        // per-request CallerRecordAccessProbe (ExternalAccessModule). Unconditional (flag rule above); the routes carry the kill switch.
+        services.AddScoped<AffectedInvoiceCounter>();
+        services.AddScoped<ProcedureService>();
+
+        // Rule drafting job (ebilling-r1 task 075, FR-27): ADR-004 IJobHandler, the same shape as the other Finance handlers. Reads the rule
+        // set's source document, asks IInvoiceAi.DraftRulesAsync (which has its Null peer, so AI-off is a clear Poisoned outcome, not a
+        // missing registration), and stores validated proposals through RuleSetService. §11: no new interface (ADR-010).
+        services.AddScoped<IJobHandler, BillingRuleDraftJobHandler>();
+        // Invoice Review context panel (ebilling-r1 task 106, FR-33): read-only, deterministic assembly of five independent sections for
+        // one invoice (core record, budget rollups, other invoices, disallow history, rate history). Concrete (ADR-010: no interface, no second
+        // implementation). Scoped: per-request, holds the (singleton) generic Dataverse client. Unconditional (flag rule above); the route carries the kill switch.
+        services.AddScoped<InvoiceContextService>();
+        // Invoice Review related work product (ebilling-r1 task 107, FR-34): candidate documents of one fee line from Dataverse (core record,
+        // author, window), each checked for Read as the caller, ranked by ISemanticSearchService in documentIds scope. Concrete (ADR-010).
+        // Scoped (holds the scoped AuthorizationService and search). Unconditional (flag rule above); ISemanticSearchService resolves to its
+        // Null-Object (AnalysisServicesModule, ADR-032 P3) when AI is off, so the answer is "unavailable", never a silent empty.
+        services.AddScoped<InvoiceRelatedWorkService>();
+        // Invoice Review read model and line decisions (ebilling-r1 task 100, FR-31, D-64, D-75). Two concrete services (ADR-010: no interface, one
+        // implementation each). Scoped: per request, they hold the scoped AuthorizationService (read) and the singleton generic Dataverse client, 016 totals,
+        // 074 recorder and processing lock (decisions). Unconditional (flag rule above); the routes carry the kill switch. The read model also takes
+        // the caller's IDataverseUserClient and EarlierInvoiceReadability (SignalsModule, unconditional) for the D-176 Duplicate check (task 119).
+        services.AddScoped<InvoiceReviewReadService>();
+        services.AddScoped<InvoiceLineDecisionService>();
+        // UTBMS line coding (ebilling-r1 task 047, FR-22, D-46): resolves an invoice's code set (CodeSetResolver), codes its
+        // lines through IInvoiceAi.CodeLinesAsync in chunks, and refuses any code outside the set (ILineCodingService).
+        // Scoped (they hold the scoped IInvoiceAi and the scoped suggestion provider; IGenericEntityService is a singleton);
+        // unconditional (flag rule above - IInvoiceAi is always registered, as NullInvoiceAi when AI is off).
+        // ICodeSetSuggestionProvider is the FR-22 step 4 seam. Task 048: CodeSetProposalService is the AI provider (it replaces
+        // NoCodeSetSuggestionProvider here) and also serves the code-set-mapping routes (proposals, confirm). One scoped instance plays
+        // both roles, so its per-scope code-set embeddings are loaded once. Unconditional (flag rule above): IInvoiceAi has its Null
+        // peer, which throws the feature-disabled exception rather than guessing.
+        services.AddScoped<CodeSetProposalService>();
+        services.AddScoped<ICodeSetSuggestionProvider>(sp => sp.GetRequiredService<CodeSetProposalService>());
+        services.AddScoped<CodeSetResolver>();
+        services.AddScoped<ILineCodingService, LineCodingService>();
+        // Tracking numbers (ebilling-r1 task 045, FR-10, D-37, D-87, ADR-002): the single server-side owner of a submission's
+        // {firm invoice number}.{n} and sprk_submissionsequence, and the creator of the submission row that carries them; made unique
+        // by the (firm, tracking number) alternate key with a bounded retry. Scoped (takes the scoped IGenericEntityService),
+        // unconditional (flag rule above). Caller: 044 (a resubmission, D-37, is a new submission through the same route).
+        services.AddScoped<ITrackingNumberAllocator, TrackingNumberAllocator>();
+        // Invoice submission (ebilling-r1 task 044, FR-17): the one intake both the SPA and the internal route call (validate, store the
+        // PDF, create the document and the submission through the allocator, enqueue processing). Concrete (ADR-010: one implementation).
+        // Scoped like its scoped dependencies (SpeFileStore, RecordContainerResolver, the allocator); unconditional (flag rule above).
+        services.AddScoped<InvoiceSubmissionService>();
+        // 050a review round 3 (uac-r2 F1-a / F1-b): the isolation rule of a confirmed existing document, decided at confirm (the service above)
+        // and again at commit (the persister below), over uac-r2's SecureChildShareSynchronizer.SecureRootsAboveAsync. Concrete (ADR-010: one
+        // implementation). Scoped like the synchronizer it composes (ExternalAccessModule); every dependency is registered unconditionally.
+        services.AddScoped<ExistingDocumentIsolationCheck>();
+        // Billing Decision Records (ebilling-r1 task 074, FR-30, D-75, D-100, D-101): the one Finance-side owner of a billing decision's record,
+        // over the writer's additive WriteBillingDecisionAsync. Concrete (ADR-010: no interface, one implementation). Singleton: it holds no
+        // state and its dependencies are singletons (DecisionRecordWriter, SignalsModule; IIdentityNormalizationService, MembershipModule, for
+        // the deciding user's contact, K3). Unconditional (flag rule above).
+        // Callers: 049, 100, 103, 104, 105.
+        services.AddSingleton<BillingDecisionRecorder>();
+
+        // Override / Return of a blocked internal submission (ebilling-r1 task 105, FR-19, FR-37, D-24, D-73, D-76). Concrete (ADR-010: no
+        // interface, one implementation). Scoped like its scoped dependencies (IGenericEntityService, IInvoiceLifecycleService). The privilege
+        // check is a static class over the existing CallerRecordAccessProbe, so it adds no registration. Unconditional (flag rule above). The
+        // blocked view also takes the caller's IDataverseUserClient and EarlierInvoiceReadability (SignalsModule) for the D-176 Duplicate check
+        // (task 119 round 2, DuplicateDetailGate, shared with InvoiceReviewReadService).
+        services.AddScoped<SubmissionOverrideService>();
+
+        // Invoice submission processing (ebilling-r1 task 049 parts B-E, FR-20 / FR-21, D-101; Processing Pipeline steps 1-9). The pipeline is
+        // three scoped components behind the seams the handler tests fake, plus the ADR-004 job handler that composes them:
+        //   * IInvoiceSubmissionProcessor  - read (043), resolve (046), code (047), evaluate (072), decide (073); writes nothing.
+        //   * IInvoiceSubmissionPersister  - the one all-or-nothing transaction (invoice, lines, approval, document link, submission link).
+        //   * IInvoiceSubmissionAfterSteps - Signals, the automatic rejection's Decision Record, indexing, notification, terminal status last.
+        //   * InvoiceSubmissionProcessingJobHandler - payload, the eBilling flag (read by the handler itself), the per-submission lock, the
+        //     step-0 re-read, the document download, and the mapping of every result to a JobOutcome.
+        // Scoped like their scoped dependencies (IGenericEntityService, IInvoiceAi, the evaluator, the lifecycle and totals services). Every
+        // dependency is registered unconditionally (the flag rule above; IInvoiceAi has its Null peer, so AI-off is a Failed submission with
+        // ai.invoice.disabled, not a missing registration). The queue consumer is the handler's job type, InvoiceSubmissionService.JobType.
+        services.AddScoped<IInvoiceSubmissionProcessor, InvoiceSubmissionProcessor>();
+        services.AddScoped<IInvoiceSubmissionPersister, InvoiceSubmissionPersister>();
+        services.AddScoped<IInvoiceSubmissionAfterSteps, InvoiceSubmissionAfterSteps>();
+        //   * InvoiceDocumentRefile - the after-steps' first step for a confirmed EXISTING document (050a, D-134 item 3; review #1: the one
+        //     writer of its sprk_invoice link): live-row check, isolation read,
+        //     ReparentAsync under the invoice (its conditional write sets the link), SecureChildReconciler.AfterRefileAsync. Scoped like its
+        //     dependencies (IRecordOwnershipResolver, IFieldMappingDataverseService,
+        //     SecureChildReconciler, ExternalAccessModule).
+        services.AddScoped<InvoiceDocumentRefile>();
+        services.AddScoped<IJobHandler, InvoiceSubmissionProcessingJobHandler>();
+
+        // ============================================================================
         // Invoice Analysis Service (ADR-013: AI via BFF, ADR-014: Playbook prompts)
         // ============================================================================
-        // Scoped: loads playbook prompts per-request, calls OpenAI structured output
-        // Uses IPlaybookService for prompt loading (FinanceClassification, FinanceExtraction)
+        // Scoped: loads the extraction playbook prompt per-request, calls OpenAI structured output
+        // (classification no longer goes through it: task 042 moved it to IInvoiceAi.ClassifyAsync / INVOICE-CLASSIFY@v1)
+        // Uses IPlaybookService for prompt loading (FinanceExtraction)
         // Uses IOpenAiClient.GetStructuredCompletionAsync for constrained JSON output
         //
         // Depends on IOpenAiClient which is only registered when DocumentIntelligence:Enabled=true
@@ -55,9 +224,9 @@ public static class FinanceModule
         // ============================================================================
         // Invoice Review Service (human-in-the-loop confirmation workflow)
         // ============================================================================
-        // Scoped: confirms documents as invoices, creates sprk_invoice records,
-        // enqueues InvoiceExtraction jobs via JobSubmissionService
-        // Uses IDataverseService for record operations
+        // Scoped: confirms a classified document as an invoice by creating its Internal submission through InvoiceSubmissionService
+        // (050a, D-134: no confirm path creates an invoice; the submission job creates it), and rejects documents. Scoped like
+        // InvoiceSubmissionService.
         services.AddScoped<IInvoiceReviewService, InvoiceReviewService>();
 
         // ============================================================================
@@ -145,7 +314,9 @@ public static class FinanceModule
         // ============================================================================
         // Attachment Classification Job Handler (ADR-013: AI via BFF, ADR-015: no content logging)
         // ============================================================================
-        // Scoped: classifies email attachments as invoice candidates via AI (Playbook A)
+        // Scoped: classifies email attachments as invoice candidates through IInvoiceAi.ClassifyAsync
+        // (Action INVOICE-CLASSIFY@v1 via its Binding; ebilling-r1 task 042). IInvoiceAi is registered
+        // unconditionally (real or Null facade), so the handler no longer depends on DocumentIntelligence:Enabled for it.
         // IdempotencyKey: classify-{documentId}-attachment
         // Writes sprk_classification, sprk_classificationconfidence, sprk_invoicehintsjson
         // Sets sprk_invoicereviewstatus=ToReview for InvoiceCandidate and Unknown
@@ -208,6 +379,22 @@ public static class FinanceModule
         //         RemainingBudget, BudgetUtilizationPercent, MonthOverMonthVelocity,
         //         AverageInvoiceAmount, MonthlySpendTimeline
         services.AddScoped<FinanceRollupService>();
+
+        // ============================================================================
+        // Finance file store (ebilling-r1 task 090; procedure-and-file-model section 4; EB-D-148)
+        // ============================================================================
+        // Placement (ADR-052 B2, B3): in the BFF - request-scoped authorization over the caller's token, short app-only writes and
+        // an hourly sweep; no new process, no new package (Azure.Storage.Blobs is already referenced by the session store).
+        //   * StoredFileBlobs - singleton: one managed-identity BlobGateway (Infrastructure/Storage, shared with SessionFileBlobStore)
+        //     over the shared TokenCredential. An empty Finance:FileStore:BlobEndpoint is a runtime state ("not configured"), not
+        //     a DI state, so the registration is unconditional (ADR-032 P1; the flag rule above).
+        //   * StoredFileService - scoped: per request, like its CallerRecordAccessProbe (a transient typed HttpClient) and request
+        //     IServiceProvider; IGenericEntityService is a singleton (GraphModule). Concrete (ADR-010: one implementation).
+        //   * StoredFileReconcileJob - the ONE scheduled job of the store (ADR-036 A1 rule 6: AddScheduledJob, no BackgroundService);
+        //     it reads Ebilling:Enabled itself (ADR-018).
+        services.AddSingleton<StoredFileBlobs>();
+        services.AddScoped<StoredFileService>();
+        services.AddScheduledJob<StoredFileReconcileJob>(StoredFileReconcileJob.DefaultCronSchedule);
 
         return services;
     }

@@ -48,7 +48,7 @@ public class SecureChildLineageTests
     }
 
     /// <summary>
-    /// Task 182 (contract C4): the Decision Record is filed under its subject like a Signal. Its row carries the same eight
+    /// Task 182 (contract C4): the Decision Record is filed under its subject like a Signal. Its row carries the same nine (eight before ebilling-r1 task 026)
     /// subject lookups as the Signal row (never the service request's) and keeps the three typed core lookups: they are
     /// the decision context and a lineage parent, kept for good (ontology task 144 K1 / 145), not retired after a backfill.
     /// </summary>
@@ -60,7 +60,9 @@ public class SecureChildLineageTests
             .Where(l => l.Key.StartsWith("sprk_regarding", StringComparison.Ordinal))
             .ToDictionary(l => l.Key, l => l.Value);
 
-        signalSubjects.Should().HaveCount(8);
+        // Nine since ebilling-r1 task 026 (FR-15, D-94): + sprk_regardinginvoiceline -> sprk_billingevent.
+        signalSubjects.Should().HaveCount(9);
+        signalSubjects.Should().Contain("sprk_regardinginvoiceline", "sprk_billingevent");
         decisionRecord.Where(l => l.Key.StartsWith("sprk_regarding", StringComparison.Ordinal))
             .ToDictionary(l => l.Key, l => l.Value)
             .Should().BeEquivalentTo(signalSubjects);
@@ -70,8 +72,56 @@ public class SecureChildLineageTests
             ["sprk_project"] = "sprk_project",
             ["sprk_workassignment"] = "sprk_workassignment",
         });
-        decisionRecord.Should().HaveCount(11);
+        decisionRecord.Should().HaveCount(12);
         decisionRecord.Keys.Should().NotContain("sprk_regardingservicerequest");
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 013 (FR-05): every core-record lookup of the invoice family is a lineage parent — a dropped one
+    /// could leave out the root with the fewest sharees and widen the child's share intersection. The line's invoice stays
+    /// a parent too (an extra lookup only narrows), but the line's CORE record is its own lookup (D-75).
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_invoice", "sprk_matter", "sprk_project", "sprk_regardingworkassignment")]
+    [InlineData("sprk_billingevent", "sprk_matter", "sprk_project", "sprk_regardingworkassignment")]
+    [InlineData("sprk_invoicesubmission", "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment")]
+    [InlineData("sprk_invoiceapproval", "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment")]
+    [InlineData("sprk_externalidentifier", "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment")]
+    [InlineData("sprk_invoicecorrection", "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment")]
+    public void TheInvoiceFamily_FilesUnderEveryCoreRecordLookup(string table, string matter, string project, string workAssignment)
+    {
+        var lookups = SecureChildLineage.Children[table].Lookups;
+
+        lookups.Should().Contain(new Dictionary<string, string>
+        {
+            [matter] = "sprk_matter",
+            [project] = "sprk_project",
+            [workAssignment] = "sprk_workassignment",
+        });
+        InvoiceFamilyCoreRecordGuard.CoreRecordLookups[table].Select(l => l.Column)
+            .Should().BeSubsetOf(lookups.Keys, "the guard's core lookups and the lineage's parents are the same columns");
+    }
+
+    /// <summary>ebilling-r1 task 013: the family rows that name an invoice, a line or a document keep that parent too.</summary>
+    [Fact]
+    public void TheInvoiceFamily_KeepsItsInvoiceLineAndDocumentParents()
+    {
+        SecureChildLineage.Children["sprk_invoicesubmission"].Lookups.Should().Contain(new Dictionary<string, string>
+        {
+            ["sprk_invoice"] = "sprk_invoice",
+            ["sprk_document"] = "sprk_document",
+            ["sprk_reportdocument"] = "sprk_document",
+            ["sprk_resubmissionof"] = "sprk_invoicesubmission",
+        });
+        SecureChildLineage.Children["sprk_invoiceapproval"].Lookups.Should().Contain("sprk_invoice", "sprk_invoice");
+        SecureChildLineage.Children["sprk_invoiceapproval"].Lookups.Keys.Should().NotContain("sprk_decisionrecord",
+            "a Decision Record is stamped outside the access taxonomy; nothing but a Signal is filed under one");
+        SecureChildLineage.Children["sprk_externalidentifier"].Lookups.Should().Contain("sprk_regardinginvoice", "sprk_invoice");
+        SecureChildLineage.Children["sprk_invoicecorrection"].Lookups.Should().Contain(new Dictionary<string, string>
+        {
+            ["sprk_invoice"] = "sprk_invoice",
+            ["sprk_invoiceline"] = "sprk_billingevent",
+        });
     }
 
     /// <summary>

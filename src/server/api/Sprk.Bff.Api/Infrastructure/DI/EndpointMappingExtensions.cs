@@ -378,6 +378,16 @@ public static class EndpointMappingExtensions
 
         app.MapFinanceEndpoints();
         app.MapFinanceRollupEndpoints();
+        app.MapRateCardImportEndpoints(); // ebilling-r1 task 078 (FR-29)
+        app.MapRuleSetEndpoints(); // ebilling-r1 task 076 (FR-28)
+        app.MapProcedureEndpoints(); // ebilling-r1 task 081 (EB-D-148)
+        app.MapInvoiceContextEndpoints(); // ebilling-r1 task 106 (FR-33)
+        app.MapInvoiceRelatedWorkEndpoints(); // ebilling-r1 task 107 (FR-34)
+        app.MapInvoiceLineReviewEndpoints(); // ebilling-r1 task 100 (FR-31)
+        app.MapInvoiceSubmissionEndpoints(); // ebilling-r1 task 044 (FR-17 internal channel)
+        app.MapCodeSetMappingEndpoints(); // ebilling-r1 task 048 (FR-22)
+        app.MapSubmissionOverrideEndpoints(); // ebilling-r1 task 105 (FR-19, FR-37)
+        app.MapStoredFileEndpoints(); // ebilling-r1 task 090 (Stored File download, EB-D-148)
         app.MapCommunicationEndpoints();
 
         // Email composer "insert template" render surface (email-communication-solution-r5). Thin,

@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="018" project="ebilling-r1">
+  <metadata>
+    <title>UTBMS code sets: schema, mapping lookups, seed files, seed script</title>
+    <phase>1 Data model (WP1)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New schema script, seed data files and an idempotent seed script applied to dev; no BFF code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Tables, columns and code-set list fixed by spec FR-08 / D-32; mechanical seeding with an idempotency contract.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>dataverse, schema, seed-data</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Create the UTBMS reference tables sprk_billingcodeset and sprk_billingcode, add a default-code-set lookup to sprk_mattertype_ref and sprk_practicearea_ref (FR-08, FR-22 mapping), commit one seed CSV per standard code set from utbms.com (D-32), and write an idempotent seed script that never overwrites an admin's guidance-text edit. Apply schema and seed to dev.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse metadata Web API, alternate keys and idempotent data seeding.</role>
+
+  <goal>In dev: both tables exist with an alternate key on sprk_billingcode; both reference tables carry sprk_defaultbillingcodeset; the eight code sets are seeded with version and source URL; a re-seed changes nothing; an edited guidance text survives a re-seed.</goal>
+
+  <context>
+    <background>The coding Action (047) receives each code's description and guidance text with a closed code list per line's code set; code-set resolution order is firm codes → matter-type mapping → practice-area mapping → AI suggestion (flagged) → settings default Litigation (FR-22). Matter, Project and Work Assignment carry lookups sprk_mattertype → sprk_mattertype_ref and sprk_practicearea → sprk_practicearea_ref (solution source 2026-10-15); both _ref tables are organization-owned with code and name columns. Spec FR-08 names the sets to seed: litigation, counseling, project, bankruptcy, IP patent, trademark, activity and expense. D-32: UTBMS / LEDES freely usable.</background>
+    <relevant-files>
+      <file role="new">scripts/ebilling/Deploy-EbillingBillingCodeSchema.ps1</file>
+      <file role="new">scripts/ebilling/Seed-EbillingBillingCodes.ps1</file>
+      <file role="new">scripts/seed-data/ebilling/utbms-*.csv (one file per code set)</file>
+      <file role="new">docs/data-model/sprk_billingcode.md</file>
+      <file role="modify">docs/data-model/INDEX.md (one row), docs/data-model/schema-additions-alternate-keys.md (one row)</file>
+      <file role="read">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_MatterType_Ref/Entity.xml, sprk_PracticeArea_Ref/Entity.xml</file>
+      <file role="read">scripts/Seed-AiPersonaDefault.ps1 (idempotent seed precedent)</file>
+      <file role="read">scripts/Deploy-ChartDefinitionEntity.ps1 (exemplar)</file>
+      <file role="read">projects/ebilling-r1/notes/research/ledes-utbms-ocg-reference.md, notes/research/test-data-sources.md §4</file>
+    </relevant-files>
+    <dependencies>none</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-08">sprk_billingcodeset: sprk_name, sprk_body (text, e.g. ABA / LOC), sprk_version, sprk_sourceurl, status on statuscode (Active / Inactive). sprk_billingcode: sprk_codeset (→ sprk_billingcodeset), sprk_codetype local choice Task / Activity / Expense, sprk_code, sprk_phase, sprk_description, sprk_guidancetext (multiline), status on statuscode; alternate key (sprk_codeset, sprk_code). sprk_defaultbillingcodeset lookup (→ sprk_billingcodeset) on sprk_mattertype_ref and sprk_practicearea_ref.</constraint>
+    <constraint source="spec FR-08 / D-32">Seed exactly the sets litigation, counseling, project, bankruptcy, IP patent, trademark, activity and expense from utbms.com; each CSV carries set name, version and source URL in a header row or columns; record the download date. No licence-restricted source.</constraint>
+    <constraint source="spec FR-08">Seed idempotency: rows are matched on the alternate key; a missing row is created; an existing row is never updated in sprk_guidancetext (an admin edit wins), and other columns are updated only if they still equal the previous seed value (or not at all — choose and document). A re-run with unchanged CSVs performs zero writes.</constraint>
+    <constraint source="project">The seed script is not added to scripts/seed-data/manifest.yaml (that manifest is the AI-seed chain). Additive schema only; do NOT edit src/dataverse/solutions/SpaarkeMaster/** (029 syncs, including admin forms / views / role privileges). No plugins or business rules (ADR-002).</constraint>
+    <constraint source="project">Settings default = Litigation: record the Litigation code-set row id and name in task notes for task 025's seed; this task does not create the settings row.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>projects/ebilling-r1/notes/research/ledes-utbms-ocg-reference.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Confirm in dev that neither table nor the lookups exist; record.</step>
+    <step order="2">Write and run Deploy-EbillingBillingCodeSchema.ps1 (-WhatIf, real, re-run with no change); verify by metadata read including the alternate key status (Active).</step>
+    <step order="3">Download the eight code sets from utbms.com; write one CSV per set under scripts/seed-data/ebilling/ with version and source URL; record download dates.</step>
+    <step order="4">Write Seed-EbillingBillingCodes.ps1 (upsert by alternate key per the idempotency constraint, -WhatIf, summary of created / updated / unchanged).</step>
+    <step order="5">Seed dev; re-run (zero writes); edit one code's guidance text in dev, re-run, confirm the edit survived; restore it.</step>
+    <step order="6">Write docs/data-model/sprk_billingcode.md and the INDEX / alternate-key rows; record the Litigation set id for 025.</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status cell to ✅ [done].</step>
+    <step order="8">If any deviations from plan, document in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any of the eight sets (most likely IP patent or trademark) is not available from utbms.com under clear terms, STOP and ask the owner whether to drop it or use another source; do not substitute silently.</trigger>
+    <trigger>If a code is not unique within its set (alternate key would fail), STOP and present the duplicates.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Grep of SpaarkeMaster/Entities and docs/data-model finds no billing-code or code-set table; sprk_mattertype_ref / sprk_practicearea_ref exist with code and name only (spec §11 rows "sprk_billingcode — none found" and "sprk_billingcodeset + default-code-set lookups").</existing>
+    <extension>The two _ref tables are extended with one lookup each; codes need their own tables because a set must be versioned and mapped as a unit and each code carries guidance text read by the coding Action.</extension>
+    <cost-of-doing-nothing>The coding Action (047) has no closed code list, out-of-set codes cannot be refused server-side (FR-22), code rules and spend-by-phase cannot run, and every line would be coded against all sets.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="pwsh">Schema and seed scripts</tool>
+    <tool name="dataverse-mcp">Metadata and row verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="script">scripts/ebilling/Deploy-EbillingBillingCodeSchema.ps1, scripts/ebilling/Seed-EbillingBillingCodes.ps1</output>
+    <output type="data">scripts/seed-data/ebilling/utbms-*.csv</output>
+    <output type="docs">docs/data-model/sprk_billingcode.md, INDEX.md, schema-additions-alternate-keys.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A dev metadata read shows both tables with every listed column, the active alternate key on sprk_billingcode, and sprk_defaultbillingcodeset on both _ref tables.</criterion>
+    <criterion testable="true">Dev holds the eight seeded code sets, each with version and source URL, and code counts equal the CSV row counts.</criterion>
+    <criterion testable="true">A second seed run with unchanged CSVs reports zero creates and zero updates.</criterion>
+    <criterion testable="true">Given an admin-edited sprk_guidancetext in dev, when the seed re-runs, then the edited text is unchanged.</criterion>
+    <criterion testable="true">manifest.yaml is unchanged; no file under src/dataverse/solutions/SpaarkeMaster/ changed; the Litigation code-set id is in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>COMPLETED 2026-10-15 (task-execute, STANDARD). Dev: sprk_billingcodeset + sprk_billingcode (alternate key sprk_billingcode_codeset_code_key Active), sprk_defaultbillingcodeset on sprk_mattertype_ref and sprk_practicearea_ref, 8 sets / 161 codes seeded; re-seed = 0 writes; guidance edit survives. 010 deferred lookups (task/activity/expense code) created by re-running Deploy-EbillingInvoiceLineSchema.ps1. Litigation set: UTBMS Litigation, dev id 827ec4c0-abc8-f111-a05c-0022482913fc (for task 025). Gap: LOC 2013 revised activity/expense and IP expense E125-E131 not seeded (DEF-005, issue 1929). Evidence: notes/018-utbms-code-sets.md. TASK-INDEX.md status cell left for the main session. rework: fix-round-3 task 018. Original note: Shared append points: docs/data-model/INDEX.md and schema-additions-alternate-keys.md (one row each). 029 re-runs this schema script before 010's (010 creates the line code lookups only when sprk_billingcode exists). AI proposals for unmapped matter types are 048's.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -25,11 +25,8 @@ public class FinancialCalculationToolHandler : IAiToolHandler
     public string ToolName => ToolNameConst;
 
     // Entity and field constants
-    private const string InvoiceEntity = "sprk_invoice";
     private const string Invoice_Matter = "sprk_matter";
     private const string Invoice_Project = "sprk_project";
-    private const string Invoice_TotalAmount = "sprk_totalamount";
-    private const string Invoice_InvoiceStatus = "sprk_invoicestatus";
 
     private const string MatterEntity = "sprk_matter";
     private const string ProjectEntity = "sprk_project";
@@ -39,10 +36,9 @@ public class FinancialCalculationToolHandler : IAiToolHandler
     private const string Budget_Project = "sprk_project";
     private const string Budget_TotalBudget = "sprk_totalbudget";
 
-    // Only count invoices that are not rejected/cancelled
-    private const int InvoiceStatus_Confirmed = 100000001;
-    private const int InvoiceStatus_Extracted = 100000002;
-    private const int InvoiceStatus_Processed = 100000003;
+    // Which invoices count as spend is FinanceBaseValues.CountedInvoiceStatuses, filtered on statuscode (ebilling-r1 task 015,
+    // D-41 / D-103). This handler once filtered the retired invoice-status choice column on 100000001-100000003, two of which it never had
+    // (it had 100000000 ToReview and 100000001 Reviewed), so its totals counted only "Reviewed" invoices (#1771).
 
     public FinancialCalculationToolHandler(
         IDataverseService dataverseService,
@@ -129,6 +125,12 @@ public class FinancialCalculationToolHandler : IAiToolHandler
         }
     }
 
+    /// <summary>The parent's invoices whose <c>statuscode</c> is one of <see cref="FinanceBaseValues.CountedInvoiceStatuses"/>: the
+    /// same query the rollup sends (<see cref="FinanceRollupService.BuildInvoiceQuery"/>), so the tool's totals agree with the
+    /// matter form. Internal so a test can pin it.</summary>
+    internal static QueryExpression BuildInvoiceQuery(string lookupField, Guid parentId) =>
+        FinanceRollupService.BuildInvoiceQuery(parentId, lookupField);
+
     /// <summary>
     /// Calculate financial totals for a matter by querying invoices and budget.
     /// </summary>
@@ -139,19 +141,8 @@ public class FinancialCalculationToolHandler : IAiToolHandler
         // Resolve to ServiceClient for QueryExpression support (Bug-1: unwrap the concrete impl).
         var serviceClient = _dataverseService.UnwrapServiceClient(nameof(FinancialCalculationToolHandler));
 
-        // Query all invoices for this matter
-        var invoiceQuery = new QueryExpression(InvoiceEntity)
-        {
-            ColumnSet = new ColumnSet(Invoice_TotalAmount, Invoice_InvoiceStatus),
-            Criteria = new FilterExpression(LogicalOperator.And)
-        };
-        invoiceQuery.Criteria.AddCondition(Invoice_Matter, ConditionOperator.Equal, matterId);
-        invoiceQuery.Criteria.AddCondition(
-            Invoice_InvoiceStatus,
-            ConditionOperator.In,
-            InvoiceStatus_Confirmed,
-            InvoiceStatus_Extracted,
-            InvoiceStatus_Processed);
+        // Query the matter's counted invoices
+        var invoiceQuery = BuildInvoiceQuery(Invoice_Matter, matterId);
 
         var invoiceResults = await Task.Run(() => serviceClient.RetrieveMultiple(invoiceQuery), ct);
 
@@ -160,11 +151,7 @@ public class FinancialCalculationToolHandler : IAiToolHandler
 
         foreach (var invoice in invoiceResults.Entities)
         {
-            var amount = invoice.GetAttributeValue<Money>(Invoice_TotalAmount);
-            if (amount != null)
-            {
-                totalSpend += amount.Value;
-            }
+            totalSpend += FinanceBaseValues.SpendAmount(invoice);   // D-130: approved total, else billed total
         }
 
         _logger.LogDebug(
@@ -199,19 +186,8 @@ public class FinancialCalculationToolHandler : IAiToolHandler
         // Resolve to ServiceClient for QueryExpression support (Bug-1: unwrap the concrete impl).
         var serviceClient = _dataverseService.UnwrapServiceClient(nameof(FinancialCalculationToolHandler));
 
-        // Query all invoices for this project
-        var invoiceQuery = new QueryExpression(InvoiceEntity)
-        {
-            ColumnSet = new ColumnSet(Invoice_TotalAmount, Invoice_InvoiceStatus),
-            Criteria = new FilterExpression(LogicalOperator.And)
-        };
-        invoiceQuery.Criteria.AddCondition(Invoice_Project, ConditionOperator.Equal, projectId);
-        invoiceQuery.Criteria.AddCondition(
-            Invoice_InvoiceStatus,
-            ConditionOperator.In,
-            InvoiceStatus_Confirmed,
-            InvoiceStatus_Extracted,
-            InvoiceStatus_Processed);
+        // Query the project's counted invoices
+        var invoiceQuery = BuildInvoiceQuery(Invoice_Project, projectId);
 
         var invoiceResults = await Task.Run(() => serviceClient.RetrieveMultiple(invoiceQuery), ct);
 
@@ -220,11 +196,7 @@ public class FinancialCalculationToolHandler : IAiToolHandler
 
         foreach (var invoice in invoiceResults.Entities)
         {
-            var amount = invoice.GetAttributeValue<Money>(Invoice_TotalAmount);
-            if (amount != null)
-            {
-                totalSpend += amount.Value;
-            }
+            totalSpend += FinanceBaseValues.SpendAmount(invoice);   // D-130: approved total, else billed total
         }
 
         _logger.LogDebug(

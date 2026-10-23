@@ -65,6 +65,9 @@ public class AccessTableAppOnlyWriterTests
 
         // #2253 fix round 5 (K1): the classifier taxonomy whose category routes an unfiled communication's owner.
         "sprk_triagecategory",
+
+        // ebilling-r1 task 090 (uac-r2 F4): the Stored File store; its blob path and parent lookups decide which bytes are served to whom.
+        "sprk_storedfile",
     ];
 
     /// <summary>#2253 fix round 2: the platform tables that grant or scope access (<c>PlatformSecurityTables</c>).</summary>
@@ -105,6 +108,17 @@ public class AccessTableAppOnlyWriterTests
 
         // #2253 fix round 4 (F-1): the message a proposal belongs to decides who sees and applies it.
         ["sprk_emailreviewlog"] = ["sprk_communication"],
+
+        // ebilling-r1 (master merge): the firm and core record scope the external submission reads.
+        // UAC review F4 (on e371dce6bf): + its invoice and tracking number, which D-176's Duplicate withholding reads.
+        ["sprk_invoicesubmission"] =
+        [
+            "sprk_vendororg", "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment",
+            "sprk_invoice", "sprk_trackingnumber",
+        ],
+
+        // UAC review F4 / DEF-043: a Signal's frozen core record and its invoice and invoice-line subjects.
+        ["sprk_signal"] = ["sprk_corerecordtype", "sprk_corerecordid", "sprk_regardinginvoice", "sprk_regardinginvoiceline"],
     };
 
     /// <summary>
@@ -220,6 +234,9 @@ public class AccessTableAppOnlyWriterTests
         data.Add("businessunit", "parentbusinessunitid@odata.bind", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
         data.Add("businessunit", "_parentbusinessunitid_value", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
         data.Add("sprk_triagecategory", "sprk_classifierguidance", InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode);
+        // ebilling-r1 task 090 (uac-r2 F4): re-pointing a Stored File's blob or parent.
+        data.Add("sprk_storedfile", "sprk_blobpath", InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode);
+        data.Add("sprk_storedfile", "sprk_Invoice@odata.bind", InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode);
         data.Add("sprk_externalrecordaccess')?$select=EntitySetName#", "sprk_name",
             InheritedAccessPermission.AppOnlyTableNameInvalidReasonCode);
         data.Add("sprk_matter')?$select=EntitySetName#", "sprk_issecure", InheritedAccessPermission.AppOnlyTableNameInvalidReasonCode);
@@ -584,9 +601,72 @@ public class AccessTableAppOnlyWriterTests
                 Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator.AttachmentDocumentColumn),
             (Sprk.Bff.Api.Api.Filters.CommunicationRecordAuthorizationFilter.EmailReviewLogEntity,
                 Sprk.Bff.Api.Api.Filters.CommunicationRecordAuthorizationFilter.ProposalCommunicationColumn),
+            (Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity,
+                Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.FirmColumn),
+            .. Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.CoreRecordLookups[
+                    Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity]
+                .Select(l => (Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity, l.Column)),
+            (Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity,
+                Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionInvoice),
+            (Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity,
+                Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.TrackingNumberColumn),
+            (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.CoreRecordTypeColumn),
+            (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.CoreRecordIdColumn),
+            (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, Sprk.Bff.Api.Services.Signals.SignalClosureService.RegardingInvoiceColumn),
+            (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, Sprk.Bff.Api.Services.Signals.SignalClosureService.RegardingInvoiceLineColumn),
         ];
         foreach (var (table, column) in readers)
             Code(table, column).Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, $"{column} on {table}");
+    }
+
+    [Fact]
+    public async Task AGenericAppOnlyWriteOfASignalsCoreRecordOrInvoiceSubject_IsRefused_OnEveryGenericPath()
+    {
+        // UAC review F4 / DEF-043: the frozen core record bounds a line Duplicate's invoice, and the subjects name the current
+        // invoice or line; a playbook or an output mapping must not re-point them (their writer is SignalWriter's own client).
+        foreach (var key in new[]
+                 {
+                     "sprk_corerecordid", "sprk_corerecordtype", "sprk_CoreRecordType@odata.bind", "_sprk_corerecordtype_value",
+                     "sprk_regardinginvoice", "sprk_RegardingInvoice@odata.bind", "sprk_regardinginvoiceline", "_sprk_regardinginvoiceline_value",
+                 })
+        {
+            Code("sprk_signal", key).Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Clear();
+            var act = () => Handler().UpdateAsync(
+                "sprk_signal", Row, new Dictionary<string, object?> { [key] = Forged.ToString("D") },
+                ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+            (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+        }
+
+        // Must not fire: a Signal's ordinary columns, the same columns on other tables, and the caller's own write.
+        Code("sprk_signal", "sprk_name").Should().BeNull();
+        Code("sprk_signal", "sprk_signalstatus").Should().BeNull();
+        Code("sprk_event", "sprk_regardinginvoice").Should().BeNull();
+        Code("sprk_decisionrecord", "sprk_corerecordid").Should().BeNull();
+        CallerCode("sprk_signal", "sprk_regardinginvoice").Should().BeNull("the caller's own privileges decide");
+    }
+
+    [Fact]
+    public void TheColumnsTheDuplicateWithholdingReads_AreRefusedOnTheSubmission_InTheFormsItReadsThem()
+    {
+        // UAC review F4 (on e371dce6bf): D-176 resolves (vendor org, tracking number) to a submission and gates a Duplicate's
+        // earlier-invoice detail on that submission's invoice (EarlierInvoiceReadability.ResolveByTrackingNumberAsync). The
+        // reader's own Web API names, so a renamed reader constant drifts here.
+        const string submission = Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity;
+        foreach (var key in new[]
+                 {
+                     Sprk.Bff.Api.Services.Signals.EarlierInvoiceReadability.InvoiceColumn,
+                     Sprk.Bff.Api.Services.Signals.EarlierInvoiceReadability.TrackingNumberColumn,
+                     "sprk_invoice", "sprk_Invoice@odata.bind", " SPRK_TRACKINGNUMBER ",
+                 })
+            Code(submission, key).Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, $"{key} on {submission}");
+
+        // Must not fire: the same columns on the invoice itself, and the submission's ordinary columns.
+        Code("sprk_invoice", "sprk_trackingnumber").Should().BeNull("the invoice's own tracking number decides no access");
+        Code(submission, "sprk_processingstatus").Should().BeNull("an ordinary column");
+        CallerCode(submission, "sprk_invoice").Should().BeNull("the caller's own privileges decide");
     }
 
     [Theory]
@@ -639,6 +719,14 @@ public class AccessTableAppOnlyWriterTests
     // #2253 fix round 5 (K1): the communication's category lookup is a column, not the taxonomy table.
     [InlineData("sprk_communication", "sprk_triagecategory")]
     [InlineData("sprk_communication", "sprk_TriageCategory@odata.bind")]
+    // ebilling-r1 (master merge): a submission's other columns, and its firm and core lookups on the other family tables.
+    [InlineData("sprk_invoicesubmission", "sprk_processingstatus")]
+    [InlineData("sprk_invoicesubmission", "sprk_submitter")]
+    [InlineData("sprk_invoicesubmission", "sprk_adminattention")]
+    // UAC review F4 (option b): D-176 takes the vendor org from the invoice's submission, so the invoice's own decides no access.
+    [InlineData("sprk_invoice", "sprk_vendororg")]
+    [InlineData("sprk_invoiceapproval", "sprk_regardingmatter")]
+    [InlineData("sprk_externalidentifier", "sprk_regardingproject")]
     public void AnOrdinaryColumn_OrAnAccessColumnOnAnotherTable_IsNotRefused(string table, string key) =>
         Code(table, key).Should().BeNull($"'{key}' on {table} decides no access");
 
@@ -761,6 +849,29 @@ public class AccessTableAppOnlyWriterTests
 
         (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode.Should().Be(code);
         _writes.Invocations.Should().BeEmpty("the refusal comes before anything is written");
+    }
+
+    [Fact]
+    public async Task AnOutputMapping_OfAnInvoicesOwner_IsRefusedBeforeTheInvoiceFamilyGuardReadsAnything()
+    {
+        // UAC review K2 (on e371dce6bf): the app-only refusal is asked before the invoice-family guard, which reads the stored
+        // row app-only for EVERY write of an invoice or line (#2081). The owner is refused on every table (#2247).
+        var reads = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        var world = new StampWorld();
+        var handler = new DataverseUpdateHandler(
+            _writes.Object, reads.Object, world.Restamper, new RecordOwnershipResolverDouble(),
+            SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance,
+            SecureChildReconcilerFixtures.OverEmptyWorld());
+
+        var act = () => handler.UpdateAsync(
+            "sprk_invoice", Row,
+            new Dictionary<string, object?> { ["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("team", Forged) },
+            ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+            .Should().Be(InheritedAccessPermission.AppOnlyOwnerWriteReasonCode);
+        reads.Invocations.Should().BeEmpty("the refusal comes before the invoice-family guard reads the stored row");
+        _writes.Invocations.Should().BeEmpty("nothing is written");
     }
 
     [Theory]

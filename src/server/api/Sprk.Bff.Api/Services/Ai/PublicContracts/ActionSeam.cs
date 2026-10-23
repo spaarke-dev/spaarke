@@ -164,7 +164,10 @@ public sealed class ActionSeam : IActionSeam
         {
             // Task 146: the update re-files a child record whose new owner cannot be resolved — no PATCH was issued.
             // A typed failure carrying the stable code (a Dataverse fault still propagates).
-            return new UpdateRecordResult(false, Array.Empty<string>(), $"{ex.RefusalCode}: {ex.Message}");
+            // The code leads the message unless the message already carries it (the owner and invoice-family refusals both end
+            // with "(code)"), so it is printed once.
+            var message = ex.Message.Contains(ex.RefusalCode, StringComparison.Ordinal) ? ex.Message : $"{ex.RefusalCode}: {ex.Message}";
+            return new UpdateRecordResult(false, Array.Empty<string>(), message);
         }
     }
 

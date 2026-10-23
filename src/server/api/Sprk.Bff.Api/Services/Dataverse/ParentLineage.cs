@@ -571,10 +571,20 @@ internal static class InheritedAccessPermission
     internal static bool RecordsOwnNarrowing(string? table) => table is not null && RecordTables.Contains(table);
 
     /// <summary>
-    /// Task 189 fix round C (K5): the reason code when an app-only generic writer names a document's Access Permission or
-    /// its own-narrowing record (<see cref="RefuseAppOnlyWrite"/>).
+    /// Task 189 fix round C (K5): the reason code when an app-only generic writer names a document's Access Permission, its
+    /// own-narrowing record, or (ebilling-r1 task 088) its invoice-submission marker <see cref="SubmissionMarkerColumn"/>
+    /// (<see cref="RefuseAppOnlyWrite"/>).
     /// </summary>
     internal const string AppOnlyDocumentWriteReasonCode = "sdap.access.document_access_server_only";
+
+    /// <summary>
+    /// ebilling-r1 task 088 (procedure-and-file-model.md 9.1): the submission marker on an .eml Document. The Outlook add-in
+    /// invoice submission writes it, in the same create as the .eml's own Restricted narrowing and never in an update
+    /// (task 095); the invoice's (a') predicate skips only a Restricted narrowing that carries it, so the firm still sees its own
+    /// invoice (task 098). A payload that set it would un-hide an isolated invoice from external callers, so
+    /// <see cref="RefuseAppOnlyWrite"/> refuses it on a document like the Access Permission and its record.
+    /// </summary>
+    internal const string SubmissionMarkerColumn = "sprk_restrictedbysubmission";
 
     /// <summary>
     /// Task 188 round 4e: the reason code when an app-only generic writer names one of a document's D7 link columns
@@ -844,6 +854,13 @@ internal static class InheritedAccessPermission
     /// so a re-worded row moves mail into another team's ownership: the <c>sprk_userentityassociation</c> rationale. The
     /// BFF only reads it; no playbook node, output mapping or field-mapping rule writes it (live dev, read-only,
     /// 2026-10-22).</item>
+    /// <item>ebilling-r1 task 090 (uac-r2 F4). <c>sprk_storedfile</c>: the Stored File store. Its rows decide which bytes
+    /// are served to whom: <c>sprk_blobpath</c> names the blob a download streams, and the parent lookups
+    /// (<c>sprk_procedureversion</c>, <c>sprk_invoice</c>, <c>sprk_billingexport</c>) and <c>sprk_sourcedocument</c> are the
+    /// records whose Read the caller must hold (<c>StoredFileAccessFilter</c>); the reconcile job
+    /// (<c>StoredFileReconcileJob</c>) deletes a blob and its row by them when the parent is gone. A re-pointed path or parent
+    /// would serve one record's file under another record's access, or delete another file's bytes. Its typed writer is
+    /// <c>StoredFileService</c>; no playbook node, output mapping or field-mapping rule writes it.</item>
     /// </list>
     /// </summary>
     internal static readonly IReadOnlySet<string> AccessTables = new HashSet<string>(
@@ -862,6 +879,7 @@ internal static class InheritedAccessPermission
         Sprk.Bff.Api.Services.Ai.Membership.MembershipJunctionUpdater.JunctionEntityLogicalName,
         "sprk_speauditlog",
         "sprk_triagecategory",
+        Sprk.Bff.Api.Services.Finance.Files.StoredFileSchema.Entity,
         "teammembership",
         "fieldpermission",
         .. PlatformSecurityTables,
@@ -948,6 +966,43 @@ internal static class InheritedAccessPermission
     /// text, by it (<c>CommunicationQueueFeedService.LoadOpenProposalItemsAsync</c>). Re-pointed at a message the caller can
     /// see, a privileged message's proposal would be shown and applied. Its target columns are not listed: the apply checks
     /// the caller's own rights on the target.</item>
+    /// <item>ebilling-r1 (the #2253 reader scan, after the master merge). <c>sprk_invoicesubmission</c>: its firm
+    /// <c>sprk_vendororg</c> (<c>TrackingNumberAllocator.FirmColumn</c>) and its core-record lookups
+    /// <c>sprk_regardingmatter</c> / <c>sprk_regardingproject</c> / <c>sprk_regardingworkassignment</c>
+    /// (<see cref="InvoiceFamilyCoreRecordGuard.CoreRecordLookups"/>). The external submission routes read the row APP-ONLY
+    /// and scope it by exactly these: the list is the firm's rows filed under a record the caller can read
+    /// (<c>InvoiceSubmissionService.ListAsync</c>), and one row is shown only when its firm is one of the caller's and the
+    /// caller can read its core record (<c>ExternalInvoiceSubmissionAuthorizationFilter.DecideReadOneAsync</c>). Re-pointed,
+    /// a submission and its tracking number, status and document id would be shown to another firm, or under another
+    /// record's partners. Their writer is the intake (<c>InvoiceSubmissionService</c>, <c>TrackingNumberAllocator</c>); no
+    /// generic writer re-files a submission.
+    /// <para>UAC review F4 (on e371dce6bf): also its invoice <c>sprk_invoice</c>
+    /// (<c>InvoiceSubmissionPersister.SubmissionInvoice</c>) and its tracking number <c>sprk_trackingnumber</c>
+    /// (<c>TrackingNumberAllocator.TrackingNumberColumn</c>). D-176's Duplicate withholding reads them:
+    /// <c>EarlierInvoiceReadability.ResolveByTrackingNumberAsync</c> resolves (vendor org, tracking number) to a submission and
+    /// uses that submission's <c>sprk_invoice</c> to decide whose Read gates a Duplicate's earlier-invoice detail, and
+    /// <c>InvoiceReviewReadService</c> applies the same rule. Re-pointed, a Duplicate would quote an earlier invoice the caller
+    /// cannot read. Their writers are typed: the persister links the invoice (<c>BuildSubmissionUpdate</c>) and the allocator
+    /// assigns the number; no playbook output mapping, Update Record node, field-mapping rule or Repair writes either.</para>
+    /// <para>The vendor org that scopes a number-only Duplicate is the current invoice's SUBMISSION's <c>sprk_vendororg</c>
+    /// (above), read as the caller (<c>SignalReadService.DuplicatesShownAsync</c>, F4 option b, agreed with ontology), never the
+    /// invoice's own <c>sprk_vendororg</c>: so <c>sprk_invoice.sprk_vendororg</c> decides no access and is not listed.</para></item>
+    /// <para>Not listed: <c>sprk_billingevent.sprk_invoice</c>. A billing-event Duplicate's current invoice is the event's invoice
+    /// (read as the caller), and that invoice's submissions give the vendor org, so the column is read. It is not refused because
+    /// the supported detach / move / re-attach sequence (<see cref="InvoiceFamilyCoreRecordGuard.DetachMoveReattachHint"/>, D-96)
+    /// writes it through the playbook update and the output orchestrator (<c>InvoiceFamilyGenericUpdatePathTests</c>). The read is
+    /// bounded: the line's invoice counts only when it is filed under the Signal's frozen core record (below), and every generic
+    /// write of it is held to the line's own core record by <see cref="InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode"/>.
+    /// Residual: a re-point within the same core record is judged in that invoice's submission's firm (DEF-043, #2294).</para></item>
+    /// <item>UAC review F4 / DEF-043. <c>sprk_signal</c>: its frozen core-record pair <c>sprk_corerecordtype</c> /
+    /// <c>sprk_corerecordid</c> (<c>SignalCoreRecordAccess.CoreRecordTypeColumn</c>, <c>CoreRecordIdColumn</c>), by which
+    /// <c>SignalCoreRecordAccess.AuthorizeAsync</c> decides who reads a Signal and <c>SignalReadService.DuplicatesShownAsync</c>
+    /// bounds a line Duplicate's invoice; and its invoice and invoice-line subjects <c>sprk_regardinginvoice</c> /
+    /// <c>sprk_regardinginvoiceline</c> (<c>SignalClosureService.RegardingInvoiceColumn</c>, <c>RegardingInvoiceLineColumn</c>),
+    /// which name the current invoice or line a Duplicate is judged by. Their only writers are typed: the Signal writer
+    /// (<c>SignalWriter</c>, the subject lookup through <c>TodoRegardingBuilder.ApplySubjectLookupAndPairAsync</c>) and the
+    /// closure and commit updates, all through the ontology writer's dedicated client (<c>OntologyWriterDataverseClient</c>),
+    /// never a generic path. Its lane and its other subject columns are not listed yet (<c>AccessTableReaderScanTests</c>).</item>
     /// </list>
     /// Data, not branching: a table with no entry has no such column.
     /// </summary>
@@ -1030,11 +1085,26 @@ internal static class InheritedAccessPermission
             {
                 Sprk.Bff.Api.Api.Filters.CommunicationRecordAuthorizationFilter.ProposalCommunicationColumn,
             },
+            [Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity] = new HashSet<string>(
+                InvoiceFamilyCoreRecordGuard.CoreRecordLookups[Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity]
+                    .Select(l => l.Column)
+                    .Append(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.FirmColumn)
+                    .Append(Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionInvoice)
+                    .Append(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.TrackingNumberColumn),
+                StringComparer.OrdinalIgnoreCase),
+            [Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.CoreRecordTypeColumn,
+                Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.CoreRecordIdColumn,
+                Sprk.Bff.Api.Services.Signals.SignalClosureService.RegardingInvoiceColumn,
+                Sprk.Bff.Api.Services.Signals.SignalClosureService.RegardingInvoiceLineColumn,
+            },
         };
 
     /// <summary>
     /// Task 189 fix round C (K5): an APP-ONLY generic writer never writes a document's <see cref="Column"/> or its
-    /// own-narrowing record (<see cref="AccessInheritance.Column"/>). These writers are the Update Record playbook node
+    /// own-narrowing record (<see cref="AccessInheritance.Column"/>), nor its submission marker
+    /// (<see cref="SubmissionMarkerColumn"/>, ebilling-r1 task 088). These writers are the Update Record playbook node
     /// (<c>UpdateRecordActionCore</c>) and an AI output mapping (<c>DataverseUpdateHandler</c>) WHATEVER identity the run
     /// writes as (#2257 fix round 1: a person's run writes AS that person, and is still asked), and the action seam when it
     /// acts for no person. A model or a configuration builds their payload, not the person running it. Only
@@ -1115,10 +1185,11 @@ internal static class InheritedAccessPermission
         }
 
         var columns = keys.Select(SecureRootInheritance.NormalizeColumn).ToList();
-        if (narrows && columns.FirstOrDefault(k => k is Column or AccessInheritance.Column) is { } named)
+        if (narrows && columns.FirstOrDefault(k => k is Column or AccessInheritance.Column or SubmissionMarkerColumn) is { } named)
         {
-            return RecordOwnerResolution.Refused(AppOnlyDocumentWriteReasonCode,
-                $"{named} of a document is set by Spaarke (it keeps the document's own narrowing), so it was not written");
+            return RecordOwnerResolution.Refused(AppOnlyDocumentWriteReasonCode, named == SubmissionMarkerColumn
+                ? $"{named} of a document is set by Spaarke (only the invoice submission writes it, with the narrowing), so it was not written"
+                : $"{named} of a document is set by Spaarke (it keeps the document's own narrowing), so it was not written");
         }
 
         var link = links ? columns.FirstOrDefault(DocumentLinkColumns.Contains) : null;

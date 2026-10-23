@@ -1,0 +1,34 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0052",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0052","generator_id":"gen_eval_set.py@1 F-0052","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0052.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Hartwell and Ellison LLP","firm_invoice_number":"INV-2025-47891","invoice_date":"2026-04-03","billing_period_start":"2026-03-01","billing_period_end":"2026-03-31","firm_matter_reference":"47226-0029","po_number":"PO-4587082","fees_total":6232.5,"expenses_total":667.42,"adjustments_total":0.0,"total_due":6899.92,"currency":"USD"},
+ "timekeepers":[{"name":"Louis Ramanathan","title":"Associate","rate":395.0,"billed_as":"LR"},{"name":"Samuel Marchetti","title":"Paralegal","rate":155.0,"billed_as":"SM"},{"name":"Victor Brennan","title":"Associate","rate":350.0,"billed_as":"VB"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-03-02","timekeeper":"LR","timekeeper_name":"Louis Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":1.75,"rate":395.0,"amount":691.25,"narrative":"Draft protective order and supporting memorandum","codes":["L240","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-03-02","timekeeper":"LR","timekeeper_name":"Louis Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":0.75,"rate":395.0,"amount":296.25,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-03-03","timekeeper":"SM","timekeeper_name":"Samuel Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":2.5,"rate":155.0,"amount":387.5,"narrative":"Prepare monthly status report to client regarding the regulatory inquiry","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-03-03","timekeeper":"LR","timekeeper_name":"Louis Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":2.75,"rate":485.0,"amount":1333.75,"narrative":"Meet and confer with counsel for Northwind Logistics regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-03-04","timekeeper":"SM","timekeeper_name":"Samuel Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":2.0,"rate":155.0,"amount":310.0,"narrative":"Organized and indexed file materials","codes":["L350","A110"],"page":1,"narrative_style":"clerical"},
+  {"n":6,"line_type":"fee","date":"2026-03-13","timekeeper":"SM","timekeeper_name":"Samuel Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":2.0,"rate":155.0,"amount":310.0,"narrative":"Attend deposition of Bluepine Holdings corporate representative","codes":["L330","A109"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-03-17","timekeeper":"VB","timekeeper_name":"Victor Brennan","timekeeper_title":"Associate","title":"Assoc","hours":1.75,"rate":350.0,"amount":612.5,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-03-19","timekeeper":"VB","timekeeper_name":"Victor Brennan","timekeeper_title":"Associate","title":"Assoc","hours":3.0,"rate":350.0,"amount":1050.0,"narrative":"Prepare responses and objections to interrogatory responses","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-03-19","timekeeper":"SM","timekeeper_name":"Samuel Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":0.75,"rate":155.0,"amount":116.25,"narrative":"Prepare production set and cover correspondence for service on Bluepine Holdings","codes":["L320","A110"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-03-26","timekeeper":"LR","timekeeper_name":"Louis Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":0.25,"rate":395.0,"amount":98.75,"narrative":"Research authority for motion for summary judgment","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2026-03-26","timekeeper":"LR","timekeeper_name":"Louis Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":395.0,"amount":987.5,"narrative":"Review and analyze notice of deposition received from Pacifica Telecom","codes":["L310","A104"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2026-03-30","timekeeper":"SM","timekeeper_name":"Samuel Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":0.25,"rate":155.0,"amount":38.75,"narrative":"Draft discovery plan regarding deficiencies in Harbor Point Capital responses","codes":["L350","A103"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2026-03-10","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":53.0,"rate":0.7,"amount":37.1,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2026-03-11","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":41.89,"amount":125.67,"narrative":"Overnight courier to Bluepine Holdings counsel","codes":["E107"],"page":1,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2026-03-24","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":504.65,"amount":504.65,"narrative":"Airfare to Portland for deposition","codes":["E110"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["692 Congress Boulevard","Phoenix","Tax ID 64-8942438"],"template":"T23","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2025-03-16","matter_close":"2026-06-29","matter_budget":52599.0,"approved_timekeepers":["Samuel Marchetti","Louis Ramanathan","Daniel Santoro","Elena Whitfield","Victor Brennan"],"invoice_received_date":"2026-04-17"},
+ "expected_findings":[
+  {"rule_id":"RS-04-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[4],"consequence":"Reduce"},
+  {"rule_id":"RS-04-R08","rule_type":"NonBillableActivity","scope":"line","line_refs":[5],"consequence":"Disallow"}
+ ],
+ "seeded_violations":2
+}

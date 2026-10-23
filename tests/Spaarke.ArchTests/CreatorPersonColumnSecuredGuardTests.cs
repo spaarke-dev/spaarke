@@ -34,9 +34,26 @@ public class CreatorPersonColumnSecuredGuardTests
 
     /// <summary>
     /// Stamped tables whose <c>sprk_createdbyperson</c> exists only through a deploy script. Each entry names the reason and the
-    /// repo-relative script that secures it. Empty today: all 28 stamped tables are declared secured in SpaarkeMaster.
+    /// repo-relative script that secures it. ebilling-r1 task 081 (master merge, uac-r2): the Procedure and policy tables. No
+    /// Entity.xml in the repo declares the column on them (sprk_procedure and sprk_procedureversion have no Entity.xml at all;
+    /// sprk_policy's and sprk_policyversion's do not define the column), and the script lists all four in its <c>$Tables</c>.
+    /// Task 090 (uac-r2 round-2 K1): sprk_ruleset (its Entity.xml does not define the column) and sprk_procedureassignment (no
+    /// Entity.xml), both in the script's <c>$Tables</c>.
     /// </summary>
-    internal static readonly DeployScriptSecured[] SecuredOnlyByDeployScript = [];
+    internal static readonly DeployScriptSecured[] SecuredOnlyByDeployScript =
+    [
+        new("sprk_procedure", EbillingScriptReason, ChildCreatorPersonScript),
+        new("sprk_procedureversion", EbillingScriptReason, ChildCreatorPersonScript),
+        new("sprk_policy", EbillingScriptReason, ChildCreatorPersonScript),
+        new("sprk_policyversion", EbillingScriptReason, ChildCreatorPersonScript),
+        new("sprk_ruleset", EbillingScriptReason, ChildCreatorPersonScript),
+        new("sprk_procedureassignment", EbillingScriptReason, ChildCreatorPersonScript),
+    ];
+
+    private const string ChildCreatorPersonScript = "scripts/Set-ChildRecordCreatorPersonSchema.ps1";
+
+    private const string EbillingScriptReason =
+        "column created by the ebilling deploy scripts; secured by the script's empty-before-securing gate";
 
     private static string SolutionsRoot => Path.Combine(SourceScan.RepoRoot, "src", "dataverse", "solutions");
 
@@ -65,14 +82,21 @@ public class CreatorPersonColumnSecuredGuardTests
             + string.Join("\n  ", violations));
     }
 
-    [Fact(DisplayName = "Creator-person guard must-not-fire: each of the 28 current stamped tables has a secured declaration")]
+    [Fact(DisplayName = "Creator-person guard must-not-fire: each current stamped table has a secured declaration, or a deploy-script entry")]
     public void CurrentStampedTablesAreEachSecured()
     {
         var declarations = ReadDeclarations(SolutionsRoot);
+        var scripted = SecuredOnlyByDeployScript.Select(e => e.Table).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var table in AllStamped())
         {
-            Assert.True(declarations.TryGetValue(table, out var found), $"{table}: no {Column} declaration found.");
-            Assert.All(found!, d => Assert.True(d.IsSecured, $"{table}: {d.File} declares {Column} unsecured."));
+            if (!declarations.TryGetValue(table, out var found))
+            {
+                // ebilling-r1 (master merge): the column exists only through the deploy script that secures it.
+                Assert.True(scripted.Contains(table), $"{table}: no {Column} declaration found, and no SecuredOnlyByDeployScript entry.");
+                continue;
+            }
+
+            Assert.All(found, d => Assert.True(d.IsSecured, $"{table}: {d.File} declares {Column} unsecured."));
         }
     }
 
@@ -85,6 +109,16 @@ public class CreatorPersonColumnSecuredGuardTests
 
         foreach (var table in stamped)
         {
+            if (!real.ContainsKey(table))
+            {
+                // ebilling-r1 (master merge): a deploy-script table has no declaration to flip; removing its entry is reported instead.
+                var withoutEntry = SecuredOnlyByDeployScript.Where(e => !string.Equals(e.Table, table, StringComparison.OrdinalIgnoreCase));
+                var missing = Assert.Single(Violations(stamped, real, withoutEntry, ScriptText));
+                Assert.StartsWith(table + ":", missing, StringComparison.Ordinal);
+                Assert.Contains("no Entity.xml", missing, StringComparison.Ordinal);
+                continue;
+            }
+
             var perturbed = real.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
             perturbed[table] = real[table].Select(d => d with { IsSecured = false }).ToList();
 

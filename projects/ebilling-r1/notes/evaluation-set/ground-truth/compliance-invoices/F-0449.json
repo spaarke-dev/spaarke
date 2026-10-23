@@ -1,0 +1,30 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0449",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0449","generator_id":"gen_eval_set.py@1 F-0449","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0449.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Penhallow and Dunmore LLP","firm_invoice_number":"A-29054/2025","invoice_date":"2025-04-03","billing_period_start":"2025-03-01","billing_period_end":"2025-03-31","firm_matter_reference":"35293-0009","po_number":"PO-4514860","fees_total":6963.0,"expenses_total":848.79,"adjustments_total":0.0,"total_due":7811.79,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Wickham","title":"Senior Associate","rate":350.0,"billed_as":"AW"},{"name":"Gideon Lockhart","title":"Associate","rate":295.0,"billed_as":"GL"},{"name":"Nadia Galbraith","title":"Legal Assistant","rate":125.0,"billed_as":"NG"},{"name":"Yusuf Thornbury","title":"Associate","rate":305.0,"billed_as":"YT"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-03-03","timekeeper":"AW","timekeeper_name":"Anders Wickham","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.4,"rate":350.0,"amount":490.0,"narrative":"Telephone conference with witness regarding the regulatory inquiry","codes":["L410","A106"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-03-04","timekeeper":"GL","timekeeper_name":"Gideon Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":1.9,"rate":295.0,"amount":560.5,"narrative":"Revise pretrial brief after review by lead counsel","codes":["L430","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-03-05","timekeeper":"YT","timekeeper_name":"Yusuf Thornbury","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":305.0,"amount":366.0,"narrative":"Analyze exposure and damages model for the insurance coverage issue","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-03-07","timekeeper":"AW","timekeeper_name":"Anders Wickham","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.9,"rate":350.0,"amount":1015.0,"narrative":"Analyze exposure and damages model for the supply agreement","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-03-07","timekeeper":"YT","timekeeper_name":"Yusuf Thornbury","timekeeper_title":"Associate","title":"Assoc","hours":2.1,"rate":305.0,"amount":640.5,"narrative":"Prepare fact witness for testimony regarding the licensing dispute","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-03-14","timekeeper":"NG","timekeeper_name":"Nadia Galbraith","timekeeper_title":"Legal Assistant","title":"LA","hours":0.5,"rate":125.0,"amount":62.5,"narrative":"Telephone conference with witness regarding the distribution agreement","codes":["L410","A106"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-03-14","timekeeper":"YT","timekeeper_name":"Yusuf Thornbury","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":305.0,"amount":335.5,"narrative":"Review court docket and calendar of pending deadlines for the regulatory inquiry","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-03-17","timekeeper":"YT","timekeeper_name":"Yusuf Thornbury","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":305.0,"amount":274.5,"narrative":"Prepare expert witness for testimony in the insurance coverage issue","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-03-25","timekeeper":"GL","timekeeper_name":"Gideon Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":2.6,"rate":295.0,"amount":767.0,"narrative":"Review court docket and calendar of pending deadlines for the licensing dispute","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-03-25","timekeeper":"AW","timekeeper_name":"Anders Wickham","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.5,"rate":350.0,"amount":875.0,"narrative":"Draft exhibit list for trial in the vendor agreement","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-03-27","timekeeper":"AW","timekeeper_name":"Anders Wickham","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.5,"rate":350.0,"amount":875.0,"narrative":"Analyze exposure and damages model for the customs audit","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-03-27","timekeeper":"YT","timekeeper_name":"Yusuf Thornbury","timekeeper_title":"Associate","title":"Assoc","hours":2.3,"rate":305.0,"amount":701.5,"narrative":"Review draft expert disclosure for the customs audit","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-03-19","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":723.09,"amount":723.09,"narrative":"Airfare to Atlanta for deposition","codes":["E110"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2025-03-25","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":41.9,"amount":125.7,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["846 Peachtree Way","Dallas","Tax ID 92-1096855"],"template":"T07","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2024-07-25","matter_close":"2025-06-29","matter_budget":56247.0,"approved_timekeepers":["Nadia Galbraith","Ingrid Okafor","Gideon Lockhart","Anders Wickham","Leila Delacroix","Yusuf Thornbury"],"invoice_received_date":"2025-04-06"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

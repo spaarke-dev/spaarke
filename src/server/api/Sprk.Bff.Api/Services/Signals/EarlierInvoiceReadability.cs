@@ -61,6 +61,10 @@ public sealed class EarlierInvoiceReadability
     /// <summary><c>sprk_invoice</c> as a Web API name (on <c>sprk_invoicesubmission</c> and <c>sprk_billingevent</c>).</summary>
     internal const string InvoiceColumn = "_sprk_invoice_value";
 
+    /// <summary><c>sprk_invoicesubmission.sprk_invoice</c> as the LOGICAL name a <c>Microsoft.Dynamics.CRM.In</c> filter needs (as
+    /// <see cref="VendorOrgLogicalName"/>): <see cref="SignalReadService"/> reads a current invoice's submissions by it (UAC review F4).</summary>
+    internal const string SubmissionInvoiceFilterColumn = "sprk_invoice";
+
     private readonly ILogger<EarlierInvoiceReadability> _logger;
 
     public EarlierInvoiceReadability(ILogger<EarlierInvoiceReadability> logger) =>
@@ -69,7 +73,8 @@ public sealed class EarlierInvoiceReadability
     /// <summary>One earlier-invoice reference. <paramref name="EarlierInvoiceId"/> wins when set (only the invoice read is needed);
     /// otherwise <paramref name="VendorOrgId"/> and <paramref name="TrackingNumber"/> are resolved through the submission.</summary>
     /// <param name="EarlierInvoiceId">The earlier <c>sprk_invoice</c> id (<c>duplicateOf.invoiceId</c>).</param>
-    /// <param name="VendorOrgId">The CURRENT invoice's vendor org: the earlier submission is always the same firm's.</param>
+    /// <param name="VendorOrgId">The CURRENT invoice's vendor org, taken from its submission (the firm its priors were read from), never
+    /// from the invoice's own <c>sprk_vendororg</c> (UAC review F4): the earlier submission is always the same firm's.</param>
     /// <param name="TrackingNumber">The earlier submission's tracking number (<c>duplicateOf.trackingNumber</c>).</param>
     public readonly record struct Reference(Guid? EarlierInvoiceId, Guid? VendorOrgId, string? TrackingNumber);
 

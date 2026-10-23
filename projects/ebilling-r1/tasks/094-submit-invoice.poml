@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="094" project="ebilling-r1">
+  <metadata>
+    <title>Submit Invoice from a source Document: all-or-nothing steps 1-6, file first (A), copy rule (B), 050a re-file retired</title>
+    <phase>3 Procedures and files (WP3, EB-D-148) — wave W3-E</phase>
+    <gate>blocked until 086, 090 and 098 are done</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the invoice write path and an authorized BFF route (tags bff-api, auth); secure-record isolation and an undo of committed rows; deps on 3 tasks.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Auth and tenant-isolation code (copy rule, isolation re-run) plus all-or-nothing ordering with races between commit, re-run, flip and undo (model 9.1, reviews section 7).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-E</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits InvoiceSubmissionService, InvoiceSubmissionPersister and InvoiceSubmissionAfterSteps, which 095 and 097 extend next; nothing else in P3-E touches them, but run it alone in the Submission folder.</parallel-reason>
+    <deps>086, 090, 092, 098</deps>
+    <tags>bff-api, api, auth, finance, write-path, secure-records, job</tags>
+    <estimated-effort>3-4 days</estimated-effort>
+  </metadata>
+
+  <prompt>Turn 050a's existing-document submission into Submit Invoice (model section 9.1, EB-D-148): the source Document (an email attachment Document, or a confirmed document) never moves; its bytes are copied into the new invoice's Stored File (Invoice PDF, Firm-visible = No, source document and communication recorded) through steps 1-6 of 9.1, all or nothing. File an unfiled communication first (A). The copy rule (B) is served by 090's internal download route from the source ids this task writes. The 050a re-file (InvoiceDocumentRefile, owner change, share mirroring) is retired.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the Dataverse write path (ADR-002), ExecuteTransaction with IfRowVersionMatches, secure-record isolation (uac-r2) and idempotent job steps. Follow ADRs strictly.</role>
+
+  <goal>An internal caller submits a source Document as an invoice; the job stages a copy, commits invoice + lines + approval + Stored File (Not yet servable) in one transaction guarded on the source version, re-runs the isolation check before any after-step, and either flips the file to Servable and runs the after-steps, or undoes every row and the blob and leaves the submission Failed. No path moves or re-owns the source Document.</goal>
+
+  <context>
+    <background>The contract is projects/ebilling-r1/notes/procedure-and-file-model.md section 9.1 (all of it) with notes/procedure-model-reviews.md section 7; read both first. Code (verified 2026-10-21): SubmitExistingDocumentAsync (InvoiceSubmissionService.cs:305), DecideAsync (:724), dedupe id per notes/050a-confirm-redirect.md section 2; ResolveFilingAsync and ExistingDocumentIsolationCheck.CheckAsync (:99) with RecordThreadFiling.ParentsOf (Services/Dataverse/RecordThreadFiling.cs:59); BuildExistingDocumentGuard (InvoiceSubmissionPersister.cs:497-513); resume (:238-240 to ResumeAsync); the 050a re-file step (InvoiceSubmissionAfterSteps.cs:326-352); the verified-pointer byte read (InvoiceSubmissionProcessingJobHandler.cs:535-548); SecureChildShareSynchronizer.SecureRootsAboveAsync; RefileCommunicationAsync behind PATCH /api/communications/{id}/filing (Api/CommunicationEndpoints.cs:133). Deps: 090 file store (staging, row, If-Match flip, internal download route with the copy rule, orphan reconcile, detector); 086 secure child registration of invoice Stored Files; 098 the (a′) predicate reading the Submit Invoice source.</background>
+    <relevant-files>
+      <file role="modify">Under src/server/api/Sprk.Bff.Api/Services/Finance/Submission/: InvoiceSubmissionService.cs (step 1), InvoiceSubmissionContracts.cs (communication id), InvoiceSubmissionPersister.cs (step 4), InvoiceSubmissionAfterSteps.cs (steps 5-6 replace :326-352), AdminAttentionText.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceSubmissionProcessingJobHandler.cs (steps 2-3)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/SubmitInvoiceIsolationRerun.cs (step 5 and the undo; name directional)</file>
+      <file role="delete">Services/Finance/Submission/InvoiceDocumentRefile.cs and its registration in Infrastructure/DI/FinanceModule.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Finance/InvoiceSubmissionEndpoints.cs (route) and FinanceEndpoints.cs:41 (confirm delegates)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Submission/SubmitInvoiceIsolationRerunTests.cs; the existing Submission tests there are updated</file>
+      <file role="modify">tests/integration/contract/Api/Finance/InvoiceSubmissionEndpointsContractTests.cs, FinanceEndpointsAuthorizationContractTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="model 9.1 step 1 (#2150, D-140)">Every request: the caller's own Read on the source document and its communication (gate variant, GetCallerRightsForRecordsAsync); Read and AppendTo on the core record. An unfiled communication is filed to the target core record first (A, the RefileCommunicationAsync core, with the caller's rights) and its thread resolved before the D-140 pre-check. 409 ebilling.submission.document_core_record_mismatch; 503 on a read fault; nothing but A is written before the submission row.</constraint>
+    <constraint source="model 9.1 steps 2-6">Implement steps 2-6 exactly as model 9.1 words them. Points a literal reading must not miss: Stored File id = f(submission id, source versionnumber) with the persister's SHA-256 IdOf scheme, version and SHA recorded at staging; the step-3 flags (Restricted, internal-only, privacy) are never refusal grounds and never stored, and an unreadable one fails the submission; step 4's one transaction holds the Stored File row (Not yet servable, Firm-visible No, Invoice PDF, source ids) and the IfRowVersionMatches guard at the STAGED version, with re-stage-and-retry on a guard fault and blob deletion on a transaction fault; it never writes sprk_document.sprk_invoice, the document's owner or its shares; step 5 runs before totals, Signals, Decision Record, indexing and notification, and any fault in it is a failure; undo order is Stored File row and blob, approval, lines, invoice, then clear sprk_FirmInvoiceNumber, sprk_PONumber, sprk_FindingsJson and sprk_Invoice, keeping Failed, the admin note and the correlation; A's filing survives and the admin note says so; undo is complete or held; resume runs step 5 and the flip first and never flips twice.</constraint>
+    <constraint source="model 9.1, 12 (050a row)">The 050a re-file is retired: InvoiceDocumentRefile, its after-step and its admin-attention "document NOT filed" wording are removed; the D-140 chain, the isolation check and the dedupe id are kept. The confirm route stays and calls the same operation.</constraint>
+    <constraint source="model 9.1 Sources, 9.2 (owner K)">Isolated sources (internal-only, Restricted, Private thread) are allowed; the copy stays Firm-visible No and out of indexing, search and chat grounding.</constraint>
+    <constraint source="model 5.3 (099)">The Submit Invoice route sits in the /api/finance group and inherits step 0 (flagged-external caller refused before any record read).</constraint>
+    <constraint source="CLAUDE.md §10">BFF hygiene per .claude/constraints/bff-extensions.md: placement stated, publish-size delta against a fresh master build, no new package, no new HIGH CVE.</constraint>
+    <constraint source="live data">No live Dataverse writes and no deploys.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (sections 4.1, 4.3, 5.1, 9.1, 9.2)</file>
+      <file>projects/ebilling-r1/notes/procedure-model-reviews.md (sections 7, 14)</file>
+      <file>projects/ebilling-r1/notes/050a-confirm-redirect.md (sections 2-4: what is kept and what is retired)</file>
+      <file>.claude/constraints/api.md, auth.md, jobs.md, testing.md, bff-extensions.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md, ADR-004-job-contract.md, ADR-008-endpoint-filters.md, ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md; .claude/patterns/testing/unit-test-structure.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md; docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Guard and resume to copy" location="src/server/api/Sprk.Bff.Api/Services/Finance/Submission/">BuildExistingDocumentGuard (Persister :497-513) re-pointed at the staged version; ResumeAsync's Retry shape (AfterSteps :233-269) for step 5.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare FULL. Read 090's, 086's and 098's notes and code (file store API, flip, registration, the column (a′) reads as the source). Grep clients of /api/finance/invoice-review/confirm.</step>
+    <step order="1">Step 1 and the route (name directional: POST /api/finance/invoice-submissions/from-document, keyed on communication and document); confirm calls the same operation.</step>
+    <step order="2">Steps 2-3 in the job; step 4 in the persister.</step>
+    <step order="3">Steps 5-6 replace the re-file step; delete InvoiceDocumentRefile, its registration and tests; AdminAttentionText for the new outcomes.</step>
+    <step order="4">Tests per the acceptance criteria; the two seeding proofs; build; Finance and Submission unit tests; full ArchTests; publish-size delta.</step>
+    <step order="5">Notes in projects/ebilling-r1/notes/094-submit-invoice.md: step order, each failure's outcome (table like 050a section 4), seeding proofs, §11 answers.</step>
+    <step order="6">Update TASK-INDEX.md: this task's status cell to `✅ [done]` after the adversarial reviews and uac-r2's review.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the Stored File row cannot join 049's ExecuteTransaction (for example 086's ForParents owner cannot be resolved before the transaction), STOP and report; do not commit the file row separately.</trigger>
+    <trigger>If 090's flip cannot check blob existence and SHA inside the If-Match write, STOP and report to 090's owner rather than flipping without the check.</trigger>
+    <trigger>If 092 has not landed and extraction still reads bytes from the source Document's SPE pointer, STOP and ask whether extraction reads the staged copy here or waits for 092.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>InvoiceSubmissionService.SubmitExistingDocumentAsync (:305) and the confirm route (FinanceEndpoints.cs:41) submit an existing document; InvoiceDocumentRefile moves it under the invoice.</existing>
+    <extension>Yes for the operation: the existing-document entry is extended, not duplicated. One new route, because the confirm route's filter needs Write on the document (a re-file) and its body has no communication; Submit Invoice needs Read on the document and its communication and the (communication, document) key (model 9.1). One new class for step 5 and the undo, because the after-steps have no undo of committed rows today.</extension>
+    <cost-of-doing-nothing>Without it the source Document is re-owned under the invoice (owner and share change), invoice bytes never reach the file store, and a source refiled or made Secure between check and commit leaves an invoice readable outside its isolation (reviews section 7 races a-e).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">InvoiceSubmissionService, InvoiceSubmissionContracts, InvoiceSubmissionProcessingJobHandler, InvoiceSubmissionPersister, InvoiceSubmissionAfterSteps, SubmitInvoiceIsolationRerun.cs, InvoiceSubmissionEndpoints, FinanceEndpoints (confirm); InvoiceDocumentRefile.cs deleted</output>
+    <output type="test">SubmitInvoiceIsolationRerunTests.cs and the updated Submission unit and Finance contract tests</output>
+    <output type="docs">projects/ebilling-r1/notes/094-submit-invoice.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Happy path: a submission from a source Document creates invoice, lines, approval and one Stored File (purpose Invoice PDF, Firm-visible No, source document, source communication, source version and SHA set) that ends Servable; the source Document's owner, shares, sprk_invoice link and bytes are unchanged (test).</criterion>
+    <criterion testable="true">Authorization, each before any submission write: caller without Read on the source document → refused; without Read on its communication → refused; without Read and AppendTo on the core record → 403; a flagged-external caller → refused by step 0 before any record read; unauthenticated → 401 (tests).</criterion>
+    <criterion testable="true">A: an unfiled communication is filed to the target core record before the pre-check, with the caller's rights; a caller without Write on the communication gets the refile's refusal and no submission; after a later step-5 undo the filing remains and the admin note says so (tests).</criterion>
+    <criterion testable="true">Step 1 answers: document filed under another core record → 409 ebilling.submission.document_core_record_mismatch; a chain read fault → 503; nothing written (tests).</criterion>
+    <criterion testable="true">Step 4: a source write between staging and commit faults the guard; the job re-stages under the new version's id and commits once; a transaction failure deletes the staged blob (tests).</criterion>
+    <criterion testable="true">Step 5 fail: the source refiled to another core record between commit and re-run, or SecureRootsAboveAsync(source) differing from the Stored File's roots, or a fault in the re-run → Stored File row and blob, approval, lines and invoice deleted in that order; the four submission columns cleared; submission Failed with admin note and correlation; no Signal, Decision Record, indexing job or notification written (tests).</criterion>
+    <criterion testable="true">Undo held: a delete fault leaves the submission Failed and the Stored File Not yet servable; a later compensation run completes it (test).</criterion>
+    <criterion testable="true">Step 6: a resume after a commit whose step 5 never ran runs step 5 and the flip before any other after-step; a resume of an already-Servable file does not flip again (tests).</criterion>
+    <criterion testable="true">Copy rule end to end: after a successful submission, a caller who loses Read on the source document is refused the copy on 090's internal download route (test using 090's route).</criterion>
+    <criterion testable="true">Retired: InvoiceDocumentRefile and its after-step are gone; no code path writes sprk_document.sprk_invoice, reassigns the source's owner or mirrors its shares for a Submit Invoice (grep plus test).</criterion>
+    <criterion testable="true">Seeding proofs, recorded in notes: (1) make the step-5 re-run report Pass unconditionally → the refiled-source undo test fails; (2) skip the Stored File delete in the undo → the undo test fails; both restored.</criterion>
+    <criterion testable="true">dotnet build exits 0; Finance and Submission unit tests and the full ArchTests pass (known pre-existing failures listed by name); publish-size delta recorded; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reviews: adversarial-reviewer twice (auth, tenant isolation) and uac-r2 (model 14). Wave order puts 092 before 094 (W3-C); it is not a declared dep. Known limits carried from the model (owner-visible): a change after step 5 passes (O-32, uac-r2 K2), K3 soft delete 7 days, K4, K6; the D-139 rule that an ended submission blocks a re-submit of the same document is kept from 050a. The guard's live version-bump proof is still outstanding (model section 15, Engineering). OWNER 2026-10-21 (re-plan Q1): the email UI is task 118 (toolbar Submit Invoice replacing Link Invoice, flagged attachments via the profile's sprk_documenttype = Invoice, Email Review Invoice tab). This task is server-only; record the final route name, request (communication, invoice document, supporting documents) and error codes in its notes for 118. ontology-r1 088 gate 2026-10-22, F1 for this task: deleting a source document deletes its SPE file first (DocumentCheckoutService.DeleteCoreAsync), and the row delete then fails with a 500 because the Stored File's Restrict lookup refuses it. The 188d 409 pre-check counts only _sprk_parentdocument_value (also DataverseDocumentsEndpoints.cs:354). Model section 5.2 promises a 409 for Stored File references. Fix here: extend the pre-check on all three document delete routes to also count sprk_storedfile rows whose _sprk_sourcedocument_value equals the document, and return the same document_has_child_documents 409 before any file is deleted. Must-fire test per route: a document referenced by a Stored File returns 409 and its SPE file is untouched. Must-not-fire: an unreferenced document deletes as before. Also see 095 for the email source. 088 retype 2026-10-22: sprk_storedfile.sprk_sourceversion is String(20) and sprk_sizebytes is Integer (files over 2 GiB cannot be stored). The source document's row version is written in the ONE canonical string form owned by 090's constraint (invariant culture, no padding, no separators), the same string used for StoredFileIds.ForSourceVersion; this task's guard reads it in that form.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load every file in knowledge/files before Step 1. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>

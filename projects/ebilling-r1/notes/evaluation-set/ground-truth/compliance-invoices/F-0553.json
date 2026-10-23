@@ -1,0 +1,24 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0553",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0553","generator_id":"gen_eval_set.py@1 F-0553","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0553.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Jarrow and Vance LLP","firm_invoice_number":"INV-2026-79331","invoice_date":"2025-11-02","billing_period_start":"2025-10-01","billing_period_end":"2025-10-31","firm_matter_reference":"22864-0031","po_number":"PO-4515882","fees_total":4174.5,"expenses_total":4289.02,"adjustments_total":0.0,"total_due":8463.52,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Galbraith","title":"Paralegal","rate":215.0,"billed_as":"AG"},{"name":"Cyrus Lindqvist","title":"Of Counsel","rate":655.0,"billed_as":"CL"},{"name":"Emeka Voss","title":"Associate","rate":420.0,"billed_as":"EV"},{"name":"Helena Carmichael","title":"Associate","rate":410.0,"billed_as":"HC"}],
+ "lines":[
+  {"n":1,"line_type":"expense","date":"2025-10-03","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":4289.02,"amount":4289.02,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-10-09","timekeeper":"AG","timekeeper_name":"Anders Galbraith","timekeeper_title":"Paralegal","title":"Para","hours":0.7,"rate":215.0,"amount":150.5,"narrative":"Review court docket and calendar of pending deadlines for the vendor agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-10-16","timekeeper":"AG","timekeeper_name":"Anders Galbraith","timekeeper_title":"Paralegal","title":"Para","hours":2.0,"rate":215.0,"amount":430.0,"narrative":"Attend and present oral argument in the supply agreement","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-10-17","timekeeper":"HC","timekeeper_name":"Helena Carmichael","timekeeper_title":"Associate","title":"Assoc","hours":2.1,"rate":410.0,"amount":861.0,"narrative":"Plan strategy for upcoming phase of the employment claim with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-10-21","timekeeper":"HC","timekeeper_name":"Helena Carmichael","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":410.0,"amount":410.0,"narrative":"Prepare monthly status report to client regarding the licensing dispute","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-10-27","timekeeper":"AG","timekeeper_name":"Anders Galbraith","timekeeper_title":"Paralegal","title":"Para","hours":1.0,"rate":215.0,"amount":215.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-10-31","timekeeper":"CL","timekeeper_name":"Cyrus Lindqvist","timekeeper_title":"Of Counsel","title":"O/C","hours":2.0,"rate":655.0,"amount":1310.0,"narrative":"Analyze exposure and damages model for the distribution agreement","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-10-31","timekeeper":"EV","timekeeper_name":"Emeka Voss","timekeeper_title":"Associate","title":"Assoc","hours":1.9,"rate":420.0,"amount":798.0,"narrative":"Draft appellate brief in the data incident","codes":["L520","A103"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["319 Congress Boulevard","Minneapolis","Tax ID 96-9740665"],"template":"T09","pages":1},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2025-02-04","matter_close":"2026-01-29","matter_budget":58854.0,"approved_timekeepers":["Helena Carmichael","Emeka Voss","Anders Galbraith","Cyrus Lindqvist","Samuel Yilmaz","Rafael Halloran","Cyrus Ashdown","Farah Nwosu","Farah Castellanos"],"invoice_received_date":"2025-11-10"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

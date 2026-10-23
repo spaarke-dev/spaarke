@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="ebilling-r1">
+  <metadata>
+    <title>sprk_externalidentifier schema and firm-scoped key</title>
+    <phase>1 Data model (WP1)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Creates a new table, an alternate key and a new script file; no C# code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-table schema script with an exact column list and canonical exemplars; the one judgment point (key composition) is an escalation trigger.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>dataverse, schema</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Create the new Dataverse table sprk_externalidentifier (typed identifiers such as firm invoice number, firm client-matter number, law-department matter number and PO as quoted) in dev with an idempotent Web API script, with ADR-024 regarding fields and an index that supports a firm-scoped lookup, then document it.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse metadata Web API scripting, alternate keys and the ADR-024 dual-field pattern. Follow ADRs strictly.</role>
+
+  <goal>scripts/ebilling/Deploy-EbillingExternalIdentifierSchema.ps1 exists and has been run against spaarkedev1 (second run: no change); a metadata read shows sprk_externalidentifier with the columns, lookups and the agreed key; docs/data-model/sprk_externalidentifier.md describes it.</goal>
+
+  <context>
+    <background>spec.md FR-12: regarding per ADR-024, identifier type, value, issuing organization / system; R1 types firm invoice number, firm client-matter number, law-department matter number, PO as quoted; reserved AP document number, VAT invoice number, e-invoice / clearance ID, Peppol message ID; acceptance: a firm-quoted client-matter number resolves to its core record for that firm only. FR-05 lists this table among the core-record-scoped tables. design.md data model: identifiers sit on the invoice (later matter, firm). Task 044 and the Duplicate rule (071) look identifiers up by (firm, type, value).</background>
+    <relevant-files>
+      <file role="new">scripts/ebilling/Deploy-EbillingExternalIdentifierSchema.ps1</file>
+      <file role="new">docs/data-model/sprk_externalidentifier.md</file>
+      <file role="modify">docs/data-model/INDEX.md (one row under "Entity Documentation — Financial")</file>
+      <file role="modify">docs/data-model/schema-additions-alternate-keys.md (catalog row for the key, if one is created)</file>
+      <file role="canonical-reference">scripts/Deploy-ChartDefinitionEntity.ps1</file>
+      <file role="canonical-reference">scripts/Create-BackgroundJobEntity.ps1:210 and :289 (alternate key)</file>
+      <file role="canonical-reference">scripts/Deploy-AccessEventEntity.ps1:585 (MSCRM.SolutionUniqueName header)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorResolver.cs:116-122</file>
+      <file role="canonical-reference">projects/spaarke-ontology-platform-r1/notes/140-schema-delta.md section 2</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Parallel with 012, 020, 021.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">This task writes ONE script, scripts/ebilling/Deploy-EbillingExternalIdentifierSchema.ps1, runs it only against https://spaarkedev1.crm.dynamics.com, supports -WhatIf, checks existence before every create, entity-scoped PublishXml.</constraint>
+    <constraint source="project">Do NOT edit src/dataverse/solutions/SpaarkeMaster/** (task 029). Additive only.</constraint>
+    <constraint source="ADR-024">Entity-specific lookups sprk_regardingmatter, sprk_regardingproject, sprk_regardingworkassignment and sprk_regardinginvoice plus the five resolver fields; one populated per row (server-enforced by 013).</constraint>
+    <constraint source="project">Identifier types are a closed choice: the four R1 values plus the four reserved values are created now so later channels need no schema change.</constraint>
+    <constraint source="project">Shared append points docs/data-model/INDEX.md and schema-additions-alternate-keys.md: re-read before editing, add only this table's rows.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse schema via Web API</topic>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>docs/data-model/schema-additions-alternate-keys.md</file>
+    </files>
+    <patterns>
+      <pattern name="Polymorphic resolver" location=".claude/patterns/dataverse/polymorphic-resolver.md">Dual-field columns.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Rigor + key decision">Declare RIGOR LEVEL: STANDARD. Read FR-12, FR-05, D-12, D-37, D-43. Apply the key escalation trigger below BEFORE writing the key part of the script.</step>
+    <step order="1" name="Table + columns">Script from the Deploy-ChartDefinitionEntity.ps1 helpers. User/team-owned table sprk_externalidentifier (display "External Identifier"), primary name sprk_name (text 200). Columns: sprk_identifiertype (local choice: Firm invoice number, Firm client-matter number, Law-department matter number, PO as quoted, AP document number, VAT invoice number, E-invoice / clearance ID, Peppol message ID); sprk_identifiervalue (text 200, as quoted); sprk_normalizedvalue (text 200, upper-case with whitespace removed — the matching value, rule documented in the data-model doc); sprk_issuingsystem (text 200).</step>
+    <step order="2" name="Lookups">OneToMany (Delete = RemoveLink, others NoCascade): sprk_issuingorganization → sprk_organization (the firm); sprk_regardinginvoice → sprk_invoice; sprk_regardingmatter → sprk_matter; sprk_regardingproject → sprk_project; sprk_regardingworkassignment → sprk_workassignment; sprk_regardingrecordtype → sprk_recordtype_ref. Resolver text: sprk_regardingrecordid (100), sprk_regardingrecordname (200), sprk_regardingrecordnumber (100), sprk_regardingrecordurl (500, Url).</step>
+    <step order="3" name="Key">Create the key agreed in step 0 and wait for EntityKeyIndexStatus Active.</step>
+    <step order="4" name="Run">Header MSCRM.SolutionUniqueName = SpaarkeMaster. -WhatIf, real run, second run reports no change.</step>
+    <step order="5" name="Verify">Metadata read (Attributes, ManyToOneRelationships, Keys); record in task notes.</step>
+    <step order="6" name="Docs">docs/data-model/sprk_externalidentifier.md (types, normalization rule, key), INDEX.md row, alternate-key catalog row.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status cell to ✅ [done].</step>
+    <step order="8">Record any deviation in projects/ebilling-r1/notes/ and this task's notes.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Key composition decided by the owner (D-68, 2026-10-15): unique key (sprk_issuingorganization, sprk_identifiertype, sprk_normalizedvalue, sprk_regardingrecordid). Lookups by (firm, type, value) are filtered queries; ambiguity (one value on two core records) is refused by the resolver in 044. If Dataverse cannot build a key on these columns, STOP and report rather than choosing another key.</trigger>
+    <trigger>If task 012 chose different entity-specific lookup names for the invoice family, STOP and align with the main session before creating lookups.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>sprk_invoice.sprk_invoicenumber (Entities/sprk_Invoice/Entity.xml) holds one number; no identifier table exists (git grep sprk_externalidentifier outside projects/ finds nothing).</existing>
+    <extension>No — one record needs several typed identifiers from different issuers (firm, law department, AP, tax authority), which single columns on sprk_invoice cannot carry (D-12).</extension>
+    <cost-of-doing-nothing>A firm-quoted client-matter number cannot resolve to its core record (FR-12), the Duplicate rule has no firm-scoped invoice-number lookup, and AP / VAT / e-invoice numbers for the fast followers have nowhere to go.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="pwsh">Run the schema script</tool>
+    <tool name="az">Dataverse token</tool>
+    <tool name="mcp-dataverse">describe for pre-validation and verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/ebilling/Deploy-EbillingExternalIdentifierSchema.ps1</output>
+    <output type="docs">docs/data-model/sprk_externalidentifier.md</output>
+    <output type="docs">docs/data-model/INDEX.md and schema-additions-alternate-keys.md (rows)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A metadata read of sprk_externalidentifier in spaarkedev1 lists every column and lookup in steps 1-2 and all eight sprk_identifiertype values.</criterion>
+    <criterion testable="true">The key chosen in step 0 exists with index status Active, and the owner's choice is recorded in task notes and projects/ebilling-r1/notes/decisions-log.md as a proposed D-entry.</criterion>
+    <criterion testable="true">Under the chosen key, a dev test shows: an exact duplicate row is refused; the same value for a different firm is accepted (firm-scoped). Test rows removed afterwards.</criterion>
+    <criterion testable="true">A second run of the script reports no change; -WhatIf makes no change.</criterion>
+    <criterion testable="true">No file under src/dataverse/solutions/SpaarkeMaster/ is modified.</criterion>
+    <criterion testable="true">The data-model doc, INDEX.md row and alternate-key catalog row exist.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    FR-05 names Matter / Project / Work Assignment lookups; sprk_regardinginvoice is added because FR-12 says "regarding per ADR-024" and the firm invoice number and PO identify an invoice, not a core record.
+    sprk_normalizedvalue exists so matching does not depend on case or spaces; the normalization rule is owned by 044.
+    Open for 013 / uac-r2 (not this task): secure-record family membership and sprk_createdbyperson for this table.
+
+    COMPLETION (2026-10-15): full record in projects/ebilling-r1/notes/022-externalidentifier-schema.md.
+    - Script scripts/ebilling/Deploy-EbillingExternalIdentifierSchema.ps1 run against spaarkedev1: run 1 created table, 14 columns / lookups and the D-68 key (Active); run 2 and a -WhatIf: no change.
+    - The D-68 key (issuing organization, identifier type, normalized value, regarding record id) was buildable; escalation trigger 1 did not fire. D-68 is already in decisions-log.md. Trigger 2 (012 lookup names) did not fire (mixed scheme, task 013).
+    - Live key tests: exact duplicate refused (HTTP 412, 0x80060892); same value for another firm accepted; same value for another core record accepted; test rows deleted (0 remain).
+    - Deviation: sprk_identifiertype and sprk_normalizedvalue raised to SystemRequired (ApplicationRequired is not enforced on API writes, DEF-009); verified live.
+    - Finding for 044 / 013: a row with an empty key column (issuing organization or regarding record id) is not covered by the key, so the writer must always fill both for a firm-quoted identifier. Documented in docs/data-model/sprk_externalidentifier.md.
+    - TASK-INDEX.md step 7 left to the main session (parallel-run rule).
+    rework: none task 022
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

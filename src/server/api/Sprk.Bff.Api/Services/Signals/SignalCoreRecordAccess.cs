@@ -128,6 +128,17 @@ public sealed class SignalCoreRecordAccess
     private const string RecordTypeRefEntity = "sprk_recordtype_ref";
     private const string RecordLogicalNameColumn = "sprk_recordlogicalname";
 
+    /// <summary>The Signal table (<c>InheritedAccessPermission.AccessColumns</c> keys its refused columns by it).</summary>
+    internal const string SignalTable = "sprk_signal";
+
+    /// <summary>The Signal's frozen core-record pair: the catalog row of its type (<c>sprk_corerecordtype</c>) and its id as text
+    /// (<c>sprk_corerecordid</c>). <see cref="AuthorizeAsync"/> decides readability by the caller's Read on that record, and
+    /// <c>SignalReadService.DuplicatesShownAsync</c> bounds a line Duplicate's invoice by it (DEF-043).</summary>
+    internal const string CoreRecordTypeColumn = "sprk_corerecordtype";
+
+    /// <inheritdoc cref="CoreRecordTypeColumn"/>
+    internal const string CoreRecordIdColumn = "sprk_corerecordid";
+
     private readonly IDataverseUserClient _userClient;
     private readonly IGenericEntityService _entities;
     private readonly IIdentityNormalizationService _identity;

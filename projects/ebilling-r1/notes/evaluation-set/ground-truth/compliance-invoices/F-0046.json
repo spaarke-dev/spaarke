@@ -1,0 +1,34 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0046",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0046","generator_id":"gen_eval_set.py@1 F-0046","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0046.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Stanhope Vance PC","firm_invoice_number":"INV-2025-48189","invoice_date":"2026-03-01","billing_period_start":"2026-02-01","billing_period_end":"2026-02-28","firm_matter_reference":"60535-0018","po_number":"PO-4538389","fees_total":4004.75,"expenses_total":675.23,"adjustments_total":0.0,"total_due":4679.98,"currency":"USD"},
+ "timekeepers":[{"name":"Cyrus Santoro","title":"Associate","rate":325.0,"billed_as":"Santoro, C."},{"name":"Hannah Esposito","title":"Legal Assistant","rate":125.0,"billed_as":"Esposito, H."},{"name":"Ingrid Abernathy","title":"Partner","rate":655.0,"billed_as":"Abernathy, I."},{"name":"Nadia Halloran","title":"Of Counsel","rate":550.0,"billed_as":"Halloran, N."},{"name":"Naomi Delacroix","title":"Associate","rate":305.0,"billed_as":"Delacroix, N."}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-02-05","timekeeper":"Santoro, C.","timekeeper_name":"Cyrus Santoro","timekeeper_title":"Associate","title":"Assoc","hours":2.25,"rate":325.0,"amount":731.25,"narrative":"Invoice preparation and review of billing entries","codes":["L190","A111"],"page":1,"narrative_style":"clerical"},
+  {"n":2,"line_type":"fee","date":"2026-02-24","timekeeper":"Santoro, C.","timekeeper_name":"Cyrus Santoro","timekeeper_title":"Associate","title":"Assoc","hours":0.75,"rate":325.0,"amount":243.75,"narrative":"Research appealability issues in the data incident","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-02-25","timekeeper":"Esposito, H.","timekeeper_name":"Hannah Esposito","timekeeper_title":"Legal Assistant","title":"LA","hours":2.0,"rate":125.0,"amount":250.0,"narrative":"Draft appellate brief in the employment claim","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-02-25","timekeeper":"Esposito, H.","timekeeper_name":"Hannah Esposito","timekeeper_title":"Legal Assistant","title":"LA","hours":2.0,"rate":125.0,"amount":250.0,"narrative":"Draft appellate brief in the employment claim","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-02-10","timekeeper":"Abernathy, I.","timekeeper_name":"Ingrid Abernathy","timekeeper_title":"Partner","title":"Ptr","hours":0.25,"rate":655.0,"amount":163.75,"narrative":"Draft appellate brief in the data incident","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-06-23","timekeeper":"Halloran, N.","timekeeper_name":"Nadia Halloran","timekeeper_title":"Of Counsel","title":"O/C","hours":2.25,"rate":550.0,"amount":1237.5,"narrative":"Draft notice of appeal and docketing statement for the distribution agreement","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-02-06","timekeeper":"Delacroix, N.","timekeeper_name":"Naomi Delacroix","timekeeper_title":"Associate","title":"Assoc","hours":2.75,"rate":305.0,"amount":838.75,"narrative":"Review court docket and calendar of pending deadlines for the vendor agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-02-11","timekeeper":"Delacroix, N.","timekeeper_name":"Naomi Delacroix","timekeeper_title":"Associate","title":"Assoc","hours":0.7,"rate":305.0,"amount":213.5,"narrative":"Review court docket and calendar of pending deadlines for the supply agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-02-27","timekeeper":"Delacroix, N.","timekeeper_name":"Naomi Delacroix","timekeeper_title":"Associate","title":"Assoc","hours":0.25,"rate":305.0,"amount":76.25,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-02-09","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":13.25,"amount":13.25,"narrative":"Postage - certified mail","codes":["E108"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-02-19","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":524.78,"amount":524.78,"narrative":"Airfare to Houston for deposition","codes":["E110"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2026-02-19","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":59.0,"rate":0.62,"amount":36.58,"narrative":"Mileage to courthouse","codes":["E109"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2026-02-19","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":33.54,"amount":100.62,"narrative":"Overnight courier to Northwind Logistics counsel","codes":["E107"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["87 Elm Court","Chicago","Tax ID 20-7350419"],"template":"T24","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2025-03-18","matter_close":"2026-05-29","matter_budget":43719.0,"approved_timekeepers":["Imani Halloran","Hannah Esposito","Sofia Delacroix","Naomi Delacroix","Nadia Halloran","Imani Delacroix","Ingrid Abernathy","Cyrus Santoro"],"invoice_received_date":"2026-03-20"},
+ "expected_findings":[
+  {"rule_id":"RS-04-R03","rule_type":"TimeIncrement","scope":"line","line_refs":[8],"consequence":"Reduce"},
+  {"rule_id":"RS-04-R04","rule_type":"CoreRecordWindow","scope":"line","line_refs":[6],"consequence":"Flag"},
+  {"rule_id":"RS-04-R06","rule_type":"Duplicate","scope":"line","line_refs":[4],"consequence":"Disallow","related_line_refs":[3]},
+  {"rule_id":"RS-04-R08","rule_type":"NonBillableActivity","scope":"line","line_refs":[1],"consequence":"Disallow"}
+ ],
+ "seeded_violations":4
+}
