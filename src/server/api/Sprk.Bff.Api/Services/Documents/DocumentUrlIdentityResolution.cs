@@ -175,9 +175,10 @@ public static class DocumentUrlIdentityResolution
                 relatedRecord.LogicalName, relatedRecord.Id, new[] { mapping.ComplementaryColumn }, ct);
             complementary = entity.GetAttributeValue<string>(mapping.ComplementaryColumn);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (!ct.IsCancellationRequested)
         {
-            ct.ThrowIfCancellationRequested();
+            // Only the CALLER's cancellation propagates (the filter above). A cancellation or timeout that is not the
+            // caller's (an HTTP client timeout surfaces as TaskCanceledException) is a failed optional read: no value, not a 500.
             logger.LogWarning(ex,
                 "Document identity: could not read {Column} for {EntityType} {Id} for the related-record card; " +
                 "it will render that field blank.",
@@ -526,9 +527,10 @@ public static class DocumentUrlIdentityResolution
             row = await dataverse.RetrieveAsync(
                 CommunicationLogicalName, communication.Id, CommunicationRegardingAttributes, ct);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (!ct.IsCancellationRequested)
         {
-            ct.ThrowIfCancellationRequested();
+            // Only the CALLER's cancellation propagates. A cancellation or timeout that is not the caller's (an HTTP client
+            // timeout surfaces as TaskCanceledException) is a failed optional read: no card, never a 500.
             logger.LogWarning(ex,
                 "Document identity: could not read sprk_communication {CommunicationId} of sprk_document {DocumentId} " +
                 "for the related-record card; the card is omitted.",

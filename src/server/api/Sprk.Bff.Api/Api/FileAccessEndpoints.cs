@@ -369,8 +369,11 @@ public static class FileAccessEndpoints
         /// shown only when the caller's own rights on it include Read, asked through the same
         /// <see cref="Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe"/> behind
         /// <see cref="RecordRouteAccessAuthorizationFilter"/>. Not readable, an unmapped type, or a failed check: no card,
-        /// and the rest of this 200 answer is unchanged — never a 403 or 503 for the whole answer. A document's own slot
-        /// keeps today's behaviour, and its communication is then not read.
+        /// and the rest of this 200 answer is unchanged — never a 403 or 503 for the whole answer. When the communication
+        /// IS filed but the card is left out for one of those reasons, the answer says so
+        /// (<see cref="DocumentIdentityResponse.RelatedRecordWithheld"/> = <c>true</c>), so the pane shows the record as
+        /// unknown rather than "not filed" and does not offer to file the document a second time; it is absent otherwise.
+        /// A document's own slot keeps today's behaviour, and its communication is then not read.
         /// </remarks>
         static async Task<DocumentIdentityResponse> BuildIdentityResponseAsync(
             Sprk.Bff.Api.Services.Documents.DocumentUrlIdentityResolution.Resolution identity,
@@ -381,14 +384,17 @@ public static class FileAccessEndpoints
             CancellationToken ct)
         {
             var related = identity.RelatedRecord;
+            var relatedRecordWithheld = false;
             if (related is null)
             {
                 var derived = await Sprk.Bff.Api.Services.Documents.DocumentUrlIdentityResolution
                     .ResolveDerivedRelatedRecordAsync(identity, dataverse, logger, ct);
-                if (derived is not null
-                    && await CallerMayReadDerivedRecordAsync(derived, callerAccessProbe, context, logger, ct))
+                if (derived is not null)
                 {
-                    related = derived;
+                    if (await CallerMayReadDerivedRecordAsync(derived, callerAccessProbe, context, logger, ct))
+                        related = derived;
+                    else
+                        relatedRecordWithheld = true; // filed, but not shown: the pane must not read a null card as "not filed"
                 }
             }
 
@@ -407,7 +413,8 @@ public static class FileAccessEndpoints
                 DocumentName: identity.DocumentName,
                 FileName: identity.FileName,
                 RelatedRecord: relatedRecordResponse,
-                Reason: null);
+                Reason: null,
+                RelatedRecordWithheld: relatedRecordWithheld ? true : null);
         }
 
         /// <summary>
@@ -438,7 +445,7 @@ public static class FileAccessEndpoints
                     Sprk.Bff.Api.Infrastructure.Auth.TokenHelper.ExtractBearerTokenOrNull(context), entitySet, record.Id, ct);
                 return (rights & AccessRights.Read) == AccessRights.Read;
             }
-            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            catch (Exception ex) when (!ct.IsCancellationRequested)
             {
                 logger.LogWarning(ex,
                     "Document identity: the caller's access to {EntitySet}({RecordId}) could not be checked; the " +

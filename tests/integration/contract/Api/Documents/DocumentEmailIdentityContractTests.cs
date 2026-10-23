@@ -84,6 +84,7 @@ public class DocumentEmailIdentityContractTests
         body.GetProperty("resolved").GetBoolean().Should().BeTrue();
         body.GetProperty("documentId").GetString().Should().Be(documentId.ToString("D"));
         body.GetProperty("relatedRecord").ValueKind.Should().Be(JsonValueKind.Null);
+        IdentityJson.RelatedRecordWithheld(body).Should().BeNull("an unfiled document is KNOWN unfiled, not withheld");
     }
 
     // ── Task 132: a captured archive's record comes from its communication ────────────────────
@@ -117,6 +118,7 @@ public class DocumentEmailIdentityContractTests
         related.GetProperty("id").GetString().Should().Be(matterId.ToString("D"));
         related.GetProperty("displayName").GetString().Should().Be("Acme v Globex");
         related.GetProperty("number").GetString().Should().Be("MAT-000042");
+        IdentityJson.RelatedRecordWithheld(body).Should().BeNull("a shown card is never also reported as withheld");
         probe.Verify(
             p => p.GetCallerRightsAsync("test-token", "sprk_matters", matterId, It.IsAny<CancellationToken>()), Times.Once,
             "the caller's own rights on the derived record are asked, with the caller's token");
@@ -146,7 +148,7 @@ public class DocumentEmailIdentityContractTests
         using var factory = Factory(entityService, AccessSource(documentId, AccessRights.Read), probe);
         var response = await AuthenticatedClient(factory).PostAsJsonAsync(Route, new { internetMessageId = MessageId });
 
-        await ShouldBeTheSameAnswerWithoutACard(response, documentId, "MAT-000042");
+        await ShouldBeTheSameAnswerWithoutACard(response, documentId, "MAT-000042", withheld: true);
     }
 
     [Fact]
@@ -164,7 +166,7 @@ public class DocumentEmailIdentityContractTests
         using var factory = Factory(entityService, AccessSource(documentId, AccessRights.Read), probe);
         var response = await AuthenticatedClient(factory).PostAsJsonAsync(Route, new { internetMessageId = MessageId });
 
-        await ShouldBeTheSameAnswerWithoutACard(response, documentId, "MAT-000042");
+        await ShouldBeTheSameAnswerWithoutACard(response, documentId, "MAT-000042", withheld: true);
     }
 
     [Fact]
@@ -182,7 +184,52 @@ public class DocumentEmailIdentityContractTests
         using var factory = Factory(entityService, AccessSource(documentId, AccessRights.Read), probe);
         var response = await AuthenticatedClient(factory).PostAsJsonAsync(Route, new { internetMessageId = MessageId });
 
-        await ShouldBeTheSameAnswerWithoutACard(response, documentId, unexpected: null);
+        await ShouldBeTheSameAnswerWithoutACard(response, documentId, unexpected: null, withheld: false);
+    }
+
+    // ── Review F2: only the CALLER's cancellation propagates ──────────────────────────────────
+
+    [Fact]
+    public async Task ResolveEmail_WhenTheCommunicationReadTimesOutOutsideTheCaller_Returns200WithoutTheCard_NotA500()
+    {
+        var documentId = Guid.NewGuid();
+        var communicationId = Guid.NewGuid();
+        var entityService = SavedCopy(CapturedArchive(documentId, communicationId));
+        // An HTTP client timeout surfaces as a TaskCanceledException although the request was never cancelled.
+        entityService
+            .Setup(e => e.RetrieveAsync("sprk_communication", communicationId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout."));
+
+        using var factory = Factory(entityService, AccessSource(documentId, AccessRights.Read), Probe());
+        var response = await AuthenticatedClient(factory).PostAsJsonAsync(Route, new { internetMessageId = MessageId });
+
+        await ShouldBeTheSameAnswerWithoutACard(response, documentId, unexpected: null, withheld: false);
+    }
+
+    [Fact]
+    public async Task ResolveEmail_WhenTheDisplayReadTimesOutOutsideTheCaller_Returns200_WithTheCardsDisplayFieldBlank()
+    {
+        var documentId = Guid.NewGuid();
+        var communicationId = Guid.NewGuid();
+        var matterId = Guid.NewGuid();
+        var entityService = SavedCopy(CapturedArchive(documentId, communicationId));
+        CommunicationFiledTo(entityService, communicationId, new EntityReference("sprk_matter", matterId) { Name = "MAT-000042" });
+        entityService
+            .Setup(e => e.RetrieveAsync("sprk_matter", matterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout."));
+        var probe = Probe();
+        probe.Setup(p => p.GetCallerRightsAsync(It.IsAny<string?>(), "sprk_matters", matterId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AccessRights.Read);
+
+        using var factory = Factory(entityService, AccessSource(documentId, AccessRights.Read), probe);
+        var response = await AuthenticatedClient(factory).PostAsJsonAsync(Route, new { internetMessageId = MessageId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "an optional display read that times out is never a 500");
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var related = body.GetProperty("relatedRecord");
+        related.GetProperty("id").GetString().Should().Be(matterId.ToString("D"));
+        related.GetProperty("displayName").ValueKind.Should().Be(JsonValueKind.Null, "the display field renders blank");
+        IdentityJson.RelatedRecordWithheld(body).Should().BeNull();
     }
 
     [Fact]
@@ -208,6 +255,7 @@ public class DocumentEmailIdentityContractTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         body.GetProperty("relatedRecord").GetProperty("id").GetString().Should().Be(matterId.ToString("D"));
+        IdentityJson.RelatedRecordWithheld(body).Should().BeNull("a direct slot is shown, never withheld");
         entityService.Verify(
             e => e.RetrieveAsync("sprk_communication", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
             Times.Never);
@@ -349,7 +397,8 @@ public class DocumentEmailIdentityContractTests
             .ReturnsAsync(new Entity("sprk_communication", communicationId) { ["sprk_regarding" + regarding.LogicalName[5..]] = regarding });
 
     /// <summary>Task 132: the same 200 resolved answer, with no related-record card and nothing of the record in it.</summary>
-    private static async Task ShouldBeTheSameAnswerWithoutACard(HttpResponseMessage response, Guid documentId, string? unexpected)
+    private static async Task ShouldBeTheSameAnswerWithoutACard(
+        HttpResponseMessage response, Guid documentId, string? unexpected, bool withheld)
     {
         response.StatusCode.Should().Be(HttpStatusCode.OK, "a derived record the caller may not see never fails the answer");
         var raw = await response.Content.ReadAsStringAsync();
@@ -363,6 +412,8 @@ public class DocumentEmailIdentityContractTests
         body.GetProperty("fileName").GetString().Should().Be("RE_ Discovery schedule_a1b2.eml");
         body.GetProperty("reason").ValueKind.Should().Be(JsonValueKind.Null);
         body.GetProperty("relatedRecord").ValueKind.Should().Be(JsonValueKind.Null);
+        // Review F1: a record that exists but is not shown is reported, so the pane never claims "not filed".
+        IdentityJson.RelatedRecordWithheld(body).Should().Be(withheld ? true : null);
     }
 
     private static HttpClient AuthenticatedClient(DocumentIdentityTestWebAppFactory factory)

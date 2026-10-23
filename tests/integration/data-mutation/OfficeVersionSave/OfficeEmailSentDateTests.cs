@@ -59,6 +59,22 @@ public class OfficeEmailSentDateTests
     }
 
     [Fact]
+    public async Task EmailSave_WhenTheClientSentTheBody_StillTakesTheMailboxsSentDateTime()
+    {
+        // The pane and Quick Save always send the body (task 116a), so the full fetch never runs for them: the light
+        // sentDateTime read is what dates the row, the .eml and the names (review F4).
+        var world = new OfficeVersionSaveWorld();
+        var graph = new MessageGraph(SentInTheMailbox, withBody: false);
+        using var factory = Host(world, graph.Factory);
+
+        var response = await factory.CreateClient().PostAsJsonAsync("/api/office/save", EmailSave(body: "<p>The email text</p>"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        graph.Reads.Should().Be(1, "one light read, no full fetch");
+        ShouldBeDatedEverywhere(world, SentInTheMailbox);
+    }
+
+    [Fact]
     public async Task EmailSave_WhenGraphIsNotReached_KeepsTheRequestsSentDate()
     {
         var world = new OfficeVersionSaveWorld();
@@ -126,7 +142,7 @@ public class OfficeEmailSentDateTests
 
     /// <summary>A pane save of a read email: no body (so the server reads the mailbox), the item's dates as Office.js
     /// gives them.</summary>
-    private static SaveRequest EmailSave() => new()
+    private static SaveRequest EmailSave(string? body = null) => new()
     {
         ContentType = SaveContentType.Email,
         TargetEntity = new SaveEntityReference { EntityType = "matter", EntityId = Guid.NewGuid() },
@@ -138,6 +154,8 @@ public class OfficeEmailSentDateTests
             InternetMessageId = RfcId,
             ExchangeItemId = ItemId,
             IsNameSystemDerived = true,
+            Body = body,
+            IsBodyHtml = body is not null,
         },
     };
 

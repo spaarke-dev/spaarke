@@ -135,7 +135,11 @@ Rule: a derived record is shown only on a positive answer to "does the CALLER ho
 `CallerRecordAccessProbe.GetCallerRightsAsync` (the probe behind `RecordRouteAccessAuthorizationFilter`; entity set from
 `EntityAccessFilter.TryResolveEntitySet`). No Read, a type outside that table, or a failed/throwing check → no card;
 the rest of the 200 answer is unchanged (never a 403 or 503 for the whole answer). Its display fields are read only after
-the check passes. A document with its own slot keeps it, and its communication is not read. Applied once, in
+the check passes. A document with its own slot keeps it, and its communication is not read. When the communication IS
+filed but the card is left out (no Read, an unmapped type, a failed check), the answer carries the optional
+`relatedRecordWithheld: true` (absent otherwise), which the pane maps to "record unknown" (`relatedRecordKnown: false`):
+it must not read the null card as "not filed" and offer "File to record", which would add a second parent. (A
+communication that cannot be READ at all is still answered without the flag: a known gap.) Applied once, in
 `FileAccessEndpoints.BuildIdentityResponseAsync`, which all three identity routes share; the derivation itself is
 `DocumentUrlIdentityResolution.ResolveDerivedRelatedRecordAsync`.
 

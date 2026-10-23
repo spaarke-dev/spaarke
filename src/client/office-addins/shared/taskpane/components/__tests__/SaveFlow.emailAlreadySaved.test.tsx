@@ -17,8 +17,10 @@ import { useState } from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { SaveFlow } from '../SaveFlow';
+import { apiClient } from '@shared/services';
 import {
   applyFiledRecord,
+  resolveEmailIdentity,
   type DocumentIdentityState,
   type ResolvedRelatedRecord,
 } from '../../services/documentIdentityService';
@@ -167,6 +169,31 @@ describe('SaveFlow — an Outlook email already in Spaarke (task 120)', () => {
       matterLookup: 'aaaaaaaa-0000-0000-0000-00000000000a',
     });
     await waitFor(() => expect(screen.queryByText('Not filed to a record yet.')).toBeNull());
+  });
+
+  it('filed through its communication to a record the caller may not see (relatedRecordWithheld): record UNKNOWN — no "Not filed", no picker, no File to record', async () => {
+    // The identity is what the pane really builds from the server's answer (review F1), not a hand-made literal.
+    const post = jest.spyOn(apiClient, 'post').mockResolvedValue({
+      resolved: true,
+      documentId: EML_ID,
+      documentName: 'RE: Discovery schedule',
+      fileName: 'RE_ Discovery schedule_a1b2.eml',
+      relatedRecord: null,
+      relatedRecordWithheld: true,
+      reason: null,
+    });
+    const identity = await resolveEmailIdentity({ internetMessageId: '<CAF0@mail.example.com>', exchangeItemId: null });
+    post.mockRestore();
+    expect(identity).not.toBeNull();
+
+    render(<OutlookPane initial={identity!} />);
+
+    expect(screen.getByText('Saved to Spaarke')).toBeInTheDocument();
+    expect(screen.getAllByText('Filing record not available here.').length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText('Not filed to a record yet.')).toBeNull();
+    expect(screen.queryByTestId('related-to-picker')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'File to record' })).toBeNull();
+    expect(callsTo('/api/v1/documents/', 'PUT')).toHaveLength(0);
   });
 
   it('"Save again as a new document" opens the email form; its Save is a CREATE, never a version', async () => {
