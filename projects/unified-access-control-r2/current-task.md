@@ -33,7 +33,18 @@
    - F2 (UAC's own #2277 matcher used a substring match) is fixed by **#2301, merged 39306ac044** (quoted-token match). It is test-only; ebilling takes it in its next master merge.
 2. **R3 ISS-005: the guard is ACCEPTED at c05d1b2788 (round 6).** It stays unmerged until the owner signs off the dedicated contact owner team design. R3 will then send the design-change diff for UAC review. The pre-existing finding is tracked privately as GHSA-hq7m-w2pf-v8j7. The defer list carries the reference only; never add the mechanism.
 3. **Ontology task 163 (PR #2298, D-185):** K4 is accepted for internal callers. Condition: no app-only policy enrichment for an external or unknown caller, mirrored privately in `SignalReadService` from master's `IsExternalOrUnknownCallerAsync` (do not copy the Filters file). Ontology accepted it and its pass 2 checks it. Ontology will ping before and after the live deploy (BFF, then config, then role) with the #1355 read-back; then run the server-side gate.
-4. **#2292 (membership junction never populated: an alternate-key miss throws instead of creating).** Filed; not an access input. Fix it when there is capacity, or leave it filed.
+4. **Dev BFF deploy gate (R3):**
+   - **0317579272** (ontology 159/161/163): UAC OK, on condition Router and Client lint are green.
+   - **HOLD on cdb149cc2d and every later master SHA** until word-add-in fixes #2304:
+     - F2: the email identity probe answers an unreadable Message-ID match (403) differently from no match (200 not_saved);
+     - F3: no tests for refused access.
+
+     Re-check their fix PR, then re-OK. K1–K3 are to be filed by word-add-in.
+   - Run the server gate after whichever SHA deploys.
+5. **Basic User (11f93c04) lost `prvReadsprk_Policy` and `prvReadsprk_ruleset`** at 2026-10-23 00:01:07Z (MCP times are local EDT). modifiedby is the owner's account; there was no import.
+   - Ruled out: UAC, R3, ebilling, ontology, word-add-in and the BFF.
+   - Ontology tracks it in its security-roles §19. Not re-granted, because D-185 removes it anyway.
+6. **#2292 (membership junction never populated: an alternate-key miss throws instead of creating).** Filed; not an access input. Fix it when there is capacity, or leave it filed.
 
 ## Peer reviews owed (UAC is the gate)
 - **ebilling:**
