@@ -1022,6 +1022,21 @@ it needs the act-on-behalf-of-another-user privilege.
   -BffApplicationIds <bff-uami-client-id>[,<bff-app-registration-id>] -Verify   # must exit 0
 ```
 
+**Rollout — an email bind needs a current invite stamp.** From the release that writes these two columns, every invite
+(`/invite` and `/invite-and-grant`) records the invited address (hashed) and, when the inviter names it, the person's
+Entra tenant id (`invitedTenantId`, a GUID; anything else is refused with 400). An unbound contact is bound to a sign-in
+by its email only when that stamp is current (the invite marker's 30-day window), records the sign-in's email and the
+contact's current `emailaddress1`, and — for a work account (the Workforce plane and WorkforceHome registration) —
+names the sign-in's tenant, unless the token carries `xms_edov` as boolean `true`. A successful bind clears the stamp.
+Otherwise the sign-in is refused with `contact_not_invited` ("invite again"); nothing is bound or created. Contacts
+already bound by oid are not affected. Plan for:
+
+- **Workforce contacts never invited through the BFF, or invited before this release, need a re-invite that names
+  their tenant** (unless their tokens carry `xms_edov`). Their first work-account sign-in is refused until then.
+- A pending invite from before this release has no stamp, so a grant to that contact sends a new invite instead of
+  answering "already pending".
+- The systemuser plane (licensed users) is unchanged: no stamp is needed there.
+
 #### 6.5.3 Identity collisions — the operator procedure
 
 A **collision** is any of: an email match on a contact bound to a different oid; an oid carried by more than one
@@ -2593,6 +2608,7 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 | 2026-10-08 | §5 handler table: **H4b** row added — the BFF app settings are written through the ARM SDK on both slots (merge, never replace), no longer by running the generated Configure script; **H6** row — the org-settings contract is one Dataverse Web API PATCH and H6 installs no application. The L2 Worker runs no shell tool (G38) | `customer-provisioning-orchestration-r1` T253 |
 | 2026-10-20 | §7.4: the document Access Permission schema — `scripts/Set-DocumentAccessPermissionSchema.ps1` (`sprk_document.sprk_accessinheritance`, not field-secured) runs BEFORE a BFF carrying task 189 is deployed; until it has, that BFF only raises a document's Access Permission to what its parents give and never lowers one (documents listed under `tablesWithoutColumn`, raises counted in `raisedOnly`). A raise kept in that window is recorded as the document's own on the first run after the script and is never widened again: the schema must go first, and §7.4 says how to find such documents and widen them by hand | `unified-access-control-r2` task 189 (D7 T7a, #2126; security pass 2) |
 | 2026-10-23 | §6.5.2: contact access-level and identity bookkeeping columns are field-secured — `scripts/Set-ExternalAccessContactSecuritySchema.ps1` (dry run, `-Apply`, `-Verify` exit 0) secures `sprk_accesspermissiongrant`, `sprk_identityplane` and the `sprk_identitycollision*` columns and adds three BFF-only columns; the H6 path for a new stamp applies once SpaarkeMaster 1.2.4.0 is published; §7.11: H7b S18 covers the plane and collision columns, S19 verifies the access-level lock and the whole standing-grant lock (Standing Grant Administrators 4/4/4; no other writer but System Administrator — `secure_setup.standing_grant_lock_other_writer`), S22 verifies the three BFF-only columns' locks once a release carries them; an H7b carrying these checks requires SpaarkeMaster >= 1.2.4.0 published before the control plane is deployed | `spaarke-SPA-external-access-platform-r3` (contact identity hardening, slice A) |
+| 2026-10-23 | §6.5.2 rollout note: an email bind needs a current invite stamp (invited address and, for work accounts, the invited tenant unless `xms_edov` is boolean true); invites take an optional `invitedTenantId` (GUID); Workforce contacts never invited through the BFF, or invited before this release, need a re-invite naming their tenant | `spaarke-SPA-external-access-platform-r3` (contact identity hardening, slice B) |
 
 ---
 
