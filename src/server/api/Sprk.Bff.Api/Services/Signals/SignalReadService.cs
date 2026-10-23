@@ -748,9 +748,9 @@ public sealed class SignalReadService
     /// reverse does not hold: an old BFF with the new configuration (no <c>policy</c> link) loses names and severity. Deploy order is
     /// BFF, then configuration, then roles last (roles first empties the worklist while the old link is still configured).
     /// A row with no policy id, or whose policy no longer exists, keeps what its Signal row carried (today's missing-alias behaviour:
-    /// no short name or work type, severity unknown, ranked last). A faulted read throws to the caller's catch (unavailable).
-    /// A caller who is external or unknown (<see cref="IsExternalOrUnknownCallerAsync"/>) gets no enrichment and no query: the same
-    /// blanks as the caller-run link gave, so the BFF read never shows an external guest what their role cannot read.
+    /// no short name or work type, severity unknown, ranked last). A faulted read, or a fault resolving the caller, throws to the caller's catch (unavailable).
+    /// A caller who is external or unknown (<see cref="IsExternalOrUnknownCallerAsync"/>) gets no BFF enrichment and no query: they get only
+    /// what their own read returned (the same blanks as the caller-run link gave), so the BFF read never shows them more than their own read did.
     /// </summary>
     private async Task<List<VisibleRow>> ApplyPolicyColumnsAsync(List<VisibleRow> visible, ClaimsPrincipal? user, CancellationToken ct)
     {
@@ -788,34 +788,40 @@ public sealed class SignalReadService
     }
 
     /// <summary>
-    /// True unless the caller is a resolved INTERNAL systemuser: not resolved, a non-GUID id, or <c>sprk_isexternal</c> true is external;
-    /// any other fault counts as external too (the policy columns are withheld; the rows are still returned). Cancellation is rethrown.
+    /// True when the caller is external or unknown: <c>ISystemUserIdentityResolver.IsExternalAsync</c> is true, the resolver cannot match
+    /// the caller (<c>no-claims-principal</c>, <c>no-oid-claim</c>, <c>no-matching-systemuser</c>, <c>resolver-not-registered</c>), or the
+    /// resolved id is not a GUID. Those are answers, not faults: the rows are returned without enrichment.
+    /// A Dataverse fault is NOT an answer: the resolver's <c>lookup-failed</c>, or any exception from either resolver, is thrown to
+    /// <c>ReadAsync</c>'s catch (503 worklist unavailable), because severity ranks every row and an internal user must never get a
+    /// 200 whose rule names, work types and severities are silently blank. Cancellation propagates unchanged.
     /// </summary>
-    // Keep in step with InternalPlaneDocumentNarrowing.IsExternalOrUnknownCallerAsync (master).
+    // Deliberate deviation from InternalPlaneDocumentNarrowing.IsExternalOrUnknownCallerAsync (master): there a fault only narrows
+    // documents (fail closed); here it would re-rank every row. The externality test itself is kept in step with it.
     internal static async Task<bool> IsExternalOrUnknownCallerAsync(
         ICallerSystemUserResolver callerResolver, ISystemUserIdentityResolver systemUsers, ClaimsPrincipal? user, ILogger logger, CancellationToken ct)
     {
-        try
+        var resolution = await callerResolver.ResolveAsync(user, ct).ConfigureAwait(false);
+        if (!resolution.IsResolved)
         {
-            var resolution = await callerResolver.ResolveAsync(user, ct).ConfigureAwait(false);
-            if (!resolution.IsResolved || !Guid.TryParse(resolution.SystemUserId, out var systemUserId))
+            if (string.Equals(resolution.UnresolvedReason, CallerLookupFailedReason, StringComparison.Ordinal))
             {
-                return true;
+                logger.LogWarning("Signal read: the caller could not be resolved ({Reason}); unavailable.", CallerLookupFailedReason);
+                throw new InvalidOperationException("The caller's systemuser lookup failed.");
             }
 
-            return await systemUsers.IsExternalAsync(systemUserId, ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning("Signal read: the caller's external flag could not be read ({ExceptionType}); policy columns withheld (fail closed).",
-                ex.GetType().Name);
             return true;
         }
+
+        if (!Guid.TryParse(resolution.SystemUserId, out var systemUserId))
+        {
+            return true;
+        }
+
+        return await systemUsers.IsExternalAsync(systemUserId, ct).ConfigureAwait(false);
     }
+
+    /// <summary><see cref="CallerSystemUserResolution.UnresolvedReason"/> of a Dataverse fault in <c>CallerSystemUserResolver</c>.</summary>
+    internal const string CallerLookupFailedReason = "lookup-failed";
 
     // ---------------------------------------------------------------------------------------------------------------
     // (5) catalog

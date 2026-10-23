@@ -1888,9 +1888,20 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
     }
 
     [Fact]
-    public async Task AnUnresolvedOrNonGuidCaller_IsNotEnriched()
+    public async Task AnUnresolvedOrNonGuidCaller_IsNotEnriched_ButTheRowsAreStillReturned()
     {
-        foreach (var world in new[] { new World { CallerUnresolved = true }, new World { CallerResolvedToNonGuid = true } })
+        // The resolver's "no answer" reasons (CallerSystemUserResolver.cs): no-claims-principal, no-oid-claim, no-matching-systemuser,
+        // and the null-object's resolver-not-registered. All are 200 with no enrichment. lookup-failed is a fault and is NOT here.
+        var worlds = new List<World>
+        {
+            new() { CallerResolvedToNonGuid = true },
+        };
+        foreach (var reason in new[] { "no-claims-principal", "no-oid-claim", "no-matching-systemuser", "resolver-not-registered" })
+        {
+            worlds.Add(new World { CallerUnresolved = true, CallerUnresolvedReason = reason });
+        }
+
+        foreach (var world in worlds)
         {
             var m = world.Matter(readers: [Alice]);
             var s = world.Signal(Decide, core: (MatterType, m), severity: Critical, workType: 100000001, shortName: "Budget gap");
@@ -1901,23 +1912,33 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
     }
 
     [Fact]
-    public async Task AResolverFault_IsNotEnriched_ButTheRowsAreStillReturned()
+    public async Task AResolverFault_Is503_NotARowListWithBlankSeverity()
     {
-        foreach (var world in new[] { new World { CallerResolverThrows = true }, new World { ExternalFlagReadThrows = true } })
+        // F2 (fix round 2): a Dataverse fault resolving the caller (an exception from either resolver, or the resolver's own
+        // "lookup-failed" answer) must not turn into a 200 whose rule names, work types and severities are blank for an internal user.
+        var worlds = new[]
+        {
+            new World { CallerResolverThrows = true },
+            new World { ExternalFlagReadThrows = true },
+            new World { CallerUnresolved = true, CallerUnresolvedReason = SignalReadService.CallerLookupFailedReason },
+        };
+        foreach (var world in worlds)
         {
             var m = world.Matter(readers: [Alice]);
-            var s = world.Signal(Decide, core: (MatterType, m), severity: Critical, workType: 100000001, shortName: "Budget gap");
+            world.Signal(Decide, core: (MatterType, m), severity: Critical, workType: 100000001, shortName: "Budget gap");
 
             var response = await GetAsync(world, Alice);
 
-            response.StatusCode.Should().Be(HttpStatusCode.OK);
-            Items((await response.Content.ReadFromJsonAsync<JsonElement>()).Clone()).Should().Equal(new ItemView(s, null, null));
+            response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+            var problem = await Problem(response);
+            problem.GetProperty("reasonCode").GetString().Should().Be("ontology.signal.worklist_unavailable");
+            problem.ToString().Should().NotContain("lanes", "no rows come back when the caller cannot be classified");
             world.PolicyReads.Should().BeEmpty();
         }
     }
 
     [Fact]
-    public async Task TheExternalRule_RethrowsCancellation_AndTreatsAnyOtherFaultAsExternal()
+    public async Task TheExternalRule_RethrowsCancellation_AndAnyOtherFault_ButNotAnAnswer()
     {
         using var cts = new CancellationTokenSource();
         cts.Cancel();
@@ -1929,9 +1950,34 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         var act = () => SignalReadService.IsExternalOrUnknownCallerAsync(cancelling.Object, users.Object, null, logger, cts.Token);
         await act.Should().ThrowAsync<OperationCanceledException>();
 
-        // The same exception while the token is NOT cancelled is any other fault: external (fail closed).
-        (await SignalReadService.IsExternalOrUnknownCallerAsync(cancelling.Object, users.Object, null, logger, CancellationToken.None))
-            .Should().BeTrue();
+        // The same exception while the token is NOT cancelled is any other fault: it propagates (the route answers 503).
+        var notCancelled = () => SignalReadService.IsExternalOrUnknownCallerAsync(cancelling.Object, users.Object, null, logger, CancellationToken.None);
+        await notCancelled.Should().ThrowAsync<OperationCanceledException>();
+
+        var faulting = new Mock<ICallerSystemUserResolver>();
+        faulting.Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>())).ThrowsAsync(new TimeoutException());
+        var fault = () => SignalReadService.IsExternalOrUnknownCallerAsync(faulting.Object, users.Object, null, logger, CancellationToken.None);
+        await fault.Should().ThrowAsync<TimeoutException>();
+
+        // lookup-failed is the resolver's own Dataverse fault; every other unresolved reason is an answer (external/unknown).
+        foreach (var (reason, expectThrow) in new[]
+        {
+            ("lookup-failed", true), ("no-claims-principal", false), ("no-oid-claim", false), ("no-matching-systemuser", false), ("resolver-not-registered", false),
+        })
+        {
+            var r = new Mock<ICallerSystemUserResolver>();
+            r.Setup(x => x.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(CallerSystemUserResolution.Unresolved(reason));
+            var call = () => SignalReadService.IsExternalOrUnknownCallerAsync(r.Object, users.Object, null, logger, CancellationToken.None);
+            if (expectThrow)
+            {
+                await call.Should().ThrowAsync<InvalidOperationException>(reason);
+            }
+            else
+            {
+                (await call()).Should().BeTrue(reason);
+            }
+        }
     }
 
     [Fact]
@@ -2257,6 +2303,8 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         /// <summary>D-185 (uac-r2): how the caller reads for the external-or-unknown rule. Default: a resolved internal systemuser.</summary>
         public bool CallerIsExternal { get; set; }
         public bool CallerUnresolved { get; set; }
+        /// <summary>The resolver's UnresolvedReason when <see cref="CallerUnresolved"/>; default no-matching-systemuser.</summary>
+        public string CallerUnresolvedReason { get; set; } = "no-matching-systemuser";
         public bool CallerResolvedToNonGuid { get; set; }
         public bool CallerResolverThrows { get; set; }
         public bool ExternalFlagReadThrows { get; set; }
@@ -2614,7 +2662,7 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
             var world = factory.World;
             if (world.CallerResolverThrows) throw new TimeoutException("caller resolution timed out");
             if (world.CallerUnresolved)
-                return Task.FromResult(new CallerSystemUserResolution { IsResolved = false, UnresolvedReason = "no-matching-systemuser" });
+                return Task.FromResult(new CallerSystemUserResolution { IsResolved = false, UnresolvedReason = world.CallerUnresolvedReason });
             return Task.FromResult(new CallerSystemUserResolution
             {
                 IsResolved = true,
