@@ -122,8 +122,9 @@ public static class SecureRecordSetupRejectionCodes
     public const string IdentityLinkWriterHasOtherMember = "secure_setup.identity_link_writer_has_other_member";
 
     /// <summary>
-    /// S18: the shipped lock on <c>contact.sprk_externalobjectid</c> / <c>systemuser.sprk_primarycontact</c> is
-    /// incomplete — a column not secured, or a reader / writer grant missing (Resumable: import SpaarkeMaster, H6).
+    /// S18: the shipped lock on a column of <see cref="SecureRecordSetupProcedure.IdentityLinkColumns"/> is incomplete — a
+    /// column not secured, or a reader / writer grant missing (Resumable: import SpaarkeMaster 1.2.4.0 or later, H6, or run
+    /// scripts/Set-ExternalAccessContactSecuritySchema.ps1 -Apply in an existing environment).
     /// </summary>
     public const string IdentityLinkLockIncomplete = "secure_setup.identity_link_lock_incomplete";
 
@@ -147,7 +148,8 @@ public static class SecureRecordSetupRejectionCodes
 
     /// <summary>
     /// S19 (#2317): <c>contact.sprk_accesspermissiongrant</c> is absent or not secured, or its lock is not the shipped one —
-    /// Standing Grant Administrators 4/4/4, Readers read 4, Writers read and update 4 (Resumable: import SpaarkeMaster, H6).
+    /// Standing Grant Administrators 4/4/4, Readers read 4, Writers read and update 4 (Resumable: import SpaarkeMaster 1.2.4.0
+    /// or later, H6, or run scripts/Set-ExternalAccessContactSecuritySchema.ps1 -Apply in an existing environment).
     /// </summary>
     public const string AccessLevelLockIncomplete = "secure_setup.access_level_lock_incomplete";
 

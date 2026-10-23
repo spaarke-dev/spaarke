@@ -1001,8 +1001,10 @@ five `sprk_identitycollision*` columns, and creates three BFF-only columns secur
 No other profile (System Administrator excepted) may read, create or update these columns. Run it with the same
 `-BffApplicationIds` as above — dry run, then `-Apply`, then `-Verify`, which checks every column is secured and every
 profile x column pair, and **must exit 0** before a BFF that writes the new columns is deployed. A new stamp receives
-the columns, the field security and the profile permissions through the SpaarkeMaster import (H6); H7b's identity-link
-check (S18) covers the plane and collision columns. The BFF trusts an EMPTY value of `sprk_accesspermissiongrant`, the
+the columns, the field security and the profile permissions through the SpaarkeMaster import (H6) — that path applies
+only once SpaarkeMaster 1.2.4.0 is published (1.2.3.1 and earlier do not secure these columns; until then run the
+script on a new stamp too). H7b's identity-link check (S18) covers the plane and collision columns, and its
+standing-grant check (S19) the access level (§7.11). The BFF trusts an EMPTY value of `sprk_accesspermissiongrant`, the
 binding, the plane or a collision column only after it has proven it can read the column (the System Administrator role,
 matched by its role template id, or a field security profile granting Read, directly or through a team; re-proven every
 10 minutes). Until then the standing grant confers no access, no contact is bound or created, no collision flag is
@@ -1747,6 +1749,13 @@ no solution import can create. Since T256, **H7b creates it on every run**, afte
   (QuarantineRequired). While a column is absent that is the expected state: H7b records the same "absent" note and
   does not fail. `scripts/Set-ExternalAccessContactSecuritySchema.ps1 -Verify` (exit 0, §6.5.2) remains the gate for
   these columns before that release.
+
+**Release ordering (#2317).** An H7b carrying these checks requires SpaarkeMaster >= 1.2.4.0 published before the
+control plane is deployed. SpaarkeMaster 1.2.3.1 and earlier do not secure the identity plane, collision and access-level
+columns, so against such an environment S18 refuses `secure_setup.identity_link_lock_incomplete` and S19
+`secure_setup.access_level_lock_incomplete`, each naming 1.2.4.0. A new stamp imports 1.2.4.0 or later (H6) and the run
+is resumed; in an existing environment run `scripts/Set-ExternalAccessContactSecuritySchema.ps1 -Apply` (then
+`-Verify`, exit 0, §6.5.2), then resume.
 
 An intake `secureRecordSetupDryRun: true` makes H7b read only. It records its plan in gate `h7b-secure-setup-plan` and
 stops the run.
@@ -2583,7 +2592,7 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 | 2026-10-05 | §6.5.4: only `dev` carries the marker today — Spaarke's production operator environment (`demo`, declared `false`) adds it in the change that stands it up; the registry declaration must be a JSON boolean and the deploy fails on any other type (`[bool]"false"` is true in PowerShell) | `unified-access-control-r2` task 165, round 57 (`task/uac-r2-165-h`) |
 | 2026-10-08 | §5 handler table: **H4b** row added — the BFF app settings are written through the ARM SDK on both slots (merge, never replace), no longer by running the generated Configure script; **H6** row — the org-settings contract is one Dataverse Web API PATCH and H6 installs no application. The L2 Worker runs no shell tool (G38) | `customer-provisioning-orchestration-r1` T253 |
 | 2026-10-20 | §7.4: the document Access Permission schema — `scripts/Set-DocumentAccessPermissionSchema.ps1` (`sprk_document.sprk_accessinheritance`, not field-secured) runs BEFORE a BFF carrying task 189 is deployed; until it has, that BFF only raises a document's Access Permission to what its parents give and never lowers one (documents listed under `tablesWithoutColumn`, raises counted in `raisedOnly`). A raise kept in that window is recorded as the document's own on the first run after the script and is never widened again: the schema must go first, and §7.4 says how to find such documents and widen them by hand | `unified-access-control-r2` task 189 (D7 T7a, #2126; security pass 2) |
-| 2026-10-23 | §6.5.2: contact access-level and identity bookkeeping columns are field-secured — `scripts/Set-ExternalAccessContactSecuritySchema.ps1` (dry run, `-Apply`, `-Verify` exit 0) secures `sprk_accesspermissiongrant`, `sprk_identityplane` and the `sprk_identitycollision*` columns and adds three BFF-only columns; §7.11: H7b S18 covers the plane and collision columns | `spaarke-SPA-external-access-platform-r3` (contact identity hardening, slice A) |
+| 2026-10-23 | §6.5.2: contact access-level and identity bookkeeping columns are field-secured — `scripts/Set-ExternalAccessContactSecuritySchema.ps1` (dry run, `-Apply`, `-Verify` exit 0) secures `sprk_accesspermissiongrant`, `sprk_identityplane` and the `sprk_identitycollision*` columns and adds three BFF-only columns; the H6 path for a new stamp applies once SpaarkeMaster 1.2.4.0 is published; §7.11: H7b S18 covers the plane and collision columns, S19 verifies the access-level lock and the whole standing-grant lock (Standing Grant Administrators 4/4/4; no other writer but System Administrator — `secure_setup.standing_grant_lock_other_writer`), S22 verifies the three BFF-only columns' locks once a release carries them; an H7b carrying these checks requires SpaarkeMaster >= 1.2.4.0 published before the control plane is deployed | `spaarke-SPA-external-access-platform-r3` (contact identity hardening, slice A) |
 
 ---
 

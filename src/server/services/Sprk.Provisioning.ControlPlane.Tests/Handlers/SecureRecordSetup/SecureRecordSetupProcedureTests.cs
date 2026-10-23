@@ -957,6 +957,55 @@ public sealed class SecureRecordSetupProcedureTests
             .And.Contain("Only Standing Grant Administrators and System Administrator may create or update the standing grant");
     }
 
+    // ------------------------------------------------------------ S18/S19: an environment on SpaarkeMaster 1.2.3.1
+
+    /// <summary>
+    /// The contact columns as SpaarkeMaster 1.2.3.1 leaves them: the identity plane, collision and access-level columns exist
+    /// but are not secured and carry no profile rows; the three BFF-only columns do not exist (NewEnvironment omits them).
+    /// </summary>
+    private static void ShapeAsSpaarkeMaster1231(FakeSecureRecordSetupDataverse dv, bool identityPlaneAndCollisionToo)
+    {
+        if (identityPlaneAndCollisionToo)
+        {
+            foreach (var (table, column) in SecureRecordSetupProcedure.IdentityLinkColumns
+                         .Where(c => c.Column.StartsWith("sprk_identity", StringComparison.Ordinal)))
+            {
+                dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey(table, column)] = false;
+                dv.ColumnPermissions(column).Clear();
+            }
+        }
+        dv.SecuredColumns[LevelKey] = false;
+        dv.ColumnPermissions(Level).Clear();
+    }
+
+    [Fact]
+    public async Task SpaarkeMaster1231Environment_IsRefusedAtS18_NamingTheMinimumVersionAndTheScript()
+    {
+        var dv = NewEnv();
+        ShapeAsSpaarkeMaster1231(dv, identityPlaneAndCollisionToo: true);
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.IdentityLinkLockIncomplete, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain("contact.sprk_identityplane")
+            .And.Contain("SpaarkeMaster 1.2.4.0 or later")
+            .And.Contain("scripts/Set-ExternalAccessContactSecuritySchema.ps1 -Apply");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task SpaarkeMaster1231AccessLevel_IsRefusedAtS19_NamingTheMinimumVersionAndTheScript()
+    {
+        var dv = NewEnv();
+        ShapeAsSpaarkeMaster1231(dv, identityPlaneAndCollisionToo: false);
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.AccessLevelLockIncomplete, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain("contact.sprk_accesspermissiongrant")
+            .And.Contain("SpaarkeMaster 1.2.4.0 or later")
+            .And.Contain("scripts/Set-ExternalAccessContactSecuritySchema.ps1 -Apply");
+        dv.Writes.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task BffOnlyColumnsAndRemovedOn_Absent_Pass_AndRecordTheAbsentOutcome()
     {

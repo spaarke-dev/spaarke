@@ -207,6 +207,20 @@ public sealed class SecureRecordSetupProcedure
     /// </summary>
     public const string AccessRemovedOnColumn = "sprk_externalaccessremovedon";
 
+    /// <summary>
+    /// S18/S19 (#2317): the first SpaarkeMaster release that secures the identity plane, collision and access-level columns
+    /// with the locks S18 and S19 verify. An environment on an earlier release is refused until it carries them.
+    /// </summary>
+    public const string ContactLocksMinimumSpaarkeMasterVersion = "1.2.4.0";
+
+    /// <summary>S18/S19 (#2317): the script that applies those locks to an existing environment (<c>-Apply</c>, then <c>-Verify</c>).</summary>
+    public const string ContactSecuritySchemaScript = "scripts/Set-ExternalAccessContactSecuritySchema.ps1";
+
+    /// <summary>S18/S19: the remedy an incomplete contact lock names — the minimum release, or the script for an existing environment.</summary>
+    private const string ContactLocksRemedy =
+        "It requires SpaarkeMaster " + ContactLocksMinimumSpaarkeMasterVersion + " or later: import it (H6), or in an existing " +
+        "environment run " + ContactSecuritySchemaScript + " -Apply (then -Verify, exit 0); then resume. Nothing was written.";
+
     /// <summary>S22 (#2317): the BFF-only columns, checked as <see cref="InviteCodeHashColumn"/> is.</summary>
     public static readonly IReadOnlyList<string> BffOnlyColumns = [InvitedEmailHashColumn, InvitedTenantIdColumn];
 
@@ -572,8 +586,8 @@ public sealed class SecureRecordSetupProcedure
                     $"'{IdentityLinkReaderProfileName}' read={reader?.CanRead.ToString() ?? "(none)"}, " +
                     $"'{IdentityLinkWriterProfileName}' read/create/update=" +
                     $"{(writer is null ? "(none)" : $"{writer.CanRead}/{writer.CanCreate}/{writer.CanUpdate}")} " +
-                    "(expected secured, 4, 4/4/4). The package's identity-binding lock (task 141) is incomplete: import " +
-                    "SpaarkeMaster (H6), then resume. Nothing was written.");
+                    "(expected secured, 4, 4/4/4). The package's identity-binding lock (task 141) is incomplete. " +
+                    ContactLocksRemedy);
             }
             var otherLinkWriters = columnPermissions
                 .Where(p => p.ProfileId != linkWriterProfileId
@@ -648,8 +662,7 @@ public sealed class SecureRecordSetupProcedure
                 $"'{StandingGrantProfileName}' read/create/update={Rights(levelStanding)}, " +
                 $"'{ReaderProfileName}' read={levelReader?.CanRead.ToString() ?? "(none)"}, " +
                 $"'{WriterProfileName}' read/update={(levelWriter is null ? "(none)" : $"{levelWriter.CanRead}/{levelWriter.CanUpdate}")} " +
-                "(expected secured, 4/4/4, 4, 4/4). The package's access-level lock is incomplete: import SpaarkeMaster (H6), " +
-                "then resume. Nothing was written.");
+                "(expected secured, 4/4/4, 4, 4/4). The package's access-level lock is incomplete. " + ContactLocksRemedy);
         }
         var levelOtherWriters = levelPermissions
             .Where(p => p.ProfileId != standingProfileId
