@@ -427,3 +427,56 @@ Verification after the fix: `dotnet build` 0 warnings, 0 errors. Handler classes
   - UAC's first gate reading is also clean.
   - Client redeploys (CommunicationActions, EmailPage, LegalWorkspace, Console) are UAC's, in its session.
 - **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261022T124709Z` (= `a7b956fb55`).
+
+## Deploy 2026-10-22/23: dev BFF 1fa0cf5cb8 + #1830 container + external SPA (owner-approved)
+
+**Owner approval.** Given directly in this session: "BFF deploy of 1fa0cf5cb8 is approved"; later "re-provisioning the 65a3fab2 container--yes approved", "the ISS-007 re-index--yes proceed" and "the SPA deploy - yes proceed".
+
+**Peer OKs for 1fa0cf5cb8:**
+- UAC, ontology, field-mapping, word-add-in, SPE admin;
+- ebilling: a fresh OK, needed because #2258 touches InvoiceExtractionJobHandler and ontology 157 adds EarlierInvoiceReadability;
+- provisioning: standing OK.
+
+**Range 1283c41817..1fa0cf5cb8:**
+- UAC #2253, #2268, #2258, #2277;
+- R3 #2279 (ISS-001/003/004/007/011/012);
+- field-mapping #2261, #2266, #2282;
+- ontology #2233;
+- CI #2252.
+
+### BFF deploy
+| Step | Result |
+|---|---|
+| A, live read | Live was 1283c41817 (23:56Z). Snapshot `deploy/rollback/wwwroot-20261022T235642Z` (222 files). healthz 200. |
+| B, setting read | `SharePointEmbedded__OwnedContainerIds` held 2 ids, comma-separated. No slots. |
+| C, setting change | Kept `b!vzGD…` only and removed `b!MVasATu…`. Read back: 1 id. Rollback: re-add the id. |
+| D, deploy | `Deploy-BffApi.ps1 -Environment dev` from detached worktree `C:\wtbffe-1fa`. The script verified 4 file hashes, health and CORS. Live ProductVersion `1.0.0+1fa0cf5cb8…`, first read 2026-10-23 00:00:36Z. healthz 200, healthz/dataverse 200, anonymous /api/me 401. |
+| E, server gate | UAC, window 00:00–00:30:36Z. The early read for 00:00–00:05Z was 0 exceptions, 0 "Invalid hostname", 0 deny-list refusals, 0 5xx. |
+
+**Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261022T235642Z` (restores 1283c41817).
+
+### #1830 Steps 0–2: project 65a3fab2
+Run as the owner's delegated az login.
+
+- **Step 0.** Matched the recorded state:
+  - etag `W/"27392369"`;
+  - container id was the dead `b!MVasATu…`;
+  - owner team 6eabc7f9 (Secure Record Owners);
+  - issecure true;
+  - one share, to 1d02f31c with mask 262167.
+- **Step 1.** PATCH container id to null with If-Match. Read back: null. New etag `W/"28862494"`.
+- **Step 2.** POST provision-project returned 200 at 00:22:42Z.
+  - `resumed=true`, with new container `b!euxXOoXL…`.
+  - The share was not rewritten.
+  - Children and filed records Completed.
+- **Read-back.** The new id is held by exactly 1 project. No matter, work assignment or BU holds it. Owner and share unchanged.
+
+### ISS-007 re-index: none needed on dev
+- Read-only query: 5 documents are linked only to a service request; 2 are indexed (85585c76, cba17a34 in `spaarke-files-index`).
+- None of the 4 service requests regards a matter, project or work assignment. Re-indexing would still give no parent (fail closed), so send-to-index was not run.
+
+### External SPA: 3531ed65e → 1fa0cf5cb8
+- Rollback tag `external-spa-dev-rollback-3531ed65e`; build tag `external-spa-dev-1fa0cf5cb8`.
+- `gh workflow run deploy-external-spa.yml --ref external-spa-dev-1fa0cf5cb8 -f environment=dev`: run 39878122856, success.
+- Verified: `/` 200, `auth-callback.html` 200. `assets/app.js` contains `hasFile` (ISS-011), `allowRemoteImages` and `contain:"paint` (ISS-003).
+- **Rollback:** `gh workflow run deploy-external-spa.yml --ref external-spa-dev-rollback-3531ed65e -f environment=dev`.
