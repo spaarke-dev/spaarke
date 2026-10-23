@@ -65,6 +65,9 @@ public class AccessTableAppOnlyWriterTests
 
         // #2253 fix round 5 (K1): the classifier taxonomy whose category routes an unfiled communication's owner.
         "sprk_triagecategory",
+
+        // ebilling-r1 task 090 (uac-r2 F4): the Stored File store; its blob path and parent lookups decide which bytes are served to whom.
+        "sprk_storedfile",
     ];
 
     /// <summary>#2253 fix round 2: the platform tables that grant or scope access (<c>PlatformSecurityTables</c>).</summary>
@@ -231,6 +234,9 @@ public class AccessTableAppOnlyWriterTests
         data.Add("businessunit", "parentbusinessunitid@odata.bind", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
         data.Add("businessunit", "_parentbusinessunitid_value", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
         data.Add("sprk_triagecategory", "sprk_classifierguidance", InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode);
+        // ebilling-r1 task 090 (uac-r2 F4): re-pointing a Stored File's blob or parent.
+        data.Add("sprk_storedfile", "sprk_blobpath", InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode);
+        data.Add("sprk_storedfile", "sprk_Invoice@odata.bind", InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode);
         data.Add("sprk_externalrecordaccess')?$select=EntitySetName#", "sprk_name",
             InheritedAccessPermission.AppOnlyTableNameInvalidReasonCode);
         data.Add("sprk_matter')?$select=EntitySetName#", "sprk_issecure", InheritedAccessPermission.AppOnlyTableNameInvalidReasonCode);

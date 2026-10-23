@@ -1111,6 +1111,11 @@ public class ExternalDocumentNarrowingGuardTests
             "Writes only statuscode and statecode on sprk_invoice (InvoiceEntity), conditioned on the row version.",
         ["Sprk.Bff.Api.Services.Finance.InvoiceTotalsService::RecalculateAsync"] =
             "Writes only sprk_amount on an adjustment sprk_billingevent and the five totals columns on sprk_invoice (literal keys).",
+        // ebilling-r1 task 090 (found at the merge of master's #2253 guard): the Stored File store's verified flip. It cannot ask the
+        // refusal: sprk_storedfile is itself refused whole (AccessTables, uac-r2 F4), and this is its typed writer.
+        ["Sprk.Bff.Api.Services.Finance.Files.StoredFileService::FlipToServableAsync"] =
+            "Writes only sprk_filestatus (StoredFileSchema.Status, Servable) on sprk_storedfile, a literal key, under the row's own " +
+            "version (UpdateIfRowVersionMatchesAsync); never a document.",
         ["Sprk.Bff.Api.Services.ScorecardCalculatorService::UpdateEntityGradesAsync"] =
             "Writes its own grade fields to sprk_matter or sprk_project only (UpdateExistingRecordFieldsAsync).",
         ["Sprk.Bff.Api.Services.Communication.CommunicationEnrichmentService::AssignOwningTeamAsync"] =

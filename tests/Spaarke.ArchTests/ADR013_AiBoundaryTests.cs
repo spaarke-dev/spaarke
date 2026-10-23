@@ -169,6 +169,61 @@ public class ADR013_AiBoundaryTests
             $"Non-AI types depending on Ai.Handlers.Dataverse: [{string.Join(", ", callerViolations)}]");
     }
 
+    /// <summary>
+    /// The Finance file store's types (ebilling-r1 task 090): the store under Services/Finance/Files, its route types in Api/Finance
+    /// and the shared blob gateway moved out of the AI session store into Infrastructure/Storage. Step 0 reaches them through
+    /// FinanceAuthorizationFilter.EvaluateStepZeroAsync (Api/Filters), never through Services.Ai.Context.
+    /// </summary>
+    private static bool IsFileStoreType(Type type)
+    {
+        var outer = IlCallScan.Outermost(type);
+        return IsInNamespace(outer, "Sprk.Bff.Api.Services.Finance.Files.")
+               || IsInNamespace(outer, "Sprk.Bff.Api.Infrastructure.Storage.")
+               || (IsInNamespace(outer, "Sprk.Bff.Api.Api.Finance.") && outer.Name.StartsWith("StoredFile", StringComparison.Ordinal));
+    }
+
+    /// <summary>Violations of "no dependency on Services.Ai.*" among <paramref name="types"/>: type-level (NetArchTest) plus call sites (IL).</summary>
+    private static List<string> AiDependencies(System.Reflection.Assembly assembly, Func<Type, bool> selects)
+    {
+        var selected = assembly.GetTypes().Where(selects).ToList();
+        var names = selected.Select(t => t.FullName!).ToHashSet(StringComparer.Ordinal);
+        var result = Types.InAssembly(assembly).ShouldNot().HaveDependencyOn(AiNamespace.TrimEnd('.')).GetResult();
+        var violations = (result.FailingTypeNames ?? new List<string>()).Where(names.Contains).ToList();
+        violations.AddRange(
+            IlCallScan.MethodReferences(selected)
+                .Where(r => IsInNamespace(r.Target.DeclaringType, AiNamespace))
+                .Select(r => $"{IlCallScan.Describe(r.CallerMethod)} -> {r.Target.DeclaringType!.FullName}.{r.Target.Name}"));
+        violations.Sort(StringComparer.Ordinal);
+        return violations;
+    }
+
+    [Fact(DisplayName = "ADR-013 (ebilling-r1 task 090): the Finance file store, its route and the shared blob gateway depend on nothing in Services.Ai")]
+    public void FinanceFileStoreDependsOnNoAiType()
+    {
+        var assembly = typeof(Program).Assembly;
+
+        // Not vacuous: the selector finds the store, the job, the route filter and the gateway.
+        var selected = assembly.GetTypes().Where(IsFileStoreType).Select(t => t.Name).ToHashSet(StringComparer.Ordinal);
+        foreach (var expected in new[] { "StoredFileService", "StoredFileBlobs", "StoredFileReconcileJob", "StoredFileAccessFilter", "BlobGateway", "AzureBlobGateway" })
+        {
+            Assert.True(selected.Contains(expected), $"The file-store selector no longer finds {expected}; fix the selector before trusting this guard.");
+        }
+
+        var violations = AiDependencies(assembly, IsFileStoreType);
+        Assert.True(violations.Count == 0,
+            "ADR-013: the Finance file store must not depend on Sprk.Bff.Api.Services.Ai.* (reach step 0 through "
+            + $"FinanceAuthorizationFilter.EvaluateStepZeroAsync). Violations: [{string.Join(", ", violations)}]");
+    }
+
+    [Fact(DisplayName = "ADR-013 (ebilling-r1 task 090) must-fire: the same check reports a type that does depend on Services.Ai (FinanceAuthorizationFilter → CallerExternality)")]
+    public void FinanceFileStoreAiCheck_FiresOnAKnownDependency()
+    {
+        var assembly = typeof(Program).Assembly;
+        var violations = AiDependencies(assembly, t => t == typeof(Sprk.Bff.Api.Api.Filters.FinanceAuthorizationFilter));
+
+        Assert.Contains(violations, v => v.Contains("CallerExternality", StringComparison.Ordinal) || v.EndsWith("FinanceAuthorizationFilter", StringComparison.Ordinal));
+    }
+
     private static bool IsInNamespace(Type? type, string namespacePrefixWithTrailingDot) =>
         type?.Namespace is { } ns
         && (ns + ".").StartsWith(namespacePrefixWithTrailingDot, StringComparison.Ordinal);

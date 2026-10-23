@@ -396,6 +396,12 @@ public partial class RouteAuthorizationGuardTests
             + "Dataverse as the caller on EVERY call inside SubmissionOverrideService (EbillingOverridePrivilege, fail closed: 403 "
             + "ebilling.override.not_permitted); Return needs no privilege (D-73). The decider, the invoice, the findings and the decision id are "
             + "derived server-side, never taken from the request."),
+        new GovernedFile("Api/Finance/StoredFileEndpoints.cs", Scope.RouteLevelGate,
+            "GET /api/finance/files/{fileId}/content (ebilling-r1 task 090, EB-D-148, procedure-and-file-model 4.3) -- an internal caller downloads "
+            + "a Stored File's bytes. AddStoredFileAccessFilter runs the download rule before the handler: step 0 (403 before any record read), "
+            + "the app-only row read, the CALLER's own Read on the parent and, for a copy, on its source document (gate variant, uniform 404), "
+            + "then StoredFileService.JudgeServableAsync: Servable / own path / scan verdict (404, 409 file_scan_pending, 503). The eBilling kill "
+            + "switch runs after it."),
         new GovernedFile("Api/ScorecardCalculatorEndpoints.cs", Scope.RouteLevelGate,
             "matter/project grade recalculation, Read on the parent as the caller (task 130)."),
         new GovernedFile("Api/NavMapEndpoints.cs", Scope.RouteLevelGate,
@@ -1008,8 +1014,11 @@ public partial class RouteAuthorizationGuardTests
     // /api/finance/procedures[/{procedureId}], POST .../versions, PATCH .../versions/{versionId}, POST .../versions/{versionId}/publish|retire,
     // GET .../retire-preview and POST .../retire. Classified by GovernedFiles (RouteLevelGate: step 0 on the group, then
     // AddFinanceAuthorizationFilter per route as the caller); the kill-switch filter is already classified in NotAuthorizationForms.
-    // Task 090 runs in parallel and may add a file too: reconcile the sum at integration.
-    private const int ExpectedEndpointFileCount = 142;
+    // 142 -> 143 (2026-10-22, ebilling-r1 task 090, integrated after task 081, EB-D-148). Net +1: Api/Finance/StoredFileEndpoints.cs ADDED -- GET
+    // /api/finance/files/{fileId}/content. Classified by GovernedFiles (RouteLevelGate: AddStoredFileAccessFilter, credited in CreditedForms:
+    // step 0, then the caller's own Read on the parent and the source document via the gate variant); .RequireEbillingEnabled is already in
+    // NotAuthorizationForms.
+    private const int ExpectedEndpointFileCount = 143;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -1062,6 +1071,11 @@ public partial class RouteAuthorizationGuardTests
             "The sibling for the rule set READ: the same Procedure resolution (BillingAdminAuthorization.cs:172) and CallerReadCheck.CheckAsync "
             + "(:191) asking Read; denied is 403 insufficient_rights, an unanswered question or a read fault 403 system_failure (:178, :200) "
             + "(ebilling-r1 081, uac r2 I-P5)."),
+        new CreditedForm("AddStoredFileAccessFilter", "Api/Finance/StoredFileEndpoints.cs",
+            "StoredFileAccessFilter decides before the handler: step 0 via FinanceAuthorizationFilter.EvaluateStepZeroAsync "
+            + "(StoredFileEndpoints.cs:241, 403), then RetrievePrincipalAccess as the caller over OBO via "
+            + "CallerRecordAccessProbe.GetCallerRightsForAuthorizationGateAsync on the row's parent (:264) and, for a copy, its source "
+            + "document (:280), uniform 404 on deny (:224); any unexpected fault refuses with 503 (:207) (ebilling-r1 task 090)."),
         new CreditedForm("AddRecordRouteAccessAuthorizationFilter", "Api/Filters/RecordRouteAccessAuthorizationFilter.cs",
             "RetrievePrincipalAccess on the route record over OBO via CallerRecordAccessProbe "
             + "(RecordRouteAccessAuthorizationFilter.cs:110), 403 on deny (:155); the probe throwing is a denial (task 076)."),

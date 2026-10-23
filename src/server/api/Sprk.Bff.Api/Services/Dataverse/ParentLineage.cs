@@ -854,6 +854,13 @@ internal static class InheritedAccessPermission
     /// so a re-worded row moves mail into another team's ownership: the <c>sprk_userentityassociation</c> rationale. The
     /// BFF only reads it; no playbook node, output mapping or field-mapping rule writes it (live dev, read-only,
     /// 2026-10-22).</item>
+    /// <item>ebilling-r1 task 090 (uac-r2 F4). <c>sprk_storedfile</c>: the Stored File store. Its rows decide which bytes
+    /// are served to whom: <c>sprk_blobpath</c> names the blob a download streams, and the parent lookups
+    /// (<c>sprk_procedureversion</c>, <c>sprk_invoice</c>, <c>sprk_billingexport</c>) and <c>sprk_sourcedocument</c> are the
+    /// records whose Read the caller must hold (<c>StoredFileAccessFilter</c>); the reconcile job
+    /// (<c>StoredFileReconcileJob</c>) deletes a blob and its row by them when the parent is gone. A re-pointed path or parent
+    /// would serve one record's file under another record's access, or delete another file's bytes. Its typed writer is
+    /// <c>StoredFileService</c>; no playbook node, output mapping or field-mapping rule writes it.</item>
     /// </list>
     /// </summary>
     internal static readonly IReadOnlySet<string> AccessTables = new HashSet<string>(
@@ -872,6 +879,7 @@ internal static class InheritedAccessPermission
         Sprk.Bff.Api.Services.Ai.Membership.MembershipJunctionUpdater.JunctionEntityLogicalName,
         "sprk_speauditlog",
         "sprk_triagecategory",
+        Sprk.Bff.Api.Services.Finance.Files.StoredFileSchema.Entity,
         "teammembership",
         "fieldpermission",
         .. PlatformSecurityTables,

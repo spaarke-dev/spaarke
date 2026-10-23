@@ -117,6 +117,11 @@ public static class RecordCreatorPerson
         // the Procedure copy-forward create them app-only for the calling admin, so they record that person; the script empty-checks,
         // secures and publishes both (SpaarkeMaster).
         "sprk_policy", "sprk_policyversion",
+        // ebilling-r1 task 090 (UAC answer to 081 Q5): every table the BFF creates app-only for a person records that person. A rule set
+        // is created app-only for the calling admin (RuleSetService's upload, ProcedureService's Procedure create: owner.ApplyTo), and a
+        // Procedure assignment will be (no BFF writer creates one yet). 080 created both columns UNSECURED; the script empty-checks,
+        // secures and publishes them like 081's four (SpaarkeMaster).
+        "sprk_ruleset", "sprk_procedureassignment",
     };
 
     /// <summary>Whether <paramref name="entityLogicalName"/> carries the column: a secure root or a stamped child table.</summary>

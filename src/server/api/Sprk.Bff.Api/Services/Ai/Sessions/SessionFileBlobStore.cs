@@ -2,9 +2,8 @@ using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using Azure;
 using Azure.Core;
-using Azure.Storage.Blobs;
-using Azure.Storage.Blobs.Models;
 using Microsoft.Extensions.Logging;
+using Sprk.Bff.Api.Infrastructure.Storage;
 
 namespace Sprk.Bff.Api.Services.Ai.Sessions;
 
@@ -222,8 +221,7 @@ public sealed class SessionFileBlobStore
 
         var endpointUri = ValidateConfiguration(blobEndpoint, containerName, out var resolvedContainer);
 
-        var serviceClient = new BlobServiceClient(endpointUri, credential);
-        _gateway = new AzureBlobSessionFileGateway(serviceClient.GetBlobContainerClient(resolvedContainer));
+        _gateway = new AzureBlobSessionFileGateway(new AzureBlobGateway(endpointUri, credential), resolvedContainer);
 
         _logger.LogInformation(
             "Durable session-file store enabled. Container={Container}, Endpoint={Endpoint}, Auth=ManagedIdentity",
@@ -708,15 +706,8 @@ public sealed class SessionFileBlobStore
     /// </summary>
     private static void RejectSecretBearingEndpoint(string blobEndpoint)
     {
-        var probe = blobEndpoint.Trim();
-        var carriesSecret =
-            probe.Contains("AccountKey=", StringComparison.OrdinalIgnoreCase) ||
-            probe.Contains("SharedAccessSignature", StringComparison.OrdinalIgnoreCase) ||
-            probe.StartsWith("DefaultEndpointsProtocol=", StringComparison.OrdinalIgnoreCase) ||
-            probe.Contains("?sig=", StringComparison.OrdinalIgnoreCase) ||
-            probe.Contains("&sig=", StringComparison.OrdinalIgnoreCase);
-
-        if (carriesSecret)
+        // The rule itself is shared with the Finance file store (ebilling-r1 task 090, BlobEndpointRules); this message is unchanged.
+        if (BlobEndpointRules.CarriesSecret(blobEndpoint))
         {
             throw new InvalidOperationException(
                 $"'{BlobEndpointConfigKey}' must be a bare blob endpoint URI. Connection strings, account " +
@@ -754,75 +745,49 @@ internal abstract class SessionFileBlobGateway
     public abstract Task<bool> DeleteAsync(string blobName, CancellationToken cancellationToken);
 }
 
-/// <summary>Managed-identity-authenticated Azure Blob implementation of <see cref="SessionFileBlobGateway"/>.</summary>
+/// <summary>
+/// Managed-identity-authenticated Azure Blob implementation of <see cref="SessionFileBlobGateway"/>: an adapter over the shared
+/// <see cref="BlobGateway"/> (ebilling-r1 task 090 moved the Azure SDK calls there), fixed to this store's one container.
+/// </summary>
+/// <remarks>Behaviour is unchanged: an unconditional overwrite on upload; <c>null</c> on download only for a missing BLOB (a
+/// missing CONTAINER propagates to <see cref="SessionFileBlobStore"/>'s Actionable); a flat listing with no traits; an
+/// idempotent delete that includes snapshots and still throws for a missing container.</remarks>
 internal sealed class AzureBlobSessionFileGateway : SessionFileBlobGateway
 {
-    private readonly BlobContainerClient _container;
+    private readonly BlobGateway _blobs;
+    private readonly string _container;
 
-    public AzureBlobSessionFileGateway(BlobContainerClient container)
-        => _container = container ?? throw new ArgumentNullException(nameof(container));
-
-    public override async Task UploadAsync(string blobName, BinaryData content, string? contentType, CancellationToken cancellationToken)
+    public AzureBlobSessionFileGateway(BlobGateway blobs, string container)
     {
-        var blob = _container.GetBlobClient(blobName);
-
-        // No Conditions => overwrite. Re-uploading the same (tenant, session, file) is idempotent,
-        // which matters because the upload endpoint may be retried by the client.
-        var options = new BlobUploadOptions();
-        if (!string.IsNullOrWhiteSpace(contentType))
-        {
-            options.HttpHeaders = new BlobHttpHeaders { ContentType = contentType };
-        }
-
-        await blob.UploadAsync(content, options, cancellationToken).ConfigureAwait(false);
+        _blobs = blobs ?? throw new ArgumentNullException(nameof(blobs));
+        ArgumentException.ThrowIfNullOrWhiteSpace(container);
+        _container = container;
     }
+
+    public override Task UploadAsync(string blobName, BinaryData content, string? contentType, CancellationToken cancellationToken)
+        => _blobs.UploadAsync(_container, blobName, content, contentType, cancellationToken);
 
     public override async Task<SessionFileBytes?> DownloadAsync(string blobName, CancellationToken cancellationToken)
     {
-        var blob = _container.GetBlobClient(blobName);
-
-        try
-        {
-            var response = await blob.DownloadContentAsync(cancellationToken).ConfigureAwait(false);
-            return new SessionFileBytes(response.Value.Content, response.Value.Details?.ContentType);
-        }
-        catch (RequestFailedException ex) when (ex.ErrorCode == BlobErrorCode.BlobNotFound)
-        {
-            // "This tenant has no durable copy of that file" — the expected miss, and the same answer
-            // a cross-tenant read gets. Deliberately narrowed to BlobNotFound: a missing CONTAINER also
-            // returns 404, and swallowing that would report an unprovisioned deployment as "no such
-            // file" on every read. ContainerNotFound propagates to SessionFileBlobStore.Actionable.
-            return null;
-        }
+        // "This tenant has no durable copy of that file" — the expected miss, and the same answer a cross-tenant read gets.
+        var downloaded = await _blobs.DownloadContentAsync(_container, blobName, cancellationToken).ConfigureAwait(false);
+        return downloaded is { } d ? new SessionFileBytes(d.Content, d.ContentType) : null;
     }
 
     public override async IAsyncEnumerable<SessionFileBlobListing> ListAsync(
         string prefix,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        // Flat listing. GetBlobsAsync pages transparently (5,000/page) and BlobItem.Properties carries
-        // both values a retention decision needs, so no per-blob GetProperties round trip is required.
-        await foreach (var item in _container
-            .GetBlobsAsync(traits: BlobTraits.None, states: BlobStates.None, prefix: prefix, cancellationToken: cancellationToken)
-            .ConfigureAwait(false))
+        // Flat listing, paged transparently; the listing carries both values a retention decision needs.
+        await foreach (var item in _blobs.ListAsync(_container, prefix, includeMetadata: false, cancellationToken).ConfigureAwait(false))
         {
             yield return new SessionFileBlobListing(
                 BlobName: item.Name,
-                SizeBytes: item.Properties?.ContentLength,
-                CreatedOn: item.Properties?.CreatedOn);
+                SizeBytes: item.SizeBytes,
+                CreatedOn: item.CreatedOn);
         }
     }
 
-    public override async Task<bool> DeleteAsync(string blobName, CancellationToken cancellationToken)
-    {
-        var blob = _container.GetBlobClient(blobName);
-
-        // DeleteIfExists returns false for a blob that is already gone. A missing CONTAINER still
-        // throws, which is correct: that is a deployment fault, not "nothing to delete".
-        var response = await blob
-            .DeleteIfExistsAsync(DeleteSnapshotsOption.IncludeSnapshots, conditions: null, cancellationToken)
-            .ConfigureAwait(false);
-
-        return response.Value;
-    }
+    public override Task<bool> DeleteAsync(string blobName, CancellationToken cancellationToken)
+        => _blobs.DeleteIfExistsAsync(_container, blobName, ifMatch: null, cancellationToken);
 }

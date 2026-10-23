@@ -77,9 +77,83 @@ public class FinanceOptions
     public string EbillingOutputContainerId { get; set; } = string.Empty;
 
     /// <summary>
+    /// The Finance file store (ebilling-r1 task 090, procedure-and-file-model section 4.2): Azure Blob with managed identity,
+    /// holding Procedure sources, invoice PDFs and supporting files, and export files. Bound from <c>Finance:FileStore</c> and
+    /// checked at start-up by <see cref="FinanceOptionsValidator"/>. Optional: an empty endpoint boots, and the file store then
+    /// refuses every operation as not configured.
+    /// </summary>
+    public FinanceFileStoreOptions FileStore { get; set; } = new();
+
+    /// <summary>
     /// A SharePoint Embedded container (drive) id: <c>b!</c> followed by URL-safe base64 characters only (so a comma- or
     /// space-separated list such as <c>b!x,b!y</c> is refused). Empty passes (optional key). Distinctness from the other
     /// indexed containers is checked by <see cref="FinanceOptionsValidator"/>.
     /// </summary>
     private const string ContainerIdPattern = @"^b![A-Za-z0-9_-]+$";
+}
+
+/// <summary>
+/// <c>Finance:FileStore</c> (ebilling-r1 task 090; procedure-and-file-model section 4.2). Managed identity only: the endpoint is a
+/// bare <c>https</c> blob endpoint, never a connection string, account key or SAS (ADR-028, root CLAUDE.md §9); a secret-bearing
+/// value fails start-up. The containers (<c>procedures</c>, <c>invoice-files</c>, <c>billing-exports</c>) and the role (Storage
+/// Blob Data Contributor plus <c>blobs/tags/read</c>) are provisioned by task 091.
+/// </summary>
+public sealed class FinanceFileStoreOptions
+{
+    /// <summary>The configuration path of this section.</summary>
+    public const string SectionPath = "Finance:FileStore";
+
+    /// <summary>Default <see cref="OrphanGraceMinutes"/>: one day.</summary>
+    public const int DefaultOrphanGraceMinutes = 1440;
+
+    /// <summary>Largest <see cref="OrphanGraceMinutes"/>: 30 days.</summary>
+    public const int MaxOrphanGraceMinutes = 43200;
+
+    /// <summary>Default <see cref="NotServableAlertMinutes"/>.</summary>
+    public const int DefaultNotServableAlertMinutes = 60;
+
+    /// <summary>Smallest <see cref="NotServableAlertMinutes"/>.</summary>
+    public const int MinNotServableAlertMinutes = 5;
+
+    /// <summary>Largest <see cref="NotServableAlertMinutes"/> (7 days).</summary>
+    public const int MaxNotServableAlertMinutes = 10080;
+
+    /// <summary>
+    /// The storage account's blob endpoint, e.g. <c>https://&lt;account&gt;.blob.core.windows.net</c>. Empty = not configured:
+    /// the host boots and every file-store operation refuses (<c>stored_file.store_not_configured</c>; the download answers 503).
+    /// App setting <c>Finance__FileStore__BlobEndpoint</c>, set per environment (079 after 091).
+    /// </summary>
+    public string BlobEndpoint { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The first segment of every blob name (<c>{tenantId}/{parent table}/{parent id}/{file id}</c>): the OrganizationId of the
+    /// Dataverse ENVIRONMENT this deployment serves (not the Entra tenant id, not a customer id: a customer's prod and UAT must never
+    /// share a prefix). A GUID, required when <see cref="BlobEndpoint"/> is set; start-up checks the shape only, and the store checks
+    /// it against the environment's <c>organization</c> row before its first operation (a mismatch refuses every operation). Every
+    /// finished name is re-checked against it, and a stored path naming another segment is refused. Set once per environment and
+    /// never changed while rows exist (a row's path is stable for its lifetime). App setting <c>Finance__FileStore__TenantId</c>.
+    /// </summary>
+    public string TenantId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Whether Defender for Storage malware scanning runs on the account. <c>null</c> (absent) means ENABLED: a file is served only
+    /// when its scan tag says "No threats found" with a scan time no earlier than its Last-Modified. Only an explicit <c>false</c>
+    /// serves files as not scanned (dev, where scanning is off, 091).
+    /// </summary>
+    public bool? MalwareScanningEnabled { get; set; }
+
+    /// <summary>
+    /// How old a blob with no Stored File row must be before the reconcile job deletes it, in minutes. Must be at least the invoice
+    /// submission job's longest retry horizon (validated at start-up), so a submission still being retried never loses its bytes.
+    /// </summary>
+    public int OrphanGraceMinutes { get; set; } = DefaultOrphanGraceMinutes;
+
+    /// <summary>A row still Not yet servable after this many minutes is reported by the reconcile job's detector (a warning; no repair).</summary>
+    public int NotServableAlertMinutes { get; set; } = DefaultNotServableAlertMinutes;
+
+    /// <summary>True when an endpoint is configured.</summary>
+    public bool IsConfigured => !string.IsNullOrWhiteSpace(BlobEndpoint);
+
+    /// <summary>True unless scanning is explicitly switched off.</summary>
+    public bool ScanningEnabled => MalwareScanningEnabled != false;
 }

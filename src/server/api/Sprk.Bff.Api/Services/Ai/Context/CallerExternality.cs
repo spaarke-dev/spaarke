@@ -32,6 +32,22 @@ public static class CallerExternality
         ClaimsPrincipal? principal,
         ICallerSystemUserResolver callerResolver,
         ISystemUserIdentityResolver identityResolver,
+        CancellationToken ct) =>
+        (await ClassifyCallerAsync(principal, callerResolver, identityResolver, ct).ConfigureAwait(false)).IsExternal;
+
+    /// <summary>
+    /// <see cref="IsExternalCallerAsync"/> with the caller's <c>systemuserid</c> as well, so a caller that needs both (the
+    /// Finance file download's audit event, ebilling-r1 task 090) asks once. Same rules, same throws: this IS the definition,
+    /// and <see cref="IsExternalCallerAsync"/> is this method's verdict.
+    /// </summary>
+    /// <returns>
+    /// The verdict; <see cref="CallerExternalityVerdict.SystemUserId"/> is the resolved row when one resolved (also for a
+    /// flagged-external caller), <c>null</c> when none did.
+    /// </returns>
+    public static async Task<CallerExternalityVerdict> ClassifyCallerAsync(
+        ClaimsPrincipal? principal,
+        ICallerSystemUserResolver callerResolver,
+        ISystemUserIdentityResolver identityResolver,
         CancellationToken ct)
     {
         var resolution = await callerResolver.ResolveAsync(principal, ct).ConfigureAwait(false);
@@ -43,9 +59,15 @@ public static class CallerExternality
 
         if (!resolution.IsResolved || !Guid.TryParse(resolution.SystemUserId, out var systemUserId))
         {
-            return true;
+            return new CallerExternalityVerdict(IsExternal: true, SystemUserId: null);
         }
 
-        return await identityResolver.IsExternalAsync(systemUserId, ct).ConfigureAwait(false);
+        var external = await identityResolver.IsExternalAsync(systemUserId, ct).ConfigureAwait(false);
+        return new CallerExternalityVerdict(external, systemUserId);
     }
 }
+
+/// <summary>The answer of <see cref="CallerExternality.ClassifyCallerAsync"/>.</summary>
+/// <param name="IsExternal">True when the caller is external (flagged, or no active systemuser row).</param>
+/// <param name="SystemUserId">The caller's resolved <c>systemuserid</c>, or <c>null</c> when none resolved.</param>
+public sealed record CallerExternalityVerdict(bool IsExternal, Guid? SystemUserId);

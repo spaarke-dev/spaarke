@@ -295,6 +295,9 @@ public sealed class ProcedureServiceTests
         set.GetAttributeValue<bool>("sprk_visibletofirms").Should().Be(visible);
         set.GetAttributeValue<EntityReference>("sprk_firm").Id.Should().Be(FirmId);
         set.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(TeamId);
+        set.GetAttributeValue<EntityReference>(RecordCreatorPerson.Column).Should().NotBeNull(
+            "the rule set is created app-only for the caller too, so it records them (task 090, UAC answer to 081 Q5)");
+        set.GetAttributeValue<EntityReference>(RecordCreatorPerson.Column).Id.Should().Be(CallerUserId);
         outcome.Value!.RuleSetId.Should().Be(set.Id);
 
         // The owner question had no parents and named the caller (model 5.1).

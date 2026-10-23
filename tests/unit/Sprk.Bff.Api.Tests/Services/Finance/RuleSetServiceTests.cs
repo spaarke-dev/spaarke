@@ -638,6 +638,20 @@ public sealed class RuleSetServiceTests
         row.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(TeamId);
     }
 
+    [Fact(DisplayName = "Task 090 (UAC answer to 081 Q5): an uploaded rule set records the calling admin as its creator person")]
+    public async Task Create_RecordsTheCallerAsCreatorPerson()
+    {
+        var caller = Guid.Parse("09000000-0000-4000-8000-0000000000c5");
+        var h = new Harness { OwnerAnswer = RecordOwnerResolution.Owned(TeamId) with { CreatedByPerson = caller } };
+
+        var outcome = await h.Service().CreateAsync(CreateRequest(), new byte[] { 1 }, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        var creator = h.Rows["sprk_ruleset"].Single().GetAttributeValue<EntityReference>(RecordCreatorPerson.Column);
+        creator.Should().NotBeNull("sprk_ruleset is a stamped table: the owner decision's person is written on create");
+        creator!.Id.Should().Be(caller);
+    }
+
     [Fact]
     public async Task Create_ForAFirm_SetsScopeAndFirm()
     {

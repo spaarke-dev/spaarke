@@ -37,6 +37,8 @@ public class CreatorPersonColumnSecuredGuardTests
     /// repo-relative script that secures it. ebilling-r1 task 081 (master merge, uac-r2): the Procedure and policy tables. No
     /// Entity.xml in the repo declares the column on them (sprk_procedure and sprk_procedureversion have no Entity.xml at all;
     /// sprk_policy's and sprk_policyversion's do not define the column), and the script lists all four in its <c>$Tables</c>.
+    /// Task 090 (uac-r2 round-2 K1): sprk_ruleset (its Entity.xml does not define the column) and sprk_procedureassignment (no
+    /// Entity.xml), both in the script's <c>$Tables</c>.
     /// </summary>
     internal static readonly DeployScriptSecured[] SecuredOnlyByDeployScript =
     [
@@ -44,6 +46,8 @@ public class CreatorPersonColumnSecuredGuardTests
         new("sprk_procedureversion", EbillingScriptReason, ChildCreatorPersonScript),
         new("sprk_policy", EbillingScriptReason, ChildCreatorPersonScript),
         new("sprk_policyversion", EbillingScriptReason, ChildCreatorPersonScript),
+        new("sprk_ruleset", EbillingScriptReason, ChildCreatorPersonScript),
+        new("sprk_procedureassignment", EbillingScriptReason, ChildCreatorPersonScript),
     ];
 
     private const string ChildCreatorPersonScript = "scripts/Set-ChildRecordCreatorPersonSchema.ps1";

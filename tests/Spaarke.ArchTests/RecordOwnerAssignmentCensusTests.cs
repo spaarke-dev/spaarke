@@ -2469,6 +2469,12 @@ public class RecordOwnerAssignmentCensusTests
             ["sprk_procedure"] = "ebilling-r1 task 081: a Procedure is a billing document filed under no record (model 5.1: owned by the "
                 + "admin's business-unit team, no parents); it records the admin who created it (model 13, O-23)",
             ["sprk_procedureversion"] = "ebilling-r1 task 081: a version of a Procedure, owned and recorded as the Procedure is",
+            ["sprk_ruleset"] = "ebilling-r1 task 090 (UAC answer to 081 Q5): a rule set is created app-only for the calling billing admin "
+                + "(RuleSetService's upload, ProcedureService's Procedure create), so it records that person; it is not in the codified "
+                + "Secure Record Owner child set",
+            ["sprk_procedureassignment"] = "ebilling-r1 task 090 (UAC answer to 081 Q5): a Procedure assignment will be created app-only for "
+                + "the calling admin and records that person (080 created the column; no BFF writer creates one yet); it is not in the "
+                + "codified Secure Record Owner child set",
         };
 
     private static List<string> StampedOutsideCodified(

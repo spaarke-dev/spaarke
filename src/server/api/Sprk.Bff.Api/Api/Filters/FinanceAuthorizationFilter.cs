@@ -118,8 +118,19 @@ public sealed class FinanceInternalCallersOnly
     }
 }
 
+/// <summary>
+/// Endpoint metadata implemented by the marker of every filter that honours <see cref="FinanceInternalCallersOnly"/> by running
+/// step 0 (<see cref="FinanceAuthorizationFilter.EvaluateStepZeroAsync"/>) before any record read: today
+/// <see cref="FinanceAuthorizationFilterAttached"/> and the file download's <c>StoredFileAccessFilterAttached</c> (ebilling-r1
+/// task 090). FinanceStepZeroCoverageGuardTests requires it on every <c>/api/finance</c> route; a marker may implement it only when
+/// its filter runs step 0 first, and its own tests prove that (task 090: StoredFileEndpointsTests).
+/// </summary>
+public interface IFinanceStepZeroFilter
+{
+}
+
 /// <summary>Endpoint metadata: the route runs <see cref="FinanceAuthorizationFilter"/> (read by the step-0 coverage guard).</summary>
-public sealed class FinanceAuthorizationFilterAttached
+public sealed class FinanceAuthorizationFilterAttached : IFinanceStepZeroFilter
 {
     public static readonly FinanceAuthorizationFilterAttached Instance = new();
 
@@ -136,6 +147,29 @@ public sealed class FinanceAuthorizationFilterAttached
 public enum FinanceStepZeroVerdict
 {
     Internal = 1,
+}
+
+/// <summary>The answer of <see cref="FinanceAuthorizationFilter.EvaluateStepZeroAsync"/>: admitted with the caller's systemuser, or refused with a reason.</summary>
+public sealed record FinanceStepZeroResult
+{
+    private FinanceStepZeroResult(string? refusalReasonCode, Guid? systemUserId)
+    {
+        RefusalReasonCode = refusalReasonCode;
+        SystemUserId = systemUserId;
+    }
+
+    /// <summary><c>null</c> when the caller is internal; otherwise the 403 reason code.</summary>
+    public string? RefusalReasonCode { get; }
+
+    /// <summary>The internal caller's <c>systemuserid</c>; <c>null</c> on a refusal.</summary>
+    public Guid? SystemUserId { get; }
+
+    /// <summary>True when step 0 admitted the caller.</summary>
+    public bool IsInternal => RefusalReasonCode is null;
+
+    internal static FinanceStepZeroResult Internal(Guid systemUserId) => new(null, systemUserId);
+
+    internal static FinanceStepZeroResult Refused(string reasonCode) => new(reasonCode, null);
 }
 
 /// <summary>How a <see cref="FinanceAuthorizationFilter"/> denial is rendered.</summary>
@@ -458,32 +492,46 @@ public class FinanceAuthorizationFilter : IEndpointFilter
     /// resolver, a lookup fault or a flag-read fault is <see cref="SystemFailureReasonCode"/>, never internal.
     /// </summary>
     private static async Task<string?> RunStepZeroAsync(
-        HttpContext httpContext, string userId, ILogger? logger, CancellationToken ct)
+        HttpContext httpContext, string userId, ILogger? logger, CancellationToken ct) =>
+        (await EvaluateStepZeroAsync(httpContext.User, httpContext.RequestServices, logger, ct)).RefusalReasonCode;
+
+    /// <summary>
+    /// Step 0 (procedure-and-file-model section 5.3) for <paramref name="user"/>, for Finance code that is not this filter: the
+    /// file download's filter and <c>StoredFileService.UploadForCallerAsync</c> (ebilling-r1 task 090). The SAME definition the
+    /// filter runs (<see cref="CallerExternality.ClassifyCallerAsync"/>), exposed here so no type under Services/Finance or
+    /// Api/Finance references a Services.Ai type (ADR-013). Fails closed exactly as the filter does: missing resolvers, a lookup
+    /// fault, a flag-read fault and a cancelled request each refuse with <see cref="SystemFailureReasonCode"/>; a flagged caller or
+    /// one with no active row refuses with <see cref="InternalCallersOnlyReasonCode"/>. Never throws.
+    /// </summary>
+    public static async Task<FinanceStepZeroResult> EvaluateStepZeroAsync(
+        System.Security.Claims.ClaimsPrincipal? user, IServiceProvider services, ILogger? logger, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(services);
+        var userId = CallerResolution.ResolveObjectId(user);
         try
         {
-            var services = httpContext.RequestServices;
             var callerResolver = services.GetService<ICallerSystemUserResolver>();
             var identityResolver = services.GetService<ISystemUserIdentityResolver>();
             if (callerResolver is null || identityResolver is null)
             {
                 logger?.LogError("Finance authorization step 0: the caller resolvers are not registered; denying caller {UserId}", userId);
-                return SystemFailureReasonCode;
+                return FinanceStepZeroResult.Refused(SystemFailureReasonCode);
             }
 
-            return await CallerExternality.IsExternalCallerAsync(httpContext.User, callerResolver, identityResolver, ct)
-                ? InternalCallersOnlyReasonCode
-                : null;
+            var verdict = await CallerExternality.ClassifyCallerAsync(user, callerResolver, identityResolver, ct);
+            return verdict.IsExternal || verdict.SystemUserId is not { } systemUserId
+                ? FinanceStepZeroResult.Refused(InternalCallersOnlyReasonCode)
+                : FinanceStepZeroResult.Internal(systemUserId);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             // The client went away: still refused (fail closed), but not a fault worth an Error log.
-            return SystemFailureReasonCode;
+            return FinanceStepZeroResult.Refused(SystemFailureReasonCode);
         }
         catch (Exception ex)
         {
             logger?.LogError(ex, "Finance authorization step 0 faulted for caller {UserId}; denying (fail closed)", userId);
-            return SystemFailureReasonCode;
+            return FinanceStepZeroResult.Refused(SystemFailureReasonCode);
         }
     }
 
