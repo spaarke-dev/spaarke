@@ -1466,7 +1466,7 @@ public sealed class ContactIdentityBinder
                 await EnsureKnownAsync(decision.FlagContactIds ?? none, known, ct).ConfigureAwait(false);
                 var party = Party(request.CallerOid, request.CallerPlane, decision.Reason!.Value);
                 var toFlag = (decision.FlagContactIds ?? none)
-                    .Where(id => known.TryGetValue(id, out var r) && ContactBindingDecision.ShouldWriteFlag(r.Flag, party))
+                    .Where(id => known.TryGetValue(id, out var r) && ShouldRecord(r, party))
                     .ToList();
                 foreach (var id in toFlag)
                 {
@@ -1477,7 +1477,9 @@ public sealed class ContactIdentityBinder
 
                 if (toFlag.Count == 0)
                 {
-                    var unreadable = (decision.FlagContactIds ?? none).Any(id => !known.ContainsKey(id));
+                    // A row that could not be read, or whose collision columns' read is not proven, is retried next run.
+                    var unreadable = (decision.FlagContactIds ?? none)
+                        .Any(id => !known.TryGetValue(id, out var r) || r.CollisionColumnsUnproven);
                     return Result(suid,
                         unreadable ? SystemUserLinkOutcome.Failed : SystemUserLinkOutcome.FlagAlreadyPresent,
                         null, decision.DenyCode, decision.Reason, decision.FlagContactIds ?? none, changes, false);
@@ -1759,7 +1761,7 @@ public sealed class ContactIdentityBinder
         var current = row;
         for (var attempt = 0; attempt < 2; attempt++)
         {
-            if (!ContactBindingDecision.ShouldWriteFlag(current.Flag, party))
+            if (!ShouldRecord(current, party))
             {
                 return false; // already recorded (or a flag whose parties cannot be read, which is never overwritten)
             }
@@ -1810,6 +1812,26 @@ public sealed class ContactIdentityBinder
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="party"/> is written onto <paramref name="row"/>'s flag
+    /// (<see cref="ContactBindingDecision.ShouldWriteFlag"/>). A row whose collision columns were read without proof is
+    /// never written: its flag may be hidden, and a write sets every collision column. The deny stands; this log line is
+    /// the operator's marker (the contact and the reason only).
+    /// </summary>
+    private bool ShouldRecord(ContactBindingRow row, CollisionParty party)
+    {
+        if (row.CollisionColumnsUnproven)
+        {
+            _logger.LogError(
+                "[ID-BIND] Collision on contact {ContactId} ({Reason}) NOT flagged: the BFF's read of the collision columns "
+                + "is not proven, so a flag on the contact may be hidden and is never overwritten. The deny stands.",
+                row.ContactId, party.Reason);
+            return false;
+        }
+
+        return ContactBindingDecision.ShouldWriteFlag(row.Flag, party);
     }
 
     private CollisionParty Party(Guid? collidingOid, IdentityPlaneMarker plane, IdentityCollisionReason reason)
@@ -1864,7 +1886,7 @@ public sealed class ContactIdentityBinder
             string.Join(",", holders.Select(h => h.ContactId)), lookup.Status);
 
         var party = Party(oid, plane, IdentityCollisionReason.KeyMirrorConflict);
-        var pending = holders.Where(h => ContactBindingDecision.ShouldWriteFlag(h.Flag, party)).ToList();
+        var pending = holders.Where(h => ShouldRecord(h, party)).ToList();
         var wrote = false;
         foreach (var holder in pending)
         {

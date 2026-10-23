@@ -27,7 +27,8 @@ namespace Sprk.Bff.Api.Tests.AccessControl.IdentityBinding;
 ///   <item><see cref="MaskIdentityColumns"/> reproduces masking of the PLANE and the COLLISION FLAG (field-secured since
 ///     the contact security schema step): both come back null in rows, and the plane is null in filters. With
 ///     <see cref="IdentityColumnsProof"/> (the outcome of the real <see cref="SecuredColumnReadProof"/>, Proven by default)
-///     every read applies the production marking (<see cref="DataverseContactIdentityStore.WithIdentityColumnsProof(ContactLookup, ColumnReadProofOutcome)"/>)
+///     (or, per column set, <see cref="BindingColumnsProof"/> and <see cref="CollisionColumnsProof"/>) every read applies
+///     the production marking (<see cref="DataverseContactIdentityStore.WithIdentityColumnsProof(ContactLookup, ColumnReadProofOutcome, ColumnReadProofOutcome)"/>)
 ///     and the probe the production verdict (<see cref="DataverseContactIdentityStore.ClassifyProbe(ContactLookup, ColumnReadProofOutcome)"/>),
 ///     as the Dataverse store does.</item>
 /// </list>
@@ -152,8 +153,32 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
     /// <summary>The plane and the collision flag read null, in rows and (the plane) in filters.</summary>
     public bool MaskIdentityColumns { get; set; }
 
-    /// <summary>The identity columns' readability proof outcome every read is marked by (the Dataverse store's proof).</summary>
-    internal ColumnReadProofOutcome IdentityColumnsProof { get; set; } = ColumnReadProofOutcome.Proven;
+    /// <summary>Only the collision flag reads null in rows (a profile granting the plane but not the collision columns).</summary>
+    public bool MaskCollisionColumns { get; set; }
+
+    /// <summary>The binding columns' readability proof outcome every read is marked by (the Dataverse store's proof).</summary>
+    internal ColumnReadProofOutcome BindingColumnsProof { get; set; } = ColumnReadProofOutcome.Proven;
+
+    /// <summary>The collision columns' readability proof outcome every read is marked by (the Dataverse store's proof).</summary>
+    internal ColumnReadProofOutcome CollisionColumnsProof { get; set; } = ColumnReadProofOutcome.Proven;
+
+    /// <summary>
+    /// Both column sets' outcome: setting it sets both proofs; reading it gives the weaker of the two (Proven only when both
+    /// are, a fault before an unproven read). The masking probe is decided on it, as the Dataverse store's probe is.
+    /// </summary>
+    internal ColumnReadProofOutcome IdentityColumnsProof
+    {
+        get => BindingColumnsProof == ColumnReadProofOutcome.Faulted || CollisionColumnsProof == ColumnReadProofOutcome.Faulted
+            ? ColumnReadProofOutcome.Faulted
+            : BindingColumnsProof == ColumnReadProofOutcome.Proven && CollisionColumnsProof == ColumnReadProofOutcome.Proven
+                ? ColumnReadProofOutcome.Proven
+                : ColumnReadProofOutcome.Unproven;
+        set
+        {
+            BindingColumnsProof = value;
+            CollisionColumnsProof = value;
+        }
+    }
     public LookupStatus OidLookupStatus { get; set; } = LookupStatus.Read;
     public LookupStatus EmailLookupStatus { get; set; } = LookupStatus.Read;
 
@@ -264,6 +289,7 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             KeyDefined = true;
             MaskBindingColumn = false;
             MaskIdentityColumns = false;
+            MaskCollisionColumns = false;
             IdentityColumnsProof = ColumnReadProofOutcome.Proven;
             OidLookupStatus = LookupStatus.Read;
             EmailLookupStatus = LookupStatus.Read;
@@ -925,9 +951,11 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
     private ContactBindingRow Row(Contact c)
     {
         var row = new ContactBindingRow(c.Id, c.StateCode, MaskBindingColumn ? null : c.Oid,
-            MaskIdentityColumns ? null : c.Plane, $"W/\"{c.Version}\"", c.Email, MaskIdentityColumns ? null : c.Flag,
+            MaskIdentityColumns ? null : c.Plane, $"W/\"{c.Version}\"", c.Email,
+            MaskIdentityColumns || MaskCollisionColumns ? null : c.Flag,
             c.KeyMirror, MaskHomeColumns ? null : c.ExternalTenantId);
-        return DataverseContactIdentityStore.WithIdentityColumnsProof(ContactLookup.Of(row), IdentityColumnsProof).Rows[0];
+        return DataverseContactIdentityStore.WithIdentityColumnsProof(
+            ContactLookup.Of(row), BindingColumnsProof, CollisionColumnsProof).Rows[0];
     }
 
     private SystemUserIdentityRow UserRow(SystemUser u)

@@ -1004,8 +1004,9 @@ profile x column pair, and **must exit 0** before a BFF that writes the new colu
 the columns, the field security and the profile permissions through the SpaarkeMaster import (H6); H7b's identity-link
 check (S18) covers the plane and collision columns. The BFF trusts an EMPTY value of `sprk_accesspermissiongrant`, the
 binding, the plane or a collision column only after it has proven it can read the column (the System Administrator role,
-or a field security profile granting Read, directly or through a team; re-proven every 10 minutes). Until then the
-standing grant confers no access, no contact is bound or created, and a revoke of a grantee with no email and an empty
+matched by its role template id, or a field security profile granting Read, directly or through a team; re-proven every
+10 minutes). Until then the standing grant confers no access, no contact is bound or created, no collision flag is
+written over, and a revoke of a grantee with no email and an empty
 binding is reported as not cleared. `-Verify` therefore also runs the proof's reads (systemuser, role, systemuserroles,
 fieldpermission, systemuserprofiles, teamprofiles, teammembership) as each BFF application user; the operator running
 it needs the act-on-behalf-of-another-user privilege.

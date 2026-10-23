@@ -358,16 +358,31 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         FlagOnColumn, FlagOidColumn, FlagPlaneColumn, FlagReasonColumn, FlagPartiesColumn);
 
     /// <summary>
-    /// The field-secured identity columns every binding read decides on: the binding, its plane and the five collision-flag
-    /// columns. An EMPTY value of one of them is trusted only while the BFF's read of all of them is proven
-    /// (<see cref="SecuredColumnReadProof"/>); a row read without that proof is marked
-    /// (<see cref="ContactBindingRow.IdentityColumnsUnproven"/>), and the masking probe reads as Masked.
+    /// The field-secured binding columns: the binding and its plane. An EMPTY plane is trusted only while the BFF's read of
+    /// both is proven (<see cref="SecuredColumnReadProof"/>); a row whose plane read empty without that proof is marked
+    /// (<see cref="ContactBindingRow.IdentityColumnsUnproven"/>).
     /// </summary>
-    public static readonly IReadOnlyList<string> IdentityColumns = new[]
+    public static readonly IReadOnlyList<string> BindingColumns = new[]
     {
         ContactBindingDecision.ExternalObjectIdColumn, ContactBindingDecision.IdentityPlaneColumn,
+    };
+
+    /// <summary>
+    /// The five field-secured collision-flag columns. A flag read while the BFF's read of all five is not proven may be
+    /// hidden in whole or in part, so it is never overwritten: the row is marked
+    /// (<see cref="ContactBindingRow.CollisionColumnsUnproven"/>) and its flag reads as one whose parties cannot be read.
+    /// The proof is per column set: the binding columns and these are proven separately.
+    /// </summary>
+    public static readonly IReadOnlyList<string> CollisionColumns = new[]
+    {
         FlagOnColumn, FlagOidColumn, FlagPlaneColumn, FlagReasonColumn, FlagPartiesColumn,
     };
+
+    /// <summary>
+    /// Every field-secured identity column a binding read decides on (<see cref="BindingColumns"/> and
+    /// <see cref="CollisionColumns"/>). The masking probe reads as Masked unless the BFF's read of all of them is proven.
+    /// </summary>
+    public static readonly IReadOnlyList<string> IdentityColumns = BindingColumns.Concat(CollisionColumns).ToArray();
 
     /// <summary>The table the identity columns live on.</summary>
     public const string ContactTable = "contact";
@@ -381,9 +396,12 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     private readonly string _apiUrl;
     private readonly ILogger _logger;
 
-    // The proof that this store's identity can READ the identity columns, made over THIS store's environment and token
-    // (a store may target another environment than the BFF's own). Held for SecuredColumnReadProof.ProofLifetime.
-    private readonly SecuredColumnReadProof _identityColumnsProof;
+    // The proofs that this store's identity can READ the binding columns and the collision columns, made over THIS store's
+    // environment and token (a store may target another environment than the BFF's own). Each is held for
+    // SecuredColumnReadProof.ProofLifetime; a store built by ContactIdentityBinderFactory shares them with every other store
+    // the factory builds for the same environment.
+    private readonly SecuredColumnReadProof _bindingColumnsProof;
+    private readonly SecuredColumnReadProof _collisionColumnsProof;
 
     /// <summary>The store for an environment, authenticated by <paramref name="getToken"/>.</summary>
     public DataverseContactIdentityStore(
@@ -392,14 +410,32 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         string dataverseBaseUrl,
         ILogger logger,
         TimeProvider? time = null)
+        : this(httpClientFactory, getToken, dataverseBaseUrl, logger,
+            (source, table, columns) => new SecuredColumnReadProof(source, table, columns, logger, time))
+    {
+    }
+
+    /// <summary>
+    /// The store for an environment, whose readability proofs come from <paramref name="readProofs"/> (given this store's
+    /// own permission source, the table and the column set): the seam through which
+    /// <see cref="ContactIdentityBinderFactory"/> shares one proof per environment and column set across its stores.
+    /// </summary>
+    internal DataverseContactIdentityStore(
+        IHttpClientFactory httpClientFactory,
+        Func<CancellationToken, Task<string>> getToken,
+        string dataverseBaseUrl,
+        ILogger logger,
+        Func<IColumnReadPermissionSource, string, IReadOnlyList<string>, SecuredColumnReadProof> readProofs)
     {
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
         _getToken = getToken ?? throw new ArgumentNullException(nameof(getToken));
         ArgumentException.ThrowIfNullOrWhiteSpace(dataverseBaseUrl);
         _apiUrl = $"{dataverseBaseUrl.TrimEnd('/')}/api/data/v9.2";
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _identityColumnsProof = new SecuredColumnReadProof(
-            new WebApiColumnReadPermissionSource(this), ContactTable, IdentityColumns, logger, time);
+        ArgumentNullException.ThrowIfNull(readProofs);
+        var source = new WebApiColumnReadPermissionSource(this);
+        _bindingColumnsProof = readProofs(source, ContactTable, BindingColumns);
+        _collisionColumnsProof = readProofs(source, ContactTable, CollisionColumns);
     }
 
     /// <summary>
@@ -805,20 +841,47 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         _ => BindingReadability.Failed,
     };
 
-    /// <summary>
-    /// Marks every row of a read lookup as read without proof when <paramref name="proof"/> is not
-    /// <see cref="ColumnReadProofOutcome.Proven"/> (<see cref="ContactBindingRow.IdentityColumnsUnproven"/>). Pure.
-    /// </summary>
+    /// <summary>The marking below, with one outcome for both column sets. Pure.</summary>
     internal static ContactLookup WithIdentityColumnsProof(ContactLookup lookup, ColumnReadProofOutcome proof)
-        => proof == ColumnReadProofOutcome.Proven || lookup.Status != LookupStatus.Read
+        => WithIdentityColumnsProof(lookup, proof, proof);
+
+    /// <summary>
+    /// Marks every row of a read lookup by the proofs of its two column sets. Pure.
+    /// <list type="bullet">
+    ///   <item><paramref name="bindingProof"/> not <see cref="ColumnReadProofOutcome.Proven"/>: the row's binding is read
+    ///     without proof (<see cref="ContactBindingRow.IdentityColumnsUnproven"/>), so an empty plane is Unreadable.</item>
+    ///   <item><paramref name="collisionProof"/> not <see cref="ColumnReadProofOutcome.Proven"/>: the row's collision flag
+    ///     may be hidden (<see cref="ContactBindingRow.CollisionColumnsUnproven"/>), so it reads as a flag whose parties
+    ///     cannot be read (<see cref="CollisionFlag.ReadWithoutProof"/>), which is never overwritten or cleared.</item>
+    /// </list>
+    /// </summary>
+    internal static ContactLookup WithIdentityColumnsProof(
+        ContactLookup lookup, ColumnReadProofOutcome bindingProof, ColumnReadProofOutcome collisionProof)
+        => lookup.Status != LookupStatus.Read
+           || (bindingProof == ColumnReadProofOutcome.Proven && collisionProof == ColumnReadProofOutcome.Proven)
             ? lookup
-            : lookup with { Rows = lookup.Rows.Select(r => r with { IdentityColumnsUnproven = true }).ToList() };
+            : lookup with { Rows = lookup.Rows.Select(r => Marked(r, bindingProof, collisionProof)).ToList() };
+
+    /// <summary>The systemuser form of the marking above, with one outcome for both column sets. Pure.</summary>
+    internal static SystemUserIdentityRow WithIdentityColumnsProof(SystemUserIdentityRow row, ColumnReadProofOutcome proof)
+        => WithIdentityColumnsProof(row, proof, proof);
 
     /// <summary>The systemuser form of the marking above: its linked contact. Pure.</summary>
-    internal static SystemUserIdentityRow WithIdentityColumnsProof(SystemUserIdentityRow row, ColumnReadProofOutcome proof)
-        => proof == ColumnReadProofOutcome.Proven || row.LinkedContact is null
+    internal static SystemUserIdentityRow WithIdentityColumnsProof(
+        SystemUserIdentityRow row, ColumnReadProofOutcome bindingProof, ColumnReadProofOutcome collisionProof)
+        => row.LinkedContact is null
+           || (bindingProof == ColumnReadProofOutcome.Proven && collisionProof == ColumnReadProofOutcome.Proven)
             ? row
-            : row with { LinkedContact = row.LinkedContact with { IdentityColumnsUnproven = true } };
+            : row with { LinkedContact = Marked(row.LinkedContact, bindingProof, collisionProof) };
+
+    private static ContactBindingRow Marked(
+        ContactBindingRow row, ColumnReadProofOutcome bindingProof, ColumnReadProofOutcome collisionProof)
+    {
+        var marked = bindingProof == ColumnReadProofOutcome.Proven ? row : row with { IdentityColumnsUnproven = true };
+        return collisionProof == ColumnReadProofOutcome.Proven
+            ? marked
+            : marked with { CollisionColumnsUnproven = true, Flag = CollisionFlag.ReadWithoutProof(marked.Flag) };
+    }
 
     /// <summary>
     /// The interactive-systemuser scan: enabled, not an application user, and a human access mode —
@@ -1264,7 +1327,13 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     public async Task<BindingReadability> ProbeBindingReadabilityAsync(CancellationToken ct)
     {
         // A hidden plane reads as no plane, so without proof the probe would find "no marked rows": nothing to protect.
-        var proof = await _identityColumnsProof.ProveAsync(ct).ConfigureAwait(false);
+        // Every identity column's read must be proven: the binding columns, then the collision columns.
+        var proof = await _bindingColumnsProof.ProveAsync(ct).ConfigureAwait(false);
+        if (proof == ColumnReadProofOutcome.Proven)
+        {
+            proof = await _collisionColumnsProof.ProveAsync(ct).ConfigureAwait(false);
+        }
+
         if (proof != ColumnReadProofOutcome.Proven)
         {
             return ClassifyProbe(ContactLookup.Failed, proof);
@@ -1606,13 +1675,16 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     public async Task<StorePage<SystemUserIdentityRow>> ScanInteractiveSystemUsersAsync(string? continuation, CancellationToken ct)
     {
         var page = await ScanAsync(continuation ?? BuildSystemUserScanPath(), ParseSystemUserRow, ct).ConfigureAwait(false);
-        if (page.Status != LookupStatus.Read || page.Rows.All(r => r.LinkedContact is not { RawPlane: null }))
+        var linked = page.Status == LookupStatus.Read
+            ? page.Rows.Where(r => r.LinkedContact is not null).Select(r => r.LinkedContact!).ToList()
+            : new List<ContactBindingRow>();
+        if (linked.Count == 0)
         {
             return page;
         }
 
-        var proof = await _identityColumnsProof.ProveAsync(ct).ConfigureAwait(false);
-        return page with { Rows = page.Rows.Select(r => WithIdentityColumnsProof(r, proof)).ToList() };
+        var (binding, collision) = await ProofsForAsync(linked, ct).ConfigureAwait(false);
+        return page with { Rows = page.Rows.Select(r => WithIdentityColumnsProof(r, binding, collision)).ToList() };
     }
 
     /// <inheritdoc />
@@ -1629,29 +1701,40 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     }
 
     /// <summary>
-    /// Applies the identity columns' readability proof to a read: a row whose plane read empty is marked when the proof
-    /// does not hold. A read with no empty plane needs no proof, so none is made for it.
+    /// Applies the readability proofs to a read. Every row needs the collision columns' proof: a hidden flag, or a hidden
+    /// part of one, reads like no flag whatever the plane holds. The binding columns' proof is needed only when a plane
+    /// read empty, since a plane that was read is a value. A read with no rows needs no proof, so none is made for it.
     /// </summary>
     private async Task<ContactLookup> ProvenAsync(ContactLookup lookup, CancellationToken ct)
     {
-        if (lookup.Status != LookupStatus.Read || lookup.Rows.All(r => r.RawPlane is not null))
+        if (lookup.Status != LookupStatus.Read || lookup.Rows.Count == 0)
         {
             return lookup;
         }
 
-        var proof = await _identityColumnsProof.ProveAsync(ct).ConfigureAwait(false);
-        return WithIdentityColumnsProof(lookup, proof);
+        var (binding, collision) = await ProofsForAsync(lookup.Rows, ct).ConfigureAwait(false);
+        return WithIdentityColumnsProof(lookup, binding, collision);
     }
 
     private async Task<SystemUserIdentityRow> ProvenAsync(SystemUserIdentityRow row, CancellationToken ct)
     {
-        if (row.LinkedContact is not { RawPlane: null })
+        if (row.LinkedContact is null)
         {
             return row;
         }
 
-        var proof = await _identityColumnsProof.ProveAsync(ct).ConfigureAwait(false);
-        return WithIdentityColumnsProof(row, proof);
+        var (binding, collision) = await ProofsForAsync(new[] { row.LinkedContact }, ct).ConfigureAwait(false);
+        return WithIdentityColumnsProof(row, binding, collision);
+    }
+
+    private async Task<(ColumnReadProofOutcome Binding, ColumnReadProofOutcome Collision)> ProofsForAsync(
+        IReadOnlyCollection<ContactBindingRow> rows, CancellationToken ct)
+    {
+        var binding = rows.Any(r => r.RawPlane is null)
+            ? await _bindingColumnsProof.ProveAsync(ct).ConfigureAwait(false)
+            : ColumnReadProofOutcome.Proven;
+        var collision = await _collisionColumnsProof.ProveAsync(ct).ConfigureAwait(false);
+        return (binding, collision);
     }
 
     /// <summary>

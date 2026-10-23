@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Xunit;
@@ -32,13 +33,19 @@ public class IdentityColumnsReadProofBindingTests
         return invite.Code;
     }
 
-    private static async Task<ColumnReadProofOutcome> ProofOver(params string[] grantedColumns)
+    /// <summary>
+    /// The store's two proofs (the binding columns, the collision columns) made by the REAL proof over a source granting
+    /// Read on <paramref name="grantedColumns"/>, as the Dataverse store makes them: one per column set.
+    /// </summary>
+    private async Task ProveOver(params string[] grantedColumns)
     {
-        var proof = new SecuredColumnReadProof(
-            new GrantedColumns(grantedColumns), DataverseContactIdentityStore.ContactTable,
-            DataverseContactIdentityStore.IdentityColumns, NullLogger.Instance);
-        return await proof.ProveAsync(CancellationToken.None);
+        _store.BindingColumnsProof = await ProofOf(DataverseContactIdentityStore.BindingColumns, new GrantedColumns(grantedColumns));
+        _store.CollisionColumnsProof = await ProofOf(DataverseContactIdentityStore.CollisionColumns, new GrantedColumns(grantedColumns));
     }
+
+    private static Task<ColumnReadProofOutcome> ProofOf(IReadOnlyCollection<string> columns, IColumnReadPermissionSource source)
+        => new SecuredColumnReadProof(source, DataverseContactIdentityStore.ContactTable, columns, NullLogger.Instance)
+            .ProveAsync(CancellationToken.None);
 
     private static string[] EveryIdentityColumnBut(string column)
         => DataverseContactIdentityStore.IdentityColumns.Where(c => c != column).ToArray();
@@ -55,11 +62,12 @@ public class IdentityColumnsReadProofBindingTests
         _store.Contacts[ContactA].Plane = (int)IdentityPlaneMarker.Workforce;
         _store.MaskBindingColumn = true;
         _store.MaskIdentityColumns = true;
-        _store.IdentityColumnsProof = await ProofOver(EveryIdentityColumnBut(ContactBindingDecision.IdentityPlaneColumn));
+        await ProveOver(EveryIdentityColumnBut(ContactBindingDecision.IdentityPlaneColumn));
 
         var result = await Binder(_store).ResolveCiamCallerAsync(CiamOid.ToString(), Email, code, CancellationToken.None);
 
-        _store.IdentityColumnsProof.Should().Be(ColumnReadProofOutcome.Unproven);
+        _store.BindingColumnsProof.Should().Be(ColumnReadProofOutcome.Unproven);
+        _store.CollisionColumnsProof.Should().Be(ColumnReadProofOutcome.Proven, "the flag's read is proven, so it may be written");
         result.IsResolved.Should().BeFalse("an empty plane read without proof may hide a binding: no bind");
         _store.Writes.Should().NotContain(w => w.Op == "bind" || w.Op == "create");
         _store.Contacts[ContactA].Oid.Should().Be(employee.ToString("D"), "the hidden binding stands");
@@ -68,20 +76,50 @@ public class IdentityColumnsReadProofBindingTests
     }
 
     [Fact]
-    public async Task AnEmptyCollisionRead_WithoutProof_RefusesTheBind_AndFlagsTheContact()
+    public async Task AnEmptyCollisionRead_WithoutProof_RefusesTheBind_AndWritesNoFlag()
     {
-        // Truly unbound and invited: only the collision columns' read is not proven.
+        // Truly unbound and invited: only the collision columns' read is not proven. The bind is refused (the masking probe
+        // needs every identity column proven), and no flag is written: a write sets every collision column, and a flag
+        // read without proof may be hidden.
         var code = InvitedContactA();
-        _store.IdentityColumnsProof = await ProofOver(EveryIdentityColumnBut(DataverseContactIdentityStore.FlagPartiesColumn));
+        await ProveOver(EveryIdentityColumnBut(DataverseContactIdentityStore.FlagPartiesColumn));
 
         var result = await Binder(_store).ResolveCiamCallerAsync(CiamOid.ToString(), Email, code, CancellationToken.None);
 
-        _store.IdentityColumnsProof.Should().Be(ColumnReadProofOutcome.Unproven);
-        result.IsResolved.Should().BeFalse("an empty collision read without proof refuses the bind");
+        _store.BindingColumnsProof.Should().Be(ColumnReadProofOutcome.Proven);
+        _store.CollisionColumnsProof.Should().Be(ColumnReadProofOutcome.Unproven);
+        result.IsResolved.Should().BeFalse("an identity column read without proof refuses the bind");
+        result.DenyCode.Should().Be(ContactBindingDecision.DenyBindingColumnMasked);
         _store.Contacts[ContactA].Oid.Should().BeNull();
         _store.Writes.Should().NotContain(w => w.Op == "bind");
-        _store.Writes.Should().Contain(w => w.Op == "flag" && w.RowId == ContactA
-            && w.Detail.StartsWith(nameof(IdentityCollisionReason.BindingUnreadable)));
+        _store.Writes.Should().NotContain(w => w.Op == "flag", "a collision flag read without proof is never written over");
+    }
+
+    [Fact]
+    public async Task ACollisionOnABoundContact_WhoseFlagReadIsNotProven_WritesNoFlag_AndKeepsTheHiddenParties()
+    {
+        // The plane is set and read (a value), but the collision columns' read is not proven: the flag on the contact reads
+        // empty although it records a party. Writing the new collision would replace every collision column.
+        var log = new BindingLogCapture<ContactIdentityBinder>();
+        var code = InvitedContactA();
+        var employee = Guid.NewGuid();
+        var recorded = new CollisionParty(Guid.NewGuid(), IdentityPlaneMarker.Workforce, IdentityCollisionReason.EmailAmbiguous, Now);
+        _store.Contacts[ContactA].Oid = employee.ToString("D");
+        _store.Contacts[ContactA].Plane = (int)IdentityPlaneMarker.Workforce;
+        _store.Contacts[ContactA].Flag = CollisionFlag.FromParties(new[] { recorded });
+        _store.MaskCollisionColumns = true;
+        _store.CollisionColumnsProof = ColumnReadProofOutcome.Unproven;
+
+        var result = await Binder(_store, log).ResolveCiamCallerAsync(CiamOid.ToString(), Email, code, CancellationToken.None);
+
+        result.IsResolved.Should().BeFalse("the contact is bound to another identity: the deny stands");
+        result.Action.Should().Be(BindingAction.Collision);
+        _store.Writes.Should().NotContain(w => w.Op == "flag", "a flag read without proof is never written over");
+        _store.Contacts[ContactA].Flag!.Parties.Should().Equal(recorded);
+        var line = log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error && e.Message.Contains("NOT flagged")).Subject.Message;
+        line.Should().Contain(ContactA.ToString()).And.Contain(result.Reason!.Value.ToString());
+        line.Should().NotContain(Email).And.NotContain(CiamOid.ToString()).And.NotContain(employee.ToString())
+            .And.NotContain(recorded.Oid!.Value.ToString(), "the operator line names the contact and the reason only");
     }
 
     [Fact]
@@ -89,7 +127,7 @@ public class IdentityColumnsReadProofBindingTests
     {
         // A hidden plane reads as no plane: the probe would otherwise find no marked rows ("nothing to protect").
         _store.AddContact(ContactA, email: Email);
-        _store.IdentityColumnsProof = await ProofOver(EveryIdentityColumnBut(ContactBindingDecision.IdentityPlaneColumn));
+        await ProveOver(EveryIdentityColumnBut(ContactBindingDecision.IdentityPlaneColumn));
 
         var write = await Binder(_store).BindInvitedContactAsync(ContactA, etag: null, CiamOid, consumeInviteCode: false, CancellationToken.None);
 
@@ -101,16 +139,20 @@ public class IdentityColumnsReadProofBindingTests
     [Fact]
     public async Task AProofThatFaulted_DeniesLikeAnUnprovenOne()
     {
+        // The empty plane is Unreadable (the binding is refused as unreadable, not merely by the masking probe), and with
+        // the collision columns' read not proven either, no flag is written over a flag that may be hidden.
         var code = InvitedContactA();
-        var proof = new SecuredColumnReadProof(new GrantedColumns(faults: true), DataverseContactIdentityStore.ContactTable,
-            DataverseContactIdentityStore.IdentityColumns, NullLogger.Instance);
-        _store.IdentityColumnsProof = await proof.ProveAsync(CancellationToken.None);
+        _store.BindingColumnsProof = await ProofOf(DataverseContactIdentityStore.BindingColumns, new GrantedColumns(faults: true));
+        _store.CollisionColumnsProof = await ProofOf(DataverseContactIdentityStore.CollisionColumns, new GrantedColumns(faults: true));
 
         var result = await Binder(_store).ResolveCiamCallerAsync(CiamOid.ToString(), Email, code, CancellationToken.None);
 
         _store.IdentityColumnsProof.Should().Be(ColumnReadProofOutcome.Faulted);
         result.IsResolved.Should().BeFalse();
+        result.DenyCode.Should().Be(ContactBindingDecision.DenyContactBindingUnreadable);
+        result.Reason.Should().Be(IdentityCollisionReason.BindingUnreadable);
         _store.Contacts[ContactA].Oid.Should().BeNull();
+        _store.Writes.Should().NotContain(w => w.Op == "bind" || w.Op == "flag");
     }
 
     // ── must not fire ───────────────────────────────────────────────────────────────────────────────────────
@@ -119,7 +161,7 @@ public class IdentityColumnsReadProofBindingTests
     public async Task AnEmptyRead_WithProof_BindsAsToday()
     {
         var code = InvitedContactA();
-        _store.IdentityColumnsProof = await ProofOver(DataverseContactIdentityStore.IdentityColumns.ToArray());
+        await ProveOver(DataverseContactIdentityStore.IdentityColumns.ToArray());
 
         var result = await Binder(_store).ResolveCiamCallerAsync(CiamOid.ToString(), Email, code, CancellationToken.None);
 
@@ -128,6 +170,26 @@ public class IdentityColumnsReadProofBindingTests
         _store.Contacts[ContactA].Oid.Should().Be(CiamOid.ToString("D"));
         _store.Contacts[ContactA].Plane.Should().Be((int)IdentityPlaneMarker.External);
         _store.Writes.Should().NotContain(w => w.Op == "flag");
+    }
+
+    [Fact]
+    public async Task ACollisionOnABoundContact_WithBothProofs_FlagsTheContactAsToday()
+    {
+        // The same collision as above with every identity column's read proven: the party is appended to the readable flag.
+        var code = InvitedContactA();
+        var recorded = new CollisionParty(Guid.NewGuid(), IdentityPlaneMarker.Workforce, IdentityCollisionReason.EmailAmbiguous, Now);
+        _store.Contacts[ContactA].Oid = Guid.NewGuid().ToString("D");
+        _store.Contacts[ContactA].Plane = (int)IdentityPlaneMarker.Workforce;
+        _store.Contacts[ContactA].Flag = CollisionFlag.FromParties(new[] { recorded });
+        await ProveOver(DataverseContactIdentityStore.IdentityColumns.ToArray());
+
+        var result = await Binder(_store).ResolveCiamCallerAsync(CiamOid.ToString(), Email, code, CancellationToken.None);
+
+        _store.IdentityColumnsProof.Should().Be(ColumnReadProofOutcome.Proven);
+        result.IsResolved.Should().BeFalse();
+        result.Action.Should().Be(BindingAction.Collision);
+        _store.Writes.Should().ContainSingle(w => w.Op == "flag" && w.RowId == ContactA);
+        _store.Contacts[ContactA].Flag!.Parties.Should().HaveCount(2).And.Contain(recorded);
     }
 
     [Fact]

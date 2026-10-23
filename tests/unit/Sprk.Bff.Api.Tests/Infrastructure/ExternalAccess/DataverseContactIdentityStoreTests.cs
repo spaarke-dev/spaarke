@@ -1143,6 +1143,45 @@ public class DataverseContactIdentityStoreTests
             DataverseContactIdentityStore.FlagPartiesColumn);
 
     [Fact]
+    public void TheIdentityColumns_AreProvenAsTwoColumnSets_TheBindingAndTheCollisionFlag()
+    {
+        DataverseContactIdentityStore.BindingColumns.Should().Equal(
+            ContactBindingDecision.ExternalObjectIdColumn, ContactBindingDecision.IdentityPlaneColumn);
+        DataverseContactIdentityStore.CollisionColumns.Should().BeEquivalentTo(
+            DataverseContactIdentityStore.FlagOnColumn, DataverseContactIdentityStore.FlagOidColumn,
+            DataverseContactIdentityStore.FlagPlaneColumn, DataverseContactIdentityStore.FlagReasonColumn,
+            DataverseContactIdentityStore.FlagPartiesColumn);
+        DataverseContactIdentityStore.IdentityColumns.Should().BeEquivalentTo(
+            DataverseContactIdentityStore.BindingColumns.Concat(DataverseContactIdentityStore.CollisionColumns));
+    }
+
+    [Fact]
+    public void ARowReadWithoutTheCollisionProof_HasAFlagThatIsNeverWrittenOver_WhateverItsPlane()
+    {
+        // MUST FIRE: the plane is set and read, the flag read empty, and the collision columns' read is not proven.
+        var bound = new ContactBindingRow(Guid.NewGuid(), 0, Oid.ToString(), (int)IdentityPlaneMarker.Workforce);
+        var party = new CollisionParty(Guid.NewGuid(), IdentityPlaneMarker.External, IdentityCollisionReason.BoundToDifferentOid,
+            DateTimeOffset.UnixEpoch);
+
+        var marked = DataverseContactIdentityStore.WithIdentityColumnsProof(
+            ContactLookup.Of(bound), ColumnReadProofOutcome.Proven, ColumnReadProofOutcome.Unproven).Rows[0];
+        var proven = DataverseContactIdentityStore.WithIdentityColumnsProof(
+            ContactLookup.Of(bound), ColumnReadProofOutcome.Proven, ColumnReadProofOutcome.Proven).Rows[0];
+
+        marked.CollisionColumnsUnproven.Should().BeTrue();
+        marked.IdentityColumnsUnproven.Should().BeFalse();
+        marked.Binding.Kind.Should().Be(BindingKind.Bound);
+        marked.Flag!.HasUnreadableParties.Should().BeTrue();
+        ContactBindingDecision.ShouldWriteFlag(marked.Flag, party).Should().BeFalse();
+        ContactBindingDecision.ReconcileFlag(marked.Flag, Array.Empty<CollisionParty>(), collidesThisRun: false).Action
+            .Should().Be(FlagReconciliationAction.Keep, "a flag read without proof is never cleared");
+
+        // MUST NOT FIRE: with both proofs the row is unchanged and an empty flag is written as today.
+        proven.Should().Be(bound);
+        ContactBindingDecision.ShouldWriteFlag(proven.Flag, party).Should().BeTrue();
+    }
+
+    [Fact]
     public void ClassifyProbe_WithoutProof_IsMasked_EvenWhenNoRowIsMarked()
     {
         // MUST FIRE: a hidden plane reads as no plane, so "no marked rows" without proof is not "nothing to protect".
@@ -1255,5 +1294,132 @@ public class DataverseContactIdentityStoreTests
 
         tables.Should().BeEquivalentTo(SecuredColumnReadProof.PlatformTablesRead,
             "the script's -Verify asserts the BFF application user reads exactly these (WhoAmI reads its own systemuser)");
+    }
+
+    // ── The real store's proof, end to end over its own Web API reads (ReadProofHttp answers by route) ────────────────
+    // These run DataverseContactIdentityStore itself: its WhoAmI and FetchXML reads, their parsing, and the guards in
+    // ProbeBindingReadabilityAsync and GetContactAsync. The binder-level tests run the in-memory store, which shares only
+    // the pure marking and verdict.
+
+    private static readonly Guid ProofContact = Guid.Parse("dddddddd-0000-4000-8000-0000000000f1");
+
+    private static DataverseContactIdentityStore StoreOver(ReadProofHttp http)
+        => new(http, _ => Task.FromResult("token"), "https://org.test.invalid", NullLogger.Instance);
+
+    private static string ContactJson(int? plane = null, string? oid = null)
+        => JsonSerializer.Serialize(new Dictionary<string, object?>
+        {
+            ["contactid"] = ProofContact,
+            ["statecode"] = 0,
+            [ContactBindingDecision.ExternalObjectIdColumn] = oid,
+            [ContactBindingDecision.IdentityPlaneColumn] = plane,
+        });
+
+    [Fact]
+    public async Task TheRealStore_WithNoMarkedRowsAndNoGrant_ProbesMasked_AndNeverSendsTheProbe()
+    {
+        // MUST FIRE: no role and no profile grants Read, and the probe would find no marked rows ("nothing to protect").
+        var http = new ReadProofHttp();
+
+        var readability = await StoreOver(http).ProbeBindingReadabilityAsync(CancellationToken.None);
+
+        readability.Should().Be(BindingReadability.Masked);
+        http.Requests.Should().NotContain(r => r.Contains("/contacts?"), "an unproven read is never classified by its rows");
+    }
+
+    [Fact]
+    public async Task TheRealStore_GetContact_AnEmptyPlaneWithoutProof_IsUnreadable()
+    {
+        // MUST FIRE: no oid, no plane, and no proof: never Unbound.
+        var http = new ReadProofHttp { ContactBody = ContactJson() };
+
+        var lookup = await StoreOver(http).GetContactAsync(ProofContact, CancellationToken.None);
+
+        lookup.Status.Should().Be(LookupStatus.Read);
+        lookup.Rows.Should().ContainSingle().Which.Binding.Kind.Should().Be(BindingKind.Unreadable);
+        http.WhoAmICount.Should().BeGreaterThan(0, "the empty read was put to the proof");
+    }
+
+    [Theory]
+    [InlineData("direct")]
+    [InlineData("team")]
+    [InlineData("role")]
+    public async Task TheRealStore_AProvenRead_TrustsTheEmptyPlane_AndProbesByItsRows(string leg)
+    {
+        // MUST NOT FIRE: WhoAmI is parsed, and each leg's FetchXML answer proves every identity column.
+        var http = new ReadProofHttp { ContactBody = ContactJson() };
+        switch (leg)
+        {
+            case "direct": http.DirectGrants.UnionWith(DataverseContactIdentityStore.IdentityColumns); break;
+            case "team": http.TeamGrants.UnionWith(DataverseContactIdentityStore.IdentityColumns); break;
+            default: http.Roles.Add(("System Administrator", SecuredColumnReadProof.SystemAdministratorRoleTemplateId)); break;
+        }
+
+        var store = StoreOver(http);
+        var readability = await store.ProbeBindingReadabilityAsync(CancellationToken.None);
+        var lookup = await store.GetContactAsync(ProofContact, CancellationToken.None);
+
+        readability.Should().Be(BindingReadability.NoMarkedRows);
+        http.Requests.Should().Contain(r => r.Contains("/contacts?"), "a proven read is classified by its rows");
+        var row = lookup.Rows.Should().ContainSingle().Subject;
+        row.Binding.Kind.Should().Be(BindingKind.Unbound);
+        row.CollisionColumnsUnproven.Should().BeFalse();
+        row.Flag.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task TheRealStore_AProofReadThatFaults_ProbesFailed_AndTheEmptyPlaneIsUnreadable()
+    {
+        // MUST FIRE: a throttled proof read is not a proof; the probe denies (retryable) and the empty plane is Unreadable.
+        var http = new ReadProofHttp { ContactBody = ContactJson(), ProofFaults = true };
+        http.DirectGrants.UnionWith(DataverseContactIdentityStore.IdentityColumns);
+        var store = StoreOver(http);
+
+        (await store.ProbeBindingReadabilityAsync(CancellationToken.None)).Should().Be(BindingReadability.Failed);
+        (await store.GetContactAsync(ProofContact, CancellationToken.None)).Rows.Should().ContainSingle()
+            .Which.Binding.Kind.Should().Be(BindingKind.Unreadable);
+    }
+
+    [Theory]
+    [InlineData("Platform Administrators", true, BindingReadability.NoMarkedRows)] // the template, renamed: proves
+    [InlineData("System Administrator", false, BindingReadability.Masked)]         // the name on another template: does not
+    public async Task TheRealStore_TheRoleLeg_MatchesTheSystemAdministratorTemplate_NeverTheRoleName(
+        string roleName, bool systemAdministratorTemplate, BindingReadability expected)
+    {
+        var http = new ReadProofHttp();
+        http.Roles.Add((roleName, systemAdministratorTemplate ? SecuredColumnReadProof.SystemAdministratorRoleTemplateId : Guid.NewGuid()));
+
+        (await StoreOver(http).ProbeBindingReadabilityAsync(CancellationToken.None)).Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task TheRealStore_ARowWithItsPlaneSet_IsStillPutToTheCollisionProof()
+    {
+        // MUST FIRE: the plane is read (a value), but the collision columns are not granted: the flag that read empty may be
+        // hidden, so it reads as one that is never written over.
+        var http = new ReadProofHttp { ContactBody = ContactJson((int)IdentityPlaneMarker.Workforce, Oid.ToString("D")) };
+        http.DirectGrants.UnionWith(DataverseContactIdentityStore.BindingColumns);
+
+        var row = (await StoreOver(http).GetContactAsync(ProofContact, CancellationToken.None)).Rows.Should().ContainSingle().Subject;
+
+        row.Binding.Should().Be(new BindingState(BindingKind.Bound, Oid, IdentityPlaneMarker.Workforce));
+        row.CollisionColumnsUnproven.Should().BeTrue();
+        row.Flag!.HasUnreadableParties.Should().BeTrue();
+        ContactBindingDecision.ShouldWriteFlag(row.Flag, new CollisionParty(Guid.NewGuid(), IdentityPlaneMarker.External,
+            IdentityCollisionReason.BoundToDifferentOid, DateTimeOffset.UnixEpoch)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task TheRealStore_ARowWithItsPlaneSet_AndEveryColumnGranted_ReadsAsToday()
+    {
+        // MUST NOT FIRE.
+        var http = new ReadProofHttp { ContactBody = ContactJson((int)IdentityPlaneMarker.Workforce, Oid.ToString("D")) };
+        http.DirectGrants.UnionWith(DataverseContactIdentityStore.IdentityColumns);
+
+        var row = (await StoreOver(http).GetContactAsync(ProofContact, CancellationToken.None)).Rows.Should().ContainSingle().Subject;
+
+        row.CollisionColumnsUnproven.Should().BeFalse();
+        row.IdentityColumnsUnproven.Should().BeFalse();
+        row.Flag.Should().BeNull();
     }
 }

@@ -214,6 +214,15 @@ public sealed record CollisionFlag(
     /// <summary>True when <paramref name="party"/>'s collision is already recorded.</summary>
     public bool Records(CollisionParty party) => Parties.Any(p => p.IsSameCollision(party));
 
+    /// <summary>
+    /// The flag of a row read while the BFF's read of the collision columns is not proven
+    /// (<see cref="ContactBindingRow.CollisionColumnsUnproven"/>): <paramref name="read"/>, or a placeholder when nothing was
+    /// read, marked as one whose parties cannot be read. A flag read without proof may hide parties, so it is never
+    /// overwritten (<see cref="ContactBindingDecision.ShouldWriteFlag"/>) and never cleared (<see cref="ContactBindingDecision.ReconcileFlag"/>).
+    /// </summary>
+    public static CollisionFlag ReadWithoutProof(CollisionFlag? read)
+        => (read ?? new CollisionFlag(DateTimeOffset.MinValue, null, null, null)) with { HasUnreadableParties = true };
+
     /// <summary>A flag whose parties are <paramref name="parties"/> (the first becomes the summary); null for none.</summary>
     public static CollisionFlag? FromParties(IReadOnlyList<CollisionParty> parties)
     {
@@ -276,12 +285,20 @@ public sealed record ContactBindingRow(
     public bool IsActive => StateCode == 0;
 
     /// <summary>
-    /// <c>true</c> when this row was read while the BFF's read of the field-secured identity columns
-    /// (<see cref="DataverseContactIdentityStore.IdentityColumns"/>: the binding, the plane and the collision flag) was NOT
+    /// <c>true</c> when this row was read while the BFF's read of the field-secured binding columns
+    /// (<see cref="DataverseContactIdentityStore.BindingColumns"/>: the binding and its plane) was NOT
     /// proven (<see cref="SecuredColumnReadProof"/>). An empty plane on such a row may be a hidden one, so its binding is
     /// <see cref="BindingKind.Unreadable"/>: never Unbound (no bind onto it) and never a plane-less legacy binding.
     /// </summary>
     public bool IdentityColumnsUnproven { get; init; }
+
+    /// <summary>
+    /// <c>true</c> when this row was read while the BFF's read of the five field-secured collision-flag columns
+    /// (<see cref="DataverseContactIdentityStore.CollisionColumns"/>) was NOT proven (<see cref="SecuredColumnReadProof"/>).
+    /// A hidden flag reads as no flag, so <see cref="Flag"/> is then <see cref="CollisionFlag.ReadWithoutProof"/>: no
+    /// collision is written over it (a write sets every collision column) and the reconciliation job never clears it.
+    /// </summary>
+    public bool CollisionColumnsUnproven { get; init; }
 
     /// <summary>
     /// The binding, read by <see cref="ContactBindingDecision.ReadBinding"/>; <see cref="BindingKind.Unreadable"/> when the
