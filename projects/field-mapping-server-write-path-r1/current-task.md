@@ -1,18 +1,19 @@
 # Current Task — field-mapping-server-write-path-r1
 
-> **Last updated**: 2026-10-22 (task 018 complete; project blocked on 017)
+> **Last updated**: 2026-10-22 (task 018 complete; #2281 fixed (1fa0cf5cb8); project blocked on 017)
 > **Phase**: Wave 2. Done (14/43): 001–006, 010–016, 018 on master (018a 36403e1f4b, 018b ef8a91a157 #2261, 018c **ab7cf4fc94** #2266).
-> **Live on dev: 1283c41817** (R3; dormant 018a). 018b (LIVE Office change) rides R3's next dev candidate (owner go by SHA in R3's session); R3 sends the SHA, then the owner makes 3 Office quick-creates and this session checks them read-only. **Active: none (blocked).**
+> **Live on dev: 1fa0cf5cb8** (R3, 2026-10-23 00:00Z; carries 018b LIVE, 018c, #2282). Waiting on the owner's 3 Office quick-creates + the Work Assignment attorney-copy check, then this session verifies read-only. **Active: none (blocked on 017).**
 
 ## Quick Recovery
 
 | Field | Value |
 |---|---|
 | **Active task** | None. Every pending task goes through 019, which needs 017 (blocked) |
-| **HEAD** | work branch = master ab7cf4fc94 + this checkpoint. No task branches or agent worktrees open |
+| **HEAD** | work branch = master 1fa0cf5cb8 + this checkpoint. No task branches or agent worktrees open |
 | **Running** | Nothing |
-| **Next Action** | Unblock 017: needs ebilling #1911 (still DRAFT) + reconcile, and the owner decisions in "Open items" 2. When R3 reports the 018b dev deploy SHA: ask the owner for the 3 Office quick-creates (Matter; Project under ordinary matter; Project under secure matter), then verify read-only on dev (owner team, sprk_issecure, regarding pair, Assigned To, search index) |
+| **Next Action** | (1) When the owner reports the dev creates: read-only MCP queries on dev for the newest sprk_matter / sprk_project rows by the owner (ownerid team, sprk_issecure, sprk_regardingrecordid + type, Assigned To, sprk_ai_search_index) and the newest work assignment (sprk_assignedattorney1 copied); report. (2) Unblock 017: ebilling #1911 (DRAFT) + reconcile, owner decisions in "Open items" 2 |
 | **018 progress** | COMPLETE. 018c deleted `OfficeRecordCreationService` + `CreateTimeFieldMapping.Apply`; `ResolveDefaultAssigneeAsync` moved to `IOfficeService`; guards updated (KnownCallSites 2, owner allow-list empty, census). Opus review: F3 fixed, K4 fixed, K2 known limit (cancellation seam test timing). Publish −21,556 B (37.73 MB). #2253 (UAC) carries `WriteIdentity.AppOnly` in `DropAppOnlyRefusedRules` + must-fire/must-not-fire tests (`RecordCreationServiceMappingSeamTests.AppOnlyAccessSets.cs`); nothing for this project |
+| **#2281 (out-of-task defect, fixed)** | PR #2282, merge **1fa0cf5cb8**. `sprk_targetfieldtype` uses the global set `sprk_fieldmappingtypes` (100000000+n, Currency 100000007); legacy rows and `sprk_sourcefieldtype` hold bare n. `FieldMappingColumns.NormalizeFieldType` reads both at the single rule read (`MapToFieldMappingRuleEntity`); Currency → Number. Client `describeError` shows the Xrm message. Ontology reviewed (no findings); dev check after the BFF deploy that carries it: Create Work Assignment from a matter with `sprk_assignedattorney1` copies it. Known limit: one bad column still voids the profile's client `$select` (task 035 deletes the engine). Seeder writing `1` = #2283, already fixed on the provisioning branch |
 | **CI note** | #2252 raised the Tier 1 arch job timeout to 10 min (merged). The Tier 2 ADR job (#2224) may still be cancelled by its timeout; read the log |
 | **Cleanup left for the owner** | Empty, unregistered folders (Remove-WorktreeSafe partial delete, "Permission denied"): `C:\code_files\spaarke\.claude\worktrees\agent-a10e5fe383a4dfcd2`, `...\agent-a80d401ebbcfb9d3e`, `...\agent-a1ced7a9c67154b2b` (018c, merged) |
 
