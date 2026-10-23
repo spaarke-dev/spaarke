@@ -26,12 +26,14 @@ public class CiamContactBindingTests
 
     /// <summary>
     /// Task 185: ContactA invited here the way the invite flow leaves it — the marker at <paramref name="invitedOn"/>
-    /// (default now) and the stored hash of a fresh code. Returns the code the invite email carries.
+    /// (default now), the stored hash of a fresh code and the invite stamp for <paramref name="email"/>. Returns the code
+    /// the invite email carries.
     /// </summary>
     private string InvitedContactA(DateTimeOffset? invitedOn = null, string email = Email)
     {
         var invite = InviteCode.Create(ContactA);
         _store.AddContact(ContactA, email: email, invitedOn: invitedOn ?? Now, inviteCodeHash: invite.StoredValue);
+        _store.StampInvite(ContactA, email);
         return invite.Code;
     }
 
@@ -215,25 +217,31 @@ public class CiamContactBindingTests
         _store.Writes.Should().BeEmpty(scenario);
     }
 
+    /// <summary>
+    /// The Workforce token plane email-binds a member only on the invite stamp (an invite to this address naming the
+    /// caller's tenant), read in the intent query. Before the stamp this test was
+    /// <c>TheWorkforcePlane_EmailBindsAMember_WithoutReadingAnyIntent</c>.
+    /// </summary>
     [Fact]
-    public async Task TheWorkforcePlane_EmailBindsAMember_WithoutReadingAnyIntent()
+    public async Task TheWorkforcePlane_EmailBindsAMember_OnTheInviteStamp()
     {
-        // Workforce-plane E11 is unchanged by task 184.
         var oid = Guid.NewGuid();
         _store.AddContact(ContactA, email: "person@customer.example");
+        _store.StampInvite(ContactA, "person@customer.example", CustomerTenant);
 
         var result = await Binder(_store).ResolveWorkforceCallerAsync(
             WorkforceUser(oid, tid: CustomerTenant), oid, stampTenantId: null, CancellationToken.None);
 
         result.Action.Should().Be(BindingAction.BindByEmail);
-        _store.Reads.Should().NotContain("intent");
+        _store.Reads.Should().Contain("intent");
     }
 
     /// <summary>
     /// #2005 (supersedes task 185 design §7's "the workforce bind is the plain bind"): the workforce plane's email bind
     /// consumes a pending invite-code hash in its ONE conditional write — a granted contact is auto-invited (185 §11), so a
-    /// B2B guest binding it would otherwise leave a live code on a bound contact. Where the hash column is not provisioned,
-    /// the bind is exactly the plain bind. The intent (marker and hash) is still never read on this plane.
+    /// B2B guest binding it would otherwise leave a live code on a bound contact. The same write clears the invite stamp.
+    /// Where the invite columns are not provisioned no stamp can exist, so the Workforce email bind is refused
+    /// (contact_not_invited) and nothing is written.
     /// MUTATION PROOF: the binder calling <c>BindOidAsync</c> here fails the provisioned case.
     /// </summary>
     [Theory]
@@ -243,20 +251,27 @@ public class CiamContactBindingTests
     {
         var oid = Guid.NewGuid();
         var invite = InviteCode.Create(ContactA);
-        _store.AddContact(ContactA, email: "person@customer.example", invitedOn: hashColumnProvisioned ? Now : null,
-            inviteCodeHash: hashColumnProvisioned ? invite.StoredValue : null);
+        _store.AddContact(ContactA, email: "person@customer.example", invitedOn: Now, inviteCodeHash: invite.StoredValue);
+        _store.StampInvite(ContactA, "person@customer.example", CustomerTenant);
         _store.InviteCodeHashColumnMissing = !hashColumnProvisioned;
 
         var result = await Binder(_store).ResolveWorkforceCallerAsync(
             WorkforceUser(oid, tid: CustomerTenant), oid, stampTenantId: null, CancellationToken.None);
 
+        if (!hashColumnProvisioned)
+        {
+            result.DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
+            _store.Writes.Should().BeEmpty();
+            return;
+        }
+
         result.Should().Be(new ContactBindingResult(ContactA, null, BindingAction.BindByEmail, Wrote: true));
-        _store.Writes.Should().ContainSingle().Which.Should().Be(("bind", (Guid?)ContactA, hashColumnProvisioned
-            ? $"{oid:D}|{IdentityPlaneMarker.Workforce}|invite-code-hash=null"
-            : $"{oid:D}|{IdentityPlaneMarker.Workforce}"));
-        _store.Contacts[ContactA].Oid.Should().Be(oid.ToString("D"));
-        _store.Contacts[ContactA].InviteCodeHash.Should().BeNull();
-        _store.Reads.Should().NotContain("intent");
+        _store.Writes.Should().ContainSingle().Which.Should().Be(
+            ("bind", (Guid?)ContactA, $"{oid:D}|{IdentityPlaneMarker.Workforce}|invite-code-hash=null"));
+        var row = _store.Contacts[ContactA];
+        row.Oid.Should().Be(oid.ToString("D"));
+        row.InviteCodeHash.Should().BeNull();
+        (row.InvitedEmailHash, row.InvitedTenantId).Should().Be(((string?)null, (string?)null), "the bind clears the stamp");
     }
 
     /// <summary>
@@ -271,6 +286,7 @@ public class CiamContactBindingTests
         var guestOid = Guid.NewGuid();
         var invite = InviteCode.Create(ContactA);
         _store.AddContact(ContactA, email: "person@customer.example", invitedOn: Now, inviteCodeHash: invite.StoredValue);
+        _store.StampInvite(ContactA, "person@customer.example", CustomerTenant);
         (await Binder(_store).ResolveWorkforceCallerAsync(
                 WorkforceUser(guestOid, tid: CustomerTenant), guestOid, stampTenantId: null, CancellationToken.None))
             .Action.Should().Be(BindingAction.BindByEmail);
@@ -445,6 +461,7 @@ public class CiamContactBindingTests
     {
         var invite = InviteCode.Create(ContactA);
         _store.AddContact(ContactA, email: Email, invitedOn: Now, inviteCodeHash: invite.StoredValue);
+        _store.StampInvite(ContactA, Email);
         var log = new BindingLogCapture<ContactIdentityBinder>();
 
         var result = await Binder(_store, log).ResolveCiamCallerAsync(CiamOid.ToString(), Email, invite.Code, CancellationToken.None);
@@ -469,6 +486,7 @@ public class CiamContactBindingTests
         var invite = InviteCode.Create(ContactA);
         var wrong = InviteCode.Create(ContactA).Code;
         _store.AddContact(ContactA, email: Email, invitedOn: Now, inviteCodeHash: invite.StoredValue);
+        _store.StampInvite(ContactA, Email);
         var log = new BindingLogCapture<ContactIdentityBinder>();
 
         var result = await Binder(_store, log).ResolveCiamCallerAsync(CiamOid.ToString(), Email, wrong, CancellationToken.None);
@@ -484,6 +502,7 @@ public class CiamContactBindingTests
     {
         var invite = InviteCode.Create(ContactA);
         _store.AddContact(ContactA, email: Email, invitedOn: Now, inviteCodeHash: invite.StoredValue);
+        _store.StampInvite(ContactA, Email);
 
         var result = await Binder(_store).ResolveCiamCallerAsync(CiamOid.ToString(), Email, inviteCode: null, CancellationToken.None);
 
@@ -655,7 +674,7 @@ public class CiamContactBindingTests
         var oldCode = InvitedContactA();
         InviteMarkResult? reInvite = null;
         _store.BeforeBind = _ => reInvite = Binder(_store)
-            .MarkInviteSentAsync(ContactA, etag: null, CancellationToken.None).GetAwaiter().GetResult();
+            .MarkInviteSentAsync(ContactA, etag: null, Email, invitedTenantId: null, CancellationToken.None).GetAwaiter().GetResult();
 
         var result = await Binder(_store).ResolveCiamCallerAsync(CiamOid.ToString(), Email, oldCode, CancellationToken.None);
 
@@ -680,7 +699,7 @@ public class CiamContactBindingTests
         _store.AddContact(ContactA, email: Email);
         var log = new BindingLogCapture<ContactIdentityBinder>();
 
-        var mark = await Binder(_store, log).MarkInviteSentAsync(ContactA, etag: null, CancellationToken.None);
+        var mark = await Binder(_store, log).MarkInviteSentAsync(ContactA, etag: null, Email, invitedTenantId: null, CancellationToken.None);
 
         mark.Status.Should().Be(StoreWriteStatus.Written);
         InviteCode.IsWellFormed(mark.InviteCode).Should().BeTrue();
@@ -698,10 +717,10 @@ public class CiamContactBindingTests
     public async Task AReInvite_ReplacesTheHash_TheEarlierCodeFails_TheNewCodeBinds()
     {
         _store.AddContact(ContactA, email: Email);
-        var first = await Binder(_store).MarkInviteSentAsync(ContactA, etag: null, CancellationToken.None);
+        var first = await Binder(_store).MarkInviteSentAsync(ContactA, etag: null, Email, invitedTenantId: null, CancellationToken.None);
         var firstHash = _store.Contacts[ContactA].InviteCodeHash;
 
-        var second = await Binder(_store).MarkInviteSentAsync(ContactA, etag: null, CancellationToken.None);
+        var second = await Binder(_store).MarkInviteSentAsync(ContactA, etag: null, Email, invitedTenantId: null, CancellationToken.None);
 
         second.InviteCode.Should().NotBe(first.InviteCode);
         _store.Contacts[ContactA].InviteCodeHash.Should().NotBe(firstHash);
@@ -721,7 +740,7 @@ public class CiamContactBindingTests
         _store.AddContact(ContactA, email: Email);
         _store.InviteCodeHashColumnMissing = true;
 
-        var mark = await Binder(_store).MarkInviteSentAsync(ContactA, etag: null, CancellationToken.None);
+        var mark = await Binder(_store).MarkInviteSentAsync(ContactA, etag: null, Email, invitedTenantId: null, CancellationToken.None);
 
         mark.Status.Should().Be(StoreWriteStatus.ColumnMissing);
         mark.InviteCode.Should().BeNull();

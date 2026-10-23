@@ -177,6 +177,7 @@ public class ContactIdentityBinderWorkforceGuestTests
     {
         var oid = Guid.NewGuid();
         _store.AddContact(ContactA, email: GuestEmail);
+        _store.StampInvite(ContactA, GuestEmail, CustomerTenant);
 
         var result = await Binder(_store).ResolveWorkforceCallerAsync(
             WorkforceUser(oid, CustomerTenant, acct: "0", email: GuestEmail), oid, Stamp, CancellationToken.None);

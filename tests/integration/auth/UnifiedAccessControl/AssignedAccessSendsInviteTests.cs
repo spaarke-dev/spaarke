@@ -156,6 +156,7 @@ public class AssignedAccessSendsInviteTests
         var invitedOn = _h.Time.GetUtcNow().AddDays(-29);
         _h.Identities.Contacts[contact].InvitedOn = invitedOn;
         _h.Identities.Contacts[contact].InviteCodeHash = "v1.pending-hash-of-the-earlier-invite";
+        _h.Identities.Contacts[contact].InvitedEmailHash = "v1:pending-stamp-of-the-earlier-invite";
         _h.Store.Assign(Matter, _matter, Attorney1, contact);
 
         var outcome = await InternalSync();

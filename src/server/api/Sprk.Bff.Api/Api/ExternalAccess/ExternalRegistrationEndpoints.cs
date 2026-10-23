@@ -191,7 +191,8 @@ public static class ExternalRegistrationEndpoints
                     string.IsNullOrWhiteSpace(request.Department) ? null : request.Department.Trim(),
                     request.ConfirmExistingRecord == true,
                     options.CurrentValue.CustomerBusinessUnitId,
-                    SecureRecordOwnerTeam.BusinessUnitName(configuration)),
+                    SecureRecordOwnerTeam.BusinessUnitName(configuration),
+                    WorkforceCallerClaims.EmailDomainOwnerVerifiedOf(home)),
                 ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -233,6 +234,13 @@ public static class ExternalRegistrationEndpoints
 
     private static IResult DeniedResult(string? denyCode) => denyCode switch
     {
+        // An existing record carries the email, but the person has no current invite naming this sign-in: a re-invite
+        // (naming their organization's tenant) is the fix, not a retry. Nothing was bound or created.
+        ContactBindingDecision.DenyContactNotInvited =>
+            Problem(StatusCodes.Status403Forbidden, ContactBindingDecision.DenyContactNotInvited,
+                "An existing record carries your email, but it can only be linked to this sign-in after you are invited "
+                + "again. Ask the person who invited you to send a new invitation."),
+
         // A squatted uniqueness mirror: an administrator must resolve the record (the holder is flagged).
         ContactBindingDecision.DenyContactKeyConflict =>
             Problem(StatusCodes.Status403Forbidden, ReasonContactConflict,

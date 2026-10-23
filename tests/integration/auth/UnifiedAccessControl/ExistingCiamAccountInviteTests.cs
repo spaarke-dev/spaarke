@@ -86,31 +86,33 @@ public class ExistingCiamAccountInviteTests
         .AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = PortalUrl })
         .Build();
 
-    private Task<IResult> InviteAndGrant(ILogger<Program>? logger = null, ContactIdentityBinder? binder = null) =>
+    private Task<IResult> InviteAndGrant(
+        ILogger<Program>? logger = null, ContactIdentityBinder? binder = null, string? invitedTenantId = null) =>
         InviteAndGrantExternalUserEndpoint.InviteAndGrantAsync(
-            Request() with { RecordId = _matter },
+            Request() with { RecordId = _matter, InvitedTenantId = invitedTenantId },
             _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new EverythingProbe(),
             _ciam, _h.Emails, binder ?? IdentityBindingTestKit.Binder(_h.Identities),
             PortalConfig(), Sprk.Bff.Api.Tests.TestInfrastructure.TestSpeOwnership.Customer(CustomerKey),
             _h.Materializer, _h.Notifier, Context(), logger ?? NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
 
     /// <summary>The /invite core, as the route runs it.</summary>
-    private Task<InviteExternalUserEndpoint.ProvisionOutcome> Invite(ContactIdentityBinder? binder = null, ILogger? logger = null) =>
+    private Task<InviteExternalUserEndpoint.ProvisionOutcome> Invite(
+        ContactIdentityBinder? binder = null, ILogger? logger = null, string? invitedTenantId = null) =>
         InviteExternalUserEndpoint.ProvisionAsync(
-            Request(), _h.Grants, _ciam, _h.Emails, binder ?? IdentityBindingTestKit.Binder(_h.Identities), PortalUrl,
+            Request() with { InvitedTenantId = invitedTenantId }, _h.Grants, _ciam, _h.Emails, binder ?? IdentityBindingTestKit.Binder(_h.Identities), PortalUrl,
             CustomerKey, logger ?? NullLogger<Program>.Instance, resolution: null, CancellationToken.None);
 
     /// <summary>
     /// The /invite ROUTE handler itself (private; reached by reflection so the test reads the response the route returns,
     /// not one it rebuilt).
     /// </summary>
-    private async Task<IResult> InviteRoute(ILogger<Program>? logger = null)
+    private async Task<IResult> InviteRoute(ILogger<Program>? logger = null, string? invitedTenantId = null)
     {
         var handler = typeof(InviteExternalUserEndpoint).GetMethod("InviteExternalUserAsync", BindingFlags.NonPublic | BindingFlags.Static)
             ?? throw new InvalidOperationException("The /invite handler was not found.");
         var task = (Task<IResult>)handler.Invoke(null, new object[]
         {
-            Request() with { RecordId = _matter }, _h.Grants, _h.Participations, _ciam, _h.Emails,
+            Request() with { RecordId = _matter, InvitedTenantId = invitedTenantId }, _h.Grants, _h.Participations, _ciam, _h.Emails,
             IdentityBindingTestKit.Binder(_h.Identities), PortalConfig(),
             Sprk.Bff.Api.Tests.TestInfrastructure.TestSpeOwnership.Customer(CustomerKey), Context(),
             logger ?? NullLogger<Program>.Instance, CancellationToken.None,
@@ -847,6 +849,115 @@ public class ExistingCiamAccountInviteTests
         _h.Identities.Contacts[contact].InviteCodeHash.Should().BeNull("the bind consumed the code");
         InviteCode.Matches(hashAtCreate!, CodeIn(_h.Emails.InviteUrls.Should().ContainSingle().Subject), contact)
             .Should().BeTrue("the emailed code is the one marked");
+    }
+
+    // ── The invite stamp: written by /invite and /invite-and-grant, independent of the CIAM account branch ──────────
+
+    private static readonly Guid PartnerTenant = IdentityBindingTestKit.CustomerTenant;
+
+    /// <summary>
+    /// /invite writes the invite stamp in the marker's write: the invited address, hashed (never the address), and the
+    /// tenant the request named. With the CIAM account already existing the contact stays unbound, so the stamp stays, and
+    /// a Workforce sign-in from that tenant with that email then binds it (and the bind clears the stamp).
+    /// </summary>
+    [Fact]
+    public async Task Invite_WritesTheInviteStamp_AndAWorkforceSignInFromTheNamedTenantBinds()
+    {
+        var contact = UnboundContact();
+        _ciam.Failure = ObjectConflictOnProxyAddresses();
+
+        var outcome = await Invite(invitedTenantId: PartnerTenant.ToString("D").ToUpperInvariant());
+
+        outcome.Status.Should().Be(InviteExternalUserEndpoint.ExistingAccountStatus);
+        var row = _h.Identities.Contacts[contact];
+        InviteEmailStamp.Matches(row.InvitedEmailHash, Email).Should().BeTrue("the stamp records the invited address");
+        row.InvitedEmailHash.Should().NotContain(Email, "only the salted hash is stored");
+        row.InvitedTenantId.Should().Be(PartnerTenant.ToString("D"));
+        _h.Identities.InviteStampWrites.Should().ContainSingle().Which.InvitedTenantId.Should().Be(PartnerTenant);
+
+        var oid = Guid.NewGuid();
+        var signIn = await IdentityBindingTestKit.Binder(_h.Identities).ResolveWorkforceCallerAsync(
+            IdentityBindingTestKit.WorkforceUser(oid, tid: PartnerTenant, email: Email), oid, stampTenantId: null,
+            CancellationToken.None);
+
+        signIn.ContactId.Should().Be(contact);
+        (row.Oid, row.InvitedEmailHash, row.InvitedTenantId).Should().Be((oid.ToString("D"), (string?)null, (string?)null));
+    }
+
+    /// <summary>/invite-and-grant writes the same stamp; an invite naming no tenant stamps none.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task InviteAndGrant_WritesTheInviteStamp(bool namesATenant)
+    {
+        var contact = UnboundContact();
+        _ciam.Failure = ObjectConflictOnProxyAddresses();
+
+        (await InviteAndGrant(invitedTenantId: namesATenant ? PartnerTenant.ToString("D") : null))
+            .Should().BeOfType<Ok<InviteAndGrantResponse>>();
+
+        var row = _h.Identities.Contacts[contact];
+        InviteEmailStamp.Matches(row.InvitedEmailHash, Email).Should().BeTrue();
+        row.InvitedTenantId.Should().Be(namesATenant ? PartnerTenant.ToString("D") : null);
+    }
+
+    /// <summary>
+    /// The stamp write does not depend on the CIAM account branch: a new-account invite writes it with the marker BEFORE the
+    /// account is created, and the invite's own bind of the new oid then clears it.
+    /// </summary>
+    [Fact]
+    public async Task ANewAccountInvite_WritesTheStampBeforeTheAccount_AndItsOwnBindClearsIt()
+    {
+        var contact = UnboundContact();
+        string? stampAtCreate = null;
+        _ciam.OnCreate = () => stampAtCreate = _h.Identities.Contacts[contact].InvitedEmailHash;
+
+        var outcome = await Invite(invitedTenantId: PartnerTenant.ToString("D"));
+
+        outcome.Status.Should().Be(InviteExternalUserEndpoint.ProvisionedStatus);
+        InviteEmailStamp.Matches(stampAtCreate, Email).Should().BeTrue("the stamp landed with the marker, before the account");
+        _h.Identities.InviteStampWrites.Should().ContainSingle();
+        var row = _h.Identities.Contacts[contact];
+        row.Oid.Should().NotBeNull();
+        (row.InvitedEmailHash, row.InvitedTenantId).Should().Be(((string?)null, (string?)null), "the bind clears the stamp");
+    }
+
+    /// <summary>
+    /// The optional invited tenant is a GUID or nothing: anything else is a 400 in each route's validation shape, before any
+    /// read or write. Blank is "none". MUST-NOT-FIRE: a GUID in any case and surrounding spaces is accepted.
+    /// </summary>
+    [Theory]
+    [InlineData("not-a-guid", true)]
+    [InlineData("00000000-0000-0000-0000-000000000000", true)]
+    [InlineData("11111111-aaaa-4aaa-8aaa-11111111111", true)]
+    [InlineData("tenant.onmicrosoft.com", true)]
+    [InlineData("", false)]
+    [InlineData("   ", false)]
+    [InlineData(" 11111111-AAAA-4AAA-8AAA-111111111111 ", false)]
+    public async Task TheInvitedTenant_IsAGuidOrOmitted_Else400(string raw, bool refused)
+    {
+        UnboundContact();
+        _ciam.Failure = ObjectConflictOnProxyAddresses();
+
+        foreach (var result in new[] { await InviteRoute(invitedTenantId: raw), await InviteAndGrant(invitedTenantId: raw) })
+        {
+            if (refused)
+            {
+                var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+                problem.StatusCode.Should().Be(400);
+                problem.ProblemDetails.Detail.Should().Contain("InvitedTenantId");
+            }
+            else
+            {
+                result.Should().NotBeOfType<ProblemHttpResult>();
+            }
+        }
+
+        if (refused)
+        {
+            _h.Identities.Writes.Should().BeEmpty("a refused request writes nothing");
+            _h.Identities.Reads.Should().BeEmpty("a refused request reads nothing");
+        }
     }
 
     // ── Doubles ─────────────────────────────────────────────────────────────────────────────────────────────

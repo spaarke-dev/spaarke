@@ -171,10 +171,19 @@ public sealed class ExternalRegistrationEndpointsTests : IClassFixture<ExternalR
 
     // ── Existing contact (step 3) ──────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// <paramref name="contact"/> with a current invite stamp: an invite to <see cref="Email"/> naming
+    /// <paramref name="tenant"/> (default: the caller's home tenant), written now (the route's binder runs on the system
+    /// clock). Binding an existing contact at registration needs it.
+    /// </summary>
+    private InMemoryContactIdentityStore.Contact Invited(InMemoryContactIdentityStore.Contact contact, Guid? tenant = null,
+        string email = Email)
+        => _store.StampInvite(contact.Id, email, tenant ?? HomeTenant, DateTimeOffset.UtcNow);
+
     [Fact]
     public async Task OneBindableContact_WithConfirmation_IsBound_NoNewContact()
     {
-        var existing = _store.AddContact(Guid.NewGuid(), email: Email);
+        var existing = Invited(_store.AddContact(Guid.NewGuid(), email: Email));
 
         var response = await Post(Body(confirm: true));
 
@@ -196,9 +205,8 @@ public sealed class ExternalRegistrationEndpointsTests : IClassFixture<ExternalR
     [Fact]
     public async Task OneBindableContact_WithAPendingInvite_WithConfirmation_IsBound_AndTheInviteCodeHashIsCleared()
     {
-        var invitedOn = DateTimeOffset.Parse("2026-10-14T09:30:00Z");
-        var existing = _store.AddContact(Guid.NewGuid(), email: Email);
-        existing.InvitedOn = invitedOn;
+        var existing = Invited(_store.AddContact(Guid.NewGuid(), email: Email));
+        var invitedOn = existing.InvitedOn;
         existing.InviteCodeHash = "pending-invite-code-hash";
 
         var response = await Post(Body(confirm: true));
@@ -206,6 +214,8 @@ public sealed class ExternalRegistrationEndpointsTests : IClassFixture<ExternalR
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         existing.Oid.Should().Be(_oid.ToString("D"));
         existing.InviteCodeHash.Should().BeNull("a bound contact must not keep an unused invite-code hash");
+        (existing.InvitedEmailHash, existing.InvitedTenantId).Should().Be(((string?)null, (string?)null),
+            "the bind clears the invite stamp in the same write");
         existing.InvitedOn.Should().Be(invitedOn, "only the hash is consumed; the marker is untouched");
         _store.Writes.Select(w => w.Op).Should().Equal("bind");
     }
@@ -213,13 +223,75 @@ public sealed class ExternalRegistrationEndpointsTests : IClassFixture<ExternalR
     [Fact]
     public async Task OneBindableContact_WithoutConfirmation_Is409ExistingRecordFound_NoWrite()
     {
-        var existing = _store.AddContact(Guid.NewGuid(), email: Email);
+        var existing = Invited(_store.AddContact(Guid.NewGuid(), email: Email));
 
         var response = await Post(Body(confirm: null));
 
         await ShouldBeProblem(response, HttpStatusCode.Conflict, ExternalRegistrationEndpoints.ReasonExistingRecordFound);
         _store.Writes.Should().BeEmpty();
         existing.Oid.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Binding an existing contact at registration needs a current invite stamp whose recorded email is the token's and the
+    /// contact's, naming the caller's home tenant (or a boolean-true <c>xms_edov</c>). Each row that misses one leg is
+    /// answered 403 <c>contact_not_invited</c> with the "invite again" detail, with or without the confirmation, before the
+    /// 409 prompt; nothing is bound and no contact is created. MUST-NOT-FIRE rows bind.
+    /// </summary>
+    [Theory]
+    [InlineData("no-stamp", null, false)]
+    [InlineData("stale-stamp", null, false)]
+    [InlineData("other-email", null, false)]
+    [InlineData("other-tenant", null, false)]
+    [InlineData("other-tenant", "string:true", false)]
+    [InlineData("other-tenant", "bool:false", false)]
+    [InlineData("no-tenant", null, false)]
+    [InlineData("other-tenant", "bool:true", true)]
+    [InlineData("no-tenant", "bool:true", true)]
+    [InlineData("home-tenant", null, true)]
+    public async Task BindingAnExistingContact_NeedsTheInviteStamp(string stamp, string? edov, bool binds)
+    {
+        var existing = _store.AddContact(Guid.NewGuid(), email: Email);
+        switch (stamp)
+        {
+            case "no-stamp":
+                break;
+            case "stale-stamp":
+                _store.StampInvite(existing.Id, Email, HomeTenant,
+                    DateTimeOffset.UtcNow - ContactBindingDecision.InviteMarkerWindow - TimeSpan.FromMinutes(1));
+                break;
+            case "other-email":
+                Invited(existing, email: "someone.else@customer.example");
+                break;
+            case "other-tenant":
+                Invited(existing, Guid.NewGuid());
+                break;
+            case "no-tenant":
+                _store.StampInvite(existing.Id, Email, invitedTenantId: null, DateTimeOffset.UtcNow);
+                break;
+            default:
+                Invited(existing);
+                break;
+        }
+
+        var response = await Post(Body(confirm: true), edov: edov);
+
+        if (binds)
+        {
+            response.StatusCode.Should().Be(HttpStatusCode.OK, stamp);
+            existing.Oid.Should().Be(_oid.ToString("D"));
+            existing.InvitedEmailHash.Should().BeNull("the bind clears the stamp");
+            return;
+        }
+
+        await ShouldBeProblem(response, HttpStatusCode.Forbidden, ContactBindingDecision.DenyContactNotInvited);
+        (await response.Content.ReadAsStringAsync()).Should().Contain("invitation");
+        existing.Oid.Should().BeNull(stamp);
+        _store.Writes.Should().BeEmpty(stamp);
+        _store.Contacts.Should().ContainSingle(stamp);
+
+        var withoutConfirmation = await Post(Body(confirm: null), edov: edov);
+        await ShouldBeProblem(withoutConfirmation, HttpStatusCode.Forbidden, ContactBindingDecision.DenyContactNotInvited);
     }
 
     [Theory]
@@ -312,7 +384,7 @@ public sealed class ExternalRegistrationEndpointsTests : IClassFixture<ExternalR
     public async Task InactiveAndOneActiveBindableMatch_ActiveDecides_AsToday_InactiveIsLeftAlone()
     {
         var inactive = _store.AddContact(Guid.NewGuid(), email: Email, stateCode: 1);
-        var active = _store.AddContact(Guid.NewGuid(), email: Email);
+        var active = Invited(_store.AddContact(Guid.NewGuid(), email: Email));
 
         var ask = await Post(Body(confirm: null));
         await ShouldBeProblem(ask, HttpStatusCode.Conflict, ExternalRegistrationEndpoints.ReasonExistingRecordFound);
@@ -424,7 +496,7 @@ public sealed class ExternalRegistrationEndpointsTests : IClassFixture<ExternalR
     [Fact]
     public async Task Bind_RefusedForAMissingPrivilege_Is500Environment_NotRetryable_NothingBound()
     {
-        var existing = _store.AddContact(Guid.NewGuid(), email: Email);
+        var existing = Invited(_store.AddContact(Guid.NewGuid(), email: Email));
         _store.BindStatusOverride = StoreWriteStatus.Forbidden;
 
         var response = await Post(Body(confirm: true));
@@ -437,7 +509,7 @@ public sealed class ExternalRegistrationEndpointsTests : IClassFixture<ExternalR
     [Fact]
     public async Task Bind_FailedTransiently_StaysA503Unavailable()
     {
-        var existing = _store.AddContact(Guid.NewGuid(), email: Email);
+        var existing = Invited(_store.AddContact(Guid.NewGuid(), email: Email));
         _store.FailBind = true;
 
         var response = await Post(Body(confirm: true));
@@ -663,12 +735,12 @@ public sealed class ExternalRegistrationEndpointsTests : IClassFixture<ExternalR
         });
 
     private Task<HttpResponseMessage> Post(string json, string scheme = AuthSchemes.WorkforceHome, string? email = Email,
-        string? preferredUsername = null)
-        => PostAs(_fixture, json, _oid, scheme, email, preferredUsername);
+        string? preferredUsername = null, string? edov = null)
+        => PostAs(_fixture, json, _oid, scheme, email, preferredUsername, edov);
 
     internal static async Task<HttpResponseMessage> PostAs(
         RegistrationFixtureBase fixture, string json, Guid oid, string scheme = AuthSchemes.WorkforceHome,
-        string? email = Email, string? preferredUsername = null)
+        string? email = Email, string? preferredUsername = null, string? edov = null)
     {
         using var client = fixture.CreateClient();
         using var request = new HttpRequestMessage(HttpMethod.Post, Route)
@@ -680,6 +752,7 @@ public sealed class ExternalRegistrationEndpointsTests : IClassFixture<ExternalR
         request.Headers.TryAddWithoutValidation(RegistrationTestAuthHandler.OidHeader, oid.ToString("D"));
         request.Headers.TryAddWithoutValidation(RegistrationTestAuthHandler.TidHeader, HomeTenant.ToString("D"));
         if (email is not null) request.Headers.TryAddWithoutValidation(RegistrationTestAuthHandler.EmailHeader, email);
+        if (edov is not null) request.Headers.TryAddWithoutValidation(RegistrationTestAuthHandler.EdovHeader, edov);
         if (preferredUsername is not null)
         {
             request.Headers.TryAddWithoutValidation(RegistrationTestAuthHandler.PreferredUsernameHeader, preferredUsername);
@@ -796,6 +869,7 @@ internal sealed class RegistrationTestAuthHandler : AuthenticationHandler<Authen
     public const string TidHeader = "X-Test-Tid";
     public const string EmailHeader = "X-Test-Email";
     public const string PreferredUsernameHeader = "X-Test-Upn";
+    public const string EdovHeader = "X-Test-Edov";
 
     public RegistrationTestAuthHandler(
         IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder)
@@ -820,6 +894,13 @@ internal sealed class RegistrationTestAuthHandler : AuthenticationHandler<Authen
             new("family_name", "Okafor"),
         };
         if (Request.Headers.TryGetValue(EmailHeader, out var email)) claims.Add(new Claim("email", email.ToString()));
+        if (Request.Headers.TryGetValue(EdovHeader, out var edov))
+        {
+            // "bool:true" is the claim a JSON boolean becomes; "string:true" is the same text as a string claim.
+            var parts = edov.ToString().Split(':', 2);
+            claims.Add(new Claim("xms_edov", parts[1], parts[0] == "bool" ? ClaimValueTypes.Boolean : ClaimValueTypes.String));
+        }
+
         if (Request.Headers.TryGetValue(PreferredUsernameHeader, out var upn))
         {
             claims.Add(new Claim("preferred_username", upn.ToString()));

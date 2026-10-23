@@ -494,6 +494,7 @@ public class ContactIdentityBinderOwnerTeamTests
     {
         var contactId = Guid.NewGuid();
         _store.AddContact(contactId, email: Email);
+        _store.StampInvite(contactId, Email, CustomerTenant);
         var oid = Guid.NewGuid();
 
         var result = await OwnedBinder(customerBusinessUnitId: null)

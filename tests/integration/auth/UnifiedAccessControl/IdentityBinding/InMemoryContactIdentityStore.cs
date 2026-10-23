@@ -64,6 +64,15 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         /// </summary>
         public string? InviteCodeHash { get; set; }
 
+        /// <summary>
+        /// <c>sprk_externalinvitedemailhash</c> — the invite stamp's salted hash of the invited address (field-secured).
+        /// Written with the marker, cleared by every consuming bind.
+        /// </summary>
+        public string? InvitedEmailHash { get; set; }
+
+        /// <summary><c>sprk_externalinvitedtenantid</c> — the tenant the invite named, as stored text (field-secured).</summary>
+        public string? InvitedTenantId { get; set; }
+
         /// <summary>A9 (r3 task 046): <c>sprk_externaltenantid</c> — the home directory of a WorkforceHome contact.</summary>
         public string? ExternalTenantId { get; set; }
 
@@ -128,6 +137,18 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
 
     /// <summary>Task 185: every bind (plain or consuming) that the <c>If-Match</c> version refused with 412.</summary>
     public int BindPreconditionFailures { get; private set; }
+
+    /// <summary>
+    /// The invite stamp columns' readability proof outcome: an email hash read empty is marked unproven unless this is
+    /// <see cref="ColumnReadProofOutcome.Proven"/> (the Dataverse store's third proof).
+    /// </summary>
+    internal ColumnReadProofOutcome InviteStampColumnsProof { get; set; } = ColumnReadProofOutcome.Proven;
+
+    /// <summary>The stamp columns read null (a profile that cannot read them) while the rows still hold values.</summary>
+    public bool MaskInviteStampColumns { get; set; }
+
+    /// <summary>Every invite stamp the marker write received (the stored hash and the tenant), in order.</summary>
+    public List<InviteStamp> InviteStampWrites { get; } = new();
 
     /// <summary>Task 184: the intent read throws (a transport fault the store did not convert into a status).</summary>
     public bool ThrowOnIntentRead { get; set; }
@@ -314,6 +335,9 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             BindPreconditionFailures = 0;
             ThrowOnIntentRead = false;
             MarkerWriteFailure = null;
+            InviteStampColumnsProof = ColumnReadProofOutcome.Proven;
+            MaskInviteStampColumns = false;
+            InviteStampWrites.Clear();
             FailOidLookupOnceFor.Clear();
             BeforeCreate = null;
             BeforeBind = null;
@@ -345,6 +369,24 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         };
         Contacts[id] = c;
         return c;
+    }
+
+    /// <summary>
+    /// Seeds the invite stamp an invite to <paramref name="email"/> writes (the real <see cref="InviteEmailStamp"/>), with
+    /// the marker at <paramref name="invitedOn"/> (default: the existing marker, else <see cref="IdentityBindingTestKit.Now"/>,
+    /// the test binders' clock) and the tenant the invite named. The row's version moves.
+    /// </summary>
+    public Contact StampInvite(Guid contactId, string email, Guid? invitedTenantId = null, DateTimeOffset? invitedOn = null)
+    {
+        lock (_gate)
+        {
+            var c = Contacts[contactId];
+            c.InvitedOn = invitedOn ?? c.InvitedOn ?? IdentityBindingTestKit.Now;
+            c.InvitedEmailHash = InviteEmailStamp.Create(email);
+            c.InvitedTenantId = invitedTenantId?.ToString("D");
+            c.Version = NextVersion();
+            return c;
+        }
     }
 
     public SystemUser AddSystemUser(Guid id, Guid? oid, string? email, Guid? primaryContactId = null,
@@ -684,9 +726,16 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             if (ThrowOnIntentRead) throw new HttpRequestException("injected intent-read fault");
             var status = InviteCodeHashColumnMissing ? LookupStatus.ColumnMissing : InviteMarkerStatus;
             var row = status == LookupStatus.Read && Contacts.TryGetValue(contactId, out var c) ? c : null;
+            var emailHash = MaskInviteStampColumns ? null : row?.InvitedEmailHash;
             return Task.FromResult(new BindIntentLookup(contactId, status, row?.InvitedOn)
             {
                 InviteCodeHash = row?.InviteCodeHash,
+                InvitedEmailHash = emailHash,
+                RawInvitedTenantId = MaskInviteStampColumns ? null : row?.InvitedTenantId,
+                CurrentEmail = row?.Email,
+                ETag = row is null ? null : $"W/\"{row.Version}\"",
+                StampColumnsUnproven = row is not null && string.IsNullOrWhiteSpace(emailHash)
+                                       && InviteStampColumnsProof != ColumnReadProofOutcome.Proven,
             });
         }
     }
@@ -694,10 +743,12 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
     // ── Writes ─────────────────────────────────────────────────────────────────────────────────────
 
     public Task<StoreWriteResult> MarkInvitedAsync(
-        Guid contactId, string? etag, DateTimeOffset invitedOn, string inviteCodeHash, CancellationToken ct)
+        Guid contactId, string? etag, DateTimeOffset invitedOn, string inviteCodeHash, InviteStamp stamp, CancellationToken ct)
     {
         lock (_gate)
         {
+            // The real payload builder's argument checks (a blank hash or an empty tenant never reaches the platform).
+            _ = DataverseContactIdentityStore.InviteMarkerPayload(invitedOn, inviteCodeHash, stamp);
             if (MarkerWriteFailure is { } failure) return Task.FromResult(new StoreWriteResult(failure, Error: "injected"));
             if (InviteMarkerStatus == LookupStatus.ColumnMissing)
             {
@@ -722,9 +773,12 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
                 return Task.FromResult(new StoreWriteResult(StoreWriteStatus.PreconditionFailed));
             }
 
-            // ONE write: the marker and the new code's hash together (a re-invite replaces both).
+            // ONE write: the marker, the new code's hash and the invite stamp together (a re-invite replaces all four).
             c.InvitedOn = invitedOn;
             c.InviteCodeHash = inviteCodeHash;
+            c.InvitedEmailHash = stamp.InvitedEmailHash;
+            c.InvitedTenantId = stamp.InvitedTenantId?.ToString("D");
+            InviteStampWrites.Add(stamp);
             c.Version = NextVersion();
             Writes.Add(("invite-marker", contactId, invitedOn.UtcDateTime.ToString("O") + "|code-hash"));
             return Task.FromResult(StoreWriteResult.Written);
@@ -787,7 +841,10 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             c.Plane = (int)plane;
             if (consumeInvite)
             {
+                // The consuming bind clears the code hash AND the invite stamp in the same write.
                 c.InviteCodeHash = null;
+                c.InvitedEmailHash = null;
+                c.InvitedTenantId = null;
             }
 
             if (homeTenantId is { } tenant)

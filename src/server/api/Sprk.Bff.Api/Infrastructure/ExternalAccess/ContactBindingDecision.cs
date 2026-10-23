@@ -478,6 +478,38 @@ public sealed record ReferenceLookup(LookupStatus Status, IReadOnlyList<SystemUs
 }
 
 /// <summary>
+/// Why an email bind was refused for its invite stamp (<see cref="ContactBindingDecision.CheckInviteStamp"/>). OPERATOR-ONLY:
+/// logged by the binder, never answered — every value is denied with the one code
+/// <see cref="ContactBindingDecision.DenyContactNotInvited"/>. No value carries an address or a hash.
+/// </summary>
+public enum InviteStampFailure
+{
+    /// <summary>No email-hash stamp: never written, cleared by a bind, or its column is not provisioned.</summary>
+    NoStamp,
+
+    /// <summary>The stamp read empty while the BFF's read of the stamp columns is not proven. Treated as no stamp.</summary>
+    StampUnproven,
+
+    /// <summary>The invite marker the stamp was written with is outside its window (<see cref="ContactBindingDecision.InviteMarkerWindow"/>).</summary>
+    StampExpired,
+
+    /// <summary>The stored value does not parse, or is of a version this code does not know. Treated as no stamp.</summary>
+    StampMalformed,
+
+    /// <summary>The token's email is not the address the invite recorded.</summary>
+    TokenEmailMismatch,
+
+    /// <summary>The contact's current <c>emailaddress1</c> is not the address the invite recorded.</summary>
+    ContactEmailMismatch,
+
+    /// <summary>
+    /// Workforce plane: the token's <c>xms_edov</c> is not boolean true, and its <c>tid</c> is not the tenant the invite named
+    /// (or the invite named none).
+    /// </summary>
+    TenantNotVerified,
+}
+
+/// <summary>
 /// Task 184 (owner round 96) — whether THIS environment intends an unbound contact to be email-bound on the CIAM plane.
 /// The pending-invite marker and its stored invite-code hash, read together in the marker's own query
 /// (<c>IContactIdentityStore.FindBindIntentAsync</c>), raw, interpreted by the decision
@@ -516,6 +548,35 @@ public sealed record BindIntentLookup(
     /// </summary>
     internal string? InviteCodeHash { get; init; }
 
+    /// <summary>
+    /// <c>contact.sprk_externalinvitedemailhash</c> as stored (<see cref="InviteEmailStamp"/>'s <c>v1:</c> value), or null:
+    /// the address the current invite was sent to, hashed. Read in the marker's own query. INTERNAL so the compiler-generated
+    /// <see cref="object.ToString"/> of this record never prints it (never log a hash).
+    /// </summary>
+    internal string? InvitedEmailHash { get; init; }
+
+    /// <summary><c>contact.sprk_externalinvitedtenantid</c> as stored (GUID text the invite named), or null.</summary>
+    public string? RawInvitedTenantId { get; init; }
+
+    /// <summary>
+    /// <c>contact.emailaddress1</c> read in the SAME query as the stamp (so at the same row version). INTERNAL so the
+    /// compiler-generated <see cref="object.ToString"/> never prints an address.
+    /// </summary>
+    internal string? CurrentEmail { get; init; }
+
+    /// <summary>
+    /// The row version the stamp was read at. An email bind decided on this stamp is written conditional on this version,
+    /// and only when the binding read saw the same version (otherwise the row changed between the reads: re-read).
+    /// </summary>
+    public string? ETag { get; init; }
+
+    /// <summary>
+    /// True when a stamp column read EMPTY while the BFF's read of the stamp columns is not proven
+    /// (<see cref="SecuredColumnReadProof"/>): an empty value may be a hidden one. Either way an empty stamp is no stamp, so
+    /// the bind is refused; this only names the reason for the operator.
+    /// </summary>
+    public bool StampColumnsUnproven { get; init; }
+
     /// <summary>The marker read failed.</summary>
     public static BindIntentLookup Failed(Guid contactId) =>
         new(contactId, LookupStatus.Failed, null);
@@ -539,6 +600,18 @@ public sealed record BindingRequest(
     /// compiler-generated <see cref="object.ToString"/> of this record never prints it (never log a code, CLAUDE.md §9).
     /// </summary>
     internal string? InviteCode { get; init; }
+
+    /// <summary>
+    /// Workforce plane: the token's <c>tid</c>, parsed, or null. An email bind on this plane needs it to equal the tenant the
+    /// invite named, unless <see cref="EmailDomainOwnerVerified"/> is true.
+    /// </summary>
+    public Guid? TokenTenantId { get; init; }
+
+    /// <summary>
+    /// Workforce plane: the token's <c>xms_edov</c> claim (the email's domain is verified by the tenant that owns it). True
+    /// ONLY for a boolean <c>true</c> claim; an absent, false, non-boolean or repeated claim is not verified (fail closed).
+    /// </summary>
+    public bool? EmailDomainOwnerVerified { get; init; }
 
     /// <summary>The plane marker this caller's oid belongs to.</summary>
     public IdentityPlaneMarker CallerPlane =>
@@ -742,6 +815,10 @@ public static class ContactBindingDecision
     /// contact, but the caller did not prove THIS environment's invite: a pending invite (<c>sprk_externalinvitedon</c> set
     /// within the last 30 days, owner round 97) together with its matching invite code. A grant alone is not an invite.
     /// Nothing is written and nothing is flagged: no other person is involved.
+    /// <para>The same code answers every invite-stamp refusal of an email bind, on the CIAM and Workforce token planes and at
+    /// WorkforceHome registration (<see cref="CheckInviteStamp"/>): no current stamp, a stamp whose recorded address is not
+    /// the token's email or the contact's current <c>emailaddress1</c>, or (Workforce) a tenant the invite did not name. The
+    /// specific leg is logged for the operator only (<see cref="InviteStampFailure"/>). Staff answer: invite the person again.</para>
     /// </summary>
     public const string DenyContactNotInvited = "sdap.access.deny.contact_not_invited";
 
@@ -960,11 +1037,12 @@ public static class ContactBindingDecision
             return Collide(IdentityCollisionReason.LinkedToOtherUser, DenyContactLinkedToOtherUser, row.ContactId);
         }
 
-        // E11 — the CIAM plane binds only on THIS environment's intent (task 184, owner round 96). A CIAM token for this
-        // customer's audience is obtainable by any CIAM user, so an email match alone is no evidence this customer means
-        // this person. The workforce and systemuser planes are unchanged: their callers are admitted by the member test
-        // or are directory-synced licensed users (Model 1 workforce sign-in is under separate owner discussion).
-        if (request.Plane == BindingPlane.CiamToken)
+        // E11 — the token planes bind by email only on THIS environment's invite (task 184, owner round 96). On the CIAM
+        // plane: the pending invite, its code, and the invite stamp. On the Workforce token plane: the invite stamp, whose
+        // recorded address must be the token's email and the contact's current emailaddress1, and whose invited tenant must
+        // be the token's tid unless xms_edov is boolean true (CheckInviteStamp). The systemuser plane is unchanged: its
+        // email is directory-synced from a licensed user.
+        if (request.Plane is BindingPlane.CiamToken or BindingPlane.WorkforceToken)
         {
             if (intent is null)
             {
@@ -978,8 +1056,9 @@ public static class ContactBindingDecision
     }
 
     /// <summary>
-    /// E11's marker leg on the CIAM plane (task 185, owner round 98). It binds, and tells the binder to consume the code,
-    /// only when the marker is current (<see cref="IsInviteMarkerCurrent"/>: at most 30 days old, at most 5 minutes in the
+    /// E11 on the token planes. On the Workforce token plane it binds only when the invite stamp holds
+    /// (<see cref="CheckInviteStamp"/>, with the tenant leg). On the CIAM plane, E11's marker leg (task 185, owner round 98)
+    /// binds, and tells the binder to consume the code, only when the invite stamp holds (without the tenant leg) and the marker is current (<see cref="IsInviteMarkerCurrent"/>: at most 30 days old, at most 5 minutes in the
     /// future) AND the presented code matches the contact's stored hash (<see cref="InviteCode.Matches"/>, constant time).
     /// FAIL CLOSED: a lookup for another contact, or a marker read that FAILED, denies <see cref="DenyContactLookupFailed"/>.
     /// Every other non-match (no code, a wrong or superseded code, no stored hash, an expired or far-future marker, a marker
@@ -994,34 +1073,119 @@ public static class ContactBindingDecision
             return Deny(DenyContactLookupFailed);
         }
 
-        var invited = intent.InviteStatus == LookupStatus.Read
-            && IsInviteMarkerCurrent(intent.InvitedOn, intent.AsOf)
-            && InviteCode.Matches(intent.InviteCodeHash, request.InviteCode, contactId);
+        var ciam = request.Plane == BindingPlane.CiamToken;
+        var invited = (!ciam
+                || (intent.InviteStatus == LookupStatus.Read
+                    && IsInviteMarkerCurrent(intent.InvitedOn, intent.AsOf)
+                    && InviteCode.Matches(intent.InviteCodeHash, request.InviteCode, contactId)))
+            && CheckInviteStamp(intent, request.Email, requireTenantProof: !ciam, request.TokenTenantId,
+                request.EmailDomainOwnerVerified) is null;
         return invited
-            ? new BindingDecision(BindingAction.BindByEmail, contactId) { ConsumeInviteCode = true }
+            ? new BindingDecision(BindingAction.BindByEmail, contactId) { ConsumeInviteCode = ciam }
             : Deny(DenyContactNotInvited);
     }
 
     /// <summary>
-    /// Task 185 (design note §5.1): the OPERATOR-only reason E11's marker leg answered <see cref="DenyContactNotInvited"/> —
-    /// <c>no-marker</c>, <c>marker-expired</c>, <c>no-stored-hash</c>, <c>no-code-presented</c> or <c>code-mismatch</c>, in
-    /// the order <see cref="DecideIntent"/> tests them. For the binder's log line only: it names no code and no hash, and
-    /// the HTTP answer never tells the reasons apart (no oracle). <c>null</c> when the leg would not deny not-invited. Pure.
+    /// The invite-stamp rule every email bind onto an existing contact by a token caller meets (CIAM and Workforce token
+    /// planes, WorkforceHome registration): <c>null</c> when it is met, else the first leg that is not, for the operator log.
+    /// Pure. In order:
+    /// <list type="number">
+    ///   <item>a stamp exists: the stamp read ran (<see cref="LookupStatus.Read"/>) and the email hash is not empty (an empty
+    ///   one read without proof is <see cref="InviteStampFailure.StampUnproven"/>, still no stamp);</item>
+    ///   <item>it is current: its invite marker is within <see cref="InviteMarkerWindow"/> (<see cref="IsInviteMarkerCurrent"/>,
+    ///   the CIAM marker's own window);</item>
+    ///   <item>it parses as a version this code writes (<see cref="InviteEmailStamp"/>; an unknown version is no stamp);</item>
+    ///   <item>its recorded address is <paramref name="tokenEmail"/>, and is the contact's current <c>emailaddress1</c> read
+    ///   with the stamp (both normalised, compared in fixed time);</item>
+    ///   <item>with <paramref name="requireTenantProof"/> (the Workforce planes): <paramref name="emailDomainOwnerVerified"/> is
+    ///   true, or <paramref name="tokenTenantId"/> is the tenant the invite named.</item>
+    /// </list>
+    /// </summary>
+    public static InviteStampFailure? CheckInviteStamp(
+        BindIntentLookup intent, string? tokenEmail, bool requireTenantProof, Guid? tokenTenantId, bool? emailDomainOwnerVerified)
+    {
+        ArgumentNullException.ThrowIfNull(intent);
+
+        if (intent.InviteStatus != LookupStatus.Read || string.IsNullOrWhiteSpace(intent.InvitedEmailHash))
+        {
+            return intent.InviteStatus == LookupStatus.Read && intent.StampColumnsUnproven
+                ? InviteStampFailure.StampUnproven
+                : InviteStampFailure.NoStamp;
+        }
+
+        if (!IsInviteMarkerCurrent(intent.InvitedOn, intent.AsOf))
+        {
+            return InviteStampFailure.StampExpired;
+        }
+
+        if (!InviteEmailStamp.IsWellFormed(intent.InvitedEmailHash))
+        {
+            return InviteStampFailure.StampMalformed;
+        }
+
+        if (!InviteEmailStamp.Matches(intent.InvitedEmailHash, tokenEmail))
+        {
+            return InviteStampFailure.TokenEmailMismatch;
+        }
+
+        if (!InviteEmailStamp.Matches(intent.InvitedEmailHash, intent.CurrentEmail))
+        {
+            return InviteStampFailure.ContactEmailMismatch;
+        }
+
+        if (requireTenantProof
+            && emailDomainOwnerVerified != true
+            && !(tokenTenantId is { } tid && IsGuid(intent.RawInvitedTenantId, tid)))
+        {
+            return InviteStampFailure.TenantNotVerified;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Task 185 (design note §5.1): the OPERATOR-only reason E11 answered <see cref="DenyContactNotInvited"/> — on the CIAM
+    /// plane <c>no-marker</c>, <c>marker-expired</c>, <c>no-stored-hash</c>, <c>no-code-presented</c> or <c>code-mismatch</c>,
+    /// in the order <see cref="DecideIntent"/> tests them; then, on both token planes, the invite stamp's leg
+    /// (<see cref="StampReason"/>). For the binder's log line only: it names no code, no address and no hash, and the HTTP
+    /// answer never tells the reasons apart (no oracle). <c>null</c> when the leg would not deny not-invited. Pure.
     /// </summary>
     internal static string? NotInvitedReason(BindingRequest request, BindIntentLookup intent, Guid contactId)
     {
         if (intent.ContactId != contactId || intent.InviteStatus is not (LookupStatus.Read or LookupStatus.ColumnMissing))
             return null;
-        if (intent.InviteStatus == LookupStatus.ColumnMissing || intent.InvitedOn is null)
-            return "no-marker";
-        if (!IsInviteMarkerCurrent(intent.InvitedOn, intent.AsOf))
-            return "marker-expired";
-        if (string.IsNullOrEmpty(intent.InviteCodeHash))
-            return "no-stored-hash";
-        if (string.IsNullOrEmpty(request.InviteCode))
-            return "no-code-presented";
-        return InviteCode.Matches(intent.InviteCodeHash, request.InviteCode, contactId) ? null : "code-mismatch";
+        if (request.Plane == BindingPlane.CiamToken)
+        {
+            if (intent.InviteStatus == LookupStatus.ColumnMissing || intent.InvitedOn is null)
+                return "no-marker";
+            if (!IsInviteMarkerCurrent(intent.InvitedOn, intent.AsOf))
+                return "marker-expired";
+            if (string.IsNullOrEmpty(intent.InviteCodeHash))
+                return "no-stored-hash";
+            if (string.IsNullOrEmpty(request.InviteCode))
+                return "no-code-presented";
+            if (!InviteCode.Matches(intent.InviteCodeHash, request.InviteCode, contactId))
+                return "code-mismatch";
+        }
+
+        return CheckInviteStamp(intent, request.Email, requireTenantProof: request.Plane != BindingPlane.CiamToken,
+                request.TokenTenantId, request.EmailDomainOwnerVerified) is { } failure
+            ? StampReason(failure)
+            : null;
     }
+
+    /// <summary>The operator log word for an invite-stamp leg (<c>stamp-</c> + the leg). Pure.</summary>
+    internal static string StampReason(InviteStampFailure failure) => failure switch
+    {
+        InviteStampFailure.NoStamp => "stamp-none",
+        InviteStampFailure.StampUnproven => "stamp-unproven",
+        InviteStampFailure.StampExpired => "stamp-expired",
+        InviteStampFailure.StampMalformed => "stamp-malformed",
+        InviteStampFailure.TokenEmailMismatch => "stamp-token-email-mismatch",
+        InviteStampFailure.ContactEmailMismatch => "stamp-contact-email-mismatch",
+        InviteStampFailure.TenantNotVerified => "stamp-tenant-not-verified",
+        _ => "stamp-unknown",
+    };
 
     /// <summary>
     /// Task 184 (owner round 97) — a pending-invite marker counts for <see cref="InviteMarkerWindow"/> (30 days) after the
@@ -1530,15 +1694,17 @@ public static class ContactBindingDecision
 
     /// <summary>
     /// <c>contact.sprk_externalinvitedemailhash</c> — the salted hash of the email address the latest invite was sent to
-    /// (never the address). FIELD-SECURED: only the BFF reads or writes it, no reader profile
-    /// (<c>scripts/Set-ExternalAccessContactSecuritySchema.ps1</c>). Created by the schema step; no BFF read or write yet.
+    /// (never the address; <see cref="InviteEmailStamp"/>). FIELD-SECURED: only the BFF reads or writes it, no reader profile
+    /// (<c>scripts/Set-ExternalAccessContactSecuritySchema.ps1</c>). Written by every invite in the same request as
+    /// <see cref="ExternalInvitedOnColumn"/>, read in the marker's own query, cleared by every bind.
     /// </summary>
     public const string ExternalInvitedEmailHashColumn = "sprk_externalinvitedemailhash";
 
     /// <summary>
     /// <c>contact.sprk_externalinvitedtenantid</c> — the Entra tenant id (GUID text) the latest invite named, when it named
     /// one. FIELD-SECURED: only the BFF reads or writes it, no reader profile
-    /// (<c>scripts/Set-ExternalAccessContactSecuritySchema.ps1</c>). Created by the schema step; no BFF read or write yet.
+    /// (<c>scripts/Set-ExternalAccessContactSecuritySchema.ps1</c>). Written (or cleared) with the email hash at every invite,
+    /// cleared by every bind.
     /// </summary>
     public const string ExternalInvitedTenantIdColumn = "sprk_externalinvitedtenantid";
 

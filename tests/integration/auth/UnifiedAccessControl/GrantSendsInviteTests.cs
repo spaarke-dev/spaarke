@@ -196,6 +196,7 @@ public class GrantSendsInviteTests
         var invitedOn = _h.Time.GetUtcNow().AddDays(-29);
         _h.Identities.Contacts[contact].InvitedOn = invitedOn;
         _h.Identities.Contacts[contact].InviteCodeHash = "v1.pending-hash-of-the-earlier-invite";
+        _h.Identities.Contacts[contact].InvitedEmailHash = "v1:pending-stamp-of-the-earlier-invite";
 
         var body = OkBody(await Grant(contact));
 
@@ -235,6 +236,29 @@ public class GrantSendsInviteTests
         var signIn = await IdentityBindingTestKit.Binder(_h.Identities)
             .ResolveCiamCallerAsync(oid.ToString(), Email, code, CancellationToken.None);
         signIn.ContactId.Should().Be(contact, "the new code binds at the first sign-in");
+    }
+
+    /// <summary>
+    /// A current invite written before the invite stamp existed (marker and code, no email hash) binds nobody, so it is not
+    /// a pending invite: the grant sends a new invite, which writes the stamp, and its code then binds.
+    /// </summary>
+    [Fact]
+    public async Task Grant_ToAContactWithACurrentInviteButNoStamp_InvitesAgain_AndStampsIt()
+    {
+        var contact = UnboundContact();
+        _h.Identities.Contacts[contact].InvitedOn = _h.Time.GetUtcNow().AddDays(-2);
+        _h.Identities.Contacts[contact].InviteCodeHash = "v1.pending-hash-of-an-invite-before-the-stamp";
+        _h.Identities.Contacts[contact].InvitedEmailHash = null;
+        _h.Ciam.Failure = ObjectConflictOnProxyAddresses();
+
+        var body = OkBody(await Grant(contact));
+
+        body.Invite.Should().Be(new GrantInviteResult(GrantInviteStatus.Sent));
+        InviteEmailStamp.Matches(_h.Identities.Contacts[contact].InvitedEmailHash, Email).Should().BeTrue();
+        var code = TheOneInviteCode();
+        var signIn = await IdentityBindingTestKit.Binder(_h.Identities)
+            .ResolveCiamCallerAsync(Guid.NewGuid().ToString(), Email, code, CancellationToken.None);
+        signIn.ContactId.Should().Be(contact);
     }
 
     [Fact]

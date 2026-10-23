@@ -247,6 +247,39 @@ public class CallerPrincipalResolverTests
         body.Should().NotContain("new.hire@customer.example");
     }
 
+    /// <summary>
+    /// The Workforce plane's contact_not_invited (an email bind needs a current invite stamp naming this sign-in) has the
+    /// CIAM plane's shape: 403, the one reasonCode, and an "invite again" detail that names no leg, address or id. Before,
+    /// it was the default Forbidden with no detail.
+    /// </summary>
+    [Fact]
+    public async Task WorkforceStrategy_ContactNotInvited_Is403_WithTheInviteAgainDetail()
+    {
+        var resolver = new Mock<IWorkforcePrincipalResolver>();
+        resolver.Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(WorkforcePrincipalResolution.Denied(
+                WorkforceDenyReason.PrincipalNotResolved, ContactBindingDecision.DenyContactNotInvited));
+        var strategy = new WorkforcePrincipalStrategy(
+            resolver.Object, new Mock<IAccessibleRecordSetService>(MockBehavior.Strict).Object,
+            Mock.Of<ILogger<WorkforcePrincipalStrategy>>());
+        var http = new DefaultHttpContext
+        {
+            User = Principal(("oid", Guid.NewGuid().ToString()), ("acct", "0"), ("email", "partner@customer.example")),
+            RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider(),
+        };
+        http.Response.Body = new MemoryStream();
+
+        var body = await DenyBodyAsync(await strategy.ResolveAsync(http, CancellationToken.None), http);
+
+        http.Response.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        using var json = System.Text.Json.JsonDocument.Parse(body);
+        json.RootElement.GetProperty("reasonCode").GetString().Should().Be(ContactBindingDecision.DenyContactNotInvited);
+        var detail = json.RootElement.GetProperty("detail").GetString();
+        detail.Should().Be(WorkforcePrincipalStrategy.WorkforceNotInvitedDetail).And.Contain("invite you again");
+        detail.Should().NotContain("@").And.NotContain("tenant");
+        body.Should().NotContain("partner@customer.example");
+    }
+
     [Fact]
     public async Task WorkforceStrategy_OwnerUnconfigured_Is500_WithRegistrationsReasonCode()
     {
@@ -672,6 +705,7 @@ public class CallerPrincipalResolverTests
                 var invite = InviteCode.Create(invited);
                 store.AddContact(invited, email: "x@firm.example", invitedOn: IdentityBindingTestKit.Now,
                     inviteCodeHash: invite.StoredValue);
+                store.StampInvite(invited, "x@firm.example");
                 store.AddContact(Guid.NewGuid(), email: "y@firm.example", keyMirror: oid.ToString("D"));
                 presentedCode = invite.Code;
                 break;
@@ -758,6 +792,7 @@ public class CallerPrincipalResolverTests
         var store = new InMemoryContactIdentityStore();
         store.AddContact(contactId, email: InvitedEmail, invitedOn: IdentityBindingTestKit.Now,
             inviteCodeHash: invite.StoredValue);
+        store.StampInvite(contactId, InvitedEmail);
         var strategy = new CiamContactPrincipalStrategy(
             IdentityBindingTestKit.Binder(store), EmptyCiamScope(contactId).Object,
             Mock.Of<ILogger<CiamContactPrincipalStrategy>>());
@@ -784,6 +819,7 @@ public class CallerPrincipalResolverTests
         var store = new InMemoryContactIdentityStore();
         store.AddContact(contactId, email: InvitedEmail, invitedOn: IdentityBindingTestKit.Now,
             inviteCodeHash: invite.StoredValue);
+        store.StampInvite(contactId, InvitedEmail);
         var http = header switch
         {
             "absent" => CiamRequest(Guid.NewGuid(), null),
@@ -838,6 +874,7 @@ public class CallerPrincipalResolverTests
         var store = new InMemoryContactIdentityStore();
         store.AddContact(contactId, email: InvitedEmail, invitedOn: IdentityBindingTestKit.Now,
             inviteCodeHash: invite.StoredValue);
+        store.StampInvite(contactId, InvitedEmail);
         var ciam = new CiamContactPrincipalStrategy(
             IdentityBindingTestKit.Binder(store), new Mock<IAccessibleRecordSetService>(MockBehavior.Strict).Object,
             Mock.Of<ILogger<CiamContactPrincipalStrategy>>());
@@ -868,6 +905,7 @@ public class CallerPrincipalResolverTests
         var store = new InMemoryContactIdentityStore();
         store.AddContact(contactId, email: InvitedEmail, invitedOn: IdentityBindingTestKit.Now,
             inviteCodeHash: invite.StoredValue);
+        store.StampInvite(contactId, InvitedEmail);
         var binderLog = new BindingLogCapture<ContactIdentityBinder>();
         var strategyLog = new BindingLogCapture<CiamContactPrincipalStrategy>();
         var strategy = new CiamContactPrincipalStrategy(

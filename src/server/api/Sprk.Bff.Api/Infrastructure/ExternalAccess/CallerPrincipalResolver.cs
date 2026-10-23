@@ -661,6 +661,15 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
         "You're signed in as a guest of the Spaarke directory. Sign in with your own organization's work account instead: "
         + "open the portal in a browser and choose your work or school account.";
 
+    /// <summary>
+    /// The ProblemDetails detail for <see cref="ContactBindingDecision.DenyContactNotInvited"/> on the workforce plane: the
+    /// email matches a record, but no current invitation names this sign-in. Never says which part of the invitation did not
+    /// match.
+    /// </summary>
+    internal const string WorkforceNotInvitedDetail =
+        "Your work account has not been invited to this workspace yet, or the invitation has expired. Ask the person who "
+        + "works with you here to invite you again.";
+
     private readonly IWorkforcePrincipalResolver _resolver;
     private readonly IAccessibleRecordSetService _accessibleSet;
     private readonly ILogger<WorkforcePrincipalStrategy> _logger;
@@ -743,6 +752,14 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
                     _logger.LogWarning("[WF-AUTH] Denying request: {DenyCode}", resolution.DenyCode);
                     return CallerPrincipalResolution.Denied(ProblemDetailsHelper.Forbidden(
                         WorkforceMembershipTest.DenyGuestUseHomeSignin, GuestUseHomeSignInDetail));
+
+                case WorkforceDenyReason.PrincipalNotResolved
+                    when resolution.DenyCode == ContactBindingDecision.DenyContactNotInvited:
+                    // The email bind needs a current invite naming this sign-in: the fix is a new invitation. Same shape as
+                    // the CIAM plane's contact_not_invited, so the SPA shows this detail.
+                    _logger.LogWarning("[WF-AUTH] Denying request: {DenyCode}", resolution.DenyCode);
+                    return CallerPrincipalResolution.Denied(ProblemDetailsHelper.Forbidden(
+                        ContactBindingDecision.DenyContactNotInvited, WorkforceNotInvitedDetail));
 
                 case WorkforceDenyReason.PrincipalNotResolved:
                 default:

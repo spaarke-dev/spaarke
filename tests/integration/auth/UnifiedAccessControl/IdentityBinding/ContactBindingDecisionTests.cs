@@ -182,7 +182,9 @@ public class ContactBindingDecisionTests
 
     [Fact]
     public void E3_PerturbToOneContact_Proceeds()
-        => ContactBindingDecision.Decide(Workforce(), NoRows, ContactLookup.Of(Unbound(ContactA)), ReferenceLookup.Of())
+        // One match proceeds to E11, which on the Workforce token plane needs the invite stamp naming this caller's tenant.
+        => ContactBindingDecision.Decide(Workforce() with { TokenTenantId = InvitedTenant }, NoRows,
+                ContactLookup.Of(Unbound(ContactA)), ReferenceLookup.Of(), Stamped(Intent(invitedOn: Now), InvitedTenant))
             .Action.Should().Be(BindingAction.BindByEmail);
 
     [Fact]
@@ -292,7 +294,7 @@ public class ContactBindingDecisionTests
         // Task 184: on the CIAM plane this bind also needs this environment's intent; task 185: a pending invite AND its
         // code. The workforce form of this row is E11_TheWorkforceAndSystemUserPlanes_BindWithoutAnyIntent, unchanged.
         => ContactBindingDecision.Decide(Ciam(code: InviteA.Code), NoRows, ContactLookup.Of(Unbound(ContactA)),
-                ReferenceLookup.Of(), Intent(invitedOn: Now, hash: InviteA.StoredValue))
+                ReferenceLookup.Of(), Invited())
             .Should().Be(BindsAndConsumes);
 
     // ── E11 intent gate (task 184, owner round 96): the CIAM plane binds only on THIS environment's intent ─────
@@ -305,9 +307,27 @@ public class ContactBindingDecisionTests
         DateTimeOffset? asOf = null, string? hash = null)
         => new(contact ?? ContactA, inviteStatus, invitedOn) { AsOf = asOf ?? Now, InviteCodeHash = hash };
 
-    /// <summary>ContactA's current invite: a marker at <paramref name="invitedOn"/> (default now) and its stored hash.</summary>
+    /// <summary>The tenant an invite named, in the Workforce rows.</summary>
+    private static readonly Guid InvitedTenant = Guid.Parse("11111111-aaaa-4aaa-8aaa-111111111111");
+
+    /// <summary>
+    /// <paramref name="intent"/> with the invite stamp an invite to <see cref="Email"/> wrote (naming
+    /// <paramref name="tenant"/>), and the contact's current email still <see cref="Email"/>.
+    /// </summary>
+    private static BindIntentLookup Stamped(BindIntentLookup intent, Guid? tenant = null)
+        => intent with
+        {
+            InvitedEmailHash = InviteEmailStamp.Create(Email),
+            RawInvitedTenantId = tenant?.ToString("D"),
+            CurrentEmail = Email,
+        };
+
+    /// <summary>
+    /// ContactA's current invite: a marker at <paramref name="invitedOn"/> (default now), its stored code hash, and the
+    /// invite stamp for <see cref="Email"/>.
+    /// </summary>
     private static BindIntentLookup Invited(DateTimeOffset? invitedOn = null)
-        => Intent(invitedOn: invitedOn ?? Now, hash: InviteA.StoredValue);
+        => Stamped(Intent(invitedOn: invitedOn ?? Now, hash: InviteA.StoredValue));
 
     private static BindingDecision CiamE11(BindIntentLookup? intent, string? code = null)
         => ContactBindingDecision.Decide(Ciam(code: code), NoRows, ContactLookup.Of(Unbound(ContactA)), ReferenceLookup.Of(),
@@ -482,7 +502,7 @@ public class ContactBindingDecisionTests
         // A re-invite overwrote the marker and the hash; the earlier email's code is presented.
         var superseded = InviteCode.Create(ContactA);
         var reInvite = InviteCode.Create(ContactA);
-        var intent = Intent(invitedOn: Now, hash: reInvite.StoredValue);
+        var intent = Stamped(Intent(invitedOn: Now, hash: reInvite.StoredValue));
 
         CiamE11(intent, superseded.Code).DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
         CiamE11(intent, reInvite.Code).Should().Be(BindsAndConsumes);
@@ -578,19 +598,36 @@ public class ContactBindingDecisionTests
         => CiamE11(Intent(invitedOn: Now, contact: ContactB, hash: InviteA.StoredValue), InviteA.Code).DenyCode
             .Should().Be(ContactBindingDecision.DenyContactLookupFailed);
 
-    [Theory]
-    [InlineData(BindingPlane.WorkforceToken)]
-    [InlineData(BindingPlane.SystemUser)]
-    public void E11_TheWorkforceAndSystemUserPlanes_BindWithoutAnyIntent(BindingPlane plane)
+    [Fact]
+    public void E11_TheSystemUserPlane_BindsWithoutAnyIntent()
     {
-        // Workforce-plane E11 is unchanged (Model 1 workforce sign-in is under separate owner discussion): it never asks
-        // for intent, and a "no intent" answer handed to it changes nothing. Pins the gate to the CIAM plane.
-        var request = new BindingRequest(plane, Caller, Email, BindingEligibility.EmailBindAndCreate);
+        // The systemuser plane's email is directory-synced from a licensed user: it never asks for intent, and a "no intent"
+        // answer handed to it changes nothing. Before the invite stamp this row also covered the Workforce token plane, which
+        // now needs the stamp (E11_TheWorkforcePlane_NeedsTheInviteStamp).
+        var request = new BindingRequest(BindingPlane.SystemUser, Caller, Email, BindingEligibility.EmailBindAndCreate);
         var rows = ContactLookup.Of(Unbound(ContactA));
 
         ContactBindingDecision.Decide(request, NoRows, rows, ReferenceLookup.Of()).Action.Should().Be(BindingAction.BindByEmail);
         ContactBindingDecision.Decide(request, NoRows, rows, ReferenceLookup.Of(), Intent()).Action
             .Should().Be(BindingAction.BindByEmail);
+    }
+
+    /// <summary>
+    /// The Workforce token plane binds by email only on a current invite stamp: it asks for the intent, a lookup with no
+    /// stamp is denied not-invited, and a stamp naming the caller's tenant binds (without consuming a code).
+    /// </summary>
+    [Fact]
+    public void E11_TheWorkforcePlane_NeedsTheInviteStamp()
+    {
+        var request = Workforce() with { TokenTenantId = InvitedTenant };
+        var rows = ContactLookup.Of(Unbound(ContactA));
+
+        ContactBindingDecision.Decide(request, NoRows, rows, ReferenceLookup.Of())
+            .Should().Be(new BindingDecision(BindingAction.NeedIntentLookup, ContactA));
+        ContactBindingDecision.Decide(request, NoRows, rows, ReferenceLookup.Of(), Intent(invitedOn: Now)).DenyCode
+            .Should().Be(ContactBindingDecision.DenyContactNotInvited);
+        ContactBindingDecision.Decide(request, NoRows, rows, ReferenceLookup.Of(), Stamped(Intent(invitedOn: Now), InvitedTenant))
+            .Should().Be(new BindingDecision(BindingAction.BindByEmail, ContactA));
     }
 
     [Theory]
@@ -599,15 +636,25 @@ public class ContactBindingDecisionTests
     public void E11_TheNonCiamPlanes_BypassTheCodeCheck_AndNeverConsumeACode(BindingPlane plane)
     {
         // Task 185 changes nothing outside the CIAM block (owner round 98, R3's request): a presented code, a wrong code or
-        // none changes nothing on these planes, and their bind never asks the binder to consume a code.
+        // none changes nothing on these planes, and their bind never asks the binder to consume a code. (The Workforce
+        // token plane needs the invite stamp, given here; the code is still not checked.)
         var rows = ContactLookup.Of(Unbound(ContactA));
         var plain = new BindingDecision(BindingAction.BindByEmail, ContactA);
+        var stamped = Stamped(Invited(), InvitedTenant);
 
         foreach (var code in new[] { null, InviteA.Code, InviteCode.Create(ContactA).Code })
         {
-            var request = new BindingRequest(plane, Caller, Email, BindingEligibility.EmailBindAndCreate) { InviteCode = code };
-            ContactBindingDecision.Decide(request, NoRows, rows, ReferenceLookup.Of()).Should().Be(plain);
-            ContactBindingDecision.Decide(request, NoRows, rows, ReferenceLookup.Of(), Invited()).Should().Be(plain);
+            var request = new BindingRequest(plane, Caller, Email, BindingEligibility.EmailBindAndCreate)
+            {
+                InviteCode = code,
+                TokenTenantId = InvitedTenant,
+            };
+            if (plane == BindingPlane.SystemUser)
+            {
+                ContactBindingDecision.Decide(request, NoRows, rows, ReferenceLookup.Of()).Should().Be(plain);
+            }
+
+            ContactBindingDecision.Decide(request, NoRows, rows, ReferenceLookup.Of(), stamped).Should().Be(plain);
         }
     }
 

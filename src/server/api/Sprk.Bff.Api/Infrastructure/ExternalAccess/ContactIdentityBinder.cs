@@ -149,6 +149,11 @@ public sealed record InviteMarkResult(StoreWriteResult Write)
 /// The Secure Record business unit's name (<c>SecureRecordOwnerTeam.BusinessUnitName(configuration)</c>): the create is
 /// refused when <paramref name="CustomerBusinessUnitId"/> is that business unit.
 /// </param>
+/// <param name="EmailDomainOwnerVerified">
+/// The home token's <c>xms_edov</c> (<see cref="WorkforceCallerClaims.EmailDomainOwnerVerifiedOf"/>): true only for a boolean
+/// true claim. Binding to an existing contact needs it, or the invite stamp's tenant to be <paramref name="HomeTenantId"/>.
+/// Absent (the default) is not verified.
+/// </param>
 public sealed record HomeRegistrationRequest(
     Guid HomeTenantId,
     Guid HomeObjectId,
@@ -158,7 +163,8 @@ public sealed record HomeRegistrationRequest(
     string? Department,
     bool ConfirmExistingRecord,
     Guid? CustomerBusinessUnitId,
-    string SecureBusinessUnitName);
+    string SecureBusinessUnitName,
+    bool? EmailDomainOwnerVerified = null);
 
 /// <summary>What a registration did.</summary>
 public enum HomeRegistrationOutcome
@@ -334,7 +340,14 @@ public sealed class ContactIdentityBinder
             callerOid,
             claims.Email,
             membership == WorkforceMembership.Member ? BindingEligibility.EmailBindAndCreate : BindingEligibility.None,
-            WorkforceMembershipTest.DenyCodeFor(membership));
+            WorkforceMembershipTest.DenyCodeFor(membership))
+        {
+            // The invite stamp's tenant leg (E11): the token's tid, and xms_edov only as a boolean true.
+            TokenTenantId = Guid.TryParse(claims.TenantId?.Trim(), out var tokenTenant) && tokenTenant != Guid.Empty
+                ? tokenTenant
+                : null,
+            EmailDomainOwnerVerified = claims.EmailDomainOwnerVerified,
+        };
 
         // #2128 round 1: the member test gates EVERY sign-in on this plane, not only the first. A stored binding does not
         // outlive it — a guest whose home tenant is not listed, or a member whose tenant was since removed from the
@@ -473,7 +486,7 @@ public sealed class ContactIdentityBinder
             }
             else
             {
-                (decision, emailLookup) = await DecideUnlinkedAsync(request, oidLookup, known, ct).ConfigureAwait(false);
+                (decision, emailLookup, _) = await DecideUnlinkedAsync(request, oidLookup, known, ct).ConfigureAwait(false);
             }
 
             var outcome = await ApplySystemUserDecisionAsync(user, request, decision, known, applyWrites,
@@ -498,7 +511,9 @@ public sealed class ContactIdentityBinder
     private static IdentityChange WorkforceBindChange(Guid contactId, Guid oid)
         => new("contact", contactId, "sprk_externalobjectid=(null) sprk_identityplane=(null)",
             $"sprk_externalobjectid={oid:D} sprk_identityplane={IdentityPlaneMarker.Workforce} "
-            + $"{ContactBindingDecision.ExternalInviteCodeHashColumn}=(cleared)");
+            + $"{ContactBindingDecision.ExternalInviteCodeHashColumn}=(cleared) "
+            + $"{ContactBindingDecision.ExternalInvitedEmailHashColumn}=(cleared) "
+            + $"{ContactBindingDecision.ExternalInvitedTenantIdColumn}=(cleared)");
 
     // ── Invite ────────────────────────────────────────────────────────────────────────────────────────
 
@@ -599,14 +614,25 @@ public sealed class ContactIdentityBinder
     /// A first CIAM sign-in that has to email-bind (a failed oid write, or a person who already had a CIAM account) then
     /// binds only by presenting this code. A re-invite replaces both, so every earlier code stops matching (superseded);
     /// nothing clears the marker. Conditional on <paramref name="etag"/> (the version the invite decided on) when there is
-    /// one. Writes only those two columns.
+    /// one. The same write stamps the invite (<see cref="InviteStamp"/>): the salted hash of <paramref name="email"/> and
+    /// the tenant the invite named (or none, clearing an earlier one), which every email bind onto the contact needs. It
+    /// writes nothing else and does not depend on how the invite then reaches the person.
     /// </summary>
+    /// <param name="email">The address the invite is sent to (hashed here; never stored or logged).</param>
+    /// <param name="invitedTenantId">The Entra tenant the invite named, or null for none.</param>
     /// <returns>
     /// The write's result and, only when it was written, the plaintext code for the invite email's link. The code is
     /// returned to the caller only: it is never stored and never logged.
     /// </returns>
-    public async Task<InviteMarkResult> MarkInviteSentAsync(Guid contactId, string? etag, CancellationToken ct)
+    public async Task<InviteMarkResult> MarkInviteSentAsync(
+        Guid contactId, string? etag, string email, Guid? invitedTenantId, CancellationToken ct)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(email);
+        if (invitedTenantId == Guid.Empty)
+        {
+            throw new ArgumentException("An invited tenant is a non-empty GUID, or null for none.", nameof(invitedTenantId));
+        }
+
         if (DataverseContactIdentityStore.RowVersionPrecondition(etag) is null)
         {
             // #2005: no row version (a contact this invite just created). A workforce sign-in may have email-bound it since
@@ -631,15 +657,18 @@ public sealed class ContactIdentityBinder
         }
 
         var (code, storedValue) = InviteCode.Create(contactId);
-        var write = await _store.MarkInvitedAsync(contactId, etag, _time.GetUtcNow(), storedValue, ct).ConfigureAwait(false);
+        var stamp = new InviteStamp(InviteEmailStamp.Create(email), invitedTenantId);
+        var write = await _store.MarkInvitedAsync(contactId, etag, _time.GetUtcNow(), storedValue, stamp, ct).ConfigureAwait(false);
         if (write.Status == StoreWriteStatus.ColumnMissing)
         {
             _logger.LogError(
-                "[ID-BIND] {Marker} or {Hash} is not provisioned in this environment, so contact {ContactId} carries no "
-                + "pending invite. A new-account invite still binds its oid in the same request; any other first CIAM sign-in "
-                + "onto it is denied until it is re-invited. Apply scripts/Set-ExternalInviteMarkerSchema.ps1 and "
-                + "scripts/Set-ExternalInviteCodeHashSchema.ps1.",
-                ContactBindingDecision.ExternalInvitedOnColumn, ContactBindingDecision.ExternalInviteCodeHashColumn, contactId);
+                "[ID-BIND] {Marker}, {Hash}, {StampHash} or {Tenant} is not provisioned in this environment, so contact "
+                + "{ContactId} carries no pending invite. A new-account invite still binds its oid in the same request; any "
+                + "email bind onto it is denied until it is re-invited. Apply scripts/Set-ExternalInviteMarkerSchema.ps1, "
+                + "scripts/Set-ExternalInviteCodeHashSchema.ps1 and scripts/Set-ExternalAccessContactSecuritySchema.ps1.",
+                ContactBindingDecision.ExternalInvitedOnColumn, ContactBindingDecision.ExternalInviteCodeHashColumn,
+                ContactBindingDecision.ExternalInvitedEmailHashColumn, ContactBindingDecision.ExternalInvitedTenantIdColumn,
+                contactId);
         }
         else if (write.Status != StoreWriteStatus.Written)
         {
@@ -771,6 +800,44 @@ public sealed class ContactIdentityBinder
                 case RegistrationEmailAction.BindExisting:
                 {
                     var target = known[decision.ContactId!.Value];
+
+                    // The email-bind rule (as the Workforce token plane, E11): binding an existing contact needs a current
+                    // invite stamp whose recorded address is the token's email and the contact's emailaddress1, and whose
+                    // tenant is the token's tid unless xms_edov is boolean true. Checked before the confirmation prompt, so
+                    // the person is never asked to confirm a bind that would be refused. No fallback to a create.
+                    var stamp = await ReadInviteStampAsync(target.ContactId, ct).ConfigureAwait(false);
+                    if (stamp.ContactId != target.ContactId
+                        || stamp.InviteStatus is not (LookupStatus.Read or LookupStatus.ColumnMissing))
+                    {
+                        _logger.LogWarning(
+                            "[ID-BIND] Registration for {Who} DENIED ({DenyCode}): the invite stamp of contact {ContactId} could "
+                            + "not be read. Nothing was bound or created; retryable.",
+                            who, ContactBindingDecision.DenyContactLookupFailed, target.ContactId);
+                        return HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactLookupFailed);
+                    }
+
+                    if (ContactBindingDecision.CheckInviteStamp(stamp, request.Email, requireTenantProof: true, tid,
+                            request.EmailDomainOwnerVerified) is { } stampFailure)
+                    {
+                        _logger.LogInformation(
+                            "[ID-BIND] Registration for {Who} DENIED ({DenyCode}): existing contact {ContactId} is not invited for "
+                            + "this sign-in ({NotInvitedReason}). Nothing was bound or created.",
+                            who, ContactBindingDecision.DenyContactNotInvited, target.ContactId,
+                            ContactBindingDecision.StampReason(stampFailure));
+                        return HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactNotInvited);
+                    }
+
+                    if (!SameRowVersion(stamp.ETag, target.ETag))
+                    {
+                        // The row changed between the email read and the stamp read: re-read and re-decide (once).
+                        if (attempt == 0)
+                        {
+                            continue;
+                        }
+
+                        return HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactBindFailed);
+                    }
+
                     if (!request.ConfirmExistingRecord)
                     {
                         _logger.LogInformation(
@@ -779,7 +846,8 @@ public sealed class ContactIdentityBinder
                         return new HomeRegistrationResult(HomeRegistrationOutcome.ExistingRecordFound, target.ContactId);
                     }
 
-                    var write = await _store.BindHomeOidAsync(target.ContactId, target.ETag, tid, oid, ct).ConfigureAwait(false);
+                    // Conditional on the version the stamp was read at (the same as the email read's, checked above).
+                    var write = await _store.BindHomeOidAsync(target.ContactId, stamp.ETag, tid, oid, ct).ConfigureAwait(false);
                     if (write.Status == StoreWriteStatus.Forbidden)
                     {
                         // A missing privilege on the contact PATCH (HTTP 403, or a 400 that names a privilege): permanent, an
@@ -1248,7 +1316,7 @@ public sealed class ContactIdentityBinder
             var known = new Dictionary<Guid, ContactBindingRow>();
             Remember(known, oidLookup);
 
-            var (decision, _) = await DecideUnlinkedAsync(request, oidLookup, known, ct).ConfigureAwait(false);
+            var (decision, _, intent) = await DecideUnlinkedAsync(request, oidLookup, known, ct).ConfigureAwait(false);
 
             switch (decision.Action)
             {
@@ -1271,10 +1339,27 @@ public sealed class ContactIdentityBinder
 
                     var target = known[decision.ContactId!.Value];
 
+                    // An email bind decided on an invite stamp is written conditional on the row version the stamp was read
+                    // at, and only when the binding read saw that same version: a row that changed between the two reads (a
+                    // re-invite, an emailaddress1 edit, a concurrent bind) is re-read and re-decided, never bound on stale state.
+                    if (intent is not null && !SameRowVersion(intent.ETag, target.ETag))
+                    {
+                        _logger.LogInformation(
+                            "[ID-BIND] Contact {ContactId} changed between its binding read and its invite-stamp read; re-deciding",
+                            target.ContactId);
+                        if (attempt == 0)
+                        {
+                            continue;
+                        }
+
+                        return ContactBindingResult.Denied(ContactBindingDecision.DenyContactBindFailed);
+                    }
+
                     // Task 185 — E11's marker leg binds only with the invite code, and consumes it in the SAME conditional
                     // write as the oid (single-use). #2005: every other email bind (the workforce plane) consumes a pending
-                    // hash the same way, so a bound contact never keeps a code an operator unbind could revive.
-                    var write = await _store.BindOidAndConsumeInviteAsync(target.ContactId, target.ETag,
+                    // hash the same way, so a bound contact never keeps a code an operator unbind could revive. The same write
+                    // clears the invite stamp (email hash and tenant).
+                    var write = await _store.BindOidAndConsumeInviteAsync(target.ContactId, intent?.ETag ?? target.ETag,
                         request.CallerOid, request.CallerPlane, ct).ConfigureAwait(false);
                     if (write.Status == StoreWriteStatus.Written)
                     {
@@ -1381,11 +1466,13 @@ public sealed class ContactIdentityBinder
         return ContactBindingResult.Denied(ContactBindingDecision.DenyContactBindFailed);
     }
 
-    private async Task<(BindingDecision Decision, ContactLookup? EmailLookup)> DecideUnlinkedAsync(
+    /// <returns>The decision, the email lookup it read (if any) and the invite stamp it read (if any, with its decision time).</returns>
+    private async Task<(BindingDecision Decision, ContactLookup? EmailLookup, BindIntentLookup? Intent)> DecideUnlinkedAsync(
         BindingRequest request, ContactLookup oidLookup, Dictionary<Guid, ContactBindingRow> known, CancellationToken ct)
     {
         var decision = ContactBindingDecision.Decide(request, oidLookup);
         ContactLookup? emailLookup = null;
+        BindIntentLookup? stamped = null;
 
         if (decision.Action == BindingAction.NeedEmailLookup)
         {
@@ -1401,23 +1488,13 @@ public sealed class ContactIdentityBinder
             decision = ContactBindingDecision.Decide(request, oidLookup, emailLookup, refs);
         }
 
-        // Tasks 184 and 185 — the CIAM plane's E11 binds only on this environment's own invite: a pending marker and its
-        // code (no grant is read). A read that throws is a fault, never "no intent" and never intent: the decision denies.
+        // Tasks 184 and 185 — E11 binds only on this environment's own invite: on the CIAM plane a pending marker and its
+        // code, and on both token planes the invite stamp (no grant is read). A read that throws is a fault, never "no
+        // intent" and never intent: the decision denies.
         if (decision.Action == BindingAction.NeedIntentLookup && decision.ContactId is { } invitee)
         {
-            BindIntentLookup intent;
-            try
-            {
-                intent = await _store.FindBindIntentAsync(invitee, ct).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (!ct.IsCancellationRequested)
-            {
-                _logger.LogWarning(ex, "[ID-BIND] The bind-intent read for contact {ContactId} threw — denied", invitee);
-                intent = BindIntentLookup.Failed(invitee);
-            }
-
-            // The marker's age is measured at the decision time, from this binder's clock (owner round 97: 30 days).
-            var asOf = intent with { AsOf = _time.GetUtcNow() };
+            var asOf = await ReadInviteStampAsync(invitee, ct).ConfigureAwait(false);
+            stamped = asOf;
             decision = ContactBindingDecision.Decide(request, oidLookup, emailLookup, refs, asOf);
 
             // Design note §5.1: an operator-only, non-secret reason for a not-invited deny (never the code or the hash).
@@ -1425,12 +1502,40 @@ public sealed class ContactIdentityBinder
                 && ContactBindingDecision.NotInvitedReason(request, asOf, invitee) is { } reason)
             {
                 _logger.LogInformation(
-                    "[ID-BIND] Contact {ContactId} is not invited for this sign-in: {NotInvitedReason}.", invitee, reason);
+                    "[ID-BIND] Contact {ContactId} is not invited for this sign-in ({Plane}): {NotInvitedReason}.",
+                    invitee, request.Plane, reason);
             }
         }
 
-        return (decision, emailLookup);
+        return (decision, emailLookup, stamped);
     }
+
+    /// <summary>
+    /// The invite marker, code hash and stamp of <paramref name="contactId"/> (one read), with the decision time set from this
+    /// binder's clock (the marker's age is measured then; owner round 97: 30 days). A read that throws is a FAILED read
+    /// (the decision denies), never "not invited" and never "invited".
+    /// </summary>
+    private async Task<BindIntentLookup> ReadInviteStampAsync(Guid contactId, CancellationToken ct)
+    {
+        BindIntentLookup intent;
+        try
+        {
+            intent = await _store.FindBindIntentAsync(contactId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "[ID-BIND] The bind-intent read for contact {ContactId} threw — denied", contactId);
+            intent = BindIntentLookup.Failed(contactId);
+        }
+
+        return intent with { AsOf = _time.GetUtcNow() };
+    }
+
+    /// <summary>True when both row versions are present and equal (ordinal). Pure.</summary>
+    private static bool SameRowVersion(string? a, string? b)
+        => DataverseContactIdentityStore.RowVersionPrecondition(a) is { } left
+           && DataverseContactIdentityStore.RowVersionPrecondition(b) is { } right
+           && string.Equals(left.Trim(), right.Trim(), StringComparison.Ordinal);
 
     /// <summary>
     /// Plans — and with <paramref name="applyWrites"/>, performs — a systemuser decision. Returns null when a

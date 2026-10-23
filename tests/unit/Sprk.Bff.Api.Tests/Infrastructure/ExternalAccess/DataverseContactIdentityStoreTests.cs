@@ -466,8 +466,13 @@ public class DataverseContactIdentityStoreTests
     {
         var contact = Guid.NewGuid();
 
+        // The invite stamp (email hash, tenant) and the contact's current email are read in the same query as the marker,
+        // so the row version that comes back covers every value the email bind is decided on.
         DataverseContactIdentityStore.BuildInviteMarkerPath(contact)
-            .Should().Be($"contacts({contact:D})?$select=contactid,sprk_externalinvitedon,sprk_externalinvitecodehash");
+            .Should().Be($"contacts({contact:D})?$select=contactid,sprk_externalinvitedon,sprk_externalinvitecodehash,"
+                         + "emailaddress1,sprk_externalinvitedemailhash,sprk_externalinvitedtenantid");
+        DataverseContactIdentityStore.ContactSelect.Should().NotContain(ContactBindingDecision.ExternalInvitedEmailHashColumn);
+        DataverseContactIdentityStore.ContactSelect.Should().NotContain(ContactBindingDecision.ExternalInvitedTenantIdColumn);
         DataverseContactIdentityStore.ContactSelect.Should().NotContain(ContactBindingDecision.ExternalInvitedOnColumn,
             "a BFF deployed before the column would otherwise fail every binding read, on every plane");
         DataverseContactIdentityStore.ContactSelect.Should().NotContain(ContactBindingDecision.ExternalInviteCodeHashColumn,
@@ -539,20 +544,58 @@ public class DataverseContactIdentityStoreTests
             .Should().Be((fault, (DateTimeOffset?)null, (string?)null));
 
     /// <summary>
-    /// Task 185: the marker write carries the marker (UTC) AND the new code's stored hash — exactly those two columns, in
-    /// the one PATCH, so a re-invite replaces both together. Before 185 this was <c>TheMarkerWrite_CarriesOnlyTheMarker_InUtc</c>.
+    /// Task 185: the marker write carries the marker (UTC), the new code's stored hash AND the invite stamp (email hash,
+    /// invited tenant as lowercase "D" text) — exactly those four columns, in the one PATCH, so a re-invite replaces all of
+    /// them together. Before 185 this was <c>TheMarkerWrite_CarriesOnlyTheMarker_InUtc</c>.
     /// </summary>
     [Fact]
-    public void TheMarkerWrite_CarriesTheMarkerInUtc_AndTheCodeHash_AndNothingElse()
+    public void TheMarkerWrite_CarriesTheMarkerInUtc_TheCodeHash_AndTheInviteStamp_AndNothingElse()
     {
+        var emailHash = InviteEmailStamp.Create("person@customer.example");
+        var tenant = Guid.Parse("11111111-AAAA-4AAA-8AAA-111111111111");
+
         var payload = DataverseContactIdentityStore.InviteMarkerPayload(
-            new DateTimeOffset(2026, 10, 13, 11, 30, 5, TimeSpan.FromHours(2)), StoredHash);
+            new DateTimeOffset(2026, 10, 13, 11, 30, 5, TimeSpan.FromHours(2)), StoredHash, new InviteStamp(emailHash, tenant));
 
         payload.Should().BeEquivalentTo(new Dictionary<string, object?>
         {
             ["sprk_externalinvitedon"] = "2026-10-13T09:30:05Z",
             ["sprk_externalinvitecodehash"] = StoredHash,
+            ["sprk_externalinvitedemailhash"] = emailHash,
+            ["sprk_externalinvitedtenantid"] = "11111111-aaaa-4aaa-8aaa-111111111111",
         });
+    }
+
+    /// <summary>An invite naming no tenant writes the tenant column as null, so a re-invite clears an earlier tenant.</summary>
+    [Fact]
+    public void TheMarkerWrite_WithoutATenant_ClearsTheTenantColumn()
+    {
+        var payload = DataverseContactIdentityStore.InviteMarkerPayload(
+            DateTimeOffset.UnixEpoch, StoredHash, new InviteStamp(InviteEmailStamp.Create("a@b.example"), null));
+
+        payload.Should().ContainKey("sprk_externalinvitedtenantid").WhoseValue.Should().BeNull();
+        JsonSerializer.Serialize(payload).Should().Contain("\"sprk_externalinvitedtenantid\":null");
+    }
+
+    /// <summary>The marker write refuses a blank email hash and the empty GUID as a tenant: neither is a stamp.</summary>
+    [Theory]
+    [InlineData("", false)]
+    [InlineData("  ", false)]
+    [InlineData("v1:valid", true)]
+    public void TheMarkerWrite_RefusesABlankEmailHash_AndTheEmptyTenant(string hash, bool emptyTenant)
+    {
+        var act = () => DataverseContactIdentityStore.InviteMarkerPayload(
+            DateTimeOffset.UnixEpoch, StoredHash, new InviteStamp(hash, emptyTenant ? Guid.Empty : null));
+
+        act.Should().Throw<ArgumentException>();
+    }
+
+    /// <summary>The stamp never prints its hash.</summary>
+    [Fact]
+    public void TheInviteStamp_NeverPrintsItsHash()
+    {
+        var hash = InviteEmailStamp.Create("person@customer.example");
+        new InviteStamp(hash, null).ToString().Should().NotContain(hash).And.NotContain("v1:");
     }
 
     /// <summary>
@@ -572,9 +615,13 @@ public class DataverseContactIdentityStoreTests
             ["sprk_externalobjectidkey"] = "aaaaaaaa-0000-4000-8000-000000000001",
             ["sprk_identityplane"] = (int)IdentityPlaneMarker.External,
             ["sprk_externalinvitecodehash"] = null,
+            ["sprk_externalinvitedemailhash"] = null,
+            ["sprk_externalinvitedtenantid"] = null,
         });
         JsonSerializer.Serialize(consuming).Should().Contain("\"sprk_externalinvitecodehash\":null",
             "the request body clears the hash; a missing key would leave it in place");
+        JsonSerializer.Serialize(consuming).Should().Contain("\"sprk_externalinvitedemailhash\":null")
+            .And.Contain("\"sprk_externalinvitedtenantid\":null", "a bind clears the invite stamp in the same write");
         plain.Keys.Should().BeEquivalentTo("sprk_externalobjectid", "sprk_externalobjectidkey", "sprk_identityplane");
     }
 
@@ -643,6 +690,54 @@ public class DataverseContactIdentityStoreTests
     }
 
     /// <summary>
+    /// Where only an invite-stamp column is missing (the code-hash column exists), no stamp can be held there: the store
+    /// re-sends the bind with the code hash still cleared, minus the stamp columns, under the SAME row version.
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_externalinvitedemailhash")]
+    [InlineData("sprk_externalinvitedtenantid")]
+    public async Task TheConsumingBind_WhereOnlyAStampColumnIsMissing_StillClearsTheCodeHash(string column)
+    {
+        var http = new ScriptedHttp(
+            (HttpStatusCode.BadRequest, HashColumnMissingBody.Replace("sprk_externalinvitecodehash", column)),
+            (HttpStatusCode.NoContent, null));
+
+        var write = await http.Store().BindOidAndConsumeInviteAsync(IntentContact, "W/\"42\"", Oid,
+            IdentityPlaneMarker.Workforce, CancellationToken.None);
+
+        write.Status.Should().Be(StoreWriteStatus.Written);
+        http.Requests.Should().HaveCount(2);
+        http.Requests.Should().AllSatisfy(r => r.IfMatch.Should().Be("W/\"42\""));
+        JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(http.Requests[0].Body)!.Keys
+            .Should().Contain(new[] { "sprk_externalinvitecodehash", "sprk_externalinvitedemailhash", "sprk_externalinvitedtenantid" });
+        JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(http.Requests[1].Body)!.Keys
+            .Should().BeEquivalentTo("sprk_externalobjectid", "sprk_externalobjectidkey", "sprk_identityplane",
+                "sprk_externalinvitecodehash");
+    }
+
+    /// <summary>
+    /// The stamp columns missing AND then the code-hash column refused: the plain bind goes out last, still under the same
+    /// row version (three requests, never an unconditional one).
+    /// </summary>
+    [Fact]
+    public async Task TheConsumingBind_WhereTheStampAndThenTheHashColumnAreMissing_EndsWithThePlainBind()
+    {
+        var http = new ScriptedHttp(
+            (HttpStatusCode.BadRequest, HashColumnMissingBody.Replace("sprk_externalinvitecodehash", "sprk_externalinvitedemailhash")),
+            (HttpStatusCode.BadRequest, HashColumnMissingBody),
+            (HttpStatusCode.NoContent, null));
+
+        var write = await http.Store().BindOidAndConsumeInviteAsync(IntentContact, "W/\"42\"", Oid,
+            IdentityPlaneMarker.Workforce, CancellationToken.None);
+
+        write.Status.Should().Be(StoreWriteStatus.Written);
+        http.Requests.Should().HaveCount(3);
+        http.Requests.Should().AllSatisfy(r => r.IfMatch.Should().Be("W/\"42\""));
+        JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(http.Requests[2].Body)!.Keys
+            .Should().BeEquivalentTo("sprk_externalobjectid", "sprk_externalobjectidkey", "sprk_identityplane");
+    }
+
+    /// <summary>
     /// #2005: the fallback is ONLY for the hash column being missing. A provisioned column binds and consumes in one
     /// request; a 412, a duplicate key or any other fault is returned as it is, with no second request.
     /// </summary>
@@ -683,7 +778,8 @@ public class DataverseContactIdentityStoreTests
             "https://org.test.invalid",
             NullLogger.Instance);
 
-        var write = await store.MarkInvitedAsync(IntentContact, etag, DateTimeOffset.UtcNow, StoredHash, CancellationToken.None);
+        var write = await store.MarkInvitedAsync(IntentContact, etag, DateTimeOffset.UtcNow, StoredHash, AStamp,
+            CancellationToken.None);
 
         write.Status.Should().Be(StoreWriteStatus.Failed);
         write.Error.Should().Be("no row version for the invite mark");
@@ -696,7 +792,7 @@ public class DataverseContactIdentityStoreTests
     {
         var http = new ScriptedHttp((HttpStatusCode.NoContent, null));
 
-        var write = await http.Store().MarkInvitedAsync(IntentContact, "W/\"7\"", DateTimeOffset.UtcNow, StoredHash,
+        var write = await http.Store().MarkInvitedAsync(IntentContact, "W/\"7\"", DateTimeOffset.UtcNow, StoredHash, AStamp,
             CancellationToken.None);
 
         write.Status.Should().Be(StoreWriteStatus.Written);
@@ -705,8 +801,22 @@ public class DataverseContactIdentityStoreTests
         request.Uri.Should().EndWith($"/contacts({IntentContact:D})");
         request.IfMatch.Should().Be("W/\"7\"").And.NotBe("*");
         JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(request.Body)!.Keys
-            .Should().BeEquivalentTo("sprk_externalinvitedon", "sprk_externalinvitecodehash");
+            .Should().BeEquivalentTo("sprk_externalinvitedon", "sprk_externalinvitecodehash",
+                "sprk_externalinvitedemailhash", "sprk_externalinvitedtenantid");
     }
+
+    /// <summary>An invite stamp (no tenant) for the marker-write tests.</summary>
+    private static readonly InviteStamp AStamp = new(InviteEmailStamp.Create("person@customer.example"), null);
+
+    /// <summary>The marker write is ColumnMissing when a stamp column is not provisioned (the marker cannot land without it).</summary>
+    [Theory]
+    [InlineData("sprk_externalinvitedemailhash")]
+    [InlineData("sprk_externalinvitedtenantid")]
+    public void AMissingStampColumn_IsColumnMissing_ForTheMarkerWrite(string column)
+        => DataverseContactIdentityStore.IsWriteColumnMissing(
+                $"The property '{column}' does not exist on type 'Microsoft.Dynamics.CRM.contact'.",
+                DataverseContactIdentityStore.InviteMarkerColumns.ToArray())
+            .Should().BeTrue();
 
     /// <summary>Answers each request with the next scripted response and records what was sent.</summary>
     private sealed class ScriptedHttp(params (HttpStatusCode Code, string? Body)[] responses) : IHttpClientFactory
@@ -897,6 +1007,8 @@ public class DataverseContactIdentityStoreTests
             ["sprk_identityplane"] = 100000002,
             ["sprk_externaltenantid"] = "bbbbbbbb-0000-4000-8000-000000000002",
             ["sprk_externalinvitecodehash"] = null,
+            ["sprk_externalinvitedemailhash"] = null,
+            ["sprk_externalinvitedtenantid"] = null,
         });
         JsonSerializer.Serialize(payload).Should().Contain("\"sprk_externalinvitecodehash\":null",
             "the request body clears the hash; a missing key would leave it in place");

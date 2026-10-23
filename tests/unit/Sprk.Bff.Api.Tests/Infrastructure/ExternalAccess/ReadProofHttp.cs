@@ -17,6 +17,8 @@ namespace Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess;
 ///   <item><c>contacts(id)</c> and <c>contacts?</c>: <see cref="ContactBody"/> and <see cref="ContactsBody"/>.</item>
 /// </list>
 /// With <see cref="ProofFaults"/> every proof read answers 503. Every request URI is recorded in <see cref="Requests"/>.
+/// A write (any method but GET) is answered <see cref="WriteStatus"/> and recorded, with its method, <c>If-Match</c> and
+/// body, in <see cref="Writes"/>.
 /// </summary>
 internal sealed class ReadProofHttp : IHttpClientFactory
 {
@@ -35,6 +37,12 @@ internal sealed class ReadProofHttp : IHttpClientFactory
     public string ContactsBody { get; set; } = "{\"value\":[]}";
 
     public List<string> Requests { get; } = new();
+
+    /// <summary>The answer to every write (default 204 No Content).</summary>
+    public HttpStatusCode WriteStatus { get; set; } = HttpStatusCode.NoContent;
+
+    /// <summary>Every write: method, URI, <c>If-Match</c> (null when absent) and body.</summary>
+    public List<(HttpMethod Method, string Uri, string? IfMatch, string Body)> Writes { get; } = new();
 
     public int WhoAmICount => Requests.Count(r => r.EndsWith("/WhoAmI", StringComparison.Ordinal));
 
@@ -94,7 +102,7 @@ internal sealed class ReadProofHttp : IHttpClientFactory
 
     private sealed class Handler(ReadProofHttp owner) : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             var uri = request.RequestUri!.ToString();
             lock (owner.Requests)
@@ -102,8 +110,20 @@ internal sealed class ReadProofHttp : IHttpClientFactory
                 owner.Requests.Add(uri);
             }
 
+            if (request.Method != HttpMethod.Get)
+            {
+                var sent = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(ct);
+                var ifMatch = request.Headers.TryGetValues("If-Match", out var values) ? values.Single() : null;
+                lock (owner.Writes)
+                {
+                    owner.Writes.Add((request.Method, uri, ifMatch, sent));
+                }
+
+                return new HttpResponseMessage(owner.WriteStatus) { Content = new StringContent(string.Empty) };
+            }
+
             var (code, body) = owner.Answer(uri);
-            return Task.FromResult(new HttpResponseMessage(code) { Content = new StringContent(body) });
+            return new HttpResponseMessage(code) { Content = new StringContent(body) };
         }
     }
 }

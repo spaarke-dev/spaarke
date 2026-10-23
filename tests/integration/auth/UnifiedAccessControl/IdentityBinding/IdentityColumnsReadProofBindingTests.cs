@@ -30,6 +30,7 @@ public class IdentityColumnsReadProofBindingTests
     {
         var invite = InviteCode.Create(ContactA);
         _store.AddContact(ContactA, email: Email, invitedOn: Now, inviteCodeHash: invite.StoredValue);
+        _store.StampInvite(ContactA, Email);
         return invite.Code;
     }
 

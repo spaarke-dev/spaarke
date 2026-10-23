@@ -124,8 +124,11 @@ public sealed class ExternalInviteService
         var intent = await store.FindBindIntentAsync(contactId, ct).ConfigureAwait(false);
         if (intent.InviteStatus == LookupStatus.Failed || intent.ContactId != contactId)
             return GrantInviteAssessment.Done(Failed(ContactBindingDecision.InviteContactLookupFailed));
+        // A pending invite also carries its invite stamp: one written before the stamp existed binds nobody, so it is
+        // replaced (a new invite) rather than kept.
         if (intent.InviteStatus == LookupStatus.Read
             && !string.IsNullOrEmpty(intent.InviteCodeHash)
+            && !string.IsNullOrEmpty(intent.InvitedEmailHash)
             && ContactBindingDecision.IsInviteMarkerCurrent(intent.InvitedOn, _time.GetUtcNow()))
             return GrantInviteAssessment.Done(new GrantInviteResult(GrantInviteStatus.AlreadyPending));
 
@@ -398,7 +401,9 @@ public sealed class ExternalInviteService
         //     the invite answers a retryable 503 (InviteMarkerNotWritten) and sends no email — never a success that
         //     leaves a contact no sign-in can bind.
         // A marker write that FAILED (anything but Written / ColumnMissing) stops the invite here: 503, nothing created.
-        var mark = await binder.MarkInviteSentAsync(contactId, etag, ct);
+        // The same write stamps the invite (the invited address, hashed, and the tenant it names): every email bind onto the
+        // contact needs that stamp. It does not depend on the CIAM account branch below.
+        var mark = await binder.MarkInviteSentAsync(contactId, etag, request.Email, InvitedTenant(request), ct);
         var markerLanded = mark.Status == StoreWriteStatus.Written;
 
         // #2005: the contact had no row version (this invite created it) and its re-read found it bound, linked to an
@@ -524,6 +529,22 @@ public sealed class ExternalInviteService
             ciamOid, request.Email, contactId);
 
         return new ProvisionOutcome(contactId, ProvisionedStatus, EmailFailed: onboardingEmailFailed);
+    }
+
+    /// <summary>
+    /// The tenant the invite names (<see cref="InviteExternalUserRequest.InvitedTenantId"/>), or null for none. The routes
+    /// validate it first (<see cref="InviteExternalUserEndpoint.ValidateInvitedTenant"/>); a value that is not a GUID here
+    /// throws rather than being stamped as "no tenant".
+    /// </summary>
+    private static Guid? InvitedTenant(InviteExternalUserRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.InvitedTenantId))
+        {
+            return null;
+        }
+
+        return InviteExternalUserEndpoint.InvitedTenantOf(request.InvitedTenantId)
+            ?? throw new InvalidOperationException("The invited tenant id is not a GUID; it is validated before the invite.");
     }
 
     /// <summary>

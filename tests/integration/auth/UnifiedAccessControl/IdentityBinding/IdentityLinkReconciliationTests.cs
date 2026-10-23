@@ -594,7 +594,7 @@ public class IdentityLinkReconciliationTests
 
     /// <summary>
     /// #2005 K2: the job's before/after change log (what a report-only run lists) says the bind also clears the invite-code
-    /// hash, so a dry run does not under-report the write. The hash value itself is never logged.
+    /// hash and the invite stamp, so a dry run does not under-report the write. No hash value is ever logged.
     /// </summary>
     [Theory]
     [InlineData(false)] // BindByEmail
@@ -613,7 +613,8 @@ public class IdentityLinkReconciliationTests
         outcome.Outcome.Should().Be(linked ? SystemUserLinkOutcome.BoundLinkedContact : SystemUserLinkOutcome.BoundAndLinked);
         var bind = outcome.Changes.Should().ContainSingle(c => c.Entity == "contact").Subject;
         bind.After.Should().Be(
-            $"sprk_externalobjectid={oid:D} sprk_identityplane={IdentityPlaneMarker.Workforce} sprk_externalinvitecodehash=(cleared)");
+            $"sprk_externalobjectid={oid:D} sprk_identityplane={IdentityPlaneMarker.Workforce} sprk_externalinvitecodehash=(cleared) "
+            + "sprk_externalinvitedemailhash=(cleared) sprk_externalinvitedtenantid=(cleared)");
         outcome.Changes.Should().AllSatisfy(c => (c.Before + c.After).Should().NotContain(stored));
         _store.Writes.Should().BeEmpty("a dry run writes nothing");
         _store.Contacts[contact].InviteCodeHash.Should().Be(stored);

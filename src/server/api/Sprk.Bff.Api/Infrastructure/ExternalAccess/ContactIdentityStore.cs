@@ -135,6 +135,17 @@ public sealed record StoreWriteResult(StoreWriteStatus Status, Guid? ContactId =
     public static StoreWriteResult Written { get; } = new(StoreWriteStatus.Written);
 }
 
+/// <summary>
+/// The invite stamp written with the pending-invite marker: the salted hash of the address the invite was sent to
+/// (<see cref="InviteEmailStamp"/>, never the address) and the Entra tenant the invite named, or null for none (which clears
+/// an earlier one). Every email bind onto the contact needs it (<see cref="ContactBindingDecision.CheckInviteStamp"/>).
+/// </summary>
+public sealed record InviteStamp(string InvitedEmailHash, Guid? InvitedTenantId)
+{
+    /// <summary>Never prints the hash.</summary>
+    public override string ToString() => $"InviteStamp {{ InvitedTenantId = {InvitedTenantId?.ToString("D") ?? "(none)"} }}";
+}
+
 /// <summary>Whether this identity can READ the binding column (field-level security).</summary>
 public enum BindingReadability
 {
@@ -255,11 +266,13 @@ public interface IContactIdentityStore
     Task<StoreWriteResult> BindHomeOidAsync(Guid contactId, string? etag, Guid homeTenantId, Guid oid, CancellationToken ct);
 
     /// <summary>
-    /// Tasks 184 and 185 — this environment's intent for <paramref name="contactId"/>, for the CIAM plane's E11: its
-    /// pending-invite marker (<c>sprk_externalinvitedon</c>) and the stored invite-code hash
-    /// (<c>sprk_externalinvitecodehash</c>), read together in ONE query of their own (never in <c>ContactSelect</c>), so a
-    /// missing column reads as <see cref="LookupStatus.ColumnMissing"/> here and nowhere else. No grant is read (task 185,
-    /// option (c)): a grant is no bind evidence.
+    /// Tasks 184 and 185 — this environment's intent for <paramref name="contactId"/>, for E11: its pending-invite marker
+    /// (<c>sprk_externalinvitedon</c>), the stored invite-code hash (<c>sprk_externalinvitecodehash</c>) and the invite stamp
+    /// (<c>sprk_externalinvitedemailhash</c>, <c>sprk_externalinvitedtenantid</c>) with the contact's current
+    /// <c>emailaddress1</c> and row version, read together in ONE query of their own (never in <c>ContactSelect</c>), so a
+    /// missing column reads as <see cref="LookupStatus.ColumnMissing"/> here and nowhere else. An email hash read EMPTY while
+    /// the BFF's read of the stamp columns is not proven is marked (<see cref="BindIntentLookup.StampColumnsUnproven"/>). No
+    /// grant is read (task 185, option (c)): a grant is no bind evidence.
     /// </summary>
     Task<BindIntentLookup> FindBindIntentAsync(Guid contactId, CancellationToken ct);
 
@@ -268,11 +281,12 @@ public interface IContactIdentityStore
     /// UTC) AND the new invite's stored code hash (<c>sprk_externalinvitecodehash</c> = <paramref name="inviteCodeHash"/>)
     /// onto an existing contact in ONE request, so a re-invite replaces both together. Conditional on
     /// <paramref name="etag"/> (never <c>*</c>; no row version, no write — #2005: a contact bound since it was read must
-    /// never receive a marker or a hash). Writes nothing else. <see cref="StoreWriteStatus.ColumnMissing"/> when either
-    /// column is not provisioned here.
+    /// never receive a marker or a hash). The same request writes the invite stamp (<paramref name="stamp"/>: the email hash
+    /// and the invited tenant, null clearing an earlier one). Writes nothing else. <see cref="StoreWriteStatus.ColumnMissing"/>
+    /// when any of the four columns is not provisioned here.
     /// </summary>
     Task<StoreWriteResult> MarkInvitedAsync(
-        Guid contactId, string? etag, DateTimeOffset invitedOn, string inviteCodeHash, CancellationToken ct);
+        Guid contactId, string? etag, DateTimeOffset invitedOn, string inviteCodeHash, InviteStamp stamp, CancellationToken ct);
 
     /// <summary>
     /// Writes the oid (D format) into the binding AND the uniqueness mirror, with the plane, in ONE request,
@@ -284,9 +298,10 @@ public interface IContactIdentityStore
     Task<StoreWriteResult> BindOidAsync(Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, CancellationToken ct);
 
     /// <summary>
-    /// Task 185 — <see cref="BindOidAsync"/>'s bind PLUS <c>sprk_externalinvitecodehash = null</c>, in ONE request
-    /// conditional on <paramref name="etag"/> (never <c>*</c>; no row version, no write). The invite code is consumed by
-    /// the same write that binds the oid, so it is single-use. The marker is not touched.
+    /// Task 185 — <see cref="BindOidAsync"/>'s bind PLUS <c>sprk_externalinvitecodehash = null</c> and the invite stamp
+    /// cleared (<c>sprk_externalinvitedemailhash</c>, <c>sprk_externalinvitedtenantid</c> = null), in ONE request conditional
+    /// on <paramref name="etag"/> (never <c>*</c>; no row version, no write). The invite code and stamp are consumed by the
+    /// same write that binds the oid, so they are single-use. The marker is not touched.
     /// <para>
     /// #2005 — EVERY bind of an oid onto an existing contact uses this, on every plane (CIAM, workforce, systemuser), so a
     /// bound contact never holds an unused code hash and an operator unbind cannot revive an earlier invite link. Where the
@@ -403,6 +418,10 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     private readonly SecuredColumnReadProof _bindingColumnsProof;
     private readonly SecuredColumnReadProof _collisionColumnsProof;
 
+    // The proof that this store's identity can READ the invite stamp's columns: an email hash read empty without it may be a
+    // hidden one. Either way an empty stamp is no stamp (the bind is refused); the proof names the reason for the operator.
+    private readonly SecuredColumnReadProof _inviteStampColumnsProof;
+
     /// <summary>The store for an environment, authenticated by <paramref name="getToken"/>.</summary>
     public DataverseContactIdentityStore(
         IHttpClientFactory httpClientFactory,
@@ -436,6 +455,7 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         var source = new WebApiColumnReadPermissionSource(this);
         _bindingColumnsProof = readProofs(source, ContactTable, BindingColumns);
         _collisionColumnsProof = readProofs(source, ContactTable, CollisionColumns);
+        _inviteStampColumnsProof = readProofs(source, ContactTable, InviteStampColumns);
     }
 
     /// <summary>
@@ -499,7 +519,37 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     /// </summary>
     public static string BuildInviteMarkerPath(Guid contactId)
         => $"contacts({contactId:D})?$select=contactid,{ContactBindingDecision.ExternalInvitedOnColumn},"
-           + ContactBindingDecision.ExternalInviteCodeHashColumn;
+           + $"{ContactBindingDecision.ExternalInviteCodeHashColumn},emailaddress1,"
+           + $"{ContactBindingDecision.ExternalInvitedEmailHashColumn},{ContactBindingDecision.ExternalInvitedTenantIdColumn}";
+
+    /// <summary>
+    /// The invite stamp's part of the marker read's answer (<see cref="BuildInviteMarkerPath"/>), from a body
+    /// <see cref="InterpretMarkerLeg"/> already read as this contact's row: the stored email hash, the invited tenant (raw
+    /// text), the contact's current <c>emailaddress1</c> and the row version (<c>@odata.etag</c>). Each is null when absent
+    /// or not a string. Pure; the decision interprets them.
+    /// </summary>
+    public static (string? InvitedEmailHash, string? RawInvitedTenantId, string? CurrentEmail, string? ETag) InterpretStampLeg(
+        string? body)
+    {
+        using var doc = body is null ? null : TryParseJson(body);
+        if (doc is null || doc.RootElement.ValueKind != JsonValueKind.Object)
+        {
+            return (null, null, null, null);
+        }
+
+        var row = doc.RootElement;
+        return (StringOf(row, ContactBindingDecision.ExternalInvitedEmailHashColumn),
+            StringOf(row, ContactBindingDecision.ExternalInvitedTenantIdColumn),
+            StringOf(row, "emailaddress1"),
+            StringOf(row, "@odata.etag"));
+    }
+
+    /// <summary>The invite stamp's two field-secured columns (the readability proof's column set; every bind clears both).</summary>
+    public static readonly IReadOnlyList<string> InviteStampColumns = new[]
+    {
+        ContactBindingDecision.ExternalInvitedEmailHashColumn,
+        ContactBindingDecision.ExternalInvitedTenantIdColumn,
+    };
 
     /// <summary>
     /// Tasks 184 and 185 — what the marker leg's answer says. Pure.
@@ -539,25 +589,37 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     }
 
     /// <summary>
-    /// Tasks 184 and 185 — the marker write's body: the marker (UTC, second precision) AND the new invite's stored code
-    /// hash, together, so a re-invite replaces both in one request. Nothing else.
+    /// Tasks 184 and 185 — the marker write's body: the marker (UTC, second precision), the new invite's stored code hash
+    /// AND the invite stamp (the email hash, and the invited tenant as lowercase "D" text or null), together, so a re-invite
+    /// replaces all four in one request. Nothing else.
     /// </summary>
-    public static Dictionary<string, object?> InviteMarkerPayload(DateTimeOffset invitedOn, string inviteCodeHash)
+    public static Dictionary<string, object?> InviteMarkerPayload(DateTimeOffset invitedOn, string inviteCodeHash, InviteStamp stamp)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(inviteCodeHash);
+        ArgumentNullException.ThrowIfNull(stamp);
+        ArgumentException.ThrowIfNullOrWhiteSpace(stamp.InvitedEmailHash);
+        if (stamp.InvitedTenantId == Guid.Empty)
+        {
+            throw new ArgumentException("An invited tenant is a non-empty GUID, or null for none.", nameof(stamp));
+        }
+
         return new Dictionary<string, object?>
         {
             [ContactBindingDecision.ExternalInvitedOnColumn] =
                 invitedOn.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture),
             [ContactBindingDecision.ExternalInviteCodeHashColumn] = inviteCodeHash,
+            [ContactBindingDecision.ExternalInvitedEmailHashColumn] = stamp.InvitedEmailHash,
+            [ContactBindingDecision.ExternalInvitedTenantIdColumn] = stamp.InvitedTenantId?.ToString("D"),
         };
     }
 
-    /// <summary>The marker write's columns: a write fault naming EITHER is <see cref="StoreWriteStatus.ColumnMissing"/>.</summary>
+    /// <summary>The marker write's columns: a write fault naming ANY is <see cref="StoreWriteStatus.ColumnMissing"/>.</summary>
     public static readonly IReadOnlyList<string> InviteMarkerColumns = new[]
     {
         ContactBindingDecision.ExternalInvitedOnColumn,
         ContactBindingDecision.ExternalInviteCodeHashColumn,
+        ContactBindingDecision.ExternalInvitedEmailHashColumn,
+        ContactBindingDecision.ExternalInvitedTenantIdColumn,
     };
 
     /// <summary>
@@ -723,8 +785,21 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     public static Dictionary<string, object?> HomeBindAndConsumeInvitePayload(Guid homeTenantId, Guid oid)
     {
         var payload = HomeBindPayload(homeTenantId, oid);
-        payload[ContactBindingDecision.ExternalInviteCodeHashColumn] = null;
+        ClearInvite(payload);
         return payload;
+    }
+
+    /// <summary>
+    /// Sets the consumed invite's columns to null on <paramref name="payload"/>: the invite-code hash and the invite stamp
+    /// (the email hash and the invited tenant). The marker is not touched.
+    /// </summary>
+    private static void ClearInvite(Dictionary<string, object?> payload)
+    {
+        payload[ContactBindingDecision.ExternalInviteCodeHashColumn] = null;
+        foreach (var column in InviteStampColumns)
+        {
+            payload[column] = null;
+        }
     }
 
     /// <summary>
@@ -935,7 +1010,7 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     public static Dictionary<string, object?> BindAndConsumeInvitePayload(Guid oid, IdentityPlaneMarker plane)
     {
         var payload = BindPayload(oid, plane);
-        payload[ContactBindingDecision.ExternalInviteCodeHashColumn] = null;
+        ClearInvite(payload);
         return payload;
     }
 
@@ -1536,20 +1611,41 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         if (inviteStatus == LookupStatus.ColumnMissing)
         {
             _logger.LogWarning(
-                "[ID-BIND] {Marker} or {Hash} is not provisioned in this environment: CIAM email binds are denied "
-                + "(contact_not_invited). Apply scripts/Set-ExternalInviteMarkerSchema.ps1 and "
-                + "scripts/Set-ExternalInviteCodeHashSchema.ps1.",
-                ContactBindingDecision.ExternalInvitedOnColumn, ContactBindingDecision.ExternalInviteCodeHashColumn);
+                "[ID-BIND] {Marker}, {Hash}, {StampHash} or {Tenant} is not provisioned in this environment: email binds "
+                + "are denied (contact_not_invited). Apply scripts/Set-ExternalInviteMarkerSchema.ps1, "
+                + "scripts/Set-ExternalInviteCodeHashSchema.ps1 and scripts/Set-ExternalAccessContactSecuritySchema.ps1.",
+                ContactBindingDecision.ExternalInvitedOnColumn, ContactBindingDecision.ExternalInviteCodeHashColumn,
+                ContactBindingDecision.ExternalInvitedEmailHashColumn, ContactBindingDecision.ExternalInvitedTenantIdColumn);
         }
 
-        return new BindIntentLookup(contactId, inviteStatus, invitedOn) { InviteCodeHash = inviteCodeHash };
+        if (inviteStatus != LookupStatus.Read)
+        {
+            return new BindIntentLookup(contactId, inviteStatus, invitedOn) { InviteCodeHash = inviteCodeHash };
+        }
+
+        var (emailHash, tenant, currentEmail, rowVersion) = InterpretStampLeg(inviteBody);
+
+        // An empty email hash is trusted as "no stamp" only on a proven read; unproven, it may be hidden. Both refuse the
+        // bind, so the proof is made only for an empty hash, and only to name the reason.
+        var unproven = string.IsNullOrWhiteSpace(emailHash)
+                       && await _inviteStampColumnsProof.ProveAsync(ct).ConfigureAwait(false) != ColumnReadProofOutcome.Proven;
+
+        return new BindIntentLookup(contactId, inviteStatus, invitedOn)
+        {
+            InviteCodeHash = inviteCodeHash,
+            InvitedEmailHash = emailHash,
+            RawInvitedTenantId = tenant,
+            CurrentEmail = currentEmail,
+            ETag = rowVersion,
+            StampColumnsUnproven = unproven,
+        };
     }
 
     /// <inheritdoc />
     public Task<StoreWriteResult> MarkInvitedAsync(
-        Guid contactId, string? etag, DateTimeOffset invitedOn, string inviteCodeHash, CancellationToken ct)
+        Guid contactId, string? etag, DateTimeOffset invitedOn, string inviteCodeHash, InviteStamp stamp, CancellationToken ct)
         => RowVersionPrecondition(etag) is { } version
-            ? WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", InviteMarkerPayload(invitedOn, inviteCodeHash),
+            ? WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", InviteMarkerPayload(invitedOn, inviteCodeHash, stamp),
                 ("If-Match", version), ct, missingColumns: InviteMarkerColumns)
             : Task.FromResult(NoRowVersion("invite mark", contactId));
 
@@ -1591,10 +1687,13 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
             : Task.FromResult(NoRowVersion("bind", contactId));
 
     /// <summary>
-    /// #2005: the one consuming bind. Sends <paramref name="consuming"/> (the bind plus the hash cleared) under
-    /// <paramref name="version"/>; where the hash column is not provisioned the platform refuses the whole PATCH (nothing
-    /// written) and no contact can hold a code to consume, so <paramref name="plain"/> goes out ONCE under the same row
-    /// version. Any other status returns as is. Shared by the CIAM/workforce/systemuser binds and the A9 home bind.
+    /// #2005: the one consuming bind. Sends <paramref name="consuming"/> (the bind plus the code hash and the invite stamp
+    /// cleared) under <paramref name="version"/>; where a cleared column is not provisioned the platform refuses the whole
+    /// PATCH (nothing written) and no contact can hold a value there to consume. A missing code-hash column sends
+    /// <paramref name="plain"/> (that environment predates the stamp columns too); missing stamp columns alone send the bind
+    /// with the code hash cleared, and then the plain bind if that is refused for the code-hash column. Every retry goes
+    /// under the SAME row version. Any other status returns as is. Shared by the CIAM/workforce/systemuser binds and the A9
+    /// home bind.
     /// </summary>
     private async Task<StoreWriteResult> BindConsumingInviteAsync(
         Guid contactId, string version, Dictionary<string, object?> consuming, Dictionary<string, object?> plain,
@@ -1602,10 +1701,32 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     {
         var path = $"contacts({contactId:D})";
         var write = await WriteAsync(HttpMethod.Patch, path, consuming, ("If-Match", version),
-            ct, missingColumns: InviteCodeHashColumn).ConfigureAwait(false);
+            ct, missingColumns: ConsumedInviteColumns).ConfigureAwait(false);
         if (write.Status != StoreWriteStatus.ColumnMissing)
         {
             return write;
+        }
+
+        if (!IsWriteColumnMissing(write.Error, ContactBindingDecision.ExternalInviteCodeHashColumn))
+        {
+            // Only the stamp columns are missing: no stamp can exist here. Clear the code hash with the bind.
+            _logger.LogWarning(
+                "[ID-BIND] {StampHash} or {Tenant} is not provisioned in this environment: contact {ContactId} is bound without "
+                + "clearing an invite stamp. Apply scripts/Set-ExternalAccessContactSecuritySchema.ps1.",
+                ContactBindingDecision.ExternalInvitedEmailHashColumn, ContactBindingDecision.ExternalInvitedTenantIdColumn,
+                contactId);
+            var codeOnly = new Dictionary<string, object?>(consuming);
+            foreach (var column in InviteStampColumns)
+            {
+                codeOnly.Remove(column);
+            }
+
+            write = await WriteAsync(HttpMethod.Patch, path, codeOnly, ("If-Match", version),
+                ct, missingColumns: InviteCodeHashColumn).ConfigureAwait(false);
+            if (write.Status != StoreWriteStatus.ColumnMissing)
+            {
+                return write;
+            }
         }
 
         _logger.LogWarning(
@@ -1620,6 +1741,9 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     {
         ContactBindingDecision.ExternalInviteCodeHashColumn,
     };
+
+    /// <summary>Every column the consuming bind clears: a write fault naming any is a missing column (#2005).</summary>
+    private static readonly IReadOnlyList<string> ConsumedInviteColumns = InviteCodeHashColumn.Concat(InviteStampColumns).ToArray();
 
     /// <inheritdoc />
     public async Task<StoreWriteResult> CreateContactForOidAsync(
