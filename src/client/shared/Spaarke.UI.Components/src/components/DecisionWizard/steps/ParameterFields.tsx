@@ -33,6 +33,7 @@ import { fieldLabel, fieldValue, parameterValid, withLookup, withValue } from '.
 import type { StepScope } from '../decisionDraft';
 import { useDecisionItem } from '../decisionItemContext';
 import type { DecisionAction, DecisionParameter } from '../decisionWizardTypes';
+import { EMAIL_MESSAGE_CODES, EmailMessageFields } from './EmailMessageFields';
 
 const useStyles = makeStyles({
   form: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalM },
@@ -264,10 +265,19 @@ const ScalarParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
 /** The editable form of an action or Next step. */
 export const ParameterFields: React.FC<{ action: DecisionAction; scope: StepScope }> = ({ action, scope }) => {
   const styles = useStyles();
+  const { locked } = useDecisionItem();
   if (action.parameters.length === 0) return null;
+  // Task 160 (D-179): the plan's `composer: "email"` puts to / subject / body in the shared EmailComposer (compose-only). A locked
+  // review keeps the read-only fields below, which show exactly what will be sent.
+  const composed =
+    action.composer === 'email' &&
+    !locked &&
+    EMAIL_MESSAGE_CODES.every(code => action.parameters.some(p => p.code === code));
+  const fields = composed ? action.parameters.filter(p => !EMAIL_MESSAGE_CODES.includes(p.code)) : action.parameters;
   return (
     <div className={styles.form} data-testid="parameter-fields">
-      {action.parameters.map(p =>
+      {composed ? <EmailMessageFields scope={scope} /> : null}
+      {fields.map(p =>
         p.kind === 'Person' || p.kind === 'Lookup' ? (
           <LookupParameter key={p.code} parameter={p} scope={scope} />
         ) : (

@@ -1,0 +1,129 @@
+/**
+ * EmailMessageFields - a message step's `to`, `subject` and `body` in the shared EmailComposer (task 160; D-179, owner 2026-10-23).
+ *
+ * Used when the plan marks the action `composer: "email"`. The composer is COMPOSE-ONLY: no Send, no From row, no External /
+ * Internal Only tags, and it never sends or saves anything itself; the commit route sends the email, from the deciding user's
+ * mailbox, at Record decision. Nothing is written here: the composer's state flows into the step's values through `onStateChange`,
+ * in the shape the executors already accept (`to` = the addresses joined with "; ", plain-text subject and body), so the
+ * wizard's own rules (Next disabled until required fields are present; the discard check) are unchanged.
+ *
+ * - Starting values are the step's current values (typed, else the defaults: the templated subject and body, D-53, and the plan's
+ *   To pre-fill). The composer is mounted with them and is uncontrolled from then on.
+ * - The To lookup opens the host's side-pane lookup for contacts (task 158's `openLookup`) and adds the pick by its email address;
+ *   a pick with no address adds nothing. Typed addresses are accepted as the composer accepts them.
+ * - The body is committed as plain text: a body the user switched to rich text is converted back.
+ * - Cc and Bcc are not part of the action: when the user adds any, the step says they will not be sent.
+ *
+ * Fluent v9 tokens only (ADR-021). No Xrm, no auth import (ADR-012, ADR-028).
+ */
+
+import * as React from 'react';
+import { MessageBar, MessageBarBody, makeStyles, tokens } from '@fluentui/react-components';
+import { EmailComposer } from '../../EmailComposer/EmailComposer';
+import type { EmailComposerState, IRecipient } from '../../EmailComposer/EmailComposer.types';
+import type { AuthenticatedFetchFn } from '../../../services/EntityCreationService';
+import { fieldValue, withValue } from '../decisionDraft';
+import type { StepScope } from '../decisionDraft';
+import { useDecisionItem } from '../decisionItemContext';
+
+/** The parameter codes the composer edits. */
+export const EMAIL_MESSAGE_CODES: readonly string[] = ['to', 'subject', 'body'];
+
+const SEPARATORS = /[;,\s]+/;
+
+const useStyles = makeStyles({
+  root: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalS },
+});
+
+/** The composer never sends in compose-only mode; a fetch that refuses makes that certain. */
+const refuseFetch = (() =>
+  Promise.reject(new Error('The decision wizard never sends from the composer.'))) as unknown as AuthenticatedFetchFn;
+
+/** Plain text of a body the user switched to rich text: block ends become line breaks, tags are dropped. */
+function toPlainText(body: string, format: EmailComposerState['bodyFormat']): string {
+  if (format !== 'HTML' || !/[<&]/.test(body)) return body;
+  const element = document.createElement('div');
+  element.innerHTML = body.replace(/<\s*br\s*\/?>/gi, '\n').replace(/<\s*\/\s*(p|div|li|h[1-6])\s*>/gi, '\n');
+  return (element.textContent ?? '').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+export const EmailMessageFields: React.FC<{ scope: StepScope }> = ({ scope }) => {
+  const { draft, update, openLookup } = useDecisionItem();
+  const styles = useStyles();
+  const latest = React.useRef(draft);
+  latest.current = draft;
+  const [otherRecipients, setOtherRecipients] = React.useState(false);
+
+  // The composer is uncontrolled: it starts from the step's values as they are when the step opens.
+  const [initial] = React.useState(() => ({
+    to: fieldValue(draft, scope, 'to')
+      .split(SEPARATORS)
+      .map(a => a.trim())
+      .filter(Boolean),
+    subject: fieldValue(draft, scope, 'subject'),
+    body: fieldValue(draft, scope, 'body'),
+  }));
+
+  const onStateChange = React.useCallback(
+    (state: EmailComposerState) => {
+      setOtherRecipients(state.cc.length > 0 || state.bcc.length > 0);
+      const next: Record<string, string> = {
+        to: state.to
+          .map(r => r.email.trim())
+          .filter(Boolean)
+          .join('; '),
+        subject: state.subject,
+        body: toPlainText(state.body, state.bodyFormat),
+      };
+      // Only a real change is written, so mounting the composer over the starting values is not a choice (discard check).
+      const changed = Object.keys(next).filter(code => fieldValue(latest.current, scope, code) !== next[code]);
+      if (changed.length === 0) return;
+      update(d => changed.reduce((acc, code) => withValue(acc, scope, code, next[code]), d));
+    },
+    [scope, update]
+  );
+
+  const paneForContacts =
+    openLookup != null && (openLookup.supportedEntities == null || openLookup.supportedEntities.includes('contact'));
+  const onLookupRecipients = React.useMemo(() => {
+    if (!paneForContacts || !openLookup) return undefined;
+    return async (field: 'to' | 'cc' | 'bcc'): Promise<IRecipient[] | null> => {
+      try {
+        const picked = await openLookup({ kind: 'Person', entity: 'contact', parameterCode: field });
+        const email = picked?.email?.trim();
+        // A contact with no email address cannot receive the inquiry: nothing is added.
+        return picked && email
+          ? [{ email, displayName: picked.name, resolved: true, sourceId: picked.id, entityType: 'contact' }]
+          : null;
+      } catch {
+        return null;
+      }
+    };
+  }, [openLookup, paneForContacts]);
+
+  return (
+    <div className={styles.root} data-testid="email-message-fields">
+      <EmailComposer
+        mode="compose"
+        mount="inline"
+        hostOwnsChrome
+        composeOnly
+        sendMode="user"
+        authenticatedFetch={refuseFetch}
+        initialTo={initial.to}
+        initialSubject={initial.subject}
+        initialBody={initial.body}
+        initialBodyFormat="PlainText"
+        showAssociations={false}
+        attachmentSources={[]}
+        onStateChange={onStateChange}
+        onLookupRecipients={onLookupRecipients}
+      />
+      {otherRecipients ? (
+        <MessageBar intent="warning" data-testid="cc-not-sent">
+          <MessageBarBody>Cc and Bcc are not sent with this step. Add every recipient to To.</MessageBarBody>
+        </MessageBar>
+      ) : null}
+    </div>
+  );
+};
