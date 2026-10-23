@@ -1728,11 +1728,16 @@ no solution import can create. Since T256, **H7b creates it on every run**, afte
 - the identity-link lock check (S18) covers `contact.sprk_identityplane` and the five `sprk_identitycollision*` columns
   as well as the binding columns: secured, `Identity Link Readers` 4/0/0, `Writers` 4/4/4, nobody else may create or
   update (`secure_setup.identity_link_*`);
-- the standing-grant lock check (S19, #2317) covers `contact.sprk_accesspermissiongrant` as well as
-  `contact.sprk_standinggrant`: secured, `Standing Grant Administrators` 4/4/4, `BFF-Managed Field Readers` Read
-  (4/0/0), `Writers` Read and Update, and no other profile (System Administrator excepted; the Readers profile is not)
-  may create or update it, else `secure_setup.access_level_lock_incomplete` (Resumable: import SpaarkeMaster) or
-  `secure_setup.access_level_lock_other_writer` (QuarantineRequired);
+- the standing-grant lock check (S19) covers two columns:
+  - `contact.sprk_standinggrant`: secured, `Standing Grant Administrators` 4/4/4, and no other profile (System
+    Administrator excepted; the Readers profile is not) may create or update it, else
+    `secure_setup.standing_grant_lock_incomplete` (Resumable: import SpaarkeMaster) or
+    `secure_setup.standing_grant_lock_other_writer` (QuarantineRequired);
+  - `contact.sprk_accesspermissiongrant` (#2317): secured, `Standing Grant Administrators` 4/4/4,
+    `BFF-Managed Field Readers` Read (4/0/0), `BFF-Managed Field Writers` Read and Update (4/0/4), and no other profile
+    (System Administrator excepted; the Readers profile is not) may create or update it, else
+    `secure_setup.access_level_lock_incomplete` (Resumable) or `secure_setup.access_level_lock_other_writer`
+    (QuarantineRequired);
 - read-only checks (S22, #2317) for the columns a later SpaarkeMaster release carries. `contact.sprk_externalinvitedemailhash`
   and `contact.sprk_externalinvitedtenantid` follow the code-hash rule (secured, `Writers` 4/4/4, no access for anyone
   else), else `secure_setup.bff_only_column_lock_incomplete` (Resumable) or

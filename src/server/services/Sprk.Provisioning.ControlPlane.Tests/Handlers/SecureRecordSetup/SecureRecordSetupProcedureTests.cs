@@ -638,6 +638,28 @@ public sealed class SecureRecordSetupProcedureTests
                     permissions.Add(new SecureSetupFieldPermission(dv.StandingGrantProfileId, "sprk_externalparty", 4, 4, 4));
                 },
                 SecureRecordSetupRejectionCodes.StandingGrantLockIncomplete, FailureClass.Resumable },
+            { "Standing Grant Administrators cannot create the standing grant (4/0/4)", dv =>
+                    Replace(dv, SecureRecordSetupProcedure.StandingGrantColumn, dv.StandingGrantProfileId, 4, 0, 4),
+                SecureRecordSetupRejectionCodes.StandingGrantLockIncomplete, FailureClass.Resumable },
+            { "Standing Grant Administrators cannot update the standing grant (4/4/0)", dv =>
+                    Replace(dv, SecureRecordSetupProcedure.StandingGrantColumn, dv.StandingGrantProfileId, 4, 4, 0),
+                SecureRecordSetupRejectionCodes.StandingGrantLockIncomplete, FailureClass.Resumable },
+            { "Readers may update the standing grant (4/0/4)", dv =>
+                    dv.ColumnPermissions(SecureRecordSetupProcedure.StandingGrantColumn).Add(new SecureSetupFieldPermission(
+                        dv.ReaderProfileId, SecureRecordSetupProcedure.StandingGrantTable, 4, 0, 4)),
+                SecureRecordSetupRejectionCodes.StandingGrantLockOtherWriter, FailureClass.QuarantineRequired },
+            { "Writers may update the standing grant (4/0/4)", dv =>
+                    dv.ColumnPermissions(SecureRecordSetupProcedure.StandingGrantColumn).Add(new SecureSetupFieldPermission(
+                        dv.WriterProfileId, SecureRecordSetupProcedure.StandingGrantTable, 4, 0, 4)),
+                SecureRecordSetupRejectionCodes.StandingGrantLockOtherWriter, FailureClass.QuarantineRequired },
+            { "another profile may create the standing grant (0/4/0)", dv =>
+                    dv.ColumnPermissions(SecureRecordSetupProcedure.StandingGrantColumn).Add(new SecureSetupFieldPermission(
+                        dv.AddProfile("Contact Admins"), SecureRecordSetupProcedure.StandingGrantTable, 0, 4, 0)),
+                SecureRecordSetupRejectionCodes.StandingGrantLockOtherWriter, FailureClass.QuarantineRequired },
+            { "another profile may only update the standing grant (0/0/4)", dv =>
+                    dv.ColumnPermissions(SecureRecordSetupProcedure.StandingGrantColumn).Add(new SecureSetupFieldPermission(
+                        dv.AddProfile("Contact Admins"), SecureRecordSetupProcedure.StandingGrantTable, 0, 0, 4)),
+                SecureRecordSetupRejectionCodes.StandingGrantLockOtherWriter, FailureClass.QuarantineRequired },
             { "Access Administrator role missing from the root unit", dv => dv.Roles.RemoveAll(r => r.Id == dv.AccessAdministratorRoleId),
                 SecureRecordSetupRejectionCodes.NoAccessEntryRolesIncomplete, FailureClass.Resumable },
             { "Core User role missing from the root unit", dv => dv.Roles.RemoveAll(r => r.Id == dv.CoreUserRoleId),
@@ -737,6 +759,10 @@ public sealed class SecureRecordSetupProcedureTests
             { "another profile may create the access level", dv =>
                     dv.ColumnPermissions(Level).Add(new SecureSetupFieldPermission(
                         dv.AddProfile("Contact Admins"), SecureRecordSetupProcedure.StandingGrantTable, 4, 4, 0)),
+                SecureRecordSetupRejectionCodes.AccessLevelLockOtherWriter, FailureClass.QuarantineRequired },
+            { "another profile may only update the access level (0/0/4)", dv =>
+                    dv.ColumnPermissions(Level).Add(new SecureSetupFieldPermission(
+                        dv.AddProfile("Contact Admins"), SecureRecordSetupProcedure.StandingGrantTable, 0, 0, 4)),
                 SecureRecordSetupRejectionCodes.AccessLevelLockOtherWriter, FailureClass.QuarantineRequired },
 
             // ---- S22 (#2317): the BFF-only columns and the removed-on marker, once they ship ----
@@ -899,6 +925,36 @@ public sealed class SecureRecordSetupProcedureTests
 
         (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>();
         dv.Writes.Should().NotContain(w => w.Contains(Level, StringComparison.OrdinalIgnoreCase), "S19 verifies the lock, never writes it");
+    }
+
+    [Fact]
+    public async Task StandingGrant_AsShipped_Passes_TheReadersProfileMayRead_AndSystemAdministratorIsExempt()
+    {
+        var dv = NewEnv();   // Standing Grant Administrators 4/4/4
+        var standing = dv.ColumnPermissions(SecureRecordSetupProcedure.StandingGrantColumn);
+        standing.Add(new SecureSetupFieldPermission(dv.SystemAdministratorProfileId, SecureRecordSetupProcedure.StandingGrantTable, 4, 4, 4));
+        standing.Add(new SecureSetupFieldPermission(dv.ReaderProfileId, SecureRecordSetupProcedure.StandingGrantTable, 4, 0, 0));
+        // A grant on the same column name on another table is not this column's lock.
+        standing.Add(new SecureSetupFieldPermission(dv.AddProfile("Contact Admins"), "sprk_externalparty", 4, 4, 4));
+
+        (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>();
+        dv.Writes.Should().NotContain(w => w.Contains(SecureRecordSetupProcedure.StandingGrantColumn, StringComparison.OrdinalIgnoreCase),
+            "S19 verifies the lock, never writes it");
+    }
+
+    [Fact]
+    public async Task StandingGrantOtherWriter_NamesTheProfile_AndTheRule()
+    {
+        var dv = NewEnv();
+        var admins = dv.AddProfile("Contact Admins");
+        dv.ColumnPermissions(SecureRecordSetupProcedure.StandingGrantColumn).Add(new SecureSetupFieldPermission(
+            admins, SecureRecordSetupProcedure.StandingGrantTable, 0, 0, 4));
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.StandingGrantLockOtherWriter,
+            FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(admins.ToString()).And.Contain("contact.sprk_standinggrant")
+            .And.Contain("Only Standing Grant Administrators and System Administrator may create or update the standing grant");
     }
 
     [Fact]

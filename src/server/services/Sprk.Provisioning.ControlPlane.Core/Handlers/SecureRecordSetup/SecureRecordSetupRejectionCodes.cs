@@ -135,9 +135,15 @@ public static class SecureRecordSetupRejectionCodes
 
     /// <summary>
     /// S19 (ISS-020 / #1565): <c>contact.sprk_standinggrant</c> is not secured, or the "Standing Grant Administrators" profile
-    /// does not grant Read on it (Resumable: import SpaarkeMaster, H6).
+    /// does not grant read/create/update (4/4/4) on it (Resumable: import SpaarkeMaster, H6).
     /// </summary>
     public const string StandingGrantLockIncomplete = "secure_setup.standing_grant_lock_incomplete";
+
+    /// <summary>
+    /// S19: a profile other than Standing Grant Administrators (and System Administrator) may create or update
+    /// <c>contact.sprk_standinggrant</c> — the Readers profile included: every default team is its member (QuarantineRequired).
+    /// </summary>
+    public const string StandingGrantLockOtherWriter = "secure_setup.standing_grant_lock_other_writer";
 
     /// <summary>
     /// S19 (#2317): <c>contact.sprk_accesspermissiongrant</c> is absent or not secured, or its lock is not the shipped one —

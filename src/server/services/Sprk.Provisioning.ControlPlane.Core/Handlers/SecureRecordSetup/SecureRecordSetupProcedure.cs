@@ -589,7 +589,9 @@ public sealed class SecureRecordSetupProcedure
             }
         }
 
-        // S19 — the standing-grant profile ships in SpaarkeMaster: exactly one, and the shipped lock on the flag is whole.
+        // S19 — the standing-grant profile ships in SpaarkeMaster: exactly one, and the shipped lock on the flag is whole:
+        // secured, Standing Grant Administrators 4/4/4. No other profile may create or update the flag — the Readers profile
+        // included (every default team is its member). System Administrator is the platform's own profile (owner decision F4).
         var standingProfile = await ResolveProfileAsync(dv, t, StandingGrantProfileName, ct).ConfigureAwait(false);
         if (standingProfile.Refusal is not null)
         {
@@ -597,15 +599,32 @@ public sealed class SecureRecordSetupProcedure
         }
         var standingProfileId = standingProfile.Id!.Value;
         var standingSecured = await dv.IsAttributeSecuredAsync(t, StandingGrantTable, StandingGrantColumn, ct).ConfigureAwait(false);
-        var standingGrant = (await dv.ListFieldPermissionsAsync(t, StandingGrantColumn, ct).ConfigureAwait(false))
-            .FirstOrDefault(p => p.ProfileId == standingProfileId && Same(p.EntityName, StandingGrantTable));
-        if (standingSecured != true || standingGrant is null || standingGrant.CanRead != FieldPermissionAllowed)
+        var standingPermissions = (await dv.ListFieldPermissionsAsync(t, StandingGrantColumn, ct).ConfigureAwait(false))
+            .Where(p => Same(p.EntityName, StandingGrantTable))
+            .ToArray();
+        var standingGrant = standingPermissions.FirstOrDefault(p => p.ProfileId == standingProfileId);
+        if (standingSecured != true
+            || standingGrant is null || standingGrant.CanRead != FieldPermissionAllowed
+            || standingGrant.CanCreate != FieldPermissionAllowed || standingGrant.CanUpdate != FieldPermissionAllowed)
         {
             return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.StandingGrantLockIncomplete,
                 $"{StandingGrantTable}.{StandingGrantColumn}: IsSecured={standingSecured?.ToString() ?? "(no such column)"}, " +
-                $"'{StandingGrantProfileName}' read={standingGrant?.CanRead.ToString() ?? "(none)"} (expected secured, 4). The " +
-                "package's standing-grant field and profile (teams-app-r1 task 050) are incomplete: import SpaarkeMaster " +
-                "(H6), then resume. Nothing was written.");
+                $"'{StandingGrantProfileName}' read/create/update={Rights(standingGrant)} (expected secured, 4/4/4). The " +
+                "package's standing-grant field and profile (teams-app-r1 task 050; SpaarkeMaster 1.2.0.0 and later) are " +
+                "incomplete: import SpaarkeMaster (H6), then resume. Nothing was written.");
+        }
+        var standingOtherWriters = standingPermissions
+            .Where(p => p.ProfileId != standingProfileId
+                        && !systemAdministratorProfiles.Contains(p.ProfileId)
+                        && (p.CanCreate == FieldPermissionAllowed || p.CanUpdate == FieldPermissionAllowed))
+            .ToArray();
+        if (standingOtherWriters.Length > 0)
+        {
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.StandingGrantLockOtherWriter,
+                $"Profiles other than '{StandingGrantProfileName}' may create or update {StandingGrantTable}.{StandingGrantColumn}: " +
+                $"{Ids(standingOtherWriters.Select(p => p.ProfileId))} (the Readers profile included — every default team is its " +
+                "member). Only Standing Grant Administrators and System Administrator may create or update the standing grant; " +
+                "who was granted more is an operator decision. Nothing was written.");
         }
 
         // S19 (#2317) — the access level ships secured with the same lock: Standing Grant Administrators 4/4/4, Readers 4/0/0,
