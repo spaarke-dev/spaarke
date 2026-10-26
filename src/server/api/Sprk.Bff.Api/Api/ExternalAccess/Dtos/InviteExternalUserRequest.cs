@@ -24,10 +24,14 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// </param>
 /// <param name="RecordId">The GUID of the root record identified by <paramref name="RecordType"/>.</param>
 /// <param name="InvitedTenantId">
-/// Optional: the Entra tenant id (a GUID) of the person's work organization. Recorded with the invite. A person who signs in
-/// with a work account binds to this contact only when their token's tenant is this one, unless their token says the
-/// email's domain is verified by its owning tenant. Anything but a non-empty GUID is refused (400). Used by <c>/invite</c>
-/// and <c>/invite-and-grant</c>.
+/// Not accepted: any non-blank value is refused (400). The person's organisation is resolved by the server from the email's
+/// domain at invite time, and staff never supply a tenant. Kept on the contract so a client that sends one is told, rather
+/// than having it silently ignored.
+/// </param>
+/// <param name="SendAsPortalAccount">
+/// Optional staff override (default false): send the invite as a portal (CIAM) account even when the email's organisation
+/// is one of this deployment's customer tenants, and skip the organisation lookup. It can only choose a portal account.
+/// Used by <c>/invite</c> and <c>/invite-and-grant</c>.
 /// </param>
 public record InviteExternalUserRequest(
     string Email,
@@ -39,4 +43,5 @@ public record InviteExternalUserRequest(
     Guid? OrganizationId,
     string? RecordType = null,
     Guid? RecordId = null,
-    string? InvitedTenantId = null);
+    string? InvitedTenantId = null,
+    bool SendAsPortalAccount = false);
