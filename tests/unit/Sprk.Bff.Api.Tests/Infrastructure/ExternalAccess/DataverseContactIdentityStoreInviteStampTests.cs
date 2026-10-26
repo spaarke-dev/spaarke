@@ -84,6 +84,72 @@ public class DataverseContactIdentityStoreInviteStampTests
     }
 
     /// <summary>
+    /// The marker, the code hash, the email stamp and the tenant stamp are read in ONE query, so a platform answer that
+    /// names ANY of the four as a property the environment lacks is <see cref="LookupStatus.ColumnMissing"/> for the whole
+    /// lookup. No stamp can then be met, so NO email bind is made on either token plane: the external (CIAM) plane answers
+    /// <c>contact_not_invited</c> (operator reason <c>no-marker</c>), the Workforce plane <c>contact_not_invited</c>
+    /// (operator reason <c>stamp-none</c>), even for an otherwise valid invite code and sign-in. MUST FIRE: each of the
+    /// four columns missing, on both planes. MUST NOT FIRE: the same sign-in over a provisioned read binds.
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_externalinvitedon", "ciam", "no-marker")]
+    [InlineData("sprk_externalinvitecodehash", "ciam", "no-marker")]
+    [InlineData("sprk_externalinvitedemailhash", "ciam", "no-marker")]
+    [InlineData("sprk_externalinvitedtenantid", "ciam", "no-marker")]
+    [InlineData("sprk_externalinvitedemailhash", "workforce", "stamp-none")]
+    [InlineData("sprk_externalinvitedtenantid", "workforce", "stamp-none")]
+    [InlineData(null, "ciam", null)]
+    [InlineData(null, "workforce", null)]
+    public async Task AStampColumnNotProvisioned_RefusesEveryEmailBind_OnBothTokenPlanes(string? missingColumn, string plane, string? reason)
+    {
+        var invite = InviteCode.Create(Contact);
+        var ciam = plane == "ciam";
+        var asOf = DateTimeOffset.Parse("2026-10-21T09:00:00Z");
+        var http = new ReadProofHttp
+        {
+            ContactBody = missingColumn is null
+                ? JsonSerializer.Serialize(new Dictionary<string, object?>
+                {
+                    ["@odata.etag"] = "W/\"4711\"",
+                    ["contactid"] = Contact,
+                    [ContactBindingDecision.ExternalInvitedOnColumn] = "2026-10-20T09:00:00Z",
+                    [ContactBindingDecision.ExternalInviteCodeHashColumn] = invite.StoredValue,
+                    ["emailaddress1"] = Email,
+                    [ContactBindingDecision.ExternalInvitedEmailHashColumn] = InviteEmailStamp.Create(Email),
+                    [ContactBindingDecision.ExternalInvitedTenantIdColumn] = Tenant.ToString("D"),
+                })
+                : $"{{\"error\":{{\"code\":\"0x80060888\",\"message\":\"Could not find a property named '{missingColumn}' on type 'Microsoft.Dynamics.CRM.contact'.\"}}}}",
+            ContactStatus = missingColumn is null ? HttpStatusCode.OK : HttpStatusCode.BadRequest,
+        };
+        http.DirectGrants.UnionWith(DataverseContactIdentityStore.InviteStampColumns);
+
+        var intent = (await StoreOver(http).FindBindIntentAsync(Contact, CancellationToken.None)) with { AsOf = asOf };
+        var request = new BindingRequest(
+            ciam ? BindingPlane.CiamToken : BindingPlane.WorkforceToken, Oid, Email,
+            ciam ? BindingEligibility.EmailBindOnly : BindingEligibility.EmailBindAndCreate)
+        {
+            InviteCode = ciam ? invite.Code : null,
+            TokenTenantId = Tenant,
+        };
+        var decision = ContactBindingDecision.Decide(request, ContactLookup.Of(),
+            ContactLookup.Of(new ContactBindingRow(Contact, 0, null, null)), ReferenceLookup.Of(), intent);
+
+        if (missingColumn is null)
+        {
+            intent.InviteStatus.Should().Be(LookupStatus.Read);
+            decision.Action.Should().Be(BindingAction.BindByEmail);
+            ContactBindingDecision.NotInvitedReason(request, intent, Contact).Should().BeNull();
+            return;
+        }
+
+        intent.InviteStatus.Should().Be(LookupStatus.ColumnMissing, "one query reads all four columns");
+        decision.Action.Should().Be(BindingAction.Deny);
+        decision.DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
+        ContactBindingDecision.NotInvitedReason(request, intent, Contact).Should().Be(reason);
+        http.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>
     /// The invite mark is ONE PATCH of the contact, If-Match the row version it was decided on (never <c>*</c>), carrying
     /// the marker, the code hash, the email hash and the tenant, and nothing else.
     /// </summary>

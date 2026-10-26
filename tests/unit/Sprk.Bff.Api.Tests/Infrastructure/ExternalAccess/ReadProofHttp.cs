@@ -34,6 +34,11 @@ internal sealed class ReadProofHttp : IHttpClientFactory
 
     public string ContactBody { get; set; } = "{}";
 
+    /// <summary>The answer to a read of one contact (<c>contacts(id)</c>); default 200 with <see cref="ContactBody"/>. A 400
+    /// with a body naming a property the environment lacks is how Dataverse answers a <c>$select</c> of a column that is not
+    /// provisioned.</summary>
+    public HttpStatusCode ContactStatus { get; set; } = HttpStatusCode.OK;
+
     public string ContactsBody { get; set; } = "{\"value\":[]}";
 
     public List<string> Requests { get; } = new();
@@ -87,7 +92,7 @@ internal sealed class ReadProofHttp : IHttpClientFactory
 
         if (path.StartsWith("contacts(", StringComparison.Ordinal))
         {
-            return (HttpStatusCode.OK, ContactBody);
+            return (ContactStatus, ContactBody);
         }
 
         if (path.StartsWith("contacts?", StringComparison.Ordinal))

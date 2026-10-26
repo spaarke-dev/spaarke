@@ -218,6 +218,37 @@ public class CiamContactBindingTests
     }
 
     /// <summary>
+    /// An environment whose invite columns (the marker, the code hash, or the invite stamp) are not provisioned reads the
+    /// whole bind-intent lookup as <see cref="LookupStatus.ColumnMissing"/> (one query selects them all). No stamp can then
+    /// be met, so the external (CIAM) email bind is refused too: <c>contact_not_invited</c>, nothing written, the contact
+    /// still unbound. Rollout order: apply the contact security schema before a build that requires the stamp.
+    /// MUST FIRE: an otherwise valid invite code and sign-in over a lookup that is ColumnMissing. MUST NOT FIRE: the same
+    /// sign-in over a provisioned lookup binds.
+    /// </summary>
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task AnInviteColumnNotProvisioned_RefusesTheCiamEmailBind_AndWritesNothing(bool columnMissing, bool binds)
+    {
+        var invite = InviteCode.Create(ContactA);
+        _store.AddContact(ContactA, email: Email, invitedOn: Now, inviteCodeHash: invite.StoredValue);
+        _store.StampInvite(ContactA, Email, CustomerTenant);
+        _store.InviteMarkerStatus = columnMissing ? LookupStatus.ColumnMissing : LookupStatus.Read;
+
+        var result = await Binder(_store).ResolveCiamCallerAsync(CiamOid.ToString(), Email, invite.Code, CancellationToken.None);
+
+        if (binds)
+        {
+            result.Action.Should().Be(BindingAction.BindByEmail);
+            return;
+        }
+
+        result.DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
+        _store.Writes.Should().BeEmpty();
+        _store.Contacts[ContactA].Oid.Should().BeNull();
+    }
+
+    /// <summary>
     /// The Workforce token plane email-binds a member only on the invite stamp (an invite to this address naming the
     /// caller's tenant), read in the intent query. Before the stamp this test was
     /// <c>TheWorkforcePlane_EmailBindsAMember_WithoutReadingAnyIntent</c>.
