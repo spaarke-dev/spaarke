@@ -855,6 +855,14 @@
         <CanReadUnmasked>0</CanReadUnmasked>
       </FieldPermission>
       <FieldPermission>
+        <EntityName>sprk_invoicesubmission</EntityName>
+        <AttributeName>sprk_findingsjson</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
         <EntityName>sprk_invoiceapproval</EntityName>
         <AttributeName>sprk_createdbyperson</AttributeName>
         <CanRead>4</CanRead>

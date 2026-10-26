@@ -20,7 +20,7 @@ User-owned, entity set `sprk_invoicesubmissions`, primary name `sprk_name` (text
 | `sprk_channel` | Choice (local) | SPA 100000000, Internal 100000001, Mailbox 100000002 (reserved), Outlook 100000003 (reserved), API 100000004 (reserved). |
 | `sprk_processingstatus` | Choice (local) | Received 100000000, Processing 100000001, Accepted 100000002, Rejected 100000003, Failed 100000004. |
 | `sprk_outcomereasoncode` | Text (100) | Stable reason code for Failed or Rejected (FR-21). |
-| `sprk_findingsjson` | Multiline (1,048,576) | Findings that caused a rejection, as JSON. |
+| `sprk_findingsjson` | Multiline (1,048,576), **field-secured, BFF only** | Findings that caused a rejection, as JSON, Duplicate detail included. Field-secured (task 122, #2235): only "Spaarke BFF-Managed Field Writers" (the BFF application users) reads, creates and updates it, and no reader profile is granted, so every other user reads null on the form and the Web API. Not on any form. Every BFF reader reads it app-only (`FindingsJsonAppOnlyReadGuardTests`); the D-176 Duplicate check is applied on `/review` and `/blocked`. Set by `scripts/ebilling/Set-EbillingFindingsJsonFieldSecurity.ps1`. |
 | `sprk_firmnoticetext` | Multiline (100,000) | The notice text sent to the firm (FR-50). |
 | `sprk_ponumber` | Text (100) | PO number as entered at submission (FR-18). |
 | `sprk_receivedon` | Date and time (user local) | When the submission was received. |

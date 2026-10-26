@@ -1017,7 +1017,8 @@ public sealed class SubmissionOverrideService
     /// <summary>
     /// The Decision Record's decision, built only from the stored findings and the call, so every attempt builds the same one (074 K-5):
     /// the code on the invoice, the deterministic decision id, a human decider (the authenticated caller), the reason, the first deciding
-    /// finding's policy version, strings-only values, and the stored, scrubbed Signal plan as facts (D-112: never the raw findings). It
+    /// finding's policy version, strings-only values, and the stored, scrubbed Signal plan as facts (D-112: never the raw findings; a
+    /// Duplicate reason's sentence is the withheld one, #2235, <see cref="InvoiceSubmissionAfterSteps.RecordSentence"/>). It
     /// resolves the stored D-122 set <paramref name="signals"/> (<c>ResolvedSignalIds</c>; its read time and policy codes in the facts).
     /// </summary>
     internal static BillingDecision BuildDecision(
@@ -1053,7 +1054,7 @@ public sealed class SubmissionOverrideService
                 ["consequence"] = p.Consequence,
                 ["fingerprint"] = p.Fingerprint,
                 ["decision"] = p.Decision,
-                ["sentence"] = p.Sentence,
+                ["sentence"] = InvoiceSubmissionAfterSteps.RecordSentence(p),
             }).ToList(),
         };
         if (signals.SetReadAtUtc != DateTime.MinValue)

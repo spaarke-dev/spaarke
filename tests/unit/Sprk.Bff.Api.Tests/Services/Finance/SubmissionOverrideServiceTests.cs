@@ -1920,6 +1920,48 @@ public class SubmissionOverrideServiceTests
         a.Facts.Keys.Should().NotContain("findings", "the facts carry the scrubbed plan, never the raw findings (D-112)");
     }
 
+    [Theory(DisplayName = "122 (#2235): the override and return records store the withheld sentence for a Duplicate reason, never the earlier invoice; a non-Duplicate sentence is unchanged")]
+    [InlineData(true, "duplicate.invoice_number")]
+    [InlineData(true, "duplicate.line_prior_submission")]
+    [InlineData(true, "duplicate.line_same_invoice")]
+    [InlineData(false, "duplicate.invoice_number")]
+    [InlineData(false, "duplicate.line_prior_submission")]
+    [InlineData(false, "duplicate.line_same_invoice")]
+    public async Task BuildDecision_StoresTheWithheldSentence_ForADuplicateReason(bool isOverride, string duplicateCode)
+    {
+        var verb = isOverride ? SubmissionOverrideService.Verb.Override : SubmissionOverrideService.Verb.Return;
+        const string otherSentence = "Line 2 bills 0.3 hours, not a multiple of 0.1.";
+        var w = await World.CreateAsync();
+        var parsed = InvoiceSubmissionAfterSteps.StoredFindings.Parse(w.FindingsJson)!;
+        parsed.Plan.Should().NotBeEmpty("the fixture's blocked submission has a Signal plan to copy the entry shape from");
+        var basis = parsed.Plan[0];
+        var stored = new InvoiceSubmissionAfterSteps.StoredFindings
+        {
+            Kind = parsed.Kind,
+            ReasonCode = parsed.ReasonCode,
+            InvoiceId = parsed.InvoiceId,
+            TrackingNumber = parsed.TrackingNumber,
+            ReliabilityThreshold = parsed.ReliabilityThreshold,
+            DecidingIndexes = parsed.DecidingIndexes,
+            Findings = parsed.Findings,
+            Plan =
+            [
+                basis with { ReasonCodes = [duplicateCode], Sentence = $"Invoice INV-100 duplicates {EarlierNumber} ({EarlierInvoice:D})." },
+                basis with { ReasonCodes = ["time.increment"], Sentence = otherSentence },
+            ],
+        };
+        var set = new InvoiceSubmissionAfterSteps.ResolvedSignalSet(new DateTime(2026, 10, 20, 9, 0, 0, DateTimeKind.Utc), []);
+
+        var decision = SubmissionOverrideService.BuildDecision(verb, stored, World.SubmissionId, World.InvoiceId, World.Caller, Reason, set);
+
+        var reasons = decision.Facts["reasons"].Should().BeAssignableTo<IEnumerable<Dictionary<string, object?>>>().Subject.ToList();
+        reasons.Should().HaveCount(2);
+        reasons[0]["sentence"].Should().Be(Sprk.Bff.Api.Services.Signals.Billing.BillingRuleCatalogue.WithheldDuplicateTemplate);
+        reasons[1]["sentence"].Should().Be(otherSentence);
+        var snapshot = JsonSerializer.Serialize(decision.Facts);
+        snapshot.Should().NotContain(EarlierNumber).And.NotContain(EarlierInvoice.ToString("D"));
+    }
+
     // ═════════════════════════════════════════════════════════════════════════════════════════════════
     // D-122 / FR-51: the human-decision Signal close (the shape agreed with ontology-r1)
     // ═════════════════════════════════════════════════════════════════════════════════════════════════

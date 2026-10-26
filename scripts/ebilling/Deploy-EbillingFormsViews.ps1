@@ -37,16 +37,23 @@
     Default SpaarkeMaster. New views are created inside it.
 .PARAMETER AllowPendingCollateral
     Continue when another pending (unpublished) form / view of a touched entity would be published too.
+.PARAMETER FormsOnly
+    Run step 1 (forms) and the entity-scoped publish only; skip views, navigation and app tables. Added by task 122 (#2235) to take
+    sprk_findingsjson off the live sprk_invoicesubmission form: on spaarkedev1 (2026-10-23) step 3 throws in the
+    sprk_MatterManagement sitemap (sprk_invoice is listed in two areas and sprk_invoicesubmission sits in area_finance), after step 1
+    has already written the form and before step 4 publishes it.
 .EXAMPLE
     pwsh scripts/ebilling/Deploy-EbillingFormsViews.ps1 -WhatIf
     pwsh scripts/ebilling/Deploy-EbillingFormsViews.ps1
+    pwsh scripts/ebilling/Deploy-EbillingFormsViews.ps1 -FormsOnly -WhatIf
 #>
 using module .\EbillingSchema.psm1
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
     [string]$EnvironmentUrl = $(if ($env:DATAVERSE_URL) { $env:DATAVERSE_URL } else { 'https://spaarkedev1.crm.dynamics.com' }),
     [string]$SolutionUniqueName = 'SpaarkeMaster',
-    [switch]$AllowPendingCollateral
+    [switch]$AllowPendingCollateral,
+    [switch]$FormsOnly
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -119,7 +126,7 @@ $Spec = [ordered]@{
             @{ Name = 'general'; Label = 'Submission'; Cols = 'sprk_name', 'sprk_trackingnumber', 'sprk_firminvoicenumber', 'sprk_submissionsequence', 'sprk_vendororg', 'sprk_submitter', 'sprk_channel', 'sprk_processingstatus', 'sprk_receivedon', 'sprk_ponumber', 'sprk_outcomereasoncode', 'sprk_adminattention', 'sprk_correlationid', 'ownerid' }
             @{ Name = 'links'; Label = 'Resulting invoice and documents'; Cols = 'sprk_invoice', 'sprk_resubmissionof', 'sprk_document', 'sprk_reportdocument' }
             @{ Name = 'regarding'; Label = 'Regarding'; Cols = 'sprk_regardingmatter', 'sprk_regardingproject', 'sprk_regardingworkassignment' }
-            @{ Name = 'findings'; Label = 'Findings and firm notice'; Cols = 'sprk_findingsjson', 'sprk_firmnoticetext' }
+            @{ Name = 'findings'; Label = 'Firm notice'; Cols = 'sprk_firmnoticetext' }  # task 122 (#2235): sprk_findingsjson is BFF-only, never on a form
         )
         View = 'sprk_trackingnumber', 'sprk_firminvoicenumber', 'sprk_vendororg', 'sprk_channel', 'sprk_processingstatus', 'sprk_receivedon', 'sprk_invoice', 'sprk_submitter'
     }
@@ -467,6 +474,9 @@ $Evidence['collateralBefore'] = @($collateral)
 Write-Host "`n1. Forms"
 foreach ($t in $Spec.Keys) { Write-Host " $t"; Sync-Form $t $Spec[$t] }
 
+if ($FormsOnly) {
+    Write-Host "`n2-3. Views, navigation and app tables skipped (-FormsOnly)"
+} else {
 Write-Host "`n2. Views"
 foreach ($t in $Spec.Keys) { Sync-ActiveView $t $Spec[$t] }
 Sync-InvoicesToReview
@@ -500,6 +510,7 @@ Sync-SiteMap 'sprk_MatterManagement' {
 
 Sync-AppTables 'sprk_SpaarkeAdministration' @('sprk_ebillingsetting', 'sprk_timekeeper', 'sprk_ratecard', 'sprk_billingcodeset', 'sprk_ruleset')
 Sync-AppTables 'sprk_MatterManagement' @('sprk_invoicesubmission', 'sprk_billingexport')
+}
 
 Write-Host "`n4. Publish (entity-scoped; never PublishAllXml)"
 $pendingOthers = @($collateral | Where-Object {

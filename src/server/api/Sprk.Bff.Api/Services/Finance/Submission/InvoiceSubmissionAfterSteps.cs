@@ -1388,7 +1388,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     /// The automatic rejection's decision (notes section 7, D-100, D-101), built only from the stored findings so every attempt builds the
     /// same one (074 K-5): <c>reject-invoice</c> on the invoice, the deterministic decision id, an <c>automated:</c> decider with no confirmer;
     /// Reason = the deciding reason codes; PolicyVersionId = the first deciding finding's version; Values strings only; Facts = the decision,
-    /// the threshold and every merged reason of the stored, scrubbed Signal plan (D-112: never the raw findings).
+    /// the threshold and every merged reason of the stored, scrubbed Signal plan (D-112: never the raw findings; a Duplicate reason's
+    /// sentence is the withheld one, #2235, <see cref="RecordSentence"/>).
     /// <para><b>ResolvedSignalIds</b> = <paramref name="resolvedSignalIds"/>: the STORED set (D-122, notes 13c), every open Signal on the
     /// invoice and its lines read once before the record; the record's hash covers it, so a resume passes the same set. Null (the preflight,
     /// which does no I/O) lists none.</para>
@@ -1426,7 +1427,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
                 ["consequence"] = p.Consequence,
                 ["fingerprint"] = p.Fingerprint,
                 ["decision"] = p.Decision,
-                ["sentence"] = p.Sentence,
+                ["sentence"] = RecordSentence(p),
             }).ToList(),
         };
         var values = new Dictionary<string, object?>(StringComparer.Ordinal)
@@ -1491,6 +1492,22 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     /// <summary>One stored plan entry: the request to write and what the record's fact snapshot lists.</summary>
     internal sealed record StoredPlanEntry(
         SignalWriteRequest Request, string Fingerprint, IReadOnlyList<string> ReasonCodes, string? Consequence, string? Decision, string? Sentence);
+
+    /// <summary>The prefix of every Duplicate reason code (<see cref="BillingReasonCodes"/>: <c>duplicate.invoice_number</c>, ...), the
+    /// same key <c>SignalReadService</c> uses to tell a Duplicate.</summary>
+    private const string DuplicateReasonPrefix = "duplicate.";
+
+    /// <summary>
+    /// #2235 (D-176): the <c>reasons[].sentence</c> a Decision Record stores for one plan entry. A Duplicate reason (any reason code
+    /// with the <c>duplicate.</c> prefix) stores <see cref="BillingRuleCatalogue.WithheldDuplicateTemplate"/>, whatever the plan sentence
+    /// says and whoever reads the record: the plan sentence of a Duplicate seen at write time names the earlier invoice's tracking number,
+    /// and anyone with Read on the invoice reads its records. Every other reason stores its plan sentence unchanged. The one rule for the
+    /// reject record (<see cref="BuildRejectionDecision"/>) and the override and return records (<c>SubmissionOverrideService.BuildDecision</c>).
+    /// </summary>
+    internal static string? RecordSentence(StoredPlanEntry entry) =>
+        entry.ReasonCodes.Any(code => code.StartsWith(DuplicateReasonPrefix, StringComparison.Ordinal))
+            ? BillingRuleCatalogue.WithheldDuplicateTemplate
+            : entry.Sentence;
 
     /// <summary>One stored billing finding (the fields the record needs).</summary>
     internal sealed record StoredFinding(string ReasonCode, Guid PolicyVersionId);
