@@ -2,14 +2,14 @@
 
 > **Format:** this file holds the CURRENT state only. Rewrite it at each checkpoint (never prepend), and keep it at or under 10 KB.
 > - **Standing rules:** the project `CLAUDE.md`.
-> - **Decisions:** `notes/session27-owner-decisions-and-research.md` (round 126 is the latest: the GHSA-hq7m design answers, reference only).
+> - **Decisions:** `notes/session27-owner-decisions-and-research.md` (round 127 is the latest: Workforce invite mode = option A; census accepted exceptions).
 > - **Defer list:** `notes/defer-issues.md`.
 > - **Delete design:** `notes/core-record-delete-design.md` (§12 = ebilling D-146, §13 = slice D Restrict, §14 = ebilling EB-D-148 Procedures).
 > - **Task 191 design:** `notes/2179-flagged-external-dataverse-design.md` (last section: D-185 input).
-> - **Last deploy + gate:** `notes/deploy-gate-2026-10-23-58ffc37da3.md`.
+> - **Last deploy + gate:** `notes/deploy-gate-2026-10-26-bc99fc3e6b.md`.
 > - **Previous copy:** `notes/handoff-history/current-task-2026-10-22-cp60.md`.
 
-> **Last Updated**: 2026-10-23 (checkpoint #62).
+> **Last Updated**: 2026-10-26 (checkpoint #63).
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -18,30 +18,19 @@
 | **Mode** | Final push, round-90 wrap-up rules. Merge only when BOTH required checks (Router + "Client lint (type-aware ratchet)") are green. One background merge job at a time. Merge with `--squash --match-head-commit`, no `--delete-branch`, after `git merge-tree`. Deploy via R3. A task closes on merge + deploy + a server-side gate. |
 | **Fix bar** | The most technically correct fix; no complexity without value. Every defect found is fixed or filed. Public repo: no live exploit mechanism in issues, PRs, commits or committed notes. |
 | **Agents** | Opus for executors and verifiers, with every model stated. Helper scripts get a unique prefix in a private folder. Cap 4 concurrent. |
-| **Dev live** | BFF `1.0.0+58ffc37da3` since **2026-10-23 11:18Z** (R3, owner go). Gate PASS (thin coverage: the new routes were not exercised). Rollback: R3 `deploy/rollback/wwwroot-20261023T111635Z`. Content: 0317579272 (ontology 159/161/163), #2304/#2308/#2309, #2313/#2314. Ontology's D-185 Console User role change is live (UAC verified). |
+| **Dev live** | BFF `1.0.0+bc99fc3e6b06` since **2026-10-26 22:03Z** (R3, owner go). Gate PASS (UAC + R3). Rollback: R3 `deploy/rollback/wwwroot-20261026T220116Z` (58ffc37da3). Content adds #2318 (census child tables) and #2321 (platform-only access-record proof). New census child lines are Critical by design; cause = root-BU placement, fix = design §5.2 BU restructure (UAT env config, FR-18). |
 | **Peers** | R3 **`spaarke-wt-spa-external-access-platform-08`** (renamed after a restart), ebilling `spaarke-wt-ebilling-r1-5b`, word-add-in `spaarke-wt-spaarkeai-word-add-in-r1-c4`, field-mapping `spaarke-wt-field-mapping-server-write-pa-be`, provisioning `spaarke-wt-customer-provisioning-orchest-ff`, ontology `spaarke-wt-spaarke-ontology-platform-r1-79`. |
 | **Gate tooling** | App Insights `spe-insights-dev-67e2xz` (RG `spe-infrastructure-westus2`), role `spaarke-bff-dev`. Pass `--offset Nd` (default look-back is 1 h). Use `contains`, not `has_any`, for exception names. Script: temp `uacmerge/uacg/uacg_gate.sh`. |
 
 ## Next actions (mine)
-1. **Census extension: #2318 MERGED as 7479ce22a9.** Clause 1 now guards Read on every codified child table, as one aggregated finding per grant shape, with case-insensitive lookup.
-   - Deploy requested from R3; it needs the owner's go in R3's session. Then run the server gate from app start. New "SECURE CHILD RECORDS ARE NOT ISOLATED" warnings are expected.
-   - Provisioning is informed (no action on their side).
-   - Owner question open: should AI Analysis Admin (Global Read on analysis and analysis output) see secure analyses? Until answered, it stays flagged.
-2. **ebilling #1911 role slice: UAC's position sent; the owner decides through ebilling.**
-   - **K1:** Billing Administrator Read on policy and policy version goes to Deep; ruleset stays Global. Assign only to users whose BU is not an ancestor of the secure BU. Nobody holds the role on dev.
-   - **K2:** UAC prefers path (ii): the submission decide gate becomes Read on the submission plus Write on its parent invoice (resolved app-only, fail closed). Core User gets Read and AppendTo only on approval, correction, externalidentifier, billingexport and submission. The gate code deploys before the role change. Fallback (i): keep Write on submission only, and file a known limit.
-   - The four secure-record-owner Reads are confirmed.
-   - Review the resulting code and role diff.
-3. **R3 GHSA-hq7m fix (owner round 126; the owner also confirmed in R3's session), branch fix/r3-iss-005-combined.** Private: never put the mechanism in public text.
-   - Brief reviewed and answered: admin authority = Standing Grant Administrators membership; reuse DenyContactNotInvited, with operator-only reasons.
-   - Slice A (1b0d9cdf36..f4e334f954) reviewed. F1: fail-open secured columns need the read proof. F2: give the proof a TTL. K: drop proof leg 1. These go first in slice B; re-check that range.
-   - Two security passes on the combined diff before merge. ISS-005 (c05d1b2788) merges with or after it.
-4. **ebilling:** when it merges to master it takes #2301 and keeps its six entries passing. Task 122 FLS runs after the owner's OK.
-5. **#2292** (membership junction never populated): filed; fix it when there is capacity.
-6. **Closed this checkpoint:**
-   - the 58ffc37da3 gate PASS;
-   - D-185 Console User verified;
-   - Basic User: the end state is correct and the cause is unknown (dev has no role audit). Offered to the owner: turn on role auditing.
+1. **Merge queue (one job at a time):**
+   - **#2322** (census accepted exceptions: Billing Admin EB-D-150, AI Analysis Admin round 127; direct grants only) — watcher `uacm_watch.sh 2322 5edc6249e3…` running. Required checks green; "Agent guard tests" red is a non-required Pester install failure. On merge: tell ebilling + ontology.
+   - **#2323** (#2320: proof sees team-held System Administrator + profiles, matches SA by template id; head e902e9f203…) — both integration suites pass in full (186/8, 353/23). Start its watcher after #2322.
+   - Then request a deploy from R3 for both, and run the gate. Then remove worktrees C:/wt-uacexc and C:/wt-uacteam (check junctions first).
+2. **Census triage sent (2026-10-26):** R3 (keep Critical), ontology (no role change for Console User / Ontology Admin; §5.2 is the fix), ebilling (EB-D-151 unchanged; #1911's four tables will flag the same way).
+3. **R3 GHSA-hq7m fix (private), branch fix/r3-iss-005-combined:** re-check slice-B review fixes; follow B2 (option A: server-side tenant resolve, workforce-any, CIAM token against workforce-any → deny); then slice C; two security passes on the combined diff before merge; ISS-005 (c05d1b2788) with or after. Asked R3 to confirm no slice-A secured column is in a team-held reader profile (root default team holds Identity Link Readers + BFF-Managed Field Readers).
+4. **ebilling #1911:** EB-D-150/151/152 decided by the owner; review the resulting code and role diff.
+5. **#2292** (membership junction never populated): filed; fix when there is capacity.
 
 ## Peer reviews owed (UAC is the gate)
 - **ebilling:**
