@@ -664,6 +664,15 @@ export interface IEmailComposerProps {
   hostOwnsChrome?: boolean;
 
   /**
+   * Compose-only (spaarke-ontology-platform-r1 task 160, D-179): the host only COLLECTS the email and sends it itself later
+   * (the decision wizard's budget inquiry is sent by the BFF when the decision is recorded). When true the engine hides the
+   * Send button, the From row (switcher and static sender text) and the External / Internal Only tags, and its own
+   * `send()` and `saveDraft()` reject with no network call and no host callback. The host reads the fields through
+   * `onStateChange`. Independent of {@link hostOwnsChrome}. Omitted (every existing caller): unchanged.
+   */
+  composeOnly?: boolean;
+
+  /**
    * Optional override for the chromed (page/dialog mount) header title. When
    * supplied, it REPLACES the mode-derived word ('Reply'/'Forward'/'New
    * Email'/…) — e.g. a caller can show `Reply: <subject>`. Additive/optional:

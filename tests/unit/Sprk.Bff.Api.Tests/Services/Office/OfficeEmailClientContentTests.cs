@@ -28,7 +28,7 @@ namespace Sprk.Bff.Api.Tests.Services.Office;
 /// <c>email.body</c> / <c>email.attachments[].contentBase64</c>. No server code changed: the server already preferred
 /// client content. These tests make that a contract instead of an accident:</para>
 /// <list type="bullet">
-/// <item>a request WITH a body never calls Graph (so a guest's save does not depend on it);</item>
+/// <item>a request WITH a body never READS its content from Graph (so a guest's save does not depend on it); since task 132 it\n/// makes one light <c>sentDateTime</c> read when it names an Exchange item id, whose failure keeps the request\n/// (<c>OfficeEmailSentDateEnrichmentTests</c>);</item>
 /// <item>a request WITHOUT one still falls back to Graph (older add-ins), and keeps the request when Graph fails;</item>
 /// <item>the .eml is built from the client's body and attachments, and the attachment extraction that creates the
 /// documents finds every attachment by the name the client sent — including an attached email, which the add-in sends

@@ -2135,12 +2135,14 @@ public partial class RouteAuthorizationGuardTests
         new HandlerDecision("GET /api/v1/signals/worklist", "GetWorklistAsync", "IDataverseUserClient",
             new[] { "SignalReadService.ReadAsync" },
             "Ontology task 038: the handler's only I/O is SignalReadService.ReadAsync (SignalReadEndpoints.cs:60). It resolves the caller "
-            + "with WhoAmI AS THE CALLER (SignalReadService.cs:270, ResolveMineCallerAsync; WhoAmI at :813; unresolved: the single 403 at SignalReadEndpoints.cs:64), runs the "
-            + "worklist FetchXML as the caller (:515), keeps a row only when the caller's own batched read of its catalog-named core "
-            + "table returns its core id (:678; the table must be in CoreAncestorResolver.CoreRecordEntities), and keeps a Do-lane row "
-            + "only when the caller's own read of its subject, filtered to the caller's work, returns it (:732-733). Nothing app-only is "
+            + "with WhoAmI AS THE CALLER (SignalReadService.cs:310, ResolveMineCallerAsync; WhoAmI at :1035; unresolved: the single 403 at SignalReadEndpoints.cs:64), runs the "
+            + "worklist FetchXML as the caller (:333), keeps a row only when the caller's own batched read of its catalog-named core "
+            + "table returns its core id (:900; the table must be in CoreAncestorResolver.CoreRecordEntities), and keeps a Do-lane row "
+            + "only when the caller's own read of its subject, filtered to the caller's work, returns it (:954-955). Nothing app-only is "
             + "returned unless the caller's read admitted its row (the app-only secure-family placement only WITHHOLDS evidence detail, "
-            + "D-123); a fault is 503 (SignalReadEndpoints.cs:73), never a shorter list."),
+            + "D-123; the rule short name, work type and severity are read app-only from sprk_policy by id for the rows kept, D-185 task 163, "
+            + "so the worklist needs no caller Read on sprk_policy: configuration, not matter data); a fault is 503 (SignalReadEndpoints.cs:73), "
+            + "never a shorter list."),
         new HandlerDecision("GET /api/v1/ontology/admin/classification/categories", "ListCategoriesAsync", "IDataverseUserClient",
             new[] { "OntologyAdminClassificationService.ListAsync" },
             "Ontology task 103: the handler's only I/O is OntologyAdminClassificationService.ListAsync (OntologyAdminClassificationEndpoints.cs:111), "

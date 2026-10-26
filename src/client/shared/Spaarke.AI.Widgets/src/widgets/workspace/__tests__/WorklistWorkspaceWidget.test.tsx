@@ -13,12 +13,14 @@ let xrm: unknown;
 let widgetProps: Record<string, unknown> | undefined;
 let cardProps: Record<string, unknown> | undefined;
 const createWorklistService = jest.fn((opts: unknown) => ({ opts }));
+const navigation = { openLookup: jest.fn(async (_o: unknown) => []), openRecordModal: jest.fn(async () => undefined) };
 
 jest.mock('@spaarke/ui-components', () => ({
   __esModule: true,
   XrmDataverseClient: class {},
   getXrm: () => xrm,
   createWorklistService: (opts: unknown) => createWorklistService(opts),
+  createXrmNavigationService: () => navigation,
   searchContactsAsLookup: jest.fn(),
   searchOrganizationsAsLookup: jest.fn(),
   WorklistWidget: (props: Record<string, unknown>) => {
@@ -72,6 +74,20 @@ describe('WorklistWorkspaceWidget', () => {
     expect(widgetProps?.narrative).toBeUndefined();
   });
 
+  it('hands the shared widget the side-pane lookup and the record modal when Xrm exists (D-182)', async () => {
+    render(<WorklistWorkspaceWidget {...props} />);
+    const openLookup = widgetProps?.openLookup as (r: unknown) => Promise<unknown>;
+    const openRecord = widgetProps?.openRecord as (e: string, i: string) => Promise<void>;
+    expect(typeof openLookup).toBe('function');
+    expect(typeof openRecord).toBe('function');
+    await openRecord('sprk_matter', 'm-1');
+    expect(navigation.openRecordModal).toHaveBeenCalledWith('sprk_matter', 'm-1');
+    await openLookup({ kind: 'Person', entity: 'contact', parameterCode: 'assignee', core: null });
+    expect(navigation.openLookup).toHaveBeenCalledWith(
+      expect.objectContaining({ entityType: 'contact', allowMultiSelect: false })
+    );
+  });
+
   it('"Open Email Review" opens the reconciliation tab on the workspace channel', () => {
     render(<WorklistWorkspaceWidget {...props} />);
     fireEvent.click(screen.getByTestId('mock-card'));
@@ -86,6 +102,8 @@ describe('WorklistWorkspaceWidget', () => {
     render(<WorklistWorkspaceWidget {...props} />);
     expect(screen.getByTestId('mock-worklist')).toBeInTheDocument();
     expect(widgetProps?.lookup).toBeUndefined();
+    expect(widgetProps?.openLookup).toBeUndefined();
+    expect(widgetProps?.openRecord).toBeUndefined();
     expect(cardProps?.dataverseClient).toBeUndefined();
   });
 });

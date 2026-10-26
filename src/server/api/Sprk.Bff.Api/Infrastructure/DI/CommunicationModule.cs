@@ -128,6 +128,8 @@ public static class CommunicationModule
         services.AddSingleton<CommunicationService>();
         // Budget Inquiry executor (ontology task 070): called by the decision commit route; scoped because it holds the
         // caller's IDataverseUserClient. The sender delegates to the singleton CommunicationService above.
+        // Task 160 (D-181): the inquiry email's record link by recipient and the record's name for the footer, read at send time.
+        services.AddScoped<Sprk.Bff.Api.Services.Signals.Actions.InquiryRecordFacts>();
         services.AddScoped<Sprk.Bff.Api.Services.Signals.Actions.InquiryEmailSender>();
         services.AddScoped<Sprk.Bff.Api.Services.Signals.Actions.BudgetInquiryExecutor>();
         services.AddScoped<Sprk.Bff.Api.Services.Signals.Actions.InquiryDispositionService>();

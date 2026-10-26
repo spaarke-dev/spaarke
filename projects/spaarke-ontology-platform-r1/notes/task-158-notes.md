@@ -1,0 +1,36 @@
+# Task 158 notes - decision wizard side-pane lookups and subject link (D-182)
+
+Branch `task/158-wizard-lookups`. Steps 1-3 done (tests first, implementation, both hosts wired). **Step 4 (deploy + dev check) is NOT done**: the main session does it after merge.
+
+## What changed
+- Shared lib (`Spaarke.UI.Components`, no Xrm, ADR-012): two optional host-injected callbacks, `openLookup` (`DecisionOpenLookup`) and `openRecord` (`DecisionOpenRecord`), carried the same way `lookup` is: `WorklistWidget` -> launch request -> `DecisionWizardHost` -> `DecisionWizard` -> `DecisionItemWizard` -> `DecisionItemContext`. `DecisionWizard` fills the item's core record into the request, as it does for `lookup`.
+- `ParameterFields`: with `openLookup` and a table (Person = `contact`; Lookup = the catalog's `lookupEntity`), the field is a read-only input + search button that opens the pane (single flight, cancel/failure = no change). Otherwise the inline `LookupField` is unchanged. D-18 pre-select still runs from the host's `lookup` search and never opens the pane.
+- `FoundStep`: the subject name is a Fluent `Link` calling `openRecord(recordType, recordId)` when the host gave `openRecord` and the subject has a name, type and id; plain text otherwise.
+- Hosts (`Spaarke.AI.Widgets` `worklistLookup.ts`): `createWorklistOpenLookup(nav)` builds the same scope as the inline search as a FetchXML `filters` entry (Person: active contacts; budget: active + the item's matter/project; organization: none; any other entity: null). `createWorklistOpenRecord(nav)` returns `openRecordModal` or undefined (never `openForm`). Wired in `WorklistWorkspaceWidget` and `LegalWorkspace/.../worklist.registration.ts` over `createXrmNavigationService()`, only when Xrm exists.
+
+## Decisions (directional step mode)
+- The filter is built by the host, not the wizard: the wizard passes `{kind, entity, parameterCode, core}` and never names a filter (keeps scoping beside the inline search it must match).
+- Budget with no core: active-only filter. Today's inline search also allows a typed-name search across budgets with no core, so this is no wider.
+- Unknown entity or non-GUID core id: the host opens nothing (the inline search returns nothing either).
+- Extra test files: `DecisionWizardSidePane.test.tsx` (wizard, 16 cases) and `worklistOpenLookup.test.ts` (host scope, 10 cases) are the cases the POML lists plus negative cases (cancel keeps a prior value, failure = cancel, single-flight, Not filed, no id, openRecord failure). `WorklistWorkspaceWidget.test.tsx` and DailyBriefing `worklistSectionRegistration.test.tsx` (+ its ai-widgets mock) got host-wiring cases.
+
+## Known limits / risks
+- **Stacking (POML escalation trigger) is untested here.** The wizard's `SprkModal` is a blocking Fluent modal. Earlier work found a blocking modal's backdrop covers or swallows clicks on the native `lookupObjects` pane (CommunicationActions UAT r6/r7; AccessGrantModal "Manage Access" 2026-10-07). `SprkModal` already has `nonBlocking` + `yieldToSidePane` for this, but `WizardShell` does not pass them through, and turning them on changes the wizard's modality, which is an owner decision. Nothing was changed. If the dev check shows the pane or the record dialog behind the wizard, STOP (POML) and decide: wire `nonBlocking`/`yieldToSidePane` through `WizardShell`, or another approach.
+- D-18 pre-select needs the host's `lookup` search; both hosts provide it. A host with `openLookup` but no `lookup` would not pre-select.
+- openRecord/openLookup failures are swallowed (treated as cancel); nothing is shown to the user.
+
+## Pre-existing, found in passing
+- `DecisionWizard.test.tsx` "Escape and the backdrop do nothing ... Keep deciding on the left" is flaky on unchanged origin (7/8 runs failed): issue #2293.
+- Environment only (no node_modules / dist in the worktree): UI.Components has 43 suites failing on `Cannot find module '@spaarke/sdap-client'`; DailyBriefing has 3 suites failing on `@spaarke/ui-components/types/LookupTypes`. Unrelated to this change.
+
+## Verification
+See the PR description for commands and counts.
+
+## Fix round 1 (independent Opus review of PR #2295)
+- **F1 (clear)**: in pane mode the field now has a Clear button (`DismissRegular`, `aria-label="Clear <label>"`, subtle/small, copied from `LookupField`) in `contentAfter` once a value is set and the field is editable. It calls `withLookup(..., null)`, which drops the value and its label. Required field: Next disables again.
+- **F2 (log)**: `FoundStep` logs `console.warn('[DecisionWizard] openRecord failed', err)` in both the promise `.catch` and the sync `catch` (as `xrmNavigationServiceAdapter.ts:272`). The wizard still keeps its place.
+- **K2 (unknown entity)**: `DecisionOpenLookup` is now a function type with an optional property `supportedEntities?: readonly string[]` (carried through the item-scoped wrapper in `DecisionWizard`). The wizard uses the pane only for listed tables and keeps the inline `LookupField` for the rest; no list = today's behaviour. Chosen over a separate prop because it needs no new prop on `WorklistWidget`, the launch request, `DecisionWizardHost`, `DecisionWizard`, `DecisionItemWizard` or the context (six hops); the list travels with the function it describes. `createWorklistOpenLookup` returns the function with `supportedEntities = WORKLIST_OPEN_LOOKUP_ENTITIES` (`sprk_budget`, `sprk_organization`, `contact`), so both hosts (`WorklistWorkspaceWidget`, LegalWorkspace `worklist.registration.ts`) pass it with no wiring change; a host test pins the list to what the function handles.
+- **GUID gap**: a wizard test feeds `{ABC...}` upper-case ids from a mocked `Xrm.Utility.lookupObjects` through the real `createXrmNavigationService().openLookup` and asserts the committed budget id is the bare lower-case GUID. It passes before and after (the guarantee is `cleanGuid` in the adapter, already there); it is a regression pin, not a fix proof.
+- **K1 (modal stacking), no code change**: the dev check (POML step 4) now also covers "after the pane closes, the wizard is clickable again and keeps its values; the record modal opens above the wizard and closing it returns to the same step". If it fails, the plan is `nonBlocking` plus `yieldToSidePane` through `WizardShell` to `SprkModal` (owner decision on modality).
+- **Proof (new tests fail on the round-0 source, pass after)**: `DecisionWizardSidePane.test.tsx` 24 cases; against source at 870d93eccf, 6 fail: F1 optional clear + commit payload, F1 required clear disables Next, K2 unlisted entity inline (x2), F2 rejected and sync-throw logs. The K2 listed-entity case and the GUID case pass both ways (must-not-fire / pin). `worklistOpenLookup.test.ts` +1 case (supportedEntities).
+- **Results after**: UI.Components `jest src/components/DecisionWizard src/components/Worklist` 362 tests, 361 pass first run (the one failure is "Keep deciding", #2293; passes when re-run alone). AI.Widgets `src/widgets/workspace` 20 suites 269 pass. DailyBriefing `worklistSectionRegistration` 9 pass. `tsc --noEmit`: no errors in changed DecisionWizard files; AI.Widgets worklistLookup shows only the unresolved `@spaarke/ui-components` module and its implicit-any follow-ons (known sibling-module errors). ESLint on `src/components/DecisionWizard`: 0 errors, 0 warnings.

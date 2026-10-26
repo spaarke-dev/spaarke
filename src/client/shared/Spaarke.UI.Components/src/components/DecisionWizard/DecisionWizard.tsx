@@ -26,7 +26,7 @@ import type { SprkModalNav } from '../SprkModal/SprkModal.types';
 import { DecisionItemWizard, hasRecordedDecision } from './DecisionItemWizard';
 import { buildReview, emptyDraft, hasUnrecordedChoices, newReviewId } from './decisionDraft';
 import type { ItemDraft } from './decisionDraft';
-import type { DecisionLookup } from './decisionItemContext';
+import type { DecisionLookup, DecisionOpenLookupForItem } from './decisionItemContext';
 import {
   closesSignal,
   failureKeepsReview,
@@ -41,6 +41,8 @@ import type {
   DecisionCommitResult,
   DecisionItemLoader,
   DecisionLookupSearch,
+  DecisionOpenLookup,
+  DecisionOpenRecord,
   DecisionPlan,
   DecisionResolution,
   DecisionWizardItem,
@@ -58,6 +60,14 @@ export interface DecisionWizardProps {
   loadItem: DecisionItemLoader;
   /** Searches for Lookup / Person fields. Absent: those fields say they cannot be searched. */
   lookup?: DecisionLookupSearch;
+  /**
+   * The host's side-pane lookup (`Xrm.Utility.lookupObjects` through `INavigationService.openLookup`, D-182). Present: every
+   * Person / Lookup field opens it (or, when it lists `supportedEntities`, every field on a listed table; the rest keep the
+   * inline type-ahead). Absent: those fields keep the inline type-ahead over `lookup`.
+   */
+  openLookup?: DecisionOpenLookup;
+  /** The host's open-record-in-a-modal (`INavigationService.openRecordModal`, D-182). Absent: the subject is plain text. */
+  openRecord?: DecisionOpenRecord;
   /** Close the wizard. Called only after the discard check (or when nothing is unrecorded). */
   onClose: () => void;
   /** Raised after an item was recorded, so the host can refresh its worklist. */
@@ -115,6 +125,8 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
   service,
   loadItem,
   lookup,
+  openLookup,
+  openRecord,
   onClose,
   onRecorded,
   uiScale,
@@ -292,8 +304,7 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
         const wasPinned = prior?.pinned === true;
         // The first failure that keeps the id pins the review. After that only a new Failed outcome replaces the failure that
         // decides `retry`; a refusal or an in-progress answer leaves it alone.
-        const pinning =
-          keeps && (!wasPinned || isFailedOutcome(failure)) ? failure : (prior?.pinning ?? null);
+        const pinning = keeps && (!wasPinned || isFailedOutcome(failure)) ? failure : (prior?.pinning ?? null);
         const isNowPinned = keeps || wasPinned;
         attempts.current[id] = {
           key: wasPinned ? prior.key : reviewKey(review),
@@ -372,6 +383,22 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
         : null,
     [lookup, readyItem]
   );
+  const itemOpenLookup = React.useMemo<DecisionOpenLookupForItem | null>(
+    () =>
+      openLookup && readyItem
+        ? Object.assign(
+            (req: Parameters<DecisionOpenLookupForItem>[0]) =>
+              openLookup({
+                ...req,
+                core: readyItem.core
+                  ? { recordType: readyItem.core.recordType, recordId: readyItem.core.recordId }
+                  : null,
+              }),
+            { supportedEntities: openLookup.supportedEntities }
+          )
+        : null,
+    [openLookup, readyItem]
+  );
   const draft = drafts[currentId];
   const done = recorded[currentId];
 
@@ -398,6 +425,8 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
         recording={recording === currentId}
         onRecord={() => record(currentId)}
         lookup={itemLookup}
+        openLookup={itemOpenLookup}
+        openRecord={openRecord ?? null}
         openItemsLeft={openItemsLeft}
         onNextOpenItem={nextOpenIndex >= 0 ? () => setIndex(nextOpenIndex) : undefined}
         nav={nav}

@@ -1,5 +1,6 @@
 using System.Collections.Frozen;
 using System.Globalization;
+using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Xml.Linq;
@@ -8,8 +9,10 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Access;
+using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Identity;
 using Sprk.Bff.Api.Services.Signals.Actions;
 
 namespace Sprk.Bff.Api.Services.Signals;
@@ -201,6 +204,7 @@ public sealed class SignalReadService
     internal const string TodoMatterColumn = "_sprk_regardingmatter_value";
     private const string RecordTypeRefEntity = "sprk_recordtype_ref";
     private const string ConfigurationEntity = "sprk_gridconfiguration";
+    private const string PolicyEntity = "sprk_policy";
 
     /// <summary>A Do-lane subject table's "mine" rule. Each part is OR-ed, each compared with the caller.</summary>
     /// <param name="Table">The subject table.</param>
@@ -273,6 +277,8 @@ public sealed class SignalReadService
     private readonly SignalSuppressionService _families;
     private readonly DecisionRecordWriter _records;
     private readonly EarlierInvoiceReadability _earlierInvoices;
+    private readonly ICallerSystemUserResolver _callerResolver;
+    private readonly ISystemUserIdentityResolver _systemUsers;
 
     public SignalReadService(
         IDataverseUserClient user,
@@ -281,11 +287,15 @@ public sealed class SignalReadService
         SignalSuppressionService families,
         DecisionRecordWriter records,
         EarlierInvoiceReadability earlierInvoices,
+        ICallerSystemUserResolver callerResolver,
+        ISystemUserIdentityResolver systemUsers,
         TimeProvider clock,
         ILogger<SignalReadService> logger)
     {
         _records = records ?? throw new ArgumentNullException(nameof(records));
         _earlierInvoices = earlierInvoices ?? throw new ArgumentNullException(nameof(earlierInvoices));
+        _callerResolver = callerResolver ?? throw new ArgumentNullException(nameof(callerResolver));
+        _systemUsers = systemUsers ?? throw new ArgumentNullException(nameof(systemUsers));
         _user = user ?? throw new ArgumentNullException(nameof(user));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _identity = identity ?? throw new ArgumentNullException(nameof(identity));
@@ -295,7 +305,7 @@ public sealed class SignalReadService
     }
 
     /// <summary>The caller's visible Signals in <paramref name="set"/>, grouped and ordered.</summary>
-    public async Task<SignalReadResult> ReadAsync(WorklistSet set, CancellationToken ct)
+    public async Task<SignalReadResult> ReadAsync(WorklistSet set, ClaimsPrincipal? user, CancellationToken ct)
     {
         // (1) + (2) Who the caller is and their linked contact: the inputs of the Do-lane "mine" rule.
         var caller = await ResolveMineCallerAsync(_user, _identity, _logger, ct).ConfigureAwait(false);
@@ -449,6 +459,10 @@ public sealed class SignalReadService
                     visible = [.. visible.Where(v => decisions.ContainsKey(v.Row.SignalId))];
                 }
             }
+
+            // (11) D-185 (task 163, #2285): the policy short name, work type and severity of the rows that are returned, read as the
+            // BFF. A read fault is caught below as "fault" (503): severity ranks the list, so rows are never returned without it.
+            visible = await ApplyPolicyColumnsAsync(visible, user, ct).ConfigureAwait(false);
 
             _logger.LogInformation(
                 "Signal read: set {Set}, {Read} Signals read as the caller, {Visible} returned.", set, rows.Count, visible.Count);
@@ -718,6 +732,97 @@ public sealed class SignalReadService
             return null;
         }
     }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // (11) policy columns, as the BFF (D-185)
+    // ---------------------------------------------------------------------------------------------------------------
+
+    /// <summary>The three <c>sprk_policy</c> columns the worklist shows and ranks by.</summary>
+    private sealed record PolicyColumns(string? ShortName, int? WorkType, int? Severity);
+
+    /// <summary>
+    /// D-185 (task 163, #2285): the rule short name, work type and severity come from ONE batched BFF read of <c>sprk_policy</c> by id
+    /// (<see cref="IdChunk"/> ids per query), not from a caller-run join, so a user needs no Read on <c>sprk_policy</c>. This is
+    /// configuration, not matter data, so the read is the BFF's own (as <c>DecisionPlanService</c>). Only the rows that are already
+    /// visible to the caller are enriched, and the read reveals nothing beyond the three columns the worklist already shows. It runs
+    /// whether or not the configuration still carries the old <c>policy</c> link, so the new BFF works with either configuration. The
+    /// reverse does not hold: an old BFF with the new configuration (no <c>policy</c> link) loses names and severity. Deploy order is
+    /// BFF, then configuration, then roles last (roles first empties the worklist while the old link is still configured).
+    /// A row with no policy id, or whose policy no longer exists, keeps what its Signal row carried (today's missing-alias behaviour:
+    /// no short name or work type, severity unknown, ranked last). A faulted read, or a fault resolving the caller, throws to the caller's catch (unavailable).
+    /// A caller who is external or unknown (<see cref="IsExternalOrUnknownCallerAsync"/>) gets no BFF enrichment and no query: they get only
+    /// what their own read returned (the same blanks as the caller-run link gave), so the BFF read never shows them more than their own read did.
+    /// </summary>
+    private async Task<List<VisibleRow>> ApplyPolicyColumnsAsync(List<VisibleRow> visible, ClaimsPrincipal? user, CancellationToken ct)
+    {
+        var ids = visible.Select(v => v.Row.PolicyId).Where(id => id is { } g && g != Guid.Empty).Select(id => id!.Value).Distinct().ToArray();
+        if (ids.Length == 0)
+        {
+            return visible;
+        }
+
+        // D-185 (uac-r2 condition): a caller who is external or unknown gets no enrichment and no sprk_policy query. Their rows keep what
+        // the caller-run read carried (blank name and work type, severity unknown, ranked last), as when the link was caller-run.
+        if (await IsExternalOrUnknownCallerAsync(_callerResolver, _systemUsers, user, _logger, ct).ConfigureAwait(false))
+        {
+            return visible;
+        }
+
+        var found = new Dictionary<Guid, PolicyColumns>();
+        foreach (var chunk in ids.Chunk(IdChunk))
+        {
+            var query = new QueryExpression(PolicyEntity) { ColumnSet = new ColumnSet("sprk_shortname", "sprk_worktype", "sprk_severity") };
+            query.Criteria.AddCondition("sprk_policyid", ConditionOperator.In, chunk.Cast<object>().ToArray());
+            var result = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            foreach (var policy in result.Entities.Where(e => chunk.Contains(e.Id)))
+            {
+                found[policy.Id] = new PolicyColumns(
+                    policy.GetAttributeValue<string>("sprk_shortname"),
+                    policy.GetAttributeValue<OptionSetValue>("sprk_worktype")?.Value,
+                    policy.GetAttributeValue<OptionSetValue>("sprk_severity")?.Value);
+            }
+        }
+
+        return [.. visible.Select(v => v.Row.PolicyId is { } id && found.TryGetValue(id, out var p)
+            ? v with { Row = v.Row with { RuleShortName = p.ShortName, WorkType = p.WorkType, Severity = p.Severity } }
+            : v)];
+    }
+
+    /// <summary>
+    /// True when the caller is external or unknown: <c>ISystemUserIdentityResolver.IsExternalAsync</c> is true, the resolver cannot match
+    /// the caller (<c>no-claims-principal</c>, <c>no-oid-claim</c>, <c>no-matching-systemuser</c>, <c>resolver-not-registered</c>), or the
+    /// resolved id is not a GUID. Those are answers, not faults: the rows are returned without enrichment.
+    /// A Dataverse fault is NOT an answer: the resolver's <c>lookup-failed</c>, or any exception from either resolver, is thrown to
+    /// <c>ReadAsync</c>'s catch (503 worklist unavailable), because severity ranks every row and an internal user must never get a
+    /// 200 whose rule names, work types and severities are silently blank. Cancellation propagates unchanged.
+    /// </summary>
+    // Deliberate deviation from InternalPlaneDocumentNarrowing.IsExternalOrUnknownCallerAsync (master): there a fault only narrows
+    // documents (fail closed); here it would re-rank every row. The externality test itself is kept in step with it.
+    internal static async Task<bool> IsExternalOrUnknownCallerAsync(
+        ICallerSystemUserResolver callerResolver, ISystemUserIdentityResolver systemUsers, ClaimsPrincipal? user, ILogger logger, CancellationToken ct)
+    {
+        var resolution = await callerResolver.ResolveAsync(user, ct).ConfigureAwait(false);
+        if (!resolution.IsResolved)
+        {
+            if (string.Equals(resolution.UnresolvedReason, CallerLookupFailedReason, StringComparison.Ordinal))
+            {
+                logger.LogWarning("Signal read: the caller could not be resolved ({Reason}); unavailable.", CallerLookupFailedReason);
+                throw new InvalidOperationException("The caller's systemuser lookup failed.");
+            }
+
+            return true;
+        }
+
+        if (!Guid.TryParse(resolution.SystemUserId, out var systemUserId))
+        {
+            return true;
+        }
+
+        return await systemUsers.IsExternalAsync(systemUserId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary><see cref="CallerSystemUserResolution.UnresolvedReason"/> of a Dataverse fault in <c>CallerSystemUserResolver</c>.</summary>
+    internal const string CallerLookupFailedReason = "lookup-failed";
 
     // ---------------------------------------------------------------------------------------------------------------
     // (5) catalog
@@ -1857,6 +1962,7 @@ public sealed class SignalReadService
         Guid? CoreId,
         bool HasNoCore,
         Guid? PolicyVersionId,
+        Guid? PolicyId,
         string? EvidenceRefs,
         string? RuleShortName,
         int? WorkType,
@@ -1896,6 +2002,7 @@ public sealed class SignalReadService
                 hasType && hasCoreId ? coreId : null,
                 noCore,
                 TryReadGuid(raw, "_sprk_policyversion_value", out var version) ? version : null,
+                TryReadGuid(raw, "_sprk_policy_value", out var policyId) ? policyId : null,
                 ReadString(raw, "sprk_evidencerefs"),
                 AsString(Aliased(raw, "sprk_shortname")),
                 Int(Aliased(raw, "sprk_worktype")),
@@ -1910,8 +2017,9 @@ public sealed class SignalReadService
             return true;
         }
 
-        /// <summary>The <c>policy</c> link-entity column: the Web API names it <c>policy.{column}</c> (verified live on spaarkedev1,
-        /// 2026-10-14); the OData-escaped <c>policy_x002e_{column}</c> is accepted too.</summary>
+        /// <summary>The <c>policy</c> link-entity column, present only under the pre-D-185 configuration: the Web API names it
+        /// <c>policy.{column}</c> (verified live on spaarkedev1, 2026-10-14); the OData-escaped <c>policy_x002e_{column}</c> is accepted
+        /// too. Since D-185 the BFF reads these columns itself (<c>ApplyPolicyColumnsAsync</c>) and the configuration has no link.</summary>
         private static JsonElement? Aliased(JsonElement raw, string column) =>
             raw.TryGetProperty($"policy.{column}", out var v) || raw.TryGetProperty($"policy_x002e_{column}", out v) ? v : null;
 

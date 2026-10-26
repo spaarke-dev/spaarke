@@ -338,7 +338,7 @@ public class FinanceAuthorizationFilter : IEndpointFilter
     public const string InsufficientRightsReasonCode = "sdap.access.deny.insufficient_rights";
 
     /// <summary>The check itself faulted — denied, never allowed (ADR-003).</summary>
-    public const string SystemFailureReasonCode = "sdap.access.error.system_failure";
+    public const string SystemFailureReasonCode = AuthorizationResult.SystemFailureReasonCode;
 
     /// <summary>The caller lacks a TABLE privilege the operation needs (e.g. Create on sprk_invoice).</summary>
     public const string InsufficientPrivilegeReasonCode = "sdap.access.deny.insufficient_privilege";

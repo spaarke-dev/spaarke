@@ -5,7 +5,9 @@
  * D-23: the sentence stays literal and carries no witness value; the values are EVIDENCE LINES (FR-48). A closed item shows the
  * Decision Record's fact snapshot - the facts as they stood when the record was written - NOT today's data. A fact that is
  * missing renders as Missing, never as zero (H-5; `EvidenceLine` owns that). "The matter" is the item's CORE record, whatever
- * its type (D-34); a Not filed item (D-35) has no core and shows no other items.
+ * its type (D-34); a Not filed item (D-35) has no core and shows no other items. The subject's name is a link that opens the
+ * record in a modal above the wizard when the host provides `openRecord` and the subject has an id (D-182); the wizard keeps
+ * its place and its typed values. Otherwise it is plain text.
  */
 
 import * as React from 'react';
@@ -17,6 +19,7 @@ import {
   Badge,
   Body1,
   Caption1,
+  Link,
   Subtitle2,
   Text,
   makeStyles,
@@ -43,7 +46,7 @@ const useStyles = makeStyles({
 });
 
 export const FoundStep: React.FC = () => {
-  const { item, plan, resolution, closedIds, today } = useDecisionItem();
+  const { item, plan, resolution, closedIds, today, openRecord } = useDecisionItem();
   // Items closed in this session (recorded here, or resolved by Also resolve) are no longer open.
   const otherOpen = item.otherOpenItems.filter(o => !closedIds.has(o.signalId));
   const styles = useStyles();
@@ -53,6 +56,37 @@ export const FoundStep: React.FC = () => {
   const clauses = plan.ruleDescription?.clauses ?? [];
   const coreName = item.core?.name?.trim() || null;
   const coreLabel = item.core?.typeLabel?.trim() || 'record';
+  const coreType = item.core?.recordType.trim() || '';
+  const coreId = item.core?.recordId.trim() || '';
+  // D-182: the subject is a link only when the host can open it and the subject has an entity and an id.
+  const canOpenSubject = openRecord != null && coreName != null && coreType !== '' && coreId !== '';
+  const openSubject = () => {
+    if (!openRecord) return;
+    // The record opens in a platform modal above the wizard; a dialog that fails to open changes nothing here.
+    try {
+      void Promise.resolve(openRecord(coreType, coreId)).catch(err => {
+        console.warn('[DecisionWizard] openRecord failed', err);
+      });
+    } catch (err) {
+      // The wizard keeps its place.
+      // eslint-disable-next-line no-restricted-syntax -- opening the record is a convenience link; the wizard keeps its step and values, and the failure is logged
+      console.warn('[DecisionWizard] openRecord failed', err);
+    }
+  };
+  const metaParts: React.ReactNode[] = [
+    ...[line.ruleShortName, line.timing.text].filter(Boolean),
+    coreName ? (
+      canOpenSubject ? (
+        <React.Fragment key="subject">
+          {coreLabel}: <Link onClick={openSubject}>{coreName}</Link>
+        </React.Fragment>
+      ) : (
+        `${coreLabel}: ${coreName}`
+      )
+    ) : (
+      'Not filed on a record'
+    ),
+  ];
 
   return (
     <div className={styles.root} data-testid="step-found">
@@ -61,10 +95,13 @@ export const FoundStep: React.FC = () => {
           What was found
         </Text>
         <Subtitle2>{line.headline}</Subtitle2>
-        <Caption1 className={styles.meta}>
-          {[line.ruleShortName, line.timing.text, coreName ? `${coreLabel}: ${coreName}` : 'Not filed on a record']
-            .filter(Boolean)
-            .join(' · ')}
+        <Caption1 className={styles.meta} data-testid="found-meta">
+          {metaParts.map((part, i) => (
+            <React.Fragment key={i}>
+              {i > 0 ? ' · ' : null}
+              {part}
+            </React.Fragment>
+          ))}
         </Caption1>
       </div>
 

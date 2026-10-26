@@ -6,10 +6,13 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Tests.Services.Documents;
 using Xunit;
@@ -197,7 +200,194 @@ public class DocumentIdentityContractTests
         body.GetProperty("type").GetString().Should().NotBeNullOrEmpty();
     }
 
+    // ── Task 132 (review F4): the record a document is filed to THROUGH its communication ─────
+    //
+    // The email route's tests (DocumentEmailIdentityContractTests) pin the rule; these two prove the other routes that
+    // share BuildIdentityResponseAsync apply it too, so the three cannot drift.
+
+    [Fact]
+    public async Task ResolveIdentity_ForAnArchiveWithNoSlot_ShowsTheCommunicationsRecord_WhenTheCallerMayReadIt()
+    {
+        var documentId = Guid.NewGuid();
+        var communicationId = Guid.NewGuid();
+        var matterId = Guid.NewGuid();
+        var entityService = ResolvingEntityService(documentId, communicationId);
+        FiledTo(entityService, communicationId, matterId);
+        var probe = Probe(matterId, AccessRights.Read);
+
+        using var factory = new DocumentIdentityTestWebAppFactory(
+            DocumentUrlIdentityResolutionTests.Spe(DocumentUrlIdentityResolutionTests.ResolvedFor(DriveId, ItemId)),
+            entityService, GrantingAccessSource(documentId), probe);
+        var response = await AuthenticatedClient(factory).PostAsJsonAsync(
+            "/api/documents/resolve-identity", new { documentUrl = DocumentUrl });
+
+        await ShouldShowTheCard(response, documentId, matterId);
+    }
+
+    [Fact]
+    public async Task ResolveIdentity_ForAnArchiveWithNoSlot_WhenTheCallerMayNotReadTheRecord_Returns200WithoutTheCard_AndSaysItIsWithheld()
+    {
+        var documentId = Guid.NewGuid();
+        var communicationId = Guid.NewGuid();
+        var matterId = Guid.NewGuid();
+        // STRICT: no display read is set up for the matter — it must never run for a record the caller may not read.
+        var entityService = ResolvingEntityService(documentId, communicationId);
+        CommunicationFiledTo(entityService, communicationId, matterId);
+        var probe = Probe(matterId, AccessRights.None);
+
+        using var factory = new DocumentIdentityTestWebAppFactory(
+            DocumentUrlIdentityResolutionTests.Spe(DocumentUrlIdentityResolutionTests.ResolvedFor(DriveId, ItemId)),
+            entityService, GrantingAccessSource(documentId), probe);
+        var response = await AuthenticatedClient(factory).PostAsJsonAsync(
+            "/api/documents/resolve-identity", new { documentUrl = DocumentUrl });
+
+        await ShouldBeWithheld(response, documentId, matterId);
+    }
+
+    [Fact]
+    public async Task GetDocumentIdentity_ForAnArchiveWithNoSlot_ShowsTheCommunicationsRecord_WhenTheCallerMayReadIt()
+    {
+        var documentId = Guid.NewGuid();
+        var communicationId = Guid.NewGuid();
+        var matterId = Guid.NewGuid();
+        var entityService = ByIdEntityService(documentId, communicationId);
+        FiledTo(entityService, communicationId, matterId);
+        var probe = Probe(matterId, AccessRights.Read);
+
+        using var factory = new DocumentIdentityTestWebAppFactory(
+            DocumentUrlIdentityResolutionTests.Spe(DocumentUrlIdentityResolutionTests.ResolvedFor(DriveId, ItemId)),
+            entityService, GrantingAccessSource(documentId), probe);
+        var response = await AuthenticatedClient(factory).GetAsync($"/api/documents/{documentId:D}/identity");
+
+        await ShouldShowTheCard(response, documentId, matterId);
+    }
+
+    [Fact]
+    public async Task GetDocumentIdentity_ForAnArchiveWithNoSlot_WhenTheCallerMayNotReadTheRecord_Returns200WithoutTheCard_AndSaysItIsWithheld()
+    {
+        var documentId = Guid.NewGuid();
+        var communicationId = Guid.NewGuid();
+        var matterId = Guid.NewGuid();
+        var entityService = ByIdEntityService(documentId, communicationId);
+        CommunicationFiledTo(entityService, communicationId, matterId);
+        var probe = Probe(matterId, AccessRights.None);
+
+        using var factory = new DocumentIdentityTestWebAppFactory(
+            DocumentUrlIdentityResolutionTests.Spe(DocumentUrlIdentityResolutionTests.ResolvedFor(DriveId, ItemId)),
+            entityService, GrantingAccessSource(documentId), probe);
+        var response = await AuthenticatedClient(factory).GetAsync($"/api/documents/{documentId:D}/identity");
+
+        await ShouldBeWithheld(response, documentId, matterId);
+    }
+
+    [Fact]
+    public async Task ResolveIdentity_ForAnUnfiledDocumentWithNoCommunication_IsKnownUnfiled_NotWithheld()
+    {
+        var documentId = Guid.NewGuid();
+
+        using var factory = new DocumentIdentityTestWebAppFactory(
+            DocumentUrlIdentityResolutionTests.Spe(DocumentUrlIdentityResolutionTests.ResolvedFor(DriveId, ItemId)),
+            ResolvingEntityService(documentId), GrantingAccessSource(documentId));
+        var response = await AuthenticatedClient(factory).PostAsJsonAsync(
+            "/api/documents/resolve-identity", new { documentUrl = DocumentUrl });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("relatedRecord").ValueKind.Should().Be(JsonValueKind.Null);
+        IdentityJson.RelatedRecordWithheld(body).Should().BeNull("an unfiled document is KNOWN unfiled; the pane may offer filing");
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────────────────────
+
+    private static async Task ShouldShowTheCard(HttpResponseMessage response, Guid documentId, Guid matterId)
+    {
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("documentId").GetString().Should().Be(documentId.ToString("D"));
+        var related = body.GetProperty("relatedRecord");
+        related.GetProperty("entityType").GetString().Should().Be("sprk_matter");
+        related.GetProperty("id").GetString().Should().Be(matterId.ToString("D"));
+        related.GetProperty("displayName").GetString().Should().Be("Acme v Globex");
+        related.GetProperty("number").GetString().Should().Be("MAT-000042");
+        IdentityJson.RelatedRecordWithheld(body).Should().BeNull();
+    }
+
+    private static async Task ShouldBeWithheld(HttpResponseMessage response, Guid documentId, Guid matterId)
+    {
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "a derived record the caller may not see never fails the answer");
+        var raw = await response.Content.ReadAsStringAsync();
+        raw.Should().NotContain("MAT-000042").And.NotContain(matterId.ToString("D"));
+        using var json = JsonDocument.Parse(raw);
+        var body = json.RootElement;
+        body.GetProperty("resolved").GetBoolean().Should().BeTrue();
+        body.GetProperty("documentId").GetString().Should().Be(documentId.ToString("D"));
+        body.GetProperty("relatedRecord").ValueKind.Should().Be(JsonValueKind.Null);
+        IdentityJson.RelatedRecordWithheld(body).Should().BeTrue(
+            "the document IS filed; the pane must show the record as unknown, not offer filing a second one");
+    }
+
+    /// <summary>A STRICT caller-rights probe that answers <paramref name="rights"/> for the matter and nothing else.</summary>
+    private static Mock<CallerRecordAccessProbe> Probe(Guid matterId, AccessRights rights)
+    {
+        var probe = new Mock<CallerRecordAccessProbe>(
+            MockBehavior.Strict,
+            new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!, null!);
+        probe.Setup(p => p.GetCallerRightsAsync(It.IsAny<string?>(), "sprk_matters", matterId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(rights);
+        return probe;
+    }
+
+    /// <summary>The communication's regarding read answers the matter.</summary>
+    private static void CommunicationFiledTo(Mock<IGenericEntityService> entityService, Guid communicationId, Guid matterId)
+        => entityService
+            .Setup(e => e.RetrieveAsync("sprk_communication", communicationId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_communication", communicationId)
+            {
+                ["sprk_regardingmatter"] = new EntityReference("sprk_matter", matterId) { Name = "MAT-000042" },
+            });
+
+    /// <summary>The communication's regarding AND the matter's display read.</summary>
+    private static void FiledTo(Mock<IGenericEntityService> entityService, Guid communicationId, Guid matterId)
+    {
+        CommunicationFiledTo(entityService, communicationId, matterId);
+        entityService
+            .Setup(e => e.RetrieveAsync(
+                "sprk_matter", matterId, It.Is<string[]>(c => c.Length == 1 && c[0] == "sprk_mattername"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_matter", matterId) { ["sprk_mattername"] = "Acme v Globex" });
+    }
+
+    /// <summary>The URL route's lookup, answering an archive linked to a communication and carrying no direct slot.</summary>
+    private static Mock<IGenericEntityService> ResolvingEntityService(Guid documentId, Guid communicationId)
+    {
+        var entityService = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        entityService
+            .Setup(e => e.RetrieveByAlternateKeyAsync(
+                "sprk_document", It.IsAny<KeyAttributeCollection>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_document", documentId)
+            {
+                ["sprk_documentname"] = "Examiner report draft",
+                ["sprk_filename"] = "Examiner report draft.docx",
+                ["sprk_graphdriveid"] = DriveId,
+                ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", communicationId),
+            });
+        return entityService;
+    }
+
+    /// <summary>The by-id route's lookup (<c>RetrieveAsync</c> on the document), same row shape.</summary>
+    private static Mock<IGenericEntityService> ByIdEntityService(Guid documentId, Guid communicationId)
+    {
+        var entityService = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        entityService
+            .Setup(e => e.RetrieveAsync("sprk_document", documentId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_document", documentId)
+            {
+                ["sprk_documentname"] = "Examiner report draft",
+                ["sprk_filename"] = "Examiner report draft.docx",
+                ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", communicationId),
+            });
+        return entityService;
+    }
 
     private static HttpClient AuthenticatedClient(DocumentIdentityTestWebAppFactory factory)
     {
@@ -237,6 +427,16 @@ public class DocumentIdentityContractTests
     }
 }
 
+/// <summary>Reads the optional <c>relatedRecordWithheld</c> field of an identity response (task 132, review F1).</summary>
+internal static class IdentityJson
+{
+    /// <summary><c>true</c> when the field is present and true; <see langword="null"/> when it is absent or null.</summary>
+    public static bool? RelatedRecordWithheld(JsonElement body)
+        => body.TryGetProperty("relatedRecordWithheld", out var value) && value.ValueKind != JsonValueKind.Null
+            ? value.GetBoolean()
+            : null;
+}
+
 /// <summary>
 /// Layers the three module-boundary doubles this route's two endpoint filters need on top of
 /// <see cref="CustomWebAppFactory"/>'s general BFF test host (FakeAuthHandler, baseline boot config, stub
@@ -247,15 +447,23 @@ internal sealed class DocumentIdentityTestWebAppFactory : CustomWebAppFactory
     private readonly Mock<SpeFileStore> _speFileStoreMock;
     private readonly Mock<IGenericEntityService> _entityServiceMock;
     private readonly Mock<IAccessDataSource> _accessDataSourceMock;
+    private readonly Mock<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>? _callerAccessProbeMock;
 
+    /// <param name="callerAccessProbeMock">
+    /// Task 132: the caller-rights probe the identity handler asks about a record derived through the document's
+    /// communication. Optional: without it the host's own probe runs, which has no OBO configuration here and so
+    /// answers no rights (fail closed).
+    /// </param>
     public DocumentIdentityTestWebAppFactory(
         Mock<SpeFileStore> speFileStoreMock,
         Mock<IGenericEntityService> entityServiceMock,
-        Mock<IAccessDataSource> accessDataSourceMock)
+        Mock<IAccessDataSource> accessDataSourceMock,
+        Mock<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>? callerAccessProbeMock = null)
     {
         _speFileStoreMock = speFileStoreMock;
         _entityServiceMock = entityServiceMock;
         _accessDataSourceMock = accessDataSourceMock;
+        _callerAccessProbeMock = callerAccessProbeMock;
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -272,6 +480,12 @@ internal sealed class DocumentIdentityTestWebAppFactory : CustomWebAppFactory
 
             services.RemoveAll<IAccessDataSource>();
             services.AddSingleton(_accessDataSourceMock.Object);
+
+            if (_callerAccessProbeMock is not null)
+            {
+                services.RemoveAll<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>();
+                services.AddSingleton(_callerAccessProbeMock.Object);
+            }
         });
     }
 }

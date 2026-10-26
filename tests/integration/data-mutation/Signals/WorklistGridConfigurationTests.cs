@@ -102,7 +102,7 @@ public class WorklistGridConfigurationTests
     }
 
     [Fact]
-    public void EveryQuery_SelectsTheDisplayColumns_AndTheCoreRecordPair_AndTheOuterPolicyLink()
+    public void EveryQuery_SelectsTheDisplayColumns_AndTheCoreRecordPair_AndTheSignalsPolicyLookup_WithNoPolicyLink()
     {
         foreach (var (name, doc) in Queries(LoadDefinitionText()))
         {
@@ -110,15 +110,14 @@ public class WorklistGridConfigurationTests
             entity.Elements("attribute").Select(a => (string)a.Attribute("name")!).Should().Contain(new[]
             {
                 "sprk_signalid", "sprk_name", "sprk_lane", "sprk_signalstatus", "sprk_firstdetected", "sprk_duedate",
-                "sprk_regardingrecordname", "sprk_corerecordtype", "sprk_corerecordid", "sprk_policyversion", "sprk_evidencerefs", "ownerid",
+                "sprk_regardingrecordname", "sprk_corerecordtype", "sprk_corerecordid", "sprk_policy", "sprk_policyversion", "sprk_evidencerefs", "ownerid",
                 "sprk_sentence", // task 154: the row's sentence, as stored
             }, name);
 
-            var link = entity.Elements("link-entity").Single();
-            ((string)link.Attribute("name")!).Should().Be("sprk_policy");
-            ((string)link.Attribute("link-type")!).Should().Be("outer", $"{name}: a display link must never change membership");
-            link.Elements("attribute").Select(a => (string)a.Attribute("name")!)
-                .Should().BeEquivalentTo("sprk_shortname", "sprk_worktype", "sprk_severity");
+            // D-185 (task 163, #2285): the route reads the policy's short name, work type and severity as the BFF, by the id the Signal's
+            // sprk_policy lookup (selected above) carries. A policy link here would make Dataverse refuse the whole query for a caller
+            // without Read on sprk_policy.
+            entity.Elements("link-entity").Should().BeEmpty($"{name}: no query links sprk_policy (D-185)");
             entity.Elements("attribute").Select(a => (string)a.Attribute("name")!).Should().NotContain(PerTypeColumns);
         }
     }
@@ -170,12 +169,11 @@ public class WorklistGridConfigurationTests
     [Theory]
     [InlineData("<order attribute='sprk_firstdetected' descending='false' />", "<order attribute='sprk_rankscore' descending='true' /><order attribute='sprk_firstdetected' descending='false' />", "order names")]
     [InlineData("<attribute name='sprk_evidencerefs' />", "<attribute name='sprk_noSuchColumn' />", "schema: sprk_signal has no column")]
-    [InlineData("<attribute name='sprk_worktype' />", "<attribute name='sprk_noSuchWorkType' />", "schema: sprk_policy has no column")]
+    [InlineData("<attribute name='sprk_policy' />", "<attribute name='sprk_policy' /><link-entity name='sprk_policy' from='sprk_policyid' to='sprk_policy' link-type='outer' alias='policy'><attribute name='sprk_shortname' /></link-entity>", "D-185")]
     [InlineData("<value>100000001</value>", "<value>100000009</value>", "schema: sprk_signalstatus has no option")]
     [InlineData("\"windowDays\": 30", "\"windowDays\": 7", "closedEarlier")]
     [InlineData("<condition attribute='statecode' operator='eq' value='0' />", "<condition attribute='statecode' operator='eq' value='0' /><condition attribute='sprk_corerecordid' operator='not-null' />", "filters on the core record")]
     [InlineData("<condition attribute='statecode' operator='eq' value='0' />", "<condition attribute='ownerid' operator='eq-userid' />", "user filter")]
-    [InlineData("link-type='outer'", "link-type='inner'", "outer")]
     [InlineData("\"kind\": \"worklist\",", "\"kind\": \"worklist\", \"actions\": [],", "no actions")]
     [InlineData("<attribute name='sprk_firstdetected' />", "<attribute name='sprk_regardingmatter' />", "per-type")]
     [InlineData("Ontology worklist membership", "Ontology worklist for sprk_matter membership", "names a core type")]
@@ -284,10 +282,10 @@ public class WorklistGridConfigurationTests
                     problems.Add($"{name}: user filter ({c.Operator} on {c.Attribute}); membership is by rule evaluation");
             }
 
+            // D-185: a linked table is read AS THE CALLER, so the caller would need Read on it. The policy columns are the BFF's read.
             foreach (var link in entity.Elements("link-entity"))
             {
-                if ((string?)link.Attribute("link-type") != "outer")
-                    problems.Add($"{name}: the policy link must be outer (a display link must not change membership)");
+                problems.Add($"{name}: links {(string?)link.Attribute("name")}; the BFF reads the policy columns (D-185), a join needs the caller's Read");
             }
 
             // Real-schema agreement with the solution source.
@@ -296,16 +294,6 @@ public class WorklistGridConfigurationTests
                          .Concat(Conditions(doc).Select(c => c.Attribute)).Distinct())
             {
                 if (!schema.Columns["sprk_signal"].Contains(a)) problems.Add($"schema: sprk_signal has no column {a} ({name})");
-            }
-
-            foreach (var link in entity.Elements("link-entity"))
-            {
-                var table = (string)link.Attribute("name")!;
-                if (!schema.Columns.TryGetValue(table, out var columns)) { problems.Add($"schema: {table} is not in the solution source ({name})"); continue; }
-                if (!columns.Contains((string)link.Attribute("from")!)) problems.Add($"schema: {table} has no column {(string)link.Attribute("from")!} ({name})");
-                if (!schema.Columns["sprk_signal"].Contains((string)link.Attribute("to")!)) problems.Add($"schema: sprk_signal has no column {(string)link.Attribute("to")!} ({name})");
-                foreach (var a in link.Elements("attribute").Select(a => (string)a.Attribute("name")!).Where(a => !columns.Contains(a)))
-                    problems.Add($"schema: {table} has no column {a} ({name})");
             }
 
             foreach (var c in Conditions(doc).Where(c => c.Attribute is "sprk_signalstatus" or "sprk_lane"))

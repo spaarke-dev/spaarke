@@ -30,9 +30,9 @@ namespace Sprk.Bff.Api.Services.Signals;
 public sealed class EarlierInvoiceReadability
 {
     /// <summary>
-    /// The sentence of a Duplicate finding whose earlier invoice is withheld. The same text as ebilling's write-time
-    /// <c>BillingRuleCatalogue.WithheldDuplicateTemplate</c> (D-112), so a row withheld at read time reads exactly like one withheld when
-    /// it was written.
+    /// The sentence of a Duplicate finding whose earlier invoice is withheld. Ontology owns this text: ebilling's write-time
+    /// <c>BillingRuleCatalogue.WithheldDuplicateTemplate</c> (D-112) is defined as this constant (ebilling task 119), so a row
+    /// withheld at read time reads exactly like one withheld when it was written.
     /// </summary>
     public const string WithheldSentence = "This matches an earlier submission.";
 

@@ -208,7 +208,9 @@ public partial class OntologyAdminAuthoringEndpointTests : IClassFixture<Ontolog
             list.EnumerateArray().Select(a => (a.GetProperty("code").GetString()!, a.GetProperty("label").GetString()!,
                 a.GetProperty("excludes").EnumerateArray().Select(e => e.GetString()!).ToArray()));
         static IEnumerable<(string Code, string Label, string[] Excludes)> Expected(IEnumerable<DecisionActionDefinition> defs) =>
-            defs.Select(d => (d.Code, d.Label, d.Excludes.ToArray()));
+            // Task 161 (D-180): a substitution-only action (create-budget) is never authorable, nor named as an exclusion.
+            defs.Where(d => !d.SubstitutionOnly).Select(d => (d.Code, d.Label,
+                d.Excludes.Where(e => !(DecisionActionCatalog.TryGet(e, out var excluded) && excluded.SubstitutionOnly)).ToArray()));
         static IEnumerable<(int, string)> Options(JsonElement list) =>
             list.EnumerateArray().Select(o => (o.GetProperty("value").GetInt32(), o.GetProperty("label").GetString()!));
 
@@ -228,7 +230,7 @@ public partial class OntologyAdminAuthoringEndpointTests : IClassFixture<Ontolog
 
         // Spot checks against the catalog's declared shape, so a test that only mirrors the source cannot hide a broken source.
         var decide = Actions(lanes[0].GetProperty("actions")).ToDictionary(a => a.Code);
-        decide.Keys.Should().Equal("send-budget-inquiry", "revise-budget", "approve-variance", "assign-work");
+        decide.Keys.Should().Equal("send-budget-inquiry", "revise-budget", "approve-variance", "assign-task", "assign-work");
         decide["revise-budget"].Excludes.Should().Equal("approve-variance");
         decide["approve-variance"].Excludes.Should().Equal("revise-budget");
         var doActions = Actions(lanes[1].GetProperty("actions")).ToDictionary(a => a.Code);
@@ -366,6 +368,23 @@ public partial class OntologyAdminAuthoringEndpointTests : IClassFixture<Ontolog
         own.GetProperty("valid").GetBoolean().Should().BeTrue(own.ToString());
         _fixture.World.Requests.Should().Contain(r => r.Contains($"sprk_policyid eq {PolicyId:D} and (sprk_domain eq null or sprk_domain eq 100000001)",
             StringComparison.Ordinal), "the policy is read as the caller through the domain allow-list");
+        _fixture.World.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Validate_AndSave_RefuseADraftThatNamesCreateBudget_ItIsOnlyEverSubstituted_D180()
+    {
+        // Task 161 (D-180): create-budget replaces revise-budget when the server builds the plan for a matter with no budget; a rule author
+        // can never name it, so a published plan is never edited by it (D-14).
+        var draft = Draft(plan: """{"actions":["send-budget-inquiry","create-budget","approve-variance"]}""");
+
+        var validate = await Json(await Validate(draft));
+        var save = await Save(draft: draft);
+
+        validate.GetProperty("valid").GetBoolean().Should().BeFalse();
+        ValidateErrors(validate)["decisionPlan"].Single().Should().Contain("action_not_allowed").And.Contain("Decide lane's catalog");
+        save.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await Json(save)).GetProperty("errors").GetProperty("decisionPlan")[0].GetString().Should().Be(ValidateErrors(validate)["decisionPlan"].Single());
         _fixture.World.Writes.Should().BeEmpty();
     }
 

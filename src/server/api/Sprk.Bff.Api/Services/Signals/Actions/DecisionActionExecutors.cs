@@ -29,7 +29,7 @@ namespace Sprk.Bff.Api.Services.Signals.Actions;
 //   Existing: the events complete handler, the child-records create/update cores, CommunicationService.SendAsync and the
 //     events due-date/assignee write (DecisionRouteCores), plus OntologyWriterDataverseClient for the one write that has no
 //     route (the budget revision).
-//   Extension: yes, every executor but ReviseBudget is a thin adapter over one of those. Revise budget has no existing path
+//   Extension: yes, every executor but ReviseBudget is a thin adapter over one of those (CreateBudget, task 161, over the child-records create). Revise budget has no existing path
 //     (#26): nothing creates sprk_budgetrevision, and the writer identity is the only one granted Create on it (task 008).
 //   Cost of doing nothing: Path B's own remedy cannot be recorded, the Do lane cannot run inside a decision, and Next steps
 //     stay browser-created after a record that can no longer list them (#23).
@@ -196,6 +196,22 @@ internal static class DecisionExec
     internal const string TodoSet = "sprk_todos";
     internal const string WorkAssignmentSet = "sprk_workassignments";
     internal const string ContactSet = "contacts";
+    internal const string EventTypeRefSet = "sprk_eventtype_refs";
+
+    /// <summary>The Task row of <c>sprk_eventtype_ref</c> (task 159, D-178): reference data shared across environments, verified on
+    /// spaarkedev1 2026-10-22. The ONE copy inside Signals (the AI nodes and the workspace carry their own private ones).</summary>
+    internal const string TaskEventTypeId = "124f5fc9-98ff-f011-8406-7c1e525abd8b";
+
+    /// <summary>The longest name a row takes from the first line of a free-text description (<c>sprk_name</c> / <c>sprk_eventname</c>).</summary>
+    private const int NameMaxLength = 200;
+
+    /// <summary>The first line of a description, trimmed, as a row name: at most <see cref="NameMaxLength"/> characters, the
+    /// last three <c>...</c> when it was cut.</summary>
+    internal static string NameFromDescription(string description)
+    {
+        var firstLine = description.Split('\n', 2)[0].Trim();
+        return firstLine.Length > NameMaxLength ? firstLine[..(NameMaxLength - 3)] + "..." : firstLine;
+    }
 
     /// <summary>Create on <c>sprk_todo</c> (live privilege name; the event one is <c>CommunicationRecordAuthorizationFilter.CreateEventPrivilege</c>).</summary>
     internal const string CreateTodoPrivilege = "prvCreatesprk_Todo";
@@ -554,6 +570,64 @@ public sealed class ReviseBudgetExecutor : IDecisionActionExecutor
 }
 
 /// <summary>
+/// <c>create-budget</c> (task 161, D-180): the matter has NO active budget, so Revise budget becomes Create budget. One active
+/// <c>sprk_budget</c> is created UNDER THE MATTER as the caller, through the child-records create core (the secure ribbon's
+/// "New Budget" path: Create on the table, AppendTo on the matter, secure parents included, owned by the team the ownership rule
+/// names). No writer identity and no second create path. <c>sprk_totalbudget</c> is the amount; the reason is recorded on the
+/// Decision Record (the budget has no column for it). Budgets are filed through <c>sprk_matter</c> (no <c>sprk_regarding*</c>
+/// lookup), so a core record that is not a matter is refused before anything is written.
+/// </summary>
+public sealed class CreateBudgetExecutor : ChildCreateExecutorBase
+{
+    /// <summary>Create on <c>sprk_budget</c> (schema name <c>sprk_Budget</c>, as <c>prvReadsprk_Budget</c>).</summary>
+    internal const string CreateBudgetPrivilege = "prvCreatesprk_Budget";
+
+    private readonly TimeProvider _clock;
+
+    public CreateBudgetExecutor(CallerRecordAccessProbe probe, DecisionRouteCores cores, IGenericEntityService entities, TimeProvider clock)
+        : base(probe, cores, entities)
+    {
+        _clock = clock ?? throw new ArgumentNullException(nameof(clock));
+    }
+
+    public override string Code => ResolvedDecisionPlan.CreateBudgetCode;
+
+    protected override string Table => "sprk_budget";
+
+    protected override string CreatePrivilege => CreateBudgetPrivilege;
+
+    protected override DecisionActionOutcome? BuildColumns(DecisionActionRequest request, IDictionary<string, object?> payload)
+    {
+        if (request.Core is not { Entity: "sprk_matter" })
+            return DecisionActionOutcome.Refused(Code, DecisionActionReasons.BudgetNotOnMatter, "A budget can only be created under a matter.");
+        if (!decimal.TryParse(request.Param("amount"), NumberStyles.Number, CultureInfo.InvariantCulture, out var amount) || amount < 0)
+            return DecisionActionOutcome.Refused(Code, DecisionActionReasons.InvalidParameter, "The budget must be an amount of zero or more.");
+        if (request.Param("reason") is null)
+            return DecisionActionOutcome.Refused(Code, DecisionActionReasons.InvalidParameter, "Give a reason for the budget.");
+
+        payload["sprk_name"] = $"Budget {_clock.GetUtcNow():yyyy-MM-dd}";
+        payload["sprk_totalbudget"] = amount;
+        return null;
+    }
+
+    protected override async Task<DecisionActionOutcome?> FileUnderAsync(DecisionCoreRecord core, IDictionary<string, object?> payload, CancellationToken ct)
+    {
+        string set;
+        try
+        {
+            set = await Entities.GetEntitySetNameAsync(core.Entity, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return DecisionActionOutcome.Failed(Code, DecisionActionReasons.WriteFailed, "The matter could not be resolved; nothing was created.");
+        }
+
+        payload["sprk_matter@odata.bind"] = $"/{set}({core.Id:D})";
+        return null;
+    }
+}
+
+/// <summary>
 /// <c>approve-variance</c> (D-19): record-only. The Decision Record (outcome Authorized) IS the approval; nothing else is
 /// written. The class takes NO collaborators on purpose: it has nothing it could write with, and nothing it could refuse.
 /// </summary>
@@ -819,7 +893,7 @@ public sealed class RecordTheResponseExecutor : DoLaneExecutor
 /// </summary>
 public abstract class MessageExecutorBase : IDecisionActionExecutor
 {
-    private static readonly Regex Address = new(@"^[^@\s]+@[^@\s]+\.[^@\s]+$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex Address = OutsideFirmContactResolver.Address;
 
     private readonly CallerRecordAccessProbe _probe;
     private readonly IDataverseUserClient _dataverse;
@@ -940,36 +1014,63 @@ public abstract class MessageExecutorBase : IDecisionActionExecutor
     }
 
     /// <summary>An email address for a contact id, or for a law firm id (its primary contacts, in order); null when neither has one.</summary>
-    private async Task<string?> ResolveAddressAsync(Guid id, CancellationToken ct)
-    {
-        if (await ContactAddressAsync(id, ct).ConfigureAwait(false) is { } direct)
-            return direct;
+    private async Task<string?> ResolveAddressAsync(Guid id, CancellationToken ct) =>
+        (await OutsideFirmContactResolver.ContactAsync(_dataverse, id, ct).ConfigureAwait(false)
+         ?? await OutsideFirmContactResolver.FirmPrimaryContactAsync(_dataverse, id, ct).ConfigureAwait(false))?.Email;
 
-        var firm = await _dataverse.GetAsync(
-            $"sprk_organizations({id:D})?$select=_sprk_primarycontact1_value,_sprk_primarycontact2_value", ct).ConfigureAwait(false);
+    private static Guid? ReadGuid(JsonElement? body, string property) =>
+        body is { ValueKind: JsonValueKind.Object } o && o.TryGetProperty(property, out var v) && v.ValueKind == JsonValueKind.String
+        && Guid.TryParse(v.GetString(), out var id) && id != Guid.Empty
+            ? id
+            : null;
+}
+
+/// <summary>An outside firm's contact as the caller reads it: the contact, its name and an email address.</summary>
+public sealed record OutsideFirmContact(Guid ContactId, string? Name, string Email);
+
+/// <summary>
+/// The outside-firm contact resolver <c>send-reminder</c> uses (a firm's primary contact 1, then 2, with an email address), shared with
+/// the plan route's budget-inquiry To pre-fill (task 160, D-179) so both name the same person. Every read is AS THE CALLER, so a firm or
+/// contact the caller cannot read resolves to nothing.
+/// </summary>
+internal static class OutsideFirmContactResolver
+{
+    /// <summary>The address shape the message executors accept.</summary>
+    internal static readonly Regex Address = new(@"^[^@\s]+@[^@\s]+\.[^@\s]+$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    /// <summary>The firm's primary contacts, in order, the first with an email address; null when neither has one or the firm is unreadable.</summary>
+    internal static async Task<OutsideFirmContact?> FirmPrimaryContactAsync(IDataverseUserClient user, Guid firmId, CancellationToken ct)
+    {
+        var firm = await user.GetAsync(
+            $"sprk_organizations({firmId:D})?$select=_sprk_primarycontact1_value,_sprk_primarycontact2_value", ct).ConfigureAwait(false);
         if (!firm.IsSuccess)
             return null;
 
         foreach (var column in new[] { "_sprk_primarycontact1_value", "_sprk_primarycontact2_value" })
         {
-            if (ReadGuid(firm.Body, column) is { } contact && await ContactAddressAsync(contact, ct).ConfigureAwait(false) is { } address)
-                return address;
+            if (ReadGuid(firm.Body, column) is { } contact && await ContactAsync(user, contact, ct).ConfigureAwait(false) is { } found)
+                return found;
         }
 
         return null;
     }
 
-    private async Task<string?> ContactAddressAsync(Guid contactId, CancellationToken ct)
+    /// <summary>The contact with its email address; null when it has none or cannot be read.</summary>
+    internal static async Task<OutsideFirmContact?> ContactAsync(IDataverseUserClient user, Guid contactId, CancellationToken ct)
     {
-        var contact = await _dataverse.GetAsync($"contacts({contactId:D})?$select=emailaddress1", ct).ConfigureAwait(false);
+        var contact = await user.GetAsync($"contacts({contactId:D})?$select=emailaddress1,fullname", ct).ConfigureAwait(false);
         if (contact.IsSuccess && contact.Body is { ValueKind: JsonValueKind.Object } row
             && row.TryGetProperty("emailaddress1", out var email) && email.ValueKind == JsonValueKind.String
             && email.GetString() is { } text && Address.IsMatch(text.Trim()))
-            return text.Trim();
+        {
+            var name = row.TryGetProperty("fullname", out var n) && n.ValueKind == JsonValueKind.String ? n.GetString()?.Trim() : null;
+            return new OutsideFirmContact(contactId, string.IsNullOrEmpty(name) ? null : name, text.Trim());
+        }
+
         return null;
     }
 
-    private static Guid? ReadGuid(JsonElement? body, string property) =>
+    internal static Guid? ReadGuid(JsonElement? body, string property) =>
         body is { ValueKind: JsonValueKind.Object } o && o.TryGetProperty(property, out var v) && v.ValueKind == JsonValueKind.String
         && Guid.TryParse(v.GetString(), out var id) && id != Guid.Empty
             ? id
@@ -1057,31 +1158,40 @@ public abstract class ChildCreateExecutorBase : DecisionExecutorBase
         return null;
     }
 
+    /// <summary>Files the new row under the Signal's core record: the typed <c>sprk_regarding{type}</c> lookup and the ADR-024 pair,
+    /// as a To Do, event or work assignment carries them. A table whose filing lookup is named differently overrides this (a budget
+    /// is filed through <c>sprk_matter</c>). Returns a failure outcome when the core's entity set cannot be resolved, else null.</summary>
+    protected virtual async Task<DecisionActionOutcome?> FileUnderAsync(DecisionCoreRecord core, IDictionary<string, object?> payload, CancellationToken ct)
+    {
+        // The typed lookup is named sprk_regarding{type}, for every core type, on To Dos and events alike.
+        var suffix = core.Entity.StartsWith("sprk_", StringComparison.Ordinal) ? core.Entity["sprk_".Length..] : core.Entity;
+        string set;
+        try
+        {
+            set = await Entities.GetEntitySetNameAsync(core.Entity, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return DecisionActionOutcome.Failed(Code, DecisionActionReasons.WriteFailed, "The record this is filed under could not be resolved; nothing was created.");
+        }
+
+        payload[$"sprk_regarding{suffix}@odata.bind"] = $"/{set}({core.Id:D})";
+        payload["sprk_regardingrecordid"] = core.Id.ToString("D");
+        if (core.Name is { } name) payload["sprk_regardingrecordname"] = name;
+        if (core.RecordTypeRefId is { } typeRef) payload["sprk_regardingrecordtype@odata.bind"] = $"/sprk_recordtype_refs({typeRef:D})";
+        return null;
+    }
+
+    protected IGenericEntityService Entities => _entities;
+
     protected override async Task<DecisionActionOutcome> WriteAsync(DecisionActionRequest request, CancellationToken ct)
     {
         var payload = new Dictionary<string, object?>(StringComparer.Ordinal);
         if (BuildColumns(request, payload) is { } refusal)
             return refusal;
 
-        if (request.Core is { } core)
-        {
-            // The typed lookup is named sprk_regarding{type}, for every core type, on To Dos and events alike.
-            var suffix = core.Entity.StartsWith("sprk_", StringComparison.Ordinal) ? core.Entity["sprk_".Length..] : core.Entity;
-            string set;
-            try
-            {
-                set = await _entities.GetEntitySetNameAsync(core.Entity, ct).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                return DecisionActionOutcome.Failed(Code, DecisionActionReasons.WriteFailed, "The record this is filed under could not be resolved; nothing was created.");
-            }
-
-            payload[$"sprk_regarding{suffix}@odata.bind"] = $"/{set}({core.Id:D})";
-            payload["sprk_regardingrecordid"] = core.Id.ToString("D");
-            if (core.Name is { } name) payload["sprk_regardingrecordname"] = name;
-            if (core.RecordTypeRefId is { } typeRef) payload["sprk_regardingrecordtype@odata.bind"] = $"/sprk_recordtype_refs({typeRef:D})";
-        }
+        if (request.Core is { } core && await FileUnderAsync(core, payload, ct).ConfigureAwait(false) is { } failed)
+            return failed;
 
         var reply = await _cores.CreateChildAsync(request.Http, Table, DecisionExec.Json(payload), ct).ConfigureAwait(false);
         if (!reply.IsSuccess)
@@ -1172,8 +1282,6 @@ public sealed class AssignWorkExecutor : ChildCreateExecutorBase
     /// <summary>Create on <c>sprk_workassignment</c> (live privilege name, spaarkedev1 2026-10-11).</summary>
     internal const string CreateWorkAssignmentPrivilege = "prvCreatesprk_WorkAssignment";
 
-    private const int NameMaxLength = 200;
-
     public AssignWorkExecutor(CallerRecordAccessProbe probe, DecisionRouteCores cores, IGenericEntityService entities)
         : base(probe, cores, entities)
     {
@@ -1198,10 +1306,86 @@ public sealed class AssignWorkExecutor : ChildCreateExecutorBase
         if (request.Param("description") is not { } description)
             return DecisionActionOutcome.Refused(Code, DecisionActionReasons.InvalidParameter, "Say what is to be done.");
 
-        var firstLine = description.Split('\n', 2)[0].Trim();
-        payload["sprk_name"] = firstLine.Length > NameMaxLength ? firstLine[..(NameMaxLength - 3)] + "..." : firstLine;
+        payload["sprk_name"] = DecisionExec.NameFromDescription(description);
         payload["sprk_description"] = description;
         payload["sprk_assignedtointernal@odata.bind"] = $"/contacts({assignee:D})";
+        return null;
+    }
+}
+
+/// <summary>
+/// <c>assign-task</c> (task 159; D-178): a Task, which is a <c>sprk_event</c> whose <c>sprk_eventtype_ref</c> is the Task row, NOT a
+/// <c>sprk_todo</c> and NOT a <c>sprk_workassignment</c> (a work assignment is for creating a matter or a project). The owner's
+/// no-budget decision creates one, assigned to the chosen contact (<c>sprk_assignedto</c>, a contact lookup on spaarkedev1,
+/// 2026-10-22), Open, filed under the core record, through the same child-records create core as the other record-creating actions
+/// (as the caller; no app-only write). The create privilege is the event one <see cref="CreateEventExecutor"/> checks.
+/// </summary>
+/// <remarks>Component justification (CLAUDE.md section 11). Existing: <see cref="CreateEventExecutor"/> (a Next step with no
+/// assignee or type) and <c>TaskActionCore</c> (AI-pipeline internal, which the Signals path must not call). Extension: one more
+/// <see cref="ChildCreateExecutorBase"/> subclass. Cost of doing nothing: the no-budget decision keeps creating a Work Assignment,
+/// which the owner rejected as the wrong record type.</remarks>
+public sealed class AssignTaskExecutor : ChildCreateExecutorBase
+{
+    private readonly CallerRecordAccessProbe _probe;
+
+    public AssignTaskExecutor(CallerRecordAccessProbe probe, DecisionRouteCores cores, IGenericEntityService entities)
+        : base(probe, cores, entities)
+    {
+        _probe = probe;
+    }
+
+    public override string Code => "assign-task";
+
+    /// <summary>The MaxLength of <c>sprk_event.sprk_description</c> (SpaarkeMaster <c>Entities/sprk_Event/Entity.xml</c>). Longer text
+    /// makes the app-only create throw, which the route reports as an uncertain write although nothing was written, so it is refused
+    /// here first.</summary>
+    internal const int DescriptionMaxLength = 2000;
+
+    protected override string Table => "sprk_event";
+
+    protected override string CreatePrivilege => CommunicationRecordAuthorizationFilter.CreateEventPrivilege;
+
+    protected override Guid? AssigneeContact(DecisionActionRequest request) =>
+        DecisionExec.TryGuid(request.Param("assignee"), out var id) ? id : null;
+
+    /// <remarks>The child-records core asks AppendTo, AS THE CALLER, on every record the row binds, and the Task type row is one
+    /// (<c>sprk_eventtype_ref</c> is user-owned on spaarkedev1). Asked here too so a caller who lacks it is refused before anything
+    /// is written, not by the core after an earlier action of the decision has landed.</remarks>
+    public override async Task<DecisionActionOutcome?> PreflightAsync(DecisionActionRequest request, CancellationToken ct)
+    {
+        if (await base.PreflightAsync(request, ct).ConfigureAwait(false) is { } refused)
+            return refused;
+
+        return await DecisionExec.CallerHoldsAsync(
+                _probe, request.Http, DecisionExec.EventTypeRefSet, new Guid(DecisionExec.TaskEventTypeId), DecisionExec.AppendToOperation, ct).ConfigureAwait(false)
+            ? null
+            : Refuse(DecisionActionReasons.NotAuthorized, "You do not have permission to create a task.");
+    }
+
+    protected override DecisionActionOutcome? BuildColumns(DecisionActionRequest request, IDictionary<string, object?> payload)
+    {
+        if (!DecisionExec.TryGuid(request.Param("assignee"), out var assignee))
+            return DecisionActionOutcome.Refused(Code, DecisionActionReasons.InvalidParameter, "Pick who the task is for.");
+        if (request.Param("description") is not { } description)
+            return DecisionActionOutcome.Refused(Code, DecisionActionReasons.InvalidParameter, "Say what is to be done.");
+        if (description.Length > DescriptionMaxLength)
+            return DecisionActionOutcome.Refused(Code, DecisionActionReasons.InvalidParameter, "Keep 'What to do' under 2,000 characters.");
+
+        // The due date is optional; one that is given must be a date.
+        DateOnly? due = null;
+        if (request.Param("dueDate") is { } dueText)
+        {
+            if (!DecisionExec.TryDate(dueText, out var parsed))
+                return DecisionActionOutcome.Refused(Code, DecisionActionReasons.InvalidParameter, "Give the due date as yyyy-MM-dd.");
+            due = parsed;
+        }
+
+        payload["sprk_eventname"] = DecisionExec.NameFromDescription(description);
+        payload["sprk_description"] = description;
+        if (due is { } date) payload["sprk_duedate"] = DecisionExec.IsoDate(date);
+        payload["statuscode"] = EventStatusCode.Open;
+        payload["sprk_eventtype_ref@odata.bind"] = $"/sprk_eventtype_refs({DecisionExec.TaskEventTypeId})";
+        payload["sprk_assignedto@odata.bind"] = $"/contacts({assignee:D})";
         return null;
     }
 }
@@ -1258,6 +1442,11 @@ public sealed class BudgetInquiryActionExecutor : IDecisionActionExecutor
             .ToList();
         if (to.Count == 0)
             return (null, DecisionActionOutcome.Refused(code, DecisionActionReasons.RecipientUnresolved, "There is no recipient to send the inquiry to."));
+        // The composer commits ADDRESSES. A token that is not one (`lead@firm`) is refused here, before the preflight and before the
+        // service request is written: Graph would reject it after the row exists and leave an orphan (fix round 1).
+        if (to.Any(address => !OutsideFirmContactResolver.Address.IsMatch(address)))
+            return (null, DecisionActionOutcome.Refused(code, DecisionActionReasons.RecipientUnresolved,
+                "A recipient is not a valid email address. Check the To field."));
         if (request.Param("subject") is not { } subject)
             return (null, DecisionActionOutcome.Refused(code, DecisionActionReasons.InvalidParameter, "Give the inquiry a subject."));
         if (request.Param("body") is not { } body)
