@@ -116,6 +116,38 @@ public static class SecureBuRoleDepthAssertion
         "System Customizer"
     };
 
+    /// <summary>
+    /// The pinned OWNER-ACCEPTED role exceptions: a named role's Read on named codified tables that reaches the secure BU
+    /// by design. A match is reported as an accepted exception (<see cref="SecureBuAssertionOutcome.AcceptedExceptions"/>),
+    /// not as a clause-1 finding, so it changes neither the verdict nor the census status.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>This is an exception register, NOT an administrative allow-list.</b> Unlike
+    /// <see cref="AdministrativeRoleAllowList"/>, which exempts a role wholesale, an entry here exempts exactly the listed
+    /// privileges of the listed role (both matched case-insensitively), each under the owner decision that accepted it.
+    /// Any other privilege of the same role that reaches the secure BU stays an ordinary finding, and so does the same
+    /// privilege held through any other role.</para>
+    ///
+    /// <para><b>Direct assignment only</b> — the reasoning of the administrative allow-list: the decision accepts a
+    /// deliberate per-identity holder. The same role held through a TEAM promotes every current and future member (a
+    /// default business-unit team cannot be curated), so it is not excepted and stays the ordinary finding.</para>
+    ///
+    /// <para><b>Visible, not silent.</b> Every match is returned on the outcome and logged by
+    /// <c>SecureRecordIsolationCensusJob</c> at Information on every run. Adding to this list requires editing this file
+    /// and citing the owner decision.</para>
+    /// </remarks>
+    public static readonly IReadOnlyList<AcceptedRoleException> AcceptedRoleExceptions = new[]
+    {
+        new AcceptedRoleException(
+            "Spaarke Billing Administrator",
+            new[] { "prvReadsprk_Policy", "prvReadsprk_PolicyVersion" },
+            "EB-D-150 (ebilling, owner 2026-10-26)"),
+        new AcceptedRoleException(
+            "Spaarke AI Analysis Admin",
+            new[] { "prvReadsprk_analysis", "prvReadsprk_analysisoutput" },
+            "UAC owner round 127 (2026-10-26)")
+    };
+
     /// <summary>The loud not-run message for the default business-unit name.</summary>
     public static string InertMessage => InertMessageFor(SecureRecordOwnerTeam.DefaultBusinessUnitName);
 
@@ -208,13 +240,16 @@ public static class SecureBuRoleDepthAssertion
         }
 
         var findings = new List<SecureBuFinding>();
-        findings.AddRange(EvaluateDepthClause(census, secureBu));
+        var acceptedExceptions = new List<SecureBuAcceptedException>();
+
+        // AddRange enumerates the clause in full, which is what fills acceptedExceptions.
+        findings.AddRange(EvaluateDepthClause(census, secureBu, acceptedExceptions));
         findings.AddRange(EvaluateNoUserBusinessUnitClause(census, secureBu));
         findings.AddRange(EvaluateOwnerTeamClause(census, secureBu));
         findings.AddRange(EvaluateOwnerRoleContainmentClause(census));
         findings.AddRange(EvaluateOwnerRoleCoverageClause(census));
 
-        return new SecureBuAssertionOutcome(findings);
+        return new SecureBuAssertionOutcome(findings) { AcceptedExceptions = acceptedExceptions };
     }
 
     /// <summary>
@@ -308,13 +343,19 @@ public static class SecureBuRoleDepthAssertion
     /// team path and depth, listing every codified child table that grant reaches (sorted), so one broad role does not
     /// emit a line per table on every run. Root findings stay one per root privilege, worded as before — the control
     /// plane parses the verdict.
+    /// <para>A human's DIRECTLY held grant matching <see cref="AcceptedRoleExceptions"/> is not a finding: it is added to
+    /// <paramref name="acceptedExceptions"/>, aggregated the same way (one entry per principal, role, anchor BU and depth,
+    /// listing its privileges), once this iterator has been enumerated to the end.</para>
     /// </remarks>
     private static IEnumerable<SecureBuFinding> EvaluateDepthClause(
         SecureBuRoleDepthCensus census,
-        BusinessUnitNode secureBu)
+        BusinessUnitNode secureBu,
+        ICollection<SecureBuAcceptedException> acceptedExceptions)
     {
         var childReaches = new Dictionary<ChildReachKey, SortedSet<string>>();
         var childReachOrder = new List<ChildReachKey>();
+        var accepted = new Dictionary<AcceptedReachKey, (SortedSet<string> Privileges, SortedSet<string> Tables)>();
+        var acceptedOrder = new List<AcceptedReachKey>();
         var businessUnitsById = BusinessUnitsById(census.BusinessUnits);
         var directAdministrativeReach = DirectAdministrativeReach(census, secureBu, businessUnitsById);
 
@@ -353,6 +394,27 @@ public static class SecureBuRoleDepthAssertion
             {
                 // The identity is independently a designated administrator; the team path confers
                 // nothing it does not already hold.
+                continue;
+            }
+
+            if (AcceptedExceptionFor(grant) is { } exception)
+            {
+                // Owner-accepted (see AcceptedRoleExceptions): reported beside the findings, never as one.
+                var key = new AcceptedReachKey(
+                    grant.PrincipalId, grant.RoleName, grant.AnchorBusinessUnitId, grant.Depth, exception.DecisionId);
+                if (!accepted.TryGetValue(key, out var entry))
+                {
+                    entry = (new SortedSet<string>(StringComparer.Ordinal), new SortedSet<string>(StringComparer.Ordinal));
+                    accepted[key] = entry;
+                    acceptedOrder.Add(key);
+                }
+
+                entry.Privileges.Add(grant.PrivilegeName);
+                if (grant.CodifiedChildTable is { } exceptedTable)
+                {
+                    entry.Tables.Add(exceptedTable);
+                }
+
                 continue;
             }
 
@@ -400,6 +462,14 @@ public static class SecureBuRoleDepthAssertion
                     + "readable by this principal, with no error and no log line. " + HumanReachRemedy);
         }
 
+        foreach (var key in acceptedOrder)
+        {
+            var (privileges, tables) = accepted[key];
+            acceptedExceptions.Add(new SecureBuAcceptedException(
+                key.PrincipalId, key.RoleName, privileges.ToArray(), tables.ToArray(), key.Depth,
+                key.AnchorBusinessUnitId, key.DecisionId));
+        }
+
         foreach (var key in childReachOrder)
         {
             var tables = string.Join(", ", childReaches[key]);
@@ -443,6 +513,21 @@ public static class SecureBuRoleDepthAssertion
     private sealed record ChildReachKey(
         bool Administrative, Guid PrincipalId, string RoleName, Guid AnchorBusinessUnitId, string? HeldViaTeam,
         PrivilegeDepth Depth);
+
+    /// <summary>One aggregated owner-accepted reach: everything a <see cref="SecureBuAcceptedException"/> names except the privileges.</summary>
+    private sealed record AcceptedReachKey(
+        Guid PrincipalId, string RoleName, Guid AnchorBusinessUnitId, PrivilegeDepth Depth, string DecisionId);
+
+    /// <summary>
+    /// The <see cref="AcceptedRoleExceptions"/> entry covering <paramref name="grant"/>, or null. Direct assignment only:
+    /// a team-held grant is never excepted. Role and privilege both match case-insensitively.
+    /// </summary>
+    private static AcceptedRoleException? AcceptedExceptionFor(EffectiveGrant grant) =>
+        grant.HeldViaTeam is not null
+            ? null
+            : AcceptedRoleExceptions.FirstOrDefault(exception =>
+                string.Equals(exception.RoleName, grant.RoleName, StringComparison.OrdinalIgnoreCase)
+                && exception.Privileges.Contains(grant.PrivilegeName, StringComparer.OrdinalIgnoreCase));
 
     /// <summary>
     /// Whether the same principal also holds the same role by DIRECT assignment — i.e. whether the
@@ -1077,9 +1162,43 @@ public enum SecureBuVerdict
 /// <summary>One violation, with the operator-actionable message that belongs in the log.</summary>
 public sealed record SecureBuFinding(SecureBuVerdict Verdict, string Message);
 
+/// <summary>One entry of <see cref="SecureBuRoleDepthAssertion.AcceptedRoleExceptions"/>.</summary>
+/// <param name="RoleName">The role, matched case-insensitively.</param>
+/// <param name="Privileges">The Read privileges the owner accepted for that role, matched case-insensitively.</param>
+/// <param name="DecisionId">The owner decision that accepted them.</param>
+public sealed record AcceptedRoleException(string RoleName, IReadOnlyList<string> Privileges, string DecisionId);
+
+/// <summary>
+/// A human's directly held grant that reaches the secure BU under an owner-accepted role exception
+/// (<see cref="SecureBuRoleDepthAssertion.AcceptedRoleExceptions"/>): visible, low severity, NOT a finding. One entry per
+/// principal, role, anchor BU and depth, listing every excepted privilege that grant shape carries.
+/// </summary>
+/// <param name="PrincipalId">The systemuser id — never a name (#2130).</param>
+/// <param name="RoleName">The role as the environment names it.</param>
+/// <param name="Privileges">The excepted privileges, sorted.</param>
+/// <param name="Tables">The codified child tables of those privileges, sorted (empty for a root privilege).</param>
+/// <param name="Depth">The depth the role grants.</param>
+/// <param name="AnchorBusinessUnitId">The business unit the depth is anchored at.</param>
+/// <param name="DecisionId">The owner decision that accepted it.</param>
+public sealed record SecureBuAcceptedException(
+    Guid PrincipalId,
+    string RoleName,
+    IReadOnlyList<string> Privileges,
+    IReadOnlyList<string> Tables,
+    PrivilegeDepth Depth,
+    Guid AnchorBusinessUnitId,
+    string DecisionId);
+
 /// <summary>The assertion's result. Empty findings is the only pass.</summary>
 public sealed record SecureBuAssertionOutcome(IReadOnlyList<SecureBuFinding> Findings)
 {
+    /// <summary>
+    /// Every owner-accepted role exception the census met (<see cref="SecureBuRoleDepthAssertion.AcceptedRoleExceptions"/>).
+    /// Reported beside the findings and never among them: <see cref="Passed"/>, <see cref="Verdict"/> and the census status
+    /// depend on <see cref="Findings"/> alone.
+    /// </summary>
+    public IReadOnlyList<SecureBuAcceptedException> AcceptedExceptions { get; init; } = Array.Empty<SecureBuAcceptedException>();
+
     /// <summary>True only when no clause was violated.</summary>
     public bool Passed => Findings.Count == 0;
 

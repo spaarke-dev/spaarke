@@ -4,7 +4,9 @@ using System.Text.Json;
 using Azure.Core;
 using Azure.Identity;
 using FluentAssertions;
+using Spaarke.Contracts.Provisioning;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.ExternalAccess;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -784,6 +786,154 @@ public class SecureBuRoleDepthAssertionTests
         SecureBuRoleDepthAssertion.Evaluate(AdminAndReader(adminHoldsPolicy: true)).Passed.Should().BeTrue();
         SecureBuRoleDepthAssertion.Evaluate(AdminAndReader(adminHoldsPolicy: false)).Findings
             .Should().ContainSingle().Which.Message.Should().Contain("(codified child tables sprk_policy)");
+    }
+
+    // ── Owner-accepted role exceptions (UAC 2026-10-26: EB-D-150; UAC owner round 127) ───────────────
+
+    /// <summary>
+    /// Must-fire (exception path): a human DIRECTLY holding Spaarke Billing Administrator with Global Read on sprk_policy
+    /// is the owner-accepted exception EB-D-150 — reported beside the findings, never as one, so the census is isolated.
+    /// </summary>
+    [Fact]
+    public void Build_WhenAHumanDirectlyHoldsBillingAdministratorWithGlobalPolicyRead_ReportsAnAcceptedExceptionAndStaysIsolated()
+    {
+        var holder = Guid.NewGuid();
+
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(CensusOfOneHolder(
+            "Spaarke Billing Administrator", "prvReadsprk_Policy", PrivilegeDepth.Global, SiblingBu, holder));
+
+        outcome.Findings.Should().BeEmpty(outcome.Message);
+        outcome.Passed.Should().BeTrue();
+        outcome.Verdict.Should().Be(SecureBuVerdict.Isolated);
+        SecureRecordIsolationCensus.StatusOf(outcome).Should().Be(KeylessProofContract.SecureRecordIsolationCensus.Isolated,
+            "an environment whose only reach is an accepted exception is isolated");
+        SecureRecordIsolationCensus.ToResult(outcome).Findings.Should().BeEmpty();
+        var accepted = outcome.AcceptedExceptions.Should().ContainSingle().Which;
+        accepted.PrincipalId.Should().Be(holder);
+        accepted.RoleName.Should().Be("Spaarke Billing Administrator");
+        accepted.Privileges.Should().Equal("prvReadsprk_Policy");
+        accepted.Tables.Should().Equal("sprk_policy");
+        accepted.Depth.Should().Be(PrivilegeDepth.Global);
+        accepted.AnchorBusinessUnitId.Should().Be(SiblingBu);
+        accepted.DecisionId.Should().Be("EB-D-150 (ebilling, owner 2026-10-26)");
+    }
+
+    /// <summary>
+    /// Must-fire (exception path): Spaarke AI Analysis Admin's Global Read on analysis and analysis output is ONE
+    /// aggregated accepted exception listing both, under UAC owner round 127.
+    /// </summary>
+    [Fact]
+    public void Build_WhenAHumanDirectlyHoldsAiAnalysisAdminWithGlobalAnalysisReads_ReportsOneAggregatedAcceptedException()
+    {
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(CensusOfRoles(
+            ("Spaarke AI Analysis Admin", PrivilegeDepth.Global, new[] { "prvReadsprk_analysisoutput", "prvReadsprk_analysis" })));
+
+        outcome.Findings.Should().BeEmpty(outcome.Message);
+        SecureRecordIsolationCensus.StatusOf(outcome).Should().Be(KeylessProofContract.SecureRecordIsolationCensus.Isolated);
+        var accepted = outcome.AcceptedExceptions.Should().ContainSingle().Which;
+        accepted.RoleName.Should().Be("Spaarke AI Analysis Admin");
+        accepted.Privileges.Should().Equal("prvReadsprk_analysis", "prvReadsprk_analysisoutput");
+        accepted.Tables.Should().Equal("sprk_analysis", "sprk_analysisoutput");
+        accepted.DecisionId.Should().Be("UAC owner round 127 (2026-10-26)");
+    }
+
+    /// <summary>The role name matches case-insensitively, like the administrative allow-list.</summary>
+    [Fact]
+    public void Build_WhenTheAcceptedRoleNameIsMisCased_IsStillAnAcceptedException()
+    {
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(CensusOfOneHolder(
+            "spaarke BILLING administrator", "prvReadsprk_PolicyVersion", PrivilegeDepth.Global, RootBu, Guid.NewGuid()));
+
+        outcome.Findings.Should().BeEmpty(outcome.Message);
+        outcome.AcceptedExceptions.Should().ContainSingle()
+            .Which.DecisionId.Should().StartWith("EB-D-150");
+    }
+
+    /// <summary>
+    /// Must-NOT-except: the same role held through a TEAM promotes every current and future member, so — as for an
+    /// allow-listed administrative role — it is not excepted and stays the ordinary finding.
+    /// </summary>
+    [Fact]
+    public void Build_WhenBillingAdministratorIsHeldThroughATeam_ReportsTheOrdinaryFinding()
+    {
+        var billingRole = Guid.NewGuid();
+        var member = Guid.NewGuid();
+
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(CensusWithAdmin(
+            new Dictionary<(Guid, string), PrivilegeDepth> { [(billingRole, "prvReadsprk_Policy")] = PrivilegeDepth.Global },
+            new[] { new CensusRole(billingRole, "Spaarke Billing Administrator", SiblingBu, billingRole) },
+            new[] { new CensusUser(member, IsHuman: true, SiblingBu, Array.Empty<Guid>()) },
+            new[] { new CensusTeam(Guid.NewGuid(), "Billing Admins", SiblingBu, IsDefault: false, TeamType: 0, new[] { billingRole }, new[] { member }) }));
+
+        outcome.AcceptedExceptions.Should().BeEmpty();
+        var finding = outcome.Findings.Should().ContainSingle(outcome.Message).Which;
+        finding.Verdict.Should().Be(SecureBuVerdict.HumanPrincipalReachesSecureBusinessUnit);
+        finding.Message.Should().Contain("(codified child tables sprk_policy)")
+            .And.Contain("(via team 'Billing Admins')")
+            .And.Contain(member.ToString());
+    }
+
+    /// <summary>
+    /// Must-NOT-except: the exception names exact privileges. Billing Administrator's other reaches — a codified child
+    /// table outside its list and a root — stay ordinary findings, while its listed privilege is still excepted.
+    /// </summary>
+    [Fact]
+    public void Build_WhenBillingAdministratorAlsoReachesAnUnlistedPrivilege_ReportsThatPrivilegeAsAFinding()
+    {
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(CensusOfRoles(
+            ("Spaarke Billing Administrator", PrivilegeDepth.Global,
+                new[] { "prvReadsprk_Policy", "prvReadsprk_Todo", "prvReadsprk_Matter" })));
+
+        outcome.Verdict.Should().Be(SecureBuVerdict.HumanPrincipalReachesSecureBusinessUnit);
+        outcome.Findings.Should().HaveCount(2, outcome.Message);
+        outcome.Findings.Should().ContainSingle(f => f.Message.StartsWith("SECURE PROJECTS ARE NOT ISOLATED: ")
+            && f.Message.Contains("prvReadsprk_Matter"));
+        outcome.Findings.Should().ContainSingle(f => f.Message.Contains("(codified child tables sprk_todo)"));
+        outcome.Findings.Should().NotContain(f => f.Message.Contains("sprk_policy"));
+        outcome.AcceptedExceptions.Should().ContainSingle().Which.Privileges.Should().Equal("prvReadsprk_Policy");
+    }
+
+    /// <summary>
+    /// Must-NOT-except: the exception is the PAIR (role, privilege). prvReadsprk_Policy through any other role — another
+    /// accepted role whose list does not name it, an unlisted role, a near-miss name — is the ordinary finding.
+    /// </summary>
+    [Theory]
+    [InlineData("Spaarke AI Analysis Admin")]
+    [InlineData("Spaarke Policy Reader")]
+    [InlineData("Spaarke Billing Administrators")]
+    public void Build_WhenAnotherRoleHoldsGlobalPolicyRead_ReportsTheOrdinaryFinding(string roleName)
+    {
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(CensusOfOneHolder(
+            roleName, "prvReadsprk_Policy", PrivilegeDepth.Global, SiblingBu, Guid.NewGuid()));
+
+        outcome.AcceptedExceptions.Should().BeEmpty();
+        outcome.Findings.Should().ContainSingle(outcome.Message)
+            .Which.Message.Should().Contain("(codified child tables sprk_policy)").And.Contain($"'{roleName}'");
+    }
+
+    /// <summary>
+    /// The vacuous-census guard is unchanged: accepted-exception grants are child grants and do not stand in for a root
+    /// read that returned nothing.
+    /// </summary>
+    [Fact]
+    public void Build_WhenOnlyAnAcceptedExceptionGrantExists_IsStillAVacuousCensus()
+    {
+        var role = Guid.NewGuid();
+
+        var census = SecureBuRoleDepthCensusBuilder.Build(
+            SecureRecordOwnerTeam.DefaultBusinessUnitName,
+            OwnerTeamName,
+            BusinessUnits,
+            new Dictionary<(Guid, string), PrivilegeDepth> { [(role, "prvReadsprk_Policy")] = PrivilegeDepth.Global },
+            new[] { new CensusRole(role, "Spaarke Billing Administrator", SiblingBu, role) },
+            new[] { new CensusUser(Guid.NewGuid(), IsHuman: true, SiblingBu, new[] { role }) },
+            Array.Empty<CensusTeam>(),
+            SecureRecordOwnerRoleSet.Embedded,
+            SecureBuRoleDepthCensusBuilder.CensusPrivilegeNames(SecureRecordOwnerRoleSet.Embedded));
+
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(census);
+        outcome.Verdict.Should().Be(SecureBuVerdict.VacuousCensus);
+        SecureRecordIsolationCensus.StatusOf(outcome).Should().Be(KeylessProofContract.SecureRecordIsolationCensus.Findings);
     }
 
     /// <summary>
