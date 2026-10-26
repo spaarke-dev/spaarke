@@ -209,6 +209,30 @@ public class GrantSendsInviteTests
     }
 
     /// <summary>
+    /// Slice B2, MUST FIRE: a current work-account invite (it names its organisation's tenant and carries no code) is
+    /// pending too. A grant keeps it: no portal-account invite replaces it, no CIAM account, no code, the tenant stays.
+    /// MUTATION: requiring a code hash alone in <c>AssessAsync</c> sends a portal-account invite here.
+    /// </summary>
+    [Fact]
+    public async Task Grant_ToAContactWithACurrentWorkAccountInvite_IsAlreadyPending_AndKeepsIt()
+    {
+        var contact = UnboundContact();
+        var invitedOn = _h.Time.GetUtcNow().AddDays(-2);
+        var row = _h.Identities.Contacts[contact];
+        row.InvitedOn = invitedOn;
+        row.InvitedEmailHash = InviteEmailStamp.Create("partner@outside.test");
+        row.InvitedTenantId = IdentityBindingTestKit.CustomerTenant.ToString("D");
+
+        var body = OkBody(await Grant(contact));
+
+        body.Invite.Should().Be(new GrantInviteResult(GrantInviteStatus.AlreadyPending));
+        (row.InviteCodeHash, row.InvitedTenantId, row.InvitedOn)
+            .Should().Be(((string?)null, IdentityBindingTestKit.CustomerTenant.ToString("D"), (DateTimeOffset?)invitedOn));
+        _h.Ciam.Attempts.Should().BeEmpty();
+        _h.Emails.InviteUrls.Should().BeEmpty();
+    }
+
+    /// <summary>
     /// #2005 F2: every bind consumes the code hash and leaves the marker, so a contact an operator unbinds after a bind holds a
     /// current marker with no code anyone can use. That is not a pending invite: the grant sends a new code, and the first
     /// CIAM sign-in with it binds. MUTATION: dropping the hash check from <c>AssessAsync</c> answers AlreadyPending, sends no
@@ -398,7 +422,7 @@ public class GrantSendsInviteTests
             new InviteExternalUserRequest(Email, Guid.Empty, (int)ExternalAccessLevel.Collaborate, "Pat", "Partner", null, null,
                 "matter", _matter),
             _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new EverythingProbe(),
-            _h.Ciam, _h.Emails, IdentityBindingTestKit.Binder(_h.Identities),
+            _h.Ciam, _h.Emails, IdentityBindingTestKit.Binder(_h.Identities), InviteOrganizationTestKit.PortalOnly(),
             new ConfigurationBuilder()
                 .AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = PortalUrl })
                 .Build(),

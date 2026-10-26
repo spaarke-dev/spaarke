@@ -75,6 +75,7 @@ public static class InviteAndGrantExternalUserEndpoint
         CiamUserProvisioningService ciamProvisioner,
         RegistrationEmailService emailService,
         ContactIdentityBinder binder,
+        InviteOrganizationResolver organizations,
         IConfiguration configuration,
         Sprk.Bff.Api.Configuration.CustomerIdentity customer,
         Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
@@ -129,6 +130,15 @@ public static class InviteAndGrantExternalUserEndpoint
         if (!policy.IsAllowed)
             return GrantExternalAccessEndpoint.PolicyRefusalProblem(policy, httpContext);
 
+        // Slice B2: a work account (the email's organisation is a configured customer tenant) or a portal account, decided
+        // before any contact is read, onboarded or granted. A malformed domain is a 400; a lookup with no definite answer
+        // is a 503 with nothing written (retry, or send it as a portal account).
+        var (organization, organizationProblem) = await InviteExternalUserEndpoint.DecideOrganizationAsync(
+            organizations, request, httpContext, ct);
+        if (organizationProblem is not null)
+            return organizationProblem;
+        var workAccountTenantId = organization!.WorkAccountTenantId;
+
         // ── Task 139: the grantor ceiling, BEFORE onboarding ──────────────────
         // The caller's own rights on the record, re-probed as them (not trusted from the delegation filter). A probe
         // that throws is a 500 with nothing onboarded; a probe that answers None becomes a ceiling of "none", which the
@@ -179,6 +189,13 @@ public static class InviteAndGrantExternalUserEndpoint
             return notProvisionable.Refusal is { } inviteRefusal
                 ? InviteExternalUserEndpoint.RefusalResult(inviteRefusal, httpContext)
                 : InviteExternalUserEndpoint.LookupFailureResult(notProvisionable.Failure!, httpContext);
+        }
+
+        // Slice B2: a work-account invite to a contact that already carries a sign-in is refused before any grant.
+        if (workAccountTenantId is not null
+            && InviteExternalUserEndpoint.WorkAccountNotProvisionable(invitee, request.Email, logger) is { Refusal: { } bound })
+        {
+            return InviteExternalUserEndpoint.RefusalResult(bound, httpContext);
         }
 
         GrantGrantee preGrantee;
@@ -293,7 +310,7 @@ public static class InviteAndGrantExternalUserEndpoint
             // The resolution the checks above judged — onboarding does not look the email up again.
             var outcome = await ExternalInviteService.ProvisionAsync(
                 request, dataverseClient, ciamProvisioner, emailService, binder, portalUrl,
-                InviteExternalUserEndpoint.InviteLinkCustomerKey(customer), logger, invitee, ct);
+                InviteExternalUserEndpoint.InviteLinkCustomerKey(customer), logger, invitee, ct, workAccountTenantId);
 
             // Task 141: a refused onboarding writes NO grant. Granting a contact an employee's work identity
             // owns would hand the employee's contact a CIAM grant it can never use — or worse, one it can.

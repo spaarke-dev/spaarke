@@ -794,7 +794,7 @@ public class GrantorCeilingTests
         var ciam = new AssignedAccessTestDoubles.RecordingCiamProvisioner();
         var result = await InviteAndGrantExternalUserEndpoint.InviteAndGrantAsync(
             request, _dataverse, _participations, DenyList(), new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new FixedRightsProbe(callerRights),
-            ciam, emailService: null!, IdentityBindingTestKit.Binder(_identities),
+            ciam, emailService: null!, IdentityBindingTestKit.Binder(_identities), InviteOrganizationTestKit.PortalOnly(),
             PortalConfig(), Sprk.Bff.Api.Tests.TestInfrastructure.TestSpeOwnership.Customer("acme"),
             AssignedAccessTestDoubles.InertMaterializer(), AssignedAccessTestDoubles.InertNotifier(), Context(),
             NullLogger<Program>.Instance, new FixedClock(Today), CancellationToken.None);

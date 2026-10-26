@@ -125,9 +125,11 @@ public sealed class ExternalInviteService
         if (intent.InviteStatus == LookupStatus.Failed || intent.ContactId != contactId)
             return GrantInviteAssessment.Done(Failed(ContactBindingDecision.InviteContactLookupFailed));
         // A pending invite also carries its invite stamp: one written before the stamp existed binds nobody, so it is
-        // replaced (a new invite) rather than kept.
+        // replaced (a new invite) rather than kept. Slice B2: a current work-account invite carries no code (only a
+        // Workforce or WorkforceHome sign-in from its tenant binds it) and is pending too, so a grant never replaces it with
+        // a portal-account invite.
         if (intent.InviteStatus == LookupStatus.Read
-            && !string.IsNullOrEmpty(intent.InviteCodeHash)
+            && (!string.IsNullOrEmpty(intent.InviteCodeHash) || ContactBindingDecision.IsWorkAccountInvite(intent))
             && !string.IsNullOrEmpty(intent.InvitedEmailHash)
             && ContactBindingDecision.IsInviteMarkerCurrent(intent.InvitedOn, _time.GetUtcNow()))
             return GrantInviteAssessment.Done(new GrantInviteResult(GrantInviteStatus.AlreadyPending));
@@ -291,6 +293,15 @@ public sealed class ExternalInviteService
     /// with the grant checks (task 139), and passes the same resolution in — so the contact the checks judged IS the
     /// contact onboarding provisions: one email→contact answer, never a second, possibly different, lookup.
     /// </param>
+    /// <param name="workAccountTenantId">
+    /// Slice B2: null for a portal-account (CIAM) invite, everything above. The customer tenant the invited email's
+    /// organisation resolved to (<see cref="InviteOrganizationResolver"/>) for a work-account invite: the contact is resolved
+    /// or created as above, a contact that already carries a sign-in is refused
+    /// (<see cref="InviteExternalUserEndpoint.WorkAccountNotProvisionable"/>), and the invite stamp (email hash, that tenant,
+    /// the marker; no code) is written. No CIAM account, no oid, no plane and no email: only a Workforce or WorkforceHome
+    /// sign-in from that tenant binds the contact. A stamp that did not land is the retryable 503
+    /// <see cref="ContactBindingDecision.InviteMarkerNotWritten"/>.
+    /// </param>
     internal static async Task<ProvisionOutcome> ProvisionAsync(
         InviteExternalUserRequest request,
         DataverseWebApiClient dataverseClient,
@@ -301,8 +312,15 @@ public sealed class ExternalInviteService
         string? customerKey,
         ILogger logger,
         InviteContactResolution? resolution,
-        CancellationToken ct)
+        CancellationToken ct,
+        Guid? workAccountTenantId = null)
     {
+        if (workAccountTenantId == Guid.Empty)
+        {
+            throw new ArgumentException("A work-account tenant is a non-empty GUID, or null for a portal account.",
+                nameof(workAccountTenantId));
+        }
+
         // Task 185: the invite link is built from trusted config only. A portal URL it cannot use (not https, credentials in
         // it) stops the invite here, before anything is resolved, written or created.
         if (BuildInviteLink(portalUrl, customerKey, inviteCode: null) is null)
@@ -320,6 +338,12 @@ public sealed class ExternalInviteService
         if (NotProvisionable(resolution, request.Email, logger) is { } stopped)
         {
             return stopped;
+        }
+
+        if (workAccountTenantId is not null
+            && InviteExternalUserEndpoint.WorkAccountNotProvisionable(resolution, request.Email, logger) is { } bound)
+        {
+            return bound;
         }
 
         Guid contactId;
@@ -403,7 +427,7 @@ public sealed class ExternalInviteService
         // A marker write that FAILED (anything but Written / ColumnMissing) stops the invite here: 503, nothing created.
         // The same write stamps the invite (the invited address, hashed, and the tenant it names): every email bind onto the
         // contact needs that stamp. It does not depend on the CIAM account branch below.
-        var mark = await binder.MarkInviteSentAsync(contactId, etag, request.Email, InvitedTenant(request), ct);
+        var mark = await binder.MarkInviteSentAsync(contactId, etag, request.Email, workAccountTenantId, ct);
         var markerLanded = mark.Status == StoreWriteStatus.Written;
 
         // #2005: the contact had no row version (this invite created it) and its re-read found it bound, linked to an
@@ -414,8 +438,29 @@ public sealed class ExternalInviteService
         {
             if (NotProvisionable(reread, request.Email, logger) is { } refused)
                 return refused;
+            if (workAccountTenantId is not null
+                && InviteExternalUserEndpoint.WorkAccountNotProvisionable(reread, request.Email, logger) is { } boundSince)
+                return boundSince;
             if (reread.Action == InviteContactAction.AlreadyProvisioned)
                 return new ProvisionOutcome(contactId, AlreadyProvisionedStatus);
+        }
+
+        // Slice B2: a work-account invite ends here. The stamp is the contact's only evidence, so a stamp that did not land
+        // (a write fault, or a column not provisioned) is the retryable 503. No CIAM account, no oid, no email.
+        if (workAccountTenantId is { } workTenant)
+        {
+            if (!markerLanded)
+            {
+                logger.LogWarning(
+                    "[EXT-INVITE] Contact {ContactId} could not be stamped for a work-account invite ({Status}) — answered 503, "
+                    + "nothing sent.", contactId, mark.Status);
+                return MarkerNotWritten(contactId);
+            }
+
+            logger.LogInformation(
+                "[EXT-INVITE] Contact {ContactId} invited for a work-account sign-in from customer tenant {TenantId}; no CIAM "
+                + "account and no invite email.", contactId, workTenant);
+            return new ProvisionOutcome(contactId, WorkAccountInvitedStatus);
         }
 
         // Task 185: the link both invite emails open. It carries the one-time code only when the marker and its hash landed
@@ -529,22 +574,6 @@ public sealed class ExternalInviteService
             ciamOid, request.Email, contactId);
 
         return new ProvisionOutcome(contactId, ProvisionedStatus, EmailFailed: onboardingEmailFailed);
-    }
-
-    /// <summary>
-    /// The tenant the invite names (<see cref="InviteExternalUserRequest.InvitedTenantId"/>), or null for none. The routes
-    /// validate it first (<see cref="InviteExternalUserEndpoint.ValidateInvitedTenant"/>); a value that is not a GUID here
-    /// throws rather than being stamped as "no tenant".
-    /// </summary>
-    private static Guid? InvitedTenant(InviteExternalUserRequest request)
-    {
-        if (string.IsNullOrWhiteSpace(request.InvitedTenantId))
-        {
-            return null;
-        }
-
-        return InviteExternalUserEndpoint.InvitedTenantOf(request.InvitedTenantId)
-            ?? throw new InvalidOperationException("The invited tenant id is not a GUID; it is validated before the invite.");
     }
 
     /// <summary>
