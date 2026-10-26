@@ -555,8 +555,30 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
 
     private static readonly Guid BffWriterProfileId = Guid.Parse("0000b175-0000-0000-0000-0000000f1e1d");
 
-    /// <summary>Task 175 fix round 2: the BFF application user holds the System Administrator role.</summary>
+    /// <summary>Task 175 fix round 2: the BFF application user holds the System Administrator role (directly; real template id).</summary>
     public bool BffIsSystemAdministrator { get; set; }
+
+    /// <summary>
+    /// #2320: the BFF application user directly holds a role NAMED "System Administrator" whose template id is NOT the System
+    /// Administrator template (a renamed or impostor role). It proves nothing.
+    /// </summary>
+    public bool BffHoldsRoleNamedSystemAdministratorWithOtherTemplate { get; set; }
+
+    /// <summary>#2320: a team the BFF application user is a member of holds the System Administrator role.</summary>
+    public bool BffTeamIsSystemAdministrator { get; set; }
+
+    /// <summary>#2320: the tables a field security profile held by the BFF's TEAM grants Read on (none by default).</summary>
+    public HashSet<string> BffTeamProfileReadTables { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The System Administrator role template id — a literal here, so the fixture pins the value independently.</summary>
+    private static readonly Guid SystemAdministratorTemplateId = Guid.Parse("627090ff-40a3-4053-8790-584edc5be201");
+
+    // #2320: the team the BFF's user is a member of, its profile, and a DECOY team (and profile) the BFF is NOT a member of —
+    // the decoy holds System Administrator and a profile granting Read on both tables, so a team query that drops the
+    // membership clause proves readability it must not.
+    private static readonly Guid BffTeamId = Guid.Parse("0000b175-0000-0000-0000-000000007ea1");
+    private static readonly Guid BffTeamProfileId = Guid.Parse("0000b175-0000-0000-0000-0000000f1e7e");
+    private static readonly Guid OtherTeamProfileId = Guid.Parse("0000b175-0000-0000-0000-0000000f1e0d");
 
     /// <summary>The BFF application user's systemuserid in this fixture.</summary>
     public static readonly Guid BffApplicationUserId = Guid.Parse("0000b175-0000-0000-0000-00000000bff1");
@@ -770,6 +792,9 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
         AccessRecordReadTables.Add("sprk_workassignment");
         AccessRecordReadTables.Add("sprk_project");
         BffIsSystemAdministrator = false;
+        BffHoldsRoleNamedSystemAdministratorWithOtherTemplate = false;
+        BffTeamIsSystemAdministrator = false;
+        BffTeamProfileReadTables.Clear();
         OwnershipPatchTimesOutAfterApplying = false;
         _updateSequence = 0;
         Grants.Clear();
@@ -1356,22 +1381,67 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
             return JsonSerializer.Serialize(new[] { new Dictionary<string, object?> { ["systemuserid"] = BffApplicationUserId } });
         if (entitySet == $"systemusers({BffApplicationUserId})/systemuserroles_association")
         {
-            return JsonSerializer.Serialize(BffIsSystemAdministrator
-                ? new[] { new Dictionary<string, object?> { ["roleid"] = Guid.Parse("0000b175-0000-0000-0000-0000000005a1") } }
+            // #2320: honours the filter — by template id or by name — over the BFF's direct roles.
+            var roles = new List<(Guid Id, string Name, Guid Template)>();
+            if (BffIsSystemAdministrator)
+                roles.Add((Guid.Parse("0000b175-0000-0000-0000-0000000005a1"), "System Administrator", SystemAdministratorTemplateId));
+            if (BffHoldsRoleNamedSystemAdministratorWithOtherTemplate)
+                roles.Add((Guid.Parse("0000b175-0000-0000-0000-0000000005a2"), "System Administrator", Guid.Parse("0000b175-0000-0000-0000-00000000075a")));
+            var matching = roles.Where(r =>
+                (filter is null || !filter.Contains("_roletemplateid_value eq ", StringComparison.Ordinal)
+                 || filter.Contains($"_roletemplateid_value eq {r.Template}", StringComparison.OrdinalIgnoreCase))
+                && (filter is null || !filter.Contains("name eq ", StringComparison.Ordinal)
+                    || filter.Contains($"name eq '{r.Name}'", StringComparison.Ordinal)));
+            return JsonSerializer.Serialize(matching.Select(r => new Dictionary<string, object?> { ["roleid"] = r.Id }).ToArray());
+        }
+        if (entitySet == $"systemusers({BffApplicationUserId})/teammembership_association")
+            return JsonSerializer.Serialize(new[] { new Dictionary<string, object?> { ["teamid"] = BffTeamId } });
+        if (entitySet == "roles")
+        {
+            // #2320: System Administrator held through a team. The org always has System Administrator roles held by someone
+            // (the decoy): only a query asking for the template AND naming the BFF's team gets the BFF's answer.
+            var asksTemplate = filter is not null
+                               && filter.Contains($"_roletemplateid_value eq {SystemAdministratorTemplateId}", StringComparison.OrdinalIgnoreCase);
+            var scopedToTeams = filter is not null && filter.Contains("teamroles_association/any(", StringComparison.Ordinal);
+            var held = asksTemplate && (!scopedToTeams
+                || (BffTeamIsSystemAdministrator && filter!.Contains($"teamid eq {BffTeamId}", StringComparison.OrdinalIgnoreCase)));
+            return JsonSerializer.Serialize(held
+                ? new[] { new Dictionary<string, object?> { ["roleid"] = Guid.Parse("0000b175-0000-0000-0000-0000000005a3") } }
                 : Array.Empty<Dictionary<string, object?>>());
         }
         if (entitySet == $"systemusers({BffApplicationUserId})/systemuserprofiles_association")
             return JsonSerializer.Serialize(new[] { new Dictionary<string, object?> { ["fieldsecurityprofileid"] = BffWriterProfileId } });
+        if (entitySet == "fieldsecurityprofiles")
+        {
+            // #2320: profiles held through a team. Unscoped, every profile comes back (the decoy team's too).
+            var scopedToTeams = filter is not null && filter.Contains("teamprofiles_association/any(", StringComparison.Ordinal);
+            var ids = new List<Guid>();
+            if (!scopedToTeams || filter!.Contains($"teamid eq {BffTeamId}", StringComparison.OrdinalIgnoreCase))
+                ids.Add(BffTeamProfileId);
+            if (!scopedToTeams)
+                ids.Add(OtherTeamProfileId);
+            return JsonSerializer.Serialize(ids.Select(id => new Dictionary<string, object?> { ["fieldsecurityprofileid"] = id }).ToArray());
+        }
         if (entitySet == "fieldpermissions")
         {
-            // Honours the filter (fix round 3): the column, Read, and the BFF's own profile must all be asked for.
+            // Honours the filter (fix round 3): the column, Read, and a profile must all be asked for; each profile grants
+            // its own tables (#2320: the BFF's direct profile, its team's, and the decoy team's).
             var asked = filter is not null
                         && filter.Contains("attributelogicalname eq 'sprk_accessinheritance'", StringComparison.Ordinal)
-                        && filter.Contains("canread eq 4", StringComparison.Ordinal)
-                        && filter.Contains($"_fieldsecurityprofileid_value eq {BffWriterProfileId}", StringComparison.OrdinalIgnoreCase);
-            return JsonSerializer.Serialize(asked && AccessRecordReadableByProfile && !ChildWorld.HidesAccessRecords
-                ? AccessRecordReadTables.Select(t => new Dictionary<string, object?> { ["entityname"] = t }).ToArray()
-                : Array.Empty<Dictionary<string, object?>>());
+                        && filter.Contains("canread eq 4", StringComparison.Ordinal);
+            bool Names(Guid profile) => filter!.Contains($"_fieldsecurityprofileid_value eq {profile}", StringComparison.OrdinalIgnoreCase);
+            var tables = new List<string>();
+            if (asked && !ChildWorld.HidesAccessRecords)
+            {
+                if (AccessRecordReadableByProfile && Names(BffWriterProfileId))
+                    tables.AddRange(AccessRecordReadTables);
+                if (Names(BffTeamProfileId))
+                    tables.AddRange(BffTeamProfileReadTables);
+                if (Names(OtherTeamProfileId))
+                    tables.AddRange(new[] { "sprk_workassignment", "sprk_project" });
+            }
+
+            return JsonSerializer.Serialize(tables.Select(t => new Dictionary<string, object?> { ["entityname"] = t }).ToArray());
         }
 
         switch (entitySet)
