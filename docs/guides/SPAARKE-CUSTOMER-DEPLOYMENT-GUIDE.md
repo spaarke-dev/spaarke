@@ -1022,6 +1022,13 @@ it needs the act-on-behalf-of-another-user privilege.
   -BffApplicationIds <bff-uami-client-id>[,<bff-app-registration-id>] -Verify   # must exit 0
 ```
 
+**Rollout order — schema first, on every environment.** Apply this script and pass `-Verify` (exit 0: the two stamp
+columns, their field security, and the proof reads) BEFORE deploying a BFF build that requires the invite stamp. An
+environment without the stamp columns refuses EVERY email bind, on the external (CIAM) plane as well as the Workforce
+plane and WorkforceHome registration, with `contact_not_invited`: the stamp is read in the same query as the invite
+marker, so a column that is not provisioned leaves no stamp to meet, and no bind is made without one. Nothing is bound
+or created while the columns are missing; contacts already bound by oid are not affected.
+
 **Rollout — an email bind needs a current invite stamp.** From the release that writes these two columns, every invite
 (`/invite` and `/invite-and-grant`) records the invited address (hashed) and, when the inviter names it, the person's
 Entra tenant id (`invitedTenantId`, a GUID; anything else is refused with 400). An unbound contact is bound to a sign-in
@@ -2608,7 +2615,7 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 | 2026-10-08 | §5 handler table: **H4b** row added — the BFF app settings are written through the ARM SDK on both slots (merge, never replace), no longer by running the generated Configure script; **H6** row — the org-settings contract is one Dataverse Web API PATCH and H6 installs no application. The L2 Worker runs no shell tool (G38) | `customer-provisioning-orchestration-r1` T253 |
 | 2026-10-20 | §7.4: the document Access Permission schema — `scripts/Set-DocumentAccessPermissionSchema.ps1` (`sprk_document.sprk_accessinheritance`, not field-secured) runs BEFORE a BFF carrying task 189 is deployed; until it has, that BFF only raises a document's Access Permission to what its parents give and never lowers one (documents listed under `tablesWithoutColumn`, raises counted in `raisedOnly`). A raise kept in that window is recorded as the document's own on the first run after the script and is never widened again: the schema must go first, and §7.4 says how to find such documents and widen them by hand | `unified-access-control-r2` task 189 (D7 T7a, #2126; security pass 2) |
 | 2026-10-23 | §6.5.2: contact access-level and identity bookkeeping columns are field-secured — `scripts/Set-ExternalAccessContactSecuritySchema.ps1` (dry run, `-Apply`, `-Verify` exit 0) secures `sprk_accesspermissiongrant`, `sprk_identityplane` and the `sprk_identitycollision*` columns and adds three BFF-only columns; the H6 path for a new stamp applies once SpaarkeMaster 1.2.4.0 is published; §7.11: H7b S18 covers the plane and collision columns, S19 verifies the access-level lock and the whole standing-grant lock (Standing Grant Administrators 4/4/4; no other writer but System Administrator — `secure_setup.standing_grant_lock_other_writer`), S22 verifies the three BFF-only columns' locks once a release carries them; an H7b carrying these checks requires SpaarkeMaster >= 1.2.4.0 published before the control plane is deployed | `spaarke-SPA-external-access-platform-r3` (contact identity hardening, slice A) |
-| 2026-10-23 | §6.5.2 rollout note: an email bind needs a current invite stamp (invited address and, for work accounts, the invited tenant unless `xms_edov` is boolean true); invites take an optional `invitedTenantId` (GUID); Workforce contacts never invited through the BFF, or invited before this release, need a re-invite naming their tenant | `spaarke-SPA-external-access-platform-r3` (contact identity hardening, slice B) |
+| 2026-10-23 | §6.5.2 rollout note: rollout order — the contact security schema is applied and `-Verify` passes (stamp columns and proof reads) on every environment BEFORE a BFF build that requires the invite stamp is deployed; without the stamp columns every email bind (CIAM and Workforce) is refused; an email bind needs a current invite stamp (invited address and, for work accounts, the invited tenant unless `xms_edov` is boolean true); invites take an optional `invitedTenantId` (GUID); Workforce contacts never invited through the BFF, or invited before this release, need a re-invite naming their tenant | `spaarke-SPA-external-access-platform-r3` (contact identity hardening, slice B) |
 
 ---
 
