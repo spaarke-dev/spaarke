@@ -31,7 +31,8 @@ public class RuleSetRolePrivilegeGuardTests
 
     /// <summary>
     /// D-76 / D-108 with uac-r2's depths: name (live privilege-name casing, as <c>BillingAdminAuthorization</c>) -> level. Read is Global;
-    /// the markers are Basic.
+    /// the markers are Basic. Global Read on sprk_Policy / sprk_PolicyVersion reaches policies re-owned into the secure business unit; the
+    /// owner kept it (EB-D-150, 2026-10-26) and uac-r2's isolation census lists it as an accepted exception (#2322).
     /// </summary>
     private static readonly Dictionary<string, string> BillingAdminSet = new(StringComparer.Ordinal)
     {
@@ -71,16 +72,7 @@ public class RuleSetRolePrivilegeGuardTests
     public void BillingAdministratorHoldsExactlyTheBillingAdminSetAtItsDepths()
     {
         var role = Assert.Single(SourceRoles(), r => r.Name == BillingAdministrator);
-        var held = Privileges(role.Xml);
-
-        var missing = BillingAdminSet
-            .Where(p => !held.Any(h => h.Name == p.Key && h.Level == p.Value))
-            .Select(p => $"{p.Key} at {p.Value}{string.Concat(held.Where(h => h.Name == p.Key).Select(h => $" (held at {h.Level})"))}")
-            .ToList();
-        var extra = held
-            .Where(h => !BillingAdminSet.ContainsKey(h.Name) && !PlatformDefaults.Contains(h.Name, StringComparer.Ordinal))
-            .Select(h => $"{h.Name} ({h.Level})")
-            .ToList();
+        var (missing, extra) = ExactSetFindings(role.Xml);
 
         Assert.True(missing.Count == 0 && extra.Count == 0,
             $"{role.RelativePath} must hold exactly Read at Global and Create, Write, Append and AppendTo at Basic on sprk_ruleset, sprk_Policy "
@@ -108,6 +100,54 @@ public class RuleSetRolePrivilegeGuardTests
         var only = Assert.Single(found);
         Assert.Contains("Spaarke Core User", only, StringComparison.Ordinal);
         Assert.Contains("prvReadsprk_ruleset (Deep)", only, StringComparison.Ordinal);
+    }
+
+    [Fact(DisplayName = "120 must-fire: the Billing Administrator exact set reports a wrong depth and an extra privilege; the exact set does not")]
+    public void ExactSetCheckFiresOnAWrongDepthAndAnExtraPrivilege()
+    {
+        var exact = BillingAdminSet.Select(p => (p.Key, p.Value)).Concat(PlatformDefaults.Select(d => (d, "Global"))).ToList();
+
+        var clean = ExactSetFindings(BillingAdminRole(exact));
+        Assert.Empty(clean.Missing);
+        Assert.Empty(clean.Extra);
+
+        var wrongDepth = ExactSetFindings(BillingAdminRole(exact.Select(p => p.Item1 == "prvReadsprk_Policy" ? (p.Item1, "Deep") : p).ToList()));
+        Assert.Equal("prvReadsprk_Policy at Global (held at Deep)", Assert.Single(wrongDepth.Missing));
+        Assert.Empty(wrongDepth.Extra);
+
+        var extraPrivilege = ExactSetFindings(BillingAdminRole(exact.Append(("prvDeletesprk_ruleset", "Basic")).ToList()));
+        Assert.Empty(extraPrivilege.Missing);
+        Assert.Equal("prvDeletesprk_ruleset (Basic)", Assert.Single(extraPrivilege.Extra));
+    }
+
+    [Fact(DisplayName = "120 must-not-fire: the holder check skips the Billing Administrator role by name")]
+    public void HolderCheckSkipsTheBillingAdministrator()
+    {
+        var role = BillingAdminRole(new List<(string, string)> { ("prvReadsprk_ruleset", "Global"), ("prvWritesprk_ruleset", "Basic") });
+
+        Assert.Empty(Violations(role));
+        Assert.Equal(2, Violations(role.Replace(BillingAdministrator, "Spaarke Billing Administrator Copy", StringComparison.Ordinal)).Count);
+    }
+
+    private static string BillingAdminRole(IEnumerable<(string Name, string Level)> privileges) =>
+        new XElement("Role", new XAttribute("name", BillingAdministrator),
+            new XElement("RolePrivileges", privileges.Select(p =>
+                new XElement("RolePrivilege", new XAttribute("name", p.Name), new XAttribute("level", p.Level))))).ToString();
+
+    /// <summary>The Billing Administrator exact-set check on one role definition: set members missing or at another depth, and privileges
+    /// outside the set and the platform defaults.</summary>
+    private static (List<string> Missing, List<string> Extra) ExactSetFindings(string roleXml)
+    {
+        var held = Privileges(roleXml);
+        var missing = BillingAdminSet
+            .Where(p => !held.Any(h => h.Name == p.Key && h.Level == p.Value))
+            .Select(p => $"{p.Key} at {p.Value}{string.Concat(held.Where(h => h.Name == p.Key).Select(h => $" (held at {h.Level})"))}")
+            .ToList();
+        var extra = held
+            .Where(h => !BillingAdminSet.ContainsKey(h.Name) && !PlatformDefaults.Contains(h.Name, StringComparer.Ordinal))
+            .Select(h => $"{h.Name} ({h.Level})")
+            .ToList();
+        return (missing, extra);
     }
 
     private sealed record SourceRole(string RelativePath, string Name, string Xml);
