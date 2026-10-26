@@ -223,10 +223,23 @@ public sealed class SecureRecordSetupProcedure
     /// <summary>S18/S19 (#2317): the script that applies those locks to an existing environment (<c>-Apply</c>, then <c>-Verify</c>).</summary>
     public const string ContactSecuritySchemaScript = "scripts/Set-ExternalAccessContactSecuritySchema.ps1";
 
-    /// <summary>S18/S19: the remedy an incomplete contact lock names — the minimum release, or the script for an existing environment.</summary>
-    private const string ContactLocksRemedy =
-        "It requires SpaarkeMaster " + ContactLocksMinimumSpaarkeMasterVersion + " or later: import it (H6), or in an existing " +
-        "environment run " + ContactSecuritySchemaScript + " -Apply (then -Verify, exit 0); then resume. Nothing was written.";
+    /// <summary>S19 (ISS-020): the first SpaarkeMaster release that ships the standing-grant field and its profile.</summary>
+    public const string StandingGrantMinimumSpaarkeMasterVersion = "1.2.0.0";
+
+    /// <summary>
+    /// The remedy an incomplete package lock names. A new run imports the release at H6; a resume does not re-run a
+    /// completed H6, so an environment already past it applies the locks with the script, verifies, then resumes.
+    /// </summary>
+    private static string LocksRemedy(string minimumVersion) =>
+        "It requires SpaarkeMaster " + minimumVersion + " or later: a new run imports it at H6 once it is published; in an " +
+        "environment already past H6 (a resume does not re-run a completed H6) run " + ContactSecuritySchemaScript +
+        " -Apply, then -Verify (exit 0), then resume. Nothing was written.";
+
+    /// <summary>S18/S19: the remedy an incomplete contact lock names.</summary>
+    private static readonly string ContactLocksRemedy = LocksRemedy(ContactLocksMinimumSpaarkeMasterVersion);
+
+    /// <summary>S19: the remedy an incomplete standing-grant lock names.</summary>
+    private static readonly string StandingGrantLocksRemedy = LocksRemedy(StandingGrantMinimumSpaarkeMasterVersion);
 
     /// <summary>S22 (#2317): the BFF-only columns, checked as <see cref="InviteCodeHashColumn"/> is.</summary>
     public static readonly IReadOnlyList<string> BffOnlyColumns = [InvitedEmailHashColumn, InvitedTenantIdColumn];
@@ -631,8 +644,7 @@ public sealed class SecureRecordSetupProcedure
             return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.StandingGrantLockIncomplete,
                 $"{StandingGrantTable}.{StandingGrantColumn}: IsSecured={standingSecured?.ToString() ?? "(no such column)"}, " +
                 $"'{StandingGrantProfileName}' read/create/update={Rights(standingGrant)} (expected secured, 4/4/4). The " +
-                "package's standing-grant field and profile (teams-app-r1 task 050; SpaarkeMaster 1.2.0.0 and later) are " +
-                "incomplete: import SpaarkeMaster (H6), then resume. Nothing was written.");
+                "package's standing-grant field and profile (teams-app-r1 task 050) are incomplete. " + StandingGrantLocksRemedy);
         }
         var standingOtherWriters = standingPermissions
             .Where(p => p.ProfileId != standingProfileId

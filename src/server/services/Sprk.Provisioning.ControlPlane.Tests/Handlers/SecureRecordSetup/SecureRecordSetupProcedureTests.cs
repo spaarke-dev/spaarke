@@ -1038,7 +1038,7 @@ public sealed class SecureRecordSetupProcedureTests
 
         refused.Diagnostic.Should().Contain("contact.sprk_identityplane")
             .And.Contain("SpaarkeMaster 1.2.4.0 or later")
-            .And.Contain("scripts/Set-ExternalAccessContactSecuritySchema.ps1 -Apply");
+            .And.Contain(ResumeRemedy);
         dv.Writes.Should().BeEmpty();
     }
 
@@ -1052,7 +1052,27 @@ public sealed class SecureRecordSetupProcedureTests
 
         refused.Diagnostic.Should().Contain("contact.sprk_accesspermissiongrant")
             .And.Contain("SpaarkeMaster 1.2.4.0 or later")
-            .And.Contain("scripts/Set-ExternalAccessContactSecuritySchema.ps1 -Apply");
+            .And.Contain(ResumeRemedy);
+        dv.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>A resume does not re-run a completed H6, so the remedy names the script for an environment past it.</summary>
+    private const string ResumeRemedy =
+        "a new run imports it at H6 once it is published; in an environment already past H6 (a resume does not re-run a " +
+        "completed H6) run scripts/Set-ExternalAccessContactSecuritySchema.ps1 -Apply, then -Verify (exit 0), then resume. " +
+        "Nothing was written.";
+
+    [Fact]
+    public async Task StandingGrantLockIncomplete_NamesTheMinimumVersionAndTheScriptForAnEnvironmentPastH6()
+    {
+        var dv = NewEnv();
+        dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey("contact", "sprk_standinggrant")] = false;
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.StandingGrantLockIncomplete, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain("contact.sprk_standinggrant")
+            .And.Contain("SpaarkeMaster 1.2.0.0 or later")
+            .And.Contain(ResumeRemedy);
         dv.Writes.Should().BeEmpty();
     }
 
