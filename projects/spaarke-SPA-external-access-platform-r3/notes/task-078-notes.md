@@ -493,3 +493,16 @@ Contents beyond the previous live build 1fa0cf5cb8: ontology 159/161/163 (#2303,
 | E, server gate | R3 read 11:18–11:49Z (`gate58.ps1`): 75 requests, 0 5xx, 0 403, 0 "Invalid hostname", 0 worklist_unavailable, 0 signal_unreadable, 0 registration_owner_unconfigured. One `RedisConnectionException` (scheduler lease renew, 11:21:20Z, at startup); 15 Redis/lease warnings earlier the same day before the deploy, and scheduler traces continue to 11:50Z, so not deploy-caused. 21 deny-code log lines (`contact_bound_to_different_oid` 14, `linked_contact_bound_to_different_oid` 7) against 18 in the same 31 minutes the day before: the reconciliation job's known collisions. UAC runs its own gate. |
 
 **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261023T111635Z` (restores 1fa0cf5cb8).
+
+## Dev BFF deploy of master bc99fc3e6b (2026-10-26 22:03Z; owner: "yes proceed to deploy", answering the request for bc99fc3e6b)
+
+Contents beyond the previous live build 58ffc37da3: UAC #2318 (secure-isolation census covers every codified child table; read-only) and UAC #2321 (access-record readability is proven only by the platform). UAC confirmed live (read-only) that the dev BFF identity passes the #2321 proof on the marker column.
+
+| Step | Result |
+|---|---|
+| Gates | CI, CI Standalone Checks and the Office add-in gate green on bc99fc3e6b; Client lint not triggered (server-only change). OKs: UAC (requester), ontology, word-add-in, field-mapping, ebilling; provisioning standing OK. |
+| A, live read and snapshot | Live ProductVersion `1.0.0+58ffc37da3…`, healthz 200. Snapshot `deploy/rollback/wwwroot-20261026T220116Z` (222 files, 148.13 MB). |
+| D, deploy | `Deploy-BffApi.ps1 -Environment dev` from detached worktree `C:\wtbffe-bc9`. 4 file hashes, health and CORS verified. OneDeploy ended 22:03:10Z. Read-back 22:04:15Z: ProductVersion `1.0.0+bc99fc3e6b…`, healthz 503 once (warm-up), then 200 from 22:04:30Z; healthz/dataverse 200; anonymous /api/me 401. |
+| E, server gate | Pending: `gatebc9.ps1` at about 22:34Z. It also counts `access_record_hidden` (must be 0) and the `[SECURE-CENSUS]` lines. |
+
+**Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261026T220116Z` (restores 58ffc37da3).
