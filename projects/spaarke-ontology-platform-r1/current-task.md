@@ -2,7 +2,7 @@
 
 > **Last Updated**: 2026-10-23 ~12:10Z (main session, context-handoff). State only — history is in git log, task `<completion>` blocks and
 > `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 and §6. Decisions: [`notes/decisions.md`](notes/decisions.md)
-> (D-1..D-189). Deferred work: one self-contained GitHub issue per item, label `ontology-deferred`, plus a DI-nn row in both tables of
+> (D-1..D-190). Deferred work: one self-contained GitHub issue per item, label `ontology-deferred`, plus a DI-nn row in both tables of
 > `notes/defer-issues.md` (next free: **DI-128**). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
@@ -34,7 +34,6 @@
 ## Open owner questions
 
 - The browser checks above.
-- **DI-126 / #2310** (a direct Duplicate Signal read shows the earlier invoice number). Options A–D were explained to the owner 2026-10-23. Recommended: **D**, field-secure the sentence, evidence and fact snapshot to the BFF writer profile; form and view check first. The owner hasn't picked yet.
 - Approve `7479ce22a9` in R3's session (uac-r2 census; optional).
 - The owner is removing `C:\wb160p` by hand (said yes).
 
