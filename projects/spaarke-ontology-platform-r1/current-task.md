@@ -10,7 +10,7 @@
 | Field | Value |
 |---|---|
 | **Task** | UAT round 1, live on dev. Dev BFF is **`58ffc37da3`**: deployed by R3 at 11:18:12Z, verified by DLL ProductVersion, healthz 200. It carries every UAT-1 task: 158, 159, 161, 162, 163, 164, and 160 + #2314. The D-185 dev steps are **done**: worklist config 11:20Z (verified in sync), POL-MATTER-NOBUDGET v2 11:20:38Z (verified), and Console User policy Reads removed 11:21:51–53Z (21 → 19). uac-r2 independently confirmed the read-back; their server gate is **PASS** (11:18–11:51Z). Basic User needed no change (D-189). |
-| **Status** | No lane running; no lane worktrees. Waiting on: (1) the **owner's browser checks** (list below); (2) ebilling's #1911 F1 merge SHA; (3) R3's next candidate `7479ce22a9` (uac-r2 census only; ontology OK sent), which needs the owner's approval in R3's session. |
+| **Status** | No lane running; no lane worktrees. Waiting on: (1) the **owner's browser checks** (list below); (2) ebilling's #1911 F1 merge SHA; (3) R3's next candidate `f183dd9c92` (uac-r2 #2322 + #2323 only; ontology OK sent 2026-10-26), which needs the owner's approval in R3's session. Live dev BFF per R3 is `bc99fc3e6b` (uac-r2 census; superset of `58ffc37da3`). |
 | **Next Action** | On the owner's browser-check results: fix any failure (a lane per defect), or close 114, 160 and 163 (✅ + POML + TASK-INDEX; run the drift check). Then open the next docs→master PR (D-185 guard #2316 plus docs; test-only). |
 
 ## Owner browser checks (sent 2026-10-23 ~12:00Z; zz- test data, delete afterwards)
@@ -35,7 +35,7 @@
 
 - **Census finding, resolved (2026-10-26):** Deep Read on Signal, Decision Record and budget revision depends on the UAC business-unit restructure (§5.2), not on a role change. Security-roles §20. No ontology task.
 - The browser checks above.
-- Approve `7479ce22a9` in R3's session (uac-r2 census; optional).
+- Approve `f183dd9c92` in R3's session (uac-r2 census exceptions and access-record proof; optional).
 - The owner is removing `C:\wb160p` by hand (said yes).
 
 ## Lane facts to carry
@@ -57,7 +57,7 @@
 
 ## Dev state (spaarkedev1 / spaarke-bff-dev)
 
-- BFF `58ffc37da3`; Console `58ffc37da3` (run 39914343605).
+- BFF `bc99fc3e6b` per R3 (UAT-1 code from `58ffc37da3` plus uac-r2 census); Console `58ffc37da3` (run 39914343605).
 - Worklist row `…5010` is in sync. POL-MATTER-NOBUDGET's current version is v2 `…6312`.
 - Console User (root `51c924e2-…`): 19 privileges, no policy Reads; AppendTo on policy and policyversion remains (outside D-185, left).
 - Worktrees: none for lanes. R2 is at `C:\code_files\spaarke-wt-spaarke-ontology-platform-r2`. Remove a worktree only with `Remove-WorktreeSafe.ps1`.
