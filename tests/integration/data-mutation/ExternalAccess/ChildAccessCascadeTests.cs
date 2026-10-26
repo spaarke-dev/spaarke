@@ -864,6 +864,48 @@ public class ChildAccessCascadeTests : IClassFixture<ProvisionProjectTestFixture
         AssertEmptyRecordUndetermined(pass, empty);
     }
 
+    /// <summary>
+    /// #2320 follow-up: team membership is joined by Dataverse, so no request the proof sends grows with the number of teams
+    /// the BFF's user is in (a long OR of team ids could pass the URL limit, fault, and fail the proof closed). The proof's
+    /// requests for a member of 1 team and of 500 teams that grant nothing are identical; and System Administrator held
+    /// through the 500th team still proves the column.
+    /// </summary>
+    [Fact]
+    public async Task TheProofsRequestsDoNotGrowWithTeamCount_AndSystemAdministratorThroughTheFiveHundredthTeamProvesTheColumn()
+    {
+        var (matter, withRecord, empty) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        SeedOneNonEmptyAndOneEmptyWorkAssignment(matter, withRecord, empty);
+        _fixture.AccessRecordReadableByProfile = false;
+
+        var oneTeam = await ProofRequestsAsync(empty);
+        _fixture.BffAdditionalTeamCount = 499;
+        var fiveHundredTeams = await ProofRequestsAsync(empty);
+
+        oneTeam.Should().Contain(q => q.StartsWith("roles?", StringComparison.Ordinal), "the proof asks for System Administrator");
+        fiveHundredTeams.Should().Equal(oneTeam, "the proof's requests do not depend on how many teams the BFF's user is in");
+        fiveHundredTeams.Should().NotContain(q => q.Contains(ProvisionProjectTestFixture.AdditionalTeamId(1).ToString(),
+            StringComparison.OrdinalIgnoreCase), "no request names a team");
+
+        _fixture.BffTeamIsSystemAdministrator = true; // held through the BFF's own team — the 500th in its roster
+        var pass = await FollowParentsPassAsync();
+
+        AssertEmptyRecordDecided(pass, empty);
+    }
+
+    /// <summary>One pass that leaves <paramref name="empty"/> undetermined, and the proof's requests it sent, sorted.</summary>
+    private async Task<List<string>> ProofRequestsAsync(Guid empty)
+    {
+        _fixture.Queries.Clear();
+        var pass = await FollowParentsPassAsync();
+        AssertEmptyRecordUndetermined(pass, empty);
+        return _fixture.Queries
+            .Where(q => q.EntitySet.StartsWith("systemusers", StringComparison.Ordinal)
+                        || q.EntitySet is "roles" or "teams" or "fieldsecurityprofiles" or "fieldpermissions")
+            .Select(q => $"{q.EntitySet}?{q.Filter}")
+            .Order(StringComparer.Ordinal)
+            .ToList();
+    }
+
     private void AssertEmptyRecordDecided(FollowParentsPass pass, Guid empty)
     {
         pass.Untrusted.Should().BeNull();
