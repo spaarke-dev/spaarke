@@ -233,6 +233,46 @@ public sealed class ExternalRegistrationEndpointsTests : IClassFixture<ExternalR
     }
 
     /// <summary>
+    /// The invite rule runs BEFORE the confirmation prompt: the "confirm it is yours" answer (409) is given only to a caller
+    /// who passes the rule. A caller with no valid stamp for a contact whose email matches is answered 403
+    /// <c>contact_not_invited</c> without confirming anything, and that answer carries neither the prompt's reason code nor
+    /// its wording nor a statement that a record exists. MUST FIRE: no stamp, no confirmation sent. MUST NOT FIRE: a valid
+    /// stamp, no confirmation sent, is still asked to confirm (409).
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TheInviteRule_RunsBeforeTheConfirmationPrompt(bool validStamp)
+    {
+        var existing = _store.AddContact(Guid.NewGuid(), email: Email);
+        if (validStamp)
+        {
+            Invited(existing);
+        }
+
+        var response = await Post(Body(confirm: null));
+        var body = await response.Content.ReadAsStringAsync();
+
+        if (validStamp)
+        {
+            await ShouldBeProblem(response, HttpStatusCode.Conflict, ExternalRegistrationEndpoints.ReasonExistingRecordFound);
+        }
+        else
+        {
+            await ShouldBeProblem(response, HttpStatusCode.Forbidden, ContactBindingDecision.DenyContactNotInvited);
+            response.StatusCode.Should().NotBe(HttpStatusCode.Conflict);
+            body.Should().NotContain(ExternalRegistrationEndpoints.ReasonExistingRecordFound);
+            body.Should().NotContain("Confirm", "the confirmation prompt is not offered to a caller who is not invited");
+            body.Should().NotContain("existing record", "the answer does not say whether a record exists");
+            body.Should().NotContain(existing.Id.ToString("D"));
+        }
+
+        existing.Oid.Should().BeNull();
+        _store.Writes.Should().BeEmpty();
+        _store.Contacts.Should().ContainSingle();
+    }
+
+    /// <summary>
     /// Binding an existing contact at registration needs a current invite stamp whose recorded email is the token's and the
     /// contact's, naming the caller's home tenant (or a boolean-true <c>xms_edov</c>). Each row that misses one leg is
     /// answered 403 <c>contact_not_invited</c> with the "invite again" detail, with or without the confirmation, before the

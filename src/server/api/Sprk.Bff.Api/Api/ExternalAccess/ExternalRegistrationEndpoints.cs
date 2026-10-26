@@ -234,12 +234,12 @@ public static class ExternalRegistrationEndpoints
 
     private static IResult DeniedResult(string? denyCode) => denyCode switch
     {
-        // An existing record carries the email, but the person has no current invite naming this sign-in: a re-invite
-        // (naming their organization's tenant) is the fix, not a retry. Nothing was bound or created.
+        // No current invite names this sign-in: a new invitation (naming their organization's tenant) is the fix, not a
+        // retry. Nothing was bound or created. The answer says nothing about what records exist.
         ContactBindingDecision.DenyContactNotInvited =>
             Problem(StatusCodes.Status403Forbidden, ContactBindingDecision.DenyContactNotInvited,
-                "An existing record carries your email, but it can only be linked to this sign-in after you are invited "
-                + "again. Ask the person who invited you to send a new invitation."),
+                "This sign-in cannot be registered until you are invited. Ask the person who invited you to send a new "
+                + "invitation."),
 
         // A squatted uniqueness mirror: an administrator must resolve the record (the holder is flagged).
         ContactBindingDecision.DenyContactKeyConflict =>
