@@ -1921,3 +1921,23 @@ R3 asked three design questions, (a)–(c), and the owner answered all three in 
 - **(c)** Every contact column the BFF trusts gets field security where Dataverse allows it, and a fail-closed check in the BFF where it does not.
 
 R3 sends the implementer brief and the diff to UAC for review, with two security passes, before any merge. ISS-005 merges with or after this fix.
+
+### Round 127 (2026-10-26): Workforce invite mode, and census accepted exceptions
+
+**1. Workforce invite mode, for the private finding GHSA-hq7m-w2pf-v8j7 (reference only; the design details are with R3).** The owner chose R3's option A: the existing invite endpoints get a Workforce mode. The owner added, verbatim: **"important that user does not need to know the organization tenant id"**.
+
+Reading:
+- Staff never enter a tenant id. The BFF works out the organisation from the invited email's domain and chooses the invite type itself.
+- Staff may still choose a portal account instead.
+- R3 implements it and UAC reviews it.
+
+**2. Census accepted exceptions (after the #2318 census extension).** The owner's answers, verbatim:
+- Billing Administrator's Global Read on rules and rule versions: **"Accepted exception"**. This follows the owner's EB-D-150, given in ebilling's session, to keep Global as a §6.5 path A project exception to design §5.2, against UAC's and ontology's recommendation of Deep.
+- AI Analysis Admin's Global Read on analysis and analysis output: **"Accepted exception"**. This was against UAC's recommendation to keep flagging it, because analyses carry document content from Secure matters.
+
+Reading:
+- The census reports both as low-severity accepted-exception lines that name the holder.
+- They do not count toward the isolation verdict, so the H13 gate does not refuse for them.
+- The exception covers exactly those roles and privileges, and only when the role is held directly. If the same role is held through a team, or the role reaches the secure BU through any other privilege, it is still a finding.
+
+Also recorded from ebilling's session: EB-D-151 (Core User stays as D-90, with a known limit) and EB-D-152 (#2310 option C).
