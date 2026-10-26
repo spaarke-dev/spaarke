@@ -219,6 +219,23 @@ public static class ExternalAccessModule
                 sp.GetRequiredService<IConfiguration>())));
         services.AddSingleton<ContactIdentityBinderFactory>();
 
+        // Slice B2: the invite's organisation lookup (a work-account invite for a configured customer tenant, else a portal
+        // account). Its named client calls one public, unauthenticated host: no auth handler, no default headers, no cookies,
+        // no redirects followed, 5-second timeout. Singleton: its dependencies are singletons (IHttpClientFactory,
+        // ITenantCache, the options monitor, configuration).
+        services.AddHttpClient(InviteOrganizationResolver.HttpClientName, client =>
+            {
+                client.Timeout = InviteOrganizationResolver.DefaultLookupTimeout;
+            })
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+            {
+                AllowAutoRedirect = false,
+                UseCookies = false,
+                Credentials = null,
+                PreAuthenticate = false,
+            });
+        services.AddSingleton<InviteOrganizationResolver>();
+
         // Workforce-token → principal resolver (ADR-028 Amendment A2 · teams-app-r1 FR-04, task 020).
         // Composes the existing AAD-oid→systemuser conversion (MembershipEndpoints.ResolveSystemUserIdAsync)
         // with the oid BINDING (ContactIdentityBinder, task 141) into one principal (systemuser / contact-only
