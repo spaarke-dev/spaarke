@@ -26,9 +26,7 @@
 
 1. Owner checks → close 114, 160 and 163, or fix.
 2. **Next docs→master PR:** the D-185 guard `PolicyReadRoleGuardTests` (#2316, docs `20d7cbd47c`) plus today's docs. Merge master first; run the full ArchTests; send before and after notices if it touches the Console or BFF (it doesn't today).
-3. **ebilling #1911:** F1 merge `bed558cb33` checked 2026-10-26: PASS for ontology. `EarlierInvoiceReadability` = the #2294 round; the combined diff is empty on every ontology file; Core User drops `InvoiceLineItem` (ebilling 029). The owner still decides, via ebilling, before master:
-   - K1: Billing Administrator policy Read goes to Deep (uac-r2);
-   - K2: Core User has full Deep CRUD, Assign and Share on `sprk_invoiceapproval`, `sprk_invoicecorrection`, `sprk_invoicesubmission` and `sprk_externalidentifier`. uac-r2 recommends Read + AppendTo only.
+3. **ebilling #1911:** F1 merge `bed558cb33` checked 2026-10-26: PASS for ontology. `EarlierInvoiceReadability` = the #2294 round; the combined diff is empty on every ontology file; Core User drops `InvoiceLineItem` (ebilling 029). K1 and K2 were decided by the owner in ebilling's session (ebilling `notes/decisions-log.md`, `399813b8f7`): EB-D-150 keeps Global policy Read on Billing Administrator (a census exception in #2322); EB-D-151 keeps D-90's full Core User rights on the five invoice working tables, a known limit. Nothing ontology-side is open.
 4. R2 §9 owner answers → `/design-to-spec`; 105 UAT; #1882 live re-run; 111 row 4; 090 wrap-up; the `[SIGNAL-EVALUATOR]` heartbeat.
 
 ## Open owner questions
