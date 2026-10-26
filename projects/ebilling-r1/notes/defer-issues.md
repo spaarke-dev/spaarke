@@ -966,7 +966,7 @@ Each restamps afterwards, but none refuses any of these:
 
 | Field | Value |
 |---|---|
-| **Status** | Open (known limit, ontology-r1 2nd pass 2026-10-20) |
+| **Status** | Closed 2026-10-26 by task 122: sprk_findingsjson is field-secured to the BFF writer profile on dev (-Verify 0), so a user with Write on a submission can no longer plant a set. Was: open known limit (ontology-r1 2nd pass 2026-10-20). |
 | **Urgency** | low |
 | **Filed** | 2026-10-20 |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2144 |
@@ -1044,7 +1044,7 @@ Each restamps afterwards, but none refuses any of these:
 
 | Field | Value |
 |---|---|
-| **Status** | Decided 2026-10-22: fix (owner). Field-secure sprk_findingsjson (BFF read/write only, also closes DEF-029) and remove it from the submission form; Decision Records store the generic Duplicate sentence. New task after 090. |
+| **Status** | Fixed 2026-10-26 (task 122, live on dev, -Verify 0; merged into work/ebilling-r1). Was: decided 2026-10-22: fix (owner). Field-secure sprk_findingsjson (BFF read/write only, also closes DEF-029) and remove it from the submission form; Decision Records store the generic Duplicate sentence. New task after 090. |
 | **Urgency** | medium |
 | **Filed** | 2026-10-21 |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2235 |
