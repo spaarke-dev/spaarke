@@ -33,6 +33,11 @@
 
 ## Open owner questions
 
+- **NEW, possible security finding (2026-10-26).** Dev BFF `bc99fc3e6b` (R3, 22:03Z; gate PASS). Its `[SECURE-CENSUS]` flags `sprk_decisionrecord` as critical.
+  - Live: Spaarke Console User and Spaarke Ontology Administrator hold Read on `sprk_signal` and `sprk_decisionrecord` at **Deep**, so root-BU holders can read secure-owned rows natively (against D-123). The BFF route trims them.
+  - Facts were sent to uac-r2, and ontology owns the fix. Options: (a) Basic plus team membership; (b) app-only worklist reads trimmed per caller; (c) exception.
+  - Waiting on uac-r2's triage. Then scope a task; the owner approves any role change.
+
 - The browser checks above.
 - Approve `7479ce22a9` in R3's session (uac-r2 census; optional).
 - The owner is removing `C:\wb160p` by hand (said yes).
