@@ -1773,7 +1773,7 @@ internal sealed class HeaderDrivenIdentityStore : IContactIdentityStore
     public Task<BindingReadability> ProbeHomeReadabilityAsync(CancellationToken ct) => _inner.ProbeHomeReadabilityAsync(ct);
     public Task<StoreWriteResult> BindHomeOidAsync(Guid contactId, string? etag, Guid homeTenantId, Guid oid, CancellationToken ct) => _inner.BindHomeOidAsync(contactId, etag, homeTenantId, oid, ct);
     public Task<BindIntentLookup> FindBindIntentAsync(Guid contactId, CancellationToken ct) => _inner.FindBindIntentAsync(contactId, ct);
-    public Task<StoreWriteResult> MarkInvitedAsync(Guid contactId, string? etag, DateTimeOffset invitedOn, string inviteCodeHash, InviteStamp stamp, CancellationToken ct) => _inner.MarkInvitedAsync(contactId, etag, invitedOn, inviteCodeHash, stamp, ct);
+    public Task<StoreWriteResult> MarkInvitedAsync(Guid contactId, string? etag, DateTimeOffset invitedOn, string? inviteCodeHash, InviteStamp stamp, CancellationToken ct) => _inner.MarkInvitedAsync(contactId, etag, invitedOn, inviteCodeHash, stamp, ct);
     public Task<StoreWriteResult> BindOidAsync(Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, CancellationToken ct) => _inner.BindOidAsync(contactId, etag, oid, plane, ct);
     public Task<StoreWriteResult> BindOidAndConsumeInviteAsync(Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, CancellationToken ct) => _inner.BindOidAndConsumeInviteAsync(contactId, etag, oid, plane, ct);
     public Task<StoreWriteResult> CreateContactForOidAsync(Guid oid, IdentityPlaneMarker plane, NewContactDetails details, CancellationToken ct) => _inner.CreateContactForOidAsync(oid, plane, details, ct);

@@ -284,9 +284,12 @@ public interface IContactIdentityStore
     /// never receive a marker or a hash). The same request writes the invite stamp (<paramref name="stamp"/>: the email hash
     /// and the invited tenant, null clearing an earlier one). Writes nothing else. <see cref="StoreWriteStatus.ColumnMissing"/>
     /// when any of the four columns is not provisioned here.
+    /// <para>A portal-account invite carries a code hash and names no tenant; a work-account invite names its resolved
+    /// tenant and carries no code hash (<paramref name="inviteCodeHash"/> null clears an earlier one). Any other pairing
+    /// throws before anything is sent (<see cref="DataverseContactIdentityStore.InviteMarkerPayload"/>).</para>
     /// </summary>
     Task<StoreWriteResult> MarkInvitedAsync(
-        Guid contactId, string? etag, DateTimeOffset invitedOn, string inviteCodeHash, InviteStamp stamp, CancellationToken ct);
+        Guid contactId, string? etag, DateTimeOffset invitedOn, string? inviteCodeHash, InviteStamp stamp, CancellationToken ct);
 
     /// <summary>
     /// Writes the oid (D format) into the binding AND the uniqueness mirror, with the plane, in ONE request,
@@ -592,15 +595,32 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     /// Tasks 184 and 185 — the marker write's body: the marker (UTC, second precision), the new invite's stored code hash
     /// AND the invite stamp (the email hash, and the invited tenant as lowercase "D" text or null), together, so a re-invite
     /// replaces all four in one request. Nothing else.
+    /// <para>Exactly one of the code hash and the tenant is set. A portal-account invite carries a code hash and no tenant
+    /// (it is bound by a CIAM sign-in presenting the code); a work-account invite carries its resolved tenant and no code
+    /// hash, which clears an earlier one (it is bound only by a Workforce or WorkforceHome sign-in from that tenant). A
+    /// tenant is never written beside a code, and a code is never cleared without a tenant: the tenant column alone says
+    /// which kind of sign-in the invite is for (<see cref="ContactBindingDecision.IsWorkAccountInvite"/>). Both or neither
+    /// throws.</para>
     /// </summary>
-    public static Dictionary<string, object?> InviteMarkerPayload(DateTimeOffset invitedOn, string inviteCodeHash, InviteStamp stamp)
+    public static Dictionary<string, object?> InviteMarkerPayload(DateTimeOffset invitedOn, string? inviteCodeHash, InviteStamp stamp)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(inviteCodeHash);
         ArgumentNullException.ThrowIfNull(stamp);
         ArgumentException.ThrowIfNullOrWhiteSpace(stamp.InvitedEmailHash);
         if (stamp.InvitedTenantId == Guid.Empty)
         {
             throw new ArgumentException("An invited tenant is a non-empty GUID, or null for none.", nameof(stamp));
+        }
+
+        if (inviteCodeHash is not null)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(inviteCodeHash);
+        }
+
+        if ((inviteCodeHash is null) != (stamp.InvitedTenantId is not null))
+        {
+            throw new ArgumentException(
+                "An invite stamp carries an invite code (a portal-account invite, no tenant) or a resolved tenant (a "
+                + "work-account invite, no code): exactly one of the two.", nameof(inviteCodeHash));
         }
 
         return new Dictionary<string, object?>
@@ -1643,11 +1663,15 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
 
     /// <inheritdoc />
     public Task<StoreWriteResult> MarkInvitedAsync(
-        Guid contactId, string? etag, DateTimeOffset invitedOn, string inviteCodeHash, InviteStamp stamp, CancellationToken ct)
-        => RowVersionPrecondition(etag) is { } version
-            ? WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", InviteMarkerPayload(invitedOn, inviteCodeHash, stamp),
+        Guid contactId, string? etag, DateTimeOffset invitedOn, string? inviteCodeHash, InviteStamp stamp, CancellationToken ct)
+    {
+        // Built first: a code-and-tenant pairing the payload refuses throws whatever the row version.
+        var payload = InviteMarkerPayload(invitedOn, inviteCodeHash, stamp);
+        return RowVersionPrecondition(etag) is { } version
+            ? WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", payload,
                 ("If-Match", version), ct, missingColumns: InviteMarkerColumns)
             : Task.FromResult(NoRowVersion("invite mark", contactId));
+    }
 
     /// <summary>The masking verdict over the probe's rows. Pure.</summary>
     public static BindingReadability ClassifyProbe(ContactLookup probe)

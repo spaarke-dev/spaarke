@@ -552,18 +552,66 @@ public class DataverseContactIdentityStoreTests
     public void TheMarkerWrite_CarriesTheMarkerInUtc_TheCodeHash_AndTheInviteStamp_AndNothingElse()
     {
         var emailHash = InviteEmailStamp.Create("person@customer.example");
-        var tenant = Guid.Parse("11111111-AAAA-4AAA-8AAA-111111111111");
 
         var payload = DataverseContactIdentityStore.InviteMarkerPayload(
-            new DateTimeOffset(2026, 10, 13, 11, 30, 5, TimeSpan.FromHours(2)), StoredHash, new InviteStamp(emailHash, tenant));
+            new DateTimeOffset(2026, 10, 13, 11, 30, 5, TimeSpan.FromHours(2)), StoredHash, new InviteStamp(emailHash, null));
 
         payload.Should().BeEquivalentTo(new Dictionary<string, object?>
         {
             ["sprk_externalinvitedon"] = "2026-10-13T09:30:05Z",
             ["sprk_externalinvitecodehash"] = StoredHash,
             ["sprk_externalinvitedemailhash"] = emailHash,
+            ["sprk_externalinvitedtenantid"] = null,
+        });
+    }
+
+    /// <summary>
+    /// Slice B2: a work-account invite's marker write carries its resolved tenant and clears the code hash (null), in the
+    /// same four columns.
+    /// </summary>
+    [Fact]
+    public void AWorkAccountMarkerWrite_CarriesTheTenant_AndClearsTheCodeHash()
+    {
+        var emailHash = InviteEmailStamp.Create("person@customer.example");
+        var tenant = Guid.Parse("11111111-AAAA-4AAA-8AAA-111111111111");
+
+        var payload = DataverseContactIdentityStore.InviteMarkerPayload(
+            new DateTimeOffset(2026, 10, 13, 11, 30, 5, TimeSpan.FromHours(2)), null, new InviteStamp(emailHash, tenant));
+
+        payload.Should().BeEquivalentTo(new Dictionary<string, object?>
+        {
+            ["sprk_externalinvitedon"] = "2026-10-13T09:30:05Z",
+            ["sprk_externalinvitecodehash"] = null,
+            ["sprk_externalinvitedemailhash"] = emailHash,
             ["sprk_externalinvitedtenantid"] = "11111111-aaaa-4aaa-8aaa-111111111111",
         });
+        JsonSerializer.Serialize(payload).Should().Contain("\"sprk_externalinvitecodehash\":null");
+    }
+
+    /// <summary>
+    /// Slice B2, MUST FIRE: the marker write carries exactly one of the code hash and the tenant. A code beside a tenant, or
+    /// neither (a null code with no tenant, which would leave a portal-account invite no CIAM sign-in can use), throws
+    /// before anything is sent. MUST NOT FIRE: exactly one is accepted.
+    /// </summary>
+    [Theory]
+    [InlineData(true, true, true)]
+    [InlineData(false, false, true)]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    public void TheMarkerWrite_CarriesExactlyOneOf_TheCodeHash_AndTheTenant(bool code, bool tenant, bool throws)
+    {
+        var act = () => DataverseContactIdentityStore.InviteMarkerPayload(
+            DateTimeOffset.UnixEpoch, code ? StoredHash : null,
+            new InviteStamp(InviteEmailStamp.Create("a@b.example"), tenant ? Guid.NewGuid() : null));
+
+        if (throws)
+        {
+            act.Should().Throw<ArgumentException>();
+        }
+        else
+        {
+            act.Should().NotThrow();
+        }
     }
 
     /// <summary>An invite naming no tenant writes the tenant column as null, so a re-invite clears an earlier tenant.</summary>

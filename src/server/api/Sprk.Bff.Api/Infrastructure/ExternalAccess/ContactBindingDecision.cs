@@ -507,6 +507,13 @@ public enum InviteStampFailure
     /// (or the invite named none).
     /// </summary>
     TenantNotVerified,
+
+    /// <summary>
+    /// The stamp is for the other kind of sign-in: a work-account invite (it names a tenant,
+    /// <see cref="ContactBindingDecision.IsWorkAccountInvite"/>) is met only by a Workforce or WorkforceHome token, and a
+    /// portal-account invite (no tenant) only by a CIAM token.
+    /// </summary>
+    StampPlaneMismatch,
 }
 
 /// <summary>
@@ -847,6 +854,19 @@ public static class ContactBindingDecision
     public const string InviteMarkerNotWritten = "sdap.access.invite.invite_marker_not_written";
 
     /// <summary>
+    /// Slice B2 — the invited email's organisation could not be looked up (a fault, a timeout or an answer that is not
+    /// definite), so the invite could not tell a work account from a portal account. Retryable (503): nothing was created,
+    /// written or sent. Staff may retry, or send the invite as a portal account (the request's override).
+    /// </summary>
+    public const string InviteTenantLookupUnavailable = "sdap.access.invite.tenant_lookup_unavailable";
+
+    /// <summary>
+    /// Slice B2 — a work-account invite resolved to a contact that already carries a sign-in (a portal account). One
+    /// contact carries one sign-in, so no work-account invite is added to it. Nothing was written or sent.
+    /// </summary>
+    public const string InviteContactAlreadyBound = "sdap.access.invite.contact_already_bound";
+
+    /// <summary>
     /// ADR-028 A9 (r3 task 046): more than one ENABLED systemuser carries the same stored home link (<c>tid</c>, <c>oid</c>).
     /// Resolving to one of them would merge two people, so the caller is denied; an operator resolves it.
     /// </summary>
@@ -1097,8 +1117,11 @@ public static class ContactBindingDecision
     ///   <item>it parses as a version this code writes (<see cref="InviteEmailStamp"/>; an unknown version is no stamp);</item>
     ///   <item>its recorded address is <paramref name="tokenEmail"/>, and is the contact's current <c>emailaddress1</c> read
     ///   with the stamp (both normalised, compared in fixed time);</item>
-    ///   <item>with <paramref name="requireTenantProof"/> (the Workforce planes): <paramref name="emailDomainOwnerVerified"/> is
-    ///   true, or <paramref name="tokenTenantId"/> is the tenant the invite named.</item>
+    ///   <item>it is for this kind of sign-in (<see cref="IsWorkAccountInvite"/>): with <paramref name="requireTenantProof"/>
+    ///   (the Workforce and WorkforceHome tokens) a work-account invite, which names a tenant; without it (CIAM) a
+    ///   portal-account invite, which names none;</item>
+    ///   <item>with <paramref name="requireTenantProof"/>: <paramref name="emailDomainOwnerVerified"/> is true, or
+    ///   <paramref name="tokenTenantId"/> is the tenant the invite named.</item>
     /// </list>
     /// </summary>
     public static InviteStampFailure? CheckInviteStamp(
@@ -1131,6 +1154,12 @@ public static class ContactBindingDecision
         if (!InviteEmailStamp.Matches(intent.InvitedEmailHash, intent.CurrentEmail))
         {
             return InviteStampFailure.ContactEmailMismatch;
+        }
+
+        if (IsWorkAccountInvite(intent) != requireTenantProof
+            || (!requireTenantProof && !string.IsNullOrWhiteSpace(intent.RawInvitedTenantId)))
+        {
+            return InviteStampFailure.StampPlaneMismatch;
         }
 
         if (requireTenantProof
@@ -1184,8 +1213,19 @@ public static class ContactBindingDecision
         InviteStampFailure.TokenEmailMismatch => "stamp-token-email-mismatch",
         InviteStampFailure.ContactEmailMismatch => "stamp-contact-email-mismatch",
         InviteStampFailure.TenantNotVerified => "stamp-tenant-not-verified",
+        InviteStampFailure.StampPlaneMismatch => "stamp-plane-mismatch",
         _ => "stamp-unknown",
     };
+
+    /// <summary>
+    /// True when the invite stamp is a work-account invite: it names the tenant (a non-empty GUID) the invited email's
+    /// organisation resolved to at invite time, which is one of this deployment's customer tenants
+    /// (<c>WorkforceIdentity:CustomerTenantIds</c>). Only a Workforce or WorkforceHome token can meet it. A portal-account
+    /// invite names no tenant (the store refuses a tenant together with an invite code, and no code without one), so a
+    /// stamp that names anything else, a non-GUID included, is met by no sign-in. Pure.
+    /// </summary>
+    public static bool IsWorkAccountInvite(BindIntentLookup intent)
+        => intent is not null && Guid.TryParse(intent.RawInvitedTenantId?.Trim(), out var tenant) && tenant != Guid.Empty;
 
     /// <summary>
     /// Task 184 (owner round 97) — a pending-invite marker counts for <see cref="InviteMarkerWindow"/> (30 days) after the

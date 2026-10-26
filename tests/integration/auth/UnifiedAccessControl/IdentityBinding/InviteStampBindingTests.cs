@@ -9,8 +9,10 @@ namespace Sprk.Bff.Api.Tests.AccessControl.IdentityBinding;
 /// <summary>
 /// The invite-stamp rule for email binds (<see cref="ContactBindingDecision.CheckInviteStamp"/>): an email bind onto an
 /// existing contact needs a current invite stamp (same 30-day window as the invite marker) whose recorded address is the
-/// token's email AND the contact's current <c>emailaddress1</c>; on the Workforce planes the stamp's tenant must also be the
-/// token's <c>tid</c>, unless <c>xms_edov</c> is boolean true. Every failing leg answers the one deny code
+/// token's email AND the contact's current <c>emailaddress1</c>, and that is for this kind of sign-in: a work-account invite
+/// (it names its organisation's tenant) only for a Workforce or WorkforceHome token, whose <c>tid</c> must be that tenant
+/// unless <c>xms_edov</c> is boolean true; a portal-account invite (no tenant) only for a CIAM token. Every failing leg
+/// answers the one deny code
 /// <see cref="ContactBindingDecision.DenyContactNotInvited"/>; the leg is an operator-only log word. A successful bind clears
 /// the stamp in its own conditional write; a row that changed since the stamp was read is re-read and re-decided.
 /// </summary>
@@ -71,21 +73,28 @@ public class InviteStampBindingTests
     [InlineData("tid-mismatch", "workforce", "stamp-tenant-not-verified")]
     [InlineData("tid-mismatch", "ciam", null)]         // the CIAM plane has no tenant leg
     [InlineData("tid-absent", "workforce", "stamp-tenant-not-verified")]
-    [InlineData("no-tenant-stamped", "workforce", "stamp-tenant-not-verified")]
-    [InlineData("stored-tenant-not-a-guid", "workforce", "stamp-tenant-not-verified")]
     [InlineData("tid-mismatch-edov-false", "workforce", "stamp-tenant-not-verified")]
     [InlineData("tid-mismatch-edov-absent", "workforce", "stamp-tenant-not-verified")]
     [InlineData("tid-mismatch-edov-true", "workforce", null)]
-    [InlineData("no-tenant-stamped-edov-true", "workforce", null)]
     [InlineData("stored-tenant-upper-case", "workforce", null)]
+    // the stamp is for this kind of sign-in: a work-account invite names a tenant, a portal-account invite none
+    [InlineData("no-tenant-stamped", "workforce", "stamp-plane-mismatch")]
+    [InlineData("no-tenant-stamped-edov-true", "workforce", "stamp-plane-mismatch")]
+    [InlineData("stored-tenant-not-a-guid", "workforce", "stamp-plane-mismatch")]
+    [InlineData("stored-tenant-not-a-guid", "ciam", "stamp-plane-mismatch")]
+    [InlineData("work-account-stamp", "ciam", "stamp-plane-mismatch")]
     public void EachLeg_DeniesNotInvited_OrBinds(string row, string plane, string? expected)
     {
-        var intent = Stamp();
+        var ciam = plane == "ciam";
+
+        // A CIAM row starts from a portal-account invite (no tenant); a Workforce row from a work-account invite.
+        var intent = ciam ? Stamp() with { RawInvitedTenantId = null } : Stamp();
         var tokenEmail = Email;
         Guid? tid = CustomerTenant;
         bool? edov = null;
         switch (row)
         {
+            case "work-account-stamp": intent = intent with { RawInvitedTenantId = CustomerTenant.ToString("D") }; break;
             case "no-stamp": intent = intent with { InvitedEmailHash = null }; break;
             case "unproven-empty": intent = intent with { InvitedEmailHash = "", StampColumnsUnproven = true }; break;
             case "column-missing": intent = intent with { InviteStatus = LookupStatus.ColumnMissing }; break;
@@ -111,7 +120,6 @@ public class InviteStampBindingTests
         }
 
         var invite = InviteCode.Create(ContactA);
-        var ciam = plane == "ciam";
         if (ciam)
         {
             intent = intent with { InviteCodeHash = invite.StoredValue };
@@ -153,8 +161,9 @@ public class InviteStampBindingTests
     [Fact]
     public void TheStampWindow_IsTheInviteMarkersWindow()
     {
-        var atTheEdge = Stamp() with { InvitedOn = Now - ContactBindingDecision.InviteMarkerWindow };
-        var pastIt = Stamp() with { InvitedOn = Now - ContactBindingDecision.InviteMarkerWindow - TimeSpan.FromTicks(1) };
+        var portal = Stamp() with { RawInvitedTenantId = null };
+        var atTheEdge = portal with { InvitedOn = Now - ContactBindingDecision.InviteMarkerWindow };
+        var pastIt = portal with { InvitedOn = Now - ContactBindingDecision.InviteMarkerWindow - TimeSpan.FromTicks(1) };
 
         ContactBindingDecision.CheckInviteStamp(atTheEdge, Email, false, null, null).Should().BeNull();
         ContactBindingDecision.CheckInviteStamp(pastIt, Email, false, null, null).Should().Be(InviteStampFailure.StampExpired);
@@ -279,7 +288,7 @@ public class InviteStampBindingTests
 
     /// <summary>
     /// xms_edov counts only as a boolean true: the string "true", false or no claim leaves the tenant leg to the token's tid,
-    /// which here is not the invited tenant (denied); a boolean true binds a stamp naming no tenant.
+    /// which here is not the invited tenant (denied); a boolean true binds the work-account invite.
     /// </summary>
     [Theory]
     [InlineData(null, false)]
@@ -289,7 +298,7 @@ public class InviteStampBindingTests
     public async Task Workforce_TheTenantLeg_NeedsTheInvitedTenant_OrABooleanTrueXmsEdov(string? edov, bool binds)
     {
         _store.AddContact(ContactA, email: Email);
-        _store.StampInvite(ContactA, Email, invitedTenantId: null);
+        _store.StampInvite(ContactA, Email, invitedTenantId: Guid.Parse("44444444-dddd-4ddd-8ddd-444444444444"));
         var claim = edov is null
             ? null
             : new Claim(WorkforceCallerClaims.EmailDomainOwnerVerifiedClaim, edov.Split(':')[1],
@@ -452,13 +461,27 @@ public class InviteStampBindingTests
     }
 
     [Fact]
-    public async Task Registration_WithABooleanTrueXmsEdov_BindsAStampNamingNoTenant()
+    public async Task Registration_WithABooleanTrueXmsEdov_BindsAWorkAccountInviteNamingAnotherTenant()
+    {
+        _store.AddContact(ContactA, email: Email);
+        _store.StampInvite(ContactA, Email, invitedTenantId: Guid.Parse("44444444-dddd-4ddd-8ddd-444444444444"));
+
+        (await Register(edov: null)).DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
+        (await Register(edov: true)).Outcome.Should().Be(HomeRegistrationOutcome.BoundExisting);
+    }
+
+    /// <summary>
+    /// MUST FIRE: a portal-account invite (no tenant) is never bound by a home-directory registration, not even with a
+    /// boolean true xms_edov: it is for a CIAM sign-in only. Nothing is written.
+    /// </summary>
+    [Fact]
+    public async Task Registration_APortalAccountInvite_IsDeniedNotInvited_EvenWithXmsEdov()
     {
         _store.AddContact(ContactA, email: Email);
         _store.StampInvite(ContactA, Email, invitedTenantId: null);
 
-        (await Register(edov: null)).DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
-        (await Register(edov: true)).Outcome.Should().Be(HomeRegistrationOutcome.BoundExisting);
+        (await Register(edov: true)).Should().Be(HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactNotInvited));
+        _store.Writes.Should().BeEmpty();
     }
 
     /// <summary>
@@ -495,22 +518,131 @@ public class InviteStampBindingTests
         }
     }
 
+    // ── Slice B2: a work-account invite (workforce-any) — explicit, named cases ──────────────────────────────
+
+    /// <summary>
+    /// MUST FIRE (UAC first check): a CIAM token never meets a work-account invite — not even with a matching email and an
+    /// invite code that matches a stored hash (a leftover the work-account write would have cleared). Denied
+    /// contact_not_invited, logged stamp-plane-mismatch, nothing written. MUTATION: dropping the plane leg from
+    /// CheckInviteStamp binds here.
+    /// </summary>
+    [Fact]
+    public async Task ACiamToken_AgainstAWorkAccountInvite_IsDeniedNotInvited()
+    {
+        var invite = InviteCode.Create(ContactA);
+        _store.AddContact(ContactA, email: Email, invitedOn: Now, inviteCodeHash: invite.StoredValue);
+        _store.StampInvite(ContactA, Email, CustomerTenant);
+        var log = new BindingLogCapture<ContactIdentityBinder>();
+
+        var result = await Binder(_store, log).ResolveCiamCallerAsync(Guid.NewGuid().ToString("D"), Email, invite.Code,
+            CancellationToken.None);
+
+        result.DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
+        _store.Writes.Should().BeEmpty();
+        _store.Contacts[ContactA].Oid.Should().BeNull();
+        log.Messages.Should().Contain(m => m.Contains("stamp-plane-mismatch", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// MUST NOT FIRE: a Workforce token from the invited tenant with the invited email binds a work-account invite once,
+    /// records the plane it bound on (Workforce), and clears the stamp; a second identity with the same email is then denied.
+    /// </summary>
+    [Fact]
+    public async Task AWorkforceToken_BindsAWorkAccountInviteOnce_AndClearsIt()
+    {
+        _store.AddContact(ContactA, email: Email);
+        _store.StampInvite(ContactA, Email, CustomerTenant);
+
+        (await SignIn(Member())).Should().Be(new ContactBindingResult(ContactA, null, BindingAction.BindByEmail, Wrote: true));
+
+        var row = _store.Contacts[ContactA];
+        (row.Oid, row.Plane, row.InvitedEmailHash, row.InvitedTenantId)
+            .Should().Be((Caller.ToString("D"), (int?)(int)IdentityPlaneMarker.Workforce, (string?)null, (string?)null));
+        _store.Writes.Should().ContainSingle();
+        var second = Guid.NewGuid();
+        (await Binder(_store).ResolveWorkforceCallerAsync(WorkforceUser(second, tid: CustomerTenant, email: Email), second,
+                null, CancellationToken.None))
+            .DenyCode.Should().NotBeNull("the stamp was consumed by the first bind");
+        _store.Contacts[ContactA].Oid.Should().Be(Caller.ToString("D"));
+    }
+
+    /// <summary>
+    /// MUST NOT FIRE: a WorkforceHome registration from the invited tenant binds a work-account invite once, records the
+    /// WorkforceHome plane, and clears the stamp; a second registration from another identity is not bound to it.
+    /// </summary>
+    [Fact]
+    public async Task AWorkforceHomeRegistration_BindsAWorkAccountInviteOnce_AndClearsIt()
+    {
+        _store.AddContact(ContactA, email: Email);
+        _store.StampInvite(ContactA, Email, CustomerTenant);
+
+        (await Register()).Outcome.Should().Be(HomeRegistrationOutcome.BoundExisting);
+
+        var row = _store.Contacts[ContactA];
+        (row.Oid, row.Plane, row.InvitedEmailHash, row.InvitedTenantId)
+            .Should().Be((Caller.ToString("D"), (int?)(int)IdentityPlaneMarker.WorkforceHome, (string?)null, (string?)null));
+        var other = await Binder(_store).RegisterHomeContactAsync(
+            new HomeRegistrationRequest(CustomerTenant, Guid.NewGuid(), Email, "Pat", "Example", null, true, Guid.NewGuid(),
+                "Secure Record"),
+            CancellationToken.None);
+        other.Outcome.Should().NotBe(HomeRegistrationOutcome.BoundExisting);
+        _store.Contacts[ContactA].Oid.Should().Be(Caller.ToString("D"));
+    }
+
+    /// <summary>MUST FIRE: a Workforce token whose tid is not the invited tenant (no xms_edov) is denied, nothing written.</summary>
+    [Fact]
+    public async Task AWorkAccountInvite_ATokenFromAnotherTenant_IsDeniedNotInvited()
+    {
+        var otherCustomerTenant = Guid.Parse("33333333-cccc-4ccc-8ccc-333333333333");
+        _store.AddContact(ContactA, email: Email);
+        _store.StampInvite(ContactA, Email, CustomerTenant);
+        var binder = new ContactIdentityBinder(_store, Tenants(CustomerTenant, otherCustomerTenant),
+            new Microsoft.Extensions.Time.Testing.FakeTimeProvider(Now), new BindingLogCapture<ContactIdentityBinder>(),
+            NoOwnerUnderTest);
+
+        (await binder.ResolveWorkforceCallerAsync(Member(otherCustomerTenant), Caller, null, CancellationToken.None))
+            .DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
+        _store.Writes.Should().BeEmpty();
+    }
+
     // ── The invite side: MarkInviteSentAsync writes the stamp ─────────────────────────────────────────────
 
+    /// <summary>
+    /// A work-account invite (a resolved tenant) writes the stamp with the marker in one write, and NO code: the stored code
+    /// hash is cleared and no code is returned for an email.
+    /// </summary>
     [Fact]
     public async Task MarkInviteSent_WritesTheStamp_WithTheMarker_InOneWrite()
     {
-        _store.AddContact(ContactA, email: Email);
+        _store.AddContact(ContactA, email: Email, invitedOn: Now, inviteCodeHash: InviteCode.Create(ContactA).StoredValue);
 
         var mark = await Binder(_store).MarkInviteSentAsync(ContactA, $"W/\"{_store.Contacts[ContactA].Version}\"", Email,
             CustomerTenant, CancellationToken.None);
 
         mark.Status.Should().Be(StoreWriteStatus.Written);
+        mark.InviteCode.Should().BeNull("a work-account invite has no code");
         _store.Writes.Should().ContainSingle().Which.Op.Should().Be("invite-marker");
         var row = _store.Contacts[ContactA];
         InviteEmailStamp.Matches(row.InvitedEmailHash, Email).Should().BeTrue();
         row.InvitedTenantId.Should().Be(CustomerTenant.ToString("D"));
+        row.InviteCodeHash.Should().BeNull("an earlier code is cleared");
         row.InvitedOn.Should().Be(Now);
+    }
+
+    /// <summary>A portal-account invite (no tenant) writes the stamp with a new code and a null tenant.</summary>
+    [Fact]
+    public async Task MarkInviteSent_APortalAccountInvite_WritesACode_AndANullTenant()
+    {
+        _store.AddContact(ContactA, email: Email);
+        _store.StampInvite(ContactA, Email, CustomerTenant);
+
+        var mark = await Binder(_store).MarkInviteSentAsync(ContactA, $"W/\"{_store.Contacts[ContactA].Version}\"", Email,
+            null, CancellationToken.None);
+
+        mark.InviteCode.Should().NotBeNullOrEmpty();
+        var row = _store.Contacts[ContactA];
+        InviteCode.Matches(row.InviteCodeHash, mark.InviteCode, ContactA).Should().BeTrue();
+        row.InvitedTenantId.Should().BeNull("a re-invite as a portal account clears the earlier tenant");
     }
 
     [Theory]

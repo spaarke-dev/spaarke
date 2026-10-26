@@ -116,7 +116,8 @@ public class DataverseContactIdentityStoreInviteStampTests
                     [ContactBindingDecision.ExternalInviteCodeHashColumn] = invite.StoredValue,
                     ["emailaddress1"] = Email,
                     [ContactBindingDecision.ExternalInvitedEmailHashColumn] = InviteEmailStamp.Create(Email),
-                    [ContactBindingDecision.ExternalInvitedTenantIdColumn] = Tenant.ToString("D"),
+                    // A portal-account invite (CIAM) names no tenant; a work-account invite (Workforce) names one.
+                    [ContactBindingDecision.ExternalInvitedTenantIdColumn] = ciam ? null : Tenant.ToString("D"),
                 })
                 : $"{{\"error\":{{\"code\":\"0x80060888\",\"message\":\"Could not find a property named '{missingColumn}' on type 'Microsoft.Dynamics.CRM.contact'.\"}}}}",
             ContactStatus = missingColumn is null ? HttpStatusCode.OK : HttpStatusCode.BadRequest,
@@ -161,7 +162,7 @@ public class DataverseContactIdentityStoreInviteStampTests
         var codeHash = InviteCode.Create(Contact).StoredValue;
 
         var write = await StoreOver(http).MarkInvitedAsync(Contact, "W/\"4711\"", DateTimeOffset.Parse("2026-10-21T09:00:00Z"),
-            codeHash, new InviteStamp(emailHash, Tenant), CancellationToken.None);
+            codeHash, new InviteStamp(emailHash, null), CancellationToken.None);
 
         write.Status.Should().Be(StoreWriteStatus.Written);
         var patch = http.Writes.Should().ContainSingle().Subject;
@@ -171,9 +172,47 @@ public class DataverseContactIdentityStoreInviteStampTests
         var body = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(patch.Body)!;
         body.Keys.Should().BeEquivalentTo(DataverseContactIdentityStore.InviteMarkerColumns);
         body[ContactBindingDecision.ExternalInvitedEmailHashColumn].GetString().Should().Be(emailHash);
-        body[ContactBindingDecision.ExternalInvitedTenantIdColumn].GetString().Should().Be(Tenant.ToString("D"));
+        body[ContactBindingDecision.ExternalInvitedTenantIdColumn].ValueKind.Should().Be(JsonValueKind.Null,
+            "a portal-account invite names no tenant");
         body[ContactBindingDecision.ExternalInviteCodeHashColumn].GetString().Should().Be(codeHash);
         patch.Body.Should().NotContain(Email, "only the hash of the address is written");
+    }
+
+    /// <summary>
+    /// Slice B2: a work-account invite mark is the same one PATCH, carrying the resolved tenant and clearing the code hash.
+    /// </summary>
+    [Fact]
+    public async Task AWorkAccountInviteMark_IsOnePatch_CarryingTheTenant_AndClearingTheCode()
+    {
+        var http = new ReadProofHttp();
+
+        var write = await StoreOver(http).MarkInvitedAsync(Contact, "W/\"4711\"", DateTimeOffset.Parse("2026-10-21T09:00:00Z"),
+            null, new InviteStamp(InviteEmailStamp.Create(Email), Tenant), CancellationToken.None);
+
+        write.Status.Should().Be(StoreWriteStatus.Written);
+        var body = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(http.Writes.Should().ContainSingle().Subject.Body)!;
+        body[ContactBindingDecision.ExternalInvitedTenantIdColumn].GetString().Should().Be(Tenant.ToString("D"));
+        body[ContactBindingDecision.ExternalInviteCodeHashColumn].ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    /// <summary>
+    /// Slice B2, MUST FIRE: the real store refuses a null code hash with no tenant (and a code beside a tenant) whatever
+    /// the row version, before anything is sent, so no caller can write a portal-account invite without its code.
+    /// </summary>
+    [Theory]
+    [InlineData(false, false, "W/\"4711\"")]
+    [InlineData(false, false, null)]
+    [InlineData(true, true, "W/\"4711\"")]
+    public async Task TheStore_RefusesANullCodeWithoutATenant_AndACodeWithATenant(bool code, bool tenant, string? etag)
+    {
+        var http = new ReadProofHttp();
+
+        var act = () => StoreOver(http).MarkInvitedAsync(Contact, etag, DateTimeOffset.Parse("2026-10-21T09:00:00Z"),
+            code ? InviteCode.Create(Contact).StoredValue : null,
+            new InviteStamp(InviteEmailStamp.Create(Email), tenant ? Tenant : null), CancellationToken.None);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        http.Writes.Should().BeEmpty();
     }
 
     /// <summary>The consuming bind clears both stamp columns in its one PATCH, If-Match the version it was decided on.</summary>

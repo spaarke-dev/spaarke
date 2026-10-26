@@ -619,10 +619,14 @@ public sealed class ContactIdentityBinder
     /// writes nothing else and does not depend on how the invite then reaches the person.
     /// </summary>
     /// <param name="email">The address the invite is sent to (hashed here; never stored or logged).</param>
-    /// <param name="invitedTenantId">The Entra tenant the invite named, or null for none.</param>
+    /// <param name="invitedTenantId">
+    /// Null for a portal-account (CIAM) invite: a new code is created and its hash stored. The resolved customer tenant for a
+    /// work-account invite: no code is created and the stored code hash is cleared, so only a Workforce or WorkforceHome
+    /// sign-in from that tenant can bind the contact (<see cref="ContactBindingDecision.IsWorkAccountInvite"/>).
+    /// </param>
     /// <returns>
-    /// The write's result and, only when it was written, the plaintext code for the invite email's link. The code is
-    /// returned to the caller only: it is never stored and never logged.
+    /// The write's result and, only when it was written for a portal-account invite, the plaintext code for the invite
+    /// email's link. The code is returned to the caller only: it is never stored and never logged.
     /// </returns>
     public async Task<InviteMarkResult> MarkInviteSentAsync(
         Guid contactId, string? etag, string email, Guid? invitedTenantId, CancellationToken ct)
@@ -656,7 +660,12 @@ public sealed class ContactIdentityBinder
             etag = reread.ETag;
         }
 
-        var (code, storedValue) = InviteCode.Create(contactId);
+        // A work-account invite (a resolved tenant) carries no code: no CIAM sign-in may bind it.
+        string? code = null, storedValue = null;
+        if (invitedTenantId is null)
+        {
+            (code, storedValue) = InviteCode.Create(contactId);
+        }
         var stamp = new InviteStamp(InviteEmailStamp.Create(email), invitedTenantId);
         var write = await _store.MarkInvitedAsync(contactId, etag, _time.GetUtcNow(), storedValue, stamp, ct).ConfigureAwait(false);
         if (write.Status == StoreWriteStatus.ColumnMissing)
@@ -700,6 +709,12 @@ public sealed class ContactIdentityBinder
         ContactBindingDecision.InviteMarkerNotWritten =>
             "The invite could not be recorded on the contact, so the person could not sign in from it. No email was "
             + "sent; try again. If this environment is still receiving its schema update, try again after it completes.",
+        ContactBindingDecision.InviteTenantLookupUnavailable =>
+            "The person's organisation could not be checked just now, so nothing was created or sent. Try again in a "
+            + "moment, or send the invite as a portal account.",
+        ContactBindingDecision.InviteContactAlreadyBound =>
+            "This email's contact already signs in with a portal account, so a work-account invite cannot be added to it. "
+            + "Send the invite as a portal account instead.",
         _ => null,
     };
 

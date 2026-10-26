@@ -287,7 +287,7 @@ public sealed class ExternalRegistrationEndpointsTests : IClassFixture<ExternalR
     [InlineData("other-tenant", "bool:false", false)]
     [InlineData("no-tenant", null, false)]
     [InlineData("other-tenant", "bool:true", true)]
-    [InlineData("no-tenant", "bool:true", true)]
+    [InlineData("no-tenant", "bool:true", false)] // a portal-account invite: CIAM sign-in only
     [InlineData("home-tenant", null, true)]
     public async Task BindingAnExistingContact_NeedsTheInviteStamp(string stamp, string? edov, bool binds)
     {

@@ -743,7 +743,7 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
     // ── Writes ─────────────────────────────────────────────────────────────────────────────────────
 
     public Task<StoreWriteResult> MarkInvitedAsync(
-        Guid contactId, string? etag, DateTimeOffset invitedOn, string inviteCodeHash, InviteStamp stamp, CancellationToken ct)
+        Guid contactId, string? etag, DateTimeOffset invitedOn, string? inviteCodeHash, InviteStamp stamp, CancellationToken ct)
     {
         lock (_gate)
         {

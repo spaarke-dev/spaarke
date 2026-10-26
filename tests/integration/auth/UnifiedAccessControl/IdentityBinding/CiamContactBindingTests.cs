@@ -232,7 +232,7 @@ public class CiamContactBindingTests
     {
         var invite = InviteCode.Create(ContactA);
         _store.AddContact(ContactA, email: Email, invitedOn: Now, inviteCodeHash: invite.StoredValue);
-        _store.StampInvite(ContactA, Email, CustomerTenant);
+        _store.StampInvite(ContactA, Email);
         _store.InviteMarkerStatus = columnMissing ? LookupStatus.ColumnMissing : LookupStatus.Read;
 
         var result = await Binder(_store).ResolveCiamCallerAsync(CiamOid.ToString(), Email, invite.Code, CancellationToken.None);
