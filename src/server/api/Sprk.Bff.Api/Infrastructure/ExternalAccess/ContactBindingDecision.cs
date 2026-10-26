@@ -1678,12 +1678,34 @@ public static class ContactBindingDecision
             return LicensedUserEmailOutcome.Unknown;
         }
 
-        var wanted = email.Trim();
-        return lookup.Rows.Any(r => r.SystemUserId != Guid.Empty
-                                    && r.IsDisabled == false
-                                    && (SameEmail(r.InternalEmail, wanted) || SameEmail(r.DomainName, wanted)))
+        return MatchingEnabledSystemUserIds(lookup, email).Count > 0
             ? LicensedUserEmailOutcome.LicensedUser
             : LicensedUserEmailOutcome.NotLicensed;
+    }
+
+    /// <summary>
+    /// The ids of the ENABLED systemusers (<c>isdisabled</c> false, non-empty id) whose <c>internalemailaddress</c> or
+    /// <c>domainname</c> equals <paramref name="email"/>: the rows <see cref="DecideLicensedUserEmail"/> decides on. Empty when
+    /// the read did not succeed.
+    /// </summary>
+    internal static IReadOnlyList<Guid> MatchingEnabledSystemUserIds(SystemUserEmailLookup lookup, string email)
+    {
+        ArgumentNullException.ThrowIfNull(lookup);
+        ArgumentException.ThrowIfNullOrWhiteSpace(email);
+
+        if (lookup.Status != LookupStatus.Read)
+        {
+            return [];
+        }
+
+        var wanted = email.Trim();
+        return lookup.Rows
+            .Where(r => r.SystemUserId != Guid.Empty
+                        && r.IsDisabled == false
+                        && (SameEmail(r.InternalEmail, wanted) || SameEmail(r.DomainName, wanted)))
+            .Select(r => r.SystemUserId)
+            .Distinct()
+            .ToList();
     }
 
     /// <summary>

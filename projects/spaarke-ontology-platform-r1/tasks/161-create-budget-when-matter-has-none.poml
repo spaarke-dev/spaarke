@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="161" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Revise budget on a matter with no budget becomes "Create budget" (D-180, UAT round 1)</title>
+    <phase>11 UAT</phase>
+    <gate>startable (D-180, owner 2026-10-22)</gate>
+    <status>pr-open-awaiting-merge (lane stopped before step 3; merge, dev deploy and step 4 belong to the main session; see notes/task-161-notes.md)</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds a catalog action, an executor and a plan substitution in Sprk.Bff.Api (.cs); client prefill (.tsx).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Copies an existing plan-reduction precedent (WithoutMarkComplete) and an existing child create path; exact files known.</model-tier-reason>
+    <effort>high</effort>
+    <deps>105 (UAT round 1); 158 for the side-pane lookup when there are several budgets (not blocking)</deps>
+    <tags>bff,api,frontend,testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+    <parallel-group>K</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Owner UAT round 1 (notes/uat-v4-log.md finding 6): in the Revise budget step, "Budget to revise" did not work. The matter used ("Test New Matter via Workspace", f6120344-64a5-f111-aaad-7ced8ddc4cc6) has 0 sprk_budget rows, so nothing could be picked; only 4 budgets exist on dev. D-180: with 0 budgets the step becomes Create budget (amount, reason), recorded like Revise budget. With one budget it is pre-selected (D-18); with several, the side-pane lookup (D-182, task 158).</prompt>
+  <role>SPAARKE BFF + front-end engineer (Signals / decision wizard).</role>
+  <goal>When the core record has no active budget, the plan route and the commit route both substitute `create-budget` for `revise-budget`. The wizard shows a Create budget step (amount, reason), and committing it creates one active sprk_budget under the matter as the caller, recorded on the Decision Record.</goal>
+
+  <context>
+    <background>Precedent to copy: `DecisionPlanService.WithoutMarkComplete()` (Actions/DecisionPlanService.cs:22) is a context-driven plan reduction applied in BOTH the plan route (Api/Signals/DecisionPlanEndpoints.cs:204-216) and the commit route (DecisionCommitService.cs:1279-1306), so the client and the server always agree on the offered actions. Published plans stay untouched (D-14). `revise-budget` (catalog :153) has parameters budget (Lookup sprk_budget, required), amount (Money, required) and reason (TextArea, required); it excludes approve-variance mutually. The `sprk_budget` create path for a secure or normal parent is the child-record route core (`ChildRecordEndpoints.CreateTables` includes sprk_budget, :68-69, the secure ribbon's "New Budget"), reached from executors through `DecisionRouteCores.CreateChildAsync`. ReviseBudgetExecutor (DecisionActionExecutors.cs:371) shows the budget↔matter columns and `sprk_totalbudget`. The no-budget predicate is "no sprk_budget with sprk_matter = core and statecode 0" (config/know-promotion.policies.json).</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionPlanService.cs (:22 WithoutMarkComplete)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Signals/DecisionPlanEndpoints.cs:204-216</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCommitService.cs:1279-1306</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionCatalog.cs (:153 revise-budget)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionExecutors.cs (:371 ReviseBudgetExecutor; :1015 ChildCreateExecutorBase)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/steps/ParameterFields.tsx:77-90 (D-18 single-candidate prefill)</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>revise-budget edits an existing budget; the secure ribbon's New Budget creates one; WithoutMarkComplete is the plan-substitution precedent.</existing>
+    <extension>A separate catalog code gives the Decision Record the right label and class without editing published plans. It is offered only by substitution, so no policy version changes.</extension>
+    <cost-of-doing-nothing>On a matter without a budget, the budget step cannot be completed. That is exactly the case the no-budget rule raises.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="D-180">`create-budget`: label "Create budget"; same lane, WorkType, class, ResolvesSignal and Gate as revise-budget; parameters amount (Money, required) and reason (TextArea, required); excludes approve-variance (mutual). It is never authorable directly: the authoring catalog does not list it, and a plan naming it is refused.</constraint>
+    <constraint source="D-180">Substitution: when the plan contains revise-budget and the core record has zero ACTIVE sprk_budget rows (read as the caller), replace revise-budget with create-budget in place (same position, same recommended flag). One shared function is used by both routes. If the count cannot be read, do not substitute and do not fail the route (the existing revise-budget path stays).</constraint>
+    <constraint source="D-17">At commit, recompute the substitution. If the client's actions do not match (a budget was created meanwhile), refuse with the existing actions-mismatch reason. Never silently convert one action into the other.</constraint>
+    <constraint source="DATAVERSE-WRITE-PATH">The budget is created as the caller through the child-record route core (secure parents included), with `sprk_matter` = the core matter, `sprk_totalbudget` = amount and a name. No writer identity and no new create path. If the core record is not a matter and sprk_budget has no lookup to it, preflight refuses.</constraint>
+    <constraint source="D-18 / D-182">Client: one candidate → pre-selected (unchanged); several → lookup (side pane once 158 lands). No client code checks budget counts to decide which action to show; the server's plan decides.</constraint>
+    <constraint source="CLAUDE.md §10">BFF hygiene: publish-size delta, full ArchTests, census row if required, no unfiltered Sprk.Bff.Api.Tests.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files.</step>
+    <step order="1">Failing tests first: substitution with 0, 1 and several active budgets; count read failure → no substitution; plan and commit routes agree; commit refuses on mismatch; executor columns and refusals; authoring catalog excludes create-budget.</step>
+    <step order="2">Implement the catalog entry, executor, substitution function and both call sites.</step>
+    <step order="3">PR into docs; R3 deploys the dev BFF; the Console auto-deploys from master.</step>
+    <step order="4">On dev: on a zz- matter with no budget, open the fee/scope or no-budget item that offers the budget action, create a budget, and record. Check the budget row, the Decision Record steps, and that the Signal closes Acted. Then on a matter with one budget, Revise budget is offered and pre-selected. Delete the zz- rows.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a plan with revise-budget and 0 active budgets on the core matter, then the plan route offers create-budget in its place; with ≥1 it offers revise-budget (must-not-fire).</criterion>
+    <criterion testable="true">Given the budget count cannot be read, then revise-budget is offered and the route does not fail.</criterion>
+    <criterion testable="true">Given a commit whose actions were computed on 0 budgets but the matter now has one, then the commit is refused with the actions-mismatch reason and nothing is written.</criterion>
+    <criterion testable="true">A taken create-budget creates one active sprk_budget (matter, amount, name) as the caller; the Decision Record step is labelled "Create budget" with its values and the budget in written.</criterion>
+    <criterion testable="true">A plan or draft that names create-budget directly is refused by DecisionPlanService.Resolve and by authoring validation.</criterion>
+    <criterion testable="true">On dev, both paths are checked and recorded in notes/deploy-log.md; zz- rows deleted.</criterion>
+    <criterion testable="true">Test scope: the cases above. Anything beyond needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the child-record route core cannot create sprk_budget for the decision path (for example it requires a ribbon-only context), STOP and report; do not add a second create path.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/uat-v4-log.md</file>
+    </files>
+  </knowledge>
+</task>

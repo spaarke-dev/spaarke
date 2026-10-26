@@ -25,6 +25,8 @@ import { render } from '@testing-library/react';
 
 const mockDispatch = jest.fn();
 const mockLookup = jest.fn();
+const mockOpenLookup = jest.fn();
+const mockOpenRecord = jest.fn();
 
 jest.mock('@spaarke/ui-components', () => {
   const actual = jest.requireActual('@spaarke/ui-components');
@@ -37,14 +39,14 @@ jest.mock('@spaarke/ui-components', () => {
 });
 jest.mock('@spaarke/ai-widgets', () => ({
   createWorklistLookup: jest.fn(() => mockLookup),
+  createWorklistOpenLookup: jest.fn(() => mockOpenLookup),
+  createWorklistOpenRecord: jest.fn(() => mockOpenRecord),
   useOptionalDispatchPaneEvent: () => mockDispatch,
 }));
 // `virtual`: this package does not depend on communication-components by name (the shim resolves it from LegalWorkspace's node_modules).
-jest.mock(
-  '@spaarke/communication-components',
-  () => ({ ReconciliationAggregateCard: jest.fn(() => null) }),
-  { virtual: true }
-);
+jest.mock('@spaarke/communication-components', () => ({ ReconciliationAggregateCard: jest.fn(() => null) }), {
+  virtual: true,
+});
 jest.mock('../../../../solutions/LegalWorkspace/src/services/authInit', () => ({
   authenticatedFetch: jest.fn(),
 }));
@@ -54,18 +56,17 @@ jest.mock('../../../../solutions/LegalWorkspace/src/config/runtimeConfig', () =>
 
 import { WorklistWidget, createWorklistService, launchDecisionWizard } from '@spaarke/ui-components';
 import type { SectionFactoryContext } from '@spaarke/ui-components';
-import { createWorklistLookup } from '@spaarke/ai-widgets';
+import { createWorklistLookup, createWorklistOpenLookup, createWorklistOpenRecord } from '@spaarke/ai-widgets';
 import { worklistRegistration } from '../../../../solutions/LegalWorkspace/src/sections/worklist.registration';
 import { authenticatedFetch } from '../../../../solutions/LegalWorkspace/src/services/authInit';
 
-const SHIM_PATH = path.resolve(
-  __dirname,
-  '../../../../solutions/LegalWorkspace/src/sections/worklist.registration.ts'
-);
+const SHIM_PATH = path.resolve(__dirname, '../../../../solutions/LegalWorkspace/src/sections/worklist.registration.ts');
 
 const widgetMock = WorklistWidget as unknown as jest.Mock;
 const serviceMock = createWorklistService as unknown as jest.Mock;
 const lookupFactoryMock = createWorklistLookup as unknown as jest.Mock;
+const openLookupFactoryMock = createWorklistOpenLookup as unknown as jest.Mock;
+const openRecordFactoryMock = createWorklistOpenRecord as unknown as jest.Mock;
 
 /** The shim's code with block and line comments removed, so prose in the docblock cannot satisfy or fail a code check. */
 const shimCode = (): string =>
@@ -97,6 +98,8 @@ describe('worklist section shim (task 156)', () => {
     widgetMock.mockClear();
     serviceMock.mockClear();
     lookupFactoryMock.mockClear();
+    openLookupFactoryMock.mockClear();
+    openRecordFactoryMock.mockClear();
     mockDispatch.mockClear();
   });
 
@@ -135,6 +138,24 @@ describe('worklist section shim (task 156)', () => {
     });
   });
 
+  test('with Xrm: WorklistWidget gets the side-pane lookup and the record modal (task 158, D-182)', () => {
+    withXrm(() => {
+      mountSection();
+      const props = widgetMock.mock.calls[0][0];
+      expect(openLookupFactoryMock).toHaveBeenCalledTimes(1);
+      expect(openRecordFactoryMock).toHaveBeenCalledTimes(1);
+      expect(props.openLookup).toBe(mockOpenLookup);
+      expect(props.openRecord).toBe(mockOpenRecord);
+    });
+  });
+
+  test('with Xrm: the side-pane lookup also gets Xrm.WebApi, to read a picked contact address (task 160, D-179)', () => {
+    withXrm(retrieve => {
+      mountSection();
+      expect(openLookupFactoryMock.mock.calls[0][1]?.retrieveMultipleRecords).toBe(retrieve);
+    });
+  });
+
   test('aggregate row opens the Email Review tab through the pane bus', () => {
     withXrm(() => {
       mountSection();
@@ -152,6 +173,11 @@ describe('worklist section shim (task 156)', () => {
     const props = widgetMock.mock.calls[0][0];
     expect(props.lookup).toBeUndefined();
     expect(lookupFactoryMock).not.toHaveBeenCalled();
+    // D-182: no Xrm, no side pane and no record modal - the wizard keeps its inline type-ahead and shows the subject as text.
+    expect(props.openLookup).toBeUndefined();
+    expect(props.openRecord).toBeUndefined();
+    expect(openLookupFactoryMock).not.toHaveBeenCalled();
+    expect(openRecordFactoryMock).not.toHaveBeenCalled();
     expect(props.aggregateRow.props.dataverseClient).toBeUndefined();
   });
 

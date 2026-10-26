@@ -4,10 +4,14 @@
 // would answer AS EACH USER: which Signals their business unit reads, which core records and subjects they may read, and it
 // EVALUATES the OData the service sends (the In() id list, the "mine" clauses, the flag filter), so a missing or wrong
 // filter in the service shows up as a wrong answer here. The worklist configuration is the REPO's task 050 row, verbatim.
+// D-185 (task 163): the policy short name, work type and severity are read by the BFF (app-only), not joined as the caller. The fake
+// returns the link-entity's columns only when the query carries the link, and refuses a query that carries it when the caller has no
+// Read on sprk_policy (World.CallerHasNoPolicyRead, Dataverse 0x80040220), so the repo row is proven to need no policy Read.
 // The opt-in live leg (SignalReadRouteLiveTests) runs the same route as real low-privilege users against spaarkedev1.
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Security.Claims;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
@@ -23,8 +27,10 @@ using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
+using Sprk.Bff.Api.Services.Identity;
 using Sprk.Bff.Api.Services.Signals;
 using Xunit;
 
@@ -1718,6 +1724,319 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
     }
 
     // ---------------------------------------------------------------------------------------------------------------
+    // D-185 (task 163, #2285): the policy columns are read by the BFF, so no user needs Read on sprk_policy
+    // ---------------------------------------------------------------------------------------------------------------
+
+    /// <summary>The repo row as it was before D-185: each query outer-links sprk_policy as alias <c>policy</c> (the same text the live
+    /// dev row holds until the new configuration is applied).</summary>
+    private static string LegacyConfigWithPolicyLink()
+    {
+        const string link = "<link-entity name='sprk_policy' from='sprk_policyid' to='sprk_policy' link-type='outer' alias='policy'>"
+            + "<attribute name='sprk_shortname' /><attribute name='sprk_worktype' /><attribute name='sprk_severity' /></link-entity>";
+        var json = File.ReadAllText(WorklistFactory.ConfigPath);
+        var legacy = json.Replace("<attribute name='ownerid' />", "<attribute name='ownerid' />" + link);
+        legacy.Should().NotBe(json);
+        Regex.Matches(legacy, "alias='policy'").Count.Should().Be(5, "all five queries carry the link, as before D-185");
+        return legacy;
+    }
+
+    private sealed record ItemView(Guid Id, string? Rule, string? WorkType);
+
+    private static List<ItemView> Items(JsonElement body) =>
+        body.GetProperty("lanes").EnumerateArray().SelectMany(l => l.GetProperty("groups").EnumerateArray())
+            .SelectMany(g => g.GetProperty("items").EnumerateArray().Select(i => new ItemView(
+                i.GetProperty("signalId").GetGuid(),
+                i.GetProperty("ruleShortName").GetString(),
+                i.GetProperty("workType").GetString())))
+            .ToList();
+
+    /// <summary>One fixture mixing severities, work types and shared/own policies: the same data is served under the new and the old configuration.</summary>
+    private static (World World, Dictionary<string, Guid> Ids) MixedWorld()
+    {
+        var world = new World();
+        var ids = new Dictionary<string, Guid>();
+        var mA = world.Matter(readers: [Alice], number: "MAT-0002");
+        var mB = world.Matter(readers: [Alice], number: "MAT-0001");
+        var mC = world.Matter(readers: [Alice], number: "MAT-0003");
+        var shared = world.Policy("Shared rule", 100000002, Critical);
+        ids["aInfo"] = world.Signal(Decide, core: (MatterType, mA), severity: Info, shortName: "Info rule", workType: 100000004, firstDetected: "2026-09-01T00:00:00Z");
+        ids["aCrit"] = world.Signal(Decide, core: (MatterType, mA), policy: shared, firstDetected: "2026-10-05T00:00:00Z");
+        ids["bCrit"] = world.Signal(Decide, core: (MatterType, mB), policy: shared, firstDetected: "2026-10-05T00:00:00Z");
+        ids["cWarn"] = world.Signal(Decide, core: (MatterType, mC), severity: Warning, shortName: "Budget gap", workType: 100000001, firstDetected: "2026-09-20T00:00:00Z");
+        ids["dNone"] = world.Signal(Decide, core: (MatterType, mC), severity: null, shortName: "No severity", workType: 100000003, firstDetected: "2026-01-01T00:00:00Z");
+        return (world, ids);
+    }
+
+    [Fact]
+    public async Task NewConfiguration_WithNoPolicyReadForTheCaller_GivesTheRuleNameWorkTypeAndRankFromTheBff()
+    {
+        var (world, ids) = MixedWorld();
+        world.CallerHasNoPolicyRead = true;
+
+        var body = await OkAsync(world, Alice);
+
+        world.Requests.Where(r => r.StartsWith("sprk_signals?", StringComparison.Ordinal))
+            .Should().NotBeEmpty().And.OnlyContain(r => !Uri.UnescapeDataString(r).Contains("link-entity", StringComparison.Ordinal));
+        var items = Items(body).ToDictionary(i => i.Id);
+        items[ids["aCrit"]].Should().Be(new ItemView(ids["aCrit"], "Shared rule", "chaseReply"));
+        items[ids["cWarn"]].Should().Be(new ItemView(ids["cWarn"], "Budget gap", "approveOrRebudget"));
+        items[ids["aInfo"]].Should().Be(new ItemView(ids["aInfo"], "Info rule", "comingDue"));
+        items[ids["dNone"]].Should().Be(new ItemView(ids["dNone"], "No severity", "finishOrReschedule"));
+        // Ranking (D-42): the Critical group first (B before A on record number), then Warning, with the severity-less item last in its group.
+        var groups = Lane(body, "Decide").GetProperty("groups").EnumerateArray()
+            .Select(g => g.GetProperty("items").EnumerateArray().Select(i => i.GetProperty("signalId").GetGuid()).ToList()).ToList();
+        groups.Should().HaveCount(3);
+        groups[0].Should().Equal(ids["bCrit"]);
+        groups[1].Should().Equal(ids["aCrit"], ids["aInfo"]);
+        groups[2].Should().Equal(ids["cWarn"], ids["dNone"]);
+    }
+
+    [Fact]
+    public async Task NewConfiguration_ReturnsTheSameItemsOrderAndFields_AsTheOldConfigurationForTheSameData()
+    {
+        var (newWorld, newIds) = MixedWorld();
+        var newBody = await OkAsync(newWorld, Alice);
+
+        var (oldWorld, oldIds) = MixedWorld();
+        oldWorld.ConfigJson = LegacyConfigWithPolicyLink();
+        var oldBody = await OkAsync(oldWorld, Alice);
+
+        // The ids differ between the two worlds; compare by the fixture's role names.
+        static List<(string Key, string? Rule, string? WorkType)> ByRole(JsonElement body, Dictionary<string, Guid> ids) =>
+            Items(body).Select(i => (ids.Single(kv => kv.Value == i.Id).Key, i.Rule, i.WorkType)).ToList();
+        var shapeNew = ByRole(newBody, newIds);
+        shapeNew.Should().HaveCount(5);
+        ByRole(oldBody, oldIds).Should().Equal(shapeNew, "the same items, in the same order, with the same rule names and work types");
+        // The old configuration really is the joined one.
+        oldWorld.Requests.Where(r => r.StartsWith("sprk_signals?", StringComparison.Ordinal))
+            .Should().OnlyContain(r => Uri.UnescapeDataString(r).Contains("alias=\"policy\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task OldConfiguration_WithTheLink_IsUnchanged_AndTheBffReadAgrees()
+    {
+        var world = new World { ConfigJson = LegacyConfigWithPolicyLink() };
+        var m = world.Matter(readers: [Alice]);
+        var s = world.Signal(Decide, core: (MatterType, m), severity: Critical, workType: 100000001, shortName: "Budget gap");
+
+        Items(await OkAsync(world, Alice)).Should().Equal(new ItemView(s, "Budget gap", "approveOrRebudget"));
+    }
+
+    [Fact]
+    public async Task OldConfiguration_WithNoPolicyReadForTheCaller_IsTheEmptyListToday_WhichIsWhyTheRoleChangeFollowsTheNewConfiguration()
+    {
+        // Premise pin for the deploy order (D-185): Dataverse refuses a Signal query that links sprk_policy when the caller has no
+        // Read on it, and the route reads that as "no read on sprk_signal" (an empty list and a Warning). So the live roles lose the
+        // Read only after the repo configuration (no link) is applied; this is the failure that ordering prevents.
+        var world = new World { ConfigJson = LegacyConfigWithPolicyLink(), CallerHasNoPolicyRead = true };
+        world.Signal(Decide, core: (MatterType, world.Matter(readers: [Alice])));
+        AllItems(await OkAsync(world, Alice)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task APolicyReadFault_Is503_NeverRowsWithBlankSeverity()
+    {
+        var (world, _) = MixedWorld();
+        world.FaultAppOnlyTables.Add("sprk_policy");
+
+        var response = await GetAsync(world, Alice);
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await Problem(response)).GetProperty("reasonCode").GetString().Should().Be("ontology.signal.worklist_unavailable");
+    }
+
+    [Fact]
+    public async Task AFaultOnTheSecondPolicyChunk_Is503_NoRowsReturned()
+    {
+        // 150 distinct policies make two sprk_policy reads (100 + 50); only the second one throws.
+        var world = new World { FaultPolicyReadFrom = 2 };
+        var m = world.Matter(readers: [Alice]);
+        for (var i = 0; i < 150; i++)
+        {
+            world.Signal(Decide, core: (MatterType, m));
+        }
+
+        var response = await GetAsync(world, Alice);
+
+        world.PolicyReads.Select(r => r.Length).Should().Equal(SignalReadService.IdChunk, 50);
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        var problem = await Problem(response);
+        problem.GetProperty("reasonCode").GetString().Should().Be("ontology.signal.worklist_unavailable");
+        problem.ToString().Should().NotContain("lanes", "no rows come back with a faulted read");
+    }
+
+    [Fact]
+    public async Task AnExternalCaller_GetsNoPolicyColumns_AndNoPolicyQueryIsIssued()
+    {
+        var world = new World { CallerIsExternal = true };
+        var m = world.Matter(readers: [Alice]);
+        var s = world.Signal(Decide, core: (MatterType, m), severity: Critical, workType: 100000001, shortName: "Budget gap");
+
+        Items(await OkAsync(world, Alice)).Should().Equal(new ItemView(s, null, null));
+        world.PolicyReads.Should().BeEmpty("an external caller triggers no sprk_policy read");
+    }
+
+    [Fact]
+    public async Task AnInternalCaller_IsEnrichedAsBefore_WithOnePolicyQuery()
+    {
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        var s = world.Signal(Decide, core: (MatterType, m), severity: Critical, workType: 100000001, shortName: "Budget gap");
+
+        Items(await OkAsync(world, Alice)).Should().Equal(new ItemView(s, "Budget gap", "approveOrRebudget"));
+        world.PolicyReads.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task AnUnresolvedOrNonGuidCaller_IsNotEnriched_ButTheRowsAreStillReturned()
+    {
+        // The resolver's "no answer" reasons (CallerSystemUserResolver.cs): no-claims-principal, no-oid-claim, no-matching-systemuser,
+        // and the null-object's resolver-not-registered. All are 200 with no enrichment. lookup-failed is a fault and is NOT here.
+        var worlds = new List<World>
+        {
+            new() { CallerResolvedToNonGuid = true },
+        };
+        foreach (var reason in new[] { "no-claims-principal", "no-oid-claim", "no-matching-systemuser", "resolver-not-registered" })
+        {
+            worlds.Add(new World { CallerUnresolved = true, CallerUnresolvedReason = reason });
+        }
+
+        foreach (var world in worlds)
+        {
+            var m = world.Matter(readers: [Alice]);
+            var s = world.Signal(Decide, core: (MatterType, m), severity: Critical, workType: 100000001, shortName: "Budget gap");
+
+            Items(await OkAsync(world, Alice)).Should().Equal(new ItemView(s, null, null));
+            world.PolicyReads.Should().BeEmpty();
+        }
+    }
+
+    [Fact]
+    public async Task AResolverFault_Is503_NotARowListWithBlankSeverity()
+    {
+        // F2 (fix round 2): a Dataverse fault resolving the caller (an exception from either resolver, or the resolver's own
+        // "lookup-failed" answer) must not turn into a 200 whose rule names, work types and severities are blank for an internal user.
+        var worlds = new[]
+        {
+            new World { CallerResolverThrows = true },
+            new World { ExternalFlagReadThrows = true },
+            new World { CallerUnresolved = true, CallerUnresolvedReason = SignalReadService.CallerLookupFailedReason },
+        };
+        foreach (var world in worlds)
+        {
+            var m = world.Matter(readers: [Alice]);
+            world.Signal(Decide, core: (MatterType, m), severity: Critical, workType: 100000001, shortName: "Budget gap");
+
+            var response = await GetAsync(world, Alice);
+
+            response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+            var problem = await Problem(response);
+            problem.GetProperty("reasonCode").GetString().Should().Be("ontology.signal.worklist_unavailable");
+            problem.ToString().Should().NotContain("lanes", "no rows come back when the caller cannot be classified");
+            world.PolicyReads.Should().BeEmpty();
+        }
+    }
+
+    [Fact]
+    public async Task TheExternalRule_RethrowsCancellation_AndAnyOtherFault_ButNotAnAnswer()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var cancelling = new Mock<ICallerSystemUserResolver>();
+        cancelling.Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>())).ThrowsAsync(new OperationCanceledException(cts.Token));
+        var users = new Mock<ISystemUserIdentityResolver>();
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
+
+        var act = () => SignalReadService.IsExternalOrUnknownCallerAsync(cancelling.Object, users.Object, null, logger, cts.Token);
+        await act.Should().ThrowAsync<OperationCanceledException>();
+
+        // The same exception while the token is NOT cancelled is any other fault: it propagates (the route answers 503).
+        var notCancelled = () => SignalReadService.IsExternalOrUnknownCallerAsync(cancelling.Object, users.Object, null, logger, CancellationToken.None);
+        await notCancelled.Should().ThrowAsync<OperationCanceledException>();
+
+        var faulting = new Mock<ICallerSystemUserResolver>();
+        faulting.Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>())).ThrowsAsync(new TimeoutException());
+        var fault = () => SignalReadService.IsExternalOrUnknownCallerAsync(faulting.Object, users.Object, null, logger, CancellationToken.None);
+        await fault.Should().ThrowAsync<TimeoutException>();
+
+        // lookup-failed is the resolver's own Dataverse fault; every other unresolved reason is an answer (external/unknown).
+        foreach (var (reason, expectThrow) in new[]
+        {
+            ("lookup-failed", true), ("no-claims-principal", false), ("no-oid-claim", false), ("no-matching-systemuser", false), ("resolver-not-registered", false),
+        })
+        {
+            var r = new Mock<ICallerSystemUserResolver>();
+            r.Setup(x => x.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(CallerSystemUserResolution.Unresolved(reason));
+            var call = () => SignalReadService.IsExternalOrUnknownCallerAsync(r.Object, users.Object, null, logger, CancellationToken.None);
+            if (expectThrow)
+            {
+                await call.Should().ThrowAsync<InvalidOperationException>(reason);
+            }
+            else
+            {
+                (await call()).Should().BeTrue(reason);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task OneBatchedPolicyReadPerRequest_ChunkedByIdChunk_AndDistinctIdsOnly()
+    {
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        for (var i = 0; i < 150; i++)
+        {
+            world.Signal(Decide, core: (MatterType, m));
+        }
+
+        AllItems(await OkAsync(world, Alice)).Should().HaveCount(150);
+        world.PolicyReads.Select(r => r.Length).Should().Equal(SignalReadService.IdChunk, 50);
+
+        var shared = new World();
+        var m2 = shared.Matter(readers: [Alice]);
+        var one = shared.Policy("One rule");
+        for (var i = 0; i < 150; i++)
+        {
+            shared.Signal(Decide, core: (MatterType, m2), policy: one);
+        }
+
+        AllItems(await OkAsync(shared, Alice)).Should().HaveCount(150);
+        shared.PolicyReads.Should().ContainSingle().Which.Should().Equal(one);
+    }
+
+    [Fact]
+    public async Task ThePolicyIsReadOnlyForTheRowsTheCallerCanSee()
+    {
+        var world = new World();
+        var visible = world.Matter(readers: [Alice]);
+        var hidden = world.Matter(readers: [Bob]);
+        var seen = world.Policy("Seen rule");
+        var secret = world.Policy("Secret rule");
+        world.Signal(Decide, core: (MatterType, visible), policy: seen);
+        world.Signal(Decide, core: (MatterType, hidden), policy: secret);
+
+        Items(await OkAsync(world, Alice)).Single().Rule.Should().Be("Seen rule");
+
+        world.PolicyReads.Should().ContainSingle().Which.Should().Equal(new[] { seen }, "a policy named only by rows the caller cannot see is never read");
+    }
+
+    [Fact]
+    public async Task APolicyThatNoLongerExists_KeepsTodaysMissingAliasBehaviour_NoNameNoWorkType_RankedLast()
+    {
+        var world = new World();
+        var mA = world.Matter(readers: [Alice], number: "MAT-0001");
+        var mB = world.Matter(readers: [Alice], number: "MAT-0002");
+        var orphan = world.Signal(Decide, core: (MatterType, mA), policy: Guid.NewGuid(), firstDetected: "2026-01-01T00:00:00Z");
+        var info = world.Signal(Decide, core: (MatterType, mB), severity: Info, shortName: "Info rule");
+
+        var items = Items(await OkAsync(world, Alice));
+
+        items.Select(i => i.Id).Should().Equal(info, orphan);
+        items.Single(i => i.Id == orphan).Should().Be(new ItemView(orphan, null, null));
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
     // helpers
     // ---------------------------------------------------------------------------------------------------------------
 
@@ -1927,9 +2246,11 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
             DateTimeOffset? suppressedUntil = null,
             string? sentence = null,
             Guid? decisionRecord = null,
-            int? status = null)
+            int? status = null,
+            Guid? policy = null)
         {
             var id = Guid.NewGuid();
+            policy ??= Policy(shortName, workType, severity);
             var subjectPair = subject ?? (core is { } c ? (c.Type, c.Id) : (null, Guid.NewGuid()));
             SubjectOf[id] = subjectPair.Id;
             var row = new Dictionary<string, object?>
@@ -1942,6 +2263,7 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
                 ["sprk_regardingrecordid"] = subjectPair.Id.ToString("D"),
                 ["sprk_regardingrecordname"] = subjectName,
                 ["_sprk_policyversion_value"] = Guid.NewGuid(),
+                ["_sprk_policy_value"] = policy,
                 ["sprk_evidencerefs"] = evidence,
                 ["sprk_sentence"] = sentence,
                 ["policy.sprk_shortname"] = shortName,
@@ -1961,6 +2283,40 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
             Signals.Add((id, sets ?? [lane == Decide ? "decide" : "do"], row));
             return id;
         }
+
+        /// <summary>A <c>sprk_policy</c> row (app-only Dataverse): its short name, work type and severity (no severity column when null).</summary>
+        public Guid Policy(string shortName = "Rule", int workType = 100000000, int? severity = Warning)
+        {
+            var row = new Entity("sprk_policy", Guid.NewGuid())
+            {
+                ["sprk_shortname"] = shortName,
+                ["sprk_worktype"] = new OptionSetValue(workType),
+            };
+            if (severity is { } sev) row["sprk_severity"] = new OptionSetValue(sev);
+            AppRows.Add(row);
+            return row.Id;
+        }
+
+        /// <summary>D-185: the caller has no Read on <c>sprk_policy</c>, so a Signal query that links it is refused by Dataverse.</summary>
+        public bool CallerHasNoPolicyRead { get; set; }
+
+        /// <summary>D-185 (uac-r2): how the caller reads for the external-or-unknown rule. Default: a resolved internal systemuser.</summary>
+        public bool CallerIsExternal { get; set; }
+        public bool CallerUnresolved { get; set; }
+        /// <summary>The resolver's UnresolvedReason when <see cref="CallerUnresolved"/>; default no-matching-systemuser.</summary>
+        public string CallerUnresolvedReason { get; set; } = "no-matching-systemuser";
+        public bool CallerResolvedToNonGuid { get; set; }
+        public bool CallerResolverThrows { get; set; }
+        public bool ExternalFlagReadThrows { get; set; }
+
+        /// <summary>From this sprk_policy app-only read on (1-based; 0: never) the read throws, like a Dataverse timeout.</summary>
+        public int FaultPolicyReadFrom { get; set; }
+
+        /// <summary>The worklist row's JSON as the BFF reads it; null: the repo row verbatim.</summary>
+        public string? ConfigJson { get; set; }
+
+        /// <summary>Every app-only read of <c>sprk_policy</c> the BFF made: the ids it asked for.</summary>
+        public List<Guid[]> PolicyReads { get; } = [];
 
         // ── app-only Dataverse (the secure-family walk and the time-zone reads), evaluated by condition ─────────────────
 
@@ -2025,6 +2381,13 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
 
         public EntityCollection AppOnly(QueryExpression q)
         {
+            if (q.EntityName == "sprk_policy")
+            {
+                lock (PolicyReads) PolicyReads.Add(q.Criteria.Conditions.SelectMany(c => c.Values).OfType<Guid>().ToArray());
+            }
+
+            if (q.EntityName == "sprk_policy" && FaultPolicyReadFrom > 0 && PolicyReads.Count >= FaultPolicyReadFrom)
+                throw new TimeoutException("app-only read of sprk_policy timed out");
             if (FaultAppOnlyTables.Contains(q.EntityName)) throw new TimeoutException($"app-only read of {q.EntityName} timed out");
             switch (q.EntityName)
             {
@@ -2119,7 +2482,11 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
             {
                 if (TableDenied.TryGetValue(me2, out var denied) && denied.Contains("sprk_signal"))
                     return DataverseUserResponse.Fail(403, DataverseUserClientErrorCodes.AccessDenied, "denied");
-                return SignalPage(XDocument.Parse(Uri.UnescapeDataString(path["sprk_signals?fetchXml=".Length..])), me2);
+                var signalFetch = XDocument.Parse(Uri.UnescapeDataString(path["sprk_signals?fetchXml=".Length..]));
+                // Dataverse refuses the whole query (0x80040220) when the caller lacks Read on a linked table (D-185).
+                if (CallerHasNoPolicyRead && signalFetch.Descendants("link-entity").Any(l => (string?)l.Attribute("name") == "sprk_policy"))
+                    return DataverseUserResponse.Fail(403, DataverseUserClientErrorCodes.AccessDenied, "0x80040220");
+                return SignalPage(signalFetch, me2);
             }
 
             if (path.StartsWith("sprk_decisionrecords?fetchXml=", StringComparison.Ordinal))
@@ -2228,6 +2595,12 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
             }
 
             var slice = all.Skip((page - 1) * PageSize).Take(PageSize).ToList();
+            // D-185: like Dataverse, the link-entity's columns (policy.*) come back only when the query carries the link.
+            if (!text.Contains("alias=\"policy\"", StringComparison.Ordinal))
+            {
+                slice = slice.Select(r => r.Where(kv => !kv.Key.StartsWith("policy.", StringComparison.Ordinal)).ToDictionary(kv => kv.Key, kv => kv.Value)).ToList();
+            }
+
             // Task 154: like Dataverse, a column comes back only when the query selects it (the route runs the FetchXML verbatim).
             if (!text.Contains("<attribute name=\"sprk_sentence\" />", StringComparison.Ordinal))
             {
@@ -2282,6 +2655,35 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         public Task InvalidateAsync(Guid systemUserId, CancellationToken ct) => Task.CompletedTask;
     }
 
+    private sealed class FakeCallerResolver(WorklistFactory factory) : ICallerSystemUserResolver
+    {
+        public Task<CallerSystemUserResolution> ResolveAsync(ClaimsPrincipal? caller, CancellationToken ct)
+        {
+            var world = factory.World;
+            if (world.CallerResolverThrows) throw new TimeoutException("caller resolution timed out");
+            if (world.CallerUnresolved)
+                return Task.FromResult(new CallerSystemUserResolution { IsResolved = false, UnresolvedReason = world.CallerUnresolvedReason });
+            return Task.FromResult(new CallerSystemUserResolution
+            {
+                IsResolved = true,
+                SystemUserId = world.CallerResolvedToNonGuid ? "not-a-guid" : (world.ActingAs ?? Guid.Empty).ToString("D"),
+            });
+        }
+    }
+
+    private sealed class FakeSystemUsers(WorklistFactory factory) : ISystemUserIdentityResolver
+    {
+        public Task<string?> ResolveOidAsync(Guid systemUserId, CancellationToken ct = default) => Task.FromResult<string?>(null);
+
+        public Task<Guid?> ResolveSystemUserIdAsync(string oid, CancellationToken ct = default) => Task.FromResult<Guid?>(null);
+
+        public Task<bool> IsExternalAsync(Guid systemUserId, CancellationToken ct = default)
+        {
+            if (factory.World.ExternalFlagReadThrows) throw new TimeoutException("external flag read timed out");
+            return Task.FromResult(factory.World.CallerIsExternal);
+        }
+    }
+
     private sealed class WorldClock(WorklistFactory factory) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => factory.World.Now;
@@ -2330,7 +2732,7 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
                 {
                     "sprk_gridconfiguration" => new EntityCollection([new Entity("sprk_gridconfiguration", SignalReadService.WorklistConfigurationId)
                     {
-                        ["sprk_configjson"] = config, ["statecode"] = new OptionSetValue(0),
+                        ["sprk_configjson"] = World.ConfigJson ?? config, ["statecode"] = new OptionSetValue(0),
                     }]),
                     "sprk_recordtype_ref" => new EntityCollection(q.Criteria.Conditions[0].Values.Cast<Guid>()
                         .Where(World.Catalog.ContainsKey)
@@ -2361,6 +2763,10 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
                 services.AddScoped<IDataverseUserClient>(_ => new FakeUserClient(this));
                 services.RemoveAll<IIdentityNormalizationService>();
                 services.AddSingleton<IIdentityNormalizationService>(_ => new FakeIdentity(this));
+                services.RemoveAll<ICallerSystemUserResolver>();
+                services.AddScoped<ICallerSystemUserResolver>(_ => new FakeCallerResolver(this));
+                services.RemoveAll<ISystemUserIdentityResolver>();
+                services.AddSingleton<ISystemUserIdentityResolver>(_ => new FakeSystemUsers(this));
                 services.RemoveAll<TimeProvider>();
                 services.AddSingleton<TimeProvider>(new WorldClock(this));
                 // The writer's own identity (WhoAmI on its dedicated connection): the createdby of every genuine Decision Record.
