@@ -97,6 +97,9 @@ overwritten.
     column on that table (each table is proven separately: a profile granting Read on one table proves only that one).
     A fault in any of these reads is no proof (fail closed).
 
+  Team membership is joined server-side: one query each for System Administrator and for the profiles, so no request
+  grows with the number of teams the BFF user is in.
+
   A non-empty record read on a table is not proof: Dataverse can grant a secured field on one record (a record-level field
   share), so one readable record says nothing about the empty ones (UAC 2026-10-23: a record-level field share must not
   prove a column).
