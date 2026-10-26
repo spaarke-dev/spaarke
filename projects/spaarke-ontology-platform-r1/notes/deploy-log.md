@@ -347,6 +347,16 @@ Criterion 89 (blank the writer client id, expect the writer-failure alert to fir
 - **Smoke:** PASS. Validate on Secure PAT-908068 (`5d46df87`) returns `valid:false` / `scope_matter_secured`; on Standard REAL-2026-123456.01 (`2444af6d`) it returns `valid:true`.
 - **Nightly sweep:** `[SIGNAL-EVALUATOR] heartbeat outcome=succeeded` at 02:30:29Z with policies=6 hits=142 written=0 closed=0, the same as 2026-10-21. Since 21:45:37Z the only 503xx trace is the heartbeat, with 0 Signals/Ontology/Gate exceptions.
 
+## 2026-10-26 — ebilling task 122 on dev: `sprk_invoicesubmission.sprk_findingsjson` field-secured (owner OK in ebilling's session + ontology PASS)
+
+- `Deploy-EbillingFormsViews.ps1 -FormsOnly`: removed the column from the submission "Information" form (c412f942); published `sprk_invoicesubmission` only.
+- `Set-EbillingFindingsJsonFieldSecurity.ps1`:
+  - The column is secured; "Spaarke BFF-Managed Field Writers" gets read, create and update; Readers has no row.
+  - The second run wrote nothing; `-Verify` exits 0.
+  - The masked window was 16.3 s, but the BFF app users hold System Administrator, so they were never masked.
+  - 0 submission rows carry findings; no role change.
+- **Ontology impact:** none. No ontology code reads the column; `mi-ontology-writer-dev` is not and must not be in the profile.
+
 ## 2026-10-23 — dev BFF `58ffc37da3` (R3) + D-185 live order on spaarkedev1 (worklist config, POL-MATTER-NOBUDGET v2, Console User)
 
 - **BFF:** R3 deployed master `58ffc37da3` at 11:18:12Z (owner approved in R3's session). Ontology read-back at about 11:20Z: `Sprk.Bff.Api.dll` ProductVersion `1.0.0+58ffc37da303a6b169b9b6b3d4d1ad6539dfc94b`, `/healthz` 200. It carries 158, 159, 161, 162, 163, 164 (#2303), 160 + #2314 (#2313) and R3 077.
