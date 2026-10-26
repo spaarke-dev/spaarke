@@ -23,12 +23,9 @@
 | **Gate tooling** | App Insights `spe-insights-dev-67e2xz` (RG `spe-infrastructure-westus2`), role `spaarke-bff-dev`. Pass `--offset Nd` (default look-back is 1 h). Use `contains`, not `has_any`, for exception names. Script: temp `uacmerge/uacg/uacg_gate.sh`. |
 
 ## Next actions (mine)
-1. **Merge queue (one job at a time):**
-   - **#2322** (census accepted exceptions: Billing Admin EB-D-150, AI Analysis Admin round 127; direct grants only) — watcher `uacm_watch.sh 2322 5edc6249e3…` running. Required checks green; "Agent guard tests" red is a non-required Pester install failure. On merge: tell ebilling + ontology.
-   - **#2323** (#2320: proof sees team-held System Administrator + profiles, matches SA by template id; head e902e9f203…) — both integration suites pass in full (186/8, 353/23). Start its watcher after #2322.
-   - Then request a deploy from R3 for both, and run the gate. Then remove worktrees C:/wt-uacexc and C:/wt-uacteam (check junctions first).
+1. **#2322 MERGED (0b8acdf8dc), #2323 / #2320 MERGED (f183dd9c92); worktrees removed.** Deploy of master f183dd9c92 requested from R3 (needs the owner's go there). On the after-notice: gate from app start (access_record_hidden = 0, census child lines unchanged apart from AcceptedException lines, 403/5xx, new exception classes), write the gate note, close #2320's task on the gate.
 2. **Census triage sent (2026-10-26):** R3 (keep Critical), ontology (no role change for Console User / Ontology Admin; §5.2 is the fix), ebilling (EB-D-151 unchanged; #1911's four tables will flag the same way).
-3. **R3 GHSA-hq7m fix (private), branch fix/r3-iss-005-combined:** re-check slice-B review fixes; follow B2 (option A: server-side tenant resolve, workforce-any, CIAM token against workforce-any → deny); then slice C; two security passes on the combined diff before merge; ISS-005 (c05d1b2788) with or after. Asked R3 to confirm no slice-A secured column is in a team-held reader profile (root default team holds Identity Link Readers + BFF-Managed Field Readers).
+3. **R3 GHSA-hq7m fix (private), branch fix/r3-iss-005-combined:** re-check slice-B review fixes; follow B2 (option A: server-side tenant resolve, workforce-any, CIAM token against workforce-any → deny); then slice C; two security passes on the combined diff before merge; ISS-005 (c05d1b2788) with or after. Slice-B review fixes (907e567c69..ff1ade8380) and the FLS answer ACCEPTED. B2 shape pre-cleared with 7 review conditions (domain grammar before URL; definitive not-found only, short negative TTL; tid from issuer; configured-tenant check incl. MSA tenant; null code hash only with workforce-any, enforced in the store; CIAM vs workforce-any → deny; no domain+email logging).
 4. **ebilling #1911:** EB-D-150/151/152 decided by the owner; review the resulting code and role diff.
 5. **#2292** (membership junction never populated): filed; fix when there is capacity.
 
