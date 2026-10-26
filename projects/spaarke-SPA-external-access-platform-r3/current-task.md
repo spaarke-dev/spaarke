@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-23 ~13:00Z (by context-handoff, 86% checkpoint). Dev BFF = 58ffc37da3; dev SPA = 1fa0cf5cb8.
+> **Last Updated**: 2026-10-26 ~22:50Z. Dev BFF = bc99fc3e6b; dev SPA = 1fa0cf5cb8.
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -34,7 +34,12 @@
   - Securable and still open: accesspermissiongrant, identityplane, the collision columns, externalobjectidkey (kept open: alternate key), emailaddress1 (owner: editable). statecode can't be secured.
   - 11 contacts hold active grants: 9 bound, 2 unbound and never invited. Those 2 need a re-invite naming their tenant once slice B is live, unless xms_edov is configured.
 - **Live steps for later, each needing owner approval with a rollback:** schema apply (`scripts/Set-ExternalAccessContactSecuritySchema.ps1 -Apply` then `-Verify`); SpaarkeMaster 1.2.4.0 set in dev + `-Verify` + re-export (source bumped in 47e9bf6a71 only); the xms_edov + email optional claims on the API app registration, then a token probe (another-tenant user, B2B guest, MSA) to settle access-token presence and JSON type (research 2026-10-23: documented for JWT, not for access tokens specifically; absent likely = omitted); `removeUnverifiedEmailClaim=true`; the BFF deploy; the re-invites.
-- **Branch progress (`fix/r3-iss-005-combined`, pushed to c2e5da998d):** slice A + UAC round 1 (F1/F2/K) + round 2 (F3/K1/K3/K4a/K4b, accepted) + #2317 H7b S19/S22 + provisioning review items 1–3 (re-check sent). Item 4 (team members of SGA) on hold for provisioning's owner. Slice B implementer running.
+- **Branch progress (`fix/r3-iss-005-combined`, pushed to ff1ade8380):**
+  - Done and reviewed: slice A + UAC rounds 1–2 (accepted); #2317 H7b S19/S22 + provisioning items 1–3 (provisioning OK; item 4 dropped, "allow teams"); slice B (UAC rule shape OK) + review fixes (a) missing stamp column refuses every email bind, schema first, (b) invite rule before the 409 prompt, approved.
+  - Running: slice B2 (work-account invite; owner CONFIRMED 2026-10-26 in R3's session). Brief: "Slice B2 FINAL" in the private implementer brief. First commit = provisioning K3 remedy text.
+  - Then: slice C (brief + UAC caveat: the BFF app user gets standinggrant Update via DIRECT SGA membership, never via the Writers profile).
+  - Then: §10 publish-size delta, UAC's two security passes, and the PR, whose body carries "SpaarkeMaster 1.2.4.0 published before the control-plane redeploy" and the schema-first rollout.
+- **Dev BFF = bc99fc3e6b** (deployed 2026-10-26 22:03:10Z, owner go). Gate PASS (R3 + UAC). Rollback: `Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261026T220116Z` (58ffc37da3). Next UAC deploy requests: #2322 and #2323 (in CI). Add `C:\wtbffe-bc9` to the cleanup list.
 - **ISS-005 merges with or after slices A–C.**
 
 ## Dev state
