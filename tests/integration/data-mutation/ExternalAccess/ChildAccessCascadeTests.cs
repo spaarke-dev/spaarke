@@ -780,6 +780,106 @@ public class ChildAccessCascadeTests : IClassFixture<ProvisionProjectTestFixture
         World.ValueOf<string>("sprk_workassignment", empty, AccessInheritance.Column).Should().NotBeNullOrEmpty();
     }
 
+    // ── #2320: the platform's answer sees team-held grants, and matches System Administrator by its template id ──
+
+    /// <summary>
+    /// #2320 must-fire: the BFF's own profile grants nothing, but a team it is a member of holds System Administrator — the
+    /// column is proven on both tables, so the empty work assignment record is decided.
+    /// </summary>
+    [Fact]
+    public async Task SystemAdministratorHeldOnlyThroughATeam_ProvesTheColumn()
+    {
+        var (matter, withRecord, empty) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        SeedOneNonEmptyAndOneEmptyWorkAssignment(matter, withRecord, empty);
+        _fixture.AccessRecordReadableByProfile = false;
+        _fixture.BffTeamIsSystemAdministrator = true;
+
+        var pass = await FollowParentsPassAsync();
+
+        AssertEmptyRecordDecided(pass, empty);
+    }
+
+    /// <summary>#2320 must-not-fire control: System Administrator held directly (by template id) still proves the column.</summary>
+    [Fact]
+    public async Task SystemAdministratorHeldDirectly_ProvesTheColumn()
+    {
+        var (matter, withRecord, empty) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        SeedOneNonEmptyAndOneEmptyWorkAssignment(matter, withRecord, empty);
+        _fixture.AccessRecordReadableByProfile = false;
+        _fixture.BffIsSystemAdministrator = true;
+
+        var pass = await FollowParentsPassAsync();
+
+        AssertEmptyRecordDecided(pass, empty);
+    }
+
+    /// <summary>
+    /// #2320 must-fire: the BFF directly holds a role NAMED "System Administrator" whose template id is another role's. A name
+    /// proves nothing (an administrator can rename a role): with no profile granting Read, the empty record is undetermined.
+    /// </summary>
+    [Fact]
+    public async Task ARoleNamedSystemAdministratorWithAnotherTemplate_ProvesNothing()
+    {
+        var (matter, withRecord, empty) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        SeedOneNonEmptyAndOneEmptyWorkAssignment(matter, withRecord, empty);
+        _fixture.AccessRecordReadableByProfile = false;
+        _fixture.BffHoldsRoleNamedSystemAdministratorWithOtherTemplate = true;
+
+        var pass = await FollowParentsPassAsync();
+
+        AssertEmptyRecordUndetermined(pass, empty);
+    }
+
+    /// <summary>
+    /// #2320 must-fire: the BFF's own profile grants nothing, but a profile held through its team grants Read on the work
+    /// assignment column — that table is proven and the empty record is decided.
+    /// </summary>
+    [Fact]
+    public async Task AProfileHeldOnlyThroughATeam_ProvesItsTable()
+    {
+        var (matter, withRecord, empty) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        SeedOneNonEmptyAndOneEmptyWorkAssignment(matter, withRecord, empty);
+        _fixture.AccessRecordReadableByProfile = false;
+        _fixture.BffTeamProfileReadTables.Add("sprk_workassignment");
+
+        var pass = await FollowParentsPassAsync();
+
+        AssertEmptyRecordDecided(pass, empty);
+    }
+
+    /// <summary>
+    /// #2320 must-not-fire: a profile held through the team grants Read on the PROJECT column only — that does not prove the
+    /// work assignment table, so its empty record is undetermined.
+    /// </summary>
+    [Fact]
+    public async Task AProfileHeldThroughATeam_OnAnotherTable_DoesNotProveThisOne()
+    {
+        var (matter, withRecord, empty) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        SeedOneNonEmptyAndOneEmptyWorkAssignment(matter, withRecord, empty);
+        _fixture.AccessRecordReadableByProfile = false;
+        _fixture.BffTeamProfileReadTables.Add("sprk_project");
+
+        var pass = await FollowParentsPassAsync();
+
+        AssertEmptyRecordUndetermined(pass, empty);
+    }
+
+    private void AssertEmptyRecordDecided(FollowParentsPass pass, Guid empty)
+    {
+        pass.Untrusted.Should().BeNull();
+        World.AccessRecordWrites.Should().Contain(w => w.Id == empty, "the platform proves the column readable on the table");
+        World.ValueOf<string>("sprk_workassignment", empty, AccessInheritance.Column).Should().NotBeNullOrEmpty();
+    }
+
+    private void AssertEmptyRecordUndetermined(FollowParentsPass pass, Guid empty)
+    {
+        pass.Untrusted.Should().Be(SecureRootInheritance.ReasonMarkerHidden);
+        pass.Undetermined.Should().BeGreaterOrEqualTo(1);
+        World.AccessRecordWrites.Should().NotContain(w => w.Id == empty, "the platform does not prove the column on this table");
+        World.ValueOf<string>("sprk_workassignment", empty, AccessInheritance.Column).Should().BeNull();
+        _fixture.IsSecureOf(empty).Should().BeTrue("an empty read the platform does not vouch for is never decided on");
+    }
+
     /// <summary>An ordinary matter with two work assignments under it: one with an access record, one secure with none.</summary>
     private void SeedOneNonEmptyAndOneEmptyWorkAssignment(Guid matter, Guid withRecord, Guid empty)
     {

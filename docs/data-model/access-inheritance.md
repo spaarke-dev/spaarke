@@ -90,8 +90,12 @@ overwritten.
   is trusted: every record is undetermined, nothing is written, and the job run fails with
   `sdap.inherit.access_record_not_secured`.
 - **An EMPTY record is decided on only once the BFF's read is proven.** Proof, once per job pass or request, is any one of:
-  - the BFF user holds the System Administrator role;
-  - one of its field security profiles grants Read on the column on that table (each table is proven separately). Today only profiles and roles the BFF user holds directly count; one held through a team is not seen, which leaves the record undetermined (fail closed).
+  - the BFF user holds the System Administrator role, matched by its role template id
+    (`627090ff-40a3-4053-8790-584edc5be201`, carried by every business unit's copy; never by its name), directly or
+    through a team it is a member of;
+  - a field security profile it holds, directly or through a team it is a member of, grants Read (`canread` = 4) on the
+    column on that table (each table is proven separately: a profile granting Read on one table proves only that one).
+    A fault in any of these reads is no proof (fail closed).
 
   A non-empty record read on a table is not proof: Dataverse can grant a secured field on one record (a record-level field
   share), so one readable record says nothing about the empty ones (UAC 2026-10-23: a record-level field share must not
@@ -99,6 +103,11 @@ overwritten.
 
   Without proof, the record is undetermined (`access_record_hidden`) and nothing is written. An empty read the BFF cannot
   vouch for may hide a real record, so the backfill rule's guess must never overwrite it.
+
+- **Provisioning dependency.** Stamps give the BFF app user System Administrator directly (H10 step 9), which proves
+  both tables. If the BFF app user is ever moved off System Administrator (least privilege), that change must add a field
+  security profile with `canread` = 4 on `sprk_accessinheritance` for both `sprk_project` and `sprk_workassignment`;
+  otherwise every empty access record becomes undetermined and the inheritance backfill stops (fails closed).
 
 ## Backfill (existing rows)
 
