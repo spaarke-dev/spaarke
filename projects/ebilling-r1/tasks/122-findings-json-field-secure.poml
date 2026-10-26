@@ -7,7 +7,7 @@
 - ontology-r1 review of the script and its -WhatIf;
 - notices to ontology-r1 and uac-r2 before and after;
 - the owner's OK for the dev run. The owner decided to fix #2235 on 2026-10-22; the run itself still needs its own OK.</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes BFF code (.cs), Dataverse field security and an access-disclosure surface (D-176).</rigor-reason>
     <model-tier>opus</model-tier>

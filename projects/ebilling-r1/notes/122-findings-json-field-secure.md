@@ -83,7 +83,7 @@ Source: `Entity.xml` `IsSecured` 1; the writer row in `Other/FieldSecurityProfil
 - ArchTests (full): 1551 passed, 0 failed.
 - Test scope: the Decision Record sentence cases, the guard's controls and the seeding proofs, nothing else.
 
-## 6. Live run (step 6, NOT run): runbook
+## 6. Live run (step 6): runbook
 
 Prerequisites: ontology-r1 PASS (2026-10-23), the owner's OK, and the before-notices to ontology-r1 and uac-r2. Run from the repository root as an operator signed in with `az login` (System Administrator on spaarkedev1).
 
@@ -105,6 +105,20 @@ pwsh scripts/ebilling/Set-EbillingFindingsJsonFieldSecurity.ps1 -BffApplicationI
 ```
 
 Then send the after-notices.
+
+**Run on dev, 2026-10-26** (owner OK EB-D-149; pre-notices to ontology-r1 and uac-r2, neither objected):
+
+| Step | Result |
+|---|---|
+| 1. `-FormsOnly -WhatIf` | 1 would change (sprk_invoicesubmission 'Information'), 13 unchanged, exit 0 |
+| 1. `-FormsOnly` | CHANGED 'Information' rebuilt; published entity sprk_invoicesubmission only; exit 0 |
+| 2. Form check | `False`: the main form no longer binds sprk_findingsjson |
+| 3. `-WhatIf` | (p0)-(p5) OK; 0 rows carry findings; both BFF app users hold System Administrator; nothing written; exit 0 |
+| 3. Run | secured the column; granted the writer profile read=4 create=4 update=4 (masked window 16.3 s; neither BFF user masked, both hold System Administrator); published; PASS; exit 0 |
+| 3. Second run | "Nothing written; no publish." PASS; exit 0 |
+| 3. `-Verify` | exit 0: secured, writer 4/4/4, no Readers row, no other profile except System Administrator (572329c1) |
+
+Informational: the -WhatIf listed a System Administrator team ('Spaarke Demo') whose members hold full field access by the platform rule, like every System Administrator. Ontology-r1 received the after-notice; uac-r2 asked for one only if -Verify flagged something, and it did not.
 
 **Why `-FormsOnly` (K1).** The repository's path for dev forms is `Deploy-EbillingFormsViews.ps1`, the generator of this form (task 029). A SpaarkeMaster import would bring the whole solution from this branch. A full run of the forms script throws on dev today: "Exception calling InsertAfter ... The reference node is not a child of this node", in step 3 (the `sprk_MatterManagement` sitemap). That happens after step 1 has written the form and before step 4 publishes it. The sitemap lists `sprk_invoice` twice (`area_mattermanagement/group_work` and `area_finance/group_c6c6d7dd`), and `sprk_invoicesubmission` sits in `area_finance`. The script places the billing-export entry after the submission entry inside the first invoice group, which does not contain it. This is pre-existing navigation drift, not caused by task 122; it is reported for filing.
 
