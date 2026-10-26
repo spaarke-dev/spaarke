@@ -10,7 +10,7 @@
 | Field | Value |
 |---|---|
 | **Task** | UAT round 1, live on dev. Dev BFF is **`58ffc37da3`**: deployed by R3 at 11:18:12Z, verified by DLL ProductVersion, healthz 200. It carries every UAT-1 task: 158, 159, 161, 162, 163, 164, and 160 + #2314. The D-185 dev steps are **done**: worklist config 11:20Z (verified in sync), POL-MATTER-NOBUDGET v2 11:20:38Z (verified), and Console User policy Reads removed 11:21:51–53Z (21 → 19). uac-r2 independently confirmed the read-back; their server gate is **PASS** (11:18–11:51Z). Basic User needed no change (D-189). |
-| **Status** | No lane running; no lane worktrees. Waiting on: (1) the **owner's browser checks** (list below); (2) ebilling's #1911 F1 merge SHA; (3) R3's next candidate `f183dd9c92` (uac-r2 #2322 + #2323 only; ontology OK sent 2026-10-26), which needs the owner's approval in R3's session. Live dev BFF per R3 is `bc99fc3e6b` (uac-r2 census; superset of `58ffc37da3`). |
+| **Status** | No lane running; no lane worktrees. Waiting on: (1) the **owner's browser checks** (list below); (2) R3's next candidate `f183dd9c92` (uac-r2 #2322 + #2323 only; ontology OK sent 2026-10-26), which needs the owner's approval in R3's session. Live dev BFF per R3 is `bc99fc3e6b` (uac-r2 census; superset of `58ffc37da3`). |
 | **Next Action** | On the owner's browser-check results: fix any failure (a lane per defect), or close 114, 160 and 163 (✅ + POML + TASK-INDEX; run the drift check). Then open the next docs→master PR (D-185 guard #2316 plus docs; test-only). |
 
 ## Owner browser checks (sent 2026-10-23 ~12:00Z; zz- test data, delete afterwards)
@@ -26,9 +26,9 @@
 
 1. Owner checks → close 114, 160 and 163, or fix.
 2. **Next docs→master PR:** the D-185 guard `PolicyReadRoleGuardTests` (#2316, docs `20d7cbd47c`) plus today's docs. Merge master first; run the full ArchTests; send before and after notices if it touches the Console or BFF (it doesn't today).
-3. **ebilling #1911:** when they send the F1 merge SHA, check `git diff origin/master <sha> -- src/server/api/Sprk.Bff.Api/Services/Signals/EarlierInvoiceReadability.cs` against the #2294 round we passed. The Core User conflict resolution keeps both lines. The owner decides these, via ebilling:
+3. **ebilling #1911:** F1 merge `bed558cb33` checked 2026-10-26: PASS for ontology. `EarlierInvoiceReadability` = the #2294 round; the combined diff is empty on every ontology file; Core User drops `InvoiceLineItem` (ebilling 029). The owner still decides, via ebilling, before master:
    - K1: Billing Administrator policy Read goes to Deep (uac-r2);
-   - K2: Core User CRUD on BFF-only invoice tables. uac-r2 recommends Read + AppendTo only.
+   - K2: Core User has full Deep CRUD, Assign and Share on `sprk_invoiceapproval`, `sprk_invoicecorrection`, `sprk_invoicesubmission` and `sprk_externalidentifier`. uac-r2 recommends Read + AppendTo only.
 4. R2 §9 owner answers → `/design-to-spec`; 105 UAT; #1882 live re-run; 111 row 4; 090 wrap-up; the `[SIGNAL-EVALUATOR]` heartbeat.
 
 ## Open owner questions
