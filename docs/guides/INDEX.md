@@ -104,6 +104,7 @@ This directory contains practical guides for deploying, configuring, administeri
 
 | Document | Description | Last Updated | Last Reviewed | Status |
 |----------|-------------|--------------|---------------|--------|
+| [UAC-ACCESS-MODEL-GUIDE.md](UAC-ACCESS-MODEL-GUIDE.md) | **How Unified Access Control decides access** — MDA, workforce SPA and partner users; Standard/Limited/Restricted; access levels; roles; record families; Secure Record; the Share button; teams; rules for building to UAC | 2026-10-27 | 2026-10-27 | Current |
 | [EXTERNAL-ACCESS-ADMIN-SETUP.md](EXTERNAL-ACCESS-ADMIN-SETUP.md) | External access administration setup | 2026-03-19 | — | — |
 | [EXTERNAL-ACCESS-SPA-GUIDE.md](EXTERNAL-ACCESS-SPA-GUIDE.md) | External access SPA user guide | 2026-03-19 | — | — |
 

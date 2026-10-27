@@ -134,18 +134,15 @@ internal static class MappingSourceReadProbe
     /// <param name="callerBearerToken">The caller's bearer token (a missing one answers <see cref="AccessRights.None"/>).</param>
     /// <param name="entityLogicalName">The record's logical name (or an alias the entity-set table knows).</param>
     /// <param name="recordId">The record.</param>
-    /// <param name="equalizeUnknownAndDenied">
-    /// True to ask through <see cref="CallerRecordAccessProbe.GetCallerRightsForAuthorizationGateAsync"/> (an unknown id and a
-    /// denied one take the same work); false keeps <see cref="CallerRecordAccessProbe.GetCallerRightsAsync"/>, which the
-    /// quick-create filter has always used.
-    /// </param>
+    /// <remarks>Always asks through <see cref="CallerRecordAccessProbe.GetCallerRightsForAuthorizationGateAsync"/>, so an
+    /// unknown id and a denied one take the same work (#2137). There is deliberately no non-equalised mode: every caller
+    /// turns a refusal into one uniform denial, and an option would let the next caller reopen the timing oracle.</remarks>
     /// <param name="ct">Cancellation; its cancellation propagates rather than being read as a decision.</param>
     internal static async Task<CallerReadCheck> CheckCallerReadAsync(
         CallerRecordAccessProbe probe,
         string? callerBearerToken,
         string? entityLogicalName,
         Guid recordId,
-        bool equalizeUnknownAndDenied,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(probe);
@@ -158,9 +155,8 @@ internal static class MappingSourceReadProbe
         AccessRights rights;
         try
         {
-            rights = equalizeUnknownAndDenied
-                ? await probe.GetCallerRightsForAuthorizationGateAsync(callerBearerToken, entitySet, recordId, ct).ConfigureAwait(false)
-                : await probe.GetCallerRightsAsync(callerBearerToken, entitySet, recordId, ct).ConfigureAwait(false);
+            rights = await probe.GetCallerRightsForAuthorizationGateAsync(callerBearerToken, entitySet, recordId, ct)
+                .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -206,8 +202,7 @@ internal static class MappingSourceReadProbe
         if (reader.Probe is { } probe)
         {
             var check = await CheckCallerReadAsync(
-                    probe, reader.CallerBearerToken, source.EntityLogicalName, source.RecordId,
-                    equalizeUnknownAndDenied: true, ct)
+                    probe, reader.CallerBearerToken, source.EntityLogicalName, source.RecordId, ct)
                 .ConfigureAwait(false);
 
             if (!check.IsAllowed)

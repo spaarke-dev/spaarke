@@ -1,17 +1,17 @@
 ---
-description: Manually refresh the AI Spend (est.) / AI Calls / AI Spend As Of fields on the portfolio board for one, several, or all projects, and produce the on-demand AI spend report / HTML dashboard (by day, project, model, main vs sub-agent)
+description: Manually refresh the AI Spend (est.) / AI Calls / AI Spend As Of / AI Cost (allocated) fields on the portfolio board for one, several, or all projects, produce the on-demand AI spend report / HTML dashboard (by day, project, model, main vs sub-agent), and compare invoiced actuals with the estimate
 tags: [devops, portfolio, cost, gh-cli]
 techStack: [gh-cli, python]
-appliesTo: ["/project-spend-update", "update project spend", "refresh AI cost", "sync project cost"]
+appliesTo: ["/project-spend-update", "update project spend", "refresh AI cost", "sync project cost", "actual AI spend", "add invoices"]
 alwaysApply: false
-last-reviewed: 2026-10-12
+last-reviewed: 2026-10-27
 ---
 
 # project-spend-update
 
 > **Category**: DevOps / Portfolio
 > **Tier**: On-demand utility — deliberately NOT wired into `task-execute` or any other hook.
-> **Last Reviewed**: 2026-10-12 (durable archive, local calendar days, `--today`, never-lower board values)
+> **Last Reviewed**: 2026-10-27 (invoiced actuals: `--actuals`, `AI Cost (allocated)`)
 
 ## Why this is a separate, manually-triggered skill
 
@@ -35,6 +35,7 @@ Recompute estimated AI spend from local Claude Code transcripts and push it to t
 | `/project-spend-update {slug} [{slug} ...]` | Refresh just the named project(s) |
 | "update project spend" / "refresh AI cost" / "what's the current spend on {project}" | Same, scoped to what was asked |
 | "spend report", "cost dashboard", "spend by day", "where is the AI spend going" | Step 4 only (report/dashboard); no board writes |
+| "actual spend", "what did we really pay", "spend YTD", the owner sends invoice screenshots | Step 6 (invoiced actuals); then Step 1 if the board should carry the new allocation |
 
 Not auto-triggered by anything — including `task-execute`, `devops-project-sync`, or project completion. If you want it current, run it.
 
@@ -63,6 +64,7 @@ This does, per project:
 3. If a folder matches but has zero logged API calls and no archive rows → skip, same reason
 4. Otherwise: rescan **all** transcripts for that folder from scratch, take the max of that and the project's archive total, and push `AI Spend (est.)`, `AI Calls`, `AI Spend As Of` = today
 5. **Never lowers a board value.** Spend and calls are compared separately with the current board values; a lower fresh figure is kept as-is and printed as `KEEP <slug> (fresh < board; transcripts likely pruned)`. `AI Spend As Of` changes only when something was written.
+6. Then, when the invoice list exists (Step 6), push `AI Cost (allocated)`: the project's share of the invoiced actuals. It is written as computed, even when lower (both inputs are durable; a share of the open cycle shrinks when other projects grow). The run ends with `AI Cost (allocated): N written, M failed (invoices through <date>)`; relay that date, since the allocation is only as current as the invoice list.
 
 ### Step 2: Report
 
@@ -100,15 +102,29 @@ The private dashboard https://claude.ai/artifact/R4J6P8Adsk12XhJV8ypxjR reads on
 
 The page's calculations (`summary`, `daily`, `by_model`) recompute from the file, so no page edit is needed. Its windows are Today / 7 / 14 / 30 / 60 days / All, anchored on the newest day in the file, in local calendar days (the CSV's `tz` column). The data covers this machine's transcripts and archive only, at list price.
 
+
+### Step 6: Invoiced actuals (when the owner sends invoices, or asks what was really paid)
+
+The invoices are typed in by hand: there is no export for a Max plan. The owner sends screenshots of the claude.ai billing list (Date / Total / Status); the PDFs are not needed.
+
+1. Add each new charge to `%USERPROFILE%\.claude\spend-archive\invoices.csv` (`date,amount,kind,invoice_id,notes`, ISO dates, outside the repo). `kind`: `plan` for the Max plan fee (the $200 charge on the 6th; when two $200 charges share the 6th, one is `plan`, the other `credits`), `credits` for every other charge (auto-recharge and manual top-ups), `other` for $0 or unusual lines. When screenshots overlap, a row repeated at the end of one and the start of the next is one charge; equal amounts on one day inside a screenshot are separate charges. Ask the owner when it is ambiguous, and note the answer in `notes`.
+2. Run Step 0 so the archive is current, then:
+   ```bash
+   python scripts/ai-cost/spend-report.py --actuals                 # by month (+ year to date), by billing cycle, allocation
+   python scripts/ai-cost/spend-report.py --actuals --format csv --out <scratchpad>/actuals.csv
+   ```
+3. Relay the month table (year-to-date actual spend), the effective-rate line and the top of the allocation. Ratios exist per billing cycle only: credits are prepaid, so a month can show a purchase with no usage or usage with no purchase. A `*` ratio is overstated (the archive covers only part of the cycle). The invoices cover the whole account (claude.ai chat and other machines too); the estimate covers this machine only.
+4. Run Step 1 to put the new allocation on the board, if the owner wants it current.
+
 ## Outputs
 
-- Up to 3 GitHub Project field mutations per project touched
-- Terminal summary: updated / skipped / failed counts + per-project cost and call count
+- Up to 4 GitHub Project field mutations per project touched
+- Terminal summary: updated / skipped / failed counts + per-project cost and call count, then the allocated lines
 
 ## What this does NOT do
 
 - Does not distinguish metered-API spend from subscription/Max-plan usage (by design — see Why above)
-- Does not reconcile against the actual Anthropic invoice (that's a manual, portfolio-level check)
+- Does not fetch invoices: the owner sends them and they are typed into the invoice list (Step 6)
 - Does not run automatically on any schedule, hook, or task completion
 - Does not recover cost history that was never captured: days not in the archive whose transcripts are gone (old worktrees cleaned up, or work done before 2026-08-12 on this machine) stay blank, not zero. Once captured by Step 0 a day is kept
 - Does not write costs into the repo — the archive, CSVs and HTML live outside it (`scripts/ai-cost/README.md`)
