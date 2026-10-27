@@ -34,6 +34,10 @@ When a project is associated with a matter in either wizard, the SERVER files th
        - Which server path writes the pair (extend the existing one; I-2, one server-side owner, wizards preview only; never Xrm.WebApi for the pair).
        - What filing changes for the project: its ownership under I-6 and its secure-if-any answer. Use the existing reconciler and Make Secure paths; never release a row from isolation.
        - One root: a second matter, or a pair naming another record, is refused with a named 409 code; nothing written. Re-filing to another matter is the existing re-file semantics, or out of scope (state which).
+       - The existing Project ↔ Matter N:N (owner confirmed 2026-10-27; it stays). The pair is the filing root; N:N rows are associations and confer nothing. Decide and record:
+         (a) A project's N:N may list several matters; only the pair's matter files it. The wizard writes both for the selected matter.
+         (b) A matter added through the MDA N:N subgrid to a project with NO pair does not file it (no plugins, I-2). State whether staff get a server action to file it, or whether it stays unfiled and is reported (census).
+         (c) Removing the N:N row of the pair's matter leaves the pair unchanged; say whether that mismatch is reported.
     2. Server: implement the write with If-Match and read-back; the previous pair is logged.
     3. Clients: CreateProjectWizard (association = matter) and CreateMatterWizard (association = an existing project) call the server path. The N:N association is still written as today. A failure is a visible warning, not a silent skip.
     4. Backfill (ii): a script under scripts/ (report-only by default) lists each project with exactly one N:N matter row and no pair, and writes the pair through the same server rule. It reports and skips projects with more than one N:N row or an existing pair. -Apply needs the owner's go in this session.
