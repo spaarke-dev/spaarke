@@ -28,6 +28,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Documents;
 
@@ -550,6 +551,10 @@ public sealed class SecureChildReconciler
     /// team, whose rule answer is in another business unit (I-6 interim: a create outside the product keeps its creator); a
     /// refusal of the rule (<see cref="SecureChildRowOutcome.Refused"/>). The grant rows and the platform-cascade rows of
     /// the root are not this pass's.</para>
+    /// <para><b>Service requests (F4-b).</b> A <c>sprk_servicerequest</c> is an ordinary root here too (it carries no
+    /// <c>sprk_issecure</c> and is never secure; one owned in the Secure Record business unit is still left alone). Its walk
+    /// also follows each row's service-request lookup (<see cref="OrdinaryOnlyServiceRequestLookups"/>); the secure pass's
+    /// walk never does, and the secure pass still refuses a service request as its root.</para>
     /// <para><b>Capped.</b> At most <paramref name="maxWrites"/> owner writes (Apply only); a row past the cap is
     /// <see cref="SecureChildRowOutcome.Failed"/> ("carried"), so the pass is Incomplete and the job carries the root.</para>
     /// <para>A re-owned document's FILE follows by the job's existing re-file pass (#2159, <see cref="RelocationPurpose.Refile"/>):
@@ -561,8 +566,10 @@ public sealed class SecureChildReconciler
         ArgumentException.ThrowIfNullOrWhiteSpace(rootLogicalName);
         ArgumentOutOfRangeException.ThrowIfNegative(maxWrites);
         var rootTable = rootLogicalName.Trim().ToLowerInvariant();
-        if (!SecureChildLineage.IsRoot(rootTable))
-            throw new ArgumentOutOfRangeException(nameof(rootLogicalName), rootLogicalName, "Not a secure-root table.");
+        // F4-b: a service request is an ordinary root too (it can never be secure: it carries no sprk_issecure).
+        var serviceRequest = string.Equals(rootTable, ServiceRequestTable, StringComparison.Ordinal);
+        if (!SecureChildLineage.IsRoot(rootTable) && !serviceRequest)
+            throw new ArgumentOutOfRangeException(nameof(rootLogicalName), rootLogicalName, "Not a core-record table.");
 
         Guid secureTeamId;
         Guid? secureBu;
@@ -585,7 +592,9 @@ public sealed class SecureChildReconciler
 
             var query = new QueryExpression(rootTable)
             {
-                ColumnSet = new ColumnSet(OwningTeamColumn, OwningUserColumn, OwningBusinessUnitColumn, IsSecureColumn),
+                ColumnSet = serviceRequest
+                    ? new ColumnSet(OwningTeamColumn, OwningUserColumn, OwningBusinessUnitColumn)
+                    : new ColumnSet(OwningTeamColumn, OwningUserColumn, OwningBusinessUnitColumn, IsSecureColumn),
                 TopCount = 1,
                 NoLock = true,
             };
@@ -604,9 +613,10 @@ public sealed class SecureChildReconciler
         }
 
         // A secure record's children are the secure pass's alone. An EMPTY flag fails closed (task 150): read as secure.
+        // A service request has no flag; one owned in the Secure Record business unit is still left alone.
         var rootTeam = root.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id;
         var rootBu = root.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id;
-        if (root.GetAttributeValue<bool?>(IsSecureColumn) != false
+        if (!serviceRequest && root.GetAttributeValue<bool?>(IsSecureColumn) != false
             || rootTeam is { } owningTeam && owningTeam == secureTeamId
             || secureBu is { } secure && rootBu == secure)
         {
@@ -637,6 +647,20 @@ public sealed class SecureChildReconciler
 
     /// <summary>UAC task 194: the ordinary-parent-move pass's settings — the Secure Record business unit, and its write cap.</summary>
     private sealed record OrdinaryMove(Guid? SecureBusinessUnit, int MaxWrites);
+
+    private const string ServiceRequestTable = "sprk_servicerequest";
+
+    /// <summary>
+    /// UAC task 194 F4-b: the lookups that file a row of <paramref name="table"/> under a service request — the solution's
+    /// 1:N relationships from <c>sprk_servicerequest</c> (<see cref="ExternalDataService.ServiceRequestRelations"/>, the one
+    /// declaration, which <c>RecordOwnershipResolver.FilingParentOf</c> reads too). Walked by the ORDINARY-parent-move pass
+    /// only: a service request is deliberately not in the secure family (<see cref="SecureChildLineage"/> remarks), so the
+    /// secure pass's walk never follows them.
+    /// </summary>
+    internal static IEnumerable<KeyValuePair<string, string>> OrdinaryOnlyServiceRequestLookups(string table) =>
+        ExternalDataService.ServiceRequestRelations
+            .Where(r => string.Equals(r.EntityLogicalName, table, StringComparison.OrdinalIgnoreCase))
+            .Select(r => new KeyValuePair<string, string>(r.LookupAttribute, ServiceRequestTable));
 
     /// <summary>How many times the child pass after a re-file runs before it reports (every pass is idempotent).</summary>
     internal const int RefileChildPassAttempts = 2;
@@ -1459,7 +1483,11 @@ public sealed class SecureChildReconciler
 
                 foreach (var table in SecureChildLineage.Children.Values.OrderBy(t => t.LogicalName, StringComparer.Ordinal))
                 {
-                    var pairs = table.Lookups
+                    // F4-b: the ordinary pass also follows a row's service-request lookup; the secure walk never does.
+                    var lookups = _ordinary is null
+                        ? table.Lookups
+                        : table.Lookups.Concat(OrdinaryOnlyServiceRequestLookups(table.LogicalName));
+                    var pairs = lookups
                         .Where(l => idsByTable.ContainsKey(l.Value))
                         .SelectMany(l => idsByTable[l.Value].Select(id => (Column: l.Key, Id: id)))
                         .ToArray();

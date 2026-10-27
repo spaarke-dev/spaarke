@@ -107,8 +107,10 @@ namespace Sprk.Bff.Api.Services.Access;
 /// Secure Record business unit and never moves a row into or out of isolation; user-owned rows are reported, not moved. A
 /// re-owned document's file follows through the re-file pass below in the same run. Report-only unless
 /// <see cref="OrdinaryMovesWritesEnabledConfigKey"/> is <c>true</c>; capped by <see cref="MaxRootsPerRunConfigKey"/> and
-/// <see cref="MaxOrdinaryMovesPerRunConfigKey"/>. Reported in <c>ResultJson.ordinaryMoves</c>.</para>
-/// /// <para><b>ADR-036 A1.</b> Rule 3: the unit of work is one root's pass, idempotent and read back, so no claim marker is
+/// <see cref="MaxOrdinaryMovesPerRunConfigKey"/>. Service requests are ordinary roots too (F4-b), and a per-instance catch-up
+/// sweep walks every ordinary root once in each mode (F4-a), so a move made before this pass existed is corrected too.
+/// Reported in <c>ResultJson.ordinaryMoves</c>.</para>
+/// <para><b>ADR-036 A1.</b> Rule 3: the unit of work is one root's pass, idempotent and read back, so no claim marker is
 /// needed. Rule 4: only a run that could not LIST the secure records throws (nothing was decided; a retry this tick can do
 /// the work); a run in which some roots are incomplete returns <c>Success = false</c> — the next run revisits them. Rule 5:
 /// one heartbeat per attempt. Rule 6: registered through <c>AddScheduledJob</c> in <c>ExternalAccessModule</c>.</para>
@@ -749,6 +751,8 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                     capReached = ordinary.CapReached,
                     incompleteRoots = ordinary.IncompleteRoots.Take(50).ToArray(),
                     carriedRoots = ordinary.CarriedRoots,
+                    // F4-a: the per-instance catch-up sweep over every ordinary root (once in each mode).
+                    sweep = new { ran = ordinary.SweepRan, roots = ordinary.SweepRoots, complete = ordinary.SweepComplete },
                     changesTotal = ordinary.ChangesTotal,
                     changesListed = ordinary.Changes.Count,
                     changes = ordinary.Changes,
@@ -898,6 +902,12 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         public List<object> Changes { get; } = new();
         public string? Failure { get; init; }
 
+        /// <summary>F4-a: whether the catch-up sweep ran this run, how many roots its window held, and whether it has now
+        /// covered every ordinary root once in this mode.</summary>
+        public bool SweepRan { get; init; }
+        public int SweepRoots { get; init; }
+        public bool SweepComplete { get; set; }
+
         /// <summary>Only a WRITING pass fails the run: a listing that failed, or a root left incomplete (not merely capped).</summary>
         public bool FailsTheRun => Writes && (Failure is not null || IncompleteRoots.Count > 0);
     }
@@ -918,8 +928,13 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     /// completely, so a report-only run looks back <see cref="InitialRecentChangesLookback"/> every time. With writes on, a
     /// root left incomplete, stopped by the write cap, or past the root cap is carried and looked at first next run (at most
     /// <see cref="MaxCarriedRows"/>; beyond that the watermark stays). Per instance, like every window of this job: a restart
-    /// looks back <see cref="InitialRecentChangesLookback"/>. Known limit: a reassignment older than that window when writes
-    /// are first turned on (or at a restart that lost a carry) is not reached until the record changes again.</para>
+    /// looks back <see cref="InitialRecentChangesLookback"/>.</para>
+    /// <para><b>Catch-up sweep (F4-a).</b> Until this instance has walked every ordinary root once in the current mode, each
+    /// run also walks the next <see cref="MaxRootsPerRunConfigKey"/> roots after a per-instance cursor (table, then id), so a
+    /// reassignment older than the window (made before this pass existed, or carried by an instance that restarted) is found.
+    /// A switch of <see cref="OrdinaryMovesWritesEnabledConfigKey"/> starts it over: a report-only cover never stands in for a
+    /// writing one. A root of the window that the write cap stops is carried; a carry past <see cref="MaxCarriedRows"/> holds
+    /// the cursor where it is.</para>
     /// <para>Never throws (cancellation aside): a listing fault is reported and the window is listed again next run.</para>
     /// </remarks>
     private async Task<OrdinaryMovesRun> ReconcileOrdinaryParentMovesAsync(
@@ -935,16 +950,32 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
 
         DateTimeOffset since;
         List<(string Table, Guid Id)> carried;
+        bool sweepRuns;
+        (string Table, Guid Id) sweepAfter;
         lock (_cursorGate)
         {
             since = _ordinaryMovesWatermark ?? startedAt - InitialRecentChangesLookback;
             carried = _pendingOrdinaryRoots.OrderBy(r => r.Table, StringComparer.Ordinal).ThenBy(r => r.Id).ToList();
+
+            // F4-a: a switch of the mode starts the sweep over, so a report-only cover never stands in for a writing one.
+            if (_ordinarySweepWrites != writes)
+            {
+                _ordinarySweepWrites = writes;
+                _ordinarySweepCursor = null;
+                _ordinarySweepComplete = false;
+            }
+
+            sweepRuns = !_ordinarySweepComplete;
+            sweepAfter = _ordinarySweepCursor ?? ChildAccessPermissionReconciler.SweepFromStart;
         }
 
         List<(string Table, Guid Id, DateTime ModifiedOn)> changed;
+        (List<(string Table, Guid Id)> Rows, bool ReachedEnd) sweep = (new(), false);
         try
         {
             changed = await ListChangedOrdinaryRootsAsync(dataverse, since, ct).ConfigureAwait(false);
+            if (sweepRuns)
+                sweep = await OrdinarySweepWindowAsync(dataverse, sweepAfter, rootCap, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -964,17 +995,23 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             .ToList();
         var take = all.Take(rootCap).ToList();
         var overflow = all.Skip(rootCap).ToList();
+        // F4-a: the sweep window after the recent and carried roots (a root in both is walked once).
+        var listedNow = take.Concat(overflow).ToHashSet();
+        var sweepBatch = sweep.Rows.Where(r => !listedNow.Contains(r)).ToList();
         var run = new OrdinaryMovesRun(writes, since)
         {
             RootsListed = changed.Count,
-            RootsInRun = take.Count,
+            RootsInRun = take.Count + sweepBatch.Count,
             RootsOverflow = overflow.Count,
             RetriedRoots = carried.Count,
+            SweepRan = sweepRuns,
+            SweepRoots = sweep.Rows.Count,
         };
 
         var carry = new List<(string Table, Guid Id)>();
         var remaining = writeCap;
-        foreach (var (table, id) in take)
+        foreach (var (table, id, swept) in take.Select(r => (r.Table, r.Id, false))
+                     .Concat(sweepBatch.Select(r => (r.Table, r.Id, true))))
         {
             ct.ThrowIfCancellationRequested();
             var key = $"{table}:{id:D}";
@@ -987,8 +1024,9 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             }
 
             _logger.LogInformation(
-                "[SECURE-CHILD-RECONCILE] ordinary-moves run={RunId} mode={Mode} root={Root}: an ordinary record changed since " +
-                "{Since:o}; its children follow its owner.", runId, mode, key, since);
+                "[SECURE-CHILD-RECONCILE] ordinary-moves run={RunId} mode={Mode} root={Root} swept={Swept}: an ordinary record " +
+                "changed since {Since:o}, carried, or reached by the catch-up sweep; its children follow its owner.",
+                runId, mode, key, swept, since);
             var report = await reconciler.ReconcileOrdinaryParentMoveAsync(table, id, mode, remaining, ct).ConfigureAwait(false);
             remaining = Math.Max(0, remaining - report.OrdinaryWritesAttempted);
             run.WritesAttempted += report.OrdinaryWritesAttempted;
@@ -1043,6 +1081,23 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                     _ordinaryMovesWatermark = startedAt - RecentChangesOverlap;
             }
 
+            // F4-a: the sweep moves past its window (a root of it the write cap stopped, or left incomplete, is carried
+            // above). Report-only it moves too: one report of every root, then it stops until the mode changes. A carry past
+            // MaxCarriedRows holds it where it is.
+            if (sweepRuns && (!writes || carry.Concat(overflow).Distinct().Count() <= MaxCarriedRows))
+            {
+                if (sweep.ReachedEnd)
+                {
+                    _ordinarySweepComplete = true;
+                    _ordinarySweepCursor = null;
+                }
+                else if (sweep.Rows.Count > 0)
+                {
+                    _ordinarySweepCursor = sweep.Rows[^1];
+                }
+            }
+
+            run.SweepComplete = _ordinarySweepComplete;
             run.CarriedRoots = _pendingOrdinaryRoots.Count;
         }
 
@@ -1051,26 +1106,77 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             "[SECURE-CHILD-RECONCILE] ordinary-moves run={RunId} mode={Mode} since={Since:o} rootsListed={Listed} " +
             "rootsInRun={InRun} rootsOverflow={Overflow} examined={Examined} alreadyCorrect={AlreadyCorrect} moved={Moved} " +
             "wouldMove={WouldMove} reported={Reported} refused={Refused} failed={Failed} writesAttempted={Writes} " +
-            "capReached={CapReached} incompleteRoots={Incomplete} carriedRoots={Carried}",
+            "capReached={CapReached} incompleteRoots={Incomplete} carriedRoots={Carried} sweepRan={SweepRan} " +
+            "sweepRoots={SweepRoots} sweepComplete={SweepComplete}",
             runId, writes ? ModeWrite : ModeReportOnly, since, run.RootsListed, run.RootsInRun, run.RootsOverflow, run.Totals[0],
             run.Totals[1], run.Totals[2], run.Totals[3], run.Reported, run.Totals[5], run.Totals[6], run.WritesAttempted,
-            run.CapReached, run.IncompleteRoots.Count, run.CarriedRoots);
+            run.CapReached, run.IncompleteRoots.Count, run.CarriedRoots, run.SweepRan, run.SweepRoots, run.SweepComplete);
         return run;
     }
 
     /// <summary>
-    /// UAC task 194: the ordinary projects, matters and work assignments (<c>sprk_issecure</c> = false) modified at or after
-    /// <paramref name="since"/>. A fault propagates (the caller reports it).
+    /// UAC task 194 F4-b: the ordinary roots' tables, in sweep order: the three secure-flaggable roots and the service request
+    /// (which carries no <c>sprk_issecure</c> and is never secure).
+    /// </summary>
+    internal static readonly IReadOnlyList<string> OrdinaryRootTables = SecureChildLineage.Roots
+        .Append("sprk_servicerequest")
+        .OrderBy(t => t, StringComparer.Ordinal)
+        .ToArray();
+
+    /// <summary>Only the three flaggable roots are filtered on <c>sprk_issecure = false</c> (an empty flag fails closed).</summary>
+    private static void OnlyOrdinary(QueryExpression query, string table)
+    {
+        if (SecureChildLineage.IsRoot(table))
+            query.Criteria.AddCondition("sprk_issecure", ConditionOperator.Equal, false);
+    }
+
+    /// <summary>
+    /// UAC task 194 F4-a: the next window of the catch-up sweep: at most <paramref name="cap"/> ordinary roots after
+    /// <paramref name="after"/>, in table then id order (the Access Permission sweep's paging), and whether it reached the
+    /// end. A fault propagates (the caller reports it).
+    /// </summary>
+    private static async Task<(List<(string Table, Guid Id)> Rows, bool ReachedEnd)> OrdinarySweepWindowAsync(
+        IGenericEntityService dataverse, (string Table, Guid Id) after, int cap, CancellationToken ct)
+    {
+        var rows = new List<(string Table, Guid Id)>();
+        foreach (var table in OrdinaryRootTables)
+        {
+            if (string.CompareOrdinal(table, after.Table) < 0)
+                continue;
+            var remaining = cap - rows.Count;
+            if (remaining <= 0)
+                return (rows, false);
+
+            var query = new QueryExpression(table) { ColumnSet = new ColumnSet(table + "id"), NoLock = true, TopCount = remaining + 1 };
+            query.AddOrder(table + "id", OrderType.Ascending);
+            OnlyOrdinary(query, table);
+            if (string.Equals(table, after.Table, StringComparison.Ordinal) && after.Id != Guid.Empty)
+                query.Criteria.AddCondition(table + "id", ConditionOperator.GreaterThan, after.Id);
+
+            var page = (await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities
+                .Where(e => e.Id != Guid.Empty)
+                .ToList();
+            rows.AddRange(page.Take(remaining).Select(e => (table, e.Id)));
+            if (page.Count > remaining)
+                return (rows, false);
+        }
+
+        return (rows, true);
+    }
+
+    /// <summary>
+    /// UAC task 194: the ordinary projects, matters and work assignments (<c>sprk_issecure</c> = false), and (F4-b) the
+    /// service requests, modified at or after <paramref name="since"/>. A fault propagates (the caller reports it).
     /// </summary>
     private static async Task<List<(string Table, Guid Id, DateTime ModifiedOn)>> ListChangedOrdinaryRootsAsync(
         IGenericEntityService dataverse, DateTimeOffset since, CancellationToken ct)
     {
         var roots = new List<(string, Guid, DateTime)>();
-        foreach (var table in SecureChildLineage.Roots.OrderBy(t => t, StringComparer.Ordinal))
+        foreach (var table in OrdinaryRootTables)
         {
             var query = new QueryExpression(table) { ColumnSet = new ColumnSet(table + "id", ModifiedOnColumn), NoLock = true };
             query.Criteria.AddCondition(ModifiedOnColumn, ConditionOperator.GreaterEqual, since.UtcDateTime);
-            query.Criteria.AddCondition("sprk_issecure", ConditionOperator.Equal, false);
+            OnlyOrdinary(query, table);
             foreach (var row in await ReadAllAsync(dataverse, query, ct).ConfigureAwait(false))
             {
                 if (row.Id != Guid.Empty)
@@ -2125,6 +2231,12 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     // reasoning; its own watermark, so it never holds the secure pass's window, #1378).
     private DateTimeOffset? _ordinaryMovesWatermark;
     private readonly HashSet<(string Table, Guid Id)> _pendingOrdinaryRoots = new();
+
+    // UAC task 194 F4-a: the ordinary catch-up sweep — per instance, like the secure catch-up. It walks every ordinary root
+    // once IN THE CURRENT MODE (a switch of OrdinaryMovesWritesEnabled starts it over), then only the watermark decides.
+    private (string Table, Guid Id)? _ordinarySweepCursor;
+    private bool _ordinarySweepComplete;
+    private bool? _ordinarySweepWrites;
 
     /// <summary>
     /// Task 147 r1: the most unplaced rows the job carries between runs. Beyond it the watermark does not move, so the whole

@@ -138,6 +138,68 @@ public class SecureChildOrdinaryParentMoveTests
         report.ChildrenReowned.Should().Be(3);
     }
 
+    [Fact(DisplayName = "194 F4-b must fire: rows filed ONLY under a service request moved to B follow it, with their own descendants")]
+    public async Task ChildrenFiledOnlyUnderAMovedServiceRequest_FollowIt()
+    {
+        var (request, todo, document, fileVersion) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        _world.Add("sprk_servicerequest", request, ("owningteam", new EntityReference("team", TeamB)));
+        Row("sprk_todo", todo, TeamRef(GeneralTeam), ("sprk_regardingservicerequest", "sprk_servicerequest", request));
+        Row("sprk_document", document, TeamRef(GeneralTeam), ("sprk_relatedservicerequest", "sprk_servicerequest", request));
+        Row("sprk_fileversion", fileVersion, TeamRef(GeneralTeam), ("sprk_document", "sprk_document", document));
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            "sprk_servicerequest", request, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        report.Status.Should().Be(SecureChildReconcileStatus.Completed, report.Detail);
+        _world.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.Team(TeamB));
+        _world.OwnerOf("sprk_document", document).Should().Be(DataversePrincipalRef.Team(TeamB));
+        _world.OwnerOf("sprk_fileversion", fileVersion).Should().Be(DataversePrincipalRef.Team(TeamB));
+        report.ChildrenReowned.Should().Be(3);
+    }
+
+    [Fact(DisplayName = "194 F4-b must not fire: a service request owned in the Secure Record business unit is left alone")]
+    public async Task AServiceRequestOwnedInTheSecureBusinessUnit_IsNotApplicable()
+    {
+        var (request, todo) = (Guid.NewGuid(), Guid.NewGuid());
+        _world.Add("sprk_servicerequest", request, ("owningteam", new EntityReference("team", SecureFamilyTeam)));
+        Row("sprk_todo", todo, TeamRef(GeneralTeam), ("sprk_regardingservicerequest", "sprk_servicerequest", request));
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            "sprk_servicerequest", request, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        report.Status.Should().Be(SecureChildReconcileStatus.NotApplicable);
+        _world.OwnerWrites.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "194 F4-b: the SECURE walk is unchanged — it never follows a service-request lookup, and a service request is no secure root")]
+    public async Task TheSecureWalk_NeverFollowsAServiceRequestLookup()
+    {
+        var (request, onlyUnderRequest, underBoth) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var secureMatter = Guid.NewGuid();
+        _world.SecureRoot(Matter, secureMatter)
+            .Add("sprk_servicerequest", request, ("owningteam", new EntityReference("team", GeneralTeam)));
+        Row("sprk_event", onlyUnderRequest, TeamRef(GeneralTeam), ("sprk_regardingservicerequest", "sprk_servicerequest", request));
+        Row("sprk_todo", underBoth, TeamRef(GeneralTeam),
+            ("sprk_regardingmatter", Matter, secureMatter), ("sprk_regardingservicerequest", "sprk_servicerequest", request));
+
+        // The secure pass of a matter reads its Assign cascade over the Web API; this matter has none.
+        var secure = SecureChildShareWorld.ReconcilerOver(
+            () => _world, new FakeRecordShareTable(), new Sprk.Bff.Api.Tests.Api.ExternalAccess.StubDataverseWebApiClient());
+        var report = await secure.ReconcileAsync(
+            Matter, secureMatter, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Provisioning, CancellationToken.None);
+
+        report.Status.Should().Be(SecureChildReconcileStatus.Completed, string.Join("; ", report.Changes.Select(c => c.Detail)));
+        _world.OwnerOf("sprk_todo", underBoth).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam),
+            "secure-if-any, as before");
+        _world.OwnerOf("sprk_event", onlyUnderRequest).Should().Be(DataversePrincipalRef.Team(GeneralTeam),
+            "the secure walk reaches nothing through a service request");
+        SecureChildLineage.Children.Values.SelectMany(t => t.Lookups.Values).Should().NotContain("sprk_servicerequest",
+            "the service request stays out of the secure family's lineage");
+        await FluentActions.Invoking(() => secure.ReconcileAsync("sprk_servicerequest", request,
+                SecureChildReconcileMode.Apply, SecureChildPassTrigger.Sweep, CancellationToken.None))
+            .Should().ThrowAsync<ArgumentOutOfRangeException>();
+    }
+
     [Fact(DisplayName = "194 F1-b must fire: a budget's buckets follow the budget when its matter moves to B")]
     public async Task ABudgetsBuckets_FollowAnOrdinaryMove()
     {
@@ -381,25 +443,109 @@ public class SecureChildOrdinaryParentMoveTests
         result.Success.Should().BeTrue(result.ErrorMessage);
     }
 
-    [Fact(DisplayName = "194 must fire: with the switch on the job moves the children of a reassigned matter; an unchanged matter is not listed")]
-    public async Task TheJob_WithTheSwitchOn_MovesTheChildren()
+    [Fact(DisplayName = "194 must fire: with the switch on the job moves the children of a reassigned matter; one reassigned long before the watermark is found by the catch-up sweep (F4-a)")]
+    public async Task TheJob_WithTheSwitchOn_MovesTheChildren_AndTheSweepFindsAStaleMove()
     {
         MatterMovedToB();
         _world.Modified(Matter, MatterId, DateTime.UtcNow);
         ChildrenStillInA();
-        var untouchedMatter = Guid.NewGuid();
-        var untouchedEvent = Guid.NewGuid();
-        MatterMovedToB(untouchedMatter); // reassigned long ago: outside the window
-        Row("sprk_event", untouchedEvent, TeamRef(GeneralTeam), ("sprk_regardingmatter", Matter, untouchedMatter));
+        var staleMatter = Guid.NewGuid();
+        var staleEvent = Guid.NewGuid();
+        MatterMovedToB(staleMatter); // reassigned long ago: outside every watermark window
+        Row("sprk_event", staleEvent, TeamRef(GeneralTeam), ("sprk_regardingmatter", Matter, staleMatter));
         var harness = new JobHarness(_world, _webApi);
 
         var (result, ordinary) = await harness.RunAsync(ordinaryWrites: "true");
 
         ordinary.GetProperty("mode").GetString().Should().Be(SecureChildReconciliationJob.ModeWrite);
-        ordinary.GetProperty("rootsListed").GetInt32().Should().Be(1);
-        ordinary.GetProperty("moved").GetInt32().Should().Be(3);
+        ordinary.GetProperty("rootsListed").GetInt32().Should().Be(1, "only the recent change is in the watermark window");
+        ordinary.GetProperty("moved").GetInt32().Should().Be(4);
         _world.OwnerOf("sprk_todo", TodoId).Should().Be(DataversePrincipalRef.Team(TeamB));
-        _world.OwnerOf("sprk_event", untouchedEvent).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
+        _world.OwnerOf("sprk_event", staleEvent).Should().Be(DataversePrincipalRef.Team(TeamB),
+            "the catch-up sweep walks every ordinary root once, so a move made before this feature is corrected too");
+        var sweep = ordinary.GetProperty("sweep");
+        sweep.GetProperty("ran").GetBoolean().Should().BeTrue();
+        sweep.GetProperty("complete").GetBoolean().Should().BeTrue();
+        result.Success.Should().BeTrue(result.ErrorMessage);
+    }
+
+    [Fact(DisplayName = "194 F4-a: the catch-up sweep's cursor advances a window a run and resumes; once complete, only the watermark decides")]
+    public async Task TheSweepCursor_AdvancesAndResumes()
+    {
+        // Three stale matters, none in any watermark window, one root a run (MaxRootsPerRun = 1).
+        var stale = new[] { Guid.Parse("2b000000-0000-4000-8000-000000194101"), Guid.Parse("2b000000-0000-4000-8000-000000194102"),
+            Guid.Parse("2b000000-0000-4000-8000-000000194103") };
+        var events = stale.Select(_ => Guid.NewGuid()).ToArray();
+        for (var i = 0; i < stale.Length; i++)
+        {
+            MatterMovedToB(stale[i]);
+            Row("sprk_event", events[i], TeamRef(GeneralTeam), ("sprk_regardingmatter", Matter, stale[i]));
+        }
+
+        var harness = new JobHarness(_world, _webApi);
+
+        var moved = new List<int>();
+        for (var run = 0; run < 50; run++)
+        {
+            var (_, ordinary) = await harness.RunAsync(ordinaryWrites: "true", maxRoots: "1");
+            moved.Add(ordinary.GetProperty("moved").GetInt32());
+            ordinary.GetProperty("sweep").GetProperty("roots").GetInt32().Should().BeLessThanOrEqualTo(1, "one root a window");
+            if (ordinary.GetProperty("sweep").GetProperty("complete").GetBoolean())
+                break;
+        }
+
+        moved.Count.Should().BeGreaterThan(3, "the sweep needs a run per root, so it resumed across runs");
+        moved.Sum().Should().Be(3, "each stale matter's event is moved exactly once, one window at a time");
+        moved.Should().OnlyContain(m => m <= 1, "one root a run");
+        foreach (var e in events)
+            _world.OwnerOf("sprk_event", e).Should().Be(DataversePrincipalRef.Team(TeamB));
+        harness.Last.GetProperty("ordinaryMoves").GetProperty("sweep").GetProperty("complete").GetBoolean().Should().BeTrue();
+
+        // Complete: the next run sweeps nothing.
+        var (_, after) = await harness.RunAsync(ordinaryWrites: "true", maxRoots: "1");
+        after.GetProperty("sweep").GetProperty("ran").GetBoolean().Should().BeFalse();
+        after.GetProperty("rootsInRun").GetInt32().Should().Be(0);
+    }
+
+    [Fact(DisplayName = "194 F4-a must not fire: a report-only sweep reports the stale move and writes nothing; turning writes on sweeps again")]
+    public async Task AReportOnlySweep_WritesNothing_AndWritesOnSweepsAgain()
+    {
+        var staleMatter = Guid.NewGuid();
+        var staleEvent = Guid.NewGuid();
+        MatterMovedToB(staleMatter);
+        Row("sprk_event", staleEvent, TeamRef(GeneralTeam), ("sprk_regardingmatter", Matter, staleMatter));
+        var harness = new JobHarness(_world, _webApi);
+
+        var (_, reportOnly) = await harness.RunAsync(ordinaryWrites: null);
+        var (_, reportOnlyAgain) = await harness.RunAsync(ordinaryWrites: null);
+
+        reportOnly.GetProperty("wouldMove").GetInt32().Should().Be(1);
+        reportOnly.GetProperty("sweep").GetProperty("complete").GetBoolean().Should().BeTrue();
+        reportOnlyAgain.GetProperty("sweep").GetProperty("ran").GetBoolean().Should().BeFalse("one report of every root a mode");
+        _world.OwnerWrites.Should().BeEmpty();
+        _webApi.ConditionalWrites.Should().BeEmpty();
+        _world.OwnerOf("sprk_event", staleEvent).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
+
+        var (_, writing) = await harness.RunAsync(ordinaryWrites: "true");
+
+        writing.GetProperty("sweep").GetProperty("ran").GetBoolean().Should().BeTrue("a report-only cover never stands in for a writing one");
+        writing.GetProperty("moved").GetInt32().Should().Be(1);
+        _world.OwnerOf("sprk_event", staleEvent).Should().Be(DataversePrincipalRef.Team(TeamB));
+    }
+
+    [Fact(DisplayName = "194 F4-b must fire: the job lists a reassigned service request and its children follow it")]
+    public async Task TheJob_ListsAReassignedServiceRequest()
+    {
+        var (request, todo) = (Guid.NewGuid(), Guid.NewGuid());
+        _world.Add("sprk_servicerequest", request, ("owningteam", new EntityReference("team", TeamB)));
+        _world.Modified("sprk_servicerequest", request, DateTime.UtcNow);
+        Row("sprk_todo", todo, TeamRef(GeneralTeam), ("sprk_regardingservicerequest", "sprk_servicerequest", request));
+        var harness = new JobHarness(_world, _webApi);
+
+        var (result, ordinary) = await harness.RunAsync(ordinaryWrites: "true");
+
+        ordinary.GetProperty("rootsListed").GetInt32().Should().Be(1);
+        _world.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.Team(TeamB));
         result.Success.Should().BeTrue(result.ErrorMessage);
     }
 
@@ -500,11 +646,13 @@ public class SecureChildOrdinaryParentMoveTests
         public JsonElement Last { get; private set; }
 
         public async Task<(JobRunResult Result, JsonElement Ordinary)> RunAsync(
-            string? ordinaryWrites, bool recentWrites = true, string? maxMoves = null)
+            string? ordinaryWrites, bool recentWrites = true, string? maxMoves = null, string? maxRoots = null)
         {
             _configuration[SecureChildReconciliationJob.OrdinaryMovesWritesEnabledConfigKey] = ordinaryWrites;
             _configuration[SecureChildReconciliationJob.RecentChangesWritesEnabledConfigKey] = recentWrites ? null : "false";
             _configuration[SecureChildReconciliationJob.MaxOrdinaryMovesPerRunConfigKey] = maxMoves;
+            if (maxRoots is not null)
+                _configuration[SecureChildReconciliationJob.MaxRootsPerRunConfigKey] = maxRoots;
             var result = await _job.ExecuteAsync(
                 new JobRunContext(Guid.NewGuid(), "test", JobRunTrigger.Scheduled, new Dictionary<string, object>()),
                 CancellationToken.None);
