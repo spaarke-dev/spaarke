@@ -14,11 +14,13 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// <summary>
 /// POST /api/v1/external-access/revoke
 ///
-/// Revokes an external Contact's access to a Secure Project by:
-///   1. Deactivating the sprk_externalrecordaccess record in Dataverse (statecode=1, statuscode=2).
-///   2. Removing the Contact from the SPE container permissions.
-///   3. If the Contact has no remaining active participations, removing the "Secure Project Participant" web role.
-///   4. Invalidating the contact's participation cache in Redis.
+/// Revokes one external grant (a contact's or an organization's, on one record) through the shared revoke
+/// (<see cref="ExternalGrantRevocationService"/>):
+///   1. Deactivating every active sprk_externalrecordaccess row of the logical grant (statecode=1, statuscode=2).
+///   2. Removing the revoked grantee's SPE container permission(s) on the record's own container.
+///   3. Invalidating the grantee's grant cache.
+///   4. Marking an Assigned-To auto grant as removed, so the rule does not re-create it.
+/// It assigns and removes no portal web role.
 ///
 /// ADR-001: Minimal API — no controllers.
 /// ADR-008: Endpoint filter for internal caller check (RequireAuthorization).
