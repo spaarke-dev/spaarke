@@ -180,11 +180,12 @@ public class AutomaticInviteOrganizationTests
     }
 
     /// <summary>
-    /// MUST FIRE: a notice that fails to send after an automatic work-account stamp keeps the stamp and is answered as a
-    /// failed invite email (email_not_sent), so staff see it.
+    /// MUST FIRE: a notice that fails to send after an automatic work-account stamp is answered as a failed invite email
+    /// (email_not_sent), so staff see it. Slice C2b: a pending invite exists only if its email went out, so the stamp is
+    /// cleared and the next invite stamps and sends again.
     /// </summary>
     [Fact]
-    public async Task InviteOnGrant_WorkAccount_ANoticeThatFails_KeepsTheStamp_AndIsEmailNotSent()
+    public async Task InviteOnGrant_WorkAccount_ANoticeThatFails_ClearsTheStamp_AndIsEmailNotSent()
     {
         var contact = UnboundContact();
         DomainIsTheCustomerTenant();
@@ -193,7 +194,8 @@ public class AutomaticInviteOrganizationTests
         var result = await _h.Invites.InviteOnGrantAsync(contact, Matter, _matter);
 
         result.Should().Be(new GrantInviteResult(GrantInviteStatus.Failed, GrantInviteStatus.EmailNotSentReasonCode));
-        _h.Identities.Contacts[contact].InvitedTenantId.Should().Be(CustomerTenant.ToString("D"), "the stamp stays");
+        _h.Identities.Contacts[contact].InvitedTenantId.Should().BeNull("the stamp of an invite whose notice did not send is cleared");
+        _h.Identities.Contacts[contact].InvitedEmailHash.Should().BeNull();
     }
 
     /// <summary>MUST NOT FIRE: the materializer's invite for any other domain is the portal-account invite.</summary>

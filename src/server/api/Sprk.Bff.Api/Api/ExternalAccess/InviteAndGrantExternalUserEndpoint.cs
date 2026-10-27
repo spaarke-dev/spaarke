@@ -316,6 +316,7 @@ public static class InviteAndGrantExternalUserEndpoint
         // ── Step 1: Onboard (idempotent CIAM provision) — reuse the invite core (task 025) ──
         Guid contactId;
         string onboardStatus;
+        string? writtenInviteStamp;
         bool? emailSent;
         string? emailErrorCode;
         try
@@ -341,7 +342,7 @@ public static class InviteAndGrantExternalUserEndpoint
                 return InviteExternalUserEndpoint.LookupFailureResult(failure, httpContext);
             }
 
-            (contactId, onboardStatus) = (outcome.ContactId, outcome.Status);
+            (contactId, onboardStatus, writtenInviteStamp) = (outcome.ContactId, outcome.Status, outcome.WrittenInviteStamp);
 
             // Adversarial pass 2, F2: an invite email that did not send is reported (the grant still proceeds), the same
             // way on the new-account and the existing-account branch (§12 I-10).
@@ -471,7 +472,7 @@ public static class InviteAndGrantExternalUserEndpoint
                 await GrantAccessNotifier.ReadRecordNameAsync(dataverseClient, logger, grantRoot.Type, grantRoot.Id));
             (emailSent, emailErrorCode) = await ExternalInviteService.SendWorkAccountNoticeAsync(
                     emailService, request.Email, portalUrl, InviteExternalUserEndpoint.InviteLinkCustomerKey(customer), record,
-                    contactId, logger)
+                    contactId, logger, binder, writtenInviteStamp)
                 ? (true, null)
                 : (false, GrantInviteStatus.EmailNotSentReasonCode);
         }

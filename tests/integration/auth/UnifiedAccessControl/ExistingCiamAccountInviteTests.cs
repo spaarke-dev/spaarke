@@ -1087,11 +1087,11 @@ public class ExistingCiamAccountInviteTests
     }
 
     /// <summary>
-    /// MUST FIRE: a notice that fails to send leaves the stamp, and the response says "email not sent" in its existing
-    /// emailSent / emailErrorCode fields.
+    /// MUST FIRE: the response says "email not sent" in its existing emailSent / emailErrorCode fields when the notice fails
+    /// to send. Slice C2b: a pending invite exists only if its email went out, so the stamp is cleared.
     /// </summary>
     [Fact]
-    public async Task Invite_WorkAccount_ANoticeThatFails_KeepsTheStamp_AndIsReportedEmailNotSent()
+    public async Task Invite_WorkAccount_ANoticeThatFails_ClearsTheStamp_AndIsReportedEmailNotSent()
     {
         var contact = UnboundContact();
         _h.Emails.Failure = new InvalidOperationException("mailbox refused");
@@ -1103,7 +1103,8 @@ public class ExistingCiamAccountInviteTests
 
         body.Status.Should().Be(InviteExternalUserEndpoint.WorkAccountInvitedStatus);
         (body.EmailSent, body.EmailErrorCode).Should().Be(((bool?)false, (string?)GrantInviteStatus.EmailNotSentReasonCode));
-        _h.Identities.Contacts[contact].InvitedTenantId.Should().Be(PartnerTenant.ToString("D"), "the stamp stays");
+        _h.Identities.Contacts[contact].InvitedTenantId.Should().BeNull("the stamp of an invite whose notice did not send is cleared");
+        _h.Identities.Contacts[contact].InvitedEmailHash.Should().BeNull();
     }
 
     /// <summary>MUST FIRE: /invite-and-grant's notice is sent after the grant is written and names the granted record.</summary>

@@ -236,7 +236,8 @@ public sealed class ExternalInviteService
                 return Logged(contactId, Failed(GrantInviteStatus.EmailNotSentReasonCode));
 
             // Slice B3: the work-account stamp landed; the notice goes to the stamped address. The grant exists, so it may
-            // name the record. A notice that did not send leaves the stamp and is reported as the invite email is.
+            // name the record. Slice C2b: a notice that did not send retracts the stamp and is reported as the invite email
+            // is, so the next invite stamps and sends again.
             if (outcome.Status == WorkAccountInvitedStatus)
             {
                 WorkAccountNoticeRecord? record = null;
@@ -247,7 +248,8 @@ public sealed class ExternalInviteService
                 }
 
                 if (!await SendWorkAccountNoticeAsync(
-                        _emails, email, portalUrl, InviteLinkCustomerKey(_customer), record, contactId, _logger).ConfigureAwait(false))
+                        _emails, email, portalUrl, InviteLinkCustomerKey(_customer), record, contactId, _logger, _binder,
+                        outcome.WrittenInviteStamp).ConfigureAwait(false))
                     return Logged(contactId, Failed(GrantInviteStatus.EmailNotSentReasonCode));
             }
 
@@ -372,10 +374,55 @@ public sealed class ExternalInviteService
     /// Sends the work-account notice (<see cref="BuildWorkAccountNotice"/>) to <paramref name="stampedEmail"/>, the address the
     /// invite stamp was written for, through the shared mailbox's portal notification (the existing template and send path).
     /// Called only after a work-account stamp landed. <c>true</c> when it was sent; <c>false</c> (logged at Warning, never
-    /// with the address) when it could not be built or sent: the stamp stays, and the caller reports "email not sent".
+    /// with the address) when it could not be built or sent, and the caller reports "email not sent". Slice C2b: a pending
+    /// invite exists only if its email went out, so a notice that did not send (a timeout included) retracts the stamp this
+    /// invite wrote (<see cref="ContactIdentityBinder.RetractUnsentInviteAsync"/>; a newer invite is never cleared, and a
+    /// clear that fails is logged at Error). Never throws.
+    /// </summary>
+    /// <param name="binder">The binder that wrote the stamp; it retracts the stamp when the notice does not send.</param>
+    /// <param name="writtenInviteStamp">The stamp's email hash the invite wrote (<c>ProvisionOutcome.WrittenInviteStamp</c>).</param>
+    internal static async Task<bool> SendWorkAccountNoticeAsync(
+        RegistrationEmailService emails, string stampedEmail, string? portalUrl, string? customerKey,
+        WorkAccountNoticeRecord? record, Guid contactId, ILogger logger, ContactIdentityBinder binder,
+        string? writtenInviteStamp)
+    {
+        if (await TrySendWorkAccountNoticeAsync(emails, stampedEmail, portalUrl, customerKey, record, contactId, logger)
+                .ConfigureAwait(false))
+        {
+            return true;
+        }
+
+        await RetractUnsentInviteAsync(binder, contactId, writtenInviteStamp, logger).ConfigureAwait(false);
+        return false;
+    }
+
+    /// <summary>
+    /// Slice C2b: retracts the invite this request wrote on <paramref name="contactId"/>, whose email did not send
+    /// (<see cref="ContactIdentityBinder.RetractUnsentInviteAsync"/>). Runs on <see cref="CancellationToken.None"/>: the email
+    /// is already lost, so a cancelled request still clears what it wrote. No stamp written (null) is nothing to retract.
     /// Never throws.
     /// </summary>
-    internal static async Task<bool> SendWorkAccountNoticeAsync(
+    internal static async Task RetractUnsentInviteAsync(
+        ContactIdentityBinder binder, Guid contactId, string? writtenInviteStamp, ILogger logger)
+    {
+        if (string.IsNullOrEmpty(writtenInviteStamp))
+        {
+            return;
+        }
+
+        try
+        {
+            await binder.RetractUnsentInviteAsync(contactId, writtenInviteStamp, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "[EXT-INVITE] The invite on contact {ContactId} whose email did not send could not be cleared; it may still be "
+                + "pending. Invite the person again.", contactId);
+        }
+    }
+
+    private static async Task<bool> TrySendWorkAccountNoticeAsync(
         RegistrationEmailService emails, string stampedEmail, string? portalUrl, string? customerKey,
         WorkAccountNoticeRecord? record, Guid contactId, ILogger logger)
     {
@@ -400,8 +447,8 @@ public sealed class ExternalInviteService
         catch (Exception ex)
         {
             logger.LogWarning(ex,
-                "[EXT-INVITE] Contact {ContactId} is invited for a work-account sign-in, but the notice was not sent. The invite "
-                + "stands; invite again to resend it.", contactId);
+                "[EXT-INVITE] Contact {ContactId} is invited for a work-account sign-in, but the notice was not sent; invite "
+                + "again to resend it.", contactId);
             return false;
         }
     }
@@ -601,7 +648,7 @@ public sealed class ExternalInviteService
             logger.LogInformation(
                 "[EXT-INVITE] Contact {ContactId} invited for a work-account sign-in from customer tenant {TenantId}; no CIAM "
                 + "account and no invite email.", contactId, workTenant);
-            return new ProvisionOutcome(contactId, WorkAccountInvitedStatus);
+            return new ProvisionOutcome(contactId, WorkAccountInvitedStatus) { WrittenInviteStamp = mark.WrittenEmailHash };
         }
 
         // Task 185: the link both invite emails open. It carries the one-time code only when the marker and its hash landed
@@ -658,8 +705,15 @@ public sealed class ExternalInviteService
             catch (Exception ex)
             {
                 existingAccountEmailFailed = true;
-                logger.LogWarning(ex, "[EXT-INVITE] Contact {ContactId} kept pending for {Email}, but the sign-in email failed to send.",
+                logger.LogWarning(ex, "[EXT-INVITE] Contact {ContactId} for {Email}: the sign-in email failed to send.",
                     contactId, request.Email);
+            }
+
+            // Slice C2b: a pending invite exists only if its email went out. Nobody holds this code, so the invite this
+            // request wrote is retracted (never a newer one): the next invite, staff or automatic, writes and sends a new one.
+            if (existingAccountEmailFailed)
+            {
+                await RetractUnsentInviteAsync(binder, contactId, mark.WrittenEmailHash, logger).ConfigureAwait(false);
             }
 
             return new ProvisionOutcome(contactId, ExistingAccountStatus, EmailFailed: existingAccountEmailFailed);

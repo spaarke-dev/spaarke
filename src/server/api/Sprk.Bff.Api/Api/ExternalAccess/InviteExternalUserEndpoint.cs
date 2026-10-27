@@ -174,12 +174,13 @@ public static class InviteExternalUserEndpoint
             var (emailSent, emailErrorCode) = InviterVisibleEmail(outcome);
 
             // Slice B3: a work-account stamp landed, so the notice goes to the stamped address. /invite writes no grant, so
-            // the notice is the fixed text and names no record. A notice that did not send leaves the stamp ("email not sent").
+            // the notice is the fixed text and names no record. Slice C2b: a notice that did not send retracts the stamp
+            // ("email not sent"), so the next invite stamps and sends again.
             if (outcome.Status == WorkAccountInvitedStatus)
             {
                 (emailSent, emailErrorCode) = await ExternalInviteService.SendWorkAccountNoticeAsync(
                         emailService, request.Email, portalUrl, InviteLinkCustomerKey(customer), record: null, outcome.ContactId,
-                        logger)
+                        logger, binder, outcome.WrittenInviteStamp)
                     ? (true, null)
                     : (false, GrantInviteStatus.EmailNotSentReasonCode);
             }
@@ -360,7 +361,15 @@ public static class InviteExternalUserEndpoint
     /// </param>
     internal sealed record ProvisionOutcome(
         Guid ContactId, string Status, InviteRefusal? Refusal = null, InviteLookupFailure? Failure = null,
-        bool EmailFailed = false);
+        bool EmailFailed = false)
+    {
+        /// <summary>
+        /// Slice C2b: the invite stamp's email hash this invite wrote on the contact, set on a work-account invite, whose
+        /// notice the caller sends: when the notice does not send, the caller retracts the invite with it
+        /// (<see cref="ExternalInviteService.SendWorkAccountNoticeAsync"/>). Null otherwise.
+        /// </summary>
+        internal string? WrittenInviteStamp { get; init; }
+    }
 
     /// <summary>
     /// The invite core: resolve-or-create the contact, stamp the pending-invite marker (task 184), create the CIAM account

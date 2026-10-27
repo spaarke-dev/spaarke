@@ -864,6 +864,46 @@ public class DataverseContactIdentityStoreTests
                 "sprk_externalinvitedemailhash", "sprk_externalinvitedtenantid");
     }
 
+    /// <summary>
+    /// Slice C2b: the retract of an invite whose email did not send is ONE PATCH, conditional on exactly the row version it
+    /// was given (never <c>*</c>), that nulls the four invite columns and nothing else (no binding column, no baseline).
+    /// </summary>
+    [Fact]
+    public async Task TheInviteRetract_IsConditionalOnTheRowVersion_AndClearsOnlyTheInviteColumns()
+    {
+        var http = new ScriptedHttp((HttpStatusCode.NoContent, null));
+
+        var write = await http.Store().ClearPendingInviteAsync(IntentContact, "W/\"9\"", CancellationToken.None);
+
+        write.Status.Should().Be(StoreWriteStatus.Written);
+        var request = http.Requests.Should().ContainSingle().Subject;
+        request.Method.Should().Be(HttpMethod.Patch);
+        request.Uri.Should().EndWith($"/contacts({IntentContact:D})");
+        request.IfMatch.Should().Be("W/\"9\"").And.NotBe("*");
+        var body = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(request.Body)!;
+        body.Keys.Should().BeEquivalentTo("sprk_externalinvitedon", "sprk_externalinvitecodehash",
+            "sprk_externalinvitedemailhash", "sprk_externalinvitedtenantid");
+        body.Values.Should().OnlyContain(v => v.ValueKind == JsonValueKind.Null);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("*")]
+    public async Task TheInviteRetract_WithoutARowVersion_SendsNothing(string? etag)
+    {
+        var requests = 0;
+        var store = new DataverseContactIdentityStore(
+            new CountingHttpClientFactory(() => requests++),
+            _ => { requests++; throw new InvalidOperationException("no request may be made"); },
+            "https://org.test.invalid",
+            NullLogger.Instance);
+
+        var write = await store.ClearPendingInviteAsync(IntentContact, etag, CancellationToken.None);
+
+        write.Status.Should().Be(StoreWriteStatus.Failed, "an unconditional clear could erase a newer invite");
+        requests.Should().Be(0);
+    }
+
     /// <summary>An invite stamp (no tenant) for the marker-write tests.</summary>
     private static readonly InviteStamp AStamp = new(InviteEmailStamp.Create("person@customer.example"), null);
 

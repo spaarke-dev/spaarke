@@ -892,6 +892,45 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         }
     }
 
+    /// <summary>Slice C2b: when set, every invite retract (<see cref="ClearPendingInviteAsync"/>) answers this.</summary>
+    public StoreWriteStatus? PendingInviteClearFailure { get; set; }
+
+    /// <summary>Slice C2b: runs inside <see cref="ClearPendingInviteAsync"/> before its version check (a concurrent writer).</summary>
+    public Action<Contact>? BeforePendingInviteClear { get; set; }
+
+    public Task<StoreWriteResult> ClearPendingInviteAsync(Guid contactId, string? etag, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            if (PendingInviteClearFailure is { } failure) return Task.FromResult(new StoreWriteResult(failure, Error: "injected"));
+            if (DataverseContactIdentityStore.RowVersionPrecondition(etag) is null)
+            {
+                return Task.FromResult(new StoreWriteResult(StoreWriteStatus.Failed, Error: "no row version for the invite retract"));
+            }
+
+            if (!Contacts.TryGetValue(contactId, out var c)) return Task.FromResult(new StoreWriteResult(StoreWriteStatus.NotFound));
+            BeforePendingInviteClear?.Invoke(c);
+            if (!VersionMatches(etag, c.Version)) return Task.FromResult(new StoreWriteResult(StoreWriteStatus.PreconditionFailed));
+
+            // The PRODUCTION payload, column by column.
+            foreach (var column in DataverseContactIdentityStore.PendingInviteClearPayload().Keys)
+            {
+                switch (column)
+                {
+                    case ContactBindingDecision.ExternalInvitedOnColumn: c.InvitedOn = null; break;
+                    case ContactBindingDecision.ExternalInviteCodeHashColumn: c.InviteCodeHash = null; break;
+                    case ContactBindingDecision.ExternalInvitedEmailHashColumn: c.InvitedEmailHash = null; break;
+                    case ContactBindingDecision.ExternalInvitedTenantIdColumn: c.InvitedTenantId = null; break;
+                    default: throw new InvalidOperationException($"The in-memory store does not model the column {column}.");
+                }
+            }
+
+            c.Version = NextVersion();
+            Writes.Add(("invite-retract", contactId, string.Empty));
+            return Task.FromResult(StoreWriteResult.Written);
+        }
+    }
+
     public Task<StoreWriteResult> BindOidAsync(Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, CancellationToken ct)
         => Task.FromResult(Bind(contactId, etag, oid, plane, consumeInvite: false));
 

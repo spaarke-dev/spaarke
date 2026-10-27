@@ -336,6 +336,14 @@ public interface IContactIdentityStore
         Guid contactId, string? etag, DateTimeOffset invitedOn, string? inviteCodeHash, InviteStamp stamp, CancellationToken ct);
 
     /// <summary>
+    /// Slice C2b: retracts an invite whose email did not go out. Clears the pending-invite marker
+    /// (<c>sprk_externalinvitedon</c>), the invite-code hash and the invite stamp (email hash and invited tenant) in ONE
+    /// request, conditional on <paramref name="etag"/> (never <c>*</c>; no row version, no write), so an invite written
+    /// after that version is never cleared. Writes nothing else: never a binding column or the access baseline.
+    /// </summary>
+    Task<StoreWriteResult> ClearPendingInviteAsync(Guid contactId, string? etag, CancellationToken ct);
+
+    /// <summary>
     /// Writes the oid (D format) into the binding AND the uniqueness mirror, with the plane, in ONE request,
     /// conditional on <paramref name="etag"/>. Another contact holding the oid in its mirror makes the platform
     /// refuse the write (<see cref="StoreWriteStatus.KeyConflict"/>). It never names the invite-code hash column, so it
@@ -1869,6 +1877,17 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
                 ("If-Match", version), ct, missingColumns: InviteMarkerColumns)
             : Task.FromResult(NoRowVersion("invite mark", contactId));
     }
+
+    /// <inheritdoc />
+    public Task<StoreWriteResult> ClearPendingInviteAsync(Guid contactId, string? etag, CancellationToken ct)
+        => RowVersionPrecondition(etag) is { } version
+            ? WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", PendingInviteClearPayload(),
+                ("If-Match", version), ct, missingColumns: InviteMarkerColumns)
+            : Task.FromResult(NoRowVersion("invite retract", contactId));
+
+    /// <summary>Slice C2b: every <see cref="InviteMarkerColumns"/> column set to null (the retract of an unsent invite). Pure.</summary>
+    public static Dictionary<string, object?> PendingInviteClearPayload()
+        => InviteMarkerColumns.ToDictionary(column => column, _ => (object?)null);
 
     /// <summary>The masking verdict over the probe's rows. Pure.</summary>
     public static BindingReadability ClassifyProbe(ContactLookup probe)

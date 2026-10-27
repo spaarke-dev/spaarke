@@ -128,12 +128,32 @@ public sealed record InviteMarkResult(StoreWriteResult Write)
     internal string? InviteCode { get; init; }
 
     /// <summary>
+    /// Slice C2b: the invite stamp's stored email hash this write put on the contact (salted per stamp, so it names THIS
+    /// invite), or null when the write did not land. <see cref="ContactIdentityBinder.RetractUnsentInviteAsync"/> clears the
+    /// invite only while the contact still carries it. INTERNAL: never printed by the record's <see cref="object.ToString"/>.
+    /// </summary>
+    internal string? WrittenEmailHash { get; init; }
+
+    /// <summary>
     /// #2005 — set only when the contact had no row version (one the invite just created) and its re-read refused the mark:
     /// the invite decision over that row (<see cref="InviteContactAction.Refuse"/>, <see cref="InviteContactAction.Fail"/>,
     /// <see cref="InviteContactAction.AlreadyProvisioned"/>, or any other action that is not an active, unbound contact).
     /// Nothing was written.
     /// </summary>
     public InviteContactResolution? Reread { get; init; }
+}
+
+/// <summary>Slice C2b: what <see cref="ContactIdentityBinder.RetractUnsentInviteAsync"/> did.</summary>
+public enum InviteRetractOutcome
+{
+    /// <summary>The invite this call wrote was cleared: no pending invite is left without its email.</summary>
+    Retracted,
+
+    /// <summary>The contact no longer carries this invite (a newer invite, or a bind, replaced it): nothing was written.</summary>
+    Superseded,
+
+    /// <summary>The invite could not be read or cleared (logged at Error): it may still be pending.</summary>
+    Failed,
 }
 
 /// <summary>ADR-028 A9 (r3 task 047): a home-directory caller's registration, as the route validated it.</summary>
@@ -717,7 +737,81 @@ public sealed class ContactIdentityBinder
                 contactId, write.Status, write.Error);
         }
 
-        return new InviteMarkResult(write) { InviteCode = write.Status == StoreWriteStatus.Written ? code : null };
+        return new InviteMarkResult(write)
+        {
+            InviteCode = write.Status == StoreWriteStatus.Written ? code : null,
+            WrittenEmailHash = write.Status == StoreWriteStatus.Written ? stamp.InvitedEmailHash : null,
+        };
+    }
+
+    /// <summary>
+    /// Slice C2b: a pending invite exists only if its email went out. Called when an invite's email (the existing-account
+    /// email or the work-account notice) did not send, it clears the invite THIS call's marker write put on the contact (the
+    /// marker, the code hash and the stamp) so the next invite, staff or automatic, writes a new one and sends it. The
+    /// contact is re-read, and cleared only while it still carries <paramref name="writtenEmailHash"/>, conditional on the
+    /// row version read with it: a newer invite (or a bind) written meanwhile is never cleared. A row that changed between
+    /// the read and the clear is re-read once. Never throws; a failure is logged at Error.
+    /// </summary>
+    /// <param name="writtenEmailHash">The stamp's email hash the invite wrote (<see cref="InviteMarkResult.WrittenEmailHash"/>).</param>
+    public async Task<InviteRetractOutcome> RetractUnsentInviteAsync(
+        Guid contactId, string writtenEmailHash, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(writtenEmailHash);
+
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            BindIntentLookup intent;
+            try
+            {
+                intent = await _store.FindBindIntentAsync(contactId, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogError(ex,
+                    "[ID-BIND] The invite on contact {ContactId} whose email did not send could not be read back to clear it; "
+                    + "it may still be pending. Invite the person again.", contactId);
+                return InviteRetractOutcome.Failed;
+            }
+
+            if (intent.InviteStatus != LookupStatus.Read || intent.ContactId != contactId
+                || (string.IsNullOrEmpty(intent.InvitedEmailHash) && intent.StampColumnsUnproven))
+            {
+                _logger.LogError(
+                    "[ID-BIND] The invite on contact {ContactId} whose email did not send could not be read back to clear it "
+                    + "({Status}); it may still be pending. Invite the person again.", contactId, intent.InviteStatus);
+                return InviteRetractOutcome.Failed;
+            }
+
+            if (!string.Equals(intent.InvitedEmailHash, writtenEmailHash, StringComparison.Ordinal))
+            {
+                _logger.LogInformation(
+                    "[ID-BIND] The invite on contact {ContactId} whose email did not send was already replaced (a newer invite or "
+                    + "a bind); nothing cleared.", contactId);
+                return InviteRetractOutcome.Superseded;
+            }
+
+            var write = await _store.ClearPendingInviteAsync(contactId, intent.ETag, ct).ConfigureAwait(false);
+            if (write.Status == StoreWriteStatus.Written)
+            {
+                _logger.LogInformation(
+                    "[ID-BIND] The invite on contact {ContactId} whose email did not send was cleared; the next invite sends a "
+                    + "new one.", contactId);
+                return InviteRetractOutcome.Retracted;
+            }
+
+            if (write.Status != StoreWriteStatus.PreconditionFailed)
+            {
+                _logger.LogError(
+                    "[ID-BIND] The invite on contact {ContactId} whose email did not send could not be cleared ({Status}); it "
+                    + "may still be pending. Invite the person again.", contactId, write.Status);
+                return InviteRetractOutcome.Failed;
+            }
+        }
+
+        _logger.LogError(
+            "[ID-BIND] The invite on contact {ContactId} whose email did not send could not be cleared: the row kept changing. "
+            + "It may still be pending. Invite the person again.", contactId);
+        return InviteRetractOutcome.Failed;
     }
 
     /// <summary>The human message carried in a refusal's ProblemDetails.</summary>
