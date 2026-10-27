@@ -232,12 +232,20 @@ public static class PersonAccessAdministrationEndpoints
         if (ExternalAccessAdministratorAuthorizationFilter.DecisionOf(httpContext) is not { IsAdministrator: true } admin)
             return ExternalAccessAdministratorAuthorizationFilter.Refusal(httpContext);
 
+        // The audit record is written whatever happens, so a reinstatement that throws (a cancelled request while the marker
+        // clear is in flight, which Dataverse may still commit; a fault) is recorded as interrupted instead of leaving no trace.
         // A reinstatement revokes nothing, so the service is built without the revoke.
-        var outcome = await new ExternalPersonRemovalService(
-                dataverseClient, revocation: null, participations, identityStore, membershipInvalidator, timeProvider, logger)
-            .ReinstateAsync(request.ContactId, ct);
-
-        Audit(loggerFactory, ReinstatePersonAuditEvent, "reinstate", admin, request.ContactId, outcome, httpContext.TraceIdentifier);
+        var outcome = PersonAdministrationOutcome.Interrupted;
+        try
+        {
+            outcome = await new ExternalPersonRemovalService(
+                    dataverseClient, revocation: null, participations, identityStore, membershipInvalidator, timeProvider, logger)
+                .ReinstateAsync(request.ContactId, ct);
+        }
+        finally
+        {
+            Audit(loggerFactory, ReinstatePersonAuditEvent, "reinstate", admin, request.ContactId, outcome, httpContext.TraceIdentifier);
+        }
 
         return outcome.Status switch
         {

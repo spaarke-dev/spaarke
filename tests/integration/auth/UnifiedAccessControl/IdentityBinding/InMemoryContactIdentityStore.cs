@@ -573,9 +573,16 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             c.RemovedOn = removedOn;
             c.Version = NextVersion();
             Writes.Add((removedOn is null ? "removed-marker-clear" : "removed-marker", contactId, string.Empty));
+            AfterConditionalRemovedMarkerWrite?.Invoke(contactId);
             return Task.FromResult(StoreWriteResult.Written);
         }
     }
+
+    /// <summary>
+    /// Runs once a conditional marker write (<see cref="WriteRemovedMarkerIfUnchangedAsync"/>) has been applied, so a test can
+    /// end the call with an exception after Dataverse committed the write (a request cancelled while the write was in flight).
+    /// </summary>
+    public Action<Guid>? AfterConditionalRemovedMarkerWrite { get; set; }
 
     public Task<StoreWriteResult> ClearRemovedPersonAccessStateAsync(Guid contactId, CancellationToken ct)
     {

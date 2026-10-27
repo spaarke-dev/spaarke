@@ -85,10 +85,10 @@ public class PersonAccessAdministrationTests
             _audit.Factory,
             ct);
 
-    private Task<IResult> Reinstate(Guid contactId, HttpContext? http = null) =>
+    private Task<IResult> Reinstate(Guid contactId, HttpContext? http = null, CancellationToken ct = default) =>
         PersonAccessAdministrationEndpoints.ReinstatePersonAsync(
             new ExternalPersonRequest(contactId), _h.Grants, _h.Participations, _h.Identities, _invalidator.Object, _h.Time,
-            http ?? AdminContext(), _log, _audit.Factory, CancellationToken.None);
+            http ?? AdminContext(), _log, _audit.Factory, ct);
 
     private Task<IResult> Grant(Guid contactId) =>
         GrantExternalAccessEndpoint.GrantAccessAsync(
@@ -783,6 +783,34 @@ public class PersonAccessAdministrationTests
 
         ReasonCode(result).Should().Be(PersonAccessAdministrationEndpoints.ReinstateIncompleteReasonCode);
         _h.Identities.Contacts[contact].RemovedOn.Should().NotBeNull();
+    }
+
+    /// <summary>
+    /// The reinstatement audit is written whatever happens: a call that ends with an exception once the marker clear has been
+    /// committed (the request cancelled while the write was in flight) still writes the 9822 record, with status Interrupted.
+    /// </summary>
+    [Fact]
+    public async Task Reinstate_ACallThatThrowsAtTheMarkerClear_IsStillAudited_AsInterrupted()
+    {
+        var (contact, _) = BoundPerson();
+        _h.Identities.Contacts[contact].RemovedOn = _h.Time.Now.AddDays(-1);
+        using var request = new CancellationTokenSource();
+        _h.Identities.AfterConditionalRemovedMarkerWrite = _ =>
+        {
+            request.Cancel();
+            throw new OperationCanceledException(request.Token);
+        };
+
+        var act = () => Reinstate(contact, ct: request.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        _h.Identities.Contacts[contact].RemovedOn.Should().BeNull("the clear was committed before the call ended");
+        var audit = _audit.Records.Should().ContainSingle(r => r.EventId.Id == 9822).Subject;
+        audit.Category.Should().Be(ExternalAccessAudit.Category);
+        audit.Message.Should().StartWith("[EXT-PERSON-AUDIT] reinstate:")
+            .And.Contain($"status {PersonAdministrationStatus.Interrupted}")
+            .And.Contain(contact.ToString())
+            .And.Contain(AdminUser.ToString());
     }
 
     [Fact]
