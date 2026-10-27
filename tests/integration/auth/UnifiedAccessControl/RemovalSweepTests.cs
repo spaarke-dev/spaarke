@@ -415,6 +415,26 @@ public class RemovalSweepTests
         people.Should().OnlyContain(p => _h.Identities.Contacts[p].RemovedOn != null);
     }
 
+    /// <summary>
+    /// Slice C5: once the cap is reached the rest are not read at all. Cap 1 over three candidates decides exactly one (one
+    /// live grant read), defers two, and the run reports partial. In report-only mode, where nothing ever drains.
+    /// </summary>
+    [Fact]
+    public async Task PastTheCap_NoCandidateIsRead_TheRestAreDeferred_AndTheRunIsPartial()
+    {
+        foreach (var _ in Enumerable.Range(0, 3))
+            GrantOnMatter(Person(stateCode: 1).ContactId);
+        var decisions = 0;
+        _h.Grants.BeforeGrantQuery = _ => decisions++; // each live decision reads the person's grants once
+
+        var result = await RunAsync(linkWrites: false, sweepWrites: false, cap: 1);
+
+        decisions.Should().Be(1, "only the candidate within the cap is decided");
+        Sweep(result).GetProperty("candidates").GetInt32().Should().Be(3);
+        Sweep(result).GetProperty("deferredByCap").GetInt32().Should().Be(2);
+        result.Success.Should().BeFalse("deferred candidates make the run partial, never a silent ok");
+    }
+
     [Theory]
     [InlineData(null, ExternalAccessRemovalSweep.DefaultMaxContactsPerRun)]
     [InlineData("0", ExternalAccessRemovalSweep.DefaultMaxContactsPerRun)]

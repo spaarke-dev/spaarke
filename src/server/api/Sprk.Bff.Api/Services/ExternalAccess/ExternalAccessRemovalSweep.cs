@@ -65,7 +65,9 @@ internal sealed class RemovalSweepReport
 /// <see cref="RemovalSweepWritesEnabledConfigKey"/>. With either absent, empty, unparseable or false the pass is report-only:
 /// it logs what it would do and writes nothing.</para>
 /// <para><b>Bounded.</b> At most <see cref="MaxContactsPerRunConfigKey"/> contacts (default
-/// <see cref="DefaultMaxContactsPerRun"/>) are acted on per run; the rest are counted and left for the next run.</para>
+/// <see cref="DefaultMaxContactsPerRun"/>) are acted on per run. Once the cap is reached the remaining candidates are neither
+/// read nor decided: they are counted (<see cref="RemovalSweepReport.DeferredByCap"/>) and left for the next run, and the run
+/// reports partial.</para>
 /// <para><b>Audit.</b> Every removal the sweep runs is audited with the sweep as the actor (<see cref="SweepRemovalAuditEvent"/>)
 /// through <see cref="ExternalAccessAudit.Write"/>, under <see cref="ExternalAccessAudit.Category"/>. No email is logged.</para>
 /// <para><b>CLAUDE.md §11.</b> Existing: <see cref="ExternalPersonRemovalService"/> removes one person on an administrator's
@@ -201,6 +203,14 @@ internal sealed class ExternalAccessRemovalSweep
         {
             ct.ThrowIfCancellationRequested();
 
+            // Slice C5: the cap is checked BEFORE the live reads, so a run past its cap reads nothing more; the rest are
+            // counted and left for the next run.
+            if (acted >= maxContactsPerRun)
+            {
+                report.DeferredByCap++;
+                continue;
+            }
+
             var action = await DecideLiveAsync(report, contactId, ct).ConfigureAwait(false);
             if (action is null)
             {
@@ -219,12 +229,6 @@ internal sealed class ExternalAccessRemovalSweep
                         + "marker's read is not proven, so the contact is skipped and not marked. correlationId={CorrelationId}",
                         mode, environment, contactId, correlationId);
                     continue;
-            }
-
-            if (acted >= maxContactsPerRun)
-            {
-                report.DeferredByCap++;
-                continue;
             }
 
             acted++;

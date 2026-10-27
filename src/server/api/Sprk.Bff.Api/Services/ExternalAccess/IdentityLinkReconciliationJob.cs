@@ -769,6 +769,8 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
                 problems.Add($"{report.MarkerUnproven} contact(s) skipped by the removal sweep: the removed marker's read is not proven. None was marked.");
             if (report.ReadFailed > 0)
                 problems.Add($"{report.ReadFailed} contact(s) not decided by the removal sweep: a live read failed. The next run retries them.");
+            if (report.DeferredByCap > 0)
+                problems.Add($"{report.DeferredByCap} candidate(s) not read by the removal sweep: the run reached its cap of {report.MaxContactsPerRun}. The next run takes them.");
             if (report.Incomplete > 0)
                 problems.Add($"{report.Incomplete} removal(s) by the sweep did not complete; the person stays marked, and the next run re-runs a removal while an active grant row remains.");
             return false;
