@@ -567,6 +567,9 @@ internal static class AssignedAccessTestDoubles
         /// </summary>
         public Action<int>? BeforeGrantQuery { get; set; }
 
+        /// <summary>Slice C2b: the <c>$top</c> of every grant-table query, in order (null when none was asked).</summary>
+        public List<int?> GrantQueryTops { get; } = new();
+
         private int _grantQueries;
 
         /// <summary>Every Dataverse write this table took (grant creates and updates).</summary>
@@ -622,7 +625,11 @@ internal static class AssignedAccessTestDoubles
                 throw new HttpRequestException("Simulated Dataverse query failure.");
 
             if (entitySetName == GrantSet)
+            {
+                lock (_gate)
+                    GrantQueryTops.Add(top);
                 BeforeGrantQuery?.Invoke(Interlocked.Increment(ref _grantQueries));
+            }
 
             if (FailRootOwnerQueries && entitySetName is "sprk_projects" or "sprk_matters" or "sprk_workassignments")
                 throw new HttpRequestException("Simulated root-owner read failure.");

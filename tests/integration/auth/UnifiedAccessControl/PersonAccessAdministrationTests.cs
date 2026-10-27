@@ -256,6 +256,60 @@ public class PersonAccessAdministrationTests
         _h.Identities.Contacts[contact].InviteCodeHash.Should().BeNull("the later steps still run");
     }
 
+    // ── Slice C2b: the grant read is bounded; a read above the bound is never reported complete ──────────────────
+
+    private void GrantRowsOnMatter(Guid contactId, int count)
+    {
+        for (var i = 0; i < count; i++)
+            GrantOnMatter(contactId);
+    }
+
+    [Fact]
+    public async Task Remove_MoreGrantRowsThanOneReadHolds_RevokesTheRowsRead_ReportsTheGrantsStepNotCompleted_AndARetryCompletes()
+    {
+        var (contact, _) = BoundPerson();
+        GrantRowsOnMatter(contact, ExternalPersonRemovalService.MaxGrantsPerRemoval + 1);
+
+        var first = await Remove(contact);
+
+        Problem(first).StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
+        ReasonCode(first).Should().Be(PersonAccessAdministrationEndpoints.RemoveIncompleteReasonCode);
+        var steps = (IReadOnlyList<ExternalPersonStepResult>)Problem(first).ProblemDetails.Extensions["steps"]!;
+        var grants = steps.Single(s => s.Step == ExternalPersonRemovalService.GrantsStep);
+        grants.Completed.Should().BeFalse("more grants than one read holds may remain");
+        grants.Detail.Should().Contain("more may remain");
+        _h.Grants.Rows.Where(r => r.ContactId == contact).Should().OnlyContain(r => !r.IsActive, "the rows read are revoked");
+
+        var retry = await Remove(contact);
+
+        retry.Should().BeOfType<Ok<RemovePersonResponse>>().Subject.Value!.Steps.Should().OnlyContain(s => s.Completed);
+    }
+
+    [Fact]
+    public async Task Remove_AsManyGrantRowsAsTheBound_IsComplete()
+    {
+        var (contact, _) = BoundPerson();
+        GrantRowsOnMatter(contact, ExternalPersonRemovalService.MaxGrantsPerRemoval);
+
+        var result = await Remove(contact);
+
+        var ok = result.Should().BeOfType<Ok<RemovePersonResponse>>().Subject.Value!;
+        ok.Steps.Single(s => s.Step == ExternalPersonRemovalService.GrantsStep).Completed.Should().BeTrue();
+        _h.Grants.Rows.Where(r => r.ContactId == contact).Should().OnlyContain(r => !r.IsActive);
+    }
+
+    [Fact]
+    public async Task Remove_ReadsThePersonsGrants_WithOneMoreThanTheBound()
+    {
+        var (contact, _) = BoundPerson();
+        GrantOnMatter(contact);
+
+        await Remove(contact);
+
+        _h.Grants.GrantQueryTops.Should().Contain(ExternalPersonRemovalService.MaxGrantsPerRemoval + 1,
+            "an unbounded read takes one page and could leave grants unread without saying so");
+    }
+
     [Fact]
     public async Task Remove_AnUnknownContact_Is404_AnUnreadableOne_Is503_AndNothingIsWritten()
     {

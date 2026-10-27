@@ -576,12 +576,18 @@ internal static class ExternalGrantLifecycle
     /// removal revokes, one logical grant at a time. Rows without a usable id are kept (the caller reports them as not
     /// revoked rather than skipping them). Exceptions propagate: a failed read is never "no grants".
     /// </summary>
+    /// <remarks>
+    /// Slice C2b: <paramref name="top"/> bounds the single page <c>QueryAsync</c> reads (it follows no next link), so a caller
+    /// passes one more than it handles and treats a page above its bound as possibly incomplete, as
+    /// <see cref="QueryActiveRowsForRootAsync"/>'s callers do.
+    /// </remarks>
     internal static Task<List<ExternalGrantRow>> QueryActiveRowsForContactAsync(
-        DataverseWebApiClient dataverseClient, Guid contactId, CancellationToken ct)
+        DataverseWebApiClient dataverseClient, Guid contactId, int top, CancellationToken ct)
         => dataverseClient.QueryAsync<ExternalGrantRow>(
             EntitySet,
             filter: ActiveRowsForContactFilter(contactId),
             select: RowSelect,
+            top: top,
             cancellationToken: ct);
 
     /// <summary>

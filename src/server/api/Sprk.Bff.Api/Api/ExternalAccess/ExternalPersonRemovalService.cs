@@ -74,6 +74,13 @@ internal sealed class ExternalPersonRemovalService
     internal const string StandingGrantStep = "standing_grant_cleared";
     internal const string MarkerClearedStep = "removed_marker_cleared";
 
+    /// <summary>
+    /// Slice C2b: the most grants one removal reads. The read asks for one more; when more come back, the rows read are
+    /// revoked and the grants step is reported not completed, because more may remain. A retry reads the rest (revoked rows
+    /// are no longer active). Below Dataverse's 5000-row page, so the bounded read is never cut short by paging.
+    /// </summary>
+    internal const int MaxGrantsPerRemoval = 4999;
+
     private readonly DataverseWebApiClient _dataverse;
     private readonly ExternalGrantRevocationService? _revocation;
     private readonly ExternalParticipationService _participations;
@@ -250,7 +257,8 @@ internal sealed class ExternalPersonRemovalService
         List<ExternalGrantRow> rows;
         try
         {
-            rows = await ExternalGrantLifecycle.QueryActiveRowsForContactAsync(_dataverse, contactId, ct).ConfigureAwait(false);
+            rows = await ExternalGrantLifecycle.QueryActiveRowsForContactAsync(
+                _dataverse, contactId, MaxGrantsPerRemoval + 1, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -303,6 +311,17 @@ internal sealed class ExternalPersonRemovalService
                 _logger.LogError(ex, "[EXT-REMOVE-PERSON] The revoke of grant {Key} threw.", key);
                 notCompleted.Add(row.Id);
             }
+        }
+
+        // Slice C2b: a read above the bound may not hold every grant, so the step is never reported complete.
+        if (rows.Count > MaxGrantsPerRemoval)
+        {
+            _logger.LogWarning(
+                "[EXT-REMOVE-PERSON] Contact {ContactId} holds more than {Bound} active grant rows; the rows read were revoked " +
+                "and the removal must be retried for the rest.", contactId, MaxGrantsPerRemoval);
+            return (revoked, notCompleted, new ExternalPersonStepResult(GrantsStep, false,
+                $"{revoked} grant(s) revoked; the person holds more than {MaxGrantsPerRemoval} grant rows, so more may remain. " +
+                "The person stays removed; retry the removal."));
         }
 
         return (revoked, notCompleted, notCompleted.Count == 0
