@@ -450,8 +450,8 @@ the family; a service request is a core record of its own.
 **Short answer.** For an ordinary (non-Secure) record, **the children follow it**, within about two minutes plus the
 run, once the owner has turned the switch on (task 194, #2339). Dataverse itself is configured not to cascade Assign,
 Reparent or Share from matter, project or work assignment to any Spaarke child, so the BFF does it: the two-minute
-`secure-child-reconciliation` job lists every ordinary matter, project and work assignment changed since its last run (an
-MDA Assign changes the record's `modifiedon`), walks its children and re-owns each child that a business unit's default
+`secure-child-reconciliation` job lists every ordinary matter, project, work assignment and service request changed since
+its last run (an MDA Assign changes the record's `modifiedon`), walks its children and re-owns each child that a business unit's default
 team owns to the owner `RecordOwnershipResolver` answers now (rule I-6). Until the switch is on, the job only reports
 the moves it would make.
 
@@ -467,13 +467,17 @@ What moves, and what does not:
   make Secure (it is also filed under a Secure record) is reported and left to the Secure pass.
 - **Reported, not moved:** a user-owned child (one created outside the product keeps its creator, the accepted I-6
   interim), and a child owned by a team that is not a business unit's default team.
-- **Not covered:** the root's access-grant rows (`sprk_externalrecordaccess`), and children filed only under a service
-  request (the walk does not reach them). See `projects/unified-access-control-r2/notes/task-194-ordinary-parent-move.md`.
+- **Service requests:** a row filed only under a service request (`sprk_regardingservicerequest`, a document's
+  `sprk_relatedservicerequest`) follows the service request. Only this job walks those lookups: a service request is not
+  in the Secure family, so the Secure pass never does.
+- **Budget buckets** follow their budget (`sprk_budgetbucket.sprk_budget`), here and into isolation under a Secure budget.
+- **Not covered:** the root's access-grant rows (`sprk_externalrecordaccess`). See
+  `projects/unified-access-control-r2/notes/task-194-ordinary-parent-move.md`.
 - **Files follow.** A filed document's file belongs in the container of the record it is filed under (that record's
   business unit, `RecordContainerResolver.DeriveDocumentContainersAsync`); only an unfiled document uses its own row's
   business unit. The job's 2-minute re-file pass moves a file whose container no longer matches — for a document filed
-  directly under a changed matter, project or work assignment, and for every document this job re-owns (the re-own changes
-  its `modifiedon`), in the same run.
+  directly under a changed matter, project or work assignment (whatever its owner), and for every document this job
+  re-owns (the re-own changes its `modifiedon`), in the same run. See the known limit below.
 
 Consequences while the switch is off (and for what the job does not cover):
 
@@ -493,9 +497,15 @@ Spaarke does not use plugins (ADR-002), so the re-own is the scheduled job's.
 turned on only after UAC reads a report-only run and the owner gives the go), `SecureChild:Reconciliation:MaxOrdinaryMovesPerRun`
 (default 200 owner writes a run) and the shared `SecureChild:Reconciliation:MaxRootsPerRun` (50 records a run). The
 recent-changes emergency stop (`RecentChangesWritesEnabled = false`) stops it too. A record not finished in one run is
-carried to the next. Each run's report is `ResultJson.ordinaryMoves`. **Known limit:** the job looks back one hour after
-it starts and only moves its window in runs that write, so a reassignment made more than an hour before the switch is
-turned on (or before a restart that lost a carried record) is reached only when the record next changes.
+carried to the next. Each run's report is `ResultJson.ordinaryMoves`. **Older moves:** besides its one-hour window, each
+App Service instance sweeps every ordinary record once (50 a run, then it stops), and sweeps again when the switch is
+turned on, so a reassignment made before this job existed, or before a restart, is corrected too
+(`ResultJson.ordinaryMoves.sweep`).
+
+**Known limit (files):** a document the job does not re-own (user-owned, or owned by a non-default team) whose file
+derives from a moved record is relocated only when it is filed DIRECTLY under the moved matter, project or work
+assignment (the re-file pass lists those); one filed deeper (under an event of the moved matter) waits until its own row
+changes.
 
 **What *does* flow to the family** is a change of **Secure** or **Access Permission** — see §4 (parent floor) and §10.
 Those changes are applied by the BFF when it makes them, and by the background jobs within minutes when they are made
