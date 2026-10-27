@@ -24,7 +24,7 @@ public class EmlMarkedPartReaderTests
     private readonly CapturingLogger _log = new();
     private static readonly Guid SubmissionId = Guid.NewGuid();
 
-    private EmlMarkedPartReader Reader() => new(_rows.Object, _world.Intake.Spe.Object, _log);
+    private EmlMarkedPartReader Reader() => new(_rows.Object, _world.Spe.Object, _log);
 
     private Entity StoreEml(params Sprk.Bff.Api.Models.Office.AttachmentReference[] attachments)
     {
@@ -127,7 +127,7 @@ public class EmlMarkedPartReaderTests
     public async Task Read_AStorageFault_IsTransient()
     {
         StoreEml(W.Invoice, W.Timesheet);
-        _world.Intake.Spe.Setup(s => s.DownloadFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        _world.Spe.Setup(s => s.DownloadFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("503"));
 
         (await Reader().ReadAsync(SubmissionId, W.EmlId, Marks, CancellationToken.None)).Outcome.Should().Be(EmlMarkedPartReadOutcome.Transient);

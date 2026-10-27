@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
@@ -12,6 +13,7 @@ using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Office;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 
 namespace Sprk.Bff.Api.Tests.Services.Finance.Submission;
 
@@ -95,17 +97,29 @@ internal sealed class FromEmailWorld
                 ? Task.FromException<Entity?>(failure)
                 : Task.FromResult(Communication));
 
-        Intake.Spe.Setup(s => s.DownloadFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        // The earlier .eml files in SPE (its own double: the intake no longer touches SPE since task 092).
+        var gcf = Mock.Of<IGraphClientFactory>();
+        Spe = new Mock<SpeFileStore>(
+            MockBehavior.Strict,
+            new ContainerOperations(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<ILogger<ContainerOperations>>()),
+            new DriveItemOperations(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<ILogger<DriveItemOperations>>()),
+            new UploadSessionManager(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<IHttpClientFactory>(), Mock.Of<ILogger<UploadSessionManager>>()),
+            new UserOperations(gcf, Mock.Of<ILogger<UserOperations>>()),
+            null!);
+        Spe.Setup(s => s.DownloadFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string drive, string item, CancellationToken _) =>
                 Files.TryGetValue((drive, item), out var bytes) ? new MemoryStream(bytes) : null);
     }
+
+    /// <summary>SPE, read-only here (Strict: any write fails the test).</summary>
+    public readonly Mock<SpeFileStore> Spe;
 
     public FromEmailSubmissionService Build()
     {
         var callers = new Mock<ICallerSystemUserResolver>();
         callers.Setup(c => c.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>())).ReturnsAsync(() => Caller);
         return new FromEmailSubmissionService(Intake.Build(), Operation, Save, Entities.Object, Communications.Object, callers.Object,
-            Intake.Spe.Object, NullLogger<FromEmailSubmissionService>.Instance);
+            Spe.Object, NullLogger<FromEmailSubmissionService>.Instance);
     }
 
     // ── the request ─────────────────────────────────────────────────────────────────────────────────────────────
