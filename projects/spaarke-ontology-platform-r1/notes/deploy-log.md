@@ -415,3 +415,10 @@ Criterion 89 (blank the writer client id, expect the writer-failure alert to fir
 - Range from `bc99fc3e6b`: #2322 (census accepted exceptions), #2323 and #2324 (access-record proof sees team-held grants). No ontology file. Ontology OK given 2026-10-26.
 - R3 verified DLL ProductVersion `1.0.0+3ff2c04bf5a516a314e4aecae41b4308148c5627`. The 30-minute gate was clean: 0 5xx, 0 403, 0 `worklist_unavailable`, 0 `signal_unreadable`, 0 `access_record_hidden`. The census lines are unchanged (Console User and Ontology Administrator stay Critical until UAC §5.2; security-roles §20).
 - Rollback snapshot: `bc99fc3e6b` at `deploy/rollback/wwwroot-20261027T012731Z`.
+
+## 2026-10-27 — ebilling `Set-ChildRecordCreatorPersonSchema.ps1` on dev (`842c0be38d`, owner-approved for ebilling 081/090)
+
+- Ran dry run, -Apply and -Verify, all exit 0 (VERIFY PASS). It created or secured `sprk_createdbyperson` on procedure, procedureversion, policy, policyversion, ruleset and procedureassignment. Publish was entity-scoped: one PublishXml over the script's 35 child tables, including ours and the two policy tables.
+- Ontology tables were checked only, all OK: the writer profile's only member is `mi-ontology-writer-dev`; it holds field permission on `sprk_createdbyperson` for budgetrevision, decisionrecord and signal, and nothing else.
+- Policy tables: only the BFF-Managed Field Writers may set `sprk_createdbyperson`. Ontology authoring never references the column (checked on master and ebilling), so nothing breaks. The missing creator stamp is DI-128 (#2336).
+
