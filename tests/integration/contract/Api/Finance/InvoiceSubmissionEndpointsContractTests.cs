@@ -54,6 +54,9 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     private readonly StubResolver _resolver = new();
     private readonly RecordingAccessDataSource _access = new();
     private WebApplication _app = null!;
+    private Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub _invoiceHiding =
+        Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub.NoneHidden();
+    private bool _registerInvoiceHiding = true;
     private HttpClient _client = null!;
 
     public InvoiceSubmissionEndpointsContractTests()
@@ -92,6 +95,9 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         builder.Services.AddSingleton(_h.Build());
         builder.Services.AddSingleton<ExternalParticipationService>(_participations);
         builder.Services.AddSingleton<ICallerPrincipalResolver>(_resolver);
+        // ebilling-r1 task 098: the (a') invoice predicate, as AddExternalAccess registers it; hides nothing unless a test says so.
+        if (_registerInvoiceHiding)
+            builder.Services.AddScoped<ExternalInvoiceHiding>(_ => (caller, ids, ct) => _invoiceHiding.Seam(caller, ids, ct));
 
         builder.WebHost.UseTestServer();
         _app = builder.Build();
@@ -956,6 +962,138 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         (await ErrorCodeAsync(one)).Should().Be(InvoiceSubmissionErrors.CoreRecordUnavailable);
         list.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
         (await ErrorCodeAsync(list)).Should().Be(InvoiceSubmissionErrors.CoreRecordUnavailable);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ebilling-r1 task 098 surface (c): a submission whose invoice the (a') predicate hides
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private static readonly Guid HiddenInvoice = Guid.Parse("09800000-0000-4000-8000-00000000c0de");
+
+    private Entity StoredSubmissionWithInvoice(Guid id, Guid invoice)
+    {
+        var row = StoredSubmission(id, FirmId);
+        row[InvoiceSubmissionService.InvoiceColumn] = new EntityReference("sprk_invoice", invoice);
+        return row;
+    }
+
+    private void ListReturns(params Entity[] rows) =>
+        _h.Entities.Setup(e => e.RetrieveMultipleAsync(
+                It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => q.EntityName == "sprk_invoicesubmission"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(rows.ToList()));
+
+    [Fact]
+    public async Task Task098_get_of_a_submission_whose_invoice_is_hidden_is_the_same_404_as_a_missing_one()
+    {
+        var id = Guid.NewGuid();
+        StoredSubmissionWithInvoice(id, HiddenInvoice);
+        _invoiceHiding = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub.Hiding(HiddenInvoice);
+        var hidden = await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{id}");
+
+        _h.Submission = null;
+        var missing = await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{Guid.NewGuid()}");
+
+        hidden.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        missing.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        static string WithoutCorrelation(string body) =>
+            System.Text.RegularExpressions.Regex.Replace(body, "\"correlationId\":\"[^\"]*\"", "\"correlationId\":\"-\"");
+        WithoutCorrelation(await hidden.Content.ReadAsStringAsync()).Should().Be(
+            WithoutCorrelation(await missing.Content.ReadAsStringAsync()),
+            "a hidden invoice's submission and a missing submission are indistinguishable (only the per-request id differs)");
+        _invoiceHiding.Calls.Should().ContainSingle().Which.Should().Equal(HiddenInvoice);
+    }
+
+    [Theory]
+    [InlineData("fault")]
+    [InlineData("no predicate")]
+    public async Task Task098_get_of_a_submission_with_an_invoice_the_predicate_cannot_decide_is_404_fail_closed(string kind)
+    {
+        if (kind == "no predicate")
+        {
+            await DisposeAsync();
+            _registerInvoiceHiding = false;
+            await InitializeAsync();
+        }
+        else
+        {
+            _invoiceHiding = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub.Faulting();
+        }
+
+        var id = Guid.NewGuid();
+        StoredSubmissionWithInvoice(id, Guid.NewGuid());
+
+        var response = await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{id}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task Task098_get_of_a_submission_whose_invoice_is_visible_or_absent_is_200_as_before()
+    {
+        var withInvoice = Guid.NewGuid();
+        StoredSubmissionWithInvoice(withInvoice, Guid.NewGuid());
+        _invoiceHiding = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub.Hiding(HiddenInvoice);
+        (await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{withInvoice}")).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var withoutInvoice = Guid.NewGuid();
+        StoredSubmission(withoutInvoice, FirmId);
+        (await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{withoutInvoice}")).StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task Task098_get_never_returns_the_invoice_id()
+    {
+        var id = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        StoredSubmissionWithInvoice(id, invoice);
+
+        var body = await (await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{id}")).Content.ReadAsStringAsync();
+
+        body.Should().NotContain(invoice.ToString(), "the invoice link is read for the predicate only");
+    }
+
+    [Theory]
+    [InlineData("hidden")]
+    [InlineData("fault")]
+    public async Task Task098_list_omits_a_submission_whose_invoice_is_hidden_and_keeps_the_others(string kind)
+    {
+        var hiddenRow = new Entity("sprk_invoicesubmission", Guid.NewGuid())
+        {
+            ["sprk_trackingnumber"] = "INV-HIDDEN",
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+            [InvoiceSubmissionService.InvoiceColumn] = new EntityReference("sprk_invoice", HiddenInvoice),
+        };
+        var noInvoice = new Entity("sprk_invoicesubmission", Guid.NewGuid())
+        {
+            ["sprk_trackingnumber"] = "INV-PENDING",
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+        };
+        ListReturns(hiddenRow, noInvoice);
+        _invoiceHiding = kind == "hidden"
+            ? Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub.Hiding(HiddenInvoice)
+            : Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub.Faulting();
+
+        var response = await SendAsync(HttpMethod.Get, "/api/v1/external/invoice-submissions");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("INV-PENDING").And.NotContain("INV-HIDDEN");
+        _invoiceHiding.Calls.Should().ContainSingle("one predicate call for the page").Which.Should().Equal(HiddenInvoice);
+    }
+
+    [Fact]
+    public async Task Task098_list_keeps_a_submission_whose_invoice_is_visible()
+    {
+        ListReturns(new Entity("sprk_invoicesubmission", Guid.NewGuid())
+        {
+            ["sprk_trackingnumber"] = "INV-VISIBLE",
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+            [InvoiceSubmissionService.InvoiceColumn] = new EntityReference("sprk_invoice", Guid.NewGuid()),
+        });
+        _invoiceHiding = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub.Hiding(HiddenInvoice);
+
+        (await (await SendAsync(HttpMethod.Get, "/api/v1/external/invoice-submissions")).Content.ReadAsStringAsync())
+            .Should().Contain("INV-VISIBLE");
     }
 
     [Fact]

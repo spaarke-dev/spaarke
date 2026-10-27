@@ -81,7 +81,12 @@ public class InvoiceSubmissionService
         TrackingNumberAllocator.TrackingNumberColumn, TrackingNumberAllocator.FirmInvoiceNumberColumn, TrackingNumberAllocator.FirmColumn,
         "sprk_ponumber", "sprk_processingstatus", "sprk_channel", "sprk_receivedon", "sprk_outcomereasoncode", "sprk_document",
         "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment", "createdon",
+        // ebilling-r1 task 098: the resulting invoice, so the external routes can apply (a') to the submission (a derived row).
+        InvoiceColumn,
     };
+
+    /// <summary>The resulting invoice of an accepted submission (<c>sprk_invoicesubmission.sprk_invoice</c>).</summary>
+    internal const string InvoiceColumn = "sprk_invoice";
 
     private readonly ITrackingNumberAllocator _allocator;
     private readonly IGenericEntityService _entities;
@@ -1266,6 +1271,9 @@ public class InvoiceSubmissionService
             FirmId = row.GetAttributeValue<EntityReference>(TrackingNumberAllocator.FirmColumn)?.Id,
             CoreRecord = core,
             CreatedOn = row.GetAttributeValue<DateTime?>("createdon"),
+            InvoiceId = row.GetAttributeValue<EntityReference>(InvoiceColumn) is { Id: var invoiceId } && invoiceId != Guid.Empty
+                ? invoiceId
+                : null,
         };
     }
 

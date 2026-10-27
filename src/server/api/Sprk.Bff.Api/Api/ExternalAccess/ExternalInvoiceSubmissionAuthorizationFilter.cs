@@ -50,7 +50,8 @@ public static class ExternalInvoiceSubmissionAuthorizationFilterExtensions
                 coreKind,
                 services.GetRequiredService<ExternalParticipationService>(),
                 services.GetRequiredService<InvoiceSubmissionService>(),
-                services.GetRequiredService<ILogger<ExternalInvoiceSubmissionAuthorizationFilter>>());
+                services.GetRequiredService<ILogger<ExternalInvoiceSubmissionAuthorizationFilter>>(),
+                services.GetService<ExternalInvoiceHiding>());
             return await filter.InvokeAsync(context, next);
         });
     }
@@ -116,19 +117,24 @@ internal sealed class ExternalInvoiceSubmissionAuthorizationFilter : IEndpointFi
     private readonly ExternalParticipationService _participations;
     private readonly InvoiceSubmissionService _submissions;
     private readonly ILogger<ExternalInvoiceSubmissionAuthorizationFilter> _logger;
+    private readonly ExternalInvoiceHiding? _hideInvoices;
 
+    /// <param name="hideInvoices">ebilling-r1 task 098: the (a') predicate. Null hides every submission that has a resulting
+    /// invoice on the read-one route (fail closed).</param>
     public ExternalInvoiceSubmissionAuthorizationFilter(
         ExternalInvoiceSubmissionAccess access,
         InvoiceCoreRecordKind? coreKind,
         ExternalParticipationService participations,
         InvoiceSubmissionService submissions,
-        ILogger<ExternalInvoiceSubmissionAuthorizationFilter> logger)
+        ILogger<ExternalInvoiceSubmissionAuthorizationFilter> logger,
+        ExternalInvoiceHiding? hideInvoices = null)
     {
         _access = access;
         _coreKind = coreKind;
         _participations = participations;
         _submissions = submissions;
         _logger = logger;
+        _hideInvoices = hideInvoices;
     }
 
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
@@ -296,6 +302,22 @@ internal sealed class ExternalInvoiceSubmissionAuthorizationFilter : IEndpointFi
             || !principal.RightsOn(core.GrantRootType, core.RecordId).HasFlag(AccessRights.Read))
         {
             return (null, ProblemDetailsHelper.UniformRecordNotFound(http));
+        }
+
+        // ebilling-r1 task 098 (model 9.1, (a')): a submission whose resulting invoice is hidden is a derived row of that invoice and
+        // is the SAME 404 as a missing submission. No predicate and a failed predicate read hide it too (fail closed).
+        if (view.InvoiceId is { } invoiceId)
+        {
+            var decision = _hideInvoices is null
+                ? InvoiceVisibilityResult.ReadFailed(new[] { invoiceId })
+                : await _hideInvoices(principal, new[] { invoiceId }, http.RequestAborted);
+            if (!decision.IsVisible(invoiceId))
+            {
+                _logger.LogInformation(
+                    "[EBILLING-SUBMIT] Submission {SubmissionId} withheld: its invoice is hidden by the (a') predicate ({Reasons}).",
+                    submissionId, _hideInvoices is null ? "no predicate" : decision.HiddenSummary());
+                return (null, ProblemDetailsHelper.UniformRecordNotFound(http));
+            }
         }
 
         return (new ExternalInvoiceSubmissionScope(principal, firms, firmId, core, view), null);
