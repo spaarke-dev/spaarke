@@ -51,6 +51,7 @@
     <constraint source="model 9.1 Idempotency key">Message-ID + core record + mode + invoice id + the sorted (file name, mark) list; a different marking is a different operation. Mode values: New, and Correction with a required invoice id (400 when missing); 097 implements Correction in the operation, this task only carries it.</constraint>
     <constraint source="CLAUDE.md §10">BFF hygiene per .claude/constraints/bff-extensions.md: placement stated, publish-size delta against a fresh master build, no new package, no new HIGH CVE.</constraint>
     <constraint source="live data">No live Dataverse writes and no deploys.</constraint>
+    <constraint source="095 contract, pinned 2026-10-27 for word-add-in-r1">The wire contract in projects/ebilling-r1/notes/095-from-email-contract.md (request fields, idempotency rule, 202 body, replay rules, error statuses and codes) is binding. Any change to it, including resolving its open points OP-1 to OP-8, needs word-add-in-r1's agreement before it merges.</constraint>
   </constraints>
 
   <knowledge>
@@ -113,6 +114,7 @@
     <criterion testable="true">ArchTest: the marker column is written only by the submission create path, only in the create that writes the narrowing, never in an update payload; must-fire controls (a writer in another member; the marker in an update payload) and must-not-fire controls (the approved create; a read) pass.</criterion>
     <criterion testable="true">Seeding proof, recorded in notes: add a marker write to an update payload → the ArchTest fails; restored.</criterion>
     <criterion testable="true">dotnet build exits 0; Office, Finance and Submission unit tests, contract tests and the full ArchTests pass (known pre-existing failures listed by name); publish-size delta recorded; no new HIGH CVE.</criterion>
+    <criterion testable="true">Contract tests (InvoiceSubmissionFromEmailContractTests.cs) pin the request and response field names, the status codes and the errorCode / reasonCode values listed in notes/095-from-email-contract.md, one test per error-table row and per replay row (tests).</criterion>
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
