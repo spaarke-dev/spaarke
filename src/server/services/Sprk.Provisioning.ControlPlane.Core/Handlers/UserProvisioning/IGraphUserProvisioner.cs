@@ -35,6 +35,16 @@ public interface IGraphUserProvisioner
         string userId,
         string tenantId,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Gives a B2B guest the configured guest licence (<c>H11UserProvisioningOptions:GuestLicenseSkuId</c>, Power Apps
+    /// Plan 2 Trial) — Dataverse will not add an unlicensed guest (owner 2026-10-16, T186 L51). Idempotent: a guest that
+    /// already holds the SKU is left alone; the usage location is set only when absent; only the guest SKU is assigned.
+    /// </summary>
+    Task<LicenseAssignmentOutcome> AssignGuestLicenseAsync(
+        string userId,
+        string tenantId,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>

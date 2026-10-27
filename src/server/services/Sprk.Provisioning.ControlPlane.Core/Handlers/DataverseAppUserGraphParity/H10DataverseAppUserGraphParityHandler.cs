@@ -75,6 +75,10 @@
 //   │ T259 customer unit not under the root      │ QuarantineRequired        │
 //   │ T259 App User already in another unit      │ QuarantineRequired        │
 //   │ T2 post-condition mismatch (count != 1)    │ QuarantineRequired        │
+//   │ T2 re-query unavailable (429/5xx/timeout   │ Resumable (T186 audit)    │
+//   │ after bounded retries — no verdict)        │                           │
+//   │ T3 re-read unavailable (429/5xx/timeout    │ Resumable (T186 audit)    │
+//   │ after bounded retries — no verdict)        │                           │
 //   │ Graph role grant call(s) failed            │ RetryableWithCleanup      │
 //   │ Removing an extra Graph role failed (T261) │ RetryableWithCleanup      │
 //   │ T3 post-condition partial (still missing   │ QuarantineRequired        │
@@ -410,6 +414,14 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
         // (11) T2 SILENT-FAIL TRAP — independent post-registration re-query.
         var t2Result = await _appUserVerifier.VerifyAsync(
             dataverseEnvUrl, tenantId, uamiClientId, cancellationToken).ConfigureAwait(false);
+        if (t2Result is DataverseAppUserVerificationResult.Unverified t2Unverified)
+        {
+            // T186 audit: Dataverse stayed unavailable (429 / 5xx / timeout) through the verifier's bounded retries — no
+            // verdict, so no quarantine. The registration is idempotent; resume re-runs and re-queries.
+            return await FailAsync(run, etag, FailureClass.Resumable, H10Rejections.AppUserUnverified,
+                $"T2 re-query could not be completed: {t2Unverified.Diagnostic} No verdict was reached; the App User " +
+                "registration is idempotent — resume re-queries.", cancellationToken).ConfigureAwait(false);
+        }
         if (t2Result is DataverseAppUserVerificationResult.CountMismatch mismatch)
         {
             var diagnostic =
@@ -470,6 +482,14 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
         // (13) T3 SILENT-FAIL TRAP — independent post-grant re-query.
         var t3Result = await _roleParityVerifier.VerifyAsync(
             uamiObjectId, tenantId, entraRoles, cancellationToken).ConfigureAwait(false);
+        if (t3Result is GraphAppRoleParityResult.Unverified t3Unverified)
+        {
+            // T186 audit: Graph stayed unavailable (429 / 5xx / timeout) through the verifier's bounded retries — no
+            // verdict, and nothing here points at a wrong GUID, so no quarantine. Grants and removals are idempotent.
+            return await FailAsync(run, etag, FailureClass.Resumable, H10Rejections.GraphRoleParityUnverified,
+                $"T3 re-read could not be completed: {t3Unverified.Diagnostic} No verdict was reached; grants and removals " +
+                "are idempotent — resume re-reads.", cancellationToken).ConfigureAwait(false);
+        }
         if (t3Result is GraphAppRoleParityResult.Partial partial)
         {
             var diagnostic =
@@ -645,8 +665,7 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
         var completedAt = DateTimeOffset.UtcNow;
         var startedAt = completedAt - TimeSpan.FromMilliseconds(1);
 
-        run.Status = RunStatus.Running;
-        run.CurrentPhase = HandlerIdentifier; // Reconciler observes + fans out.
+        run.MarkPhaseSucceeded(HandlerIdentifier); // Reconciler observes + fans out.
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = HandlerIdentifier,

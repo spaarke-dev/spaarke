@@ -689,7 +689,7 @@ prereqs:
     scope: once_per_env
     frequency: once per tenant L2 provisions into (Spaarke's, for Model 1); the platform parameter exchangeAdminAppId names it
     owner: Spaarke platform admin (Entra Global Admin + Exchange Organization Management) — SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §4.2.1
-    consequence_of_absence: H14a and H13 T4 fail on first use ("ExchangeAdminAppId is not configured", or the sign-in / Exchange call is refused); the stamp identity never receives its group-scoped mailbox roles, so its Mail.* calls 403 (trap T4). Without the T263 roles (guide section 4.2.1 step 5, owner decision D32, applied on the Spaarke tenant 2026-10-13) H14m fails Resumable h14m-mailbox-ensure-failed naming PRQ-E-16 and creates nothing - no run reaches Ready.
+    consequence_of_absence: H14a and H13 T4 fail on first use ("ExchangeAdminAppId is not configured", or the sign-in / Exchange call is refused); the stamp identity never receives its group-scoped mailbox roles, so its Mail.* calls 403 (trap T4). Without the T263 roles (guide section 4.2.1 step 5, owner decision D32, applied on the Spaarke tenant 2026-10-13; the New-Mailbox entry must also carry the PowerShell common parameters - T186 L62, added 2026-10-20) H14m fails Resumable h14m-mailbox-ensure-failed naming PRQ-E-16 and creates nothing - no run reaches Ready.
     check_recipe:
       cli: |
         set -o pipefail
@@ -701,7 +701,7 @@ prereqs:
         [ -z "$keys" ] || { echo "app $appid holds a secret or certificate - it must hold none (D24/D25)"; exit 1; }
         echo ok
       expect: '`ok` - the app `Spaarke Exchange Admin` exists, a federated credential names the L2 Worker UAMI principal id, and the app holds NO secret or certificate. NOT asserted here (needs an interactive Exchange Online session, which Step 0.5b must not open): `Exchange.ManageAsApp` consent and, in Exchange, `Get-ManagementRoleAssignment -RoleAssignee <its service-principal object id>` listing `Spaarke App RBAC Admin`, `View-Only Recipients` and the four DelegatingOrgWide `Application Mail.*` / `MailboxSettings.Read` assignments - H14a / H13 T4 fail loudly on first use if they are missing'
-    remediation: 'Follow SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §4.2.1 (Enable-OrganizationCustomization once per tenant — irreversible, ~1 h to apply). Never give the app a secret, a certificate or an Entra directory role. Step 5 of §4.2.1 (T263 shared-mailbox roles, called PRQ-E-16 in H14m diagnostics) is the exact set the owner approved in decision D32 (applied on the Spaarke tenant 2026-10-13); apply nothing wider.'
+    remediation: "Follow SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §4.2.1 (Enable-OrganizationCustomization once per tenant — irreversible, ~1 h to apply). Never give the app a secret, a certificate or an Entra directory role. Step 5 of §4.2.1 (T263 shared-mailbox roles, called PRQ-E-16 in H14m diagnostics) is the exact set the owner approved in decision D32 (applied on the Spaarke tenant 2026-10-13); apply nothing wider, but keep the common parameters (ErrorAction ... WhatIf) on the New-Mailbox entry - without them the sidecar's New-Mailbox -ErrorAction Stop is refused (T186 L62). H14m's probe of both writes on an @authz-probe.invalid address names the refused one."
     related_findings: [T251-G30, D24, D25, D26, T263-D32]
 
   - id: PRQ-E-14
@@ -979,11 +979,11 @@ prereqs:
     related_findings: [T232, D2, G10]
 
   - id: PRQ-C-11
-    name: The customer's Dataverse environment is linked to a pay-as-you-go billing policy on the customer's stamp subscription (Model 1 — Spaarke pays guest access)
+    name: The customer's Dataverse environment is linked to a pay-as-you-go billing policy on the customer's stamp subscription (Model 1 — Dataverse capacity; guests are licensed by H11, T186 L51)
     scope: once_per_customer
     frequency: once per customer, BEFORE the run
     owner: Spaarke platform admin (Power Platform admin of Spaarke's tenant)
-    consequence_of_absence: "Model 1 guests hold no licence (owner 2026-10-07: Spaarke pays pay-as-you-go, not per user). Without the link the environment has no way to bill their access: H11 still makes each guest a Dataverse user, but the guest is refused at sign-in. L2 cannot see billing (no Dataverse-visible setting; the licensing API needs a Power Platform admin, which L2 is not) — this check is the operator's."
+    consequence_of_absence: "The environment has no pay-as-you-go billing for its Dataverse capacity. User access is NOT paid this way any more: since owner 2026-10-16 (T186 L51) H11 gives every Model 1 guest the Power Apps Plan 2 Trial licence, because the T186 policy carried only the Dataverse storage meters (AppPass off) and Dataverse refused the unlicensed guests. L2 cannot see billing (no Dataverse-visible setting; the licensing API needs a Power Platform admin, which L2 is not) — this check is the operator's."
     check_recipe:
       cli: |
         set -o pipefail

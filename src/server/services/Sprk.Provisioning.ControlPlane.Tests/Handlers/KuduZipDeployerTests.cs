@@ -46,7 +46,20 @@ public sealed class KuduZipDeployerTests : IDisposable
     private static BffDeployOptions NewOptions() => new()
     {
         KuduZipDeployTimeout = TimeSpan.FromSeconds(5),
+        KuduDeploymentPollInterval = TimeSpan.FromMilliseconds(10),
     };
+
+    private const string DeploymentUrl = $"https://{AppServiceName}-{SlotName}.scm.azurewebsites.net/api/deployments/abc123";
+
+    private static HttpResponseMessage Accepted()
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.Accepted);
+        response.Headers.Location = new Uri(DeploymentUrl);
+        return response;
+    }
+
+    private static HttpResponseMessage Record(HttpStatusCode code, string json)
+        => new(code) { Content = new StringContent(json) };
 
     // ---------- T1 success — request shape ground-truthed ----------
 
@@ -56,8 +69,12 @@ public sealed class KuduZipDeployerTests : IDisposable
         HttpRequestMessage? capturedRequest = null;
         var handler = new FakeKuduHttpMessageHandler(async request =>
         {
+            if (request.Method == HttpMethod.Get)
+            {
+                return Record(HttpStatusCode.OK, "{\"status\":4,\"complete\":true}");
+            }
             capturedRequest = request;
-            return new HttpResponseMessage(HttpStatusCode.OK);
+            return Accepted();
         });
 
         var deployer = new KuduZipDeployer(
@@ -75,6 +92,8 @@ public sealed class KuduZipDeployerTests : IDisposable
         capturedRequest!.Method.Should().Be(HttpMethod.Post);
         capturedRequest.RequestUri!.Host.Should().Be($"{AppServiceName}-{SlotName}.scm.azurewebsites.net");
         capturedRequest.RequestUri.AbsolutePath.Should().Be("/api/zipdeploy");
+        capturedRequest.RequestUri.Query.Should().Be("?isAsync=true",
+            "a synchronous POST is cut off by the App Service front end at ~230 s (T186 L45)");
         capturedRequest.Headers.Authorization.Should().NotBeNull();
         capturedRequest.Headers.Authorization!.Scheme.Should().Be("Bearer");
         capturedRequest.Headers.Authorization.Parameter.Should().Be("fake-arm-scope-token");
@@ -171,6 +190,102 @@ public sealed class KuduZipDeployerTests : IDisposable
 
         await act.Should().ThrowAsync<TimeoutException>();
     }
+
+    // ---------- T186 L45: async deploy + status poll ----------
+
+    [Fact]
+    public async Task DeployAsync_PollsTheLocationUntilComplete_ThenSucceeds()
+    {
+        var polls = new List<HttpRequestMessage>();
+        var answers = new Queue<HttpResponseMessage>(new[]
+        {
+            Record(HttpStatusCode.Accepted, "{\"status\":1,\"complete\":false}"),
+            Record(HttpStatusCode.OK, "{\"status\":2,\"complete\":false}"),
+            Record(HttpStatusCode.OK, "{\"status\":4,\"complete\":true,\"status_text\":\"\"}"),
+        });
+        var handler = new FakeKuduHttpMessageHandler(async request =>
+        {
+            if (request.Method == HttpMethod.Post) return Accepted();
+            polls.Add(request);
+            return answers.Dequeue();
+        });
+
+        var result = await NewDeployer(handler, NewOptions()).DeployAsync(
+            new KuduZipDeployRequest(AppServiceName, SlotName, _tempZipPath), CancellationToken.None);
+
+        result.Should().BeOfType<KuduZipDeployResult.Success>();
+        polls.Should().HaveCount(3, "202 and complete:false both mean still running");
+        polls.Should().OnlyContain(p => p.RequestUri!.AbsoluteUri == DeploymentUrl);
+        polls.Should().OnlyContain(p => p.Headers.Authorization!.Parameter == "fake-arm-scope-token");
+    }
+
+    [Fact]
+    public async Task DeployAsync_DeploymentCompletesAsFailed_ReturnsFailureWithKuduStatusText()
+    {
+        var handler = new FakeKuduHttpMessageHandler(async request => request.Method == HttpMethod.Post
+            ? Accepted()
+            : Record(HttpStatusCode.OK,
+                "{\"status\":3,\"complete\":true,\"status_text\":\"Deployment failed: disk full\",\"log_url\":\"https://x/log\"}"));
+
+        var result = await NewDeployer(handler, NewOptions()).DeployAsync(
+            new KuduZipDeployRequest(AppServiceName, SlotName, _tempZipPath), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<KuduZipDeployResult.Failure>().Subject;
+        failure.Diagnostic.Should().Contain("status 3").And.Contain("disk full").And.Contain("https://x/log");
+    }
+
+    [Fact]
+    public async Task DeployAsync_NoLocationHeader_PollsTheLatestDeployment()
+    {
+        Uri? polled = null;
+        var handler = new FakeKuduHttpMessageHandler(async request =>
+        {
+            if (request.Method == HttpMethod.Post) return new HttpResponseMessage(HttpStatusCode.Accepted);
+            polled = request.RequestUri;
+            return Record(HttpStatusCode.OK, "{\"status\":4,\"complete\":true}");
+        });
+
+        var result = await NewDeployer(handler, NewOptions()).DeployAsync(
+            new KuduZipDeployRequest(AppServiceName, SlotName, _tempZipPath), CancellationToken.None);
+
+        result.Should().BeOfType<KuduZipDeployResult.Success>();
+        polled!.AbsolutePath.Should().Be("/api/deployments/latest");
+    }
+
+    [Fact]
+    public async Task DeployAsync_DeploymentNeverCompletes_ThrowsTimeoutException()
+    {
+        var handler = new FakeKuduHttpMessageHandler(async request => request.Method == HttpMethod.Post
+            ? Accepted()
+            : Record(HttpStatusCode.Accepted, "{\"status\":1,\"complete\":false}"));
+
+        var options = NewOptions();
+        options.KuduZipDeployTimeout = TimeSpan.FromMilliseconds(200);
+
+        var act = async () => await NewDeployer(handler, options).DeployAsync(
+            new KuduZipDeployRequest(AppServiceName, SlotName, _tempZipPath), CancellationToken.None);
+
+        await act.Should().ThrowAsync<TimeoutException>("the one ceiling covers the poll as well as the POST");
+    }
+
+    [Fact]
+    public async Task DeployAsync_StatusGetRejected_ReturnsFailure()
+    {
+        var handler = new FakeKuduHttpMessageHandler(async request => request.Method == HttpMethod.Post
+            ? Accepted()
+            : Record(HttpStatusCode.Forbidden, "{\"Message\":\"no access\"}"));
+
+        var result = await NewDeployer(handler, NewOptions()).DeployAsync(
+            new KuduZipDeployRequest(AppServiceName, SlotName, _tempZipPath), CancellationToken.None);
+
+        result.Should().BeOfType<KuduZipDeployResult.Failure>().Which.Diagnostic.Should().Contain("403");
+    }
+
+    private static KuduZipDeployer NewDeployer(HttpMessageHandler handler, BffDeployOptions options) => new(
+        new HttpClient(handler),
+        new FakeTokenCredential(),
+        Options.Create(options),
+        NullLogger<KuduZipDeployer>.Instance);
 
     // ---------- fakes ----------
 

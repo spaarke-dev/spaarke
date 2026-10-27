@@ -232,6 +232,7 @@ class MainOutput(unittest.TestCase):
         out = io.StringIO()
         with mock.patch.object(ubs, "board_projects", lambda: pairs), \
                 mock.patch.object(ubs, "archive_totals", lambda: {}), \
+                mock.patch.object(ubs, "allocated_totals", lambda: ({}, None)), \
                 mock.patch.object(ubs, "find_folder", lambda s, known=None: "c--code-files-spaarke-wt-" + s), \
                 mock.patch.object(ubs, "cost_for_folder", lambda f: dict(totals[f])), \
                 mock.patch.object(ubs, "set_field", lambda *a: (writes.append(a) or (True, ""))), \
@@ -242,10 +243,28 @@ class MainOutput(unittest.TestCase):
         self.assertIn("KEEP alpha-r1 (fresh < board; transcripts likely pruned)", text)
         self.assertIn("OK       beta-r1", text)
         self.assertIn("1 updated, 1 kept (board already higher)", text)
+        self.assertIn("AI Cost (allocated): not written", text)
         # set_field(item_id, field_id, flag, value): only beta-r1 (I2) was written; alpha-r1 (I1) not at all.
         self.assertEqual({w[0] for w in writes}, {"I2"})
         self.assertEqual({w[1] for w in writes}, {ubs.F_SPEND, ubs.F_ASOF, ubs.F_CALLS})
         self.assertEqual(len(writes), 3)
+
+    def test_allocated_is_written_even_when_lower_and_only_for_projects_with_an_allocation(self):
+        pairs = [("I1", "alpha-r1", 500.0, 900), ("I2", "beta-r1", None, None)]
+        writes = []
+        out = io.StringIO()
+        with mock.patch.object(ubs, "board_projects", lambda: pairs), \
+                mock.patch.object(ubs, "archive_totals", lambda: {}), \
+                mock.patch.object(ubs, "allocated_totals", lambda: ({"alpha-r1": 12.5}, "2026-10-23")), \
+                mock.patch.object(ubs, "find_folder", lambda s, known=None: "c--code-files-spaarke-wt-" + s), \
+                mock.patch.object(ubs, "cost_for_folder", lambda f: {"cost": 1.0, "calls": 1}), \
+                mock.patch.object(ubs, "set_field", lambda *a: (writes.append(a) or (True, ""))), \
+                mock.patch("sys.argv", ["update-board-spend.py"]), \
+                contextlib.redirect_stdout(out):
+            ubs.main()
+        alloc = [w for w in writes if w[1] == ubs.F_ALLOC]
+        self.assertEqual(alloc, [("I1", ubs.F_ALLOC, "--number", 12.5)])   # alpha's spend was KEEP, allocated still written
+        self.assertIn("AI Cost (allocated): 1 written, 0 failed (invoices through 2026-10-23)", out.getvalue())
 
 
 if __name__ == "__main__":

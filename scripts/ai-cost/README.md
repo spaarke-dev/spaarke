@@ -17,7 +17,8 @@ python scripts/ai-cost/get-project-cost.py unified-access-control-r2
 ## update-board-spend.py
 
 Pushes the per-project totals from `get-project-cost.py` to the GitHub portfolio board
-(AI Spend / AI Calls / AI Spend As Of). Normally driven by the `/project-spend-update` skill.
+(AI Spend / AI Calls / AI Spend As Of), then each project's share of the invoiced actuals to AI Cost (allocated)
+(see "Invoiced actuals" below). Normally driven by the `/project-spend-update` skill.
 
 The board figures never go down. Transcripts are deleted over time, so a fresh figure that is lower
 than the one already on the board is not written: the script prints
@@ -90,6 +91,47 @@ python scripts/ai-cost/spend-report.py --source archive --since 2026-09-01 --pro
 - `--source archive` reports from the archive instead of the transcripts, in any `--format`. Without
   `--days/--since/--today` it covers the whole history; `--archive PATH` picks the file and nothing is
   written. The days are in the archive's tz.
+
+## Invoiced actuals (`--actuals`)
+
+The estimate prices this machine's transcripts at list price. What was actually paid comes from the invoices on the
+claude.ai billing page: the Max plan fee on the same day each month, plus credit purchases (auto-recharge when the
+balance runs low, and manual top-ups). There is no export for a Max plan, so the charges are typed by hand into a CSV
+beside the archive:
+
+```
+%USERPROFILE%\.claude\spend-archive\invoices.csv
+date,amount,kind,invoice_id,notes
+2026-10-06,200.00,plan,B4B3290F-0149,Max 20x Oct 6-Nov 6
+2026-10-09,450.74,credits,,
+```
+
+`date` is ISO; `amount` may carry `$` and commas, and a refund is negative; `kind` is `plan`, `credits` or `other`;
+`invoice_id` and `notes` are optional. It lives outside the repo, like the archive.
+
+```
+python scripts/ai-cost/spend-report.py --actuals                     # text
+python scripts/ai-cost/spend-report.py --actuals --format csv --out actuals.csv
+python scripts/ai-cost/spend-report.py --actuals --project ebilling  # filters the allocation table only
+```
+
+`--invoices PATH` and `--archive PATH` pick the files. It reads the archive, not the transcripts, and covers the
+whole history, so it takes no `--days`/`--since`/`--today` (and no `--format html`). Output:
+
+- **By month**, with a year-to-date running total, and **by year**: plan / credits / other / actual, and the estimate.
+- **By billing cycle**: a cycle starts on each `plan` charge and runs to the day before the next (the last one to the
+  newest invoice or archived day; charges before the first plan charge form a leading cycle), with the ratio
+  actual / estimate. Credits are prepaid, so a charge pays for later usage: **only cycles have a ratio**, never months
+  or days. `*` marks a cycle the archive covers only partly (ratio overstated); `-` one before the archive.
+- **Effective rate**: actual / estimate over the cycles the archive fully covers.
+- **Allocated actual by project**: each cycle's invoiced total split by the projects' share of that cycle's estimate.
+  A cycle with no estimate stays `unallocated`; a partly covered cycle is split whole. Allocated plus unallocated equals
+  the invoiced total.
+
+The invoices cover the whole account (claude.ai chat, other machines); the estimate covers this machine only.
+`update-board-spend.py` writes each project's allocation to the board field `AI Cost (allocated)`, as computed (it may
+go down: both inputs are durable, and a share of the open cycle shrinks when other projects grow). Without an invoice
+list the field is not written.
 
 ## Model fit: was each piece of work run on the right model?
 

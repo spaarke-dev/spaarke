@@ -206,6 +206,14 @@
       "addedBy": "unified-access-control-r2 task 146"
     },
     {
+      "logicalName": "sprk_budgetbucket",
+      "privilegeName": "prvReadsprk_BudgetBucket",
+      "kind": "child",
+      "reason": "Task 194 F1-b (owner round 128): a budget bucket is filed under its budget (sprk_budgetbucket.sprk_budget), so under a Secure record the reconciler re-owns it to the named Secure team with its budget. Without its lineage row the budget was isolated and its buckets were not.",
+      "evidence": "Exception to the probe rule, read-only (task 194 ran under a no-dev-writes rule, so no probe row could be created): spaarkedev1, 2026-10-27, the privilege prvReadsprk_BudgetBucket (Id=0e1b51ff-78cb-41e8-a4ba-78198ff2122b) exists and the role 'Secure Record Owner' (e4ebabd9-b4a0-f111-aaac-000d3a99d1d7) has no roleprivileges row for it, while it has one for prvReadsprk_Budget (8cf76905-35f2-4441-b3a2-1e3312ad9b6b). Apply with scripts/Set-SecureRecordOwnerRolePrivileges.ps1 (dry run, -Apply, -Verify) BEFORE a BFF carrying this entry is deployed: until the role holds it, the Secure pass's owner write of a bucket is refused.",
+      "addedBy": "unified-access-control-r2 task 194"
+    },
+    {
       "logicalName": "sprk_budgetrevision",
       "privilegeName": "prvReadsprk_BudgetRevision",
       "kind": "child",

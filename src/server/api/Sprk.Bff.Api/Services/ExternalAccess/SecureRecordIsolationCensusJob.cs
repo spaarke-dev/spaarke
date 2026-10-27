@@ -141,6 +141,18 @@ public sealed class SecureRecordIsolationCensusJob : IScheduledJob
                     "[SECURE-CENSUS] {Verdict}: {Message} correlationId={CorrelationId}",
                     finding.Verdict, finding.Message, context.CorrelationId);
             }
+
+            foreach (var accepted in outcome.AcceptedExceptions)
+            {
+                // Owner-accepted role exception (SecureBuRoleDepthAssertion.AcceptedRoleExceptions): visible on every run,
+                // but not a finding, so Information and no effect on the status. By systemuser id only (#2130).
+                _logger.LogInformation(
+                    "[SECURE-CENSUS] AcceptedException systemuserId={SystemUserId} role={RoleName} " +
+                    "privileges={Privileges} depth={Depth} anchorBusinessUnitId={AnchorBusinessUnitId} " +
+                    "decision={DecisionId} correlationId={CorrelationId}",
+                    accepted.PrincipalId, accepted.RoleName, string.Join(", ", accepted.Privileges), accepted.Depth,
+                    accepted.AnchorBusinessUnitId, accepted.DecisionId, context.CorrelationId);
+            }
         }
 
         var findingCount = outcome?.Findings.Count ?? 0;
