@@ -181,6 +181,7 @@ import {
   Text,
   Tooltip,
   MessageBar,
+  MessageBarActions,
   MessageBarBody,
   MessageBarTitle,
   Badge,
@@ -921,6 +922,32 @@ interface IGrantBatchOutcome {
   /** Task 149: the server's `detail` for each share that WAS written while some related records of the secure record
    * are not updated yet. Those shares are counted in `granted`; this only adds the server's sentence. */
   relatedRecordsPending?: string[];
+  /** Slice B3: the people granted whose invite is for a work account (`WorkAccountInvited`). */
+  workAccountInvited?: string[];
+  /** Slice B3: the people whose organisation could not be checked (503 tenant_lookup_unavailable): nothing was
+   * written for them; they stay selected and the notice offers Retry. */
+  lookupUnavailable?: string[];
+}
+
+/** Slice B3: `/invite-and-grant`'s 503 when the person's organisation could not be checked (nothing was written). */
+export const INVITE_TENANT_LOOKUP_UNAVAILABLE_REASON_CODE = 'sdap.access.invite.tenant_lookup_unavailable';
+
+/** Slice B3: the invite status of a person who will sign in with their work account (`onboardStatus` / `invite.status`). */
+const WORK_ACCOUNT_INVITED_STATUS = 'WorkAccountInvited';
+
+/** Slice B3: added to the batch notice after the names of people invited for a work-account sign-in. */
+export const WORK_ACCOUNT_INVITED_SENTENCE = 'invited — will sign in with their work account.';
+
+/** Slice B3: the batch notice's sentence for people whose organisation could not be checked; the notice offers Retry. */
+export function tenantLookupRetrySentence(names: string[]): string {
+  return `Couldn't check the organisation of ${names.join(', ')}, so nothing was granted or sent for them. Retry.`;
+}
+
+/** The notice the modal shows; `retry` adds a Retry action that re-runs Add for the rows still selected (slice B3). */
+interface IModalNotice {
+  intent: 'success' | 'warning' | 'error';
+  text: string;
+  retry?: boolean;
 }
 
 /** Builds the post-batch notice for `Add (N)` — five distinct shapes ordered by
@@ -930,20 +957,34 @@ interface IGrantBatchOutcome {
  * without Write on the record fails the same way). Task 181: whichever shape
  * applies, a grant whose person could not be notified adds
  * {@link NOTIFICATION_FAILED_SENTENCE}, and a success becomes a warning. */
-function buildGrantBatchNotice(outcome: IGrantBatchOutcome): { intent: 'success' | 'warning' | 'error'; text: string } {
+function buildGrantBatchNotice(outcome: IGrantBatchOutcome): IModalNotice {
   const { granted, selectedCount, failures, denied, anyNotificationFailed, anyNarrowed } = outcome;
   const policyRefusals = outcome.policyRefusals ?? [];
+  const lookupUnavailable = outcome.lookupUnavailable ?? [];
+  // Slice B3: who was invited for a work-account sign-in, named once, before the other suffixes.
+  const workAccount = outcome.workAccountInvited ?? [];
+  const workSuffix = workAccount.length > 0 ? ` ${workAccount.join(', ')}: ${WORK_ACCOUNT_INVITED_SENTENCE}` : '';
   // Task 149: shares that WERE written (counted in `granted`) while some related records of the secure record are not
   // updated yet — the server's sentence is appended to whichever notice applies, never reported as a failure.
   // Task 181: likewise the could-not-notify sentence, last.
   const relatedPending = Array.from(new Set(outcome.relatedRecordsPending ?? [])).join(' ');
   const notifySuffix = anyNotificationFailed ? ` ${NOTIFICATION_FAILED_SENTENCE}` : '';
-  const relatedSuffix = `${relatedPending ? ` ${relatedPending}` : ''}${notifySuffix}`;
+  const relatedSuffix = `${workSuffix}${relatedPending ? ` ${relatedPending}` : ''}${notifySuffix}`;
 
   if (denied) {
     return {
       intent: 'error',
       text: `Granted access to ${granted} of ${selectedCount} before access was denied; the message above says why.${relatedSuffix}`,
+    };
+  }
+  if (lookupUnavailable.length > 0) {
+    // Slice B3: nothing was written for these people; they stay selected, and Retry adds them again.
+    const reasons = policyRefusals.length > 0 ? ` ${Array.from(new Set(policyRefusals)).join(' ')}` : '';
+    const others = failures > 0 ? ` ${failures} other item(s) failed; please try those again.` : '';
+    return {
+      intent: 'error',
+      text: `Granted access to ${granted} of ${selectedCount}. ${tenantLookupRetrySentence(lookupUnavailable)}${reasons}${others}${relatedSuffix}`,
+      retry: true,
     };
   }
   if (policyRefusals.length > 0) {
@@ -971,7 +1012,7 @@ function buildGrantBatchNotice(outcome: IGrantBatchOutcome): { intent: 'success'
   if (relatedPending || anyNarrowed || anyNotificationFailed) {
     return { intent: 'warning', text: `Granted access to ${granted} item(s).${narrowedNote}${relatedSuffix}` };
   }
-  return { intent: 'success', text: `Granted access to ${granted} item(s).` };
+  return { intent: 'success', text: `Granted access to ${granted} item(s).${workSuffix}` };
 }
 
 /** Task 181 (owner round 89 item 3): added to the batch notice when the server granted access but could not send the
@@ -1199,7 +1240,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   const [assignedEntries, setAssignedEntries] = React.useState<IAssignedAccessEntry[]>([]);
   const [suggestionBusy, setSuggestionBusy] = React.useState<string | null>(null);
 
-  const [notice, setNotice] = React.useState<{ intent: 'success' | 'warning' | 'error'; text: string } | null>(null);
+  const [notice, setNotice] = React.useState<IModalNotice | null>(null);
 
   // The designed 401/403 deny states (task 008 FR-07 delegation gate; project
   // constraint "the 403 delegation deny is a designed UI state, not a toast").
@@ -1266,7 +1307,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     [recordId]
   );
   const setNoticeIfCurrent = React.useCallback(
-    (n: { intent: 'success' | 'warning' | 'error'; text: string } | null) => {
+    (n: IModalNotice | null) => {
       if (showsThisRecord()) setNotice(n);
     },
     [showsThisRecord]
@@ -1627,6 +1668,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     notificationFailed: boolean;
     /** Task 139: the server capped the grant at the caller's own level. */
     narrowed: boolean;
+    /** Slice B3: the person's invite is for a work account (they sign in with it; no portal account). */
+    workAccountInvited?: boolean;
   }
 
   /** The additive fields `/grant`, `/invite-and-grant` and `/share-user` return (task 139; task 181's
@@ -1636,6 +1679,10 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     grantedAccessLevel?: number | null;
     narrowed?: boolean;
     notificationFailed?: boolean;
+    /** `/invite-and-grant`: how the person was onboarded (slice B3: `WorkAccountInvited`). */
+    onboardStatus?: string;
+    /** `/grant`: what the grant did about the person's invite (slice B3: `WorkAccountInvited`). */
+    invite?: { status?: string } | null;
   }
 
   /**
@@ -1695,7 +1742,12 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
 
       // Task 139: every grant is capped at the caller's own level; the server
       // says when it did, and the batch notice reports it.
-      return { notificationFailed: data.notificationFailed === true, narrowed: data.narrowed === true };
+      return {
+        notificationFailed: data.notificationFailed === true,
+        narrowed: data.narrowed === true,
+        workAccountInvited:
+          data.onboardStatus === WORK_ACCOUNT_INVITED_STATUS || data.invite?.status === WORK_ACCOUNT_INVITED_STATUS,
+      };
     },
     [isInternalContact, postJson, recordId, recordType, addExpiryDate]
   );
@@ -1827,6 +1879,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     let denied = false;
     const policyRefusals: string[] = [];
     const relatedRecordsPending: string[] = [];
+    const workAccountInvited: string[] = [];
+    const lookupUnavailable: IAvailableItem[] = [];
     for (const it of selected) {
       const level = rowLevels[it.id];
       // Unreachable: the missing-level guard above returned before any write. Narrows `level` for the writes below.
@@ -1836,6 +1890,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           const outcome = await grantContact(it.contact, { level });
           anyNotificationFailed = anyNotificationFailed || outcome.notificationFailed;
           anyNarrowed = anyNarrowed || outcome.narrowed;
+          if (outcome.workAccountInvited) workAccountInvited.push(it.name);
         } else if (it.kind === 'organization' && it.org) {
           const outcome = await grantOrganization(it.org, level);
           anyNarrowed = anyNarrowed || outcome.narrowed;
@@ -1860,6 +1915,16 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         // Task 175: this item would make the record looser than its parent's floor. A refusal of this item only.
         if (parentRefusal) {
           policyRefusals.push(`${it.name}: ${parentRefusal}`);
+          continue;
+        }
+        // Slice B3: the person's organisation could not be checked, so nothing was written for them. Kept selected for
+        // Retry; never counted as an ordinary failure.
+        if (
+          err instanceof AccessGrantModalApiError &&
+          err.status === 503 &&
+          err.reasonCode === INVITE_TENANT_LOOKUP_UNAVAILABLE_REASON_CODE
+        ) {
+          lookupUnavailable.push(it);
           continue;
         }
         // Task 149: the share on the record WAS written; only some related records of the secure record are not yet
@@ -1889,9 +1954,12 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     setApproving(false);
     // Rebound to another record meanwhile: its staged picks, list and notice are not this batch's to touch.
     if (!showsThisRecord()) return false;
-    setSelectedCandidateIds(new Set());
-    setRowLevels({});
-    setLookedUpContacts([]);
+    // Slice B3: the rows whose organisation could not be checked stay staged (selection, level, looked-up contact), so
+    // the notice's Retry adds exactly them again.
+    const retryIds = new Set(lookupUnavailable.map(it => it.id));
+    setSelectedCandidateIds(new Set(retryIds));
+    setRowLevels(Object.fromEntries(Object.entries(rowLevels).filter(([id]) => retryIds.has(id))));
+    setLookedUpContacts(prev => prev.filter(c => retryIds.has(c.contactId)));
     setLookedUpOrgs([]);
     setLookedUpUsers([]);
     await loadData();
@@ -1906,6 +1974,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         anyNarrowed,
         policyRefusals,
         relatedRecordsPending,
+        workAccountInvited,
+        lookupUnavailable: lookupUnavailable.map(it => it.name),
       })
     );
     // Success (for Save's close decision) iff nothing failed, nothing was refused
@@ -1920,6 +1990,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       failures === 0 &&
       policyRefusals.length === 0 &&
       relatedRecordsPending.length === 0 &&
+      lookupUnavailable.length === 0 &&
       !anyNotificationFailed
     );
   }, [
@@ -2440,6 +2511,13 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                   </MessageBarTitle>
                   {notice.text}
                 </MessageBarBody>
+                {notice.retry && (
+                  <MessageBarActions>
+                    <Button size="small" disabled={approving} onClick={() => void handleGrantSelected()}>
+                      Retry
+                    </Button>
+                  </MessageBarActions>
+                )}
               </MessageBar>
             )}
 
