@@ -385,32 +385,156 @@ public class SecureChildOrdinaryParentMoveTests
     // Multi-parent: the resolver's primary parent decides
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-    [Theory(DisplayName = "194 multi-parent: a child filed under the moved matter (B) and a project in A takes the resolver's primary-parent answer")]
-    [InlineData(true)]  // the matter is the first lookup: the primary parent — the child moves to B
-    [InlineData(false)] // the project is the first lookup: the primary parent — the child stays in A
-    public async Task AMultiParentChild_TakesThePrimaryParentsAnswer(bool matterFirst)
+    [Theory(DisplayName = "194b multi-parent: a child filed under the moved matter (B) and a project in A takes its table's primary (the matter), whatever order its lookups were read in")]
+    [InlineData(true)]  // the matter is the first lookup read
+    [InlineData(false)] // the project is the first lookup read: before 194b the child stayed in A
+    public async Task AMultiParentChild_TakesItsTablesPrimary_WhateverTheAttributeOrder(bool matterFirst)
     {
+        // 194 pinned the attribute order as the primary; that was the defect (49 of 52 planned moves on dev were wrong). An
+        // event's primary order (SecureChildLineage) names sprk_regardingmatter before sprk_regardingproject.
         var projectInA = Guid.NewGuid();
         MatterMovedToB();
         _world.OrdinaryRoot(Project, projectInA);
         var lookups = new[] { ("sprk_regardingmatter", Matter, MatterId), ("sprk_regardingproject", Project, projectInA) };
         Row("sprk_event", EventId, TeamRef(GeneralTeam), matterFirst ? lookups : lookups.Reverse().ToArray());
-        var expected = await new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver(
-                SecureChildShareWorld.EntitiesOver(() => _world).Object, SecureChildShareWorld.Configuration(),
-                NullLogger<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver>.Instance)
-            .ResolveOwnerAsync(new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
-            {
-                Parents = Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ParentsOf(
-                    _world.Retrieve("sprk_event", EventId, null)).ToArray(),
-                WhenUnfiled = Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.KeepCreator,
-            }, CancellationToken.None);
 
         await Reconciler().ReconcileOrdinaryParentMoveAsync(
             Matter, MatterId, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
 
-        expected.OwningTeamId.Should().Be(matterFirst ? TeamB : GeneralTeam, "the resolver's primary parent is the first lookup");
-        _world.OwnerOf("sprk_event", EventId).Should().Be(DataversePrincipalRef.Team(expected.OwningTeamId!.Value));
-        _world.OwnerWrites.Should().HaveCount(matterFirst ? 1 : 0);
+        _world.OwnerOf("sprk_event", EventId).Should().Be(DataversePrincipalRef.Team(TeamB), "the matter is the event's primary");
+        _world.OwnerWrites.Should().HaveCount(1);
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // 194b: one deterministic ownership question per existing row, the writer's (RecordOwnershipContext.ForExistingRowAsync)
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>The record-type catalog row naming <c>sprk_matter</c> (a Signal's or Decision Record's core type).</summary>
+    private static readonly Guid CatalogMatter = Guid.Parse("4b000000-0000-4000-8000-000000194401");
+
+    /// <summary>A Signal or Decision Record row: <paramref name="lookups"/> in the order given (the attribute order Dataverse
+    /// happens to return), its core pair naming <paramref name="core"/> (a matter; none when null), its regarding pair id the
+    /// subject's.</summary>
+    private void OntologyRow(
+        string table, Guid id, EntityReference owner, Guid? core, Guid subject, params (string Column, string Target, Guid TargetId)[] lookups)
+    {
+        _world.Add("sprk_recordtype_ref", CatalogMatter, ("sprk_recordlogicalname", "sprk_matter"));
+        Row(table, id, owner, core is { } c ? lookups.Append(("sprk_corerecordtype", "sprk_recordtype_ref", CatalogMatter)).ToArray() : lookups);
+        if (core is { } coreId)
+            _world.Set(table, id, "sprk_corerecordid", coreId.ToString("D"));
+        _world.Set(table, id, "sprk_regardingrecordid", subject.ToString("D"));
+    }
+
+    [Fact(DisplayName = "194b must fire: a Signal whose user-owned To Do (root unit, filed to the B matter) is read BEFORE its core matter is already correct at B's team — never a move")]
+    public async Task ASignalWhoseToDoComesFirst_IsAlreadyCorrect_AtItsCoresTeam()
+    {
+        MatterMovedToB();
+        _world.UserOwnedChild("sprk_todo", TodoId, ("sprk_regardingmatter", Matter, MatterId));
+        var signal = Guid.NewGuid();
+        OntologyRow("sprk_signal", signal, TeamRef(TeamB), core: MatterId, subject: TodoId,
+            ("sprk_regardingtodo", "sprk_todo", TodoId), ("sprk_matter", Matter, MatterId));
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            Matter, MatterId, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        _world.OwnerOf("sprk_signal", signal).Should().Be(DataversePrincipalRef.Team(TeamB));
+        _world.OwnerWrites.Should().NotContain(w => w.Id == signal, "SignalWriter gives the core matter's team, and so does the reconciler");
+        report.Tables.Single(t => t.Table == "sprk_signal").AlreadyCorrect.Should().Be(1);
+    }
+
+    [Fact(DisplayName = "194b never-flip: decide the Signal, re-own its To Do to B's team, decide again — the same answer, no write either time")]
+    public async Task ASignal_NeverFlips_WhenItsSubjectIsReowned()
+    {
+        MatterMovedToB();
+        _world.UserOwnedChild("sprk_todo", TodoId, ("sprk_regardingmatter", Matter, MatterId));
+        var signal = Guid.NewGuid();
+        OntologyRow("sprk_signal", signal, TeamRef(TeamB), core: MatterId, subject: TodoId,
+            ("sprk_regardingtodo", "sprk_todo", TodoId), ("sprk_matter", Matter, MatterId));
+
+        await Reconciler().ReconcileOrdinaryParentMoveAsync(Matter, MatterId, SecureChildReconcileMode.Apply, 200, CancellationToken.None);
+        _world.Add("sprk_todo", TodoId, ("owningteam", TeamRef(TeamB)), ("sprk_regardingmatter", new EntityReference(Matter, MatterId)),
+            ("versionnumber", 2L));
+        await Reconciler().ReconcileOrdinaryParentMoveAsync(Matter, MatterId, SecureChildReconcileMode.Apply, 200, CancellationToken.None);
+
+        _world.OwnerOf("sprk_signal", signal).Should().Be(DataversePrincipalRef.Team(TeamB));
+        _world.OwnerWrites.Should().NotContain(w => w.Id == signal);
+    }
+
+    [Theory(DisplayName = "194b must fire: an .eml document of a user-owned communication filed to the B matter is already correct at B's team, and its attachment does not cascade")]
+    [InlineData(true)]  // it also names the matter (after the communication in its attributes): the primary order decides
+    [InlineData(false)] // it names only the communication: its user-owned FILED communication is looked through (I-6)
+    public async Task AnEmlDocumentOfAUserOwnedFiledCommunication_IsAlreadyCorrect_AndItsAttachmentStays(bool namesTheMatter)
+    {
+        MatterMovedToB();
+        var (communication, eml, attachment) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        _world.UserOwnedChild("sprk_communication", communication, ("sprk_regardingmatter", Matter, MatterId));
+        var emlLookups = new[] { ("sprk_relatedcommunication", "sprk_communication", communication), ("sprk_matter", Matter, MatterId) };
+        Row("sprk_document", eml, TeamRef(TeamB), namesTheMatter ? emlLookups : emlLookups.Take(1).ToArray());
+        Row("sprk_document", attachment, TeamRef(TeamB), ("sprk_parentdocument", "sprk_document", eml));
+
+        await Reconciler().ReconcileOrdinaryParentMoveAsync(Matter, MatterId, SecureChildReconcileMode.Apply, 200, CancellationToken.None);
+
+        _world.OwnerOf("sprk_document", eml).Should().Be(DataversePrincipalRef.Team(TeamB));
+        _world.OwnerOf("sprk_document", attachment).Should().Be(DataversePrincipalRef.Team(TeamB));
+        _world.OwnerWrites.Should().NotContain(w => w.Id == eml || w.Id == attachment);
+    }
+
+    [Fact(DisplayName = "194b must fire: an analysis of a root-unit document, also regarding the B matter, keeps its document's team (the writers ask about the document first)")]
+    public async Task AnAnalysis_FollowsItsDocument_NotItsRegardingMatter()
+    {
+        MatterMovedToB();
+        var (document, analysis) = (Guid.NewGuid(), Guid.NewGuid());
+        _world.Add("sprk_document", document, ("owningteam", TeamRef(GeneralTeam)));
+        Row("sprk_analysis", analysis, TeamRef(GeneralTeam),
+            ("sprk_regardingmatter", Matter, MatterId), ("sprk_documentid", "sprk_document", document));
+
+        await Reconciler().ReconcileOrdinaryParentMoveAsync(Matter, MatterId, SecureChildReconcileMode.Apply, 200, CancellationToken.None);
+
+        _world.OwnerOf("sprk_analysis", analysis).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
+        _world.OwnerWrites.Should().NotContain(w => w.Id == analysis);
+    }
+
+    [Theory(DisplayName = "194b must not fire: a Signal or Decision Record with NO core record is reported, never moved — TodoAssigneeOwnerReconciliationJob owns it")]
+    [InlineData("sprk_signal")]
+    [InlineData("sprk_decisionrecord")]
+    public async Task ANoCoreRow_IsReported_NotMoved(string table)
+    {
+        MatterMovedToB();
+        Row("sprk_todo", TodoId, TeamRef(GeneralTeam), ("sprk_regardingmatter", Matter, MatterId));
+        var row = Guid.NewGuid();
+        OntologyRow(table, row, TeamRef(GeneralTeam), core: null, subject: TodoId, ("sprk_regardingtodo", "sprk_todo", TodoId));
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            Matter, MatterId, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        _world.OwnerOf(table, row).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
+        _world.OwnerWrites.Should().NotContain(w => w.Id == row);
+        report.Changes.Should().ContainSingle(c => c.Id == row)
+            .Which.Should().Match<SecureChildRowChange>(c => c.Outcome == SecureChildRowOutcome.Untouched
+                                                             && c.Detail!.Contains("TodoAssigneeOwnerReconciliationJob"));
+    }
+
+    [Theory(DisplayName = "194b must fire: an Unsecure takes a Signal OUT to its core's business-unit team, whatever order its lookups were read in")]
+    [InlineData(true)]  // its To Do (owned in B) is read first: before 194b the Signal went OUT to B's team
+    [InlineData(false)]
+    public async Task AnUnsecure_ReleasesASignal_ToItsCoresTeam_WhateverTheAttributeOrder(bool todoFirst)
+    {
+        var unsecured = Guid.NewGuid();
+        _world.FlaggedNotIsolatedRoot(Matter, unsecured); // mid-unsecure: moved to the general unit's team, flag cleared last
+        MatterMovedToB();
+        Row("sprk_todo", TodoId, TeamRef(TeamB), ("sprk_regardingmatter", Matter, MatterId));
+        var signal = Guid.NewGuid();
+        var lookups = new[] { ("sprk_regardingtodo", "sprk_todo", TodoId), ("sprk_matter", Matter, unsecured) };
+        OntologyRow("sprk_signal", signal, TeamRef(SecureChildShareWorld.SecureTeam), core: unsecured, subject: TodoId,
+            todoFirst ? lookups : lookups.Reverse().ToArray());
+
+        var report = await Reconciler().ReconcileAsync(
+            Matter, unsecured, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Unsecure, CancellationToken.None);
+
+        // (This harness's Web API double does not answer the root's platform-cascade rows; the pass is incomplete for them only.)
+        report.Changes.Should().NotContain(c => c.Id == signal && c.Outcome != SecureChildRowOutcome.Changed);
+        _world.OwnerOf("sprk_signal", signal).Should().Be(DataversePrincipalRef.Team(GeneralTeam),
+            "its core (the unsecured matter) is its primary, as SignalWriter asks");
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════

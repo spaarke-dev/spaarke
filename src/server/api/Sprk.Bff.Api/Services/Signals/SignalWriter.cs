@@ -378,16 +378,25 @@ public sealed partial class SignalWriter
     /// same agreement rule uac-r2 applies to an untyped pair (a lookup carrying the pair id). A later core-ancestor stamp in
     /// another <c>sprk_regarding*</c> column (task 144) carries a different id and so never matches.
     /// </remarks>
-    internal static string? SubjectEntityOf(Guid pairId, Func<string, Guid?> lookupIdOf)
+    internal static string? SubjectEntityOf(Guid pairId, Func<string, Guid?> lookupIdOf) =>
+        SubjectEntityOf(SignalEntity, pairId, lookupIdOf);
+
+    /// <summary>
+    /// UAC task 194b: <see cref="SubjectEntityOf(Guid, Func{string, Guid?})"/> for any host table of the shared regarding builder
+    /// (<c>TodoRegardingBuilder.RegardingLookupsByHostTable</c>): a Decision Record is filed under its subject by the same builder,
+    /// so the same agreement rule names it. <c>null</c> for a host table the builder does not file.
+    /// </summary>
+    internal static string? SubjectEntityOf(string hostTable, Guid pairId, Func<string, Guid?> lookupIdOf)
     {
         ArgumentNullException.ThrowIfNull(lookupIdOf);
-        if (pairId == Guid.Empty)
+        if (pairId == Guid.Empty
+            || !TodoRegardingBuilder.RegardingLookupsByHostTable.TryGetValue(hostTable ?? string.Empty, out var lookupByEntity))
         {
             return null;
         }
 
         string? subject = null;
-        foreach (var (entity, lookup) in RegardingLookupByEntity)
+        foreach (var (entity, lookup) in lookupByEntity)
         {
             if (lookupIdOf(lookup) != pairId)
             {

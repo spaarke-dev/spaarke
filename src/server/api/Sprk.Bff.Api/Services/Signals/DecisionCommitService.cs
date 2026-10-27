@@ -1629,9 +1629,7 @@ public sealed class DecisionCommitService
     {
         try
         {
-            var row = await _entities.RetrieveAsync("sprk_recordtype_ref", recordTypeRefId, ["sprk_recordlogicalname"], ct).ConfigureAwait(false);
-            var table = row.GetAttributeValue<string>("sprk_recordlogicalname")?.Trim().ToLowerInvariant();
-            return (table is not null && CoreAncestorResolver.CoreRecordEntities.Contains(table, StringComparer.Ordinal) ? table : null, false);
+            return (await CoreAncestorResolver.CoreTableOfRecordTypeAsync(_entities, recordTypeRefId, ct).ConfigureAwait(false), false);
         }
         catch (Exception ex) when (IsNotFound(ex))
         {

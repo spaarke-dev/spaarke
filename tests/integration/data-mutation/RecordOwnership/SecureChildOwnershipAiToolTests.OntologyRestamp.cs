@@ -181,6 +181,9 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _user.OwningTeamOf[OntologyCommunication] = Directory.SecureNamedTeam;
         ShareWorld.Add("businessunit", Directory.ChildBu, ("name", "Spaarke Business Unit 1"));
         ShareWorld.Team(Directory.ChildTeam, Directory.ChildBu, "Spaarke Business Unit 1", isDefault: true, teamType: 0);
+        // 194b: the share world places the ordinary matter where the harness's directory does (its unit's team). The Signal's and
+        // Decision Record's core IS that matter, and their writers ask about the core first, so the two worlds must agree on it.
+        ShareWorld.Add("sprk_matter", OrdinaryMatter, ("owningteam", new EntityReference("team", Directory.ChildTeam)), ("sprk_issecure", false));
         ShareWorld.SecureChild("sprk_communication", OntologyCommunication, ("sprk_regardingmatter", "sprk_matter", OrdinaryMatter));
         OntologyRowsAboutTheCommunication(stamp: SecureMatter, isolated: true);
         foreach (var table in OntologyTables)
@@ -208,6 +211,9 @@ public sealed partial class SecureChildOwnershipAiToolTests
             ShareWorld.Set(table, row, "sprk_matter", new EntityReference("sprk_matter", OrdinaryMatter));
             ShareWorld.Set(table, row, "sprk_corerecordid", OrdinaryMatter.ToString("D"));
             ShareWorld.Set(table, row, "sprk_corerecordtype", new EntityReference("sprk_recordtype_ref", OntologyCoreType));
+            // 194b: as the writers file them: the regarding pair names the subject, the catalog row names the core's table.
+            ShareWorld.Set(table, row, "sprk_regardingrecordid", OntologyCommunication.ToString("D"));
+            ShareWorld.Add("sprk_recordtype_ref", OntologyCoreType, ("sprk_recordlogicalname", "sprk_matter"));
             ShareWorld.Set(table, row, "sprk_policyversion", new EntityReference("sprk_policyversion", OntologyPolicyVersion));
             ShareWorld.Set(table, row, "sprk_snapshot", "{\"evidence\":[1,2,3]}");
         }

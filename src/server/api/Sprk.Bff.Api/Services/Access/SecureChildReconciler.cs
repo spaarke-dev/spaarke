@@ -412,6 +412,10 @@ public sealed class SecureChildReconciler
     private readonly Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker? _ownerPrivileges;
     private readonly Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing _gateDecisionRecords;
 
+    /// <summary>UAC task 194b: derives a Signal's or Decision Record's subject stamps for its ownership question
+    /// (<see cref="RecordOwnershipContext.ForExistingRowAsync"/>), the same derivation their writers use.</summary>
+    private readonly CoreAncestorResolver? _coreAncestors;
+
     /// <param name="accessCacheInvalidator">Batch-4 integration, 148 × 132. Every child OWNER change this pass makes
     /// (provisioning's child pass, the unsecure's Step 3.5 and completion branch, a re-file, <c>SecureChildReconciliationJob</c>)
     /// is evicted through task 132's ONE owner-change hook. It is optional so this service's test compositions keep
@@ -427,6 +431,10 @@ public sealed class SecureChildReconciler
     /// assignment, and the row is reported Failed the same way.</param>
     /// <param name="gateDecisionRecords">Ontology task 042b (D-169, uac-r2 choice A): after a re-filed COMMUNICATION, its gate Decision
     /// Records still owned by a user are re-owned to the resolver's team (<see cref="AfterRefileAsync"/>).</param>
+    /// <param name="coreAncestors">UAC task 194b: the ONE core-ancestor derivation, so a Signal's or Decision Record's ownership
+    /// question names the same stamps its writer did (<see cref="RecordOwnershipContext.ForExistingRowAsync"/>). Optional so the
+    /// test compositions keep compiling; the host registers it unconditionally (<c>AddCoreAncestorResolver</c>). Without it such
+    /// a row with a core record is not decided (fail closed).</param>
     public SecureChildReconciler(
         IGenericEntityService dataverse,
         IRecordOwnershipResolver ownership,
@@ -438,9 +446,11 @@ public sealed class SecureChildReconciler
         Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator? accessCacheInvalidator = null,
         Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null,
         Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker? ownerPrivileges = null,
-        DocumentContainerRelocator? relocator = null)
+        DocumentContainerRelocator? relocator = null,
+        CoreAncestorResolver? coreAncestors = null)
     {
         _relocator = relocator;
+        _coreAncestors = coreAncestors;
         _threads = threads;
         _ownerPrivileges = ownerPrivileges;
         _gateDecisionRecords = gateDecisionRecords ?? throw new ArgumentNullException(nameof(gateDecisionRecords));
@@ -1442,6 +1452,10 @@ public sealed class SecureChildReconciler
         // UAC task 194 F1-a: each document's latest ordinary decision — whether its file may be handed to the re-file pass.
         private readonly Dictionary<Guid, bool> _documentHandOff = new();
 
+        // UAC task 194b: each row's ownership question (RecordOwnershipContext.ForExistingRowAsync), built once per pass from the
+        // row as the pass read it: its parents, primary first, and whether its owner comes from another rule or cannot be asked.
+        private readonly Dictionary<(string Table, Guid Id), ExistingRowOwnership> _questions = new();
+
         public Pass(
             SecureChildReconciler owner, SecureChildReconcileMode mode, RecordOwnershipParent root, bool rootIsolated,
             bool unsecuring, bool mayRelease, Guid secureTeamId, CancellationToken ct, OrdinaryMove? ordinary = null)
@@ -1706,6 +1720,7 @@ public sealed class SecureChildReconciler
                 .ToList();
             var keys = ordered.Select(r => (Table: r.LogicalName, r.Id)).ToList();
             var rows = ordered.ToDictionary(r => (r.LogicalName, r.Id));
+            await LoadOwnershipQuestionsAsync(ordered).ConfigureAwait(false);
             var ancestors = AncestorsInPass(ordered);
 
             // Owner round 22: the owner each row had when this pass began — before any re-own — decides whether it WAS
@@ -2093,6 +2108,13 @@ public sealed class SecureChildReconciler
             if (_ordinary is { } ordinary)
                 return await DecideOrdinaryRowAsync(row, current, ordinary).ConfigureAwait(false);
 
+            if (QuestionFor(row).Undetermined is { } undetermined)
+            {
+                Log.LogWarning("[SECURE-CHILD-RECONCILE] {Table} {Id}: its owner cannot be decided ({Why}); it is left as it is.",
+                    table, row.Id, undetermined);
+                return new(RowMove.None, SecureChildRowOutcome.Failed, null, undetermined);
+            }
+
             RecordOwnerResolution resolution;
             try
             {
@@ -2231,6 +2253,19 @@ public sealed class SecureChildReconciler
                 return new(RowMove.Stay, SecureChildRowOutcome.Untouched, null, null);
             if (current is null)
                 return new(RowMove.None, SecureChildRowOutcome.Failed, null, "its owner could not be read");
+
+            // 194b: a row whose question cannot be asked is not decided; a Signal or Decision Record with no core record is
+            // owned by its assignee's team, which TodoAssigneeOwnerReconciliationJob keeps: reported, never moved here.
+            var question = QuestionFor(row);
+            if (question.Undetermined is { } undetermined)
+            {
+                Log.LogWarning("[SECURE-CHILD-RECONCILE] ordinary move {Table} {Id}: its owner cannot be decided ({Why}); it is " +
+                    "left as it is.", table, row.Id, undetermined);
+                return new(RowMove.None, SecureChildRowOutcome.Failed, null, undetermined);
+            }
+
+            if (question.NoCoreOwnerRule is { } otherRule)
+                return new(RowMove.Stay, SecureChildRowOutcome.Untouched, null, otherRule);
 
             (Guid? BusinessUnit, bool IsDefault)? owningTeam = null;
             RecordOwnerResolution resolution;
@@ -2437,9 +2472,11 @@ public sealed class SecureChildReconciler
         /// </summary>
         private RecordOwnershipContext ContextFor(Entity row)
         {
+            // UAC task 194b: the row's parents in its writer's order (RecordOwnershipContext.ForExistingRowAsync), so the primary
+            // that decides an ordinary row's business unit never depends on the order its attributes were read in.
             var parents = IsGrant(row.LogicalName)
                 ? GrantRootParent(row)
-                : RecordOwnershipContext.ParentsOf(row).ToList();
+                : QuestionFor(row).Context.Parents.ToList();
             // #2143 round 6: the ONE rule for a message's thread parents (RecordThreadFiling — round 7d: by the thread's type, a
             // Direct thread adding nothing), from the pass's preloaded row or,
             // for a thread outside the pass, the one LoadThreadsOutsidePassAsync read (a faulted read decides nothing here:
@@ -2459,6 +2496,42 @@ public sealed class SecureChildReconciler
                 PlannedOwningTeams = _planned.Count > 0 ? new Dictionary<RecordOwnershipParent, Guid>(_planned) : null,
             };
         }
+
+        /// <summary>
+        /// UAC task 194b: every row's ownership question (<see cref="RecordOwnershipContext.ForExistingRowAsync"/>), built once
+        /// from the row as this pass read it. A read that faults leaves that row undetermined (it is reported failed, never
+        /// decided on a guess); the rest of the pass goes on.
+        /// </summary>
+        private async Task LoadOwnershipQuestionsAsync(IEnumerable<Entity> rows)
+        {
+            foreach (var row in rows)
+            {
+                var key = (row.LogicalName, row.Id);
+                if (_questions.ContainsKey(key))
+                    continue;
+                try
+                {
+                    _questions[key] = await RecordOwnershipContext.ForExistingRowAsync(
+                        row, _owner._dataverse, _owner._coreAncestors, _ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !_ct.IsCancellationRequested)
+                {
+                    Log.LogWarning(ex, "[SECURE-CHILD-RECONCILE] {Table} {Id}: its ownership question could not be built (a read " +
+                        "failed).", row.LogicalName, row.Id);
+                    _questions[key] = new ExistingRowOwnership(RecordOwnershipContext.ForParents(RecordOwnershipContext.OrderedParentsOf(row)))
+                    {
+                        Undetermined = "its core record could not be read",
+                    };
+                }
+            }
+        }
+
+        /// <summary>The row's ownership question (<see cref="LoadOwnershipQuestionsAsync"/>).</summary>
+        private ExistingRowOwnership QuestionFor(Entity row) =>
+            _questions.TryGetValue((row.LogicalName, row.Id), out var question)
+                ? question
+                : throw new InvalidOperationException(
+                    $"No ownership question was built for {row.LogicalName} {row.Id:D} before it was decided (194b).");
 
         /// <summary>
         /// A grant row's root, read from its own lookup to the pass's root table (the lookup <see cref="LoadGrantRowsAsync"/>

@@ -640,6 +640,10 @@ internal sealed class SecureChildShareWorld
         entities
             .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .Returns((QueryExpression query, CancellationToken _) => Task.FromResult(current().Answer(query)));
+        // 194b: a single-row read (the record-type catalog row a Signal's or Decision Record's core pair names).
+        entities
+            .Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns((string table, Guid id, string[] columns, CancellationToken _) => Task.FromResult(current().Retrieve(table, id, columns)));
         entities
             .Setup(e => e.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
             .Returns((string table, Guid id, Dictionary<string, object> fields, CancellationToken _) =>
@@ -691,7 +695,8 @@ internal sealed class SecureChildShareWorld
         return new SecureChildReconciler(
             entities, resolver, synchronizer, webApi, configuration, logger ?? NullLogger<SecureChildReconciler>.Instance,
             gateDecisionRecords ?? new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing, // ontology 042b: a gate-record double over an empty world
-            accessCacheInvalidator, threads, ownerPrivileges, relocator);
+            accessCacheInvalidator, threads, ownerPrivileges, relocator,
+            coreAncestors: CoreAncestorsOver(current)); // 194b: a Signal's or Decision Record's subject stamps
     }
 
     /// <summary>
