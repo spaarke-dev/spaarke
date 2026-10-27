@@ -772,11 +772,22 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
             if (report.ChangedSinceRead > 0)
                 problems.Add($"{report.ChangedSinceRead} contact(s) not marked by the removal sweep: the contact changed after it was decided. The next run decides them again.");
             if (report.DeferredByCap > 0)
-                problems.Add($"{report.DeferredByCap} candidate(s) not read by the removal sweep: the run reached its cap of {report.MaxContactsPerRun}. The next run takes them.");
+                problems.Add(DeferredByCapProblem(report.DeferredByCap, report.MaxContactsPerRun, Writes));
             if (report.Incomplete > 0)
                 problems.Add($"{report.Incomplete} removal(s) by the sweep did not complete; the person stays marked, and the next run re-runs a removal while an active grant row remains.");
             return false;
         }
+
+        /// <summary>
+        /// What the run says about candidates past the cap. With writes enabled the marked candidates drop out of the next
+        /// scan, so the next run takes the rest. In report-only mode nothing is marked, so every run previews the same first
+        /// candidates and the rest are not processed until the sweep's writes are enabled.
+        /// </summary>
+        private static string DeferredByCapProblem(int deferred, int cap, bool writes) => writes
+            ? $"{deferred} candidate(s) not read by the removal sweep: the run reached its cap of {cap}. The next run takes them."
+            : $"{deferred} candidate(s) not read by the removal sweep: the run reached its cap of {cap}. In report-only mode each " +
+              $"run previews only the first {cap} candidate(s); the rest are not processed until the removal sweep's writes " +
+              "are enabled.";
 
         public object Result() => new
         {

@@ -437,6 +437,9 @@ public class RemovalSweepTests
         people.Count(p => _h.Identities.Contacts[p].RemovedOn is not null).Should().Be(2);
         Sweep(first).GetProperty("deferredByCap").GetInt32().Should().Be(1);
         Sweep(first).GetProperty("maxContactsPerRun").GetInt32().Should().Be(2);
+        first.ErrorMessage.Should().Contain("reached its cap of 2. The next run takes them.",
+            "with writes enabled the marked candidates leave the scan, so the next run takes the rest")
+            .And.NotContain("report-only");
 
         await RunAsync(linkWrites: true, sweepWrites: true, cap: 2);
 
@@ -461,6 +464,28 @@ public class RemovalSweepTests
         Sweep(result).GetProperty("candidates").GetInt32().Should().Be(3);
         Sweep(result).GetProperty("deferredByCap").GetInt32().Should().Be(2);
         result.Success.Should().BeFalse("deferred candidates make the run partial, never a silent ok");
+        result.ErrorMessage.Should().Contain(
+                "In report-only mode each run previews only the first 1 candidate(s); the rest are not processed until the " +
+                "removal sweep's writes are enabled.",
+                "in report-only mode nothing is marked, so no later run takes the deferred candidates")
+            .And.NotContain("The next run takes them");
+    }
+
+    /// <summary>
+    /// The deferred wording follows the sweep's own write switch: link writes on with the sweep's writes off is report-only
+    /// for the sweep, so the run says the rest are not processed until those writes are enabled.
+    /// </summary>
+    [Fact]
+    public async Task PastTheCap_WithOnlyLinkWritesEnabled_TheRunSaysTheRestWaitForTheSweepsWrites()
+    {
+        foreach (var _ in Enumerable.Range(0, 2))
+            Person(stateCode: 1);
+
+        var result = await RunAsync(linkWrites: true, sweepWrites: false, cap: 1);
+
+        Sweep(result).GetProperty("deferredByCap").GetInt32().Should().Be(1);
+        result.ErrorMessage.Should().Contain("In report-only mode each run previews only the first 1 candidate(s)")
+            .And.NotContain("The next run takes them");
     }
 
     [Theory]
