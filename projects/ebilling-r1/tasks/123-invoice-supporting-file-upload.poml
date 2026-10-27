@@ -33,6 +33,7 @@
   </context>
 
   <constraints>
+    <constraint source="123 contract (word-add-in-r1)">The wire contract in projects/ebilling-r1/notes/123-upload-contract.md (route, limits, synchronous 201, error statuses and codes) is binding; where this POML differs, the contract wins; any change needs word-add-in-r1's agreement first.</constraint>
     <constraint source="EB-D-161">Upload only: multipart/form-data, one file per request, field name "file". No email, attachment-id or document-id input; no from-email variant.</constraint>
     <constraint source="model 9.1">The Stored File is purpose Invoice supporting file, Firm-visible = No, parent sprk_invoice = {invoiceId}, created through StoredFileService.UploadForCallerAsync (staged, row Not yet servable, verified flip). Never a sprk_document.</constraint>
     <constraint source="Finance step 0, ADR-008">The route is in the /api/finance group and gets step 0 (internal callers only) and the group's filters. The caller needs Write on the invoice, asked as the caller (CallerRecordAccessProbe / the equalised gate call GetCallerRightsForAuthorizationGateAsync if present), never app-only: no Write or not found gives 404 sdap.access.deny.record_unavailable (one body for both); unknown rights give 403 sdap.access.error.system_failure.</constraint>
@@ -75,7 +76,7 @@
   <acceptance-criteria>
     <criterion testable="true">201 with { fileId, fileName, sizeBytes } for a caller with Write on an Active invoice; the Stored File has purpose Invoice supporting file, Firm-visible No, parent the invoice; no sprk_document is created.</criterion>
     <criterion testable="true">No Write and a missing invoice both give 404 sdap.access.deny.record_unavailable with byte-identical bodies; unknown rights give 403 sdap.access.error.system_failure; a flagged-external caller is refused by step 0; unauthenticated is 401. None of them stages bytes.</criterion>
-    <criterion testable="true">Each Inactive status gives 409 ebilling.invoice.inactive and stages nothing; an empty file, a missing "file" field, two files, or an oversize file give 400 and stage nothing.</criterion>
+    <criterion testable="true">Each Inactive status gives 409 ebilling.invoice.inactive and stages nothing; an empty file, a missing "file" field or two files give 400, and an oversize file gives 413, each with the contract's code; none stages anything.</criterion>
     <criterion testable="true">A staging or flip failure leaves no servable row (090's undo), and the answer is 503.</criterion>
     <criterion testable="true">Seeding proof recorded; §11 justification in the notes; publish-size delta; no package; no new HIGH CVE.</criterion>
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
