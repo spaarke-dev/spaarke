@@ -62,6 +62,44 @@ public static class InvoiceSubmissionEndpoints
             .WithName("SubmitInvoiceForWorkAssignment")
             .WithSubmitContract("work assignment");
 
+        // POST /api/finance/invoice-submissions/from-email (ebilling-r1 task 095, model §9.1, contract notes/095-from-email-contract.md).
+        // Filters in the constrained order: step 0 and the body-shape 400 and the record and firm rights (the Finance filter, as the
+        // caller: Read + AppendTo on the core record, AppendTo on the firm), the Office caller, EntityAccessFilter on the same core record
+        // (the save files the .eml there), the Office Save rate limit, the version-save gate (a no-op for this body), the eBilling kill
+        // switch, then the X-Idempotency-Key response cache bound to K. The handler is InvoiceSubmissionFromEmailHttp.
+        group.MapPost("/invoice-submissions/from-email", InvoiceSubmissionFromEmailHttp.SubmitFromEmailAsync)
+            .AddFinanceAuthorizationFilter(InvoiceSubmissionFromEmailHttp.ResolveFromEmailTargets)
+            .AddOfficeAuthFilter()
+            .AddEntityAccessFilter()
+            .AddOfficeRateLimitFilter(OfficeRateLimitCategory.Save)
+            .AddOfficeVersionSaveAuthorizationFilter()
+            .RequireEbillingEnabled()
+            .AddIdempotencyFilter(bindClientKeyTo: InvoiceSubmissionFromEmailHttp.IdempotencyBinding)
+            .Accepts<FromEmailSubmissionRequest>("application/json")
+            .WithName("SubmitInvoiceFromEmail")
+            .WithSummary("Submit an invoice from an Outlook email: save the email alone and submit its marked attachment")
+            .Produces<InvoiceSubmissionFromEmailAccepted>(StatusCodes.Status202Accepted)
+            .ProducesValidationProblem()
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status413PayloadTooLarge)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        // GET /api/finance/core-records/{entityType}/{entityId}/firms (task 095, contract section 8): the firms the submit accepts.
+        group.MapGet("/core-records/{entityType}/{entityId:guid}/firms", InvoiceSubmissionFromEmailHttp.GetFirmsAsync)
+            .AddFinanceAuthorizationFilter(InvoiceSubmissionFromEmailHttp.ResolveFirmsTargets, FinanceDenial.UniformNotFound)
+            .RequireEbillingEnabled()
+            .WithName("GetCoreRecordFirms")
+            .WithSummary("The active firms linked to a matter, project or work assignment")
+            .Produces<IReadOnlyList<CoreRecordFirm>>(StatusCodes.Status200OK)
+            .ProducesValidationProblem()
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
         // GET /api/finance/invoice-submissions/{id}
         group.MapGet("/invoice-submissions/{id:guid}", GetAsync)
             .AddFinanceAuthorizationFilter("finance.read", FinanceAuthorizationFilter.InvoiceSubmissionEntitySet, "id", FinanceDenial.UniformNotFound)

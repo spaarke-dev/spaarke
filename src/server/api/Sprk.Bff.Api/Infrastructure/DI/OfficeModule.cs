@@ -86,6 +86,12 @@ public static class OfficeModule
         // Scoped lifetime - new instance per request for proper auth context
         services.AddScoped<IOfficeService, OfficeService>();
 
+        // ebilling-r1 task 095: the from-email submission's in-process save, the SAME scoped OfficeService instance (no second
+        // pipeline). A host that replaced IOfficeService with something that is not the save pipeline fails resolution loudly.
+        services.AddScoped<IOfficeSubmissionEmailSave>(sp =>
+            sp.GetRequiredService<IOfficeService>() as IOfficeSubmissionEmailSave
+            ?? throw new InvalidOperationException("IOfficeService is not the Office save pipeline; the from-email submission cannot save its email."));
+
         // ============================================================================
         // Rate Limiting Configuration and Service (Task 031)
         // ============================================================================

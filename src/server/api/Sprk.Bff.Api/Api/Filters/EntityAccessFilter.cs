@@ -344,6 +344,10 @@ public class EntityAccessFilter : IEndpointFilter
     /// nothing. Extend this method in the same change, and add a guard that pins the pairing.
     /// </para>
     /// <para>
+    /// ebilling-r1 task 095: a request type that is not a <c>SaveRequest</c> but files a document to a record implements
+    /// <see cref="IEntityAccessTarget"/> (today the from-email submission body); <c>EntityAccessTargetPairingTests</c> pins it.
+    /// </para>
+    /// <para>
     /// Today only <c>SaveRequest</c> reaches this filter (<c>POST /api/office/save</c>). For
     /// <c>POST /api/office/todo</c>, see <c>TodoSourceAccessFilter</c> (spaarkeai-word-add-in-r1 task
     /// 064), which gates all four caller-supplied ids; a <c>CreateTodoRequest</c> branch that once lived
@@ -358,6 +362,13 @@ public class EntityAccessFilter : IEndpointFilter
             if (argument is SaveRequest saveRequest && saveRequest.TargetEntity != null)
             {
                 return saveRequest.TargetEntity;
+            }
+
+            // ebilling-r1 task 095: POST /api/finance/invoice-submissions/from-email names its core record in its own body (not a
+            // SaveRequest); the bound body hands this filter the SAME target the in-process save files the .eml to.
+            if (argument is IEntityAccessTarget targeted && targeted.EntityAccessTarget is { } target)
+            {
+                return target;
             }
         }
 
@@ -409,4 +420,14 @@ public class EntityAccessFilter : IEndpointFilter
         + "requires the \"Append To\" permission on it, and your security role does not currently grant "
         + "that. Ask an administrator to grant Append To for this record type, or ask the record's owner "
         + "to share the record with you.";
+}
+
+/// <summary>
+/// ebilling-r1 task 095: a bound request argument, other than <see cref="SaveRequest"/>, that files a document to a record and so must be
+/// gated by <see cref="EntityAccessFilter"/>. <see cref="EntityAccessTarget"/> is the record, in the filter's accepted spellings; null
+/// lets the filter pass (the route's own validation refuses a request without one first).
+/// </summary>
+public interface IEntityAccessTarget
+{
+    SaveEntityReference? EntityAccessTarget { get; }
 }

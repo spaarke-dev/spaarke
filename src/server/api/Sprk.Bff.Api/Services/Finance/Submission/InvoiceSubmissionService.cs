@@ -865,6 +865,23 @@ public class InvoiceSubmissionService
             && file.Content.AsSpan().StartsWith(PdfSignature);
     }
 
+    // ── ebilling-r1 task 095 (from-email route): the same firm and filing rules, reached from FromEmailSubmissionService ──
+
+    /// <summary>Task 095: <see cref="IsActiveFirmAsync"/> for the from-email route (the same rule, one definition).</summary>
+    internal virtual Task<bool?> IsActiveFirmForFromEmailAsync(Guid firmId, CancellationToken ct) => IsActiveFirmAsync(firmId, ct);
+
+    /// <summary>
+    /// Task 095 (model §9.1 step 1a): the core records an email's communication is filed under, by D-140's communication hop (its
+    /// regarding columns together with its thread's, <see cref="ResolveFilingAsync"/>): what a document linked only to that communication
+    /// would be filed under. Empty: unfiled; a fault propagates.
+    /// </summary>
+    internal virtual async Task<IReadOnlyList<(string Column, InvoiceCoreRecordKind Kind, Guid Id)>> ResolveCommunicationFilingAsync(
+        Guid communicationId, CancellationToken ct)
+    {
+        var linkedOnly = new Entity(DocumentEntity) { [DocumentRelatedCommunication] = new EntityReference(CommunicationEntity, communicationId) };
+        return await ResolveFilingAsync(Guid.Empty, linkedOnly, ct) ?? Array.Empty<(string, InvoiceCoreRecordKind, Guid)>();
+    }
+
     /// <summary>True for an active firm, false for a missing or inactive one, null when it could not be read (a fault is never "no firm").</summary>
     private async Task<bool?> IsActiveFirmAsync(Guid firmId, CancellationToken ct)
     {
