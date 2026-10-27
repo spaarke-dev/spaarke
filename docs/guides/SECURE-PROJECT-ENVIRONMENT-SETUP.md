@@ -27,8 +27,8 @@ This runbook produces a correctly scoped owner team. It does **not** by itself i
 because isolation also depends on a property this runbook cannot set: **no ordinary user role may hold
 `Deep` or `Global` depth on `sprk_project`.**
 
-In `spaarkedev1` as of 2026-08-25 that condition is **NOT met**, and secure projects are therefore
-readable by ordinary users. See [§6 Blocking prerequisite](#6-blocking-prerequisite--role-depth) —
+In `spaarkedev1` as of 2026-08-25 that condition was **NOT met** (historical; see §6 for Fix A and its validation). Today
+the condition is checked continuously by the isolation census (`[SECURE-CENSUS]`, every 15 minutes). See [§6 Blocking prerequisite](#6-blocking-prerequisite--role-depth) —
 **do not report an environment as "secure-project ready" until §6 passes.**
 
 ---
