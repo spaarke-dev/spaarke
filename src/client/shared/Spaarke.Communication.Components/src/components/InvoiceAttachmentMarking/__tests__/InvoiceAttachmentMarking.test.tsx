@@ -45,6 +45,19 @@ describe('validateInvoiceMarking', () => {
     expect(validateInvoiceMarking(none, 'supporting-only')).toEqual({ ok: true });
     expect(validateInvoiceMarking({}, 'supporting-only')).toEqual({ ok: true });
   });
+  it.each(['new', 'correction', 'supporting-only'] as const)(
+    '%s: a disabled attachment may only be skip',
+    mode => {
+      const locked = pdf('x', { disabledReason: 'Over 20 MB' });
+      const base: Record<string, InvoiceAttachmentRole> =
+        mode === 'supporting-only' ? { a: 'supporting' } : { a: 'invoice' };
+      expect(validateInvoiceMarking({ ...base, x: 'supporting' }, mode, [pdf('a'), locked])).toEqual({
+        ok: false,
+        reason: 'disabled-attachment-marked',
+      });
+      expect(validateInvoiceMarking({ ...base, x: 'skip' }, mode, [pdf('a'), locked])).toEqual({ ok: true });
+    }
+  );
 });
 
 describe('defaultInvoiceMarking', () => {
