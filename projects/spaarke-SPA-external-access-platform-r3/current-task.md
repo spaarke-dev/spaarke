@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-27 ~01:45Z (by context-handoff, 85% checkpoint). Dev BFF = 3ff2c04bf5; dev SPA = 1fa0cf5cb8.
+> **Last Updated**: 2026-10-27 ~02:40Z. Dev BFF = 3ff2c04bf5 (gate passed); dev SPA = 1fa0cf5cb8.
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -10,9 +10,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | **Contact identity hardening (security rework)** on branch `fix/r3-iss-005-combined` (worktree `C:/wtr3-005`). Tracked ONLY in private draft advisory GHSA-hq7m-w2pf-v8j7. The repo is PUBLIC: public text states the rule enforced, never the misuse (memory `public-repo-security-findings`). Before every push, scan commits for sensitive wording. |
-| **Step** | Pushed to origin at 97ba1614e7: slices A, B, B2, all UAC-accepted. **Slice B3 implementer `r3-sec-slice-b3` RUNNING in C:/wtr3-005** (local HEAD ≥ f0f90bce89). Its first commit is the provisioning F1 standing-grant remedy text. Slice C has not started. |
+| **Step** | Pushed to origin at ec1bb26d83: slices A, B, B2, B3, all UAC-accepted (B3 accepted 2026-10-27; provisioning OK on F1 f0f90bce89). **Slice C implementer `r3-sec-slice-c` RUNNING in C:/wtr3-005** (opus). Its first commit is UAC's required B3 item (a): the modal shows the /grant invite Failed. |
 | **Status** | in-progress |
-| **Next Action** | (1) Ask the owner to confirm what "defers" means for automatic invites (see Open owner items). (2) When the dev gate `gate3ff.ps1` (background, about 02:00Z) reports: record it in `notes/task-078-notes.md` E row, then send after-notices to UAC, ontology, field-mapping, ebilling and word-add-in. (3) When B3 reports: scan its commits, push, send the range to UAC (check list below) and the F1 SHA to provisioning. (4) Launch slice C (implementer, opus) from the private brief's Slice C + UAC BINDING (3C) + the "UAC note for slice C" section. (5) Then the §10 publish-size delta against a fresh master build, UAC's two security passes on the combined diff, and the PR. |
+| **Next Action** | (1) Owner: confirm what "defers" means (Open owner items). (2) When slice C reports: review it, scan the commits for sensitive wording, push, tell UAC the final head (UAC runs its two security passes on the full combined diff). (3) The §10 publish-size delta against a fresh master build. (4) The PR (rule-level title; body carries SpaarkeMaster 1.2.4.0 ordering + schema-first), then update the advisory. |
 
 ### Private files (scratchpad, NOT in repo)
 `C:\Users\RALPHS~1\AppData\Local\Temp\claude\c--code-files-spaarke-wt-SPA-external-access-platform-r3\15aa240f-634c-4332-99f6-382ebcb06a62\scratchpad\`
@@ -29,7 +29,8 @@
 
 ---
 
-## Slice B3 (running): owner decisions 2026-10-26 in R3's session
+## Slice B3 (done, ec1bb26d83): owner decisions 2026-10-26 in R3's session
+- UAC known limits accepted: a malformed domain on auto-invite → generic invite.failed; the notice names the "Sign in with your company account" button.
 - **Automatic invites check the organisation too.**
   - Materializer = option A: on a lookup fault, the grant is written, no stamp is written, `Invite = Failed(tenant_lookup_unavailable)`, and a new failure kind `invite-deferred` is counted as `inviteDeferred`. I-9 stays.
   - UAC conditions: staff can SEE the owed invite, and the reconciliation job does not re-run the pass every tick.
@@ -68,9 +69,8 @@
 ## Dev state
 - **Dev BFF = 3ff2c04bf5** (UAC #2322/#2323/#2324). Owner: "approve deploy 3ff2c04bf5".
   - OneDeploy ended 2026-10-27 01:29:15Z. Read-back at 01:30:10Z: ProductVersion 1.0.0+3ff2c04bf5…, healthz 200.
-  - Gate `gate3ff.ps1` is running in the background, due about 02:00Z.
+  - Gate passed (b56317910d).
   - Rollback: `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261027T012731Z` (bc99fc3e6b).
-  - Record: `notes/task-078-notes.md` (E row pending).
 - `[SECURE-CENSUS]` Critical "child tables" and "projects" lines are intended, per UAC; do not change the severity.
 
 ## Open owner items
