@@ -1255,6 +1255,10 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   // "+ Organization" / "+ User" advanced lookup — appended into the "Add
   // Access Permissions" list as selectable rows.
   const [lookedUpContacts, setLookedUpContacts] = React.useState<IContactSearchResult[]>([]);
+  /** Contacts whose `/grant` was written but whose invite was not sent. Their grant stands, so Retry invites them through
+   * `/invite` (which always sends) instead of granting again: a re-grant answers an invite whose marker was written before
+   * the send failed as still pending, and sends nothing. */
+  const [inviteRetryContactIds, setInviteRetryContactIds] = React.useState<ReadonlySet<string>>(new Set());
   const [lookedUpOrgs, setLookedUpOrgs] = React.useState<IOrganizationPick[]>([]);
   const [lookedUpUsers, setLookedUpUsers] = React.useState<IUserPick[]>([]);
 
@@ -1633,6 +1637,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       setSelectedCandidateIds(new Set());
       setRowLevels({});
       setLookedUpContacts([]);
+      setInviteRetryContactIds(new Set());
       setLookedUpOrgs([]);
       setLookedUpUsers([]);
       setPendingRevoke(null);
@@ -1785,6 +1790,24 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     [isInternalContact, postJson, recordId, recordType, addExpiryDate]
   );
 
+  /**
+   * Retry for a person whose grant stands but whose invite was not sent: `/invite` (onboard only; it writes no grant),
+   * which re-runs the organisation decision and always sends. Returns whether the invite was sent; throws when the request
+   * fails. `emailSent: false` (the email did not go) is not sent.
+   */
+  const inviteGrantedContact = React.useCallback(
+    async (contact: { email: string }, level: number): Promise<{ sent: boolean; workAccountInvited: boolean }> => {
+      const data = await postJson<{ status?: string; emailSent?: boolean | null }>('/api/v1/external-access/invite', {
+        email: contact.email,
+        recordType,
+        recordId,
+        accessLevel: level,
+      });
+      return { sent: data.emailSent !== false, workAccountInvited: data.status === WORK_ACCOUNT_INVITED_STATUS };
+    },
+    [postJson, recordId, recordType]
+  );
+
   // Unified "Available Contacts & Organizations & Users" list (task 073 v1.0.23; task
   // 065 adds the 'user' kind): role-based membership candidates + any contacts/
   // organizations/users staged via the "+ Contact" / "+ Organization" / "+ User"
@@ -1921,8 +1944,17 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       const level = rowLevels[it.id];
       // Unreachable: the missing-level guard above returned before any write. Narrows `level` for the writes below.
       if (level === undefined) continue;
+      // The person's grant stands and only their invite is retried (inviteRetryContactIds).
+      const inviteRetryEmail =
+        it.kind === 'contact' && it.contact && inviteRetryContactIds.has(it.contact.contactId)
+          ? it.contact.email
+          : undefined;
       try {
-        if (it.kind === 'contact' && it.contact) {
+        if (inviteRetryEmail) {
+          const invited = await inviteGrantedContact({ email: inviteRetryEmail }, level);
+          if (invited.workAccountInvited) workAccountInvited.push(it.name);
+          if (!invited.sent) inviteNotSent.push(it);
+        } else if (it.kind === 'contact' && it.contact) {
           const outcome = await grantContact(it.contact, { level });
           anyNotificationFailed = anyNotificationFailed || outcome.notificationFailed;
           anyNarrowed = anyNarrowed || outcome.narrowed;
@@ -1957,6 +1989,17 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         // Task 175: this item would make the record looser than its parent's floor. A refusal of this item only.
         if (parentRefusal) {
           policyRefusals.push(`${it.name}: ${parentRefusal}`);
+          continue;
+        }
+        // An invite retry that did not send: the grant still stands, so the person stays staged with the same notice.
+        if (inviteRetryEmail) {
+          inviteNotSent.push(it);
+          if (
+            err instanceof AccessGrantModalApiError &&
+            err.reasonCode === INVITE_TENANT_LOOKUP_UNAVAILABLE_REASON_CODE
+          ) {
+            organisationUnchecked.push(it.name);
+          }
           continue;
         }
         // Slice B3: the person's organisation could not be checked, so nothing was written for them. Kept selected for
@@ -2001,6 +2044,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     // A granted person whose invite was not sent is no longer a candidate once Current Access lists them, so they are
     // kept as a looked-up contact for Retry.
     const retryIds = new Set([...lookupUnavailable, ...inviteNotSent].map(it => it.id));
+    setInviteRetryContactIds(new Set(inviteNotSent.flatMap(it => (it.contact?.email ? [it.contact.contactId] : []))));
     setSelectedCandidateIds(new Set(retryIds));
     setRowLevels(Object.fromEntries(Object.entries(rowLevels).filter(([id]) => retryIds.has(id))));
     setLookedUpContacts(prev => {
@@ -2051,6 +2095,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     selectedCandidateIds,
     rowLevels,
     grantContact,
+    inviteGrantedContact,
+    inviteRetryContactIds,
     grantOrganization,
     shareUser,
     loadData,

@@ -313,6 +313,111 @@ public class GrantSendsInviteTests
         _h.Emails.Sent.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// The modal's Retry for a <c>/grant</c> whose invite did not complete: the grant already exists, so Retry calls
+    /// <c>/invite</c> for the person, which sends the invite and writes no grant. MUST FIRE for each way the invite fails
+    /// and leaves the contact unbound: the organisation check, the CIAM call, and the existing-account email.
+    /// </summary>
+    [Theory]
+    [InlineData("organisation-lookup")]
+    [InlineData("ciam-outage")]
+    [InlineData("existing-account-email-not-sent")]
+    public async Task Invite_AfterAGrantWhoseInviteFailed_SendsTheInvite_AndWritesNoGrant(string failure)
+    {
+        var contact = UnboundContact();
+        var discovery = FailTheInvite(failure);
+
+        OkBody(await Grant(contact)).Invite!.Status.Should().Be(GrantInviteStatus.Failed);
+        var grantWrites = _h.Grants.WriteCount;
+        _h.Emails.InviteUrls.Should().BeEmpty();
+
+        // The cause clears; staff press Retry.
+        ClearTheFailure(discovery, failure);
+        var retried = await InviteRoute();
+
+        retried.Should().BeOfType<Ok<InviteExternalUserResponse>>().Subject.Value!.EmailSent.Should().BeTrue(
+            "Retry is what sends the invite");
+        _h.Grants.WriteCount.Should().Be(grantWrites, "the grant already exists, and /invite writes none");
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle()
+            .Which.AccessLevel.Should().Be((int)ExternalAccessLevel.Collaborate);
+        TheOneInviteCode();
+    }
+
+    /// <summary>
+    /// The same Retry as a second <c>/grant</c> at the same level: it writes no grant, and it sends the invite only when the
+    /// failure wrote nothing (the organisation check). That is why the modal's Retry calls <c>/invite</c> instead.
+    /// </summary>
+    [Fact]
+    public async Task Grant_Again_AfterItsOrganisationCheckFailed_WritesNoGrant_AndSendsTheInvite()
+    {
+        var contact = UnboundContact();
+        var discovery = FailTheInvite("organisation-lookup");
+
+        OkBody(await Grant(contact)).Invite!.Status.Should().Be(GrantInviteStatus.Failed);
+        var grantWrites = _h.Grants.WriteCount;
+
+        ClearTheFailure(discovery, "organisation-lookup");
+        OkBody(await Grant(contact)).Invite.Should().Be(new GrantInviteResult(GrantInviteStatus.Sent));
+
+        _h.Grants.WriteCount.Should().Be(grantWrites, "a same-level re-grant on an existing grant writes nothing");
+        TheOneInviteCode();
+    }
+
+    private InviteOrganizationTestKit.DiscoveryHandler FailTheInvite(string failure)
+    {
+        // The organisation decision a customer-tenant deployment makes; a scripted discovery endpoint answers each lookup.
+        var discovery = new InviteOrganizationTestKit.DiscoveryHandler();
+        _h.Organizations = InviteOrganizationTestKit.Resolver(
+            discovery, new InviteOrganizationTestKit.RecordingTenantCache(), new[] { Guid.NewGuid() });
+        switch (failure)
+        {
+            case "organisation-lookup":
+                discovery.Answer(System.Net.HttpStatusCode.InternalServerError, "{}");
+                break;
+            case "ciam-outage":
+                discovery.Answer(System.Net.HttpStatusCode.BadRequest, InviteOrganizationTestKit.TenantNotFoundBody);
+                _h.Ciam.Failure = new HttpRequestException("Simulated Graph outage.");
+                break;
+            default:
+                discovery.Answer(System.Net.HttpStatusCode.BadRequest, InviteOrganizationTestKit.TenantNotFoundBody);
+                _h.Ciam.Failure = ObjectConflictOnProxyAddresses();
+                _h.Emails.InviteEmailFailure = new HttpRequestException(
+                    "Simulated mailbox throttling.", null, System.Net.HttpStatusCode.TooManyRequests);
+                break;
+        }
+
+        return discovery;
+    }
+
+    /// <summary>The cause clears. A person who already has a CIAM account still has it.</summary>
+    private void ClearTheFailure(InviteOrganizationTestKit.DiscoveryHandler discovery, string failure)
+    {
+        discovery.Answer(System.Net.HttpStatusCode.BadRequest, InviteOrganizationTestKit.TenantNotFoundBody);
+        if (failure == "ciam-outage")
+            _h.Ciam.Failure = null;
+        _h.Emails.InviteEmailFailure = null;
+    }
+
+    /// <summary>The /invite ROUTE handler (private; reached by reflection, as ExistingCiamAccountInviteTests does).</summary>
+    private async Task<IResult> InviteRoute()
+    {
+        var handler = typeof(InviteExternalUserEndpoint).GetMethod(
+                          "InviteExternalUserAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+                      ?? throw new InvalidOperationException("The /invite handler was not found.");
+        var portal = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = PortalUrl })
+            .Build();
+        var task = (Task<IResult>)handler.Invoke(null, new object[]
+        {
+            new InviteExternalUserRequest(
+                Email, Guid.Empty, (int)ExternalAccessLevel.Collaborate, null, null, null, null, "matter", _matter),
+            _h.Grants, _h.Participations, _h.Ciam, _h.Emails, IdentityBindingTestKit.Binder(_h.Identities), _h.Organizations,
+            portal, Sprk.Bff.Api.Tests.TestInfrastructure.TestSpeOwnership.Customer(CustomerKey), Context(),
+            NullLogger<Program>.Instance, CancellationToken.None,
+        })!;
+        return await task;
+    }
+
     // ── A failed invite never undoes the grant ──────────────────────────────────────────────────────────────
 
     [Fact]
