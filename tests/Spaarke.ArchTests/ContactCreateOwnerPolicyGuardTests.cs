@@ -129,6 +129,9 @@ public class ContactCreateOwnerPolicyGuardTests
     private const string StoreFile = BffRoot + "Infrastructure/ExternalAccess/ContactIdentityStore.cs";
     private const string InviteFile = BffRoot + "Api/ExternalAccess/ExternalInviteService.cs";
 
+    /// <summary>Slice C2c: the invite's contact create, made by the binder's guarded create (the invite service calls it).</summary>
+    private const string InviteCreateFile = BffRoot + "Infrastructure/ExternalAccess/ContactIdentityBinder.cs";
+
     /// <summary>Stands in for an interpolation hole (or a non-literal operand) whose value is not known from the syntax.</summary>
     private const char Hole = '\u0001';
 
@@ -921,7 +924,7 @@ public class ContactCreateOwnerPolicyGuardTests
         }
 
         // The invite create is the other real create, and it is owned (not a seam).
-        var invite = files.Single(f => f.Path == InviteFile);
+        var invite = files.Single(f => f.Path == InviteCreateFile);
         Assert.Contains(ContactCreates(invite.Path, invite.Root, names), h => h.Owned && h.Shape == nameof(Shape.WebApiCreateAsync));
     }
 

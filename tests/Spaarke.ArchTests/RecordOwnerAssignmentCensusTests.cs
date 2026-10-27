@@ -380,7 +380,8 @@ public class RecordOwnerAssignmentCensusTests
         // R3 task 047 (UAC re-check F3): the WorkforceHome contact create refuses an empty owning team.
         new OwnerSeam("ContactIdentityStore.cs", "CreatePayload", Refusal),
         // ISS-005 (#1673 review F1): the invite's contact create binds the customer business unit's default team, or refuses.
-        new OwnerSeam("ExternalInviteService.cs", "CreateContactAsync", Refusal),
+        // Slice C2c: that create is the binder's guarded invite create (the invite service calls it).
+        new OwnerSeam("ContactIdentityBinder.cs", "CreateInviteContactGuardedAsync", Refusal),
     };
 
     /// <summary>The refusal every seam throws: "... refusing to create ... app-owned ..." (a stray throw elsewhere in
@@ -489,8 +490,9 @@ public class RecordOwnerAssignmentCensusTests
             + "creates (first sign-in, licensed-user link) are owned by the same team, resolved by the same binder lookup and "
             + "refused the same way when it does not resolve; a binder over ANOTHER environment binds none. The rule is "
             + "plane-independent (the CIAM plane creates nothing today); CreatePayload throws on an empty team on any plane."),
-        new OwnerWriteEntry("ExternalInviteService.cs", "CreateContactAsync", 1, OwnerWriteKind.Seam,
-            "ISS-005 (#1673 review F1): the invite's new contact is owned by the default team of the customer business unit "
+        new OwnerWriteEntry("ContactIdentityBinder.cs", "CreateInviteContactGuardedAsync", 1, OwnerWriteKind.Seam,
+            "ISS-005 (#1673 review F1; slice C2c moved the create into the binder's guarded invite create, which checks for a "
+            + "removal immediately before it writes): the invite's new contact is owned by the default team of the customer business unit "
             + "(ExternalAccess:CustomerBusinessUnitId), resolved by the binder's one owner lookup before anything is written; the "
             + "invite is refused (sdap.access.registration_owner_unconfigured) when it does not resolve, and the builder throws on an "
             + "empty team. A contact the invite reuses is never re-owned."),

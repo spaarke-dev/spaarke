@@ -568,7 +568,19 @@ public sealed class ExternalInviteService
 
                     try
                     {
-                        contactId = await CreateContactAsync(dataverseClient, request, owner.TeamId, logger, ct);
+                        // Slice C2c: the create goes through the binder's guarded POST, which re-checks for a removal
+                        // immediately before it writes (the resolution above may have been read earlier, or handed in).
+                        var (refused, created) = await binder.CreateInviteContactGuardedAsync(
+                            dataverseClient, request.Email, request.FirstName, request.LastName, owner.TeamId, ct);
+                        if (refused is not null)
+                        {
+                            return NotProvisionable(refused, request.Email, logger)
+                                   ?? throw new InvalidOperationException("A guarded invite create refusal must not provision.");
+                        }
+
+                        contactId = created;
+                        logger.LogInformation("[EXT-INVITE] Created new Contact {ContactId} for email {Email}",
+                            contactId, request.Email);
                     }
                     catch (Exception ex) when (!ct.IsCancellationRequested && IsOwnerPrivilegeRefusal(ex))
                     {
@@ -835,41 +847,6 @@ public sealed class ExternalInviteService
                 StatusCode: StatusCodes.Status500InternalServerError));
     }
 
-    /// <summary>
-    /// Creates a new, unbound Contact for the invite email, owned by <paramref name="ownerTeamId"/> (the customer business
-    /// unit's default owner team; ISS-005, #1673). Throws on failure.
-    /// </summary>
-    private static async Task<Guid> CreateContactAsync(
-        DataverseWebApiClient dataverseClient,
-        InviteExternalUserRequest request,
-        Guid ownerTeamId,
-        ILogger logger,
-        CancellationToken ct)
-    {
-        if (ownerTeamId == Guid.Empty)
-        {
-            throw new InvalidOperationException(
-                "Invite create: refusing to create a contact with no owner team (it would be app-owned in the root business unit).");
-        }
-
-        var payload = new Dictionary<string, object?>
-        {
-            ["emailaddress1"] = request.Email,
-            ["firstname"] = request.FirstName ?? string.Empty,
-            ["lastname"] = request.LastName ?? request.Email.Split('@')[0],
-            ["ownerid@odata.bind"] = $"/teams({ownerTeamId:D})",
-        };
-
-        var newContactId = await dataverseClient.CreateAsync(ContactEntitySet, payload, ct);
-        if (newContactId == Guid.Empty)
-        {
-            throw new InvalidOperationException($"Failed to create a Contact for '{request.Email}'.");
-        }
-
-        logger.LogInformation("[EXT-INVITE] Created new Contact {ContactId} for email {Email}",
-            newContactId, request.Email);
-        return newContactId;
-    }
 }
 
 /// <summary>

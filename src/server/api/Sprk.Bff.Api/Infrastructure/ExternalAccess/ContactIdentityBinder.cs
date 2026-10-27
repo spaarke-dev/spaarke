@@ -16,6 +16,7 @@
 
 using System.Collections.Concurrent;
 using System.Security.Claims;
+using Spaarke.Dataverse;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
@@ -559,12 +560,63 @@ public sealed class ContactIdentityBinder
         // for the email whose external access an administrator removed refuses the invite.
         var inactiveLookup = await _store.FindInactiveContactsByEmailAsync(email, ct).ConfigureAwait(false);
         var removal = ContactBindingDecision.DecideCreateAroundRemoval(inactiveLookup);
-        if (removal.MayCreate)
+        return removal.MayCreate ? resolution : InviteRemovalRefusal(removal);
+    }
+
+    /// <summary>
+    /// Slice C2c: the invite create's ONE guarded contact POST. It runs <see cref="ContactBindingDecision.DecideCreateAroundRemoval"/>
+    /// over the inactive contacts for <paramref name="email"/> immediately before the create, so no contact is created around
+    /// a removal even when the resolution that answered "create" was read earlier (<c>/invite-and-grant</c> hands its
+    /// pre-check's resolution to onboarding). The owner team is the caller's decision and is only written here. The POST's
+    /// exceptions propagate unchanged (the caller maps the owner-privilege refusal). Every contact-entity-set create in server
+    /// code is either this method or <see cref="CreateContactGuardedAsync"/> (ArchTest <c>ContactCreateAroundRemovalGuardTests</c>).
+    /// </summary>
+    /// <returns>The refusal (and no contact id) when the create may not go ahead; else the new contact's id.</returns>
+    internal async Task<(InviteContactResolution? Refusal, Guid ContactId)> CreateInviteContactGuardedAsync(
+        DataverseWebApiClient dataverseClient, string email, string? firstName, string? lastName, Guid ownerTeamId,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(dataverseClient);
+        ArgumentException.ThrowIfNullOrWhiteSpace(email);
+        if (ownerTeamId == Guid.Empty)
         {
-            return resolution;
+            throw new InvalidOperationException(
+                "Invite create: refusing to create a contact with no owner team (it would be app-owned in the root business unit).");
         }
 
-        // Slice C2c: only a SET marker is a refusal (409); an unproven one, like a read that failed, is a retryable failure.
+        var inactiveLookup = await _store.FindInactiveContactsByEmailAsync(email.Trim(), ct).ConfigureAwait(false);
+        var removal = ContactBindingDecision.DecideCreateAroundRemoval(inactiveLookup);
+        if (!removal.MayCreate)
+        {
+            return (InviteRemovalRefusal(removal), Guid.Empty);
+        }
+
+        var payload = new Dictionary<string, object?>
+        {
+            ["emailaddress1"] = email,
+            ["firstname"] = firstName ?? string.Empty,
+            ["lastname"] = lastName ?? email.Split('@')[0],
+            ["ownerid@odata.bind"] = $"/teams({ownerTeamId:D})",
+        };
+
+        var created = await dataverseClient.CreateAsync(InviteContactEntitySet, payload, ct).ConfigureAwait(false);
+        if (created == Guid.Empty)
+        {
+            throw new InvalidOperationException("Failed to create a contact for the invite.");
+        }
+
+        return (null, created);
+    }
+
+    /// <summary>The contact entity set the invite create writes to.</summary>
+    private const string InviteContactEntitySet = "contacts";
+
+    /// <summary>
+    /// Slice C2c: an invite's answer when a contact may not be created around a removal. Only a SET marker is a refusal
+    /// (409); an unproven one, like a read that failed, is a retryable failure.
+    /// </summary>
+    private InviteContactResolution InviteRemovalRefusal(CreateAroundRemovalDecision removal)
+    {
         var action = removal.IsRemoval && !removal.MarkerUnproven ? InviteContactAction.Refuse : InviteContactAction.Fail;
         if (removal.IsRemoval && !removal.MarkerUnproven)
         {
