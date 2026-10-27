@@ -93,14 +93,16 @@ One pass over the local transcripts (~30–100 s), grouped by day (local), proje
 
 ### Step 5: Refresh the Spaarke Dev Metrics page (when asked, or after Step 1 when the owner wants the page current)
 
-The private dashboard https://claude.ai/artifact/R4J6P8Adsk12XhJV8ypxjR reads one attached file, dataset `spend`. Refresh it:
+The private dashboard https://claude.ai/artifact/R4J6P8Adsk12XhJV8ypxjR reads two attached files: dataset `spend` (the estimate) and dataset `actuals` (what was paid, section "What was actually paid"). Refresh both, so the two sections never disagree on the archive they were computed from:
 
-1. Run Step 0 (archive capture), then `python scripts/ai-cost/spend-report.py --source archive --format csv --out <scratchpad>/ai-spend-daily.csv` — the full archived history, so the page never loses days when transcripts are pruned
-2. Upload it: Artifact `publish` with `url` = the page, `file_path` = the CSV, `asset: true`. Note the returned `/_blob/<id>` url.
-3. `ArtifactData` `get` `datasets/spend`, then `update` it, pinned with `if_version`, setting `source.url` to the new url, `source.name` to `ai-spend-daily.csv` and `updated` to `{at: <ISO now>, by: "Claude (spend-report.py)"}`.
-4. Delete the previous asset (Artifact `delete` with `path` = its id) once nothing references it.
+1. Run Step 0 (archive capture), then
+   - `python scripts/ai-cost/spend-report.py --source archive --format csv --out <scratchpad>/ai-spend-daily.csv` — the full archived history, so the page never loses days when transcripts are pruned
+   - `python scripts/ai-cost/spend-report.py --actuals --format csv --out <scratchpad>/ai-spend-actuals.csv` — months, billing cycles, years, the per-project allocation (Step 6's invoice list must be current)
+2. Upload each: Artifact `publish` with `url` = the page, `file_path` = the CSV, `asset: true`. Note each returned `/_blob/<id>` url.
+3. For each of `datasets/spend` and `datasets/actuals`: `ArtifactData` `get`, then `update` it, pinned with `if_version`, setting `source.url` to the new url, `source.name` to the file's name and `updated` to `{at: <ISO now>, by: "Claude (spend-report.py)"}`.
+4. Delete each previous asset (Artifact `delete` with `path` = its id) once nothing references it.
 
-The page's calculations (`summary`, `daily`, `by_model`) recompute from the file, so no page edit is needed. Its windows are Today / 7 / 14 / 30 / 60 days / All, anchored on the newest day in the file, in local calendar days (the CSV's `tz` column). The data covers this machine's transcripts and archive only, at list price.
+The page's calculations (`summary`, `daily`, `by_model`, `actuals_rate`) recompute from the files, so no page edit is needed. Its windows are Today / 7 / 14 / 30 / 60 days / All, anchored on the newest day in the file, in local calendar days (the CSV's `tz` column). The data covers this machine's transcripts and archive only, at list price.
 
 
 ### Step 6: Invoiced actuals (when the owner sends invoices, or asks what was really paid)
@@ -114,7 +116,7 @@ The invoices are typed in by hand: there is no export for a Max plan. The owner 
    python scripts/ai-cost/spend-report.py --actuals --format csv --out <scratchpad>/actuals.csv
    ```
 3. Relay the month table (year-to-date actual spend), the effective-rate line and the top of the allocation. Ratios exist per billing cycle only: credits are prepaid, so a month can show a purchase with no usage or usage with no purchase. A `*` ratio is overstated (the archive covers only part of the cycle). The invoices cover the whole account (claude.ai chat and other machines too); the estimate covers this machine only.
-4. Run Step 1 to put the new allocation on the board, if the owner wants it current.
+4. Run Step 1 to put the new allocation on the board, and Step 5 to put it on the Dev Metrics page, if the owner wants them current.
 
 ## Outputs
 
