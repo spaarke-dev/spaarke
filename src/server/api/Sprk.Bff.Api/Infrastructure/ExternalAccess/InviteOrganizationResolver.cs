@@ -49,8 +49,8 @@ public sealed record InviteOrganizationDecision(InviteOrganizationStatus Status,
 /// </summary>
 /// <remarks>
 /// <list type="bullet">
-/// <item>The staff override (<c>sendAsPortalAccount</c>) is always a portal account, and so is a deployment with no
-/// customer tenants: neither makes a call.</item>
+/// <item>A deployment with no customer tenants is always a portal account and makes no call. Nothing else chooses the kind
+/// of sign-in: there is no request override.</item>
 /// <item>The domain is normalised (trim, lower-case, one trailing dot stripped, IDN to punycode) and must then be a plain
 /// host name (<see cref="NormaliseDomain"/>); anything else is <see cref="InviteOrganizationStatus.MalformedDomain"/> and
 /// never reaches the network.</item>
@@ -139,17 +139,11 @@ public sealed class InviteOrganizationResolver
     /// <see cref="InviteOrganizationStatus.LookupUnavailable"/>); a cancelled <paramref name="ct"/> propagates.
     /// </summary>
     /// <param name="email">The invited address (only its domain is used; never logged).</param>
-    /// <param name="sendAsPortalAccount">The staff override: a portal-account invite, no lookup.</param>
     /// <param name="cacheTenantId">The caller's tenant, which scopes the cache key (ADR-009); null skips the cache.</param>
     /// <param name="ct">The request's cancellation.</param>
     public async Task<InviteOrganizationDecision> DecideAsync(
-        string email, bool sendAsPortalAccount, string? cacheTenantId, CancellationToken ct)
+        string email, string? cacheTenantId, CancellationToken ct)
     {
-        if (sendAsPortalAccount)
-        {
-            return InviteOrganizationDecision.PortalAccount;
-        }
-
         var customers = _workforce.CurrentValue.ParsedCustomerTenantIds();
         if (customers.Count == 0)
         {

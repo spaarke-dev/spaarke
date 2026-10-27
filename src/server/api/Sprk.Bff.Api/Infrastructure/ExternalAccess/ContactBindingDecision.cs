@@ -856,7 +856,7 @@ public static class ContactBindingDecision
     /// <summary>
     /// Slice B2 — the invited email's organisation could not be looked up (a fault, a timeout or an answer that is not
     /// definite), so the invite could not tell a work account from a portal account. Retryable (503): nothing was created,
-    /// written or sent. Staff may retry, or send the invite as a portal account (the request's override).
+    /// written or sent. Staff retry; the kind of sign-in is never chosen by the request.
     /// </summary>
     public const string InviteTenantLookupUnavailable = "sdap.access.invite.tenant_lookup_unavailable";
 

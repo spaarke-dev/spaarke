@@ -89,7 +89,7 @@ public class ExistingCiamAccountInviteTests
 
     private Task<IResult> InviteAndGrant(
         ILogger<Program>? logger = null, ContactIdentityBinder? binder = null, string? invitedTenantId = null,
-        InviteOrganizationResolver? organizations = null, string email = Email, bool sendAsPortalAccount = false) =>
+        InviteOrganizationResolver? organizations = null, string email = Email, bool? sendAsPortalAccount = null) =>
         InviteAndGrantExternalUserEndpoint.InviteAndGrantAsync(
             Request() with
             {
@@ -113,7 +113,7 @@ public class ExistingCiamAccountInviteTests
     /// </summary>
     private async Task<IResult> InviteRoute(
         ILogger<Program>? logger = null, string? invitedTenantId = null, InviteOrganizationResolver? organizations = null,
-        string email = Email, bool sendAsPortalAccount = false)
+        string email = Email, bool? sendAsPortalAccount = null)
     {
         var handler = typeof(InviteExternalUserEndpoint).GetMethod("InviteExternalUserAsync", BindingFlags.NonPublic | BindingFlags.Static)
             ?? throw new InvalidOperationException("The /invite handler was not found.");
@@ -1089,7 +1089,7 @@ public class ExistingCiamAccountInviteTests
 
     /// <summary>
     /// MUST FIRE: a lookup with no definite answer is a 503 tenant_lookup_unavailable on both routes, whose message offers a
-    /// retry or a portal account. Nothing is read about the contact, nothing is written or granted, no account, no email —
+    /// retry only. Nothing is read about the contact, nothing is written or granted, no account, no email —
     /// and nothing is cached, so the retry looks up again.
     /// </summary>
     [Theory]
@@ -1134,7 +1134,8 @@ public class ExistingCiamAccountInviteTests
             var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
             problem.StatusCode.Should().Be(503, fault);
             problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ContactBindingDecision.InviteTenantLookupUnavailable);
-            problem.ProblemDetails.Detail.Should().Contain("Try again").And.Contain("portal account");
+            problem.ProblemDetails.Detail.Should().Contain("Try again").And.NotContain("portal account",
+                "the only remedy is a retry: the kind of sign-in is never chosen by staff");
         }
 
         handler.Requests.Should().HaveCount(2, "a fault is never cached: the second request looks up again");
@@ -1182,21 +1183,32 @@ public class ExistingCiamAccountInviteTests
     }
 
     /// <summary>
-    /// MUST NOT FIRE: the staff override sends a portal-account invite to a customer-tenant domain, and makes no lookup.
+    /// MUST FIRE: the request never chooses the kind of sign-in. Any supplied SendAsPortalAccount, false included, is a 400 on
+    /// both routes, before any read, write or lookup.
     /// </summary>
-    [Fact]
-    public async Task TheStaffOverride_SendsAPortalAccountInvite_WithoutALookup()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ASuppliedSendAsPortalAccount_IsRefused400_WhateverItsValue(bool value)
     {
-        var contact = UnboundContact();
-        _ciam.Failure = ObjectConflictOnProxyAddresses();
+        UnboundContact();
         var handler = new InviteOrganizationTestKit.DiscoveryHandler();
 
-        var result = await InviteRoute(organizations: Organizations(handler), sendAsPortalAccount: true);
+        foreach (var result in new[]
+                 {
+                     await InviteRoute(organizations: Organizations(handler), sendAsPortalAccount: value),
+                     await InviteAndGrant(organizations: Organizations(handler), sendAsPortalAccount: value),
+                 })
+        {
+            var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+            problem.StatusCode.Should().Be(400);
+            problem.ProblemDetails.Detail.Should().Contain("SendAsPortalAccount");
+        }
 
-        result.Should().BeOfType<Ok<InviteExternalUserResponse>>()
-            .Which.Value!.Status.Should().Be(InviteExternalUserEndpoint.ProvisionedStatus);
-        _h.Identities.Contacts[contact].InvitedTenantId.Should().BeNull();
-        handler.Requests.Should().BeEmpty();
+        handler.Requests.Should().BeEmpty("a refused request looks nothing up");
+        _h.Identities.Writes.Should().BeEmpty("a refused request writes nothing");
+        _h.Identities.Reads.Should().BeEmpty("a refused request reads nothing");
+        _h.Grants.Rows.Should().BeEmpty();
     }
 
     /// <summary>MUST NOT FIRE: a deployment with no customer tenants never calls the discovery endpoint; the invite is as before.</summary>

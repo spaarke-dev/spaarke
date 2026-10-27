@@ -68,7 +68,7 @@ public static class InviteExternalUserEndpoint
             // pending-invite marker a contact needed did not land (task 184, sdap.access.invite.invite_marker_not_written;
             // no email sent — retry, after the SpaarkeMaster import on a stamp still receiving the column), or the email's
             // organisation could not be looked up (slice B2, sdap.access.invite.tenant_lookup_unavailable; nothing written —
-            // retry, or send it as a portal account).
+            // retry).
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         return group;
@@ -104,6 +104,9 @@ public static class InviteExternalUserEndpoint
 
         if (ValidateInvitedTenant(request.InvitedTenantId) is { } tenantProblem)
             return tenantProblem;
+
+        if (ValidateNoInviteKindChoice(request.SendAsPortalAccount) is { } kindProblem)
+            return kindProblem;
 
         // Note (task 070): /invite only onboards (resolve-or-create Contact + CIAM account); it writes NO grant.
         // The grant is created separately by /grant or /invite-and-grant.
@@ -187,14 +190,25 @@ public static class InviteExternalUserEndpoint
         => string.IsNullOrWhiteSpace(raw)
             ? null
             : ProblemDetailsHelper.ValidationError(
-                "InvitedTenantId is not accepted: the person's organisation is resolved from the email address. Omit it; to "
-                + "send a portal account instead of a work account, set SendAsPortalAccount.");
+                "InvitedTenantId is not accepted: the person's organisation is resolved from the email address. Omit it.");
+
+    /// <summary>
+    /// Slice B3: <see cref="InviteExternalUserRequest.SendAsPortalAccount"/> is not accepted. Null when absent, else a 400 in
+    /// the route's validation shape, whatever the value (<c>false</c> included): the kind of sign-in an invite is for is
+    /// decided by the server from the email's domain, never chosen by the request. Pure. Shared by <c>/invite</c> and
+    /// <c>/invite-and-grant</c>.
+    /// </summary>
+    internal static IResult? ValidateNoInviteKindChoice(bool? sendAsPortalAccount)
+        => sendAsPortalAccount is null
+            ? null
+            : ProblemDetailsHelper.ValidationError(
+                "SendAsPortalAccount is not accepted: the kind of sign-in is decided from the email address. Omit it.");
 
     /// <summary>
     /// Slice B2: which sign-in the invite is for (<see cref="InviteOrganizationResolver"/>), or the problem that stops the
     /// invite before anything is read or written: 400 for an email domain that is not a host name, 503
-    /// <see cref="ContactBindingDecision.InviteTenantLookupUnavailable"/> when the lookup gave no definite answer (retry, or
-    /// send it as a portal account). The cache is scoped to the caller's tenant. Shared by <c>/invite</c> and
+    /// <see cref="ContactBindingDecision.InviteTenantLookupUnavailable"/> when the lookup gave no definite answer (retry). The
+    /// cache is scoped to the caller's tenant. Shared by <c>/invite</c> and
     /// <c>/invite-and-grant</c>.
     /// </summary>
     internal static async Task<(InviteOrganizationDecision? Decision, IResult? Problem)> DecideOrganizationAsync(
@@ -203,7 +217,7 @@ public static class InviteExternalUserEndpoint
     {
         var callerTenant = httpContext.User.FindFirst("tid")?.Value
             ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
-        var decision = await organizations.DecideAsync(request.Email, request.SendAsPortalAccount, callerTenant, ct);
+        var decision = await organizations.DecideAsync(request.Email, callerTenant, ct);
         return decision.Status switch
         {
             InviteOrganizationStatus.Decided => (decision, null),

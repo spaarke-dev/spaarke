@@ -83,7 +83,7 @@ public class InviteOrganizationResolverTests
     {
         _handler.Answer(HttpStatusCode.OK, DiscoveryBody(Customer));
 
-        var decision = await Resolver().DecideAsync("Person@Customer.Example.", false, CallerTenant, CancellationToken.None);
+        var decision = await Resolver().DecideAsync("Person@Customer.Example.", CallerTenant, CancellationToken.None);
 
         decision.Should().Be(InviteOrganizationDecision.WorkAccount(Customer));
         var call = _handler.Requests.Should().ContainSingle().Subject;
@@ -114,7 +114,7 @@ public class InviteOrganizationResolverTests
         };
 
         var decision = await Resolver(Customer, InviteOrganizationResolver.ConsumerTenantId, CiamTenant)
-            .DecideAsync("person@hotmail.com", false, CallerTenant, CancellationToken.None);
+            .DecideAsync("person@hotmail.com", CallerTenant, CancellationToken.None);
 
         decision.Should().Be(InviteOrganizationDecision.PortalAccount, answer);
     }
@@ -149,8 +149,8 @@ public class InviteOrganizationResolverTests
             _handler.Answer(HttpStatusCode.BadRequest, TenantNotFoundBody);
         var resolver = Resolver();
 
-        var first = await resolver.DecideAsync("one@Customer.example", false, CallerTenant, CancellationToken.None);
-        var second = await resolver.DecideAsync("two@customer.example", false, CallerTenant, CancellationToken.None);
+        var first = await resolver.DecideAsync("one@Customer.example", CallerTenant, CancellationToken.None);
+        var second = await resolver.DecideAsync("two@customer.example", CallerTenant, CancellationToken.None);
 
         second.Should().Be(first);
         _handler.Requests.Should().ContainSingle("the second invite reads the cache");
@@ -169,9 +169,9 @@ public class InviteOrganizationResolverTests
         var later = Guid.NewGuid();
         _handler.Answer(HttpStatusCode.OK, DiscoveryBody(later));
 
-        (await Resolver().DecideAsync("p@customer.example", false, CallerTenant, CancellationToken.None))
+        (await Resolver().DecideAsync("p@customer.example", CallerTenant, CancellationToken.None))
             .Should().Be(InviteOrganizationDecision.PortalAccount);
-        (await Resolver(Customer, later).DecideAsync("p@customer.example", false, CallerTenant, CancellationToken.None))
+        (await Resolver(Customer, later).DecideAsync("p@customer.example", CallerTenant, CancellationToken.None))
             .Should().Be(InviteOrganizationDecision.WorkAccount(later));
         _handler.Requests.Should().ContainSingle();
     }
@@ -198,7 +198,7 @@ public class InviteOrganizationResolverTests
             _ => _handler.Throw(new HttpRequestException("dns")),
         };
 
-        var decision = await Resolver().DecideAsync("p@customer.example", false, CallerTenant, CancellationToken.None);
+        var decision = await Resolver().DecideAsync("p@customer.example", CallerTenant, CancellationToken.None);
 
         decision.Status.Should().Be(InviteOrganizationStatus.LookupUnavailable, fault);
         decision.WorkAccountTenantId.Should().BeNull();
@@ -213,36 +213,34 @@ public class InviteOrganizationResolverTests
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(20));
         var resolver = InviteOrganizationTestKit.Resolver(_handler, _cache, new[] { Customer }, TimeSpan.FromSeconds(30));
 
-        var act = () => resolver.DecideAsync("p@customer.example", false, CallerTenant, cts.Token);
+        var act = () => resolver.DecideAsync("p@customer.example", CallerTenant, cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
     /// <summary>
-    /// MUST NOT FIRE: the override and an empty customer list make no call (the handler fails the test if called); a cache
-    /// outage is skipped, never a fault; no caller tenant skips the cache.
+    /// MUST NOT FIRE: an empty customer list makes no call (the handler fails the test if called); a cache outage is skipped,
+    /// never a fault; no caller tenant skips the cache.
     /// </summary>
     [Fact]
-    public async Task TheOverride_AndAnEmptyList_MakeNoCall_ACacheOutageIsSkipped()
+    public async Task AnEmptyList_MakesNoCall_ACacheOutageIsSkipped()
     {
-        (await Resolver().DecideAsync("p@customer.example", true, CallerTenant, CancellationToken.None))
+        (await InviteOrganizationTestKit.Resolver(_handler, _cache, Array.Empty<Guid>())
+                .DecideAsync("p@customer.example", CallerTenant, CancellationToken.None))
             .Should().Be(InviteOrganizationDecision.PortalAccount);
         (await InviteOrganizationTestKit.Resolver(_handler, _cache, Array.Empty<Guid>())
-                .DecideAsync("p@customer.example", false, CallerTenant, CancellationToken.None))
-            .Should().Be(InviteOrganizationDecision.PortalAccount);
-        (await InviteOrganizationTestKit.Resolver(_handler, _cache, Array.Empty<Guid>())
-                .DecideAsync("not an email", false, CallerTenant, CancellationToken.None))
+                .DecideAsync("not an email", CallerTenant, CancellationToken.None))
             .Should().Be(InviteOrganizationDecision.PortalAccount, "with no lookup to run there is no domain to judge");
         _handler.Requests.Should().BeEmpty();
 
         _cache.Fault = new InvalidOperationException("cache down");
         _handler.Answer(HttpStatusCode.OK, DiscoveryBody(Customer));
-        (await Resolver().DecideAsync("p@customer.example", false, CallerTenant, CancellationToken.None))
+        (await Resolver().DecideAsync("p@customer.example", CallerTenant, CancellationToken.None))
             .Should().Be(InviteOrganizationDecision.WorkAccount(Customer));
 
         _cache.Fault = null;
         _handler.Answer(HttpStatusCode.OK, DiscoveryBody(Customer));
-        (await Resolver().DecideAsync("p@customer.example", false, null, CancellationToken.None)).IsWorkAccount.Should().BeTrue();
+        (await Resolver().DecideAsync("p@customer.example", null, CancellationToken.None)).IsWorkAccount.Should().BeTrue();
         _cache.Writes.Should().BeEmpty("no caller tenant, no cache key");
     }
 
@@ -254,8 +252,8 @@ public class InviteOrganizationResolverTests
         _handler.Answer(HttpStatusCode.OK, DiscoveryBody(Customer)).Answer(HttpStatusCode.InternalServerError, "{}");
         var resolver = InviteOrganizationTestKit.Resolver(_handler, _cache, new[] { Customer }, logger: log);
 
-        await resolver.DecideAsync("secret.person@customer.example", false, null, CancellationToken.None);
-        await resolver.DecideAsync("secret.person@customer.example", false, null, CancellationToken.None);
+        await resolver.DecideAsync("secret.person@customer.example", null, CancellationToken.None);
+        await resolver.DecideAsync("secret.person@customer.example", null, CancellationToken.None);
 
         log.Messages.Should().NotBeEmpty();
         log.Messages.Should().OnlyContain(m => !m.Contains("secret.person", StringComparison.Ordinal));

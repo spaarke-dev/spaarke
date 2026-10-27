@@ -29,9 +29,9 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// than having it silently ignored.
 /// </param>
 /// <param name="SendAsPortalAccount">
-/// Optional staff override (default false): send the invite as a portal (CIAM) account even when the email's organisation
-/// is one of this deployment's customer tenants, and skip the organisation lookup. It can only choose a portal account.
-/// Used by <c>/invite</c> and <c>/invite-and-grant</c>.
+/// Not accepted: any supplied value, <c>false</c> included, is refused (400). The kind of sign-in an invite is for (a work
+/// account or a portal account) is decided by the server from the email's domain, never chosen by the request. Kept on the
+/// contract so a client that sends one is told, rather than having it silently ignored.
 /// </param>
 public record InviteExternalUserRequest(
     string Email,
@@ -44,4 +44,4 @@ public record InviteExternalUserRequest(
     string? RecordType = null,
     Guid? RecordId = null,
     string? InvitedTenantId = null,
-    bool SendAsPortalAccount = false);
+    bool? SendAsPortalAccount = null);

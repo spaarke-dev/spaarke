@@ -711,10 +711,10 @@ public sealed class ContactIdentityBinder
             + "sent; try again. If this environment is still receiving its schema update, try again after it completes.",
         ContactBindingDecision.InviteTenantLookupUnavailable =>
             "The person's organisation could not be checked just now, so nothing was created or sent. Try again in a "
-            + "moment, or send the invite as a portal account.",
+            + "moment.",
         ContactBindingDecision.InviteContactAlreadyBound =>
             "This email's contact already signs in with a portal account, so a work-account invite cannot be added to it. "
-            + "Send the invite as a portal account instead.",
+            + "Grant the access to that contact instead; they keep signing in as they do now.",
         _ => null,
     };
 

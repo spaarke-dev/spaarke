@@ -98,6 +98,9 @@ public static class InviteAndGrantExternalUserEndpoint
         if (InviteExternalUserEndpoint.ValidateInvitedTenant(request.InvitedTenantId) is { } tenantProblem)
             return tenantProblem;
 
+        if (InviteExternalUserEndpoint.ValidateNoInviteKindChoice(request.SendAsPortalAccount) is { } kindProblem)
+            return kindProblem;
+
         if (!Enum.IsDefined(typeof(ExternalAccessLevel), request.AccessLevel))
             return ProblemDetailsHelper.ValidationError(
                 $"AccessLevel must be one of: {string.Join(", ", Enum.GetNames<ExternalAccessLevel>())}.");
@@ -132,7 +135,7 @@ public static class InviteAndGrantExternalUserEndpoint
 
         // Slice B2: a work account (the email's organisation is a configured customer tenant) or a portal account, decided
         // before any contact is read, onboarded or granted. A malformed domain is a 400; a lookup with no definite answer
-        // is a 503 with nothing written (retry, or send it as a portal account).
+        // is a 503 with nothing written (retry).
         var (organization, organizationProblem) = await InviteExternalUserEndpoint.DecideOrganizationAsync(
             organizations, request, httpContext, ct);
         if (organizationProblem is not null)
