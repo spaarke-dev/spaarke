@@ -386,6 +386,67 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
         result.Data!.Value.GetProperty("results").EnumerateArray()
             .Select(r => r.GetProperty("entity").GetString()!).ToList();
 
+    // ═════════════════════════════════════════════════════════════════════════════
+    // ebilling-r1 task 098 surface (d): the (a') invoice predicate on invoice-family hits
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    private static readonly Guid InvoiceHitVisible = Guid.Parse("09800000-0000-4000-8000-0000000000b1");
+    private static readonly Guid InvoiceHitHidden = Guid.Parse("09800000-0000-4000-8000-0000000000b2");
+    private static readonly Guid SignalHitHidden = Guid.Parse("09800000-0000-4000-8000-0000000000b3");
+
+    private static string InvoiceFamilyHitsJson =>
+        "{ \"value\": [ "
+        + "{ \"@search.score\": 4.0, \"entityname\": \"sprk_matter\", \"objectid\": \"" + MatterHit.ToString("D") + "\" }, "
+        + "{ \"@search.score\": 3.0, \"entityname\": \"sprk_invoice\", \"objectid\": \"" + InvoiceHitVisible.ToString("D") + "\" }, "
+        + "{ \"@search.score\": 2.0, \"entityname\": \"sprk_invoice\", \"objectid\": \"" + InvoiceHitHidden.ToString("D") + "\" }, "
+        + "{ \"@search.score\": 1.0, \"entityname\": \"sprk_signal\", \"objectid\": \"" + SignalHitHidden.ToString("D") + "\" } "
+        + "] }";
+
+    [Fact]
+    public async Task ExecuteChatAsync_Task098_ExternalCaller_HiddenInvoiceFamilyHitsAreDropped_OneSeamCallPerTable()
+    {
+        AsExternalCaller();
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(InvoiceFamilyHitsJson)));
+        var calls = new List<string>();
+        _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.Hiding(calls, InvoiceHitHidden, SignalHitHidden);
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"query":"contoso"}""");
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        ResultEntities(result).Should().Equal("sprk_matter", "sprk_invoice");
+        result.Data!.Value.GetProperty("count").GetInt32().Should().Be(2);
+        result.Warnings.Should().BeEmpty("nothing tells the model that hits were dropped");
+        calls.Should().BeEquivalentTo(new[] { "sprk_invoice:2", "sprk_signal:1" });
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_Task098_ExternalCaller_ThePredicateReadFails_ErrorWithNoData()
+    {
+        AsExternalCaller();
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(InvoiceFamilyHitsJson)));
+        _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.Throwing;
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"query":"contoso"}""");
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
+
+        result.Success.Should().BeFalse("a predicate read fault can never turn into 'show it'");
+        result.Data.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_Task098_InternalCaller_InvoiceFamilyHitsNeverReachThePredicate()
+    {
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(InvoiceFamilyHitsJson)));
+        // _hideInvoiceFamily stays NeverCalled: any call would fail the tool.
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"query":"contoso"}""");
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        ResultEntities(result).Should().Equal("sprk_matter", "sprk_invoice", "sprk_invoice", "sprk_signal");
+    }
+
     [Fact]
     public async Task ExecuteChatAsync_ExternalCallerUnscoped_DropsCommunicationFamilyHitsOnly()
     {

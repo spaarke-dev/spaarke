@@ -1018,6 +1018,102 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
         body.Entities.Select(r => r["sprk_name"]).Should().Equal("Agreement under ordinary");
     }
 
+    // ---- ebilling-r1 task 098 surface (a): the (a') invoice predicate on the invoices module fetch ----
+
+    [Fact]
+    public async Task InvoicesModule_SingleRecordRead_IsRefusedForEveryInvoiceId_BeforeAnyRead_SoThePredicateIsNotNeededThere()
+    {
+        // Task 098 classification: /data/record/sprk_invoice/{id} never returns an invoice to an external caller. The module's
+        // Tier-2 dimensions are PARENT ids (project, matter), so an invoice's own id is never in them and the route refuses
+        // with the SAME 403 for an invoice the caller's project holds and for an id that does not exist, reading nothing.
+        var caller = PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+        var reads = 0;
+        Task<IReadOnlyDictionary<string, object?>> Read(string _, Guid __, string[]? ___, CancellationToken ____)
+        {
+            reads++;
+            return Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?>());
+        }
+
+        var known = await ExternalModuleDataEndpoints.GetScopedRecordCoreAsync(
+            "sprk_invoice", Guid.NewGuid(), select: null, caller, Registry(), Read, NullLogger.Instance, CancellationToken.None);
+        var unknown = await ExternalModuleDataEndpoints.GetScopedRecordCoreAsync(
+            "sprk_invoice", Guid.NewGuid(), select: null, caller, Registry(), Read, NullLogger.Instance, CancellationToken.None);
+
+        var knownProblem = known.Should().BeOfType<ProblemHttpResult>().Subject;
+        var unknownProblem = unknown.Should().BeOfType<ProblemHttpResult>().Subject;
+        knownProblem.StatusCode.Should().Be(403);
+        knownProblem.ProblemDetails.Detail.Should().Be(unknownProblem.ProblemDetails.Detail);
+        reads.Should().Be(0);
+    }
+
+    private const string InvoiceGridFetchWithoutId =
+        "<fetch><entity name='sprk_invoice'><attribute name='sprk_name'/><attribute name='sprk_project'/></entity></fetch>";
+
+    [Fact]
+    public async Task InvoicesModuleFetch_AnInvoiceThePredicateHides_IsAbsent_EvenWhenTheGridDoesNotAskForItsId()
+    {
+        var caller = PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+        var visible = InvoiceRow("Visible", project: RecordA);
+        var hidden = InvoiceRow("Isolated source", project: RecordA);
+        var hiding = InvoiceHidingStub.Hiding((Guid)hidden["sprk_invoiceid"]!);
+
+        var (body, executed) = await RunInvoicesFetchAsync(caller, new[] { visible, hidden }, hiding.Seam, InvoiceGridFetchWithoutId);
+
+        body.Entities.Select(r => r["sprk_name"]).Should().Equal("Visible");
+        body.Truncated.Should().BeFalse("a row the rule hides is not a read failure");
+        executed.Should().Contain("name=\"sprk_invoiceid\"", "the server projects the key the predicate needs");
+        body.Entities.Single().Keys.Should().NotContain("sprk_invoiceid", "a key the grid did not ask for is stripped");
+        hiding.Calls.Should().ContainSingle().Which.Should().BeEquivalentTo(
+            new[] { (Guid)visible["sprk_invoiceid"]!, (Guid)hidden["sprk_invoiceid"]! }, "one predicate call per page");
+    }
+
+    [Fact]
+    public async Task InvoicesModuleFetch_APredicateThatHidesNothing_ListsEveryRow_AsBefore()
+    {
+        var caller = PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+
+        var (body, _) = await RunInvoicesFetchAsync(caller,
+            new[] { InvoiceRow("One", project: RecordA), InvoiceRow("Two", project: RecordA) }, InvoiceHidingStub.NoneHidden().Seam);
+
+        body.Entities.Select(r => r["sprk_name"]).Should().Equal("One", "Two");
+        body.Truncated.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task InvoicesModuleFetch_APredicateReadFault_HidesEveryRow_AndSaysTruncated()
+    {
+        var caller = PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+
+        var (body, _) = await RunInvoicesFetchAsync(caller,
+            new[] { InvoiceRow("One", project: RecordA), InvoiceRow("Two", project: RecordA) }, InvoiceHidingStub.Faulting().Seam);
+
+        body.Entities.Should().BeEmpty();
+        body.Truncated.Should().BeTrue("rows were dropped because a read failed");
+    }
+
+    [Fact]
+    public async Task InvoicesModuleFetch_NoPredicate_HidesEveryRow_AndSaysTruncated_FailClosed()
+    {
+        var caller = PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+
+        var (body, _) = await RunInvoicesFetchAsync(caller, new[] { InvoiceRow("One", project: RecordA) }, hideInvoices: null);
+
+        body.Entities.Should().BeEmpty();
+        body.Truncated.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task InvoicesModuleFetch_ARowWithoutAReadableId_IsHidden_FailClosed()
+    {
+        var caller = PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+        var noId = new Dictionary<string, object?>(InvoiceRow("No id", project: RecordA)) { ["sprk_invoiceid"] = "not-a-guid" };
+
+        var (body, _) = await RunInvoicesFetchAsync(caller,
+            new IReadOnlyDictionary<string, object?>[] { noId, InvoiceRow("Fine", project: RecordA) }, InvoiceHidingStub.NoneHidden().Seam);
+
+        body.Entities.Select(r => r["sprk_name"]).Should().Equal("Fine");
+    }
+
     private static IReadOnlyDictionary<string, object?> InvoiceRow(
         string name, Guid? project = null, Guid? matter = null, Guid? agreement = null) => new Dictionary<string, object?>
     {
@@ -1031,13 +1127,19 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
     };
 
     /// <summary>The real invoices-module fetch pipeline, with the REAL secure-flag and live-parent reads over FakeDataverse.</summary>
+    private Task<(FetchResponseDto Body, string Executed)> RunInvoicesFetchAsync(
+        CallerPrincipal caller, IReadOnlyList<IReadOnlyDictionary<string, object?>> rows) =>
+        // ebilling-r1 task 098: these tests are about the multi-root rule; the (a') predicate hides nothing here.
+        RunInvoicesFetchAsync(caller, rows, InvoiceHidingStub.NoneHidden().Seam);
+
     private async Task<(FetchResponseDto Body, string Executed)> RunInvoicesFetchAsync(
-        CallerPrincipal caller, IReadOnlyList<IReadOnlyDictionary<string, object?>> rows)
+        CallerPrincipal caller, IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, ExternalInvoiceHiding? hideInvoices,
+        string fetchXml = InvoiceGridFetch)
     {
         var executed = string.Empty;
         var data = _fixture.Data.NewService();
         var result = await ExternalModuleDataEndpoints.ExecuteScopedFetchCoreAsync(
-            new FetchRequestDto("sprk_invoice", InvoiceGridFetch, PagingCookie: null),
+            new FetchRequestDto("sprk_invoice", fetchXml, PagingCookie: null),
             caller, Registry(), new FetchXmlEntityExtractor(),
             (request, _) =>
             {
@@ -1047,8 +1149,7 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
             },
             data.GetNonSecureRootsAsync, data.NarrowDocumentsAsync, NullLogger.Instance, CancellationToken.None,
             data.GetLiveParentRootsAsync,
-            // ebilling-r1 task 098: these tests are about the multi-root rule; the (a') predicate hides nothing here.
-            InvoiceHidingStub.NoneHidden().Seam);
+            hideInvoices);
         return (result.Should().BeOfType<Ok<FetchResponseDto>>().Subject.Value!, executed);
     }
 

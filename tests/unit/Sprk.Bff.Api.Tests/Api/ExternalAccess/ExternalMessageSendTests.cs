@@ -556,6 +556,48 @@ public class ExternalMessageSendTests
         ShouldHaveWrittenNothing();
     }
 
+    // ebilling-r1 task 098 surface (b): the post gate is the read gate, so an invoice the (a') predicate hides (or cannot
+    // decide) is refused exactly as an invoice that does not exist, and nothing is written.
+    [Theory]
+    [InlineData("hidden")]
+    [InlineData("fault")]
+    public async Task Task098_AnInvoiceThePredicateHides_IsRefusedAsANonexistentInvoice_AndCreatesNoRow(string kind)
+    {
+        var matter = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        _records[("sprk_invoice", invoice)] = new Dictionary<string, object?>
+        {
+            ["id"] = invoice,
+            ["sprk_matter"] = Lookup(matter, "sprk_matter"),
+        };
+        _invoiceHiding = kind == "hidden" ? InvoiceHidingStub.Hiding(invoice) : InvoiceHidingStub.Faulting();
+
+        var hidden = await Post("invoices", invoice, Ciam(matter: matter));
+        var missing = await Post("invoices", Guid.NewGuid(), Ciam(matter: matter));
+
+        ShouldBeForbidden(hidden, ExternalMessageEndpoints.DenyRecordNotAccessible);
+        ShouldBeForbidden(missing, ExternalMessageEndpoints.DenyRecordNotAccessible);
+        ((ProblemHttpResult)hidden).ProblemDetails.Detail.Should().Be(((ProblemHttpResult)missing).ProblemDetails.Detail);
+        ((ProblemHttpResult)hidden).ProblemDetails.Title.Should().Be(((ProblemHttpResult)missing).ProblemDetails.Title);
+        ShouldHaveWrittenNothing();
+    }
+
+    [Fact]
+    public async Task Task098_AnInvoiceThePredicateLeavesVisible_IsPosted_AsBefore()
+    {
+        var matter = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        _records[("sprk_invoice", invoice)] = new Dictionary<string, object?>
+        {
+            ["id"] = invoice,
+            ["sprk_matter"] = Lookup(matter, "sprk_matter"),
+        };
+        _invoiceHiding = InvoiceHidingStub.Hiding(Guid.NewGuid());
+
+        Created(await Post("invoices", invoice, Ciam(matter: matter)));
+        _invoiceHiding.Calls.Should().Contain(call => call.Contains(invoice));
+    }
+
     [Theory]
     [InlineData("projects")]
     [InlineData("matters")]

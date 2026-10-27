@@ -426,6 +426,87 @@ public sealed class DataverseDescribeHandlerTests : TypedToolHandlerTestFixture
             because: "a guarded not-found and a hidden record carry one message, not Dataverse's own 404 text");
         missing.Data.Should().BeNull();
     }
+    // ═════════════════════════════════════════════════════════════════════════════
+    // ebilling-r1 task 098 surface (d): the (a') invoice predicate on an invoice-family record
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    private static readonly Guid InvoiceRecordId = Guid.Parse("09800000-0000-4000-8000-0000000000d1");
+
+    private void SetupInvoiceRecord(bool exists = true)
+    {
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_invoice')")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("{ \"EntitySetName\": \"sprk_invoices\", \"PrimaryIdAttribute\": \"sprk_invoiceid\" }")));
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_invoices(")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(exists
+                ? DataverseUserResponse.Ok(200, ParseJson("{ \"sprk_invoiceid\": \"" + InvoiceRecordId.ToString("D") + "\", \"sprk_name\": \"INV-1\" }"))
+                : DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "Entity 'sprk_invoice' Does Not Exist"));
+    }
+
+    private Task<ToolResult> DescribeInvoiceAsync() =>
+        CreateHandler().ExecuteChatAsync(
+            BuildChatInvocationContext(toolArgumentsJson: "{\"path\":\"tables/sprk_invoice/records/" + InvoiceRecordId.ToString("D") + "\"}"),
+            BuildDescribeTool(), CancellationToken.None);
+
+    [Fact]
+    public async Task ExecuteChatAsync_Task098_ExternalCaller_AHiddenInvoice_AnswersExactlyLikeAMissingOne()
+    {
+        AsExternalCaller();
+        SetupInvoiceRecord();
+        var calls = new List<string>();
+        _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.Hiding(calls, InvoiceRecordId);
+        var hidden = await DescribeInvoiceAsync();
+
+        SetupInvoiceRecord(exists: false);
+        var missing = await DescribeInvoiceAsync();
+
+        hidden.Success.Should().BeFalse();
+        hidden.Data.Should().BeNull();
+        hidden.ErrorCode.Should().Be(DataverseUserClientErrorCodes.NotFound);
+        hidden.ErrorMessage.Should().Be(ExternalCallerCommunicationGuard.RecordNotVisibleMessage);
+        missing.ErrorCode.Should().Be(hidden.ErrorCode);
+        missing.ErrorMessage.Should().Be(hidden.ErrorMessage, "a hidden invoice and a missing one are indistinguishable");
+        calls.Should().Equal("sprk_invoice:1");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_Task098_ExternalCaller_AVisibleInvoice_ReturnsTheRecord()
+    {
+        AsExternalCaller();
+        SetupInvoiceRecord();
+        _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.Hiding(null, Guid.NewGuid());
+
+        var result = await DescribeInvoiceAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.Data!.Value.GetProperty("fields").GetProperty("sprk_name").GetString().Should().Be("INV-1");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_Task098_ExternalCaller_ThePredicateReadFails_ErrorWithNoData()
+    {
+        AsExternalCaller();
+        SetupInvoiceRecord();
+        _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.Throwing;
+
+        var result = await DescribeInvoiceAsync();
+
+        result.Success.Should().BeFalse("a predicate read fault can never turn into 'show it'");
+        result.Data.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_Task098_InternalCaller_AnInvoiceNeverReachesThePredicate()
+    {
+        SetupInvoiceRecord();
+        // _hideInvoiceFamily stays NeverCalled: any call would fail the tool.
+
+        var result = await DescribeInvoiceAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+    }
+
 
     [Theory]
     [InlineData("sprk_emailartifact")]

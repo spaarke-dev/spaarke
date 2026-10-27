@@ -475,6 +475,45 @@ public class ExternalNotificationFeedTests
         feed.UnreadCount.Should().Be(1);
     }
 
+    // ── ebilling-r1 task 098 surface (b): a message regarding an invoice the (a') predicate hides is not in the feed ──
+
+    [Theory]
+    [InlineData("hidden")]
+    [InlineData("fault")]
+    public async Task Task098_AMessageRegardingAnInvoiceThePredicateHides_NeverAppears_NorCounts(string kind)
+    {
+        var project = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        var caller = Ciam(Guid.NewGuid(), project: project);
+        _roots.AddFilingRow("sprk_invoice", invoice, ("sprk_project", "sprk_project", project));
+        var plain = Message("sprk_regardingproject", project, Now.AddHours(-2));
+        var aboutInvoice = Message("sprk_regardingproject", project, Now.AddHours(-1));
+        aboutInvoice["_sprk_regardinginvoice_value"] = El(invoice.ToString("D"));
+        _data.Name(project, "Project Alpha");
+        _invoiceHiding = kind == "hidden" ? InvoiceHidingStub.Hiding(invoice) : InvoiceHidingStub.Faulting();
+
+        var feed = Body(await Feed(caller));
+
+        feed.Value.Select(i => i.Id).Should().Equal(IdOf(plain));
+        feed.UnreadCount.Should().Be(1);
+        _invoiceHiding.Calls.Should().ContainSingle().Which.Should().Equal(invoice);
+    }
+
+    [Fact]
+    public async Task Task098_AMessageRegardingAnInvoiceThePredicateLeavesVisible_Appears()
+    {
+        var project = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        var caller = Ciam(Guid.NewGuid(), project: project);
+        _roots.AddFilingRow("sprk_invoice", invoice, ("sprk_project", "sprk_project", project));
+        var aboutInvoice = Message("sprk_regardingproject", project, Now.AddHours(-1));
+        aboutInvoice["_sprk_regardinginvoice_value"] = El(invoice.ToString("D"));
+        _data.Name(project, "Project Alpha");
+        _invoiceHiding = InvoiceHidingStub.Hiding(Guid.NewGuid());
+
+        Body(await Feed(caller)).Value.Select(i => i.Id).Should().Equal(IdOf(aboutInvoice));
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

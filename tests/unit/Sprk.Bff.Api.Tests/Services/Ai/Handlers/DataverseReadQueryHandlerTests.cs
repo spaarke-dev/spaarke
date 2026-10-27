@@ -846,6 +846,112 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
     private static readonly Guid ThreadOpen = Guid.Parse("71000000-0000-0000-0000-000000000001");
     private static readonly Guid ThreadPrivate = Guid.Parse("71000000-0000-0000-0000-000000000002");
 
+    // ═════════════════════════════════════════════════════════════════════════════
+    // ebilling-r1 task 098 surface (d): the (a') invoice predicate on invoice-family tables
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    private static readonly Guid InvoiceVisible = Guid.Parse("09800000-0000-4000-8000-0000000000a1");
+    private static readonly Guid InvoiceHidden = Guid.Parse("09800000-0000-4000-8000-0000000000a2");
+
+    private void SetupFamilyTable(string table, string entitySet, string idColumn, string nameColumn) =>
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith($"EntityDefinitions(LogicalName='{table}')")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson(
+                "{ \"EntitySetName\": \"" + entitySet + "\", \"PrimaryIdAttribute\": \"" + idColumn + "\", "
+                + "\"Attributes\": [ { \"LogicalName\": \"" + nameColumn + "\", \"AttributeType\": \"String\" } ] }")));
+
+    private void UserReadReturns(string entitySet, string rowsJson) =>
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith($"{entitySet}?")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson(rowsJson)));
+
+    private static string FamilyRows(string idColumn, params (Guid? Id, string Name)[] rows) =>
+        "{ \"value\": [ " + string.Join(", ", rows.Select(r =>
+            "{ \"" + idColumn + "\": " + (r.Id is { } id ? "\"" + id.ToString("D") + "\"" : "null") + ", \"sprk_name\": \"" + r.Name + "\" }"))
+        + " ] }";
+
+    private async Task<ToolResult> ReadAsync(string sql) =>
+        await CreateHandler().ExecuteChatAsync(
+            BuildChatInvocationContext(toolArgumentsJson: Args(sql)), BuildReadQueryTool(), CancellationToken.None);
+
+    private static IEnumerable<string?> Names(ToolResult result) =>
+        result.Data!.Value.GetProperty("rows").EnumerateArray().Select(r => r.GetProperty("sprk_name").GetString());
+
+    [Fact]
+    public async Task ExecuteChatAsync_Task098_ExternalCallerOnInvoices_AHiddenInvoiceIsDropped_OneSeamCallForThePage()
+    {
+        AsExternalCaller();
+        SetupFamilyTable("sprk_invoice", "sprk_invoices", "sprk_invoiceid", "sprk_name");
+        UserReadReturns("sprk_invoices", FamilyRows("sprk_invoiceid", (InvoiceVisible, "Visible"), (InvoiceHidden, "Isolated")));
+        var calls = new List<string>();
+        _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.Hiding(calls, InvoiceHidden);
+
+        var result = await ReadAsync("SELECT sprk_name FROM sprk_invoice");
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal("Visible");
+        calls.Should().Equal("sprk_invoice:2");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_Task098_ExternalCallerOnInvoiceLines_ALineOfAHiddenInvoiceIsDropped()
+    {
+        AsExternalCaller();
+        var hiddenLine = Guid.NewGuid();
+        var visibleLine = Guid.NewGuid();
+        SetupFamilyTable("sprk_billingevent", "sprk_billingevents", "sprk_billingeventid", "sprk_name");
+        UserReadReturns("sprk_billingevents", FamilyRows("sprk_billingeventid", (hiddenLine, "Hidden line"), (visibleLine, "Visible line")));
+        var calls = new List<string>();
+        _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.Hiding(calls, hiddenLine);
+
+        var result = await ReadAsync("SELECT sprk_name FROM sprk_billingevent");
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal("Visible line");
+        calls.Should().Equal("sprk_billingevent:2");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_Task098_ExternalCallerOnInvoices_ARowWithoutAnId_IsHidden()
+    {
+        AsExternalCaller();
+        SetupFamilyTable("sprk_invoice", "sprk_invoices", "sprk_invoiceid", "sprk_name");
+        UserReadReturns("sprk_invoices", FamilyRows("sprk_invoiceid", (null, "No id"), (InvoiceVisible, "Visible")));
+        _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.Hiding(null);
+
+        var result = await ReadAsync("SELECT sprk_name FROM sprk_invoice");
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal("Visible");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_Task098_ExternalCallerOnInvoices_ThePredicateReadFails_ErrorWithNoData()
+    {
+        AsExternalCaller();
+        SetupFamilyTable("sprk_invoice", "sprk_invoices", "sprk_invoiceid", "sprk_name");
+        UserReadReturns("sprk_invoices", FamilyRows("sprk_invoiceid", (InvoiceVisible, "Visible")));
+        _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.Throwing;
+
+        var result = await ReadAsync("SELECT sprk_name FROM sprk_invoice");
+
+        result.Success.Should().BeFalse("a predicate read fault can never turn into 'show it'");
+        result.Data.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_Task098_InternalCallerOnInvoices_NeverReachesThePredicate()
+    {
+        SetupFamilyTable("sprk_invoice", "sprk_invoices", "sprk_invoiceid", "sprk_name");
+        UserReadReturns("sprk_invoices", FamilyRows("sprk_invoiceid", (InvoiceVisible, "Visible"), (InvoiceHidden, "Isolated")));
+        // _hideInvoiceFamily stays NeverCalled: any call would fail the tool.
+
+        var result = await ReadAsync("SELECT sprk_name FROM sprk_invoice");
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal("Visible", "Isolated");
+    }
+
     private void SetupDocumentMetadata() =>
         _dataverse
             .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_document')")), It.IsAny<CancellationToken>()))
