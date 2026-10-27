@@ -138,6 +138,22 @@ public class SecureChildOrdinaryParentMoveTests
         report.ChildrenReowned.Should().Be(3);
     }
 
+    [Fact(DisplayName = "194 F1-b must fire: a budget's buckets follow the budget when its matter moves to B")]
+    public async Task ABudgetsBuckets_FollowAnOrdinaryMove()
+    {
+        var (budget, bucket) = (Guid.NewGuid(), Guid.NewGuid());
+        MatterMovedToB();
+        Row("sprk_budget", budget, TeamRef(GeneralTeam), ("sprk_matter", Matter, MatterId));
+        Row("sprk_budgetbucket", bucket, TeamRef(GeneralTeam), ("sprk_budget", "sprk_budget", budget));
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            Matter, MatterId, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        report.Status.Should().Be(SecureChildReconcileStatus.Completed, report.Detail);
+        _world.OwnerOf("sprk_budget", budget).Should().Be(DataversePrincipalRef.Team(TeamB));
+        _world.OwnerOf("sprk_budgetbucket", bucket).Should().Be(DataversePrincipalRef.Team(TeamB));
+    }
+
     [Fact(DisplayName = "194 must fire: report-only plans every move, the grandchild through its planned parent, and writes nothing")]
     public async Task ReportOnly_PlansEveryMove_AndWritesNothing()
     {

@@ -48,6 +48,19 @@ public class SecureChildLineageTests
     }
 
     /// <summary>
+    /// Task 194 F1-b: a budget's buckets are its children, through the one lookup the solution XML declares
+    /// (<c>sprk_BudgetBucket/Entity.xml</c>: <c>sprk_budget</c>; entity set <c>sprk_budgetbuckets</c>).
+    /// </summary>
+    [Fact]
+    public void TheBudgetBucketRow_IsFiledUnderItsBudget()
+    {
+        var bucket = SecureChildLineage.Children["sprk_budgetbucket"];
+
+        bucket.EntitySet.Should().Be("sprk_budgetbuckets");
+        bucket.Lookups.Should().BeEquivalentTo(new Dictionary<string, string> { ["sprk_budget"] = "sprk_budget" });
+    }
+
+    /// <summary>
     /// Task 182 (contract C4): the Decision Record is filed under its subject like a Signal. Its row carries the same eight
     /// subject lookups as the Signal row (never the service request's) and keeps the three typed core lookups: they are
     /// the decision context and a lineage parent, kept for good (ontology task 144 K1 / 145), not retired after a backfill.
