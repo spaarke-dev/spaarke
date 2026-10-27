@@ -1251,7 +1251,8 @@ public sealed class AssignedAccessMaterializer
             {
                 case ActorKind.Internal:
                     {
-                        var invite = await _invites.InviteOnGrantAsync(subject.Id).ConfigureAwait(false);
+                        var invite = await _invites.InviteOnGrantAsync(subject.Id, run.Request.RootType, run.RootId)
+                            .ConfigureAwait(false);
                         if (invite is { Status: GrantInviteStatus.Failed, ErrorCode: ContactBindingDecision.InviteTenantLookupUnavailable })
                         {
                             // Slice B3: the grant stands and no stamp was written. Not retried automatically (I-9: a

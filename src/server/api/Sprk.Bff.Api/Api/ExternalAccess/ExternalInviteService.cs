@@ -151,7 +151,10 @@ public sealed class ExternalInviteService
     /// <see cref="CancellationToken.None"/>, as the grant notifier does: the grant is written, so the person is invited even
     /// if the granter's browser has gone.
     /// </summary>
-    public async Task<GrantInviteResult> InviteOnGrantAsync(Guid contactId)
+    /// <param name="rootType">Slice B3: the granted record's type, named in a work-account notice; null names no record.</param>
+    /// <param name="rootId">Slice B3: the granted record's id (its name is read for the notice); null names no record.</param>
+    public async Task<GrantInviteResult> InviteOnGrantAsync(
+        Guid contactId, ExternalGrantRootType? rootType = null, Guid? rootId = null)
     {
         var ct = CancellationToken.None;
         try
@@ -221,6 +224,22 @@ public sealed class ExternalInviteService
             if (outcome.EmailFailed)
                 return Logged(contactId, Failed(GrantInviteStatus.EmailNotSentReasonCode));
 
+            // Slice B3: the work-account stamp landed; the notice goes to the stamped address. The grant exists, so it may
+            // name the record. A notice that did not send leaves the stamp and is reported as the invite email is.
+            if (outcome.Status == WorkAccountInvitedStatus)
+            {
+                WorkAccountNoticeRecord? record = null;
+                if (rootType is { } type && rootId is { } id && id != Guid.Empty)
+                {
+                    record = new WorkAccountNoticeRecord(ExternalGrantRoot.LabelFor(type),
+                        await GrantAccessNotifier.ReadRecordNameAsync(_dataverse, _logger, type, id).ConfigureAwait(false));
+                }
+
+                if (!await SendWorkAccountNoticeAsync(
+                        _emails, email, portalUrl, InviteLinkCustomerKey(_customer), record, contactId, _logger).ConfigureAwait(false))
+                    return Logged(contactId, Failed(GrantInviteStatus.EmailNotSentReasonCode));
+            }
+
             if (outcome.Status == ExistingAccountStatus)
             {
                 // §12 I-10: the operator log keeps the branch; the inviter is answered Sent, as for a new account.
@@ -289,6 +308,91 @@ public sealed class ExternalInviteService
                && value.GetString() is { } s && !string.IsNullOrWhiteSpace(s)
                 ? s.Trim()
                 : null;
+    }
+
+    // =========================================================================
+    // Slice B3: the work-account notice
+    // =========================================================================
+
+    /// <summary>The record a work-account notice names: only when a grant to it was written for the person.</summary>
+    /// <param name="Label">The record type's label (<see cref="ExternalGrantRoot.LabelFor"/>).</param>
+    /// <param name="Name">The record's display name, or null when it has none or could not be read.</param>
+    internal sealed record WorkAccountNoticeRecord(string Label, string? Name);
+
+    /// <summary>What a work-account notice says, and where its one link goes.</summary>
+    internal sealed record WorkAccountNotice(string Subject, string Headline, string Message, string LinkUrl, string LinkText);
+
+    /// <summary>
+    /// The work-account notice for <paramref name="record"/> (null: fixed text, for <c>/invite</c>, which writes no grant),
+    /// or <c>null</c> when the portal link cannot be built. Fixed text plus, when a grant exists, the record's label and
+    /// name; the link is the portal with this deployment's customer key (<see cref="BuildInviteLink"/> with no code). It never
+    /// carries a code, a contact id or a tenant id. The name is a plain-text value: the template HTML-encodes it in the
+    /// body, and the subject has every control character removed. Pure.
+    /// </summary>
+    internal static WorkAccountNotice? BuildWorkAccountNotice(
+        string? portalUrl, string? customerKey, WorkAccountNoticeRecord? record)
+    {
+        if (BuildInviteLink(portalUrl, customerKey, inviteCode: null) is not { } link)
+            return null;
+
+        const string Message =
+            "Sign in with your work account: on the Spaarke sign-in page, choose \"Sign in with your company account\".";
+        if (record is null)
+        {
+            return new WorkAccountNotice(
+                "You've been invited to Spaarke", "You've been invited to Spaarke", Message, link, "Open Spaarke");
+        }
+
+        var label = WithoutControlCharacters(record.Label);
+        var name = record.Name is { } raw ? WithoutControlCharacters(raw).Trim() : null;
+        var headline = string.IsNullOrEmpty(name)
+            ? $"You've been given access to a {label} in Spaarke"
+            : $"You've been given access to the {label} \"{name}\" in Spaarke";
+        return new WorkAccountNotice(headline, headline, Message, link, "Open Spaarke");
+    }
+
+    /// <summary><paramref name="value"/> with every control character (and line or paragraph separator) removed. Pure.</summary>
+    internal static string WithoutControlCharacters(string value)
+        => string.Concat(value.Where(c => !char.IsControl(c)
+                                           && char.GetUnicodeCategory(c) is not (System.Globalization.UnicodeCategory.LineSeparator
+                                               or System.Globalization.UnicodeCategory.ParagraphSeparator)));
+
+    /// <summary>
+    /// Sends the work-account notice (<see cref="BuildWorkAccountNotice"/>) to <paramref name="stampedEmail"/>, the address the
+    /// invite stamp was written for, through the shared mailbox's portal notification (the existing template and send path).
+    /// Called only after a work-account stamp landed. <c>true</c> when it was sent; <c>false</c> (logged at Warning, never
+    /// with the address) when it could not be built or sent: the stamp stays, and the caller reports "email not sent".
+    /// Never throws.
+    /// </summary>
+    internal static async Task<bool> SendWorkAccountNoticeAsync(
+        RegistrationEmailService emails, string stampedEmail, string? portalUrl, string? customerKey,
+        WorkAccountNoticeRecord? record, Guid contactId, ILogger logger)
+    {
+        var notice = BuildWorkAccountNotice(portalUrl, customerKey, record);
+        if (notice is null)
+        {
+            logger.LogWarning(
+                "[EXT-INVITE] Contact {ContactId} is invited for a work-account sign-in, but the notice was not sent: the portal "
+                + "link could not be built from ExternalAccess:PortalUrl.", contactId);
+            return false;
+        }
+
+        using var timeout = new CancellationTokenSource(GrantAccessNotifier.DefaultSendTimeout);
+        try
+        {
+            await emails.SendPortalNotificationEmailAsync(
+                stampedEmail.Trim(), notice.Subject, notice.Headline, notice.Message, notice.LinkUrl, notice.LinkText,
+                correlationId: $"work-account-invite-{Guid.NewGuid():N}", timeout.Token).ConfigureAwait(false);
+            logger.LogInformation("[EXT-INVITE] Contact {ContactId}: the work-account notice was sent.", contactId);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "[EXT-INVITE] Contact {ContactId} is invited for a work-account sign-in, but the notice was not sent. The invite "
+                + "stands; invite again to resend it.", contactId);
+            return false;
+        }
     }
 
     // =========================================================================

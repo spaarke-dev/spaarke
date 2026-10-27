@@ -1000,7 +1000,8 @@ public class ExistingCiamAccountInviteTests
 
         var body = result.Should().BeOfType<Ok<InviteExternalUserResponse>>().Subject.Value!;
         body.Status.Should().Be(InviteExternalUserEndpoint.WorkAccountInvitedStatus);
-        (body.ContactId, body.EmailSent, body.EmailErrorCode).Should().Be((contact, (bool?)null, (string?)null));
+        (body.ContactId, body.EmailSent, body.EmailErrorCode).Should().Be((contact, (bool?)true, (string?)null),
+            "slice B3: the work-account notice was sent");
         var row = _h.Identities.Contacts[contact];
         row.InvitedTenantId.Should().Be(PartnerTenant.ToString("D"));
         InviteEmailStamp.Matches(row.InvitedEmailHash, Email).Should().BeTrue();
@@ -1045,11 +1046,113 @@ public class ExistingCiamAccountInviteTests
             .Should().BeOfType<Ok<InviteAndGrantResponse>>().Subject.Value!;
 
         body.OnboardStatus.Should().Be(InviteExternalUserEndpoint.WorkAccountInvitedStatus);
-        (body.EmailSent, body.EmailErrorCode).Should().Be(((bool?)null, (string?)null));
+        (body.EmailSent, body.EmailErrorCode).Should().Be(((bool?)true, (string?)null), "slice B3: the notice was sent");
         _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle();
         _h.Identities.Contacts[contact].InvitedTenantId.Should().Be(PartnerTenant.ToString("D"));
         _ciam.Created.Should().BeEmpty();
         _h.Emails.InviteUrls.Should().BeEmpty();
+    }
+
+    // ── Slice B3: the work-account notice ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// MUST FIRE: /invite to a customer-tenant domain sends ONE notice to the stamped address, after the stamp landed: fixed
+    /// text (no grant exists, so no record), and one link — the portal with the customer key. No code, no contact id, no
+    /// tenant id anywhere in it.
+    /// </summary>
+    [Fact]
+    public async Task Invite_WorkAccount_SendsTheFixedNotice_ToTheStampedAddress_WithNoCodeOrIds()
+    {
+        var contact = UnboundContact();
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler()
+            .Answer(HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(PartnerTenant));
+
+        (await InviteRoute(organizations: Organizations(handler))).Should().BeOfType<Ok<InviteExternalUserResponse>>();
+
+        var sent = _h.Emails.Sent.Should().ContainSingle("one notice").Subject;
+        sent.To.Should().Be(Email);
+        sent.Subject.Should().Be("You've been invited to Spaarke");
+        sent.LinkUrl.Should().Be($"{PortalUrl}/?customer={CustomerKey}", "the portal and the customer key only");
+        var message = _h.Emails.Messages.Single();
+        message.Should().Contain("work account");
+        foreach (var text in new[] { sent.Subject, sent.LinkUrl, message })
+        {
+            text.Should().NotContain(contact.ToString("D")).And.NotContain(contact.ToString("N"))
+                .And.NotContain(PartnerTenant.ToString("D")).And.NotContain("#").And.NotContain("invite=");
+        }
+
+        _h.Identities.Contacts[contact].InvitedEmailHash.Should().NotBeNull("the notice follows a stamp that landed");
+        _h.Emails.InviteUrls.Should().BeEmpty("no portal-account invite email");
+    }
+
+    /// <summary>
+    /// MUST FIRE: a notice that fails to send leaves the stamp, and the response says "email not sent" in its existing
+    /// emailSent / emailErrorCode fields.
+    /// </summary>
+    [Fact]
+    public async Task Invite_WorkAccount_ANoticeThatFails_KeepsTheStamp_AndIsReportedEmailNotSent()
+    {
+        var contact = UnboundContact();
+        _h.Emails.Failure = new InvalidOperationException("mailbox refused");
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler()
+            .Answer(HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(PartnerTenant));
+
+        var body = (await InviteRoute(organizations: Organizations(handler)))
+            .Should().BeOfType<Ok<InviteExternalUserResponse>>().Subject.Value!;
+
+        body.Status.Should().Be(InviteExternalUserEndpoint.WorkAccountInvitedStatus);
+        (body.EmailSent, body.EmailErrorCode).Should().Be(((bool?)false, (string?)GrantInviteStatus.EmailNotSentReasonCode));
+        _h.Identities.Contacts[contact].InvitedTenantId.Should().Be(PartnerTenant.ToString("D"), "the stamp stays");
+    }
+
+    /// <summary>MUST FIRE: /invite-and-grant's notice is sent after the grant is written and names the granted record.</summary>
+    [Fact]
+    public async Task InviteAndGrant_WorkAccount_SendsTheNotice_NamingTheGrantedRecord()
+    {
+        UnboundContact();
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler()
+            .Answer(HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(PartnerTenant));
+
+        (await InviteAndGrant(organizations: Organizations(handler))).Should().BeOfType<Ok<InviteAndGrantResponse>>();
+
+        var sent = _h.Emails.Sent.Should().ContainSingle().Subject;
+        sent.To.Should().Be(Email);
+        sent.Subject.Should().Be("You've been given access to the matter \"Smith v. Smith\" in Spaarke");
+        sent.LinkUrl.Should().Be($"{PortalUrl}/?customer={CustomerKey}");
+    }
+
+    /// <summary>
+    /// MUST NOT FIRE: when the grant fails after the work-account stamp, /invite-and-grant sends no notice: never a record
+    /// name the person cannot open.
+    /// </summary>
+    [Fact]
+    public async Task InviteAndGrant_WorkAccount_AGrantThatFails_SendsNoNotice()
+    {
+        UnboundContact();
+        _h.Grants.GrantCreateFailure = new HttpRequestException("grant write refused");
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler()
+            .Answer(HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(PartnerTenant));
+
+        var result = await InviteAndGrant(organizations: Organizations(handler));
+
+        result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(500);
+        _h.Emails.Sent.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// MUST NOT FIRE: a portal-account invite sends no work-account notice (it keeps its own CIAM email), on both routes.
+    /// </summary>
+    [Fact]
+    public async Task APortalAccountInvite_SendsNoWorkAccountNotice()
+    {
+        UnboundContact();
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler()
+            .Answer(HttpStatusCode.BadRequest, InviteOrganizationTestKit.TenantNotFoundBody);
+
+        (await InviteRoute(organizations: Organizations(handler))).Should().BeOfType<Ok<InviteExternalUserResponse>>();
+
+        _h.Emails.Onboarding.Should().ContainSingle("the portal-account invite keeps its CIAM email");
+        _h.Emails.Sent.Should().BeEmpty("no work-account notice");
     }
 
     /// <summary>
@@ -1249,6 +1352,7 @@ public class ExistingCiamAccountInviteTests
             problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ContactBindingDecision.InviteContactAlreadyBound);
         }
 
+        _h.Emails.Sent.Should().BeEmpty("a bound contact gets no work-account notice");
         _h.Identities.Writes.Should().BeEmpty();
         _h.Grants.Rows.Should().BeEmpty();
     }

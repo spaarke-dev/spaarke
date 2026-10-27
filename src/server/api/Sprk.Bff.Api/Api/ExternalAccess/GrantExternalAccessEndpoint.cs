@@ -221,7 +221,7 @@ public static class GrantExternalAccessEndpoint
         // invite is kept (AlreadyPending); a bound contact needs none (NotNeeded) and keeps the notification below. The invite
         // REPLACES the "you were given access" email for the contact it just invited (I-3): one email per person.
         var invite = !grantedKey.IsOrganizationGrant && grantedKey.ContactId is { } inviteeId
-            ? await invites.InviteOnGrantAsync(inviteeId)
+            ? await invites.InviteOnGrantAsync(inviteeId, root.Type, root.Id)
             : null;
         var justInvited = invite?.Status is GrantInviteStatus.Sent; // both invite emails (§12 I-10)
 

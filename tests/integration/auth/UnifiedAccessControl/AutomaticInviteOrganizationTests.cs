@@ -69,9 +69,13 @@ public class AutomaticInviteOrganizationTests
         var contact = UnboundContact();
         DomainIsTheCustomerTenant();
 
-        var result = await _h.Invites.InviteOnGrantAsync(contact);
+        var result = await _h.Invites.InviteOnGrantAsync(contact, Matter, _matter);
 
         result.Should().Be(new GrantInviteResult(GrantInviteStatus.WorkAccountInvited));
+        var notice = _h.Emails.Sent.Should().ContainSingle("the work-account notice, after the stamp").Subject;
+        notice.To.Should().Be(Email);
+        notice.Subject.Should().Be("You've been given access to the matter \"Smith v. Smith\" in Spaarke");
+        notice.LinkUrl.Should().Be("https://external.test/?customer=acme");
         var row = _h.Identities.Contacts[contact];
         row.InvitedTenantId.Should().Be(CustomerTenant.ToString("D"));
         row.InvitedEmailHash.Should().NotBeNull();
@@ -93,6 +97,7 @@ public class AutomaticInviteOrganizationTests
 
         result.Should().Be(new GrantInviteResult(GrantInviteStatus.Sent));
         _h.Ciam.Created.Should().ContainSingle().Which.Email.Should().Be(Email);
+        _h.Emails.Sent.Should().BeEmpty("a portal-account invite sends its own CIAM email, never the work-account notice");
         _h.Identities.Contacts[contact].InvitedTenantId.Should().BeNull("a portal-account invite names no tenant");
     }
 
@@ -132,6 +137,24 @@ public class AutomaticInviteOrganizationTests
             .Which.Invite.Should().Be(new GrantInviteResult(GrantInviteStatus.WorkAccountInvited));
         _h.Identities.Contacts[contact].InvitedTenantId.Should().Be(CustomerTenant.ToString("D"));
         _h.Ciam.Attempts.Should().BeEmpty();
+        _h.Emails.Sent.Should().ContainSingle().Which.Subject.Should().Contain("Smith v. Smith");
+    }
+
+    /// <summary>
+    /// MUST FIRE: a notice that fails to send after an automatic work-account stamp keeps the stamp and is answered as a
+    /// failed invite email (email_not_sent), so staff see it.
+    /// </summary>
+    [Fact]
+    public async Task InviteOnGrant_WorkAccount_ANoticeThatFails_KeepsTheStamp_AndIsEmailNotSent()
+    {
+        var contact = UnboundContact();
+        DomainIsTheCustomerTenant();
+        _h.Emails.Failure = new InvalidOperationException("mailbox refused");
+
+        var result = await _h.Invites.InviteOnGrantAsync(contact, Matter, _matter);
+
+        result.Should().Be(new GrantInviteResult(GrantInviteStatus.Failed, GrantInviteStatus.EmailNotSentReasonCode));
+        _h.Identities.Contacts[contact].InvitedTenantId.Should().Be(CustomerTenant.ToString("D"), "the stamp stays");
     }
 
     /// <summary>MUST NOT FIRE: the materializer's invite for any other domain is the portal-account invite.</summary>

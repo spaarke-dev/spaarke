@@ -163,6 +163,18 @@ public static class InviteExternalUserEndpoint
             // §12 I-10: an existing CIAM account is answered as a new one (the operator log keeps the difference), and an
             // email that did not send is reported the same way on both branches (adversarial pass 2, F2).
             var (emailSent, emailErrorCode) = InviterVisibleEmail(outcome);
+
+            // Slice B3: a work-account stamp landed, so the notice goes to the stamped address. /invite writes no grant, so
+            // the notice is the fixed text and names no record. A notice that did not send leaves the stamp ("email not sent").
+            if (outcome.Status == WorkAccountInvitedStatus)
+            {
+                (emailSent, emailErrorCode) = await ExternalInviteService.SendWorkAccountNoticeAsync(
+                        emailService, request.Email, portalUrl, InviteLinkCustomerKey(customer), record: null, outcome.ContactId,
+                        logger)
+                    ? (true, null)
+                    : (false, GrantInviteStatus.EmailNotSentReasonCode);
+            }
+
             return TypedResults.Ok(new InviteExternalUserResponse(
                 outcome.ContactId, portalUrl, InviterVisibleStatus(outcome.Status), emailSent, emailErrorCode));
         }

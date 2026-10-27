@@ -452,6 +452,20 @@ public static class InviteAndGrantExternalUserEndpoint
                 == GrantNotificationOutcome.Failed;
         }
 
+        // Slice B3: a work-account stamp landed (no CIAM email was sent), and the grant is written, so the notice may name
+        // the record. Sent only here, after the grant: a refused or failed grant returned above, with no notice.
+        if (string.Equals(onboardStatus, InviteExternalUserEndpoint.WorkAccountInvitedStatus, StringComparison.Ordinal))
+        {
+            var record = new ExternalInviteService.WorkAccountNoticeRecord(
+                ExternalGrantRoot.LabelFor(grantRoot.Type),
+                await GrantAccessNotifier.ReadRecordNameAsync(dataverseClient, logger, grantRoot.Type, grantRoot.Id));
+            (emailSent, emailErrorCode) = await ExternalInviteService.SendWorkAccountNoticeAsync(
+                    emailService, request.Email, portalUrl, InviteExternalUserEndpoint.InviteLinkCustomerKey(customer), record,
+                    contactId, logger)
+                ? (true, null)
+                : (false, GrantInviteStatus.EmailNotSentReasonCode);
+        }
+
         // Task 185 §12 I-10: the inviter is never told that the email already had a CIAM account (the log above keeps it).
         return TypedResults.Ok(new InviteAndGrantResponse(
             contactId, InviteExternalUserEndpoint.InviterVisibleStatus(onboardStatus), accessRecordId, portalUrl,
