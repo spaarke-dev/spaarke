@@ -1187,7 +1187,12 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // parent of its versions. sprk_policyversion is NOT listed: it is a lineage child only (SecureChildLineage), like
         // sprk_signal, because Signals and Decision Records name the version they cite, which files nothing.
         "sprk_policy",
+        // ebilling-r1 task 089 (uac-r2 F1-a, EB-D-148): an assignment / override row is its core record's child, and a record-scoped
+        // rule set is its core record's child and the parent of its record rules (sprk_policy.sprk_ruleset). A client, firm-wide or
+        // Procedure set has no core lookup, so it resolves to its creator as before. Both UserOwned (live spaarkedev1 2026-10-27).
+        "sprk_procedureassignment",
         "sprk_reportcard",
+        "sprk_ruleset",
         "sprk_spendsignal",
         "sprk_spendsnapshot",
         "sprk_todo",
@@ -1205,7 +1210,14 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// <c>OwnedChildWrite.ParentsOf</c>.
     /// </summary>
     private static readonly HashSet<(string Table, string Column)> CitationLookups = new(
-        [("sprk_signal", "sprk_policy")], CitationComparer.Instance);
+        [
+            ("sprk_signal", "sprk_policy"),
+            // ebilling-r1 task 089: an assignment row names the Procedure, the pinned version and the excluded rule it overrides; it is
+            // filed under its core record only. A firm-wide rule owned in its author's business unit must never decide its owner.
+            ("sprk_procedureassignment", "sprk_procedure"),
+            ("sprk_procedureassignment", "sprk_pinnedversion"),
+            ("sprk_procedureassignment", "sprk_excludedpolicy"),
+        ], CitationComparer.Instance);
 
     /// <summary>True when <paramref name="column"/> of <paramref name="table"/> cites a record rather than files the row under it.</summary>
     public static bool IsCitation(string? table, string? column) =>

@@ -294,6 +294,22 @@
       "addedBy": "unified-access-control-r2 #2084"
     },
     {
+      "logicalName": "sprk_procedureassignment",
+      "privilegeName": "prvReadsprk_procedureassignment",
+      "kind": "child",
+      "reason": "ebilling-r1 task 089 (EB-D-148, uac-r2 F1-a): ProcedureAssignmentService creates an assignment or override row (pin, exclude, exclude rule, change rule) owned through RecordOwnershipResolver with parents [its core record], so a Secure record's row is owned by the Secure Record Owners team. SecureChildLineage lists it as the core record's child, so SecureChildReconciler re-owns existing rows on Make Secure.",
+      "evidence": "PENDING-LIVE-PROBE: no refusal recorded yet (owner EB-D-158: the main session runs the probe). Read-only, spaarkedev1 2026-10-27: the privilege exists (prvReadsprk_procedureassignment, Id=287f9674-9656-4006-9eda-ad999cbc69a0). To record: create a probe sprk_procedureassignment with ownerid bound to the Secure Record Owners team 6eabc7f9-13be-f111-a05b-0022482913fc BEFORE -Apply and quote the 0x80040299 'Read Privilege Check For Owner failed ... is missing prvReadsprk_procedureassignment privilege' refusal verbatim here.",
+      "addedBy": "ebilling-r1 task 089"
+    },
+    {
+      "logicalName": "sprk_ruleset",
+      "privilegeName": "prvReadsprk_ruleset",
+      "kind": "child",
+      "reason": "ebilling-r1 task 089 (model 6.3, uac-r2 F1-a): a changed rule lives in its core record's record-scoped rule set (sprk_scope Record or Firm record), created by ProcedureAssignmentService owned through RecordOwnershipResolver with parents [the core record]; its record rules (sprk_policy.sprk_ruleset) and their versions take the set's owner. A Secure record's set is owned by the Secure Record Owners team. A client, firm-wide or Procedure set has no core lookup and is never reached.",
+      "evidence": "PENDING-LIVE-PROBE: no refusal recorded yet (owner EB-D-158: the main session runs the probe). Read-only, spaarkedev1 2026-10-27: the privilege exists (prvReadsprk_ruleset, Id=717306f0-6f28-42d0-83ca-5ce3a9fe8e42). To record: create a probe sprk_ruleset with ownerid bound to the Secure Record Owners team 6eabc7f9-13be-f111-a05b-0022482913fc BEFORE -Apply and quote the 0x80040299 'Read Privilege Check For Owner failed ... is missing prvReadsprk_ruleset privilege' refusal verbatim here.",
+      "addedBy": "ebilling-r1 task 089"
+    },
+    {
       "logicalName": "sprk_externalrecordaccess",
       "privilegeName": "prvReadsprk_ExternalRecordAccess",
       "kind": "grant",

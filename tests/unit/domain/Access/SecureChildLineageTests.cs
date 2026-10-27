@@ -145,8 +145,9 @@ public class SecureChildLineageTests
     {
         var rule = SecureChildLineage.Children["sprk_policy"];
         rule.EntitySet.Should().Be("sprk_policies");
-        rule.Lookups.Should().BeEquivalentTo(new Dictionary<string, string> { ["sprk_matter"] = "sprk_matter" },
-            "sprk_currentversion names the rule's own version and can add no root");
+        rule.Lookups.Should().BeEquivalentTo(
+            new Dictionary<string, string> { ["sprk_matter"] = "sprk_matter", ["sprk_ruleset"] = "sprk_ruleset" },
+            "sprk_currentversion names the rule's own version and can add no root; a record rule is filed under its set (task 089)");
 
         var version = SecureChildLineage.Children["sprk_policyversion"];
         version.EntitySet.Should().Be("sprk_policyversions");
@@ -155,6 +156,50 @@ public class SecureChildLineageTests
         RecordOwnershipResolver.IsReparentableChild("sprk_policy").Should().BeTrue();
         RecordOwnershipResolver.IsOwnershipParent("sprk_policyversion").Should().BeFalse(
             "a Signal or Decision Record citing a version is not filed under it");
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 089 (EB-D-148, uac-r2 F1-a): an assignment / override row and a record-scoped rule set are filed under their core
+    /// record; a record rule under its set. An assignment's Procedure, pinned version and excluded rule are citations (must fire: dropped
+    /// from its parents); its core lookup is its parent (must not fire).
+    /// </summary>
+    [Fact]
+    public void AnAssignmentAndARecordRuleSetAreFiledUnderTheirCoreRecord_AndTheAssignmentsSubjectsAreCitations()
+    {
+        var core = new Dictionary<string, string>
+        {
+            ["sprk_matter"] = "sprk_matter", ["sprk_project"] = "sprk_project", ["sprk_workassignment"] = "sprk_workassignment",
+        };
+        var assignment = SecureChildLineage.Children["sprk_procedureassignment"];
+        assignment.EntitySet.Should().Be("sprk_procedureassignments");
+        assignment.Lookups.Should().BeEquivalentTo(core, "the Procedure, pinned version, excluded rule and firm are not filing parents");
+
+        var set = SecureChildLineage.Children["sprk_ruleset"];
+        set.EntitySet.Should().Be("sprk_rulesets");
+        set.Lookups.Should().BeEquivalentTo(core, "a client, firm-wide or Procedure set has no core lookup value and is never reached");
+
+        RecordOwnershipResolver.IsReparentableChild("sprk_procedureassignment").Should().BeTrue();
+        RecordOwnershipResolver.IsReparentableChild("sprk_ruleset").Should().BeTrue();
+
+        var (matter, procedure, version, policy, firm) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var row = new Microsoft.Xrm.Sdk.Entity("sprk_procedureassignment")
+        {
+            ["sprk_matter"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", matter),
+            ["sprk_procedure"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_procedure", procedure),
+            ["sprk_pinnedversion"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_procedureversion", version),
+            ["sprk_excludedpolicy"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_policy", policy),
+            ["sprk_firm"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_organization", firm),
+        };
+        RecordOwnershipContext.ForChild(row).Parents.Should().Equal(new RecordOwnershipParent("sprk_matter", matter));
+        RecordOwnershipResolver.IsCitation("sprk_procedureassignment", "sprk_excludedpolicy").Should().BeTrue();
+        RecordOwnershipResolver.IsCitation("sprk_procedureassignment", "sprk_matter").Should().BeFalse();
+
+        var setId = Guid.NewGuid();
+        var recordRule = new Microsoft.Xrm.Sdk.Entity("sprk_policy")
+        {
+            ["sprk_ruleset"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_ruleset", setId),
+        };
+        RecordOwnershipContext.ForChild(recordRule).Parents.Should().Equal(new RecordOwnershipParent("sprk_ruleset", setId));
     }
 
     /// <summary>

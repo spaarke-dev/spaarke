@@ -387,6 +387,21 @@ public sealed class RuleSetServiceTests
                     return null;
                 }
 
+                // Task 089: an override removal deletes its row in the same transaction as switching the record rule Off.
+                case Microsoft.Xrm.Sdk.Messages.DeleteRequest delete:
+                {
+                    var target = delete.Target;
+                    if (Rows.GetValueOrDefault(target.LogicalName)?.Any(r => r.Id == target.Id) != true)
+                    {
+                        return (unchecked((int)0x80040217), $"{target.LogicalName} With Id = {target.Id} Does Not Exist");
+                    }
+
+                    Writes.Add((Write.Delete, target.LogicalName, target.Id, new Dictionary<string, object>()));
+                    Order.Add("txn-delete:" + target.LogicalName);
+                    Rows[target.LogicalName].RemoveAll(r => r.Id == target.Id);
+                    return null;
+                }
+
                 default:
                     throw new NotSupportedException(request.GetType().Name);
             }

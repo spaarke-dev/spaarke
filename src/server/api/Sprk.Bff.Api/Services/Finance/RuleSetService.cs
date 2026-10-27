@@ -339,17 +339,17 @@ public class RuleSetService
     internal static readonly Guid EditVersionIdNamespace = new("3d7b9c1e-52a4-4f86-b0e3-9a6c2f41d875");
 
     // sprk_policy columns billing needs on a policy that is NOT created here (075 creates them): see the notes for the row shape.
-    private static readonly string[] PolicyColumns =
+    internal static readonly string[] PolicyColumns =
         { "sprk_name", "sprk_policycode", "sprk_currentversion", "sprk_enabled", "sprk_ruleset", RuleDomains.PolicyDomainColumn, RowVersionColumn };
 
-    private static readonly string[] VersionColumns =
+    internal static readonly string[] VersionColumns =
     {
         "sprk_policy", "sprk_versionnumber", "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate", "sprk_shortheadline",
         "sprk_consequence", "sprk_proposalstatus", "sprk_clausereference", "sprk_clauselocation", "sprk_inforcefrom", "sprk_inforceto",
         RowVersionColumn, RejectionReasonColumn, ProcedureVersionColumn, PublishStateColumn,
     };
 
-    private static readonly string[] RuleSetColumns =
+    internal static readonly string[] RuleSetColumns =
     {
         "sprk_name", "sprk_scope", "sprk_firm", "sprk_visibletofirms", "sprk_effectivefrom", "sprk_effectiveto", "sprk_sourcedocument",
         "sprk_notconverted", "statuscode", RuleDomains.PolicyDomainColumn, ProcedureColumn,
@@ -559,7 +559,9 @@ public class RuleSetService
                 StatusCodes.Status422UnprocessableEntity, CodeResultTruncated, "There are more rule sets than can be listed in one pass.");
         }
 
-        var rows = sets.Entities.Where(RuleDomains.IsBillingRow).ToList();
+        // ebilling-r1 task 089 (model 5.2, uac-r2 F1-a): a record-scoped set holds one record's changed rules and is a secure child of that
+        // record. It is written and read only through ProcedureAssignmentService (caller-checked against the record), never listed here.
+        var rows = sets.Entities.Where(r => RuleDomains.IsBillingRow(r) && !RecordScopedRuleSet.IsRecordScoped(r)).ToList();
         var counts = new Dictionary<Guid, int>();
         foreach (var batch in rows.Select(r => (object)r.Id).Chunk(MaxInValues))
         {
@@ -2500,7 +2502,9 @@ public class RuleSetService
         };
         RuleDomains.AddBillingFilter(query);
         var rows = await _entities.RetrieveMultipleAsync(query, ct);
-        return rows.Entities.FirstOrDefault(r => r.Id == ruleSetId && RuleDomains.IsBillingRow(r));
+        // ebilling-r1 task 089: a record-scoped set is the uniform "not found" for every rule set route (read, edit, decide, publish, assign,
+        // visibility, drafting): only ProcedureAssignmentService writes it, after the caller's checks on its record.
+        return rows.Entities.FirstOrDefault(r => r.Id == ruleSetId && RuleDomains.IsBillingRow(r) && !RecordScopedRuleSet.IsRecordScoped(r));
     }
 
     private static QueryExpression PolicyQuery(string column, ConditionOperator op, object[] values)
@@ -2629,7 +2633,7 @@ public class RuleSetService
             : (rule, null);
     }
 
-    private static VersionRow ToVersion(Entity v) => new(
+    internal static VersionRow ToVersion(Entity v) => new(
         v.Id,
         v.GetAttributeValue<int?>("sprk_versionnumber") ?? 0,
         v.GetAttributeValue<OptionSetValue>("sprk_ruletype")?.Value,
@@ -2727,6 +2731,13 @@ public class RuleSetService
     /// columns (consequence, headline, template). Task 073 (FR-26, I-5, D-89): the validator also gets the consequence, so a rule whose
     /// type may not carry it (Reject on an AiObservation rule, say) is refused on every one of these paths, publish included.
     /// </summary>
+    /// <summary>
+    /// ebilling-r1 task 089 (model 6.3): the same validation for a rule copied from <paramref name="policy"/> with edited parameters, before
+    /// the copy is written (PolicyVersionValidator with the Billing domain and the consequence, then the required columns).
+    /// </summary>
+    internal IReadOnlyList<RuleSetError> ValidateCopiedRule(PolicyRow policy, string? ruleTypeRaw, VersionRow version) =>
+        ValidateRule(policy, ruleTypeRaw, version);
+
     private List<RuleSetError> ValidateRule(PolicyRow policy, string? ruleTypeRaw, VersionRow version)
     {
         var errors = new List<RuleSetError>();

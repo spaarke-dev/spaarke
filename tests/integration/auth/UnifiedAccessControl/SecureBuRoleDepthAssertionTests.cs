@@ -427,6 +427,93 @@ public class SecureBuRoleDepthAssertionTests
             "prvReadsprk_Project", "prvReadsprk_Matter", "prvReadsprk_WorkAssignment");
     }
 
+    // ── Task 089 (procedure model 5.1, NFR-05 depth list): the secure CHILD tables that name what is watched or overridden ──
+
+    /// <summary>
+    /// The five secure-child Reads graded for reach (task 089), kept apart from the three roots above (which stay pinned, and stay the only
+    /// names whose absence blinds the census). Casing as read live from the <c>privilege</c> table, spaarkedev1 2026-10-27.
+    /// </summary>
+    [Fact]
+    public void GuardedChildPrivileges_CoverTheAssignmentRuleSetRuleVersionAndStoredFileTables()
+    {
+        SecureBuRoleDepthAssertion.GuardedChildPrivileges.Should().BeEquivalentTo(
+            "prvReadsprk_procedureassignment", "prvReadsprk_ruleset", "prvReadsprk_Policy", "prvReadsprk_PolicyVersion", "prvReadsprk_StoredFile");
+        SecureBuRoleDepthAssertion.GuardedChildPrivileges.Should().NotIntersectWith(SecureBuRoleDepthAssertion.GuardedPrivileges);
+        SecureBuRoleDepthCensusBuilder.CensusPrivilegeNames(SecureRecordOwnerRoleSet.Embedded)
+            .Should().Contain(SecureBuRoleDepthAssertion.GuardedChildPrivileges, "a census reader must resolve them");
+    }
+
+    /// <summary>
+    /// Must-fire: a human whose role holds Global (or Deep at an ancestor) Read on a secure child table reads those rows of every Secure record,
+    /// so the builder emits the grant and clause 1 reports it exactly as for a root table. Must-not-fire: Basic in a sibling subtree.
+    /// </summary>
+    [Theory]
+    [InlineData("prvReadsprk_procedureassignment")]
+    [InlineData("prvReadsprk_ruleset")]
+    [InlineData("prvReadsprk_Policy")]
+    [InlineData("prvReadsprk_PolicyVersion")]
+    [InlineData("prvReadsprk_StoredFile")]
+    public void Build_WhenAHumanReachesTheSecureBuOnASecureChildTable_ReportsNotIsolated_AndBasicInASiblingDoesNot(string privilege)
+    {
+        SecureBuRoleDepthCensus CensusOf(PrivilegeDepth depth, Guid anchor)
+        {
+            var role = Guid.NewGuid();
+            var user = Guid.NewGuid();
+            return SecureBuRoleDepthCensusBuilder.Build(
+                SecureRecordOwnerTeam.DefaultBusinessUnitName,
+                OwnerTeamName,
+                BusinessUnits,
+                new Dictionary<(Guid, string), PrivilegeDepth> { [(role, privilege)] = depth },
+                new[] { new CensusRole(role, "Spaarke Billing Administrator", anchor, role) },
+                new[] { new CensusUser(user, IsHuman: true, anchor, new[] { role }) },
+                Array.Empty<CensusTeam>(),
+                SecureRecordOwnerRoleSet.Embedded,
+                SecureBuRoleDepthCensusBuilder.CensusPrivilegeNames(SecureRecordOwnerRoleSet.Embedded));
+        }
+
+        var global = CensusOf(PrivilegeDepth.Global, SiblingBu);
+        global.Grants.Should().ContainSingle(g => g.PrivilegeName == privilege);
+        SecureBuRoleDepthAssertion.Evaluate(global).Findings.Select(f => f.Verdict)
+            .Should().Contain(SecureBuVerdict.HumanPrincipalReachesSecureBusinessUnit);
+
+        var deepAtRoot = CensusOf(PrivilegeDepth.Deep, RootBu);
+        SecureBuRoleDepthAssertion.Evaluate(deepAtRoot).Findings.Select(f => f.Verdict)
+            .Should().Contain(SecureBuVerdict.HumanPrincipalReachesSecureBusinessUnit);
+
+        var basicInSibling = CensusOf(PrivilegeDepth.Basic, SiblingBu);
+        SecureBuRoleDepthAssertion.Evaluate(basicInSibling).Findings.Select(f => f.Verdict)
+            .Should().NotContain(SecureBuVerdict.HumanPrincipalReachesSecureBusinessUnit);
+    }
+
+    /// <summary>
+    /// Must-fire: a secure-child name the environment did not return is exactly one finding naming it (reach on it was not graded), and the
+    /// census still runs: the root guard does not throw for it. Must-not-fire: every name resolved, no such finding.
+    /// </summary>
+    [Fact]
+    public void Build_WhenTheEnvironmentDoesNotReturnASecureChildPrivilege_ReportsExactlyOneFindingNamingIt()
+    {
+        var all = SecureBuRoleDepthCensusBuilder.CensusPrivilegeNames(SecureRecordOwnerRoleSet.Embedded);
+        SecureBuRoleDepthCensus Built(IReadOnlyList<string> resolved) => SecureBuRoleDepthCensusBuilder.Build(
+            SecureRecordOwnerTeam.DefaultBusinessUnitName,
+            OwnerTeamName,
+            BusinessUnits,
+            new Dictionary<(Guid, string), PrivilegeDepth>(),
+            Array.Empty<CensusRole>(),
+            Array.Empty<CensusUser>(),
+            Array.Empty<CensusTeam>(),
+            SecureRecordOwnerRoleSet.Embedded,
+            resolved);
+
+        // One ordinary grant in a sibling subtree, so the census is not vacuous (clause 1 passes; only the unresolved name is reported).
+        var ordinary = new[] { Grant("Spaarke Basic User", PrivilegeDepth.Deep, SiblingBu, "Test User 1", isHuman: true) };
+        var missing = Built(all.Where(n => n != "prvReadsprk_ruleset").ToArray()) with { Grants = ordinary };
+        var findings = SecureBuRoleDepthAssertion.Evaluate(missing).Findings.Where(f => f.Verdict == SecureBuVerdict.GuardedChildPrivilegeNotResolved).ToList();
+        findings.Should().ContainSingle().Which.Message.Should().Contain("prvReadsprk_ruleset");
+
+        SecureBuRoleDepthAssertion.Evaluate(Built(all) with { Grants = ordinary }).Findings
+            .Should().NotContain(f => f.Verdict == SecureBuVerdict.GuardedChildPrivilegeNotResolved);
+    }
+
     // ── Clause 5 (task 145, #1046): the owner role covers the codified set ───────────────────────────
 
     /// <summary>
@@ -734,7 +821,7 @@ public class SecureBuRoleDepthAssertionTests
             Array.Empty<CensusUser>(),
             new[] { new CensusTeam(namedTeam, OwnerTeamName, SecureBu, IsDefault: false, TeamType: 0, new[] { ownerRole }, Array.Empty<Guid>()) },
             set,
-            present.Select(t => t.PrivilegeName).ToArray());
+            present.Select(t => t.PrivilegeName).Concat(SecureBuRoleDepthAssertion.GuardedChildPrivileges).Distinct().ToArray());
 
         var gap = census.OwnerRoleCoverage.Tables.Should().ContainSingle(t => !t.ExistsInEnvironment).Subject;
         gap.LogicalName.Should().Be("sprk_memo");

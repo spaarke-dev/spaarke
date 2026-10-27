@@ -57,6 +57,9 @@ public class RecordOwnerAssignmentCensusTests
         "sprk_invoicesubmission", "sprk_invoiceapproval", "sprk_externalidentifier", "sprk_invoicecorrection",
         // #2084 (owner round 102 item 4): a matter-scoped rule and its versions joined the secure family.
         "sprk_policy", "sprk_policyversion",
+        // ebilling-r1 task 089 (EB-D-148, uac-r2 F1-a): an assignment / override row and a record-scoped rule set are their core record's
+        // children (a record rule is filed under its set: SecureChildLineage).
+        "sprk_procedureassignment", "sprk_ruleset",
     };
 
     private enum Disposition
@@ -123,31 +126,31 @@ public class RecordOwnerAssignmentCensusTests
     //      Behaviour tests (SecureChildOwnership*Tests, InvoiceReviewWritePathTests, TodoGenerationAssignedToTests) pin
     //      each EXISTING writer's owner; these limits bite only on new code.
     // =============================================================================================
-    /// <summary>The one waiver text for RuleSetService's sprk_policy and sprk_policyversion creates (ebilling-r1).</summary>
+    /// <summary>The one waiver text for RuleSetService's sprk_ruleset, sprk_policy and sprk_policyversion creates (ebilling-r1).</summary>
     private const string RuleSetServicePolicyWaiver =
-        "ebilling-r1 RuleSetService (Billing-domain rules; the first version at CreateDraftRuleAsync and the edit-path version at EditAsync "
-        + "included). Billing rules have no matter scope YET; the rule-set scope model is under owner review (2026-10-20, ontology-r1 "
-        + "leads). This waiver ends when that review decides a scope level; the creates must then be routed. Open owner decision: "
-        + "scope model under owner review 2026-10-20 (#2129). "
-        + "When a billing rule gains a matter/project/work-assignment scope, this waiver ends: the policy and policy-version creates must be "
-        + "routed (owner via IRecordOwnershipResolver WITH the scope parent), and SecureChildLineage / FilingParentOf must gain any new "
-        + "filing lookups on sprk_policy (today only sprk_matter). Otherwise a rule scoped under a Secure record lands outside isolation. "
-        + "Today a billing rule hangs off sprk_ruleset and RuleSetService never writes "
-        + "sprk_policy.sprk_matter, so it cannot be filed under a Secure matter; its owner is resolved through "
-        + "IRecordOwnershipResolver.ResolveOwnerAsync with NO parents (the caller's team) and a refusal writes nothing. "
-        + "Condition (1): RuleSetService never writes sprk_matter on sprk_policy, on create or update (RuleSetServiceNoMatterScopeGuardTests "
-        + "and RuleSetServiceOwnerTests.NoWrittenPolicyOrVersionRowCarriesAMatter_OnCreateOrUpdate fail the build otherwise); if a billing rule ever gains a "
-        + "matter scope, this waiver ends and the creates must be routed. "
-        + "Condition (2): both creates, the first version and the edit-path version, resolve the owner the same way "
-        + "(RuleSetServiceOwnerTests pins the identical no-parent context and the ApplyTo). "
-        + "ebilling-r1 task 081 adds a third sprk_policyversion create, the Procedure copy-forward (PlanCopyForwardAsync): it applies the "
-        + "owner ProcedureService resolved with the same no-parent context and the caller as RequestedBy (ProcedureServiceTests pins it), "
-        + "so the waiver covers it on the same conditions. "
+        "ebilling-r1 RuleSetService: rule sets, rules and versions that belong to NO core record. The scope model is decided "
+        + "(EB-D-148, procedure model 6.3; ebilling-r1 task 089 rewrote this waiver): a rule that applies to ONE matter, project or work "
+        + "assignment lives in that record's record-scoped rule set (sprk_scope Record or Firm record, a core lookup), and every create "
+        + "of such a set, its rules and their versions is ProcedureAssignmentService's, Routed below through IRecordOwnershipResolver with "
+        + "the core record as parent. RuleSetService creates only client-default, firm-wide and Procedure sets "
+        + "(CreateAsync; NewProcedureRuleSet, whose create ProcedureService sends) and their rules and versions (CreateDraftRuleAsync, "
+        + "EditAsync's edit-path version with the caller-chosen id VersionIdFor, the Procedure copy-forward PlanCopyForwardAsync): none "
+        + "names a core record, so none is a secure child (SecureChildLineage reaches a set or rule only through a core lookup value). "
+        + "Their owner is resolved through IRecordOwnershipResolver.ResolveOwnerAsync with NO parents and the caller as RequestedBy "
+        + "(RuleSetServiceOwnerTests, ProcedureServiceTests), and a refusal writes nothing. "
+        + "Condition (1): RuleSetService never writes a core lookup (sprk_matter, sprk_project, sprk_workassignment) on a rule set or "
+        + "rule, nor a record scope, nor references RecordScopedRuleSet beyond IsRecordScoped (RuleSetServiceNoMatterScopeGuardTests, "
+        + "RuleSetServiceOwnerTests.NoWrittenPolicyOrVersionRowCarriesAMatter_OnCreateOrUpdate and RecordScopedRuleSetWritersAreRouted "
+        + "fail the build otherwise), and the RuleSetScope enum it accepts cannot name a record scope. "
+        + "Condition (2): every RuleSetService read treats a record-scoped set as not found (ListAsync, LoadRuleSetAsync), so its admin "
+        + "routes cannot add rules to, edit or publish one. "
         + "Condition (3): it covers only Billing-domain rows written by RuleSetService; Ontology-domain policies stay under the authoring "
         + "entries. "
-        + "Known limit: a matter set on a Billing policy outside the BFF (form edit) is not seen here; the next edit-path version is "
-        + "re-owned by SecureChildReconciliationJob. "
-        + "Agreed as Pending: ontology-r1 2026-10-20; uac-r2 re-checked 2026-10-20.";
+        + "Known limit: NewProcedureRuleSet builds its row in one member and ProcedureService creates it in another, which this scanner "
+        + "does not count (KNOWN LIMITS); a Procedure set has no core lookup. A core lookup set on a set or rule outside the BFF (a form "
+        + "edit) is not seen here; SecureChildReconciliationJob re-owns such a row. "
+        + "History: agreed as Pending with ontology-r1 and uac-r2 on 2026-10-20 while the scope model was open; Permanent from task 089, "
+        + "for ontology-r1 review.";
 
     private static readonly IReadOnlyList<CensusEntry> Census = new[]
     {
@@ -273,8 +276,24 @@ public class RecordOwnerAssignmentCensusTests
         // because matter/project/work-assignment-level billing rules are planned): the billing rule's policy and its versions. The census
         // keys on (file, table), so the one waiver is two entries with one text: sprk_policy (1 site: CreateDraftRuleAsync's policy) and
         // sprk_policyversion (2 sites: CreateDraftRuleAsync's first version and EditAsync's edit-path version, created with the caller-chosen id VersionIdFor).
-        new CensusEntry("RuleSetService.cs", "sprk_policy", 1, Disposition.Waived, RuleSetServicePolicyWaiver, WaiverKind.Pending),
-        new CensusEntry("RuleSetService.cs", "sprk_policyversion", 3, Disposition.Waived, RuleSetServicePolicyWaiver, WaiverKind.Pending),
+        new CensusEntry("RuleSetService.cs", "sprk_policy", 1, Disposition.Waived, RuleSetServicePolicyWaiver, WaiverKind.Permanent),
+        new CensusEntry("RuleSetService.cs", "sprk_policyversion", 3, Disposition.Waived, RuleSetServicePolicyWaiver, WaiverKind.Permanent),
+        // ebilling-r1 task 089: CreateAsync's client-default or firm-wide set (no core lookup; the same waiver).
+        new CensusEntry("RuleSetService.cs", "sprk_ruleset", 1, Disposition.Waived, RuleSetServicePolicyWaiver, WaiverKind.Permanent),
+        // ebilling-r1 task 089 (EB-D-148, uac-r2 F1-a): the assignment and override service. Every row is owned through
+        // IRecordOwnershipResolver with the caller as RequestedBy, and a refusal writes nothing (ProcedureAssignmentServiceTests).
+        new CensusEntry("ProcedureAssignmentService.cs", "sprk_procedureassignment", 2, Disposition.Routed,
+            "ebilling-r1 task 089: an assignment (AssignProcedureAsync) or a rule-level Exclude row (AddExcludeCreate, for exclude and change) "
+            + "is owned through ResolveOwnerAsync with parents [its core record]; ApplyTo writes the answer onto the row before its create."),
+        new CensusEntry("ProcedureAssignmentService.cs", "sprk_ruleset", 1, Disposition.Routed,
+            "ebilling-r1 task 089: a record-scoped rule set (PlanChange, first change on the record) is owned through ResolveOwnerAsync with "
+            + "parents [its core record]; ApplyTo writes the answer onto the row before its create, in the change's one transaction."),
+        new CensusEntry("ProcedureAssignmentService.cs", "sprk_policy", 1, Disposition.Routed,
+            "ebilling-r1 task 089: a record rule (PlanChange) is owned through ResolveOwnerAsync with parents [its record-scoped set] when the "
+            + "set exists, else with the set's own resolution (the set is created in the same transaction and cannot be read yet)."),
+        new CensusEntry("ProcedureAssignmentService.cs", "sprk_policyversion", 1, Disposition.Routed,
+            "ebilling-r1 task 089: a record rule's one Published version (PlanChange) is created with its policy in one transaction, so it "
+            + "takes the policy's resolution (ResolveOwnerAsync) through ApplyTo; nothing else creates versions of a record rule."),
         // WorkAssignmentEndpoints.cs's sprk_workassignment create is gone: task 166 deleted the caller-less route (S-76,
         // owner round 10 item 1), so its Pending waiver went with it (batch-4 integration).
 
@@ -2456,6 +2475,8 @@ public class RecordOwnerAssignmentCensusTests
         // ebilling-r1 task 081 (procedure model 13, O-23): the calling admin creates Procedures, their versions and the copied policy
         // versions; ProcedureService's one owner decision names them (RequestedBy), which ApplyTo stamps on sprk_procedure(version).
         new PersonBearingWriter("ProcedureService.cs", "OwnerContext", "the calling admin (oid) of a Procedure, version or copy-forward create"),
+        // ebilling-r1 task 089: every assignment, Exclude row, record-scoped set, record rule and version names the calling admin.
+        new PersonBearingWriter("ProcedureAssignmentService.cs", "OwnerContext", "the calling admin (oid) of an assignment or override"),
     };
 
     /// <summary>
@@ -2469,12 +2490,7 @@ public class RecordOwnerAssignmentCensusTests
             ["sprk_procedure"] = "ebilling-r1 task 081: a Procedure is a billing document filed under no record (model 5.1: owned by the "
                 + "admin's business-unit team, no parents); it records the admin who created it (model 13, O-23)",
             ["sprk_procedureversion"] = "ebilling-r1 task 081: a version of a Procedure, owned and recorded as the Procedure is",
-            ["sprk_ruleset"] = "ebilling-r1 task 090 (UAC answer to 081 Q5): a rule set is created app-only for the calling billing admin "
-                + "(RuleSetService's upload, ProcedureService's Procedure create), so it records that person; it is not in the codified "
-                + "Secure Record Owner child set",
-            ["sprk_procedureassignment"] = "ebilling-r1 task 090 (UAC answer to 081 Q5): a Procedure assignment will be created app-only for "
-                + "the calling admin and records that person (080 created the column; no BFF writer creates one yet); it is not in the "
-                + "codified Secure Record Owner child set",
+            // ebilling-r1 task 089: sprk_ruleset and sprk_procedureassignment left this list; both are codified secure children now.
         };
 
     private static List<string> StampedOutsideCodified(
@@ -3119,6 +3135,131 @@ public class RecordOwnerAssignmentCensusTests
         if (entitySet == "sprk_analyses")
             return "sprk_analysis";
         return entitySet.EndsWith('s') && ChildTables.Contains(entitySet[..^1]) ? entitySet[..^1] : null;
+    }
+
+    // =============================================================================================
+    // ebilling-r1 task 089 (procedure model 5.1 / 5.2, ontology O1, F3-e): the record-scope guard
+    // =============================================================================================
+
+    /// <summary>
+    /// A file that can make a rule set, rule or version RECORD-scoped: it declares or uses <c>RecordScopedRuleSet</c> beyond the read-only
+    /// <c>IsRecordScoped</c> test, or writes <c>sprk_scope</c> = Record (100000002) / Firm record (100000003) as a literal.
+    /// </summary>
+    private static readonly Regex RecordScopeMarker = new(
+        @"\bRecordScopedRuleSet\s*\.\s*(?!IsRecordScoped\b)\w+|\bclass\s+RecordScopedRuleSet\b|\[\s*""sprk_scope""\s*\]\s*=\s*new\s+OptionSetValue\s*\(\s*10000000[23]\s*\)",
+        RegexOptions.Compiled);
+
+    private static readonly string[] RecordRuleTables = { "sprk_ruleset", "sprk_policy", "sprk_policyversion" };
+
+    /// <summary>
+    /// The problems of the record-scope guard: in every file carrying <see cref="RecordScopeMarker"/>, each create of a rule set, rule or
+    /// version must be a ROUTED census entry (never waived, never unlisted), the file must call the resolver, and each site must write
+    /// its own row's owner (<see cref="SiteOwnerProblems"/>). A file without the marker (client, firm-wide and Procedure sets) is not
+    /// judged here; the census and its waiver judge it.
+    /// </summary>
+    private static List<string> RecordScopeProblems(IReadOnlyDictionary<string, string> files, IReadOnlyList<CensusEntry> census)
+    {
+        var problems = new List<string>();
+        var sites = ScanSiteIndexes(files);
+        foreach (var (fileName, code) in files.Where(f => RecordScopeMarker.IsMatch(f.Value)).OrderBy(f => f.Key, StringComparer.Ordinal))
+        {
+            foreach (var table in RecordRuleTables)
+            {
+                if (!sites.TryGetValue((fileName, table), out var indexes))
+                {
+                    continue;
+                }
+
+                var entry = census.FirstOrDefault(e => e.FileName == fileName && e.Table == table);
+                if (entry is null || entry.Disposition != Disposition.Routed)
+                {
+                    problems.Add($"{fileName} writes record scope and creates {table}, but its census entry is "
+                                 + (entry is null ? "missing" : entry.Disposition.ToString()) + ": a record-scoped create must be Routed");
+                }
+
+                if (!ResolverCall.IsMatch(code))
+                {
+                    problems.Add($"{fileName} writes record scope and creates {table}, but makes no IRecordOwnershipResolver call");
+                }
+
+                problems.AddRange(SiteOwnerProblems(code, fileName, table, indexes));
+            }
+        }
+
+        return problems;
+    }
+
+    [Fact(DisplayName = "Task 089: every record-scoped rule set, record rule and version create is Routed through the resolver")]
+    public void RecordScopedRuleSetWritersAreRouted()
+    {
+        var files = ServerFiles();
+        Assert.Contains(files, f => RecordScopeMarker.IsMatch(f.Value)); // the guard is not vacuous: ProcedureAssignmentService carries it
+        var problems = RecordScopeProblems(files, Census);
+        Assert.True(problems.Count == 0, "Record-scoped rule writers outside the resolver (task 089):\n" + string.Join("\n", problems));
+    }
+
+    [Fact(DisplayName = "Task 089: controls — the record-scope guard fires on an unrouted or waived record-scoped create, not on a Procedure set")]
+    public void RecordScopeGuard_Controls()
+    {
+        const string Unrouted = """
+            internal sealed class Seeded
+            {
+                private const string RuleSetEntity = "sprk_ruleset";
+                private const string PolicyEntity = "sprk_policy";
+                private void Plan(List<OrganizationRequest> requests, Guid matterId)
+                {
+                    var set = new Entity(RuleSetEntity, Guid.NewGuid()) { ["sprk_scope"] = new OptionSetValue(100000002) };
+                    requests.Add(new CreateRequest { Target = set });
+                    var policy = new Entity(PolicyEntity, Guid.NewGuid()) { ["sprk_policycode"] = RecordScopedRuleSet.CodeFor(Guid.NewGuid()) };
+                    requests.Add(new CreateRequest { Target = policy });
+                }
+            }
+            """;
+        const string Routed = """
+            internal sealed class Seeded
+            {
+                private const string RuleSetEntity = "sprk_ruleset";
+                private async Task Plan(List<OrganizationRequest> requests, Guid matterId)
+                {
+                    var owner = await _ownership.ResolveOwnerAsync(context, ct);
+                    var set = new Entity(RuleSetEntity, Guid.NewGuid()) { ["sprk_scope"] = new OptionSetValue(100000003) };
+                    owner.ApplyTo(set);
+                    requests.Add(new CreateRequest { Target = set });
+                }
+            }
+            """;
+        const string ProcedureSet = """
+            internal sealed class Seeded
+            {
+                private const string RuleSetEntity = "sprk_ruleset";
+                private void Plan(List<OrganizationRequest> requests, Guid procedureId)
+                {
+                    var set = new Entity(RuleSetEntity, Guid.NewGuid()) { ["sprk_procedure"] = new EntityReference("sprk_procedure", procedureId) };
+                    requests.Add(new CreateRequest { Target = set });
+                    if (RecordScopedRuleSet.IsRecordScoped(set)) { }
+                }
+            }
+            """;
+        var routedEntries = new[]
+        {
+            new CensusEntry("Seeded.cs", "sprk_ruleset", 1, Disposition.Routed, "seeded"),
+            new CensusEntry("Seeded.cs", "sprk_policy", 1, Disposition.Routed, "seeded"),
+        };
+
+        // Must fire: a record-scoped set and a record rule created with no resolver call and no owner write (even when listed Routed).
+        var unrouted = RecordScopeProblems(new Dictionary<string, string> { ["Seeded.cs"] = Unrouted }, routedEntries);
+        Assert.Contains(unrouted, p => p.Contains("no IRecordOwnershipResolver call", StringComparison.Ordinal) && p.Contains("sprk_ruleset", StringComparison.Ordinal));
+        Assert.Contains(unrouted, p => p.Contains("sprk_policy created with no owner write", StringComparison.Ordinal));
+
+        // Must fire: the same routed create, but waived in the census.
+        var waived = RecordScopeProblems(
+            new Dictionary<string, string> { ["Seeded.cs"] = Routed },
+            new[] { new CensusEntry("Seeded.cs", "sprk_ruleset", 1, Disposition.Waived, "seeded", WaiverKind.Permanent) });
+        Assert.Contains(waived, p => p.Contains("Waived", StringComparison.Ordinal));
+
+        // Must not fire: a routed record-scoped create, and a Procedure set (no record scope; IsRecordScoped is only read).
+        Assert.Empty(RecordScopeProblems(new Dictionary<string, string> { ["Seeded.cs"] = Routed }, routedEntries));
+        Assert.Empty(RecordScopeProblems(new Dictionary<string, string> { ["Seeded.cs"] = ProcedureSet }, Array.Empty<CensusEntry>()));
     }
 
     /// <summary>The text of the first method named <paramref name="method"/> (declaration to its closing brace).</summary>

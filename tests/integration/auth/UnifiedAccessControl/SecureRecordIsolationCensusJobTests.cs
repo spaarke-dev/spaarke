@@ -101,6 +101,13 @@ public class SecureRecordIsolationCensusJobTests
             _directory.Depth(OwnerRole, privilegeId, PrivilegeDepth.Basic);
         }
 
+        // Task 089: the guarded secure-child Reads the environment returns (no role holds them here, so they reach nothing).
+        foreach (var name in SecureBuRoleDepthAssertion.GuardedChildPrivileges
+                     .Where(n => SecureRecordOwnerRoleSet.Embedded.Tables.All(t => t.PrivilegeName != n)))
+        {
+            _directory.Privilege(Guid.NewGuid(), name);
+        }
+
         _directory.User(Admin, "Ralph Admin", RootBu, accessMode: 0, isDisabled: false, isApplication: false, SysAdminRole);
         _directory.User(TestUser, "Test User 1", SiblingBu, accessMode: 0, isDisabled: false, isApplication: false, BasicUserSiblingCopy);
         _directory.User(AppUser, "# mi-bff-api-dev", RootBu, accessMode: 4, isDisabled: false, isApplication: true);

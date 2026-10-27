@@ -62,6 +62,24 @@ public static class SecureBuRoleDepthAssertion
         "prvReadsprk_WorkAssignment"
     };
 
+    /// <summary>
+    /// ebilling-r1 task 089 (procedure model 5.1, NFR-05 depth list): the Read privileges of the secure CHILD tables whose rows name what is
+    /// watched or overridden on a Secure record: an assignment or override, a record-scoped rule set, a rule and its versions, a stored
+    /// file. A human whose role reaches the Secure business unit on one of them reads those rows of every Secure record (clause 1, the same
+    /// finding as for the roots). Kept SEPARATE from <see cref="GuardedPrivileges"/>, which is unchanged and pinned: an environment without
+    /// one of these tables must not blind the census (<see cref="SecureBuRoleDepthCensusBuilder.RequireGuardedPrivilegesResolved"/> throws only
+    /// for the three roots), so a name the environment does not return is one <see cref="SecureBuVerdict.GuardedChildPrivilegeNotResolved"/>
+    /// finding naming it. Names read live, spaarkedev1 2026-10-27 (<c>privilege</c> table; casing follows each table's schema name).
+    /// </summary>
+    public static readonly IReadOnlyList<string> GuardedChildPrivileges = new[]
+    {
+        "prvReadsprk_procedureassignment",
+        "prvReadsprk_ruleset",
+        "prvReadsprk_Policy",
+        "prvReadsprk_PolicyVersion",
+        "prvReadsprk_StoredFile"
+    };
+
     /// <summary>The role that legitimately anchors ownership inside the secure BU (design §5.1a).</summary>
     public const string SecureOwnerRoleName = "Secure Record Owner";
 
@@ -183,9 +201,21 @@ public static class SecureBuRoleDepthAssertion
         findings.AddRange(EvaluateOwnerTeamClause(census, secureBu));
         findings.AddRange(EvaluateOwnerRoleContainmentClause(census));
         findings.AddRange(EvaluateOwnerRoleCoverageClause(census));
+        findings.AddRange(EvaluateChildPrivilegesResolvedClause(census));
 
         return new SecureBuAssertionOutcome(findings);
     }
+
+    /// <summary>
+    /// Task 089 (NFR-05 depth list): one finding per <see cref="GuardedChildPrivileges"/> name the environment did not return. Clause 1 cannot
+    /// grade reach on a privilege it never resolved, so an unresolved name is never a quiet pass.
+    /// </summary>
+    private static IEnumerable<SecureBuFinding> EvaluateChildPrivilegesResolvedClause(SecureBuRoleDepthCensus census) =>
+        census.UnresolvedChildPrivileges.Select(name => new SecureBuFinding(
+            SecureBuVerdict.GuardedChildPrivilegeNotResolved,
+            $"The secure-child privilege {name} was not returned by the environment (table not installed, renamed, or the name is mis-cased: the "
+            + "census matches names exactly). Reach on that table could not be graded, so no role's depth on it was checked. Install the table "
+            + "or correct the name in SecureBuRoleDepthAssertion.GuardedChildPrivileges, then re-run."));
 
     /// <summary>
     /// Clause 5 (task 145) — the owner role covers the codified set. Fails closed on everything it cannot grade: an
@@ -552,7 +582,8 @@ public static class SecureBuRoleDepthCensusBuilder
     /// <see cref="SecureRecordOwnerRoleSet.Embedded"/>; <paramref name="depthByRootRole"/> must carry its privileges
     /// (<see cref="CensusPrivilegeNames"/>).</param>
     /// <param name="resolvedPrivilegeNames">Every privilege name the environment returned, exactly as returned. A
-    /// codified privilege not among them is reported by clause 5 as not present in the environment.</param>
+    /// codified privilege not among them is reported by clause 5 as not present in the environment, and a
+    /// <see cref="SecureBuRoleDepthAssertion.GuardedChildPrivileges"/> name not among them by its own finding (task 089).</param>
     public static SecureBuRoleDepthCensus Build(
         string secureBusinessUnitName,
         string secureOwnerTeamName,
@@ -645,18 +676,24 @@ public static class SecureBuRoleDepthCensusBuilder
             namedTeams.Count,
             ownerTeamMembers,
             secureBuUsers,
-            OwnerRoleCoverage(ownerRoleSet, resolvedPrivilegeNames, depthByRootRole, roles, secureBuIds));
+            OwnerRoleCoverage(ownerRoleSet, resolvedPrivilegeNames, depthByRootRole, roles, secureBuIds))
+        {
+            UnresolvedChildPrivileges = SecureBuRoleDepthAssertion.GuardedChildPrivileges
+                .Where(name => !resolvedPrivilegeNames.Contains(name, StringComparer.Ordinal))
+                .ToArray(),
+        };
     }
 
     /// <summary>
-    /// Every privilege a census reader must resolve: the guarded root-table Reads (clause 1) and every privilege of the
-    /// codified set (clause 5). Distinct, in a stable order.
+    /// Every privilege a census reader must resolve: the guarded root-table Reads and the guarded secure-child Reads (clause 1) and every
+    /// privilege of the codified set (clause 5). Distinct, in a stable order.
     /// </summary>
     public static IReadOnlyList<string> CensusPrivilegeNames(SecureRecordOwnerRoleSet ownerRoleSet)
     {
         ArgumentNullException.ThrowIfNull(ownerRoleSet);
 
         return SecureBuRoleDepthAssertion.GuardedPrivileges
+            .Concat(SecureBuRoleDepthAssertion.GuardedChildPrivileges)
             .Concat(ownerRoleSet.Tables.Select(t => t.PrivilegeName))
             .Distinct(StringComparer.Ordinal)
             .ToArray();
@@ -759,7 +796,7 @@ public static class SecureBuRoleDepthCensusBuilder
             return;
         }
 
-        foreach (var privilege in SecureBuRoleDepthAssertion.GuardedPrivileges)
+        foreach (var privilege in SecureBuRoleDepthAssertion.GuardedPrivileges.Concat(SecureBuRoleDepthAssertion.GuardedChildPrivileges))
         {
             if (!depthByRootRole.TryGetValue((role.RootRoleId, privilege), out var depth))
             {
@@ -860,7 +897,14 @@ public sealed record SecureBuRoleDepthCensus(
     int SecureOwnerTeamMatches,
     IReadOnlyList<string> SecureOwnerTeamMembers,
     IReadOnlyList<string> SecureBusinessUnitUsers,
-    SecureOwnerRoleCoverage OwnerRoleCoverage);
+    SecureOwnerRoleCoverage OwnerRoleCoverage)
+{
+    /// <summary>
+    /// Task 089: the <see cref="SecureBuRoleDepthAssertion.GuardedChildPrivileges"/> names the environment did not return (each one finding).
+    /// Empty by default, so a census composed without the builder grades as before.
+    /// </summary>
+    public IReadOnlyList<string> UnresolvedChildPrivileges { get; init; } = Array.Empty<string>();
+}
 
 /// <summary>The <c>Secure Record Owner</c> role's coverage of the codified set (task 145).</summary>
 /// <param name="OwnerRoleCount">How many distinct roles of that name live in the secure BU. Only 1 is gradeable.</param>
@@ -921,7 +965,13 @@ public enum SecureBuVerdict
     /// The <c>Secure Record Owner</c> role lacks Read at User depth on a codified table, holds it wider, or cannot be
     /// graded (task 145). Fail-CLOSED, not an exposure: the secure child of that table cannot be owned by the team.
     /// </summary>
-    SecureOwnerRoleLacksCodifiedPrivilege
+    SecureOwnerRoleLacksCodifiedPrivilege,
+
+    /// <summary>
+    /// A <see cref="SecureBuRoleDepthAssertion.GuardedChildPrivileges"/> name the environment did not return (task 089): reach on that secure
+    /// child table was not graded. Never a pass; ranks with the fail-closed verdicts, below every exposure.
+    /// </summary>
+    GuardedChildPrivilegeNotResolved
 }
 
 /// <summary>One violation, with the operator-actionable message that belongs in the log.</summary>
@@ -954,6 +1004,7 @@ public sealed record SecureBuAssertionOutcome(IReadOnlyList<SecureBuFinding> Fin
         SecureBuVerdict.SecureOwnerTeamNotResolved => 5,
         SecureBuVerdict.SecureBusinessUnitAmbiguous => 6,
         SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege => 7, // fail-closed: ranks below every exposure
+        SecureBuVerdict.GuardedChildPrivilegeNotResolved => 7, // task 089: ungraded reach on a secure child table
         SecureBuVerdict.VacuousCensus => 8,
         SecureBuVerdict.SecureBusinessUnitNotFound => 9,
         _ => 10

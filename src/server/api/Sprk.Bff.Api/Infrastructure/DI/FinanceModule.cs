@@ -117,6 +117,7 @@ public static class FinanceModule
         // per-request CallerRecordAccessProbe (ExternalAccessModule). Unconditional (flag rule above); the routes carry the kill switch.
         services.AddScoped<AffectedInvoiceCounter>();
         services.AddScoped<ProcedureService>();
+        services.AddScoped<ProcedureAssignmentService>(); // ebilling-r1 task 089: assignments and record overrides
 
         // Rule drafting job (ebilling-r1 task 075, FR-27): ADR-004 IJobHandler, the same shape as the other Finance handlers. Reads the rule
         // set's source document, asks IInvoiceAi.DraftRulesAsync (which has its Null peer, so AI-off is a clear Poisoned outcome, not a

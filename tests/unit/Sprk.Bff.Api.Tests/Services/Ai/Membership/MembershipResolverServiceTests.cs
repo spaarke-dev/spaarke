@@ -1321,6 +1321,41 @@ public class MembershipResolverServiceTests
     }
 
     [Fact]
+    public async Task ResolveAsync_AccessConferringOnly_BillingFirmAndBillingResponsible_ConferNothing()
+    {
+        // ebilling-r1 task 089 (procedure model 5.2 K-2): the billing lookups on a core record name who is BILLED and who answers for the
+        // bill. Discovery finds them (an Organization and a Contact lookup), but neither is in the access-conferring registry, so neither
+        // ever reaches the emitted FetchXml: a firm billed for a matter is not thereby assigned to it.
+        var discovery = BuildDiscoveryMock(
+            Descriptor("sprk_assignedlawfirm1", "assignedLawFirm", "Organization"),   // registered
+            Descriptor("sprk_billingfirm", "billingFirm", "Organization"),             // NOT registered
+            Descriptor("sprk_billingresponsible", "billingResponsible", "Contact"));   // NOT registered
+
+        var identity = BuildIdentityMock(BuildFullIdentity());
+
+        FetchExpression? captured = null;
+        var dataverse = new Mock<IDataverseService>();
+        dataverse
+            .Setup(x => x.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
+            .Callback<FetchExpression, CancellationToken>((fe, _) => captured = fe)
+            .ReturnsAsync(new EntityCollection());
+
+        var sut = CreateSut(discovery.Object, identity.Object, dataverse.Object);
+
+        var result = await sut.ResolveAsync(
+            TestSystemUserId,
+            EntityType,
+            new MembershipResolveOptions(AccessConferringOnly: true),
+            CancellationToken.None);
+
+        result.ByRole.Keys.Should().BeEquivalentTo(new[] { "assignedLawFirm" });
+        captured.Should().NotBeNull();
+        captured!.Query.Should().Contain("sprk_assignedlawfirm1", "the control: a registered column still confers");
+        captured.Query.Should().NotContain("sprk_billingfirm", "the billed firm is not an access-conferring role (K-2)");
+        captured.Query.Should().NotContain("sprk_billingresponsible", "the billing-responsible person is not an access-conferring role (K-2)");
+    }
+
+    [Fact]
     public async Task ResolveAsync_AccessConferringOnly_OwnershipIdentityTypes_EmitOnlyThePlatformOwnershipConditions()
     {
         // #2121 — the contract AccessibleRecordSetService's OWNERSHIP walk relies on: AccessConferringOnly plus

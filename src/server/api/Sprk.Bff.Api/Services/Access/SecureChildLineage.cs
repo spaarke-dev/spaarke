@@ -172,12 +172,23 @@ internal static class SecureChildLineage
         // matter is that matter's child, and its versions are the rule's (solution XML: sprk_policy_matter, sprk_policyversion_policy).
         // A rule with no matter has no lookup value, so it is never reached. sprk_policy.sprk_currentversion is left out: it names
         // the rule's own version, whose only parent is this rule, so it can add no root (only a loop).
+        // ebilling-r1 task 089 (uac-r2 F1-a): a record rule is filed under its record-scoped rule set (sprk_policy.sprk_ruleset), which
+        // is the core record's child. A rule in a firm-wide, client or Procedure set reaches no core record (its set has no core lookup).
         T("sprk_policy", "sprk_policies",
-            ("sprk_matter", Matter)),
+            ("sprk_matter", Matter), ("sprk_ruleset", "sprk_ruleset")),
         T("sprk_policyversion", "sprk_policyversions",
             ("sprk_policy", "sprk_policy")),
+        // ebilling-r1 task 089 (EB-D-148; lookups read live, spaarkedev1 2026-10-27): an assignment or override row is its core record's
+        // child. sprk_procedure, sprk_pinnedversion and sprk_excludedpolicy name what it overrides (citations, not filing parents:
+        // RecordOwnershipResolver.CitationLookups); sprk_firm is a rule filter, not a parent.
+        T("sprk_procedureassignment", "sprk_procedureassignments",
+            ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_workassignment", WorkAssignment)),
         T("sprk_reportcard", "sprk_reportcards",
             Regarding(Matter, Project)),
+        // ebilling-r1 task 089 (model 6.3): a record-scoped rule set is its core record's child. A set with no core lookup (client,
+        // firm-wide, Procedure) has no lookup value, so it is never reached.
+        T("sprk_ruleset", "sprk_rulesets",
+            ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_workassignment", WorkAssignment)),
         // spaarke-ontology-platform-r1 task 039 (owner D-33/D-36; reviewed by unified-access-control-r2 on #1355). Lookups
         // read live, spaarkedev1 2026-10-07: the typed core lookup sprk_matter, the subject's regarding lookups and the
         // Decision Record. sprk_regardingservicerequest is left out (see the remarks); sprk_policy, sprk_policyversion and

@@ -359,6 +359,16 @@ public partial class RouteAuthorizationGuardTests
             + "and GET .../retire-preview -- Write on the Procedure AND the billing-admin marker (Write on sprk_ruleset); POST .../versions -- the "
             + "same plus Create on sprk_policyversion; POST .../versions/{versionId}/publish -- the same plus Write on sprk_policyversion and "
             + "sprk_policy; POST .../retire -- the same plus Write on sprk_policy. The eBilling kill switch runs after it."),
+        new GovernedFile("Api/Finance/ProcedureAssignmentEndpoints.cs", Scope.RouteLevelGate,
+            "/api/finance/{matters|projects|workassignments}/{recordId}/procedure-assignments, .../rule-overrides/exclude, .../rule-overrides/change, "
+            + "GET .../overrides/{assignmentId}/removal-preview and DELETE .../overrides/{assignmentId} (ebilling-r1 task 089, EB-D-148) -- a "
+            + "record's assignments and rule overrides; the core table is fixed per literal route chain. Step 0 on the group "
+            + "(RequireInternalFinanceCaller). Each route then carries two AddFinanceAuthorizationFilter declarations, as the caller, fail "
+            + "closed: Write and AppendTo on the route record (ebilling.record.override, uniform 404), then the subject and the role (403): "
+            + "Read on the body's Procedure (assign) or rule's policy (exclude, change) plus the billing-admin marker (Write on sprk_ruleset); "
+            + "change also Create on sprk_ruleset, sprk_policy and sprk_policyversion; removal-preview the marker; DELETE the marker plus Write "
+            + "on sprk_policy. Preview and DELETE then carry RequireReadOnTheOverridesSubject (the caller's Read on what the stored override "
+            + "names). The eBilling kill switch runs after them."),
         new GovernedFile("Api/Finance/InvoiceContextEndpoints.cs", Scope.RouteLevelGate,
             "GET /api/finance/invoices/{invoiceId}/context (ebilling-r1 task 106, FR-33) -- the Invoice Review context panel. The route carries "
             + "AddFinanceAuthorizationFilter(\"finance.read\", sprk_invoices, invoiceId): Read on the invoice as the caller, fail closed; the eBilling "
@@ -1018,7 +1028,12 @@ public partial class RouteAuthorizationGuardTests
     // /api/finance/files/{fileId}/content. Classified by GovernedFiles (RouteLevelGate: AddStoredFileAccessFilter, credited in CreditedForms:
     // step 0, then the caller's own Read on the parent and the source document via the gate variant); .RequireEbillingEnabled is already in
     // NotAuthorizationForms.
-    private const int ExpectedEndpointFileCount = 143;
+    // 143 -> 144 (2026-10-27, ebilling-r1 task 089, EB-D-148). Net +1: Api/Finance/ProcedureAssignmentEndpoints.cs ADDED -- POST
+    // /api/finance/{matters|projects|workassignments}/{recordId}/procedure-assignments, .../rule-overrides/exclude|change, GET
+    // .../overrides/{assignmentId}/removal-preview and DELETE .../overrides/{assignmentId}. Classified by GovernedFiles (RouteLevelGate:
+    // step 0 on the group, then AddFinanceAuthorizationFilter twice per route as the caller, and RequireReadOnTheOverridesSubject, credited
+    // in CreditedForms, on preview and DELETE).
+    private const int ExpectedEndpointFileCount = 144;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -1071,6 +1086,11 @@ public partial class RouteAuthorizationGuardTests
             "The sibling for the rule set READ: the same Procedure resolution (BillingAdminAuthorization.cs:172) and CallerReadCheck.CheckAsync "
             + "(:191) asking Read; denied is 403 insufficient_rights, an unanswered question or a read fault 403 system_failure (:178, :200) "
             + "(ebilling-r1 081, uac r2 I-P5)."),
+        new CreditedForm("RequireReadOnTheOverridesSubject", "Api/Finance/ProcedureAssignmentEndpoints.cs",
+            "Reads what the stored override names -- its Procedure or the rule it excludes -- server-side (ProcedureAssignmentEndpoints.cs:302, "
+            + "ProcedureAssignmentService.TargetOfAsync) and asks the caller's own Read on it via CallerReadCheck.CheckAsync (:317); denied is 403 "
+            + "insufficient_rights (:327), an unanswered question or a read fault 403 system_failure (:307, :330) (ebilling-r1 task 089, the shape "
+            + "of RequireReadOnTheRuleSetsProcedure)."),
         new CreditedForm("AddStoredFileAccessFilter", "Api/Finance/StoredFileEndpoints.cs",
             "StoredFileAccessFilter decides before the handler: step 0 via FinanceAuthorizationFilter.EvaluateStepZeroAsync "
             + "(StoredFileEndpoints.cs:241, 403), then RetrievePrincipalAccess as the caller over OBO via "

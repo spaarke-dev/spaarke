@@ -125,6 +125,12 @@ public static class InvoiceFamilyCoreRecordGuard
     private static readonly string[] FilingCores = ["sprk_matter", "sprk_project", "sprk_workassignment"];
 
     /// <summary>
+    /// The core-record types, read-only (ebilling-r1 task 089: the assignment and override routes are fixed per core type from this
+    /// list, never from a free string).
+    /// </summary>
+    internal static IReadOnlyList<string> FilingCoreTables => FilingCores;
+
+    /// <summary>
     /// Each family table's entity-specific core-record lookups (column → core table), from live metadata (spaarkedev1,
     /// 2026-10-15, <c>EntityDefinitions(...)/ManyToOneRelationships</c>; tasks 010, 012, 020, 021, 022, 027).
     /// </summary>

@@ -9,6 +9,10 @@ namespace Spaarke.ArchTests;
 /// <c>sprk_policyversion</c> secure-family tables; the census waives RuleSetService's creates of them (owner resolved with no
 /// parents) only because a billing rule hangs off <c>sprk_ruleset</c> and is never filed under a matter. The day a billing rule gains a
 /// matter scope the waiver ends and the creates must be routed through <c>IRecordOwnershipResolver</c> with the matter as a parent.
+/// ebilling-r1 task 089 (EB-D-148): that day came for record-scoped rule sets, and their creates live in <c>ProcedureAssignmentService</c>,
+/// Routed. The guard is kept and widened so the rewritten waiver's condition (1) holds: RuleSetService names no core record of ANY kind
+/// (matter, project, work assignment) and writes no record scope (<c>sprk_scope</c> Record / Firm record, or <c>RecordScopedRuleSet</c>
+/// beyond its read-only <c>IsRecordScoped</c> test), and the <c>RuleSetScope</c> it accepts cannot name a record scope.
 /// </summary>
 /// <remarks>
 /// <b>How.</b> The comment-stripped source of <c>Services/Finance/RuleSetService.cs</c> must hold no <c>sprk_matter</c> and no
@@ -21,9 +25,16 @@ public sealed class RuleSetServiceNoMatterScopeGuardTests
 {
     private const string RuleSetServicePath = "Services/Finance/RuleSetService.cs";
 
-    /// <summary>The column literal, or an identifier that names a matter (a variable, parameter or const that could carry one).</summary>
+    /// <summary>
+    /// A core-record column literal, an identifier that names a core record (a variable, parameter or const that could carry one), or a
+    /// record-scope write (task 089).
+    /// </summary>
     private static readonly Regex MatterReference = new(
-        @"(?i:sprk_matter)|(?-i:\b[Mm]atter[A-Z_]\w*|\b[Mm]atter\b)", RegexOptions.Compiled);
+        @"(?i:sprk_matter|sprk_project|sprk_workassignment)"
+        + @"|(?-i:\b[Mm]atter[A-Z_]\w*|\b[Mm]atter\b|\b[Pp]roject(?:[A-Z_]\w*)?\b|\b[Ww]ork[Aa]ssignment\w*)"
+        + @"|\bRecordScopedRuleSet\s*\.\s*(?!IsRecordScoped\b)\w+|\bScope(?:Firm)?Record\b"
+        + @"|\[\s*""sprk_scope""\s*\]\s*=\s*new\s+OptionSetValue\s*\(\s*10000000[23]\s*\)",
+        RegexOptions.Compiled);
 
     private static IReadOnlyList<string> Violations(string source)
     {
@@ -59,6 +70,13 @@ public sealed class RuleSetServiceNoMatterScopeGuardTests
     [InlineData("policy[\"sprk_regardingmatter\"] = new EntityReference(MatterEntity, matterId);")]
     [InlineData("fields[\"sprk_regarding\"] = new EntityReference(\"sprk_matter\", request.MatterId);")]
     [InlineData("var matterRef = Lookup(request); version[Bind] = matterRef;")]
+    // Task 089: the other core records and the record scope.
+    [InlineData("set[\"sprk_project\"] = new EntityReference(\"sprk_project\", id);")]
+    [InlineData("set[Col] = new EntityReference(ProjectEntity, projectId);")]
+    [InlineData("set[\"sprk_workassignment\"] = new EntityReference(\"sprk_workassignment\", id);")]
+    [InlineData("set[\"sprk_scope\"] = new OptionSetValue(100000002);")]
+    [InlineData("set[\"sprk_scope\"] = new OptionSetValue(RecordScopedRuleSet.ScopeFirmRecord);")]
+    [InlineData("policy[\"sprk_policycode\"] = RecordScopedRuleSet.CodeFor(policyId);")]
     public void TheGuardFiresOnAPlantedMatterWrite(string planted)
     {
         Assert.NotEmpty(Violations("class C { void M() {\n" + planted + "\n} }"));
@@ -74,9 +92,22 @@ public sealed class RuleSetServiceNoMatterScopeGuardTests
                 policy["sprk_domain"] = new OptionSetValue(1);
                 var version = new Entity(VersionEntity) { ["sprk_policy"] = new EntityReference(PolicyEntity, policyId) };
                 owner.ApplyTo(policy);
+                // task 089: a client-default or firm-wide set, a firm projection, and the read-only record-scope test
+                var set = new Entity(RuleSetEntity) { ["sprk_scope"] = new OptionSetValue((int)request.Scope) };
+                var projection = FirmClauseText(policy);
+                if (RecordScopedRuleSet.IsRecordScoped(set)) { return; }
             } }
             """;
 
         Assert.Empty(Violations(clean));
+    }
+
+    [Fact(DisplayName = "ebilling-r1 task 089: the RuleSetScope RuleSetService accepts cannot name a record scope")]
+    public void RuleSetScopeCannotNameARecordScope()
+    {
+        var values = Enum.GetValues<Sprk.Bff.Api.Services.Finance.RuleSetScope>().Select(v => (int)v).ToArray();
+        Assert.NotEmpty(values);
+        Assert.DoesNotContain(Sprk.Bff.Api.Services.Finance.Procedures.RecordScopedRuleSet.ScopeRecord, values);
+        Assert.DoesNotContain(Sprk.Bff.Api.Services.Finance.Procedures.RecordScopedRuleSet.ScopeFirmRecord, values);
     }
 }

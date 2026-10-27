@@ -215,6 +215,12 @@ public static class OperationAccessPolicy
         // this (no privilege); Override needs this AND the "eBilling Override" table privilege, which the service asks of the caller
         // separately (EbillingOverridePrivilege). A separate key so deny logs name the act.
         ["ebilling.submission.decide"] = AccessRights.Read | AccessRights.Write,
+        // "ebilling.record.override" — Write AND AppendTo on the CORE RECORD (sprk_matters / sprk_projects / sprk_workassignments) named by
+        // the route of /api/finance/{matters|projects|workassignments}/{recordId}/procedure-assignments and .../rule-overrides (ebilling-r1
+        // task 089, procedure model 5.1 F1-c, 6.2, 6.3). Assigning, pinning or excluding a Procedure, excluding or changing a rule, and
+        // removing an override change how that record's invoices are checked (Write on the record), and the application then creates rows
+        // whose lookup attaches them TO the record (AppendTo, the "finance.submit_invoice" reasoning). A separate key so deny logs name the act.
+        ["ebilling.record.override"] = AccessRights.Write | AccessRights.AppendTo,
 
         // "analysis.attach" — Read AND AppendTo on each PARENT record a NEW app-created sprk_analysis will point
         // at: the document and the regarding matter/project of POST /api/ai/analysis/promote (body, or the
