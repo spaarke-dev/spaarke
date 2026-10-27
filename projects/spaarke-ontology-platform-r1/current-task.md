@@ -27,7 +27,11 @@
 1. Owner checks → close 114, 160 and 163, or fix.
 2. **Docs→master:** done. PR #2344 merged as `0b035c23fd` on 2026-10-27 (D-185 guard `PolicyReadRoleGuardTests` + notes); the branch and main checkout are synced to master.
 3. **ebilling #1911:** F1 merge `bed558cb33` checked 2026-10-26: PASS for ontology. `EarlierInvoiceReadability` = the #2294 round; the combined diff is empty on every ontology file; Core User drops `InvoiceLineItem` (ebilling 029). K1 and K2 were decided by the owner in ebilling's session (ebilling `notes/decisions-log.md`, `399813b8f7`): EB-D-150 keeps Global policy Read on Billing Administrator (a census exception in #2322); EB-D-151 keeps D-90's full Core User rights on the five invoice working tables, a known limit. Nothing ontology-side is open.
-4. R2 §9 owner answers → `/design-to-spec`; 105 UAT; #1882 live re-run; 111 row 4; 090 wrap-up; the `[SIGNAL-EVALUATOR]` heartbeat.
+4. **ebilling 089** (`task/ebill-089-assignments` @ `9082a05a04`), reviewed 2026-10-27:
+   - Agreed: the record-rule code `BRR-{policyId N}`, on condition the code is immutable; the census waiver made Permanent; the widened scope guard and the new census guard.
+   - Ontology Administrator's Deep Read on Policy and PolicyVersion: no change. It is a business-unit placement dependency, as in §20.
+   - Billing Administrator's Global Read on Policy and PolicyVersion: we recommend lowering it to Deep. That revisits EB-D-150 and is an owner decision in ebilling's session.
+5. R2 §9 owner answers → `/design-to-spec`; 105 UAT; #1882 live re-run; 111 row 4; 090 wrap-up; the `[SIGNAL-EVALUATOR]` heartbeat.
 
 ## Open owner questions
 
