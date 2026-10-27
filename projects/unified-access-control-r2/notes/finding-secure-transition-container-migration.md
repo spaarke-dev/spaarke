@@ -2,7 +2,9 @@
 
 > **Filed**: 2026-08-31, by owner direction during the #858 design discussion.
 > **Disposition**: **its own focused project**. Documented here; revisit after core UAC-r2 completes.
-> **Status**: NOT implemented, NOT scheduled. This file is the handoff.
+> **Status**: ~~NOT implemented, NOT scheduled.~~ **Superseded (2026-10-27): implemented.** Make Secure copies existing
+> files into the record's own container (`DocumentContainerRelocator`, purpose MakeSecure; `ProvisionProjectEndpoint`),
+> with the 2-minute `SecureChildReconciliationJob` finishing leftovers. Kept for history.
 
 ---
 
