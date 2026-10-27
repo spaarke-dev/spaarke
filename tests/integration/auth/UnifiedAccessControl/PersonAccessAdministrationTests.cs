@@ -64,11 +64,12 @@ public class PersonAccessAdministrationTests
             new[] { new System.Security.Claims.Claim("oid", CallerOid) }, "Test")),
     };
 
-    private Task<IResult> Remove(Guid contactId, HttpContext? http = null, RecordContainerResolver? resolver = null) =>
+    private Task<IResult> Remove(Guid contactId, HttpContext? http = null, RecordContainerResolver? resolver = null,
+        SpeContainerMembershipService? spe = null) =>
         PersonAccessAdministrationEndpoints.RemovePersonAsync(
             new ExternalPersonRequest(contactId),
             _h.Grants,
-            new SpeContainerMembershipService(TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<SpeContainerMembershipService>.Instance),
+            spe ?? new SpeContainerMembershipService(TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<SpeContainerMembershipService>.Instance),
             _h.Participations,
             _h.Materializer,
             resolver ?? TestRecordContainerResolver.ForNonSecureRecord("sprk_matter", _matter),
@@ -132,7 +133,8 @@ public class PersonAccessAdministrationTests
         var ok = result.Should().BeOfType<Ok<RemovePersonResponse>>().Subject.Value!;
         ok.Steps.Should().OnlyContain(s => s.Completed);
         ok.Steps.Select(s => s.Step).Should().Equal(
-            ExternalPersonRemovalService.MarkerStep, ExternalPersonRemovalService.GrantsStep, ExternalPersonRemovalService.CachesStep,
+            ExternalPersonRemovalService.MarkerStep, ExternalPersonRemovalService.GrantsStep,
+            ExternalPersonRemovalService.OrganizationGrantPermissionsStep, ExternalPersonRemovalService.CachesStep,
             ExternalPersonRemovalService.InviteStateStep, ExternalPersonRemovalService.StandingGrantStep);
         ok.GrantsRevoked.Should().Be(1);
         ok.GrantsNotCompleted.Should().BeEmpty();
@@ -224,6 +226,87 @@ public class PersonAccessAdministrationTests
         _h.Grants.Rows.Single(r => r.Id == grant.Id).IsActive.Should().BeTrue();
         _h.Identities.Contacts[contact].InviteCodeHash.Should().NotBeNull();
         _h.Identities.Contacts[contact].StandingGrant.Should().NotBeNull();
+    }
+
+    // ── Slice C2c: the person's own permission on their organizations' granted containers ──────────────────────
+
+    private const string SecureMatterContainer = "b!secure-matter-c2c";
+
+    private (Guid Contact, Guid Organization, ExternalGrantRow OrgGrant, Mock<SpeContainerMembershipService> Spe) OrgMemberWithOrgGrant(
+        SpeContainerMembershipResult answer)
+    {
+        var (contact, _) = BoundPerson();
+        var organization = Guid.NewGuid();
+        _h.Grants.Memberships.Add((contact, organization, 0));
+        _h.Grants.ContactEmails[contact] = Email;
+        var orgGrant = _h.Grants.Seed(Matter, _matter, null, organization, (int)ExternalAccessLevel.Collaborate, null);
+        var spe = new Mock<SpeContainerMembershipService>(
+            TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<SpeContainerMembershipService>.Instance);
+        spe.Setup(s => s.RevokeMembershipAsync(
+                It.IsAny<string>(), It.IsAny<SpeMembershipKey>(), It.IsAny<DataverseWebApiClient>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(answer);
+        return (contact, organization, orgGrant, spe);
+    }
+
+    [Fact]
+    public async Task Remove_RemovesThePersonsOwnPermission_OnTheContainerOfTheirOrganizationsGrant_AndLeavesTheGrantActive()
+    {
+        var (contact, _, orgGrant, spe) = OrgMemberWithOrgGrant(new SpeContainerMembershipResult(true, "perm-c2c", null));
+
+        var result = await Remove(contact,
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_matter", _matter, SecureMatterContainer), spe: spe.Object);
+
+        var ok = result.Should().BeOfType<Ok<RemovePersonResponse>>().Subject.Value!;
+        ok.Steps.Single(s => s.Step == ExternalPersonRemovalService.OrganizationGrantPermissionsStep).Completed.Should().BeTrue();
+        spe.Verify(s => s.RevokeMembershipAsync(SecureMatterContainer,
+            It.Is<SpeMembershipKey>(k => k.Email == Email), It.IsAny<DataverseWebApiClient>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+        spe.Verify(s => s.RemoveMembershipsAsync(It.IsAny<string>(), It.IsAny<IReadOnlyCollection<SpeMembershipKey>>(),
+            It.IsAny<DataverseWebApiClient>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never,
+            "the other members of the organization are never swept");
+        _h.Grants.Rows.Single(r => r.Id == orgGrant.Id).IsActive.Should().BeTrue("the organization's grant is not the person's");
+    }
+
+    [Fact]
+    public async Task Remove_AnAmbiguousOrganizationGrantPermission_IsIncomplete_NeverReportedDone()
+    {
+        var (contact, _, _, spe) = OrgMemberWithOrgGrant(
+            new SpeContainerMembershipResult(false, null, SpeContainerMembershipService.AmbiguousMatchError + ": two"));
+
+        var result = await Remove(contact,
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_matter", _matter, SecureMatterContainer), spe: spe.Object);
+
+        Problem(result).StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
+        var steps = (IReadOnlyList<ExternalPersonStepResult>)Problem(result).ProblemDetails.Extensions["steps"]!;
+        steps.Single(s => s.Step == ExternalPersonRemovalService.OrganizationGrantPermissionsStep).Completed.Should().BeFalse();
+        _h.Identities.Contacts[contact].RemovedOn.Should().NotBeNull("the person stays removed");
+    }
+
+    [Fact]
+    public async Task Remove_APersonInNoOrganization_ChecksNoContainer_AndTheStepCompletes()
+    {
+        var (contact, _) = BoundPerson();
+        var spe = new Mock<SpeContainerMembershipService>(
+            TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<SpeContainerMembershipService>.Instance);
+
+        var result = await Remove(contact,
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_matter", _matter, SecureMatterContainer), spe: spe.Object);
+
+        result.Should().BeOfType<Ok<RemovePersonResponse>>().Subject.Value!.Steps
+            .Single(s => s.Step == ExternalPersonRemovalService.OrganizationGrantPermissionsStep).Completed.Should().BeTrue();
+        spe.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task Remove_ARemovalWhoseMembershipReadFails_IsIncomplete()
+    {
+        var (contact, _) = BoundPerson();
+        _h.Grants.FailMembershipQueries = true;
+
+        var result = await Remove(contact);
+
+        var steps = (IReadOnlyList<ExternalPersonStepResult>)Problem(result).ProblemDetails.Extensions["steps"]!;
+        steps.Single(s => s.Step == ExternalPersonRemovalService.OrganizationGrantPermissionsStep).Completed.Should().BeFalse();
     }
 
     [Fact]

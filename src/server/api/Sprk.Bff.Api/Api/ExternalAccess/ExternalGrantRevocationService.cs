@@ -40,6 +40,26 @@ internal sealed record GrantRevocation(
 }
 
 /// <summary>
+/// Slice C2c: what <see cref="ExternalGrantRevocationService.RemovePersonOrganizationGrantPermissionsAsync"/> did for one
+/// person. <see cref="Completed"/> only when every organization, every organization grant and every container was read and
+/// the person's permission on each container is gone or was never there.
+/// </summary>
+/// <param name="Organizations">The person's active organization memberships read (null when they could not be read).</param>
+/// <param name="Containers">The distinct secure-root containers of those organizations' active grants.</param>
+/// <param name="PermissionsRemoved">Containers on which the person's permission was removed.</param>
+/// <param name="Failed">Containers (or roots) whose cleanup failed or could not be decided; a retry may complete them.</param>
+/// <param name="Ambiguous">The part of <see cref="Failed"/> that is an ambiguous or unverifiable permission match.</param>
+/// <param name="Truncated">A read went past its bound, so more organizations or grants may remain.</param>
+internal sealed record PersonOrganizationGrantSpeCleanup(
+    bool Completed,
+    int? Organizations,
+    int Containers,
+    int PermissionsRemoved,
+    int Failed,
+    int Ambiguous,
+    bool Truncated);
+
+/// <summary>
 /// The ONE revoke of an external grant: deactivate every active row of the logical grant, remove the revoked grantee's
 /// SPE container permission(s), invalidate the grant cache and mark an Assigned-To auto grant revoked. Moved unchanged from
 /// <see cref="RevokeExternalAccessEndpoint"/> (slice C1), which is now a thin caller that turns the outcome into a
@@ -200,6 +220,190 @@ internal sealed class ExternalGrantRevocationService
             organizationTooLarge,
             permissionsAmbiguous,
             residualAccessTerms);
+    }
+
+    /// <summary>
+    /// Slice C2c: the most organization grants one organization contributes to a person's cleanup. One more is read; a page
+    /// above the bound reports the cleanup not completed (more grants may remain), never a truncated success.
+    /// </summary>
+    internal const int MaxOrganizationGrantsPerPersonCleanup = 200;
+
+    /// <summary>
+    /// Slice C2c: removes ONE person's SPE container permission from the own container of every secure root that an
+    /// organization they are an active member of is granted. Person-scoped: the organization grants stay active and the
+    /// other members' permissions are untouched. Shared by an administrator removal and the removal sweep.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Rule.</b> A removed person keeps no container permission that their organization's grants could account for.
+    /// The direct grants are cleared by <see cref="RevokeAsync"/>; this covers the organization grants, which belong to the
+    /// organization and so are not revoked.</para>
+    /// <para><b>Order.</b> The person's active memberships (statecode only, the superset the organization sweep uses), then each
+    /// organization's active organization grants, then each distinct root's OWN container
+    /// (<see cref="ProjectClosureEndpoint.DeriveRecordOwnContainerAsync"/>; a root that is not secure owns none and is
+    /// skipped, as a single revoke skips it), then this person's permission on each container through the one matcher
+    /// (<see cref="SpeContainerMembershipService.RevokeMembershipAsync"/>). An ambiguous or unverifiable match removes nothing
+    /// and is not completed.</para>
+    /// <para><b>No overlap check.</b> Unlike a single revoke, nothing the person still holds keeps the permission: a removed
+    /// person is entitled to nothing.</para>
+    /// <para><b>Completion.</b> Any read fault, any read past its bound, an undecidable container or a failed removal reports
+    /// <see cref="PersonOrganizationGrantSpeCleanup.Completed"/> = false. Every step is idempotent, so a retry completes it.
+    /// The caller's cancellation propagates; nothing else throws.</para>
+    /// <para><b>CLAUDE.md §11.</b> Existing: the organization half of <see cref="RevokeAsync"/> clears every member of ONE
+    /// organization on ONE root. Extension: this reuses its container derivation and its per-contact removal
+    /// (<c>RemoveContactSpePermissionAsync</c>); only the person-to-roots walk is new. Cost of doing nothing: a removed person
+    /// keeps a container permission on every secure root their organization is granted, because that grant is not revoked.</para>
+    /// </remarks>
+    public async Task<PersonOrganizationGrantSpeCleanup> RemovePersonOrganizationGrantPermissionsAsync(
+        Guid contactId, CancellationToken ct)
+    {
+        OrganizationMemberSet organizations;
+        try
+        {
+            organizations = await ExternalOrganizationMembership.QueryActiveOrganizationsOfContactAsync(
+                _dataverse, contactId, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "[EXT-REMOVE-PERSON] The organization memberships of contact {ContactId} could not be read; no organization-grant " +
+                "container permission was checked.", contactId);
+            return new PersonOrganizationGrantSpeCleanup(false, null, 0, 0, 0, 0, false);
+        }
+
+        if (organizations.ExceededBound)
+        {
+            _logger.LogError(
+                "[EXT-REMOVE-PERSON] Contact {ContactId} is an active member of more than {Bound} organizations; the " +
+                "organization-grant container cleanup cannot be completed in one pass.",
+                contactId, ExternalOrganizationMembership.MaxMembersPerSweep);
+            return new PersonOrganizationGrantSpeCleanup(false, null, 0, 0, 0, 0, true);
+        }
+
+        var truncated = false;
+        var failed = 0;
+        var roots = new HashSet<(ExternalGrantRootType RootType, Guid RootId)>();
+        foreach (var organizationId in organizations.ContactIds)
+        {
+            List<ExternalGrantRow> grants;
+            try
+            {
+                grants = await ExternalGrantLifecycle.QueryActiveOrganizationGrantsAsync(
+                    _dataverse, organizationId, MaxOrganizationGrantsPerPersonCleanup + 1, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "[EXT-REMOVE-PERSON] The grants of organization {OrganizationId} could not be read; contact {ContactId}'s " +
+                    "permission on their containers was not checked.", organizationId, contactId);
+                failed++;
+                continue;
+            }
+
+            if (grants.Count > MaxOrganizationGrantsPerPersonCleanup)
+            {
+                _logger.LogError(
+                    "[EXT-REMOVE-PERSON] Organization {OrganizationId} holds more than {Bound} active grants; contact " +
+                    "{ContactId}'s organization-grant container cleanup cannot be completed in one pass.",
+                    organizationId, MaxOrganizationGrantsPerPersonCleanup, contactId);
+                truncated = true;
+            }
+
+            foreach (var row in grants.Take(MaxOrganizationGrantsPerPersonCleanup))
+            {
+                if (ExternalGrantLifecycle.DeriveKey(row) is { IsOrganizationGrant: true } key)
+                {
+                    roots.Add((key.RootType, key.RootId));
+                }
+                else
+                {
+                    // A row this filter selected must be an organization grant on a root; anything else cannot be placed.
+                    _logger.LogError(
+                        "[EXT-REMOVE-PERSON] Organization grant {AccessRecordId} names no root; its container cannot be derived.",
+                        row.Id);
+                    failed++;
+                }
+            }
+        }
+
+        var containers = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (rootType, rootId) in roots)
+        {
+            var (containerId, decided) = await ProjectClosureEndpoint.DeriveRecordOwnContainerAsync(
+                _containerResolver, ExternalGrantRoot.LogicalNameFor(rootType), rootId, _logger, ct).ConfigureAwait(false);
+            if (!decided)
+            {
+                _logger.LogError(
+                    "[EXT-REMOVE-PERSON] The container of organization-granted root {RootType} {RootId} could not be determined; " +
+                    "contact {ContactId}'s permission on it was not checked.", rootType, rootId, contactId);
+                failed++;
+                continue;
+            }
+
+            if (containerId is not null)
+            {
+                containers.Add(containerId);
+            }
+        }
+
+        var removed = 0;
+        var ambiguous = 0;
+        foreach (var containerId in containers)
+        {
+            SpeContainerRevokeOutcome outcome;
+            bool isAmbiguous;
+            try
+            {
+                (outcome, isAmbiguous) = await RemoveContactSpePermissionAsync(contactId, containerId, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "[EXT-REMOVE-PERSON] Removing contact {ContactId}'s permission on container {ContainerId} threw.",
+                    contactId, containerId);
+                (outcome, isAmbiguous) = (SpeContainerRevokeOutcome.Failed, false);
+            }
+
+            switch (outcome)
+            {
+                case SpeContainerRevokeOutcome.PermissionRemoved:
+                    removed++;
+                    break;
+                case SpeContainerRevokeOutcome.NoPermissionFound:
+                // The person has neither a bound object id nor an email, so no permission can be theirs (#2103).
+                case RevokeExternalAccessEndpoint.NoContainerMembershipKeyOutcome:
+                    break;
+                default:
+                    failed++;
+                    if (isAmbiguous)
+                    {
+                        ambiguous++;
+                    }
+
+                    break;
+            }
+        }
+
+        var completed = failed == 0 && !truncated;
+        _logger.LogInformation(
+            "[EXT-REMOVE-PERSON] Contact {ContactId}'s organization-grant container cleanup: {Organizations} organization(s), " +
+            "{Containers} container(s), {Removed} permission(s) removed, {Failed} not completed ({Ambiguous} ambiguous), " +
+            "truncated {Truncated}.", contactId, organizations.ContactIds.Count, containers.Count, removed, failed, ambiguous,
+            truncated);
+
+        return new PersonOrganizationGrantSpeCleanup(
+            completed, organizations.ContactIds.Count, containers.Count, removed, failed, ambiguous, truncated);
     }
 
     /// <summary>

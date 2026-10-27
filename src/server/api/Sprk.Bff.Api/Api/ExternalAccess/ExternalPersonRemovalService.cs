@@ -48,6 +48,9 @@ internal sealed record PersonAdministrationOutcome(
 /// <item>every active grant the contact holds as its grantee, revoked through the ONE revoke
 /// (<see cref="ExternalGrantRevocationService"/>: the row sweep, the SPE container cleanup, the grant-cache invalidation for
 /// the root, the Assigned-To marking);</item>
+/// <item>the person's own container permission on every secure root an organization they belong to is granted
+/// (<see cref="ExternalGrantRevocationService.RemovePersonOrganizationGrantPermissionsAsync"/>; the organization grants and
+/// the other members are untouched);</item>
 /// <item>cache eviction: the contact's grant sets, and the cached identity of every systemuser that links the contact
 /// (<see cref="IMembershipCacheInvalidator.InvalidateUserAccessAsync"/>);</item>
 /// <item>the invite state and the access permission baseline cleared, so no outstanding invite link or stamp can bind;</item>
@@ -69,6 +72,7 @@ internal sealed class ExternalPersonRemovalService
 {
     internal const string MarkerStep = "removed_marker";
     internal const string GrantsStep = "grants_revoked";
+    internal const string OrganizationGrantPermissionsStep = "organization_grant_permissions_removed";
     internal const string CachesStep = "caches_evicted";
     internal const string InviteStateStep = "invite_state_cleared";
     internal const string StandingGrantStep = "standing_grant_cleared";
@@ -146,6 +150,9 @@ internal sealed class ExternalPersonRemovalService
         // ── 2. Every active grant the person holds, through the ONE revoke ───────────────────────────────────────────
         var (revoked, notCompleted, grantsStep) = await RevokeGrantsAsync(revocation, contactId, ct).ConfigureAwait(false);
         steps.Add(grantsStep);
+
+        // ── 2b. Slice C2c: the person's own permission on the containers of their organizations' grants ─────────────
+        steps.Add(await RemoveOrganizationGrantPermissionsAsync(revocation, contactId, ct).ConfigureAwait(false));
 
         // ── 3. Cache eviction (the marker is read live, so this is belt and braces) ────────────────────────────────
         steps.Add(await EvictCachesAsync(contactId, correlationId).ConfigureAwait(false));
@@ -328,6 +335,39 @@ internal sealed class ExternalPersonRemovalService
             ? new ExternalPersonStepResult(GrantsStep, true, $"{revoked} grant(s) revoked.")
             : new ExternalPersonStepResult(GrantsStep, false,
                 $"{revoked} grant(s) revoked; {notCompleted.Count} did not complete. The person stays removed; retry the removal."));
+    }
+
+    private async Task<ExternalPersonStepResult> RemoveOrganizationGrantPermissionsAsync(
+        ExternalGrantRevocationService revocationService, Guid contactId, CancellationToken ct)
+    {
+        PersonOrganizationGrantSpeCleanup cleanup;
+        try
+        {
+            cleanup = await revocationService.RemovePersonOrganizationGrantPermissionsAsync(contactId, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "[EXT-REMOVE-PERSON] The organization-grant container cleanup of contact {ContactId} threw.", contactId);
+            cleanup = new PersonOrganizationGrantSpeCleanup(false, null, 0, 0, 0, 0, false);
+        }
+
+        if (cleanup.Completed)
+        {
+            return new ExternalPersonStepResult(OrganizationGrantPermissionsStep, true,
+                $"{cleanup.PermissionsRemoved} organization-grant container permission(s) removed.");
+        }
+
+        var detail = cleanup.Ambiguous > 0
+            ? $"{cleanup.Ambiguous} container permission(s) could not be matched to this person with certainty, so they were " +
+              "left in place; an administrator must review them on the container. The person stays removed."
+            : "The person's container permissions from their organizations' grants could not all be checked or removed. The " +
+              "person stays removed; retry the removal.";
+        return new ExternalPersonStepResult(OrganizationGrantPermissionsStep, false, detail);
     }
 
     private async Task<ExternalPersonStepResult> EvictCachesAsync(Guid contactId, string? correlationId)

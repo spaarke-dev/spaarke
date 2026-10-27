@@ -652,6 +652,8 @@ internal static class AssignedAccessTestDoubles
                 "systemusers" => SystemUsers.Values
                     .Where(u => filter is not null && filter.Contains($"systemuserid eq {u.Id}", StringComparison.OrdinalIgnoreCase))
                     .ToList(),
+                // Slice C2c: a person's organization memberships (the contact → organizations direction).
+                ExternalOrganizationMembership.EntitySet => MatchMemberships(filter),
                 "sprk_projects" or "sprk_matters" or "sprk_workassignments" => RootOwners.Keys.Union(RootCreators.Keys)
                     .Where(id => filter is not null && filter.Contains(id.ToString(), StringComparison.OrdinalIgnoreCase))
                     .Select(id => new Dictionary<string, object?>
@@ -669,6 +671,14 @@ internal static class AssignedAccessTestDoubles
         public override Task<T?> RetrieveAsync<T>(string entitySetName, Guid id, string? select = null,
             CancellationToken cancellationToken = default) where T : default
         {
+            // Slice C2c: a contact's container-permission key (its email), read by the SPE cleanup.
+            if (entitySetName == "contacts")
+            {
+                return Task.FromResult(ContactEmails.TryGetValue(id, out var email)
+                    ? JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(new Dictionary<string, object?> { ["emailaddress1"] = email }))
+                    : default);
+            }
+
             // Task 181: the grant notification reads a root's display name by id, selecting that one column.
             if (entitySetName is "sprk_projects" or "sprk_matters" or "sprk_workassignments")
             {
@@ -779,9 +789,17 @@ internal static class AssignedAccessTestDoubles
             var activeOnly = filter.Contains("statecode eq 0", StringComparison.Ordinal);
 
             // Slice C3: a person's grants across every root (ExternalGrantLifecycle.ActiveRowsForContactFilter) name no root.
+            if (!root.Success && filter.Contains("_sprk_contact_value eq null", StringComparison.Ordinal))
+            {
+                // Slice C2c: an organization's grants across every root (ExternalGrantLifecycle.ActiveOrganizationGrantsFilter).
+                var orgId = Guid.Parse(Regex.Match(filter, @"_sprk_organization_value eq ([0-9a-fA-F-]{36})").Groups[1].Value);
+                lock (_gate)
+                    return _rows.Where(r => r.OrganizationId == orgId && r.ContactId is null && (!activeOnly || r.IsActive)).ToList();
+            }
+
             if (!root.Success)
             {
-                var person = Regex.Match(filter, @"_sprk_contact_value eq ([0-9a-fA-F-]{36})");
+                var person =Regex.Match(filter, @"_sprk_contact_value eq ([0-9a-fA-F-]{36})");
                 if (!person.Success)
                     throw new InvalidOperationException($"Unexpected grant filter: {filter}");
                 var personId = Guid.Parse(person.Groups[1].Value);
@@ -804,6 +822,38 @@ internal static class AssignedAccessTestDoubles
                 return contact.Success
                     ? candidates.Where(r => r.ContactId == Guid.Parse(contact.Groups[1].Value)).ToList()
                     : candidates.ToList();
+            }
+        }
+
+        /// <summary>Slice C2c: a contact's <c>emailaddress1</c> as the SPE cleanup reads it by id. Empty by default.</summary>
+        public ConcurrentDictionary<Guid, string> ContactEmails { get; } = new();
+
+        /// <summary>Slice C2c: contact ↔ organization junction rows (statecode 0 = active). Empty by default.</summary>
+        public List<(Guid ContactId, Guid OrganizationId, int StateCode)> Memberships { get; } = new();
+
+        /// <summary>Slice C2c: a membership read fails (every other query still answers).</summary>
+        public bool FailMembershipQueries { get; set; }
+
+        private List<ExternalOrganizationMembership.ContactOrganizationRow> MatchMemberships(string? filter)
+        {
+            if (FailMembershipQueries)
+                throw new HttpRequestException("Simulated membership read failure.");
+
+            var contact = Regex.Match(filter ?? string.Empty, @"_sprk_contact_value eq ([0-9a-fA-F-]{36})");
+            var organization = Regex.Match(filter ?? string.Empty, @"_sprk_organization_value eq ([0-9a-fA-F-]{36})");
+            var activeOnly = filter?.Contains("statecode eq 0", StringComparison.Ordinal) == true;
+            lock (_gate)
+            {
+                return Memberships
+                    .Where(m => (!contact.Success || m.ContactId == Guid.Parse(contact.Groups[1].Value))
+                                && (!organization.Success || m.OrganizationId == Guid.Parse(organization.Groups[1].Value))
+                                && (!activeOnly || m.StateCode == 0))
+                    .Select(m => new ExternalOrganizationMembership.ContactOrganizationRow
+                    {
+                        ContactId = m.ContactId,
+                        OrganizationId = m.OrganizationId,
+                    })
+                    .ToList();
             }
         }
 

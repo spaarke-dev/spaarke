@@ -591,6 +591,28 @@ internal static class ExternalGrantLifecycle
             cancellationToken: ct);
 
     /// <summary>
+    /// Slice C2c: the OData <c>$filter</c> selecting every ACTIVE organization grant (no contact) an organization holds, on
+    /// every root. The grantee half is <see cref="ExternalGrantKey.ToActiveRowsFilter"/>'s organization clause, so the two
+    /// never disagree about which rows are organization grants.
+    /// </summary>
+    internal static string ActiveOrganizationGrantsFilter(Guid organizationId)
+        => $"_sprk_organization_value eq {organizationId} and _sprk_contact_value eq null and statecode eq 0";
+
+    /// <summary>
+    /// Slice C2c: every ACTIVE organization grant <paramref name="organizationId"/> holds, on every root — read so a removed
+    /// member's own container permission can be cleared on each granted root. <paramref name="top"/> bounds the single page,
+    /// as for <see cref="QueryActiveRowsForContactAsync"/>. Exceptions propagate.
+    /// </summary>
+    internal static Task<List<ExternalGrantRow>> QueryActiveOrganizationGrantsAsync(
+        DataverseWebApiClient dataverseClient, Guid organizationId, int top, CancellationToken ct)
+        => dataverseClient.QueryAsync<ExternalGrantRow>(
+            EntitySet,
+            filter: ActiveOrganizationGrantsFilter(organizationId),
+            select: RowSelect,
+            top: top,
+            cancellationToken: ct);
+
+    /// <summary>
     /// Shapes a <see cref="DateOnly"/> for an SDK write to <c>sprk_expiresdate</c> / <c>sprk_granteddate</c>:
     /// midnight, <see cref="DateTimeKind.Unspecified"/>.
     /// </summary>
