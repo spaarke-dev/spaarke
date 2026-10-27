@@ -506,3 +506,16 @@ Contents beyond the previous live build 58ffc37da3: UAC #2318 (secure-isolation 
 | E, server gate | PASS. R3 read 22:03–22:36Z (`gatebc9.ps1`): 36 requests, 0 403. One 5xx: the single warm-up `/healthz` 503 at read-back. `access_record_hidden` 0 (#2321). 0 Invalid hostname, 0 worklist_unavailable, 0 signal_unreadable, 0 registration_owner_unconfigured. Exceptions are known classes only: 4 Redis scheduler-lease timeouts and 1 TaskCanceled. 21 deny-code lines, the reconciliation job's known collisions. `[SECURE-CENSUS]`: the "secure projects not isolated" critical lines were already present before the deploy (891 in 20:00–22:03Z, 198 after). New with #2318: 94 critical "codified child tables" lines, expected per UAC, forwarded to UAC and ebilling for triage. |
 
 **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261026T220116Z` (restores 58ffc37da3).
+
+## Dev BFF deploy of master 3ff2c04bf5 (2026-10-27 01:29Z; owner: "approve deploy 3ff2c04bf5")
+
+Contents beyond the previous live build bc99fc3e6b, all UAC: #2322 (the census reports owner-accepted role exceptions as AcceptedException), #2323 (the access-record proof sees team-held System Administrator and profiles, and matches System Administrator by template id; closes #2320), #2324 (the team join moves server-side, so a request does not grow with team count). On dev the outcome is unchanged: the BFF app user holds System Administrator directly.
+
+| Step | Result |
+|---|---|
+| Gates | CI (Router and every Tier 1 job), CI Standalone Checks and the Office add-in gate green on 3ff2c04bf5. OKs: UAC (requester), ontology, word-add-in, field-mapping, ebilling; provisioning standing OK. |
+| A, live read and snapshot | Live ProductVersion `1.0.0+bc99fc3e6b…`, healthz 200. Snapshot `deploy/rollback/wwwroot-20261027T012731Z` (222 files, 148.14 MB). |
+| D, deploy | `Deploy-BffApi.ps1 -Environment dev` from detached worktree `C:\wtbffe-3ff`. 4 file hashes, health and CORS verified. OneDeploy ended 01:29:15Z. Read-back 01:30:10Z: ProductVersion `1.0.0+3ff2c04bf5…`, healthz 200, healthz/dataverse 200, anonymous /api/me 401. |
+| E, server gate | Pending: `gate3ff.ps1` at about 02:00Z. |
+
+**Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261027T012731Z` (restores bc99fc3e6b).
