@@ -136,8 +136,9 @@ internal static class MappingSourceReadProbe
     /// <param name="recordId">The record.</param>
     /// <param name="equalizeUnknownAndDenied">
     /// True to ask through <see cref="CallerRecordAccessProbe.GetCallerRightsForAuthorizationGateAsync"/> (an unknown id and a
-    /// denied one take the same work); false keeps <see cref="CallerRecordAccessProbe.GetCallerRightsAsync"/>, which the
-    /// quick-create filter has always used.
+    /// denied one take the same work); false asks <see cref="CallerRecordAccessProbe.GetCallerRightsAsync"/>, which answers
+    /// a denied record at once but an unknown one only after the replication-lag retry. A caller that turns a refusal
+    /// into one uniform denial passes true (#2137).
     /// </param>
     /// <param name="ct">Cancellation; its cancellation propagates rather than being read as a decision.</param>
     internal static async Task<CallerReadCheck> CheckCallerReadAsync(

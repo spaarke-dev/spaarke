@@ -6,10 +6,13 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.FieldMappings;
+using Sprk.Bff.Api.Api.FieldMappings.Dtos;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Models.Office;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.AccessControl;
@@ -151,6 +154,129 @@ public class AuthorizationGateTimingTests
         StatusOf(a).Should().Be(StatusCodes.Status403Forbidden);
         StatusOf(b).Should().Be(StatusCodes.Status403Forbidden);
         denied.Waits.Should().Equal(unknown.Waits).And.Equal(NotFoundSchedule);
+    }
+
+    // ── Read checks that refuse with one uniform denial: the same gate, the same time (#2137) ─────────────────────
+    //
+    // Before #2137 these four call sites asked GetCallerRightsAsync, so a record id that does not exist (404, re-asked
+    // for replication lag) came back ~1.6 s after one the caller cannot read (403, answered at once) although the
+    // refusal text was identical. Each test runs the PRODUCTION filter / handler step over the TimingProbe and asserts
+    // the unknown and the denied record take the same work: the same asks and the same recorded waits.
+
+    [Fact]
+    public async Task QuickCreateSourceCheck_AnUnknownAndADeniedSource_AreTheSame403_AfterTheSameWork()
+    {
+        var unknown = new TimingProbe();
+        var denied = new TimingProbe();
+
+        var a = await QuickCreate(unknown, new QuickCreateRequest { SourceEntityType = "sprk_matter", SourceRecordId = Unknown });
+        var b = await QuickCreate(denied, new QuickCreateRequest { SourceEntityType = "sprk_matter", SourceRecordId = Denied });
+
+        StatusOf(a.Result).Should().Be(StatusCodes.Status403Forbidden);
+        StatusOf(b.Result).Should().Be(StatusCodes.Status403Forbidden);
+        denied.Waits.Should().Equal(unknown.Waits).And.Equal(NotFoundSchedule);
+        denied.Asks.Should().Be(unknown.Asks).And.Be(3);
+    }
+
+    [Fact]
+    public async Task QuickCreateSourceCheck_AReadableSource_PassesAtOnce_WithNoWait()
+    {
+        var probe = new TimingProbe();
+
+        var run = await QuickCreate(probe, new QuickCreateRequest { SourceEntityType = "sprk_matter", SourceRecordId = Visible });
+
+        run.NextCalled.Should().BeTrue("an allowed caller reaches the handler");
+        probe.Asks.Should().Be(1);
+        probe.Waits.Should().BeEmpty("an allowed caller pays nothing");
+    }
+
+    [Fact]
+    public async Task QuickCreateAssigneeCheck_AnUnknownAndADeniedContact_AreTheSameRefusal_AfterTheSameWork()
+    {
+        var unknown = new TimingProbe();
+        var denied = new TimingProbe();
+
+        var a = await QuickCreate(unknown, new QuickCreateRequest { AssignedToContactId = Unknown });
+        var b = await QuickCreate(denied, new QuickCreateRequest { AssignedToContactId = Denied });
+
+        StatusOf(a.Result).Should().Be(StatusCodes.Status403Forbidden);
+        StatusOf(b.Result).Should().Be(StatusCodes.Status403Forbidden);
+        denied.Waits.Should().Equal(unknown.Waits).And.Equal(NotFoundSchedule);
+        denied.Asks.Should().Be(unknown.Asks).And.Be(3);
+    }
+
+    [Fact]
+    public async Task QuickCreateAssigneeCheck_AReadableContact_PassesAtOnce_WithNoWait()
+    {
+        var probe = new TimingProbe();
+
+        var run = await QuickCreate(probe, new QuickCreateRequest { AssignedToContactId = Visible });
+
+        run.NextCalled.Should().BeTrue();
+        probe.Asks.Should().Be(1);
+        probe.Waits.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task PushSourceCheck_AnUnknownAndADeniedSource_AreBothDenied_AfterTheSameWork()
+    {
+        var unknown = new TimingProbe();
+        var denied = new TimingProbe();
+
+        var a = await FieldMappingEndpoints.AuthorizePushSourceAsync(
+            new PushFieldMappingsRequest { SourceEntity = "sprk_matter", SourceRecordId = Unknown, TargetEntity = "sprk_event" },
+            unknown, Context(Unknown), NullLogger.Instance, CancellationToken.None);
+        var b = await FieldMappingEndpoints.AuthorizePushSourceAsync(
+            new PushFieldMappingsRequest { SourceEntity = "sprk_matter", SourceRecordId = Denied, TargetEntity = "sprk_event" },
+            denied, Context(Denied), NullLogger.Instance, CancellationToken.None);
+
+        a.Should().BeNull();
+        b.Should().BeNull();
+        denied.Waits.Should().Equal(unknown.Waits).And.Equal(NotFoundSchedule);
+        denied.Asks.Should().Be(unknown.Asks).And.Be(3);
+    }
+
+    [Fact]
+    public async Task TodoSourceCheck_AnUnknownAndADeniedSource_AreTheSame403_AfterTheSameWork()
+    {
+        var unknown = new TimingProbe();
+        var denied = new TimingProbe();
+
+        var a = await Todo(unknown, new CreateTodoRequest { Name = "n", RegardingEntityType = "Matter", RegardingRecordId = Unknown });
+        var b = await Todo(denied, new CreateTodoRequest { Name = "n", RegardingEntityType = "Matter", RegardingRecordId = Denied });
+
+        StatusOf(a.Result).Should().Be(StatusCodes.Status403Forbidden);
+        StatusOf(b.Result).Should().Be(StatusCodes.Status403Forbidden);
+        a.NextCalled.Should().BeFalse();
+        b.NextCalled.Should().BeFalse();
+        denied.Waits.Should().Equal(unknown.Waits).And.Equal(NotFoundSchedule);
+        denied.Asks.Should().Be(unknown.Asks).And.Be(3);
+    }
+
+    private static async Task<(object? Result, bool NextCalled)> QuickCreate(TimingProbe probe, QuickCreateRequest request)
+    {
+        var filter = new QuickCreateSourceAccessFilter(probe);
+        return await RunFilter(filter, request);
+    }
+
+    private static async Task<(object? Result, bool NextCalled)> Todo(TimingProbe probe, CreateTodoRequest request)
+    {
+        var filter = new TodoSourceAccessFilter(probe);
+        return await RunFilter(filter, request);
+    }
+
+    private static async Task<(object? Result, bool NextCalled)> RunFilter(IEndpointFilter filter, object request)
+    {
+        var http = new DefaultHttpContext();
+        http.Request.Headers.Authorization = "Bearer caller";
+        var context = new DefaultEndpointFilterInvocationContext(http, request);
+        var nextCalled = false;
+        var result = await filter.InvokeAsync(context, _ =>
+        {
+            nextCalled = true;
+            return ValueTask.FromResult<object?>(Results.Ok());
+        });
+        return (result, nextCalled);
     }
 
     private static DefaultHttpContext Context(Guid recordId)
