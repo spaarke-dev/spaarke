@@ -2299,8 +2299,9 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     private readonly HashSet<(string Table, Guid Id)> _pendingOrdinaryRoots = new();
 
     // UAC task 194 F1-a: the documents the ordinary pass handed to the re-file pass that it has not reached yet. The re-file
-    // pass reads them with its own carried rows and drops each once it examines it; they are never truncated, and with its
-    // own carry they never exceed MaxCarriedRows (the ordinary pass hands off at most the free capacity).
+    // pass reads them with its own carried rows and drops each once it examines it; they are never truncated. The ordinary
+    // pass hands off at most the free capacity (MaxCarriedRows minus both sets), so the hand-offs alone never exceed
+    // MaxCarriedRows; the re-file carry can still fill to its own cap after them, so both together stay under twice it.
     private readonly HashSet<Guid> _ordinaryHandOffs = new();
 
     // UAC task 194 F4-a: the ordinary catch-up sweep — per instance, like the secure catch-up. It walks every ordinary root
