@@ -52,6 +52,7 @@ public sealed class DataverseWebApiGuestUserWriter : IDataverseGuestUserWriter
     private readonly HttpClient _httpClient;
     private readonly IDataverseRootBusinessUnitReader _rootBusinessUnitReader;
     private readonly Func<string, TokenCredential> _credentialFactory;
+    private readonly H11UserProvisioningOptions _options;
 
     /// <summary>Production constructor (typed HttpClient registration in Worker/Program.cs).</summary>
     public DataverseWebApiGuestUserWriter(
@@ -77,6 +78,7 @@ public sealed class DataverseWebApiGuestUserWriter : IDataverseGuestUserWriter
         _httpClient = httpClient;
         _rootBusinessUnitReader = rootBusinessUnitReader;
         _credentialFactory = credentialFactory;
+        _options = options.Value;
         _httpClient.Timeout = options.Value.DataverseRequestTimeout;
     }
 
@@ -183,7 +185,14 @@ public sealed class DataverseWebApiGuestUserWriter : IDataverseGuestUserWriter
         try
         {
             var token = await AcquireTokenAsync(envUri, request.TenantId, cancellationToken).ConfigureAwait(false);
-            var (systemUserId, unitId) = await ReadOrAddSystemUserAsync(envUri, token, objectId, cancellationToken).ConfigureAwait(false);
+            var (systemUserId, unitId, isDisabled) = await ReadOrAddSystemUserAsync(envUri, token, objectId, cancellationToken).ConfigureAwait(false);
+
+            // #2034: a disabled systemuser cannot sign in, so moving it or granting roles would report a guest who has
+            // access when they do not. Nothing is written; re-enabling a user is an owner decision.
+            if (isDisabled)
+            {
+                return new DataverseGuestUserOutcome.Disabled(systemUserId.ToString("D"));
+            }
 
             // T259: the guest belongs in the customer's unit. Dataverse adds it to the ROOT on the read above; move it from
             // there (before any role — a unit change strips roles) and read it back. Never move it out of any other unit.
@@ -274,25 +283,39 @@ public sealed class DataverseWebApiGuestUserWriter : IDataverseGuestUserWriter
             .ToList();
     }
 
-    private async Task<(Guid SystemUserId, Guid? BusinessUnitId)> ReadOrAddSystemUserAsync(
+    private async Task<(Guid SystemUserId, Guid? BusinessUnitId, bool IsDisabled)> ReadOrAddSystemUserAsync(
         Uri envUri, AccessToken token, Guid objectId, CancellationToken ct)
     {
         // Alternate key: Dataverse adds a security-group member who is not yet a user (Microsoft, group-team article).
-        using var request = new HttpRequestMessage(HttpMethod.Get,
-            new Uri(envUri, $"/api/data/v9.2/systemusers(azureactivedirectoryobjectid={objectId:D})?$select=systemuserid,_businessunitid_value"));
-        ApplyHeaders(request, token);
-        using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
-        var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode)
+        // T186 audit: the group add just before this read has not necessarily propagated to Dataverse — it answers 404 until it
+        // does. Re-read while that is the answer; any other refusal, and the 404 once the attempts run out, fail as before.
+        // T186 L51: Dataverse's user sync takes minutes (> 4 min live), so this waits DataverseUserSyncRetry*, not the
+        // Entra-replication ReplicationRetry*.
+        var reply = await H11ReplicationRetry.RunAsync(
+            async attemptCt =>
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Get,
+                    new Uri(envUri, $"/api/data/v9.2/systemusers(azureactivedirectoryobjectid={objectId:D})?$select=systemuserid,_businessunitid_value,isdisabled"));
+                ApplyHeaders(request, token);
+                using var response = await _httpClient.SendAsync(request, attemptCt).ConfigureAwait(false);
+                var body = await response.Content.ReadAsStringAsync(attemptCt).ConfigureAwait(false);
+                return new H11ReplicationRetry.Reply(response.StatusCode, body);
+            },
+            H11ReplicationRetry.IsDataverseUserNotYetVisible,
+            _options.DataverseUserSyncRetryCount, _options.DataverseUserSyncRetryDelay, logger: null, "guest systemuser read",
+            ct).ConfigureAwait(false);
+        var text = reply.Body;
+        if (!reply.IsSuccess)
         {
-            var why = response.StatusCode == HttpStatusCode.NotFound
+            var why = reply.Status == HttpStatusCode.NotFound
                 ? "Dataverse did not add the user — it adds one on this read only when it is a DIRECT member of the " +
-                  "environment security group, the environment allows guests and its billing (pay-as-you-go, PRQ-C-11) " +
-                  "covers the user; membership can take minutes to propagate (re-run)"
+                  "environment security group, the environment allows guest access (PRQ-C-12) and the guest holds a " +
+                  "Power Apps licence (H11 assigns Power Apps Plan 2 Trial); Dataverse's user sync can take several " +
+                  "minutes (re-run)"
                 : "Dataverse refused the read";
             throw new InvalidOperationException(
-                $"GET systemusers(azureactivedirectoryobjectid={objectId:D}) failed: {(int)response.StatusCode} " +
-                $"{response.StatusCode} — {why}. Body: {Truncate(text, 400)}");
+                $"GET systemusers(azureactivedirectoryobjectid={objectId:D}) failed: {(int)reply.Status} " +
+                $"{reply.Status} — {why}. Body: {Truncate(text, 400)}");
         }
 
         using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(text) ? "{}" : text);
@@ -300,7 +323,12 @@ public sealed class DataverseWebApiGuestUserWriter : IDataverseGuestUserWriter
             ? parsed
             : throw new InvalidOperationException(
                 $"GET systemusers(azureactivedirectoryobjectid={objectId:D}) returned no systemuserid.");
-        return (userId, UnitOf(doc.RootElement));
+        // Fail closed: a reply without a boolean isdisabled is not read as an enabled user.
+        var isDisabled = doc.RootElement.TryGetProperty("isdisabled", out var disabled) && disabled.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? disabled.ValueKind == JsonValueKind.True
+            : throw new InvalidOperationException(
+                $"GET systemusers(azureactivedirectoryobjectid={objectId:D}) returned no isdisabled value.");
+        return (userId, UnitOf(doc.RootElement), isDisabled);
     }
 
     private async Task<Guid?> ReadBusinessUnitAsync(Uri envUri, AccessToken token, Guid systemUserId, CancellationToken ct)

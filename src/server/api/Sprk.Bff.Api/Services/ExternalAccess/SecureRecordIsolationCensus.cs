@@ -78,7 +78,8 @@ public static class SecureRecordIsolationCensus
             .ToArray();
 
         // The guarded root-table Reads (clause 1) plus every privilege of the codified owner-role set (clause 5, task
-        // 145) — read from the ONE list compiled into this assembly.
+        // 145; clause 1 grades its child tables too since UAC 2026-10-23) — read from the ONE list compiled into this
+        // assembly.
         var ownerRoleSet = SecureRecordOwnerRoleSet.Embedded;
         var privilegeNames = SecureBuRoleDepthCensusBuilder.CensusPrivilegeNames(ownerRoleSet);
 

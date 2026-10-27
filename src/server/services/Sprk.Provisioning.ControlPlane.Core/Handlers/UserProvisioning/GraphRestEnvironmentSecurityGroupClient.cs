@@ -34,6 +34,7 @@ public sealed class GraphRestEnvironmentSecurityGroupClient : IEnvironmentSecuri
 
     private readonly HttpClient _httpClient;
     private readonly Func<string, TokenCredential> _credentialFactory;
+    private readonly H11UserProvisioningOptions _options;
 
     /// <summary>Production constructor (typed HttpClient registration in Worker/Program.cs).</summary>
     public GraphRestEnvironmentSecurityGroupClient(HttpClient httpClient, IOptions<H11UserProvisioningOptions> options)
@@ -53,6 +54,7 @@ public sealed class GraphRestEnvironmentSecurityGroupClient : IEnvironmentSecuri
         ArgumentNullException.ThrowIfNull(credentialFactory);
         _httpClient = httpClient;
         _credentialFactory = credentialFactory;
+        _options = options.Value;
         _httpClient.Timeout = options.Value.GraphRequestTimeout;
     }
 
@@ -106,31 +108,43 @@ public sealed class GraphRestEnvironmentSecurityGroupClient : IEnvironmentSecuri
         try
         {
             var token = await AcquireTokenAsync(tenantId, cancellationToken).ConfigureAwait(false);
-            using var request = new HttpRequestMessage(
-                HttpMethod.Post, $"https://graph.microsoft.com/v1.0/groups/{groupGuid:D}/members/$ref")
-            {
-                Content = JsonContent.Create(new Dictionary<string, string>
+            // T186 audit: a guest invited or a user created moments ago can 404 / 400 "does not reference a valid object"
+            // as a $ref target until Entra replicates it. Wait that out ("already exist" is a different message and is
+            // handled below); any other error fails as before.
+            var reply = await H11ReplicationRetry.RunAsync(
+                async ct =>
                 {
-                    ["@odata.id"] = $"https://graph.microsoft.com/v1.0/directoryObjects/{userGuid:D}",
-                }),
-            };
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
-            using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
-            if (response.IsSuccessStatusCode)
+                    using var request = new HttpRequestMessage(
+                        HttpMethod.Post, $"https://graph.microsoft.com/v1.0/groups/{groupGuid:D}/members/$ref")
+                    {
+                        Content = JsonContent.Create(new Dictionary<string, string>
+                        {
+                            ["@odata.id"] = $"https://graph.microsoft.com/v1.0/directoryObjects/{userGuid:D}",
+                        }),
+                    };
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
+                    using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+                    var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                    return new H11ReplicationRetry.Reply(response.StatusCode, text);
+                },
+                H11ReplicationRetry.IsGraphObjectNotYetReplicated,
+                _options.ReplicationRetryCount, _options.ReplicationRetryDelay, logger: null, "group membership add",
+                cancellationToken).ConfigureAwait(false);
+            if (reply.IsSuccess)
             {
                 return new SecurityGroupMembershipOutcome.Success();
             }
 
-            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            if (response.StatusCode == HttpStatusCode.BadRequest
+            var body = reply.Body;
+            if (reply.Status == HttpStatusCode.BadRequest
                 && body.Contains(AlreadyMemberMessage, StringComparison.OrdinalIgnoreCase))
             {
                 return new SecurityGroupMembershipOutcome.Success();
             }
 
             return new SecurityGroupMembershipOutcome.Failure(
-                $"POST /groups/{groupGuid:D}/members/$ref for user {userGuid:D} failed: {(int)response.StatusCode} " +
-                $"{response.StatusCode}. Body: {Truncate(body, 300)}");
+                $"POST /groups/{groupGuid:D}/members/$ref for user {userGuid:D} failed: {(int)reply.Status} " +
+                $"{reply.Status}. Body: {Truncate(body, 300)}");
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
