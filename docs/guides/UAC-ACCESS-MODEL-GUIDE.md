@@ -476,8 +476,11 @@ What moves, and what does not:
 - **Files follow.** A filed document's file belongs in the container of the record it is filed under (that record's
   business unit, `RecordContainerResolver.DeriveDocumentContainersAsync`); only an unfiled document uses its own row's
   business unit. The job's 2-minute re-file pass moves a file whose container no longer matches — for a document filed
-  directly under a changed matter, project or work assignment (whatever its owner), and for every document this job
-  re-owns (the re-own changes its `modifiedon`), in the same run. See the known limit below.
+  directly under a changed matter, project or work assignment (whatever its owner), for every document this job
+  re-owns (the re-own changes its `modifiedon`), and for every other document of the moved record's family that this job
+  hands it (any owner, at any depth — never one held in isolation or filed under a Secure record). The hand-off is
+  bounded by the re-file pass's carry (1000 rows); a record whose documents do not fit waits for the next run and is
+  never dropped.
 
 Consequences while the switch is off (and for what the job does not cover):
 
@@ -501,11 +504,6 @@ carried to the next. Each run's report is `ResultJson.ordinaryMoves`. **Older mo
 App Service instance sweeps every ordinary record once (50 a run, then it stops), and sweeps again when the switch is
 turned on, so a reassignment made before this job existed, or before a restart, is corrected too
 (`ResultJson.ordinaryMoves.sweep`).
-
-**Known limit (files):** a document the job does not re-own (user-owned, or owned by a non-default team) whose file
-derives from a moved record is relocated only when it is filed DIRECTLY under the moved matter, project or work
-assignment (the re-file pass lists those); one filed deeper (under an event of the moved matter) waits until its own row
-changes.
 
 **What *does* flow to the family** is a change of **Secure** or **Access Permission** — see §4 (parent floor) and §10.
 Those changes are applied by the BFF when it makes them, and by the background jobs within minutes when they are made

@@ -79,7 +79,7 @@ In the census list but not walked:
 | `sprk_workassignment`, `sprk_servicerequest` | Roots of their own, not children | n/a (a work assignment is its own ordinary root here) |
 | `sprk_communicationchannelref`, `sprk_processingjob` | Waived in the census (transport key; job tracking, not a child) | n/a |
 | `sprk_budgetbucket` | A budget's buckets (`sprk_budgetbucket.sprk_budget`, solution XML) | **Fixed (review F1-b):** lineage row + role-set entry. A Secure budget's buckets were not isolated before (2 rows on dev). The role entry is applied on an environment by `scripts/Set-SecureRecordOwnerRolePrivileges.ps1` (dry run, `-Apply`, `-Verify`) — a post-merge live step that needs the owner's go, and must run BEFORE the BFF carrying it is deployed (until then the Secure pass's owner write of a bucket is refused, and the isolation census reports the missing privilege). Evidence is read-only: dev holds `prvReadsprk_BudgetBucket` (0e1b51ff-…), the Secure Record Owner role has no row for it. |
-| `sprk_invoicelineitem` | Under an invoice (`sprk_invoice`) and a billing event (`sprk_billingevent`) | **Not changed — reported to the coordinator.** The entity IS defined in source (`src/dataverse/solutions/SpaarkeMaster/Entities/sprk_InvoiceLineItem/Entity.xml`, user/team-owned) but is not on dev (no `prvReadsprk_InvoiceLineItem` privilege). Once deployed it is the same gap the bucket was. |
+| `sprk_invoicelineitem` | Under an invoice (`sprk_invoice`) and a billing event (`sprk_billingevent`) | **Left out of the lineage (coordinator decision):** adding a table that is not deployed would make the Secure pass query a missing entity set on dev; the coordinator files an issue to add it to the lineage and the role set when it is deployed. The entity IS defined in source (`src/dataverse/solutions/SpaarkeMaster/Entities/sprk_InvoiceLineItem/Entity.xml`, user/team-owned) but is not on dev (no `prvReadsprk_InvoiceLineItem` privilege). Once deployed it is the same gap the bucket was. |
 
 **Service requests (review F4-b).** The ordinary pass now walks each row's service-request lookup
 (`ExternalDataService.ServiceRequestRelations`, the one declaration: `sprk_regardingservicerequest` on nine tables, a
@@ -101,22 +101,30 @@ table then id, the Access Permission sweep's paging), then only the watermark de
 assignments, 6 service requests = 117 roots → 117 ÷ 50 = 3 runs × 2 minutes ≈ 6 minutes per instance per mode, at most
 50 extra root walks a run during it, nothing after. A 10 000-root customer would take 200 runs ≈ 7 hours per instance.
 
-## Files of documents the pass does not re-own (review F1-a) — NOT built, design question open
+## Files of documents the pass does not re-own (review F1-a) — built as option A
 
 - Covered today (evidence test `TheJob_MovesTheFileOfAUserOwnedDocumentDirectlyUnderAMovedMatter`): a document filed
   DIRECTLY under the moved matter, project or work assignment, whatever its owner (the re-file pass's A3 listing), and any
   document the pass re-owns (its `modifiedon` changes).
 - The gap: a document the pass does not re-own (user-owned, a non-default team, a Secure answer reported) filed BELOW a
   direct child (under an event of the moved matter).
-- The prescribed fix (queue through `sprk_relocationpending`, settle in the existing step) was not built: that settle
-  step relocates every ledger row with `RelocationPurpose.MakeSecure`, which moves whatever file the row shows, wider
-  than the re-file's BFF-bound-item proof (B9); the ledger is the witness-bearing record of owed steps, written only
-  under the relocation lock; a request entry needs a ledger format change and a purpose dispatch in the relocator. See
-  the task report for the options.
+- Not through `sprk_relocationpending`: its settle step relocates every ledger row with `RelocationPurpose.MakeSecure`,
+  which moves whatever file the row shows (wider than the re-file's BFF-bound-item proof, B9), and the ledger is the
+  witness-bearing record of owed steps, written only under the relocation lock.
+- **Built (coordinator decision, option A).** With writes on, every document of a root's walk except one held in
+  isolation / the Secure Record business unit, one the rule answers Secure (its container answer is a Secure record's),
+  and one whose owner could not be decided or was refused (`SecureChildReconcileReport.OrdinaryHandOffDocumentIds`) is
+  handed to the re-file pass as a carried row (`_ordinaryHandOffs`, read with its carry). It is examined and moved under
+  the Refile purpose's guards, `MaxRelocationsPerRun` and the examination budget; the relocator's own refusals stand.
+- **Back-pressure.** At most `MaxCarriedRows` minus (re-file carry ∪ hand-offs not yet reached). A root whose documents do
+  not all fit is deferred (`ResultJson.ordinaryMoves.deferredRoots`): a recent root is carried, a swept root holds the
+  sweep cursor just before it. Hand-offs the re-file pass has not reached stay hand-offs and are never truncated; one it
+  reached leaves (a failure joins its normal carry). Report-only hands nothing off (`documentsToHandOff` counts them).
 
 ## Known limits
 
 - Grant rows (`sprk_externalrecordaccess`, owned by the root's team, D-11) do not follow an ordinary move.
-- The F1-a gap above.
+- Hand-offs and the re-file carry are per instance, like every window of the job: a restart loses them, and the
+  catch-up sweep (F4-a) walks every root again, handing the documents off anew.
 - Each changed ordinary root is walked in full (one query per lineage table per level, plus resolver reads per row), so
   a burst of edits to large matters is bounded only by `MaxRootsPerRun` (50).
