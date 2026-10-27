@@ -11,7 +11,7 @@
 |---|---|
 | **Task** | UAT round 1, live on dev. Dev BFF is **`58ffc37da3`**: deployed by R3 at 11:18:12Z, verified by DLL ProductVersion, healthz 200. It carries every UAT-1 task: 158, 159, 161, 162, 163, 164, and 160 + #2314. The D-185 dev steps are **done**: worklist config 11:20Z (verified in sync), POL-MATTER-NOBUDGET v2 11:20:38Z (verified), and Console User policy Reads removed 11:21:51–53Z (21 → 19). uac-r2 independently confirmed the read-back; their server gate is **PASS** (11:18–11:51Z). Basic User needed no change (D-189). |
 | **Status** | No lane running; no lane worktrees. Waiting on: (1) the **owner's browser checks** (list below); (2) nothing else from R3: dev BFF `3ff2c04bf5` has been live since 2026-10-27 01:29:15Z (R3 after-notice; DLL 1.0.0+3ff2c04bf5; 30-minute gate clean). |
-| **Next Action** | On the owner's browser-check results: fix any failure (a lane per defect), or close 114, 160 and 163 (✅ + POML + TASK-INDEX; run the drift check). Then open the next docs→master PR (D-185 guard #2316 plus docs; test-only). |
+| **Next Action** | On the owner's browser-check results: fix any failure (a lane per defect), or close 114, 160 and 163 (✅ + POML + TASK-INDEX; run the drift check). (The D-185 guard is on master: #2344 `0b035c23fd`.) |
 
 ## Owner browser checks (sent 2026-10-23 ~12:00Z; zz- test data, delete afterwards)
 
@@ -25,7 +25,7 @@
 ## Next, in order
 
 1. Owner checks → close 114, 160 and 163, or fix.
-2. **Next docs→master PR:** the D-185 guard `PolicyReadRoleGuardTests` (#2316, docs `20d7cbd47c`) plus today's docs. Merge master first; run the full ArchTests; send before and after notices if it touches the Console or BFF (it doesn't today).
+2. **Docs→master:** done. PR #2344 merged as `0b035c23fd` on 2026-10-27 (D-185 guard `PolicyReadRoleGuardTests` + notes); the branch and main checkout are synced to master.
 3. **ebilling #1911:** F1 merge `bed558cb33` checked 2026-10-26: PASS for ontology. `EarlierInvoiceReadability` = the #2294 round; the combined diff is empty on every ontology file; Core User drops `InvoiceLineItem` (ebilling 029). K1 and K2 were decided by the owner in ebilling's session (ebilling `notes/decisions-log.md`, `399813b8f7`): EB-D-150 keeps Global policy Read on Billing Administrator (a census exception in #2322); EB-D-151 keeps D-90's full Core User rights on the five invoice working tables, a known limit. Nothing ontology-side is open.
 4. R2 §9 owner answers → `/design-to-spec`; 105 UAT; #1882 live re-run; 111 row 4; 090 wrap-up; the `[SIGNAL-EVALUATOR]` heartbeat.
 
@@ -42,7 +42,7 @@
   - The footer label is used ONLY when the matter is exactly Standard and every recipient is an enabled systemuser with `IsExternalAsync` false. Otherwise the subject is used (#2314).
   - Known limits: `IsExternalAsync` is cached for 10 minutes; Sent Items reveals whether an address is an enabled user (K2, accepted); a null access permission gets no label.
 - **D-188:** the document parent link uses the unprefixed lookups (`sprk_matter` etc.). DI-127 / #2315 fixes `DocumentLinkFieldMap`'s "superseded" claim.
-- **D-185 is enforced by** `tests/Spaarke.ArchTests/PolicyReadRoleGuardTests.cs` (on docs; not yet on master). uac-r2 extends its census to the codified child tables (in `7479ce22a9`).
+- **D-185 is enforced by** `tests/Spaarke.ArchTests/PolicyReadRoleGuardTests.cs` (on master since #2344 `0b035c23fd`). uac-r2 extends its census to the codified child tables (in `7479ce22a9`).
 - `RemovePrivilegeRole` payload: `{"Privilege":{"@odata.type":"Microsoft.Dynamics.CRM.privilege","privilegeid":…}}`. `PrivilegeId` is rejected.
 
 ## Blocked follow-ups (ours)
