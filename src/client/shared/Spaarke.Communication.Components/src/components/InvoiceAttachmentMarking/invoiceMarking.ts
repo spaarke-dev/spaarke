@@ -56,7 +56,7 @@ export function validateInvoiceMarking(
 ):
   | { ok: true }
   | { ok: false; reason: 'no-invoice' | 'more-than-one-invoice' | 'invoice-not-allowed' | 'disabled-attachment-marked' } {
-  if (attachments?.some(a => a.disabledReason && value[a.id] !== undefined && value[a.id] !== 'skip')) {
+  if (attachments?.some(a => a.disabledReason && a.id in value && value[a.id] !== 'skip')) {
     return { ok: false, reason: 'disabled-attachment-marked' };
   }
   const invoiceIds = Object.keys(value).filter(id => value[id] === 'invoice');
