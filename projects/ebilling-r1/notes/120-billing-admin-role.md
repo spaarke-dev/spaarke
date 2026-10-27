@@ -228,3 +228,6 @@ Pre-notices went to ontology-r1 and uac-r2. Ontology confirmed it did not change
    - Fixed by renaming the loop variables (`$stripRoleName`, `$watchRoleName`). The re-run of -Verify exits 0: `VERIFY PASS: the task 120 / D-185 state holds.`
 
 **Open, not ebilling's:** who removed `prvReadsprk_ruleset` and `prvReadsprk_Policy` from live Basic User before this run. Ontology didn't, and no ebilling session made a privilege-removal call on that role. The result matches the agreed end state.
+
+### 2026-10-27: Read lowered to Deep (EB-D-162)
+The owner chose option A: Read on `sprk_ruleset`, `sprk_Policy` and `sprk_PolicyVersion` is Deep, not Global. `Deploy-EbillingBillingAdminRole.ps1` now lowers a Read still held at Global (RemovePrivilegeRole, then AddPrivilegesRole at Deep, each read back); any other over-grant still stops the run. The markers stay at Basic.

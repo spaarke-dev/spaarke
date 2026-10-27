@@ -171,18 +171,18 @@ public class SecureRecordIsolationCensusJobTests
     }
 
     /// <summary>
-    /// UAC 2026-10-26: an owner-accepted role exception (EB-D-150) is logged at Information under a fixed prefix, by
+    /// UAC 2026-10-26: an owner-accepted role exception (UAC owner round 127) is logged at Information under a fixed prefix, by
     /// systemuser id only, and leaves the run isolated — never a Critical line.
     /// </summary>
     [Fact]
     public async Task Run_WhenAHumanDirectlyHoldsAnAcceptedRoleException_LogsItAtInformation_AndStaysIsolated()
     {
-        var billingRole = Guid.NewGuid();
-        var billingAdmin = Guid.NewGuid();
-        _directory.Role(billingRole, "Spaarke Billing Administrator", RootBu, billingRole);
-        _directory.Depth(billingRole, _codifiedChildPrivileges["sprk_policy"], PrivilegeDepth.Global);
-        _directory.Depth(billingRole, _codifiedChildPrivileges["sprk_policyversion"], PrivilegeDepth.Global);
-        _directory.User(billingAdmin, "Billing Person", RootBu, accessMode: 0, isDisabled: false, isApplication: false, billingRole);
+        var analysisRole = Guid.NewGuid();
+        var analysisAdmin = Guid.NewGuid();
+        _directory.Role(analysisRole, "Spaarke AI Analysis Admin", RootBu, analysisRole);
+        _directory.Depth(analysisRole, _codifiedChildPrivileges["sprk_analysis"], PrivilegeDepth.Global);
+        _directory.Depth(analysisRole, _codifiedChildPrivileges["sprk_analysisoutput"], PrivilegeDepth.Global);
+        _directory.User(analysisAdmin, "Billing Person", RootBu, accessMode: 0, isDisabled: false, isApplication: false, analysisRole);
 
         var result = await RunAsync();
 
@@ -191,9 +191,9 @@ public class SecureRecordIsolationCensusJobTests
         _log.Entries.Should().ContainSingle(e => e.Message.StartsWith("[SECURE-CENSUS] AcceptedException "))
             .Which.Should().Match<(LogLevel Level, string Message)>(e =>
                 e.Level == LogLevel.Information
-                && e.Message.Contains($"systemuserId={billingAdmin}")
-                && e.Message.Contains("privileges=prvReadsprk_Policy, prvReadsprk_PolicyVersion")
-                && e.Message.Contains("EB-D-150"));
+                && e.Message.Contains($"systemuserId={analysisAdmin}")
+                && e.Message.Contains("privileges=prvReadsprk_analysis, prvReadsprk_analysisoutput")
+                && e.Message.Contains("UAC owner round 127"));
         _log.Entries.Should().NotContain(e => e.Message.Contains("@example.test") || e.Message.Contains("Billing Person"),
             "#2130: the line names the principal by systemuser id only");
         _log.Entries.Should().ContainSingle(e => e.Message.Contains("heartbeat status=isolated"));
