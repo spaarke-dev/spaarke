@@ -292,7 +292,7 @@ public class OfficeSearchService
     /// </param>
     internal sealed record EntitySearchMeta(string EntitySet, string IdField, string NameField, string? RefField, string? DescField, string? EmailField = null);
 
-    private static readonly IReadOnlyDictionary<AssociationEntityType, EntitySearchMeta> _searchMeta =
+    internal static readonly IReadOnlyDictionary<AssociationEntityType, EntitySearchMeta> _searchMeta =
         new Dictionary<AssociationEntityType, EntitySearchMeta>
         {
             [AssociationEntityType.Matter] = new("sprk_matters", "sprk_matterid", "sprk_mattername", "sprk_matternumber", "sprk_matterdescription"),
@@ -300,7 +300,26 @@ public class OfficeSearchService
             [AssociationEntityType.Invoice] = new("sprk_invoices", "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_description"),
             [AssociationEntityType.Account] = new("accounts", "accountid", "name", "accountnumber", "description"),
             [AssociationEntityType.Contact] = new("contacts", "contactid", "fullname", null, "jobtitle", "emailaddress1"),
+            // Task 133. sprk_workassignment's display name is sprk_name (it has no sprk_workassignmentname) and its
+            // number is sprk_workassignmentnumber — the columns ExternalAccessModule's work-assignments module and
+            // ExternalGrantRoot.NameColumnFor already read; sprk_description per docs/data-model/sprk_workassignment.md.
+            [AssociationEntityType.WorkAssignment] = new("sprk_workassignments", "sprk_workassignmentid", "sprk_name", "sprk_workassignmentnumber", "sprk_description"),
         };
+
+    /// <summary>
+    /// The types an entity search covers when the request names none (or none valid). Task 133 added
+    /// <see cref="AssociationEntityType.WorkAssignment"/> to the enum for the Invoice view, which always asks for it by
+    /// name; it is deliberately NOT in this default, so a search that names no type returns exactly what it did before
+    /// (and costs no extra Dataverse query).
+    /// </summary>
+    internal static readonly IReadOnlyList<AssociationEntityType> DefaultSearchTypes =
+    [
+        AssociationEntityType.Matter,
+        AssociationEntityType.Project,
+        AssociationEntityType.Invoice,
+        AssociationEntityType.Account,
+        AssociationEntityType.Contact,
+    ];
 
     /// <summary>
     /// Runs a single entity type's name/number 'contains' query against the Dataverse Web API
@@ -428,27 +447,30 @@ public class OfficeSearchService
     /// <summary>
     /// Determines which entity types to search based on the request.
     /// </summary>
-    private static HashSet<AssociationEntityType> GetEntityTypesToSearch(string[]? requestedTypes)
+    internal static HashSet<AssociationEntityType> GetEntityTypesToSearch(string[]? requestedTypes)
     {
-        // If no types specified, search all
+        // If no types specified, search the default set (task 133: not WorkAssignment — see DefaultSearchTypes)
         if (requestedTypes == null || requestedTypes.Length == 0)
         {
-            return new HashSet<AssociationEntityType>(Enum.GetValues<AssociationEntityType>());
+            return new HashSet<AssociationEntityType>(DefaultSearchTypes);
         }
 
         var typesToSearch = new HashSet<AssociationEntityType>();
         foreach (var typeStr in requestedTypes)
         {
-            if (Enum.TryParse<AssociationEntityType>(typeStr, ignoreCase: true, out var entityType))
+            // Names only: Enum.TryParse also accepts numeric strings ("5"), which would reach a type by its ordinal.
+            if (Enum.TryParse<AssociationEntityType>(typeStr, ignoreCase: true, out var entityType)
+                && Enum.IsDefined(entityType)
+                && !int.TryParse(typeStr, out _))
             {
                 typesToSearch.Add(entityType);
             }
         }
 
-        // If no valid types were specified, search all
+        // If no valid types were specified, search the default set
         return typesToSearch.Count > 0
             ? typesToSearch
-            : new HashSet<AssociationEntityType>(Enum.GetValues<AssociationEntityType>());
+            : new HashSet<AssociationEntityType>(DefaultSearchTypes);
     }
 
     /// <summary>
@@ -461,6 +483,7 @@ public class OfficeSearchService
         AssociationEntityType.Invoice => "sprk_invoice",
         AssociationEntityType.Account => "account",
         AssociationEntityType.Contact => "contact",
+        AssociationEntityType.WorkAssignment => "sprk_workassignment",
         _ => throw new ArgumentOutOfRangeException(nameof(entityType))
     };
 
